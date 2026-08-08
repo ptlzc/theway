@@ -347,9 +347,15 @@ message CommandResult {
 // dependency and works with the pure-Rust proto compiler.
 message Empty {}
 
-message PromptRequest {
+message SendMessageRequest {
   string text = 1;
   repeated Image images = 2;
+  MessageMode mode = 3; // GUIDE (default): queue after the current turn; INTERRUPT: stop the current turn and run now
+}
+
+enum MessageMode {
+  GUIDE = 0;
+  INTERRUPT = 1;
 }
 
 message Image {
@@ -361,8 +367,47 @@ message SetModelRequest {
   string spec = 1;
 }
 
-message ResolveControlPlaneRequest {
+message ApproveRequest {
   bool approve = 1;
+}
+
+// ─────────────────────────── DAG control ───────────────────────────
+
+message DagPlanRequest {
+  string name = 1;
+  // mermaid flowchart text OR JSON array of nodes — same format as the dag_plan
+  // tool ({id, agent, task, dependsOn?, timeout?, cwd?, model?, thinking?}).
+  string definition = 2;
+  optional bool fail_fast = 3;
+  optional uint32 max_concurrency = 4;
+  optional string direction = 5; // "TD" | "LR"
+}
+
+message DagPlanResponse {
+  string run_id = 1;
+  string mermaid = 2; // rendered status graph
+}
+
+message DagCancelRequest {
+  string run_id = 1;
+}
+
+message DagRetryRequest {
+  string run_id = 1;
+  optional string node_id = 2; // omitted = all failed/cancelled nodes
+}
+
+message DagRetryResponse {
+  repeated string reset_node_ids = 1;
+}
+
+message DagSkipRequest {
+  string run_id = 1;
+  string node_id = 2;
+}
+
+message DagSkipResponse {
+  bool skipped = 1;
 }
 
 service ThewayGrpc {
@@ -372,8 +417,17 @@ service ThewayGrpc {
   rpc StreamEvents(Empty) returns (stream StreamFrame);
   // Fetch a DAG node's full output from an offset (P3).
   rpc GetNodeOutput(GetNodeOutputRequest) returns (GetNodeOutputResponse);
-  rpc Prompt(PromptRequest) returns (CommandResult);
+  // Submit a message. mode=GUIDE queues after the current turn (default);
+  // mode=INTERRUPT stops the current turn and runs the message immediately.
+  rpc SendMessage(SendMessageRequest) returns (CommandResult);
   rpc SetModel(SetModelRequest) returns (CommandResult);
-  rpc Abort(Empty) returns (CommandResult);
-  rpc ResolveControlPlane(ResolveControlPlaneRequest) returns (CommandResult);
+  // Stop the in-flight turn (same as local Ctrl-C). Does not cancel DAG runs.
+  rpc Cancel(Empty) returns (CommandResult);
+  // Resolve a pending control-plane approval request (approve / reject).
+  rpc Approve(ApproveRequest) returns (CommandResult);
+  // DAG orchestration (graph engineering mode).
+  rpc DagPlan(DagPlanRequest) returns (DagPlanResponse);
+  rpc DagCancel(DagCancelRequest) returns (CommandResult);
+  rpc DagRetry(DagRetryRequest) returns (DagRetryResponse);
+  rpc DagSkip(DagSkipRequest) returns (DagSkipResponse);
 }

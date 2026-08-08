@@ -176,7 +176,11 @@ impl App {
 
     pub(crate) async fn handle_web_command(&mut self, command: WebCommand, turn: &mut TurnState) {
         match command {
-            WebCommand::Submit { text, images } => self.submit_web_text(text, images, turn).await,
+            WebCommand::Submit {
+                text,
+                images,
+                interrupt,
+            } => self.submit_web_text(text, images, interrupt, turn).await,
             WebCommand::TriggerRuleNow { id } => self.trigger_web_rule_now(id, turn),
             WebCommand::Abort => self.request_abort(turn),
             WebCommand::ResolveControlPlane { approve } => {
@@ -227,6 +231,7 @@ impl App {
         &mut self,
         text: String,
         images: Vec<WebPromptImage>,
+        interrupt: bool,
         turn: &mut TurnState,
     ) {
         let trimmed = text.trim().to_string();
@@ -266,6 +271,13 @@ impl App {
         let prompt_text =
             crate::commands::attach_skill_prompt(expanded, self.pending_skill.take().as_deref());
         let display = crate::ui::prompt_display(&trimmed, loaded_images.len());
+        if interrupt {
+            // INTERRUPT mode: stop the in-flight turn and drop anything queued
+            // behind it; this message runs as soon as the aborted turn unwinds.
+            self.request_abort(turn);
+            self.queued_turns.clear();
+            self.system_line("interrupt: stopping current turn for new message");
+        }
         if turn.fut.is_some() {
             self.queue_user_prompt(display, prompt_text, loaded_images);
         } else {
@@ -564,6 +576,7 @@ async fn prompt(
         .send(WebCommand::Submit {
             text: req.text,
             images: req.images,
+            interrupt: false,
         })
         .is_ok();
     Json(CommandAccepted { accepted })

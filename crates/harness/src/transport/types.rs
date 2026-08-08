@@ -20,6 +20,9 @@ pub(crate) enum WebCommand {
     Submit {
         text: String,
         images: Vec<WebPromptImage>,
+        /// true = stop the current turn and run this message now (INTERRUPT);
+        /// false = queue after the current turn (GUIDE, default).
+        interrupt: bool,
     },
     TriggerRuleNow {
         id: String,

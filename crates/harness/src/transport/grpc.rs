@@ -28,8 +28,10 @@ pub mod theway_grpc {
 
 use theway_grpc::theway_grpc_server::{ThewayGrpc, ThewayGrpcServer};
 use theway_grpc::{
-    CommandResult, Empty, GetNodeOutputRequest, GetNodeOutputResponse, PromptRequest,
-    ResolveControlPlaneRequest, SessionState, SetModelRequest, StreamFrame,
+    ApproveRequest, CommandResult, DagCancelRequest, DagPlanRequest, DagPlanResponse,
+    DagRetryRequest, DagRetryResponse, DagSkipRequest, DagSkipResponse, Empty,
+    GetNodeOutputRequest, GetNodeOutputResponse, MessageMode, SendMessageRequest, SessionState,
+    SetModelRequest, StreamFrame,
 };
 
 #[derive(Clone, Debug)]
@@ -49,6 +51,10 @@ struct GrpcState {
     dag_events: broadcast::Sender<DagEvent>,
     /// Job registry backing GetNodeOutput.
     registry: SubagentJobRegistry,
+    /// DAG orchestration engine (graph engineering mode): DagPlan/DagCancel/…
+    dag_engine: Arc<theway_core::harness::graph_engineering::engine::DagEngine>,
+    /// Owning session id (DAG ownership check).
+    session_id: String,
 }
 
 #[tonic::async_trait]
@@ -135,11 +141,12 @@ impl ThewayGrpc for GrpcState {
         }))
     }
 
-    async fn prompt(
+    async fn send_message(
         &self,
-        request: Request<PromptRequest>,
+        request: Request<SendMessageRequest>,
     ) -> Result<Response<CommandResult>, Status> {
         let request = request.into_inner();
+        let interrupt = request.mode() == MessageMode::Interrupt;
         let accepted = self
             .commands
             .send(WebCommand::Submit {
@@ -152,6 +159,7 @@ impl ThewayGrpc for GrpcState {
                         name: image.name,
                     })
                     .collect(),
+                interrupt,
             })
             .is_ok();
         Ok(Response::new(CommandResult { accepted }))
@@ -170,14 +178,14 @@ impl ThewayGrpc for GrpcState {
         Ok(Response::new(CommandResult { accepted }))
     }
 
-    async fn abort(&self, _request: Request<Empty>) -> Result<Response<CommandResult>, Status> {
+    async fn cancel(&self, _request: Request<Empty>) -> Result<Response<CommandResult>, Status> {
         let accepted = self.commands.send(WebCommand::Abort).is_ok();
         Ok(Response::new(CommandResult { accepted }))
     }
 
-    async fn resolve_control_plane(
+    async fn approve(
         &self,
-        request: Request<ResolveControlPlaneRequest>,
+        request: Request<ApproveRequest>,
     ) -> Result<Response<CommandResult>, Status> {
         let accepted = self
             .commands
@@ -186,6 +194,71 @@ impl ThewayGrpc for GrpcState {
             })
             .is_ok();
         Ok(Response::new(CommandResult { accepted }))
+    }
+
+    // ── DAG orchestration ──────────────────────────────────────────────
+
+    async fn dag_plan(
+        &self,
+        request: Request<DagPlanRequest>,
+    ) -> Result<Response<DagPlanResponse>, Status> {
+        use crate::tools::dag_tools::plan_from_definition;
+        let request = request.into_inner();
+        let known: Vec<String> = crate::tools::subagent_specs::builtin_spec_names()
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let direction = match request.direction.as_deref() {
+            Some("LR") => Some(theway_core::harness::graph_engineering::types::Direction::Lr),
+            _ => None,
+        };
+        let def = plan_from_definition(
+            &request.name,
+            &request.definition,
+            request.fail_fast,
+            request.max_concurrency.map(|n| n as usize),
+            direction,
+        )
+        .map_err(Status::invalid_argument)?;
+        let run = self
+            .dag_engine
+            .plan(def, Some(&known), Some(self.session_id.clone()))
+            .map_err(|errors| Status::invalid_argument(errors.join("\n")))?;
+        Ok(Response::new(DagPlanResponse {
+            run_id: run.id.clone(),
+            mermaid: theway_core::harness::graph_engineering::graph::render_mermaid(&run),
+        }))
+    }
+
+    async fn dag_cancel(
+        &self,
+        request: Request<DagCancelRequest>,
+    ) -> Result<Response<CommandResult>, Status> {
+        let run_id = request.into_inner().run_id;
+        self.dag_engine
+            .cancel_run(&run_id, Some("cancelled via rpc"));
+        Ok(Response::new(CommandResult { accepted: true }))
+    }
+
+    async fn dag_retry(
+        &self,
+        request: Request<DagRetryRequest>,
+    ) -> Result<Response<DagRetryResponse>, Status> {
+        let request = request.into_inner();
+        let node_ids = request.node_id.as_deref().map(|id| vec![id.to_string()]);
+        let reset = self.dag_engine.retry(&request.run_id, node_ids.as_deref());
+        Ok(Response::new(DagRetryResponse {
+            reset_node_ids: reset,
+        }))
+    }
+
+    async fn dag_skip(
+        &self,
+        request: Request<DagSkipRequest>,
+    ) -> Result<Response<DagSkipResponse>, Status> {
+        let request = request.into_inner();
+        let skipped = self.dag_engine.skip(&request.run_id, &request.node_id);
+        Ok(Response::new(DagSkipResponse { skipped }))
     }
 }
 
@@ -214,6 +287,8 @@ impl App {
             events: event_tx,
             dag_events: dag_event_tx,
             registry: self.subagent_registry.clone(),
+            dag_engine: self.dag_engine.clone(),
+            session_id: self.session_id.clone(),
         };
 
         let server = tonic::transport::Server::builder()
@@ -357,6 +432,10 @@ mod tests {
                 events: event_tx,
                 dag_events: dag_event_tx,
                 registry,
+                dag_engine: Arc::new(
+                    theway_core::harness::graph_engineering::engine::DagEngine::new(),
+                ),
+                session_id: "test-session".into(),
             },
             command_rx,
         )
@@ -380,19 +459,24 @@ mod tests {
         let (state, mut command_rx) = grpc_state();
 
         let result = state
-            .prompt(Request::new(PromptRequest {
+            .send_message(Request::new(SendMessageRequest {
                 text: "hello".into(),
                 images: vec![theway_grpc::Image {
                     data: "data".into(),
                     name: Some("clip.png".into()),
                 }],
+                mode: MessageMode::Guide.into(),
             }))
             .await
             .unwrap()
             .into_inner();
         assert!(result.accepted);
         match command_rx.recv().await.unwrap() {
-            WebCommand::Submit { text, images } => {
+            WebCommand::Submit {
+                text,
+                images,
+                interrupt: _,
+            } => {
                 assert_eq!(text, "hello");
                 assert_eq!(images.len(), 1);
                 assert_eq!(images[0].data, "data");
@@ -402,7 +486,7 @@ mod tests {
         }
 
         let result = state
-            .abort(Request::new(Empty {}))
+            .cancel(Request::new(Empty {}))
             .await
             .unwrap()
             .into_inner();
@@ -426,7 +510,7 @@ mod tests {
         }
 
         let result = state
-            .resolve_control_plane(Request::new(ResolveControlPlaneRequest { approve: true }))
+            .approve(Request::new(ApproveRequest { approve: true }))
             .await
             .unwrap()
             .into_inner();
@@ -643,9 +727,10 @@ mod tests {
         assert_eq!(state.session_id, "sess-1");
 
         let result = client
-            .prompt(PromptRequest {
+            .send_message(SendMessageRequest {
                 text: "via transport".into(),
                 images: Vec::new(),
+                mode: MessageMode::Guide.into(),
             })
             .await
             .unwrap()

@@ -161,7 +161,11 @@ async fn handle_client_frame(text: &str, state: &HttpState) -> Option<Message> {
     match frame {
         ClientFrame::Prompt { text, images } => state
             .commands
-            .send(WebCommand::Submit { text, images })
+            .send(WebCommand::Submit {
+                text,
+                images,
+                interrupt: false,
+            })
             .is_ok()
             .then(|| Message::Text(json!({ "type": "accepted" }).to_string().into())),
         ClientFrame::Abort => state

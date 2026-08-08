@@ -351,6 +351,37 @@ fn node_def_from_json(n: &Value) -> DagNodeDef {
 
 // ── dag_plan ─────────────────────────────────────────────────────────────────
 
+/// Build a `DagRunDef` from a name + definition string (mermaid text or JSON
+/// nodes[]), mirroring the `dag_plan` tool's parameter handling. Shared with the
+/// gRPC `DagPlan` RPC so the wire surface and the tool accept the same input.
+pub fn plan_from_definition(
+    name: &str,
+    definition: &str,
+    fail_fast: Option<bool>,
+    max_concurrency: Option<usize>,
+    direction: Option<Direction>,
+) -> Result<DagRunDef, String> {
+    let trimmed = definition.trim();
+    let (def_nodes, mermaid_dir) = if trimmed.starts_with("graph ") {
+        let parsed = parse_mermaid(trimmed);
+        if !parsed.errors.is_empty() {
+            return Err(format!("mermaid 解析失败:\n{}", parsed.errors.join("\n")));
+        }
+        (parsed.nodes, Some(parsed.direction))
+    } else {
+        let arr: Vec<serde_json::Value> =
+            serde_json::from_str(trimmed).map_err(|e| format!("definition 不是合法 JSON: {e}"))?;
+        (arr.iter().map(node_def_from_json).collect(), None)
+    };
+    Ok(DagRunDef {
+        name: name.to_string(),
+        nodes: def_nodes,
+        max_concurrency,
+        fail_fast,
+        direction: direction.or(mermaid_dir),
+    })
+}
+
 impl DagPlanTool {
     async fn execute_impl(&self, params: Value) -> Result<AgentToolResult, AgentToolError> {
         let name = params
@@ -372,44 +403,36 @@ impl DagPlanTool {
         if has_nodes && has_mermaid {
             return Ok(ok_text("nodes 和 mermaid 只能提供其一。".to_string()));
         }
-        let (def_nodes, mermaid_dir) = if has_mermaid {
-            let text = params.get("mermaid").and_then(|v| v.as_str()).unwrap_or("");
-            let parsed = parse_mermaid(text);
-            if !parsed.errors.is_empty() {
-                return Ok(ok_text(format!(
-                    "mermaid 解析失败:\n{}",
-                    parsed.errors.join("\n")
-                )));
-            }
-            (parsed.nodes, Some(parsed.direction))
+        let definition = if has_mermaid {
+            params
+                .get("mermaid")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
         } else if has_nodes {
-            let arr = params
-                .get("nodes")
-                .and_then(|v| v.as_array())
-                .cloned()
-                .unwrap_or_default();
-            (arr.iter().map(node_def_from_json).collect(), None)
+            params.get("nodes").cloned().unwrap_or_default().to_string()
         } else {
             return Ok(ok_text("需要 nodes[] 或 mermaid 参数。".to_string()));
         };
-
-        let known: Vec<String> = builtin_spec_names().into_iter().map(String::from).collect();
-        let def = DagRunDef {
-            name: name.to_string(),
-            nodes: def_nodes,
-            max_concurrency: params
+        let def = match plan_from_definition(
+            name,
+            &definition,
+            params.get("failFast").and_then(|v| v.as_bool()),
+            params
                 .get("maxConcurrency")
                 .and_then(|v| v.as_u64())
                 .map(|n| n as usize),
-            fail_fast: params.get("failFast").and_then(|v| v.as_bool()),
-            // TS only reads the `direction` param; we additionally honor the
-            // mermaid directive's direction so `graph LR` actually renders LR.
-            direction: if params.get("direction").and_then(|v| v.as_str()) == Some("LR") {
+            if params.get("direction").and_then(|v| v.as_str()) == Some("LR") {
                 Some(Direction::Lr)
             } else {
-                mermaid_dir
+                None
             },
+        ) {
+            Ok(def) => def,
+            Err(e) => return Ok(ok_text(e)),
         };
+
+        let known: Vec<String> = builtin_spec_names().into_iter().map(String::from).collect();
         match self.engine.plan(def, Some(&known), self.session_id.clone()) {
             Err(errors) => Ok(ok_text(format!("DAG 校验失败:\n{}", errors.join("\n")))),
             Ok(run) => {
