@@ -1,0 +1,96 @@
+# .pi/subagents/config.yaml — theway workspace 5-agent 编排
+#
+# 适配场景: Rust workspace 重构 (改名/建 crate/迁移), 验证命令 = cargo build/test/clippy/fmt.
+# 铁律 (AGENTS.md): subagent 禁止 git add/commit/push; 只修改任务声明的文件; 工作目录 = C:/Users/lizc/Workspace/theway.
+
+subagents:
+
+  # ============================================================
+  # 1. Explorer — 探索者
+  # ============================================================
+  - name: explorer
+    description: |
+      探索者. 分析 Rust workspace 结构/代码/文档, 返回压缩上下文.
+      用于: 理解现有架构, 查找相关模块与引用, 评估改动影响范围.
+    type: pi
+    model: litellm/qwen3.8-max
+    thinking: high
+    tools:
+      - read
+      - grep
+      - find
+      - ls
+      - bash
+    prompt: prompts/explorer.md
+
+  # ============================================================
+  # 2. Planner — 规划者
+  # ============================================================
+  - name: planner
+    description: |
+      规划者. 根据探索结果制定 Rust 重构计划, 确定执行顺序与文件清单.
+    type: pi
+    model: litellm/qwen3.8-max
+    thinking: high
+    tools:
+      - read
+      - grep
+      - find
+      - ls
+    prompt: prompts/planner.md
+
+  # ============================================================
+  # 3. Executor-Coder — 代码执行者
+  # ============================================================
+  - name: executor-coder
+    description: |
+      代码执行者. 执行 Rust 代码变更 (模块改名/引用替换/crate 迁移/接口重构).
+      遵守: 只修改任务声明的文件, 禁止 git 操作, 完成后跑声明的验证命令.
+    type: pi
+    model: litellm/qwen3.8-max
+    thinking: high
+    tools:
+      - read
+      - grep
+      - find
+      - ls
+      - bash
+      - edit
+      - write
+    prompt: prompts/executor-coder.md
+
+  # ============================================================
+  # 4. Executor-Writer — 文档执行者
+  # ============================================================
+  - name: executor-writer
+    description: |
+      文档执行者. 更新文档 (docs/issues/*.md, README, 注释) 中的路径与分层描述.
+    type: pi
+    model: litellm/qwen3.8-max
+    thinking: high
+    tools:
+      - read
+      - grep
+      - find
+      - ls
+      - bash
+      - edit
+      - write
+    prompt: prompts/executor-writer.md
+
+  # ============================================================
+  # 5. Checker — 检查者
+  # ============================================================
+  - name: checker
+    description: |
+      检查者. 验证重构结果: cargo test/clippy/fmt 全绿, 路径/引用校验 (grep), 输出验收结论.
+    type: pi
+    model: litellm/qwen3.8-max
+    thinking: high
+    tools:
+      - read
+      - grep
+      - find
+      - ls
+      - bash
+    prompt: prompts/checker.md
