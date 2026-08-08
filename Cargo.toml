@@ -3,7 +3,7 @@ resolver = "2"
 members = [
     "crates/llm-provider",
     "crates/core",
-    "crates/harness",
+    "crates/app",
     "crates/mcp",
 ]
 

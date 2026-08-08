@@ -6,7 +6,7 @@
 `graph engineering mode` is the Rust port of the pi `dag-orchestrator` extension: an
 in-process DAG engine that runs subagent tasks as a dependency graph and exposes it to
 the agent through the `dag_*` tool set. The engine lives in
-`crates/agent/src/harness/graph_engineering/` (pure logic — the coding-agent side drives
+`crates/core/src/runtime/graph_engineering/` (pure logic — the coding-agent side drives
 it through a `NodeLauncher`), the tools in `crates/coding-agent/src/tools/dag_tools.rs`,
 and the subagent execution in `tools/{subagent_specs,node_launcher}.rs`.
 
@@ -87,7 +87,7 @@ the whole run in `tokio::time::timeout`.
 
 ## Implementation notes
 
-- Engine (`crates/agent/src/harness/graph_engineering/`): `types.rs` (node/run model),
+- Engine (`crates/core/src/runtime/graph_engineering/`): `types.rs` (node/run model),
   `graph.rs` (mermaid parse/render, validation, reconcile — the "auto-trigger" state
   derivation), `engine.rs` (scheduler: plan/tick/terminal handling/failFast/retry/skip/
   cancel/wait, `Notify`-based event-driven waiting with a ≤30s idle watchdog),
@@ -102,4 +102,4 @@ the whole run in `tokio::time::timeout`.
 - Windows note: tokio process pipes are blocking-pool backed — an orphan holding the
   pipe write end can hang the drain. The shell spawn path kills the tree via
   `taskkill /T` while the parent is still alive (the same class of issue as the
-  pre-existing `harness::env::native::exec_timeout` test failure on Windows).
+  pre-existing `runtime::env::native::exec_timeout` test failure on Windows).
