@@ -3,5 +3,5 @@
 
 /// Stub passthrough — replace with the real ANSI-aware, head-and-tail truncator.
 pub fn truncate_shell_output(stdout: &str, _stderr: &str, max_chars: usize) -> String {
-    crate::harness::utils::truncate::truncate_text(stdout, max_chars)
+    crate::runtime::utils::truncate::truncate_text(stdout, max_chars)
 }

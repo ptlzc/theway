@@ -298,7 +298,7 @@ fn prune_expired_cycle(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::harness::trigger::{
+    use crate::runtime::trigger::{
         CredentialScope, PayloadVisibility, SourceKind, TriggerAuthority, TriggerSource,
     };
 

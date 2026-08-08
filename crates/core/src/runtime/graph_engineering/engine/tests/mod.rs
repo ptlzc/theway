@@ -4,8 +4,8 @@ use std::time::Duration;
 use parking_lot::Mutex;
 
 use super::*;
-use crate::harness::graph_engineering::persist::PersistedNode;
-use crate::harness::graph_engineering::types::{DagNodeDef, Direction};
+use crate::runtime::graph_engineering::persist::PersistedNode;
+use crate::runtime::graph_engineering::types::{DagNodeDef, Direction};
 
 mod goal;
 mod plan;

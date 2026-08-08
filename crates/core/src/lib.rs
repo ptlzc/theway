@@ -8,7 +8,7 @@ pub mod proxy;
 pub mod types;
 
 #[cfg(feature = "harness")]
-pub mod harness;
+pub mod runtime;
 
 // Public surface — mirrors `packages/agent/src/index.ts`.
 pub use agent::{Agent, AgentListener, AgentOptions, AgentRunError};
@@ -24,7 +24,7 @@ pub use types::{
 };
 
 #[cfg(feature = "harness")]
-pub use harness::{
+pub use runtime::{
     agent_harness::{
         AgentHarness, AgentHarnessOptions, BeforeTriggerActionContext, BeforeTriggerActionHook,
         BeforeTriggerContext, BeforeTriggerDecision, BeforeTriggerHook,
@@ -90,4 +90,4 @@ pub use harness::{
 };
 
 #[cfg(all(feature = "harness", feature = "native-env"))]
-pub use harness::env::native::NativeEnv;
+pub use runtime::env::native::NativeEnv;

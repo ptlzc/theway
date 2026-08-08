@@ -2,7 +2,7 @@
 //!
 //! Renders a discovered skill catalog into a discoverable block the model can scan to decide
 //! which skill to invoke. The actual skill bodies are loaded on demand via the per-skill
-//! invocation block (see [`crate::harness::skills::format_skill_invocation`]).
+//! invocation block (see [`crate::runtime::skills::format_skill_invocation`]).
 
 use super::types::Skill;
 
