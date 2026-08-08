@@ -28,9 +28,10 @@ pub mod theway_grpc {
 
 use theway_grpc::theway_grpc_server::{ThewayGrpc, ThewayGrpcServer};
 use theway_grpc::{
-    ApproveRequest, CommandResult, DagCancelRequest, DagPlanRequest, DagPlanResponse,
-    DagRetryRequest, DagRetryResponse, DagSkipRequest, DagSkipResponse, Empty,
-    GetNodeOutputRequest, GetNodeOutputResponse, MessageMode, SendMessageRequest, SessionState,
+    ApproveRequest, CommandResult, Empty, GetNodeOutputRequest, GetNodeOutputResponse,
+    GraphCancelRequest, GraphCheckpointRequest, GraphCheckpointResponse, GraphKind,
+    GraphRestoreRequest, GraphRestoreResponse, GraphRetryRequest, GraphRetryResponse,
+    GraphSkipRequest, GraphSkipResponse, MessageMode, SendMessageRequest, SessionState,
     SetModelRequest, StreamFrame,
 };
 
@@ -51,10 +52,8 @@ struct GrpcState {
     dag_events: broadcast::Sender<DagEvent>,
     /// Job registry backing GetNodeOutput.
     registry: SubagentJobRegistry,
-    /// DAG orchestration engine (graph engineering mode): DagPlan/DagCancel/…
+    /// DAG orchestration engine (graph engineering mode): GraphCancel/Retry/…
     dag_engine: Arc<theway_core::harness::graph_engineering::engine::DagEngine>,
-    /// Owning session id (DAG ownership check).
-    session_id: String,
 }
 
 #[tonic::async_trait]
@@ -196,43 +195,11 @@ impl ThewayGrpc for GrpcState {
         Ok(Response::new(CommandResult { accepted }))
     }
 
-    // ── DAG orchestration ──────────────────────────────────────────────
+    // ── graph orchestration (DAG + goal runs) ────────────────────────────
 
-    async fn dag_plan(
+    async fn graph_cancel(
         &self,
-        request: Request<DagPlanRequest>,
-    ) -> Result<Response<DagPlanResponse>, Status> {
-        use crate::tools::dag_tools::plan_from_definition;
-        let request = request.into_inner();
-        let known: Vec<String> = crate::tools::subagent_specs::builtin_spec_names()
-            .into_iter()
-            .map(String::from)
-            .collect();
-        let direction = match request.direction.as_deref() {
-            Some("LR") => Some(theway_core::harness::graph_engineering::types::Direction::Lr),
-            _ => None,
-        };
-        let def = plan_from_definition(
-            &request.name,
-            &request.definition,
-            request.fail_fast,
-            request.max_concurrency.map(|n| n as usize),
-            direction,
-        )
-        .map_err(Status::invalid_argument)?;
-        let run = self
-            .dag_engine
-            .plan(def, Some(&known), Some(self.session_id.clone()))
-            .map_err(|errors| Status::invalid_argument(errors.join("\n")))?;
-        Ok(Response::new(DagPlanResponse {
-            run_id: run.id.clone(),
-            mermaid: theway_core::harness::graph_engineering::graph::render_mermaid(&run),
-        }))
-    }
-
-    async fn dag_cancel(
-        &self,
-        request: Request<DagCancelRequest>,
+        request: Request<GraphCancelRequest>,
     ) -> Result<Response<CommandResult>, Status> {
         let run_id = request.into_inner().run_id;
         self.dag_engine
@@ -240,25 +207,74 @@ impl ThewayGrpc for GrpcState {
         Ok(Response::new(CommandResult { accepted: true }))
     }
 
-    async fn dag_retry(
+    async fn graph_retry(
         &self,
-        request: Request<DagRetryRequest>,
-    ) -> Result<Response<DagRetryResponse>, Status> {
+        request: Request<GraphRetryRequest>,
+    ) -> Result<Response<GraphRetryResponse>, Status> {
         let request = request.into_inner();
         let node_ids = request.node_id.as_deref().map(|id| vec![id.to_string()]);
         let reset = self.dag_engine.retry(&request.run_id, node_ids.as_deref());
-        Ok(Response::new(DagRetryResponse {
+        Ok(Response::new(GraphRetryResponse {
             reset_node_ids: reset,
         }))
     }
 
-    async fn dag_skip(
+    async fn graph_skip(
         &self,
-        request: Request<DagSkipRequest>,
-    ) -> Result<Response<DagSkipResponse>, Status> {
+        request: Request<GraphSkipRequest>,
+    ) -> Result<Response<GraphSkipResponse>, Status> {
         let request = request.into_inner();
         let skipped = self.dag_engine.skip(&request.run_id, &request.node_id);
-        Ok(Response::new(DagSkipResponse { skipped }))
+        Ok(Response::new(GraphSkipResponse { skipped }))
+    }
+
+    async fn graph_checkpoint(
+        &self,
+        request: Request<GraphCheckpointRequest>,
+    ) -> Result<Response<GraphCheckpointResponse>, Status> {
+        use theway_core::harness::graph_engineering::persist::to_persisted;
+        let run_id = request.into_inner().run_id;
+        let Some(run) = self.dag_engine.get_run(&run_id) else {
+            return Ok(Response::new(GraphCheckpointResponse {
+                kind: GraphKind::GraphDag as i32,
+                snapshot: String::new(),
+                error: Some(format!("unknown run: {run_id}")),
+            }));
+        };
+        let persisted = to_persisted(&run);
+        let snapshot =
+            serde_json::to_string(&persisted).map_err(|e| Status::internal(e.to_string()))?;
+        Ok(Response::new(GraphCheckpointResponse {
+            kind: match run.kind {
+                theway_core::harness::graph_engineering::types::RunKind::Goal => {
+                    GraphKind::GraphGoal as i32
+                }
+                _ => GraphKind::GraphDag as i32,
+            },
+            snapshot,
+            error: None,
+        }))
+    }
+
+    async fn graph_restore(
+        &self,
+        request: Request<GraphRestoreRequest>,
+    ) -> Result<Response<GraphRestoreResponse>, Status> {
+        let snapshot = request.into_inner().snapshot;
+        let persisted: theway_core::harness::graph_engineering::persist::PersistedRun =
+            serde_json::from_str(&snapshot)
+                .map_err(|e| Status::invalid_argument(format!("invalid snapshot: {e}")))?;
+        let ids = self.dag_engine.restore(vec![persisted]);
+        let Some(run_id) = ids.first() else {
+            return Ok(Response::new(GraphRestoreResponse {
+                run_id: String::new(),
+                error: Some("restore produced no run".into()),
+            }));
+        };
+        Ok(Response::new(GraphRestoreResponse {
+            run_id: run_id.clone(),
+            error: None,
+        }))
     }
 }
 
@@ -288,7 +304,6 @@ impl App {
             dag_events: dag_event_tx,
             registry: self.subagent_registry.clone(),
             dag_engine: self.dag_engine.clone(),
-            session_id: self.session_id.clone(),
         };
 
         let server = tonic::transport::Server::builder()
@@ -435,7 +450,6 @@ mod tests {
                 dag_engine: Arc::new(
                     theway_core::harness::graph_engineering::engine::DagEngine::new(),
                 ),
-                session_id: "test-session".into(),
             },
             command_rx,
         )

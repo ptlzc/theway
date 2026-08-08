@@ -111,46 +111,53 @@ pub fn load_runs(path: &Path) -> Vec<PersistedRun> {
     parsed.runs
 }
 
+/// Project a run onto its persisted form (definition + node progress). Terminal
+/// runs persist too when exported directly; [`save_runs`] filters to Running.
+/// Exposed for the gRPC GraphCheckpoint / GraphRestore surface.
+pub fn to_persisted(run: &DagRun) -> PersistedRun {
+    PersistedRun {
+        id: run.id.clone(),
+        name: run.name.clone(),
+        max_concurrency: run.max_concurrency,
+        fail_fast: run.fail_fast,
+        direction: run.direction.clone(),
+        created_at: run.created_at,
+        session_id: run.session_id.clone(),
+        kind: run.kind.clone(),
+        nodes: run
+            .nodes
+            .iter()
+            .map(|n| PersistedNode {
+                id: n.id.clone(),
+                agent: n.agent.clone(),
+                task: n.task.clone(),
+                depends_on: n.depends_on.clone(),
+                timeout: n.timeout,
+                cwd: n.cwd.clone(),
+                model: n.model.clone(),
+                thinking: n.thinking.clone(),
+                status: n.status.clone(),
+                attempt: n.attempt,
+                started_at: n.started_at,
+                completed_at: n.completed_at,
+                error: n.error.clone(),
+                input_tokens: n.input_tokens,
+                output_tokens: n.output_tokens,
+                result: n.result.clone(),
+                output: n.output.clone(),
+                live_preview: n.live_preview.clone(),
+            })
+            .collect(),
+    }
+}
+
 /// Best-effort write of only the Running runs; terminal runs drop off
 /// naturally. Creates parent dirs; failures are silent.
 pub fn save_runs(path: &Path, runs: &[DagRun]) {
     let live: Vec<PersistedRun> = runs
         .iter()
         .filter(|r| r.status == DagStatus::Running)
-        .map(|r| PersistedRun {
-            id: r.id.clone(),
-            name: r.name.clone(),
-            max_concurrency: r.max_concurrency,
-            fail_fast: r.fail_fast,
-            direction: r.direction.clone(),
-            created_at: r.created_at,
-            session_id: r.session_id.clone(),
-            kind: r.kind.clone(),
-            nodes: r
-                .nodes
-                .iter()
-                .map(|n| PersistedNode {
-                    id: n.id.clone(),
-                    agent: n.agent.clone(),
-                    task: n.task.clone(),
-                    depends_on: n.depends_on.clone(),
-                    timeout: n.timeout,
-                    model: n.model.clone(),
-                    thinking: n.thinking.clone(),
-                    status: n.status.clone(),
-                    attempt: n.attempt,
-                    started_at: n.started_at,
-                    completed_at: n.completed_at,
-                    error: n.error.clone(),
-                    input_tokens: n.input_tokens,
-                    output_tokens: n.output_tokens,
-                    result: n.result.clone(),
-                    output: n.output.clone(),
-                    live_preview: n.live_preview.clone(),
-                    cwd: n.cwd.clone(),
-                })
-                .collect(),
-        })
+        .map(to_persisted)
         .collect();
     let state = PersistedStateFile {
         version: STATE_VERSION,

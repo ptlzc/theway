@@ -371,43 +371,64 @@ message ApproveRequest {
   bool approve = 1;
 }
 
-// ─────────────────────────── DAG control ───────────────────────────
+// ─────────────────────────── graph control (DAG + goal runs) ───────────────────────────
+//
+// "graph" covers both run kinds surfaced in `DagRunSnapshot.kind`:
+//   - DAG  — node graph orchestration (dag_plan-style definitions)
+//   - GOAL — single-node self-loop, condition-terminated (/goal)
+// Planning is NOT exposed here: orchestrator agents create runs via their
+// dag_plan / goal tools; external clients observe (GetState/StreamEvents) and
+// control (cancel/retry/skip) or checkpoint/restore runs.
 
-message DagPlanRequest {
-  string name = 1;
-  // mermaid flowchart text OR JSON array of nodes — same format as the dag_plan
-  // tool ({id, agent, task, dependsOn?, timeout?, cwd?, model?, thinking?}).
-  string definition = 2;
-  optional bool fail_fast = 3;
-  optional uint32 max_concurrency = 4;
-  optional string direction = 5; // "TD" | "LR"
+enum GraphKind {
+  GRAPH_DAG = 0;
+  GRAPH_GOAL = 1;
 }
 
-message DagPlanResponse {
-  string run_id = 1;
-  string mermaid = 2; // rendered status graph
-}
-
-message DagCancelRequest {
+message GraphCancelRequest {
   string run_id = 1;
 }
 
-message DagRetryRequest {
+message GraphRetryRequest {
   string run_id = 1;
   optional string node_id = 2; // omitted = all failed/cancelled nodes
 }
 
-message DagRetryResponse {
+message GraphRetryResponse {
   repeated string reset_node_ids = 1;
 }
 
-message DagSkipRequest {
+message GraphSkipRequest {
   string run_id = 1;
   string node_id = 2;
 }
 
-message DagSkipResponse {
+message GraphSkipResponse {
   bool skipped = 1;
+}
+
+// Checkpoint: export a run's full state (definition + node progress) as a
+// portable JSON snapshot. External clients can persist it, migrate it, or feed
+// it back to GraphRestore (e.g. after the runtime restarted).
+message GraphCheckpointRequest {
+  string run_id = 1;
+}
+
+message GraphCheckpointResponse {
+  GraphKind kind = 1;
+  string snapshot = 2; // JSON (PersistedRun shape: definition, node states, progress)
+  optional string error = 3;
+}
+
+// Restore: resume a run from a GraphCheckpoint snapshot. Running runs are
+// revived with their ready nodes re-scheduled.
+message GraphRestoreRequest {
+  string snapshot = 1;
+}
+
+message GraphRestoreResponse {
+  string run_id = 1;
+  optional string error = 2;
 }
 
 service ThewayGrpc {
@@ -425,9 +446,11 @@ service ThewayGrpc {
   rpc Cancel(Empty) returns (CommandResult);
   // Resolve a pending control-plane approval request (approve / reject).
   rpc Approve(ApproveRequest) returns (CommandResult);
-  // DAG orchestration (graph engineering mode).
-  rpc DagPlan(DagPlanRequest) returns (DagPlanResponse);
-  rpc DagCancel(DagCancelRequest) returns (CommandResult);
-  rpc DagRetry(DagRetryRequest) returns (DagRetryResponse);
-  rpc DagSkip(DagSkipRequest) returns (DagSkipResponse);
+  // Graph orchestration control (DAG + goal runs; planning is agent-side).
+  rpc GraphCancel(GraphCancelRequest) returns (CommandResult);
+  rpc GraphRetry(GraphRetryRequest) returns (GraphRetryResponse);
+  rpc GraphSkip(GraphSkipRequest) returns (GraphSkipResponse);
+  // Checkpoint / restore (portable run snapshots for external persistence).
+  rpc GraphCheckpoint(GraphCheckpointRequest) returns (GraphCheckpointResponse);
+  rpc GraphRestore(GraphRestoreRequest) returns (GraphRestoreResponse);
 }
