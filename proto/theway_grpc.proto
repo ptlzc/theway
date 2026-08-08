@@ -407,23 +407,34 @@ message GraphSkipResponse {
   bool skipped = 1;
 }
 
-// Checkpoint: export a run's full state (definition + node progress) as a
-// portable JSON snapshot. External clients can persist it, migrate it, or feed
-// it back to GraphRestore (e.g. after the runtime restarted).
+// Checkpoints are organized by session: a session owns its runs
+// (DagRun.session_id), and `SessionState.dags` mounts the live graph status
+// under that session. Checkpoint exports one run or the session's whole graph
+// set as portable JSON snapshots; restore revives them back under the session.
 message GraphCheckpointRequest {
-  string run_id = 1;
+  // Owning session. Omitted = the session this connection belongs to.
+  optional string session_id = 1;
+  // Omitted = every running run of the session; set to export a single run.
+  optional string run_id = 2;
 }
 
 message GraphCheckpointResponse {
-  GraphKind kind = 1;
-  string snapshot = 2; // JSON (PersistedRun shape: definition, node states, progress)
+  string session_id = 1;
+  repeated GraphSnapshotEntry checkpoints = 2;
   optional string error = 3;
 }
 
-// Restore: resume a run from a GraphCheckpoint snapshot. Running runs are
-// revived with their ready nodes re-scheduled.
+message GraphSnapshotEntry {
+  GraphKind kind = 1;
+  string run_id = 2;
+  string snapshot = 3; // JSON (PersistedRun shape: definition, node states, progress)
+}
+
+// Restore: resume run(s) from GraphCheckpoint snapshots. Running runs are
+// revived with their ready nodes re-scheduled, and re-attached to the session.
 message GraphRestoreRequest {
-  string snapshot = 1;
+  string session_id = 1;
+  string snapshot = 2; // single GraphSnapshotEntry.snapshot (PersistedRun JSON)
 }
 
 message GraphRestoreResponse {
