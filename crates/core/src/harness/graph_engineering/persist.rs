@@ -22,6 +22,7 @@ pub struct PersistedNode {
     pub task: String,
     pub depends_on: Vec<String>,
     pub timeout: Option<u64>,
+    pub cwd: Option<String>,
     pub model: Option<String>,
     pub thinking: Option<String>,
     pub status: NodeStatus,
@@ -146,6 +147,7 @@ pub fn save_runs(path: &Path, runs: &[DagRun]) {
                     result: n.result.clone(),
                     output: n.output.clone(),
                     live_preview: n.live_preview.clone(),
+                    cwd: n.cwd.clone(),
                 })
                 .collect(),
         })
@@ -196,6 +198,8 @@ pub fn hydrate(p: PersistedRun) -> DagRun {
                 result: n.result,
                 output: n.output,
                 live_preview: n.live_preview,
+                cwd: n.cwd.clone(),
+                last_active_at: None,
             }
         })
         .collect();

@@ -166,6 +166,7 @@ fn register_node(
                 task: String::new(),
                 depends_on: None,
                 timeout: None,
+                cwd: None,
                 model: None,
                 thinking: None,
             });
@@ -366,6 +367,7 @@ pub fn build_run(def: &DagRunDef) -> DagRun {
             task: n.task.clone(),
             depends_on: n.depends_on.clone().unwrap_or_default(),
             timeout: n.timeout,
+            cwd: n.cwd.clone(),
             model: n.model.clone(),
             thinking: n.thinking.clone(),
             status: NodeStatus::Pending,
@@ -379,6 +381,7 @@ pub fn build_run(def: &DagRunDef) -> DagRun {
             result: None,
             output: None,
             live_preview: None,
+            last_active_at: None,
         })
         .collect();
     DagRun {

@@ -11,6 +11,7 @@ pub(super) fn sample_run(id: &str, status: DagStatus) -> DagRun {
         task: format!("task {id}"),
         depends_on: vec!["root".to_string()],
         timeout: Some(120),
+        cwd: None,
         model: Some("m1".to_string()),
         thinking: Some("high".to_string()),
         status: status.clone(),
@@ -24,6 +25,7 @@ pub(super) fn sample_run(id: &str, status: DagStatus) -> DagRun {
         result: None,
         output: Some("tail".to_string()),
         live_preview: Some("preview".to_string()),
+        last_active_at: None,
     };
     DagRun {
         id: id.to_string(),

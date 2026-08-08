@@ -77,6 +77,7 @@ impl AgentTool for BashTool {
             .get("run_in_background")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+        let cwd = params.get("cwd").and_then(|v| v.as_str()).map(String::from);
 
         if run_in_background {
             let bg = super::shell::run_in_background(command).await?;
@@ -88,7 +89,9 @@ impl AgentTool for BashTool {
             });
         }
 
-        let outcome = run_with_kill_on_timeout_or_cancel(command, timeout_secs, &cancel).await?;
+        let outcome =
+            run_with_kill_on_timeout_or_cancel(command, timeout_secs, cwd.as_deref(), &cancel)
+                .await?;
 
         let exit = outcome.rendered_exit();
         let (stdout_trim, st) =
@@ -143,13 +146,18 @@ impl AgentTool for BashTool {
 async fn run_with_kill_on_timeout_or_cancel(
     command: &str,
     timeout_secs: Option<u64>,
+    cwd: Option<&str>,
     cancel: &CancellationToken,
 ) -> Result<RunOutcome, AgentToolError> {
     let mut cmd = tokio::process::Command::new("sh");
     cmd.arg("-c")
         .arg(command)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(dir) = cwd {
+        cmd.current_dir(dir);
+    }
+    cmd
         // Defense in depth: any early-return path between here and the explicit kill
         // branches below still destroys the child instead of leaving an orphan.
         .kill_on_drop(true);
@@ -342,6 +350,7 @@ static DEFINITION: Lazy<Tool> = Lazy::new(|| Tool {
         "properties": {
             "command": { "type": "string", "description": "Shell command to execute" },
             "run_in_background": { "type": "boolean", "description": "If true, start a background shell and return its shell_id immediately instead of waiting" },
+            "cwd": { "type": "string", "description": "Working directory to run the command in (absolute path). Optional; defaults to the session cwd" },
             "timeout": { "type": "integer", "description": "Timeout in seconds (optional). On timeout the child is killed and any output captured so far is returned." },
         },
         "required": ["command"],

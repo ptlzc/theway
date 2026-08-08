@@ -159,6 +159,7 @@ impl DagEngine {
             task: condition.to_string(),
             depends_on: Vec::new(),
             timeout: None,
+            cwd: None,
             model: None,
             thinking: None,
             status: NodeStatus::Running,
@@ -172,6 +173,7 @@ impl DagEngine {
             result: None,
             output: None,
             live_preview: None,
+            last_active_at: None,
         };
         let mut run = DagRun {
             id: String::new(), // assigned below
@@ -546,6 +548,7 @@ impl DagEngine {
         if let Some(p) = preview {
             node.live_preview = Some(cap_chars(&p, 2048));
         }
+        node.last_active_at = Some(now_ms());
     }
 
     /// Re-derive non-terminal node states after a dependency flipped.

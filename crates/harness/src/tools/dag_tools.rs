@@ -194,6 +194,16 @@ fn node_result_text(node: &DagNode, tail: usize) -> String {
             fmt_dur(completed - node.started_at.unwrap_or(completed))
         ));
     }
+    if node.status == NodeStatus::Running {
+        if let Some(active) = node.last_active_at {
+            let idle = (current_time_ms() - active).max(0);
+            parts.push(format!(
+                "  last-active: {} ({}s ago)",
+                iso_time_ms(active),
+                idle / 1000
+            ));
+        }
+    }
     let tokens = node.input_tokens.unwrap_or(0) + node.output_tokens.unwrap_or(0);
     if tokens > 0 {
         parts.push(format!(
@@ -274,6 +284,13 @@ fn tail_truncate(text: &str, tail: usize) -> String {
 /// Epoch ms → `toISOString()`-style UTC string ("YYYY-MM-DDTHH:MM:SS.mmmZ").
 /// Written by hand because chrono's RFC3339 formatters need the `alloc`
 /// feature, which this crate's chrono dependency does not enable.
+fn current_time_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 fn iso_time_ms(ms: i64) -> String {
     let days = ms.div_euclid(86_400_000);
     let ms_of_day = ms.rem_euclid(86_400_000);
@@ -326,6 +343,7 @@ fn node_def_from_json(n: &Value) -> DagNodeDef {
                 .collect()
         }),
         timeout: n.get("timeout").and_then(|v| v.as_u64()),
+        cwd: n.get("cwd").and_then(|v| v.as_str()).map(String::from),
         model: n.get("model").and_then(|v| v.as_str()).map(String::from),
         thinking: n.get("thinking").and_then(|v| v.as_str()).map(String::from),
     }
@@ -443,7 +461,7 @@ impl AgentTool for DagPlanTool {
 static PLAN_DEFINITION: Lazy<Tool> = Lazy::new(|| {
     Tool {
     name: "dag_plan".into(),
-    description: "Define a DAG of subagent tasks (JSON nodes[] or mermaid flowchart text) and AUTO-START it. The engine launches nodes whose prerequisites all succeeded — you do NOT launch them manually with subagent(background:true). Parameters: name (required label), nodes (array of {id, agent, task, dependsOn?, timeout?, model?, thinking?}) OR mermaid (graph TD text; node labels must be \"agent: task\"). Optional: maxConcurrency (default 10), failFast (default false: only the failed node's downstream is cancelled, side branches continue; true: any failure aborts the whole run), direction TD|LR. Session-scoped: runs bind to the calling session — multiple concurrent agents in one project each manage their own DAGs, and dag_* tools refuse runs owned by another session. Node ID convention: short semantic names (lowercase + hyphen), e.g. explore → plan → impl → verify; parallel siblings get suffixes (impl-api, impl-web); a numeric phase prefix is allowed (1-explore, 2-plan). Every non-root node MUST declare dependsOn — the status display shows \"[deps] id\" so prerequisites are always visible. One session can own MULTIPLE DAGs in parallel (dag-1, dag-2, …): dag_wait with no dagId harvests ALL running DAGs of the session; comma-separated dagIds wait for a subset. Returns the run id + rendered mermaid status graph. Monitor via dag_status / the live widget; harvest via dag_wait.".into(),
+    description: "Define a DAG of subagent tasks (JSON nodes[] or mermaid flowchart text) and AUTO-START it. The engine launches nodes whose prerequisites all succeeded — you do NOT launch them manually with subagent(background:true). Parameters: name (required label), nodes (array of {id, agent, task, dependsOn?, timeout?, cwd?, model?, thinking?}) OR mermaid (graph TD text; node labels must be \"agent: task\"). Optional: maxConcurrency (default 10), failFast (default false: only the failed node's downstream is cancelled, side branches continue; true: any failure aborts the whole run), direction TD|LR. Session-scoped: runs bind to the calling session — multiple concurrent agents in one project each manage their own DAGs, and dag_* tools refuse runs owned by another session. Node ID convention: short semantic names (lowercase + hyphen), e.g. explore → plan → impl → verify; parallel siblings get suffixes (impl-api, impl-web); a numeric phase prefix is allowed (1-explore, 2-plan). Every non-root node MUST declare dependsOn — the status display shows \"[deps] id\" so prerequisites are always visible. One session can own MULTIPLE DAGs in parallel (dag-1, dag-2, …): dag_wait with no dagId harvests ALL running DAGs of the session; comma-separated dagIds wait for a subset. Returns the run id + rendered mermaid status graph. Monitor via dag_status / the live widget; harvest via dag_wait.".into(),
     parameters: json!({
         "type": "object",
         "properties": {
@@ -458,6 +476,7 @@ static PLAN_DEFINITION: Lazy<Tool> = Lazy::new(|| {
                         "task": { "type": "string", "description": "Task prompt for the subagent" },
                         "dependsOn": { "type": "array", "items": { "type": "string" }, "description": "Prerequisite node ids" },
                         "timeout": { "type": "number", "description": "Idle timeout override (sec)" },
+                        "cwd": { "type": "string", "description": "Working directory (absolute path) for the subagent; pinned into its system prompt. Required for multi-repo tasks — without it the subagent operates in the session cwd" },
                         "model": { "type": "string", "description": "Primary-target model override" },
                         "thinking": { "type": "string", "description": "Primary-target thinking override" },
                     },

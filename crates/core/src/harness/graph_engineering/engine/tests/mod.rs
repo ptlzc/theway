@@ -75,6 +75,7 @@ fn run_def(
                     Some(deps.iter().map(|d| (*d).to_string()).collect())
                 },
                 timeout: None,
+                cwd: None,
                 model: None,
                 thinking: None,
             })
@@ -118,6 +119,7 @@ fn persisted_node(id: &str, status: NodeStatus, deps: &[&str]) -> PersistedNode 
         task: format!("task {id}"),
         depends_on: deps.iter().map(|s| s.to_string()).collect(),
         timeout: None,
+        cwd: None,
         model: None,
         thinking: None,
         status,

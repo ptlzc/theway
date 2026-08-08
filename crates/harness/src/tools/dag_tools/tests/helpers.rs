@@ -85,6 +85,7 @@ fn node_def(id: &str) -> DagNodeDef {
         task: format!("task {id}"),
         depends_on: None,
         timeout: None,
+        cwd: None,
         model: None,
         thinking: None,
     }

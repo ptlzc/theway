@@ -17,6 +17,7 @@ fn node_def(id: &str, agent: &str, task: &str, deps: &[&str]) -> DagNodeDef {
             Some(deps.iter().map(|s| s.to_string()).collect())
         },
         timeout: None,
+        cwd: None,
         model: None,
         thinking: None,
     }

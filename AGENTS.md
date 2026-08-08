@@ -34,3 +34,28 @@ The current history only shows an initial commit, so no strict commit convention
 ## Security & Configuration Tips
 
 Do not commit API keys or local session data. The CLI reads provider keys from environment variables such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and related provider-specific keys. Runtime data is written under `~/.theway/` by default, or under `$THEWAY_DIR` when set.
+
+## Subagent Orchestration Ops (DAG / task tool)
+
+Hard-won lessons from multi-repo orchestration runs (theway-public, 2026-08). Applies to
+any orchestrator driving the built-in subagents (task tool / dag_*):
+
+1. **Multi-directory tasks must pin the target directory.** Subagents default to the
+   orchestrator's cwd. When a task targets a different repo/directory, the task prompt
+   must (a) start with an explicit `cd <absolute target>`, (b) forbid touching the
+   default cwd, and (c) name the files it may modify. Built-in subagent prompts already
+   carry this operating discipline (see `OPERATING_DISCIPLINE` in
+   `crates/harness/src/tools/subagent_specs.rs`); the orchestrator still must supply the
+   concrete target path — subagents cannot guess it.
+2. **Stalled nodes are the orchestrator's to handle.** A node whose token/round counter
+   stops growing across two inspection cycles is stalled. Don't wait on it: skip the node
+   (its downstream treats it as done), take over its remaining work yourself, and fix
+   whatever it produced that is wrong. Subagents sometimes leave a build half-fixed or a
+   commit pushed early — verify, don't trust.
+3. **Only the final publish node may write version control.** Subagents must not
+   `git add/commit/push` unless a task explicitly authorizes them. The orchestrator owns
+   commits; a `publish`-style node at the end of the DAG is the single allowed writer.
+4. **DAG node task text is the contract.** `dependsOn` must be declared on every
+   non-root node (a missing `dependsOn` runs everything in parallel). Task text must
+   include absolute paths, forbidden operations, and the acceptance check — the node
+   label is not the task.

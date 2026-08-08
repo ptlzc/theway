@@ -70,6 +70,9 @@ pub struct DagNodeDef {
     pub depends_on: Option<Vec<String>>,
     /// Idle timeout override (sec), passed through to the subagent runner.
     pub timeout: Option<u64>,
+    /// Working directory for the subagent (absolute path). When set, the node's task
+    /// prompt pins it and the subagent is told to run all commands from there.
+    pub cwd: Option<String>,
     /// Primary-target model override, passed through to the subagent runner.
     pub model: Option<String>,
     /// Primary-target thinking override.
@@ -109,6 +112,7 @@ pub struct DagNode {
     pub task: String,
     pub depends_on: Vec<String>,
     pub timeout: Option<u64>,
+    pub cwd: Option<String>,
     pub model: Option<String>,
     pub thinking: Option<String>,
     pub status: NodeStatus,
@@ -130,6 +134,9 @@ pub struct DagNode {
     pub output: Option<String>,
     /// Live output while running (launcher updates, capped ~2 KB).
     pub live_preview: Option<String>,
+    /// Heartbeat (ms): refreshed by the engine on every token/preview update. Lets
+    /// orchestrators spot stalled nodes (heartbeat frozen across inspections).
+    pub last_active_at: Option<i64>,
 }
 
 /// One DAG run. Nodes keep declaration order (graphs are small; linear scan).
