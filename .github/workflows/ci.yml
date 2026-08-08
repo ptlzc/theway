@@ -1,0 +1,107 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  # NOTE: do NOT set `RUSTFLAGS: -D warnings` globally — it would make every cargo invocation
+  # (including `cargo test`) fail on lint warnings from generated/transitive crates. The
+  # `clippy` job below passes `-D warnings` via `clippy -- -D warnings` instead, so deny-warn
+  # only applies to first-party clippy lints.
+
+jobs:
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: cargo registry cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: clippy-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
+          restore-keys: |
+            clippy-${{ runner.os }}-
+      # `--workspace` + `--all-targets` covers every crate's lib/bin/tests/examples. All 10
+      # providers are linted because `theway` already activates the `all-providers`
+      # feature on `theway-llm-provider` (feature unification across the workspace).
+      - run: cargo clippy --workspace --all-targets --features tui -- -D warnings
+
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: install rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: test-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
+          restore-keys: |
+            test-${{ runner.os }}-
+      - name: cargo test --workspace --features tui
+        # Strip all provider env vars so any test that accidentally hits a real API will
+        # self-skip / error cleanly. Mirrors the TS repo's `test.sh` discipline.
+        env:
+          ANTHROPIC_API_KEY: ""
+          OPENAI_API_KEY: ""
+          OPENROUTER_API_KEY: ""
+          GROQ_API_KEY: ""
+          MISTRAL_API_KEY: ""
+          GEMINI_API_KEY: ""
+          GOOGLE_API_KEY: ""
+          AWS_BEARER_TOKEN_BEDROCK: ""
+          GOOGLE_VERTEX_ACCESS_TOKEN: ""
+          CODEX_AUTH_TOKEN: ""
+          AZURE_OPENAI_API_KEY: ""
+        run: cargo test --workspace --features tui
+
+  fefe-worker:
+    name: fefe worker
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: workers/fefe-hub
+    steps:
+      - uses: actions/checkout@v4
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: workers/fefe-hub/package-lock.json
+      - run: npm ci
+      - run: npm test

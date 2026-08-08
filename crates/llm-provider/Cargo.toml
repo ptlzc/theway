@@ -1,0 +1,97 @@
+[package]
+name = "theway-llm-provider"
+version = "0.75.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Rust rewrite of the original pi AI client — unified streaming LLM client across Anthropic / OpenAI / Google / Bedrock / Mistral and OpenAI-compatible endpoints."
+license = "MIT"
+repository = "https://github.com/earendil-works/theway"
+authors = ["theway contributors"]
+
+[lib]
+name = "theway_llm_provider"
+path = "src/lib.rs"
+
+[features]
+default = ["anthropic", "faux"]
+
+# Each provider is opt-in via feature so a thin consumer can avoid pulling SDK glue it doesn't need.
+anthropic = []
+openai-completions = []
+openai-responses = []
+openai-codex-responses = []
+azure-openai-responses = []
+google = []
+google-vertex = []
+amazon-bedrock = []
+cloudflare = []
+mistral = []
+faux = []
+
+# Image-generation providers are gated separately.
+openrouter-images = []
+
+# Bundle everything (used by the workspace's smoke tests).
+all-providers = [
+    "anthropic",
+    "openai-completions",
+    "openai-responses",
+    "openai-codex-responses",
+    "azure-openai-responses",
+    "google",
+    "google-vertex",
+    "amazon-bedrock",
+    "cloudflare",
+    "mistral",
+    "faux",
+    "openrouter-images",
+]
+
+[dependencies]
+# Async runtime + HTTP/SSE.
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "io-util"] }
+tokio-util = { version = "0.7", features = ["io"] }
+futures = "0.3"
+futures-core = "0.3"
+pin-project-lite = "0.2"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "gzip"] }
+async-trait = "0.1"
+bytes = "1"
+
+# Serialization. Tool-call args + provider payloads are JSON-shaped.
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+
+# Misc utilities.
+thiserror = "2"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+url = "2"
+percent-encoding = "2"
+once_cell = "1"
+rand = "0.9"
+base64 = "0.22"
+sha2 = "0.10"
+hex = "0.4"
+hmac = "0.12"
+async-stream = "0.3"
+jsonwebtoken = { version = "9", default-features = false, features = ["use_pem"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+tracing = "0.1"
+regex = "1"
+
+[dev-dependencies]
+anyhow = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }
+serde_yaml = "0.9"
+tempfile = "3"
+
+[[example]]
+name = "anthropic_hello"
+required-features = ["anthropic"]
+
+[[example]]
+name = "gpt55_hello"
+required-features = ["openai-responses"]
+
+[lints]
+workspace = true

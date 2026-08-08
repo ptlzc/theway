@@ -1,0 +1,13 @@
+/target
+/output
+/workers/fefe-hub/dist
+/workers/fefe-hub/node_modules
+Cargo.lock
+*.log
+.DS_Store
+.env
+.idea
+.vscode
+.pie/
+workers/fefe-hub/src/viewer_html.generated.ts
+workers/fefe-hub/.wrangler/

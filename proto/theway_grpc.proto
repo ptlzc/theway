@@ -1,0 +1,379 @@
+syntax = "proto3";
+package theway.grpc.v1;
+
+// Single source of truth for the theway <-> workmate protocol. Consumed by the
+// Rust build (crates/harness/build.rs, via protox + tonic-prost-build)
+// and by the TypeScript side (@grpc/proto-loader runtime load, no codegen).
+//
+// Architecture: dual wire format — gRPC carries structured protobuf binary,
+// JSON channels (--web SSE, relay, future WebSocket) carry the same domain
+// model. See docs/PROTOCOL.md for the full design (state plane vs event plane,
+// graph mode data flow, metrics).
+
+// ─────────────────────────── state plane ───────────────────────────
+
+// Full session state (the structured form of the former WebSnapshot JSON).
+// Low-frequency, whole-replacement: GetState / stream snapshot frames.
+message SessionState {
+  string session_id = 1;
+  string model = 2;
+  repeated ProviderGroup model_catalog = 3;
+  string cwd = 4;
+  bool busy = 5;
+  uint32 queued_count = 6;
+  optional TriggerPollStatus latest_trigger_poll = 7;
+  optional GoalSnapshot goal = 8;
+  optional ControlPlanePromptSnapshot control_plane_prompt = 9;
+  SidebarSnapshot sidebar = 10;
+  repeated FeedBlock feed_blocks = 11;
+  repeated string feed_lines = 12;
+  // graph mode (P1/P2 fill these):
+  repeated DagRunSnapshot dags = 13;
+  repeated SubagentJobSnapshot subagents = 14;
+}
+
+message ProviderGroup {
+  string provider = 1;
+  bool has_credential = 2;
+  repeated ModelEntry models = 3;
+}
+
+message ModelEntry {
+  string id = 1;
+  string name = 2;
+}
+
+message TriggerPollStatus {
+  string checked_at = 1;
+  string trace_id = 2;
+  string source_label = 3;
+  string event_label = 4;
+  string summary = 5;
+}
+
+message GoalSnapshot {
+  string condition = 1;
+  string status = 2;
+  uint32 iterations = 3;
+  optional string last_reason = 4;
+}
+
+message ControlPlanePromptSnapshot {
+  string tool_name = 1;
+  string label = 2;
+  string reason = 3;
+  string args_hash = 4;
+  string payload = 5;
+}
+
+message SidebarSnapshot {
+  uint32 inbox_new = 1;
+  SkillsSnapshot skills = 2;
+  TriggersSnapshot triggers = 3;
+  CronSnapshot cron = 4;
+  McpSnapshot mcp = 5;
+  ToolsSnapshot tools = 6;
+  repeated string hooks = 7;
+  repeated string runtime = 8;
+}
+
+message SkillsSnapshot {
+  uint32 total = 1;
+  uint32 enabled = 2;
+  uint32 disabled = 3;
+  uint32 builtin = 4;
+  uint32 user = 5;
+  uint32 project = 6;
+  repeated SkillSnapshot items = 7;
+}
+
+message SkillSnapshot {
+  string name = 1;
+  string source = 2;
+  string file_path = 3;
+  bool enabled = 4;
+}
+
+message TriggersSnapshot {
+  uint32 total = 1;
+  uint32 enabled = 2;
+  uint32 disabled = 3;
+  repeated TriggerRuleSnapshot rules = 4;
+}
+
+message TriggerRuleSnapshot {
+  string id = 1;
+  string full_id = 2;
+  bool enabled = 3;
+  string mode = 4;
+  string condition = 5;
+  string action = 6;
+}
+
+message CronSnapshot {
+  uint32 total = 1;
+  uint32 enabled = 2;
+  uint32 disabled = 3;
+  repeated CronJobSnapshot jobs = 4;
+}
+
+message CronJobSnapshot {
+  string id = 1;
+  bool enabled = 2;
+  string schedule = 3;
+  string action = 4;
+  uint64 skipped_overlap_count = 5;
+  optional string last_error = 6;
+}
+
+message McpSnapshot {
+  uint32 servers = 1;
+  uint32 tools = 2;
+  uint32 notification_hooks = 3;
+  repeated string server_names = 4;
+  repeated string tool_names = 5;
+}
+
+message ToolsSnapshot {
+  uint32 total = 1;
+  repeated string names = 2;
+}
+
+// One renderable feed entry. oneof mirrors the serde tagged enum WebFeedBlock;
+// JSON channels keep serde shape until the protojson migration.
+message FeedBlock {
+  oneof kind {
+    UserBlock user = 1;
+    AssistantBlock assistant = 2;
+    ThinkingBlock thinking = 3;
+    ToolBlock tool = 4;
+    ToolResultBlock tool_result = 5;
+    PlainBlock plain = 6;
+  }
+}
+
+message UserBlock {
+  string text = 1;
+  optional string timestamp = 2;
+}
+
+message AssistantBlock {
+  string text = 1;
+  optional string timestamp = 2;
+}
+
+message ThinkingBlock {
+  string text = 1;
+  optional string timestamp = 2;
+}
+
+message ToolBlock {
+  string name = 1;
+  string args = 2;
+  optional string timestamp = 3;
+}
+
+message ToolResultBlock {
+  repeated string lines = 1;
+  bool is_error = 2;
+  optional string timestamp = 3;
+}
+
+message PlainBlock {
+  string text = 1;
+  string level = 2; // "output" | "system" | "error" | "note" (serde snake_case variant names)
+  optional string timestamp = 3;
+}
+
+// ─────────────────────────── graph mode ───────────────────────────
+
+message DagRunSnapshot {
+  string id = 1;
+  string name = 2;
+  string status = 3; // running/completed/failed/cancelled
+  bool fail_fast = 4;
+  uint32 max_concurrency = 5;
+  string direction = 6; // TD/LR
+  int64 created_at = 7;
+  optional int64 completed_at = 8;
+  optional string error = 9;
+  repeated DagNodeSnapshot nodes = 10;
+  string kind = 11; // "dag" | "goal" — goal runs are single-node self-loops (condition-terminated)
+}
+
+message DagNodeSnapshot {
+  string id = 1;
+  string agent = 2;
+  string status = 3; // pending/ready/running/succeeded/failed/skipped/cancelled
+  repeated string depends_on = 4;
+  optional string job_id = 5; // ↔ SubagentJobSnapshot.id
+  uint32 attempt = 6;
+  optional int64 started_at = 7;
+  optional int64 completed_at = 8;
+  optional string error = 9;
+  optional uint64 input_tokens = 10;
+  optional uint64 output_tokens = 11;
+  optional NodeResultSnapshot result = 12;
+  optional string output_tail = 13; // terminal output tail; full text via events/GetNodeOutput
+  optional string live_preview = 14; // live output while running
+}
+
+message NodeResultSnapshot {
+  bool success = 1;
+  optional string error = 2;
+  optional uint64 duration_ms = 3;
+  uint32 attempt = 4;
+  uint32 total_attempts = 5;
+}
+
+message SubagentJobSnapshot {
+  string id = 1;
+  string agent = 2; // general / explorer / executor-coder / ...
+  string source = 3; // task | dag
+  optional string run_id = 4;
+  optional string node_id = 5;
+  string status = 6; // running/succeeded/failed/cancelled
+  optional int64 started_at = 7;
+  optional int64 completed_at = 8;
+  optional uint64 duration_ms = 9;
+  uint32 attempt = 10;
+  uint32 total_attempts = 11;
+  optional uint64 input_tokens = 12;
+  optional uint64 output_tokens = 13;
+  optional string error = 14;
+  optional string output_tail = 15;
+  optional string live_preview = 16;
+  // graph mode metrics:
+  optional double tps = 17; // output tokens/sec (sliding window)
+  optional double cps = 18; // output chars/sec
+  optional uint64 chars = 19; // cumulative output chars
+  optional uint64 tools_called = 20; // cumulative tool calls
+  optional uint32 turn = 21; // completed turns
+}
+
+// Full output of a DAG node, fetched on demand with an offset (P3).
+message GetNodeOutputRequest {
+  string run_id = 1;
+  string node_id = 2;
+  uint64 offset = 3;
+}
+
+message GetNodeOutputResponse {
+  string text = 1; // fragment from offset
+  uint64 offset = 2; // start offset of this fragment
+  uint64 total = 3; // full length
+  bool truncated = 4; // server buffer capped
+}
+
+// ─────────────────────────── event plane ───────────────────────────
+
+// Unified envelope for StreamEvents / WebSocket frames.
+message StreamFrame {
+  oneof payload {
+    SessionState snapshot = 1; // connection start + periodic full state
+    StreamEvent event = 2; // high-frequency increment
+  }
+}
+
+message StreamEvent {
+  oneof kind {
+    SubagentStarted subagent_started = 1;
+    SubagentOutput subagent_output = 2;
+    SubagentMetrics subagent_metrics = 3;
+    SubagentCompleted subagent_completed = 4;
+    NodeStatus node_status = 5;
+    RunStatus run_status = 6;
+  }
+}
+
+message SubagentStarted {
+  string id = 1;
+  string agent = 2;
+  string source = 3;
+  optional string run_id = 4;
+  optional string node_id = 5;
+}
+
+message SubagentOutput {
+  string id = 1;
+  string chunk = 2; // high-frequency, untruncated
+}
+
+message SubagentMetrics {
+  string id = 1;
+  double tps = 2;
+  double cps = 3;
+  uint64 chars = 4;
+  uint64 tokens_in = 5;
+  uint64 tokens_out = 6;
+  uint64 tools_called = 7;
+  uint32 turn = 8;
+}
+
+message SubagentCompleted {
+  string id = 1;
+  string status = 2;
+  optional string error = 3;
+  optional uint64 duration_ms = 4;
+  uint64 chars = 5;
+  uint64 tokens_in = 6;
+  uint64 tokens_out = 7;
+  uint64 tools_called = 8;
+}
+
+message NodeStatus {
+  string run_id = 1;
+  string node_id = 2;
+  string status = 3;
+  optional string error = 4;
+}
+
+message RunStatus {
+  string run_id = 1;
+  string status = 2;
+  optional string error = 3;
+}
+
+// ─────────────────────────── commands ───────────────────────────
+
+// Command result: `accepted` carries the same semantics as the existing
+// `GET /prompt`-style endpoints (true = the command was queued into the event loop).
+message CommandResult {
+  bool accepted = 1;
+}
+
+// Empty request marker. Kept as a local message (instead of
+// google/protobuf/empty.proto) so the build has no well-known-type include
+// dependency and works with the pure-Rust proto compiler.
+message Empty {}
+
+message PromptRequest {
+  string text = 1;
+  repeated Image images = 2;
+}
+
+message Image {
+  string data = 1;
+  optional string name = 2;
+}
+
+message SetModelRequest {
+  string spec = 1;
+}
+
+message ResolveControlPlaneRequest {
+  bool approve = 1;
+}
+
+service ThewayGrpc {
+  // Full structured state (binary protobuf).
+  rpc GetState(Empty) returns (SessionState);
+  // Snapshot/event stream (P0: snapshot frames; P2+: event increments).
+  rpc StreamEvents(Empty) returns (stream StreamFrame);
+  // Fetch a DAG node's full output from an offset (P3).
+  rpc GetNodeOutput(GetNodeOutputRequest) returns (GetNodeOutputResponse);
+  rpc Prompt(PromptRequest) returns (CommandResult);
+  rpc SetModel(SetModelRequest) returns (CommandResult);
+  rpc Abort(Empty) returns (CommandResult);
+  rpc ResolveControlPlane(ResolveControlPlaneRequest) returns (CommandResult);
+}

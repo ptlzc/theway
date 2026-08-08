@@ -1,0 +1,19 @@
+# Example theway MCP server registry — drop this (or the matching `[[server]]` block) into
+# either of theway's two mcp.toml locations:
+#
+#   ~/.theway/mcp.toml             # user-global, applies to every theway run on this machine
+#   <repo>/.theway/mcp.toml        # project-local, only applies when running theway from <repo>
+#                                 (project entries override same-named user entries)
+#
+# The path in `args` is relative to the cwd theway is launched from. Replace it with an
+# absolute path if you want the entry to work regardless of where you run theway. Example:
+#
+#   args = ["/abs/path/to/theway/examples/mcp-notify-python/notify-server.py"]
+
+[[server]]
+# `name` becomes the source label `mcp:<name>` and the prefix on every minted
+# idempotency key (e.g. `mcp:demo-notify:custom:heartbeat:1`). It must be unique
+# across all configured MCP servers.
+name = "demo-notify"
+command = "python3"
+args = ["./examples/mcp-notify-python/notify-server.py"]

@@ -1,0 +1,61 @@
+[package]
+name = "theway-core"
+version = "0.75.0"
+edition = "2024"
+rust-version = "1.85"
+description = "theway core — stateful agent runtime + harness (Agent loop, skills, prompt templates, sessions, compaction) on top of theway-llm-provider."
+license = "MIT"
+repository = "https://github.com/earendil-works/theway"
+authors = ["theway contributors"]
+
+[lib]
+name = "theway_core"
+path = "src/lib.rs"
+
+[features]
+default = ["harness", "native-env"]
+
+# Bare Agent + agent-loop. Always on.
+# Harness layer (skills, prompt templates, sessions, compaction, system prompt). Opt-out for
+# embedders that only want the bare Agent (e.g. browser-side consumers).
+harness = []
+# Native filesystem adapter (std::fs). Default for native targets; turn off for wasm.
+native-env = []
+
+[dependencies]
+theway-llm-provider = { path = "../llm-provider" }
+
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "fs", "io-util", "process"] }
+tokio-util = { version = "0.7", features = ["io"] }
+futures = "0.3"
+futures-core = "0.3"
+async-trait = "0.1"
+parking_lot = "0.12"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+serde_yaml = "0.9"
+
+thiserror = "2"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+uuid = { version = "1", features = ["v7", "serde"] }
+once_cell = "1"
+tracing = "0.1"
+ignore = "0.4"
+regex = "1"
+# Stable content hash for trigger_promotion audit. Used only to fingerprint promotion
+# template bodies for cross-process replay verification — never used as a credential
+# / authentication primitive. SHA-256 is overkill cryptographically for this purpose
+# but avoids the "two hashers disagree" footgun of non-deterministic stdlib hashers.
+sha2 = "0.10"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+anyhow = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }
+
+[lints]
+workspace = true

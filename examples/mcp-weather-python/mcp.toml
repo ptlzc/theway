@@ -1,0 +1,32 @@
+# Example theway MCP server registry for the live-weather push source. Drop this (or the
+# matching `[[server]]` block) into either of theway's two mcp.toml locations:
+#
+#   ~/.theway/mcp.toml             # user-global, applies to every theway run on this machine
+#   <repo>/.theway/mcp.toml        # project-local, only applies when running theway from <repo>
+#                                 (project entries override same-named user entries)
+#
+# The path in `args` is relative to the cwd theway is launched from. Replace it with an
+# absolute path if you want the entry to work regardless of where you run theway. Example:
+#
+#   args = ["/abs/path/to/theway/examples/mcp-weather-python/weather-server.py"]
+#
+# This registry has no `env` key; the child inherits theway's environment, so override the
+# defaults ("San Francisco", 600s) by exporting before launch:
+#   THEWAY_WEATHER_LOCATION=Tokyo THEWAY_WEATHER_INTERVAL_SECS=300 theway
+# ...or bake them into the spawn via a shell wrapper:
+#   command = "sh"
+#   args = ["-c", "THEWAY_WEATHER_LOCATION=Tokyo python3 ./examples/mcp-weather-python/weather-server.py"]
+
+[[server]]
+# `name` becomes the source label `mcp:<name>` and the prefix on every minted idempotency
+# key (e.g. `mcp:weather:custom:obs:2026-05-23:02:07PM`). Must be unique across all servers.
+name = "weather"
+command = "python3"
+args = ["./examples/mcp-weather-python/weather-server.py"]
+# Delivery mode for this server's pushes (pick at most one; both default false):
+#   inject_summary = true   each `theway_summary` is injected into chat as a `[Trigger …]`
+#                           message — no sub-agent, no model call, zero cost.
+#   inject_and_run = true   same injection, then ONE model turn runs in the chat's full
+#                           context so the agent reacts to the update (costs a turn).
+# Drop both to instead route pushes through dynamic trigger rules (sub-agent).
+inject_summary = true
