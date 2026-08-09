@@ -52,7 +52,9 @@ async fn exec_background_returns_shell_id() {
 
 #[tokio::test]
 async fn bash_run_in_background_returns_shell_id() {
-    let tool = crate::tools::bash::BashTool;
+    // Relative on purpose: this module also compiles inside integration tests that pull
+    // `tools/` in via `#[path]` at a different crate-root depth (server tests/tools.rs).
+    let tool = super::super::super::bash::BashTool;
     let result = tool
         .execute(
             "b1",

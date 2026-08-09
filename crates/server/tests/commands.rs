@@ -61,11 +61,8 @@ mod session;
 #[path = "../src/session_archive.rs"]
 mod session_archive;
 #[allow(dead_code)]
-#[path = "../src/skills_state.rs"]
+#[path = "../../core/src/skills_state.rs"]
 mod skills_state;
-#[allow(dead_code)]
-#[path = "../src/tools/mod.rs"]
-mod tools;
 #[allow(dead_code)]
 #[path = "../src/triggers/mod.rs"]
 mod triggers;

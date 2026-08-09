@@ -15,23 +15,17 @@ use theway_llm_provider::{
 };
 use tokio_util::sync::CancellationToken;
 
-#[path = "../src/tools/subagent_runner.rs"]
+#[path = "../../core/src/runtime/tools/subagent_runner.rs"]
 mod subagent_runner;
-#[path = "../src/tools/subagent_specs.rs"]
+#[path = "../../core/src/runtime/tools/subagent_specs.rs"]
 mod subagent_specs;
-#[path = "../src/tools/task.rs"]
+#[path = "../../core/src/runtime/tools/task.rs"]
 mod task;
 
 // ── shims for the spec tool-set factories (never executed by this e2e) ─────
-// `subagent_specs::*_tools()` closures build concrete tools via `super::` and
-// `crate::config::memory_dir`; provide inert stand-ins so the included modules
-// compile inside this test crate. The agent loop stops after the faux model's
-// single turn, so no stub tool is ever dispatched.
-mod config {
-    pub fn memory_dir() -> std::path::PathBuf {
-        std::env::temp_dir()
-    }
-}
+// `subagent_specs::*_tools()` closures build concrete tools via `super::`; provide
+// inert stand-ins so the included modules compile inside this test crate. The agent
+// loop stops after the faux model's single turn, so no stub tool is ever dispatched.
 
 fn default_tools(_dir: std::path::PathBuf) -> Vec<Arc<dyn AgentTool>> {
     vec![Arc::new(read::ReadTool), Arc::new(bash::BashTool)]

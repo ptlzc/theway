@@ -65,7 +65,7 @@ use theway_core::{
 use theway_llm_provider::{Tool, UserContentBlock};
 use tokio_util::sync::CancellationToken;
 
-use crate::tools::skill::SkillHarnessCell;
+use super::skill::SkillHarnessCell;
 
 /// Pure OOM guard on the URL stream-read path, NOT a per-skill artifact cap. Set well
 /// above any realistic skill size (real-world skills are kilobytes, sometimes hundreds of

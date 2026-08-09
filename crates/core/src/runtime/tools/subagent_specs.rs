@@ -118,7 +118,20 @@ fn planner_tools() -> Vec<Arc<dyn AgentTool>> {
 
 fn executor_coder_tools() -> Vec<Arc<dyn AgentTool>> {
     // Same store as the parent agent: DAG subagents share the parent's memory dir.
-    super::default_tools(crate::config::memory_dir())
+    super::default_tools(default_memory_dir())
+}
+
+/// The theway memory dir: `${THEWAY_DIR:-$HOME/.theway}/memory`. Inlined (not via the CLI's
+/// `config` module, which lives one layer up) so this module stays engine-self-contained and
+/// can be pulled into integration tests through `#[path]` includes. Mirrors the CLI's
+/// `config::memory_dir()`.
+fn default_memory_dir() -> std::path::PathBuf {
+    if let Ok(p) = std::env::var("THEWAY_DIR") {
+        return std::path::PathBuf::from(p).join("memory");
+    }
+    directories::BaseDirs::new()
+        .map(|d| d.home_dir().join(".theway").join("memory"))
+        .unwrap_or_else(|| std::path::PathBuf::from(".theway").join("memory"))
 }
 
 fn checker_tools() -> Vec<Arc<dyn AgentTool>> {

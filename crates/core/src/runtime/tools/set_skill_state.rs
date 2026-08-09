@@ -43,7 +43,7 @@ use theway_llm_provider::{Tool, UserContentBlock};
 use tokio_util::sync::CancellationToken;
 
 use crate::skills_state;
-use crate::tools::skill::SkillHarnessCell;
+use super::skill::SkillHarnessCell;
 
 pub struct SetSkillStateTool {
     harness: SkillHarnessCell,

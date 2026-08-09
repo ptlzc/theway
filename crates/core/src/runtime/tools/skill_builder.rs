@@ -31,10 +31,10 @@ use theway_core::{
 use theway_llm_provider::{Tool, UserContentBlock};
 use tokio_util::sync::CancellationToken;
 
-use crate::tools::install_skill::{
+use super::install_skill::{
     atomic_write_skill, default_skills_root, on_disk_skill_hash, parse_and_validate_skill_md,
 };
-use crate::tools::skill::SkillHarnessCell;
+use super::skill::SkillHarnessCell;
 
 pub struct SkillBuilderTool {
     harness: SkillHarnessCell,

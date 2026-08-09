@@ -8,7 +8,7 @@ use tempfile::TempDir;
 use theway_core::AgentTool;
 use tokio_util::sync::CancellationToken;
 
-#[path = "../src/tools/git.rs"]
+#[path = "../../core/src/runtime/tools/git.rs"]
 mod git;
 
 /// Initialise a fresh repo at `dir` with one committed file and one staged change.

@@ -1,72 +1,21 @@
-//! Built-in tools. Modeled on `packages/coding-agent/src/core/tools/` (the TS implementation):
-//! same names, same parameter shapes, simpler bodies. Each tool implements
-//! [`theway_core::AgentTool`].
-
-pub mod bash;
-pub mod dag_tools;
-pub mod edit;
-pub mod find;
-pub mod git;
-pub mod grep;
-pub mod install_skill;
-pub mod ls;
-pub mod mcp_adapter;
-pub mod memory;
-pub mod node_launcher;
-pub mod outline;
-pub mod read;
-pub mod remove_skill;
-pub mod set_skill_state;
-pub mod shell;
-pub mod skill;
-pub mod skill_builder;
-pub mod subagent_runner;
-pub mod subagent_specs;
-pub mod task;
-pub mod truncate;
-pub mod web_fetch;
-pub mod web_search;
-pub mod write;
+//! Tool ASSEMBLY layer (openspec tools-into-core): injection-style constructors that wire
+//! runtime objects (model / stream backend / DAG engine / subagent registry / skill harness
+//! cell / cron+trigger registries) into the builtin tool bodies. The tool bodies themselves
+//! live in the engine crate at [`theway_core::runtime::tools`]; this module is the
+//! application-layer composition half of that split.
+//!
+//! Pure tool-set constructors shared with engine code (`default_tools`,
+//! `subagent_read_only_tools`) stayed in [`theway_core::runtime::tools`] and are
+//! re-exported here so call sites keep one import path.
 
 use std::sync::Arc;
 
 use theway_core::AgentTool;
+use theway_core::runtime::tools::{
+    dag_tools, install_skill, outline, remove_skill, set_skill_state, skill, skill_builder, task,
+};
 
-/// Default tool set the coding agent ships with. Order matches the TS `createCodingTools()`
-/// + the read-only quartet (`grep`/`find`/`ls`) the TS exposes via `createAllTools()`.
-pub fn default_tools(memory_dir: std::path::PathBuf) -> Vec<Arc<dyn AgentTool>> {
-    vec![
-        Arc::new(read::ReadTool),
-        Arc::new(write::WriteTool),
-        Arc::new(edit::EditTool),
-        Arc::new(bash::BashTool),
-        Arc::new(shell::ExecTool),
-        Arc::new(shell::GetOutputTool),
-        Arc::new(shell::KillShellTool),
-        Arc::new(shell::WriteToProcessTool),
-        Arc::new(ls::LsTool),
-        Arc::new(grep::GrepTool),
-        Arc::new(find::FindTool),
-        Arc::new(web_fetch::WebFetchTool),
-        Arc::new(web_search::WebSearchTool::new()),
-        Arc::new(git::GitTool),
-        Arc::new(memory::MemoryTool::new(memory_dir)),
-    ]
-}
-
-/// Read-only tool set used by spawned subagents (issue #11). No `write`/`edit`/`bash` — a
-/// subagent should not mutate the workspace; if it needs to, the parent agent should run the
-/// write itself.
-pub fn subagent_read_only_tools() -> Vec<Arc<dyn AgentTool>> {
-    vec![
-        Arc::new(read::ReadTool),
-        Arc::new(ls::LsTool),
-        Arc::new(grep::GrepTool),
-        Arc::new(find::FindTool),
-        Arc::new(web_fetch::WebFetchTool),
-        Arc::new(git::GitTool),
-    ]
-}
+pub use theway_core::runtime::tools::{default_tools, subagent_read_only_tools};
 
 /// Build the Task tool. Separate from `default_tools` because Task needs the model handle to
 /// spawn its inner harness; the caller wires it in at construction time. `session_id`
@@ -224,8 +173,8 @@ pub fn list_triggers_tool() -> Arc<dyn AgentTool> {
 }
 
 /// Build the dynamic trigger removal tool. This is the model-facing counterpart to
-/// `/triggers remove`: when the user asks in ordinary conversation to delete a trigger, the
-/// model can remove the rule by id or clear all rules when explicitly requested.
+/// `/triggers remove`: when the user asks in ordinary conversation to delete a trigger,
+/// the model can remove the rule by id or clear all rules when explicitly requested.
 pub fn remove_trigger_tool() -> Arc<dyn AgentTool> {
     Arc::new(crate::triggers::RemoveTriggerTool)
 }

@@ -18,7 +18,7 @@ use theway_mcp::{
 
 use crate::auth::AuthStore;
 use crate::config::base_dir;
-use crate::tools::mcp_adapter::McpAgentTool;
+use theway_core::runtime::tools::mcp_adapter::McpAgentTool;
 use crate::triggers::McpNotificationHook;
 
 #[derive(Debug, Default, Deserialize, Serialize)]

@@ -6,9 +6,15 @@ use tempfile::tempdir;
 use theway_core::AgentTool;
 use tokio_util::sync::CancellationToken;
 
-// Pull tool types out of the binary crate by including the source. Test-only.
-// `skills_state` is a top-level module that `tools::set_skill_state` references via
-// `crate::skills_state`, so it must be in this test binary's module tree too.
+// Tool BODIES moved into the engine crate (openspec tools-into-core) — use the real lib
+// copy so the types match what the assembly layer below consumes.
+use theway_core::runtime::tools as tools;
+
+// The ASSEMBLY layer (`src/tools.rs`) and `triggers` are still pulled in by path: the
+// assembly's cron/trigger builders reference `crate::triggers`, which must resolve to the
+// SAME registry instances this test clears through the cfg(test)-only `clear_for_tests` —
+// only a path-included copy compiles with cfg(test). Their `crate::` siblings (config,
+// inbox, bug_report, ...) come along for the same reason.
 #[path = "../src/auth.rs"]
 #[allow(dead_code)]
 mod auth;
@@ -24,12 +30,9 @@ mod export;
 #[path = "../src/inbox.rs"]
 #[allow(dead_code)]
 mod inbox;
-#[path = "../src/skills_state.rs"]
+#[path = "../src/tools.rs"]
 #[allow(dead_code)]
-mod skills_state;
-#[path = "../src/tools/mod.rs"]
-#[allow(dead_code)]
-mod tools;
+mod tools_asm;
 #[path = "../src/triggers/mod.rs"]
 #[allow(dead_code)]
 mod triggers;
@@ -121,7 +124,7 @@ async fn new_trigger_tool_registers_dynamic_rule() {
     let _guard = DYNAMIC_TRIGGER_LOCK.lock().unwrap();
     triggers::global_registry().clear_for_tests();
 
-    let tool = tools::new_trigger_tool();
+    let tool = tools_asm::new_trigger_tool();
     let result = tool
         .execute(
             "new-trigger-1",
@@ -155,7 +158,7 @@ async fn new_trigger_tool_rejects_fixed_schedule_jobs() {
     let _guard = DYNAMIC_TRIGGER_LOCK.lock().unwrap();
     triggers::global_registry().clear_for_tests();
 
-    let tool = tools::new_trigger_tool();
+    let tool = tools_asm::new_trigger_tool();
     let err = tool
         .execute(
             "new-trigger-scheduled-1",
@@ -181,7 +184,7 @@ async fn new_trigger_tool_rejects_fixed_schedule_in_action_or_spec() {
     let _guard = DYNAMIC_TRIGGER_LOCK.lock().unwrap();
     triggers::global_registry().clear_for_tests();
 
-    let tool = tools::new_trigger_tool();
+    let tool = tools_asm::new_trigger_tool();
     let err = tool
         .execute(
             "new-trigger-scheduled-bypass-1",
@@ -239,10 +242,10 @@ async fn new_cron_job_tool_registers_session_cron_job() {
 #[test]
 fn cron_management_tool_builders_expose_expected_catalog_names() {
     let cell: tools::skill::SkillHarnessCell = Arc::new(once_cell::sync::OnceCell::new());
-    let new = tools::new_cron_job_tool(cell.clone());
-    let list = tools::list_cron_jobs_tool();
-    let remove = tools::remove_cron_job_tool(cell.clone());
-    let state = tools::set_cron_job_state_tool(cell);
+    let new = tools_asm::new_cron_job_tool(cell.clone());
+    let list = tools_asm::list_cron_jobs_tool();
+    let remove = tools_asm::remove_cron_job_tool(cell.clone());
+    let state = tools_asm::set_cron_job_state_tool(cell);
     let names = [
         new.definition().name.as_str(),
         list.definition().name.as_str(),
@@ -269,7 +272,7 @@ async fn list_cron_jobs_tool_returns_redacted_session_jobs() {
         .add_job("0 * * * *", &format!("fetch Hacker News with {secret}"))
         .unwrap();
 
-    let tool = tools::list_cron_jobs_tool();
+    let tool = tools_asm::list_cron_jobs_tool();
     let result = tool
         .execute(
             "list-cron-1",
@@ -375,7 +378,7 @@ async fn new_trigger_tool_can_request_chat_promotion() {
     let _guard = DYNAMIC_TRIGGER_LOCK.lock().unwrap();
     triggers::global_registry().clear_for_tests();
 
-    let tool = tools::new_trigger_tool();
+    let tool = tools_asm::new_trigger_tool();
     let result = tool
         .execute(
             "new-trigger-promote-1",
@@ -404,7 +407,7 @@ async fn list_triggers_tool_returns_dynamic_rules() {
         .add_rule("event says list me", "echo listed")
         .expect("rule");
 
-    let tool = tools::list_triggers_tool();
+    let tool = tools_asm::list_triggers_tool();
     let result = tool
         .execute(
             "list-triggers-1",
@@ -434,7 +437,7 @@ async fn remove_trigger_tool_removes_dynamic_rule() {
         .add_rule("event says remove me", "echo removed")
         .expect("rule");
 
-    let tool = tools::remove_trigger_tool();
+    let tool = tools_asm::remove_trigger_tool();
     let result = tool
         .execute(
             "remove-trigger-1",
@@ -461,7 +464,7 @@ async fn set_trigger_state_tool_disables_and_enables_rule() {
         .add_rule("event says pause me", "echo paused")
         .expect("rule");
 
-    let tool = tools::set_trigger_state_tool();
+    let tool = tools_asm::set_trigger_state_tool();
     let disabled = tool
         .execute(
             "set-trigger-state-1",
