@@ -20,6 +20,9 @@ use theway::ui::App;
 use theway::ui::web_loop::TransportMode;
 use theway::wire::{WebCommand, WebPromptImage, WebStatus};
 
+use crate::proto::health::health_check_response::ServingStatus;
+use crate::proto::health::health_server::{Health, HealthServer};
+use crate::proto::health::{HealthCheckRequest, HealthCheckResponse};
 use crate::proto::theway_grpc;
 use crate::proto::{dag_event_wire, session_state, stream_event_wire};
 use theway_core::runtime::graph_engineering::types::DagEvent;
@@ -309,6 +312,39 @@ impl ThewayGrpc for GrpcState {
     }
 }
 
+/// Standard `grpc.health.v1` service: the server is live as long as the
+/// event loop owns it, so every probe answers SERVING regardless of the
+/// requested service name.
+#[derive(Clone, Default)]
+pub struct HealthService;
+
+#[tonic::async_trait]
+impl Health for HealthService {
+    type WatchStream = Pin<Box<dyn Stream<Item = Result<HealthCheckResponse, Status>> + Send>>;
+
+    async fn check(
+        &self,
+        _request: Request<HealthCheckRequest>,
+    ) -> Result<Response<HealthCheckResponse>, Status> {
+        Ok(Response::new(HealthCheckResponse {
+            status: ServingStatus::Serving as i32,
+        }))
+    }
+
+    async fn watch(
+        &self,
+        _request: Request<HealthCheckRequest>,
+    ) -> Result<Response<Self::WatchStream>, Status> {
+        // Emit a single SERVING frame, then end the stream.
+        let stream = futures::stream::once(async {
+            Ok(HealthCheckResponse {
+                status: ServingStatus::Serving as i32,
+            })
+        });
+        Ok(Response::new(Box::pin(stream)))
+    }
+}
+
 /// Full `--grpc` driver: bind, wire the transport channels, spawn the tonic
 /// server, then hand the App into the shared event loop.
 pub async fn run_grpc(mut app: App, options: GrpcOptions) -> Result<()> {
@@ -332,6 +368,7 @@ pub async fn run_grpc(mut app: App, options: GrpcOptions) -> Result<()> {
     let server_task = serve_grpc(listener, grpc_state);
 
     println!("theway grpc listening on {actual}");
+    println!("  service: theway.grpc.v1.ThewayGrpc + grpc.health.v1.Health · UI: workmate (独立)");
 
     app.run_transport_loop(TransportMode::Grpc, endpoints, server_task)
         .await
@@ -342,6 +379,7 @@ pub async fn run_grpc(mut app: App, options: GrpcOptions) -> Result<()> {
 pub fn serve_grpc(listener: TcpListener, state: GrpcState) -> tokio::task::JoinHandle<Result<()>> {
     let server = tonic::transport::Server::builder()
         .add_service(ThewayGrpcServer::new(state))
+        .add_service(HealthServer::new(HealthService))
         .serve_with_incoming(TcpListenerStream::new(listener));
     tokio::spawn(async move {
         server.await?;
@@ -691,6 +729,47 @@ mod tests {
             WebCommand::Submit { text, .. } => assert_eq!(text, "via transport"),
             other => panic!("unexpected command: {other:?}"),
         }
+
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn health_service_serves_serving_over_transport() {
+        let (state, _command_rx) = grpc_state();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = serve_grpc(listener, state);
+
+        let mut client = crate::proto::health::health_client::HealthClient::connect(format!(
+            "http://{addr}"
+        ))
+        .await
+        .unwrap();
+
+        // Check answers SERVING.
+        let response = client
+            .check(crate::proto::health::HealthCheckRequest {
+                service: String::new(),
+            })
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(response.status, ServingStatus::Serving as i32);
+
+        // Watch emits one SERVING frame, then ends.
+        let mut watch = client
+            .watch(crate::proto::health::HealthCheckRequest {
+                service: String::new(),
+            })
+            .await
+            .unwrap()
+            .into_inner();
+        let first = watch.message().await.unwrap().expect("first frame");
+        assert_eq!(first.status, ServingStatus::Serving as i32);
+        assert!(
+            watch.message().await.unwrap().is_none(),
+            "watch stream should end after the single SERVING frame"
+        );
 
         server.abort();
     }

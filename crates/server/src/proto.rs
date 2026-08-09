@@ -13,6 +13,12 @@ pub mod theway_grpc {
     tonic::include_proto!("theway.grpc.v1");
 }
 
+/// Generated code for `proto/health.proto` (standard `grpc.health.v1` health
+/// checking protocol), produced by this crate's build.rs.
+pub mod health {
+    tonic::include_proto!("grpc.health.v1");
+}
+
 use theway_grpc as wire;
 use theway::wire::WebStatus;
 use theway::ui::feed::{self, WebFeedBlock};

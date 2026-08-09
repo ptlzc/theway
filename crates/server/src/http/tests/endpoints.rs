@@ -321,3 +321,55 @@ async fn websocket_serves_snapshot_and_accepts_commands() {
     ws.close(None).await.unwrap();
     server.abort();
 }
+
+#[tokio::test]
+async fn healthz_answers_ok_without_snapshot_and_root_404s() {
+    use super::helpers::test_router;
+
+    let router = test_router(WebStatus {
+        session_id: "sess-1".into(),
+        model: "provider:model".into(),
+        model_catalog: Vec::new(),
+        cwd: "/tmp/theway".into(),
+        busy: false,
+        queued_count: 0,
+        latest_trigger_poll: None,
+        goal: None,
+        control_plane_prompt: None,
+        sidebar: empty_sidebar_snapshot(),
+        feed_blocks: Vec::new(),
+        feed_lines: vec!["secret-feed-line".into()],
+        dags: Vec::new(),
+        subagents: Vec::new(),
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, router.into_make_service())
+            .await
+            .unwrap();
+    });
+    let client = reqwest::Client::new();
+    let base = format!("http://{addr}");
+
+    // /healthz: fixed short text, plain content type, no business snapshot.
+    let response = client.get(format!("{base}/healthz")).send().await.unwrap();
+    assert_eq!(response.status(), 200);
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(content_type.starts_with("text/plain"), "{content_type}");
+    let body = response.text().await.unwrap();
+    assert_eq!(body, "ok");
+    assert!(!body.contains("secret-feed-line"));
+
+    // The embedded web UI is gone: root answers 404.
+    let response = client.get(format!("{base}/")).send().await.unwrap();
+    assert_eq!(response.status(), 404);
+
+    server.abort();
+}

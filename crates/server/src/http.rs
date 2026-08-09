@@ -12,7 +12,7 @@ use std::sync::Arc;
 use anyhow::{Context as _, Result, bail};
 use axum::extract::State;
 use axum::response::sse::{Event, KeepAlive, Sse};
-use axum::response::{Html, IntoResponse};
+use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::Stream;
@@ -65,6 +65,7 @@ pub async fn run_web(mut app: App, options: WebOptions) -> Result<()> {
 
     let url = format!("http://{actual}");
     println!("theway web listening on {url}");
+    println!("  endpoints: /state /events /ws /healthz · UI: workmate (独立)");
     if let Err(e) = open_web_browser(&url) {
         eprintln!("web browser auto-open skipped: {e}");
     }
@@ -86,7 +87,7 @@ pub fn serve_web(listener: TcpListener, state: HttpState) -> tokio::task::JoinHa
 
 pub(crate) fn web_router(state: HttpState) -> Router {
     Router::new()
-        .route("/", get(index))
+        .route("/healthz", get(healthz))
         .route("/state", get(state_snapshot))
         .route("/events", get(events))
         .route("/ws", get(ws_upgrade))
@@ -99,8 +100,9 @@ pub(crate) fn web_router(state: HttpState) -> Router {
         .with_state(state)
 }
 
-async fn index() -> Html<&'static str> {
-    Html(INDEX_HTML)
+/// Liveness probe: fixed short text, no dependency on business state.
+async fn healthz() -> &'static str {
+    "ok"
 }
 
 async fn state_snapshot(State(state): State<HttpState>) -> Json<WebStatus> {
@@ -278,8 +280,6 @@ fn open_browser_command(url: &str) -> std::process::Command {
         cmd
     }
 }
-
-const INDEX_HTML: &str = include_str!("web_index.html");
 
 #[cfg(test)]
 mod tests;

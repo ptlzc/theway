@@ -5,6 +5,28 @@
 
 use super::super::*;
 
+/// Router wired with throwaway transport channels, for endpoint-level tests
+/// that only need a snapshot fixture.
+pub(crate) fn test_router(latest: WebStatus) -> Router {
+    let (command_tx, _) = mpsc::unbounded_channel::<WebCommand>();
+    let (snapshot_tx, _) = broadcast::channel::<WebStatus>(16);
+    web_router(HttpState {
+        commands: command_tx,
+        snapshots: snapshot_tx,
+        latest: Arc::new(Mutex::new(latest)),
+        completer: SlashCompleter::from_registry(&theway::commands::Registry::with_builtins()),
+        events: broadcast::channel::<theway_core::runtime::subagents::registry::SubagentEvent>(
+            16,
+        )
+        .0,
+        dag_events: broadcast::channel::<theway_core::runtime::graph_engineering::types::DagEvent>(
+            16,
+        )
+        .0,
+        registry: theway_core::runtime::subagents::registry::SubagentJobRegistry::new(),
+    })
+}
+
 #[test]
 fn bind_addr_rejects_remote_by_default() {
     let err = bind_addr("0.0.0.0", 0).unwrap_err().to_string();
