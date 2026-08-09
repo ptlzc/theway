@@ -53,7 +53,6 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"
 tokio-util = { version = "0.7", features = ["io"] }
 futures = "0.3"
 futures-core = "0.3"
-pin-project-lite = "0.2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "gzip"] }
 async-trait = "0.1"
 bytes = "1"

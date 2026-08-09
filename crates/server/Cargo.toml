@@ -114,3 +114,9 @@ tempfile = "3"
 
 [lints]
 workspace = true
+
+# cargo-machete false positive: prost/tonic-prost are referenced by the proto
+# generated code (tonic::include_proto! in transport/proto.rs) which lives in
+# OUT_DIR and is invisible to machete's source scan.
+[package.metadata.cargo-machete]
+ignored = ["prost", "tonic-prost"]
