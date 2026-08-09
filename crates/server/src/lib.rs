@@ -18,3 +18,6 @@ pub mod grpc;
 pub mod http;
 pub mod proto;
 pub mod ws;
+
+#[cfg(test)]
+pub(crate) mod testing;

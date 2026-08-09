@@ -22,6 +22,7 @@ pub(crate) fn test_router(latest: WebStatus) -> Router {
         )
         .0,
         registry: theway_core::runtime::subagents::registry::SubagentJobRegistry::new(),
+        session_ops: std::sync::Arc::new(crate::testing::FakeSessionOps::new()),
     })
 }
 

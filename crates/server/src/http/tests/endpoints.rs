@@ -2,6 +2,7 @@
 //! shared event loop, and `/events` streams snapshot frames over SSE.
 
 use super::super::*;
+use crate::testing::FakeSessionOps;
 use base64::Engine as _;
 use futures::{SinkExt as _, StreamExt};
 use serde_json::json;
@@ -39,6 +40,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
         )
         .0,
         registry: theway_core::runtime::subagents::registry::SubagentJobRegistry::new(),
+        session_ops: Arc::new(FakeSessionOps::new()),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -253,6 +255,7 @@ async fn websocket_serves_snapshot_and_accepts_commands() {
         )
         .0,
         registry: theway_core::runtime::subagents::registry::SubagentJobRegistry::new(),
+        session_ops: Arc::new(FakeSessionOps::new()),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

@@ -171,6 +171,23 @@ pub fn session_summary_wire(summary: &theway::wire::SessionSummary) -> wire::Ses
     }
 }
 
+/// Resolve a session id argument (full id or unique prefix, same semantics as the
+/// repo-backed `SessionOps` impls) against a session list. Returns the full id, or
+/// `None` when nothing or more than one session matches.
+pub(crate) fn resolve_session_id(
+    sessions: &[theway::wire::SessionSummary],
+    id: &str,
+) -> Option<String> {
+    if let Some(exact) = sessions.iter().find(|s| s.session_id == id) {
+        return Some(exact.session_id.clone());
+    }
+    let mut matches = sessions
+        .iter()
+        .filter(|s| !id.is_empty() && s.session_id.starts_with(id));
+    let first = matches.next()?.session_id.clone();
+    matches.next().map_or(Some(first), |_| None)
+}
+
 /// Convert one DAG run snapshot into the wire form.
 pub fn dag_run_wire(run: &theway::wire::WebDagRunSnapshot) -> wire::DagRunSnapshot {
     wire::DagRunSnapshot {

@@ -10,16 +10,18 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, bail};
-use axum::extract::State;
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::response::sse::{Event, KeepAlive, Sse};
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post};
 use axum::{Json, Router};
 use futures::Stream;
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, broadcast, mpsc};
 
 use theway::readline::SlashCompleter;
+use theway::session_ops::SessionOps;
 use theway::ui::App;
 use theway::ui::web_loop::TransportMode;
 use theway::wire::*;
@@ -40,6 +42,9 @@ pub struct HttpState {
     /// DAG engine event plane (node_status / run_status), shared with /ws.
     pub dag_events: broadcast::Sender<DagEvent>,
     pub registry: SubagentJobRegistry,
+    /// session-resource-model: session lifecycle ops behind the `/sessions` routes.
+    /// *Switching* the current session goes through `WebCommand::SwitchSession`.
+    pub session_ops: Arc<dyn SessionOps>,
 }
 
 /// Full `--web` driver: bind, wire the transport channels, spawn the axum
@@ -60,12 +65,13 @@ pub async fn run_web(mut app: App, options: WebOptions) -> Result<()> {
         events: endpoints.events.clone(),
         dag_events: endpoints.dag_events.clone(),
         registry: endpoints.registry.clone(),
+        session_ops: endpoints.session_ops.clone(),
     };
     let server_task = serve_web(listener, state);
 
     let url = format!("http://{actual}");
     println!("theway web listening on {url}");
-    println!("  endpoints: /state /events /ws /healthz · UI: workmate (独立)");
+    println!("  endpoints: /state /events /ws /sessions /healthz · UI: workmate (独立)");
     if let Err(e) = open_web_browser(&url) {
         eprintln!("web browser auto-open skipped: {e}");
     }
@@ -97,6 +103,13 @@ pub(crate) fn web_router(state: HttpState) -> Router {
         .route("/abort", post(abort))
         .route("/trigger/immediate", post(trigger_immediate))
         .route("/control-plane/resolve", post(resolve_control_plane))
+        // session-resource-model: sessions as first-class resources.
+        .route("/sessions", get(list_sessions).post(create_session))
+        .route("/sessions/{id}/switch", post(switch_session_route))
+        .route(
+            "/sessions/{id}",
+            patch(rename_session_route).delete(delete_session_route),
+        )
         .with_state(state)
 }
 
@@ -193,6 +206,172 @@ async fn resolve_control_plane(
         })
         .is_ok();
     Json(CommandAccepted { accepted })
+}
+
+// ── session resources (session-resource-model) ──────────────────────────
+
+/// `GET /sessions` body: `{ sessions: SessionSummary[], current_session_id }`.
+#[derive(serde::Serialize)]
+struct SessionsResponse {
+    sessions: Vec<SessionSummary>,
+    current_session_id: String,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct CreateSessionBody {
+    name: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct RenameSessionBody {
+    name: String,
+}
+
+fn session_error(status: StatusCode, message: String) -> (StatusCode, Json<serde_json::Value>) {
+    (status, Json(serde_json::json!({ "error": message })))
+}
+
+async fn list_sessions(State(state): State<HttpState>) -> axum::response::Response {
+    let current_session_id = state.latest.lock().await.session_id.clone();
+    match state.session_ops.list().await {
+        Ok(sessions) => Json(SessionsResponse {
+            sessions,
+            current_session_id,
+        })
+        .into_response(),
+        Err(e) => session_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// `POST /sessions` (body optional `{ name }`): create, then make current through the
+/// serialized event loop (same as the gRPC `CreateSession`).
+async fn create_session(
+    State(state): State<HttpState>,
+    body: Option<Json<CreateSessionBody>>,
+) -> axum::response::Response {
+    let name = body.and_then(|Json(b)| b.name);
+    let new_id = match state.session_ops.create().await {
+        Ok(id) => id,
+        Err(e) => {
+            return session_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+        }
+    };
+    if let Some(name) = name.as_deref()
+        && !name.trim().is_empty()
+        && let Err(e) = state.session_ops.rename(&new_id, name).await
+    {
+        return session_error(StatusCode::BAD_REQUEST, e.to_string()).into_response();
+    }
+    let _ = state
+        .commands
+        .send(WebCommand::SwitchSession { id: new_id.clone() });
+    let session = state
+        .session_ops
+        .list()
+        .await
+        .ok()
+        .and_then(|sessions| sessions.into_iter().find(|s| s.session_id == new_id));
+    match session {
+        Some(session) => (StatusCode::CREATED, Json(session)).into_response(),
+        None => session_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("created session {new_id} missing from list"),
+        )
+        .into_response(),
+    }
+}
+
+/// `POST /sessions/{id}/switch`: rebind the current session (resume semantics).
+async fn switch_session_route(
+    State(state): State<HttpState>,
+    Path(id): Path<String>,
+) -> axum::response::Response {
+    let sessions = match state.session_ops.list().await {
+        Ok(sessions) => sessions,
+        Err(e) => {
+            return session_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+        }
+    };
+    let Some(target) = crate::proto::resolve_session_id(&sessions, &id) else {
+        return session_error(StatusCode::NOT_FOUND, format!("no session matches id {id}"))
+            .into_response();
+    };
+    let accepted = state
+        .commands
+        .send(WebCommand::SwitchSession { id: target.clone() })
+        .is_ok();
+    if accepted {
+        state.latest.lock().await.session_id = target;
+    }
+    Json(CommandAccepted { accepted }).into_response()
+}
+
+/// `PATCH /sessions/{id}` (body `{ name }`): rename.
+async fn rename_session_route(
+    State(state): State<HttpState>,
+    Path(id): Path<String>,
+    Json(body): Json<RenameSessionBody>,
+) -> axum::response::Response {
+    let sessions = match state.session_ops.list().await {
+        Ok(sessions) => sessions,
+        Err(e) => {
+            return session_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+        }
+    };
+    let Some(target) = crate::proto::resolve_session_id(&sessions, &id) else {
+        return session_error(StatusCode::NOT_FOUND, format!("no session matches id {id}"))
+            .into_response();
+    };
+    match state.session_ops.rename(&target, &body.name).await {
+        Ok(()) => Json(CommandAccepted { accepted: true }).into_response(),
+        Err(e) => session_error(StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+    }
+}
+
+/// `DELETE /sessions/{id}`: 409 while the session still has running graphs;
+/// deleting the current session falls back to the most recent remaining one.
+async fn delete_session_route(
+    State(state): State<HttpState>,
+    Path(id): Path<String>,
+) -> axum::response::Response {
+    let sessions = match state.session_ops.list().await {
+        Ok(sessions) => sessions,
+        Err(e) => {
+            return session_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+        }
+    };
+    let Some(target) = crate::proto::resolve_session_id(&sessions, &id) else {
+        return session_error(StatusCode::NOT_FOUND, format!("no session matches id {id}"))
+            .into_response();
+    };
+    match state.session_ops.delete(&target).await {
+        Ok(running) if !running.is_empty() => session_error(
+            StatusCode::CONFLICT,
+            format!(
+                "session {target} still has running graphs: {}; cancel them before deleting",
+                running.join(", ")
+            ),
+        )
+        .into_response(),
+        Ok(_) => {
+            let was_current = state.latest.lock().await.session_id == target;
+            if was_current {
+                let remaining = state.session_ops.list().await.unwrap_or_default();
+                let fallback = remaining
+                    .last()
+                    .map(|s| s.session_id.clone())
+                    .unwrap_or_default();
+                state.latest.lock().await.session_id = fallback.clone();
+                if !fallback.is_empty() {
+                    let _ = state
+                        .commands
+                        .send(WebCommand::SwitchSession { id: fallback });
+                }
+            }
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err(e) => session_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
 }
 
 pub(crate) fn bind_addr(host: &str, port: u16) -> Result<SocketAddr> {

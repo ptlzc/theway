@@ -16,6 +16,7 @@ use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::{BroadcastStream, TcpListenerStream};
 use tonic::{Request, Response, Status};
 
+use theway::session_ops::SessionOps;
 use theway::ui::App;
 use theway::ui::web_loop::TransportMode;
 use theway::wire::{WebCommand, WebPromptImage, WebStatus};
@@ -24,7 +25,10 @@ use crate::proto::health::health_check_response::ServingStatus;
 use crate::proto::health::health_server::{Health, HealthServer};
 use crate::proto::health::{HealthCheckRequest, HealthCheckResponse};
 use crate::proto::theway_grpc;
-use crate::proto::{dag_event_wire, session_state, stream_event_wire};
+use crate::proto::{
+    dag_event_wire, dag_run_wire, resolve_session_id, session_state, session_summary_wire,
+    stream_event_wire,
+};
 use theway_core::runtime::graph_engineering::types::DagEvent;
 use theway_core::runtime::subagents::registry::{SubagentEvent, SubagentJobRegistry};
 
@@ -58,9 +62,14 @@ pub struct GrpcState {
     pub registry: SubagentJobRegistry,
     /// DAG orchestration engine (graph engineering mode): GraphCancel/Retry/…
     pub dag_engine: Arc<theway_core::runtime::graph_engineering::engine::DagEngine>,
+    /// session-resource-model: session lifecycle ops (list/create/rename/delete).
+    /// Switching the *current* session goes through `WebCommand::SwitchSession`.
+    pub session_ops: Arc<dyn SessionOps>,
     /// Owning session id: default scope for GraphCheckpoint and the mount key
-    /// under which `SessionState.dags` is served.
-    pub session_id: String,
+    /// under which `SessionState.dags` is served. Mutable: SwitchSession (and
+    /// the DeleteSession fallback) rebind it; the event loop re-syncs it via
+    /// snapshots.
+    pub session_id: Arc<std::sync::RwLock<String>>,
 }
 
 #[tonic::async_trait]
@@ -245,7 +254,7 @@ impl ThewayGrpc for GrpcState {
         let session_id = request
             .session_id
             .clone()
-            .unwrap_or_else(|| self.session_id.clone());
+            .unwrap_or_else(|| self.session_id.read().unwrap().clone());
 
         // Single-run export, or every run owned by the session.
         let runs: Vec<theway_core::runtime::graph_engineering::types::DagRun> = match request.run_id
@@ -313,60 +322,169 @@ impl ThewayGrpc for GrpcState {
         }))
     }
 
-    // ── session resources (proto layer stubs; wired to SessionOps in N4) ──
+    // ── session resources (session-resource-model; backed by SessionOps) ──
 
     async fn list_sessions(
         &self,
         _request: Request<Empty>,
     ) -> Result<Response<ListSessionsResponse>, Status> {
-        Err(Status::unimplemented(
-            "session resources land with SessionOps",
-        ))
+        let sessions = self
+            .session_ops
+            .list()
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let current_session_id = self.session_id.read().unwrap().clone();
+        Ok(Response::new(ListSessionsResponse {
+            sessions: sessions.iter().map(session_summary_wire).collect(),
+            current_session_id,
+        }))
     }
 
     async fn create_session(
         &self,
-        _request: Request<CreateSessionRequest>,
+        request: Request<CreateSessionRequest>,
     ) -> Result<Response<CreateSessionResponse>, Status> {
-        Err(Status::unimplemented(
-            "session resources land with SessionOps",
-        ))
+        let request = request.into_inner();
+        let new_id = self
+            .session_ops
+            .create()
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+        if let Some(name) = request.name.as_deref()
+            && !name.trim().is_empty()
+        {
+            self.session_ops
+                .rename(&new_id, name)
+                .await
+                .map_err(|e| Status::invalid_argument(e.to_string()))?;
+        }
+        // Becoming current goes through the serialized event loop; the current
+        // marker in ListSessions follows on the next snapshot.
+        let accepted = self
+            .commands
+            .send(WebCommand::SwitchSession { id: new_id.clone() })
+            .is_ok();
+        if !accepted {
+            return Err(Status::unavailable("event loop command channel closed"));
+        }
+        let sessions = self
+            .session_ops
+            .list()
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let session = sessions
+            .iter()
+            .find(|s| s.session_id == new_id)
+            .map(session_summary_wire);
+        Ok(Response::new(CreateSessionResponse { session }))
     }
 
     async fn switch_session(
         &self,
-        _request: Request<SwitchSessionRequest>,
+        request: Request<SwitchSessionRequest>,
     ) -> Result<Response<CommandResult>, Status> {
-        Err(Status::unimplemented(
-            "session resources land with SessionOps",
-        ))
+        let requested = request.into_inner().session_id;
+        let sessions = self
+            .session_ops
+            .list()
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let target = resolve_session_id(&sessions, &requested)
+            .ok_or_else(|| Status::not_found(format!("no session matches id {requested}")))?;
+        let accepted = self
+            .commands
+            .send(WebCommand::SwitchSession { id: target.clone() })
+            .is_ok();
+        if accepted {
+            // Rebind the connection-level current session; the event loop applies
+            // the same change on the serialized loop and re-publishes snapshots.
+            *self.session_id.write().unwrap() = target.clone();
+            self.latest.lock().await.session_id = target;
+        }
+        Ok(Response::new(CommandResult { accepted }))
     }
 
     async fn rename_session(
         &self,
-        _request: Request<RenameSessionRequest>,
+        request: Request<RenameSessionRequest>,
     ) -> Result<Response<CommandResult>, Status> {
-        Err(Status::unimplemented(
-            "session resources land with SessionOps",
-        ))
+        let request = request.into_inner();
+        self.session_ops
+            .rename(&request.session_id, &request.name)
+            .await
+            .map_err(|e| {
+                if e.to_string().contains("no session matches") {
+                    Status::not_found(e.to_string())
+                } else {
+                    Status::invalid_argument(e.to_string())
+                }
+            })?;
+        Ok(Response::new(CommandResult { accepted: true }))
     }
 
     async fn delete_session(
         &self,
-        _request: Request<DeleteSessionRequest>,
+        request: Request<DeleteSessionRequest>,
     ) -> Result<Response<DeleteSessionResponse>, Status> {
-        Err(Status::unimplemented(
-            "session resources land with SessionOps",
-        ))
+        let requested = request.into_inner().session_id;
+        // Resolve to the full id first: delete protection and the current-session
+        // fallback compare against the metadata id.
+        let sessions = self
+            .session_ops
+            .list()
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let full_id = resolve_session_id(&sessions, &requested)
+            .ok_or_else(|| Status::not_found(format!("no session matches id {requested}")))?;
+        let running = self
+            .session_ops
+            .delete(&full_id)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+        if !running.is_empty() {
+            return Err(Status::failed_precondition(format!(
+                "session {full_id} still has running graphs: {}; cancel them (GraphCancel) before deleting",
+                running.join(", ")
+            )));
+        }
+        // Deleted the current session → fall back to the most recent remaining
+        // session (or empty) and tell the event loop to switch to it.
+        if self.session_id.read().unwrap().clone() == full_id {
+            let remaining = self
+                .session_ops
+                .list()
+                .await
+                .map_err(|e| Status::internal(e.to_string()))?;
+            let fallback = remaining
+                .last()
+                .map(|s| s.session_id.clone())
+                .unwrap_or_default();
+            *self.session_id.write().unwrap() = fallback.clone();
+            self.latest.lock().await.session_id = fallback.clone();
+            if !fallback.is_empty() {
+                let _ = self
+                    .commands
+                    .send(WebCommand::SwitchSession { id: fallback });
+            }
+        }
+        Ok(Response::new(DeleteSessionResponse {
+            running_run_ids: Vec::new(),
+        }))
     }
 
     async fn graph_list(
         &self,
-        _request: Request<GraphListRequest>,
+        request: Request<GraphListRequest>,
     ) -> Result<Response<GraphListResponse>, Status> {
-        Err(Status::unimplemented(
-            "session resources land with SessionOps",
-        ))
+        let session_id = request.into_inner().session_id;
+        let runs = self
+            .dag_engine
+            .list_runs()
+            .into_iter()
+            .filter(|run| run.session_id.as_deref() == Some(session_id.as_str()))
+            .map(|run| dag_run_wire(&WebStatus::from_dag_run(&run)))
+            .collect();
+        Ok(Response::new(GraphListResponse { runs }))
     }
 }
 
@@ -421,7 +539,8 @@ pub async fn run_grpc(mut app: App, options: GrpcOptions) -> Result<()> {
         dag_events: endpoints.dag_events.clone(),
         registry: endpoints.registry.clone(),
         dag_engine: endpoints.dag_engine.clone(),
-        session_id: endpoints.session_id.clone(),
+        session_ops: endpoints.session_ops.clone(),
+        session_id: Arc::new(std::sync::RwLock::new(endpoints.session_id.clone())),
     };
     let server_task = serve_grpc(listener, grpc_state);
 
@@ -448,6 +567,7 @@ pub fn serve_grpc(listener: TcpListener, state: GrpcState) -> tokio::task::JoinH
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::FakeSessionOps;
     use std::time::Duration;
 
     fn fixture_snapshot(feed_line: &str) -> WebStatus {
@@ -470,6 +590,17 @@ mod tests {
     }
 
     fn grpc_state() -> (GrpcState, mpsc::UnboundedReceiver<WebCommand>) {
+        let (state, command_rx, _ops) = grpc_state_with_ops();
+        (state, command_rx)
+    }
+
+    /// Same fixture plus a handle on the fake SessionOps (seeded with the owning
+    /// session) so session RPC tests can mutate the resource set.
+    fn grpc_state_with_ops() -> (
+        GrpcState,
+        mpsc::UnboundedReceiver<WebCommand>,
+        Arc<FakeSessionOps>,
+    ) {
         let (command_tx, command_rx) = mpsc::unbounded_channel::<WebCommand>();
         let (snapshot_tx, _) = broadcast::channel::<WebStatus>(16);
         let latest = Arc::new(Mutex::new(fixture_snapshot("ready")));
@@ -477,6 +608,8 @@ mod tests {
         let registry = SubagentJobRegistry::new();
         registry.set_event_sender(Some(event_tx.clone()));
         let (dag_event_tx, _) = broadcast::channel::<DagEvent>(16);
+        let session_ops = Arc::new(FakeSessionOps::new());
+        session_ops.add_session("test-session");
         (
             GrpcState {
                 commands: command_tx,
@@ -488,9 +621,11 @@ mod tests {
                 dag_engine: Arc::new(
                     theway_core::runtime::graph_engineering::engine::DagEngine::new(),
                 ),
-                session_id: "test-session".into(),
+                session_ops: session_ops.clone(),
+                session_id: Arc::new(std::sync::RwLock::new("test-session".into())),
             },
             command_rx,
+            session_ops,
         )
     }
 
@@ -832,5 +967,232 @@ mod tests {
         );
 
         server.abort();
+    }
+
+    // ── session resources ────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn list_sessions_returns_sessions_and_current_marker() {
+        let (state, _rx, ops) = grpc_state_with_ops();
+        ops.add_session("other-session");
+        let response = state
+            .list_sessions(Request::new(Empty {}))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(response.current_session_id, "test-session");
+        assert!(!response.sessions.is_empty());
+        let ids: Vec<&str> = response
+            .sessions
+            .iter()
+            .map(|s| s.session_id.as_str())
+            .collect();
+        assert!(ids.contains(&"test-session"), "{ids:?}");
+        assert!(ids.contains(&"other-session"), "{ids:?}");
+    }
+
+    #[tokio::test]
+    async fn create_session_returns_summary_and_queues_switch() {
+        let (state, mut rx, _ops) = grpc_state_with_ops();
+        let response = state
+            .create_session(Request::new(CreateSessionRequest {
+                name: Some("brand new".into()),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        let session = response.session.expect("new session summary");
+        assert!(
+            session.session_id.starts_with("sess-new-"),
+            "{}",
+            session.session_id
+        );
+        assert_eq!(session.name, "brand new");
+        // Becoming current flows through the event-loop command channel.
+        match rx.recv().await.unwrap() {
+            WebCommand::SwitchSession { id } => assert_eq!(id, session.session_id),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn switch_session_rebinds_current_and_get_state_reflects_it() {
+        let (state, mut rx, ops) = grpc_state_with_ops();
+        ops.add_session("target-session");
+        let result = state
+            .switch_session(Request::new(SwitchSessionRequest {
+                session_id: "target-session".into(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(result.accepted);
+        match rx.recv().await.unwrap() {
+            WebCommand::SwitchSession { id } => assert_eq!(id, "target-session"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+        assert_eq!(*state.session_id.read().unwrap(), "target-session");
+        let state_snapshot = state
+            .get_state(Request::new(Empty {}))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(state_snapshot.session_id, "target-session");
+    }
+
+    #[tokio::test]
+    async fn switch_session_unknown_target_errors_and_keeps_current() {
+        let (state, _rx, _ops) = grpc_state_with_ops();
+        let err = state
+            .switch_session(Request::new(SwitchSessionRequest {
+                session_id: "no-such-session".into(),
+            }))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), tonic::Code::NotFound);
+        assert_eq!(*state.session_id.read().unwrap(), "test-session");
+    }
+
+    #[tokio::test]
+    async fn rename_session_is_reflected_in_list() {
+        let (state, _rx, _ops) = grpc_state_with_ops();
+        let result = state
+            .rename_session(Request::new(RenameSessionRequest {
+                session_id: "test-session".into(),
+                name: "renamed".into(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(result.accepted);
+        let response = state
+            .list_sessions(Request::new(Empty {}))
+            .await
+            .unwrap()
+            .into_inner();
+        let session = response
+            .sessions
+            .iter()
+            .find(|s| s.session_id == "test-session")
+            .unwrap();
+        assert_eq!(session.name, "renamed");
+
+        // Empty name → invalid argument; unknown id → not found.
+        let err = state
+            .rename_session(Request::new(RenameSessionRequest {
+                session_id: "test-session".into(),
+                name: "   ".into(),
+            }))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        let err = state
+            .rename_session(Request::new(RenameSessionRequest {
+                session_id: "no-such-session".into(),
+                name: "x".into(),
+            }))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), tonic::Code::NotFound);
+    }
+
+    #[tokio::test]
+    async fn delete_session_refused_while_graphs_running() {
+        let (state, _rx, ops) = grpc_state_with_ops();
+        ops.add_session("busy-session");
+        ops.set_running("busy-session", &["run-1", "run-2"]);
+        let err = state
+            .delete_session(Request::new(DeleteSessionRequest {
+                session_id: "busy-session".into(),
+            }))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+        assert!(err.message().contains("run-1"), "{}", err.message());
+        assert!(err.message().contains("run-2"), "{}", err.message());
+        // Session survives the refused delete.
+        let response = state
+            .list_sessions(Request::new(Empty {}))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(
+            response
+                .sessions
+                .iter()
+                .any(|s| s.session_id == "busy-session")
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_current_session_falls_back_to_most_recent() {
+        let (state, mut rx, ops) = grpc_state_with_ops();
+        ops.add_session("next-session");
+        let response = state
+            .delete_session(Request::new(DeleteSessionRequest {
+                session_id: "test-session".into(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(response.running_run_ids.is_empty());
+        // Current rebinds to the most recent remaining session + switch queued.
+        assert_eq!(*state.session_id.read().unwrap(), "next-session");
+        match rx.recv().await.unwrap() {
+            WebCommand::SwitchSession { id } => assert_eq!(id, "next-session"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+        let response = state
+            .list_sessions(Request::new(Empty {}))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(
+            !response
+                .sessions
+                .iter()
+                .any(|s| s.session_id == "test-session")
+        );
+    }
+
+    #[tokio::test]
+    async fn graph_list_filters_runs_by_session() {
+        let (state, _rx, _ops) = grpc_state_with_ops();
+        let run_mine = state
+            .dag_engine
+            .plan_goal("condition mine", Some("test-session".into()));
+        let run_other = state
+            .dag_engine
+            .plan_goal("condition other", Some("other-session".into()));
+
+        let response = state
+            .graph_list(Request::new(GraphListRequest {
+                session_id: "test-session".into(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(response.runs.len(), 1);
+        assert_eq!(response.runs[0].id, run_mine);
+
+        let response = state
+            .graph_list(Request::new(GraphListRequest {
+                session_id: "other-session".into(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(response.runs.len(), 1);
+        assert_eq!(response.runs[0].id, run_other);
+
+        // Unknown session → empty list.
+        let response = state
+            .graph_list(Request::new(GraphListRequest {
+                session_id: "no-such-session".into(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(response.runs.is_empty());
     }
 }

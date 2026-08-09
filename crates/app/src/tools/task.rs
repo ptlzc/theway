@@ -78,6 +78,10 @@ impl TaskTool {
     /// Stamp the owning session on jobs this tool spawns (session-resource-model). Each
     /// harness build gets its own TaskTool stamped with that harness's session, so jobs
     /// started after an in-process session switch belong to the new session.
+    //
+    // Called only from the CLI's session factory (crates/cli) — invisible to the app
+    // lib's own test targets, hence the dead_code allowance.
+    #[allow(dead_code)]
     pub fn with_session_id(mut self, session_id: Option<String>) -> Self {
         self.session_id = session_id;
         self

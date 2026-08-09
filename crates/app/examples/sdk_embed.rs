@@ -70,6 +70,14 @@ async fn main() -> anyhow::Result<()> {
         panel_status: Default::default(),
         dag_engine: Arc::new(DagEngine::new()),
         subagent_registry: SubagentJobRegistry::new(),
+        // SDK demo: no in-process session switching; the factory is only
+        // exercised by the CLI's `--resume-id`/SwitchSession path.
+        session_factory: Arc::new(|_id| {
+            Box::pin(async { anyhow::bail!("sdk_embed: no session factory") })
+        }),
+        session_repo: Arc::new(JsonlSessionRepo::new(
+            std::env::temp_dir().join("theway-sdk-demo-sessions"),
+        )),
     });
     let _opts = WebOptions {
         host: "127.0.0.1".into(),
