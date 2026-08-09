@@ -47,6 +47,8 @@ pub mod skills;
 pub mod skills_state;
 pub mod templates;
 pub mod tools;
+#[cfg(feature = "server")]
+pub mod transport;
 pub mod triggers;
 pub mod ui;
 pub mod wire;

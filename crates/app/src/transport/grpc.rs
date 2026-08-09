@@ -16,16 +16,16 @@ use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::{BroadcastStream, TcpListenerStream};
 use tonic::{Request, Response, Status};
 
-use theway::session_ops::SessionOps;
-use theway::ui::App;
-use theway::ui::web_loop::TransportMode;
-use theway::wire::{WebCommand, WebPromptImage, WebStatus};
+use crate::session_ops::SessionOps;
+use crate::ui::App;
+use crate::ui::web_loop::TransportMode;
+use crate::wire::{WebCommand, WebPromptImage, WebStatus};
 
-use crate::proto::health::health_check_response::ServingStatus;
-use crate::proto::health::health_server::{Health, HealthServer};
-use crate::proto::health::{HealthCheckRequest, HealthCheckResponse};
-use crate::proto::theway_grpc;
-use crate::proto::{
+use crate::transport::proto::health::health_check_response::ServingStatus;
+use crate::transport::proto::health::health_server::{Health, HealthServer};
+use crate::transport::proto::health::{HealthCheckRequest, HealthCheckResponse};
+use crate::transport::proto::theway_grpc;
+use crate::transport::proto::{
     dag_event_wire, dag_run_wire, resolve_session_id, session_state, session_summary_wire,
     stream_event_wire,
 };
@@ -535,7 +535,7 @@ impl Health for HealthService {
 /// Full `--grpc` driver: bind, wire the transport channels, spawn the tonic
 /// server, then hand the App into the shared event loop.
 pub async fn run_grpc(mut app: App, options: GrpcOptions) -> Result<()> {
-    let addr = crate::http::bind_addr(&options.host, options.port)?;
+    let addr = crate::transport::http::bind_addr(&options.host, options.port)?;
     let listener = TcpListener::bind(addr)
         .await
         .with_context(|| format!("bind grpc ui on {addr}"))?;
@@ -578,7 +578,7 @@ pub fn serve_grpc(listener: TcpListener, state: GrpcState) -> tokio::task::JoinH
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::FakeSessionOps;
+    use crate::transport::testing::FakeSessionOps;
     use std::time::Duration;
 
     fn fixture_snapshot(feed_line: &str) -> WebStatus {
@@ -592,7 +592,7 @@ mod tests {
             latest_trigger_poll: None,
             goal: None,
             control_plane_prompt: None,
-            sidebar: crate::http::empty_sidebar_snapshot(),
+            sidebar: crate::transport::http::empty_sidebar_snapshot(),
             feed_blocks: Vec::new(),
             feed_lines: vec![feed_line.into()],
             dags: Vec::new(),
@@ -981,13 +981,13 @@ mod tests {
         let server = serve_grpc(listener, state);
 
         let mut client =
-            crate::proto::health::health_client::HealthClient::connect(format!("http://{addr}"))
+            crate::transport::proto::health::health_client::HealthClient::connect(format!("http://{addr}"))
                 .await
                 .unwrap();
 
         // Check answers SERVING.
         let response = client
-            .check(crate::proto::health::HealthCheckRequest {
+            .check(crate::transport::proto::health::HealthCheckRequest {
                 service: String::new(),
             })
             .await
@@ -997,7 +997,7 @@ mod tests {
 
         // Watch emits one SERVING frame, then ends.
         let mut watch = client
-            .watch(crate::proto::health::HealthCheckRequest {
+            .watch(crate::transport::proto::health::HealthCheckRequest {
                 service: String::new(),
             })
             .await

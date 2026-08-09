@@ -14,6 +14,9 @@ default = []
 # Terminal UI (ratatui TUI + terminal input). External projects that only embed the
 # runtime headless (transport servers / AgentSession) can set default-features = false.
 tui = ["dep:crossterm", "dep:ratatui", "dep:tui-textarea", "dep:arboard", "dep:qrcode", "dep:image"]
+# Transport servers (`--web` axum HTTP/SSE + WebSocket, `--grpc` tonic) plus the
+# proto wire codecs, consolidated from the former `theway-server` crate.
+server = ["dep:axum", "dep:tonic", "dep:tonic-prost", "dep:prost", "dep:tokio-stream"]
 
 [lib]
 name = "theway"
@@ -36,6 +39,18 @@ rpassword = "7"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "stream"] }
 tokio-tungstenite = { version = "0.26", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 base64 = "0.22"
+
+# Transport server stack (feature `server`, consolidated from theway-server).
+# HTTP/WS server: axum router + SSE + WebSocket upgrade.
+axum = { version = "0.8", features = ["ws"], optional = true }
+# gRPC wire stack: tonic "server" is the runtime mode; "channel" backs the
+# generated client; "codegen" supports tonic::include_proto!; tonic-prost
+# supplies the ProstCodec the generated code references.
+prost = { version = "0.14", optional = true }
+tonic = { version = "0.14", features = ["server", "channel", "codegen"], optional = true }
+tonic-prost = { version = "0.14", optional = true }
+tokio-stream = { version = "0.1", features = ["net", "sync"], optional = true }
+
 toml = "0.8"
 futures = "0.3"
 async-trait = "0.1"
@@ -79,6 +94,12 @@ directories = "5"
 # timeout/cancel. Same pattern as `NativeEnv::exec` (PR #40), the bash tool (PR #41),
 # and shell hooks (PR #58).
 libc = "0.2"
+
+[build-dependencies]
+# Pure-Rust proto compiler (no system protoc required) + tonic codegen bridge
+# for the `server` feature's proto wire codecs (build.rs).
+protox = "0.9"
+tonic-prost-build = "0.14"
 
 [dev-dependencies]
 tempfile = "3"

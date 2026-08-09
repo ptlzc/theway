@@ -1,9 +1,9 @@
 //! Local browser HTTP transport for the coding-agent REPL (`--web` mode).
 //!
 //! This is intentionally a small loopback-only surface. The browser layer sends commands into the
-//! single-turn event loop owned by [`theway::ui::App`] (`run_transport_loop`) and receives full
-//! feed snapshots over SSE. The protocol model it serializes lives in [`theway::wire`]; the
-//! channels/state bridging the two crates come from [`theway::ui::web_loop::TransportEndpoints`].
+//! single-turn event loop owned by [`crate::ui::App`] (`run_transport_loop`) and receives full
+//! feed snapshots over SSE. The protocol model it serializes lives in [`crate::wire`]; the
+//! channels/state bridging the two crates come from [`crate::ui::web_loop::TransportEndpoints`].
 
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -20,15 +20,15 @@ use futures::Stream;
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, broadcast, mpsc};
 
-use theway::readline::SlashCompleter;
-use theway::session_ops::SessionOps;
-use theway::ui::App;
-use theway::ui::web_loop::TransportMode;
-use theway::wire::*;
+use crate::readline::SlashCompleter;
+use crate::session_ops::SessionOps;
+use crate::ui::App;
+use crate::ui::web_loop::TransportMode;
+use crate::wire::*;
 use theway_core::runtime::graph_engineering::types::DagEvent;
 use theway_core::runtime::subagents::registry::{SubagentEvent, SubagentJobRegistry};
 
-use crate::ws::ws_upgrade;
+use crate::transport::ws::ws_upgrade;
 
 /// Shared axum state: command queue + snapshot/event broadcasts + the
 /// completer/registry backing `/complete` and `/ws` node-output.
@@ -308,7 +308,7 @@ async fn switch_session_route(
             return session_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
     };
-    let Some(target) = crate::proto::resolve_session_id(&sessions, &id) else {
+    let Some(target) = crate::transport::proto::resolve_session_id(&sessions, &id) else {
         return session_error(StatusCode::NOT_FOUND, format!("no session matches id {id}"))
             .into_response();
     };
@@ -334,7 +334,7 @@ async fn rename_session_route(
             return session_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
     };
-    let Some(target) = crate::proto::resolve_session_id(&sessions, &id) else {
+    let Some(target) = crate::transport::proto::resolve_session_id(&sessions, &id) else {
         return session_error(StatusCode::NOT_FOUND, format!("no session matches id {id}"))
             .into_response();
     };
@@ -356,7 +356,7 @@ async fn delete_session_route(
             return session_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
     };
-    let Some(target) = crate::proto::resolve_session_id(&sessions, &id) else {
+    let Some(target) = crate::transport::proto::resolve_session_id(&sessions, &id) else {
         return session_error(StatusCode::NOT_FOUND, format!("no session matches id {id}"))
             .into_response();
     };
@@ -407,7 +407,7 @@ pub(crate) fn bind_addr(host: &str, port: u16) -> Result<SocketAddr> {
 #[cfg(test)]
 pub(crate) fn empty_sidebar_snapshot() -> WebSidebarSnapshot {
     WebSidebarSnapshot {
-        inbox_new: theway::inbox::new_count(&theway::inbox::default_inbox_path()),
+        inbox_new: crate::inbox::new_count(&crate::inbox::default_inbox_path()),
         skills: WebSkillsSnapshot {
             total: 0,
             enabled: 0,

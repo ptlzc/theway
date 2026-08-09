@@ -2,7 +2,7 @@
 //! shared event loop, and `/events` streams snapshot frames over SSE.
 
 use super::super::*;
-use crate::testing::FakeSessionOps;
+use crate::transport::testing::FakeSessionOps;
 use base64::Engine as _;
 use futures::{SinkExt as _, StreamExt};
 use serde_json::json;
@@ -32,7 +32,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
         commands: command_tx,
         snapshots: snapshot_tx.clone(),
         latest,
-        completer: SlashCompleter::from_registry(&theway::commands::Registry::with_builtins()),
+        completer: SlashCompleter::from_registry(&crate::commands::Registry::with_builtins()),
         events: broadcast::channel::<theway_core::runtime::subagents::registry::SubagentEvent>(16)
             .0,
         dag_events: broadcast::channel::<theway_core::runtime::graph_engineering::types::DagEvent>(
@@ -247,7 +247,7 @@ async fn websocket_serves_snapshot_and_accepts_commands() {
         commands: command_tx,
         snapshots: snapshot_tx.clone(),
         latest,
-        completer: SlashCompleter::from_registry(&theway::commands::Registry::with_builtins()),
+        completer: SlashCompleter::from_registry(&crate::commands::Registry::with_builtins()),
         events: broadcast::channel::<theway_core::runtime::subagents::registry::SubagentEvent>(16)
             .0,
         dag_events: broadcast::channel::<theway_core::runtime::graph_engineering::types::DagEvent>(

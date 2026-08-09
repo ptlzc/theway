@@ -3,7 +3,7 @@
 //! HTTP against a router wired with the in-memory [`FakeSessionOps`].
 
 use super::super::*;
-use crate::testing::FakeSessionOps;
+use crate::transport::testing::FakeSessionOps;
 use serde_json::json;
 
 fn web_status(session_id: &str) -> WebStatus {
@@ -41,7 +41,7 @@ async fn spawn_sessions_server(
         commands: command_tx,
         snapshots: snapshot_tx,
         latest: Arc::new(Mutex::new(web_status(current))),
-        completer: SlashCompleter::from_registry(&theway::commands::Registry::with_builtins()),
+        completer: SlashCompleter::from_registry(&crate::commands::Registry::with_builtins()),
         events: broadcast::channel::<SubagentEvent>(16).0,
         dag_events: broadcast::channel::<DagEvent>(16).0,
         registry: SubagentJobRegistry::new(),

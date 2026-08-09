@@ -1,7 +1,7 @@
 //! Unit tests for HTTP transport helpers: the loopback bind policy.
 //!
 //! App-side helper tests (feed-line projection, prompt image decoding) live in
-//! `theway::ui::web_loop` (they exercise App-owned functions).
+//! `crate::ui::web_loop` (they exercise App-owned functions).
 
 use super::super::*;
 
@@ -14,7 +14,7 @@ pub(crate) fn test_router(latest: WebStatus) -> Router {
         commands: command_tx,
         snapshots: snapshot_tx,
         latest: Arc::new(Mutex::new(latest)),
-        completer: SlashCompleter::from_registry(&theway::commands::Registry::with_builtins()),
+        completer: SlashCompleter::from_registry(&crate::commands::Registry::with_builtins()),
         events: broadcast::channel::<theway_core::runtime::subagents::registry::SubagentEvent>(16)
             .0,
         dag_events: broadcast::channel::<theway_core::runtime::graph_engineering::types::DagEvent>(
@@ -22,7 +22,7 @@ pub(crate) fn test_router(latest: WebStatus) -> Router {
         )
         .0,
         registry: theway_core::runtime::subagents::registry::SubagentJobRegistry::new(),
-        session_ops: std::sync::Arc::new(crate::testing::FakeSessionOps::new()),
+        session_ops: std::sync::Arc::new(crate::transport::testing::FakeSessionOps::new()),
     })
 }
 

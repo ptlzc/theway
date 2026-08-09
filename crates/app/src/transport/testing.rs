@@ -1,6 +1,6 @@
 //! Test fakes for the transport servers (session-resource-model N4).
 //!
-//! [`FakeSessionOps`] is an in-memory [`theway::session_ops::SessionOps`] so the gRPC/HTTP
+//! [`FakeSessionOps`] is an in-memory [`crate::session_ops::SessionOps`] so the gRPC/HTTP
 //! session tests exercise the transport surface without a real `JsonlSessionRepo` on disk.
 //! Delete protection is simulated by mapping a session id to its "running" run ids.
 
@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use anyhow::Result;
-use theway::wire::SessionSummary;
+use crate::wire::SessionSummary;
 
 /// In-memory `SessionOps`: sessions live in a `Vec` (oldest → newest, like the repo-backed
 /// impl), ids for `create` come from a counter.
@@ -63,7 +63,7 @@ fn summary(id: &str) -> SessionSummary {
 }
 
 #[tonic::async_trait]
-impl theway::session_ops::SessionOps for FakeSessionOps {
+impl crate::session_ops::SessionOps for FakeSessionOps {
     async fn list(&self) -> Result<Vec<SessionSummary>> {
         Ok(self.inner.lock().unwrap().sessions.clone())
     }
