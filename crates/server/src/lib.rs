@@ -47,7 +47,7 @@ pub mod skills;
 pub mod skills_state;
 pub mod templates;
 pub mod tools;
-#[cfg(feature = "server")]
+// Server-first: transport is always on (theway IS an agent server).
 pub mod transport;
 pub mod triggers;
 pub mod ui;

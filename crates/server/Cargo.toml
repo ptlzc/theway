@@ -3,20 +3,18 @@ name = "theway"
 version = "0.75.0"
 edition = "2024"
 rust-version = "1.85"
-description = "theway: local agent runtime SDK (fork of theway) — REPL TUI, graph engineering mode, goal loops, cron/triggers. Ships the `theway` CLI binary ([[bin]], requires features `tui` + `server`); transport servers live in the `server` feature."
+description = "theway: agent server (fork of theway) — REPL TUI, graph engineering mode, goal loops, cron/triggers, gRPC/HTTP/WS transport servers (server-first; the `theway` binary is the server entry, `tui` optional for terminal UI)."
 license = "MIT"
 authors = ["theway contributors"]
 
 [features]
-# SDK default is headless: no terminal stack. The `theway` binary ([[bin]] below) requires
-# `tui` + `server`; external embeds opt in per feature (`features = ["tui"]` etc.).
-default = []
-# Terminal UI (ratatui TUI + terminal input). External projects that only embed the
-# runtime headless (transport servers / AgentSession) can set default-features = false.
+# Server-first: transport servers (gRPC/HTTP/WS) are always on — theway IS an
+# agent server. `tui` stays optional (terminal UI); embeds that only want the
+# headless server set default-features = false.
+default = ["tui"]
+# Terminal UI (ratatui TUI + terminal input). Optional: headless server embeds
+# (or CI) can use default-features = false.
 tui = ["dep:crossterm", "dep:ratatui", "dep:tui-textarea", "dep:arboard", "dep:qrcode", "dep:image"]
-# Transport servers (`--web` axum HTTP/SSE + WebSocket, `--grpc` tonic) plus the
-# proto wire codecs, consolidated from the former `theway-server` crate.
-server = ["dep:axum", "dep:tonic", "dep:tonic-prost", "dep:prost", "dep:tokio-stream"]
 
 [lib]
 name = "theway"
@@ -29,7 +27,6 @@ path = "src/lib.rs"
 [[bin]]
 name = "theway"
 path = "src/main.rs"
-required-features = ["tui", "server"]
 
 [dependencies]
 # Enable every wire-protocol provider so model auto-detection isn't bottlenecked by feature
@@ -53,14 +50,14 @@ base64 = "0.22"
 
 # Transport server stack (feature `server`, consolidated from theway-server).
 # HTTP/WS server: axum router + SSE + WebSocket upgrade.
-axum = { version = "0.8", features = ["ws"], optional = true }
+axum = { version = "0.8", features = ["ws"] }
 # gRPC wire stack: tonic "server" is the runtime mode; "channel" backs the
 # generated client; "codegen" supports tonic::include_proto!; tonic-prost
 # supplies the ProstCodec the generated code references.
-prost = { version = "0.14", optional = true }
-tonic = { version = "0.14", features = ["server", "channel", "codegen"], optional = true }
-tonic-prost = { version = "0.14", optional = true }
-tokio-stream = { version = "0.1", features = ["net", "sync"], optional = true }
+prost = "0.14"
+tonic = { version = "0.14", features = ["server", "channel", "codegen"] }
+tonic-prost = "0.14"
+tokio-stream = { version = "0.1", features = ["net", "sync"] }
 
 toml = "0.8"
 futures = "0.3"
