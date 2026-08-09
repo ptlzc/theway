@@ -22,26 +22,6 @@ mod subagent_specs;
 #[path = "../../core/src/runtime/tools/task.rs"]
 mod task;
 
-// ── shims for the spec tool-set factories (never executed by this e2e) ─────
-// `subagent_specs::*_tools()` closures build concrete tools via `super::`; provide
-// inert stand-ins so the included modules compile inside this test crate. The agent
-// loop stops after the faux model's single turn, so no stub tool is ever dispatched.
-
-fn default_tools(_dir: std::path::PathBuf) -> Vec<Arc<dyn AgentTool>> {
-    vec![Arc::new(read::ReadTool), Arc::new(bash::BashTool)]
-}
-
-fn subagent_read_only_tools() -> Vec<Arc<dyn AgentTool>> {
-    vec![
-        Arc::new(read::ReadTool),
-        Arc::new(ls::LsTool),
-        Arc::new(grep::GrepTool),
-        Arc::new(find::FindTool),
-        Arc::new(web_fetch::WebFetchTool),
-        Arc::new(git::GitTool),
-    ]
-}
-
 macro_rules! stub_tool {
     ($mod:ident, $ty:ident, $label:literal) => {
         pub mod $mod {
