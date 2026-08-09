@@ -190,12 +190,6 @@ fn dag_node_wire(node: &theway::wire::WebDagNodeSnapshot) -> wire::DagNodeSnapsh
     }
 }
 
-/// Convert one subagent job (registry state) into the wire snapshot form.
-/// Defined next to the wire model in `theway::wire` (shared with
-/// `App::web_snapshot`); re-exported here for the proto conversions.
-pub use theway::wire::subagent_job_snapshot;
-
-/// Convert one subagent job snapshot into the wire form.
 /// Convert an event-plane message into the wire `StreamEvent`.
 pub fn stream_event_wire(event: &SubagentEvent) -> wire::StreamEvent {
     use wire::stream_event::Kind;

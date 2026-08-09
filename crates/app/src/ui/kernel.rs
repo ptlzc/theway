@@ -18,22 +18,22 @@ use theway_llm_provider::{ImageContent, InputModality};
 /// Running this as a local future (not `tokio::spawn`) sidesteps the `Send` bound:
 /// `AgentSession::prompt` briefly holds a `parking_lot` guard across an `.await`, so its future is
 /// `!Send`.
-pub(crate) type TurnFut = Pin<Box<dyn Future<Output = Result<Option<String>, AgentRunError>>>>;
+pub(super) type TurnFut = Pin<Box<dyn Future<Output = Result<Option<String>, AgentRunError>>>>;
 
 #[derive(Default)]
-pub(crate) struct TurnState {
-    pub(crate) fut: Option<TurnFut>,
-    pub(crate) aborted: bool,
+pub(super) struct TurnState {
+    pub(super) fut: Option<TurnFut>,
+    pub(super) aborted: bool,
     /// Prefix for the error line if the turn fails (e.g. `triggered turn: `).
-    pub(crate) prefix: &'static str,
+    pub(super) prefix: &'static str,
 }
 
-pub(crate) async fn poll_turn(fut: &mut Option<TurnFut>) -> Result<Option<String>, AgentRunError> {
+pub(super) async fn poll_turn(fut: &mut Option<TurnFut>) -> Result<Option<String>, AgentRunError> {
     // Only created by `select!` when `fut.is_some()`, so the unwrap is sound.
     fut.as_mut().expect("turn future present").await
 }
 
-pub(crate) enum QueuedTurn {
+pub(super) enum QueuedTurn {
     UserPrompt {
         display: String,
         prompt: String,
@@ -56,7 +56,7 @@ pub(crate) enum QueuedTurn {
 }
 
 impl QueuedTurn {
-    pub(crate) fn display(&self) -> &str {
+    pub(super) fn display(&self) -> &str {
         match self {
             Self::UserPrompt { display, .. }
             | Self::AgentPrompt { display, .. }
@@ -67,29 +67,29 @@ impl QueuedTurn {
 }
 
 #[derive(Clone)]
-pub(crate) struct ReplKernel {
+pub(super) struct ReplKernel {
     harness: Arc<AgentHarness>,
     retry: RetrySettings,
 }
 
 impl ReplKernel {
-    pub(crate) fn new(harness: Arc<AgentHarness>, retry: RetrySettings) -> Self {
+    pub(super) fn new(harness: Arc<AgentHarness>, retry: RetrySettings) -> Self {
         Self { harness, retry }
     }
 
-    pub(crate) fn harness(&self) -> &Arc<AgentHarness> {
+    pub(super) fn harness(&self) -> &Arc<AgentHarness> {
         &self.harness
     }
 
-    pub(crate) fn abort(&self) {
+    pub(super) fn abort(&self) {
         self.harness.abort();
     }
 
-    pub(crate) fn is_streaming(&self) -> bool {
+    pub(super) fn is_streaming(&self) -> bool {
         self.harness.agent().is_streaming()
     }
 
-    pub(crate) fn current_model_accepts_images(&self) -> bool {
+    pub(super) fn current_model_accepts_images(&self) -> bool {
         let state = self.harness.agent().state();
         state
             .model
@@ -98,12 +98,12 @@ impl ReplKernel {
             .unwrap_or(false)
     }
 
-    pub(crate) fn prompt_turn(&self, prompt: String) -> TurnFut {
+    pub(super) fn prompt_turn(&self, prompt: String) -> TurnFut {
         let harness = self.harness.clone();
         Box::pin(async move { harness.prompt(prompt).await.map(|_| None) })
     }
 
-    pub(crate) fn user_prompt_turn(
+    pub(super) fn user_prompt_turn(
         &self,
         prompt_text: String,
         loaded_images: Vec<ImageContent>,
@@ -126,7 +126,7 @@ impl ReplKernel {
         })
     }
 
-    pub(crate) fn template_turn(
+    pub(super) fn template_turn(
         &self,
         name: String,
         vars: serde_json::Map<String, serde_json::Value>,
@@ -140,7 +140,7 @@ impl ReplKernel {
         })
     }
 
-    pub(crate) fn compaction_turn(&self, custom: Option<String>) -> TurnFut {
+    pub(super) fn compaction_turn(&self, custom: Option<String>) -> TurnFut {
         let harness = self.harness.clone();
         Box::pin(async move {
             harness.force_compact(custom).await.map(|ran| {
@@ -153,7 +153,7 @@ impl ReplKernel {
         })
     }
 
-    pub(crate) fn continue_turn(&self) -> TurnFut {
+    pub(super) fn continue_turn(&self) -> TurnFut {
         let harness = self.harness.clone();
         Box::pin(async move { harness.continue_().await.map(|_| None) })
     }

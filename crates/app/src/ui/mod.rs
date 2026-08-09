@@ -24,9 +24,9 @@
 //! (`commands::console`). The ratatui terminal is the single writer.
 
 pub mod feed;
-pub(crate) mod kernel;
+mod kernel;
 pub mod listener;
-pub(crate) mod relay;
+mod relay;
 pub mod web_loop;
 
 pub use feed::FeedUpdate;
@@ -153,46 +153,48 @@ pub struct AppConfig {
     pub subagent_registry: theway_core::runtime::subagents::registry::SubagentJobRegistry,
 }
 
-// Fields and methods the transport servers touch (the `theway-server` crate drives
-// the same event loop through `web_loop::TransportEndpoints`) are `pub(crate)`;
-// the rest stays private to the TUI.
+// Everything here is private to the `ui` subtree: the TUI event loop and the
+// transport event loop (`ui::web_loop`) share it internally. The `theway-server`
+// crate never touches App internals — it programs against the public
+// `web_loop::TransportEndpoints` channel surface plus `transport_endpoints()` /
+// `run_transport_loop()`.
 pub struct App {
-    pub(crate) kernel: ReplKernel,
-    pub(crate) registry: Registry,
-    pub(crate) completer: SlashCompleter,
-    pub(crate) cwd: PathBuf,
-    pub(crate) session_id: String,
-    pub(crate) log_path: Option<PathBuf>,
-    pub(crate) tool_count: usize,
+    kernel: ReplKernel,
+    registry: Registry,
+    completer: SlashCompleter,
+    cwd: PathBuf,
+    session_id: String,
+    log_path: Option<PathBuf>,
+    tool_count: usize,
 
-    pub(crate) history: HistoryStore,
+    history: HistoryStore,
     #[cfg(feature = "tui")]
     history_idx: Option<usize>,
     #[cfg(feature = "tui")]
     draft: String,
-    pub(crate) pending_skill: Option<String>,
+    pending_skill: Option<String>,
     #[cfg(feature = "tui")]
     pending_images: Vec<PathBuf>,
     #[cfg(feature = "tui")]
     pending_pasted_images: Vec<ImageContent>,
 
-    pub(crate) feed: Feed,
-    pub(crate) latest_trigger_poll: Option<TriggerPollStatus>,
-    pub(crate) latest_goal: Option<crate::goal::GoalState>,
-    pub(crate) feed_rx: Option<UnboundedReceiver<FeedUpdate>>,
-    pub(crate) main_run_rx: Option<UnboundedReceiver<String>>,
-    pub(crate) control_plane_prompt_rx: Option<UnboundedReceiver<UiControlPlanePrompt>>,
-    pub(crate) control_plane_prompt: Option<UiControlPlanePrompt>,
+    feed: Feed,
+    latest_trigger_poll: Option<TriggerPollStatus>,
+    latest_goal: Option<crate::goal::GoalState>,
+    feed_rx: Option<UnboundedReceiver<FeedUpdate>>,
+    main_run_rx: Option<UnboundedReceiver<String>>,
+    control_plane_prompt_rx: Option<UnboundedReceiver<UiControlPlanePrompt>>,
+    control_plane_prompt: Option<UiControlPlanePrompt>,
     #[cfg(feature = "tui")]
     model_picker: Option<crate::model_picker::ModelPickerState>,
     /// Cached for web snapshots; refreshed on picker open and model switch.
-    pub(crate) model_catalog: Vec<crate::model_picker::ProviderGroup>,
-    pub(crate) panel_status: PanelStatus,
+    model_catalog: Vec<crate::model_picker::ProviderGroup>,
+    panel_status: PanelStatus,
     /// DAG orchestration engine, shared with the dag_* tools (graph mode state).
-    pub(crate) dag_engine:
+    dag_engine:
         std::sync::Arc<theway_core::runtime::graph_engineering::engine::DagEngine>,
     /// Subagent job registry (graph mode). Task tool + DAG nodes register here.
-    pub(crate) subagent_registry: theway_core::runtime::subagents::registry::SubagentJobRegistry,
+    subagent_registry: theway_core::runtime::subagents::registry::SubagentJobRegistry,
 
     #[cfg(feature = "tui")]
     input: TextArea<'static>,
@@ -203,14 +205,14 @@ pub struct App {
 
     #[cfg(feature = "tui")]
     scroll: usize,
-    pub(crate) follow: bool,
+    follow: bool,
     #[cfg(feature = "tui")]
     last_viewport_h: usize,
     #[cfg(feature = "tui")]
     last_feed_area: Option<Rect>,
 
-    pub(crate) busy: bool,
-    pub(crate) queued_turns: std::collections::VecDeque<QueuedTurn>,
+    busy: bool,
+    queued_turns: std::collections::VecDeque<QueuedTurn>,
     spinner_frame: usize,
     #[cfg(feature = "tui")]
     last_ctrlc: Option<Instant>,
@@ -219,19 +221,19 @@ pub struct App {
 
     // Remote relay (issue #22). The channels exist from construction so the event loops
     // can always select on them; they only carry traffic while a relay is connected.
-    pub(crate) relay: Option<relay::RelayHandle>,
+    relay: Option<relay::RelayHandle>,
     /// Render a QR code of the relay URL into the feed on connect. Only useful where a
     /// real terminal shows the feed (TUI); off for web/headless modes.
     #[cfg(feature = "tui")]
     relay_qr_in_feed: bool,
     relay_prompt_tx: UnboundedSender<String>,
-    pub(crate) relay_prompt_rx: Option<UnboundedReceiver<String>>,
+    relay_prompt_rx: Option<UnboundedReceiver<String>>,
     relay_abort_tx: UnboundedSender<()>,
-    pub(crate) relay_abort_rx: Option<UnboundedReceiver<()>>,
+    relay_abort_rx: Option<UnboundedReceiver<()>>,
     relay_resolve_tx: UnboundedSender<bool>,
-    pub(crate) relay_resolve_rx: Option<UnboundedReceiver<bool>>,
+    relay_resolve_rx: Option<UnboundedReceiver<bool>>,
     relay_model_tx: UnboundedSender<String>,
-    pub(crate) relay_model_rx: Option<UnboundedReceiver<String>>,
+    relay_model_rx: Option<UnboundedReceiver<String>>,
     /// Imported-but-disabled automation awaiting the user's "activate now?" answer on the
     /// shared confirm surface (TUI keys, local web modal, or the relay viewer).
     pending_import_activation: Option<PendingImportActivation>,
@@ -533,7 +535,7 @@ impl App {
     }
 
     /// Wrap up a finished turn: clear the busy state and surface an aborted/error line.
-    pub(crate) async fn finish_turn(
+    async fn finish_turn(
         &mut self,
         turn: &mut TurnState,
         result: Result<Option<String>, AgentRunError>,
@@ -561,7 +563,7 @@ impl App {
     }
 
     /// Handle `/web-connect` family outcomes. Shared by the TUI and web event loops.
-    pub(crate) async fn handle_web_relay(&mut self, action: commands::WebRelayAction) {
+    async fn handle_web_relay(&mut self, action: commands::WebRelayAction) {
         use commands::WebRelayAction;
         match action {
             WebRelayAction::Connect => {
@@ -635,7 +637,7 @@ impl App {
 
     /// `/session import` brought automation that the source had enabled. Raise the
     /// shared confirm surface; approval restores exactly the source enablement.
-    pub(crate) fn prompt_import_activation(
+    fn prompt_import_activation(
         &mut self,
         session_path: PathBuf,
         trigger_ids: Vec<String>,
@@ -679,7 +681,7 @@ impl App {
 
     /// Resolve a pending control-plane prompt from the relay — first-class, identical
     /// to a local confirmation (owner decision 2026-06-11).
-    pub(crate) fn resolve_from_relay(&mut self, approve: bool) {
+    fn resolve_from_relay(&mut self, approve: bool) {
         if self.control_plane_prompt.is_none() {
             return;
         }
@@ -696,7 +698,7 @@ impl App {
     /// Inject a prompt that arrived over the relay through the same path as local
     /// input. Remote slash commands are refused — the capability URL grants prompting,
     /// not REPL control.
-    pub(crate) fn submit_remote_text(&mut self, text: String, turn: &mut TurnState) {
+    fn submit_remote_text(&mut self, text: String, turn: &mut TurnState) {
         let trimmed = text.trim().to_string();
         if trimmed.is_empty() {
             return;
@@ -715,7 +717,7 @@ impl App {
         }
     }
 
-    pub(crate) fn apply_feed_update(&mut self, update: FeedUpdate) {
+    fn apply_feed_update(&mut self, update: FeedUpdate) {
         match update {
             FeedUpdate::TriggerPollStatus(status) => {
                 self.latest_trigger_poll = Some(status);
@@ -724,14 +726,14 @@ impl App {
         }
     }
 
-    pub(crate) fn show_control_plane_prompt(&mut self, prompt: UiControlPlanePrompt) {
+    fn show_control_plane_prompt(&mut self, prompt: UiControlPlanePrompt) {
         let label = safe_control_prompt_label(&prompt.request.label);
         self.control_plane_prompt = Some(prompt);
         self.system_line(format!("approval required: {label}"));
         self.follow = true;
     }
 
-    pub(crate) fn resolve_control_plane_prompt(
+    fn resolve_control_plane_prompt(
         &mut self,
         decision: theway_core::ControlPlanePromptDecision,
     ) {
@@ -991,7 +993,7 @@ impl App {
         true
     }
 
-    pub(crate) async fn set_model_from_spec(&mut self, spec: &str) {
+    async fn set_model_from_spec(&mut self, spec: &str) {
         let Some((provider, id)) = commands::parse_model_spec(spec) else {
             self.error_line(format!("invalid model spec: {spec}"));
             return;
@@ -1094,7 +1096,7 @@ impl App {
         Ok(())
     }
 
-    pub(crate) fn start_triggered_turn(&mut self, trace_id: String, turn: &mut TurnState) {
+    fn start_triggered_turn(&mut self, trace_id: String, turn: &mut TurnState) {
         // The kernel emits this only for an idle parent, but a user prompt may have started in
         // the gap; `continue_` would return AlreadyStreaming. Skip rather than error.
         if self.kernel.is_streaming() {
@@ -1154,7 +1156,7 @@ impl App {
         self.system_line(label);
     }
 
-    pub(crate) fn current_model_accepts_images(&self) -> bool {
+    fn current_model_accepts_images(&self) -> bool {
         self.kernel.current_model_accepts_images()
     }
 
@@ -1170,7 +1172,7 @@ impl App {
         false
     }
 
-    pub(crate) fn queue_user_prompt(
+    fn queue_user_prompt(
         &mut self,
         display: String,
         prompt: String,
@@ -1183,7 +1185,7 @@ impl App {
         });
     }
 
-    pub(crate) fn enqueue_turn(&mut self, job: QueuedTurn) {
+    fn enqueue_turn(&mut self, job: QueuedTurn) {
         let preview = queue_preview(job.display());
         self.queued_turns.push_back(job);
         self.system_line(format!(
@@ -1248,7 +1250,7 @@ impl App {
         true
     }
 
-    pub(crate) async fn refresh_goal_state(&mut self) {
+    async fn refresh_goal_state(&mut self) {
         self.latest_goal = crate::goal::current(self.kernel.harness()).await;
     }
 
@@ -1336,7 +1338,7 @@ impl App {
         }
     }
 
-    pub(crate) fn start_prompt_turn(
+    fn start_prompt_turn(
         &mut self,
         prompt: String,
         error_context: &'static str,
@@ -1348,7 +1350,7 @@ impl App {
         self.busy = true;
     }
 
-    pub(crate) fn start_user_prompt_turn(
+    fn start_user_prompt_turn(
         &mut self,
         prompt_text: String,
         loaded_images: Vec<ImageContent>,
@@ -1360,7 +1362,7 @@ impl App {
         self.busy = true;
     }
 
-    pub(crate) fn start_template_turn(
+    fn start_template_turn(
         &mut self,
         name: String,
         vars: serde_json::Map<String, serde_json::Value>,
@@ -1372,7 +1374,7 @@ impl App {
         self.busy = true;
     }
 
-    pub(crate) fn start_compaction_turn(&mut self, custom: Option<String>, turn: &mut TurnState) {
+    fn start_compaction_turn(&mut self, custom: Option<String>, turn: &mut TurnState) {
         turn.fut = Some(self.kernel.compaction_turn(custom));
         turn.aborted = false;
         turn.prefix = "compaction failed: ";
@@ -1407,7 +1409,7 @@ impl App {
         }
     }
 
-    pub(crate) fn request_abort(&mut self, turn: &mut TurnState) {
+    fn request_abort(&mut self, turn: &mut TurnState) {
         if turn.fut.is_some() {
             turn.aborted = true;
             self.kernel.abort();
@@ -2294,7 +2296,7 @@ fn queue_preview(text: &str) -> String {
     feed::truncate_chars(&redacted, QUEUED_PREVIEW_CHARS)
 }
 
-pub(crate) fn prompt_display(text: &str, image_count: usize) -> String {
+fn prompt_display(text: &str, image_count: usize) -> String {
     if image_count == 0 {
         return text.to_string();
     }

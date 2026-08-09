@@ -32,7 +32,7 @@ const SNAPSHOT_DEBOUNCE: Duration = Duration::from_millis(250);
 /// Frames the agent sends to the worker.
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub(crate) enum AgentFrame {
+pub(super) enum AgentFrame {
     /// First frame after connect; pins the agent key on the Durable Object (TOFU).
     Hello {
         agent_key: String,
@@ -47,7 +47,7 @@ pub(crate) enum AgentFrame {
 /// Frames the worker sends to the agent.
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub(crate) enum WorkerFrame {
+pub(super) enum WorkerFrame {
     Prompt {
         text: String,
     },
@@ -123,14 +123,14 @@ impl RelayHandle {
 
 /// Generate a URL-safe 160-bit random token (40 lowercase hex chars). Sourced from two
 /// v4 UUIDs (OS RNG) so no extra dependency is needed.
-pub(crate) fn new_token() -> String {
+pub(super) fn new_token() -> String {
     let a = uuid::Uuid::new_v4().simple().to_string();
     let b = uuid::Uuid::new_v4().simple().to_string();
     format!("{a}{b}")[..40].to_string()
 }
 
 /// Derive the agent WebSocket URL from the configured https base URL.
-pub(crate) fn agent_ws_url(base_url: &str, view_token: &str) -> Result<String> {
+pub(super) fn agent_ws_url(base_url: &str, view_token: &str) -> Result<String> {
     let trimmed = base_url.trim_end_matches('/');
     let ws_base = if let Some(rest) = trimmed.strip_prefix("https://") {
         format!("wss://{rest}")
@@ -145,7 +145,7 @@ pub(crate) fn agent_ws_url(base_url: &str, view_token: &str) -> Result<String> {
 /// Public viewer URL for a token. Trailing slash is load-bearing: the shared viewer HTML
 /// fetches relative paths (`state`, `events`, `prompt`), which must resolve under the
 /// token segment.
-pub(crate) fn viewer_url(base_url: &str, view_token: &str) -> String {
+pub(super) fn viewer_url(base_url: &str, view_token: &str) -> String {
     format!("{}/session/{view_token}/", base_url.trim_end_matches('/'))
 }
 
@@ -153,7 +153,7 @@ pub(crate) fn viewer_url(base_url: &str, view_token: &str) -> String {
 /// rendering, inverted so modules read dark-on-light on dark terminal themes (phone
 /// cameras accept inverted QR codes).
 #[cfg(feature = "tui")]
-pub(crate) fn qr_lines(url: &str) -> Result<Vec<String>> {
+pub(super) fn qr_lines(url: &str) -> Result<Vec<String>> {
     use qrcode::render::unicode;
     let code =
         qrcode::QrCode::new(url.as_bytes()).map_err(|e| anyhow::anyhow!("qr encode: {e}"))?;

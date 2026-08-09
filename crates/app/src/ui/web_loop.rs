@@ -221,7 +221,7 @@ impl App {
         Ok(())
     }
 
-    pub(crate) async fn handle_web_command(&mut self, command: WebCommand, turn: &mut TurnState) {
+    async fn handle_web_command(&mut self, command: WebCommand, turn: &mut TurnState) {
         match command {
             WebCommand::Submit {
                 text,
@@ -423,7 +423,7 @@ impl App {
         }
     }
 
-    pub(crate) fn web_snapshot(&self) -> WebStatus {
+    pub(super) fn web_snapshot(&self) -> WebStatus {
         let model = {
             let state = self.kernel.harness().agent().state();
             state
@@ -558,7 +558,7 @@ impl App {
         }
     }
 
-    pub(crate) async fn publish_snapshot(
+    async fn publish_snapshot(
         &self,
         latest: &Arc<Mutex<WebStatus>>,
         snapshots: &broadcast::Sender<WebStatus>,
@@ -572,11 +572,11 @@ impl App {
     }
 }
 
-pub(crate) fn web_feed_lines(feed: &feed::Feed) -> Vec<String> {
+fn web_feed_lines(feed: &feed::Feed) -> Vec<String> {
     feed.plain_lines(100)
 }
 
-pub(crate) fn web_preview(text: &str) -> String {
+fn web_preview(text: &str) -> String {
     feed::truncate_chars(&crate::bug_report::redact(text), 120)
 }
 
@@ -598,7 +598,7 @@ fn web_prompt_text(text: &str, cap: usize) -> String {
     feed::truncate_chars(&crate::bug_report::redact(text), cap)
 }
 
-pub(crate) fn load_web_prompt_images(
+fn load_web_prompt_images(
     images: &[WebPromptImage],
 ) -> Result<Vec<theway_llm_provider::ImageContent>> {
     if images.len() > crate::images::MAX_IMAGES_PER_MESSAGE {

@@ -92,10 +92,5 @@ libc = "0.2"
 [dev-dependencies]
 tempfile = "3"
 
-[build-dependencies]
-# Pure-Rust proto compiler (no system protoc required) + tonic codegen bridge.
-protox = "0.9"
-tonic-prost-build = "0.14"
-
 [lints]
 workspace = true
