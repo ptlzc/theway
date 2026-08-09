@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use theway::agent_session::{AgentSession, RetrySettings};
 use theway::commands::Registry;
-use theway::transport::types::WebOptions;
+use theway::wire::WebOptions;
 use theway::ui::{App, AppConfig};
 use theway_core::runtime::graph_engineering::engine::DagEngine;
 use theway_core::runtime::subagents::registry::SubagentJobRegistry;

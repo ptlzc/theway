@@ -1,19 +1,26 @@
 //! `WebStatus` ↔ `SessionState` conversion (transport layer).
 //!
-//! `WebStatus` (serde, `transport::types`) is the internal model shared by the
+//! `WebStatus` (serde, `theway::wire`) is the internal model shared by the
 //! `--web` JSON surface and the UI event loop; `SessionState` (prost, generated
-//! from `proto/theway_grpc.proto`) is the structured wire model for gRPC. The gRPC
-//! server serializes `SessionState` as binary protobuf; JSON channels keep using
-//! `WebStatus` until the protojson migration (see docs/PROTOCOL.md).
+//! from `proto/theway_grpc.proto` by this crate's build.rs) is the structured
+//! wire model for gRPC. The gRPC server serializes `SessionState` as binary
+//! protobuf; JSON channels keep using `WebStatus` until the protojson migration
+//! (see docs/PROTOCOL.md).
 
-use crate::transport::grpc::theway_grpc as wire;
-use crate::transport::types::WebStatus;
-use crate::ui::feed::{self, WebFeedBlock};
+/// Generated protobuf code for `proto/theway_grpc.proto` (package
+/// `theway.grpc.v1`), produced by this crate's `build.rs` into its own OUT_DIR.
+pub mod theway_grpc {
+    tonic::include_proto!("theway.grpc.v1");
+}
+
+use theway_grpc as wire;
+use theway::wire::WebStatus;
+use theway::ui::feed::{self, WebFeedBlock};
 use theway_core::runtime::graph_engineering::types::DagEvent;
 use theway_core::runtime::subagents::registry::SubagentEvent;
 
 /// Convert the internal snapshot into the structured wire model.
-pub(crate) fn session_state(snapshot: &WebStatus) -> wire::SessionState {
+pub fn session_state(snapshot: &WebStatus) -> wire::SessionState {
     wire::SessionState {
         session_id: snapshot.session_id.clone(),
         model: snapshot.model.clone(),
@@ -142,7 +149,7 @@ pub(crate) fn session_state(snapshot: &WebStatus) -> wire::SessionState {
 }
 
 /// Convert one DAG run snapshot into the wire form.
-fn dag_run_wire(run: &crate::transport::types::WebDagRunSnapshot) -> wire::DagRunSnapshot {
+fn dag_run_wire(run: &theway::wire::WebDagRunSnapshot) -> wire::DagRunSnapshot {
     wire::DagRunSnapshot {
         id: run.id.clone(),
         name: run.name.clone(),
@@ -158,7 +165,7 @@ fn dag_run_wire(run: &crate::transport::types::WebDagRunSnapshot) -> wire::DagRu
     }
 }
 
-fn dag_node_wire(node: &crate::transport::types::WebDagNodeSnapshot) -> wire::DagNodeSnapshot {
+fn dag_node_wire(node: &theway::wire::WebDagNodeSnapshot) -> wire::DagNodeSnapshot {
     wire::DagNodeSnapshot {
         id: node.id.clone(),
         agent: node.agent.clone(),
@@ -184,45 +191,13 @@ fn dag_node_wire(node: &crate::transport::types::WebDagNodeSnapshot) -> wire::Da
 }
 
 /// Convert one subagent job (registry state) into the wire snapshot form.
-pub(crate) fn subagent_job_snapshot(
-    job: &theway_core::runtime::subagents::registry::SubagentJob,
-) -> crate::transport::types::WebSubagentJobSnapshot {
-    crate::transport::types::WebSubagentJobSnapshot {
-        id: job.id.clone(),
-        agent: job.agent.clone(),
-        source: job.source.clone(),
-        run_id: job.run_id.clone(),
-        node_id: job.node_id.clone(),
-        status: job.status.as_str().to_string(),
-        started_at: job.started_at,
-        completed_at: job.completed_at,
-        duration_ms: job
-            .completed_at
-            .zip(job.started_at)
-            .map(|(end, start)| (end - start).max(0) as u64),
-        attempt: job.attempt,
-        total_attempts: job.total_attempts,
-        input_tokens: Some(job.input_tokens),
-        output_tokens: Some(job.output_tokens),
-        error: job.error.clone(),
-        output_tail: Some(job.output.clone()),
-        live_preview: if job.status == theway_core::runtime::subagents::registry::JobStatus::Running
-        {
-            Some(job.output.clone())
-        } else {
-            None
-        },
-        tps: job.tps(),
-        cps: job.cps(),
-        chars: Some(job.chars),
-        tools_called: Some(job.tools_called),
-        turn: Some(job.turn),
-    }
-}
+/// Defined next to the wire model in `theway::wire` (shared with
+/// `App::web_snapshot`); re-exported here for the proto conversions.
+pub use theway::wire::subagent_job_snapshot;
 
 /// Convert one subagent job snapshot into the wire form.
 /// Convert an event-plane message into the wire `StreamEvent`.
-pub(crate) fn stream_event_wire(event: &SubagentEvent) -> wire::StreamEvent {
+pub fn stream_event_wire(event: &SubagentEvent) -> wire::StreamEvent {
     use wire::stream_event::Kind;
     let kind = match event {
         SubagentEvent::Started {
@@ -285,8 +260,8 @@ pub(crate) fn stream_event_wire(event: &SubagentEvent) -> wire::StreamEvent {
 
 /// Convert a DAG engine event-plane message (node_status / run_status) into
 /// the wire `StreamEvent`.
-pub(crate) fn dag_event_wire(event: &DagEvent) -> wire::StreamEvent {
-    use crate::transport::types::{dag_status_str, node_status_str};
+pub fn dag_event_wire(event: &DagEvent) -> wire::StreamEvent {
+    use theway::wire::{dag_status_str, node_status_str};
     use wire::stream_event::Kind;
     let kind = match event {
         DagEvent::NodeStatus {
@@ -314,7 +289,7 @@ pub(crate) fn dag_event_wire(event: &DagEvent) -> wire::StreamEvent {
 }
 
 fn subagent_wire(
-    job: &crate::transport::types::WebSubagentJobSnapshot,
+    job: &theway::wire::WebSubagentJobSnapshot,
 ) -> wire::SubagentJobSnapshot {
     wire::SubagentJobSnapshot {
         id: job.id.clone(),
@@ -403,12 +378,12 @@ fn level_str(level: &feed::Level) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model_picker::{ModelEntry, ProviderGroup};
-    use crate::transport::types::{
+    use theway::model_picker::{ModelEntry, ProviderGroup};
+    use theway::wire::{
         WebCronSnapshot, WebMcpSnapshot, WebSidebarSnapshot, WebSkillsSnapshot, WebToolsSnapshot,
         WebTriggersSnapshot,
     };
-    use crate::ui::feed::{Level, TriggerPollStatus};
+    use theway::ui::feed::{Level, TriggerPollStatus};
 
     fn fixture_snapshot() -> WebStatus {
         WebStatus {
@@ -571,7 +546,7 @@ mod tests {
             error: None,
         };
 
-        let web = crate::transport::types::WebStatus::from_dag_run(&run);
+        let web = theway::wire::WebStatus::from_dag_run(&run);
         assert_eq!(web.id, "dag-1");
         assert_eq!(web.kind, "dag");
         assert_eq!(web.status, "running");
@@ -612,7 +587,7 @@ mod tests {
         let engine = DagEngine::new();
         let id = engine.plan_goal("finish the migration", Some("sess-1".into()));
         let run = engine.get_run(&id).expect("goal run");
-        let web = crate::transport::types::WebStatus::from_dag_run(&run);
+        let web = theway::wire::WebStatus::from_dag_run(&run);
         assert_eq!(web.kind, "goal");
         let state = session_state(&{
             let mut snap = fixture_snapshot();

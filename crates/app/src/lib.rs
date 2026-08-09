@@ -2,7 +2,8 @@
 //!
 //! Embeddable library surface of the `theway` CLI: agent session management,
 //! slash-command dispatch, REPL kernel, tools, triggers, skills, MCP client wiring,
-//! hooks, session archive, and the gRPC / HTTP / WebSocket transport servers.
+//! hooks, session archive, and the transport event loop (`ui::web_loop`); the
+//! HTTP / gRPC / WebSocket protocol servers live in the `theway-server` crate.
 //!
 //! The `theway` binary (`src/main.rs`) is a thin assembly layer on top of this
 //! crate; external projects (e.g. workmate-local) can depend on `theway`
@@ -45,6 +46,6 @@ pub mod skills;
 pub mod skills_state;
 pub mod templates;
 pub mod tools;
-pub mod transport;
 pub mod triggers;
 pub mod ui;
+pub mod wire;

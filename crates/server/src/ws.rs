@@ -33,7 +33,7 @@ use theway_core::runtime::graph_engineering::types::DagEvent;
 use theway_core::runtime::subagents::registry::SubagentEvent;
 
 use super::http::HttpState;
-use super::types::{WebCommand, WebPromptImage, dag_status_str, node_status_str};
+use theway::wire::{WebCommand, WebPromptImage, dag_status_str, node_status_str};
 
 /// `GET /ws` upgrade handler.
 pub(crate) async fn ws_upgrade(

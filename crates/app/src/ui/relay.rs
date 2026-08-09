@@ -1,7 +1,7 @@
 //! Remote relay client (`/web-connect`, issue #22).
 //!
 //! Maintains one outbound WebSocket to the relay worker (default
-//! `pie.0xfefe.me`), pushing [`crate::transport::types::WebStatus`] frames and receiving remote
+//! `pie.0xfefe.me`), pushing [`crate::wire::WebStatus`] frames and receiving remote
 //! prompt frames. The view token in the public URL is a capability: watch + prompt +
 //! abort, never control-plane approval (see docs/issues/22-web-relay.md). The agent key
 //! authenticates this process as the snapshot source and never appears in the URL.
@@ -22,7 +22,7 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_util::sync::CancellationToken;
 
-use crate::transport::types::WebStatus;
+use crate::wire::WebStatus;
 
 /// Snapshot frames above this size are dropped (and counted) instead of sent.
 const MAX_SNAPSHOT_BYTES: usize = 1024 * 1024;

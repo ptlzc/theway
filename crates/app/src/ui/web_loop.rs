@@ -1,84 +1,131 @@
-//! Local browser HTTP transport for the coding-agent REPL (`--web` mode).
+//! Transport event loop for the `--web` / `--grpc` servers.
 //!
-//! This is intentionally a small loopback-only surface. The browser layer sends commands into the
-//! same single-turn event loop used by the TUI and receives full feed snapshots over SSE. The
-//! protocol model it serializes lives in [`super::types`]; the event loop it drives is
-//! `crate::ui::App`.
+//! The axum/tonic/ws protocol surfaces live in the `theway-server` crate; this
+//! module keeps the half that owns *turn semantics*: the kernel-polling
+//! `select!` loop ([`App::run_transport_loop`]) plus the App-side command
+//! handling and snapshot building it drives. The two sides communicate only
+//! through the public channels/state in [`TransportEndpoints`] — the server
+//! crate never touches App internals.
+//!
+//! Startup flow (driven by `theway-server`):
+//! 1. [`App::transport_endpoints`] builds the command/snapshot/event channels
+//!    and wires the subagent registry + DAG engine event senders.
+//! 2. The server crate binds the listener, spawns the protocol server
+//!    (`serve_web` / `serve_grpc`) and hands back its [`tokio::task::JoinHandle`].
+//! 3. [`App::run_transport_loop`] runs the serialized event loop until Ctrl-C
+//!    or server exit.
 
-use std::convert::Infallible;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, bail};
-use axum::extract::State;
-use axum::response::sse::{Event, KeepAlive, Sse};
-use axum::response::{Html, IntoResponse};
-use axum::routing::{get, post};
-use axum::{Json, Router};
 use base64::Engine as _;
-use futures::Stream;
 use tokio::sync::{Mutex, broadcast, mpsc};
+
+use theway_core::SkillSource;
+use theway_core::runtime::graph_engineering::engine::DagEngine;
+use theway_core::runtime::graph_engineering::types::DagEvent;
+use theway_core::runtime::subagents::registry::{SubagentEvent, SubagentJobRegistry};
 
 use crate::commands::{CommandCtx, CommandOutcome};
 use crate::mentions;
 use crate::readline::SlashCompleter;
-use crate::transport::proto::subagent_job_snapshot;
-use crate::transport::types::*;
-use crate::transport::ws::ws_upgrade;
+use crate::ui::App;
 use crate::ui::kernel::{QueuedTurn, TurnState, poll_turn};
-use crate::ui::{App, feed};
-use theway_core::SkillSource;
-use theway_core::runtime::graph_engineering::types::DagEvent;
-use theway_core::runtime::subagents::registry::{SubagentEvent, SubagentJobRegistry};
+use crate::ui::{feed, prompt_display};
+use crate::wire::*;
 
-#[derive(Clone)]
-pub(crate) struct HttpState {
-    pub(crate) commands: mpsc::UnboundedSender<WebCommand>,
-    pub(crate) snapshots: broadcast::Sender<WebStatus>,
-    pub(crate) latest: Arc<Mutex<WebStatus>>,
-    completer: SlashCompleter,
-    pub(crate) events: broadcast::Sender<SubagentEvent>,
-    /// DAG engine event plane (node_status / run_status), shared with /ws.
-    pub(crate) dag_events: broadcast::Sender<DagEvent>,
-    pub(crate) registry: SubagentJobRegistry,
+/// Which transport drives the loop (only affects log/error labels).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TransportMode {
+    Web,
+    Grpc,
+}
+
+impl TransportMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            TransportMode::Web => "web",
+            TransportMode::Grpc => "grpc",
+        }
+    }
+}
+
+/// Public channel/state surface shared with the `theway-server` crate.
+///
+/// Built by [`App::transport_endpoints`]: the server side takes the senders /
+/// shared state it needs to build its `HttpState` / `GrpcState`, while the
+/// receiver half (`command_rx`) plus `snapshot_tx`/`latest` feed the event
+/// loop ([`App::run_transport_loop`]).
+pub struct TransportEndpoints {
+    /// Browser/client commands into the serialized event loop.
+    pub command_tx: mpsc::UnboundedSender<WebCommand>,
+    /// Event-loop side of the command queue.
+    pub command_rx: mpsc::UnboundedReceiver<WebCommand>,
+    /// Full `WebStatus` snapshots broadcast to SSE / WS / gRPC subscribers.
+    pub snapshot_tx: broadcast::Sender<WebStatus>,
+    /// Latest snapshot (served by `GET /state` / `GetState`).
+    pub latest: Arc<Mutex<WebStatus>>,
+    /// Event plane (graph mode): subagent started/output/metrics/completed.
+    pub events: broadcast::Sender<SubagentEvent>,
+    /// Event plane (graph mode): DAG engine node_status / run_status.
+    pub dag_events: broadcast::Sender<DagEvent>,
+    /// Slash-command completer backing `POST /complete`.
+    pub completer: SlashCompleter,
+    /// Subagent job registry (GetNodeOutput / snapshot source).
+    pub registry: SubagentJobRegistry,
+    /// DAG orchestration engine (graph cancel/retry/skip/checkpoint/restore).
+    pub dag_engine: Arc<DagEngine>,
+    /// Owning session id (checkpoint scope / mount key).
+    pub session_id: String,
 }
 
 impl App {
-    pub async fn run_web(mut self, options: WebOptions) -> Result<()> {
-        let addr = bind_addr(&options.host, options.port)?;
-        let listener = tokio::net::TcpListener::bind(addr)
-            .await
-            .with_context(|| format!("bind web ui on {addr}"))?;
-        let actual = listener.local_addr()?;
-
-        let (command_tx, mut command_rx) = mpsc::unbounded_channel::<WebCommand>();
+    /// Build the public transport channels and wire the event planes.
+    ///
+    /// Registers the subagent-registry and DAG-engine event senders (graph
+    /// mode) and snapshots the current state; the server crate consumes the
+    /// sender side, the event loop ([`App::run_transport_loop`]) the receiver.
+    pub fn transport_endpoints(&mut self) -> TransportEndpoints {
+        let (command_tx, command_rx) = mpsc::unbounded_channel::<WebCommand>();
         let (snapshot_tx, _) = broadcast::channel::<WebStatus>(128);
         let latest = Arc::new(Mutex::new(self.web_snapshot()));
         // Event plane (graph mode) shared with /ws; the registry broadcasts into it.
-        let (event_tx, _) =
-            broadcast::channel::<theway_core::runtime::subagents::registry::SubagentEvent>(256);
+        let (event_tx, _) = broadcast::channel::<SubagentEvent>(256);
         self.subagent_registry
             .set_event_sender(Some(event_tx.clone()));
         // DAG engine broadcasts node_status / run_status (goal runs + DAG runs).
         let (dag_event_tx, _) = broadcast::channel::<DagEvent>(256);
         self.dag_engine.set_event_sender(Some(dag_event_tx.clone()));
-        let router = web_router(HttpState {
-            commands: command_tx,
-            snapshots: snapshot_tx.clone(),
-            latest: latest.clone(),
-            completer: self.completer.clone(),
+        TransportEndpoints {
+            command_tx,
+            command_rx,
+            snapshot_tx,
+            latest,
             events: event_tx,
             dag_events: dag_event_tx,
+            completer: self.completer.clone(),
             registry: self.subagent_registry.clone(),
-        });
-
-        let server = axum::serve(listener, router.into_make_service());
-        let mut server_task = tokio::spawn(async move { server.await });
-        let url = format!("http://{actual}");
-        println!("theway web listening on {url}");
-        if let Err(e) = open_web_browser(&url) {
-            eprintln!("web browser auto-open skipped: {e}");
+            dag_engine: self.dag_engine.clone(),
+            session_id: self.session_id.clone(),
         }
+    }
+
+    /// Serialized transport event loop shared by `--web` and `--grpc`.
+    ///
+    /// Drives turn polling, command intake, feed updates, triggered turns,
+    /// relay channels and the control-plane prompt until Ctrl-C or the server
+    /// task (`server_task`, spawned by `theway-server`) exits. `mode` only
+    /// affects log labels.
+    pub async fn run_transport_loop(
+        mut self,
+        mode: TransportMode,
+        endpoints: TransportEndpoints,
+        mut server_task: tokio::task::JoinHandle<Result<()>>,
+    ) -> Result<()> {
+        let label = mode.label();
+        let mut command_rx = endpoints.command_rx;
+        let latest = endpoints.latest;
+        let snapshot_tx = endpoints.snapshot_tx;
 
         let mut feed_rx = self.feed_rx.take().expect("feed_rx taken once");
         let mut main_run_rx = self.main_run_rx.take().expect("main_run_rx taken once");
@@ -131,7 +178,7 @@ impl App {
                 }
                 Some(()) = relay_abort_rx.recv() => {
                     if turn.fut.is_some() {
-                        self.system_line("[web] abort requested");
+                        self.system_line(format!("[{label}] abort requested"));
                         self.request_abort(&mut turn);
                         self.publish_snapshot(&latest, &snapshot_tx).await;
                     }
@@ -141,7 +188,7 @@ impl App {
                     self.publish_snapshot(&latest, &snapshot_tx).await;
                 }
                 Some(spec) = relay_model_rx.recv() => {
-                    self.system_line(format!("[web] set model: {spec}"));
+                    self.system_line(format!("[{label}] set model: {spec}"));
                     self.set_model_from_spec(&spec).await;
                     self.publish_snapshot(&latest, &snapshot_tx).await;
                 }
@@ -164,8 +211,8 @@ impl App {
                 server_result = &mut server_task => {
                     match server_result {
                         Ok(Ok(())) => {}
-                        Ok(Err(e)) => self.error_line(format!("web server: {e}")),
-                        Err(e) => self.error_line(format!("web server task: {e}")),
+                        Ok(Err(e)) => self.error_line(format!("{label} server: {e}")),
+                        Err(e) => self.error_line(format!("{label} server task: {e}")),
                     }
                     break;
                 }
@@ -270,7 +317,7 @@ impl App {
         };
         let prompt_text =
             crate::commands::attach_skill_prompt(expanded, self.pending_skill.take().as_deref());
-        let display = crate::ui::prompt_display(&trimmed, loaded_images.len());
+        let display = prompt_display(&trimmed, loaded_images.len());
         if interrupt {
             // INTERRUPT mode: stop the in-flight turn and drop anything queued
             // behind it; this message runs as soon as the aborted turn unwinds.
@@ -418,7 +465,7 @@ impl App {
                 .subagent_registry
                 .list()
                 .iter()
-                .map(subagent_job_snapshot)
+                .map(crate::wire::subagent_job_snapshot)
                 .collect(),
         }
     }
@@ -524,120 +571,12 @@ impl App {
         let _ = snapshots.send(snapshot);
     }
 }
-fn web_router(state: HttpState) -> Router {
-    Router::new()
-        .route("/", get(index))
-        .route("/state", get(state_snapshot))
-        .route("/events", get(events))
-        .route("/ws", get(ws_upgrade))
-        .route("/prompt", post(prompt))
-        .route("/model", post(set_model))
-        .route("/complete", post(complete))
-        .route("/abort", post(abort))
-        .route("/trigger/immediate", post(trigger_immediate))
-        .route("/control-plane/resolve", post(resolve_control_plane))
-        .with_state(state)
-}
 
-async fn index() -> Html<&'static str> {
-    Html(INDEX_HTML)
-}
-
-async fn state_snapshot(State(state): State<HttpState>) -> Json<WebStatus> {
-    Json(state.latest.lock().await.clone())
-}
-
-async fn events(
-    State(state): State<HttpState>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let rx = state.snapshots.subscribe();
-    let stream = futures::stream::unfold(rx, |mut rx| async move {
-        loop {
-            match rx.recv().await {
-                Ok(snapshot) => {
-                    let data = serde_json::to_string(&snapshot)
-                        .unwrap_or_else(|_| "{\"error\":\"serialize\"}".to_string());
-                    return Some((Ok(Event::default().event("status").data(data)), rx));
-                }
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(broadcast::error::RecvError::Closed) => return None,
-            }
-        }
-    });
-    Sse::new(stream).keep_alive(KeepAlive::default())
-}
-
-async fn prompt(
-    State(state): State<HttpState>,
-    Json(req): Json<PromptRequest>,
-) -> impl IntoResponse {
-    let accepted = state
-        .commands
-        .send(WebCommand::Submit {
-            text: req.text,
-            images: req.images,
-            interrupt: false,
-        })
-        .is_ok();
-    Json(CommandAccepted { accepted })
-}
-
-async fn complete(
-    State(state): State<HttpState>,
-    Json(req): Json<CompleteRequest>,
-) -> impl IntoResponse {
-    Json(CompleteResponse {
-        completions: state.completer.matches(&req.text),
-    })
-}
-
-async fn abort(State(state): State<HttpState>) -> impl IntoResponse {
-    let accepted = state.commands.send(WebCommand::Abort).is_ok();
-    Json(CommandAccepted { accepted })
-}
-
-async fn trigger_immediate(
-    State(state): State<HttpState>,
-    Json(req): Json<TriggerRuleRequest>,
-) -> impl IntoResponse {
-    let accepted = state
-        .commands
-        .send(WebCommand::TriggerRuleNow { id: req.id })
-        .is_ok();
-    Json(CommandAccepted { accepted })
-}
-
-async fn set_model(
-    State(state): State<HttpState>,
-    Json(request): Json<SetModelRequest>,
-) -> impl IntoResponse {
-    let accepted = state
-        .commands
-        .send(WebCommand::SetModel {
-            spec: request.model,
-        })
-        .is_ok();
-    Json(CommandAccepted { accepted })
-}
-
-async fn resolve_control_plane(
-    State(state): State<HttpState>,
-    Json(req): Json<ControlPlaneDecisionRequest>,
-) -> impl IntoResponse {
-    let accepted = state
-        .commands
-        .send(WebCommand::ResolveControlPlane {
-            approve: req.approve,
-        })
-        .is_ok();
-    Json(CommandAccepted { accepted })
-}
-
-fn web_feed_lines(feed: &feed::Feed) -> Vec<String> {
+pub(crate) fn web_feed_lines(feed: &feed::Feed) -> Vec<String> {
     feed.plain_lines(100)
 }
 
-fn web_preview(text: &str) -> String {
+pub(crate) fn web_preview(text: &str) -> String {
     feed::truncate_chars(&crate::bug_report::redact(text), 120)
 }
 
@@ -659,7 +598,7 @@ fn web_prompt_text(text: &str, cap: usize) -> String {
     feed::truncate_chars(&crate::bug_report::redact(text), cap)
 }
 
-fn load_web_prompt_images(
+pub(crate) fn load_web_prompt_images(
     images: &[WebPromptImage],
 ) -> Result<Vec<theway_llm_provider::ImageContent>> {
     if images.len() > crate::images::MAX_IMAGES_PER_MESSAGE {
@@ -690,93 +629,64 @@ fn load_web_prompt_images(
     Ok(out)
 }
 
-pub(crate) fn bind_addr(host: &str, port: u16) -> Result<SocketAddr> {
-    let ip = match host {
-        "localhost" => IpAddr::V4(Ipv4Addr::LOCALHOST),
-        host => host
-            .parse::<IpAddr>()
-            .with_context(|| format!("parse --web-host `{host}` as an IP address"))?,
-    };
-    if !ip.is_loopback() {
-        bail!("refusing non-loopback web bind {ip}; Web UI is loopback-only");
-    }
-    Ok(SocketAddr::new(ip, port))
-}
-
-/// Minimal sidebar used by snapshot fixtures in tests (web + grpc).
 #[cfg(test)]
-pub(crate) fn empty_sidebar_snapshot() -> WebSidebarSnapshot {
-    WebSidebarSnapshot {
-        inbox_new: crate::inbox::new_count(&crate::inbox::default_inbox_path()),
-        skills: WebSkillsSnapshot {
-            total: 0,
-            enabled: 0,
-            disabled: 0,
-            builtin: 0,
-            user: 0,
-            project: 0,
-            items: Vec::new(),
-        },
-        triggers: WebTriggersSnapshot {
-            total: 0,
-            enabled: 0,
-            disabled: 0,
-            rules: Vec::new(),
-        },
-        cron: WebCronSnapshot {
-            total: 0,
-            enabled: 0,
-            disabled: 0,
-            jobs: Vec::new(),
-        },
-        mcp: WebMcpSnapshot {
-            servers: 0,
-            tools: 0,
-            notification_hooks: 0,
-            server_names: Vec::new(),
-            tool_names: Vec::new(),
-        },
-        tools: WebToolsSnapshot {
-            total: 0,
-            names: Vec::new(),
-        },
-        hooks: Vec::new(),
-        runtime: Vec::new(),
+mod tests {
+    //! Unit tests for the App-side web helpers (feed-line projection and prompt
+    //! image decoding); router/bind tests live in `theway-server`.
+
+    use super::*;
+
+    #[test]
+    fn web_feed_lines_keeps_all_rows() {
+        let mut feed = feed::Feed::new();
+        for i in 0..250 {
+            feed.apply(feed::FeedUpdate::Plain {
+                text: format!("line {i}"),
+                level: feed::Level::Output,
+            });
+        }
+
+        let lines = web_feed_lines(&feed);
+        assert_eq!(lines.len(), 250);
+        assert!(
+            lines.first().is_some_and(|line| line.contains("line 0")),
+            "{lines:?}"
+        );
+        assert!(
+            lines.last().is_some_and(|line| line.contains("line 249")),
+            "{lines:?}"
+        );
+        let first = lines.first().expect("first line");
+        assert_eq!(first.chars().nth(4), Some('-'), "{lines:?}");
+        assert_eq!(first.chars().nth(7), Some('-'), "{lines:?}");
+        assert_eq!(first.chars().nth(10), Some(' '), "{lines:?}");
+        assert_eq!(first.chars().nth(13), Some(':'), "{lines:?}");
+    }
+
+    #[test]
+    fn web_prompt_images_decode_to_image_content() {
+        let data = base64::engine::general_purpose::STANDARD.encode(b"\x89PNG\r\n\x1a\npng");
+        let images = load_web_prompt_images(&[WebPromptImage {
+            data,
+            name: Some("clip.png".into()),
+        }])
+        .unwrap();
+
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].mime_type, "image/png");
+        assert!(!images[0].data.is_empty());
+    }
+
+    #[test]
+    fn web_prompt_images_enforce_count_limit() {
+        let images = vec![
+            WebPromptImage {
+                data: String::new(),
+                name: None,
+            };
+            crate::images::MAX_IMAGES_PER_MESSAGE + 1
+        ];
+        let err = load_web_prompt_images(&images).unwrap_err().to_string();
+        assert!(err.contains("exceeds per-message cap"), "{err}");
     }
 }
-
-fn open_web_browser(url: &str) -> Result<()> {
-    let mut command = open_browser_command(url);
-    command
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    command.spawn().context("spawn system browser")?;
-    Ok(())
-}
-
-fn open_browser_command(url: &str) -> std::process::Command {
-    #[cfg(target_os = "macos")]
-    {
-        let mut cmd = std::process::Command::new("open");
-        cmd.arg(url);
-        cmd
-    }
-    #[cfg(target_os = "windows")]
-    {
-        let mut cmd = std::process::Command::new("cmd");
-        cmd.args(["/C", "start", "", url]);
-        cmd
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        let mut cmd = std::process::Command::new("xdg-open");
-        cmd.arg(url);
-        cmd
-    }
-}
-
-const INDEX_HTML: &str = include_str!("../ui/web_index.html");
-
-#[cfg(test)]
-mod tests;

@@ -27,6 +27,7 @@ pub mod feed;
 pub(crate) mod kernel;
 pub mod listener;
 pub(crate) mod relay;
+pub mod web_loop;
 
 pub use feed::FeedUpdate;
 
@@ -152,8 +153,9 @@ pub struct AppConfig {
     pub subagent_registry: theway_core::runtime::subagents::registry::SubagentJobRegistry,
 }
 
-// Fields and methods the transport servers touch (`crate::transport::http` / `grpc` drive
-// the same event loop) are `pub(crate)`; the rest stays private to the TUI.
+// Fields and methods the transport servers touch (the `theway-server` crate drives
+// the same event loop through `web_loop::TransportEndpoints`) are `pub(crate)`;
+// the rest stays private to the TUI.
 pub struct App {
     pub(crate) kernel: ReplKernel,
     pub(crate) registry: Registry,

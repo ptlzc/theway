@@ -10,7 +10,7 @@
 use theway::{
     agent_session, builtin_skills, commands, config, control_plane_prompt, debug, goal, history,
     hooks, inbox, local_models, logging, lsp_supervisor, mcp_loader, model, resume_picker, session,
-    session_archive, skills, skills_state, templates, tools, transport, triggers, ui,
+    session_archive, skills, skills_state, templates, tools, triggers, ui,
 };
 
 use std::io::IsTerminal as _;
@@ -1077,18 +1077,22 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
 
     // Hand off to the full-screen UI. It owns the terminal, the input box, the scrolling feed,
     // and the serialized run slot (user prompts + inject-and-run triggered turns) until quit.
+    //
+    // `--web` / `--grpc`: the protocol servers moved to the `theway-server` crate
+    // (dependency direction `server -> app` is strictly one-way), so this binary
+    // can no longer start them — cargo forbids the `theway` package from depending
+    // on `theway-server` (package-level dependency cycle). The dispatch moves to
+    // `theway-cli`, which assembles `theway` + `theway-server` (openspec
+    // crate-restructure-web-isolation tasks 4.1/4.2: `theway_server::http::run_web` /
+    // `theway_server::grpc::run_grpc` are the ready entry points).
     let run_result = if run_grpc {
-        app.run_grpc(transport::grpc::GrpcOptions {
-            host: cli.web_host.clone(),
-            port: cli.web_port,
-        })
-        .await
+        anyhow::bail!(
+            "--grpc: the gRPC server moved to the theway-server crate; the dispatch lands in theway-cli (openspec crate-restructure-web-isolation tasks 4.1/4.2)"
+        )
     } else if run_web {
-        app.run_web(transport::types::WebOptions {
-            host: cli.web_host.clone(),
-            port: cli.web_port,
-        })
-        .await
+        anyhow::bail!(
+            "--web: the web server moved to the theway-server crate; the dispatch lands in theway-cli (openspec crate-restructure-web-isolation tasks 4.1/4.2)"
+        )
     } else {
         app.run().await
     };

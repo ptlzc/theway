@@ -17,13 +17,13 @@ const SUPPORTED_APIS: [&str; 4] = [
 ];
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub(crate) struct ModelEntry {
+pub struct ModelEntry {
     pub id: String,
     pub name: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub(crate) struct ProviderGroup {
+pub struct ProviderGroup {
     pub provider: String,
     pub has_credential: bool,
     pub models: Vec<ModelEntry>,

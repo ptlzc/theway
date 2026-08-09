@@ -10,21 +10,20 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
 use futures::{Stream, StreamExt as _};
+use tokio::net::TcpListener;
 use tokio::sync::{Mutex, broadcast, mpsc};
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::{BroadcastStream, TcpListenerStream};
 use tonic::{Request, Response, Status};
 
-use crate::transport::proto::{dag_event_wire, session_state, stream_event_wire};
-use crate::transport::types::{WebCommand, WebPromptImage, WebStatus};
-use crate::ui::App;
-use crate::ui::kernel::{TurnState, poll_turn};
+use theway::ui::App;
+use theway::ui::web_loop::TransportMode;
+use theway::wire::{WebCommand, WebPromptImage, WebStatus};
+
+use crate::proto::theway_grpc;
+use crate::proto::{dag_event_wire, session_state, stream_event_wire};
 use theway_core::runtime::graph_engineering::types::DagEvent;
 use theway_core::runtime::subagents::registry::{SubagentEvent, SubagentJobRegistry};
-
-pub mod theway_grpc {
-    tonic::include_proto!("theway.grpc.v1");
-}
 
 use theway_grpc::theway_grpc_server::{ThewayGrpc, ThewayGrpcServer};
 use theway_grpc::{
@@ -42,21 +41,21 @@ pub struct GrpcOptions {
 }
 
 #[derive(Clone)]
-struct GrpcState {
-    commands: mpsc::UnboundedSender<WebCommand>,
-    snapshots: broadcast::Sender<WebStatus>,
-    latest: Arc<Mutex<WebStatus>>,
+pub struct GrpcState {
+    pub commands: mpsc::UnboundedSender<WebCommand>,
+    pub snapshots: broadcast::Sender<WebStatus>,
+    pub latest: Arc<Mutex<WebStatus>>,
     /// Event plane (graph mode): subagent started/output/metrics/completed.
-    events: broadcast::Sender<SubagentEvent>,
+    pub events: broadcast::Sender<SubagentEvent>,
     /// Event plane (graph mode): DAG engine node_status / run_status.
-    dag_events: broadcast::Sender<DagEvent>,
+    pub dag_events: broadcast::Sender<DagEvent>,
     /// Job registry backing GetNodeOutput.
-    registry: SubagentJobRegistry,
+    pub registry: SubagentJobRegistry,
     /// DAG orchestration engine (graph engineering mode): GraphCancel/Retry/…
-    dag_engine: Arc<theway_core::runtime::graph_engineering::engine::DagEngine>,
+    pub dag_engine: Arc<theway_core::runtime::graph_engineering::engine::DagEngine>,
     /// Owning session id: default scope for GraphCheckpoint and the mount key
     /// under which `SessionState.dags` is served.
-    session_id: String,
+    pub session_id: String,
 }
 
 #[tonic::async_trait]
@@ -310,134 +309,44 @@ impl ThewayGrpc for GrpcState {
     }
 }
 
-impl App {
-    pub async fn run_grpc(mut self, options: GrpcOptions) -> Result<()> {
-        let addr = crate::transport::http::bind_addr(&options.host, options.port)?;
-        let listener = tokio::net::TcpListener::bind(addr)
-            .await
-            .with_context(|| format!("bind grpc ui on {addr}"))?;
-        let actual = listener.local_addr()?;
+/// Full `--grpc` driver: bind, wire the transport channels, spawn the tonic
+/// server, then hand the App into the shared event loop.
+pub async fn run_grpc(mut app: App, options: GrpcOptions) -> Result<()> {
+    let addr = crate::http::bind_addr(&options.host, options.port)?;
+    let listener = TcpListener::bind(addr)
+        .await
+        .with_context(|| format!("bind grpc ui on {addr}"))?;
+    let actual = listener.local_addr()?;
 
-        let (command_tx, mut command_rx) = mpsc::unbounded_channel::<WebCommand>();
-        let (snapshot_tx, _) = broadcast::channel::<WebStatus>(128);
-        let latest = Arc::new(Mutex::new(self.web_snapshot()));
-        // Event plane: the registry broadcasts subagent started/output/metrics/completed,
-        // the DAG engine broadcasts node_status / run_status (goal runs + DAG runs).
-        let (event_tx, _) = broadcast::channel::<SubagentEvent>(256);
-        self.subagent_registry
-            .set_event_sender(Some(event_tx.clone()));
-        let (dag_event_tx, _) = broadcast::channel::<DagEvent>(256);
-        self.dag_engine.set_event_sender(Some(dag_event_tx.clone()));
-        let grpc_state = GrpcState {
-            commands: command_tx,
-            snapshots: snapshot_tx.clone(),
-            latest: latest.clone(),
-            events: event_tx,
-            dag_events: dag_event_tx,
-            registry: self.subagent_registry.clone(),
-            dag_engine: self.dag_engine.clone(),
-            session_id: self.session_id.clone(),
-        };
+    let endpoints = app.transport_endpoints();
+    let grpc_state = GrpcState {
+        commands: endpoints.command_tx.clone(),
+        snapshots: endpoints.snapshot_tx.clone(),
+        latest: endpoints.latest.clone(),
+        events: endpoints.events.clone(),
+        dag_events: endpoints.dag_events.clone(),
+        registry: endpoints.registry.clone(),
+        dag_engine: endpoints.dag_engine.clone(),
+        session_id: endpoints.session_id.clone(),
+    };
+    let server_task = serve_grpc(listener, grpc_state);
 
-        let server = tonic::transport::Server::builder()
-            .add_service(ThewayGrpcServer::new(grpc_state))
-            .serve_with_incoming(TcpListenerStream::new(listener));
-        let mut server_task = tokio::spawn(server);
-        println!("theway grpc listening on {actual}");
+    println!("theway grpc listening on {actual}");
 
-        let mut feed_rx = self.feed_rx.take().expect("feed_rx taken once");
-        let mut main_run_rx = self.main_run_rx.take().expect("main_run_rx taken once");
-        let mut control_plane_prompt_rx = self.control_plane_prompt_rx.take();
-        let mut relay_prompt_rx = self
-            .relay_prompt_rx
-            .take()
-            .expect("relay_prompt_rx taken once");
-        let mut relay_abort_rx = self
-            .relay_abort_rx
-            .take()
-            .expect("relay_abort_rx taken once");
-        let mut relay_resolve_rx = self
-            .relay_resolve_rx
-            .take()
-            .expect("relay_resolve_rx taken once");
-        let mut relay_model_rx = self
-            .relay_model_rx
-            .take()
-            .expect("relay_model_rx taken once");
-        let mut turn = TurnState::default();
-        self.refresh_goal_state().await;
-        self.publish_snapshot(&latest, &snapshot_tx).await;
+    app.run_transport_loop(TransportMode::Grpc, endpoints, server_task)
+        .await
+}
 
-        loop {
-            tokio::select! {
-                biased;
-                result = poll_turn(&mut turn.fut), if turn.fut.is_some() => {
-                    self.finish_turn(&mut turn, result).await;
-                    self.publish_snapshot(&latest, &snapshot_tx).await;
-                }
-                Some(command) = command_rx.recv() => {
-                    self.handle_web_command(command, &mut turn).await;
-                    self.publish_snapshot(&latest, &snapshot_tx).await;
-                }
-                Some(update) = feed_rx.recv() => {
-                    self.apply_feed_update(update);
-                    while let Ok(update) = feed_rx.try_recv() {
-                        self.apply_feed_update(update);
-                    }
-                    self.publish_snapshot(&latest, &snapshot_tx).await;
-                }
-                Some(trace_id) = main_run_rx.recv(), if turn.fut.is_none() => {
-                    self.start_triggered_turn(trace_id, &mut turn);
-                    self.publish_snapshot(&latest, &snapshot_tx).await;
-                }
-                Some(text) = relay_prompt_rx.recv() => {
-                    self.submit_remote_text(text, &mut turn);
-                    self.publish_snapshot(&latest, &snapshot_tx).await;
-                }
-                Some(()) = relay_abort_rx.recv() => {
-                    if turn.fut.is_some() {
-                        self.system_line("[grpc] abort requested");
-                        self.request_abort(&mut turn);
-                        self.publish_snapshot(&latest, &snapshot_tx).await;
-                    }
-                }
-                Some(approve) = relay_resolve_rx.recv() => {
-                    self.resolve_from_relay(approve);
-                    self.publish_snapshot(&latest, &snapshot_tx).await;
-                }
-                Some(spec) = relay_model_rx.recv() => {
-                    self.system_line(format!("[grpc] set model: {spec}"));
-                    self.set_model_from_spec(&spec).await;
-                    self.publish_snapshot(&latest, &snapshot_tx).await;
-                }
-                Some(prompt) = async {
-                    match control_plane_prompt_rx.as_mut() {
-                        Some(rx) => rx.recv().await,
-                        None => None,
-                    }
-                }, if self.control_plane_prompt.is_none() && control_plane_prompt_rx.is_some() => {
-                    self.show_control_plane_prompt(prompt);
-                    self.publish_snapshot(&latest, &snapshot_tx).await;
-                }
-                _ = tokio::signal::ctrl_c() => {
-                    if turn.fut.is_some() {
-                        self.request_abort(&mut turn);
-                        self.publish_snapshot(&latest, &snapshot_tx).await;
-                    }
-                    break;
-                }
-                server_result = &mut server_task => {
-                    match server_result {
-                        Ok(Ok(())) => {}
-                        Ok(Err(e)) => self.error_line(format!("grpc server: {e}")),
-                        Err(e) => self.error_line(format!("grpc server task: {e}")),
-                    }
-                    break;
-                }
-            }
-        }
+/// Spawn the tonic server on a bound listener; the handle resolves when the
+/// server exits (the event loop selects on it).
+pub fn serve_grpc(listener: TcpListener, state: GrpcState) -> tokio::task::JoinHandle<Result<()>> {
+    let server = tonic::transport::Server::builder()
+        .add_service(ThewayGrpcServer::new(state))
+        .serve_with_incoming(TcpListenerStream::new(listener));
+    tokio::spawn(async move {
+        server.await?;
         Ok(())
-    }
+    })
 }
 
 #[cfg(test)]
@@ -456,7 +365,7 @@ mod tests {
             latest_trigger_poll: None,
             goal: None,
             control_plane_prompt: None,
-            sidebar: crate::transport::http::empty_sidebar_snapshot(),
+            sidebar: crate::http::empty_sidebar_snapshot(),
             feed_blocks: Vec::new(),
             feed_lines: vec![feed_line.into()],
             dags: Vec::new(),
@@ -758,13 +667,7 @@ mod tests {
         let (state, mut command_rx) = grpc_state();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
-            tonic::transport::Server::builder()
-                .add_service(ThewayGrpcServer::new(state))
-                .serve_with_incoming(TcpListenerStream::new(listener))
-                .await
-                .unwrap();
-        });
+        let server = serve_grpc(listener, state);
 
         let mut client =
             theway_grpc::theway_grpc_client::ThewayGrpcClient::connect(format!("http://{addr}"))
