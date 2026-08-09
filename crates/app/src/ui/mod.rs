@@ -42,7 +42,7 @@ use std::time::Duration;
 #[cfg(feature = "tui")]
 use std::time::Instant;
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 #[cfg(feature = "tui")]
 use crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, Event,
@@ -151,6 +151,13 @@ pub struct AppConfig {
     pub dag_engine: std::sync::Arc<theway_core::runtime::graph_engineering::engine::DagEngine>,
     /// Subagent job registry (graph mode). Task tool + DAG nodes register here.
     pub subagent_registry: theway_core::runtime::subagents::registry::SubagentJobRegistry,
+    /// session-resource-model: builds a fresh harness for any session id (resume
+    /// semantics). Drives [`App::switch_session`] from the serialized event loop;
+    /// the CLI crate extracts its harness-construction path into this closure.
+    pub session_factory: crate::session_ops::SessionFactory,
+    /// cwd-scoped session repo backing [`crate::session_ops::SessionOps`] (list / create /
+    /// rename / delete) and cheap "does this id exist" checks before a switch.
+    pub session_repo: Arc<theway_core::JsonlSessionRepo>,
 }
 
 // Everything here is private to the `ui` subtree: the TUI event loop and the
@@ -194,6 +201,13 @@ pub struct App {
     dag_engine: std::sync::Arc<theway_core::runtime::graph_engineering::engine::DagEngine>,
     /// Subagent job registry (graph mode). Task tool + DAG nodes register here.
     subagent_registry: theway_core::runtime::subagents::registry::SubagentJobRegistry,
+    /// session-resource-model: rebuilds a harness for another session (switch).
+    session_factory: crate::session_ops::SessionFactory,
+    /// cwd-scoped session repo (SessionOps + switch validation).
+    session_repo: Arc<theway_core::JsonlSessionRepo>,
+    /// Live "current session" state shared with [`crate::session_ops::AppSessionOps`];
+    /// synced on every published snapshot and on session switch.
+    current_session_state: Arc<parking_lot::Mutex<crate::session_ops::CurrentSessionState>>,
 
     #[cfg(feature = "tui")]
     input: TextArea<'static>,
@@ -246,10 +260,32 @@ struct PendingImportActivation {
 
 const IMPORT_ACTIVATION_PROMPT_ID: &str = "session-import-activation";
 
+/// `provider:model-id` label of the harness's active model, or "no-model". Shared by the
+/// web snapshot header and the SessionOps current-session state.
+fn current_model_label(harness: &Arc<AgentHarness>) -> String {
+    let state = harness.agent().state();
+    state
+        .model
+        .as_ref()
+        .map(|m| format!("{}:{}", m.provider.0, m.id))
+        .unwrap_or_else(|| "no-model".to_string())
+}
+
 impl App {
     pub fn new(config: AppConfig) -> Self {
         let completer =
             SlashCompleter::from_registry_and_skills(&config.registry, &config.harness.skills());
+        // session-resource-model: live "current session" state shared with SessionOps.
+        // Bound before the struct literal below because that literal moves fields out of
+        // `config` (harness / session_id / cwd) in declaration order.
+        let current_session_state = Arc::new(parking_lot::Mutex::new(
+            crate::session_ops::CurrentSessionState {
+                session_id: config.session_id.clone(),
+                busy: false,
+                model: current_model_label(&config.harness),
+                cwd: config.cwd.display().to_string(),
+            },
+        ));
         let (relay_prompt_tx, relay_prompt_rx) = tokio::sync::mpsc::unbounded_channel();
         let (relay_abort_tx, relay_abort_rx) = tokio::sync::mpsc::unbounded_channel();
         let (relay_resolve_tx, relay_resolve_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -285,6 +321,9 @@ impl App {
             panel_status: config.panel_status,
             dag_engine: config.dag_engine,
             subagent_registry: config.subagent_registry,
+            session_factory: config.session_factory,
+            session_repo: config.session_repo.clone(),
+            current_session_state,
             #[cfg(feature = "tui")]
             input: new_textarea(),
             #[cfg(feature = "tui")]
@@ -1243,6 +1282,46 @@ impl App {
 
     async fn refresh_goal_state(&mut self) {
         self.latest_goal = crate::goal::current(self.kernel.harness()).await;
+    }
+
+    /// session-resource-model: swap the runtime to a different session.
+    ///
+    /// Builds a fresh harness via the [`crate::session_ops::SessionFactory`] (resume
+    /// semantics — the factory rehydrates the transcript and re-wires session-stamped
+    /// tools), replaces the kernel's harness, and resets every piece of per-session UI
+    /// state. Must run inside the serialized event loop (it is driven by
+    /// `WebCommand::SwitchSession`); a turn in flight on the old harness must be aborted
+    /// by the caller before this runs.
+    pub(crate) async fn switch_session(&mut self, id: String) -> Result<()> {
+        let harness = (self.session_factory)(id.clone())
+            .await
+            .with_context(|| format!("build harness for session {id}"))?;
+        self.kernel.replace_harness(harness);
+        self.session_id = id.clone();
+        // Feed is UI-transient: clear it and mark the boundary; the transcript itself stays
+        // in the JSONL store (design decision: 清空 + 系统提示行).
+        self.feed.clear();
+        self.system_line(format!("switched to session {id}"));
+        self.busy = false;
+        self.queued_turns.clear();
+        // A pending control-plane prompt belongs to the old harness's tool call — drop it
+        // so the UI never waits on a decision the new harness will never consume.
+        self.control_plane_prompt = None;
+        // Goal state belongs to the previous session's harness; re-read from the new one.
+        self.refresh_goal_state().await;
+        self.sync_current_session_state();
+        Ok(())
+    }
+
+    /// Push the live current-session state (id / busy / model / cwd) into the shared cell
+    /// that backs [`crate::session_ops::AppSessionOps`]. Called on every published snapshot
+    /// and on session switch.
+    fn sync_current_session_state(&self) {
+        let mut state = self.current_session_state.lock();
+        state.session_id = self.session_id.clone();
+        state.busy = self.busy;
+        state.model = current_model_label(self.kernel.harness());
+        state.cwd = self.cwd.display().to_string();
     }
 
     #[cfg(feature = "tui")]
@@ -2493,6 +2572,15 @@ mod tests {
             ),
             subagent_registry: theway_core::runtime::subagents::registry::SubagentJobRegistry::new(
             ),
+            // UI tests never switch sessions: the factory always errors if reached.
+            session_factory: std::sync::Arc::new(|id| {
+                Box::pin(
+                    async move { Err(anyhow::anyhow!("no session factory in UI tests ({id})")) },
+                )
+            }),
+            session_repo: std::sync::Arc::new(theway_core::JsonlSessionRepo::new(
+                std::path::PathBuf::from("/nonexistent-theway-sessions"),
+            )),
         })
     }
 

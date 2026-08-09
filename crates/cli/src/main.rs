@@ -524,6 +524,9 @@ async fn select_resume_session(
 }
 
 async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo) -> Result<()> {
+    // Arc'd so the session factory (session-resource-model) can share the cwd-scoped repo
+    // with the App / SessionOps; every existing call site keeps working through Deref.
+    let repo = std::sync::Arc::new(repo);
     let run_web = should_run_web(&cli);
     let run_grpc = should_run_grpc(&cli);
     let cli_base_url = cli.base_url.clone();
@@ -598,7 +601,6 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
     let cron_path = session::cron_sidecar_path_for_session(&session, &repo).await?;
     let cron_load_error = cron_registry.load_from_path(cron_path).err();
     let memory_dir = config::memory_dir();
-    let mut tools = tools::default_tools(memory_dir.clone());
     // DAG orchestration (graph_engineering): one engine shared by the dag_* tools and the
     // node launcher. The launcher MUST be installed before `restore` — resumed runs tick
     // immediately and their ready nodes need a launcher to re-schedule into.
@@ -624,51 +626,21 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
             restored_dags.join(", ")
         );
     }
-    // DAG + outline tools, main agent only — the read-only subagent tool set stays
-    // deliberately untouched (shell/exec already ship via `default_tools`).
-    tools.push(Arc::new(tools::outline::OutlineTool));
-    tools.extend(tools::dag_tools::DagTools::new(
-        dag_engine.clone(),
-        Some(session_id.clone()),
-    ));
-    // Task delegation tool (issue #11). Shares the parent's model + stream backend so its
-    // subagents go through the same provider; registers jobs in the graph registry.
-    tools.push(tools::task_tool(
-        model.clone(),
-        Some(stream_fn.clone()),
-        subagent_registry.clone(),
-    ));
-    // Skill tool (issue #25). Needs to reach the live `AgentHarness::skills()` snapshot, but
-    // the harness does not exist yet — we are still assembling the tool list that will be
-    // passed to `AgentHarness::new`. Use a `OnceCell` that we'll fill immediately after the
-    // harness is constructed, before the REPL accepts any input.
+    // Per-session tool set (session-resource-model). One source of truth shared with the
+    // session factory below (`SessionHarnessFactory`): dag_* / task are stamped with this
+    // session; the skill family wires a harness cell filled right after construction.
+    // Process-level groups (MCP tools) are appended after they load.
     let skill_harness_cell: tools::skill::SkillHarnessCell =
         std::sync::Arc::new(once_cell::sync::OnceCell::new());
-    tools.push(tools::skill_tool(skill_harness_cell.clone()));
-    // InstallSkill tool (issue #87). Shares the same `skill_harness_cell` as `skill_tool`
-    // so post-install it can call `harness.reload_skills_from_disk()` to hot-reload the
-    // catalog. Two-phase preview→confirm safety inside the tool; see
-    // `crates/harness/src/tools/install_skill.rs` for the security model.
-    tools.push(tools::install_skill_tool(skill_harness_cell.clone()));
-    // SkillBuilder tool (issue #21). Authors a NEW user skill from structured fields —
-    // renders the canonical SKILL.md itself, then shares InstallSkill's validation,
-    // atomic-write, and hot-reload path via the same harness cell.
-    tools.push(tools::skill_builder_tool(skill_harness_cell.clone()));
-    // SetSkillState tool (task #23, S-A2). Enable/disable a loaded skill at runtime via the
-    // `~/.theway/skills-state.json` overlay; shares the same harness cell so it can reload the
-    // catalog after writing.
-    tools.push(tools::set_skill_state_tool(skill_harness_cell.clone()));
-    // RemoveSkill tool (task #23, S-A2b). Deletes a user-installed skill dir + clears its
-    // overlay entry + reloads; builtin/project skills are refused (disable instead).
-    tools.push(tools::remove_skill_tool(skill_harness_cell.clone()));
-    tools.push(tools::new_cron_job_tool(skill_harness_cell.clone()));
-    tools.push(tools::list_cron_jobs_tool());
-    tools.push(tools::remove_cron_job_tool(skill_harness_cell.clone()));
-    tools.push(tools::set_cron_job_state_tool(skill_harness_cell.clone()));
-    tools.push(tools::new_trigger_tool());
-    tools.push(tools::list_triggers_tool());
-    tools.push(tools::remove_trigger_tool());
-    tools.push(tools::set_trigger_state_tool());
+    let mut tools = tools::session_tool_set(
+        &memory_dir,
+        &dag_engine,
+        &subagent_registry,
+        &model,
+        Some(&stream_fn),
+        &skill_harness_cell,
+        &session_id,
+    );
 
     // MCP (issue #9): spawn every server configured under ~/.theway/mcp.toml or
     // <cwd>/.theway/mcp.toml, append their tools to the registry. MCP push adapters are
@@ -685,6 +657,8 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
     let mcp_notification_hook_count = mcp_notification_hooks.len();
     let mcp_inject_summary_servers = mcp.inject_summary_servers;
     let mcp_inject_and_run_servers = mcp.inject_and_run_servers;
+    // Keep Arc clones for the session factory: rebuilt harnesses get the same MCP tools.
+    let mcp_tools_for_factory = mcp.tools.clone();
     tools.extend(mcp.tools);
     let tool_names = tools
         .iter()
@@ -730,7 +704,7 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
 
     let goal_harness_cell: Arc<OnceLock<Arc<AgentHarness>>> = Arc::new(OnceLock::new());
     let mut opts = AgentHarnessOptions::new(model.clone(), session.clone());
-    opts.system_prompt = system_prompt;
+    opts.system_prompt = system_prompt.clone();
     opts.thinking_level = thinking;
     opts.tools = tools;
     opts.skills = combined_skills.clone();
@@ -742,7 +716,10 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
     // we used at startup — no path drift between "where skills get loaded from" and
     // "where reload looks." Built-in skills are re-merged so a user-installed skill of
     // the same name shadows the built-in just like at startup.
-    opts.reload_skills_fn = Some({
+    //
+    // Bound once and shared by reference with the session factory: the closure is
+    // stateless across harnesses (captures only cwd + built-in skill list).
+    let reload_skills_fn: theway_core::ReloadSkillsFn = {
         let cwd = cwd.clone();
         let builtins = resolved_builtins.skills.clone();
         std::sync::Arc::new(move || {
@@ -762,7 +739,8 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
                 }
             })
         })
-    });
+    };
+    opts.reload_skills_fn = Some(reload_skills_fn.clone());
     opts.on_turn_end = Some(goal::stop_hook(
         goal_harness_cell.clone(),
         dag_engine.clone(),
@@ -772,38 +750,47 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
         Some(PermissionPolicy::default_for_coding_agent().as_before_tool_call());
     let interactive_tui =
         !run_web && !run_grpc && std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
-    let control_plane_prompt_rx = if cli.always_allow || cli.yes {
-        opts.on_control_plane_prompt = Some(control_plane_prompt::allow_hook());
-        None
+    // Control-plane prompt policy: decided once, then shared with every harness the
+    // session factory builds — the interactive hook is Arc'd internally, so all clones
+    // feed the same receiver that the App drains.
+    let (control_plane_hook, control_plane_prompt_rx) = if cli.always_allow || cli.yes {
+        (Some(control_plane_prompt::allow_hook()), None)
     } else if interactive_tui || run_web || run_grpc {
         let (hook, rx) = control_plane_prompt::interactive_hook();
-        opts.on_control_plane_prompt = Some(hook);
-        Some(rx)
+        (Some(hook), Some(rx))
     } else {
-        opts.on_control_plane_prompt = Some(control_plane_prompt::deny_hook(
-            "control-plane prompt requires an interactive terminal; run theway in a TTY to approve this action",
-        ));
-        None
+        (
+            Some(control_plane_prompt::deny_hook(
+                "control-plane prompt requires an interactive terminal; run theway in a TTY to approve this action",
+            )),
+            None,
+        )
     };
+    opts.on_control_plane_prompt = control_plane_hook.clone();
     // Triggers from MCP servers configured with `inject_summary` / `inject_and_run` bypass
     // the sub-agent and inject their pushed summary into chat (the latter also runs one
     // model turn in the parent context); everything else falls through to the dynamic-rule
-    // hook. The match is structural (server name), no model.
-    opts.before_trigger_action = Some(triggers::cron_action_hook(
+    // hook. The match is structural (server name), no model. Bound once and shared with
+    // the session factory (stateless mapping).
+    let before_trigger_action = triggers::cron_action_hook(
         cron_registry.clone(),
         triggers::direct_inject_action_hook(
             mcp_inject_summary_servers,
             mcp_inject_and_run_servers,
             triggers::before_trigger_action_hook(dynamic_trigger_registry.clone()),
         ),
-    ));
+    );
+    opts.before_trigger_action = Some(before_trigger_action.clone());
     // LSP feedback loop (issue #12): attach diagnostics to write/edit tool results when
     // ~/.theway/lsp.toml or <cwd>/.theway/lsp.toml is configured.
     let lsp_supervisor = std::sync::Arc::new(lsp_supervisor::LspSupervisor::load(&cwd).await);
     let lsp_lang_count = lsp_supervisor.language_count();
-    if !lsp_supervisor.is_empty() {
-        opts.after_tool_call = Some(lsp_supervisor::as_after_tool_call(lsp_supervisor.clone()));
-    }
+    let after_tool_call = if lsp_supervisor.is_empty() {
+        None
+    } else {
+        Some(lsp_supervisor::as_after_tool_call(lsp_supervisor.clone()))
+    };
+    opts.after_tool_call = after_tool_call.clone();
     let harness = std::sync::Arc::new(AgentHarness::new(opts));
 
     // Resolve the Skill tool's chicken-and-egg harness reference (issue #25). The cell was
@@ -832,7 +819,9 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
     // tool-initialized state (including the Skill cell above) is in place.
     // `register_notification_hook` spawns a driver task that runs `hook.run(sink)` and a
     // pump task that drains the sink into `handle_trigger`; both tear down naturally when
-    // the MCP transport closes or the harness drops.
+    // the MCP transport closes or the harness drops. The clones survive for the session
+    // factory: rebuilt harnesses re-register the same Arc'd push sources.
+    let mcp_notification_hooks_for_factory = mcp_notification_hooks.clone();
     for hook in mcp_notification_hooks {
         harness.register_notification_hook(hook);
     }
@@ -875,6 +864,43 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
     }
     let (main_run_tx, main_run_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
 
+    // session-resource-model: the session factory rebuilds a fully-wired harness for any
+    // session id — the in-process version of `--resume-id`. Process-level pieces (DAG
+    // engine, subagent registry, feed/main-run channels, control-plane hook, MCP
+    // tools/hooks) are shared by Arc; per-session pieces (tools, harness cells, CLI hooks,
+    // rehydration) are rebuilt on every switch. See `SessionHarnessFactory::build`.
+    let session_factory: theway::session_ops::SessionFactory = {
+        let plan = std::sync::Arc::new(SessionHarnessFactory {
+            cwd: cwd.clone(),
+            model: model.clone(),
+            thinking,
+            stream_fn: stream_fn.clone(),
+            system_prompt,
+            skills: combined_skills.clone(),
+            templates: loaded_templates.templates.clone(),
+            memory_dir: memory_dir.clone(),
+            dag_engine: dag_engine.clone(),
+            subagent_registry: subagent_registry.clone(),
+            mcp_tools: mcp_tools_for_factory,
+            mcp_notification_hooks: mcp_notification_hooks_for_factory,
+            dynamic_trigger_registry: dynamic_trigger_registry.clone(),
+            cron_registry: cron_registry.clone(),
+            reload_skills_fn,
+            before_trigger_action,
+            control_plane_hook,
+            after_tool_call,
+            feed_tx: feed_tx.clone(),
+            main_run_tx: main_run_tx.clone(),
+            debug: cli.debug,
+        });
+        let repo = repo.clone();
+        std::sync::Arc::new(move |id: String| {
+            let plan = plan.clone();
+            let repo = repo.clone();
+            Box::pin(async move { plan.build(&repo, &id).await })
+        })
+    };
+
     let mut app = ui::App::new(ui::AppConfig {
         harness: harness.clone(),
         retry: agent_session::RetrySettings::default(),
@@ -900,6 +926,8 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
         },
         dag_engine: dag_engine.clone(),
         subagent_registry: subagent_registry.clone(),
+        session_factory,
+        session_repo: repo.clone(),
     });
     app.banner(&display_model, &session_id, resumed, &tool_names);
     if !local_models.models.is_empty() {
@@ -1112,6 +1140,181 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
     dag_engine.abort_all_runs("session shutdown");
     save_runs(&dag_state_path, &dag_engine.list_runs());
     run_result
+}
+
+/// session-resource-model: rebuilds a fully-wired [`AgentHarness`] for any session id —
+/// the in-process version of the CLI `--resume-id` path. Constructed once in `run_repl`
+/// after the initial harness is up; wrapped into [`theway::session_ops::SessionFactory`]
+/// and consumed by `App::switch_session` on the serialized event loop.
+///
+/// Every field is either process-level state shared by Arc (DAG engine, subagent registry,
+/// feed/main-run channels, trigger registries, MCP tools + push hooks) or an immutable
+/// ingredient captured from the startup build (model, skills, templates, system prompt,
+/// hook closures). Per-session pieces are rebuilt on every `build`:
+///
+/// * the tool set — `dag_*` / `task` stamped with the target session, skill family wired
+///   to a fresh harness cell;
+/// * the goal hook's harness cell (per harness);
+/// * CLI hooks (`hooks::load` embeds the session id);
+/// * feed / main-run listener subscriptions on the new harness;
+/// * crash-recovery restore of the target session's persisted DAG runs;
+/// * transcript rehydration (resume semantics).
+///
+/// Scope notes (design decisions): automations (triggers/cron) stay process-level and are
+/// NOT reloaded from the target session's sidecars on switch; the harness starts on the
+/// startup model — a `/model` change made before switching is not carried over (the
+/// rehydrated transcript restores the session's own last recorded model when it has one).
+struct SessionHarnessFactory {
+    cwd: std::path::PathBuf,
+    model: theway_llm_provider::Model,
+    thinking: ThinkingLevel,
+    stream_fn: theway_core::StreamFn,
+    system_prompt: String,
+    skills: Vec<theway_core::Skill>,
+    templates: Vec<theway_core::PromptTemplate>,
+    memory_dir: std::path::PathBuf,
+    dag_engine: Arc<DagEngine>,
+    subagent_registry: theway_core::runtime::subagents::registry::SubagentJobRegistry,
+    mcp_tools: Vec<Arc<dyn theway_core::AgentTool>>,
+    mcp_notification_hooks: Vec<Arc<triggers::McpNotificationHook>>,
+    dynamic_trigger_registry: triggers::dynamic::DynamicTriggerRegistry,
+    cron_registry: triggers::cron::CronRegistry,
+    reload_skills_fn: theway_core::ReloadSkillsFn,
+    before_trigger_action: theway_core::BeforeTriggerActionHook,
+    control_plane_hook: Option<theway_core::OnControlPlanePromptHook>,
+    after_tool_call: Option<theway_core::AfterToolCallHook>,
+    feed_tx: tokio::sync::mpsc::UnboundedSender<ui::FeedUpdate>,
+    main_run_tx: tokio::sync::mpsc::UnboundedSender<String>,
+    debug: bool,
+}
+
+impl SessionHarnessFactory {
+    /// Build (and rehydrate) a harness for `id` (full session id or unique prefix).
+    async fn build(&self, repo: &JsonlSessionRepo, id: &str) -> Result<Arc<AgentHarness>> {
+        // Resume semantics: same lookup as CLI --resume-id.
+        let session = session::resume(repo, Some(id))
+            .await
+            .with_context(|| format!("open session {id}"))?;
+        let meta = session.storage().get_metadata_json().await?;
+        let session_id = meta
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?")
+            .to_string();
+
+        // Crash-recovery parity with startup: restore this session's persisted DAG runs.
+        // `restore` skips ids already live in the engine, so switching back and forth is
+        // idempotent.
+        let dag_state_path = state_path_for_project(&self.cwd.join(".pi"), Some(&session_id));
+        let restored = self.dag_engine.restore(load_runs(&dag_state_path));
+        if !restored.is_empty() {
+            tracing::info!(
+                "session {session_id}: restored {} in-flight DAG run(s): {}",
+                restored.len(),
+                restored.join(", ")
+            );
+        }
+
+        // Fresh per-session tool set (dag_* / task stamped with the target session; the
+        // skill family gets a brand-new harness cell filled right after construction).
+        let skill_harness_cell: tools::skill::SkillHarnessCell =
+            std::sync::Arc::new(once_cell::sync::OnceCell::new());
+        let mut tools = tools::session_tool_set(
+            &self.memory_dir,
+            &self.dag_engine,
+            &self.subagent_registry,
+            &self.model,
+            Some(&self.stream_fn),
+            &skill_harness_cell,
+            &session_id,
+        );
+        tools.extend(self.mcp_tools.iter().cloned());
+
+        let goal_harness_cell: Arc<OnceLock<Arc<AgentHarness>>> = Arc::new(OnceLock::new());
+        let mut opts = AgentHarnessOptions::new(self.model.clone(), session);
+        opts.system_prompt = self.system_prompt.clone();
+        opts.thinking_level = self.thinking;
+        opts.tools = tools;
+        opts.skills = self.skills.clone();
+        opts.prompt_templates = self.templates.clone();
+        opts.stream_fn = Some(self.stream_fn.clone());
+        opts.reload_skills_fn = Some(self.reload_skills_fn.clone());
+        opts.on_turn_end = Some(goal::stop_hook(
+            goal_harness_cell.clone(),
+            self.dag_engine.clone(),
+        ));
+        opts.turn_continuation_cap = Some(goal::MAX_CONTINUATIONS);
+        opts.before_tool_call =
+            Some(PermissionPolicy::default_for_coding_agent().as_before_tool_call());
+        opts.on_control_plane_prompt = self.control_plane_hook.clone();
+        opts.before_trigger_action = Some(self.before_trigger_action.clone());
+        opts.after_tool_call = self.after_tool_call.clone();
+        let harness = std::sync::Arc::new(AgentHarness::new(opts));
+        // Each build owns its cells, so `set` cannot fail; ignore the Result anyway.
+        let _ = skill_harness_cell.set(harness.clone());
+        let _ = goal_harness_cell.set(harness.clone());
+
+        // Notification hooks: MCP push sources are Arc'd, so clones re-register on the
+        // rebuilt harness; cron / dynamic-trigger hooks are constructed fresh per harness.
+        for hook in &self.mcp_notification_hooks {
+            harness.register_notification_hook(hook.clone());
+        }
+        harness.register_notification_hook(std::sync::Arc::new(
+            triggers::CronNotificationHook::new(self.cron_registry.clone()),
+        ));
+        harness.register_notification_hook(std::sync::Arc::new(
+            triggers::DynamicTriggerCheckHook::new(self.dynamic_trigger_registry.clone()),
+        ));
+
+        // Feed + main-run listeners. The unsubscribe handles are dropped WITHOUT being
+        // called, which keeps the subscriptions alive for the harness's lifetime (they
+        // only detach when invoked).
+        let _ = harness
+            .agent()
+            .subscribe(ui::listener::agent_listener(self.feed_tx.clone()));
+        let _ = harness.subscribe_harness(ui::listener::harness_listener(
+            self.feed_tx.clone(),
+            self.debug,
+        ));
+        let _ = harness.subscribe_harness(triggers::fire_once_harness_listener(
+            self.dynamic_trigger_registry.clone(),
+        ));
+        let _ = harness.subscribe_harness(triggers::cron_harness_listener(
+            self.cron_registry.clone(),
+            inbox::default_inbox_path(),
+        ));
+        // CLI hooks are session-scoped (they embed the session id) — reload per switch.
+        let (hook_model, hook_thinking) = {
+            let state = harness.agent().state();
+            (state.model.clone(), state.thinking_level)
+        };
+        let loaded_hooks = hooks::load(
+            &self.cwd,
+            session_id.clone(),
+            hook_model.as_ref(),
+            hook_thinking,
+        )
+        .await;
+        for diag in &loaded_hooks.diagnostics {
+            tracing::warn!("session {session_id}: hooks loader: {diag}");
+        }
+        let _ = harness.agent().subscribe(loaded_hooks.runner.listener());
+        let _ = harness.subscribe_harness(loaded_hooks.runner.harness_listener());
+        let main_run_tx = self.main_run_tx.clone();
+        let _ =
+            harness.subscribe_harness(std::sync::Arc::new(move |ev: theway_core::HarnessEvent| {
+                if let theway_core::HarnessEvent::TriggerRequestsMainRun { trace_id } = ev {
+                    let _ = main_run_tx.send(trace_id);
+                }
+            }));
+
+        // Resume semantics: rebuild the agent's in-memory state from the transcript.
+        harness
+            .rehydrate_from_session()
+            .await
+            .with_context(|| format!("rehydrate session {session_id}"))?;
+        Ok(harness)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

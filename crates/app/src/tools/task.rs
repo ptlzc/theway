@@ -53,6 +53,10 @@ pub struct TaskTool {
     _subagent_tools: SubagentToolsFn,
     /// Subagent job registry (graph mode metrics/output).
     registry: SubagentJobRegistry,
+    /// Owning session stamped on every spawned job (session-resource-model). `None` for
+    /// session-less construction (e2e tests); the CLI wires `Some(current)` via
+    /// [`super::task_tool`].
+    session_id: Option<String>,
 }
 
 impl TaskTool {
@@ -67,7 +71,16 @@ impl TaskTool {
             stream_fn,
             _subagent_tools: subagent_tools,
             registry,
+            session_id: None,
         }
+    }
+
+    /// Stamp the owning session on jobs this tool spawns (session-resource-model). Each
+    /// harness build gets its own TaskTool stamped with that harness's session, so jobs
+    /// started after an in-process session switch belong to the new session.
+    pub fn with_session_id(mut self, session_id: Option<String>) -> Self {
+        self.session_id = session_id;
+        self
     }
 }
 
@@ -126,9 +139,9 @@ impl AgentTool for TaskTool {
             source: "task".into(),
             run_id: None,
             node_id: None,
-            // Session stamping lands with the app-layer session-resource
-            // wiring; the registry treats `None` as session-less.
-            session_id: None,
+            // session-resource-model: jobs spawned by the task tool belong to the session
+            // whose harness owns this tool instance (stamped at construction).
+            session_id: self.session_id.clone(),
             cancel: parent_cancel.clone(),
             // Keep the v1 behaviour: the task description lands in the subagent's
             // system prompt, not just the tool-result details.

@@ -125,7 +125,7 @@ pub async fn list_entries(repo: &JsonlSessionRepo) -> Result<Vec<SessionEntry>> 
     Ok(out)
 }
 
-async fn first_user_text(session: &Session) -> Option<String> {
+pub(crate) async fn first_user_text(session: &Session) -> Option<String> {
     let entries = session.entries().await.ok()?;
     for e in entries {
         if let theway_core::SessionTreeEntry::Message {

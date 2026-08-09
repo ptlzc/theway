@@ -75,6 +75,10 @@ pub struct TransportEndpoints {
     pub registry: SubagentJobRegistry,
     /// DAG orchestration engine (graph cancel/retry/skip/checkpoint/restore).
     pub dag_engine: Arc<DagEngine>,
+    /// session-resource-model: session lifecycle ops (list/create/rename/delete) for the
+    /// gRPC/HTTP session surfaces. Sync query/mutation only — *switching* the current
+    /// session goes through `WebCommand::SwitchSession` on the serialized event loop.
+    pub session_ops: Arc<dyn crate::session_ops::SessionOps>,
     /// Owning session id (checkpoint scope / mount key).
     pub session_id: String,
 }
@@ -106,6 +110,11 @@ impl App {
             completer: self.completer.clone(),
             registry: self.subagent_registry.clone(),
             dag_engine: self.dag_engine.clone(),
+            session_ops: Arc::new(crate::session_ops::AppSessionOps::new(
+                self.session_repo.clone(),
+                self.dag_engine.clone(),
+                self.current_session_state.clone(),
+            )),
             session_id: self.session_id.clone(),
         }
     }
@@ -241,6 +250,41 @@ impl App {
                 self.resolve_control_plane_prompt(decision);
             }
             WebCommand::SetModel { spec } => self.set_model_from_spec(&spec).await,
+            WebCommand::SwitchSession { id } => self.handle_switch_session(id, turn).await,
+        }
+    }
+
+    /// session-resource-model: validate + run a session switch on the serialized loop.
+    ///
+    /// Existence is checked BEFORE aborting anything so an invalid id is harmless; an
+    /// in-flight turn on the old harness is aborted first (same semantics as `Abort`) and
+    /// unwinds on the next loop iteration after the harness swap.
+    async fn handle_switch_session(&mut self, id: String, turn: &mut TurnState) {
+        let id = id.trim().to_string();
+        if id.is_empty() {
+            self.error_line("switch session: missing session id");
+            return;
+        }
+        if id == self.session_id {
+            self.system_line(format!("already on session {id}"));
+            return;
+        }
+        match crate::session::find_path_by_id(&self.session_repo, &id).await {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                self.error_line(format!("switch session: no session matches id {id}"));
+                return;
+            }
+            Err(e) => {
+                self.error_line(format!("switch session: {e}"));
+                return;
+            }
+        }
+        if turn.fut.is_some() {
+            self.request_abort(turn);
+        }
+        if let Err(e) = self.switch_session(id).await {
+            self.error_line(format!("switch session: {e:#}"));
         }
     }
 
@@ -453,18 +497,23 @@ impl App {
             sidebar: self.web_sidebar_snapshot(),
             feed_blocks: self.feed.web_blocks(),
             feed_lines: web_feed_lines(&self.feed),
-            // graph mode: DAG run/node state from the shared engine (P1).
+            // graph mode: DAG run/node state from the shared engine (P1). Session-scoped:
+            // only runs belonging to the current session are surfaced (the engine is
+            // process-wide and outlives session switches).
             dags: self
                 .dag_engine
                 .list_runs()
                 .iter()
+                .filter(|run| run.session_id.as_deref() == Some(self.session_id.as_str()))
                 .map(WebStatus::from_dag_run)
                 .collect(),
-            // graph mode: subagent jobs (task tool + DAG nodes) from the registry.
+            // graph mode: subagent jobs (task tool + DAG nodes) from the registry,
+            // session-scoped the same way (jobs are stamped with their owning session).
             subagents: self
                 .subagent_registry
                 .list()
                 .iter()
+                .filter(|job| job.session_id.as_deref() == Some(self.session_id.as_str()))
                 .map(crate::wire::subagent_job_snapshot)
                 .collect(),
         }
@@ -563,6 +612,10 @@ impl App {
         latest: &Arc<Mutex<WebStatus>>,
         snapshots: &broadcast::Sender<WebStatus>,
     ) {
+        // Keep the SessionOps view of "current session" in lockstep with the loop state;
+        // every state mutation on this loop is followed by a publish, so this is the sync
+        // point.
+        self.sync_current_session_state();
         let snapshot = self.web_snapshot();
         *latest.lock().await = snapshot.clone();
         if let Some(active) = &self.relay {

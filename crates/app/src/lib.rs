@@ -42,6 +42,7 @@ pub mod readline;
 pub mod resume_picker;
 pub mod session;
 pub mod session_archive;
+pub mod session_ops;
 pub mod skills;
 pub mod skills_state;
 pub mod templates;

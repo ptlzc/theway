@@ -36,6 +36,13 @@ pub enum WebCommand {
     SetModel {
         spec: String,
     },
+    /// session-resource-model: switch the runtime to another session (resume semantics).
+    /// `CreateSession`'s "make current" path also flows through this command — creating the
+    /// session is a sync `SessionOps` call, becoming current goes through the serialized
+    /// event loop.
+    SwitchSession {
+        id: String,
+    },
 }
 
 /// session-resource-model: one session as a managed resource (mirrors

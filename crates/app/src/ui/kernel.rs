@@ -81,6 +81,17 @@ impl ReplKernel {
         &self.harness
     }
 
+    /// Swap in a different harness (session-resource-model: in-process session switch).
+    ///
+    /// Only the harness field changes — `retry` settings are session-independent and stay.
+    /// Callers must guarantee no turn is in flight on the old harness (or have requested its
+    /// abort): the event loop is serialized, so the transport loop / TUI loop calling this
+    /// between turns is safe. An in-flight turn future holds its own `Arc` clone of the old
+    /// harness and unwinds independently.
+    pub(super) fn replace_harness(&mut self, harness: Arc<AgentHarness>) {
+        self.harness = harness;
+    }
+
     pub(super) fn abort(&self) {
         self.harness.abort();
     }

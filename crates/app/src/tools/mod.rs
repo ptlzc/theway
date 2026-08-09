@@ -69,18 +69,70 @@ pub fn subagent_read_only_tools() -> Vec<Arc<dyn AgentTool>> {
 }
 
 /// Build the Task tool. Separate from `default_tools` because Task needs the model handle to
-/// spawn its inner harness; the caller wires it in at construction time.
+/// spawn its inner harness; the caller wires it in at construction time. `session_id`
+/// (session-resource-model) stamps the owning session on every spawned job — each harness
+/// build gets its own TaskTool stamped with that harness's session.
 pub fn task_tool(
     model: theway_llm_provider::Model,
     stream_fn: Option<theway_core::StreamFn>,
     registry: theway_core::runtime::subagents::registry::SubagentJobRegistry,
+    session_id: Option<String>,
 ) -> Arc<dyn AgentTool> {
-    Arc::new(task::TaskTool::new(
-        model,
-        stream_fn,
-        Arc::new(subagent_read_only_tools),
-        registry,
-    ))
+    Arc::new(
+        task::TaskTool::new(
+            model,
+            stream_fn,
+            Arc::new(subagent_read_only_tools),
+            registry,
+        )
+        .with_session_id(session_id),
+    )
+}
+
+/// Build the per-session tool set (session-resource-model). One source of truth shared by
+/// the CLI's initial harness build and the session factory ([`crate::session_ops::SessionFactory`]):
+/// everything here is either session-stamped (`dag_*` / `task`) or must be rebuilt per
+/// harness (the skill family wires a fresh harness cell per build). Process-level tool
+/// groups (`default_tools`, MCP tools) are the caller's to add.
+pub fn session_tool_set(
+    memory_dir: &std::path::Path,
+    dag_engine: &std::sync::Arc<theway_core::runtime::graph_engineering::engine::DagEngine>,
+    subagent_registry: &theway_core::runtime::subagents::registry::SubagentJobRegistry,
+    model: &theway_llm_provider::Model,
+    stream_fn: Option<&theway_core::StreamFn>,
+    skill_harness_cell: &skill::SkillHarnessCell,
+    session_id: &str,
+) -> Vec<Arc<dyn AgentTool>> {
+    let mut tools = default_tools(memory_dir.to_path_buf());
+    // DAG + outline tools, main agent only — the read-only subagent tool set stays
+    // deliberately untouched (shell/exec already ship via `default_tools`).
+    tools.push(Arc::new(outline::OutlineTool));
+    tools.extend(dag_tools::DagTools::new(
+        dag_engine.clone(),
+        Some(session_id.to_string()),
+    ));
+    // Task delegation tool (issue #11): shares the parent's model + stream backend; jobs
+    // are stamped with this session.
+    tools.push(task_tool(
+        model.clone(),
+        stream_fn.cloned(),
+        subagent_registry.clone(),
+        Some(session_id.to_string()),
+    ));
+    tools.push(skill_tool(skill_harness_cell.clone()));
+    tools.push(install_skill_tool(skill_harness_cell.clone()));
+    tools.push(skill_builder_tool(skill_harness_cell.clone()));
+    tools.push(set_skill_state_tool(skill_harness_cell.clone()));
+    tools.push(remove_skill_tool(skill_harness_cell.clone()));
+    tools.push(new_cron_job_tool(skill_harness_cell.clone()));
+    tools.push(list_cron_jobs_tool());
+    tools.push(remove_cron_job_tool(skill_harness_cell.clone()));
+    tools.push(set_cron_job_state_tool(skill_harness_cell.clone()));
+    tools.push(new_trigger_tool());
+    tools.push(list_triggers_tool());
+    tools.push(remove_trigger_tool());
+    tools.push(set_trigger_state_tool());
+    tools
 }
 
 /// Build the `Skill` tool. Separate from `default_tools` because the tool needs to reach the
