@@ -2,135 +2,74 @@
   "version": 1,
   "runs": [
     {
-      "id": "dag-3",
-      "name": "crate-restructure-v2",
+      "id": "dag-1",
+      "name": "crate-restructure-remaining",
       "maxConcurrency": 10,
       "failFast": true,
       "direction": "TD",
-      "createdAt": 1786215595819,
+      "createdAt": 1786253012766,
       "sessionId": "019fe2a5-eed4-7bfb-bf09-7fec975286ac",
       "nodes": [
         {
-          "id": "rename-core-module",
-          "agent": "executor-coder",
-          "task": "cd C:/Users/lizc/Workspace/theway\n\n任务: 把 theway-core 的 harness 模块改名为 runtime (openspec tasks.md 1.1+1.2)。零行为变化。\n\n步骤:\n1. 移动目录: mv crates/core/src/harness crates/core/src/runtime (可用 mv 或 git mv)\n2. 编辑 crates/core/src/lib.rs: 把 `pub mod harness;` 改为 `pub mod runtime;`,把 `pub use harness::{` 改为 `pub use runtime::{` (cfg(feature = \"harness\") 条件保持不动)\n3. 全库替换引用 (排除 target/ 和 openspec/):\n   - `theway_core::harness::` → `theway_core::runtime::` (grep -rl 定位所有 .rs / build.rs)\n   - core 内部相对引用: `use crate::harness::` → `use crate::runtime::` (在 crates/core/src 内)\n   - `super::harness::` → `super::runtime::` (crates/core/src/runtime 内)\n   - lib.rs 的 use 块已处理\n4. 复核 (排除 target/, openspec/):\n   grep -rn \"theway_core::harness\\|crate::harness\\|super::harness\" --include=*.rs . 结果必须为空\n\n只修改: crates/core/**、crates/harness/** (含 src/tests/examples)、build.rs。禁止碰其他文件。\n禁止 git add/commit/push (只读 git 命令可用)。\n\n验收: cargo check --workspace 通过 (target/ 已存在, 增量编译)。\n完成后报告: 替换的文件清单 + 复核 grep 结果 + cargo check 结果。",
-          "dependsOn": [],
-          "status": "succeeded",
-          "attempt": 1,
-          "startedAt": 1786215595819,
-          "completedAt": 1786215909409,
-          "inputTokens": 28889,
-          "outputTokens": 6030,
-          "result": {
-            "success": true,
-            "durationMs": 313590,
-            "attempt": 1,
-            "totalAttempts": 1
-          }
-        },
-        {
-          "id": "rename-crate-dir",
-          "agent": "executor-coder",
-          "task": "cd C:/Users/lizc/Workspace/theway\n\n任务: crates/harness 目录改名为 crates/app (openspec tasks.md 1.3)。包名 theway 不变。零行为变化。\n\n步骤:\n1. 移动目录: mv crates/harness crates/app (可用 mv 或 git mv)\n2. 编辑根 Cargo.toml: workspace.members 中 `crates/harness` → `crates/app`\n3. 检查并更新 workspace 内所有引用旧目录的 path 依赖: grep -rn 'path = \"../harness\"' crates/*/Cargo.toml (若有)\n4. 复核: grep -rn 'crates/harness' Cargo.toml crates/*/Cargo.toml 结果为空; ls crates/ 应含 app\n\n只修改: 根 Cargo.toml、crates/*/Cargo.toml (若有 path 引用)、目录移动。禁止碰其他文件。\n禁止 git add/commit/push。\n\n验收: cargo check --workspace 通过。\n完成后报告: 移动结果 + Cargo.toml 改动 + cargo check 结果。",
-          "dependsOn": [
-            "rename-core-module"
-          ],
-          "status": "succeeded",
-          "attempt": 1,
-          "startedAt": 1786215909409,
-          "completedAt": 1786215975831,
-          "inputTokens": 4529,
-          "outputTokens": 1460,
-          "result": {
-            "success": true,
-            "durationMs": 66421,
-            "attempt": 1,
-            "totalAttempts": 1
-          }
-        },
-        {
-          "id": "update-docs",
-          "agent": "executor-writer",
-          "task": "cd C:/Users/lizc/Workspace/theway\n\n任务: 同步文档中的路径/分层描述 (openspec tasks.md 1.4)。只改文档文字, 不改语义。\n\n步骤:\n1. grep 定位 (排除 openspec/ 和 target/):\n   grep -rn \"crates/harness\\|theway_core::harness\\|core::harness\" docs/ README.md CHANGELOG.md CLAUDE.md\n2. 逐处更新:\n   - `crates/harness` (目录引用) → `crates/app`\n   - `theway_core::harness` / `core::harness` (模块路径引用) → `theway_core::runtime`\n   - 若文档描述 \"theway-core 的 harness 模块\" 这类文字, 同步改为 runtime\n3. 复核: 上述 grep (排除 openspec/) 结果为空\n\n只修改: docs/**、README.md、CHANGELOG.md、CLAUDE.md。禁止碰 openspec/** (那是变更提案, 描述的是迁移目标, 不动) 和任何 .rs 文件。\n禁止 git add/commit/push。\n\n完成后报告: 修改的文件清单 + grep 复核结果。",
-          "dependsOn": [
-            "rename-core-module"
-          ],
-          "status": "succeeded",
-          "attempt": 1,
-          "startedAt": 1786215909410,
-          "completedAt": 1786216475031,
-          "inputTokens": 37969,
-          "outputTokens": 16917,
-          "result": {
-            "success": true,
-            "durationMs": 565573,
-            "attempt": 1,
-            "totalAttempts": 1
-          }
-        },
-        {
-          "id": "extract-server-skeleton",
-          "agent": "executor-coder",
-          "task": "cd C:/Users/lizc/Workspace/theway\n\n任务: 建 theway-server crate 骨架 + wire 模型迁移 + proto/build.rs 迁移 (openspec tasks.md 2.1/2.3/2.5 部分)。此时 app 仍保留 http/grpc/ws 服务器 (还依赖 axum/tonic), 本节点不动它们。\n\n步骤:\n1. 创建 crates/server/Cargo.toml:\n   name = \"theway-server\", version 0.75.0, edition 2024\n   [dependencies]: theway (path ../app), theway-core (path ../core), theway-llm-provider (path ../llm-provider), tokio (同 app 的版本与 features), tokio-util, futures, serde (derive), serde_json, thiserror, anyhow, tracing, prost 0.14, tonic 0.14 (features server/channel/codegen), tonic-prost 0.14, tokio-stream (net/sync), tokio-tungstenite 0.26 (connect/rustls-tls-webpki-roots), base64 0.22 — 全部从 crates/app/Cargo.toml 复制相同版本, 不要 invent 新版本\n2. 创建 crates/server/build.rs: 从 crates/app/build.rs 完整复制 (protox 生成)\n3. 创建 crates/server/src/lib.rs: pub mod proto; (本节点只迁 proto)\n4. 迁移 wire 模型: mv crates/app/src/transport/types.rs crates/app/src/wire.rs; 在 crates/app/src/lib.rs 加 `pub mod wire;`; 编辑 crates/app/src/transport/mod.rs 移除 types 模块行\n5. 全库替换 (排除 target/ openspec/): `crate::transport::types::` → `crate::wire::` (app 内), 若 app 内跨模块引用 transport::types:: 用 crate::wire::\n6. 迁移 proto 编解码: mv crates/app/src/transport/proto.rs crates/server/src/proto.rs\n   - 编辑 crates/server/src/proto.rs: 引用适配 — 原 `use crate::transport::types::...` → `use theway::wire::...`; 原 app 内部引用 (如 crate::ui::feed) → `use theway::ui::...` (需要 theway 公开对应项; ui::feed 若 pub(crate) 则需在 theway lib.rs 公开 pub use ui::feed 或调整)\n   - include_proto! 宏: 保持 (server/build.rs 生成到 server 的 OUT_DIR)\n7. crates/app/src/transport/mod.rs 移除 proto 模块; 删掉 crates/app/build.rs (protox 不再需要), 编辑 crates/app/Cargo.toml 移除 protox 依赖 (保留 axum/tonic 等, 本节点不拆服务器)\n8. 根 Cargo.toml workspace.members 加 crates/server\n9. 先读 crates/app/src/lib.rs 与 crates/app/src/transport/mod.rs 的现状再动手 (先读后写)\n\n只修改: crates/server/** (新建)、crates/app/src/lib.rs、crates/app/src/transport/mod.rs、crates/app/src/transport/proto.rs (移动)、crates/app/src/transport/types.rs (移动)、crates/app/build.rs (删除)、crates/app/Cargo.toml、根 Cargo.toml、以及 grep 到的引用 transport::types 的文件 (仅改引用行)。\n禁止 git add/commit/push。\n\n验收: cargo build --workspace 通过 (app 的 http.rs/grpc.rs/ws.rs 还在, 引用 crate::wire 应编译; server crate 的 proto.rs 编译)。\n完成后报告: 新建/移动文件清单 + 引用适配清单 + cargo build 结果。",
-          "dependsOn": [
-            "rename-crate-dir",
-            "update-docs"
-          ],
-          "status": "running",
-          "attempt": 0,
-          "startedAt": 1786216475031,
-          "inputTokens": 0,
-          "outputTokens": 0
-        },
-        {
-          "id": "extract-server-split",
-          "agent": "executor-coder",
-          "task": "cd C:/Users/lizc/Workspace/theway\n\n任务: 把 http/grpc/ws 服务器从 app 迁到 theway-server, 拆分事件循环与服务器 (openspec tasks.md 2.2/2.4/3.2)。这是本次重构最核心的一步。\n\n架构原则: 事件循环 (kernel 轮询 select! 循环) 留在 app (impl App 方法), axum/tonic/ws 服务器进 server crate; 两者通过公开 channel/state 通信, 服务器不访问 App 私有字段。\n\n步骤:\n1. 迁移文件: mv crates/app/src/transport/{http,grpc,ws}.rs crates/server/src/; mv crates/app/src/transport/http/tests crates/server/src/http/tests (保持结构); 删 crates/app/src/transport 目录与 transport/mod.rs; crates/app/src/lib.rs 移除 pub mod transport\n2. 服务器部分进 server (crates/server/src/):\n   - http.rs: 保留 web_router + 全部 axum handler + HttpState (pub struct + pub 字段) + 新增 pub async fn serve_web(listener, state: HttpState) -> JoinHandle 把 bind+axum::serve spawn 进去 (参考原 run_web 的前半段)\n   - grpc.rs: 保留 ThewayGrpc service impl + 新增 pub fn serve_grpc(...) 启动 tonic server (参考原 run_grpc 的服务器部分)\n   - ws.rs: 保留 ws handler\n   - server 侧引用适配: 原 `crate::transport::types::` → `theway::wire::`; 原 `crate::ui::feed::FeedUpdate`/`crate::ui::...` → `theway::ui::...` (若 theway 未公开, 在 theway lib.rs 补 pub use); 原 `crate::bug_report::redact` → theway 对应公开项; 原 app 私有类型 (如 completer: SlashCompleter) → theway 公开 (theway lib.rs 补 pub use, 先读代码确认类型路径); core 类型引用已是 theway_core::runtime::...\n3. 事件循环部分留 app (新建 crates/app/src/ui/web_loop.rs 或直接在 ui/mod.rs 精简):\n   - impl App { run_web }: 精简为 — 建 command_tx/snapshot_tx/latest/event_tx/dag_event_tx (同原代码) → 调 theway_server::http::serve_web(listener, HttpState{...}) 拿 JoinHandle → 打印 listening + 打开浏览器 → 跑原 select! 事件循环 (poll_turn/command_rx/feed_rx/main_run_rx/relay_*/... 全部保留)\n   - impl App { run_grpc } 同理: 建 channels → theway_server::grpc::serve_grpc(...) → 事件循环\n   - 事件循环用到的 self 字段 (feed_rx/main_run_rx/...) 是 pub(crate), 在 app 内部可用, 保持\n4. 可见性调整: server 需要的 app 类型 (wire 模块、HttpState 用的 SlashCompleter、feed 类型、bug_report::redact) 在 theway lib.rs 补公开 re-export\n5. crates/app/Cargo.toml 移除服务器依赖: axum, tonic, tonic-prost, prost, tokio-tungstenite, tokio-stream, base64 (如不再用) — 保留 tokio/tokio-util/futures/serde/serde_json/anyhow/thiserror/tracing 等\n6. crates/server/Cargo.toml 确认包含 ws.rs/http.rs/grpc.rs 全部依赖 (axum 0.8 ws feature, tonic server/channel/codegen, tonic-prost, prost, tokio-tungstenite, tokio-stream net/sync, base64)\n7. 适配 server crate 内引用: `crate::transport::types::WebStatus` → `theway::wire::WebStatus`; 模块间 `crate::http::`/`crate::ws::` 保持\n8. 根 Cargo.toml 无新成员变化 (server 已加)\n\n先读 crates/app/src/transport/http.rs 与 grpc.rs 全文, 理解原 run_web/run_grpc 结构后再拆 (先读后写)。\n只修改: crates/server/**、crates/app/src/**、crates/app/Cargo.toml。禁止碰其他文件。\n禁止 git add/commit/push。\n\n验收: cargo build --workspace 通过; cargo test -p theway-server 通过 (http endpoints 测试随迁后适配通过)。\n完成后报告: 拆分后的文件布局 (app 剩什么/ server 有什么) + 可见性调整清单 + build/test 结果。",
-          "dependsOn": [
-            "extract-server-skeleton"
-          ],
-          "status": "pending",
-          "attempt": 0
-        },
-        {
           "id": "apphandle-refine",
           "agent": "executor-coder",
-          "task": "cd C:/Users/lizc/Workspace/theway\n\n任务: 接口收敛与清理 (openspec tasks.md 3.1/3.3)。目标是: server crate 只通过公开类型 (wire 模型 + HttpState/GrpcState + theway 公开 API) 工作, app 内部不再为 server 暴露多余可见性。\n\n步骤:\n1. 检查 theway lib.rs 与 ui/mod.rs: 上一步为编译临时公开的项 (pub(crate)→pub 的字段/方法), 逐个判断是否仍被 theway-server 使用 (grep -rn 在 crates/server 内搜索引用)\n2. 不再被 server 使用的: 收回 pub(crate) 或私有\n3. 仍被 server 使用的: 收敛为清晰公开 API — 优先方法而非裸字段; 若 HttpState 直接拿 App 字段, 评估是否可改为 App 提供 pub fn web_state() 返回 HttpState 构造所需数据\n4. 确保 theway 的 wire 模块是唯一 wire 模型来源, server 不重复定义\n5. 检查 app 内是否残留对已删 transport 的引用 (crate::transport 或 transport::) — grep 应为空\n6. 检查 app Cargo.toml 无残留服务器依赖\n\n只修改: crates/app/src/**、crates/server/src/** (若需调整引用)。禁止碰其他文件。\n禁止 git add/commit/push。\n\n验收: cargo build --workspace + cargo test -p theway-server -p theway 全过。\n完成后报告: 可见性收敛清单 (哪些收回/哪些保留) + 测试结果。",
-          "dependsOn": [
-            "extract-server-split"
-          ],
-          "status": "pending",
-          "attempt": 0
+          "task": "cd C:/Users/lizc/Workspace/theway\n\n任务: 接口收敛与清理 (openspec tasks.md 3.1/3.3)。前置已完成: transport 已迁到 theway-server (crates/server), 事件循环拆分到 app 的 ui/web_loop.rs。目标是: server crate 只通过公开类型 (wire 模型 + HttpState + theway 公开 API) 工作, app 内部不再为 server 暴露多余可见性。\n\n步骤:\n1. 先读 crates/app/src/lib.rs 与 crates/app/src/ui/mod.rs、crates/server/src/http.rs: 查看上一步为编译临时公开的项 (pub(crate)→pub 的字段/方法/类型)\n2. 检查哪些仍被 theway-server 使用: grep -rn 在 crates/server 内搜索对 theway 类型的引用\n3. 不再被 server 使用的: 收回 pub(crate) 或私有\n4. 仍被 server 使用的: 确认是清晰公开 API (wire 模块是唯一 wire 模型来源, server 不重复定义)\n5. 检查 app 内是否残留对已删 transport 的引用: grep -rn \"transport::\" crates/app/src --include=*.rs 应为空 (除 ui/web_loop.rs 可能引用)\n6. 检查 crates/app/Cargo.toml 无残留服务器依赖 (axum/tonic/prost/tokio-tungstenite/tokio-stream 应已移除; 若有残留则移除)\n\n只修改: crates/app/src/**、crates/server/src/** (若需调整引用)。禁止碰其他文件。\n禁止 git add/commit/push。\n\n验收: cargo build --workspace + cargo test -p theway-server (应 17 个测试全过)。\n注意: crates/app 的 3 个既有测试失败 (hooks shell 转义 + tui 鼠标捕获, Windows 环境问题) 与本次无关, 不用管。\n完成后报告: 可见性收敛清单 + 测试结果。",
+          "dependsOn": [],
+          "status": "skipped",
+          "attempt": 0,
+          "startedAt": 1786253012767,
+          "completedAt": 1786253583361,
+          "error": "skipped by orchestrator (job aborted)",
+          "inputTokens": 98272,
+          "outputTokens": 17882
         },
         {
           "id": "create-cli-crate",
           "agent": "executor-coder",
-          "task": "cd C:/Users/lizc/Workspace/theway\n\n任务: 建 theway-cli crate, main.rs 从 app 移入 (openspec tasks.md 4.1-4.4)。\n\n步骤:\n1. 创建 crates/cli/Cargo.toml:\n   name = \"theway-cli\", version 0.75.0, edition 2024\n   [[bin]] name = \"theway\" path = \"src/main.rs\"\n   [features] tui = [\"dep:crossterm\", \"dep:ratatui\", \"dep:tui-textarea\", \"dep:arboard\", \"dep:qrcode\", \"dep:image\"] (default = [\"tui\"])\n   [dependencies]: theway (path ../app), theway-server (path ../server), theway-core, theway-llm-provider, theway-mcp, 以及原 main.rs 直接使用的依赖 (clap 4 derive, tokio, tracing, tracing-subscriber, tracing-appender, serde_json, anyhow, chrono, uuid, ignore, regex, base64 等 — 从 crates/app/Cargo.toml + crates/app/src/main.rs 的 use 反推, 缺什么编译报错补什么)\n2. 移动: mv crates/app/src/main.rs crates/cli/src/main.rs\n3. 适配 main.rs 引用: 原 `crate::xxx` → `theway::xxx` (agent_session, commands, config, tools, ui, session, model_picker, triggers, skills, hooks, extensions, mcp_loader, auth, oauth, debug, export, history, inbox, lsp, local_models, logging, mentions, model, otlp, readline, resume_picker, session_archive, templates, goal, control_plane_prompt, bug_report, builtin_skills, clipboard_image, images, markdown, spinner 等 — 逐一适配); 服务器相关: run_web/run_grpc 在 theway 的 ui (事件循环) + theway_server (服务器) 中, 先读 main.rs 1080-1110 行看调用点再适配\n4. crates/app/Cargo.toml: 移除 [[bin]] 段与 clap 等 bin-only 依赖 (保留 lib 所需)\n5. 根 Cargo.toml members 加 crates/cli\n6. 先读 crates/app/src/main.rs 全文与 crates/app/Cargo.toml (先读后写)\n\n只修改: crates/cli/** (新建)、crates/app/Cargo.toml、根 Cargo.toml、crates/app/src/main.rs (移动)。\n禁止 git add/commit/push。\n\n验收: cargo build --workspace 通过 (theway-cli 的 bin 编译成功)。\n完成后报告: cli crate 内容 + 适配的引用清单 + build 结果。",
+          "task": "cd C:/Users/lizc/Workspace/theway\n\n任务: 建 theway-cli crate, main.rs 从 app 移入 (openspec tasks.md 4.1-4.4)。\n\n步骤:\n1. 创建 crates/cli/Cargo.toml:\n   name = \"theway-cli\", version 0.75.0, edition 2024\n   [[bin]] name = \"theway\" path = \"src/main.rs\"\n   [features] tui = [\"dep:crossterm\", \"dep:ratatui\", \"dep:tui-textarea\", \"dep:arboard\", \"dep:qrcode\", \"dep:image\"] (default = [\"tui\"])\n   [dependencies]: theway (path ../app), theway-server (path ../server), theway-core (path ../core), theway-llm-provider (path ../llm-provider), theway-mcp (path ../mcp), 以及原 main.rs 直接使用的依赖 (clap 4 derive, tokio, tracing, tracing-subscriber, tracing-appender, serde, serde_json, anyhow, chrono, uuid, ignore, regex, base64 等 — 从 crates/app/Cargo.toml 的 [dependencies] 反推哪些是 main.rs 用的, 先读 crates/app/src/main.rs 的 use 语句确认)\n2. 移动: mv crates/app/src/main.rs crates/cli/src/main.rs\n3. 适配 main.rs 引用: 原 `crate::xxx` → `theway::xxx` (逐一: agent_session, commands, config, tools, ui, session, model_picker, triggers, skills, hooks, extensions, mcp_loader, auth, oauth, debug, export, history, inbox, lsp, local_models, logging, mentions, model, otlp, readline, resume_picker, session_archive, templates, goal, control_plane_prompt, bug_report, builtin_skills, clipboard_image, images, markdown, spinner, wire 等); 服务器相关: run_web/run_grpc 的调用点在 main.rs (约 1080-1110 行) — 先读代码看 app 的 ui::mod 或 web_loop 暴露了什么 (App::run_web / App::run_grpc 现在是 app 的方法), theway_server 提供 serve_web/serve_grpc (被 app 内部调用, main.rs 不需要直接调)\n4. crates/app/Cargo.toml: 移除 [[bin]] 段与 clap 等 bin-only 依赖 (保留 lib 所需)\n5. 根 Cargo.toml workspace.members 加 crates/cli\n6. 先读 crates/app/src/main.rs 全文、crates/app/Cargo.toml、crates/cli 不存在确认 (先读后写)\n\n只修改: crates/cli/** (新建)、crates/app/Cargo.toml、根 Cargo.toml、crates/app/src/main.rs (移动)。禁止碰其他文件。\n禁止 git add/commit/push。\n\n验收: cargo build --workspace 通过 (theway-cli 的 bin 编译成功)。\n完成后报告: cli crate 内容 + 适配的引用清单 + build 结果。",
           "dependsOn": [
             "apphandle-refine"
           ],
-          "status": "pending",
-          "attempt": 0
+          "status": "skipped",
+          "attempt": 0,
+          "startedAt": 1786253583362,
+          "completedAt": 1786254160532,
+          "error": "skipped by orchestrator (job aborted)",
+          "inputTokens": 65623,
+          "outputTokens": 16302
         },
         {
           "id": "delete-ui-health",
           "agent": "executor-coder",
-          "task": "cd C:/Users/lizc/Workspace/theway\n\n任务: 删除内嵌 web UI, 加 health 端点 (openspec tasks.md 5.1-5.5)。\n\n步骤:\n1. 删除 crates/app/src/ui/web_index.html 文件\n2. server crate http.rs: 删除 index 路由 (web_router 里 .route(\"/\", get(index))) 与 index handler + INDEX_HTML include_str 引用; 删掉后 `GET /` 自然 404\n3. server crate http.rs 新增 `GET /healthz` handler: 返回固定短文本 \"ok\" (Content-Type text/plain), 不依赖任何业务状态; 在 web_router 注册\n4. server crate grpc.rs 实现标准 grpc.health.v1.Health service:\n   - 在 build.rs 的 protox 配置加 health.proto (手写等价 proto: package grpc.health.v1; message HealthCheckRequest{string service=1;} message HealthCheckResponse{enum ServingStatus{UNKNOWN=0;SERVING=1;NOT_SERVING=2;SERVICE_UNKNOWN=3;} ServingStatus status=1;} service Health{rpc Check(HealthCheckRequest) returns (HealthCheckResponse); rpc Watch(HealthCheckRequest) returns (stream HealthCheckResponse);}) — 写入 crates/server/src/health.proto (或 build.rs include 路径)\n   - grpc.rs 实现 Health service: Check 返回 SERVING, Watch 返回一次 SERVING 后结束\n   - tonic Server 同时注册 ThewayGrpc 与 Health (tonic::service::Routes 或 Server::add_service 两次)\n5. CLI 引导日志: 在 app 的 run_web (事件循环侧) 的 listening 打印行后补一行端点清单: println!(\"... endpoints: /state /events /ws /healthz · UI: workmate (独立)\") 或类似; run_grpc 同理补 gRPC 端点说明\n6. 新增测试 (server crate): http /healthz 返回 200 \"ok\" 且不携带业务快照; / 返回 404; gRPC Health Check 返回 SERVING (参考现有 grpc 测试写法)\n\n先读 crates/server/src/http.rs 的 web_router/handlers 与 build.rs、grpc.rs 再动手 (先读后写)。\n只修改: crates/server/**、crates/app/src/ui/** (web_index.html 删除 + 事件循环打印行)。禁止碰其他文件。\n禁止 git add/commit/push。\n\n验收: cargo build --workspace; cargo test -p theway-server 全过 (含新增 health 测试)。\n完成后报告: 删除/新增清单 + health 实现方式 + 测试结果。",
+          "task": "cd C:/Users/lizc/Workspace/theway\n\n任务: 删除内嵌 web UI, 加 health 端点 (openspec tasks.md 5.1-5.5)。\n\n步骤:\n1. 删除 crates/server/src/web_index.html 文件 (它当前在 server 里, 上一节点迁移时带入)\n2. crates/server/src/http.rs: 删除 index 路由 (web_router 里 .route(\"/\", get(index))) 与 index handler + INDEX_HTML include_str 引用; 删掉后 `GET /` 自然 404\n3. crates/server/src/http.rs 新增 `GET /healthz` handler: 返回固定短文本 \"ok\" (Content-Type text/plain), 不依赖任何业务状态; 在 web_router 注册\n4. crates/server/src/grpc.rs 实现标准 grpc.health.v1.Health service:\n   - 在 crates/server/ 下创建 health.proto (手写等价 proto: package grpc.health.v1; message HealthCheckRequest{string service=1;} message HealthCheckResponse{enum ServingStatus{UNKNOWN=0;SERVING=1;NOT_SERVING=2;SERVICE_UNKNOWN=3;} ServingStatus status=1;} service Health{rpc Check(HealthCheckRequest) returns (HealthCheckResponse); rpc Watch(HealthCheckRequest) returns (stream HealthCheckResponse);})\n   - 编辑 crates/server/build.rs: protox 编译列表加 health.proto (注意 proto_dir 是 ../../proto, health.proto 放 crates/server/ 则用独立目录或把文件复制到 ../../proto/ — 建议: 把 health.proto 放在 ../../proto/health.proto 与 theway_grpc.proto 同级, 与 TS 侧共享约定一致)\n   - grpc.rs 实现 Health service: Check 返回 SERVING, Watch 返回一次 SERVING 后结束\n   - tonic Server 同时注册 ThewayGrpc 与 Health (读现有 grpc.rs 看服务器启动方式再改)\n5. CLI 引导日志: app 的 ui/web_loop.rs (或 ui/mod.rs) 里 run_web 的 listening 打印行后补一行端点清单: println!(\"... endpoints: /state /events /ws /healthz · UI: workmate (独立)\") 或类似; run_grpc 同理补 gRPC 端点说明\n6. 新增测试 (server crate): http /healthz 返回 200 \"ok\" 且不携带业务快照; / 返回 404; gRPC Health Check 返回 SERVING (参考 crates/server 现有测试写法, 如 http/tests/endpoints.rs)\n\n先读 crates/server/src/http.rs 的 web_router/handlers、crates/server/build.rs、crates/server/src/grpc.rs 再动手 (先读后写)。\n只修改: crates/server/**、crates/app/src/ui/** (web_loop.rs 打印行)、proto/health.proto (新建)。禁止碰其他文件。\n禁止 git add/commit/push。\n\n验收: cargo build --workspace; cargo test -p theway-server 全过 (含新增 health 测试)。\n完成后报告: 删除/新增清单 + health 实现方式 + 测试结果。",
           "dependsOn": [
             "create-cli-crate"
           ],
-          "status": "pending",
-          "attempt": 0
+          "status": "succeeded",
+          "attempt": 1,
+          "startedAt": 1786254160534,
+          "completedAt": 1786254639429,
+          "inputTokens": 33769,
+          "outputTokens": 10696,
+          "result": {
+            "success": true,
+            "durationMs": 478894,
+            "attempt": 1,
+            "totalAttempts": 1
+          }
         },
         {
           "id": "final-verify",
           "agent": "checker",
-          "task": "cd C:/Users/lizc/Workspace/theway\n\n任务: 全量验收 (openspec tasks.md 5.6 + crate-layout / protocol-server-health spec)。只读验证, 不修改任何文件。\n\n逐项验证并报告 PASS/FAIL (每项附命令输出摘要):\n1. cargo test --workspace 全绿\n2. cargo clippy --workspace --all-targets -- -D warnings 通过\n3. cargo fmt --all --check 通过\n4. 路径/引用校验 (排除 target/ openspec/):\n   - grep -rn \"theway_core::harness\" 为空\n   - grep -rn \"crate::transport\\|transport::types\" (crates/ 内 .rs) 为空\n   - ls crates/: 含 app, server, cli, core, mcp, llm-provider\n   - ls crates/core/src/: 含 runtime 目录, 无 harness 目录\n   - ls crates/app/src/: 含 wire.rs, 无 transport 目录\n5. 术语校验: grep -rn \"harness\" crates/*/src --include=*.rs -l 只出现在 AgentHarness 类型相关 (人工判断)\n6. 前端校验: crates/server 与 crates/app 内无 .html/.js/.css 文件\n7. 依赖校验: crates/app/Cargo.toml 无 axum/tonic/prost/tokio-tungstenite; crates/server/Cargo.toml 有 axum/tonic\n8. 根 Cargo.toml members 含 crates/server, crates/cli, crates/app (无 crates/harness)\n\n输出: 逐项 PASS/FAIL + 证据; 有 FAIL 给出修复方向。不修改任何文件。",
+          "task": "cd C:/Users/lizc/Workspace/theway\n\n任务: 全量验收 (openspec tasks.md 5.6 + crate-layout / protocol-server-health spec)。只读验证, 不修改任何文件。\n\n逐项验证并报告 PASS/FAIL (每项附命令输出摘要):\n1. cargo build --workspace 全绿\n2. cargo test --workspace --features tui 全绿 (已知 3 个既有 Windows 环境失败可标注为 pre-existing: hooks::tests::command_hook_receives_env_and_payload / compaction_command_hook / ui::tests::tui_enter_leave_enable_mouse_capture)\n3. cargo clippy --workspace --all-targets --features tui -- -D warnings 通过\n4. cargo fmt --all --check 通过\n5. 路径/引用校验 (排除 target/ openspec/):\n   - grep -rn \"theway_core::harness\" 为空\n   - grep -rn \"crate::transport\\|transport::types\" (crates/ 内 .rs) 为空\n   - ls crates/: 含 app, server, cli, core, mcp, llm-provider\n   - ls crates/core/src/: 含 runtime 目录, 无 harness 目录\n   - ls crates/app/src/: 含 wire.rs, 无 transport 目录\n6. 术语校验: grep -rn \"harness\" crates/*/src --include=*.rs -l 只出现在 AgentHarness 类型相关 (人工判断)\n7. 前端校验: crates/server 与 crates/app 内无 .html/.js/.css 文件\n8. 依赖校验: crates/app/Cargo.toml 无 axum/tonic/prost/tokio-tungstenite; crates/server/Cargo.toml 有 axum/tonic\n9. 根 Cargo.toml members 含 crates/server, crates/cli, crates/app (无 crates/harness)\n10. health 校验: crates/server 有 /healthz handler 与 grpc Health service; 无 index 路由\n\n输出: 逐项 PASS/FAIL + 证据; 有 FAIL 给出修复方向。不修改任何文件。",
           "dependsOn": [
             "delete-ui-health"
           ],
-          "status": "pending",
-          "attempt": 0
+          "status": "running",
+          "attempt": 0,
+          "startedAt": 1786254639429,
+          "inputTokens": 0,
+          "outputTokens": 0
         }
       ]
     }

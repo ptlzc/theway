@@ -11,8 +11,8 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, Result, bail};
 use axum::extract::State;
-use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::IntoResponse;
+use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::Stream;

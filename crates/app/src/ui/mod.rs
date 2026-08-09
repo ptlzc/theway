@@ -191,8 +191,7 @@ pub struct App {
     model_catalog: Vec<crate::model_picker::ProviderGroup>,
     panel_status: PanelStatus,
     /// DAG orchestration engine, shared with the dag_* tools (graph mode state).
-    dag_engine:
-        std::sync::Arc<theway_core::runtime::graph_engineering::engine::DagEngine>,
+    dag_engine: std::sync::Arc<theway_core::runtime::graph_engineering::engine::DagEngine>,
     /// Subagent job registry (graph mode). Task tool + DAG nodes register here.
     subagent_registry: theway_core::runtime::subagents::registry::SubagentJobRegistry,
 
@@ -733,10 +732,7 @@ impl App {
         self.follow = true;
     }
 
-    fn resolve_control_plane_prompt(
-        &mut self,
-        decision: theway_core::ControlPlanePromptDecision,
-    ) {
+    fn resolve_control_plane_prompt(&mut self, decision: theway_core::ControlPlanePromptDecision) {
         let Some(prompt) = self.control_plane_prompt.take() else {
             return;
         };
@@ -1172,12 +1168,7 @@ impl App {
         false
     }
 
-    fn queue_user_prompt(
-        &mut self,
-        display: String,
-        prompt: String,
-        images: Vec<ImageContent>,
-    ) {
+    fn queue_user_prompt(&mut self, display: String, prompt: String, images: Vec<ImageContent>) {
         self.enqueue_turn(QueuedTurn::UserPrompt {
             display,
             prompt,

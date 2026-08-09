@@ -19,11 +19,11 @@ pub mod health {
     tonic::include_proto!("grpc.health.v1");
 }
 
-use theway_grpc as wire;
-use theway::wire::WebStatus;
 use theway::ui::feed::{self, WebFeedBlock};
+use theway::wire::WebStatus;
 use theway_core::runtime::graph_engineering::types::DagEvent;
 use theway_core::runtime::subagents::registry::SubagentEvent;
+use theway_grpc as wire;
 
 /// Convert the internal snapshot into the structured wire model.
 pub fn session_state(snapshot: &WebStatus) -> wire::SessionState {
@@ -288,9 +288,7 @@ pub fn dag_event_wire(event: &DagEvent) -> wire::StreamEvent {
     wire::StreamEvent { kind: Some(kind) }
 }
 
-fn subagent_wire(
-    job: &theway::wire::WebSubagentJobSnapshot,
-) -> wire::SubagentJobSnapshot {
+fn subagent_wire(job: &theway::wire::WebSubagentJobSnapshot) -> wire::SubagentJobSnapshot {
     wire::SubagentJobSnapshot {
         id: job.id.clone(),
         agent: job.agent.clone(),
@@ -379,11 +377,11 @@ fn level_str(level: &feed::Level) -> &'static str {
 mod tests {
     use super::*;
     use theway::model_picker::{ModelEntry, ProviderGroup};
+    use theway::ui::feed::{Level, TriggerPollStatus};
     use theway::wire::{
         WebCronSnapshot, WebMcpSnapshot, WebSidebarSnapshot, WebSkillsSnapshot, WebToolsSnapshot,
         WebTriggersSnapshot,
     };
-    use theway::ui::feed::{Level, TriggerPollStatus};
 
     fn fixture_snapshot() -> WebStatus {
         WebStatus {

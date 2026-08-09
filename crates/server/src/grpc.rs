@@ -740,11 +740,10 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let server = serve_grpc(listener, state);
 
-        let mut client = crate::proto::health::health_client::HealthClient::connect(format!(
-            "http://{addr}"
-        ))
-        .await
-        .unwrap();
+        let mut client =
+            crate::proto::health::health_client::HealthClient::connect(format!("http://{addr}"))
+                .await
+                .unwrap();
 
         // Check answers SERVING.
         let response = client

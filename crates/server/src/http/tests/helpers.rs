@@ -15,10 +15,8 @@ pub(crate) fn test_router(latest: WebStatus) -> Router {
         snapshots: snapshot_tx,
         latest: Arc::new(Mutex::new(latest)),
         completer: SlashCompleter::from_registry(&theway::commands::Registry::with_builtins()),
-        events: broadcast::channel::<theway_core::runtime::subagents::registry::SubagentEvent>(
-            16,
-        )
-        .0,
+        events: broadcast::channel::<theway_core::runtime::subagents::registry::SubagentEvent>(16)
+            .0,
         dag_events: broadcast::channel::<theway_core::runtime::graph_engineering::types::DagEvent>(
             16,
         )
