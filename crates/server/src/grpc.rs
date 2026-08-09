@@ -161,6 +161,17 @@ impl ThewayGrpc for GrpcState {
         request: Request<SendMessageRequest>,
     ) -> Result<Response<CommandResult>, Status> {
         let request = request.into_inner();
+        // Explicit session targeting: only the current (live) session can receive
+        // messages — the process runs a single agent loop. Other sessions must be
+        // switched to first (connection-level binding is client-side state).
+        if let Some(target) = request.session_id.as_deref() {
+            let current = self.session_id.read().unwrap().clone();
+            if target != current {
+                return Err(Status::failed_precondition(format!(
+                    "session {target} is not the active session ({current}); SwitchSession first"
+                )));
+            }
+        }
         let interrupt = request.mode() == MessageMode::Interrupt;
         let accepted = self
             .commands
@@ -654,6 +665,7 @@ mod tests {
                     name: Some("clip.png".into()),
                 }],
                 mode: MessageMode::Guide.into(),
+                session_id: None,
             }))
             .await
             .unwrap()
@@ -707,6 +719,37 @@ mod tests {
             WebCommand::ResolveControlPlane { approve } => assert!(approve),
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn send_message_rejects_non_current_session() {
+        let (state, _command_rx) = grpc_state();
+
+        // Same session (or omitted) → accepted.
+        let ok = state
+            .send_message(Request::new(SendMessageRequest {
+                text: "hi".into(),
+                images: vec![],
+                mode: MessageMode::Guide.into(),
+                session_id: Some("test-session".into()),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(ok.accepted);
+
+        // Another session → FAILED_PRECONDITION, nothing queued.
+        let err = state
+            .send_message(Request::new(SendMessageRequest {
+                text: "hi".into(),
+                images: vec![],
+                mode: MessageMode::Guide.into(),
+                session_id: Some("other-session".into()),
+            }))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+        assert!(err.message().contains("SwitchSession"));
     }
 
     #[tokio::test]
@@ -916,6 +959,7 @@ mod tests {
                 text: "via transport".into(),
                 images: Vec::new(),
                 mode: MessageMode::Guide.into(),
+                session_id: None,
             })
             .await
             .unwrap()

@@ -369,6 +369,10 @@ pub struct PromptRequest {
     pub text: String,
     #[serde(default)]
     pub images: Vec<WebPromptImage>,
+    /// Target session (optional; must be the active session — see
+    /// `POST /prompt` validation in theway-server).
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

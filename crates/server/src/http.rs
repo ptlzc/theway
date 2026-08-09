@@ -146,6 +146,22 @@ async fn prompt(
     State(state): State<HttpState>,
     Json(req): Json<PromptRequest>,
 ) -> impl IntoResponse {
+    // Explicit session targeting: only the active session can receive prompts
+    // (single live agent loop); other sessions must be switched to first.
+    if let Some(target) = req.session_id.as_deref() {
+        let current = state.latest.lock().await.session_id.clone();
+        if target != current {
+            return (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({
+                    "error": format!(
+                        "session {target} is not the active session ({current}); switch first"
+                    )
+                })),
+            )
+                .into_response();
+        }
+    }
     let accepted = state
         .commands
         .send(WebCommand::Submit {
@@ -154,7 +170,7 @@ async fn prompt(
             interrupt: false,
         })
         .is_ok();
-    Json(CommandAccepted { accepted })
+    Json(CommandAccepted { accepted }).into_response()
 }
 
 async fn complete(
