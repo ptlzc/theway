@@ -697,7 +697,9 @@ fn print_remove_skill_result(result: &theway_core::AgentToolResult) {
     }
 }
 
-fn skill_harness_cell(ctx: &CommandCtx<'_>) -> theway_core::runtime::tools::skill::SkillHarnessCell {
+fn skill_harness_cell(
+    ctx: &CommandCtx<'_>,
+) -> theway_core::runtime::tools::skill::SkillHarnessCell {
     let cell = std::sync::Arc::new(once_cell::sync::OnceCell::new());
     // This is a fresh cell scoped to a single slash command invocation, so set() can only fail
     // if this helper is called incorrectly inside the same invocation.

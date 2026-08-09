@@ -32,9 +32,9 @@ use theway_core::{
 use theway_llm_provider::{Tool, UserContentBlock};
 use tokio_util::sync::CancellationToken;
 
-use crate::skills_state;
 use super::set_skill_state::default_base_dir;
 use super::skill::SkillHarnessCell;
+use crate::skills_state;
 
 pub struct RemoveSkillTool {
     harness: SkillHarnessCell,

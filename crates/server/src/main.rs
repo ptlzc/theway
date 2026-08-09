@@ -608,13 +608,15 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
     let dag_engine = Arc::new(DagEngine::new());
     // Subagent job registry (graph mode): task tool + DAG node launches both register.
     let subagent_registry = theway_core::runtime::subagents::registry::SubagentJobRegistry::new();
-    dag_engine.set_launcher(Some(theway_core::runtime::tools::node_launcher::node_launcher(
-        dag_engine.clone(),
-        model.clone(),
-        Some(stream_fn.clone()),
-        cwd.clone(),
-        subagent_registry.clone(),
-    )));
+    dag_engine.set_launcher(Some(
+        theway_core::runtime::tools::node_launcher::node_launcher(
+            dag_engine.clone(),
+            model.clone(),
+            Some(stream_fn.clone()),
+            cwd.clone(),
+            subagent_registry.clone(),
+        ),
+    ));
     // Resume in-flight DAG runs from this session's state file (crash recovery). Restored
     // ids are logged; a clean shutdown flushes the file at exit, so a file here means the
     // previous process died before aborting its runs.

@@ -8,7 +8,7 @@ use tokio_util::sync::CancellationToken;
 
 // Tool BODIES moved into the engine crate (openspec tools-into-core) — use the real lib
 // copy so the types match what the assembly layer below consumes.
-use theway_core::runtime::tools as tools;
+use theway_core::runtime::tools;
 
 // The ASSEMBLY layer (`src/tools.rs`) and `triggers` are still pulled in by path: the
 // assembly's cron/trigger builders reference `crate::triggers`, which must resolve to the

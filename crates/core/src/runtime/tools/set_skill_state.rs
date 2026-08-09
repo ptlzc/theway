@@ -42,8 +42,8 @@ use theway_core::{
 use theway_llm_provider::{Tool, UserContentBlock};
 use tokio_util::sync::CancellationToken;
 
-use crate::skills_state;
 use super::skill::SkillHarnessCell;
+use crate::skills_state;
 
 pub struct SetSkillStateTool {
     harness: SkillHarnessCell,
