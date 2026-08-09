@@ -33,13 +33,6 @@ impl MemorySessionStorage {
         }
     }
 
-    pub fn with_metadata(metadata: SessionMetadata) -> Self {
-        Self {
-            metadata,
-            inner: Mutex::new(Inner::default()),
-        }
-    }
-
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
         self.inner.lock().expect("storage mutex poisoned")
     }

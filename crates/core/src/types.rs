@@ -140,15 +140,7 @@ impl From<Message> for AgentMessage {
     }
 }
 
-impl AgentMessage {
-    /// Convenience: returns the inner LLM message if this variant is `Llm`.
-    pub fn as_llm(&self) -> Option<&Message> {
-        match self {
-            Self::Llm(m) => Some(m),
-            Self::Custom(_) => None,
-        }
-    }
-}
+impl AgentMessage {}
 
 // ──────────────────────────────────────────────────────────────────────────────────────────
 // Tools

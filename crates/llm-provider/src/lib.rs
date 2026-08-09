@@ -4,7 +4,6 @@
 pub mod api_registry;
 pub mod bedrock_anthropic;
 pub mod bedrock_provider;
-pub mod cli;
 pub mod env_api_keys;
 pub mod event_stream;
 pub mod image_models;

@@ -99,11 +99,6 @@ impl PendingMessageQueue {
             }
         }
     }
-
-    #[allow(dead_code)] // public API for future schedulers; not used by the current loop.
-    pub fn has_items(&self) -> bool {
-        !self.items.is_empty()
-    }
 }
 
 impl Agent {

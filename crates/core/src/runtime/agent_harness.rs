@@ -236,7 +236,6 @@ use super::messages::compaction_summary;
 use super::notification_hook::{DynNotificationHook, NotificationHookStatus};
 use super::prompt_templates::PromptTemplateRegistry;
 use super::session::session::{BranchSummaryInput, Session};
-use super::skills::format_skill_invocation;
 use super::system_prompt::format_skills_for_system_prompt;
 use super::trigger::{Trigger, TriggerRecord, TriggerState};
 use super::trigger_runtime::{
@@ -1551,22 +1550,6 @@ impl AgentHarness {
         Ok(out)
     }
 
-    /// Replace the prompt-template registry.
-    pub fn replace_prompt_templates(&self, templates: Vec<PromptTemplate>) {
-        *self.templates.lock() = PromptTemplateRegistry::new(templates);
-    }
-
-    /// Replace the tool set. UI consumers calling this mid-run will see the new tools on the
-    /// next turn.
-    pub fn replace_tools(&self, tools: Vec<Arc<dyn AgentTool>>) {
-        self.agent.state().tools = tools;
-    }
-
-    /// Update auto-compaction thresholds.
-    pub fn set_compaction_settings(&self, settings: CompactionSettings) {
-        *self.compaction_settings.lock() = settings;
-    }
-
     pub fn abort(&self) {
         self.agent.abort();
         // If an `OnTurnEndHook` future is currently in flight (typically waiting on an
@@ -2151,11 +2134,6 @@ impl AgentHarness {
             s.messages = new_msgs;
         }
         Ok(true)
-    }
-
-    /// Format a single skill invocation block for ad-hoc UI surfaces.
-    pub fn format_skill(skill: &Skill, extra: Option<&str>) -> String {
-        format_skill_invocation(skill, extra)
     }
 }
 

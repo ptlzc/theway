@@ -521,27 +521,6 @@ impl Session {
         .await
     }
 
-    pub async fn append_label(
-        &self,
-        target_id: impl Into<String>,
-        label: Option<String>,
-    ) -> Result<String, SessionError> {
-        let target = target_id.into();
-        if self.storage.get_entry(&target).await?.is_none() {
-            return Err(Self::not_found(format!("Entry {target} not found")));
-        }
-        let id = self.storage.create_entry_id().await?;
-        let parent = self.storage.get_leaf_id().await?;
-        self.append_typed(SessionTreeEntry::Label {
-            id,
-            parent_id: parent,
-            timestamp: Self::now_rfc3339(),
-            target_id: target,
-            label,
-        })
-        .await
-    }
-
     pub async fn append_session_name(
         &self,
         name: impl Into<String>,
