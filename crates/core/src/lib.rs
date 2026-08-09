@@ -17,6 +17,12 @@ pub mod types;
 #[cfg(feature = "harness")]
 pub mod skills_state;
 
+/// Core capability tools — agent-facing generic capabilities (process/files/network/
+/// search/git/MCP) that do not support the harness runtime itself. Native-only (they
+/// spawn processes / touch the filesystem / dial the network).
+#[cfg(feature = "native-env")]
+pub mod tools;
+
 #[cfg(feature = "harness")]
 pub mod runtime;
 

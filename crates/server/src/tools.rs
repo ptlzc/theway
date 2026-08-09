@@ -12,10 +12,10 @@ use std::sync::Arc;
 
 use theway_core::AgentTool;
 use theway_core::runtime::tools::{
-    dag_tools, install_skill, outline, remove_skill, set_skill_state, skill, skill_builder, task,
+    dag_tools, install_skill, remove_skill, set_skill_state, skill, skill_builder, task,
 };
 
-pub use theway_core::runtime::tools::{default_tools, subagent_read_only_tools};
+pub use theway_core::tools::{default_tools, subagent_read_only_tools};
 
 /// Build the Task tool. Separate from `default_tools` because Task needs the model handle to
 /// spawn its inner harness; the caller wires it in at construction time. `session_id`
@@ -55,7 +55,7 @@ pub fn session_tool_set(
     let mut tools = default_tools(memory_dir.to_path_buf());
     // DAG + outline tools, main agent only — the read-only subagent tool set stays
     // deliberately untouched (shell/exec already ship via `default_tools`).
-    tools.push(Arc::new(outline::OutlineTool));
+    tools.push(Arc::new(theway_core::tools::outline::OutlineTool));
     tools.extend(dag_tools::DagTools::new(
         dag_engine.clone(),
         Some(session_id.to_string()),

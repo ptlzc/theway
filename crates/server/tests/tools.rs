@@ -45,8 +45,8 @@ async fn read_writes_then_reads() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("hello.txt");
 
-    let write = tools::write::WriteTool;
-    let read = tools::read::ReadTool;
+    let write = theway_core::tools::write::WriteTool;
+    let read = theway_core::tools::read::ReadTool;
 
     write
         .execute(
@@ -81,7 +81,7 @@ async fn ls_lists_entries() {
     std::fs::write(dir.path().join("a.txt"), "a").unwrap();
     std::fs::create_dir(dir.path().join("sub")).unwrap();
 
-    let ls = tools::ls::LsTool;
+    let ls = theway_core::tools::ls::LsTool;
     let r = ls
         .execute(
             "l1",
@@ -101,7 +101,7 @@ async fn ls_lists_entries() {
 
 #[tokio::test]
 async fn bash_captures_stdout_and_exit() {
-    let bash = tools::bash::BashTool;
+    let bash = theway_core::tools::bash::BashTool;
     let r = bash
         .execute(
             "b1",
@@ -492,7 +492,7 @@ async fn set_trigger_state_tool_disables_and_enables_rule() {
 
 #[tokio::test]
 async fn bash_reports_nonzero_exit() {
-    let bash = tools::bash::BashTool;
+    let bash = theway_core::tools::bash::BashTool;
     let r = bash
         .execute(
             "b2",

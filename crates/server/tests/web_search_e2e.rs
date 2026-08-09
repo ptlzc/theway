@@ -8,7 +8,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
-#[path = "../../core/src/runtime/tools/web_search.rs"]
+#[path = "../../core/src/tools/web_search.rs"]
 mod web_search;
 
 async fn spawn_mock(json: &'static str) -> (String, tokio::task::JoinHandle<()>) {

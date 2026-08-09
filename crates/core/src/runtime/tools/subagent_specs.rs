@@ -102,23 +102,25 @@ pub fn resolve_spec(name: &str) -> Option<&'static SubagentSpec> {
 // ── tool-set factories ──────────────────────────────────────────────────────
 
 fn explorer_tools() -> Vec<Arc<dyn AgentTool>> {
-    let mut tools = super::subagent_read_only_tools();
-    tools.push(Arc::new(super::web_search::WebSearchTool::new()));
+    let mut tools = theway_core::tools::subagent_read_only_tools();
+    tools.push(Arc::new(
+        theway_core::tools::web_search::WebSearchTool::new(),
+    ));
     tools
 }
 
 fn planner_tools() -> Vec<Arc<dyn AgentTool>> {
     vec![
-        Arc::new(super::read::ReadTool),
-        Arc::new(super::ls::LsTool),
-        Arc::new(super::grep::GrepTool),
-        Arc::new(super::find::FindTool),
+        Arc::new(theway_core::tools::read::ReadTool),
+        Arc::new(theway_core::tools::ls::LsTool),
+        Arc::new(theway_core::tools::grep::GrepTool),
+        Arc::new(theway_core::tools::find::FindTool),
     ]
 }
 
 fn executor_coder_tools() -> Vec<Arc<dyn AgentTool>> {
     // Same store as the parent agent: DAG subagents share the parent's memory dir.
-    super::default_tools(default_memory_dir())
+    theway_core::tools::default_tools(default_memory_dir())
 }
 
 /// The theway memory dir: `${THEWAY_DIR:-$HOME/.theway}/memory`. Inlined (not via the CLI's
@@ -136,17 +138,17 @@ fn default_memory_dir() -> std::path::PathBuf {
 
 fn checker_tools() -> Vec<Arc<dyn AgentTool>> {
     vec![
-        Arc::new(super::read::ReadTool),
-        Arc::new(super::ls::LsTool),
-        Arc::new(super::grep::GrepTool),
-        Arc::new(super::find::FindTool),
-        Arc::new(super::bash::BashTool),
-        Arc::new(super::git::GitTool),
+        Arc::new(theway_core::tools::read::ReadTool),
+        Arc::new(theway_core::tools::ls::LsTool),
+        Arc::new(theway_core::tools::grep::GrepTool),
+        Arc::new(theway_core::tools::find::FindTool),
+        Arc::new(theway_core::tools::bash::BashTool),
+        Arc::new(theway_core::tools::git::GitTool),
     ]
 }
 
 fn general_tools() -> Vec<Arc<dyn AgentTool>> {
-    super::subagent_read_only_tools()
+    theway_core::tools::subagent_read_only_tools()
 }
 
 #[cfg(test)]
