@@ -1,9 +1,9 @@
 //! Wire protocol model shared by the `--web` (axum) and `--grpc` (tonic) transport
 //! servers: the command enum both event loops consume and the status payload both
 //! serialize. Decoupled from the terminal UI — the servers live in the
-//! `theway-server` crate (`crates/server`), the event loop stays in
+//! `transport` module (`theway` crate, `server` feature), the event loop stays in
 //! `crate::ui::web_loop`. The proto codecs that map these models onto the
-//! generated gRPC types live in `theway-server` as well.
+//! generated gRPC types live in `transport::proto` as well.
 
 use serde::{Deserialize, Serialize};
 

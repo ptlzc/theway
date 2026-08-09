@@ -51,7 +51,7 @@ jobs:
       - name: build
         run: |
           BIN="${CARGO_BIN:-cargo}"
-          $BIN build --release --target ${{ matrix.target }} --workspace --features tui -p theway
+          $BIN build --release --target ${{ matrix.target }} --workspace --features tui,server -p theway
         shell: bash
 
       - name: package

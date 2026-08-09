@@ -48,7 +48,7 @@ jobs:
       # `--workspace` + `--all-targets` covers every crate's lib/bin/tests/examples. All 10
       # providers are linted because `theway` already activates the `all-providers`
       # feature on `theway-llm-provider` (feature unification across the workspace).
-      - run: cargo clippy --workspace --all-targets --features tui -- -D warnings
+      - run: cargo clippy --workspace --all-targets --features tui,server -- -D warnings
 
   test:
     name: test (${{ matrix.os }})
@@ -72,7 +72,7 @@ jobs:
           key: test-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
           restore-keys: |
             test-${{ runner.os }}-
-      - name: cargo test --workspace --features tui
+      - name: cargo test --workspace --features tui,server
         # Strip all provider env vars so any test that accidentally hits a real API will
         # self-skip / error cleanly. Mirrors the TS repo's `test.sh` discipline.
         env:
@@ -87,7 +87,7 @@ jobs:
           GOOGLE_VERTEX_ACCESS_TOKEN: ""
           CODEX_AUTH_TOKEN: ""
           AZURE_OPENAI_API_KEY: ""
-        run: cargo test --workspace --features tui
+        run: cargo test --workspace --features tui,server
 
   fefe-worker:
     name: fefe worker

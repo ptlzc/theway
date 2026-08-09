@@ -20,23 +20,23 @@ help: ## show this help
 # --- build ------------------------------------------------------------------
 
 .PHONY: build
-build: ## cargo build --workspace --features tui (full CLI; SDK-only consumers don't need tui)
-	$(CARGO) build --workspace --features tui --target-dir $(OUTPUT_DIR)
+build: ## cargo build --workspace --features tui,server (full CLI; SDK-only consumers need neither)
+	$(CARGO) build --workspace --features tui,server --target-dir $(OUTPUT_DIR)
 	cp $(THEWAY_BINARY) $(dir $(THEWAY_BINARY))tw$(EXE)
 
 .PHONY: release
-release: ## cargo build --release (optimized binary at (THEWAY_RELEASE_BINARY))
-	$(CARGO) build --workspace --release --target-dir $(OUTPUT_DIR)
+release: ## cargo build --release --features tui,server (optimized binary at (THEWAY_RELEASE_BINARY))
+	$(CARGO) build --workspace --release --features tui,server --target-dir $(OUTPUT_DIR)
 
 .PHONY: check
-check: ## fast type-check without producing artifacts (full workspace incl. tui)
-	$(CARGO) check --workspace --all-targets --features tui
+check: ## fast type-check without producing artifacts (full workspace incl. tui,server)
+	$(CARGO) check --workspace --all-targets --features tui,server
 
 # --- tests ------------------------------------------------------------------
 
 .PHONY: test
 test: ## run every workspace test (full CLI surface)
-	$(CARGO) test --workspace --features tui
+	$(CARGO) test --workspace --features tui,server
 
 .PHONY: test-coding-agent
 test-coding-agent: ## run only the harness crate's tests
@@ -66,7 +66,7 @@ fmt-check: ## rustfmt --check (CI uses this)
 
 .PHONY: lint
 lint: ## clippy with -D warnings (matches CI)
-	$(CARGO) clippy --workspace --all-targets --features tui -- -D warnings
+	$(CARGO) clippy --workspace --all-targets --features tui,server -- -D warnings
 
 .PHONY: ci
 ci: fmt-check lint test ## run the full CI pipeline locally
@@ -75,11 +75,11 @@ ci: fmt-check lint test ## run the full CI pipeline locally
 
 .PHONY: run
 run: ## build + run theway in dev mode (interactive)
-	$(CARGO) run --workspace --features tui -p theway
+	$(CARGO) run --workspace --features tui,server -p theway
 
 .PHONY: install
 install: ## install theway binary into ~/.cargo/bin
-	$(CARGO) install --path crates/harness --features tui --force
+	$(CARGO) install --path crates/app --features tui,server --force
 	cp ~/.cargo/bin/theway$(EXE) ~/.cargo/bin/tw$(EXE)
 
 # --- docs / housekeeping ----------------------------------------------------

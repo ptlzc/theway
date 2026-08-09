@@ -6,7 +6,7 @@ This repository is a Rust 2024 Cargo workspace. The root `Cargo.toml` lists four
 
 - `crates/llm-provider`: `theway-llm-provider`, the unified streaming LLM client, provider integrations, OAuth helpers, model catalogs, and utilities.
 - `crates/core`: `theway-core`, the agent runtime, harness, session storage, skills loading, compaction, and lifecycle hooks.
-- `crates/harness`: `theway`, the `theway` CLI binary, REPL TUI, tools, config, and session handling.
+- `crates/app`: `theway`, the `theway` CLI binary (bin, features `tui`+`server`), REPL TUI, transport servers, tools, config, and session handling.
 
 Each crate keeps implementation in `src/`, integration tests in `tests/`, and runnable examples in `examples/` where present. Provider model data and generated Rust live under `crates/llm-provider/src/`; use `crates/llm-provider/scripts/regen_models.sh` when regenerating model catalogs.
 
@@ -21,7 +21,7 @@ Each crate keeps implementation in `src/`, integration tests in `tests/`, and ru
 
 ## Coding Style & Naming Conventions
 
-Use standard `rustfmt` formatting and Rust 2024 idioms. Keep module and file names in `snake_case`; public types and traits in `PascalCase`; functions, variables, and test names in `snake_case`. Prefer crate-local patterns and shared workspace dependencies before adding new dependencies. Keep provider-specific code under `crates/llm-provider/src/providers/` and CLI tools under `crates/harness/src/tools/`.
+Use standard `rustfmt` formatting and Rust 2024 idioms. Keep module and file names in `snake_case`; public types and traits in `PascalCase`; functions, variables, and test names in `snake_case`. Prefer crate-local patterns and shared workspace dependencies before adding new dependencies. Keep provider-specific code under `crates/llm-provider/src/providers/` and CLI tools under `crates/app/src/tools/`.
 
 ## Testing Guidelines
 
@@ -45,7 +45,7 @@ any orchestrator driving the built-in subagents (task tool / dag_*):
    must (a) start with an explicit `cd <absolute target>`, (b) forbid touching the
    default cwd, and (c) name the files it may modify. Built-in subagent prompts already
    carry this operating discipline (see `OPERATING_DISCIPLINE` in
-   `crates/harness/src/tools/subagent_specs.rs`); the orchestrator still must supply the
+   `crates/app/src/tools/subagent_specs.rs`); the orchestrator still must supply the
    concrete target path — subagents cannot guess it.
 2. **Stalled nodes are the orchestrator's to handle.** A node whose token/round counter
    stops growing across two inspection cycles is stalled. Don't wait on it: skip the node
