@@ -1,0 +1,47 @@
+[package]
+name = "theway-cli"
+version = "0.75.0"
+edition = "2024"
+rust-version = "1.85"
+description = "theway CLI binary: thin assembly layer over the theway SDK (TUI / --web / --grpc dispatch). The transport servers live in theway-server; the runtime SDK in theway."
+default-run = "theway"
+license = "MIT"
+authors = ["theway contributors"]
+
+[features]
+# The terminal stack (crossterm/ratatui/tui-textarea/arboard/qrcode/image) is owned by the
+# `theway` SDK crate — `main.rs` itself imports no TUI dependency directly, but it calls
+# `resume_picker` and `App::run`, which compile only under the SDK's `tui` feature. The CLI
+# feature therefore forwards to `theway/tui`. Headless embeds use the SDK directly, not this
+# binary.
+default = ["tui"]
+tui = ["theway/tui"]
+
+[[bin]]
+name = "theway"
+path = "src/main.rs"
+# The CLI is a TUI application: without the `tui` feature cargo skips building this target
+# entirely (same posture the app crate's bin had before the move).
+required-features = ["tui"]
+
+[dependencies]
+# SDK + transports: this crate is the ONLY place that depends on both `theway` and
+# `theway-server` (dependency direction `theway-server -> theway` stays one-way).
+theway = { path = "../app" }
+theway-server = { path = "../server" }
+theway-core = { path = "../core" }
+# Same feature pin as the app crate so model auto-detection sees every wire provider.
+theway-llm-provider = { path = "../llm-provider", default-features = false, features = ["all-providers"] }
+
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "fs"] }
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+clap = { version = "4", features = ["derive"] }
+once_cell = "1"
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

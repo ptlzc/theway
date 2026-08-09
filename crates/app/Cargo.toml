@@ -3,14 +3,13 @@ name = "theway"
 version = "0.75.0"
 edition = "2024"
 rust-version = "1.85"
-description = "theway: local agent runtime (fork of theway) — REPL TUI, graph engineering mode, goal loops, cron/triggers, gRPC/WebSocket transports."
-default-run = "theway"
+description = "theway: local agent runtime SDK (fork of theway) — REPL TUI, graph engineering mode, goal loops, cron/triggers. The CLI binary lives in theway-cli; transport servers in theway-server."
 license = "MIT"
 authors = ["theway contributors"]
 
 [features]
-# SDK default is headless: no terminal stack. The CLI binary enables 
-# explicitly (required-features below); external projects opt in with features = ["tui"].
+# SDK default is headless: no terminal stack. The theway-cli binary enables it via
+# feature forwarding (`tui = ["theway/tui"]`); external projects opt in with features = ["tui"].
 default = []
 # Terminal UI (ratatui TUI + terminal input). External projects that only embed the
 # runtime headless (transport servers / AgentSession) can set default-features = false.
@@ -19,13 +18,6 @@ tui = ["dep:crossterm", "dep:ratatui", "dep:tui-textarea", "dep:arboard", "dep:q
 [lib]
 name = "theway"
 path = "src/lib.rs"
-
-[[bin]]
-name = "theway"
-path = "src/main.rs"
-# The CLI is a TUI application: without the `tui` feature (headless SDK embedding)
-# cargo skips building this target entirely.
-required-features = ["tui"]
 
 [dependencies]
 # Enable every wire-protocol provider so model auto-detection isn't bottlenecked by feature
@@ -66,7 +58,6 @@ unicode-width = "0.2"
 arboard = { version = "3", optional = true }
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 qrcode = { version = "0.14", default-features = false, optional = true }
-clap = { version = "4", features = ["derive"] }
 ignore = "0.4"
 # tree-sitter structural outline (tools/outline.rs) — same version family as the
 # enhanced-tools native addon; grammar crates must stay compatible with the core pin.
