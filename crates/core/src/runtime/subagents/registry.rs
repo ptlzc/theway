@@ -88,6 +88,9 @@ pub struct SubagentJob {
     pub source: String,
     pub run_id: Option<String>,
     pub node_id: Option<String>,
+    /// Owning session (`None` for session-less headless runs; stamped by the
+    /// launch path — DAG node jobs inherit it from the run).
+    pub session_id: Option<String>,
     pub status: JobStatus,
     pub started_at: Option<i64>,
     pub completed_at: Option<i64>,
@@ -111,6 +114,7 @@ impl SubagentJob {
         source: String,
         run_id: Option<String>,
         node_id: Option<String>,
+        session_id: Option<String>,
     ) -> Self {
         Self {
             id,
@@ -118,6 +122,7 @@ impl SubagentJob {
             source,
             run_id,
             node_id,
+            session_id,
             status: JobStatus::Running,
             started_at: Some(now_ms()),
             completed_at: None,
@@ -177,6 +182,8 @@ pub struct JobInit {
     pub source: String,
     pub run_id: Option<String>,
     pub node_id: Option<String>,
+    /// Owning session (`None` for session-less headless runs).
+    pub session_id: Option<String>,
 }
 
 impl SubagentJobRegistry {
@@ -200,6 +207,7 @@ impl SubagentJobRegistry {
             init.source.clone(),
             init.run_id.clone(),
             init.node_id.clone(),
+            init.session_id.clone(),
         ));
         Self::evict(&mut inner.jobs);
         drop(inner);
@@ -398,6 +406,7 @@ mod tests {
             source: "task".into(),
             run_id: None,
             node_id: None,
+            session_id: None,
         });
         let job = registry.job(&id).unwrap();
         assert_eq!(job.status, JobStatus::Running);
@@ -420,7 +429,14 @@ mod tests {
 
     #[test]
     fn output_buffer_caps_and_flags_truncated() {
-        let mut job = SubagentJob::new("j1".into(), "general".into(), "task".into(), None, None);
+        let mut job = SubagentJob::new(
+            "j1".into(),
+            "general".into(),
+            "task".into(),
+            None,
+            None,
+            None,
+        );
         let big = "x".repeat(MAX_OUTPUT_BYTES + 10);
         append_output(&mut job, &big);
         assert!(job.truncated);
@@ -439,6 +455,7 @@ mod tests {
                 source: "task".into(),
                 run_id: None,
                 node_id: None,
+                session_id: None,
             });
             if i == 0 {
                 first_id = Some(id.clone());
@@ -472,6 +489,7 @@ mod tests {
             source: "task".into(),
             run_id: None,
             node_id: None,
+            session_id: None,
         });
         let emit = |event: AgentEvent| {
             let listener = metrics_listener(registry.clone(), id.clone());

@@ -38,6 +38,24 @@ pub enum WebCommand {
     },
 }
 
+/// session-resource-model: one session as a managed resource (mirrors
+/// `theway_grpc.proto` SessionSummary). Produced by the app-side SessionOps
+/// from the JsonlSessionRepo plus live DagEngine state; served verbatim on
+/// the JSON surface and mapped onto the proto message by `theway-server`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SessionSummary {
+    pub session_id: String,
+    pub name: String,
+    pub cwd: String,
+    pub model: String,
+    pub created_at: String,
+    pub last_activity_at: i64,
+    pub graph_count: u32,
+    pub active_graph_count: u32,
+    pub busy: bool,
+    pub preview: Option<String>,
+}
+
 /// graph mode: one DAG run (mirrors `theway_grpc.proto` DagRunSnapshot; task text is
 /// deliberately excluded from the wire model — full text goes through GetNodeOutput).
 #[derive(Clone, Debug, Serialize)]

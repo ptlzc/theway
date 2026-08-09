@@ -442,6 +442,66 @@ message GraphRestoreResponse {
   optional string error = 2;
 }
 
+// ─────────────────────────── session resources ───────────────────────────
+//
+// Sessions are first-class resources (openspec session-resource-model): the
+// server hosts one live session (the harness) plus archived sessions on disk
+// (JsonlSessionRepo). ListSessions summarizes both and marks the current one;
+// Create/Switch/Rename/Delete manage the resource set. DeleteSession is
+// refused while the session still has running graphs, reporting their run ids.
+
+message SessionSummary {
+  string session_id = 1;
+  string name = 2;
+  string cwd = 3;
+  string model = 4;
+  string created_at = 5;
+  int64 last_activity_at = 6;
+  uint32 graph_count = 7;
+  uint32 active_graph_count = 8;
+  bool busy = 9;
+  optional string preview = 10;
+}
+
+message ListSessionsResponse {
+  repeated SessionSummary sessions = 1;
+  string current_session_id = 2;
+}
+
+message CreateSessionRequest {
+  optional string name = 1;
+}
+
+message CreateSessionResponse {
+  SessionSummary session = 1;
+}
+
+message SwitchSessionRequest {
+  string session_id = 1;
+}
+
+message RenameSessionRequest {
+  string session_id = 1;
+  string name = 2;
+}
+
+message DeleteSessionRequest {
+  string session_id = 1;
+}
+
+message DeleteSessionResponse {
+  // Non-empty = deletion refused, these graphs are still running.
+  repeated string running_run_ids = 1;
+}
+
+message GraphListRequest {
+  string session_id = 1;
+}
+
+message GraphListResponse {
+  repeated DagRunSnapshot runs = 1;
+}
+
 service ThewayGrpc {
   // Full structured state (binary protobuf).
   rpc GetState(Empty) returns (SessionState);
@@ -464,4 +524,14 @@ service ThewayGrpc {
   // Checkpoint / restore (portable run snapshots for external persistence).
   rpc GraphCheckpoint(GraphCheckpointRequest) returns (GraphCheckpointResponse);
   rpc GraphRestore(GraphRestoreRequest) returns (GraphRestoreResponse);
+  // Session resources: list (with current marker) / create / switch / rename /
+  // delete. DeleteSession reports the offending run ids when refused because
+  // the session still has running graphs.
+  rpc ListSessions(Empty) returns (ListSessionsResponse);
+  rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
+  rpc SwitchSession(SwitchSessionRequest) returns (CommandResult);
+  rpc RenameSession(RenameSessionRequest) returns (CommandResult);
+  rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse);
+  // Enumerate one session's graph runs (DagRunSnapshot shape).
+  rpc GraphList(GraphListRequest) returns (GraphListResponse);
 }

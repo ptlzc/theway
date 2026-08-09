@@ -41,6 +41,9 @@ pub struct SubagentRunOptions {
     pub source: String,
     pub run_id: Option<String>,
     pub node_id: Option<String>,
+    /// Owning session stamped on the registry job (`None` for session-less
+    /// runs; DAG node jobs inherit it from the run).
+    pub session_id: Option<String>,
     /// Parent/engine abort token; fires the inner harness's abort.
     pub cancel: CancellationToken,
     /// Extra system-prompt lines appended after the spec's static prompt (e.g. the
@@ -78,6 +81,7 @@ pub async fn run_subagent(opts: SubagentRunOptions) -> SubagentRunResult {
         source: opts.source,
         run_id: opts.run_id,
         node_id: opts.node_id,
+        session_id: opts.session_id,
     });
 
     let storage = Arc::new(MemorySessionStorage::new());

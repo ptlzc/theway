@@ -154,8 +154,25 @@ pub fn session_state(snapshot: &WebStatus) -> wire::SessionState {
     }
 }
 
+/// Convert the internal session summary (session-resource-model) into the
+/// structured wire model.
+pub fn session_summary_wire(summary: &theway::wire::SessionSummary) -> wire::SessionSummary {
+    wire::SessionSummary {
+        session_id: summary.session_id.clone(),
+        name: summary.name.clone(),
+        cwd: summary.cwd.clone(),
+        model: summary.model.clone(),
+        created_at: summary.created_at.clone(),
+        last_activity_at: summary.last_activity_at,
+        graph_count: summary.graph_count,
+        active_graph_count: summary.active_graph_count,
+        busy: summary.busy,
+        preview: summary.preview.clone(),
+    }
+}
+
 /// Convert one DAG run snapshot into the wire form.
-fn dag_run_wire(run: &theway::wire::WebDagRunSnapshot) -> wire::DagRunSnapshot {
+pub fn dag_run_wire(run: &theway::wire::WebDagRunSnapshot) -> wire::DagRunSnapshot {
     wire::DagRunSnapshot {
         id: run.id.clone(),
         name: run.name.clone(),
@@ -269,6 +286,7 @@ pub fn dag_event_wire(event: &DagEvent) -> wire::StreamEvent {
             node_id,
             status,
             error,
+            .. // `session_id` has no wire field yet (proto change pending).
         } => Kind::NodeStatus(wire::NodeStatus {
             run_id: run_id.clone(),
             node_id: node_id.clone(),
@@ -279,6 +297,7 @@ pub fn dag_event_wire(event: &DagEvent) -> wire::StreamEvent {
             run_id,
             status,
             error,
+            .. // `session_id` has no wire field yet (proto change pending).
         } => Kind::RunStatus(wire::RunStatus {
             run_id: run_id.clone(),
             status: dag_status_str(status).to_string(),
@@ -579,6 +598,38 @@ mod tests {
     }
 
     #[test]
+    fn session_summary_converts_to_wire_shape() {
+        let summary = theway::wire::SessionSummary {
+            session_id: "sess-1".into(),
+            name: "main".into(),
+            cwd: "/tmp/theway".into(),
+            model: "provider:model".into(),
+            created_at: "2026-08-01T00:00:00Z".into(),
+            last_activity_at: 1234,
+            graph_count: 3,
+            active_graph_count: 1,
+            busy: true,
+            preview: Some("last prompt".into()),
+        };
+        let w = session_summary_wire(&summary);
+        assert_eq!(w.session_id, "sess-1");
+        assert_eq!(w.name, "main");
+        assert_eq!(w.cwd, "/tmp/theway");
+        assert_eq!(w.model, "provider:model");
+        assert_eq!(w.created_at, "2026-08-01T00:00:00Z");
+        assert_eq!(w.last_activity_at, 1234);
+        assert_eq!(w.graph_count, 3);
+        assert_eq!(w.active_graph_count, 1);
+        assert!(w.busy);
+        assert_eq!(w.preview.as_deref(), Some("last prompt"));
+
+        // preview stays optional on both sides.
+        let mut no_preview = summary;
+        no_preview.preview = None;
+        assert!(session_summary_wire(&no_preview).preview.is_none());
+    }
+
+    #[test]
     fn goal_run_round_trips_kind_and_dag_event_wire() {
         use theway_core::runtime::graph_engineering::engine::DagEngine;
 
@@ -597,6 +648,7 @@ mod tests {
         // Engine event → wire: run_status (running) + node_status.
         let event = dag_event_wire(&DagEvent::RunStatus {
             run_id: id.clone(),
+            session_id: String::new(),
             status: theway_core::runtime::graph_engineering::types::DagStatus::Running,
             error: None,
         });
@@ -610,6 +662,7 @@ mod tests {
         }
         let event = dag_event_wire(&DagEvent::NodeStatus {
             run_id: id.clone(),
+            session_id: String::new(),
             node_id: "main".into(),
             status: theway_core::runtime::graph_engineering::types::NodeStatus::Running,
             error: Some("not yet".into()),

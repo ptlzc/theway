@@ -179,12 +179,18 @@ impl DagRun {
 pub enum DagEvent {
     NodeStatus {
         run_id: String,
+        /// Owning session of the run (empty string when the run is
+        /// session-less; `DagRun.session_id` is `Option<String>`).
+        session_id: String,
         node_id: String,
         status: NodeStatus,
         error: Option<String>,
     },
     RunStatus {
         run_id: String,
+        /// Owning session of the run (empty string when the run is
+        /// session-less; `DagRun.session_id` is `Option<String>`).
+        session_id: String,
         status: DagStatus,
         error: Option<String>,
     },

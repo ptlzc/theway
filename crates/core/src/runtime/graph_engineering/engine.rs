@@ -153,6 +153,7 @@ impl DagEngine {
     /// Returns the run id (`goal-N`, independent counter from dag-N).
     pub fn plan_goal(&self, condition: &str, session_id: Option<String>) -> String {
         let now = now_ms();
+        let session_id_str = session_id.clone().unwrap_or_default();
         let node = DagNode {
             id: "main".to_string(),
             agent: "main-agent".to_string(),
@@ -201,6 +202,7 @@ impl DagEngine {
         };
         self.emit(DagEvent::RunStatus {
             run_id: id.clone(),
+            session_id: session_id_str,
             status: DagStatus::Running,
             error: None,
         });
@@ -243,14 +245,17 @@ impl DagEngine {
                 run.status = DagStatus::Completed;
                 run.completed_at = Some(now_ms());
                 emit_state(run);
+                let run_session_id = run.session_id.clone().unwrap_or_default();
                 events.push(DagEvent::NodeStatus {
                     run_id: run_id.to_string(),
+                    session_id: run_session_id.clone(),
                     node_id: "main".to_string(),
                     status: NodeStatus::Succeeded,
                     error: None,
                 });
                 events.push(DagEvent::RunStatus {
                     run_id: run_id.to_string(),
+                    session_id: run_session_id,
                     status: DagStatus::Completed,
                     error: None,
                 });
@@ -258,6 +263,7 @@ impl DagEngine {
                 emit_state(run);
                 events.push(DagEvent::NodeStatus {
                     run_id: run_id.to_string(),
+                    session_id: run.session_id.clone().unwrap_or_default(),
                     node_id: "main".to_string(),
                     status: NodeStatus::Running,
                     error: reason,
@@ -303,6 +309,7 @@ impl DagEngine {
             if let Some(node) = run.node("main") {
                 events.push(DagEvent::NodeStatus {
                     run_id: run_id.to_string(),
+                    session_id: run.session_id.clone().unwrap_or_default(),
                     node_id: "main".to_string(),
                     status: node.status.clone(),
                     error: node.error.clone(),
@@ -310,6 +317,7 @@ impl DagEngine {
             }
             events.push(DagEvent::RunStatus {
                 run_id: run_id.to_string(),
+                session_id: run.session_id.clone().unwrap_or_default(),
                 status: run_status,
                 error: reason,
             });
@@ -505,6 +513,7 @@ impl DagEngine {
             emit_state(run);
             let event = DagEvent::NodeStatus {
                 run_id: run_id.to_string(),
+                session_id: run.session_id.clone().unwrap_or_default(),
                 node_id: node_id.to_string(),
                 status,
                 error,
@@ -611,6 +620,7 @@ impl DagEngine {
                 emit_state(run);
                 Some(DagEvent::RunStatus {
                     run_id: run_id.to_string(),
+                    session_id: run.session_id.clone().unwrap_or_default(),
                     status: run.status.clone(),
                     error: run.error.clone(),
                 })
@@ -626,7 +636,7 @@ impl DagEngine {
 
     /// Abort the whole run: in-flight jobs killed, pending/ready cancelled.
     pub fn cancel_run(&self, run_id: &str, reason: Option<&str>) {
-        let cancelled = {
+        let (cancelled, session_id) = {
             let mut inner = self.inner.lock();
             let Some(run) = inner.runs.get_mut(run_id) else {
                 return;
@@ -655,7 +665,7 @@ impl DagEngine {
             run.status = DagStatus::Cancelled;
             run.completed_at = Some(now_ms());
             emit_state(run);
-            running_ids
+            (running_ids, run.session_id.clone().unwrap_or_default())
         };
         // Second lock scope: abort the collected jobs' tokens.
         {
@@ -668,6 +678,7 @@ impl DagEngine {
         }
         self.emit(DagEvent::RunStatus {
             run_id: run_id.to_string(),
+            session_id,
             status: DagStatus::Cancelled,
             error: Some(reason.unwrap_or("cancelled by orchestrator").to_string()),
         });
@@ -779,6 +790,7 @@ impl DagEngine {
             emit_state(run);
             let event = DagEvent::NodeStatus {
                 run_id: run_id.to_string(),
+                session_id: run.session_id.clone().unwrap_or_default(),
                 node_id: node_id.to_string(),
                 status: NodeStatus::Skipped,
                 error,

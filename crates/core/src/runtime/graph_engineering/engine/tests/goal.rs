@@ -101,6 +101,7 @@ fn goal_run_emits_events() {
             run_id,
             status,
             error,
+            ..
         } => {
             assert_eq!(run_id, id);
             assert_eq!(status, DagStatus::Running);
@@ -117,6 +118,7 @@ fn goal_run_emits_events() {
             node_id,
             status,
             error,
+            ..
         } => {
             assert_eq!(run_id, id);
             assert_eq!(node_id, "main");

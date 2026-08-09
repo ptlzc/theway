@@ -30,11 +30,13 @@ use theway_core::runtime::subagents::registry::{SubagentEvent, SubagentJobRegist
 
 use theway_grpc::theway_grpc_server::{ThewayGrpc, ThewayGrpcServer};
 use theway_grpc::{
-    ApproveRequest, CommandResult, Empty, GetNodeOutputRequest, GetNodeOutputResponse,
-    GraphCancelRequest, GraphCheckpointRequest, GraphCheckpointResponse, GraphKind,
-    GraphRestoreRequest, GraphRestoreResponse, GraphRetryRequest, GraphRetryResponse,
-    GraphSkipRequest, GraphSkipResponse, MessageMode, SendMessageRequest, SessionState,
-    SetModelRequest, StreamFrame,
+    ApproveRequest, CommandResult, CreateSessionRequest, CreateSessionResponse,
+    DeleteSessionRequest, DeleteSessionResponse, Empty, GetNodeOutputRequest,
+    GetNodeOutputResponse, GraphCancelRequest, GraphCheckpointRequest, GraphCheckpointResponse,
+    GraphKind, GraphListRequest, GraphListResponse, GraphRestoreRequest, GraphRestoreResponse,
+    GraphRetryRequest, GraphRetryResponse, GraphSkipRequest, GraphSkipResponse,
+    ListSessionsResponse, MessageMode, RenameSessionRequest, SendMessageRequest, SessionState,
+    SetModelRequest, StreamFrame, SwitchSessionRequest,
 };
 
 #[derive(Clone, Debug)]
@@ -310,6 +312,62 @@ impl ThewayGrpc for GrpcState {
             error: None,
         }))
     }
+
+    // ── session resources (proto layer stubs; wired to SessionOps in N4) ──
+
+    async fn list_sessions(
+        &self,
+        _request: Request<Empty>,
+    ) -> Result<Response<ListSessionsResponse>, Status> {
+        Err(Status::unimplemented(
+            "session resources land with SessionOps",
+        ))
+    }
+
+    async fn create_session(
+        &self,
+        _request: Request<CreateSessionRequest>,
+    ) -> Result<Response<CreateSessionResponse>, Status> {
+        Err(Status::unimplemented(
+            "session resources land with SessionOps",
+        ))
+    }
+
+    async fn switch_session(
+        &self,
+        _request: Request<SwitchSessionRequest>,
+    ) -> Result<Response<CommandResult>, Status> {
+        Err(Status::unimplemented(
+            "session resources land with SessionOps",
+        ))
+    }
+
+    async fn rename_session(
+        &self,
+        _request: Request<RenameSessionRequest>,
+    ) -> Result<Response<CommandResult>, Status> {
+        Err(Status::unimplemented(
+            "session resources land with SessionOps",
+        ))
+    }
+
+    async fn delete_session(
+        &self,
+        _request: Request<DeleteSessionRequest>,
+    ) -> Result<Response<DeleteSessionResponse>, Status> {
+        Err(Status::unimplemented(
+            "session resources land with SessionOps",
+        ))
+    }
+
+    async fn graph_list(
+        &self,
+        _request: Request<GraphListRequest>,
+    ) -> Result<Response<GraphListResponse>, Status> {
+        Err(Status::unimplemented(
+            "session resources land with SessionOps",
+        ))
+    }
 }
 
 /// Standard `grpc.health.v1` service: the server is live as long as the
@@ -563,6 +621,7 @@ mod tests {
                 source: "dag".into(),
                 run_id: Some("run-1".into()),
                 node_id: Some("node-1".into()),
+                session_id: None,
             });
         state.registry.update(&job_id, |job| {
             job.output = "hello graph".into();
@@ -629,6 +688,7 @@ mod tests {
             .dag_events
             .send(DagEvent::RunStatus {
                 run_id: "goal-1".into(),
+                session_id: String::new(),
                 status: theway_core::runtime::graph_engineering::types::DagStatus::Running,
                 error: None,
             })
@@ -676,6 +736,7 @@ mod tests {
             .dag_events
             .send(DagEvent::NodeStatus {
                 run_id: "goal-1".into(),
+                session_id: String::new(),
                 node_id: "main".into(),
                 status: theway_core::runtime::graph_engineering::types::NodeStatus::Failed,
                 error: Some("condition broken".into()),

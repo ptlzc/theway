@@ -292,23 +292,27 @@ pub(crate) fn dag_event_json(event: &DagEvent) -> Value {
     match event {
         DagEvent::NodeStatus {
             run_id,
+            session_id,
             node_id,
             status,
             error,
         } => json!({
             "event": "node_status",
             "run_id": run_id,
+            "session_id": session_id,
             "node_id": node_id,
             "status": node_status_str(status),
             "error": error,
         }),
         DagEvent::RunStatus {
             run_id,
+            session_id,
             status,
             error,
         } => json!({
             "event": "run_status",
             "run_id": run_id,
+            "session_id": session_id,
             "status": dag_status_str(status),
             "error": error,
         }),
@@ -352,16 +356,19 @@ mod tests {
 
         let value = dag_event_json(&DagEvent::RunStatus {
             run_id: "goal-1".into(),
+            session_id: "sess-1".into(),
             status: DagStatus::Running,
             error: None,
         });
         assert_eq!(value["event"], "run_status");
         assert_eq!(value["run_id"], "goal-1");
+        assert_eq!(value["session_id"], "sess-1");
         assert_eq!(value["status"], "running");
         assert!(value["error"].is_null());
 
         let value = dag_event_json(&DagEvent::NodeStatus {
             run_id: "goal-1".into(),
+            session_id: "sess-1".into(),
             node_id: "main".into(),
             status: NodeStatus::Failed,
             error: Some("condition broken".into()),

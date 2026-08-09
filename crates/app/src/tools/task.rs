@@ -126,6 +126,9 @@ impl AgentTool for TaskTool {
             source: "task".into(),
             run_id: None,
             node_id: None,
+            // Session stamping lands with the app-layer session-resource
+            // wiring; the registry treats `None` as session-less.
+            session_id: None,
             cancel: parent_cancel.clone(),
             // Keep the v1 behaviour: the task description lands in the subagent's
             // system prompt, not just the tool-result details.
