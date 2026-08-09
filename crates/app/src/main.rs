@@ -1,7 +1,8 @@
-//! theway — coding agent CLI binary (`theway-cli` crate). Thin assembly layer on top of
-//! the `theway` SDK crate; all runtime logic lives in the library so external projects can
-//! embed it in-process. `--web` / `--grpc` dispatch into the `theway-server` transport
-//! drivers; this crate is the only place depending on both.
+//! theway — coding agent CLI binary (`[[bin]]` of the `theway` crate). Thin assembly layer
+//! on top of the `theway` SDK library; all runtime logic lives in the library so external
+//! projects can embed it in-process. `--web` / `--grpc` dispatch into the `transport::http`
+//! / `transport::grpc` drivers (crate `server` feature). The bin target requires features
+//! `tui` + `server`, so both are compile-time constants here.
 //!
 //! Modeled on `packages/coding-agent/` (the TS implementation) in spirit: same tools
 //! (`read`/`write`/`edit`/`bash`/`ls`/`grep`/`find` + `memory`), same `--resume` semantics
@@ -1107,23 +1108,22 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
     // Hand off to the UI layer. The TUI owns the terminal, the input box, the scrolling feed,
     // and the serialized run slot (user prompts + inject-and-run triggered turns) until quit.
     //
-    // `--web` / `--grpc`: the protocol servers live in the `theway-server` crate. Each driver
-    // binds the listener, spawns the protocol server and runs the shared transport event loop
-    // (`App::run_transport_loop`) on the public `theway::ui::web_loop::TransportEndpoints`
-    // channel surface. This binary is the only place that depends on both `theway` and
-    // `theway-server` — the dependency direction `theway-server -> theway` stays strictly
-    // one-way (openspec crate-restructure-web-isolation tasks 4.1/4.2).
+    // `--web` / `--grpc`: the protocol servers live in this crate's `transport` module
+    // (`server` feature). Each driver binds the listener, spawns the protocol server and runs
+    // the shared transport event loop (`App::run_transport_loop`) on the public
+    // `theway::ui::web_loop::TransportEndpoints` channel surface (openspec
+    // consolidate-server-cli 2.x: bin consolidated back into the `theway` crate).
     let run_result = if run_grpc {
-        theway_server::grpc::run_grpc(
+        theway::transport::grpc::run_grpc(
             app,
-            theway_server::grpc::GrpcOptions {
+            theway::transport::grpc::GrpcOptions {
                 host: cli.web_host.clone(),
                 port: cli.web_port,
             },
         )
         .await
     } else if run_web {
-        theway_server::http::run_web(
+        theway::transport::http::run_web(
             app,
             theway::wire::WebOptions {
                 host: cli.web_host.clone(),

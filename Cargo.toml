@@ -5,7 +5,6 @@ members = [
     "crates/core",
     "crates/app",
     "crates/mcp",
-    # "crates/cli",  # TEMP(N1 verify): depends on deleted theway-server; restored after check
 ]
 
 [workspace.package]

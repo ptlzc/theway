@@ -3,13 +3,13 @@ name = "theway"
 version = "0.75.0"
 edition = "2024"
 rust-version = "1.85"
-description = "theway: local agent runtime SDK (fork of theway) — REPL TUI, graph engineering mode, goal loops, cron/triggers. The CLI binary lives in theway-cli; transport servers in theway-server."
+description = "theway: local agent runtime SDK (fork of theway) — REPL TUI, graph engineering mode, goal loops, cron/triggers. Ships the `theway` CLI binary ([[bin]], requires features `tui` + `server`); transport servers live in the `server` feature."
 license = "MIT"
 authors = ["theway contributors"]
 
 [features]
-# SDK default is headless: no terminal stack. The theway-cli binary enables it via
-# feature forwarding (`tui = ["theway/tui"]`); external projects opt in with features = ["tui"].
+# SDK default is headless: no terminal stack. The `theway` binary ([[bin]] below) requires
+# `tui` + `server`; external embeds opt in per feature (`features = ["tui"]` etc.).
 default = []
 # Terminal UI (ratatui TUI + terminal input). External projects that only embed the
 # runtime headless (transport servers / AgentSession) can set default-features = false.
@@ -22,6 +22,15 @@ server = ["dep:axum", "dep:tonic", "dep:tonic-prost", "dep:prost", "dep:tokio-st
 name = "theway"
 path = "src/lib.rs"
 
+# The `theway` CLI binary (consolidated back from the former `theway-cli` crate, openspec
+# consolidate-server-cli 2.x). Thin assembly layer over this crate's lib: TUI dispatch plus
+# `--web` / `--grpc` hand-off into `transport::{http,grpc}`. Both features are compile-time
+# constants for this target, so `main.rs` needs no cfg gating.
+[[bin]]
+name = "theway"
+path = "src/main.rs"
+required-features = ["tui", "server"]
+
 [dependencies]
 # Enable every wire-protocol provider so model auto-detection isn't bottlenecked by feature
 # flags. The cost is compile time, not runtime — only the registered provider for the chosen
@@ -33,6 +42,8 @@ theway-mcp = { path = "../mcp" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "fs", "io-util", "io-std", "process", "signal"] }
 tokio-util = { version = "0.7", features = ["io"] }
 tracing = "0.1"
+# CLI argument parsing for the `theway` [[bin]] (src/main.rs).
+clap = { version = "4", features = ["derive"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-appender = "0.2"
 rpassword = "7"
