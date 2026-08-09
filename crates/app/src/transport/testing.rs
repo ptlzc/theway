@@ -7,8 +7,8 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use anyhow::Result;
 use crate::wire::SessionSummary;
+use anyhow::Result;
 
 /// In-memory `SessionOps`: sessions live in a `Vec` (oldest → newest, like the repo-backed
 /// impl), ids for `create` come from a counter.
