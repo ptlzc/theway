@@ -1,7 +1,12 @@
 # .pi/subagents/config.yaml — theway workspace 5-agent 编排
 #
-# 适配场景: Rust workspace 重构 (改名/建 crate/迁移), 验证命令 = cargo build/test/clippy/fmt.
+# 适配场景: Rust workspace 重构, 验证命令 = cargo build/test/clippy/fmt.
 # 铁律 (AGENTS.md): subagent 禁止 git add/commit/push; 只修改任务声明的文件; 工作目录 = C:/Users/lizc/Workspace/theway.
+#
+# 效率要点 (2026-08-09 修正):
+# - 全部 agent 启用 enhanced_* 工具 (Rust native, 比基础 read/grep 快)
+# - executor-coder / checker 启用 exec 系列 (run_in_background + get_output):
+#   长 cargo 命令必须用后台模式, 避免 bash 前台阻塞导致对话停摆
 
 subagents:
 
@@ -17,7 +22,10 @@ subagents:
     thinking: high
     tools:
       - read
-      - grep
+      - enhanced_read
+      - enhanced_grep
+      - enhanced_outline
+      - find_file_by_name
       - find
       - ls
       - bash
@@ -34,7 +42,10 @@ subagents:
     thinking: high
     tools:
       - read
-      - grep
+      - enhanced_read
+      - enhanced_grep
+      - enhanced_outline
+      - find_file_by_name
       - find
       - ls
     prompt: prompts/planner.md
@@ -51,12 +62,19 @@ subagents:
     thinking: high
     tools:
       - read
-      - grep
+      - enhanced_read
+      - enhanced_grep
+      - enhanced_outline
+      - enhanced_edit
+      - enhanced_write
+      - find_file_by_name
       - find
       - ls
       - bash
-      - edit
-      - write
+      - exec
+      - get_output
+      - kill_shell
+      - write_to_process
     prompt: prompts/executor-coder.md
 
   # ============================================================
@@ -70,12 +88,13 @@ subagents:
     thinking: high
     tools:
       - read
-      - grep
+      - enhanced_read
+      - enhanced_grep
+      - enhanced_edit
+      - enhanced_write
       - find
       - ls
       - bash
-      - edit
-      - write
     prompt: prompts/executor-writer.md
 
   # ============================================================
@@ -89,8 +108,14 @@ subagents:
     thinking: high
     tools:
       - read
-      - grep
+      - enhanced_read
+      - enhanced_grep
+      - enhanced_outline
+      - find_file_by_name
       - find
       - ls
       - bash
+      - exec
+      - get_output
+      - kill_shell
     prompt: prompts/checker.md
