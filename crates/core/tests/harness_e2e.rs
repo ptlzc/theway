@@ -756,6 +756,7 @@ async fn force_compact_writes_reachable_first_kept_entry_id_and_resume_preserves
         enabled: true,
         reserve_tokens: 0,
         keep_recent_tokens: 4, // forces the cut close to the end
+        algorithm: "builtin".into(),
     };
     let harness = AgentHarness::new(opts);
 
@@ -973,6 +974,7 @@ async fn cut_point_anchors_on_user_message_even_around_trigger_custom() {
             enabled: true,
             reserve_tokens: 0,
             keep_recent_tokens: 1, // tiny: forces walk-back to nearest user message
+            algorithm: "builtin".into(),
         },
     );
 
@@ -1087,6 +1089,7 @@ async fn force_compact_fallback_when_session_branch_read_fails() {
         enabled: true,
         reserve_tokens: 0,
         keep_recent_tokens: 4,
+        algorithm: "builtin".into(),
     };
     let harness = AgentHarness::new(opts);
 
@@ -1218,6 +1221,7 @@ async fn auto_compaction_bounds_oversized_summary_prompt_before_provider_call() 
         enabled: true,
         reserve_tokens: 1_000,
         keep_recent_tokens: 1,
+        algorithm: "builtin".into(),
     };
     let harness = AgentHarness::new(opts);
 

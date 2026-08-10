@@ -1,6 +1,7 @@
 //! Tests for `compaction` — split out of src (see docs/RUST_TEST_FILES.md).
 
 use super::*;
+use super::super::algorithm::BuiltinCompactAlgorithm;
 use std::sync::{Arc, Mutex};
 
 fn user(text: &str) -> AgentMessage {
@@ -91,6 +92,7 @@ fn should_compact_when_over_threshold() {
         enabled: true,
         reserve_tokens: 1024,
         keep_recent_tokens: 0,
+        algorithm: default_compaction_algorithm(),
     };
     // Threshold is 80% of window = 102_400 for a 128K window.
     assert!(should_compact(102_401, 128_000, &s));
@@ -166,12 +168,14 @@ async fn compact_trims_summarizer_prompt_before_provider_call() {
     });
 
     let result = compact(
+        &BuiltinCompactAlgorithm,
         model_with_context_window(5_000),
         &entries,
         &CompactionSettings {
             enabled: true,
             reserve_tokens: 1_000,
             keep_recent_tokens: 1,
+            algorithm: default_compaction_algorithm(),
         },
         None,
         Some(stream_fn),
@@ -220,12 +224,14 @@ async fn summarizer_request_sets_bounded_max_tokens() {
     });
 
     compact(
+        &BuiltinCompactAlgorithm,
         model_with_limits(200_000, 64_000),
         &entries,
         &CompactionSettings {
             enabled: true,
             reserve_tokens: 16_384,
             keep_recent_tokens: 1,
+            algorithm: default_compaction_algorithm(),
         },
         None,
         Some(stream_fn),
@@ -249,6 +255,7 @@ fn summary_budget_leaves_room_for_output_and_estimate_error() {
         enabled: true,
         reserve_tokens: 16_384,
         keep_recent_tokens: 20_000,
+        algorithm: default_compaction_algorithm(),
     };
     let budget = summarization_prompt_budget(&model, &settings);
     assert!(budget > 0);
@@ -320,12 +327,14 @@ async fn compact_retries_with_smaller_budget_on_provider_overflow() {
     });
 
     let result = compact(
+        &BuiltinCompactAlgorithm,
         model_with_context_window(5_000),
         &entries,
         &CompactionSettings {
             enabled: true,
             reserve_tokens: 1_000,
             keep_recent_tokens: 1,
+            algorithm: default_compaction_algorithm(),
         },
         None,
         Some(stream_fn),

@@ -16,6 +16,7 @@
 //! - `serialize_conversation` formatting parity with TS (used inside summarization prompts)
 
 use futures::StreamExt;
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use theway_llm_provider::{
     AssistantMessage, AssistantMessageEvent, Context as PiContext, Message as PiMessage, Model,
@@ -26,10 +27,16 @@ use tokio_util::sync::CancellationToken;
 use super::super::super::types::default_stream_fn;
 use super::super::super::types::*;
 use super::super::session::session::SessionTreeEntry;
+use super::algorithm::{CompactAlgorithm, SummarizeRequest, SummaryOutcome};
 
 // ──────────────────────────────────────────────────────────────────────────────────────────
 // Settings
 // ──────────────────────────────────────────────────────────────────────────────────────────
+
+/// Default `CompactionSettings.algorithm` — the builtin strategy.
+pub fn default_compaction_algorithm() -> String {
+    "builtin".to_string()
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CompactionSettings {
@@ -39,6 +46,10 @@ pub struct CompactionSettings {
     pub reserve_tokens: u32,
     /// Approximate recent-context tokens to keep after compaction.
     pub keep_recent_tokens: u32,
+    /// Compaction algorithm to use: `"builtin"` (default) or the name of a custom
+    /// algorithm (e.g. a TS extension under `.theway/extensions/compaction/<name>.ts`).
+    #[serde(default = "default_compaction_algorithm")]
+    pub algorithm: String,
 }
 
 impl Default for CompactionSettings {
@@ -47,11 +58,13 @@ impl Default for CompactionSettings {
     }
 }
 
-pub const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = CompactionSettings {
-    enabled: true,
-    reserve_tokens: 16_384,
-    keep_recent_tokens: 20_000,
-};
+pub static DEFAULT_COMPACTION_SETTINGS: Lazy<CompactionSettings> =
+    Lazy::new(|| CompactionSettings {
+        enabled: true,
+        reserve_tokens: 16_384,
+        keep_recent_tokens: 20_000,
+        algorithm: default_compaction_algorithm(),
+    });
 
 // ──────────────────────────────────────────────────────────────────────────────────────────
 // Token estimation
@@ -636,9 +649,11 @@ pub struct CompactionResult {
     pub usage: Usage,
 }
 
-/// Top-level compaction entry point. Picks a cut point, summarizes the prefix, returns the
-/// summary plus metadata for the harness to record on the session.
+/// Top-level compaction entry point. Picks a cut point via the algorithm, summarizes the
+/// prefix via the algorithm's summarize hook, returns the summary plus metadata for the
+/// harness to record on the session.
 pub async fn compact(
+    algorithm: &dyn CompactAlgorithm,
     model: Model,
     entries: &[SessionTreeEntry],
     settings: &CompactionSettings,
@@ -646,40 +661,69 @@ pub async fn compact(
     stream_fn: Option<StreamFn>,
     cancel: CancellationToken,
 ) -> Result<CompactionResult, SummarizeError> {
-    let prep = prepare_compaction(entries, settings);
-    if prep.entries_to_summarize.is_empty() {
+    let cut = algorithm.find_cut_point(entries, settings).await;
+    let entries_to_summarize = &entries[..cut.cut_index];
+    let tokens_before = entries_to_summarize
+        .iter()
+        .filter_map(|e| match e {
+            SessionTreeEntry::Message { message, .. } => Some(estimate_tokens(message)),
+            _ => None,
+        })
+        .sum();
+    if entries_to_summarize.is_empty() {
         return Ok(CompactionResult {
             summary: String::new(),
-            first_kept_entry_id: prep.cut.first_kept_entry_id,
-            tokens_before: prep.tokens_before,
+            first_kept_entry_id: cut.first_kept_entry_id,
+            tokens_before,
             usage: Usage::default(),
         });
     }
     // Project the entries into AgentMessage[] for the summarizer.
-    let messages: Vec<AgentMessage> = prep
-        .entries_to_summarize
+    let messages: Vec<AgentMessage> = entries_to_summarize
         .iter()
         .filter_map(|e| match e {
             SessionTreeEntry::Message { message, .. } => Some(message.clone()),
             _ => None,
         })
         .collect();
-    // The prompt budget is a char-class estimate, so the provider can still reject the call as a
-    // context overflow. Halve the budget and retry instead of failing the whole compaction.
-    let max_output_tokens = summary_output_tokens(&model, settings);
-    let mut budget = summarization_prompt_budget(&model, settings);
+    let request = SummarizeRequest {
+        model: &model,
+        messages: &messages,
+        custom_instructions: custom_instructions.as_deref(),
+        settings,
+        stream_fn: stream_fn.as_ref(),
+        cancel: &cancel,
+    };
+    let out = algorithm.summarize(&request).await?;
+    Ok(CompactionResult {
+        summary: out.summary,
+        first_kept_entry_id: cut.first_kept_entry_id,
+        tokens_before,
+        usage: out.usage,
+    })
+}
+
+/// LLM-backed summarize used by the builtin algorithm (and as the trait default). Runs the
+/// overflow-retry budget loop: the prompt budget is a char-class estimate, so the provider
+/// can still reject the call as a context overflow — halve the budget and retry instead of
+/// failing the whole compaction.
+pub async fn summarize_with_llm(
+    request: &SummarizeRequest<'_>,
+) -> Result<SummaryOutcome, SummarizeError> {
+    let max_output_tokens = summary_output_tokens(request.model, request.settings);
+    let mut budget = summarization_prompt_budget(request.model, request.settings);
     let mut attempts = 0u32;
     let out = loop {
         let result = generate_summary(
             GenerateSummaryRequest {
-                model: model.clone(),
-                messages: messages.clone(),
-                custom_instructions: custom_instructions.clone(),
+                model: request.model.clone(),
+                messages: request.messages.to_vec(),
+                custom_instructions: request.custom_instructions.map(str::to_string),
                 prompt_budget_tokens: Some(budget),
                 max_output_tokens: Some(max_output_tokens),
-                stream_fn: stream_fn.clone(),
+                stream_fn: request.stream_fn.cloned(),
             },
-            cancel.clone(),
+            request.cancel.clone(),
         )
         .await;
         match result {
@@ -696,10 +740,8 @@ pub async fn compact(
             Err(e) => return Err(e),
         }
     };
-    Ok(CompactionResult {
+    Ok(SummaryOutcome {
         summary: out.summary,
-        first_kept_entry_id: prep.cut.first_kept_entry_id,
-        tokens_before: prep.tokens_before,
         usage: out.usage,
     })
 }
