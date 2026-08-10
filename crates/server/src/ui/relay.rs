@@ -342,4 +342,4 @@ fn snapshot_frame(snapshot: &WebStatus) -> Option<String> {
 #[cfg(test)]
 // Test files live in `tests/ui/relay/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
-tests_bridge!("../../tests/ui/relay/mod.rs");
+tests_bridge_macro::tests_bridge!("ui/relay");

@@ -391,4 +391,4 @@ static DEFINITION: Lazy<Tool> = Lazy::new(|| Tool {
 #[cfg(test)]
 // Test files live in `tests/tools/skill_builder/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
-tests_bridge!("../../tests/tools/skill_builder/mod.rs");
+tests_bridge_macro::tests_bridge!("tools/skill_builder");

@@ -1362,4 +1362,4 @@ static SET_CRON_JOB_STATE_TOOL: once_cell::sync::Lazy<Tool> = once_cell::sync::L
 #[cfg(test)]
 // Test files live in `tests/triggers/cron/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
-tests_bridge!("../../tests/triggers/cron/mod.rs");
+tests_bridge_macro::tests_bridge!("triggers/cron");

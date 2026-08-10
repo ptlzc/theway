@@ -3182,4 +3182,4 @@ pub async fn dispatch(input: &str, registry: &Registry, ctx: &CommandCtx<'_>) ->
 #[cfg(test)]
 // Test files live in `tests/commands/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
-tests_bridge!("../tests/commands/mod.rs");
+tests_bridge_macro::tests_bridge!("commands");

@@ -34,20 +34,21 @@ crates/server/src/tools/shell.rs                      ←→  crates/server/test
 crates/server/src/transport/http.rs                   ←→  crates/server/tests/transport/http/
 ```
 
-桥接声明 (src 模块末尾):
+桥接声明 (src 模块末尾, 用 `tests-bridge-macro` 的 proc-macro — 展开时以
+`CARGO_MANIFEST_DIR` 为锚点生成绝对路径, 等价 TS `@/` 顶层锚定; 语言级
+`#[path]` 不接受宏计算路径, 这是社区唯一可行方案):
 
 ```rust
 #[cfg(test)]
-#[path = "../../tests/tools/dag_tools/mod.rs"]  // 相对本文件所在目录
-mod tests;
+tests_bridge_macro::tests_bridge!("tools/dag_tools");  // 路径相对 crate 根
 ```
 
 镜像目录内的 `mod.rs` 声明子模块 (`mod plan;` 等), 每个子模块文件对应一个
 测试面。**禁止**在 src 下新建 `tests/` 目录。
 
 > cargo 只把 `tests/` **顶层** `.rs` 自动编译为集成测试 target; 镜像子目录
-> 下的文件不会成为独立 target (仅被 `#[path]` 引用), 因此可以安全存放
-> 依赖 `super::` 私有项的测试代码。
+> 下的文件不会成为独立 target (仅被宏生成的 `#[path]` 引用), 因此可以安全
+> 存放依赖 `super::` 私有项的测试代码。
 
 ## 3. 命名规范
 

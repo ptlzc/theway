@@ -352,4 +352,4 @@ pub async fn automation_elsewhere_hint(
 #[cfg(test)]
 // Test files live in `tests/session/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
-tests_bridge!("../../tests/session/mod.rs");
+tests_bridge_macro::tests_bridge!("session");

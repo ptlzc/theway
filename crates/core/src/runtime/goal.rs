@@ -527,4 +527,4 @@ fn tail_chars(text: &str, max_chars: usize) -> String {
 #[cfg(test)]
 // Test files live in `tests/runtime/goal/` (mirror of `src/runtime/`), pulled in by
 // path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
-tests_bridge!("../../tests/runtime/goal/mod.rs");
+tests_bridge_macro::tests_bridge!("runtime/goal");

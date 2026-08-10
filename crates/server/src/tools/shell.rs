@@ -773,4 +773,4 @@ static WRITE_TO_PROCESS_DEFINITION: Lazy<Tool> = Lazy::new(|| {
 }
 });
 #[cfg(test)]
-tests_bridge!("../../tests/tools/shell/mod.rs");
+tests_bridge_macro::tests_bridge!("tools/shell");

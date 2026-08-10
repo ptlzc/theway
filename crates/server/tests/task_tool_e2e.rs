@@ -15,12 +15,7 @@ use theway_llm_provider::{
 };
 use tokio_util::sync::CancellationToken;
 
-#[path = "../../core/src/tools/subagent_runner.rs"]
-mod subagent_runner;
-#[path = "../../core/src/tools/subagent_specs.rs"]
-mod subagent_specs;
-#[path = "../../core/src/tools/task.rs"]
-mod task;
+use theway_core::tools::task;
 
 fn faux_model() -> theway_llm_provider::Model {
     theway_llm_provider::Model {

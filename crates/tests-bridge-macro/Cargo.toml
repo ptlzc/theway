@@ -1,0 +1,15 @@
+[package]
+name = "tests-bridge-macro"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Compile-time top-level anchor for module tests (generates #[path] absolute bridges)"
+
+[lib]
+proc-macro = true
+
+[dependencies]

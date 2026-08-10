@@ -5,6 +5,7 @@ members = [
     "crates/core",
     "crates/server",
     "crates/mcp",
+    "crates/tests-bridge-macro",
 ]
 
 [workspace.package]

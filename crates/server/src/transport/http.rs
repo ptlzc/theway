@@ -477,4 +477,4 @@ fn open_browser_command(url: &str) -> std::process::Command {
 }
 
 #[cfg(test)]
-tests_bridge!("../../tests/transport/http/mod.rs");
+tests_bridge_macro::tests_bridge!("transport/http");

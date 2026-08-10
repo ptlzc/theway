@@ -6,6 +6,7 @@
 //! the graph mode output panel (`GetNodeOutput`) and the streamed `subagent_output`
 //! events. Snapshot accessors are cheap clones — the registry is a small Vec.
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::Utc;
@@ -21,6 +22,11 @@ pub const MAX_JOBS: usize = 64;
 /// Per-job full-text output cap; beyond this the buffer keeps the tail and sets
 /// `truncated` (the graph UI shows the tail + a truncated marker).
 pub const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
+/// Per-job structured-message cap (serialized bytes). Beyond this the buffer
+/// drops the oldest messages and keeps the tail (transcript stays recoverable
+/// from the newest end). Half the output cap — full messages carry tool
+/// results, so they eat bytes faster than the flat text tail.
+pub const MAX_MESSAGES_BYTES: usize = 512 * 1024;
 
 /// High-frequency event plane (graph mode): broadcast by the registry as jobs
 /// start, produce output, update metrics, and complete. Transport-agnostic — the
@@ -105,6 +111,12 @@ pub struct SubagentJob {
     /// Full-text output buffer (capped at MAX_OUTPUT_BYTES).
     pub output: String,
     pub truncated: bool,
+    /// Full conversation transcript (user prompts + assistant messages with
+    /// tool calls + tool results), captured from every `AgentEvent::MessageEnd`
+    /// in emission order. Capped at MAX_MESSAGES_BYTES (oldest dropped).
+    pub messages: Vec<AgentMessage>,
+    /// Set when the transcript exceeded MAX_MESSAGES_BYTES (oldest dropped).
+    pub messages_truncated: bool,
 }
 
 impl SubagentJob {
@@ -136,6 +148,8 @@ impl SubagentJob {
             error: None,
             output: String::new(),
             truncated: false,
+            messages: Vec::new(),
+            messages_truncated: false,
         }
     }
 
@@ -166,6 +180,9 @@ impl SubagentJob {
 #[derive(Default)]
 struct Inner {
     jobs: Vec<SubagentJob>,
+    /// Where finished jobs' full transcripts are written (set by the host,
+    /// e.g. `<cwd>/.pi/subagent-jobs`). `None` = no disk persistence.
+    messages_dir: Option<PathBuf>,
 }
 
 /// Thread-safe registry (cheap clone via `Arc`).
@@ -195,6 +212,13 @@ impl SubagentJobRegistry {
     /// `None` detaches (used by tests to close the merged stream).
     pub fn set_event_sender(&self, tx: Option<tokio::sync::broadcast::Sender<SubagentEvent>>) {
         *self.events.lock() = tx;
+    }
+
+    /// Set the directory where finished jobs' full transcripts are persisted
+    /// (`<dir>/<run_id>/<node_id>.json` for DAG nodes, `<dir>/task/<job_id>.json`
+    /// for task-tool jobs). `None` disables disk persistence (default).
+    pub fn set_messages_dir(&self, dir: Option<PathBuf>) {
+        self.inner.lock().messages_dir = dir;
     }
 
     /// Register a running job and return its stable id.
@@ -242,7 +266,13 @@ impl SubagentJobRegistry {
             job.error = error.clone();
             job.completed_at = Some(now_ms());
         });
+        eprintln!("DBG finish: job={} exists={}", id, self.job(id).is_some());
         if let Some(job) = self.job(id) {
+            eprintln!("DBG finish: messages.len={}", job.messages.len());
+            // Persist the transcript for terminal jobs (crash-safe recovery:
+            // the in-memory registry dies with the process, the disk copy
+            // survives a restart and is served by `node_messages` / `job_messages`).
+            self.persist_messages(&job);
             self.emit(SubagentEvent::Completed {
                 id: job.id.clone(),
                 status,
@@ -253,6 +283,61 @@ impl SubagentJobRegistry {
                 tools_called: job.tools_called,
             });
         }
+    }
+
+    /// Look up a DAG node's transcript: in-memory job first, then the disk copy
+    /// (a finished node's messages survive a process restart via the per-node
+    /// file written by [`Self::finish`]). Returns `None` when neither exists.
+    pub fn node_messages(&self, run_id: &str, node_id: &str) -> Option<Vec<AgentMessage>> {
+        if let Some(job) = self.find_node(run_id, node_id) {
+            if !job.messages.is_empty() {
+                return Some(job.messages);
+            }
+        }
+        let dir = self.inner.lock().messages_dir.clone()?;
+        load_messages(&messages_path_for_node(&dir, run_id, node_id))
+    }
+
+    /// Look up a task-tool job's transcript (in-memory, then disk).
+    pub fn job_messages(&self, job_id: &str) -> Option<Vec<AgentMessage>> {
+        if let Some(job) = self.job(job_id) {
+            if !job.messages.is_empty() {
+                return Some(job.messages);
+            }
+        }
+        let dir = self.inner.lock().messages_dir.clone()?;
+        load_messages(&messages_path_for_task(&dir, job_id))
+    }
+
+    /// Write the job's transcript to disk (best-effort, failures are silent).
+    fn persist_messages(&self, job: &SubagentJob) {
+        if job.messages.is_empty() {
+            eprintln!("DBG persist: no messages");
+            return;
+        }
+        let Some(dir) = self.inner.lock().messages_dir.clone() else {
+            eprintln!("DBG persist: no messages_dir");
+            return;
+        };
+        let path = match (&job.run_id, &job.node_id) {
+            (Some(run), Some(node)) => messages_path_for_node(&dir, run, node),
+            _ => messages_path_for_task(&dir, &job.id),
+        };
+        eprintln!("DBG persist: path={:?}", path);
+        let json = match serde_json::to_string_pretty(&job.messages) {
+            Ok(j) => j,
+            Err(e) => {
+                eprintln!("DBG persist: serialize err {e}");
+                return;
+            }
+        };
+        eprintln!("DBG persist: json {} bytes", json.len());
+        if let Some(parent) = path.parent() {
+            let r = std::fs::create_dir_all(parent);
+            eprintln!("DBG persist: create_dir_all {:?}", r);
+        }
+        let r = std::fs::write(&path, json);
+        eprintln!("DBG persist: write {:?}", r);
     }
 
     /// Broadcast an event-plane message (no-op without a sender).
@@ -325,6 +410,67 @@ pub fn append_output(job: &mut SubagentJob, chunk: &str) {
     }
 }
 
+/// Append one structured message to the job's transcript, honoring the cap.
+/// Oversized transcripts drop the oldest messages and keep the tail (the
+/// newest messages are the ones a recovery/inspection flow cares about); the
+/// newest message is never dropped even if it alone exceeds the cap.
+pub fn append_message(job: &mut SubagentJob, message: &AgentMessage) {
+    job.messages.push(message.clone());
+    let mut total = 0usize;
+    for m in &job.messages {
+        total = total.saturating_add(serde_json::to_string(m).map_or(0, |s| s.len()));
+    }
+    if total <= MAX_MESSAGES_BYTES {
+        return;
+    }
+    job.messages_truncated = true;
+    // Drop oldest messages until under the cap; never drop the newest.
+    while job.messages.len() > 1 && total > MAX_MESSAGES_BYTES {
+        let first = serde_json::to_string(&job.messages[0]).map_or(0, |s| s.len());
+        total = total.saturating_sub(first);
+        job.messages.remove(0);
+    }
+}
+
+/// Disk path for a DAG node's transcript file.
+pub fn messages_path_for_node(dir: &Path, run_id: &str, node_id: &str) -> PathBuf {
+    dir.join(sanitize_path_segment(run_id))
+        .join(format!("{}.json", sanitize_path_segment(node_id)))
+}
+
+/// Disk path for a task-tool job's transcript file.
+pub fn messages_path_for_task(dir: &Path, job_id: &str) -> PathBuf {
+    dir.join("task")
+        .join(format!("{}.json", sanitize_path_segment(job_id)))
+}
+
+/// Best-effort read of a transcript file (missing / corrupt → `None`).
+pub fn load_messages(path: &Path) -> Option<Vec<AgentMessage>> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+/// Keep path segments filesystem-safe (run/node/job ids are uuid-v7 / short
+/// slugs, but never trust user-supplied strings on the disk layer).
+fn sanitize_path_segment(seg: &str) -> String {
+    let clean: String = seg
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .take(80)
+        .collect();
+    if clean.is_empty() {
+        "default".to_string()
+    } else {
+        clean
+    }
+}
+
 /// Build an `AgentListener` that accumulates metrics + output for a registered job.
 /// Attach to the sub-harness (`sub.agent().subscribe(...)`) right after registering.
 pub fn metrics_listener(registry: SubagentJobRegistry, job_id: String) -> crate::AgentListener {
@@ -348,17 +494,27 @@ pub fn metrics_listener(registry: SubagentJobRegistry, job_id: String) -> crate:
                         chunk: delta,
                     });
                 }
-                AgentEvent::MessageEnd {
-                    message: AgentMessage::Llm(PiMessage::Assistant(a)),
-                } => {
-                    let usage = a.usage;
-                    let input = usage
-                        .input
-                        .saturating_add(usage.cache_read)
-                        .saturating_add(usage.cache_write);
+                AgentEvent::MessageEnd { message } => {
+                    // Token usage only exists on assistant messages; the
+                    // transcript capture below covers every message kind
+                    // (user prompts, assistant turns w/ tool calls, tool results).
+                    let usage_tokens = match &message {
+                        AgentMessage::Llm(PiMessage::Assistant(a)) => {
+                            let usage = &a.usage;
+                            let input = usage
+                                .input
+                                .saturating_add(usage.cache_read)
+                                .saturating_add(usage.cache_write);
+                            Some((input, usage.output))
+                        }
+                        _ => None,
+                    };
                     registry.update(&job_id, |job| {
-                        job.input_tokens = job.input_tokens.saturating_add(input);
-                        job.output_tokens = job.output_tokens.saturating_add(usage.output);
+                        append_message(job, &message);
+                        if let Some((input, output)) = usage_tokens {
+                            job.input_tokens = job.input_tokens.saturating_add(input);
+                            job.output_tokens = job.output_tokens.saturating_add(output);
+                        }
                     });
                     if let Some(job) = registry.job(&job_id) {
                         registry.emit(SubagentEvent::Metrics {
@@ -508,5 +664,205 @@ mod tests {
         // chars accumulate via TextDelta (covered end-to-end; constructing an
         // AssistantMessage here is not worth the fixture surface).
         assert_eq!(job.chars, 0);
+    }
+
+    #[test]
+    fn message_end_captures_full_transcript_in_order() {
+        use theway_llm_provider::{
+            AssistantMessage, ContentBlock, StopReason, ToolResultMessage, ToolResultRole, Usage,
+            UserContent, UserContentBlock, UserMessage, UserRole,
+        };
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let registry = SubagentJobRegistry::new();
+        let id = registry.register(JobInit {
+            agent: "explorer".into(),
+            source: "dag".into(),
+            run_id: Some("run-1".into()),
+            node_id: Some("node-1".into()),
+            session_id: None,
+        });
+        let emit = |event: AgentEvent| {
+            let listener = metrics_listener(registry.clone(), id.clone());
+            let fut = listener(event, Default::default());
+            rt.block_on(fut);
+        };
+
+        // User prompt (agent_loop replays new_messages through MessageStart/MessageEnd).
+        emit(AgentEvent::MessageEnd {
+            message: AgentMessage::Llm(PiMessage::User(UserMessage {
+                role: UserRole::User,
+                content: UserContent::Text("explore the repo".into()),
+                timestamp: 0,
+            })),
+        });
+        // Assistant turn with a text block + usage (tokens must still accumulate).
+        emit(AgentEvent::MessageEnd {
+            message: AgentMessage::Llm(PiMessage::Assistant(AssistantMessage {
+                role: theway_llm_provider::AssistantRole::Assistant,
+                content: vec![ContentBlock::text("found it")],
+                api: theway_llm_provider::Api::from("faux"),
+                provider: theway_llm_provider::Provider::from("faux"),
+                model: "faux".into(),
+                response_model: None,
+                response_id: None,
+                diagnostics: None,
+                usage: Usage {
+                    input: 10,
+                    output: 5,
+                    ..Default::default()
+                },
+                stop_reason: StopReason::Stop,
+                error_message: None,
+                timestamp: 0,
+            })),
+        });
+        // Tool result (also replayed through MessageStart/MessageEnd).
+        emit(AgentEvent::MessageEnd {
+            message: AgentMessage::Llm(PiMessage::ToolResult(ToolResultMessage {
+                role: ToolResultRole::ToolResult,
+                tool_call_id: "t1".into(),
+                tool_name: "grep".into(),
+                content: vec![UserContentBlock::text("3 matches")],
+                details: None,
+                is_error: false,
+                timestamp: 0,
+            })),
+        });
+
+        let job = registry.job(&id).unwrap();
+        assert_eq!(
+            job.messages.len(),
+            3,
+            "user + assistant + tool result transcript"
+        );
+        let AgentMessage::Llm(PiMessage::User(u)) = &job.messages[0] else {
+            panic!("first message should be the user prompt");
+        };
+        assert!(matches!(u.content, UserContent::Text(ref t) if t == "explore the repo"));
+        let AgentMessage::Llm(PiMessage::Assistant(a)) = &job.messages[1] else {
+            panic!("second message should be the assistant turn");
+        };
+        assert_eq!(a.content.len(), 1);
+        let AgentMessage::Llm(PiMessage::ToolResult(tr)) = &job.messages[2] else {
+            panic!("third message should be the tool result");
+        };
+        assert_eq!(tr.tool_name, "grep");
+        assert!(!job.messages_truncated);
+        // Usage still accumulated from the assistant turn.
+        assert_eq!(job.input_tokens, 10);
+        assert_eq!(job.output_tokens, 5);
+    }
+
+    #[test]
+    fn message_buffer_caps_drops_oldest_keeps_newest() {
+        let mut job = SubagentJob::new(
+            "j1".into(),
+            "general".into(),
+            "task".into(),
+            None,
+            None,
+            None,
+        );
+        // A single message alone exceeds the cap: it is kept (never drop newest).
+        let huge = AgentMessage::Custom(crate::CustomMessage {
+            role: "note".into(),
+            timestamp: 0,
+            payload: serde_json::json!({"blob": "x".repeat(MAX_MESSAGES_BYTES)}),
+        });
+        append_message(&mut job, &huge);
+        assert!(job.messages_truncated);
+        assert_eq!(job.messages.len(), 1);
+        // The next small message evicts the huge one (drop oldest until under cap).
+        let small = AgentMessage::Custom(crate::CustomMessage {
+            role: "note".into(),
+            timestamp: 1,
+            payload: serde_json::json!("tail"),
+        });
+        append_message(&mut job, &small);
+        assert_eq!(job.messages.len(), 1, "huge message dropped, tail kept");
+        let AgentMessage::Custom(c) = &job.messages[0] else {
+            panic!("expected custom message");
+        };
+        assert_eq!(c.timestamp, 1);
+        assert!(job.messages_truncated);
+    }
+
+    #[test]
+    fn finish_persists_messages_recoverable_after_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = SubagentJobRegistry::new();
+        registry.set_messages_dir(Some(dir.path().join("subagent-jobs")));
+        let id = registry.register(JobInit {
+            agent: "explorer".into(),
+            source: "dag".into(),
+            run_id: Some("run-1".into()),
+            node_id: Some("node-1".into()),
+            session_id: None,
+        });
+        registry.update(&id, |job| {
+            append_message(
+                job,
+                &AgentMessage::Custom(crate::CustomMessage {
+                    role: "note".into(),
+                    timestamp: 0,
+                    payload: serde_json::json!("recover me"),
+                }),
+            );
+        });
+        registry.finish(&id, JobStatus::Succeeded, None);
+        // Disk copy exists.
+        let path = messages_path_for_node(&dir.path().join("subagent-jobs"), "run-1", "node-1");
+        assert!(path.exists());
+
+        // Simulated restart: a fresh registry (same messages dir, empty memory).
+        let restarted = SubagentJobRegistry::new();
+        restarted.set_messages_dir(Some(dir.path().join("subagent-jobs")));
+        let messages = restarted
+            .node_messages("run-1", "node-1")
+            .expect("transcript recovered from disk after restart");
+        assert_eq!(messages.len(), 1);
+        let AgentMessage::Custom(c) = &messages[0] else {
+            panic!("expected custom message");
+        };
+        assert_eq!(c.payload, serde_json::json!("recover me"));
+        // In-memory lookup still serves the live job first.
+        let live = registry.node_messages("run-1", "node-1").unwrap();
+        assert_eq!(live.len(), 1);
+        // Unknown node → None.
+        assert!(restarted.node_messages("run-1", "nope").is_none());
+    }
+
+    #[test]
+    fn task_job_messages_persist_under_task_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = SubagentJobRegistry::new();
+        registry.set_messages_dir(Some(dir.path().join("subagent-jobs")));
+        let id = registry.register(JobInit {
+            agent: "general".into(),
+            source: "task".into(),
+            run_id: None,
+            node_id: None,
+            session_id: None,
+        });
+        registry.update(&id, |job| {
+            append_message(
+                job,
+                &AgentMessage::Custom(crate::CustomMessage {
+                    role: "note".into(),
+                    timestamp: 0,
+                    payload: serde_json::json!("task transcript"),
+                }),
+            );
+        });
+        registry.finish(&id, JobStatus::Succeeded, None);
+        assert!(messages_path_for_task(&dir.path().join("subagent-jobs"), &id).exists());
+
+        let restarted = SubagentJobRegistry::new();
+        restarted.set_messages_dir(Some(dir.path().join("subagent-jobs")));
+        let messages = restarted.job_messages(&id).unwrap();
+        assert_eq!(messages.len(), 1);
     }
 }

@@ -67,6 +67,7 @@ sha2 = "0.10"
 libc = "0.2"
 
 [dev-dependencies]
+tests-bridge-macro = { path = "../tests-bridge-macro" }
 anyhow = "1"
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }

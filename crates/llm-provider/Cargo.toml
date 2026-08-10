@@ -79,6 +79,7 @@ tracing = "0.1"
 regex = "1"
 
 [dev-dependencies]
+tests-bridge-macro = { path = "../tests-bridge-macro" }
 anyhow = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }
 serde_yaml = "0.9"

@@ -707,4 +707,4 @@ pub async fn compact(
 #[cfg(test)]
 // Test files live in `tests/runtime/compaction/compaction/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
-tests_bridge!("../../../tests/runtime/compaction/compaction/mod.rs");
+tests_bridge_macro::tests_bridge!("runtime/compaction/compaction");

@@ -19,28 +19,9 @@ use theway_llm_provider::{
 };
 use tokio_util::sync::CancellationToken;
 
-// Tool modules under test, pulled in exactly like `task_tool_e2e` pulls `task.rs`.
-// (Bodies moved into theway-core by openspec tools-into-core; assembly stayed server-side.)
-// e2e includes engine/src files by `#[path]`; those files may contain a
-// `tests_bridge!("...")` call (module tests live in `tests/<mirror>/`, see
-// docs/RUST_TEST_FILES.md). This test crate is a separate binary, so the macro
-// from lib.rs is not in scope — define it here (before the includes).
-#[cfg(test)]
-macro_rules! tests_bridge {
-    ($path:literal) => {
-        #[path = $path]
-        mod tests;
-    };
-}
-
-#[path = "../../core/src/tools/dag_tools.rs"]
-mod dag_tools;
-#[path = "../../core/src/tools/node_launcher.rs"]
-mod node_launcher;
-#[path = "../../core/src/tools/subagent_runner.rs"]
-mod subagent_runner;
-#[path = "../../core/src/tools/subagent_specs.rs"]
-mod subagent_specs;
+// Tool modules under test, via the engine's lib surface (the `#[path]` include
+// trick is no longer needed — everything the e2e drives is pub API).
+use theway_core::tools::{dag_tools, node_launcher};
 
 fn faux_model() -> theway_llm_provider::Model {
     theway_llm_provider::Model {
