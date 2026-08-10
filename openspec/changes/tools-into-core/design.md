@@ -1,5 +1,15 @@
 # Design: tools-into-core
 
+## 修订记录 (2026-08-17)
+
+最终分层在原提案基础上做了修正 (commit `f290c0b`):
+
+- **runtime/tools (core)** = harness 支撑: dag_tools/skill*/memory/subagent_runner/subagent_specs/task/node_launcher。
+- **core/tools (core)** = 引擎通用能力: bash/fs/git/grep/find/ls/outline/mcp/truncate/shell + 装配 `default_tools`/`subagent_read_only_tools`。
+- **server (应用层)** = agent 能力: **web_fetch/web_search 移回 `server/src/tools/`** — web 是 agent 的联网调研能力,不是 harness 运行支撑,不应在引擎里;subagent 工具集随之移除 web 能力 (纯本地)。
+
+分层判据: 该工具是否支撑 harness 运行 (subagents 编排/DAG/skill/memory) → runtime;是否引擎通用能力 → core/tools;是否应用级 agent 能力 (如 web, 需外部 API key 配置) → server。
+
 ## Context
 
 依赖面调研结论 (grep 全部 26 个工具): 工具本体只引用 theway-core (AgentTool trait/类型)、theway-llm-provider (Tool/UserContentBlock)、theway-mcp (mcp_adapter) 与通用库。工具装配 (default_tools/session_tool_set/task_tool/skill_tool 等) 是注入式构造函数 (model/stream_fn/registry/SkillHarnessCell 由调用方传入)。dag_tools 引用同目录 subagent_specs (随目录整体迁移解决)。theway-mcp 不依赖 core (无环)。
