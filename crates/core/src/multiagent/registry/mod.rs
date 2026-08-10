@@ -6,16 +6,30 @@
 //! the graph mode output panel (`GetNodeOutput`) and the streamed `subagent_output`
 //! events. Snapshot accessors are cheap clones — the registry is a small Vec.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use chrono::Utc;
 use parking_lot::Mutex;
 use uuid::Uuid;
 
+#[cfg(test)]
 use crate::AgentEvent;
+#[cfg(test)]
 use crate::AgentMessage;
+#[cfg(test)]
 use theway_llm_provider::Message as PiMessage;
+
+mod events;
+mod metrics;
+mod persist;
+
+pub use events::{AgentJobEvent, JobStatus};
+pub use metrics::metrics_listener;
+pub use persist::{
+    agent_message_to_json, append_message, append_output, load_messages, messages_path_for_node,
+    messages_path_for_task,
+};
 
 /// Jobs beyond this are evicted oldest-first (terminal states only).
 pub const MAX_JOBS: usize = 64;
@@ -27,67 +41,6 @@ pub const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
 /// from the newest end). Half the output cap — full messages carry tool
 /// results, so they eat bytes faster than the flat text tail.
 pub const MAX_MESSAGES_BYTES: usize = 512 * 1024;
-
-/// High-frequency event plane (graph mode): broadcast by the registry as jobs
-/// start, produce output, update metrics, and complete. Transport-agnostic — the
-/// transport layer converts these into the wire `StreamEvent` (see
-/// `proto/theway_grpc.proto`).
-#[derive(Clone, Debug)]
-pub enum AgentJobEvent {
-    Started {
-        id: String,
-        agent: String,
-        source: String,
-        run_id: Option<String>,
-        node_id: Option<String>,
-    },
-    Output {
-        id: String,
-        chunk: String,
-    },
-    Metrics {
-        id: String,
-        tps: Option<f64>,
-        cps: Option<f64>,
-        chars: u64,
-        tokens_in: u64,
-        tokens_out: u64,
-        tools_called: u64,
-        turn: u32,
-    },
-    Completed {
-        id: String,
-        status: JobStatus,
-        error: Option<String>,
-        chars: u64,
-        tokens_in: u64,
-        tokens_out: u64,
-        tools_called: u64,
-    },
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum JobStatus {
-    Running,
-    Succeeded,
-    Failed,
-    Cancelled,
-    /// The current turn was interrupted (`AgentControlHandle::interrupt`) and no
-    /// steering was queued, so the run ended at the turn boundary.
-    Interrupted,
-}
-
-impl JobStatus {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            JobStatus::Running => "running",
-            JobStatus::Succeeded => "succeeded",
-            JobStatus::Failed => "failed",
-            JobStatus::Cancelled => "cancelled",
-            JobStatus::Interrupted => "interrupted",
-        }
-    }
-}
 
 /// Live control handle for a running subagent (registered by the runner right
 /// after the job starts, cleared on finish). Lets an external caller (parent
@@ -417,7 +370,7 @@ impl AgentJobRegistry {
     }
 
     /// Broadcast an event-plane message (no-op without a sender).
-    fn emit(&self, event: AgentJobEvent) {
+    pub(crate) fn emit(&self, event: AgentJobEvent) {
         if let Some(tx) = self.events.lock().as_ref() {
             let _ = tx.send(event);
         }
@@ -459,196 +412,6 @@ impl AgentJobRegistry {
             jobs.remove(0);
         }
     }
-}
-
-/// Append a chunk to the job's full-text buffer, honoring the cap.
-pub fn append_output(job: &mut AgentJob, chunk: &str) {
-    if chunk.is_empty() {
-        return;
-    }
-    // A single chunk larger than the cap keeps only its tail.
-    let chunk = if chunk.len() > MAX_OUTPUT_BYTES {
-        job.truncated = true;
-        &chunk[chunk.len() - MAX_OUTPUT_BYTES..]
-    } else {
-        chunk
-    };
-    if job.output.len() + chunk.len() > MAX_OUTPUT_BYTES {
-        let keep = MAX_OUTPUT_BYTES.saturating_sub(chunk.len());
-        if keep > 0 {
-            let start = job.output.len().saturating_sub(keep);
-            job.output = job.output[start..].to_string();
-        }
-        job.output.push_str(chunk);
-        job.truncated = true;
-    } else {
-        job.output.push_str(chunk);
-    }
-}
-
-/// Append one structured message to the job's transcript, honoring the cap.
-/// Oversized transcripts drop the oldest messages and keep the tail (the
-/// newest messages are the ones a recovery/inspection flow cares about); the
-/// newest message is never dropped even if it alone exceeds the cap.
-pub fn append_message(job: &mut AgentJob, message: &serde_json::Value) {
-    job.messages.push(message.clone());
-    let mut total = 0usize;
-    for m in &job.messages {
-        total = total.saturating_add(serde_json::to_string(m).map_or(0, |s| s.len()));
-    }
-    if total <= MAX_MESSAGES_BYTES {
-        return;
-    }
-    job.messages_truncated = true;
-    // Drop oldest messages until under the cap; never drop the newest.
-    while job.messages.len() > 1 && total > MAX_MESSAGES_BYTES {
-        let first = serde_json::to_string(&job.messages[0]).map_or(0, |s| s.len());
-        total = total.saturating_sub(first);
-        job.messages.remove(0);
-    }
-}
-
-/// Project an `AgentMessage` onto a persistable JSON value. `AgentMessage`
-/// cannot be serialized directly (untagged enum + `#[serde(flatten)]` inside
-/// `CustomMessage` is rejected by serde at runtime), so every captured message
-/// is converted here: LLM messages keep their external-tag shape
-/// (`{"assistant": …}` / `{"user": …}` / `{"toolResult": …}` — role is the
-/// outer key), custom messages mirror `CustomMessage`'s flatten semantics
-/// (payload keys merged with `role`/`timestamp`).
-pub fn agent_message_to_json(m: &AgentMessage) -> serde_json::Value {
-    match m {
-        AgentMessage::Llm(msg) => serde_json::to_value(msg).unwrap_or(serde_json::Value::Null),
-        AgentMessage::Custom(c) => match &c.payload {
-            serde_json::Value::Object(map) => {
-                let mut obj = map.clone();
-                obj.insert(
-                    "role".to_string(),
-                    serde_json::Value::String(c.role.clone()),
-                );
-                obj.insert(
-                    "timestamp".to_string(),
-                    serde_json::Value::from(c.timestamp),
-                );
-                serde_json::Value::Object(obj)
-            }
-            other => {
-                serde_json::json!({ "role": c.role, "timestamp": c.timestamp, "payload": other })
-            }
-        },
-    }
-}
-
-/// Disk path for a DAG node's transcript file.
-pub fn messages_path_for_node(dir: &Path, run_id: &str, node_id: &str) -> PathBuf {
-    dir.join(sanitize_path_segment(run_id))
-        .join(format!("{}.json", sanitize_path_segment(node_id)))
-}
-
-/// Disk path for a task-tool job's transcript file.
-pub fn messages_path_for_task(dir: &Path, job_id: &str) -> PathBuf {
-    dir.join("subagent")
-        .join(format!("{}.json", sanitize_path_segment(job_id)))
-}
-
-/// Best-effort read of a transcript file (missing / corrupt → `None`).
-pub fn load_messages(path: &Path) -> Option<Vec<serde_json::Value>> {
-    let raw = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str(&raw).ok()
-}
-
-/// Keep path segments filesystem-safe (run/node/job ids are uuid-v7 / short
-/// slugs, but never trust user-supplied strings on the disk layer).
-fn sanitize_path_segment(seg: &str) -> String {
-    let clean: String = seg
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .take(80)
-        .collect();
-    if clean.is_empty() {
-        "default".to_string()
-    } else {
-        clean
-    }
-}
-
-/// Build an `AgentListener` that accumulates metrics + output for a registered job.
-/// Attach to the sub-harness (`sub.agent().subscribe(...)`) right after registering.
-pub fn metrics_listener(registry: AgentJobRegistry, job_id: String) -> crate::AgentListener {
-    Arc::new(move |event, _cancel| {
-        let registry = registry.clone();
-        let job_id = job_id.clone();
-        Box::pin(async move {
-            match event {
-                AgentEvent::MessageUpdate {
-                    assistant_message_event:
-                        theway_llm_provider::AssistantMessageEvent::TextDelta { delta, .. },
-                    ..
-                } => {
-                    let delta = delta.clone();
-                    registry.update(&job_id, |job| {
-                        job.chars = job.chars.saturating_add(delta.chars().count() as u64);
-                        append_output(job, &delta);
-                    });
-                    registry.emit(AgentJobEvent::Output {
-                        id: job_id.clone(),
-                        chunk: delta,
-                    });
-                }
-                AgentEvent::MessageEnd { message } => {
-                    // Token usage only exists on assistant messages; the
-                    // transcript capture below covers every message kind
-                    // (user prompts, assistant turns w/ tool calls, tool results).
-                    let usage_tokens = match &message {
-                        AgentMessage::Llm(PiMessage::Assistant(a)) => {
-                            let usage = &a.usage;
-                            let input = usage
-                                .input
-                                .saturating_add(usage.cache_read)
-                                .saturating_add(usage.cache_write);
-                            Some((input, usage.output))
-                        }
-                        _ => None,
-                    };
-                    registry.update(&job_id, |job| {
-                        append_message(job, &agent_message_to_json(&message));
-                        if let Some((input, output)) = usage_tokens {
-                            job.input_tokens = job.input_tokens.saturating_add(input);
-                            job.output_tokens = job.output_tokens.saturating_add(output);
-                        }
-                    });
-                    if let Some(job) = registry.job(&job_id) {
-                        registry.emit(AgentJobEvent::Metrics {
-                            id: job_id.clone(),
-                            tps: job.tps(),
-                            cps: job.cps(),
-                            chars: job.chars,
-                            tokens_in: job.input_tokens,
-                            tokens_out: job.output_tokens,
-                            tools_called: job.tools_called,
-                            turn: job.turn,
-                        });
-                    }
-                }
-                AgentEvent::ToolExecutionStart { .. } => {
-                    registry.update(&job_id, |job| {
-                        job.tools_called = job.tools_called.saturating_add(1);
-                    });
-                }
-                AgentEvent::TurnStart => {
-                    registry.update(&job_id, |job| {
-                        job.turn = job.turn.saturating_add(1);
-                    });
-                }
-                _ => {}
-            }
-        })
-    })
 }
 
 fn now_ms() -> i64 {
