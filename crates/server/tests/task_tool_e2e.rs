@@ -70,7 +70,7 @@ async fn task_returns_subagent_final_text() {
     let tool = task::TaskTool::new(
         faux_model(),
         Some(faux_stream("subagent result")),
-        Arc::new(Vec::new),
+        Arc::new(|_| Vec::new()),
         theway_core::runtime::subagents::registry::SubagentJobRegistry::new(),
     );
     let res = tool
@@ -98,7 +98,7 @@ async fn task_unknown_subagent_type_errors() {
     let tool = task::TaskTool::new(
         faux_model(),
         Some(faux_stream("nope")),
-        Arc::new(Vec::new),
+        Arc::new(|_| Vec::new()),
         theway_core::runtime::subagents::registry::SubagentJobRegistry::new(),
     );
     let err = tool
@@ -122,7 +122,7 @@ async fn task_missing_prompt_errors() {
     let tool = task::TaskTool::new(
         faux_model(),
         Some(faux_stream("nope")),
-        Arc::new(Vec::new),
+        Arc::new(|_| Vec::new()),
         theway_core::runtime::subagents::registry::SubagentJobRegistry::new(),
     );
     let err = tool
@@ -148,7 +148,7 @@ async fn task_parent_abort_cascades_to_subagent() {
     let tool = task::TaskTool::new(
         faux_model(),
         Some(stalled),
-        Arc::new(Vec::new),
+        Arc::new(|_| Vec::new()),
         theway_core::runtime::subagents::registry::SubagentJobRegistry::new(),
     );
     let cancel = CancellationToken::new();

@@ -1,6 +1,7 @@
 //! Tool ASSEMBLY layer. The engine (`theway_core`) supplies the harness-runtime tools
-//! (graph/DAG, subagents, skills, memory, MCP — see `theway_core::tools`); this module
-//! is the application-layer half:
+//! (graph/DAG, subagents, skills, memory, MCP — see `theway_core::tools`) AND assembles
+//! them via `theway_core::tools::assembly::session_engine_tools`; this module is the
+//! application-layer half:
 //!
 //! - **Local-execution tool bodies** (bash / shell / fs / git / grep / find / ls /
 //!   outline / truncate) live HERE, not in the engine: they are environment-specific
@@ -10,10 +11,13 @@
 //!   need external credentials/configuration).
 //! - **Assembly**: `default_tools` / `subagent_read_only_tools` / the per-subagent
 //!   tool-set resolver / `session_tool_set` wire engine tools + local tools together.
+//!   The engine-owned part (DAG / task / skills / memory) is assembled core-side
+//!   ([`theway_core::tools::assembly::session_engine_tools`]); this module appends the
+//!   local-execution tools and the server-side trigger/cron family.
 //!
 //! Subagent tool sets are injected into the engine (`SubagentSpec` carries no tool
-//! factory): [`subagent_tool_sets`] builds the resolver `task_tool` and the DAG node
-//! launcher are constructed with.
+//! factory): [`subagent_tool_sets`] builds the ONE resolver both `task_tool` and the
+//! DAG node launcher are constructed with — task and DAG share one subagent mechanism.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -23,10 +27,7 @@ use theway_core::runtime::graph_engineering::engine::DagEngine;
 use theway_core::runtime::subagents::registry::SubagentJobRegistry;
 use theway_core::tools::node_launcher::ToolSetResolver;
 use theway_core::tools::skill::SkillHarnessCell;
-use theway_core::tools::{
-    dag_tools, install_skill, node_launcher, remove_skill, set_skill_state, skill, skill_builder,
-    task,
-};
+use theway_core::tools::{node_launcher, task};
 
 // ── tool bodies (app-layer: local execution + web) ──────────────────────────
 //
@@ -103,8 +104,10 @@ pub fn subagent_read_only_tools() -> Vec<Arc<dyn AgentTool>> {
 /// (session-resource-model) stamps the owning session on every spawned job — each harness
 /// build gets its own TaskTool stamped with that harness's session.
 ///
-/// The subagent gets the FULL default tool set (same as the DAG `executor-coder`), not the
-/// read-only set: the main agent defines in the task prompt what the subagent may do.
+/// The subagent tool set comes from [`subagent_tool_sets`] — the SAME resolver the DAG
+/// node launcher gets, so `task` and DAG subagents share one mechanism. The main agent
+/// picks the spec (explorer / planner / executor-coder / checker / general) and defines
+/// in the prompt what the subagent may do.
 pub fn task_tool(
     model: theway_llm_provider::Model,
     stream_fn: Option<theway_core::StreamFn>,
@@ -113,13 +116,8 @@ pub fn task_tool(
     session_id: Option<String>,
 ) -> Arc<dyn AgentTool> {
     Arc::new(
-        task::TaskTool::new(
-            model,
-            stream_fn,
-            Arc::new(move || default_tools(memory_dir.clone())),
-            registry,
-        )
-        .with_session_id(session_id),
+        task::TaskTool::new(model, stream_fn, subagent_tool_sets(memory_dir), registry)
+            .with_session_id(session_id),
     )
 }
 
@@ -194,8 +192,10 @@ pub fn node_launcher(
 /// Build the per-session tool set (session-resource-model). One source of truth shared by
 /// the CLI's initial harness build and the session factory ([`crate::session_ops::SessionFactory`]):
 /// everything here is either session-stamped (`dag_*` / `task`) or must be rebuilt per
-/// harness (the skill family wires a fresh harness cell per build). Process-level tool
-/// groups (`default_tools`, MCP tools) are the caller's to add.
+/// harness (the skill family wires a fresh harness cell per build). Engine-owned tools
+/// are assembled core-side; this function appends the local-execution tools
+/// ([`default_tools`]) and the server-side trigger/cron family. Process-level tool
+/// groups (MCP tools) are the caller's to add.
 pub fn session_tool_set(
     memory_dir: &std::path::Path,
     dag_engine: &Arc<DagEngine>,
@@ -206,26 +206,19 @@ pub fn session_tool_set(
     session_id: &str,
 ) -> Vec<Arc<dyn AgentTool>> {
     let mut tools = default_tools(memory_dir.to_path_buf());
-    // DAG tools, main agent only — the read-only subagent tool set stays deliberately
-    // untouched (shell/exec already ship via `default_tools`).
-    tools.extend(dag_tools::DagTools::new(
-        dag_engine.clone(),
-        Some(session_id.to_string()),
+    // Engine-owned tools (DAG / task / skills / memory), assembled core-side with the
+    // same subagent tool-set resolver the DAG node launcher uses.
+    tools.extend(theway_core::tools::assembly::session_engine_tools(
+        memory_dir,
+        dag_engine,
+        subagent_registry,
+        subagent_tool_sets(memory_dir.to_path_buf()),
+        model,
+        stream_fn,
+        skill_harness_cell,
+        session_id,
     ));
-    // Task delegation tool (issue #11): shares the parent's model + stream backend; jobs
-    // are stamped with this session.
-    tools.push(task_tool(
-        model.clone(),
-        stream_fn.cloned(),
-        subagent_registry.clone(),
-        memory_dir.to_path_buf(),
-        Some(session_id.to_string()),
-    ));
-    tools.push(skill_tool(skill_harness_cell.clone()));
-    tools.push(install_skill_tool(skill_harness_cell.clone()));
-    tools.push(skill_builder_tool(skill_harness_cell.clone()));
-    tools.push(set_skill_state_tool(skill_harness_cell.clone()));
-    tools.push(remove_skill_tool(skill_harness_cell.clone()));
+    // Trigger/cron family: harness-adjacent but implemented in this crate.
     tools.push(new_cron_job_tool(skill_harness_cell.clone()));
     tools.push(list_cron_jobs_tool());
     tools.push(remove_cron_job_tool(skill_harness_cell.clone()));
@@ -235,49 +228,4 @@ pub fn session_tool_set(
     tools.push(remove_trigger_tool());
     tools.push(set_trigger_state_tool());
     tools
-}
-
-/// Build the `Skill` tool. Separate from `default_tools` because the tool needs to reach the
-/// live `AgentHarness::skills()` snapshot, and the harness does not exist yet when this is
-/// called (we are still assembling the tool list that will be passed to `AgentHarness::new`).
-///
-/// The caller (`main.rs`) builds an `Arc<OnceCell<Arc<AgentHarness>>>`, passes it here, and —
-/// crucially — sets the cell immediately after the harness is constructed and *before* the
-/// REPL accepts any input. If the cell is unset at execute time the tool returns a recoverable
-/// `AgentToolError`, never a panic.
-pub fn skill_tool(harness_cell: SkillHarnessCell) -> Arc<dyn AgentTool> {
-    Arc::new(skill::SkillTool::new(harness_cell))
-}
-
-/// Build the `InstallSkill` tool. Same harness-cell wiring as `skill_tool` because install
-/// must hot-reload the catalog via `AgentHarness::reload_skills_from_disk` after writing.
-/// See `install_skill::InstallSkillTool` for the two-phase safety model
-/// (preview → confirm) and the security note about the in-flight
-/// `PermissionCategory::ControlPlaneWrite` plumbing.
-pub fn install_skill_tool(harness_cell: SkillHarnessCell) -> Arc<dyn AgentTool> {
-    Arc::new(install_skill::InstallSkillTool::new(harness_cell))
-}
-
-/// Build the `SkillBuilder` tool (author a NEW user skill from structured fields). Same
-/// harness-cell wiring as `install_skill_tool` — it shares InstallSkill's validation and
-/// atomic-write path and hot-reloads the catalog after writing. Where InstallSkill ingests
-/// an existing `SKILL.md`, SkillBuilder renders the canonical template itself. See
-/// `skill_builder::SkillBuilderTool` for the two-phase preview → confirm model.
-pub fn skill_builder_tool(harness_cell: SkillHarnessCell) -> Arc<dyn AgentTool> {
-    Arc::new(skill_builder::SkillBuilderTool::new(harness_cell))
-}
-
-/// Build the `SetSkillState` tool (enable/disable a loaded skill at runtime). Same
-/// harness-cell wiring as `skill_tool` / `install_skill_tool` — it reads the live catalog,
-/// writes the `~/.theway/skills-state.json` overlay, and hot-reloads via
-/// `reload_skills_from_disk`. See `set_skill_state::SetSkillStateTool` for the overlay model.
-pub fn set_skill_state_tool(harness_cell: SkillHarnessCell) -> Arc<dyn AgentTool> {
-    Arc::new(set_skill_state::SetSkillStateTool::new(harness_cell))
-}
-
-/// Build the `RemoveSkill` tool (delete a user-installed skill). Same harness-cell wiring;
-/// deletes `~/.theway/skills/<name>/`, clears the overlay entry, and hot-reloads. Builtin/project
-/// skills are refused (disable instead). See `remove_skill::RemoveSkillTool`.
-pub fn remove_skill_tool(harness_cell: SkillHarnessCell) -> Arc<dyn AgentTool> {
-    Arc::new(remove_skill::RemoveSkillTool::new(harness_cell))
 }

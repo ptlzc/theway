@@ -20,6 +20,7 @@
 //! decides *what* a subagent can do only through injected tool-set resolvers
 //! (`SubagentSpec` carries no tool factory; the app layer supplies one).
 
+pub mod assembly;
 pub mod dag_tools;
 pub mod install_skill;
 pub mod mcp_adapter;
