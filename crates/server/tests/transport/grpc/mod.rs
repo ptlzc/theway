@@ -331,7 +331,7 @@ async fn get_node_output_recovers_messages_from_disk_after_restart() {
     );
 
     // Restart: fresh GrpcState with a fresh registry, same messages dir.
-    let (mut state, _command_rx) = grpc_state();
+    let (state, _command_rx) = grpc_state();
     state.registry.set_messages_dir(Some(dir.path().join("subagent-jobs")));
     let response = state
         .get_node_output(Request::new(GetNodeOutputRequest {
