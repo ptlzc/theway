@@ -49,14 +49,19 @@
 //! metadata (name, description, hash, size, target path) is echoed; the body itself never
 //! enters the tool result text or the `skill_install` Custom audit entry.
 
+pub mod fetch;
+pub mod parse;
+
+// Domain split re-exports: external import paths (e.g. `super::install_skill::
+// parse_and_validate_skill_md` from `skill_builder`) stay stable.
+pub(crate) use parse::parse_and_validate_skill_md;
+
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use serde_yaml::Value as YamlValue;
 use sha2::{Digest, Sha256};
 use theway_core::{
     AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate, PermissionClassification,
@@ -66,6 +71,8 @@ use theway_llm_provider::{Tool, UserContentBlock};
 use tokio_util::sync::CancellationToken;
 
 use super::skill::SkillHarnessCell;
+use fetch::fetch_source;
+use parse::parse_and_validate;
 
 /// Pure OOM guard on the URL stream-read path, NOT a per-skill artifact cap. Set well
 /// above any realistic skill size (real-world skills are kilobytes, sometimes hundreds of
@@ -365,321 +372,6 @@ fn audit_url_reference(url: &str) -> Value {
         }
         Err(_) => json!({ "redacted": true }),
     }
-}
-
-// ──────────────────────────────────────────────────────────────────────────────────────────
-// Fetch
-// ──────────────────────────────────────────────────────────────────────────────────────────
-
-struct Fetched {
-    content: String,
-}
-
-async fn fetch_source(
-    source: &Source,
-    cancel: &CancellationToken,
-) -> Result<Fetched, AgentToolError> {
-    match source {
-        Source::Url { url } => fetch_url(url, cancel).await,
-        Source::Path { path } => fetch_path(path).await,
-        Source::Content { content } => Ok(fetch_inline(content)),
-    }
-}
-
-async fn fetch_url(url: &str, cancel: &CancellationToken) -> Result<Fetched, AgentToolError> {
-    let parsed = reqwest::Url::parse(url)
-        .map_err(|e| AgentToolError::Message(format!("invalid url: {e}")))?;
-    if parsed.scheme() != "https" {
-        return Err(AgentToolError::Message(
-            "url must use https:// (http, file, data, and other schemes are refused)".into(),
-        ));
-    }
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| AgentToolError::from("url must have a host"))?;
-    if is_private_or_local_host(host) {
-        return Err(AgentToolError::Message(format!(
-            "refusing to fetch from local/private host '{host}' (SSRF guard)"
-        )));
-    }
-
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .user_agent(format!("theway/{}", env!("CARGO_PKG_VERSION")))
-        .build()
-        .map_err(|e| AgentToolError::Message(format!("http client init: {e}")))?;
-
-    let fut = client.get(parsed).send();
-    let mut resp = tokio::select! {
-        r = fut => r.map_err(|e| AgentToolError::Message(format!("fetch failed: {e}")))?,
-        _ = cancel.cancelled() => return Err(AgentToolError::Message("cancelled".into())),
-    };
-    if !resp.status().is_success() {
-        return Err(AgentToolError::Message(format!(
-            "fetch returned non-success status: {}",
-            resp.status()
-        )));
-    }
-    // Stream-read with cap so a hostile server can't OOM the agent.
-    let mut buf = Vec::<u8>::new();
-    loop {
-        let chunk = tokio::select! {
-            r = resp.chunk() => r,
-            _ = cancel.cancelled() => return Err(AgentToolError::Message("cancelled".into())),
-        };
-        match chunk {
-            Ok(Some(c)) => {
-                if buf.len() + c.len() > SKILL_FETCH_OOM_GUARD_BYTES {
-                    // Pure OOM guard, not a per-skill artifact cap. See module-level docs.
-                    return Err(AgentToolError::Message(format!(
-                        "fetched skill body exceeds {SKILL_FETCH_OOM_GUARD_BYTES}-byte \
-                         in-memory guard ({} bytes received so far); refusing to install \
-                         from a stream this large",
-                        buf.len()
-                    )));
-                }
-                buf.extend_from_slice(&c);
-            }
-            Ok(None) => break,
-            Err(e) => {
-                return Err(AgentToolError::Message(format!("read body: {e}")));
-            }
-        }
-    }
-    let content = String::from_utf8(buf)
-        .map_err(|e| AgentToolError::Message(format!("skill body is not valid utf-8: {e}")))?;
-    Ok(Fetched { content })
-}
-
-async fn fetch_path(path: &str) -> Result<Fetched, AgentToolError> {
-    let p = PathBuf::from(path);
-    if !p.is_absolute() {
-        return Err(AgentToolError::from(
-            "path must be absolute (relative paths are ambiguous in agent context)",
-        ));
-    }
-    let meta = tokio::fs::metadata(&p)
-        .await
-        .map_err(|e| AgentToolError::Message(format!("stat {}: {e}", p.display())))?;
-    if !meta.is_file() {
-        return Err(AgentToolError::Message(format!(
-            "{} is not a regular file",
-            p.display()
-        )));
-    }
-    // Local fs source is user-trusted (they pointed at this path) — same OOM guard as
-    // the URL stream-read, just to keep memory bounded if the path points at something
-    // unexpectedly huge.
-    if meta.len() as usize > SKILL_FETCH_OOM_GUARD_BYTES {
-        return Err(AgentToolError::Message(format!(
-            "{} ({} bytes) exceeds {SKILL_FETCH_OOM_GUARD_BYTES}-byte in-memory guard",
-            p.display(),
-            meta.len()
-        )));
-    }
-    let content = tokio::fs::read_to_string(&p)
-        .await
-        .map_err(|e| AgentToolError::Message(format!("read {}: {e}", p.display())))?;
-    Ok(Fetched { content })
-}
-
-fn fetch_inline(content: &str) -> Fetched {
-    Fetched {
-        content: content.to_string(),
-    }
-}
-
-/// Reject hostnames that point at the loopback / private RFC1918 / link-local space.
-/// Pre-flight check: refuses the request before the HTTP client gets a chance to follow a
-/// DNS rebinding or hit a local service. Not airtight (a hostile DNS could still resolve a
-/// public name to a private IP), but raises the bar.
-fn is_private_or_local_host(host: &str) -> bool {
-    let host_lower = host
-        .trim_start_matches('[')
-        .trim_end_matches(']')
-        .to_ascii_lowercase();
-    if matches!(
-        host_lower.as_str(),
-        "localhost" | "ip6-localhost" | "ip6-loopback" | "broadcasthost"
-    ) {
-        return true;
-    }
-    if host_lower.ends_with(".localhost") || host_lower.ends_with(".local") {
-        return true;
-    }
-    if let Ok(ip) = host_lower.parse::<std::net::IpAddr>() {
-        return match ip {
-            std::net::IpAddr::V4(v4) => {
-                v4.is_loopback()
-                    || v4.is_private()
-                    || v4.is_link_local()
-                    || v4.is_unspecified()
-                    || v4.is_broadcast()
-            }
-            std::net::IpAddr::V6(v6) => {
-                v6.is_loopback() || v6.is_unspecified() || v6.segments()[0] & 0xfe00 == 0xfc00
-            }
-        };
-    }
-    false
-}
-
-// ──────────────────────────────────────────────────────────────────────────────────────────
-// Parse + validate
-// ──────────────────────────────────────────────────────────────────────────────────────────
-
-pub(crate) struct ParsedSkill {
-    pub(crate) name: String,
-    pub(crate) description: String,
-    pub(crate) normalized_content: String,
-    pub(crate) content_hash: String,
-    pub(crate) size: usize,
-    pub(crate) warnings: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Frontmatter {
-    name: Option<String>,
-    description: Option<String>,
-}
-
-/// Validate complete `SKILL.md` text (frontmatter + body) and normalize it. Shared with
-/// `SkillBuilder`, which renders its own content and runs it through here so authored and
-/// installed skills obey identical rules.
-pub(crate) fn parse_and_validate_skill_md(content: &str) -> Result<ParsedSkill, AgentToolError> {
-    parse_and_validate(&Fetched {
-        content: content.to_string(),
-    })
-}
-
-fn parse_and_validate(fetched: &Fetched) -> Result<ParsedSkill, AgentToolError> {
-    let normalized = fetched.content.replace("\r\n", "\n").replace('\r', "\n");
-    if !normalized.starts_with("---") {
-        return Err(AgentToolError::from(
-            "skill body missing YAML frontmatter (must start with `---` followed by name/description)",
-        ));
-    }
-    let end = normalized[3..]
-        .find("\n---")
-        .ok_or_else(|| AgentToolError::from("skill frontmatter missing closing `\\n---`"))?;
-    let yaml = &normalized[4..end + 3];
-    let frontmatter: Frontmatter = serde_yaml::from_str(yaml)
-        .map_err(|e| AgentToolError::Message(format!("invalid frontmatter yaml: {e}")))?;
-
-    let name = frontmatter
-        .name
-        .ok_or_else(|| AgentToolError::from("frontmatter missing required field: name"))?;
-    validate_name(&name)?;
-
-    let (description, warnings, rewrite_description) =
-        normalize_description(frontmatter.description);
-    let normalized_content = if rewrite_description {
-        normalize_skill_content(&normalized, end + 3, &description)?
-    } else {
-        normalized
-    };
-
-    let mut hasher = Sha256::new();
-    hasher.update(normalized_content.as_bytes());
-    let hash = hex::encode(hasher.finalize());
-    let size = normalized_content.len();
-
-    Ok(ParsedSkill {
-        name,
-        description,
-        normalized_content,
-        content_hash: hash,
-        size,
-        warnings,
-    })
-}
-
-fn normalize_description(description: Option<String>) -> (String, Vec<String>, bool) {
-    let Some(description) = description else {
-        return (
-            fallback_description(),
-            vec!["description missing; using generated fallback".to_string()],
-            true,
-        );
-    };
-    let trimmed = description.trim().to_string();
-    if trimmed.is_empty() {
-        return (
-            fallback_description(),
-            vec!["description empty; using generated fallback".to_string()],
-            true,
-        );
-    }
-    if trimmed.chars().count() > MAX_DESCRIPTION_LEN {
-        return (
-            fallback_description(),
-            vec![format!(
-                "description exceeds {MAX_DESCRIPTION_LEN} characters; using generated fallback"
-            )],
-            true,
-        );
-    }
-    (trimmed, Vec::new(), false)
-}
-
-fn fallback_description() -> String {
-    "No description provided.".to_string()
-}
-
-fn normalize_skill_content(
-    normalized: &str,
-    yaml_end: usize,
-    description: &str,
-) -> Result<String, AgentToolError> {
-    let yaml = &normalized[4..yaml_end];
-    let mut frontmatter: YamlValue = serde_yaml::from_str(yaml)
-        .map_err(|e| AgentToolError::Message(format!("invalid frontmatter yaml: {e}")))?;
-    let mapping = frontmatter
-        .as_mapping_mut()
-        .ok_or_else(|| AgentToolError::from("skill frontmatter must be a YAML mapping"))?;
-    mapping.insert(
-        YamlValue::String("description".to_string()),
-        YamlValue::String(description.to_string()),
-    );
-    let frontmatter = serde_yaml::to_string(&frontmatter)
-        .map_err(|e| AgentToolError::Message(format!("failed to normalize frontmatter: {e}")))?;
-
-    Ok(format!(
-        "---\n{}{}",
-        frontmatter.trim_start_matches("---\n"),
-        &normalized[yaml_end..]
-    ))
-}
-
-fn validate_name(name: &str) -> Result<(), AgentToolError> {
-    if name.is_empty() {
-        return Err(AgentToolError::from("skill name must not be empty"));
-    }
-    if name.chars().count() > MAX_NAME_LEN {
-        return Err(AgentToolError::Message(format!(
-            "skill name exceeds {MAX_NAME_LEN} characters"
-        )));
-    }
-    if !name
-        .chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-    {
-        return Err(AgentToolError::from(
-            "skill name must contain only lowercase a-z, 0-9, and hyphens",
-        ));
-    }
-    if name.starts_with('-') || name.ends_with('-') {
-        return Err(AgentToolError::from(
-            "skill name must not start or end with a hyphen",
-        ));
-    }
-    if name.contains("--") {
-        return Err(AgentToolError::from(
-            "skill name must not contain consecutive hyphens",
-        ));
-    }
-    Ok(())
 }
 
 // ──────────────────────────────────────────────────────────────────────────────────────────
