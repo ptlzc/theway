@@ -27,6 +27,7 @@ use theway_core::{AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate};
 use theway_llm_provider::{Tool, UserContentBlock};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Notify;
+#[cfg(windows)]
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
