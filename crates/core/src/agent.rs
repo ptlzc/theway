@@ -34,8 +34,6 @@ pub mod notification_hook;
 #[cfg(feature = "harness")]
 pub mod permission;
 #[cfg(feature = "harness")]
-pub mod prompt_templates;
-#[cfg(feature = "harness")]
 pub mod session;
 #[cfg(feature = "harness")]
 pub mod skills;

@@ -235,7 +235,6 @@ use super::compaction::compaction::{
 use super::cost::{CostSnapshot, CostTracker};
 use super::messages::compaction_summary;
 use super::notification_hook::{DynNotificationHook, NotificationHookStatus};
-use super::prompt_templates::PromptTemplateRegistry;
 use super::session::session::{BranchSummaryInput, Session};
 use super::system_prompt::format_skills_for_system_prompt;
 use super::trigger::{Trigger, TriggerRecord, TriggerState};
@@ -502,10 +501,10 @@ pub enum PromoteAction {
     PromoteSummaryNow {
         /// **Inline template body** to render against the allowlisted context. `None` uses
         /// the runtime's built-in safe default. The audit + event `template_name` field is
-        /// always `None` in v1 (named-template lookup via `PromptTemplateRegistry` lands
-        /// in sub-PR 6 / RFC 4 rule engine work); the body is what gets rendered but is
-        /// never persisted as `template_name` because the audit contract reserves
-        /// `template_name` for a registry-style identity, not the body content.
+        /// always `None` in v1 (named-template lookup lands in sub-PR 6 / RFC 4 rule engine
+        /// work); the body is what gets rendered but is never persisted as `template_name`
+        /// because the audit contract reserves `template_name` for a registry-style identity,
+        /// not the body content.
         template_body: Option<String>,
     },
     /// Deprecated: free-form `summary` substring matching cannot safely gate promotion —
@@ -920,7 +919,7 @@ pub struct AgentHarness {
     session: Session,
     skills: Mutex<Vec<Skill>>,
     base_system_prompt: String,
-    templates: Mutex<PromptTemplateRegistry>,
+    templates: Mutex<Vec<PromptTemplate>>,
     compaction_settings: Mutex<CompactionSettings>,
     /// Resolves `compaction_settings.algorithm` to an implementation (builtin + TS ext).
     compact_algorithms: Arc<CompactAlgorithmRegistry>,
@@ -1019,7 +1018,7 @@ impl AgentHarness {
             session: options.session,
             skills: Mutex::new(options.skills),
             base_system_prompt: options.system_prompt,
-            templates: Mutex::new(PromptTemplateRegistry::new(options.prompt_templates)),
+            templates: Mutex::new(options.prompt_templates),
             compaction_settings: Mutex::new(options.compaction),
             compact_algorithms: options.compact_algorithms,
             stream_fn: options.stream_fn,
@@ -1507,7 +1506,7 @@ impl AgentHarness {
     /// Snapshot of the loaded prompt templates. Listing-only — callers run them via
     /// [`Self::prompt_from_template`].
     pub fn templates(&self) -> Vec<PromptTemplate> {
-        self.templates.lock().list().to_vec()
+        self.templates.lock().clone()
     }
 
     pub fn system_prompt(&self) -> String {
@@ -1658,7 +1657,7 @@ impl AgentHarness {
     ) -> Result<(), AgentRunError> {
         let template = {
             let g = self.templates.lock();
-            g.get(name).cloned()
+            g.iter().find(|t| t.name == name).cloned()
         };
         let template = match template {
             Some(t) => t,
@@ -1668,7 +1667,7 @@ impl AgentHarness {
                 )));
             }
         };
-        let rendered = PromptTemplateRegistry::interpolate(&template, &vars);
+        let rendered = template.interpolate(&vars);
         self.prompt(rendered).await
     }
 

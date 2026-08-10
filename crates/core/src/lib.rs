@@ -84,8 +84,6 @@ pub use agent::notification_hook::{
 #[cfg(feature = "harness")]
 pub use agent::permission::{PermissionCategory, PermissionDecision, PermissionPolicy};
 #[cfg(feature = "harness")]
-pub use agent::prompt_templates::{LoadTemplatesOutput, PromptTemplateRegistry, load_templates};
-#[cfg(feature = "harness")]
 pub use agent::session::{
     jsonl_repo::JsonlSessionRepo,
     jsonl_storage::JsonlSessionStorage,

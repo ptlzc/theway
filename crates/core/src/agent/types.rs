@@ -334,6 +334,40 @@ pub struct PromptTemplate {
     pub file_path: String,
 }
 
+impl PromptTemplate {
+    /// Interpolate `{{var}}` placeholders. Missing keys leave the placeholder verbatim.
+    pub fn interpolate(&self, vars: &serde_json::Map<String, serde_json::Value>) -> String {
+        let mut out = self.content.clone();
+        for (k, v) in vars {
+            let needle = format!("{{{{{k}}}}}");
+            let value = match v {
+                serde_json::Value::String(s) => s.clone(),
+                _ => v.to_string(),
+            };
+            out = out.replace(&needle, &value);
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PromptTemplate;
+
+    #[test]
+    fn interpolates_known_vars_and_leaves_unknown() {
+        let t = PromptTemplate {
+            name: "t".into(),
+            description: None,
+            content: "hi {{who}} — {{missing}}".into(),
+            file_path: "/x".into(),
+        };
+        let mut vars = serde_json::Map::new();
+        vars.insert("who".into(), serde_json::json!("world"));
+        assert_eq!(t.interpolate(&vars), "hi world — {{missing}}");
+    }
+}
+
 // ──────────────────────────────────────────────────────────────────────────────────────────
 // Higher-level harness errors (declared up front so each subsystem can use them as it lands)
 // ──────────────────────────────────────────────────────────────────────────────────────────
