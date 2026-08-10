@@ -12,8 +12,8 @@
 
 use std::sync::Arc;
 
-use super::execution::TriggerPromptRequest;
 use super::types::{SourceKind, TriggerState};
+use crate::trigger_engine::execution::types::TriggerPromptRequest;
 
 /// Listener for [`TriggerEvent`]. Same shape as `HarnessListener` so UI adapters can mix
 /// both streams with the same closure style.
