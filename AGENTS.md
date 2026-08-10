@@ -10,6 +10,12 @@ This repository is a Rust 2024 Cargo workspace. The root `Cargo.toml` lists four
 
 Each crate keeps implementation in `src/`, integration tests in `tests/`, and runnable examples in `examples/` where present. Provider model data and generated Rust live under `crates/llm-provider/src/`; use `crates/llm-provider/scripts/regen_models.sh` when regenerating model catalogs.
 
+## File Size Governance (>800 lines)
+
+Source and test files must stay under ~800 lines; larger files must be split into a **directory** (`foo.rs` → `foo/mod.rs` + domain submodules for src; `tests/<name>/mod.rs` + domain submodule files for tests), splitting by domain/module, never mechanically. Exceptions (third-party vendored/extracted code that must stay monolithic):
+
+- `crates/mermaid-parser/src/parser.rs` — extracted from the third-party `mmdr` parser (vendored mermaid parse stage); kept as one file to stay diff-compatible with upstream extraction. Do NOT split it; do not re-apply the 800-line rule to it.
+
 ## Build, Test, and Development Commands
 
 - `cargo build --workspace`: build all workspace crates.
