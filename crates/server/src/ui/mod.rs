@@ -45,8 +45,8 @@ use std::time::Instant;
 use anyhow::{Context as _, Result};
 #[cfg(feature = "tui")]
 use crossterm::event::{
-    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, Event,
-    EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind,
+    DisableBracketedPaste, EnableBracketedPaste, Event, EventStream, KeyCode, KeyEvent,
+    KeyEventKind, KeyModifiers, MouseEventKind,
 };
 #[cfg(feature = "tui")]
 use crossterm::execute;
@@ -2438,22 +2438,25 @@ fn leave_tui() -> Result<()> {
 
 #[cfg(feature = "tui")]
 fn write_enter_tui_commands(out: &mut impl std::io::Write) -> std::io::Result<()> {
-    execute!(
-        out,
-        EnterAlternateScreen,
-        EnableBracketedPaste,
-        EnableMouseCapture
-    )
+    execute!(out, EnterAlternateScreen, EnableBracketedPaste)?;
+    // Mouse capture is written explicitly instead of via crossterm's
+    // `EnableMouseCapture`: on Windows that command routes through winapi
+    // (`is_ansi_code_supported() == false`) and pokes the real console
+    // directly, so the sequences never reach a non-console writer — the
+    // enter/leave byte streams desync the moment the TUI is redirected
+    // (tests, `tee`, winpty-style wrappers). Windows Terminal and conhost
+    // (Win10+) both implement the VT mouse protocol (`?1000h` normal + `?1006h`
+    // SGR, the two modes the feed wheel needs), so writing them explicitly is
+    // behavior-preserving on a real console and faithful to the writer here.
+    write!(out, "\x1b[?1000h\x1b[?1006h")?;
+    out.flush()
 }
 
 #[cfg(feature = "tui")]
 fn write_leave_tui_commands(out: &mut impl std::io::Write) -> std::io::Result<()> {
-    execute!(
-        out,
-        DisableMouseCapture,
-        DisableBracketedPaste,
-        LeaveAlternateScreen
-    )
+    write!(out, "\x1b[?1006l\x1b[?1000l")?;
+    execute!(out, DisableBracketedPaste, LeaveAlternateScreen)?;
+    Ok(())
 }
 
 #[cfg(feature = "tui")]
