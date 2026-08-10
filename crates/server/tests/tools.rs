@@ -16,6 +16,18 @@ use theway_core::tools;
 // `clear_for_tests` — only a path-included copy compiles with cfg(test). `cron.rs` pulls
 // in `crate::inbox` / `crate::bug_report` siblings along the way; `bug_report.rs` pulls
 // in `crate::config`.
+// e2e includes engine/src files by `#[path]`; those files may contain a
+// `tests_bridge!("...")` call (module tests live in `tests/<mirror>/`, see
+// docs/RUST_TEST_FILES.md). This test crate is a separate binary, so the macro
+// from lib.rs is not in scope — define it here (before the includes).
+#[cfg(test)]
+macro_rules! tests_bridge {
+    ($path:literal) => {
+        #[path = $path]
+        mod tests;
+    };
+}
+
 #[path = "../src/bug_report.rs"]
 #[allow(dead_code)]
 mod bug_report;

@@ -5,6 +5,19 @@
 //! overlay) keep their `use theway_core::...` import paths unchanged inside this crate.
 extern crate self as theway_core;
 
+/// Bridge macro for module tests stored in `tests/<mirror>/` (see
+/// docs/RUST_TEST_FILES.md). Macro expansion happens before attribute
+/// evaluation, so a literal path argument IS accepted by `#[path]` — unlike
+/// `concat!`/`env!`, which the attribute evaluator rejects. The path stays
+/// relative (Rust limitation): `<src depth + 2>../tests/<mirror>/mod.rs`.
+#[cfg(test)]
+macro_rules! tests_bridge {
+    ($path:literal) => {
+        #[path = $path]
+        mod tests;
+    };
+}
+
 pub mod agent;
 pub mod agent_loop;
 pub mod node;

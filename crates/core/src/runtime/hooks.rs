@@ -921,5 +921,4 @@ fn shell_arg() -> &'static str {
 #[cfg(test)]
 // Test files live in `tests/runtime/hooks/` (mirror of `src/runtime/`), pulled in by
 // path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
-#[path = "../../tests/runtime/hooks/mod.rs"]
-mod tests;
+tests_bridge!("../../tests/runtime/hooks/mod.rs");

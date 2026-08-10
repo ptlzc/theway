@@ -756,5 +756,4 @@ pub fn first_line(text: &str, max: usize) -> String {
     }
 }
 #[cfg(test)]
-#[path = "../../../tests/runtime/graph_engineering/graph/mod.rs"]
-mod tests;
+tests_bridge!("../../../tests/runtime/graph_engineering/graph/mod.rs");

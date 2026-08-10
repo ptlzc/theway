@@ -22,6 +22,18 @@ use theway_llm_provider::{
 use tokio_util::sync::CancellationToken;
 
 #[allow(dead_code)]
+// e2e includes engine/src files by `#[path]`; those files may contain a
+// `tests_bridge!("...")` call (module tests live in `tests/<mirror>/`, see
+// docs/RUST_TEST_FILES.md). This test crate is a separate binary, so the macro
+// from lib.rs is not in scope — define it here (before the includes).
+#[cfg(test)]
+macro_rules! tests_bridge {
+    ($path:literal) => {
+        #[path = $path]
+        mod tests;
+    };
+}
+
 #[path = "../src/auth.rs"]
 mod auth;
 #[allow(dead_code)]

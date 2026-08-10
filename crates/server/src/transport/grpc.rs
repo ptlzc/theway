@@ -578,5 +578,4 @@ pub fn serve_grpc(listener: TcpListener, state: GrpcState) -> tokio::task::JoinH
 #[cfg(test)]
 // Test files live in `tests/transport/grpc/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
-#[path = "../../tests/transport/grpc/mod.rs"]
-mod tests;
+tests_bridge!("../../tests/transport/grpc/mod.rs");

@@ -29,6 +29,18 @@ static CRON_LOCK: Mutex<()> = Mutex::new(());
 // references sibling modules through `crate::...`, so we include those siblings too. They appear unused-from-tests
 // (no items are called directly here) — that's fine; the commands module reaches into them.
 #[allow(dead_code)]
+// e2e includes engine/src files by `#[path]`; those files may contain a
+// `tests_bridge!("...")` call (module tests live in `tests/<mirror>/`, see
+// docs/RUST_TEST_FILES.md). This test crate is a separate binary, so the macro
+// from lib.rs is not in scope — define it here (before the includes).
+#[cfg(test)]
+macro_rules! tests_bridge {
+    ($path:literal) => {
+        #[path = $path]
+        mod tests;
+    };
+}
+
 #[path = "../src/auth.rs"]
 mod auth;
 #[allow(dead_code)]

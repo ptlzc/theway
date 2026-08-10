@@ -239,5 +239,4 @@ pub fn max_run_counter(runs: &[DagRun]) -> u64 {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/runtime/graph_engineering/persist/mod.rs"]
-mod tests;
+tests_bridge!("../../../tests/runtime/graph_engineering/persist/mod.rs");

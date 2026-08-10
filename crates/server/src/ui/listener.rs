@@ -321,5 +321,4 @@ fn source_kind_label(kind: theway_core::SourceKind) -> &'static str {
 #[cfg(test)]
 // Test files live in `tests/ui/listener/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
-#[path = "../../tests/ui/listener/mod.rs"]
-mod tests;
+tests_bridge!("../../tests/ui/listener/mod.rs");

@@ -412,5 +412,4 @@ fn level_str(level: &feed::Level) -> &'static str {
 #[cfg(test)]
 // Test files live in `tests/transport/proto/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
-#[path = "../../tests/transport/proto/mod.rs"]
-mod tests;
+tests_bridge!("../../tests/transport/proto/mod.rs");

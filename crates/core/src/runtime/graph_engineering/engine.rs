@@ -1019,5 +1019,4 @@ fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
 // Test files live in `tests/runtime/graph_engineering/engine/` (mirror of
 // `src/runtime/graph_engineering/`), pulled in by path so they keep unit-test
 // semantics (private access). See docs/RUST_TEST_FILES.md.
-#[path = "../../../tests/runtime/graph_engineering/engine/mod.rs"]
-mod tests;
+tests_bridge!("../../../tests/runtime/graph_engineering/engine/mod.rs");

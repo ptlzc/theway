@@ -1,6 +1,14 @@
 //! theway-llm-provider — Rust port of `@earendil-works/theway-llm-provider`. 1:1 file mapping with the TypeScript source at
 //! `packages/ai/src/`. The barrel re-exports the public surface.
 
+#[cfg(test)]
+macro_rules! tests_bridge {
+    ($path:literal) => {
+        #[path = $path]
+        mod tests;
+    };
+}
+
 pub mod api_registry;
 pub mod bedrock_anthropic;
 pub mod bedrock_provider;

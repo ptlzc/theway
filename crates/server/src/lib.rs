@@ -9,6 +9,19 @@
 //! crate; external projects (e.g. workmate-local) can depend on `theway`
 //! directly and embed the runtime in-process.
 
+/// Bridge macro for module tests stored in `tests/<mirror>/` (see
+/// docs/RUST_TEST_FILES.md). Macro expansion runs before attribute evaluation,
+/// so a literal path argument IS accepted by `#[path]` — unlike `concat!`/
+/// `env!`, which the attribute evaluator rejects. Path stays relative (Rust
+/// limitation): `<src depth + 2>../tests/<mirror>/mod.rs`.
+#[cfg(test)]
+macro_rules! tests_bridge {
+    ($path:literal) => {
+        #[path = $path]
+        mod tests;
+    };
+}
+
 pub mod agent_session;
 pub mod auth;
 pub mod bug_report;

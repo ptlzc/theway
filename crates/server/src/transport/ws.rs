@@ -322,5 +322,4 @@ pub(crate) fn dag_event_json(event: &DagEvent) -> Value {
 #[cfg(test)]
 // Test files live in `tests/transport/ws/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
-#[path = "../../tests/transport/ws/mod.rs"]
-mod tests;
+tests_bridge!("../../tests/transport/ws/mod.rs");

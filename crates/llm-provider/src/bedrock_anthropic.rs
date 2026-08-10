@@ -332,5 +332,4 @@ struct AnthropicErrorBody {
 #[cfg(test)]
 // Test files live in `tests/bedrock_anthropic/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
-#[path = "../tests/bedrock_anthropic/mod.rs"]
-mod tests;
+tests_bridge!("../tests/bedrock_anthropic/mod.rs");
