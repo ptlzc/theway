@@ -5,7 +5,7 @@
 //!
 //! - **graph / DAG orchestration**: [`dag_tools`] (model-facing dag_* tools), backed by
 //!   `crate::runtime::graph_engineering`.
-//! - **subagents**: [`subagent_specs`] (built-in agent specs), [`subagent_runner`]
+//! - **subagents**: [`subagent_launch`] (launch data channel), [`subagent_runner`]
 //!   (shared sub-harness lifecycle), [`node_launcher`] (DAG node execution), [`subagent`]
 //!   (model-facing Task delegation tool).
 //! - **skills**: [`skill`], [`install_skill`], [`remove_skill`], [`set_skill_state`],
@@ -18,7 +18,7 @@
 //! `crate::tools` there): they are environment-specific agent capabilities — the local
 //! ones may become remote sandbox execution later — not engine concerns. The engine
 //! decides *what* a subagent can do only through injected tool-set resolvers
-//! (`SubagentSpec` carries no tool factory; the app layer supplies one).
+//! (no spec/tool content lives here; the app layer supplies both resolvers).
 
 pub mod assembly;
 pub mod dag_tools;
@@ -31,5 +31,5 @@ pub mod set_skill_state;
 pub mod skill;
 pub mod skill_builder;
 pub mod subagent;
+pub mod subagent_launch;
 pub mod subagent_runner;
-pub mod subagent_specs;

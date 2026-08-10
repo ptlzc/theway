@@ -1,15 +1,29 @@
-//! App-layer subagent spec table — the BEHAVIOR content of the built-in subagent
-//! specs (explorer / planner / executor-coder / checker / general).
+//! App-layer subagent spec table — the spec CONCEPT lives here, not in the engine.
 //!
-//! The engine (`theway_core::tools::subagent_specs`) defines the mechanism (the
-//! [`SubagentSpec`] structure and the [`SpecResolver`] injection point) but not the
-//! content; which specs exist and what they are told to do is an app-layer decision,
-//! same line as the tool-set resolver. User-defined specs via
-//! `~/.theway/subagents/*.toml` can replace this table later without engine changes.
+//! The engine (`theway_core::tools::subagent_launch`) provides only the launch data
+//! channel ([`SubagentLaunch`] + [`LaunchResolver`]); it does not define what a spec is.
+//! This module owns the spec structure (name / description / system prompt / iteration
+//! budget), the built-in table (explorer / planner / executor-coder / checker /
+//! general), and the mapping into launch parameters injected into the engine. User-defined
+//! specs via `~/.theway/subagents/*.toml` can extend this table later without engine
+//! changes.
 
 use std::sync::Arc;
 
-use theway_core::tools::subagent_specs::{DEFAULT_MAX_ITERATIONS, SpecResolver, SubagentSpec};
+use theway_core::tools::subagent_launch::{LaunchResolver, SubagentLaunch};
+
+/// Iteration budget default, mirroring the `subagent` tool's "max 16 iterations" doc.
+pub const DEFAULT_MAX_ITERATIONS: u32 = 16;
+
+/// App-layer spec definition. Structure and content are server decisions; the engine
+/// only ever sees the mapped [`SubagentLaunch`].
+#[derive(Clone, Copy)]
+pub struct SubagentSpec {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub system_prompt: &'static str,
+    pub max_iterations: u32,
+}
 
 /// The built-in spec table, in declaration order.
 pub static SUBAGENT_SPECS: [SubagentSpec; 5] = [
@@ -54,10 +68,20 @@ pub static SUBAGENT_SPECS: [SubagentSpec; 5] = [
     },
 ];
 
-/// App-layer spec resolver: spec name -> spec (the one injected into the subagent tool
-/// and the DAG node launcher).
-pub fn spec_resolver() -> SpecResolver {
-    Arc::new(|name: &str| SUBAGENT_SPECS.iter().find(|s| s.name == name).copied())
+/// App-layer launch resolver: spec name -> launch parameters (the one injected into the
+/// subagent tool and the DAG node launcher). How specs map to launches is server policy.
+pub fn launch_resolver() -> LaunchResolver {
+    Arc::new(|name: &str| {
+        SUBAGENT_SPECS
+            .iter()
+            .find(|s| s.name == name)
+            .map(|s| SubagentLaunch {
+                name: s.name,
+                description: s.description,
+                system_prompt: s.system_prompt,
+                max_iterations: s.max_iterations,
+            })
+    })
 }
 
 /// Known spec names, in declaration order (populates the `subagent_type` enum and the
@@ -92,13 +116,13 @@ mod tests {
     #[test]
     fn resolver_roundtrips_all_specs_and_rejects_unknown() {
         for spec in &SUBAGENT_SPECS {
-            let resolved = spec_resolver()(spec.name).expect("known name must resolve");
-            assert_eq!(resolved.name, spec.name);
-            assert_eq!(resolved.max_iterations, DEFAULT_MAX_ITERATIONS);
-            assert!(!resolved.system_prompt.is_empty());
-            assert!(!resolved.description.is_empty());
+            let launch = launch_resolver()(spec.name).expect("known name must resolve");
+            assert_eq!(launch.name, spec.name);
+            assert_eq!(launch.description, spec.description);
+            assert_eq!(launch.system_prompt, spec.system_prompt);
+            assert_eq!(launch.max_iterations, spec.max_iterations);
         }
-        assert!(spec_resolver()("no-such-agent").is_none());
-        assert!(spec_resolver()("").is_none());
+        assert!(launch_resolver()("no-such-agent").is_none());
+        assert!(launch_resolver()("").is_none());
     }
 }

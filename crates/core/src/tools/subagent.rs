@@ -33,8 +33,8 @@ use theway_llm_provider::{Model, Tool, UserContentBlock};
 use tokio_util::sync::CancellationToken;
 
 use super::node_launcher::ToolSetResolver;
+use super::subagent_launch::LaunchResolver;
 use super::subagent_runner::{SubagentRunOptions, run_subagent};
-use super::subagent_specs::SpecResolver;
 
 /// Closure that resolves the tool set a subagent should have access to from its spec
 /// name. Same shape as the DAG node launcher's [`ToolSetResolver`] — `task` and DAG
@@ -52,9 +52,9 @@ pub struct SubagentTool {
     /// App-layer tool-set resolver for subagents, keyed by spec name (see
     /// [`SubagentToolsFn`]). Shared with the DAG node launcher — one mechanism.
     subagent_tools: SubagentToolsFn,
-    /// App-layer spec resolver (spec name → spec). The spec table lives app-side;
-    /// this tool only consumes it.
-    spec_resolver: SpecResolver,
+    /// App-layer launch resolver (spec name → launch params). The spec table lives
+    /// app-side; this tool only consumes it.
+    launch_resolver: LaunchResolver,
     /// Known spec names (for the `subagent_type` enum in the tool definition),
     /// captured at construction from the app's spec table.
     spec_names: Vec<String>,
@@ -74,7 +74,7 @@ impl SubagentTool {
         model: Model,
         stream_fn: Option<StreamFn>,
         subagent_tools: SubagentToolsFn,
-        spec_resolver: SpecResolver,
+        launch_resolver: LaunchResolver,
         spec_names: Vec<String>,
         registry: SubagentJobRegistry,
     ) -> Self {
@@ -83,7 +83,7 @@ impl SubagentTool {
             model,
             stream_fn,
             subagent_tools,
-            spec_resolver,
+            launch_resolver,
             spec_names,
             registry,
             session_id: None,
@@ -147,11 +147,11 @@ impl AgentTool for SubagentTool {
         // the harness from the resolved spec (system prompt); the tool set comes from
         // the app-layer resolver injected at construction (same one the DAG launcher
         // uses).
-        let spec = (self.spec_resolver)(subagent_type).ok_or_else(|| {
+        let launch = (self.launch_resolver)(subagent_type).ok_or_else(|| {
             AgentToolError::Message(format!("unknown subagent_type: {subagent_type}"))
         })?;
         let result = run_subagent(SubagentRunOptions {
-            spec,
+            launch,
             tools: (self.subagent_tools)(subagent_type),
             prompt,
             model: self.model.clone(),

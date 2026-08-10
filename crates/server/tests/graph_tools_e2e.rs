@@ -100,13 +100,13 @@ async fn dag_plan_wait_status_completes_2_node_dag_with_real_launcher() {
         Arc::new(|_| Vec::new()),
         // Spec resolver: minimal app-side table (the plan uses `explorer`).
         Arc::new(|name: &str| {
-            let spec = theway_core::tools::subagent_specs::SubagentSpec {
+            let launch = theway_core::tools::subagent_launch::SubagentLaunch {
                 name: "explorer",
                 description: "test",
                 system_prompt: "You are a test subagent.",
                 max_iterations: 16,
             };
-            (name == "explorer").then_some(spec)
+            (name == "explorer").then_some(launch)
         }),
     )));
     let tools = dag_tools::DagTools::new(

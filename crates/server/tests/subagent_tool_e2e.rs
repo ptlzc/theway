@@ -35,14 +35,14 @@ fn faux_model() -> theway_llm_provider::Model {
     }
 }
 
-fn test_spec_resolver() -> theway_core::tools::subagent_specs::SpecResolver {
-    let spec = theway_core::tools::subagent_specs::SubagentSpec {
+fn test_launch_resolver() -> theway_core::tools::subagent_launch::LaunchResolver {
+    let launch = theway_core::tools::subagent_launch::SubagentLaunch {
         name: "general",
         description: "test",
         system_prompt: "You are a test subagent.",
         max_iterations: 16,
     };
-    std::sync::Arc::new(move |name: &str| (name == "general").then_some(spec))
+    std::sync::Arc::new(move |name: &str| (name == "general").then_some(launch))
 }
 
 fn faux_stream(text: &'static str) -> StreamFn {
@@ -81,7 +81,7 @@ async fn subagent_returns_final_text() {
         faux_model(),
         Some(faux_stream("subagent result")),
         Arc::new(|_| Vec::new()),
-        test_spec_resolver(),
+        test_launch_resolver(),
         vec!["general".to_string()],
         theway_core::runtime::subagents::registry::SubagentJobRegistry::new(),
     );
@@ -111,7 +111,7 @@ async fn subagent_unknown_type_errors() {
         faux_model(),
         Some(faux_stream("nope")),
         Arc::new(|_| Vec::new()),
-        test_spec_resolver(),
+        test_launch_resolver(),
         vec!["general".to_string()],
         theway_core::runtime::subagents::registry::SubagentJobRegistry::new(),
     );
@@ -137,7 +137,7 @@ async fn subagent_missing_prompt_errors() {
         faux_model(),
         Some(faux_stream("nope")),
         Arc::new(|_| Vec::new()),
-        test_spec_resolver(),
+        test_launch_resolver(),
         vec!["general".to_string()],
         theway_core::runtime::subagents::registry::SubagentJobRegistry::new(),
     );
@@ -165,7 +165,7 @@ async fn subagent_parent_abort_cascades() {
         faux_model(),
         Some(stalled),
         Arc::new(|_| Vec::new()),
-        test_spec_resolver(),
+        test_launch_resolver(),
         vec!["general".to_string()],
         theway_core::runtime::subagents::registry::SubagentJobRegistry::new(),
     );

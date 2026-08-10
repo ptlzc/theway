@@ -37,7 +37,7 @@ use super::set_skill_state;
 use super::skill::{self, SkillHarnessCell};
 use super::skill_builder;
 use super::subagent::{SubagentTool, SubagentToolsFn};
-use super::subagent_specs::SpecResolver;
+use super::subagent_launch::LaunchResolver;
 
 /// App-layer factory producing the LOCAL execution tools (bash / fs / git / web / …) —
 /// the part the engine cannot know about. Injected once at assembly; every harness
@@ -53,7 +53,7 @@ pub fn engine_tools(
     dag_engine: &Arc<DagEngine>,
     subagent_registry: &SubagentJobRegistry,
     subagent_tools: SubagentToolsFn,
-    spec_resolver: SpecResolver,
+    launch_resolver: LaunchResolver,
     spec_names: Vec<String>,
     model: &Model,
     stream_fn: Option<&StreamFn>,
@@ -74,7 +74,7 @@ pub fn engine_tools(
             model.clone(),
             stream_fn.cloned(),
             subagent_tools,
-            spec_resolver,
+            launch_resolver,
             spec_names,
             subagent_registry.clone(),
         )

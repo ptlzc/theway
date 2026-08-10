@@ -4,7 +4,7 @@
 //! Both callers used to duplicate the same pipeline: a fresh [`AgentHarness`] on an
 //! in-memory session, a [`metrics_listener`] registry subscription, final-text
 //! collection, a cancel watcher, an optional timeout wrapper, and the registry
-//! `finish`. This module is that pipeline, parameterized by a [`SubagentSpec`], so
+//! `finish`. This module is that pipeline, parameterized by [`SubagentLaunch`], so
 //! `subagent` and `node_launcher` behave identically (same harness shape, same registry
 //! semantics: `source` is "subagent" or "dag", run/node ids carried through).
 
@@ -22,15 +22,15 @@ use theway_core::{
 use theway_llm_provider::{Message as PiMessage, Model};
 use tokio_util::sync::CancellationToken;
 
-use super::subagent_specs::SubagentSpec;
+use super::subagent_launch::SubagentLaunch;
 
 /// Everything a single subagent run needs, captured at launch time by the caller.
 pub struct SubagentRunOptions {
-    /// Resolved spec (via the app-layer [`SpecResolver`](super::subagent_specs::SpecResolver)):
+    /// Resolved launch parameters (via the app-layer [`LaunchResolver`](super::subagent_launch::LaunchResolver)):
     /// system prompt + metadata.
-    pub spec: SubagentSpec,
+    pub launch: SubagentLaunch,
     /// Tool set the sub-harness runs with. Resolved by the caller from the app-layer
-    /// tool-set resolver (specs carry no tool factory — see `subagent_specs` docs).
+    /// tool-set resolver (specs carry no tool factory; the app supplies one).
     pub tools: Vec<Arc<dyn AgentTool>>,
     pub prompt: String,
     pub model: Model,
@@ -81,7 +81,7 @@ pub async fn run_subagent(opts: SubagentRunOptions) -> SubagentRunResult {
 
     // Graph mode: track this job in the registry (metrics + full-text output).
     let job_id = opts.registry.register(JobInit {
-        agent: opts.spec.name.to_string(),
+        agent: opts.launch.name.to_string(),
         source: opts.source,
         run_id: opts.run_id,
         node_id: opts.node_id,
@@ -92,8 +92,8 @@ pub async fn run_subagent(opts: SubagentRunOptions) -> SubagentRunResult {
     let session = Session::new(storage as Arc<dyn SessionStorage>);
     let mut harness_opts = AgentHarnessOptions::new(opts.model, session);
     harness_opts.system_prompt = match opts.system_prompt_extra {
-        Some(extra) => format!("{}\n{extra}", opts.spec.system_prompt),
-        None => opts.spec.system_prompt.to_string(),
+        Some(extra) => format!("{}\n{extra}", opts.launch.system_prompt),
+        None => opts.launch.system_prompt.to_string(),
     };
     harness_opts.tools = opts.tools;
     harness_opts.stream_fn = opts.stream_fn;

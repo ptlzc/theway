@@ -3,7 +3,7 @@
 //! [`NodeLauncherImpl`] implements the engine's [`NodeLauncher`] contract: each launched
 //! node is executed by the shared [`subagent_runner`](super::subagent_runner) (one fresh
 //! in-memory harness per node, nothing touches disk), spawned by the node's `agent` name
-//! resolved through [`subagent_specs`]. The outcome (success, error, duration, tokens,
+//! resolved through the injected [`LaunchResolver`](super::subagent_launch). The outcome (success, error, duration, tokens,
 //! final text) is reported back to the engine via [`DagEngine::on_node_completed`]; live
 //! token/preview sync runs through [`DagEngine::on_node_update`] via the runner's
 //! per-turn callback. 1:1 port of the dag-orchestrator extension's `defaultLauncher`
@@ -28,8 +28,8 @@ use theway_core::{AgentTool, StreamFn};
 use theway_llm_provider::Model;
 use tokio_util::sync::CancellationToken;
 
+use super::subagent_launch::{LaunchResolver, SubagentLaunch};
 use super::subagent_runner::{SubagentRunOptions, run_subagent};
-use super::subagent_specs::{SpecResolver, SubagentSpec};
 use theway_core::runtime::subagents::registry::SubagentJobRegistry;
 
 /// Resolves a subagent's tool set from its spec name. App-layer injection: the engine
@@ -44,7 +44,7 @@ struct NodeJob {
     engine: DagEngine,
     run_id: String,
     node_id: String,
-    spec: SubagentSpec,
+    launch: SubagentLaunch,
     /// Resolved tool set for this node's subagent (from the launcher's resolver).
     tools: Vec<Arc<dyn AgentTool>>,
     model: Model,
@@ -74,8 +74,8 @@ pub struct NodeLauncherImpl {
     registry: SubagentJobRegistry,
     /// App-layer tool-set resolver (spec name → tools), injected at construction.
     tools_resolver: ToolSetResolver,
-    /// App-layer spec resolver (spec name → spec), injected at construction.
-    spec_resolver: SpecResolver,
+    /// App-layer launch resolver (spec name → launch params), injected at construction.
+    launch_resolver: LaunchResolver,
 }
 
 impl NodeLauncher for NodeLauncherImpl {
@@ -88,7 +88,7 @@ impl NodeLauncher for NodeLauncherImpl {
         let Some(node) = run.node(node_id) else {
             return;
         };
-        let Some(spec) = (self.spec_resolver)(&node.agent) else {
+        let Some(launch) = (self.launch_resolver)(&node.agent) else {
             self.engine.on_node_completed(
                 run_id,
                 node_id,
@@ -113,9 +113,9 @@ impl NodeLauncher for NodeLauncherImpl {
         tracing::debug!(
             run_id,
             node_id,
-            agent = spec.name,
-            description = spec.description,
-            max_iterations = spec.max_iterations,
+            agent = launch.name,
+            description = launch.description,
+            max_iterations = launch.max_iterations,
             cwd = %self.cwd.display(),
             "launching DAG node subagent"
         );
@@ -134,7 +134,7 @@ impl NodeLauncher for NodeLauncherImpl {
             engine: self.engine.as_ref().clone(),
             run_id: run_id.to_string(),
             node_id: node_id.to_string(),
-            spec,
+            launch,
             tools: (self.tools_resolver)(&node.agent),
             model,
             stream_fn: self.stream_fn.clone(),
@@ -149,7 +149,7 @@ impl NodeLauncher for NodeLauncherImpl {
 }
 
 /// Build a launcher wired to `engine`, using the parent agent's model and stream fn and
-/// the app-layer tool-set + spec resolvers (spec name → tools / spec).
+/// the app-layer tool-set + launch resolvers (spec name → tools / launch params).
 pub fn node_launcher(
     engine: Arc<DagEngine>,
     model: Model,
@@ -157,7 +157,7 @@ pub fn node_launcher(
     cwd: PathBuf,
     registry: SubagentJobRegistry,
     tools_resolver: ToolSetResolver,
-    spec_resolver: SpecResolver,
+    launch_resolver: LaunchResolver,
 ) -> Arc<NodeLauncherImpl> {
     Arc::new(NodeLauncherImpl {
         engine,
@@ -166,7 +166,7 @@ pub fn node_launcher(
         cwd,
         registry,
         tools_resolver,
-        spec_resolver,
+        launch_resolver,
     })
 }
 
@@ -186,7 +186,7 @@ async fn run_node(job: NodeJob, cancel: CancellationToken) {
     let run_id_cb = run_id.clone();
     let node_id_cb = node_id.clone();
     let result = run_subagent(SubagentRunOptions {
-        spec: job.spec,
+        launch: job.launch,
         tools: job.tools,
         prompt: job.task_text,
         model: job.model,
@@ -348,20 +348,20 @@ mod tests {
             Arc::new(|_| Vec::new()),
             // Spec resolver: minimal app-side table for the tests (general only;
             // unknown names must fail the node synchronously).
-            test_spec_resolver(),
+            test_launch_resolver(),
         );
         engine.set_launcher(Some(launcher));
         engine
     }
 
-    fn test_spec_resolver() -> super::SpecResolver {
-        let spec = super::SubagentSpec {
+    fn test_launch_resolver() -> super::LaunchResolver {
+        let launch = super::SubagentLaunch {
             name: "general",
             description: "test",
             system_prompt: "You are a test subagent.",
             max_iterations: 16,
         };
-        Arc::new(move |name: &str| (name == "general").then_some(spec))
+        Arc::new(move |name: &str| (name == "general").then_some(launch))
     }
 
     fn plan_single_node(

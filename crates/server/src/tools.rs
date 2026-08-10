@@ -14,7 +14,7 @@
 //!   core-side ([`theway_core::tools::assembly`]); this module appends the
 //!   local-execution tools and the server-side trigger/cron family.
 //!
-//! Subagent tool sets are injected into the engine (`SubagentSpec` carries no tool
+//! Subagent tool sets are injected into the engine (specs carry no tool
 //! factory): [`subagent_tool_sets`] builds the ONE resolver both `subagent_tool` and the
 //! DAG node launcher are constructed with — every spec gets the same uniform set (engine
 //! tools minus `subagent`/`dag_*` plus local tools); behavior is prompt-defined.
@@ -103,7 +103,7 @@ pub fn subagent_tool(
             model,
             stream_fn,
             subagent_tool_sets(memory_dir, skill_harness_cell),
-            crate::subagent_specs::spec_resolver(),
+            crate::subagent_specs::launch_resolver(),
             crate::subagent_specs::spec_names(),
             registry,
         )
@@ -144,7 +144,7 @@ pub fn node_launcher(
         cwd,
         registry,
         subagent_tool_sets(memory_dir, skill_harness_cell),
-        crate::subagent_specs::spec_resolver(),
+        crate::subagent_specs::launch_resolver(),
     )
 }
 
@@ -172,7 +172,7 @@ pub fn session_tool_set(
         dag_engine,
         subagent_registry,
         subagent_tool_sets(memory_dir.to_path_buf(), skill_harness_cell.clone()),
-        crate::subagent_specs::spec_resolver(),
+        crate::subagent_specs::launch_resolver(),
         crate::subagent_specs::spec_names(),
         model,
         stream_fn,
