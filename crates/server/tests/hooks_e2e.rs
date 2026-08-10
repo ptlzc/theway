@@ -18,7 +18,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 // hooks moved into the engine (theway_core::runtime::hooks); the e2e drives its pub API.
-use theway_core::runtime::hooks;
+use theway_core::runtime::agent::hooks;
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 

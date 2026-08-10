@@ -4,9 +4,9 @@
 
 use tempfile::tempdir;
 use theway_core::extensions::ExtensionRegistry;
-use theway_core::runtime::compaction::algorithm::CompactAlgorithmRegistry;
-use theway_core::runtime::compaction::compaction::DEFAULT_COMPACTION_SETTINGS;
-use theway_core::runtime::session::session::SessionTreeEntry;
+use theway_core::runtime::agent::compaction::algorithm::CompactAlgorithmRegistry;
+use theway_core::runtime::agent::compaction::compaction::DEFAULT_COMPACTION_SETTINGS;
+use theway_core::runtime::agent::session::session::SessionTreeEntry;
 use theway_core::types::AgentMessage;
 
 /// `THEWAY_DIR` is process-global, so discovery tests that point it at a tempdir must be
@@ -219,7 +219,7 @@ async fn compaction_adapter_dispatches_through_ts_hooks() {
         headers: None,
         compat: None,
     };
-    let request = theway_core::runtime::compaction::algorithm::SummarizeRequest {
+    let request = theway_core::runtime::agent::compaction::algorithm::SummarizeRequest {
         model: &model,
         messages: &messages,
         custom_instructions: None,

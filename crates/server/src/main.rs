@@ -14,7 +14,7 @@ use theway::{
     history, inbox, local_models, logging, lsp_supervisor, mcp_loader, model, resume_picker,
     session, session_archive, skills, skills_state, templates, tools, triggers, ui,
 };
-use theway_core::runtime::{hooks, multiagent::goal};
+use theway_core::runtime::{agent::hooks, multiagent::goal};
 
 use std::io::IsTerminal as _;
 use std::sync::{Arc, OnceLock};

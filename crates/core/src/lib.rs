@@ -49,7 +49,7 @@ pub use types::{
 
 #[cfg(feature = "harness")]
 pub use runtime::{
-    agent_harness::{
+    agent::agent_harness::{
         AgentHarness, AgentHarnessOptions, BeforeTriggerActionContext, BeforeTriggerActionHook,
         BeforeTriggerContext, BeforeTriggerDecision, BeforeTriggerHook,
         DEFAULT_TURN_CONTINUATION_CAP, HarnessEvent, HarnessListener, NotificationStatusSnapshot,
@@ -58,7 +58,7 @@ pub use runtime::{
         TriggerAction, TriggerDelivery, TriggerPromptDecision, TriggerPromptRequest, TurnEndAction,
         TurnEndDecision,
     },
-    compaction::{
+    agent::compaction::{
         branch_summarization::{BranchSummaryResult, summarize_branch},
         compaction::{
             CompactionPreparation, CompactionResult, CompactionSettings, ContextUsageEstimate,
@@ -69,18 +69,18 @@ pub use runtime::{
             prepare_compaction, serialize_conversation, should_compact,
         },
     },
-    cost::{
+    agent::cost::{
         CostSnapshot, CostTracker, full_breakdown as cost_full_breakdown,
         one_line_summary as cost_one_line_summary,
     },
-    messages,
-    notification_hook::{
+    agent::messages,
+    agent::notification_hook::{
         DynNotificationHook, HookError, HookFuture, HookState, NotificationHook,
         NotificationHookStatus, TriggerSink,
     },
-    permission::{PermissionCategory, PermissionDecision, PermissionPolicy},
-    prompt_templates::{LoadTemplatesOutput, PromptTemplateRegistry, load_templates},
-    session::{
+    agent::permission::{PermissionCategory, PermissionDecision, PermissionPolicy},
+    agent::prompt_templates::{LoadTemplatesOutput, PromptTemplateRegistry, load_templates},
+    agent::session::{
         jsonl_repo::JsonlSessionRepo,
         jsonl_storage::JsonlSessionStorage,
         memory_repo::MemorySessionRepo,
@@ -96,16 +96,16 @@ pub use runtime::{
         },
         uuid::uuidv7,
     },
-    skills::{LoadSkillsOutput, format_skill_invocation, load_skills, load_sourced_skills},
-    system_prompt::format_skills_for_system_prompt,
-    trigger::{
+    agent::skills::{LoadSkillsOutput, format_skill_invocation, load_skills, load_sourced_skills},
+    agent::system_prompt::format_skills_for_system_prompt,
+    agent::trigger::{
         CredentialScope, PayloadVisibility, ReplacementPolicy, SourceKind, Trigger,
         TriggerAuthority, TriggerRecord, TriggerSource, TriggerState,
     },
-    trigger_runtime::{
+    agent::trigger_runtime::{
         EvaluationOutcome, TriggerRuntime, TriggerRuntimeConfig, TriggerRuntimeSnapshot,
     },
-    types::{
+    agent::types::{
         ExecOptions, ExecOutput, ExecResult, ExecutionEnv, ExecutionError, ExecutionErrorCode,
         FileError, FileErrorCode, FileInfo, FileKind, FsResult, PromptTemplate, SessionError,
         SessionErrorCode, Skill, SkillDiagnostic, SkillDiagnosticCode, SkillFrontmatter,
@@ -114,4 +114,4 @@ pub use runtime::{
 };
 
 #[cfg(all(feature = "harness", feature = "native-env"))]
-pub use runtime::env::native::NativeEnv;
+pub use runtime::agent::env::native::NativeEnv;
