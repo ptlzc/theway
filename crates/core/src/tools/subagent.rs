@@ -5,8 +5,9 @@
 //! v1 scope:
 //! - Subagent specs: the full builtin table (explorer / planner / executor-coder /
 //!   checker / general — same table the DAG node launcher resolves against), same model
-//!   as parent, tool set injected from the app layer at construction (full default set —
-//!   the parent defines in the prompt what the subagent may do), max 16 iterations,
+//!   as parent. ONE uniform tool set for every spec, injected from the app layer at
+//!   construction (engine tools minus subagent/dag_* plus local tools — the spec's
+//!   system prompt and the parent's task prompt define behavior), max 16 iterations,
 //!   MemorySessionStorage so nothing leaks to disk.
 //! - Concurrent execution mode (Parallel) so the parent can fire multiple subagent calls in one
 //!   turn and they run together.
@@ -188,14 +189,14 @@ static DEFINITION: Lazy<Tool> = Lazy::new(|| {
     Tool {
     name: "subagent".into(),
     description:
-        "Delegate a self-contained task to a fresh sub-agent. The subagent gets its own context window and the tool set of its spec (resolved app-side; full default set for executor-coder, read-only for explorer/planner/checker/general); this tool returns a single text result from the subagent. Use this when you need to inspect a large surface area (search, file reads) or run a contained change without polluting the main conversation.".into(),
+        "Delegate a self-contained task to a fresh sub-agent. The subagent gets its own context window and the uniform subagent tool set (engine tools minus subagent/dag_* plus local tools); this tool returns a single text result from the subagent. Use this when you need to inspect a large surface area (search, file reads) or run a contained change without polluting the main conversation.".into(),
     parameters: json!({
         "type": "object",
         "properties": {
             "subagent_type": {
                 "type": "string",
                 "enum": subagent_types,
-                "description": "Which subagent spec to spawn. Builtin specs: explorer (read-only research), planner (read-only planning), executor-coder (full tool set: read/write/edit/bash/exec/git/web), checker (read-only + bash + git), general (read-only research).",
+                "description": "Which subagent spec to spawn. All builtin specs share ONE uniform tool set (engine tools minus subagent/dag_* plus local tools: read/write/edit/bash/exec/git/web/skills/memory); the spec's system prompt defines the role (explorer: research, planner: planning, executor-coder: implementation, checker: verification, general: research).",
                 "default": "general",
             },
             "description": {

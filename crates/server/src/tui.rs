@@ -42,7 +42,7 @@ impl Tui {
     }
 
     /// Render the startup banner. `tool_names` comes from the registered tool definitions so
-    /// adding/removing a tool in `tools::default_tools()` flows through here automatically — no
+    /// adding/removing a tool in `tools::local_tools()` / engine assembly flows through here automatically — no
     /// hand-edited literal list to drift out of sync.
     pub fn banner(
         &self,

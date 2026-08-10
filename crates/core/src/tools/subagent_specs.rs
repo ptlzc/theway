@@ -37,7 +37,7 @@ static SPECS: Lazy<[SubagentSpec; 5]> = Lazy::new(|| {
     [
         SubagentSpec {
             name: "explorer",
-            description: "Read-only investigation: search and read local context.",
+            description: "Investigation: search and read local context.",
             system_prompt: "You are an exploration subagent dispatched by a coding agent. \
                             Gather facts from the codebase and context you are given. \
                             Stay focused on the prompt; return a concise findings summary.",
@@ -45,7 +45,7 @@ static SPECS: Lazy<[SubagentSpec; 5]> = Lazy::new(|| {
         },
         SubagentSpec {
             name: "planner",
-            description: "Read-only planning from local context.",
+            description: "Planning from local context.",
             system_prompt: "You are a planning subagent dispatched by a coding agent. \
                             Turn the given task into a concrete, step-by-step plan. \
                             Stay focused on the prompt; return the plan as your final answer.",
@@ -61,7 +61,7 @@ static SPECS: Lazy<[SubagentSpec; 5]> = Lazy::new(|| {
         },
         SubagentSpec {
             name: "checker",
-            description: "Verification: read-only plus bash and git to check results.",
+            description: "Verification: check results with evidence.",
             system_prompt: "You are a verification subagent dispatched by a coding agent. \
                             Check the given work against the task and report pass/fail with evidence. \
                             Stay focused on the prompt; return a concise verdict.",
@@ -69,7 +69,7 @@ static SPECS: Lazy<[SubagentSpec; 5]> = Lazy::new(|| {
         },
         SubagentSpec {
             name: "general",
-            description: "Read-only research subagent (same as the subagent tool).",
+            description: "General-purpose research subagent (same as the subagent tool).",
             system_prompt: "You are a research subagent dispatched by a coding agent. \
                             Stay focused on the prompt; return a concise final answer.",
             max_iterations: DEFAULT_MAX_ITERATIONS,

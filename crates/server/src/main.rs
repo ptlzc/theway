@@ -603,11 +603,17 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
     let cron_path = session::cron_sidecar_path_for_session(&session, &repo).await?;
     let cron_load_error = cron_registry.load_from_path(cron_path).err();
     let memory_dir = config::memory_dir();
+    // Shared harness cell for the skill family: built before the node launcher (subagents
+    // get the skill/memory engine tools too) and filled right after the main harness is
+    // constructed. If the cell is unset at execute time the skill tools return a
+    // recoverable error, never a panic.
+    let skill_harness_cell: theway_core::tools::skill::SkillHarnessCell =
+        std::sync::Arc::new(once_cell::sync::OnceCell::new());
     // DAG orchestration (graph_engineering): one engine shared by the dag_* tools and the
     // node launcher. The launcher MUST be installed before `restore` — resumed runs tick
     // immediately and their ready nodes need a launcher to re-schedule into.
     let dag_engine = Arc::new(DagEngine::new());
-    // Subagent job registry (graph mode): task tool + DAG node launches both register.
+    // Subagent job registry (graph mode): subagent tool + DAG node launches both register.
     // Finished jobs' full transcripts are persisted under `<cwd>/.pi/subagent-jobs`
     // (per-node files keyed run/node) so they survive a process restart.
     let subagent_registry = theway_core::runtime::subagents::registry::SubagentJobRegistry::new();
@@ -619,6 +625,7 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
         cwd.clone(),
         subagent_registry.clone(),
         memory_dir.clone(),
+        skill_harness_cell.clone(),
     )));
     // Resume in-flight DAG runs from this session's state file (crash recovery). Restored
     // ids are logged; a clean shutdown flushes the file at exit, so a file here means the
@@ -633,11 +640,9 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
         );
     }
     // Per-session tool set (session-resource-model). One source of truth shared with the
-    // session factory below (`SessionHarnessFactory`): dag_* / task are stamped with this
-    // session; the skill family wires a harness cell filled right after construction.
+    // session factory below (`SessionHarnessFactory`): dag_* / subagent are stamped with
+    // this session; the skill family wires a harness cell filled right after construction.
     // Process-level groups (MCP tools) are appended after they load.
-    let skill_harness_cell: theway_core::tools::skill::SkillHarnessCell =
-        std::sync::Arc::new(once_cell::sync::OnceCell::new());
     let mut tools = tools::session_tool_set(
         &memory_dir,
         &dag_engine,
@@ -1450,7 +1455,7 @@ fn compose_system_prompt(cwd: &std::path::Path, memory: &str, tool_names: &[Stri
 }
 
 /// Build the prompt header. The tool inventory is rendered from the actual registered tool
-/// definitions so adding/removing a tool in `tools::default_tools()` flows through here without
+/// definitions so adding/removing a tool in the tool assembly flows through here without
 /// a hand-edited literal list.
 fn render_base_prompt(tool_names: &[String]) -> String {
     let inventory = if tool_names.is_empty() {

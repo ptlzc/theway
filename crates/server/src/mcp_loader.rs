@@ -1,6 +1,6 @@
 //! MCP server configuration loader. Reads `~/.theway/mcp.toml` (and `<cwd>/.theway/mcp.toml`),
 //! spawns each configured stdio server, runs the initialize+tools/list handshake, and
-//! returns the resulting AgentTool list ready to append to `default_tools()`.
+//! returns the resulting AgentTool list ready to append to the session tool set.
 //!
 //! Failure is non-fatal at the load level: a server that fails to start emits a startup
 //! diagnostic and is skipped. The agent runs without it.
