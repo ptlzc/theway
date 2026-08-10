@@ -9,6 +9,8 @@ use std::collections::HashSet;
 use std::io::Write as _;
 use std::sync::Arc;
 
+use crate::trigger_engine::event::{TriggerEvent, TriggerListener};
+use crate::trigger_engine::types::TriggerState;
 use crossterm::ExecutableCommand;
 use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor};
 use parking_lot::Mutex;
@@ -116,6 +118,20 @@ impl Tui {
         })
     }
 
+    /// Listener for the CLI trigger engine's lifecycle events (the trigger pipeline moved
+    /// out of the core harness event bus; see `trigger_engine`).
+    pub fn trigger_listener(&self) -> TriggerListener {
+        let me = self.clone();
+        Arc::new(move |event| {
+            me.handle_trigger_event(&event);
+        })
+    }
+
+    fn handle_trigger_event(&self, event: &TriggerEvent) {
+        let mut out = std::io::stdout();
+        self.render_trigger_event(event, &mut out);
+    }
+
     fn handle_event(&self, event: &AgentEvent) {
         let mut out = std::io::stdout();
         self.render_event(event, &mut out);
@@ -211,8 +227,12 @@ impl Tui {
     }
 
     pub fn render_harness_event(&self, event: &HarnessEvent, out: &mut dyn std::io::Write) {
+        let _ = (event, out);
+    }
+
+    pub fn render_trigger_event(&self, event: &TriggerEvent, out: &mut dyn std::io::Write) {
         match event {
-            HarnessEvent::TriggerHandlingStart {
+            TriggerEvent::TriggerHandlingStart {
                 trace_id,
                 source_kind,
                 source_label,
@@ -238,14 +258,14 @@ impl Tui {
                 );
                 let _ = out.flush();
             }
-            HarnessEvent::TriggerHandled {
+            TriggerEvent::TriggerHandled {
                 trace_id, state, ..
             } => match state {
-                theway_core::TriggerState::Accepted => {}
-                theway_core::TriggerState::Deduped
-                | theway_core::TriggerState::CycleSuppressed
-                | theway_core::TriggerState::PermissionDenied
-                | theway_core::TriggerState::NeedsApproval => {
+                crate::trigger_engine::types::TriggerState::Accepted => {}
+                crate::trigger_engine::types::TriggerState::Deduped
+                | crate::trigger_engine::types::TriggerState::CycleSuppressed
+                | crate::trigger_engine::types::TriggerState::PermissionDenied
+                | crate::trigger_engine::types::TriggerState::NeedsApproval => {
                     self.state
                         .lock()
                         .quiet_dynamic_trigger_traces
@@ -263,7 +283,7 @@ impl Tui {
                 }
                 _ => {}
             },
-            HarnessEvent::TriggerCompleted {
+            TriggerEvent::TriggerCompleted {
                 trace_id, summary, ..
             } => {
                 let summary = summary.as_deref().unwrap_or("completed");
@@ -285,7 +305,7 @@ impl Tui {
                 );
                 let _ = out.flush();
             }
-            HarnessEvent::TriggerFailed { trace_id, reason } => {
+            TriggerEvent::TriggerFailed { trace_id, reason } => {
                 self.state
                     .lock()
                     .quiet_dynamic_trigger_traces
@@ -299,7 +319,7 @@ impl Tui {
                 );
                 let _ = out.flush();
             }
-            HarnessEvent::TriggerExecutionStarted {
+            TriggerEvent::TriggerExecutionStarted {
                 trace_id,
                 source_label,
                 event_label,
@@ -358,17 +378,17 @@ impl Tui {
     }
 }
 
-fn trigger_state_label(state: theway_core::TriggerState) -> &'static str {
+fn trigger_state_label(state: TriggerState) -> &'static str {
     match state {
-        theway_core::TriggerState::Deduped => "deduped",
-        theway_core::TriggerState::CycleSuppressed => "cycle-suppressed",
-        theway_core::TriggerState::PermissionDenied => "permission-denied",
-        theway_core::TriggerState::NeedsApproval => "needs-approval",
-        theway_core::TriggerState::Received => "received",
-        theway_core::TriggerState::Accepted => "accepted",
-        theway_core::TriggerState::Running => "running",
-        theway_core::TriggerState::Failed => "failed",
-        theway_core::TriggerState::Completed => "completed",
+        crate::trigger_engine::types::TriggerState::Deduped => "deduped",
+        crate::trigger_engine::types::TriggerState::CycleSuppressed => "cycle-suppressed",
+        crate::trigger_engine::types::TriggerState::PermissionDenied => "permission-denied",
+        crate::trigger_engine::types::TriggerState::NeedsApproval => "needs-approval",
+        crate::trigger_engine::types::TriggerState::Received => "received",
+        crate::trigger_engine::types::TriggerState::Accepted => "accepted",
+        crate::trigger_engine::types::TriggerState::Running => "running",
+        crate::trigger_engine::types::TriggerState::Failed => "failed",
+        crate::trigger_engine::types::TriggerState::Completed => "completed",
     }
 }
 
@@ -385,19 +405,18 @@ fn is_no_match_dynamic_summary(summary: &str) -> bool {
         || normalized.contains("not matched")
 }
 
-fn trigger_state_color(state: theway_core::TriggerState) -> &'static str {
+fn trigger_state_color(state: TriggerState) -> &'static str {
     match state {
-        theway_core::TriggerState::PermissionDenied | theway_core::TriggerState::NeedsApproval => {
-            RED
-        }
+        crate::trigger_engine::types::TriggerState::PermissionDenied
+        | crate::trigger_engine::types::TriggerState::NeedsApproval => RED,
         _ => DARK_GREY,
     }
 }
 
-fn source_kind_label(kind: theway_core::SourceKind) -> &'static str {
+fn source_kind_label(kind: crate::trigger_engine::types::SourceKind) -> &'static str {
     match kind {
-        theway_core::SourceKind::Local => "local",
-        theway_core::SourceKind::Mcp => "mcp",
+        crate::trigger_engine::types::SourceKind::Local => "local",
+        crate::trigger_engine::types::SourceKind::Mcp => "mcp",
     }
 }
 

@@ -28,9 +28,14 @@ mod export;
 #[path = "../src/inbox.rs"]
 #[allow(dead_code)]
 mod inbox;
-#[path = "../src/triggers/mod.rs"]
 #[allow(dead_code)]
+#[path = "../src/triggers/mod.rs"]
 mod triggers;
+// The src `triggers` module references `crate::trigger_engine::...`; forward to the
+// lib crate so all code sees ONE type identity.
+mod trigger_engine {
+    pub use theway::trigger_engine::*;
+}
 // `triggers::tool_assembly` resolves through the `mod triggers` include above (the
 // assembly's `crate::triggers` refs hit the SAME registry instances this test clears).
 use triggers::tool_assembly as tools_asm;

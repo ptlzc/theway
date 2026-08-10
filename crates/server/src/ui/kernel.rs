@@ -69,12 +69,27 @@ impl QueuedTurn {
 #[derive(Clone)]
 pub(super) struct ReplKernel {
     harness: Arc<AgentHarness>,
+    trigger_executor: Arc<crate::trigger_engine::execution::TriggerExecutor>,
     retry: RetrySettings,
 }
 
 impl ReplKernel {
-    pub(super) fn new(harness: Arc<AgentHarness>, retry: RetrySettings) -> Self {
-        Self { harness, retry }
+    pub(super) fn new(
+        harness: Arc<AgentHarness>,
+        trigger_executor: Arc<crate::trigger_engine::execution::TriggerExecutor>,
+        retry: RetrySettings,
+    ) -> Self {
+        Self {
+            harness,
+            trigger_executor,
+            retry,
+        }
+    }
+
+    pub(super) fn trigger_executor(
+        &self,
+    ) -> &Arc<crate::trigger_engine::execution::TriggerExecutor> {
+        &self.trigger_executor
     }
 
     pub(super) fn harness(&self) -> &Arc<AgentHarness> {

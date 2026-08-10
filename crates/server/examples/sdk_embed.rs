@@ -54,8 +54,21 @@ async fn main() -> anyhow::Result<()> {
     // 3. Full interactive surface: App + transport options (same assembly as the CLI).
     let (_feed_tx, feed_rx) = tokio::sync::mpsc::unbounded_channel();
     let (_main_run_tx, main_run_rx) = tokio::sync::mpsc::unbounded_channel();
+    let trigger_executor =
+        std::sync::Arc::new(theway::trigger_engine::execution::TriggerExecutor::new(
+            harness.agent_arc(),
+            harness.session().clone(),
+            theway::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ));
     let _app = App::new(AppConfig {
         harness,
+        trigger_executor,
         retry: RetrySettings::default(),
         registry: Registry::with_builtins(),
         cwd: std::env::current_dir()?,

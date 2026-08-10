@@ -8,11 +8,14 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use theway::trigger_engine::types::{
+    CredentialScope, PayloadVisibility, ReplacementPolicy, SourceKind, Trigger, TriggerAuthority,
+    TriggerSource,
+};
 use theway_core::{
     AgentHarness, AgentHarnessOptions, AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate,
-    ControlPlanePromptDecision, CredentialScope, HarnessEvent, MemorySessionStorage,
-    OnControlPlanePromptHook, PayloadVisibility, ReplacementPolicy, Session, SessionStorage, Skill,
-    SkillSource, SourceKind, StreamFn, Trigger, TriggerAuthority, TriggerSource,
+    ControlPlanePromptDecision, MemorySessionStorage, OnControlPlanePromptHook, Session,
+    SessionStorage, Skill, SkillSource, StreamFn,
 };
 use theway_llm_provider::{
     AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, AssistantRole,
@@ -39,6 +42,12 @@ mod inbox;
 #[path = "../src/triggers/mod.rs"]
 #[allow(dead_code)]
 mod triggers;
+// The src `triggers` module is pulled in by path and references
+// `crate::trigger_engine::...`; forward to the lib crate so all code sees ONE
+// type identity (no duplicated path-include types).
+mod trigger_engine {
+    pub use theway::trigger_engine::*;
+}
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 static DYNAMIC_TRIGGER_LOCK: Mutex<()> = Mutex::new(());
@@ -452,7 +461,7 @@ fn sample_event_trigger() -> Trigger {
 }
 
 async fn wait_for_completed(
-    events: &Arc<parking_lot::Mutex<Vec<HarnessEvent>>>,
+    events: &Arc<parking_lot::Mutex<Vec<theway::trigger_engine::event::TriggerEvent>>>,
     trace_id: &str,
 ) -> bool {
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -460,7 +469,7 @@ async fn wait_for_completed(
         if events.lock().iter().any(|event| {
             matches!(
                 event,
-                HarnessEvent::TriggerCompleted { trace_id: t, .. } if t == trace_id
+                theway::trigger_engine::event::TriggerEvent::TriggerCompleted { trace_id: t, .. } if t == trace_id
             )
         }) {
             return true;
@@ -518,10 +527,22 @@ async fn natural_language_prompt_creates_dynamic_trigger_and_runtime_event_execu
         Arc::new(RecordingBashTool::new(bash_calls.clone())) as Arc<dyn AgentTool>,
     ];
     opts.stream_fn = Some(dynamic_trigger_stream());
-    opts.before_trigger_action = Some(triggers::before_trigger_action_hook(
+    let before_trigger_action = Some(triggers::before_trigger_action_hook(
         triggers::global_registry().clone(),
     ));
+    let stream_fn = opts.stream_fn.clone();
     let harness = AgentHarness::new(opts);
+    let executor = std::sync::Arc::new(theway::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        theway::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        before_trigger_action,
+        stream_fn,
+        None,
+        None,
+    ));
 
     harness
         .prompt("Create a trigger: when the event says build finished, run echo dynamic-fired")
@@ -537,17 +558,17 @@ async fn natural_language_prompt_creates_dynamic_trigger_and_runtime_event_execu
         "event/condition trigger request must not create a cron job"
     );
 
-    let events: Arc<parking_lot::Mutex<Vec<HarnessEvent>>> =
+    let events: Arc<parking_lot::Mutex<Vec<theway::trigger_engine::event::TriggerEvent>>> =
         Arc::new(parking_lot::Mutex::new(Vec::new()));
     let event_sink = events.clone();
-    let _unsub = harness.subscribe_harness(Arc::new(move |event| {
+    let _unsub = executor.subscribe(Arc::new(move |event| {
         event_sink.lock().push(event);
     }));
-    let _fire_once_unsub = harness.subscribe_harness(triggers::fire_once_harness_listener(
+    let _fire_once_unsub = executor.subscribe(triggers::fire_once_trigger_listener(
         triggers::global_registry().clone(),
     ));
 
-    let _ = harness.handle_trigger(sample_event_trigger()).await;
+    let _ = executor.handle_trigger(sample_event_trigger()).await;
     assert!(
         wait_for_completed(&events, "trace-dynamic-e2e").await,
         "dynamic trigger sub-agent should complete"
@@ -594,7 +615,21 @@ async fn natural_language_scheduled_job_creates_cron_not_dynamic_trigger_chinese
         Arc::new(triggers::NewTriggerTool) as Arc<dyn AgentTool>,
     ];
     opts.stream_fn = Some(dynamic_trigger_stream());
+    let before_trigger_action: Option<theway::trigger_engine::execution::BeforeTriggerActionHook> =
+        None;
+    let stream_fn = opts.stream_fn.clone();
     let harness = AgentHarness::new(opts);
+    let _executor = std::sync::Arc::new(theway::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        theway::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        before_trigger_action,
+        stream_fn,
+        None,
+        None,
+    ));
 
     harness
         .prompt("创建一个每小时的定时任务，查看下 hackernews 首页新闻")
@@ -626,7 +661,21 @@ async fn natural_language_scheduled_job_creates_cron_not_dynamic_trigger_english
         Arc::new(triggers::NewTriggerTool) as Arc<dyn AgentTool>,
     ];
     opts.stream_fn = Some(dynamic_trigger_stream());
+    let before_trigger_action: Option<theway::trigger_engine::execution::BeforeTriggerActionHook> =
+        None;
+    let stream_fn = opts.stream_fn.clone();
     let harness = AgentHarness::new(opts);
+    let _executor = std::sync::Arc::new(theway::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        theway::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        before_trigger_action,
+        stream_fn,
+        None,
+        None,
+    ));
 
     harness
         .prompt("Create an hourly scheduled job to check Hacker News")
@@ -658,10 +707,22 @@ async fn promoted_dynamic_trigger_result_enters_parent_chat_context() {
         Arc::new(RecordingBashTool::new(bash_calls.clone())) as Arc<dyn AgentTool>,
     ];
     opts.stream_fn = Some(dynamic_trigger_stream());
-    opts.before_trigger_action = Some(triggers::before_trigger_action_hook(
+    let before_trigger_action = Some(triggers::before_trigger_action_hook(
         triggers::global_registry().clone(),
     ));
+    let stream_fn = opts.stream_fn.clone();
     let harness = AgentHarness::new(opts);
+    let executor = std::sync::Arc::new(theway::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        theway::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        before_trigger_action,
+        stream_fn,
+        None,
+        None,
+    ));
 
     harness
         .prompt(
@@ -674,14 +735,14 @@ async fn promoted_dynamic_trigger_result_enters_parent_chat_context() {
     assert_eq!(rules.len(), 1);
     assert!(rules[0].promote_to_chat);
 
-    let events: Arc<parking_lot::Mutex<Vec<HarnessEvent>>> =
+    let events: Arc<parking_lot::Mutex<Vec<theway::trigger_engine::event::TriggerEvent>>> =
         Arc::new(parking_lot::Mutex::new(Vec::new()));
     let event_sink = events.clone();
-    let _unsub = harness.subscribe_harness(Arc::new(move |event| {
+    let _unsub = executor.subscribe(Arc::new(move |event| {
         event_sink.lock().push(event);
     }));
 
-    let _ = harness.handle_trigger(sample_event_trigger()).await;
+    let _ = executor.handle_trigger(sample_event_trigger()).await;
     assert!(
         wait_for_completed(&events, "trace-dynamic-e2e").await,
         "dynamic trigger sub-agent should complete"
@@ -747,19 +808,31 @@ async fn audit_only_match_is_not_promoted_when_other_rule_requests_chat_promotio
     opts.on_control_plane_prompt = Some(allow_all_control_plane_hook());
     opts.tools = vec![Arc::new(RecordingBashTool::new(bash_calls.clone())) as Arc<dyn AgentTool>];
     opts.stream_fn = Some(dynamic_trigger_stream());
-    opts.before_trigger_action = Some(triggers::before_trigger_action_hook(
+    let before_trigger_action = Some(triggers::before_trigger_action_hook(
         triggers::global_registry().clone(),
     ));
+    let stream_fn = opts.stream_fn.clone();
     let harness = AgentHarness::new(opts);
+    let executor = std::sync::Arc::new(theway::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        theway::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        before_trigger_action,
+        stream_fn,
+        None,
+        None,
+    ));
 
-    let events: Arc<parking_lot::Mutex<Vec<HarnessEvent>>> =
+    let events: Arc<parking_lot::Mutex<Vec<theway::trigger_engine::event::TriggerEvent>>> =
         Arc::new(parking_lot::Mutex::new(Vec::new()));
     let event_sink = events.clone();
-    let _unsub = harness.subscribe_harness(Arc::new(move |event| {
+    let _unsub = executor.subscribe(Arc::new(move |event| {
         event_sink.lock().push(event);
     }));
 
-    let _ = harness.handle_trigger(sample_event_trigger()).await;
+    let _ = executor.handle_trigger(sample_event_trigger()).await;
     assert!(
         wait_for_completed(&events, "trace-dynamic-e2e").await,
         "dynamic trigger sub-agent should complete"
@@ -812,19 +885,31 @@ async fn trigger_sub_agent_sees_parent_skill_catalog() {
     opts.stream_fn = Some(recording_dynamic_trigger_stream(
         seen_system_prompts.clone(),
     ));
-    opts.before_trigger_action = Some(triggers::before_trigger_action_hook(
+    let before_trigger_action = Some(triggers::before_trigger_action_hook(
         triggers::global_registry().clone(),
     ));
+    let stream_fn = opts.stream_fn.clone();
     let harness = AgentHarness::new(opts);
+    let executor = std::sync::Arc::new(theway::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        theway::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        before_trigger_action,
+        stream_fn,
+        None,
+        None,
+    ));
 
-    let events: Arc<parking_lot::Mutex<Vec<HarnessEvent>>> =
+    let events: Arc<parking_lot::Mutex<Vec<theway::trigger_engine::event::TriggerEvent>>> =
         Arc::new(parking_lot::Mutex::new(Vec::new()));
     let event_sink = events.clone();
-    let _unsub = harness.subscribe_harness(Arc::new(move |event| {
+    let _unsub = executor.subscribe(Arc::new(move |event| {
         event_sink.lock().push(event);
     }));
 
-    let _ = harness.handle_trigger(sample_event_trigger()).await;
+    let _ = executor.handle_trigger(sample_event_trigger()).await;
     assert!(
         wait_for_completed(&events, "trace-dynamic-e2e").await,
         "dynamic trigger sub-agent should complete"
@@ -863,17 +948,31 @@ async fn home_helloworld_trigger_prints_file_contents() {
         Arc::new(HomeFileBashTool::new(bash_calls.clone())) as Arc<dyn AgentTool>,
     ];
     opts.stream_fn = Some(dynamic_trigger_stream());
-    opts.before_trigger_action = Some(triggers::before_trigger_action_hook(
+    let before_trigger_action = Some(triggers::before_trigger_action_hook(
         triggers::global_registry().clone(),
     ));
+    let stream_fn = opts.stream_fn.clone();
     let harness = Arc::new(AgentHarness::new(opts));
-    let _fire_once_unsub = harness.subscribe_harness(triggers::fire_once_harness_listener(
+    let executor = std::sync::Arc::new(theway::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        theway::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        before_trigger_action,
+        stream_fn,
+        None,
+        None,
+    ));
+    let _fire_once_unsub = executor.subscribe(triggers::fire_once_trigger_listener(
         triggers::global_registry().clone(),
     ));
-    harness.register_notification_hook(Arc::new(triggers::DynamicTriggerCheckHook::with_interval(
-        triggers::global_registry().clone(),
-        Duration::from_millis(10),
-    )));
+    executor.register_notification_hook(Arc::new(
+        triggers::DynamicTriggerCheckHook::with_interval(
+            triggers::global_registry().clone(),
+            Duration::from_millis(10),
+        ),
+    ));
 
     let user_request = concat!(
         "\u{5f53} $home \u{76ee}\u{5f55}\u{4e0b}\u{6709}\u{4e2a} helloworld ",
@@ -949,12 +1048,23 @@ async fn periodic_dynamic_hook_checks_rules_and_executes_matching_action() {
     opts.on_control_plane_prompt = Some(allow_all_control_plane_hook());
     opts.tools = vec![Arc::new(RecordingBashTool::new(bash_calls.clone())) as Arc<dyn AgentTool>];
     opts.stream_fn = Some(dynamic_trigger_stream());
-    opts.before_trigger_action = Some(triggers::before_trigger_action_hook(registry.clone()));
+    let before_trigger_action = Some(triggers::before_trigger_action_hook(registry.clone()));
+    let stream_fn = opts.stream_fn.clone();
     let harness = Arc::new(AgentHarness::new(opts));
-    harness.register_notification_hook(Arc::new(triggers::DynamicTriggerCheckHook::with_interval(
-        registry,
-        Duration::from_millis(10),
-    )));
+    let executor = std::sync::Arc::new(theway::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        theway::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        before_trigger_action,
+        stream_fn,
+        None,
+        None,
+    ));
+    executor.register_notification_hook(Arc::new(
+        triggers::DynamicTriggerCheckHook::with_interval(registry, Duration::from_millis(10)),
+    ));
 
     assert!(
         wait_for_bash_call(&bash_calls, "echo periodic-fired").await,

@@ -1,9 +1,10 @@
 //! Tests for `dynamic` — split out of src (see docs/RUST_TEST_FILES.md).
 
 use super::*;
-use theway_core::{
+use crate::trigger_engine::runtime::TriggerRuntimeSnapshot;
+use crate::trigger_engine::types::{
     CredentialScope, PayloadVisibility, ReplacementPolicy, SourceKind, TriggerAuthority,
-    TriggerRuntimeSnapshot, TriggerSource,
+    TriggerSource,
 };
 
 #[test]

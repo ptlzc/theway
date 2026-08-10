@@ -247,7 +247,7 @@ fn render_triggers_status_summarizes_runtime_hooks_and_running() {
             subscription_labels: vec!["repo c4pt0r/theway".into()],
             requires_attention: Some("upgrade hub".into()),
         }],
-        runtime: theway_core::TriggerRuntimeSnapshot {
+        runtime: crate::trigger_engine::runtime::TriggerRuntimeSnapshot {
             dedup_entries: 5,
             active_traces: 6,
             accepted_total: 7,

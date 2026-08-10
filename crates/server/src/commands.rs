@@ -8,12 +8,12 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::trigger_engine::execution::TriggerExecutor;
+use crate::trigger_engine::execution::{NotificationStatusSnapshot, RunningTriggerState};
+use crate::trigger_engine::notification_hook::{HookState, NotificationHookStatus};
 use async_trait::async_trait;
 use serde_json::json;
-use theway_core::{
-    AgentHarness, AgentTool, HookState, NotificationHookStatus, NotificationStatusSnapshot,
-    RunningTriggerState, SessionTreeEntry, Skill, SkillSource, ThinkingLevel,
-};
+use theway_core::{AgentHarness, AgentTool, SessionTreeEntry, Skill, SkillSource, ThinkingLevel};
 use theway_llm_provider::{Model, Provider, UserContentBlock, get_model, list_models};
 use tokio_util::sync::CancellationToken;
 
@@ -178,6 +178,7 @@ impl std::fmt::Debug for CommandOutcome {
 /// explicit.
 pub struct CommandCtx<'a> {
     pub harness: &'a Arc<AgentHarness>,
+    pub trigger_executor: &'a Arc<TriggerExecutor>,
     pub session_id: &'a str,
     pub log_path: Option<&'a PathBuf>,
     pub tool_count: usize,
@@ -2197,7 +2198,7 @@ impl SlashCommand for TriggersCommand {
         let subcommand = argv.first().map(String::as_str).unwrap_or("status");
         match subcommand {
             "status" => {
-                let snapshot = ctx.harness.notification_status_snapshot();
+                let snapshot = ctx.trigger_executor.notification_status_snapshot();
                 for line in render_triggers_status(&snapshot) {
                     cprintln!("{line}");
                 }
@@ -2245,14 +2246,14 @@ impl SlashCommand for TriggersCommand {
             "enable" | "resume" => set_dynamic_trigger_enabled(argv.get(1), true),
             "disable" | "pause" => set_dynamic_trigger_enabled(argv.get(1), false),
             "sources" | "hooks" => {
-                let snapshot = ctx.harness.notification_status_snapshot();
+                let snapshot = ctx.trigger_executor.notification_status_snapshot();
                 for line in render_trigger_sources(&snapshot.hooks) {
                     cprintln!("{line}");
                 }
                 CommandOutcome::Handled
             }
             "running" => {
-                let snapshot = ctx.harness.notification_status_snapshot();
+                let snapshot = ctx.trigger_executor.notification_status_snapshot();
                 for line in render_running_triggers(&snapshot.running) {
                     cprintln!("{line}");
                 }
@@ -2274,10 +2275,10 @@ impl SlashCommand for TriggersCommand {
                 let Some(target) = argv.get(1) else {
                     return CommandOutcome::Error("usage: /triggers abort <trace_id>|--all".into());
                 };
-                let snapshot = ctx.harness.notification_status_snapshot();
+                let snapshot = ctx.trigger_executor.notification_status_snapshot();
                 if target == "--all" {
                     let count = snapshot.running.len();
-                    ctx.harness.abort_all_triggers();
+                    ctx.trigger_executor.abort_all_triggers();
                     cprintln!("requested abort for {count} running trigger(s)");
                 } else {
                     if !snapshot.running.iter().any(|t| t.trace_id == *target) {
@@ -2285,7 +2286,7 @@ impl SlashCommand for TriggersCommand {
                             "no running trigger with trace_id '{target}'"
                         ));
                     }
-                    ctx.harness.abort_trigger(target);
+                    ctx.trigger_executor.abort_trigger(target);
                     cprintln!("requested abort for trigger {target}");
                 }
                 CommandOutcome::Handled

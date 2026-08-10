@@ -770,8 +770,8 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
         Some(stream_fn.clone()),
     ));
     opts.turn_continuation_cap = Some(goal::MAX_CONTINUATIONS);
-    opts.before_tool_call =
-        Some(PermissionPolicy::default_for_coding_agent().as_before_tool_call());
+    let before_tool_call = PermissionPolicy::default_for_coding_agent().as_before_tool_call();
+    opts.before_tool_call = Some(before_tool_call.clone());
     let interactive_tui =
         !run_web && !run_grpc && std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
     // Control-plane prompt policy: decided once, then shared with every harness the
@@ -804,7 +804,6 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
             triggers::before_trigger_action_hook(dynamic_trigger_registry.clone()),
         ),
     );
-    opts.before_trigger_action = Some(before_trigger_action.clone());
     // LSP feedback loop (issue #12): attach diagnostics to write/edit tool results when
     // ~/.theway/lsp.toml or <cwd>/.theway/lsp.toml is configured.
     let lsp_supervisor = std::sync::Arc::new(lsp_supervisor::LspSupervisor::load(&cwd).await);
@@ -839,20 +838,35 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
         "Goal hook harness cell was set twice; main.rs wiring is the only setter"
     );
 
-    // Wire each MCP server's trigger-source adapter into the harness now that all
+    // Trigger engine (host-side): the CLI owns the trigger pipeline — the executor
+    // evaluates/audits/executes triggers and registers the transport adapters. The core
+    // harness no longer knows about triggers.
+    let trigger_executor =
+        std::sync::Arc::new(theway::trigger_engine::execution::TriggerExecutor::new(
+            harness.agent_arc(),
+            harness.session().clone(),
+            theway::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+            None,
+            None,
+            Some(before_trigger_action.clone()),
+            Some(stream_fn.clone()),
+            Some(before_tool_call.clone()),
+            after_tool_call.clone(),
+        ));
+    // Wire each MCP server's trigger-source adapter into the executor now that all
     // tool-initialized state (including the Skill cell above) is in place.
     // `register_notification_hook` spawns a driver task that runs `hook.run(sink)` and a
     // pump task that drains the sink into `handle_trigger`; both tear down naturally when
-    // the MCP transport closes or the harness drops. The clones survive for the session
-    // factory: rebuilt harnesses re-register the same Arc'd push sources.
+    // the MCP transport closes or the executor drops. The clones survive for the session
+    // factory: rebuilt executors re-register the same Arc'd push sources.
     let mcp_notification_hooks_for_factory = mcp_notification_hooks.clone();
     for hook in mcp_notification_hooks {
-        harness.register_notification_hook(hook);
+        trigger_executor.register_notification_hook(hook);
     }
-    harness.register_notification_hook(std::sync::Arc::new(triggers::CronNotificationHook::new(
-        cron_registry.clone(),
-    )));
-    harness.register_notification_hook(std::sync::Arc::new(
+    trigger_executor.register_notification_hook(std::sync::Arc::new(
+        triggers::CronNotificationHook::new(cron_registry.clone()),
+    ));
+    trigger_executor.register_notification_hook(std::sync::Arc::new(
         triggers::DynamicTriggerCheckHook::new(dynamic_trigger_registry.clone()),
     ));
     // Resume hydration (if --resume) — the rebuilt transcript is replayed into the feed below.
@@ -911,6 +925,7 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
             dynamic_trigger_registry: dynamic_trigger_registry.clone(),
             cron_registry: cron_registry.clone(),
             reload_skills_fn,
+            before_tool_call: Some(before_tool_call.clone()),
             before_trigger_action,
             control_plane_hook,
             after_tool_call,
@@ -928,6 +943,7 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
 
     let mut app = ui::App::new(ui::AppConfig {
         harness: harness.clone(),
+        trigger_executor: trigger_executor.clone(),
         retry: agent_session::RetrySettings::default(),
         registry: commands::Registry::with_builtins(),
         cwd: cwd.clone(),
@@ -1103,10 +1119,12 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
         .subscribe(ui::listener::agent_listener(feed_tx.clone()));
     let _unsub_harness_tui =
         harness.subscribe_harness(ui::listener::harness_listener(feed_tx.clone(), cli.debug));
-    let _unsub_dynamic_fire_once = harness.subscribe_harness(triggers::fire_once_harness_listener(
-        dynamic_trigger_registry.clone(),
-    ));
-    let _unsub_cron = harness.subscribe_harness(triggers::cron_harness_listener(
+    let _unsub_trigger_tui =
+        trigger_executor.subscribe(ui::listener::trigger_listener(feed_tx.clone(), cli.debug));
+    let _unsub_dynamic_fire_once = trigger_executor.subscribe(
+        triggers::fire_once_trigger_listener(dynamic_trigger_registry.clone()),
+    );
+    let _unsub_cron = trigger_executor.subscribe(triggers::cron_trigger_listener(
         cron_registry.clone(),
         inbox::default_inbox_path(),
     ));
@@ -1119,15 +1137,19 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
     // one channel that the REPL loop drains on the SAME serialized path as user input — so a
     // triggered turn and a user prompt never race for the agent. The only sender lives in
     // this listener, so the channel stays open exactly as long as the subscription does.
-    let _unsub_main_run =
-        harness.subscribe_harness(std::sync::Arc::new(move |ev: theway_core::HarnessEvent| {
-            if let theway_core::HarnessEvent::TriggerRequestsMainRun { trace_id } = ev {
+    let _unsub_main_run = trigger_executor.subscribe(std::sync::Arc::new(
+        move |ev: theway::trigger_engine::event::TriggerEvent| {
+            if let theway::trigger_engine::event::TriggerEvent::TriggerRequestsMainRun {
+                trace_id,
+            } = ev
+            {
                 // Non-blocking on an unbounded channel; the UI loop drains it on the same
                 // serialized run slot as user input. The message itself was already injected
                 // by the kernel.
                 let _ = main_run_tx.send(trace_id);
             }
-        }));
+        },
+    ));
 
     // Hand off to the UI layer. The TUI owns the terminal, the input box, the scrolling feed,
     // and the serialized run slot (user prompts + inject-and-run triggered turns) until quit.
@@ -1206,7 +1228,8 @@ struct SessionHarnessFactory {
     dynamic_trigger_registry: triggers::dynamic::DynamicTriggerRegistry,
     cron_registry: triggers::cron::CronRegistry,
     reload_skills_fn: theway_core::ReloadSkillsFn,
-    before_trigger_action: theway_core::BeforeTriggerActionHook,
+    before_tool_call: Option<theway_core::BeforeToolCallHook>,
+    before_trigger_action: theway::trigger_engine::execution::BeforeTriggerActionHook,
     control_plane_hook: Option<theway_core::OnControlPlanePromptHook>,
     after_tool_call: Option<theway_core::AfterToolCallHook>,
     feed_tx: tokio::sync::mpsc::UnboundedSender<ui::FeedUpdate>,
@@ -1274,25 +1297,47 @@ impl SessionHarnessFactory {
             Some(self.stream_fn.clone()),
         ));
         opts.turn_continuation_cap = Some(goal::MAX_CONTINUATIONS);
-        opts.before_tool_call =
-            Some(PermissionPolicy::default_for_coding_agent().as_before_tool_call());
+        opts.before_tool_call = self.before_tool_call.clone();
         opts.on_control_plane_prompt = self.control_plane_hook.clone();
-        opts.before_trigger_action = Some(self.before_trigger_action.clone());
         opts.after_tool_call = self.after_tool_call.clone();
         let harness = std::sync::Arc::new(AgentHarness::new(opts));
+
+        // Per-session trigger executor: same wiring as the startup path (transport
+        // adapters + trigger UI/cron/dynamic listeners re-registered per harness).
+        let trigger_executor =
+            std::sync::Arc::new(theway::trigger_engine::execution::TriggerExecutor::new(
+                harness.agent_arc(),
+                harness.session().clone(),
+                theway::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+                None,
+                None,
+                Some(self.before_trigger_action.clone()),
+                Some(self.stream_fn.clone()),
+                self.before_tool_call.clone(),
+                self.after_tool_call.clone(),
+            ));
+        for hook in self.mcp_notification_hooks.clone() {
+            trigger_executor.register_notification_hook(hook);
+        }
+        trigger_executor.register_notification_hook(std::sync::Arc::new(
+            triggers::CronNotificationHook::new(self.cron_registry.clone()),
+        ));
+        trigger_executor.register_notification_hook(std::sync::Arc::new(
+            triggers::DynamicTriggerCheckHook::new(self.dynamic_trigger_registry.clone()),
+        ));
         // Each build owns its cells, so `set` cannot fail; ignore the Result anyway.
         let _ = skill_harness_cell.set(harness.clone());
         let _ = goal_harness_cell.set(harness.clone());
 
         // Notification hooks: MCP push sources are Arc'd, so clones re-register on the
-        // rebuilt harness; cron / dynamic-trigger hooks are constructed fresh per harness.
+        // rebuilt executor; cron / dynamic-trigger hooks are constructed fresh per executor.
         for hook in &self.mcp_notification_hooks {
-            harness.register_notification_hook(hook.clone());
+            trigger_executor.register_notification_hook(hook.clone());
         }
-        harness.register_notification_hook(std::sync::Arc::new(
+        trigger_executor.register_notification_hook(std::sync::Arc::new(
             triggers::CronNotificationHook::new(self.cron_registry.clone()),
         ));
-        harness.register_notification_hook(std::sync::Arc::new(
+        trigger_executor.register_notification_hook(std::sync::Arc::new(
             triggers::DynamicTriggerCheckHook::new(self.dynamic_trigger_registry.clone()),
         ));
 
@@ -1306,10 +1351,14 @@ impl SessionHarnessFactory {
             self.feed_tx.clone(),
             self.debug,
         ));
-        let _ = harness.subscribe_harness(triggers::fire_once_harness_listener(
+        let _ = trigger_executor.subscribe(ui::listener::trigger_listener(
+            self.feed_tx.clone(),
+            self.debug,
+        ));
+        let _ = trigger_executor.subscribe(triggers::fire_once_trigger_listener(
             self.dynamic_trigger_registry.clone(),
         ));
-        let _ = harness.subscribe_harness(triggers::cron_harness_listener(
+        let _ = trigger_executor.subscribe(triggers::cron_trigger_listener(
             self.cron_registry.clone(),
             inbox::default_inbox_path(),
         ));
@@ -1331,12 +1380,16 @@ impl SessionHarnessFactory {
         let _ = harness.agent().subscribe(loaded_hooks.runner.listener());
         let _ = harness.subscribe_harness(loaded_hooks.runner.harness_listener());
         let main_run_tx = self.main_run_tx.clone();
-        let _ =
-            harness.subscribe_harness(std::sync::Arc::new(move |ev: theway_core::HarnessEvent| {
-                if let theway_core::HarnessEvent::TriggerRequestsMainRun { trace_id } = ev {
+        let _ = trigger_executor.subscribe(std::sync::Arc::new(
+            move |ev: theway::trigger_engine::event::TriggerEvent| {
+                if let theway::trigger_engine::event::TriggerEvent::TriggerRequestsMainRun {
+                    trace_id,
+                } = ev
+                {
                     let _ = main_run_tx.send(trace_id);
                 }
-            }));
+            },
+        ));
 
         // Resume semantics: rebuild the agent's in-memory state from the transcript.
         harness

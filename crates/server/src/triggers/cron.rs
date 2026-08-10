@@ -10,6 +10,18 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::trigger_engine::event::{TriggerEvent, TriggerListener};
+use crate::trigger_engine::execution::{
+    BeforeTriggerActionContext, BeforeTriggerActionHook, PromoteAction, TriggerAction,
+    TriggerDelivery,
+};
+use crate::trigger_engine::notification_hook::{
+    HookError, HookState, NotificationHook, NotificationHookStatus, TriggerSink,
+};
+use crate::trigger_engine::types::{
+    CredentialScope, PayloadVisibility, ReplacementPolicy, SourceKind, Trigger, TriggerAuthority,
+    TriggerSource,
+};
 use async_trait::async_trait;
 use chrono::{DateTime, Datelike, Local, Timelike, Utc};
 use once_cell::sync::OnceCell;
@@ -17,11 +29,7 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use theway_core::{
-    AgentHarness, AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate,
-    BeforeTriggerActionContext, BeforeTriggerActionHook, CredentialScope, HarnessEvent,
-    HarnessListener, HookError, HookState, NotificationHook, NotificationHookStatus,
-    PayloadVisibility, PromoteAction, ReplacementPolicy, SourceKind, ToolExecutionMode, Trigger,
-    TriggerAction, TriggerAuthority, TriggerDelivery, TriggerSink, TriggerSource,
+    AgentHarness, AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate, ToolExecutionMode,
 };
 use theway_llm_provider::{Tool, UserContentBlock};
 use tokio::time::{Duration, MissedTickBehavior};
@@ -898,9 +906,9 @@ pub fn cron_action_hook(
     )
 }
 
-pub fn cron_harness_listener(registry: CronRegistry, inbox_path: PathBuf) -> HarnessListener {
+pub fn cron_trigger_listener(registry: CronRegistry, inbox_path: PathBuf) -> TriggerListener {
     Arc::new(move |event| match event {
-        HarnessEvent::TriggerCompleted {
+        TriggerEvent::TriggerCompleted {
             trace_id, summary, ..
         } => {
             // Resolve the job BEFORE mark_completed clears the trace binding.
@@ -938,7 +946,7 @@ pub fn cron_harness_listener(registry: CronRegistry, inbox_path: PathBuf) -> Har
                 }
             }
         }
-        HarnessEvent::TriggerFailed { trace_id, reason } => {
+        TriggerEvent::TriggerFailed { trace_id, reason } => {
             registry.mark_completed(&trace_id, Some(reason.clone()));
         }
         _ => {}

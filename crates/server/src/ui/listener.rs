@@ -6,9 +6,11 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use crate::trigger_engine::event::{TriggerEvent, TriggerListener};
+use crate::trigger_engine::types::{SourceKind, TriggerState};
 use chrono::Local;
 use parking_lot::Mutex;
-use theway_core::{AgentEvent, AgentListener, HarnessEvent, HarnessListener, TriggerState};
+use theway_core::{AgentEvent, AgentListener, HarnessEvent, HarnessListener};
 use theway_llm_provider::AssistantMessageEvent;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -93,123 +95,15 @@ fn tool_start_display(tool_name: &str, args: &serde_json::Value) -> (String, Str
 /// Build the harness listener for trigger lifecycle lines. Keeps the same "stay quiet unless a
 /// dynamic periodic check actually matched" behavior the old renderer had.
 pub fn harness_listener(tx: UnboundedSender<FeedUpdate>, debug: bool) -> HarnessListener {
-    let quiet: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
     Arc::new(move |event| {
-        if let Some(update) = map_harness_event(&event, &quiet, debug) {
+        if let Some(update) = map_harness_event(&event, debug) {
             let _ = tx.send(update);
         }
     })
 }
 
-fn map_harness_event(
-    event: &HarnessEvent,
-    quiet: &Mutex<HashSet<String>>,
-    debug: bool,
-) -> Option<FeedUpdate> {
+fn map_harness_event(event: &HarnessEvent, debug: bool) -> Option<FeedUpdate> {
     match event {
-        HarnessEvent::TriggerHandlingStart {
-            trace_id,
-            source_kind,
-            source_label,
-            event_label,
-            ..
-        } => {
-            if !debug && source_label == "local:dynamic" && event_label == "dynamic periodic check"
-            {
-                quiet.lock().insert(trace_id.clone());
-                return None;
-            }
-            Some(FeedUpdate::Plain {
-                text: format!(
-                    "[trigger fired] trace={} source={} kind={} event={}",
-                    debug_text(debug, trace_id, 24),
-                    debug_text(debug, source_label, 48),
-                    source_kind_label(*source_kind),
-                    debug_text(debug, event_label, 64)
-                ),
-                level: Level::System,
-            })
-        }
-        HarnessEvent::TriggerHandled {
-            trace_id, state, ..
-        } => match state {
-            TriggerState::Accepted => None,
-            TriggerState::Deduped
-            | TriggerState::CycleSuppressed
-            | TriggerState::PermissionDenied
-            | TriggerState::NeedsApproval => {
-                quiet.lock().remove(trace_id);
-                Some(FeedUpdate::Plain {
-                    text: format!(
-                        "[trigger {}] trace={}",
-                        trigger_state_label(*state),
-                        debug_text(debug, trace_id, 24)
-                    ),
-                    level: trigger_state_level(*state),
-                })
-            }
-            _ => None,
-        },
-        HarnessEvent::TriggerCompleted {
-            trace_id, summary, ..
-        } => {
-            // Loop-protocol tags are persisted by the cron listener; keep them out of
-            // the conversation line.
-            let summary = summary
-                .as_deref()
-                .map(crate::triggers::cron::strip_loop_protocol_tags)
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| "completed".to_string());
-            let summary = summary.as_str();
-            let was_quiet = quiet.lock().remove(trace_id);
-            if !debug && was_quiet && is_no_match_dynamic_summary(summary) {
-                return Some(dynamic_poll_status_update(
-                    trace_id,
-                    "local:dynamic",
-                    "dynamic periodic check",
-                    summary,
-                ));
-            }
-            Some(FeedUpdate::Plain {
-                text: format!(
-                    "[trigger completed] trace={} {}",
-                    debug_text(debug, trace_id, 24),
-                    summary
-                ),
-                level: Level::Note,
-            })
-        }
-        HarnessEvent::TriggerFailed { trace_id, reason } => {
-            quiet.lock().remove(trace_id);
-            Some(FeedUpdate::Plain {
-                text: format!(
-                    "[trigger failed] trace={} {}",
-                    debug_text(debug, trace_id, 24),
-                    debug_text(debug, reason, 180)
-                ),
-                level: Level::Error,
-            })
-        }
-        HarnessEvent::TriggerExecutionStarted {
-            trace_id,
-            source_label,
-            event_label,
-            prompt_preview,
-        } => {
-            if !debug && source_label == "local:dynamic" && event_label == "dynamic periodic check"
-            {
-                quiet.lock().insert(trace_id.clone());
-                return None;
-            }
-            Some(FeedUpdate::Plain {
-                text: format!(
-                    "[trigger running] trace={} {}",
-                    debug_text(debug, trace_id, 24),
-                    debug_text(debug, prompt_preview, 120)
-                ),
-                level: Level::System,
-            })
-        }
         HarnessEvent::TurnEnded {
             decision,
             reason,
@@ -246,6 +140,137 @@ fn map_harness_event(
         }
         _ => None,
     }
+}
+
+/// Build the trigger-engine listener. Maps trigger lifecycle events into feed updates,
+/// mirroring the old `HarnessEvent::Trigger*` branches (the trigger pipeline now lives in
+/// the CLI host, not the core harness event bus).
+pub fn trigger_listener(tx: UnboundedSender<FeedUpdate>, debug: bool) -> TriggerListener {
+    let quiet: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+    Arc::new(move |event| {
+        if let Some(update) = map_trigger_event(&event, &quiet, debug) {
+            let _ = tx.send(update);
+        }
+    })
+}
+
+fn map_trigger_event(
+    event: &TriggerEvent,
+    quiet: &Mutex<HashSet<String>>,
+    debug: bool,
+) -> Option<FeedUpdate> {
+    match event {
+        TriggerEvent::TriggerHandlingStart {
+            trace_id,
+            source_kind,
+            source_label,
+            event_label,
+            ..
+        } => {
+            if !debug && source_label == "local:dynamic" && event_label == "dynamic periodic check"
+            {
+                quiet.lock().insert(trace_id.clone());
+                return None;
+            }
+            Some(FeedUpdate::Plain {
+                text: format!(
+                    "[trigger fired] trace={} source={} kind={} event={}",
+                    debug_text(debug, trace_id, 24),
+                    debug_text(debug, source_label, 48),
+                    source_kind_label(*source_kind),
+                    debug_text(debug, event_label, 64)
+                ),
+                level: Level::System,
+            })
+        }
+        TriggerEvent::TriggerHandled {
+            trace_id, state, ..
+        } => match state {
+            TriggerState::Accepted => None,
+            TriggerState::Deduped
+            | TriggerState::CycleSuppressed
+            | TriggerState::PermissionDenied
+            | TriggerState::NeedsApproval => {
+                quiet.lock().remove(trace_id);
+                Some(FeedUpdate::Plain {
+                    text: format!(
+                        "[trigger {}] trace={}",
+                        trigger_state_label(*state),
+                        debug_text(debug, trace_id, 24)
+                    ),
+                    level: trigger_state_level(*state),
+                })
+            }
+            _ => None,
+        },
+        TriggerEvent::TriggerCompleted {
+            trace_id, summary, ..
+        } => {
+            // Loop-protocol tags are persisted by the cron listener; keep them out of
+            // the conversation line.
+            let summary = summary
+                .as_deref()
+                .map(crate::triggers::cron::strip_loop_protocol_tags)
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "completed".to_string());
+            let summary = summary.as_str();
+            let was_quiet = quiet.lock().remove(trace_id);
+            if !debug && was_quiet && is_no_match_dynamic_summary(summary) {
+                return Some(dynamic_poll_status_update(
+                    trace_id,
+                    "local:dynamic",
+                    "dynamic periodic check",
+                    summary,
+                ));
+            }
+            Some(FeedUpdate::Plain {
+                text: format!(
+                    "[trigger completed] trace={} {}",
+                    debug_text(debug, trace_id, 24),
+                    summary
+                ),
+                level: Level::Note,
+            })
+        }
+        TriggerEvent::TriggerFailed { trace_id, reason } => {
+            quiet.lock().remove(trace_id);
+            Some(FeedUpdate::Plain {
+                text: format!(
+                    "[trigger failed] trace={} {}",
+                    debug_text(debug, trace_id, 24),
+                    debug_text(debug, reason, 180)
+                ),
+                level: Level::Error,
+            })
+        }
+        TriggerEvent::TriggerExecutionStarted {
+            trace_id,
+            source_label,
+            event_label,
+            prompt_preview,
+        } => {
+            if !debug && source_label == "local:dynamic" && event_label == "dynamic periodic check"
+            {
+                quiet.lock().insert(trace_id.clone());
+                return None;
+            }
+            Some(FeedUpdate::Plain {
+                text: format!(
+                    "[trigger running] trace={} {}",
+                    debug_text(debug, trace_id, 24),
+                    debug_text(debug, prompt_preview, 120)
+                ),
+                level: Level::System,
+            })
+        }
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+fn map_trigger_event_for_test(event: &TriggerEvent) -> Option<FeedUpdate> {
+    let quiet = Mutex::new(HashSet::new());
+    map_trigger_event(event, &quiet, false)
 }
 
 fn debug_text(debug: bool, s: &str, max_chars: usize) -> String {
@@ -286,8 +311,7 @@ fn is_no_match_dynamic_summary(summary: &str) -> bool {
 
 #[cfg(test)]
 fn map_harness_event_for_test(event: &HarnessEvent) -> Option<FeedUpdate> {
-    let quiet = Mutex::new(HashSet::new());
-    map_harness_event(event, &quiet, false)
+    map_harness_event(event, false)
 }
 
 fn trigger_state_label(state: TriggerState) -> &'static str {
@@ -311,10 +335,10 @@ fn trigger_state_level(state: TriggerState) -> Level {
     }
 }
 
-fn source_kind_label(kind: theway_core::SourceKind) -> &'static str {
+fn source_kind_label(kind: SourceKind) -> &'static str {
     match kind {
-        theway_core::SourceKind::Local => "local",
-        theway_core::SourceKind::Mcp => "mcp",
+        SourceKind::Local => "local",
+        SourceKind::Mcp => "mcp",
     }
 }
 

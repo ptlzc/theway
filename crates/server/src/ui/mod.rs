@@ -133,6 +133,7 @@ pub struct PanelStatus {
 /// Everything the app needs to run a session, assembled by `main.rs` after the harness is built.
 pub struct AppConfig {
     pub harness: Arc<AgentHarness>,
+    pub trigger_executor: Arc<crate::trigger_engine::execution::TriggerExecutor>,
     pub retry: RetrySettings,
     pub registry: Registry,
     pub cwd: PathBuf,
@@ -291,7 +292,7 @@ impl App {
         let (relay_resolve_tx, relay_resolve_rx) = tokio::sync::mpsc::unbounded_channel();
         let (relay_model_tx, relay_model_rx) = tokio::sync::mpsc::unbounded_channel();
         Self {
-            kernel: ReplKernel::new(config.harness, config.retry),
+            kernel: ReplKernel::new(config.harness, config.trigger_executor, config.retry),
             registry: config.registry,
             completer,
             cwd: config.cwd,
@@ -1334,6 +1335,7 @@ impl App {
         let outcome = {
             let ctx = CommandCtx {
                 harness: self.kernel.harness(),
+                trigger_executor: self.kernel.trigger_executor(),
                 session_id: &self.session_id,
                 log_path: self.log_path.as_ref(),
                 tool_count: self.tool_count,
@@ -2229,6 +2231,7 @@ impl App {
             if input.starts_with('/') {
                 let ctx = CommandCtx {
                     harness: self.kernel.harness(),
+                    trigger_executor: self.kernel.trigger_executor(),
                     session_id: &self.session_id,
                     log_path: self.log_path.as_ref(),
                     tool_count: self.tool_count,
@@ -2553,10 +2556,23 @@ mod tests {
 
     fn test_app_with_options(opts: AgentHarnessOptions) -> App {
         let harness = Arc::new(AgentHarness::new(opts));
+        let trigger_executor =
+            std::sync::Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+                harness.agent_arc(),
+                harness.session().clone(),
+                crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ));
         let (_ftx, feed_rx) = tokio::sync::mpsc::unbounded_channel();
         let (_mtx, main_run_rx) = tokio::sync::mpsc::unbounded_channel();
         App::new(AppConfig {
             harness,
+            trigger_executor,
             retry: RetrySettings::default(),
             registry: Registry::with_builtins(),
             cwd: std::path::PathBuf::from("."),

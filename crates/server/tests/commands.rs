@@ -37,6 +37,10 @@ mod bug_report;
 #[path = "../src/commands.rs"]
 mod commands;
 #[allow(dead_code)]
+#[path = "../src/trigger_engine/mod.rs"]
+mod trigger_engine;
+
+#[allow(dead_code)]
 #[path = "../src/config.rs"]
 mod config;
 #[allow(dead_code)]
@@ -293,11 +297,23 @@ async fn dispatch_thinking_command_updates_state_and_session() {
     let mut opts = AgentHarnessOptions::new(faux_model(), session.clone());
     opts.thinking_level = ThinkingLevel::Off;
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -346,10 +362,22 @@ async fn dispatch_session_export_writes_archive_with_bounded_output() {
     let session_id = metadata["id"].as_str().unwrap().to_string();
     let opts = AgentHarnessOptions::new(faux_model(), session);
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
     let registry = commands::Registry::with_builtins();
     let capture = OutputCapture::install();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: &session_id,
         log_path: None,
         tool_count: 0,
@@ -373,11 +401,23 @@ async fn dispatch_unknown_command_returns_error_outcome() {
     let session = Session::new(storage as Arc<dyn SessionStorage>);
     let opts = AgentHarnessOptions::new(faux_model(), session);
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -398,11 +438,23 @@ async fn dispatch_goal_sets_and_reports_session_goal() {
     let session = Session::new(storage as Arc<dyn SessionStorage>);
     let opts = AgentHarnessOptions::new(faux_model(), session.clone());
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -449,6 +501,17 @@ async fn dispatch_goal_start_runs_prompt_when_goal_active() {
     let session = Session::new(storage as Arc<dyn SessionStorage>);
     let opts = AgentHarnessOptions::new(faux_model(), session.clone());
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     goal::set(&harness, "finish only after cargo test passes".into())
         .await
@@ -458,6 +521,7 @@ async fn dispatch_goal_start_runs_prompt_when_goal_active() {
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -485,6 +549,17 @@ async fn dispatch_goal_start_shortcut_runs_prompt_when_goal_active() {
     let session = Session::new(storage as Arc<dyn SessionStorage>);
     let opts = AgentHarnessOptions::new(faux_model(), session.clone());
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     goal::set(&harness, "finish only after cargo test passes".into())
         .await
@@ -494,6 +569,7 @@ async fn dispatch_goal_start_shortcut_runs_prompt_when_goal_active() {
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -521,11 +597,23 @@ async fn dispatch_goal_start_requires_active_goal() {
     let session = Session::new(storage as Arc<dyn SessionStorage>);
     let opts = AgentHarnessOptions::new(faux_model(), session.clone());
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -559,12 +647,24 @@ async fn dispatch_goal_clear_hides_current_goal() {
     let session = Session::new(storage as Arc<dyn SessionStorage>);
     let opts = AgentHarnessOptions::new(faux_model(), session);
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
     goal::set(&harness, "ship a release".into()).await.unwrap();
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -590,6 +690,17 @@ async fn goal_evaluator_false_returns_continuation_and_audits_reason() {
         ))
     }));
     let harness = Arc::new(AgentHarness::new(opts));
+    let _executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
     let harness_cell = Arc::new(OnceLock::new());
     assert!(harness_cell.set(harness.clone()).is_ok());
     let registry = theway_core::multiagent::registry::AgentJobRegistry::new();
@@ -670,11 +781,23 @@ async fn dynamic_skill_slash_command_attaches_skill_without_body_echo() {
     let mut opts = AgentHarnessOptions::new(faux_model(), session);
     opts.skills = vec![skill("db9", "SECRET SKILL BODY", false)];
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -700,11 +823,23 @@ async fn dynamic_skill_slash_command_with_prompt_runs_skill_wrapped_turn() {
     let mut opts = AgentHarnessOptions::new(faux_model(), session);
     opts.skills = vec![skill("db9", "SECRET SKILL BODY", false)];
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -733,6 +868,17 @@ async fn dynamic_skill_slash_command_hides_disabled_and_builtin_conflicts() {
         skill("help", "conflicting body", false),
     ];
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let shortcuts = commands::skill_shortcuts(&harness.skills(), &registry);
@@ -746,6 +892,7 @@ async fn dynamic_skill_slash_command_hides_disabled_and_builtin_conflicts() {
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -772,11 +919,23 @@ async fn help_lists_dynamic_skill_commands_without_body() {
         skill("hidden-skill", "SECRET HIDDEN BODY", true),
     ];
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -805,11 +964,23 @@ async fn dispatch_triggers_status_is_read_only_and_available() {
     opts.tools = vec![Arc::new(triggers::NewTriggerTool) as Arc<dyn AgentTool>];
     opts.stream_fn = Some(new_trigger_extraction_stream());
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -830,11 +1001,23 @@ async fn dispatch_template_returns_repl_owned_agent_work() {
     let session = Session::new(storage as Arc<dyn SessionStorage>);
     let opts = AgentHarnessOptions::new(faux_model(), session.clone());
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -860,11 +1043,23 @@ async fn dispatch_compact_returns_repl_owned_agent_work() {
     let session = Session::new(storage as Arc<dyn SessionStorage>);
     let opts = AgentHarnessOptions::new(faux_model(), session.clone());
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -900,11 +1095,23 @@ async fn dispatch_new_trigger_registers_dynamic_rule() {
     // the embedder's real prompt card; see PR #138 for the CLI/TUI wiring.
     opts.on_control_plane_prompt = Some(allow_all_control_plane_hook());
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -940,7 +1147,7 @@ async fn dispatch_new_trigger_registers_dynamic_rule() {
     assert_eq!(rules.len(), 1);
     assert_eq!(rules[0].condition, condition);
     assert_eq!(rules[0].action, action);
-    let status_lines = commands::render_triggers_status(&harness.notification_status_snapshot());
+    let status_lines = commands::render_triggers_status(&executor.notification_status_snapshot());
     assert!(
         status_lines
             .iter()
@@ -966,11 +1173,23 @@ async fn dispatch_triggers_remove_deletes_dynamic_rule() {
     let session = Session::new(storage as Arc<dyn SessionStorage>);
     let opts = AgentHarnessOptions::new(faux_model(), session.clone());
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -999,11 +1218,23 @@ async fn dispatch_triggers_disable_and_enable_updates_rule_state() {
     let session = Session::new(storage as Arc<dyn SessionStorage>);
     let opts = AgentHarnessOptions::new(faux_model(), session.clone());
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -1034,11 +1265,23 @@ async fn dispatch_cron_add_lists_toggles_and_removes_job() {
     let session = Session::new(storage as Arc<dyn SessionStorage>);
     let opts = AgentHarnessOptions::new(faux_model(), session.clone());
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -1153,11 +1396,23 @@ async fn dispatch_cron_add_audit_redacts_secret_like_action_preview() {
     let session = Session::new(storage as Arc<dyn SessionStorage>);
     let opts = AgentHarnessOptions::new(faux_model(), session.clone());
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -1198,11 +1453,23 @@ async fn dispatch_triggers_abort_missing_trace_returns_error() {
     let session = Session::new(storage as Arc<dyn SessionStorage>);
     let opts = AgentHarnessOptions::new(faux_model(), session.clone());
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -1229,11 +1496,23 @@ async fn dispatch_triggers_abort_all_empty_harness_is_handled_and_read_only() {
     let session = Session::new(storage as Arc<dyn SessionStorage>);
     let opts = AgentHarnessOptions::new(faux_model(), session.clone());
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -1291,6 +1570,17 @@ async fn dispatch_undo_removes_last_turn_from_active_branch() {
     let mut opts = AgentHarnessOptions::new(faux_model(), session.clone());
     opts.stream_fn = Some(faux_stream("ack-1"));
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
     harness.prompt("hi").await.unwrap();
 
     // Sanity: there are now 2 messages on the active branch (1 user, 1 assistant).
@@ -1301,6 +1591,7 @@ async fn dispatch_undo_removes_last_turn_from_active_branch() {
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -1322,11 +1613,23 @@ async fn dispatch_name_sets_session_name() {
     let session = Session::new(storage as Arc<dyn SessionStorage>);
     let opts = AgentHarnessOptions::new(faux_model(), session.clone());
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -1346,11 +1649,23 @@ async fn dispatch_quit_returns_quit_outcome() {
     let session = Session::new(storage as Arc<dyn SessionStorage>);
     let opts = AgentHarnessOptions::new(faux_model(), session);
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -1372,11 +1687,23 @@ async fn dispatch_login_prompts_for_secret_instead_of_accepting_inline_key() {
     let session = Session::new(storage as Arc<dyn SessionStorage>);
     let opts = AgentHarnessOptions::new(faux_model(), session);
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -1405,11 +1732,23 @@ async fn dispatch_login_rejects_inline_secret_material() {
     let session = Session::new(storage as Arc<dyn SessionStorage>);
     let opts = AgentHarnessOptions::new(faux_model(), session);
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -1462,11 +1801,23 @@ async fn dispatch_share_default_uses_gh_private_default_without_secret_flag() {
     let session = Session::new(storage as Arc<dyn SessionStorage>);
     let opts = AgentHarnessOptions::new(faux_model(), session);
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test-share-default",
         log_path: None,
         tool_count: 0,
@@ -1502,11 +1853,23 @@ async fn dispatch_share_public_passes_public_flag() {
     let session = Session::new(storage as Arc<dyn SessionStorage>);
     let opts = AgentHarnessOptions::new(faux_model(), session);
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test-share-public",
         log_path: None,
         tool_count: 0,
@@ -1534,11 +1897,23 @@ async fn dispatch_share_preserves_gh_stderr_on_failure() {
     let session = Session::new(storage as Arc<dyn SessionStorage>);
     let opts = AgentHarnessOptions::new(faux_model(), session);
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test-share-failure",
         log_path: None,
         tool_count: 0,
@@ -1562,11 +1937,23 @@ async fn dispatch_skill_attaches_loaded_skill_without_exposing_body() {
     let mut opts = AgentHarnessOptions::new(faux_model(), session);
     opts.skills = vec![skill("review-pr", "SECRET SKILL BODY", false)];
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -1596,11 +1983,23 @@ async fn dispatch_skill_refuses_disabled_skill() {
     let mut opts = AgentHarnessOptions::new(faux_model(), session);
     opts.skills = vec![skill("disabled-skill", "SECRET SKILL BODY", true)];
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -1628,11 +2027,23 @@ async fn dispatch_skills_disable_persists_overlay_and_reloads() {
         temp.path(),
         vec![skill("review-pr", "SECRET SKILL BODY", false)],
     );
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -1682,11 +2093,23 @@ async fn dispatch_skills_enable_is_user_mediated_and_reuses_overlay() {
         temp.path(),
         vec![skill("formatter", "SECRET SKILL BODY", true)],
     );
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -1734,11 +2157,35 @@ async fn dispatch_skills_show_prints_metadata_without_body() {
     s.source = SkillSource::Project;
     opts.skills = vec![s];
     let harness = Arc::new(AgentHarness::new(opts));
+    let _executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
+
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -1773,11 +2220,23 @@ async fn dispatch_skills_reload_uses_harness_reload_and_prints_summary() {
     // Make the live catalog stale so the assertion proves `/skills reload` called the harness
     // reload closure rather than just recounting the current catalog.
     harness.replace_skills(Vec::new());
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -1812,10 +2271,22 @@ async fn dispatch_skills_install_previews_then_confirms_without_body_echo() {
     .unwrap();
 
     let harness = harness_with_disk_skill_reload(temp.path(), Vec::new());
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -1871,10 +2342,22 @@ async fn dispatch_skills_remove_previews_then_confirms_user_skill() {
     .unwrap();
     let harness =
         harness_with_disk_skill_reload(temp.path(), vec![user_skill_at(temp.path(), "db9", false)]);
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -1920,10 +2403,34 @@ async fn dispatch_skills_remove_project_skill_points_to_disable() {
         .to_string();
     opts.skills = vec![s];
     let harness = Arc::new(AgentHarness::new(opts));
+    let _executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
+
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,
@@ -1948,11 +2455,23 @@ async fn dispatch_skill_unknown_name_suggests_prefix_matches() {
     let mut opts = AgentHarnessOptions::new(faux_model(), session);
     opts.skills = vec![skill("review-pr", "SECRET SKILL BODY", false)];
     let harness = Arc::new(AgentHarness::new(opts));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
 
     let registry = commands::Registry::with_builtins();
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {
         harness: &harness,
+        trigger_executor: &executor,
         session_id: "test",
         log_path: None,
         tool_count: 0,

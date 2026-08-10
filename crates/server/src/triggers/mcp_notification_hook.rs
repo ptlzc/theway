@@ -45,15 +45,17 @@
 
 use std::sync::Arc;
 
+use crate::trigger_engine::notification_hook::{
+    HookError, HookState, NotificationHook, NotificationHookStatus, TriggerSink,
+};
+use crate::trigger_engine::types::{
+    CredentialScope, PayloadVisibility, ReplacementPolicy, SourceKind, Trigger, TriggerAuthority,
+    TriggerSource,
+};
 use async_trait::async_trait;
 use chrono::Utc;
 use parking_lot::Mutex;
 use sha2::{Digest, Sha256};
-use theway_core::{
-    CredentialScope, HookError, HookState, NotificationHook, NotificationHookStatus,
-    PayloadVisibility, ReplacementPolicy, SourceKind, Trigger, TriggerAuthority, TriggerSink,
-    TriggerSource,
-};
 use theway_mcp::client::McpServerNotification;
 use tokio::sync::mpsc::UnboundedReceiver;
 use uuid::Uuid;

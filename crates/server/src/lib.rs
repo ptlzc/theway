@@ -48,6 +48,7 @@ pub mod skills;
 pub use theway_core::skills_state;
 pub mod templates;
 pub mod tools;
+pub mod trigger_engine;
 pub mod ts_extensions;
 // Server-first: transport is always on (theway IS an agent server).
 pub mod transport;

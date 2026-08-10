@@ -114,9 +114,9 @@ fn skills_reloaded_maps_to_sidebar_refresh_update() {
 
 #[test]
 fn trigger_handling_start_renders_preview_safe_live_line() {
-    let update = map_harness_event_for_test(&HarnessEvent::TriggerHandlingStart {
+    let update = map_trigger_event_for_test(&TriggerEvent::TriggerHandlingStart {
         idempotency_key: "idem-key".into(),
-        source_kind: theway_core::SourceKind::Mcp,
+        source_kind: crate::trigger_engine::types::SourceKind::Mcp,
         source_label: "mcp:github".into(),
         event_label: "pr.merged".into(),
         trace_id: "trace-start".into(),
@@ -135,10 +135,10 @@ fn trigger_handling_start_renders_preview_safe_live_line() {
 #[test]
 fn debug_mode_renders_dynamic_periodic_trigger_lines() {
     let quiet = Mutex::new(HashSet::new());
-    let update = map_harness_event(
-        &HarnessEvent::TriggerHandlingStart {
+    let update = map_trigger_event(
+        &TriggerEvent::TriggerHandlingStart {
             idempotency_key: "idem-key".into(),
-            source_kind: theway_core::SourceKind::Local,
+            source_kind: crate::trigger_engine::types::SourceKind::Local,
             source_label: "local:dynamic".into(),
             event_label: "dynamic periodic check".into(),
             trace_id: "trace-debug".into(),
@@ -162,7 +162,7 @@ fn trigger_completed_summary_is_not_display_truncated() {
         .map(|i| format!("trigger result line {i}"))
         .collect::<Vec<_>>()
         .join("\n");
-    let update = map_harness_event_for_test(&HarnessEvent::TriggerCompleted {
+    let update = map_trigger_event_for_test(&TriggerEvent::TriggerCompleted {
         trace_id: "trace-full-trigger-result".into(),
         summary: Some(summary.clone()),
         cost_usd: None,
@@ -214,8 +214,8 @@ fn turn_end_stop_stays_quiet() {
 fn dynamic_periodic_no_match_variants_stay_quiet() {
     let quiet = Mutex::new(HashSet::new());
     assert!(
-        map_harness_event(
-            &HarnessEvent::TriggerExecutionStarted {
+        map_trigger_event(
+            &TriggerEvent::TriggerExecutionStarted {
                 trace_id: "trace-chrome-check".into(),
                 source_label: "local:dynamic".into(),
                 event_label: "dynamic periodic check".into(),
@@ -227,8 +227,8 @@ fn dynamic_periodic_no_match_variants_stay_quiet() {
         .is_none()
     );
 
-    let update = map_harness_event(
-        &HarnessEvent::TriggerCompleted {
+    let update = map_trigger_event(
+        &TriggerEvent::TriggerCompleted {
             trace_id: "trace-chrome-check".into(),
             summary: Some("Checked Chrome tabs; no matching rule found.".into()),
             cost_usd: None,
@@ -267,8 +267,8 @@ fn dynamic_periodic_poll_status_redacts_and_bounds_summary() {
 fn dynamic_periodic_matched_completion_renders_result() {
     let quiet = Mutex::new(HashSet::new());
     assert!(
-        map_harness_event(
-            &HarnessEvent::TriggerExecutionStarted {
+        map_trigger_event(
+            &TriggerEvent::TriggerExecutionStarted {
                 trace_id: "trace-chrome-match".into(),
                 source_label: "local:dynamic".into(),
                 event_label: "dynamic periodic check".into(),
@@ -280,8 +280,8 @@ fn dynamic_periodic_matched_completion_renders_result() {
         .is_none()
     );
 
-    let update = map_harness_event(
-        &HarnessEvent::TriggerCompleted {
+    let update = map_trigger_event(
+        &TriggerEvent::TriggerCompleted {
             trace_id: "trace-chrome-match".into(),
             summary: Some("matched dyn-123 and archived the Chrome tab".into()),
             cost_usd: None,
@@ -300,7 +300,7 @@ fn dynamic_periodic_matched_completion_renders_result() {
 
 #[test]
 fn trigger_deduped_renders_terminal_status_line() {
-    let update = map_harness_event_for_test(&HarnessEvent::TriggerHandled {
+    let update = map_trigger_event_for_test(&TriggerEvent::TriggerHandled {
         idempotency_key: "idem-key".into(),
         trace_id: "trace-deduped".into(),
         state: TriggerState::Deduped,

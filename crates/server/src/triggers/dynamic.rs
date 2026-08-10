@@ -10,6 +10,18 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::trigger_engine::event::{TriggerEvent, TriggerListener};
+use crate::trigger_engine::execution::{
+    BeforeTriggerActionContext, BeforeTriggerActionHook, PromoteAction, TriggerAction,
+    TriggerDelivery,
+};
+use crate::trigger_engine::notification_hook::{
+    HookError, HookState, NotificationHook, NotificationHookStatus, TriggerSink,
+};
+use crate::trigger_engine::types::{
+    CredentialScope, PayloadVisibility, ReplacementPolicy, SourceKind, Trigger, TriggerAuthority,
+    TriggerSource,
+};
 use async_trait::async_trait;
 use chrono::{DateTime, Local, Utc};
 use once_cell::sync::OnceCell;
@@ -17,11 +29,8 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use theway_core::{
-    AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate, BeforeTriggerActionContext,
-    BeforeTriggerActionHook, CredentialScope, HarnessEvent, HarnessListener, HookError, HookState,
-    NotificationHook, NotificationHookStatus, PayloadVisibility, PermissionClassification,
-    PromoteAction, ReplacementPolicy, SourceKind, ToolExecutionMode, Trigger, TriggerAction,
-    TriggerAuthority, TriggerDelivery, TriggerSink, TriggerSource,
+    AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate, PermissionClassification,
+    ToolExecutionMode,
 };
 use theway_llm_provider::{Tool, UserContentBlock};
 use tokio::time::{Duration, MissedTickBehavior};
@@ -669,9 +678,9 @@ pub fn direct_inject_action_hook(
     )
 }
 
-pub fn fire_once_harness_listener(registry: DynamicTriggerRegistry) -> HarnessListener {
+pub fn fire_once_trigger_listener(registry: DynamicTriggerRegistry) -> TriggerListener {
     Arc::new(move |event| {
-        let HarnessEvent::TriggerCompleted {
+        let TriggerEvent::TriggerCompleted {
             summary: Some(summary),
             ..
         } = event

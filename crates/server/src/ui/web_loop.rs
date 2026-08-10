@@ -381,6 +381,7 @@ impl App {
         let outcome = {
             let ctx = CommandCtx {
                 harness: self.kernel.harness(),
+                trigger_executor: self.kernel.trigger_executor(),
                 session_id: &self.session_id,
                 log_path: self.log_path.as_ref(),
                 tool_count: self.tool_count,

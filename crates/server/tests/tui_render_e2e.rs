@@ -7,14 +7,17 @@
 
 use std::sync::Arc;
 
-use theway_core::{
-    AgentEvent, AgentMessage, AgentTool, AgentToolResult, HarnessEvent, SourceKind, TriggerState,
-};
+use crate::trigger_engine::event::TriggerEvent;
+use crate::trigger_engine::types::{SourceKind, TriggerState};
+use theway_core::{AgentEvent, AgentMessage, AgentTool, AgentToolResult};
 use theway_llm_provider::{
     AssistantMessage, AssistantMessageEvent, AssistantRole, ContentBlock, ImageContent, Message,
     StopReason, ToolCall, ToolResultMessage, ToolResultRole, Usage, UserContentBlock,
 };
 
+#[allow(dead_code)]
+#[path = "../src/trigger_engine/mod.rs"]
+mod trigger_engine;
 #[allow(dead_code)]
 #[path = "../src/tui.rs"]
 mod tui;
@@ -610,8 +613,8 @@ fn trigger_completion_renders_live_result_line() {
         ),
         &mut buf,
     );
-    tui.render_harness_event(
-        &HarnessEvent::TriggerCompleted {
+    tui.render_trigger_event(
+        &TriggerEvent::TriggerCompleted {
             trace_id: "trace-live-result".into(),
             summary: Some("wrote /tmp/trigger-output".into()),
             cost_usd: None,
@@ -633,8 +636,8 @@ fn trigger_start_renders_live_fired_line() {
     let tui = tui::Tui::new();
     let mut buf: Vec<u8> = Vec::new();
 
-    tui.render_harness_event(
-        &HarnessEvent::TriggerHandlingStart {
+    tui.render_trigger_event(
+        &TriggerEvent::TriggerHandlingStart {
             idempotency_key: "idem-key".into(),
             source_kind: SourceKind::Mcp,
             source_label: "mcp:github".into(),
@@ -658,8 +661,8 @@ fn trigger_terminal_non_running_state_renders_live_status_line() {
     let tui = tui::Tui::new();
     let mut buf: Vec<u8> = Vec::new();
 
-    tui.render_harness_event(
-        &HarnessEvent::TriggerHandled {
+    tui.render_trigger_event(
+        &TriggerEvent::TriggerHandled {
             idempotency_key: "idem-key".into(),
             trace_id: "trace-deduped".into(),
             state: TriggerState::Deduped,
@@ -685,8 +688,8 @@ fn trigger_completion_summary_is_not_display_truncated() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    tui.render_harness_event(
-        &HarnessEvent::TriggerCompleted {
+    tui.render_trigger_event(
+        &TriggerEvent::TriggerCompleted {
             trace_id: "trace-long-result".into(),
             summary: Some(long_summary),
             cost_usd: None,
@@ -709,8 +712,8 @@ fn trigger_completion_starts_on_new_line_while_readline_prompt_is_idle() {
     let tui = tui::Tui::new();
     let mut buf: Vec<u8> = Vec::new();
 
-    tui.render_harness_event(
-        &HarnessEvent::TriggerCompleted {
+    tui.render_trigger_event(
+        &TriggerEvent::TriggerCompleted {
             trace_id: "trace-idle-result".into(),
             summary: Some("hello from trigger".into()),
             cost_usd: None,
@@ -735,8 +738,8 @@ fn trigger_completion_renders_full_summary_without_preview_truncation() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    tui.render_harness_event(
-        &HarnessEvent::TriggerCompleted {
+    tui.render_trigger_event(
+        &TriggerEvent::TriggerCompleted {
             trace_id: "trace-long-result".into(),
             summary: Some(summary.clone()),
             cost_usd: None,
@@ -760,8 +763,8 @@ fn trigger_failure_renders_live_error_line() {
     let tui = tui::Tui::new();
     let mut buf: Vec<u8> = Vec::new();
 
-    tui.render_harness_event(
-        &HarnessEvent::TriggerFailed {
+    tui.render_trigger_event(
+        &TriggerEvent::TriggerFailed {
             trace_id: "trace-failed".into(),
             reason: "tool denied".into(),
         },
@@ -780,8 +783,8 @@ fn dynamic_poll_no_match_stays_quiet() {
     let tui = tui::Tui::new();
     let mut buf: Vec<u8> = Vec::new();
 
-    tui.render_harness_event(
-        &HarnessEvent::TriggerExecutionStarted {
+    tui.render_trigger_event(
+        &TriggerEvent::TriggerExecutionStarted {
             trace_id: "trace-dynamic-check".into(),
             source_label: "local:dynamic".into(),
             event_label: "dynamic periodic check".into(),
@@ -789,8 +792,8 @@ fn dynamic_poll_no_match_stays_quiet() {
         },
         &mut buf,
     );
-    tui.render_harness_event(
-        &HarnessEvent::TriggerCompleted {
+    tui.render_trigger_event(
+        &TriggerEvent::TriggerCompleted {
             trace_id: "trace-dynamic-check".into(),
             summary: Some("no dynamic trigger rule matched".into()),
             cost_usd: None,
@@ -808,8 +811,8 @@ fn dynamic_poll_no_match_variant_stays_quiet() {
     let tui = tui::Tui::new();
     let mut buf: Vec<u8> = Vec::new();
 
-    tui.render_harness_event(
-        &HarnessEvent::TriggerExecutionStarted {
+    tui.render_trigger_event(
+        &TriggerEvent::TriggerExecutionStarted {
             trace_id: "trace-chrome-check".into(),
             source_label: "local:dynamic".into(),
             event_label: "dynamic periodic check".into(),
@@ -817,8 +820,8 @@ fn dynamic_poll_no_match_variant_stays_quiet() {
         },
         &mut buf,
     );
-    tui.render_harness_event(
-        &HarnessEvent::TriggerCompleted {
+    tui.render_trigger_event(
+        &TriggerEvent::TriggerCompleted {
             trace_id: "trace-chrome-check".into(),
             summary: Some("Checked Chrome tabs; no matching rule found.".into()),
             cost_usd: None,
@@ -836,8 +839,8 @@ fn dynamic_poll_matched_result_still_renders() {
     let tui = tui::Tui::new();
     let mut buf: Vec<u8> = Vec::new();
 
-    tui.render_harness_event(
-        &HarnessEvent::TriggerExecutionStarted {
+    tui.render_trigger_event(
+        &TriggerEvent::TriggerExecutionStarted {
             trace_id: "trace-chrome-match".into(),
             source_label: "local:dynamic".into(),
             event_label: "dynamic periodic check".into(),
@@ -845,8 +848,8 @@ fn dynamic_poll_matched_result_still_renders() {
         },
         &mut buf,
     );
-    tui.render_harness_event(
-        &HarnessEvent::TriggerCompleted {
+    tui.render_trigger_event(
+        &TriggerEvent::TriggerCompleted {
             trace_id: "trace-chrome-match".into(),
             summary: Some("matched dyn-123 and archived the Chrome tab".into()),
             cost_usd: None,

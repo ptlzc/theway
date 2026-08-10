@@ -3,7 +3,7 @@
 use super::*;
 use chrono::TimeZone;
 use tempfile::tempdir;
-use theway_core::TriggerRecord;
+use crate::trigger_engine::types::TriggerRecord;
 
 #[test]
 fn cron_parser_supports_steps_ranges_and_sunday_alias() {
@@ -123,8 +123,8 @@ fn listener_persists_state_and_inbox_for_stateful_job_completion() {
     let due = registry.due_jobs(since, now);
     let trace_id = due[0].0.running_trace_id.clone().unwrap();
 
-    let listener = cron_harness_listener(registry.clone(), inbox_path.clone());
-    listener(HarnessEvent::TriggerCompleted {
+    let listener = cron_trigger_listener(registry.clone(), inbox_path.clone());
+    listener(TriggerEvent::TriggerCompleted {
         trace_id: trace_id.clone(),
         summary: Some(
             "checked. <inbox>issue #9 looks stuck</inbox> done <loop-state>seen: #9</loop-state>"
@@ -250,11 +250,11 @@ fn listener_clears_running_job_by_trace_id() {
         .running_trace_id
         .clone()
         .unwrap();
-    let listener = cron_harness_listener(
+    let listener = cron_trigger_listener(
         registry.clone(),
         std::env::temp_dir().join("unused-inbox.jsonl"),
     );
-    listener(HarnessEvent::TriggerCompleted {
+    listener(TriggerEvent::TriggerCompleted {
         trace_id,
         summary: None,
         cost_usd: None,
@@ -276,7 +276,7 @@ async fn cron_action_hook_maps_cron_trigger_to_inject_and_run() {
     let action = hook(
         BeforeTriggerActionContext {
             trigger,
-            runtime: theway_core::TriggerRuntimeSnapshot {
+            runtime: crate::trigger_engine::runtime::TriggerRuntimeSnapshot {
                 dedup_entries: 0,
                 active_traces: 0,
                 accepted_total: 0,
