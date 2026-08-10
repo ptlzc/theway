@@ -10,10 +10,11 @@
 //! Trimmed scope: no extensions, no themes, no print/rpc/json modes.
 
 use theway::{
-    agent_session, builtin_skills, commands, config, control_plane_prompt, debug, goal, history,
-    hooks, inbox, local_models, logging, lsp_supervisor, mcp_loader, model, resume_picker, session,
+    agent_session, builtin_skills, commands, config, control_plane_prompt, debug, history, inbox,
+    local_models, logging, lsp_supervisor, mcp_loader, model, resume_picker, session,
     session_archive, skills, skills_state, templates, tools, triggers, ui,
 };
+use theway_core::runtime::{goal, hooks};
 
 use std::io::IsTerminal as _;
 use std::sync::{Arc, OnceLock};

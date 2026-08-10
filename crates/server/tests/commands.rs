@@ -43,8 +43,8 @@ mod config;
 #[path = "../src/export.rs"]
 mod export;
 #[allow(dead_code)]
-#[path = "../src/goal.rs"]
-mod goal;
+// goal moved into the engine (theway_core::runtime::goal); the tests drive its pub API.
+use theway_core::runtime::goal;
 #[allow(dead_code)]
 #[path = "../src/history.rs"]
 mod history;

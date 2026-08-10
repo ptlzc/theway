@@ -52,6 +52,11 @@ once_cell = "1"
 tracing = "0.1"
 directories = "5"
 hex = "0.4"
+# hooks (user-configured CLI hooks: TOML rules + shell/webhook side effects) and
+# goal (session goal stop-hook) live in the engine; toml parses hook rules, anyhow
+# is the hook runner's error type (mirrors the former server-crate versions).
+toml = "0.8"
+anyhow = "1"
 # Stable content hash for trigger_promotion audit. Used only to fingerprint promotion
 # template bodies for cross-process replay verification — never used as a credential
 # / authentication primitive. SHA-256 is overkill cryptographically for this purpose

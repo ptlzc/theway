@@ -5,7 +5,9 @@
 pub mod agent_harness;
 pub mod compaction;
 pub mod cost;
+pub mod goal;
 pub mod graph_engineering;
+pub mod hooks;
 pub mod messages;
 pub mod notification_hook;
 pub mod permission;

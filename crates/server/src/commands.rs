@@ -1011,7 +1011,7 @@ async fn run_goal_start(prompt: String, ctx: &CommandCtx<'_>) -> CommandOutcome 
     if prompt.is_empty() {
         return CommandOutcome::Error("usage: /goal-start <prompt>".into());
     }
-    if let Err(e) = crate::goal::current(ctx.harness)
+    if let Err(e) = theway_core::runtime::goal::current(ctx.harness)
         .await
         .filter(|state| state.active())
         .ok_or_else(|| "no active goal; set one with /goal <condition>".to_string())
@@ -1044,34 +1044,40 @@ impl SlashCommand for GoalCommand {
                 print_goal_status(ctx).await;
                 CommandOutcome::Handled
             }
-            Some("pause") if argv.len() == 1 => match crate::goal::pause(ctx.harness).await {
-                Ok(state) => {
-                    cprintln!("goal paused: {}", state.condition);
-                    CommandOutcome::Handled
+            Some("pause") if argv.len() == 1 => {
+                match theway_core::runtime::goal::pause(ctx.harness).await {
+                    Ok(state) => {
+                        cprintln!("goal paused: {}", state.condition);
+                        CommandOutcome::Handled
+                    }
+                    Err(e) => CommandOutcome::Error(e),
                 }
-                Err(e) => CommandOutcome::Error(e),
-            },
-            Some("resume") if argv.len() == 1 => match crate::goal::resume(ctx.harness).await {
-                Ok(state) => {
-                    cprintln!("goal resumed: {}", state.condition);
-                    CommandOutcome::Handled
+            }
+            Some("resume") if argv.len() == 1 => {
+                match theway_core::runtime::goal::resume(ctx.harness).await {
+                    Ok(state) => {
+                        cprintln!("goal resumed: {}", state.condition);
+                        CommandOutcome::Handled
+                    }
+                    Err(e) => CommandOutcome::Error(e),
                 }
-                Err(e) => CommandOutcome::Error(e),
-            },
-            Some("clear") if argv.len() == 1 => match crate::goal::clear(ctx.harness).await {
-                Ok(_) => {
-                    cprintln!("goal cleared");
-                    CommandOutcome::Handled
+            }
+            Some("clear") if argv.len() == 1 => {
+                match theway_core::runtime::goal::clear(ctx.harness).await {
+                    Ok(_) => {
+                        cprintln!("goal cleared");
+                        CommandOutcome::Handled
+                    }
+                    Err(e) => CommandOutcome::Error(e),
                 }
-                Err(e) => CommandOutcome::Error(e),
-            },
+            }
             Some("start") => run_goal_start(goal_start_prompt(&argv[1..]), ctx).await,
             Some(_) => {
                 let condition = argv.join(" ").trim().to_string();
                 if condition.is_empty() {
                     return CommandOutcome::Error("usage: /goal <condition>".into());
                 }
-                match crate::goal::set(ctx.harness, condition).await {
+                match theway_core::runtime::goal::set(ctx.harness, condition).await {
                     Ok(state) => {
                         cprintln!("goal set: {}", state.condition);
                         cprintln!(
@@ -1109,8 +1115,11 @@ impl SlashCommand for GoalStartCommand {
 }
 
 async fn print_goal_status(ctx: &CommandCtx<'_>) {
-    match crate::goal::current(ctx.harness).await {
-        Some(state) if state.active() || state.status == crate::goal::GoalStatus::Achieved => {
+    match theway_core::runtime::goal::current(ctx.harness).await {
+        Some(state)
+            if state.active()
+                || state.status == theway_core::runtime::goal::GoalStatus::Achieved =>
+        {
             cprintln!("goal: {}", state.condition);
             cprintln!("status: {}", state.status.as_str());
             cprintln!("iterations: {}", state.iterations);

@@ -187,7 +187,7 @@ pub struct App {
 
     feed: Feed,
     latest_trigger_poll: Option<TriggerPollStatus>,
-    latest_goal: Option<crate::goal::GoalState>,
+    latest_goal: Option<theway_core::runtime::goal::GoalState>,
     feed_rx: Option<UnboundedReceiver<FeedUpdate>>,
     main_run_rx: Option<UnboundedReceiver<String>>,
     control_plane_prompt_rx: Option<UnboundedReceiver<UiControlPlanePrompt>>,
@@ -1281,7 +1281,7 @@ impl App {
     }
 
     async fn refresh_goal_state(&mut self) {
-        self.latest_goal = crate::goal::current(self.kernel.harness()).await;
+        self.latest_goal = theway_core::runtime::goal::current(self.kernel.harness()).await;
     }
 
     /// session-resource-model: swap the runtime to a different session.
@@ -1979,12 +1979,11 @@ impl App {
             lines.push(Line::raw(""));
             lines.push(panel_line("Goal".to_string(), Color::Cyan, width));
             let color = match goal.status {
-                crate::goal::GoalStatus::Pursuing => Color::Yellow,
-                crate::goal::GoalStatus::Achieved => Color::Green,
-                crate::goal::GoalStatus::Paused | crate::goal::GoalStatus::BudgetLimited => {
-                    Color::DarkGray
-                }
-                crate::goal::GoalStatus::Cleared => Color::DarkGray,
+                theway_core::runtime::goal::GoalStatus::Pursuing => Color::Yellow,
+                theway_core::runtime::goal::GoalStatus::Achieved => Color::Green,
+                theway_core::runtime::goal::GoalStatus::Paused
+                | theway_core::runtime::goal::GoalStatus::BudgetLimited => Color::DarkGray,
+                theway_core::runtime::goal::GoalStatus::Cleared => Color::DarkGray,
             };
             lines.push(panel_line(goal.status.as_str().to_string(), color, width));
             lines.push(panel_line(
@@ -3089,7 +3088,7 @@ mod tests {
     #[tokio::test]
     async fn finished_turn_refreshes_goal_panel_state() {
         let mut app = test_app();
-        crate::goal::set(
+        theway_core::runtime::goal::set(
             app.kernel.harness(),
             "run verification before stopping".into(),
         )
@@ -3107,7 +3106,10 @@ mod tests {
 
         let goal = app.latest_goal.as_ref().expect("goal state");
         assert_eq!(goal.condition, "run verification before stopping");
-        assert_eq!(goal.status, crate::goal::GoalStatus::Pursuing);
+        assert_eq!(
+            goal.status,
+            theway_core::runtime::goal::GoalStatus::Pursuing
+        );
         assert!(
             turn.fut.is_none(),
             "runtime OnTurnEndHook, not the UI, owns continuation"
