@@ -1,0 +1,6 @@
+# 统一行尾: 仓库存 LF, checkout 按平台 (Windows 自动 CRLF 可选)。
+# 2026-08-10 清理历史行尾混乱 (python 写 LF / cargo fmt 写 CRLF 交替)。
+* text=auto
+*.rs text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
