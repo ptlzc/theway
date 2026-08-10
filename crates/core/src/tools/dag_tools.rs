@@ -11,8 +11,6 @@
 //! one project never cross-trigger each other's DAGs). The session id is
 //! injected at construction by p3c-wire (`None` = no isolation, e.g. REPL).
 
-#![allow(dead_code)] // consumed once p3c-wire registers the module + wires DagTools::new into the binary.
-
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;

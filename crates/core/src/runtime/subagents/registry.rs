@@ -229,6 +229,12 @@ impl SubagentJobRegistry {
         }
     }
 
+    /// Look up a single job (P3 GetNodeOutput / dag_inspect consumers).
+    pub fn job(&self, id: &str) -> Option<SubagentJob> {
+        let inner = self.inner.lock();
+        inner.jobs.iter().find(|j| j.id == id).cloned()
+    }
+
     /// Terminal state: status + error + completion time.
     pub fn finish(&self, id: &str, status: JobStatus, error: Option<String>) {
         self.update(id, |job| {
@@ -272,13 +278,6 @@ impl SubagentJobRegistry {
         let mut jobs = inner.jobs.clone();
         jobs.reverse();
         jobs
-    }
-
-    /// Look up a single job (P3 GetNodeOutput / dag_inspect consumers).
-    #[allow(dead_code)]
-    pub fn job(&self, id: &str) -> Option<SubagentJob> {
-        let inner = self.inner.lock();
-        inner.jobs.iter().find(|j| j.id == id).cloned()
     }
 
     /// Evict oldest terminal jobs beyond MAX_JOBS.

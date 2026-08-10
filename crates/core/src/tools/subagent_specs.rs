@@ -16,8 +16,6 @@
 //! v1 scope: static built-in table only. User-defined specs via `~/.theway/subagents/*.toml`
 //! are a follow-up (same line as the `task` tool's issue #11 out-of-scope note).
 
-#![allow(dead_code)] // consumed by node_launcher/dag_tools (p3c-wire) once wired into the binary.
-
 use once_cell::sync::Lazy;
 
 /// Static description of a built-in subagent.

@@ -20,8 +20,6 @@
 //! - The spec's `max_iterations` is logged only: the agent loop has no hard iteration
 //!   cap yet, same as the `task` tool.
 
-#![allow(dead_code)] // consumed by dag_tools (p3c-wire) once wired into the binary.
-
 use std::path::PathBuf;
 use std::sync::Arc;
 
