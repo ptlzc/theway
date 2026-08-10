@@ -15,6 +15,11 @@ use theway_core::runtime::tools::{
     dag_tools, install_skill, remove_skill, set_skill_state, skill, skill_builder, task,
 };
 
+#[path = "tools/web_fetch.rs"]
+pub mod web_fetch;
+#[path = "tools/web_search.rs"]
+pub mod web_search;
+
 pub use theway_core::tools::{default_tools, subagent_read_only_tools};
 
 /// Build the Task tool. Separate from `default_tools` because Task needs the model handle to
@@ -43,6 +48,9 @@ pub fn task_tool(
 /// everything here is either session-stamped (`dag_*` / `task`) or must be rebuilt per
 /// harness (the skill family wires a fresh harness cell per build). Process-level tool
 /// groups (`default_tools`, MCP tools) are the caller's to add.
+///
+/// Web tools (`web_fetch` / `web_search`) are app-layer capabilities — they are appended
+/// here, not part of the engine's `default_tools` (see `theway_core::tools` module docs).
 pub fn session_tool_set(
     memory_dir: &std::path::Path,
     dag_engine: &std::sync::Arc<theway_core::runtime::graph_engineering::engine::DagEngine>,
@@ -53,6 +61,9 @@ pub fn session_tool_set(
     session_id: &str,
 ) -> Vec<Arc<dyn AgentTool>> {
     let mut tools = default_tools(memory_dir.to_path_buf());
+    // Web capabilities are app-layer: appended here, not in the engine's default set.
+    tools.push(Arc::new(web_fetch::WebFetchTool));
+    tools.push(Arc::new(web_search::WebSearchTool::new()));
     // DAG + outline tools, main agent only — the read-only subagent tool set stays
     // deliberately untouched (shell/exec already ship via `default_tools`).
     tools.push(Arc::new(theway_core::tools::outline::OutlineTool));

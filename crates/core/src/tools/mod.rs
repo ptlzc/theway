@@ -1,7 +1,9 @@
-//! Core capability tools — agent-facing generic tools (process/files/network/
-//! search/git/MCP) that do not support the harness runtime itself; they are
-//! plain capabilities the agent can call. Harness-supporting tools (subagents,
-//! DAG orchestration, skills, memory) live in `crate::runtime::tools`.
+//! Core capability tools — agent-facing generic tools (process/files/git/MCP)
+//! that do not support the harness runtime itself; they are plain capabilities
+//! the agent can call. Harness-supporting tools (subagents, DAG orchestration,
+//! skills, memory) live in `crate::runtime::tools`. Web tools (`web_fetch` /
+//! `web_search`) live in the application layer (the `theway` server crate,
+//! `crate::tools` there) — they are agent capabilities, not engine concerns.
 
 pub mod bash;
 pub mod edit;
@@ -14,8 +16,6 @@ pub mod outline;
 pub mod read;
 pub mod shell;
 pub mod truncate;
-pub mod web_fetch;
-pub mod web_search;
 pub mod write;
 
 use std::sync::Arc;
@@ -37,8 +37,6 @@ pub fn default_tools(memory_dir: std::path::PathBuf) -> Vec<Arc<dyn AgentTool>> 
         Arc::new(crate::tools::ls::LsTool),
         Arc::new(crate::tools::grep::GrepTool),
         Arc::new(crate::tools::find::FindTool),
-        Arc::new(crate::tools::web_fetch::WebFetchTool),
-        Arc::new(crate::tools::web_search::WebSearchTool::new()),
         Arc::new(crate::tools::git::GitTool),
         Arc::new(crate::runtime::tools::memory::MemoryTool::new(memory_dir)),
     ]
@@ -46,14 +44,14 @@ pub fn default_tools(memory_dir: std::path::PathBuf) -> Vec<Arc<dyn AgentTool>> 
 
 /// Read-only tool set used by spawned subagents (issue #11). No `write`/`edit`/`bash` — a
 /// subagent should not mutate the workspace; if it needs to, the parent agent should run the
-/// write itself.
+/// write itself. No web tools either: web capabilities are app-layer (`web_fetch` /
+/// `web_search` live in the `theway` crate) and subagents are intentionally engine-scoped.
 pub fn subagent_read_only_tools() -> Vec<Arc<dyn AgentTool>> {
     vec![
         Arc::new(crate::tools::read::ReadTool),
         Arc::new(crate::tools::ls::LsTool),
         Arc::new(crate::tools::grep::GrepTool),
         Arc::new(crate::tools::find::FindTool),
-        Arc::new(crate::tools::web_fetch::WebFetchTool),
         Arc::new(crate::tools::git::GitTool),
     ]
 }

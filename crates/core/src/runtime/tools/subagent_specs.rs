@@ -38,7 +38,7 @@ static SPECS: Lazy<[SubagentSpec; 5]> = Lazy::new(|| {
     [
         SubagentSpec {
             name: "explorer",
-            description: "Read-only investigation: search, read, and web lookups.",
+            description: "Read-only investigation: search and read local context.",
             system_prompt: "You are an exploration subagent dispatched by a coding agent. \
                             Gather facts from the codebase and context you are given. \
                             Stay focused on the prompt; return a concise findings summary.",
@@ -56,7 +56,7 @@ static SPECS: Lazy<[SubagentSpec; 5]> = Lazy::new(|| {
         },
         SubagentSpec {
             name: "executor-coder",
-            description: "Full coding agent: read/write/edit/bash plus web and git.",
+            description: "Full coding agent: read/write/edit/bash plus git.",
             system_prompt: "You are a coding subagent dispatched by a coding agent. \
                             Implement the requested change using your tools. \
                             Stay focused on the prompt; return a concise summary of what you changed.",
@@ -102,11 +102,7 @@ pub fn resolve_spec(name: &str) -> Option<&'static SubagentSpec> {
 // ── tool-set factories ──────────────────────────────────────────────────────
 
 fn explorer_tools() -> Vec<Arc<dyn AgentTool>> {
-    let mut tools = theway_core::tools::subagent_read_only_tools();
-    tools.push(Arc::new(
-        theway_core::tools::web_search::WebSearchTool::new(),
-    ));
-    tools
+    theway_core::tools::subagent_read_only_tools()
 }
 
 fn planner_tools() -> Vec<Arc<dyn AgentTool>> {
@@ -203,7 +199,7 @@ mod tests {
     }
 
     #[test]
-    fn explorer_and_general_are_read_only_plus_web() {
+    fn explorer_and_general_are_read_only() {
         let labels = |spec: &SubagentSpec| {
             let mut l: Vec<String> = (spec.tools)()
                 .iter()
@@ -213,22 +209,8 @@ mod tests {
             l
         };
         let general = labels(resolve_spec("general").unwrap());
-        assert_eq!(
-            general,
-            vec!["find", "git", "grep", "ls", "read", "web_fetch"]
-        );
+        assert_eq!(general, vec!["find", "git", "grep", "ls", "read"]);
         let explorer = labels(resolve_spec("explorer").unwrap());
-        assert_eq!(
-            explorer,
-            vec![
-                "find",
-                "git",
-                "grep",
-                "ls",
-                "read",
-                "web_fetch",
-                "web_search"
-            ]
-        );
+        assert_eq!(explorer, vec!["find", "git", "grep", "ls", "read"]);
     }
 }

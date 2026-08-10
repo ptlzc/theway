@@ -3,7 +3,7 @@
 //! returns the final assistant text to the parent agent as a single tool result.
 //!
 //! v1 scope:
-//! - One subagent spec, "general": same model as parent, read-only tools (read/grep/find/ls/web_fetch),
+//! - One subagent spec, "general": same model as parent, read-only tools (read/grep/find/ls/git),
 //!   max 16 iterations, MemorySessionStorage so nothing leaks to disk.
 //! - Concurrent execution mode (Parallel) so the parent can fire multiple Task calls in one
 //!   turn and they run together.

@@ -44,9 +44,9 @@ uuid = { version = "1", features = ["v7", "serde"] }
 ignore = "0.4"
 regex = "1"
 
-# Builtin tools (`runtime/tools/`). web_fetch / web_search / install_skill need the HTTP
-# client; outline.rs drives tree-sitter structural outlines. Versions stay in lockstep with
-# the former home (the `theway` server crate) so behavior doesn't drift on the move.
+# Builtin tools (`runtime/tools/`). install_skill needs the HTTP client; outline.rs
+# drives tree-sitter structural outlines. Web tools moved back to the server crate
+# (app-layer capabilities; reqwest still needed here for install_skill).
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "stream"] }
 tree-sitter = "0.25"
 tree-sitter-typescript = "0.23"

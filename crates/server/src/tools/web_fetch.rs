@@ -1,6 +1,10 @@
 //! `web_fetch` built-in tool. GETs a URL, returns the body as text (HTML stripped to a
 //! readable plain-text form for v1; a proper readability pass is a follow-up under #11).
 //!
+//! App-layer tool: lives in the `theway` (server) crate, not the engine — web
+//! capabilities are agent capabilities, not harness-runtime support (see
+//! `theway_core::tools` module docs).
+//!
 //! Guards: 15s timeout, 5 MiB body cap, plain GET only (no auth headers, no redirects beyond
 //! 10). Errors surface as tool errors so the LLM sees a clear message and can adjust.
 //!

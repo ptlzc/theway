@@ -10,7 +10,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
-#[path = "../../core/src/tools/web_fetch.rs"]
+#[path = "../src/tools/web_fetch.rs"]
 mod web_fetch;
 
 async fn spawn_http(

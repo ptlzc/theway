@@ -74,14 +74,6 @@ stub_tool!(grep, GrepTool, "grep");
 stub_tool!(find, FindTool, "find");
 stub_tool!(bash, BashTool, "bash");
 stub_tool!(git, GitTool, "git");
-stub_tool!(web_fetch, WebFetchTool, "web_fetch");
-stub_tool!(web_search, WebSearchTool, "web_search");
-
-impl web_search::WebSearchTool {
-    pub fn new() -> Self {
-        Self
-    }
-}
 
 fn faux_model() -> theway_llm_provider::Model {
     theway_llm_provider::Model {

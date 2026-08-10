@@ -1,6 +1,10 @@
 //! `web_search` tool. Pluggable backend; v1 ships Brave Search via env credential
 //! `BRAVE_SEARCH_API_KEY`. Returns ranked results as formatted text.
 //!
+//! App-layer tool: lives in the `theway` (server) crate, not the engine — web
+//! capabilities are agent capabilities, not harness-runtime support (see
+//! `theway_core::tools` module docs).
+//!
 //! When the backend is unavailable (no API key or empty results), the tool returns a clear
 //! error so the LLM knows to fall back to web_fetch against a known URL.
 
