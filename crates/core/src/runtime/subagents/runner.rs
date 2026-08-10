@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use theway_core::runtime::subagents::registry::{
-    JobInit, JobStatus, SubagentJobRegistry, metrics_listener,
+    JobInit, JobStatus, SubagentControlHandle, SubagentJobRegistry, metrics_listener,
 };
 use theway_core::{
     AgentEvent, AgentHarness, AgentHarnessOptions, AgentMessage, AgentRunError, AgentTool,
@@ -108,6 +108,29 @@ pub async fn run_subagent(opts: SubagentRunOptions) -> SubagentRunResult {
     }
     let sub = Arc::new(AgentHarness::new(harness_opts));
 
+    // Live control handle: lets an external caller (parent agent, graph UI, gRPC)
+    // interrupt the in-flight turn or queue steering for the next one while
+    // `run_subagent` awaits below. Detached automatically by `finish`.
+    {
+        let sub_ctl = sub.clone();
+        let sub_steer = sub.clone();
+        opts.registry.set_control(
+            &job_id,
+            Some(SubagentControlHandle {
+                interrupt: Arc::new(move || sub_ctl.interrupt()),
+                steer: Arc::new(move |text: String| {
+                    let msg =
+                        AgentMessage::Llm(PiMessage::User(theway_llm_provider::UserMessage {
+                            role: theway_llm_provider::UserRole::User,
+                            content: theway_llm_provider::UserContent::Text(text),
+                            timestamp: chrono::Utc::now().timestamp_millis(),
+                        }));
+                    sub_steer.enqueue_steering(msg);
+                }),
+            }),
+        );
+    }
+
     // Metrics + output accumulation into the job registry.
     let _metrics_sub = sub
         .agent()
@@ -192,11 +215,14 @@ pub async fn run_subagent(opts: SubagentRunOptions) -> SubagentRunResult {
         };
     }
 
+    let interrupted = matches!(run, Err(AgentRunError::TurnInterrupted));
     let success = run.is_ok();
     let error = run.err().map(|e| e.to_string());
     opts.registry.finish(
         &job_id,
-        if success {
+        if interrupted {
+            JobStatus::Interrupted
+        } else if success {
             JobStatus::Succeeded
         } else {
             JobStatus::Failed

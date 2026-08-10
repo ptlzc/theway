@@ -80,13 +80,48 @@ async fn drive_loop(
         }
         emit(inner, AgentEvent::TurnStart, &cancel).await;
 
-        let assistant = match call_llm(inner, &cancel).await {
+        // Fresh per-turn cancel token: `interrupt()` targets the in-flight LLM call
+        // only, leaving the run alive to pick up queued steering on the next turn.
+        let turn_cancel = CancellationToken::new();
+        *inner.turn_cancel.lock() = Some(turn_cancel.clone());
+
+        let assistant = match call_llm(inner, &cancel, &turn_cancel).await {
             Ok(m) => m,
+            // Turn interrupted: finalize whatever the stream produced, then either
+            // carry on with queued steering (next turn) or end the run with the
+            // interrupted outcome.
+            Err(AgentRunError::TurnInterrupted) => {
+                *inner.turn_cancel.lock() = None;
+                finalize_partial_turn(inner, &cancel).await;
+                let mut queued: Vec<AgentMessage> = inner.steering.lock().drain();
+                if queued.is_empty() {
+                    queued = inner.follow_up.lock().drain();
+                }
+                if !queued.is_empty() {
+                    for msg in queued {
+                        inner.state.lock().messages.push(msg.clone());
+                        emit(
+                            inner,
+                            AgentEvent::MessageStart {
+                                message: msg.clone(),
+                            },
+                            &cancel,
+                        )
+                        .await;
+                        emit(inner, AgentEvent::MessageEnd { message: msg }, &cancel).await;
+                    }
+                    continue;
+                }
+                inner.state.lock().error_message = Some(AgentRunError::TurnInterrupted.to_string());
+                return Err(AgentRunError::TurnInterrupted);
+            }
             Err(e) => {
+                *inner.turn_cancel.lock() = None;
                 inner.state.lock().error_message = Some(e.to_string());
                 return Err(e);
             }
         };
+        *inner.turn_cancel.lock() = None;
         let assistant_agent = AgentMessage::Llm(PiMessage::Assistant(assistant.clone()));
         inner.state.lock().messages.push(assistant_agent.clone());
         emit(
@@ -181,6 +216,20 @@ async fn drive_loop(
     }
 }
 
+/// Push the partial assistant message accumulated so far (if any) into the
+/// transcript, so an interrupted turn leaves a coherent record behind.
+async fn finalize_partial_turn(inner: &Arc<AgentInner>, cancel: &CancellationToken) {
+    let partial = inner.state.lock().streaming_message.take();
+    if let Some(m) = partial {
+        let has_content =
+            matches!(&m, AgentMessage::Llm(PiMessage::Assistant(a)) if !a.content.is_empty());
+        if has_content {
+            inner.state.lock().messages.push(m.clone());
+            emit(inner, AgentEvent::MessageEnd { message: m }, cancel).await;
+        }
+    }
+}
+
 fn apply_turn_update(inner: &Arc<AgentInner>, update: AgentLoopTurnUpdate) {
     let mut state = inner.state.lock();
     if let Some(ctx) = update.context {
@@ -208,6 +257,7 @@ fn snapshot_context(inner: &Arc<AgentInner>) -> AgentContext {
 async fn call_llm(
     inner: &Arc<AgentInner>,
     cancel: &CancellationToken,
+    turn_cancel: &CancellationToken,
 ) -> Result<PiAssistantMessage, AgentRunError> {
     let (system_prompt, agent_messages, tools, model) = {
         let g = inner.state.lock();
@@ -276,6 +326,9 @@ async fn call_llm(
             biased;
             _ = cancel.cancelled() => {
                 return Err(AgentRunError::Other("aborted".into()));
+            }
+            _ = turn_cancel.cancelled() => {
+                return Err(AgentRunError::TurnInterrupted);
             }
             next = stream.next() => match next {
                 Some(ev) => ev,
@@ -865,6 +918,7 @@ async fn finalize(inner: &Arc<AgentInner>, cancel: CancellationToken) {
     emit(inner, AgentEvent::AgentEnd { messages }, &cancel).await;
     inner.state.lock().is_streaming = false;
     *inner.active_cancel.lock() = None;
+    *inner.turn_cancel.lock() = None;
     inner.idle.notify_waiters();
 }
 

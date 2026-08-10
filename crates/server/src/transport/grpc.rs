@@ -37,10 +37,11 @@ use theway_grpc::{
     ApproveRequest, CommandResult, CreateSessionRequest, CreateSessionResponse,
     DeleteSessionRequest, DeleteSessionResponse, Empty, GetNodeOutputRequest,
     GetNodeOutputResponse, GraphCancelRequest, GraphCheckpointRequest, GraphCheckpointResponse,
-    GraphKind, GraphListRequest, GraphListResponse, GraphRestoreRequest, GraphRestoreResponse,
-    GraphRetryRequest, GraphRetryResponse, GraphSkipRequest, GraphSkipResponse,
-    ListSessionsResponse, MessageMode, RenameSessionRequest, SendMessageRequest, SessionState,
-    SetModelRequest, StreamFrame, SwitchSessionRequest,
+    GraphKind, GraphListRequest, GraphListResponse, GraphNodeInterruptRequest,
+    GraphNodeSteerRequest, GraphRestoreRequest, GraphRestoreResponse, GraphRetryRequest,
+    GraphRetryResponse, GraphSkipRequest, GraphSkipResponse, ListSessionsResponse, MessageMode,
+    RenameSessionRequest, SendMessageRequest, SessionState, SetModelRequest, StreamFrame,
+    SwitchSessionRequest,
 };
 
 #[derive(Clone, Debug)]
@@ -281,6 +282,28 @@ impl ThewayGrpc for GrpcState {
         let request = request.into_inner();
         let skipped = self.dag_engine.skip(&request.run_id, &request.node_id);
         Ok(Response::new(GraphSkipResponse { skipped }))
+    }
+
+    async fn graph_node_interrupt(
+        &self,
+        request: Request<GraphNodeInterruptRequest>,
+    ) -> Result<Response<CommandResult>, Status> {
+        let request = request.into_inner();
+        let accepted = self
+            .registry
+            .interrupt_node(&request.run_id, &request.node_id);
+        Ok(Response::new(CommandResult { accepted }))
+    }
+
+    async fn graph_node_steer(
+        &self,
+        request: Request<GraphNodeSteerRequest>,
+    ) -> Result<Response<CommandResult>, Status> {
+        let request = request.into_inner();
+        let accepted = self
+            .registry
+            .steer_node(&request.run_id, &request.node_id, request.text);
+        Ok(Response::new(CommandResult { accepted }))
     }
 
     async fn graph_checkpoint(

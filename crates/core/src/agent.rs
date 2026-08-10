@@ -67,6 +67,9 @@ pub(crate) struct AgentInner {
     pub follow_up: Mutex<PendingMessageQueue>,
     pub options: AgentOptions,
     pub active_cancel: Mutex<Option<CancellationToken>>,
+    /// Per-turn cancel token: `interrupt()` cancels the in-flight LLM call only;
+    /// the run survives if a steering message is queued, otherwise it ends.
+    pub turn_cancel: Mutex<Option<CancellationToken>>,
     pub idle: Notify,
 }
 
@@ -114,6 +117,7 @@ impl Agent {
             follow_up: Mutex::new(PendingMessageQueue::new(options.follow_up_mode)),
             options,
             active_cancel: Mutex::new(None),
+            turn_cancel: Mutex::new(None),
             idle: Notify::new(),
         };
         Self {
@@ -157,6 +161,14 @@ impl Agent {
         }
     }
 
+    /// Interrupt the current turn: cancels the in-flight LLM call. The run ends
+    /// unless a steering message is queued (then the next turn carries it).
+    pub fn interrupt(&self) {
+        if let Some(token) = self.inner.turn_cancel.lock().as_ref() {
+            token.cancel();
+        }
+    }
+
     /// Active cancellation token while a run is in flight, otherwise `None`.
     pub fn active_token(&self) -> Option<CancellationToken> {
         self.inner.active_cancel.lock().clone()
@@ -194,6 +206,10 @@ pub enum AgentRunError {
         "Agent is already processing a prompt. Use enqueue_steering/enqueue_follow_up or wait for completion."
     )]
     AlreadyStreaming,
+    /// The current turn was interrupted via [`Agent::interrupt`] and no steering
+    /// message was queued, so the run ended at the turn boundary.
+    #[error("turn interrupted")]
+    TurnInterrupted,
     #[error("{0}")]
     Other(String),
 }

@@ -413,6 +413,18 @@ message GraphSkipRequest {
   string node_id = 2;
 }
 
+// Turn-level control for a running DAG node's subagent.
+message GraphNodeInterruptRequest {
+  string run_id = 1;
+  string node_id = 2;
+}
+
+message GraphNodeSteerRequest {
+  string run_id = 1;
+  string node_id = 2;
+  string text = 3;
+}
+
 message GraphSkipResponse {
   bool skipped = 1;
 }
@@ -531,6 +543,10 @@ service ThewayGrpc {
   rpc GraphCancel(GraphCancelRequest) returns (CommandResult);
   rpc GraphRetry(GraphRetryRequest) returns (GraphRetryResponse);
   rpc GraphSkip(GraphSkipRequest) returns (GraphSkipResponse);
+  // Stop the node's in-flight turn (run ends unless steering was queued).
+  rpc GraphNodeInterrupt(GraphNodeInterruptRequest) returns (CommandResult);
+  // Queue a steering message injected at the node's next natural turn boundary.
+  rpc GraphNodeSteer(GraphNodeSteerRequest) returns (CommandResult);
   // Checkpoint / restore (portable run snapshots for external persistence).
   rpc GraphCheckpoint(GraphCheckpointRequest) returns (GraphCheckpointResponse);
   rpc GraphRestore(GraphRestoreRequest) returns (GraphRestoreResponse);

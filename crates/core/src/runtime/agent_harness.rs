@@ -227,9 +227,10 @@ pub enum HarnessEvent {
 /// helpers translate.
 pub type HarnessListener = Arc<dyn Fn(HarnessEvent) + Send + Sync>;
 
+use super::compaction::algorithm::CompactAlgorithmRegistry;
 use super::compaction::compaction::{
     CompactionSettings, DEFAULT_COMPACTION_SETTINGS, SummarizeError, compact,
-    estimate_context_tokens, should_compact,
+    estimate_context_tokens,
 };
 use super::cost::{CostSnapshot, CostTracker};
 use super::messages::compaction_summary;
@@ -811,6 +812,11 @@ pub struct AgentHarnessOptions {
     pub stream_fn: Option<StreamFn>,
     /// Auto-compaction thresholds. Defaults to [`DEFAULT_COMPACTION_SETTINGS`].
     pub compaction: CompactionSettings,
+    /// Custom compaction algorithm registry (TS extensions). Defaults to discovery from
+    /// `<cwd>/.theway/extensions/compaction/*.ts` + `$THEWAY_DIR/extensions/compaction/*.ts`
+    /// (see [`crate::runtime::compaction::ts_extension`]). The builtin algorithm is always
+    /// available regardless of discovery.
+    pub compact_algorithms: Arc<CompactAlgorithmRegistry>,
     /// Optional `before_tool_call` hook. Wire a `PermissionPolicy::as_before_tool_call()` here
     /// to apply danger-detection to tool calls before the loop runs them.
     pub before_tool_call: Option<BeforeToolCallHook>,
@@ -880,6 +886,7 @@ impl AgentHarnessOptions {
             session,
             stream_fn: None,
             compaction: DEFAULT_COMPACTION_SETTINGS.clone(),
+            compact_algorithms: Arc::new(CompactAlgorithmRegistry::discover(std::path::Path::new("."))),
             before_tool_call: None,
             after_tool_call: None,
             on_control_plane_prompt: None,
@@ -922,6 +929,8 @@ pub struct AgentHarness {
     base_system_prompt: String,
     templates: Mutex<PromptTemplateRegistry>,
     compaction_settings: Mutex<CompactionSettings>,
+    /// Resolves `compaction_settings.algorithm` to an implementation (builtin + TS ext).
+    compact_algorithms: Arc<CompactAlgorithmRegistry>,
     /// Used by auto-compaction to call the LLM for summarization.
     stream_fn: Option<StreamFn>,
     /// Harness-level lifecycle listeners. Separate from `Agent::listeners` — those cover
@@ -1019,6 +1028,7 @@ impl AgentHarness {
             base_system_prompt: options.system_prompt,
             templates: Mutex::new(PromptTemplateRegistry::new(options.prompt_templates)),
             compaction_settings: Mutex::new(options.compaction),
+            compact_algorithms: options.compact_algorithms,
             stream_fn: options.stream_fn,
             harness_listeners: Arc::new(Mutex::new(Vec::new())),
             session_start_emitted: Mutex::new(false),
@@ -1560,6 +1570,12 @@ impl AgentHarness {
         }
     }
 
+    /// Interrupt the in-flight turn: cancels the current LLM call only. The run ends
+    /// unless a steering message was queued beforehand (then the next turn carries it).
+    pub fn interrupt(&self) {
+        self.agent.interrupt();
+    }
+
     pub fn enqueue_steering(&self, message: AgentMessage) {
         self.agent.enqueue_steering(message);
     }
@@ -2015,7 +2031,11 @@ impl AgentHarness {
             let estimate = estimate_context_tokens(&s.messages);
             (estimate.tokens, model.context_window)
         };
-        if !should_compact(context_tokens, context_window, &settings) {
+        let algorithm = self.compact_algorithms.algorithm(&settings.algorithm);
+        if !algorithm
+            .should_compact(context_tokens, context_window, &settings)
+            .await
+        {
             return Ok(());
         }
         let _ = self.do_compact(false, None).await?;
@@ -2058,7 +2078,9 @@ impl AgentHarness {
         };
 
         let settings = self.compaction_settings.lock().clone();
+        let algorithm = self.compact_algorithms.algorithm(&settings.algorithm);
         let result = compact(
+            algorithm.as_ref(),
             model,
             &entries,
             &settings,

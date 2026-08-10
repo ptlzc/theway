@@ -72,6 +72,9 @@ pub enum JobStatus {
     Succeeded,
     Failed,
     Cancelled,
+    /// The current turn was interrupted (`SubagentControlHandle::interrupt`) and no
+    /// steering was queued, so the run ended at the turn boundary.
+    Interrupted,
 }
 
 impl JobStatus {
@@ -81,7 +84,27 @@ impl JobStatus {
             JobStatus::Succeeded => "succeeded",
             JobStatus::Failed => "failed",
             JobStatus::Cancelled => "cancelled",
+            JobStatus::Interrupted => "interrupted",
         }
+    }
+}
+
+/// Live control handle for a running subagent (registered by the runner right
+/// after the job starts, cleared on finish). Lets an external caller (parent
+/// agent, graph UI, gRPC control plane) steer a run that `run_subagent` is
+/// awaiting in another task.
+#[derive(Clone)]
+pub struct SubagentControlHandle {
+    /// Stop the current turn's LLM call. The run ends unless a steering message
+    /// is queued (then the next turn carries it).
+    pub interrupt: Arc<dyn Fn() + Send + Sync>,
+    /// Queue a message injected at the next natural turn boundary.
+    pub steer: Arc<dyn Fn(String) + Send + Sync>,
+}
+
+impl std::fmt::Debug for SubagentControlHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SubagentControlHandle")
     }
 }
 
@@ -120,6 +143,9 @@ pub struct SubagentJob {
     pub messages: Vec<serde_json::Value>,
     /// Set when the transcript exceeded MAX_MESSAGES_BYTES (oldest dropped).
     pub messages_truncated: bool,
+    /// Live control handle while the run is in flight (`None` for jobs that
+    /// never registered one, or after finish).
+    pub control: Option<SubagentControlHandle>,
 }
 
 impl SubagentJob {
@@ -153,6 +179,7 @@ impl SubagentJob {
             truncated: false,
             messages: Vec::new(),
             messages_truncated: false,
+            control: None,
         }
     }
 
@@ -256,18 +283,75 @@ impl SubagentJobRegistry {
         }
     }
 
+    /// Attach (or detach, `None`) the live control handle for a job. The runner
+    /// registers it right after the job starts; `finish` detaches automatically.
+    pub fn set_control(&self, id: &str, control: Option<SubagentControlHandle>) {
+        self.update(id, |job| job.control = control);
+    }
+
+    /// Interrupt the in-flight turn of a running subagent by job id. Returns
+    /// `false` when the job is unknown or has no control handle (e.g. finished).
+    pub fn interrupt(&self, id: &str) -> bool {
+        let Some(control) = self.control_for(id) else {
+            return false;
+        };
+        (control.interrupt)();
+        true
+    }
+
+    /// Queue a steering message for the next turn of a running subagent by job
+    /// id. Returns `false` when the job is unknown or has no control handle.
+    pub fn steer(&self, id: &str, text: String) -> bool {
+        let Some(control) = self.control_for(id) else {
+            return false;
+        };
+        (control.steer)(text);
+        true
+    }
+
+    /// Interrupt a DAG node's in-flight turn (resolved via run/node ids).
+    pub fn interrupt_node(&self, run_id: &str, node_id: &str) -> bool {
+        let Some(job) = self.find_node(run_id, node_id) else {
+            return false;
+        };
+        self.interrupt(&job.id)
+    }
+
+    /// Queue a steering message for a DAG node's next turn (run/node ids).
+    pub fn steer_node(&self, run_id: &str, node_id: &str, text: String) -> bool {
+        let Some(job) = self.find_node(run_id, node_id) else {
+            return false;
+        };
+        self.steer(&job.id, text)
+    }
+
+    /// Clone the control handle out of the lock (never invoke closures while
+    /// holding the registry mutex — the harness may touch the registry from its
+    /// event listeners).
+    fn control_for(&self, id: &str) -> Option<SubagentControlHandle> {
+        self.inner
+            .lock()
+            .jobs
+            .iter()
+            .find(|j| j.id == id)?
+            .control
+            .clone()
+    }
+
     /// Look up a single job (P3 GetNodeOutput / dag_inspect consumers).
     pub fn job(&self, id: &str) -> Option<SubagentJob> {
         let inner = self.inner.lock();
         inner.jobs.iter().find(|j| j.id == id).cloned()
     }
 
-    /// Terminal state: status + error + completion time.
+    /// Terminal state: status + error + completion time. Detaches the live
+    /// control handle so a finished job can no longer steer anything.
     pub fn finish(&self, id: &str, status: JobStatus, error: Option<String>) {
         self.update(id, |job| {
             job.status = status;
             job.error = error.clone();
             job.completed_at = Some(now_ms());
+            job.control = None;
         });
         if let Some(job) = self.job(id) {
             // Persist the transcript for terminal jobs (crash-safe recovery:
@@ -574,6 +658,86 @@ fn now_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn control_handle_routes_interrupt_and_steer_by_job_id() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let registry = SubagentJobRegistry::new();
+        let id = registry.register(JobInit {
+            agent: "general".into(),
+            source: "subagent".into(),
+            run_id: None,
+            node_id: None,
+            session_id: None,
+        });
+
+        let interrupted = Arc::new(AtomicBool::new(false));
+        let steered = Arc::new(std::sync::Mutex::new(None::<String>));
+        registry.set_control(
+            &id,
+            Some(SubagentControlHandle {
+                interrupt: {
+                    let flag = interrupted.clone();
+                    Arc::new(move || flag.store(true, Ordering::SeqCst))
+                },
+                steer: {
+                    let buf = steered.clone();
+                    Arc::new(move |text: String| *buf.lock().unwrap() = Some(text))
+                },
+            }),
+        );
+
+        // Unknown job / no handle -> false, no panic.
+        assert!(!registry.interrupt("no-such-job"));
+        assert!(!registry.steer("no-such-job", "x".into()));
+
+        assert!(registry.interrupt(&id));
+        assert!(interrupted.load(Ordering::SeqCst));
+        assert!(registry.steer(&id, "use plan B".into()));
+        assert_eq!(steered.lock().unwrap().as_deref(), Some("use plan B"));
+
+        // finish detaches the handle -> no longer controllable.
+        registry.finish(&id, JobStatus::Succeeded, None);
+        assert!(!registry.interrupt(&id));
+        assert!(registry.job(&id).unwrap().control.is_none());
+    }
+
+    #[test]
+    fn control_handle_routes_by_run_node_ids() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let registry = SubagentJobRegistry::new();
+        let id = registry.register(JobInit {
+            agent: "explorer".into(),
+            source: "dag".into(),
+            run_id: Some("run-9".into()),
+            node_id: Some("node-2".into()),
+            session_id: None,
+        });
+        let interrupted = Arc::new(AtomicBool::new(false));
+        let steered = Arc::new(std::sync::Mutex::new(None::<String>));
+        registry.set_control(
+            &id,
+            Some(SubagentControlHandle {
+                interrupt: {
+                    let flag = interrupted.clone();
+                    Arc::new(move || flag.store(true, Ordering::SeqCst))
+                },
+                steer: {
+                    let buf = steered.clone();
+                    Arc::new(move |text: String| *buf.lock().unwrap() = Some(text))
+                },
+            }),
+        );
+
+        assert!(registry.interrupt_node("run-9", "node-2"));
+        assert!(interrupted.load(Ordering::SeqCst));
+        assert!(registry.steer_node("run-9", "node-2", "dig deeper".into()));
+        assert_eq!(steered.lock().unwrap().as_deref(), Some("dig deeper"));
+
+        // Wrong node / run -> false.
+        assert!(!registry.interrupt_node("run-9", "nope"));
+        assert!(!registry.steer_node("other", "node-2", "x".into()));
+    }
 
     #[test]
     fn register_list_finish_roundtrip() {

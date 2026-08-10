@@ -187,3 +187,186 @@ async fn subagent_parent_abort_cascades() {
         "expected abort error: {err}"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Turn-level control: interrupt (stop the current turn) + steer (inject at the
+// next natural turn boundary), exercised through `run_subagent` + registry.
+// ─────────────────────────────────────────────────────────────────────────────
+
+use std::sync::Arc as StdArc;
+use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+use std::time::Duration;
+
+use theway_core::runtime::subagents::registry::{JobStatus, SubagentJobRegistry};
+use theway_core::runtime::subagents::runner::{SubagentRunOptions, run_subagent};
+
+/// Per-call scripted stream: `(text, delay_ms)` for each LLM call; calls past the
+/// last entry repeat it. Empty text = stall `delay_ms` then end without emitting
+/// (an interrupted turn's view of a dead stream).
+fn sequence_stream(turns: Vec<(&'static str, u64)>) -> StreamFn {
+    let calls = StdArc::new(AtomicUsize::new(0));
+    StdArc::new(move |_, _, _| {
+        let n = calls.fetch_add(1, AtomicOrdering::SeqCst);
+        let (text, delay) = turns[n.min(turns.len() - 1)];
+        let (stream, mut sender) = AssistantMessageEventStream::new();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(delay)).await;
+            if text.is_empty() {
+                // Stalled / dead stream: no events at all.
+                return;
+            }
+            let msg = AssistantMessage {
+                role: AssistantRole::Assistant,
+                content: vec![ContentBlock::text(text)],
+                api: theway_llm_provider::Api::from("faux"),
+                provider: theway_llm_provider::Provider::from("faux"),
+                model: "faux".into(),
+                response_model: None,
+                response_id: None,
+                diagnostics: None,
+                usage: Usage::default(),
+                stop_reason: StopReason::Stop,
+                error_message: None,
+                timestamp: 0,
+            };
+            sender.push(AssistantMessageEvent::Start {
+                partial: msg.clone(),
+            });
+            sender.push(AssistantMessageEvent::Done {
+                reason: DoneReason::Stop,
+                message: msg,
+            });
+        });
+        stream
+    })
+}
+
+/// First call stalls forever (dead stream), later calls reply `text`.
+fn stall_then_reply(text: &'static str) -> StreamFn {
+    sequence_stream(vec![("", 30_000), (text, 0)])
+}
+
+async fn wait_for_job(registry: &SubagentJobRegistry) -> String {
+    for _ in 0..100 {
+        if let Some(job) = registry.list().first() {
+            return job.id.clone();
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("job never registered");
+}
+
+fn run_options(
+    registry: SubagentJobRegistry,
+    stream: StreamFn,
+    cancel: CancellationToken,
+) -> SubagentRunOptions {
+    SubagentRunOptions {
+        launch: test_launch_resolver()("general").unwrap(),
+        tools: Vec::new(),
+        prompt: "explore X".into(),
+        model: faux_model(),
+        stream_fn: Some(stream),
+        timeout: None,
+        thinking: None,
+        registry,
+        source: "subagent".into(),
+        run_id: None,
+        node_id: None,
+        session_id: None,
+        cancel,
+        system_prompt_extra: None,
+        on_turn_end: None,
+    }
+}
+
+#[tokio::test]
+async fn interrupt_without_steer_ends_run_interrupted() {
+    let registry = SubagentJobRegistry::new();
+    let cancel = CancellationToken::new();
+    let handle = tokio::spawn(run_subagent(run_options(
+        registry.clone(),
+        stall_then_reply("done"),
+        cancel,
+    )));
+
+    let id = wait_for_job(&registry).await;
+    // Let the first turn reach the stalled LLM call.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    assert!(registry.interrupt(&id), "interrupt accepted");
+    let result = handle.await.expect("run task panicked");
+    assert!(!result.success);
+    assert_eq!(result.error.as_deref(), Some("turn interrupted"));
+
+    let job = registry.job(&id).unwrap();
+    assert_eq!(job.status, JobStatus::Interrupted);
+    assert!(job.control.is_none(), "control detached after finish");
+}
+
+#[tokio::test]
+async fn interrupt_with_steer_continues_into_next_turn() {
+    let registry = SubagentJobRegistry::new();
+    let cancel = CancellationToken::new();
+    let handle = tokio::spawn(run_subagent(run_options(
+        registry.clone(),
+        stall_then_reply("done after steer"),
+        cancel,
+    )));
+
+    let id = wait_for_job(&registry).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Queue the steer BEFORE interrupting so the drained queue is never empty.
+    assert!(registry.steer(&id, "abandon plan A, use plan B".into()));
+    assert!(registry.interrupt(&id), "interrupt accepted");
+
+    let result = handle.await.expect("run task panicked");
+    assert!(
+        result.success,
+        "run continues after steer: {:?}",
+        result.error
+    );
+    assert_eq!(result.text, "done after steer");
+
+    let job = registry.job(&id).unwrap();
+    assert_eq!(job.status, JobStatus::Succeeded);
+    // The steer message landed in the transcript at the next turn.
+    let steered = job
+        .messages
+        .iter()
+        .any(|m| m["role"] == "user" && m["content"] == "abandon plan A, use plan B");
+    assert!(
+        steered,
+        "steer message present in transcript: {:?}",
+        job.messages
+    );
+}
+
+#[tokio::test]
+async fn steer_mid_turn_lands_at_next_natural_turn() {
+    // Steer without interrupt: queued while the first turn is in flight (300 ms
+    // scripted delay), drained at the natural turn boundary, next turn carries it.
+    let registry = SubagentJobRegistry::new();
+    let cancel = CancellationToken::new();
+    let handle = tokio::spawn(run_subagent(run_options(
+        registry.clone(),
+        sequence_stream(vec![("first turn", 300), ("second turn", 0)]),
+        cancel,
+    )));
+
+    let id = wait_for_job(&registry).await;
+    // Queue the steer while the first turn is still streaming (delay 300ms).
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(registry.steer(&id, "nudge".into()));
+
+    let result = handle.await.expect("run task panicked");
+    assert!(result.success, "{:?}", result.error);
+    assert_eq!(result.text, "second turn", "steer routes the next turn");
+    let job = registry.job(&id).unwrap();
+    let steered = job
+        .messages
+        .iter()
+        .any(|m| m["role"] == "user" && m["content"] == "nudge");
+    assert!(steered, "steer at next natural turn: {:?}", job.messages);
+}
