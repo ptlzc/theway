@@ -41,24 +41,24 @@ fn discover_with_user_dir(
 const FULL_EXT: &str = r#"export const kind = "compaction";
 export const description = "test algorithm";
 
-export function shouldCompact(ctx: {
-  contextTokens: number;
-  contextWindow: number;
-  settings: { enabled: boolean; reserveTokens: number; keepRecentTokens: number };
+export function decide_compact(ctx: {
+  context_tokens: number;
+  context_window: number;
+  settings: { enabled: boolean; reserve_tokens: number; keep_recent_tokens: number };
 }): boolean {
-  return ctx.contextTokens > 12345;
+  return ctx.context_tokens > 12345;
 }
 
-export function findCutPoint(ctx: {
+export function select_cut_point(ctx: {
   entries: unknown[];
-  settings: { enabled: boolean; reserveTokens: number; keepRecentTokens: number };
-}): { cutIndex: number } {
-  return { cutIndex: ctx.entries.length - 2 };
+  settings: { enabled: boolean; reserve_tokens: number; keep_recent_tokens: number };
+}): { cut_index: number } {
+  return { cut_index: ctx.entries.length - 2 };
 }
 
-export function summarize(ctx: {
+export function summarize_prefix(ctx: {
   messages: unknown[];
-  customInstructions?: string;
+  custom_instructions?: string;
 }): string {
   return "custom summary: " + ctx.messages.length + " messages folded";
 }
@@ -120,33 +120,33 @@ fn runs_all_hooks_with_json_contract() {
     let ext = registry.get("my-algo").unwrap();
     let settings = DEFAULT_COMPACTION_SETTINGS.clone();
 
-    // shouldCompact: boolean over the numeric context.
+    // decide_compact: boolean over the numeric context.
     let arg = serde_json::json!({
-        "contextTokens": 20000,
-        "contextWindow": 100000,
+        "context_tokens": 20000,
+        "context_window": 100000,
         "settings": serde_json::to_value(&settings).unwrap(),
     });
-    let out = ext.run_hook("shouldCompact", &arg).unwrap();
+    let out = ext.run_hook("decide_compact", &arg).unwrap();
     assert_eq!(out, Some(serde_json::json!(true)));
     let arg = serde_json::json!({
-        "contextTokens": 100,
-        "contextWindow": 100000,
+        "context_tokens": 100,
+        "context_window": 100000,
         "settings": serde_json::to_value(&settings).unwrap(),
     });
     assert_eq!(
-        ext.run_hook("shouldCompact", &arg).unwrap(),
+        ext.run_hook("decide_compact", &arg).unwrap(),
         Some(serde_json::json!(false))
     );
 
-    // findCutPoint: entries array → cutIndex.
+    // select_cut_point: entries array → cut_index.
     let arg = serde_json::json!({
         "entries": serde_json::to_value(entries(5)).unwrap(),
         "settings": serde_json::to_value(&settings).unwrap(),
     });
-    let out = ext.run_hook("findCutPoint", &arg).unwrap().unwrap();
-    assert_eq!(out.get("cutIndex").and_then(|c| c.as_u64()), Some(3));
+    let out = ext.run_hook("select_cut_point", &arg).unwrap().unwrap();
+    assert_eq!(out.get("cut_index").and_then(|c| c.as_u64()), Some(3));
 
-    // summarize: messages array → literal summary string.
+    // summarize_prefix: messages array → literal summary string.
     let arg = serde_json::json!({
         "messages": serde_json::to_value(vec![
             user_message("a"),
@@ -155,9 +155,9 @@ fn runs_all_hooks_with_json_contract() {
         ])
         .unwrap(),
         "settings": serde_json::to_value(&settings).unwrap(),
-        "customInstructions": null,
+        "custom_instructions": null,
     });
-    let out = ext.run_hook("summarize", &arg).unwrap();
+    let out = ext.run_hook("summarize_prefix", &arg).unwrap();
     assert_eq!(
         out,
         Some(serde_json::json!("custom summary: 3 messages folded"))
@@ -193,12 +193,12 @@ async fn compaction_adapter_dispatches_through_ts_hooks() {
     let algorithm = registry.algorithm("my-algo");
     let settings = DEFAULT_COMPACTION_SETTINGS.clone();
 
-    // shouldCompact → TS hook.
-    assert!(algorithm.should_compact(20_000, 100_000, &settings).await);
-    assert!(!algorithm.should_compact(100, 100_000, &settings).await);
+    // decide_compact → TS hook.
+    assert!(algorithm.decide_compact(20_000, 100_000, &settings).await);
+    assert!(!algorithm.decide_compact(100, 100_000, &settings).await);
 
-    // findCutPoint → TS hook (cutIndex = len - 2, first kept id derived host-side).
-    let cut = algorithm.find_cut_point(&entries(5), &settings).await;
+    // select_cut_point → TS hook (cut_index = len - 2, first kept id derived host-side).
+    let cut = algorithm.select_cut_point(&entries(5), &settings).await;
     assert_eq!(cut.cut_index, 3);
     assert_eq!(cut.first_kept_entry_id.as_deref(), Some("m3"));
 
@@ -227,7 +227,7 @@ async fn compaction_adapter_dispatches_through_ts_hooks() {
         stream_fn: None,
         cancel: &tokio_util::sync::CancellationToken::new(),
     };
-    let out = algorithm.summarize(&request).await.unwrap();
+    let out = algorithm.summarize_prefix(&request).await.unwrap();
     assert_eq!(out.summary, "custom summary: 3 messages folded");
 }
 
@@ -238,8 +238,8 @@ async fn missing_hooks_fall_back_to_builtin() {
         dir.path(),
         "cut-only",
         r#"export const kind = "compaction";
-export function findCutPoint(ctx: { entries: unknown[] }): { cutIndex: number } {
-  return { cutIndex: 1 };
+export function select_cut_point(ctx: { entries: unknown[] }): { cut_index: number } {
+  return { cut_index: 1 };
 }
 "#,
     );
@@ -247,13 +247,13 @@ export function findCutPoint(ctx: { entries: unknown[] }): { cutIndex: number } 
     let registry = CompactAlgorithmRegistry::from_extensions(&extensions);
     let algorithm = registry.algorithm("cut-only");
 
-    // No shouldCompact export → builtin 80% heuristic.
+    // No decide_compact export → builtin 80% heuristic.
     let settings = DEFAULT_COMPACTION_SETTINGS.clone();
-    assert!(!algorithm.should_compact(100, 100_000, &settings).await);
-    assert!(algorithm.should_compact(80_001, 100_000, &settings).await);
+    assert!(!algorithm.decide_compact(100, 100_000, &settings).await);
+    assert!(algorithm.decide_compact(80_001, 100_000, &settings).await);
 
-    // findCutPoint is custom.
-    let cut = algorithm.find_cut_point(&entries(4), &settings).await;
+    // select_cut_point is custom.
+    let cut = algorithm.select_cut_point(&entries(4), &settings).await;
     assert_eq!(cut.cut_index, 1);
 }
 
@@ -264,7 +264,7 @@ fn invalid_extension_is_skipped_with_diagnostic() {
     write_extension(
         dir.path(),
         "broken",
-        "export const kind = \"compaction\";\nexport function shouldCompact(ctx {",
+        "export const kind = \"compaction\";\nexport function decide_compact(ctx {",
     );
     // Valid TS but no `kind` export.
     write_extension(dir.path(), "no-kind", "export const helper = 42;\n");
@@ -299,7 +299,7 @@ fn project_extension_shadows_user_global() {
         project.path(),
         "shadow",
         r#"export const kind = "compaction";
-export function shouldCompact(ctx: any): boolean { return true; }
+export function decide_compact(ctx: any): boolean { return true; }
 "#,
     );
     let user_ext_dir = user.path().join("extensions");
@@ -307,7 +307,7 @@ export function shouldCompact(ctx: any): boolean { return true; }
     std::fs::write(
         user_ext_dir.join("shadow.ts"),
         r#"export const kind = "compaction";
-export function shouldCompact(ctx: any): boolean { return false; }
+export function decide_compact(ctx: any): boolean { return false; }
 "#,
     )
     .unwrap();
@@ -318,8 +318,8 @@ export function shouldCompact(ctx: any): boolean { return false; }
     let ext = registry.get("shadow").expect("extension found");
     assert_eq!(
         ext.run_hook(
-            "shouldCompact",
-            &serde_json::json!({ "contextTokens": 1, "contextWindow": 2, "settings": {} })
+            "decide_compact",
+            &serde_json::json!({ "context_tokens": 1, "context_window": 2, "settings": {} })
         )
         .unwrap(),
         Some(serde_json::json!(true)),

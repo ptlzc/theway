@@ -13,7 +13,7 @@
 //!   registered here. Hooks the TS file doesn't export fall back to the builtin behavior.
 //!
 //! The trait methods carry defaults that delegate to the same free functions the builtin
-//! uses, so a custom algorithm that overrides only `find_cut_point` still gets the builtin
+//! uses, so a custom algorithm that overrides only `select_cut_point` still gets the builtin
 //! trigger + summarizer for free.
 
 use std::collections::HashMap;
@@ -34,7 +34,7 @@ use crate::types::{AgentMessage, StreamFn};
 #[derive(Clone)]
 pub struct SummarizeRequest<'a> {
     pub model: &'a Model,
-    /// The message prefix being folded (already cut by [`CompactAlgorithm::find_cut_point`]).
+    /// The message prefix being folded (already cut by [`CompactAlgorithm::select_cut_point`]).
     pub messages: &'a [AgentMessage],
     pub custom_instructions: Option<&'a str>,
     pub settings: &'a CompactionSettings,
@@ -43,7 +43,8 @@ pub struct SummarizeRequest<'a> {
     pub cancel: &'a CancellationToken,
 }
 
-/// Result of a summarize hook. `usage` is meaningful for LLM-backed algorithms; custom
+/// Result of a summarize hook (`summarize_prefix`). `usage` is meaningful for LLM-backed
+/// algorithms; custom
 /// (e.g. TS) algorithms return `Usage::default()`.
 #[derive(Clone, Debug)]
 pub struct SummaryOutcome {
@@ -63,7 +64,7 @@ pub trait CompactAlgorithm: Send + Sync {
 
     /// Decide whether a compaction should trigger at this context level.
     /// Default: the builtin 80%-of-window heuristic.
-    async fn should_compact(
+    async fn decide_compact(
         &self,
         context_tokens: u64,
         context_window: u32,
@@ -74,7 +75,7 @@ pub trait CompactAlgorithm: Send + Sync {
 
     /// Choose the cut point (entries[..cut] get folded). Must land on a valid index in
     /// `[0, entries.len()]`. Default: turn-boundary-safe `keep_recent_tokens` walk.
-    async fn find_cut_point(
+    async fn select_cut_point(
         &self,
         entries: &[SessionTreeEntry],
         settings: &CompactionSettings,
@@ -83,7 +84,7 @@ pub trait CompactAlgorithm: Send + Sync {
     }
 
     /// Summarize the folded prefix. Default: LLM summarization with the budget-retry loop.
-    async fn summarize(
+    async fn summarize_prefix(
         &self,
         request: &SummarizeRequest<'_>,
     ) -> Result<SummaryOutcome, SummarizeError> {
@@ -183,10 +184,9 @@ impl TsCompactAlgorithm {
     }
 }
 
-/// Serialized settings passed to every hook (camelCase to match the TS contract).
+/// Serialized settings passed to every hook (snake_case, matching the TS contract).
 #[cfg(feature = "ts-extensions")]
 #[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
 struct SettingsJson<'a> {
     enabled: bool,
     reserve_tokens: u32,
@@ -213,35 +213,35 @@ impl CompactAlgorithm for TsCompactAlgorithm {
         self.ext.name()
     }
 
-    async fn should_compact(
+    async fn decide_compact(
         &self,
         context_tokens: u64,
         context_window: u32,
         settings: &CompactionSettings,
     ) -> bool {
         let arg = serde_json::json!({
-            "contextTokens": context_tokens,
-            "contextWindow": context_window,
+            "context_tokens": context_tokens,
+            "context_window": context_window,
             "settings": SettingsJson::new(settings),
         });
-        match self.ext.run_hook("shouldCompact", &arg) {
+        match self.ext.run_hook("decide_compact", &arg) {
             Ok(Some(v)) => v.as_bool().unwrap_or_else(|| {
                 tracing::warn!(
                     algorithm = self.name(),
-                    "shouldCompact returned a non-boolean value, treating as decline"
+                    "decide_compact returned a non-boolean value, treating as decline"
                 );
                 false
             }),
             // Missing hook / declined: builtin decision.
             _ => {
                 self.builtin
-                    .should_compact(context_tokens, context_window, settings)
+                    .decide_compact(context_tokens, context_window, settings)
                     .await
             }
         }
     }
 
-    async fn find_cut_point(
+    async fn select_cut_point(
         &self,
         entries: &[SessionTreeEntry],
         settings: &CompactionSettings,
@@ -253,17 +253,17 @@ impl CompactAlgorithm for TsCompactAlgorithm {
             }),
             Err(e) => {
                 tracing::warn!(algorithm = self.name(), "failed to serialize entries: {e}");
-                return self.builtin.find_cut_point(entries, settings).await;
+                return self.builtin.select_cut_point(entries, settings).await;
             }
         };
-        match self.ext.run_hook("findCutPoint", &arg) {
+        match self.ext.run_hook("select_cut_point", &arg) {
             Ok(Some(v)) => {
-                let Some(cut_index) = v.get("cutIndex").and_then(|c| c.as_u64()) else {
+                let Some(cut_index) = v.get("cut_index").and_then(|c| c.as_u64()) else {
                     tracing::warn!(
                         algorithm = self.name(),
-                        "findCutPoint returned no valid cutIndex, falling back to builtin"
+                        "select_cut_point returned no valid cut_index, falling back to builtin"
                     );
-                    return self.builtin.find_cut_point(entries, settings).await;
+                    return self.builtin.select_cut_point(entries, settings).await;
                 };
                 // Clamp into bounds; out-of-range is a bug in the extension, not fatal.
                 let cut_index = (cut_index as usize).min(entries.len());
@@ -273,11 +273,11 @@ impl CompactAlgorithm for TsCompactAlgorithm {
                     first_kept_entry_id,
                 }
             }
-            _ => self.builtin.find_cut_point(entries, settings).await,
+            _ => self.builtin.select_cut_point(entries, settings).await,
         }
     }
 
-    async fn summarize(
+    async fn summarize_prefix(
         &self,
         request: &SummarizeRequest<'_>,
     ) -> Result<SummaryOutcome, SummarizeError> {
@@ -285,14 +285,14 @@ impl CompactAlgorithm for TsCompactAlgorithm {
             Ok(messages) => serde_json::json!({
                 "messages": messages,
                 "settings": SettingsJson::new(request.settings),
-                "customInstructions": request.custom_instructions,
+                "custom_instructions": request.custom_instructions,
             }),
             Err(e) => {
                 tracing::warn!(algorithm = self.name(), "failed to serialize messages: {e}");
-                return self.builtin.summarize(request).await;
+                return self.builtin.summarize_prefix(request).await;
             }
         };
-        match self.ext.run_hook("summarize", &arg) {
+        match self.ext.run_hook("summarize_prefix", &arg) {
             Ok(Some(v)) => match v.as_str() {
                 Some(summary) => Ok(SummaryOutcome {
                     summary: summary.to_string(),
@@ -301,13 +301,13 @@ impl CompactAlgorithm for TsCompactAlgorithm {
                 None => {
                     tracing::warn!(
                         algorithm = self.name(),
-                        "summarize returned a non-string value, falling back to builtin"
+                        "summarize_prefix returned a non-string value, falling back to builtin"
                     );
-                    self.builtin.summarize(request).await
+                    self.builtin.summarize_prefix(request).await
                 }
             },
             // Missing hook / declined: builtin LLM summarization.
-            _ => self.builtin.summarize(request).await,
+            _ => self.builtin.summarize_prefix(request).await,
         }
     }
 }

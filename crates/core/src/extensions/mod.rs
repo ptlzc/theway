@@ -17,23 +17,24 @@
 //! export const kind = "compaction"; // which extension point this file implements
 //! export const description = "drop tool results older than 10 messages";
 //!
-//! // kind-specific hooks (all optional; missing hooks fall back to the builtin):
-//! export function shouldCompact(ctx: {
-//!   contextTokens: number;
-//!   contextWindow: number;
-//!   settings: { enabled: boolean; reserveTokens: number; keepRecentTokens: number };
-//! }): boolean | undefined { ... }
+//! // Kind-specific hooks (all optional; missing hooks fall back to the builtin). Hook
+//! // names follow the verb+object convention in lowercase_with_underscores.
+//! export function decide_compact(ctx: {
+//!   context_tokens: number;
+//!   context_window: number;
+//!   settings: { enabled: boolean; reserve_tokens: number; keep_recent_tokens: number };
+//! }): boolean | undefined { ... } // whether compaction should trigger
 //!
-//! export function findCutPoint(ctx: {
+//! export function select_cut_point(ctx: {
 //!   entries: unknown[]; // serialized SessionTreeEntry[] (serde tags)
-//!   settings: { enabled: boolean; reserveTokens: number; keepRecentTokens: number };
-//! }): { cutIndex: number } | undefined { ... }
+//!   settings: { enabled: boolean; reserve_tokens: number; keep_recent_tokens: number };
+//! }): { cut_index: number } | undefined { ... } // where to cut (entries[..cut_index] folded)
 //!
-//! export function summarize(ctx: {
+//! export function summarize_prefix(ctx: {
 //!   messages: unknown[]; // serialized AgentMessage[]
-//!   settings: { enabled: boolean; reserveTokens: number; keepRecentTokens: number };
-//!   customInstructions?: string;
-//! }): string | undefined { ... } // literal summary text
+//!   settings: { enabled: boolean; reserve_tokens: number; keep_recent_tokens: number };
+//!   custom_instructions?: string;
+//! }): string | undefined { ... } // literal summary text for the folded prefix
 //! ```
 //!
 //! Hooks that are missing (or return `undefined`/`null`) fall back to the builtin

@@ -661,7 +661,7 @@ pub async fn compact(
     stream_fn: Option<StreamFn>,
     cancel: CancellationToken,
 ) -> Result<CompactionResult, SummarizeError> {
-    let cut = algorithm.find_cut_point(entries, settings).await;
+    let cut = algorithm.select_cut_point(entries, settings).await;
     let entries_to_summarize = &entries[..cut.cut_index];
     let tokens_before = entries_to_summarize
         .iter()
@@ -694,7 +694,7 @@ pub async fn compact(
         stream_fn: stream_fn.as_ref(),
         cancel: &cancel,
     };
-    let out = algorithm.summarize(&request).await?;
+    let out = algorithm.summarize_prefix(&request).await?;
     Ok(CompactionResult {
         summary: out.summary,
         first_kept_entry_id: cut.first_kept_entry_id,
