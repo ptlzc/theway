@@ -582,10 +582,7 @@ mod tests {
         // ignore matching behave identically on both platforms.
         assert_eq!(dirname_env_path("C:\\a\\b\\c"), "C:/a/b");
         assert_eq!(basename_env_path("C:\\a\\b\\c"), "c");
-        assert_eq!(
-            relative_env_path("C:\\root", "C:\\root\\a\\b"),
-            "a/b"
-        );
+        assert_eq!(relative_env_path("C:\\root", "C:\\root\\a\\b"), "a/b");
         assert_eq!(
             basename_env_path("C:\\Users\\x\\Temp\\tmp1\\my-skill"),
             "my-skill"

@@ -2015,7 +2015,6 @@ fn write_fake_gh(dir: &Path, body: &str) -> std::path::PathBuf {
     }
 }
 
-
 struct EnvGuard {
     key: &'static str,
     original: Option<std::ffi::OsString>,

@@ -30,6 +30,6 @@ pub mod remove_skill;
 pub mod set_skill_state;
 pub mod skill;
 pub mod skill_builder;
+pub mod subagent;
 pub mod subagent_runner;
 pub mod subagent_specs;
-pub mod subagent;

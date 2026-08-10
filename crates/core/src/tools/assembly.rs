@@ -37,7 +37,7 @@ use super::remove_skill;
 use super::set_skill_state;
 use super::skill::{self, SkillHarnessCell};
 use super::skill_builder;
-use super::subagent::{SubagentToolsFn, SubagentTool};
+use super::subagent::{SubagentTool, SubagentToolsFn};
 
 /// Assemble the engine-owned session tool set: DAG tools, the `subagent` delegation tool,
 /// the skill family, and memory. The app layer calls this and appends its local tools.
