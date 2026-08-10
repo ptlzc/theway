@@ -36,6 +36,17 @@ Test file layout, naming, and structure follow [`docs/RUST_TEST_FILES.md`](docs/
 
 The current history only shows an initial commit, so no strict commit convention is established. Use concise imperative subjects, for example `Add session storage tests` or `Fix Anthropic SSE parsing`. Pull requests should include a short summary, test results, linked issues when relevant, and screenshots or terminal output for CLI-visible behavior changes.
 
+## Git 协作 (本项目 — worktree 工作模式)
+
+> 通用 Git 纪律 (commit 规范 / `git log` 事实源 / 冲突排查协议 / 大任务逐步提交 / worktree 小步 merge) 见全局 `~/.pi/agent/AGENTS.md`。以下为本项目硬约束,优先级高于上游规则:
+
+- **Issue-first**: 本仓库是 GitHub (`github.com:ptlzc/theway`),已认证 `gh` 时接到任务先 `gh issue create` 记录需求,拿到 issue 编号再实现;commit message 引用 issue (如 `feat(#12): ...`),完成时 `gh issue close`。无 issue 不开始实现。
+- **直推 main**: 提交后立即 `git push origin main`;commit message 用 Conventional Commits 并引用 issue 线。
+- **禁止动他人改动**: 其他 agent 的未提交变更保留原样,禁止修改 / 丢弃 / 还原 (`git checkout --` / `git restore` / `git reset --hard` 一律禁止,详见全局 AGENTS.md 冲突排查协议)。
+- **大功能按归属分笔提交** (core / server / 文档各一笔),不 `git add -A` 混入 `.pi/` 状态文件与 `.agents/` 记忆 (已 gitignore,stage 仍须精确到文件)。
+- **worktree 工作模式**: 每个并行子任务一个独立 worktree,用 [`scripts/wt.sh`](scripts/wt.sh) 管理 — `wt start <标题>` 一条命令建 issue + worktree + 分支 (`wt wt <id>` 为已有 issue 建),`wt push` / `wt mr` / `wt merge --rm-wt` / `wt cleanup` 走完推送→PR→合并→清理闭环;每完成一小步即同步到主分支并推送;worktree 用完即删 (`git worktree remove`),不留垃圾分支。
+- **Merge 前置检查**: 任何 `git checkout` / `git merge` 之前先 `git status --porcelain` 确认目标分支干净;有未提交改动先 `git add` (stage) / `git commit` / `git stash push` 固化,禁止覆盖 (详见全局 AGENTS.md)。
+
 ## Security & Configuration Tips
 
 Do not commit API keys or local session data. The CLI reads provider keys from environment variables such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and related provider-specific keys. Runtime data is written under `~/.theway/` by default, or under `$THEWAY_DIR` when set.
