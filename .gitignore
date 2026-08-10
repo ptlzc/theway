@@ -12,3 +12,4 @@ Cargo.lock
 workers/fefe-hub/src/viewer_html.generated.ts
 workers/fefe-hub/.wrangler/
 .agents/
+.se/
