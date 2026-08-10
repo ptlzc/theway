@@ -80,10 +80,14 @@ pub fn default_tools(memory_dir: PathBuf) -> Vec<Arc<dyn AgentTool>> {
     ]
 }
 
-/// Read-only tool set used by spawned subagents (issue #11). No `write`/`edit`/`bash` —
-/// a subagent should not mutate the workspace; if it needs to, the parent agent should
-/// run the write itself. No web tools either (subagents are intentionally scoped to
-/// local read-only research).
+/// Read-only tool set for the read-only subagent specs (explorer / general). No
+/// `write`/`edit`/`bash` — these specs are research agents; if the work needs mutation,
+/// the parent agent should run the write itself. No web tools either (research is
+/// intentionally scoped to local reads).
+///
+/// NOTE: the `task` tool's subagent is NOT bound to this set anymore — it ships the
+/// full [`default_tools`] (same as the DAG `executor-coder`), so the main agent defines
+/// in the task prompt what the subagent may do (mutate, run commands, etc.).
 pub fn subagent_read_only_tools() -> Vec<Arc<dyn AgentTool>> {
     vec![
         Arc::new(read::ReadTool),
@@ -98,17 +102,21 @@ pub fn subagent_read_only_tools() -> Vec<Arc<dyn AgentTool>> {
 /// spawn its inner harness; the caller wires it in at construction time. `session_id`
 /// (session-resource-model) stamps the owning session on every spawned job — each harness
 /// build gets its own TaskTool stamped with that harness's session.
+///
+/// The subagent gets the FULL default tool set (same as the DAG `executor-coder`), not the
+/// read-only set: the main agent defines in the task prompt what the subagent may do.
 pub fn task_tool(
     model: theway_llm_provider::Model,
     stream_fn: Option<theway_core::StreamFn>,
     registry: SubagentJobRegistry,
+    memory_dir: PathBuf,
     session_id: Option<String>,
 ) -> Arc<dyn AgentTool> {
     Arc::new(
         task::TaskTool::new(
             model,
             stream_fn,
-            Arc::new(subagent_read_only_tools),
+            Arc::new(move || default_tools(memory_dir.clone())),
             registry,
         )
         .with_session_id(session_id),
@@ -210,6 +218,7 @@ pub fn session_tool_set(
         model.clone(),
         stream_fn.cloned(),
         subagent_registry.clone(),
+        memory_dir.to_path_buf(),
         Some(session_id.to_string()),
     ));
     tools.push(skill_tool(skill_harness_cell.clone()));

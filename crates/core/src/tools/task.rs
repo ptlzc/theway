@@ -4,7 +4,8 @@
 //!
 //! v1 scope:
 //! - One subagent spec, "general": same model as parent, tool set injected from the app
-//!   layer at construction (read-only by default), max 16 iterations, MemorySessionStorage
+//!   layer at construction (full default set — the parent defines in the prompt what the
+//!   subagent may do), max 16 iterations, MemorySessionStorage
 //!   so nothing leaks to disk.
 //! - Concurrent execution mode (Parallel) so the parent can fire multiple Task calls in one
 //!   turn and they run together.
@@ -38,7 +39,7 @@ use super::subagent_specs::resolve_spec;
 const SUBAGENT_TYPES: &[&str] = &["general"];
 
 /// Closure that builds the tool set a subagent should have access to. Built at parent-harness
-/// construction so each subagent starts with the same set of (read-only) capabilities.
+/// construction so each subagent starts with the same set of (full) capabilities.
 /// App-layer injection: the engine does not know which tools exist — the server supplies
 /// this via `task_tool` (`server/src/tools.rs`) / e2e tests.
 pub type SubagentToolsFn = Arc<dyn Fn() -> Vec<Arc<dyn AgentTool>> + Send + Sync>;
