@@ -43,13 +43,9 @@ pub mod multiagent;
 
 #[cfg(feature = "harness")]
 pub use agent::agent_harness::{
-    AgentHarness, AgentHarnessOptions, BeforeTriggerActionContext, BeforeTriggerActionHook,
-    BeforeTriggerContext, BeforeTriggerDecision, BeforeTriggerHook, DEFAULT_TURN_CONTINUATION_CAP,
-    HarnessEvent, HarnessListener, NotificationStatusSnapshot, OnTriggerPromptHook,
-    OnTurnEndContext, OnTurnEndHook, PromoteAction, PromotionCondition,
-    PromotionConditionSkipReason, ReloadSkillsError, ReloadSkillsFn, RunningTriggerState,
-    TriggerAction, TriggerDelivery, TriggerPromptDecision, TriggerPromptRequest, TurnEndAction,
-    TurnEndDecision,
+    AgentHarness, AgentHarnessOptions, DEFAULT_TURN_CONTINUATION_CAP, HarnessEvent,
+    HarnessListener, OnTurnEndContext, OnTurnEndHook, ReloadSkillsError, ReloadSkillsFn,
+    TurnEndAction, TurnEndDecision,
 };
 #[cfg(feature = "harness")]
 pub use agent::compaction::{
@@ -70,11 +66,6 @@ pub use agent::cost::{
 };
 #[cfg(feature = "harness")]
 pub use agent::messages;
-#[cfg(feature = "harness")]
-pub use agent::notification_hook::{
-    DynNotificationHook, HookError, HookFuture, HookState, NotificationHook,
-    NotificationHookStatus, TriggerSink,
-};
 #[cfg(feature = "harness")]
 pub use agent::permission::{PermissionCategory, PermissionDecision, PermissionPolicy};
 #[cfg(feature = "harness")]
@@ -100,15 +91,6 @@ pub use agent::skills::{
 };
 #[cfg(feature = "harness")]
 pub use agent::system_prompt::format_skills_for_system_prompt;
-#[cfg(feature = "harness")]
-pub use agent::trigger::{
-    CredentialScope, PayloadVisibility, ReplacementPolicy, SourceKind, Trigger, TriggerAuthority,
-    TriggerRecord, TriggerSource, TriggerState,
-};
-#[cfg(feature = "harness")]
-pub use agent::trigger_runtime::{
-    EvaluationOutcome, TriggerRuntime, TriggerRuntimeConfig, TriggerRuntimeSnapshot,
-};
 #[cfg(feature = "harness")]
 pub use agent::types::{
     ExecOptions, ExecOutput, ExecResult, ExecutionEnv, ExecutionError, ExecutionErrorCode,

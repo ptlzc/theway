@@ -30,8 +30,6 @@ pub mod hooks;
 #[cfg(feature = "harness")]
 pub mod messages;
 #[cfg(feature = "harness")]
-pub mod notification_hook;
-#[cfg(feature = "harness")]
 pub mod permission;
 #[cfg(feature = "harness")]
 pub mod session;
@@ -39,10 +37,6 @@ pub mod session;
 pub mod skills;
 #[cfg(feature = "harness")]
 pub mod system_prompt;
-#[cfg(feature = "harness")]
-pub mod trigger;
-#[cfg(feature = "harness")]
-pub mod trigger_runtime;
 #[cfg(feature = "harness")]
 pub mod types;
 #[cfg(feature = "harness")]

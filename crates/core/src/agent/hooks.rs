@@ -734,16 +734,7 @@ impl EventData {
             }
             HarnessEvent::SessionStart { .. }
             | HarnessEvent::Branch { .. }
-            | HarnessEvent::TriggerHandlingStart { .. }
-            | HarnessEvent::TriggerHandled { .. }
-            | HarnessEvent::TriggerPromptRequest { .. }
             | HarnessEvent::PersistenceError { .. }
-            | HarnessEvent::TriggerExecutionStarted { .. }
-            | HarnessEvent::TriggerCompleted { .. }
-            | HarnessEvent::TriggerFailed { .. }
-            | HarnessEvent::TriggerPromoted { .. }
-            | HarnessEvent::TriggerRequestsMainRun { .. }
-            | HarnessEvent::PromotionPending { .. }
             | HarnessEvent::TurnEnded { .. }
             | HarnessEvent::SkillsReloaded { .. } => None,
         }
