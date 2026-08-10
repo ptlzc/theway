@@ -15,7 +15,7 @@ fn event_json_matches_wire_shape() {
 
     let event = AgentJobEvent::Completed {
         id: "job-1".into(),
-        status: theway_core::runtime::multiagent::registry::JobStatus::Succeeded,
+        status: theway_core::multiagent::registry::JobStatus::Succeeded,
         error: None,
         chars: 10,
         tokens_in: 5,
@@ -31,7 +31,7 @@ fn event_json_matches_wire_shape() {
 
 #[test]
 fn dag_event_json_matches_wire_shape() {
-    use theway_core::runtime::multiagent::graph::types::{DagStatus, NodeStatus};
+    use theway_core::multiagent::graph::types::{DagStatus, NodeStatus};
 
     let value = dag_event_json(&DagEvent::RunStatus {
         run_id: "goal-1".into(),

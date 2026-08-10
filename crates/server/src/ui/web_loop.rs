@@ -22,9 +22,9 @@ use base64::Engine as _;
 use tokio::sync::{Mutex, broadcast, mpsc};
 
 use theway_core::SkillSource;
-use theway_core::runtime::multiagent::graph::engine::DagEngine;
-use theway_core::runtime::multiagent::graph::types::DagEvent;
-use theway_core::runtime::multiagent::registry::{AgentJobEvent, AgentJobRegistry};
+use theway_core::multiagent::graph::engine::DagEngine;
+use theway_core::multiagent::graph::types::DagEvent;
+use theway_core::multiagent::registry::{AgentJobEvent, AgentJobRegistry};
 
 use crate::commands::{CommandCtx, CommandOutcome};
 use crate::mentions;

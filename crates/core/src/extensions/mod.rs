@@ -3,7 +3,7 @@
 //! `extensions` is a **core-level module**: any runtime capability can declare an
 //! extension point and consume user-authored TypeScript extensions. Today one extension
 //! point exists — compaction algorithms (`kind = "compaction"`, see
-//! [`crate::runtime::agent::compaction::algorithm`]) — but the mechanism is generic: load,
+//! [`crate::agent::compaction::algorithm`]) — but the mechanism is generic: load,
 //! transpile and execute single-file TS extensions, then route them to extension points
 //! by their declared `kind`.
 //!

@@ -29,8 +29,8 @@ use serde_json::{Value, json};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
-use theway_core::runtime::multiagent::graph::types::DagEvent;
-use theway_core::runtime::multiagent::registry::AgentJobEvent;
+use theway_core::multiagent::graph::types::DagEvent;
+use theway_core::multiagent::registry::AgentJobEvent;
 
 use super::http::HttpState;
 use crate::wire::{WebCommand, WebPromptImage, dag_status_str, node_status_str};

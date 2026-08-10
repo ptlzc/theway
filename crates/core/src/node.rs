@@ -2,4 +2,4 @@
 //! so the common consumer path is `use theway_core::node::*`.
 
 #[cfg(feature = "native-env")]
-pub use crate::runtime::agent::env::native::NativeEnv;
+pub use crate::agent::env::native::NativeEnv;

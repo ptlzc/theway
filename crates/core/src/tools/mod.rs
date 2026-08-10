@@ -4,10 +4,10 @@
 //! (engine-crate) capability:
 //!
 //! - **graph / DAG orchestration**: [`dag_tools`] (model-facing dag_* tools), backed by
-//!   `crate::runtime::multiagent::graph`.
+//!   `crate::multiagent::graph`.
 //! - **subagents**: [`subagent`] (model-facing delegation tool). The runtime side
 //!   (launch data channel, shared sub-harness lifecycle, DAG node execution) lives in
-//!   `crate::runtime::multiagent`.
+//!   `crate::multiagent`.
 //! - **skills**: [`skill`], [`install_skill`], [`remove_skill`], [`set_skill_state`],
 //!   [`skill_builder`].
 //! - **memory**: [`memory`].

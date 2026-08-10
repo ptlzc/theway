@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use theway_core::runtime::multiagent::types::{AgentRunParams, AgentRunResolver};
+use theway_core::multiagent::types::{AgentRunParams, AgentRunResolver};
 
 /// Iteration budget default, mirroring the `subagent` tool's "max 16 iterations" doc.
 pub const DEFAULT_MAX_ITERATIONS: u32 = 16;
@@ -69,7 +69,7 @@ pub static SUBAGENT_SPECS: [SubagentSpec; 6] = [
     SubagentSpec {
         name: "goal-evaluator",
         description: "Goal stop-condition judge (tool-less, single turn).",
-        system_prompt: theway_core::runtime::multiagent::goal::evaluator_system_prompt(),
+        system_prompt: theway_core::multiagent::goal::evaluator_system_prompt(),
         max_iterations: 1,
     },
 ];

@@ -33,13 +33,13 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
         snapshots: snapshot_tx.clone(),
         latest,
         completer: SlashCompleter::from_registry(&crate::commands::Registry::with_builtins()),
-        events: broadcast::channel::<theway_core::runtime::multiagent::registry::AgentJobEvent>(16)
+        events: broadcast::channel::<theway_core::multiagent::registry::AgentJobEvent>(16)
             .0,
-        dag_events: broadcast::channel::<theway_core::runtime::multiagent::graph::types::DagEvent>(
+        dag_events: broadcast::channel::<theway_core::multiagent::graph::types::DagEvent>(
             16,
         )
         .0,
-        registry: theway_core::runtime::multiagent::registry::AgentJobRegistry::new(),
+        registry: theway_core::multiagent::registry::AgentJobRegistry::new(),
         session_ops: Arc::new(FakeSessionOps::new()),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -248,13 +248,13 @@ async fn websocket_serves_snapshot_and_accepts_commands() {
         snapshots: snapshot_tx.clone(),
         latest,
         completer: SlashCompleter::from_registry(&crate::commands::Registry::with_builtins()),
-        events: broadcast::channel::<theway_core::runtime::multiagent::registry::AgentJobEvent>(16)
+        events: broadcast::channel::<theway_core::multiagent::registry::AgentJobEvent>(16)
             .0,
-        dag_events: broadcast::channel::<theway_core::runtime::multiagent::graph::types::DagEvent>(
+        dag_events: broadcast::channel::<theway_core::multiagent::graph::types::DagEvent>(
             16,
         )
         .0,
-        registry: theway_core::runtime::multiagent::registry::AgentJobRegistry::new(),
+        registry: theway_core::multiagent::registry::AgentJobRegistry::new(),
         session_ops: Arc::new(FakeSessionOps::new()),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

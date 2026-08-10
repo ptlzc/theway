@@ -15,7 +15,7 @@
 //!   its inner harness immediately.
 //!
 //! The sub-harness lifecycle itself (harness construction, metrics registry, final-text
-//! collection, cancel watcher) lives in [`crate::runtime::multiagent::runner`], shared with the DAG
+//! collection, cancel watcher) lives in [`crate::multiagent::runner`], shared with the DAG
 //! node launcher.
 //!
 //! Out of scope (follow-ups under #11):
@@ -25,19 +25,19 @@
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use theway_core::runtime::multiagent::registry::AgentJobRegistry;
+use theway_core::multiagent::registry::AgentJobRegistry;
 use theway_core::{
     AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate, StreamFn, ToolExecutionMode,
 };
 use theway_llm_provider::{Model, Tool, UserContentBlock};
 use tokio_util::sync::CancellationToken;
 
-use crate::runtime::multiagent::runner::{AgentRunOptions, run_agent};
-use crate::runtime::multiagent::types::AgentRunResolver;
-use crate::runtime::multiagent::types::ToolSetResolver;
+use crate::multiagent::runner::{AgentRunOptions, run_agent};
+use crate::multiagent::types::AgentRunResolver;
+use crate::multiagent::types::ToolSetResolver;
 
 /// Closure that resolves the tool set a subagent should have access to from its spec
-/// name. Same shape as the DAG node launcher's [`ToolSetResolver`](crate::runtime::multiagent::types::ToolSetResolver) — `task` and DAG
+/// name. Same shape as the DAG node launcher's [`ToolSetResolver`](crate::multiagent::types::ToolSetResolver) — `task` and DAG
 /// share one mechanism (and one app-layer instance). App-layer injection: the engine
 /// does not know which tools exist — the server supplies this via `subagent_tool`
 /// (`server/src/tools.rs`) / e2e tests.

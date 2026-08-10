@@ -25,8 +25,8 @@ use crate::session_ops::SessionOps;
 use crate::ui::App;
 use crate::ui::web_loop::TransportMode;
 use crate::wire::*;
-use theway_core::runtime::multiagent::graph::types::DagEvent;
-use theway_core::runtime::multiagent::registry::{AgentJobEvent, AgentJobRegistry};
+use theway_core::multiagent::graph::types::DagEvent;
+use theway_core::multiagent::registry::{AgentJobEvent, AgentJobRegistry};
 
 use crate::transport::ws::ws_upgrade;
 

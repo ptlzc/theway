@@ -1011,7 +1011,7 @@ async fn run_goal_start(prompt: String, ctx: &CommandCtx<'_>) -> CommandOutcome 
     if prompt.is_empty() {
         return CommandOutcome::Error("usage: /goal-start <prompt>".into());
     }
-    if let Err(e) = theway_core::runtime::multiagent::goal::current(ctx.harness)
+    if let Err(e) = theway_core::multiagent::goal::current(ctx.harness)
         .await
         .filter(|state| state.active())
         .ok_or_else(|| "no active goal; set one with /goal <condition>".to_string())
@@ -1045,7 +1045,7 @@ impl SlashCommand for GoalCommand {
                 CommandOutcome::Handled
             }
             Some("pause") if argv.len() == 1 => {
-                match theway_core::runtime::multiagent::goal::pause(ctx.harness).await {
+                match theway_core::multiagent::goal::pause(ctx.harness).await {
                     Ok(state) => {
                         cprintln!("goal paused: {}", state.condition);
                         CommandOutcome::Handled
@@ -1054,7 +1054,7 @@ impl SlashCommand for GoalCommand {
                 }
             }
             Some("resume") if argv.len() == 1 => {
-                match theway_core::runtime::multiagent::goal::resume(ctx.harness).await {
+                match theway_core::multiagent::goal::resume(ctx.harness).await {
                     Ok(state) => {
                         cprintln!("goal resumed: {}", state.condition);
                         CommandOutcome::Handled
@@ -1063,7 +1063,7 @@ impl SlashCommand for GoalCommand {
                 }
             }
             Some("clear") if argv.len() == 1 => {
-                match theway_core::runtime::multiagent::goal::clear(ctx.harness).await {
+                match theway_core::multiagent::goal::clear(ctx.harness).await {
                     Ok(_) => {
                         cprintln!("goal cleared");
                         CommandOutcome::Handled
@@ -1077,7 +1077,7 @@ impl SlashCommand for GoalCommand {
                 if condition.is_empty() {
                     return CommandOutcome::Error("usage: /goal <condition>".into());
                 }
-                match theway_core::runtime::multiagent::goal::set(ctx.harness, condition).await {
+                match theway_core::multiagent::goal::set(ctx.harness, condition).await {
                     Ok(state) => {
                         cprintln!("goal set: {}", state.condition);
                         cprintln!(
@@ -1115,10 +1115,10 @@ impl SlashCommand for GoalStartCommand {
 }
 
 async fn print_goal_status(ctx: &CommandCtx<'_>) {
-    match theway_core::runtime::multiagent::goal::current(ctx.harness).await {
+    match theway_core::multiagent::goal::current(ctx.harness).await {
         Some(state)
             if state.active()
-                || state.status == theway_core::runtime::multiagent::goal::GoalStatus::Achieved =>
+                || state.status == theway_core::multiagent::goal::GoalStatus::Achieved =>
         {
             cprintln!("goal: {}", state.condition);
             cprintln!("status: {}", state.status.as_str());

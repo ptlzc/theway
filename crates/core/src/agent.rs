@@ -1,7 +1,8 @@
-//! `Agent` state machine. Partial 1:1 port of `packages/agent/src/agent.ts` (~554 lines). The
-//! bare Agent owns conversation state (`AgentState`) and exposes
-//! `prompt()` / `continue()` / `subscribe()` / `abort()`. It never reaches into the filesystem
-//! — IO belongs to the harness or the caller.
+//! The single-agent runtime. The bare `Agent` state machine (this file) is always on —
+//! `prompt()` / `continue()` / `subscribe()` / `abort()`, no harness dependency. The
+//! harness layer (skills, sessions, compaction, permission, …) lives in the submodules
+//! below, behind `#[cfg(feature = "harness")]` (opt-out for embedders that only want the
+//! bare Agent). Orchestration builds on top in `crate::multiagent`.
 //!
 //! Implemented:
 //! - State container + getters/setters (Mutex-protected)
@@ -14,6 +15,40 @@
 //! - `onPayload` / `onResponse` SimpleStreamOptions surface
 //! - `transformContext` & `getApiKey` hooks (declared, wired up later)
 //! - `prepareNextTurn` model/thinking-level rewrite mid-run
+
+// Harness layer (feature-gated): the bare Agent stays always-on.
+#[cfg(feature = "harness")]
+pub mod agent_harness;
+#[cfg(feature = "harness")]
+pub mod compaction;
+#[cfg(feature = "harness")]
+pub mod cost;
+#[cfg(all(feature = "harness", feature = "native-env"))]
+pub mod env;
+#[cfg(feature = "harness")]
+pub mod hooks;
+#[cfg(feature = "harness")]
+pub mod messages;
+#[cfg(feature = "harness")]
+pub mod notification_hook;
+#[cfg(feature = "harness")]
+pub mod permission;
+#[cfg(feature = "harness")]
+pub mod prompt_templates;
+#[cfg(feature = "harness")]
+pub mod session;
+#[cfg(feature = "harness")]
+pub mod skills;
+#[cfg(feature = "harness")]
+pub mod system_prompt;
+#[cfg(feature = "harness")]
+pub mod trigger;
+#[cfg(feature = "harness")]
+pub mod trigger_runtime;
+#[cfg(feature = "harness")]
+pub mod types;
+#[cfg(feature = "harness")]
+pub mod utils;
 
 use std::sync::Arc;
 

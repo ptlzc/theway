@@ -21,8 +21,8 @@ pub mod health {
 
 use crate::ui::feed::{self, WebFeedBlock};
 use crate::wire::WebStatus;
-use theway_core::runtime::multiagent::graph::types::DagEvent;
-use theway_core::runtime::multiagent::registry::AgentJobEvent;
+use theway_core::multiagent::graph::types::DagEvent;
+use theway_core::multiagent::registry::AgentJobEvent;
 use theway_grpc as wire;
 
 /// Convert the internal snapshot into the structured wire model.

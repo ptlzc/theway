@@ -5360,7 +5360,7 @@ async fn on_turn_end_continuation_cap_emits_budget_limited_without_invoking_hook
 }
 
 // The in-harness `run_evaluator` API was removed in the multiagent rework: the goal
-// evaluator now runs as the goal run's node via `runtime::multiagent::runner::run_agent`
+// evaluator now runs as the goal run's node via `multiagent::runner::run_agent`
 // (tool-less judge, isolated in-memory session). Behavior is covered end-to-end in
 // `crates/server/tests/goal_hook_e2e.rs` (node job registration, transcript capture,
 // interrupt -> goal pause, parent-session isolation).

@@ -11,7 +11,7 @@
 use std::sync::Arc;
 
 use serde_json::json;
-use theway_core::runtime::multiagent::graph::engine::DagEngine;
+use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::{AgentTool, AgentToolResult, StreamFn};
 use theway_llm_provider::{
     AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, AssistantRole,
@@ -21,7 +21,7 @@ use tokio_util::sync::CancellationToken;
 
 // Tool modules under test, via the engine's lib surface (the `#[path]` include
 // trick is no longer needed — everything the e2e drives is pub API).
-use theway_core::runtime::multiagent::graph::node_launcher;
+use theway_core::multiagent::graph::node_launcher;
 use theway_core::tools::dag_tools;
 
 fn faux_model() -> theway_llm_provider::Model {
@@ -95,13 +95,13 @@ async fn dag_plan_wait_status_completes_2_node_dag_with_real_launcher() {
         faux_model(),
         Some(faux_stream("node result")),
         std::env::temp_dir(),
-        theway_core::runtime::multiagent::registry::AgentJobRegistry::new(),
+        theway_core::multiagent::registry::AgentJobRegistry::new(),
         // Tool-set resolver: subagents never call tools in this e2e (the faux model
         // stops after one turn), so an empty tool set per spec suffices.
         Arc::new(|_| Vec::new()),
         // Spec resolver: minimal app-side table (the plan uses `explorer`).
         Arc::new(|name: &str| {
-            let launch = theway_core::runtime::multiagent::types::AgentRunParams {
+            let launch = theway_core::multiagent::types::AgentRunParams {
                 name: "explorer",
                 description: "test",
                 system_prompt: "You are a test subagent.",

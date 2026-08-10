@@ -14,17 +14,15 @@ use theway::{
     history, inbox, local_models, logging, lsp_supervisor, mcp_loader, model, resume_picker,
     session, session_archive, skills, skills_state, templates, tools, triggers, ui,
 };
-use theway_core::runtime::{agent::hooks, multiagent::goal};
+use theway_core::{agent::hooks, multiagent::goal};
 
 use std::io::IsTerminal as _;
 use std::sync::{Arc, OnceLock};
 
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
-use theway_core::runtime::multiagent::graph::engine::DagEngine;
-use theway_core::runtime::multiagent::graph::persist::{
-    load_runs, save_runs, state_path_for_project,
-};
+use theway_core::multiagent::graph::engine::DagEngine;
+use theway_core::multiagent::graph::persist::{load_runs, save_runs, state_path_for_project};
 use theway_core::{
     AgentHarness, AgentHarnessOptions, AgentMessage, JsonlSessionRepo, PermissionPolicy,
     ThinkingLevel,
@@ -616,7 +614,7 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
     // Subagent job registry (graph mode): subagent tool + DAG node launches both register.
     // Finished jobs' full transcripts are persisted under `<cwd>/.pi/subagent-jobs`
     // (per-node files keyed run/node) so they survive a process restart.
-    let subagent_registry = theway_core::runtime::multiagent::registry::AgentJobRegistry::new();
+    let subagent_registry = theway_core::multiagent::registry::AgentJobRegistry::new();
     subagent_registry.set_messages_dir(Some(cwd.join(".pi").join("subagent-jobs")));
     dag_engine.set_launcher(Some(crate::tools::node_launcher(
         dag_engine.clone(),
@@ -1187,7 +1185,7 @@ struct SessionHarnessFactory {
     templates: Vec<theway_core::PromptTemplate>,
     memory_dir: std::path::PathBuf,
     dag_engine: Arc<DagEngine>,
-    subagent_registry: theway_core::runtime::multiagent::registry::AgentJobRegistry,
+    subagent_registry: theway_core::multiagent::registry::AgentJobRegistry,
     mcp_tools: Vec<Arc<dyn theway_core::AgentTool>>,
     mcp_notification_hooks: Vec<Arc<triggers::McpNotificationHook>>,
     dynamic_trigger_registry: triggers::dynamic::DynamicTriggerRegistry,

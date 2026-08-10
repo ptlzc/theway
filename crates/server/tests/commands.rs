@@ -43,8 +43,8 @@ mod config;
 #[path = "../src/export.rs"]
 mod export;
 #[allow(dead_code)]
-// goal moved into the engine (theway_core::runtime::multiagent::goal); the tests drive its pub API.
-use theway_core::runtime::multiagent::goal;
+// goal moved into the engine (theway_core::multiagent::goal); the tests drive its pub API.
+use theway_core::multiagent::goal;
 #[allow(dead_code)]
 #[path = "../src/history.rs"]
 mod history;
@@ -592,19 +592,17 @@ async fn goal_evaluator_false_returns_continuation_and_audits_reason() {
     let harness = Arc::new(AgentHarness::new(opts));
     let harness_cell = Arc::new(OnceLock::new());
     assert!(harness_cell.set(harness.clone()).is_ok());
-    let registry = theway_core::runtime::multiagent::registry::AgentJobRegistry::new();
+    let registry = theway_core::multiagent::registry::AgentJobRegistry::new();
     let hook = goal::stop_hook(
         harness_cell,
-        std::sync::Arc::new(theway_core::runtime::multiagent::graph::engine::DagEngine::new()),
+        std::sync::Arc::new(theway_core::multiagent::graph::engine::DagEngine::new()),
         std::sync::Arc::new(|name: &str| {
-            (name == "goal-evaluator").then_some(
-                theway_core::runtime::multiagent::types::AgentRunParams {
-                    name: "goal-evaluator",
-                    description: "test",
-                    system_prompt: goal::evaluator_system_prompt(),
-                    max_iterations: 1,
-                },
-            )
+            (name == "goal-evaluator").then_some(theway_core::multiagent::types::AgentRunParams {
+                name: "goal-evaluator",
+                description: "test",
+                system_prompt: goal::evaluator_system_prompt(),
+                max_iterations: 1,
+            })
         }),
         registry,
         Some(Arc::new(|_, _, _| {

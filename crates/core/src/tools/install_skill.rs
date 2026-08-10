@@ -39,7 +39,7 @@
 //!   window and JSON-RPC frame size.
 //! - Skill name: must come from the frontmatter `name:` field, must match
 //!   `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$` and be ≤ 64 chars (matches `validate_name` in
-//!   `theway_core::runtime::skills`). No path traversal characters reach the target
+//!   `theway_core::skills`). No path traversal characters reach the target
 //!   path.
 //! - Skill description: missing, empty, or oversized `description:` is normalized to a
 //!   bounded fallback and surfaced as a warning, not a hard install failure. The installed

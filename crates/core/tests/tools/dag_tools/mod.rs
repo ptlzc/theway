@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use theway_core::runtime::multiagent::graph::engine::{NodeLauncher, NodeOutcome};
-use theway_core::runtime::multiagent::graph::graph::node_summary_line;
+use theway_core::multiagent::graph::engine::{NodeLauncher, NodeOutcome};
+use theway_core::multiagent::graph::graph::node_summary_line;
 
 use super::*;
 

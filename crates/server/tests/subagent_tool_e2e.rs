@@ -35,8 +35,8 @@ fn faux_model() -> theway_llm_provider::Model {
     }
 }
 
-fn test_launch_resolver() -> theway_core::runtime::multiagent::types::AgentRunResolver {
-    let launch = theway_core::runtime::multiagent::types::AgentRunParams {
+fn test_launch_resolver() -> theway_core::multiagent::types::AgentRunResolver {
+    let launch = theway_core::multiagent::types::AgentRunParams {
         name: "general",
         description: "test",
         system_prompt: "You are a test subagent.",
@@ -83,7 +83,7 @@ async fn subagent_returns_final_text() {
         Arc::new(|_| Vec::new()),
         test_launch_resolver(),
         vec!["general".to_string()],
-        theway_core::runtime::multiagent::registry::AgentJobRegistry::new(),
+        theway_core::multiagent::registry::AgentJobRegistry::new(),
     );
     let res = tool
         .execute(
@@ -113,7 +113,7 @@ async fn subagent_unknown_type_errors() {
         Arc::new(|_| Vec::new()),
         test_launch_resolver(),
         vec!["general".to_string()],
-        theway_core::runtime::multiagent::registry::AgentJobRegistry::new(),
+        theway_core::multiagent::registry::AgentJobRegistry::new(),
     );
     let err = tool
         .execute(
@@ -139,7 +139,7 @@ async fn subagent_missing_prompt_errors() {
         Arc::new(|_| Vec::new()),
         test_launch_resolver(),
         vec!["general".to_string()],
-        theway_core::runtime::multiagent::registry::AgentJobRegistry::new(),
+        theway_core::multiagent::registry::AgentJobRegistry::new(),
     );
     let err = tool
         .execute("t-3", serde_json::json!({}), CancellationToken::new(), None)
@@ -167,7 +167,7 @@ async fn subagent_parent_abort_cascades() {
         Arc::new(|_| Vec::new()),
         test_launch_resolver(),
         vec!["general".to_string()],
-        theway_core::runtime::multiagent::registry::AgentJobRegistry::new(),
+        theway_core::multiagent::registry::AgentJobRegistry::new(),
     );
     let cancel = CancellationToken::new();
     let cancel2 = cancel.clone();
@@ -197,8 +197,8 @@ use std::sync::Arc as StdArc;
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::time::Duration;
 
-use theway_core::runtime::multiagent::registry::{AgentJobRegistry, JobStatus};
-use theway_core::runtime::multiagent::runner::{AgentRunOptions, run_agent};
+use theway_core::multiagent::registry::{AgentJobRegistry, JobStatus};
+use theway_core::multiagent::runner::{AgentRunOptions, run_agent};
 
 /// Per-call scripted stream: `(text, delay_ms)` for each LLM call; calls past the
 /// last entry repeat it. Empty text = stall `delay_ms` then end without emitting

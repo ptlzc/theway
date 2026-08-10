@@ -6,7 +6,7 @@
 //! Behavior (per issue #25 acceptance):
 //! - Looks the requested name up in the live `AgentHarness::skills()` snapshot.
 //! - On hit + enabled (`disable_model_invocation = false`): returns the body wrapped by
-//!   `theway_core::runtime::agent::skills::format_skill_invocation` as the tool result content.
+//!   `theway_core::agent::skills::format_skill_invocation` as the tool result content.
 //! - On hit + `disable_model_invocation = true`: returns a typed error regardless of caller
 //!   path. The model-facing schema deliberately has NO `force` parameter so the model cannot
 //!   bypass the disable flag (a future `/skill --force <name>` is a user-explicit follow-up

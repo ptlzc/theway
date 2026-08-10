@@ -2,9 +2,9 @@
 //! (dag_status / dag_inspect), harvest (dag_wait), intervene (dag_retry /
 //! dag_skip / dag_cancel). 1:1 port of the dag-orchestrator extension's
 //! `tools.ts`, driving the engine in
-//! `theway_core::runtime::multiagent::graph::engine` (which owns the
+//! `theway_core::multiagent::graph::engine` (which owns the
 //! scheduler/state machine; the real subagent launcher lives in
-//! `crate::runtime::multiagent::graph::node_launcher` and is wired in by the app layer).
+//! `crate::multiagent::graph::node_launcher` and is wired in by the app layer).
 //!
 //! Session isolation: runs are stamped with the owning pi session id, and every
 //! tool refuses runs owned by another session (multiple concurrent agents in
@@ -18,12 +18,12 @@ use std::time::Duration;
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use serde_json::{Value, json};
-use theway_core::runtime::multiagent::graph::engine::DagEngine;
-use theway_core::runtime::multiagent::graph::graph::{
+use theway_core::multiagent::graph::engine::DagEngine;
+use theway_core::multiagent::graph::graph::{
     dag_status_label, fmt_dur, node_status_label, parse_mermaid, render_mermaid, render_tree,
     run_summary_line,
 };
-use theway_core::runtime::multiagent::graph::types::{
+use theway_core::multiagent::graph::types::{
     DagNode, DagNodeDef, DagRun, DagRunDef, DagStatus, Direction, NodeStatus,
 };
 use theway_core::{AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate, ToolExecutionMode};

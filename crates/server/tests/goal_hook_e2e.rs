@@ -11,11 +11,11 @@ use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use theway_core::runtime::multiagent::goal;
-use theway_core::runtime::multiagent::graph::engine::DagEngine;
-use theway_core::runtime::multiagent::graph::types::RunKind;
-use theway_core::runtime::multiagent::registry::{AgentJobRegistry, JobStatus};
-use theway_core::runtime::multiagent::types::{AgentRunParams, AgentRunResolver};
+use theway_core::multiagent::goal;
+use theway_core::multiagent::graph::engine::DagEngine;
+use theway_core::multiagent::graph::types::RunKind;
+use theway_core::multiagent::registry::{AgentJobRegistry, JobStatus};
+use theway_core::multiagent::types::{AgentRunParams, AgentRunResolver};
 use theway_core::{
     AgentHarness, AgentHarnessOptions, AgentMessage, AgentTool, MemorySessionStorage, Session,
     SessionStorage, StreamFn, TurnEndAction,
@@ -251,7 +251,7 @@ async fn goal_evaluator_can_be_interrupted_via_node_control() {
     let run = engine.get_run("goal-1").expect("goal run exists");
     assert_eq!(
         run.status,
-        theway_core::runtime::multiagent::graph::types::DagStatus::Cancelled
+        theway_core::multiagent::graph::types::DagStatus::Cancelled
     );
 }
 

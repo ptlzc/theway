@@ -7,9 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use theway_core::runtime::multiagent::graph::types::{
-    DagNode, DagRun, Direction, NodeResult, NodeStatus,
-};
+use theway_core::multiagent::graph::types::{DagNode, DagRun, Direction, NodeResult, NodeStatus};
 
 #[derive(Clone, Debug)]
 pub struct WebOptions {
@@ -207,7 +205,7 @@ impl WebStatus {
 
 /// Convert one subagent job (registry state) into the wire snapshot form.
 pub fn subagent_job_snapshot(
-    job: &theway_core::runtime::multiagent::registry::AgentJob,
+    job: &theway_core::multiagent::registry::AgentJob,
 ) -> WebAgentJobSnapshot {
     WebAgentJobSnapshot {
         id: job.id.clone(),
@@ -228,9 +226,7 @@ pub fn subagent_job_snapshot(
         output_tokens: Some(job.output_tokens),
         error: job.error.clone(),
         output_tail: Some(job.output.clone()),
-        live_preview: if job.status
-            == theway_core::runtime::multiagent::registry::JobStatus::Running
-        {
+        live_preview: if job.status == theway_core::multiagent::registry::JobStatus::Running {
             Some(job.output.clone())
         } else {
             None
@@ -255,14 +251,12 @@ pub fn node_status_str(status: &NodeStatus) -> &'static str {
     }
 }
 
-pub fn dag_status_str(
-    status: &theway_core::runtime::multiagent::graph::types::DagStatus,
-) -> &'static str {
+pub fn dag_status_str(status: &theway_core::multiagent::graph::types::DagStatus) -> &'static str {
     match status {
-        theway_core::runtime::multiagent::graph::types::DagStatus::Running => "running",
-        theway_core::runtime::multiagent::graph::types::DagStatus::Completed => "completed",
-        theway_core::runtime::multiagent::graph::types::DagStatus::Failed => "failed",
-        theway_core::runtime::multiagent::graph::types::DagStatus::Cancelled => "cancelled",
+        theway_core::multiagent::graph::types::DagStatus::Running => "running",
+        theway_core::multiagent::graph::types::DagStatus::Completed => "completed",
+        theway_core::multiagent::graph::types::DagStatus::Failed => "failed",
+        theway_core::multiagent::graph::types::DagStatus::Cancelled => "cancelled",
     }
 }
 
