@@ -43,6 +43,8 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "serd
 uuid = { version = "1", features = ["v7", "serde"] }
 ignore = "0.4"
 regex = "1"
+# Vendored mermaid parse stage (mmdr 0.3.1) — see crates/mermaid-parser.
+mermaid-rs-parser = { path = "../mermaid-parser" }
 
 # Builtin tools (`tools/`). install_skill needs the HTTP client. Local-execution tools
 # (bash/fs/git/grep/find/ls/outline) and web tools live in the server crate (app layer);

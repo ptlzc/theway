@@ -90,11 +90,25 @@ pub fn fmt_dur(ms: i64) -> String {
 
 // ── mermaid parsing (input: dag_plan's `mermaid` param) ──────────────────────
 //
+// Layered design:
+//   1. preprocess() — dag_plan-subset line scan: classify lines (directive /
+//      node / edge / comment / unknown), extract declared ids, and normalize
+//      them for mmdr (hyphen ids like `impl-api` are core dag_plan syntax but
+//      the vendored parser treats `-` as edge syntax — map them to `_` here
+//      and back afterwards). Line-level diagnostics (with line numbers) are
+//      collected here, where the original regex parser reported them.
+//   2. mermaid_rs_parser (vendored mmdr parse stage) — parses the normalized
+//      text: standard mermaid labels/shapes, `&` multi-target, chains, `%%`.
+//   3. postprocess — map ids back, split `agent: task` labels, derive
+//      depends_on, and cross-check the mmdr node set against the declared
+//      ones (mmdr silently mangles unknown lines / stray commas — the check
+//      turns that into an explicit error).
+//
 // Supported subset (documented in the extension README):
-//   graph TD|LR  (or flowchart)
+//   graph TD|TB|LR (or flowchart)
 //   A["agent: task"]          node definition, label = "agent: task"
 //   A --> B                   edge
-//   A --> B, C                multi-target edges
+//   A --> B & C               multi-target edges (standard mermaid)
 //   A["agent: task"] --> B    node def + edge in one line
 //   A -.-> B                  dotted edge (same semantics)
 //   %% comment lines
@@ -109,11 +123,213 @@ static NODE_ONLY_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^([A-Za-z0-9_-]+)\s*(?:\[([^\]]*)\])?\s*$").unwrap());
 static TARGET_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\s*([A-Za-z0-9_-]+)\s*(?:\[([^\]]*)\])?\s*$").unwrap());
+/// Chain edge symbols — `A --> B --> C` is split on these before per-segment
+/// target parsing (mmdr handles chains natively; preprocess must see the
+/// same node set for its declared/consistency bookkeeping).
+static EDGE_SYM_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"-->|-\.->").unwrap());
+/// For malformed edge targets (e.g. stray commas) we still register the id
+/// prefix so downstream "missing task/agent" diagnostics fire, then error.
+static ID_PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([A-Za-z0-9_-]+)").unwrap());
 
 pub struct MermaidParseResult {
     pub direction: Direction,
     pub nodes: Vec<DagNodeDef>,
     pub errors: Vec<String>,
+}
+
+/// Split a target segment on `&` only when it is outside quotes (labels may
+/// legitimately contain `&`, e.g. `A["a: x & y"] --> B`).
+fn split_ampersand_outside_quotes(s: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut in_quote: Option<char> = None;
+    let mut start = 0;
+    let mut prev = '\0';
+    for (i, c) in s.char_indices() {
+        match in_quote {
+            Some(q) => {
+                if c == q && prev != '\\' {
+                    in_quote = None;
+                }
+            }
+            None => {
+                if c == '"' || c == '\'' {
+                    in_quote = Some(c);
+                } else if c == '&' {
+                    parts.push(&s[start..i]);
+                    start = i + 1;
+                }
+            }
+        }
+        prev = c;
+    }
+    parts.push(&s[start..]);
+    parts
+}
+
+struct Preprocessed {
+    /// mmdr-safe text (hyphen ids rewritten to underscores).
+    normalized: String,
+    /// normalized id → original id (inverse of the rewrite).
+    id_map: HashMap<String, String>,
+    /// declared node ids (normalized) in declaration order.
+    declared: Vec<String>,
+    /// ids that were declared WITH an explicit label (mmdr fills label-less
+    /// nodes with the id itself; we must not read that back as a task).
+    labeled: HashSet<String>,
+    errors: Vec<String>,
+    direction: Direction,
+}
+
+/// Map an original id to its mmdr-safe form, deduplicating collisions.
+fn map_id(
+    orig: &str,
+    id_map: &mut HashMap<String, String>,
+    reverse: &mut HashMap<String, String>,
+) -> String {
+    if let Some(n) = reverse.get(orig) {
+        return n.clone();
+    }
+    let mut n = if orig.contains('-') {
+        orig.replace('-', "_")
+    } else {
+        orig.to_string()
+    };
+    while id_map.contains_key(&n) {
+        n.push('_');
+    }
+    id_map.insert(n.clone(), orig.to_string());
+    reverse.insert(orig.to_string(), n.clone());
+    n
+}
+
+fn preprocess(text: &str) -> Preprocessed {
+    let mut out_lines: Vec<String> = Vec::new();
+    let mut id_map: HashMap<String, String> = HashMap::new();
+    let mut reverse: HashMap<String, String> = HashMap::new();
+    let mut declared: Vec<String> = Vec::new();
+    let mut labeled: HashSet<String> = HashSet::new();
+    let mut errors: Vec<String> = Vec::new();
+    let mut direction = Direction::Td;
+
+    for (i, raw) in text.replace("\r\n", "\n").split('\n').enumerate() {
+        let line_no = i + 1;
+        let line = match raw.find("%%") {
+            Some(p) => raw[..p].trim(),
+            None => raw.trim(),
+        };
+        if line.is_empty() {
+            continue;
+        }
+
+        if DIRECTIVE_RE.is_match(line) {
+            if line
+                .split_whitespace()
+                .any(|t| t.eq_ignore_ascii_case("LR"))
+            {
+                direction = Direction::Lr;
+            }
+            out_lines.push(line.to_string());
+            continue;
+        }
+
+        if EDGE_LINE_RE.is_match(line) {
+            // Split chains first: `A --> B --> C` → tokens [A, B, C]; each
+            // token may itself carry `&` multi-targets.
+            let mut tokens: Vec<&str> = Vec::new();
+            let mut last = 0usize;
+            for m in EDGE_SYM_RE.find_iter(line) {
+                tokens.push(line[last..m.start()].trim());
+                last = m.end();
+            }
+            tokens.push(line[last..].trim());
+            // Per-token target parsing → (normalized id, label).
+            let mut parts: Vec<Vec<(String, Option<String>)>> = Vec::new();
+            for token in &tokens {
+                let mut ids = Vec::new();
+                for seg in split_ampersand_outside_quotes(token) {
+                    let seg = seg.trim();
+                    if let Some(tm) = TARGET_RE.captures(seg) {
+                        let seg_id = tm.get(1).expect("capture 1").as_str();
+                        let seg_label = tm.get(2).map(|m| m.as_str());
+                        let norm = map_id(seg_id, &mut id_map, &mut reverse);
+                        if !declared.contains(&norm) {
+                            declared.push(norm.clone());
+                        }
+                        if seg_label.is_some() {
+                            labeled.insert(norm.clone());
+                        }
+                        ids.push((norm, seg_label.map(|l| l.to_string())));
+                    } else {
+                        // Malformed target (stray comma etc.): register the id
+                        // prefix so node-level diagnostics still fire, then error.
+                        if let Some(im) = ID_PREFIX_RE.captures(seg) {
+                            let seg_id = im.get(1).expect("capture 1").as_str();
+                            let norm = map_id(seg_id, &mut id_map, &mut reverse);
+                            if !declared.contains(&norm) {
+                                declared.push(norm.clone());
+                            }
+                            ids.push((norm, None));
+                        }
+                        errors.push(format!(
+                            "第 {line_no} 行: 无法解析目标节点 \"{}\"",
+                            seg.trim()
+                        ));
+                    }
+                }
+                parts.push(ids);
+            }
+            // Rebuild as one chain line; `-.->` and `-->` share dag_plan
+            // semantics (mmdr keeps the style, we don't consume it).
+            let mut rebuilt: Vec<String> = Vec::new();
+            for part in &parts {
+                let joined: Vec<String> = part
+                    .iter()
+                    .map(|(n, l)| match l {
+                        Some(l) => format!("{n}[{l}]"),
+                        None => n.clone(),
+                    })
+                    .collect();
+                if rebuilt.is_empty() {
+                    rebuilt.push(joined.join(" & "));
+                } else {
+                    rebuilt.push(format!(" --> {}", joined.join(" & ")));
+                }
+            }
+            out_lines.push(rebuilt.concat());
+            continue;
+        }
+
+        if let Some(caps) = NODE_ONLY_RE.captures(line) {
+            let id = caps.get(1).expect("capture 1").as_str();
+            let label = caps.get(2).map(|m| m.as_str());
+            let norm = map_id(id, &mut id_map, &mut reverse);
+            if !declared.contains(&norm) {
+                declared.push(norm.clone());
+            }
+            if label.is_some() {
+                labeled.insert(norm.clone());
+            }
+            out_lines.push(match label {
+                Some(l) => format!("{norm}[{l}]"),
+                None => norm,
+            });
+            continue;
+        }
+
+        let shown: String = line.chars().take(60).collect();
+        errors.push(format!(
+            "第 {line_no} 行: 无法解析 \"{shown}\" (仅支持 graph TD|LR、A[\"agent: task\"]、--> / -.-> 边)"
+        ));
+    }
+
+    Preprocessed {
+        normalized: out_lines.join("\n"),
+        id_map,
+        declared,
+        labeled,
+        errors,
+        direction,
+    }
 }
 
 /// Splits a label on the first colon (ASCII or fullwidth `：`); the agent part
@@ -150,129 +366,130 @@ fn split_label(raw: &str) -> (Option<String>, Option<String>) {
     }
 }
 
-fn register_node(
-    nodes: &mut Vec<DagNodeDef>,
-    index: &mut HashMap<String, usize>,
-    id: &str,
-    label_raw: Option<&str>,
-) {
-    let idx = match index.get(id) {
-        Some(&i) => i,
-        None => {
-            index.insert(id.to_string(), nodes.len());
+pub fn parse_mermaid(text: &str) -> MermaidParseResult {
+    let prep = preprocess(text);
+    let mut errors = prep.errors;
+
+    if !prep.declared.is_empty() {
+        let parsed = match mermaid_rs_parser::parse_mermaid(&prep.normalized) {
+            Ok(p) => p,
+            Err(e) => {
+                errors.push(format!("mermaid 解析失败: {e}"));
+                return MermaidParseResult {
+                    direction: prep.direction,
+                    nodes: Vec::new(),
+                    errors,
+                };
+            }
+        };
+        let graph = parsed.graph;
+        if graph.kind != mermaid_rs_parser::DiagramKind::Flowchart {
+            errors.push(format!(
+                "仅支持 flowchart (graph/flowchart), 收到 {:?}",
+                graph.kind
+            ));
+        }
+
+        // Cross-check: mmdr must produce exactly the declared node set. It
+        // silently mangles unknown lines and stray commas otherwise.
+        let parsed_ids: HashSet<&str> = graph.nodes.keys().map(|s| s.as_str()).collect();
+        let declared_ids: HashSet<&str> = prep.declared.iter().map(|s| s.as_str()).collect();
+        for id in &declared_ids {
+            if !parsed_ids.contains(id) {
+                errors.push(format!("节点 \"{}\" 未被解析器识别", id));
+            }
+        }
+        for id in &parsed_ids {
+            if !declared_ids.contains(id) {
+                errors.push(format!("解析出未声明的节点 \"{}\"", id));
+            }
+        }
+
+        // Assemble nodes in declaration order (mmdr's BTreeMap is sorted, the
+        // original parser kept declaration order).
+        let mut nodes: Vec<DagNodeDef> = Vec::new();
+        for norm in &prep.declared {
+            let orig = prep
+                .id_map
+                .get(norm)
+                .cloned()
+                .unwrap_or_else(|| norm.clone());
+            let label = if prep.labeled.contains(norm) {
+                graph
+                    .nodes
+                    .get(norm)
+                    .map(|n| n.label.clone())
+                    .unwrap_or_default()
+            } else {
+                // mmdr fills label-less nodes with the id itself; treat them
+                // as unlabeled so the agent/task diagnostics below fire.
+                String::new()
+            };
+            // Malformed label (mmdr swallowed a stray comma): surface it.
+            if label.contains('"') || label.contains(']') {
+                errors.push(format!("节点 \"{orig}\" 的 label 畸形 (含未闭合引号)"));
+            }
+            let (agent, task) = split_label(&label);
             nodes.push(DagNodeDef {
-                id: id.to_string(),
-                agent: String::new(),
-                task: String::new(),
+                id: orig,
+                agent: agent.unwrap_or_default(),
+                task: task.unwrap_or_default(),
                 depends_on: None,
                 timeout: None,
                 cwd: None,
                 model: None,
                 thinking: None,
             });
-            nodes.len() - 1
         }
-    };
-    if let Some(raw) = label_raw {
-        let (agent, task) = split_label(raw);
-        let node = &mut nodes[idx];
-        if let Some(a) = agent {
-            node.agent = a;
+
+        // Derive depends_on from edges (mmdr ids are the normalized form).
+        let mut deps_of: HashMap<String, Vec<String>> = HashMap::new();
+        for e in &graph.edges {
+            let from = prep
+                .id_map
+                .get(&e.from)
+                .cloned()
+                .unwrap_or_else(|| e.from.clone());
+            let to = prep
+                .id_map
+                .get(&e.to)
+                .cloned()
+                .unwrap_or_else(|| e.to.clone());
+            deps_of.entry(to).or_default().push(from);
         }
-        if let Some(t) = task {
-            node.task = t;
+        for node in &mut nodes {
+            let deps = deps_of.remove(&node.id).unwrap_or_default();
+            node.depends_on = if deps.is_empty() { None } else { Some(deps) };
+        }
+
+        // Node-level diagnostics (agent/task presence), same as before.
+        for n in &nodes {
+            if n.agent.is_empty() {
+                errors.push(format!(
+                    "节点 \"{}\" 的 label 需以 \"agent: task\" 格式 (如 A[\"explorer: 调研代码库\"])",
+                    n.id
+                ));
+            }
+            if n.task.is_empty() {
+                errors.push(format!("节点 \"{}\" 缺少 task 描述", n.id));
+            }
+        }
+
+        MermaidParseResult {
+            direction: prep.direction,
+            nodes,
+            errors,
+        }
+    } else {
+        // No declared nodes: comments/blank-only input. Nothing for mmdr to
+        // parse; keep the original empty-result behavior (no "missing header").
+        MermaidParseResult {
+            direction: prep.direction,
+            nodes: Vec::new(),
+            errors,
         }
     }
 }
-
-pub fn parse_mermaid(text: &str) -> MermaidParseResult {
-    let mut nodes: Vec<DagNodeDef> = Vec::new();
-    let mut index: HashMap<String, usize> = HashMap::new();
-    let mut edges: Vec<(String, String)> = Vec::new();
-    let mut errors: Vec<String> = Vec::new();
-    let mut direction = Direction::Td;
-
-    for (i, raw) in text.replace("\r\n", "\n").split('\n').enumerate() {
-        let line_no = i + 1;
-        let line = match raw.find("%%") {
-            Some(p) => raw[..p].trim(),
-            None => raw.trim(),
-        };
-        if line.is_empty() {
-            continue;
-        }
-
-        if DIRECTIVE_RE.is_match(line) {
-            if line
-                .split_whitespace()
-                .any(|t| t.eq_ignore_ascii_case("LR"))
-            {
-                direction = Direction::Lr;
-            }
-            continue;
-        }
-
-        if let Some(caps) = EDGE_LINE_RE.captures(line) {
-            let from_id = caps.get(1).expect("capture 1").as_str();
-            let from_label = caps.get(2).map(|m| m.as_str());
-            let rest = caps.get(3).expect("capture 3").as_str();
-            register_node(&mut nodes, &mut index, from_id, from_label);
-            for target_raw in rest.split(',') {
-                let Some(tm) = TARGET_RE.captures(target_raw) else {
-                    errors.push(format!(
-                        "第 {line_no} 行: 无法解析目标节点 \"{}\"",
-                        target_raw.trim()
-                    ));
-                    continue;
-                };
-                let to_id = tm.get(1).expect("capture 1").as_str();
-                let to_label = tm.get(2).map(|m| m.as_str());
-                register_node(&mut nodes, &mut index, to_id, to_label);
-                edges.push((from_id.to_string(), to_id.to_string()));
-            }
-            continue;
-        }
-
-        if let Some(caps) = NODE_ONLY_RE.captures(line) {
-            let id = caps.get(1).expect("capture 1").as_str();
-            let label = caps.get(2).map(|m| m.as_str());
-            register_node(&mut nodes, &mut index, id, label);
-            continue;
-        }
-
-        let shown: String = line.chars().take(60).collect();
-        errors.push(format!(
-            "第 {line_no} 行: 无法解析 \"{shown}\" (仅支持 graph TD|LR、A[\"agent: task\"]、--> / -.-> 边)"
-        ));
-    }
-
-    // Assemble: dependents derive from edges; keep declaration order stable.
-    let mut ordered: Vec<DagNodeDef> = Vec::new();
-    for mut n in nodes {
-        let deps: Vec<String> = edges
-            .iter()
-            .filter(|(_, to)| *to == n.id)
-            .map(|(from, _)| from.clone())
-            .collect();
-        n.depends_on = if deps.is_empty() { None } else { Some(deps) };
-        if n.agent.is_empty() {
-            errors.push(format!(
-                "节点 \"{}\" 的 label 需以 \"agent: task\" 格式 (如 A[\"explorer: 调研代码库\"])",
-                n.id
-            ));
-        }
-        if n.task.is_empty() {
-            errors.push(format!("节点 \"{}\" 缺少 task 描述", n.id));
-        }
-        ordered.push(n);
-    }
-    MermaidParseResult {
-        direction,
-        nodes: ordered,
-        errors,
-    }
-}
-
 // ── validation ───────────────────────────────────────────────────────────────
 
 pub fn validate_graph(nodes: &[DagNodeDef], known_agents: Option<&[String]>) -> Vec<String> {

@@ -38,7 +38,14 @@ drill into failures with `dag_inspect`, intervene with `dag_retry` / `dag_skip` 
 `dag_cancel`.
 
 Mermaid subset: `graph|flowchart TD|TB|LR`, node definitions `A["agent: task"]` (also
-`: ` full-width colon), edges `-->` / `-.->`, multi-target `A --> B, C`, `%%` comments.
+`: ` full-width colon), edges `-->` / `-.->`, multi-target `A --> B & C`, `%%` comments.
+
+Parsing is layered: a dag_plan-subset line scan (declaration order, hyphen ids like
+`impl-api` preserved) feeds the vendored [`mermaid-rs-parser`](crates/mermaid-parser)
+(extracted parse stage of mermaid-rs-renderer 0.3.1), then a postprocess maps ids
+back, splits `agent: task` labels, derives `depends_on`, and cross-checks the parsed
+node set against the declared one — mmdr's silent tolerance of unknown lines / stray
+commas surfaces as explicit line-numbered errors instead.
 
 ## Node execution
 

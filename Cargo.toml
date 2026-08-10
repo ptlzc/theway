@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/llm-provider",
+    "crates/mermaid-parser",
     "crates/core",
     "crates/server",
     "crates/mcp",
