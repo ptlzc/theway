@@ -4,6 +4,14 @@
 //! they observe `AgentEvent`s and run best-effort side effects (shell commands and/or HTTP
 //! webhooks). They never mutate agent state and failures are surfaced as diagnostics/logs,
 //! not prompt failures.
+//!
+//! Layout: [`event`] holds the hook event taxonomy and agent/harness-event → payload-data
+//! mapping; [`utils`] holds the execution and summary helpers shared by that mapping and
+//! the runner. This module keeps rule loading (`load`/`read_file`/`push_rules`) and the
+//! [`HookRunner`] execution logic.
+
+pub mod event;
+pub mod utils;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -12,14 +20,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use theway_core::{
-    AgentEvent, AgentListener, AgentMessage, HarnessEvent, HarnessListener, ThinkingLevel,
-};
+#[cfg(test)] // Only used by the bridged unit tests (`tests/agent/hooks`) via `use super::*`.
+use theway_core::AgentMessage;
+use theway_core::{AgentEvent, AgentListener, HarnessEvent, HarnessListener, ThinkingLevel};
 use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
+use event::{EventData, HookEvent, HookOutcome};
+use utils::{env_for, shell_arg, shell_program, write_payload_file};
+
 const DEFAULT_TIMEOUT_MS: u64 = 5_000;
-const MAX_SUMMARY_CHARS: usize = 2_000;
 
 /// The theway base dir: `${THEWAY_DIR}` or `~/.theway`. Inlined (not via the server's
 /// `config` module, which lives one layer up) so hooks stay engine-self-contained.
@@ -60,21 +70,6 @@ struct HookRule {
     on_failure: OnFailure,
     tool: Option<String>,
     source: String,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum HookEvent {
-    AgentStart,
-    AgentEnd,
-    TurnStart,
-    TurnEnd,
-    MessageStart,
-    MessageUpdate,
-    MessageEnd,
-    ToolStart,
-    ToolUpdate,
-    ToolEnd,
-    Compaction,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -124,39 +119,24 @@ struct HookRuleConfig {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct HookPayload {
-    event: String,
-    session_id: String,
-    cwd: String,
-    model_provider: String,
-    model_id: String,
-    thinking_level: String,
-    source: Option<String>,
-    message_kind: Option<String>,
-    message_summary: Option<String>,
-    assistant_event: Option<String>,
-    tool_call_id: Option<String>,
-    tool_name: Option<String>,
-    tool_is_error: Option<bool>,
-    tool_args: Option<serde_json::Value>,
-    tool_result_summary: Option<String>,
-    compaction_trigger: Option<String>,
-    compaction_tokens_before: Option<u64>,
-    compaction_summary: Option<String>,
-}
-
-struct EventData {
-    event: HookEvent,
-    message_kind: Option<String>,
-    message_summary: Option<String>,
-    assistant_event: Option<String>,
-    tool_call_id: Option<String>,
-    tool_name: Option<String>,
-    tool_is_error: Option<bool>,
-    tool_args: Option<serde_json::Value>,
-    tool_result_summary: Option<String>,
-    compaction_trigger: Option<String>,
-    compaction_tokens_before: Option<u64>,
-    compaction_summary: Option<String>,
+    pub(super) event: String,
+    pub(super) session_id: String,
+    pub(super) cwd: String,
+    pub(super) model_provider: String,
+    pub(super) model_id: String,
+    pub(super) thinking_level: String,
+    pub(super) source: Option<String>,
+    pub(super) message_kind: Option<String>,
+    pub(super) message_summary: Option<String>,
+    pub(super) assistant_event: Option<String>,
+    pub(super) tool_call_id: Option<String>,
+    pub(super) tool_name: Option<String>,
+    pub(super) tool_is_error: Option<bool>,
+    pub(super) tool_args: Option<serde_json::Value>,
+    pub(super) tool_result_summary: Option<String>,
+    pub(super) compaction_trigger: Option<String>,
+    pub(super) compaction_tokens_before: Option<u64>,
+    pub(super) compaction_summary: Option<String>,
 }
 
 pub async fn load(
@@ -505,15 +485,6 @@ impl HookRunner {
     }
 }
 
-/// Outcome of one `run_command` race. Lifted out of `tokio::select!` so the match below
-/// can spell the kill-tree path explicitly per branch rather than mixing it into the
-/// select arms.
-enum HookOutcome {
-    Completed(std::io::Result<std::process::Output>),
-    TimedOut,
-    Cancelled,
-}
-
 /// Best-effort SIGKILL of the hook child's whole process group on Unix. On non-Unix targets
 /// this is a no-op (the `kill_on_drop(true)` set on the `Command` is the only kill path
 /// when the wait future is dropped). The pid was snapshotted with `child.id()` before the
@@ -587,326 +558,6 @@ impl HookRule {
         }
         true
     }
-}
-
-impl HookEvent {
-    fn parse(s: &str) -> Option<Self> {
-        match s {
-            "agent_start" => Some(Self::AgentStart),
-            "agent_end" => Some(Self::AgentEnd),
-            "turn_start" => Some(Self::TurnStart),
-            "turn_end" => Some(Self::TurnEnd),
-            "message_start" => Some(Self::MessageStart),
-            "message_update" => Some(Self::MessageUpdate),
-            "message_end" => Some(Self::MessageEnd),
-            "tool_start" => Some(Self::ToolStart),
-            "tool_update" => Some(Self::ToolUpdate),
-            "tool_end" => Some(Self::ToolEnd),
-            "compaction" => Some(Self::Compaction),
-            _ => None,
-        }
-    }
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::AgentStart => "agent_start",
-            Self::AgentEnd => "agent_end",
-            Self::TurnStart => "turn_start",
-            Self::TurnEnd => "turn_end",
-            Self::MessageStart => "message_start",
-            Self::MessageUpdate => "message_update",
-            Self::MessageEnd => "message_end",
-            Self::ToolStart => "tool_start",
-            Self::ToolUpdate => "tool_update",
-            Self::ToolEnd => "tool_end",
-            Self::Compaction => "compaction",
-        }
-    }
-}
-
-impl EventData {
-    fn from_agent_event(event: &AgentEvent) -> Option<Self> {
-        match event {
-            AgentEvent::AgentStart => Some(Self::basic(HookEvent::AgentStart)),
-            AgentEvent::AgentEnd { .. } => Some(Self::basic(HookEvent::AgentEnd)),
-            AgentEvent::TurnStart => Some(Self::basic(HookEvent::TurnStart)),
-            AgentEvent::TurnEnd { message, .. } => {
-                let mut d = Self::basic(HookEvent::TurnEnd);
-                d.message_kind = Some(message_kind(message));
-                d.message_summary = Some(message_summary(message));
-                Some(d)
-            }
-            AgentEvent::MessageStart { message } => {
-                let mut d = Self::basic(HookEvent::MessageStart);
-                d.message_kind = Some(message_kind(message));
-                d.message_summary = Some(message_summary(message));
-                Some(d)
-            }
-            AgentEvent::MessageUpdate {
-                message,
-                assistant_message_event,
-            } => {
-                let mut d = Self::basic(HookEvent::MessageUpdate);
-                d.message_kind = Some(message_kind(message));
-                d.message_summary = Some(message_summary(message));
-                d.assistant_event = Some(assistant_event_name(assistant_message_event).into());
-                Some(d)
-            }
-            AgentEvent::MessageEnd { message } => {
-                let mut d = Self::basic(HookEvent::MessageEnd);
-                d.message_kind = Some(message_kind(message));
-                d.message_summary = Some(message_summary(message));
-                Some(d)
-            }
-            AgentEvent::ToolExecutionStart {
-                tool_call_id,
-                tool_name,
-                args,
-            } => {
-                let mut d = Self::basic(HookEvent::ToolStart);
-                d.tool_call_id = Some(tool_call_id.clone());
-                d.tool_name = Some(tool_name.clone());
-                d.tool_args = Some(args.clone());
-                Some(d)
-            }
-            AgentEvent::ToolExecutionUpdate {
-                tool_call_id,
-                tool_name,
-                args,
-                partial_result,
-            } => {
-                let mut d = Self::basic(HookEvent::ToolUpdate);
-                d.tool_call_id = Some(tool_call_id.clone());
-                d.tool_name = Some(tool_name.clone());
-                d.tool_args = Some(args.clone());
-                d.tool_result_summary = Some(result_summary(partial_result));
-                Some(d)
-            }
-            AgentEvent::ToolExecutionEnd {
-                tool_call_id,
-                tool_name,
-                result,
-                is_error,
-            } => {
-                let mut d = Self::basic(HookEvent::ToolEnd);
-                d.tool_call_id = Some(tool_call_id.clone());
-                d.tool_name = Some(tool_name.clone());
-                d.tool_is_error = Some(*is_error);
-                d.tool_result_summary = Some(result_summary(result));
-                Some(d)
-            }
-            // Issue #110: control-plane prompt observability event. Embedder-side
-            // hook-script bridge does not currently surface this; defer to a follow-up
-            // PR once we have a concrete bridge consumer that wants it.
-            AgentEvent::ControlPlanePromptResolved { .. } => None,
-        }
-    }
-
-    fn basic(event: HookEvent) -> Self {
-        Self {
-            event,
-            message_kind: None,
-            message_summary: None,
-            assistant_event: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_is_error: None,
-            tool_args: None,
-            tool_result_summary: None,
-            compaction_trigger: None,
-            compaction_tokens_before: None,
-            compaction_summary: None,
-        }
-    }
-
-    fn from_harness_event(event: &HarnessEvent) -> Option<Self> {
-        match event {
-            HarnessEvent::Compaction {
-                from_hook,
-                summary,
-                tokens_before,
-            } => {
-                let mut d = Self::basic(HookEvent::Compaction);
-                d.compaction_trigger = Some(compaction_trigger(*from_hook).into());
-                d.compaction_tokens_before = Some(*tokens_before);
-                d.compaction_summary = Some(truncate(summary));
-                Some(d)
-            }
-            HarnessEvent::SessionStart { .. }
-            | HarnessEvent::Branch { .. }
-            | HarnessEvent::PersistenceError { .. }
-            | HarnessEvent::TurnEnded { .. }
-            | HarnessEvent::SkillsReloaded { .. } => None,
-        }
-    }
-}
-
-fn compaction_trigger(from_hook: bool) -> &'static str {
-    // In current AgentHarness call sites, true is the explicit `force_compact` path used by
-    // `/compact`; false is the threshold-based automatic compaction path.
-    if from_hook { "manual" } else { "auto" }
-}
-
-fn env_for(payload: &HookPayload, payload_path: &Path) -> BTreeMap<String, String> {
-    let mut env = BTreeMap::new();
-    env.insert("THEWAY_HOOK_EVENT".into(), payload.event.clone());
-    env.insert(
-        "THEWAY_HOOK_PAYLOAD".into(),
-        payload_path.display().to_string(),
-    );
-    env.insert("THEWAY_SESSION_ID".into(), payload.session_id.clone());
-    env.insert("THEWAY_CWD".into(), payload.cwd.clone());
-    env.insert(
-        "THEWAY_MODEL_PROVIDER".into(),
-        payload.model_provider.clone(),
-    );
-    env.insert("THEWAY_MODEL_ID".into(), payload.model_id.clone());
-    env.insert(
-        "THEWAY_THINKING_LEVEL".into(),
-        payload.thinking_level.clone(),
-    );
-    if let Some(v) = &payload.message_kind {
-        env.insert("THEWAY_MESSAGE_KIND".into(), v.clone());
-    }
-    if let Some(v) = &payload.assistant_event {
-        env.insert("THEWAY_ASSISTANT_EVENT".into(), v.clone());
-    }
-    if let Some(v) = &payload.tool_call_id {
-        env.insert("THEWAY_TOOL_CALL_ID".into(), v.clone());
-    }
-    if let Some(v) = &payload.tool_name {
-        env.insert("THEWAY_TOOL_NAME".into(), v.clone());
-    }
-    if let Some(v) = payload.tool_is_error {
-        env.insert("THEWAY_TOOL_IS_ERROR".into(), v.to_string());
-    }
-    if let Some(v) = &payload.compaction_trigger {
-        env.insert("THEWAY_COMPACTION_TRIGGER".into(), v.clone());
-    }
-    if let Some(v) = payload.compaction_tokens_before {
-        env.insert("THEWAY_COMPACTION_TOKENS_BEFORE".into(), v.to_string());
-    }
-    env
-}
-
-async fn write_payload_file(payload_json: &str) -> anyhow::Result<PathBuf> {
-    let dir = std::env::temp_dir().join("theway-hooks");
-    tokio::fs::create_dir_all(&dir).await?;
-    let path = dir.join(format!("{}.json", uuid::Uuid::new_v4()));
-    tokio::fs::write(&path, payload_json).await?;
-    Ok(path)
-}
-
-fn message_kind(message: &AgentMessage) -> String {
-    match message {
-        AgentMessage::Llm(theway_llm_provider::Message::User(_)) => "user".into(),
-        AgentMessage::Llm(theway_llm_provider::Message::Assistant(_)) => "assistant".into(),
-        AgentMessage::Llm(theway_llm_provider::Message::ToolResult(_)) => "tool_result".into(),
-        AgentMessage::Custom(c) => c.role.clone(),
-    }
-}
-
-fn message_summary(message: &AgentMessage) -> String {
-    let text = match message {
-        AgentMessage::Llm(theway_llm_provider::Message::User(u)) => match &u.content {
-            theway_llm_provider::UserContent::Text(t) => t.clone(),
-            theway_llm_provider::UserContent::Blocks(blocks) => blocks
-                .iter()
-                .map(|b| match b {
-                    theway_llm_provider::UserContentBlock::Text(t) => t.text.clone(),
-                    theway_llm_provider::UserContentBlock::Image(i) => {
-                        format!("<image {}>", i.mime_type)
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n"),
-        },
-        AgentMessage::Llm(theway_llm_provider::Message::Assistant(a)) => a
-            .content
-            .iter()
-            .map(|b| match b {
-                theway_llm_provider::ContentBlock::Text(t) => t.text.clone(),
-                theway_llm_provider::ContentBlock::Thinking(_) => "<thinking>".into(),
-                theway_llm_provider::ContentBlock::ToolCall(tc) => {
-                    format!("<tool_call {}>", tc.name)
-                }
-                theway_llm_provider::ContentBlock::Image(i) => format!("<image {}>", i.mime_type),
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
-        AgentMessage::Llm(theway_llm_provider::Message::ToolResult(t)) => t
-            .content
-            .iter()
-            .map(|b| match b {
-                theway_llm_provider::UserContentBlock::Text(t) => t.text.clone(),
-                theway_llm_provider::UserContentBlock::Image(i) => {
-                    format!("<image {}>", i.mime_type)
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
-        AgentMessage::Custom(c) => serde_json::to_string(&c.payload).unwrap_or_default(),
-    };
-    truncate(&text)
-}
-
-fn result_summary(result: &theway_core::AgentToolResult) -> String {
-    let text = result
-        .content
-        .iter()
-        .map(|b| match b {
-            theway_llm_provider::UserContentBlock::Text(t) => t.text.clone(),
-            theway_llm_provider::UserContentBlock::Image(i) => format!("<image {}>", i.mime_type),
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    truncate(&text)
-}
-
-fn assistant_event_name(ev: &theway_llm_provider::AssistantMessageEvent) -> &'static str {
-    match ev {
-        theway_llm_provider::AssistantMessageEvent::Start { .. } => "start",
-        theway_llm_provider::AssistantMessageEvent::TextStart { .. } => "text_start",
-        theway_llm_provider::AssistantMessageEvent::TextDelta { .. } => "text_delta",
-        theway_llm_provider::AssistantMessageEvent::TextEnd { .. } => "text_end",
-        theway_llm_provider::AssistantMessageEvent::ThinkingStart { .. } => "thinking_start",
-        theway_llm_provider::AssistantMessageEvent::ThinkingDelta { .. } => "thinking_delta",
-        theway_llm_provider::AssistantMessageEvent::ThinkingEnd { .. } => "thinking_end",
-        theway_llm_provider::AssistantMessageEvent::ToolCallStart { .. } => "tool_call_start",
-        theway_llm_provider::AssistantMessageEvent::ToolCallDelta { .. } => "tool_call_delta",
-        theway_llm_provider::AssistantMessageEvent::ToolCallEnd { .. } => "tool_call_end",
-        theway_llm_provider::AssistantMessageEvent::Done { .. } => "done",
-        theway_llm_provider::AssistantMessageEvent::Error { .. } => "error",
-    }
-}
-
-fn truncate(s: &str) -> String {
-    if s.chars().count() <= MAX_SUMMARY_CHARS {
-        return s.to_string();
-    }
-    let mut out = s.chars().take(MAX_SUMMARY_CHARS).collect::<String>();
-    out.push('…');
-    out
-}
-
-#[cfg(unix)]
-fn shell_program() -> &'static str {
-    "sh"
-}
-
-#[cfg(unix)]
-fn shell_arg() -> &'static str {
-    "-c"
-}
-
-#[cfg(windows)]
-fn shell_program() -> &'static str {
-    "cmd"
-}
-
-#[cfg(windows)]
-fn shell_arg() -> &'static str {
-    "/C"
 }
 
 #[cfg(test)]
