@@ -4,24 +4,30 @@
 //! retry/skip/cancel/wait. 1:1 port of the dag-orchestrator extension's
 //! `engine.ts`; execution is delegated to a `NodeLauncher` (implemented by
 //! the coding-agent side — the engine only schedules).
+//!
+//! Module layout: registry/goal/intervention API lives here; scheduling and
+//! run-lifecycle methods live in [`run`]; small state-machine helpers live in
+//! [`helpers`].
+
+pub mod helpers;
+pub mod run;
 
 use std::collections::HashMap;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
-use std::time::Duration;
 
-use futures::future::join_all;
 use parking_lot::Mutex;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
-use super::graph::{
-    build_run, downstream_closure, is_blocked, is_terminal, now_ms, validate_graph,
-};
-use super::persist::{PersistedRun, hydrate, max_run_counter};
+use super::graph::{build_run, downstream_closure, is_blocked, now_ms, validate_graph};
+// Glob-imported by the bridged tests (`tests/multiagent/graph/engine/`).
+#[cfg(test)]
+use super::persist::PersistedRun;
 use super::types::{
-    DagEvent, DagNode, DagRun, DagRunDef, DagStatus, Direction, NodeResult, NodeStatus, RunKind,
+    DagEvent, DagNode, DagRun, DagRunDef, DagStatus, Direction, NodeStatus, RunKind,
 };
+
+use helpers::{cap_chars, emit_state, push_unique, reset_node, run_counter};
 
 /// Node execution result reported by the launcher when the subagent job ends.
 #[derive(Clone, Debug)]
@@ -48,18 +54,18 @@ pub struct DagEngine {
     inner: Arc<Mutex<EngineInner>>,
 }
 
-struct EngineInner {
-    runs: HashMap<String, DagRun>,
-    dag_counter: u64,
+pub(super) struct EngineInner {
+    pub(super) runs: HashMap<String, DagRun>,
+    pub(super) dag_counter: u64,
     /// Independent id sequence for goal runs (goal-N, self-loop semantics).
-    goal_counter: u64,
-    launcher: Option<Arc<dyn NodeLauncher>>,
+    pub(super) goal_counter: u64,
+    pub(super) launcher: Option<Arc<dyn NodeLauncher>>,
     /// Event-plane broadcast (node_status / run_status). `None` = detached.
-    events: Option<tokio::sync::broadcast::Sender<DagEvent>>,
+    pub(super) events: Option<tokio::sync::broadcast::Sender<DagEvent>>,
     /// Abort tokens for in-flight nodes, keyed by (run_id, node_id).
-    jobs: HashMap<(String, String), CancellationToken>,
+    pub(super) jobs: HashMap<(String, String), CancellationToken>,
     /// Condition variable per run for `wait_for_runs` (created on demand).
-    waiters: HashMap<String, Arc<Notify>>,
+    pub(super) waiters: HashMap<String, Arc<Notify>>,
 }
 
 impl Clone for DagEngine {
@@ -112,7 +118,7 @@ impl DagEngine {
     }
 
     /// Broadcast an event-plane message (no-op without a sender).
-    fn emit(&self, event: DagEvent) {
+    pub(super) fn emit(&self, event: DagEvent) {
         if let Some(tx) = self.inner.lock().events.clone() {
             let _ = tx.send(event);
         }
@@ -380,270 +386,6 @@ impl DagEngine {
             .cloned()
     }
 
-    // ── scheduling ──────────────────────────────────────────────────────────
-
-    /// Launch every eligible ready node within the concurrency budget.
-    fn tick(&self, run_id: &str) {
-        loop {
-            let next = {
-                let inner = self.inner.lock();
-                let Some(run) = inner.runs.get(run_id) else {
-                    return;
-                };
-                if run.status != DagStatus::Running {
-                    return;
-                }
-                let running = run
-                    .nodes
-                    .iter()
-                    .filter(|n| n.status == NodeStatus::Running)
-                    .count();
-                if running >= run.max_concurrency {
-                    return;
-                }
-                match run.nodes.iter().find(|n| n.status == NodeStatus::Ready) {
-                    Some(n) => Some(n.id.clone()),
-                    None => return,
-                }
-            };
-            match next {
-                Some(id) => self.start_node(run_id, &id),
-                None => return,
-            }
-        }
-    }
-
-    fn start_node(&self, run_id: &str, node_id: &str) {
-        let (launcher, token) = {
-            let mut inner = self.inner.lock();
-            let Some(run) = inner.runs.get_mut(run_id) else {
-                return;
-            };
-            let Some(node) = run.node_mut(node_id) else {
-                return;
-            };
-            // Concurrent ticks can both pick the same ready node; only the
-            // first wins (the TS original is single-threaded).
-            if node.status != NodeStatus::Ready {
-                return;
-            }
-            node.status = NodeStatus::Running;
-            node.started_at = Some(now_ms());
-            node.job_id = Some(format!("job-{}-{}", run_id, node_id));
-            let token = CancellationToken::new();
-            emit_state(run);
-            // MutexGuard does not split field borrows: touch `jobs` only
-            // after the `run` borrow has ended (NLL).
-            inner
-                .jobs
-                .insert((run_id.to_string(), node_id.to_string()), token.clone());
-            (inner.launcher.clone(), token)
-        };
-        match launcher {
-            None => {
-                // No launch context (tests / misconfiguration): fail now.
-                self.on_node_completed(
-                    run_id,
-                    node_id,
-                    NodeOutcome {
-                        success: false,
-                        error: Some("no launch context".to_string()),
-                        duration_ms: 0,
-                        attempt: 0,
-                        total_attempts: 0,
-                        input_tokens: 0,
-                        output_tokens: 0,
-                        output: None,
-                    },
-                );
-            }
-            Some(launcher) => {
-                let result =
-                    catch_unwind(AssertUnwindSafe(|| launcher.launch(run_id, node_id, token)));
-                if let Err(panic) = result {
-                    self.on_node_completed(
-                        run_id,
-                        node_id,
-                        NodeOutcome {
-                            success: false,
-                            error: Some(panic_message(&panic)),
-                            duration_ms: 0,
-                            attempt: 0,
-                            total_attempts: 0,
-                            input_tokens: 0,
-                            output_tokens: 0,
-                            output: None,
-                        },
-                    );
-                }
-            }
-        }
-    }
-
-    /// Launcher callback: a node's subagent job ended with `outcome`.
-    pub fn on_node_completed(&self, run_id: &str, node_id: &str, outcome: NodeOutcome) {
-        let applied = {
-            let mut inner = self.inner.lock();
-            let Some(run) = inner.runs.get_mut(run_id) else {
-                return;
-            };
-            let Some(node) = run.node_mut(node_id) else {
-                return;
-            };
-            // Stale report (node was cancelled/skipped/retried meanwhile).
-            if node.status != NodeStatus::Running {
-                return;
-            }
-            node.completed_at = Some(now_ms());
-            if outcome.success {
-                node.status = NodeStatus::Succeeded;
-                node.error = None;
-            } else {
-                node.status = NodeStatus::Failed;
-                node.error = Some(
-                    outcome
-                        .error
-                        .clone()
-                        .unwrap_or_else(|| "no result".to_string()),
-                );
-            }
-            node.result = Some(NodeResult {
-                success: outcome.success,
-                error: outcome.error.clone(),
-                duration_ms: Some(outcome.duration_ms),
-                attempt: outcome.attempt,
-                total_attempts: outcome.total_attempts,
-            });
-            node.attempt = node.attempt.max(outcome.total_attempts);
-            node.input_tokens = Some(outcome.input_tokens);
-            node.output_tokens = Some(outcome.output_tokens);
-            if outcome.output.is_some() {
-                node.output = outcome.output;
-            }
-            let status = node.status.clone();
-            let error = node.error.clone();
-            emit_state(run);
-            let event = DagEvent::NodeStatus {
-                run_id: run_id.to_string(),
-                session_id: run.session_id.clone().unwrap_or_default(),
-                node_id: node_id.to_string(),
-                status,
-                error,
-            };
-            // `run` borrow ends here (NLL) — jobs map is a separate field.
-            inner
-                .jobs
-                .remove(&(run_id.to_string(), node_id.to_string()));
-            (true, event)
-        };
-        if applied.0 {
-            self.emit(applied.1);
-            self.after_node_terminal(run_id, node_id);
-        }
-    }
-
-    /// Live token/preview sync while a node is running (mirrors the TS job
-    /// update handler; refreshes the idle watchdog clock).
-    pub fn on_node_update(
-        &self,
-        run_id: &str,
-        node_id: &str,
-        input_tokens: Option<u64>,
-        output_tokens: Option<u64>,
-        preview: Option<String>,
-    ) {
-        let mut inner = self.inner.lock();
-        let Some(run) = inner.runs.get_mut(run_id) else {
-            return;
-        };
-        run.last_activity_at = now_ms();
-        let Some(node) = run.node_mut(node_id) else {
-            return;
-        };
-        if let Some(t) = input_tokens {
-            node.input_tokens = Some(t);
-        }
-        if let Some(t) = output_tokens {
-            node.output_tokens = Some(t);
-        }
-        if let Some(p) = preview {
-            node.live_preview = Some(cap_chars(&p, 2048));
-        }
-        node.last_active_at = Some(now_ms());
-    }
-
-    /// Re-derive non-terminal node states after a dependency flipped.
-    fn reconcile(&self, run_id: &str) {
-        let mut inner = self.inner.lock();
-        let Some(run) = inner.runs.get_mut(run_id) else {
-            return;
-        };
-        super::graph::reconcile(run);
-        emit_state(run);
-    }
-
-    /// Common post-terminal-node processing: failFast abort, cascade,
-    /// schedule, maybe finish.
-    fn after_node_terminal(&self, run_id: &str, node_id: &str) {
-        let (fail_fast, failed) = {
-            let inner = self.inner.lock();
-            let Some(run) = inner.runs.get(run_id) else {
-                return;
-            };
-            let failed = run
-                .node(node_id)
-                .map(|n| n.status == NodeStatus::Failed)
-                .unwrap_or(false);
-            (run.fail_fast, failed)
-        };
-        if failed && fail_fast {
-            self.cancel_run(
-                run_id,
-                Some(&format!("failFast: 节点 {node_id} 失败, 终止整个运行")),
-            );
-            return;
-        }
-        self.reconcile(run_id);
-        self.tick(run_id);
-        self.maybe_complete(run_id);
-    }
-
-    /// Terminal when every node is terminal; sets run status failed/completed.
-    pub fn maybe_complete(&self, run_id: &str) {
-        let terminal = {
-            let mut inner = self.inner.lock();
-            let Some(run) = inner.runs.get_mut(run_id) else {
-                return;
-            };
-            if run.status != DagStatus::Running || !run.nodes.iter().all(|n| is_terminal(&n.status))
-            {
-                None
-            } else {
-                let has_failure = run
-                    .nodes
-                    .iter()
-                    .any(|n| matches!(n.status, NodeStatus::Failed | NodeStatus::Cancelled));
-                run.status = if has_failure {
-                    DagStatus::Failed
-                } else {
-                    DagStatus::Completed
-                };
-                run.completed_at = Some(now_ms());
-                emit_state(run);
-                Some(DagEvent::RunStatus {
-                    run_id: run_id.to_string(),
-                    session_id: run.session_id.clone().unwrap_or_default(),
-                    status: run.status.clone(),
-                    error: run.error.clone(),
-                })
-            }
-        };
-        if let Some(event) = terminal {
-            self.emit(event);
-            self.wake_waiters(run_id);
-        }
-    }
-
     // ── intervention ────────────────────────────────────────────────────────
 
     /// Abort the whole run: in-flight jobs killed, pending/ready cancelled.
@@ -842,125 +584,6 @@ impl DagEngine {
         ids.len()
     }
 
-    /// Resume persisted runs (running nodes demoted to ready and re-scheduled
-    /// by tick). Skips ids already registered; aligns the dag-N counter.
-    /// Returns the restored run ids.
-    pub fn restore(&self, runs: Vec<PersistedRun>) -> Vec<String> {
-        let mut restored: Vec<String> = Vec::new();
-        {
-            let mut inner = self.inner.lock();
-            for p in runs {
-                if inner.runs.contains_key(&p.id) {
-                    continue;
-                }
-                let run = hydrate(p);
-                inner.dag_counter = inner
-                    .dag_counter
-                    .max(max_run_counter(std::slice::from_ref(&run)));
-                let id = run.id.clone();
-                inner.runs.insert(id.clone(), run);
-                restored.push(id);
-            }
-        }
-        for id in &restored {
-            self.reconcile(id);
-            self.tick(id);
-        }
-        restored
-    }
-
-    // ── waiting ─────────────────────────────────────────────────────────────
-
-    /// Block until each run reaches a terminal state (event-driven, no
-    /// polling). One shared deadline for all runs; `(id, true)` means the run
-    /// was still running when the timeout / idle watchdog fired.
-    pub async fn wait_for_runs(
-        &self,
-        run_ids: &[String],
-        timeout: Duration,
-        idle: Option<Duration>,
-    ) -> Vec<(String, bool)> {
-        if run_ids.is_empty() {
-            return Vec::new();
-        }
-        let deadline = tokio::time::Instant::now() + timeout;
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        let waiters: Vec<_> = run_ids
-            .iter()
-            .map(|id| {
-                let engine = self.clone();
-                let id = id.clone();
-                async move { engine.wait_for_run(&id, remaining, idle).await }
-            })
-            .collect();
-        join_all(waiters).await
-    }
-
-    /// Condition-variable loop, deadline-bounded; re-checks terminal state
-    /// every wake so a missed notify (notify_waiters raced our park) is
-    /// harmless — we fall through to the next sleep.
-    async fn wait_for_run(
-        &self,
-        run_id: &str,
-        timeout: Duration,
-        idle: Option<Duration>,
-    ) -> (String, bool) {
-        self.maybe_complete(run_id);
-        let deadline = tokio::time::Instant::now() + timeout;
-        loop {
-            let terminal = {
-                let inner = self.inner.lock();
-                match inner.runs.get(run_id) {
-                    Some(run) => run.status != DagStatus::Running,
-                    // Unknown run: treat as already finished (defensive close).
-                    None => true,
-                }
-            };
-            if terminal {
-                return (run_id.to_string(), false);
-            }
-            let now = tokio::time::Instant::now();
-            if now >= deadline {
-                return (run_id.to_string(), true);
-            }
-            let last_activity = {
-                let inner = self.inner.lock();
-                inner
-                    .runs
-                    .get(run_id)
-                    .map(|r| r.last_activity_at)
-                    .unwrap_or(now_ms())
-            };
-            let mut sleep = deadline - now;
-            if let Some(idle_dur) = idle {
-                let idle_ms = idle_dur.as_millis() as i64;
-                let idle_elapsed = (now_ms() - last_activity).max(0);
-                if idle_elapsed >= idle_ms {
-                    return (run_id.to_string(), true);
-                }
-                sleep = sleep.min(Duration::from_millis((idle_ms - idle_elapsed) as u64));
-            }
-            let notify = self
-                .inner
-                .lock()
-                .waiters
-                .entry(run_id.to_string())
-                .or_default()
-                .clone();
-            tokio::select! {
-                _ = tokio::time::sleep(sleep) => {}
-                _ = notify.notified() => {}
-            }
-        }
-    }
-
-    fn wake_waiters(&self, run_id: &str) {
-        let notify = self.inner.lock().waiters.get(run_id).cloned();
-        if let Some(notify) = notify {
-            notify.notify_waiters();
-        }
-    }
-
     /// Test-only: clear all engine state.
     pub fn __reset_for_tests(&self) {
         let mut inner = self.inner.lock();
@@ -974,61 +597,8 @@ impl DagEngine {
     }
 }
 
-// ── helpers ─────────────────────────────────────────────────────────────────
-
-/// TS `emitState` equivalent: stamp last activity (drives the idle watchdog).
-/// State listeners (widget push) are a p3 concern, not wired here yet.
-fn emit_state(run: &mut DagRun) {
-    run.last_activity_at = now_ms();
-}
-
-/// Revert a blocked node to pending (retry/skip replay).
-fn reset_node(n: &mut DagNode) {
-    n.status = NodeStatus::Pending;
-    n.started_at = None;
-    n.completed_at = None;
-    n.error = None;
-    n.job_id = None;
-    n.result = None;
-    n.attempt = 0;
-    n.input_tokens = None;
-    n.output_tokens = None;
-}
-
-fn push_unique(vec: &mut Vec<String>, id: &str) {
-    if !vec.iter().any(|v| v == id) {
-        vec.push(id.to_string());
-    }
-}
-
-/// "dag-12" → 12 (0 for anything else) — list_runs tie-breaker.
-fn run_counter(id: &str) -> u64 {
-    id.strip_prefix("dag-")
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(0)
-}
-
-/// Char-safe truncation for live previews (TS `updatePreview` caps ~2 KB).
-fn cap_chars(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
-        text.to_string()
-    } else {
-        text.chars().take(max).collect()
-    }
-}
-
-fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
-    if let Some(s) = panic.downcast_ref::<&str>() {
-        (*s).to_string()
-    } else if let Some(s) = panic.downcast_ref::<String>() {
-        s.clone()
-    } else {
-        "launcher panicked".to_string()
-    }
-}
-
 #[cfg(test)]
-// Test files live in `tests/runtime/multiagent/graph/engine/` (mirror of
-// `src/runtime/multiagent/graph/`), pulled in by path so they keep unit-test
+// Test files live in `tests/multiagent/graph/engine/` (mirror of
+// `src/multiagent/graph/`), pulled in by path so they keep unit-test
 // semantics (private access). See docs/RUST_TEST_FILES.md.
 tests_bridge_macro::tests_bridge!("multiagent/graph/engine");
