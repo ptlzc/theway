@@ -8,8 +8,8 @@ use std::sync::{Arc, OnceLock};
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use theway_core::runtime::graph_engineering::engine::DagEngine;
-use theway_core::runtime::graph_engineering::types::{DagStatus, RunKind};
+use theway_core::runtime::multiagent::graph::engine::DagEngine;
+use theway_core::runtime::multiagent::graph::types::{DagStatus, RunKind};
 use theway_core::{
     AgentHarness, AgentMessage, EvaluatorError, OnTurnEndContext, OnTurnEndHook, SessionTreeEntry,
     ThinkingLevel, TurnEndAction, TurnEndDecision,
@@ -527,4 +527,4 @@ fn tail_chars(text: &str, max_chars: usize) -> String {
 #[cfg(test)]
 // Test files live in `tests/runtime/goal/` (mirror of `src/runtime/`), pulled in by
 // path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
-tests_bridge_macro::tests_bridge!("runtime/goal");
+tests_bridge_macro::tests_bridge!("runtime/multiagent/goal");

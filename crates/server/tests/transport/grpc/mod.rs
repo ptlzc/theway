@@ -38,8 +38,8 @@ fn grpc_state_with_ops() -> (
     let (command_tx, command_rx) = mpsc::unbounded_channel::<WebCommand>();
     let (snapshot_tx, _) = broadcast::channel::<WebStatus>(16);
     let latest = Arc::new(Mutex::new(fixture_snapshot("ready")));
-    let (event_tx, _) = broadcast::channel::<SubagentEvent>(16);
-    let registry = SubagentJobRegistry::new();
+    let (event_tx, _) = broadcast::channel::<AgentJobEvent>(16);
+    let registry = AgentJobRegistry::new();
     registry.set_event_sender(Some(event_tx.clone()));
     let (dag_event_tx, _) = broadcast::channel::<DagEvent>(16);
     let session_ops = Arc::new(FakeSessionOps::new());
@@ -52,7 +52,7 @@ fn grpc_state_with_ops() -> (
             events: event_tx,
             dag_events: dag_event_tx,
             registry,
-            dag_engine: Arc::new(theway_core::runtime::graph_engineering::engine::DagEngine::new()),
+            dag_engine: Arc::new(theway_core::runtime::multiagent::graph::engine::DagEngine::new()),
             session_ops: session_ops.clone(),
             session_id: Arc::new(std::sync::RwLock::new("test-session".into())),
         },
@@ -215,7 +215,7 @@ async fn get_node_output_returns_fragment_from_offset() {
     let (state, _command_rx) = grpc_state();
     let job_id = state
         .registry
-        .register(theway_core::runtime::subagents::registry::JobInit {
+        .register(theway_core::runtime::multiagent::registry::JobInit {
             agent: "explorer".into(),
             source: "dag".into(),
             run_id: Some("run-1".into()),
@@ -270,7 +270,7 @@ async fn get_node_output_includes_messages_json() {
     let (state, _command_rx) = grpc_state();
     let job_id = state
         .registry
-        .register(theway_core::runtime::subagents::registry::JobInit {
+        .register(theway_core::runtime::multiagent::registry::JobInit {
             agent: "explorer".into(),
             source: "dag".into(),
             run_id: Some("run-1".into()),
@@ -278,11 +278,11 @@ async fn get_node_output_includes_messages_json() {
             session_id: None,
         });
     state.registry.update(&job_id, |job| {
-        theway_core::runtime::subagents::registry::append_message(
+        theway_core::runtime::multiagent::registry::append_message(
             job,
             &serde_json::json!({"role": "user", "content": "explore"}),
         );
-        theway_core::runtime::subagents::registry::append_message(
+        theway_core::runtime::multiagent::registry::append_message(
             job,
             &serde_json::json!({"role": "assistant", "content": [{"type": "text", "text": "done"}]}),
         );
@@ -309,9 +309,9 @@ async fn get_node_output_includes_messages_json() {
 async fn get_node_output_recovers_messages_from_disk_after_restart() {
     let dir = tempfile::tempdir().unwrap();
     // First process: job runs, finishes, transcript written to disk.
-    let registry = SubagentJobRegistry::new();
+    let registry = AgentJobRegistry::new();
     registry.set_messages_dir(Some(dir.path().join("subagent-jobs")));
-    let job_id = registry.register(theway_core::runtime::subagents::registry::JobInit {
+    let job_id = registry.register(theway_core::runtime::multiagent::registry::JobInit {
         agent: "explorer".into(),
         source: "dag".into(),
         run_id: Some("run-1".into()),
@@ -319,14 +319,14 @@ async fn get_node_output_recovers_messages_from_disk_after_restart() {
         session_id: None,
     });
     registry.update(&job_id, |job| {
-        theway_core::runtime::subagents::registry::append_message(
+        theway_core::runtime::multiagent::registry::append_message(
             job,
             &serde_json::json!({"role": "assistant", "content": [{"type": "text", "text": "survives"}]}),
         );
     });
     registry.finish(
         &job_id,
-        theway_core::runtime::subagents::registry::JobStatus::Succeeded,
+        theway_core::runtime::multiagent::registry::JobStatus::Succeeded,
         None,
     );
 
@@ -374,7 +374,7 @@ async fn stream_events_merges_snapshot_and_event_payloads() {
     state.snapshots.send(fixture_snapshot("snap")).unwrap();
     state
         .events
-        .send(SubagentEvent::Output {
+        .send(AgentJobEvent::Output {
             id: "job-1".into(),
             chunk: "hi".into(),
         })
@@ -384,7 +384,7 @@ async fn stream_events_merges_snapshot_and_event_payloads() {
         .send(DagEvent::RunStatus {
             run_id: "goal-1".into(),
             session_id: String::new(),
-            status: theway_core::runtime::graph_engineering::types::DagStatus::Running,
+            status: theway_core::runtime::multiagent::graph::types::DagStatus::Running,
             error: None,
         })
         .unwrap();
@@ -433,7 +433,7 @@ async fn stream_events_forwards_dag_node_status_frames() {
             run_id: "goal-1".into(),
             session_id: String::new(),
             node_id: "main".into(),
-            status: theway_core::runtime::graph_engineering::types::NodeStatus::Failed,
+            status: theway_core::runtime::multiagent::graph::types::NodeStatus::Failed,
             error: Some("condition broken".into()),
         })
         .unwrap();

@@ -43,8 +43,8 @@ mod config;
 #[path = "../src/export.rs"]
 mod export;
 #[allow(dead_code)]
-// goal moved into the engine (theway_core::runtime::goal); the tests drive its pub API.
-use theway_core::runtime::goal;
+// goal moved into the engine (theway_core::runtime::multiagent::goal); the tests drive its pub API.
+use theway_core::runtime::multiagent::goal;
 #[allow(dead_code)]
 #[path = "../src/history.rs"]
 mod history;
@@ -594,7 +594,7 @@ async fn goal_evaluator_false_returns_continuation_and_audits_reason() {
     assert!(harness_cell.set(harness.clone()).is_ok());
     let hook = goal::stop_hook(
         harness_cell,
-        std::sync::Arc::new(theway_core::runtime::graph_engineering::engine::DagEngine::new()),
+        std::sync::Arc::new(theway_core::runtime::multiagent::graph::engine::DagEngine::new()),
     );
     goal::set(&harness, "finish only after cargo test passes".into())
         .await

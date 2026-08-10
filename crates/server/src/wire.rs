@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use theway_core::runtime::graph_engineering::types::{
+use theway_core::runtime::multiagent::graph::types::{
     DagNode, DagRun, Direction, NodeResult, NodeStatus,
 };
 
@@ -108,11 +108,11 @@ pub struct WebNodeResultSnapshot {
     pub total_attempts: u32,
 }
 
-/// graph mode: one subagent job (mirrors `theway_grpc.proto` SubagentJobSnapshot).
-/// Populated from the SubagentJobRegistry in P2; the type ships now so the wire
+/// graph mode: one subagent job (mirrors `theway_grpc.proto` AgentJobSnapshot).
+/// Populated from the AgentJobRegistry in P2; the type ships now so the wire
 /// shape is stable.
 #[derive(Clone, Debug, Serialize)]
-pub struct WebSubagentJobSnapshot {
+pub struct WebAgentJobSnapshot {
     pub id: String,
     pub agent: String,
     pub source: String,
@@ -151,7 +151,7 @@ pub struct WebStatus {
     pub feed_blocks: Vec<crate::ui::feed::WebFeedBlock>,
     pub feed_lines: Vec<String>,
     pub dags: Vec<WebDagRunSnapshot>,
-    pub subagents: Vec<WebSubagentJobSnapshot>,
+    pub subagents: Vec<WebAgentJobSnapshot>,
 }
 
 impl WebStatus {
@@ -207,9 +207,9 @@ impl WebStatus {
 
 /// Convert one subagent job (registry state) into the wire snapshot form.
 pub fn subagent_job_snapshot(
-    job: &theway_core::runtime::subagents::registry::SubagentJob,
-) -> WebSubagentJobSnapshot {
-    WebSubagentJobSnapshot {
+    job: &theway_core::runtime::multiagent::registry::AgentJob,
+) -> WebAgentJobSnapshot {
+    WebAgentJobSnapshot {
         id: job.id.clone(),
         agent: job.agent.clone(),
         source: job.source.clone(),
@@ -228,7 +228,8 @@ pub fn subagent_job_snapshot(
         output_tokens: Some(job.output_tokens),
         error: job.error.clone(),
         output_tail: Some(job.output.clone()),
-        live_preview: if job.status == theway_core::runtime::subagents::registry::JobStatus::Running
+        live_preview: if job.status
+            == theway_core::runtime::multiagent::registry::JobStatus::Running
         {
             Some(job.output.clone())
         } else {
@@ -255,13 +256,13 @@ pub fn node_status_str(status: &NodeStatus) -> &'static str {
 }
 
 pub fn dag_status_str(
-    status: &theway_core::runtime::graph_engineering::types::DagStatus,
+    status: &theway_core::runtime::multiagent::graph::types::DagStatus,
 ) -> &'static str {
     match status {
-        theway_core::runtime::graph_engineering::types::DagStatus::Running => "running",
-        theway_core::runtime::graph_engineering::types::DagStatus::Completed => "completed",
-        theway_core::runtime::graph_engineering::types::DagStatus::Failed => "failed",
-        theway_core::runtime::graph_engineering::types::DagStatus::Cancelled => "cancelled",
+        theway_core::runtime::multiagent::graph::types::DagStatus::Running => "running",
+        theway_core::runtime::multiagent::graph::types::DagStatus::Completed => "completed",
+        theway_core::runtime::multiagent::graph::types::DagStatus::Failed => "failed",
+        theway_core::runtime::multiagent::graph::types::DagStatus::Cancelled => "cancelled",
     }
 }
 

@@ -4,7 +4,7 @@
 //! Both callers used to duplicate the same pipeline: a fresh [`AgentHarness`] on an
 //! in-memory session, a [`metrics_listener`] registry subscription, final-text
 //! collection, a cancel watcher, an optional timeout wrapper, and the registry
-//! `finish`. This module is that pipeline, parameterized by [`SubagentLaunch`], so
+//! `finish`. This module is that pipeline, parameterized by [`AgentRunParams`], so
 //! `subagent` and `node_launcher` behave identically (same harness shape, same registry
 //! semantics: `source` is "subagent" or "dag", run/node ids carried through).
 
@@ -12,8 +12,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
-use theway_core::runtime::subagents::registry::{
-    JobInit, JobStatus, SubagentControlHandle, SubagentJobRegistry, metrics_listener,
+use theway_core::runtime::multiagent::registry::{
+    AgentControlHandle, AgentJobRegistry, JobInit, JobStatus, metrics_listener,
 };
 use theway_core::{
     AgentEvent, AgentHarness, AgentHarnessOptions, AgentMessage, AgentRunError, AgentTool,
@@ -22,13 +22,13 @@ use theway_core::{
 use theway_llm_provider::{Message as PiMessage, Model};
 use tokio_util::sync::CancellationToken;
 
-use super::types::SubagentLaunch;
+use super::types::AgentRunParams;
 
 /// Everything a single subagent run needs, captured at launch time by the caller.
-pub struct SubagentRunOptions {
-    /// Resolved launch parameters (via the app-layer [`LaunchResolver`](super::types::LaunchResolver)):
+pub struct AgentRunOptions {
+    /// Resolved launch parameters (via the app-layer [`AgentRunResolver`](super::types::AgentRunResolver)):
     /// system prompt + metadata.
-    pub launch: SubagentLaunch,
+    pub launch: AgentRunParams,
     /// Tool set the sub-harness runs with. Resolved by the caller from the app-layer
     /// tool-set resolver (specs carry no tool factory; the app supplies one).
     pub tools: Vec<Arc<dyn AgentTool>>,
@@ -40,7 +40,7 @@ pub struct SubagentRunOptions {
     pub timeout: Option<u64>,
     pub thinking: Option<String>,
     /// Subagent job registry (graph mode metrics/output).
-    pub registry: SubagentJobRegistry,
+    pub registry: AgentJobRegistry,
     /// "subagent" or "dag" — the registry job's `source` field.
     pub source: String,
     pub run_id: Option<String>,
@@ -64,7 +64,7 @@ pub struct SubagentRunOptions {
 /// reads varies (`task` uses text/error, `node_launcher` uses all), so field-level
 /// dead_code is expected when only one caller is compiled (e2e test crates).
 #[allow(dead_code)]
-pub struct SubagentRunResult {
+pub struct AgentRunResult {
     pub text: String,
     pub success: bool,
     pub error: Option<String>,
@@ -76,7 +76,7 @@ pub struct SubagentRunResult {
 /// Run one subagent to completion: fresh in-memory session (nothing touches disk), the
 /// spec's tool set, registry registration + metrics, final-text collection, cancel
 /// watcher, and optional timeout wrapper.
-pub async fn run_subagent(opts: SubagentRunOptions) -> SubagentRunResult {
+pub async fn run_agent(opts: AgentRunOptions) -> AgentRunResult {
     let started = Instant::now();
 
     // Graph mode: track this job in the registry (metrics + full-text output).
@@ -110,13 +110,13 @@ pub async fn run_subagent(opts: SubagentRunOptions) -> SubagentRunResult {
 
     // Live control handle: lets an external caller (parent agent, graph UI, gRPC)
     // interrupt the in-flight turn or queue steering for the next one while
-    // `run_subagent` awaits below. Detached automatically by `finish`.
+    // `run_agent` awaits below. Detached automatically by `finish`.
     {
         let sub_ctl = sub.clone();
         let sub_steer = sub.clone();
         opts.registry.set_control(
             &job_id,
-            Some(SubagentControlHandle {
+            Some(AgentControlHandle {
                 interrupt: Arc::new(move || sub_ctl.interrupt()),
                 steer: Arc::new(move |text: String| {
                     let msg =
@@ -205,7 +205,7 @@ pub async fn run_subagent(opts: SubagentRunOptions) -> SubagentRunResult {
         // own state (task returns Err("cancelled"); the engine has already marked the
         // node Cancelled, so node_launcher drops the report).
         opts.registry.finish(&job_id, JobStatus::Cancelled, None);
-        return SubagentRunResult {
+        return AgentRunResult {
             text: String::new(),
             success: false,
             error: Some("cancelled".into()),
@@ -229,7 +229,7 @@ pub async fn run_subagent(opts: SubagentRunOptions) -> SubagentRunResult {
         },
         error.clone(),
     );
-    SubagentRunResult {
+    AgentRunResult {
         text: std::mem::take(&mut *final_text.lock()),
         success,
         error,

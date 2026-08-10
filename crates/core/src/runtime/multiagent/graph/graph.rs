@@ -973,4 +973,4 @@ pub fn first_line(text: &str, max: usize) -> String {
     }
 }
 #[cfg(test)]
-tests_bridge_macro::tests_bridge!("runtime/graph_engineering/graph");
+tests_bridge_macro::tests_bridge!("runtime/multiagent/graph/graph");

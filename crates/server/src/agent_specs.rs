@@ -1,7 +1,7 @@
 //! App-layer subagent spec table — the spec CONCEPT lives here, not in the engine.
 //!
 //! The engine (`theway_core::tools::subagent_launch`) provides only the launch data
-//! channel ([`SubagentLaunch`] + [`LaunchResolver`]); it does not define what a spec is.
+//! channel ([`AgentRunParams`] + [`AgentRunResolver`]); it does not define what a spec is.
 //! This module owns the spec structure (name / description / system prompt / iteration
 //! budget), the built-in table (explorer / planner / executor-coder / checker /
 //! general), and the mapping into launch parameters injected into the engine. User-defined
@@ -10,13 +10,13 @@
 
 use std::sync::Arc;
 
-use theway_core::runtime::subagents::types::{LaunchResolver, SubagentLaunch};
+use theway_core::runtime::multiagent::types::{AgentRunParams, AgentRunResolver};
 
 /// Iteration budget default, mirroring the `subagent` tool's "max 16 iterations" doc.
 pub const DEFAULT_MAX_ITERATIONS: u32 = 16;
 
 /// App-layer spec definition. Structure and content are server decisions; the engine
-/// only ever sees the mapped [`SubagentLaunch`].
+/// only ever sees the mapped [`AgentRunParams`].
 #[derive(Clone, Copy)]
 pub struct SubagentSpec {
     pub name: &'static str,
@@ -70,12 +70,12 @@ pub static SUBAGENT_SPECS: [SubagentSpec; 5] = [
 
 /// App-layer launch resolver: spec name -> launch parameters (the one injected into the
 /// subagent tool and the DAG node launcher). How specs map to launches is server policy.
-pub fn launch_resolver() -> LaunchResolver {
+pub fn launch_resolver() -> AgentRunResolver {
     Arc::new(|name: &str| {
         SUBAGENT_SPECS
             .iter()
             .find(|s| s.name == name)
-            .map(|s| SubagentLaunch {
+            .map(|s| AgentRunParams {
                 name: s.name,
                 description: s.description,
                 system_prompt: s.system_prompt,

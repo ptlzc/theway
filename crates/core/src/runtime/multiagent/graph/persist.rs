@@ -239,4 +239,4 @@ pub fn max_run_counter(runs: &[DagRun]) -> u64 {
 }
 
 #[cfg(test)]
-tests_bridge_macro::tests_bridge!("runtime/graph_engineering/persist");
+tests_bridge_macro::tests_bridge!("runtime/multiagent/graph/persist");

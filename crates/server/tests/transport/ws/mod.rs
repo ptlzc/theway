@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 fn event_json_matches_wire_shape() {
-    let event = SubagentEvent::Output {
+    let event = AgentJobEvent::Output {
         id: "job-1".into(),
         chunk: "hi".into(),
     };
@@ -13,9 +13,9 @@ fn event_json_matches_wire_shape() {
     assert_eq!(value["id"], "job-1");
     assert_eq!(value["chunk"], "hi");
 
-    let event = SubagentEvent::Completed {
+    let event = AgentJobEvent::Completed {
         id: "job-1".into(),
-        status: theway_core::runtime::subagents::registry::JobStatus::Succeeded,
+        status: theway_core::runtime::multiagent::registry::JobStatus::Succeeded,
         error: None,
         chars: 10,
         tokens_in: 5,
@@ -31,7 +31,7 @@ fn event_json_matches_wire_shape() {
 
 #[test]
 fn dag_event_json_matches_wire_shape() {
-    use theway_core::runtime::graph_engineering::types::{DagStatus, NodeStatus};
+    use theway_core::runtime::multiagent::graph::types::{DagStatus, NodeStatus};
 
     let value = dag_event_json(&DagEvent::RunStatus {
         run_id: "goal-1".into(),

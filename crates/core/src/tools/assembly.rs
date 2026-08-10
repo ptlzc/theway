@@ -24,9 +24,9 @@ use std::sync::Arc;
 
 use theway_llm_provider::Model;
 
-use crate::runtime::graph_engineering::engine::DagEngine;
-use crate::runtime::subagents::registry::SubagentJobRegistry;
-use crate::runtime::subagents::types::ToolSetResolver;
+use crate::runtime::multiagent::graph::engine::DagEngine;
+use crate::runtime::multiagent::registry::AgentJobRegistry;
+use crate::runtime::multiagent::types::ToolSetResolver;
 use crate::{AgentTool, StreamFn};
 
 use super::dag_tools;
@@ -37,7 +37,7 @@ use super::set_skill_state;
 use super::skill::{self, SkillHarnessCell};
 use super::skill_builder;
 use super::subagent::{SubagentTool, SubagentToolsFn};
-use crate::runtime::subagents::types::LaunchResolver;
+use crate::runtime::multiagent::types::AgentRunResolver;
 
 /// App-layer factory producing the LOCAL execution tools (bash / fs / git / web / …) —
 /// the part the engine cannot know about. Injected once at assembly; every harness
@@ -51,9 +51,9 @@ pub type LocalToolsFn = Arc<dyn Fn() -> Vec<Arc<dyn AgentTool>> + Send + Sync>;
 pub fn engine_tools(
     memory_dir: &Path,
     dag_engine: &Arc<DagEngine>,
-    subagent_registry: &SubagentJobRegistry,
+    subagent_registry: &AgentJobRegistry,
     subagent_tools: SubagentToolsFn,
-    launch_resolver: LaunchResolver,
+    launch_resolver: AgentRunResolver,
     spec_names: Vec<String>,
     model: &Model,
     stream_fn: Option<&StreamFn>,

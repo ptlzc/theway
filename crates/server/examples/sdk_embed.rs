@@ -15,8 +15,8 @@ use theway::agent_session::{AgentSession, RetrySettings};
 use theway::commands::Registry;
 use theway::ui::{App, AppConfig};
 use theway::wire::WebOptions;
-use theway_core::runtime::graph_engineering::engine::DagEngine;
-use theway_core::runtime::subagents::registry::SubagentJobRegistry;
+use theway_core::runtime::multiagent::graph::engine::DagEngine;
+use theway_core::runtime::multiagent::registry::AgentJobRegistry;
 use theway_core::{AgentHarness, AgentHarnessOptions, JsonlSessionRepo};
 use theway_llm_provider::{Api, Model, ModelCost, Provider};
 
@@ -69,7 +69,7 @@ async fn main() -> anyhow::Result<()> {
         control_plane_prompt_rx: None,
         panel_status: Default::default(),
         dag_engine: Arc::new(DagEngine::new()),
-        subagent_registry: SubagentJobRegistry::new(),
+        subagent_registry: AgentJobRegistry::new(),
         // SDK demo: no in-process session switching; the factory is only
         // exercised by the CLI's `--resume-id`/SwitchSession path.
         session_factory: Arc::new(|_id| {

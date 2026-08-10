@@ -5,16 +5,14 @@
 pub mod agent_harness;
 pub mod compaction;
 pub mod cost;
-pub mod goal;
-pub mod graph_engineering;
 pub mod hooks;
 pub mod messages;
+pub mod multiagent;
 pub mod notification_hook;
 pub mod permission;
 pub mod prompt_templates;
 pub mod session;
 pub mod skills;
-pub mod subagents;
 pub mod system_prompt;
 pub mod trigger;
 pub mod trigger_runtime;

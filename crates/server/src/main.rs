@@ -14,15 +14,15 @@ use theway::{
     local_models, logging, lsp_supervisor, mcp_loader, model, resume_picker, session,
     session_archive, skills, skills_state, templates, tools, triggers, ui,
 };
-use theway_core::runtime::{goal, hooks};
+use theway_core::runtime::{hooks, multiagent::goal};
 
 use std::io::IsTerminal as _;
 use std::sync::{Arc, OnceLock};
 
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
-use theway_core::runtime::graph_engineering::engine::DagEngine;
-use theway_core::runtime::graph_engineering::persist::{
+use theway_core::runtime::multiagent::graph::engine::DagEngine;
+use theway_core::runtime::multiagent::graph::persist::{
     load_runs, save_runs, state_path_for_project,
 };
 use theway_core::{
@@ -609,14 +609,14 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
     // recoverable error, never a panic.
     let skill_harness_cell: theway_core::tools::skill::SkillHarnessCell =
         std::sync::Arc::new(once_cell::sync::OnceCell::new());
-    // DAG orchestration (graph_engineering): one engine shared by the dag_* tools and the
+    // DAG orchestration (multiagent graph): one engine shared by the dag_* tools and the
     // node launcher. The launcher MUST be installed before `restore` — resumed runs tick
     // immediately and their ready nodes need a launcher to re-schedule into.
     let dag_engine = Arc::new(DagEngine::new());
     // Subagent job registry (graph mode): subagent tool + DAG node launches both register.
     // Finished jobs' full transcripts are persisted under `<cwd>/.pi/subagent-jobs`
     // (per-node files keyed run/node) so they survive a process restart.
-    let subagent_registry = theway_core::runtime::subagents::registry::SubagentJobRegistry::new();
+    let subagent_registry = theway_core::runtime::multiagent::registry::AgentJobRegistry::new();
     subagent_registry.set_messages_dir(Some(cwd.join(".pi").join("subagent-jobs")));
     dag_engine.set_launcher(Some(crate::tools::node_launcher(
         dag_engine.clone(),
@@ -1184,7 +1184,7 @@ struct SessionHarnessFactory {
     templates: Vec<theway_core::PromptTemplate>,
     memory_dir: std::path::PathBuf,
     dag_engine: Arc<DagEngine>,
-    subagent_registry: theway_core::runtime::subagents::registry::SubagentJobRegistry,
+    subagent_registry: theway_core::runtime::multiagent::registry::AgentJobRegistry,
     mcp_tools: Vec<Arc<dyn theway_core::AgentTool>>,
     mcp_notification_hooks: Vec<Arc<triggers::McpNotificationHook>>,
     dynamic_trigger_registry: triggers::dynamic::DynamicTriggerRegistry,

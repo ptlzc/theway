@@ -106,7 +106,7 @@ impl DagEngine {
     }
 
     /// Wire the event-plane broadcast (transport setup calls this once);
-    /// `None` detaches (same contract as SubagentJobRegistry).
+    /// `None` detaches (same contract as AgentJobRegistry).
     pub fn set_event_sender(&self, tx: Option<tokio::sync::broadcast::Sender<DagEvent>>) {
         self.inner.lock().events = tx;
     }
@@ -1016,7 +1016,7 @@ fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
 }
 
 #[cfg(test)]
-// Test files live in `tests/runtime/graph_engineering/engine/` (mirror of
-// `src/runtime/graph_engineering/`), pulled in by path so they keep unit-test
+// Test files live in `tests/runtime/multiagent/graph/engine/` (mirror of
+// `src/runtime/multiagent/graph/`), pulled in by path so they keep unit-test
 // semantics (private access). See docs/RUST_TEST_FILES.md.
-tests_bridge_macro::tests_bridge!("runtime/graph_engineering/engine");
+tests_bridge_macro::tests_bridge!("runtime/multiagent/graph/engine");

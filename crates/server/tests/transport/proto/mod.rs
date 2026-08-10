@@ -128,7 +128,7 @@ fn converts_full_snapshot_to_session_state() {
 
 #[test]
 fn dag_run_converts_to_wire_shape() {
-    use theway_core::runtime::graph_engineering::types::{
+    use theway_core::runtime::multiagent::graph::types::{
         DagNode, DagRun, DagStatus, Direction, NodeStatus, RunKind,
     };
 
@@ -237,7 +237,7 @@ fn session_summary_converts_to_wire_shape() {
 
 #[test]
 fn goal_run_round_trips_kind_and_dag_event_wire() {
-    use theway_core::runtime::graph_engineering::engine::DagEngine;
+    use theway_core::runtime::multiagent::graph::engine::DagEngine;
 
     let engine = DagEngine::new();
     let id = engine.plan_goal("finish the migration", Some("sess-1".into()));
@@ -255,7 +255,7 @@ fn goal_run_round_trips_kind_and_dag_event_wire() {
     let event = dag_event_wire(&DagEvent::RunStatus {
         run_id: id.clone(),
         session_id: String::new(),
-        status: theway_core::runtime::graph_engineering::types::DagStatus::Running,
+        status: theway_core::runtime::multiagent::graph::types::DagStatus::Running,
         error: None,
     });
     match event.kind {
@@ -270,7 +270,7 @@ fn goal_run_round_trips_kind_and_dag_event_wire() {
         run_id: id.clone(),
         session_id: String::new(),
         node_id: "main".into(),
-        status: theway_core::runtime::graph_engineering::types::NodeStatus::Running,
+        status: theway_core::runtime::multiagent::graph::types::NodeStatus::Running,
         error: Some("not yet".into()),
     });
     match event.kind {

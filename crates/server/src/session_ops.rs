@@ -21,8 +21,8 @@ use std::sync::Arc;
 use anyhow::{Context as _, Result, bail};
 use async_trait::async_trait;
 use parking_lot::Mutex;
-use theway_core::runtime::graph_engineering::engine::DagEngine;
-use theway_core::runtime::graph_engineering::types::DagStatus;
+use theway_core::runtime::multiagent::graph::engine::DagEngine;
+use theway_core::runtime::multiagent::graph::types::DagStatus;
 use theway_core::{JsonlSessionRepo, SessionTreeEntry};
 
 use crate::wire::SessionSummary;

@@ -35,8 +35,8 @@ fn faux_model() -> theway_llm_provider::Model {
     }
 }
 
-fn test_launch_resolver() -> theway_core::runtime::subagents::types::LaunchResolver {
-    let launch = theway_core::runtime::subagents::types::SubagentLaunch {
+fn test_launch_resolver() -> theway_core::runtime::multiagent::types::AgentRunResolver {
+    let launch = theway_core::runtime::multiagent::types::AgentRunParams {
         name: "general",
         description: "test",
         system_prompt: "You are a test subagent.",
@@ -83,7 +83,7 @@ async fn subagent_returns_final_text() {
         Arc::new(|_| Vec::new()),
         test_launch_resolver(),
         vec!["general".to_string()],
-        theway_core::runtime::subagents::registry::SubagentJobRegistry::new(),
+        theway_core::runtime::multiagent::registry::AgentJobRegistry::new(),
     );
     let res = tool
         .execute(
@@ -113,7 +113,7 @@ async fn subagent_unknown_type_errors() {
         Arc::new(|_| Vec::new()),
         test_launch_resolver(),
         vec!["general".to_string()],
-        theway_core::runtime::subagents::registry::SubagentJobRegistry::new(),
+        theway_core::runtime::multiagent::registry::AgentJobRegistry::new(),
     );
     let err = tool
         .execute(
@@ -139,7 +139,7 @@ async fn subagent_missing_prompt_errors() {
         Arc::new(|_| Vec::new()),
         test_launch_resolver(),
         vec!["general".to_string()],
-        theway_core::runtime::subagents::registry::SubagentJobRegistry::new(),
+        theway_core::runtime::multiagent::registry::AgentJobRegistry::new(),
     );
     let err = tool
         .execute("t-3", serde_json::json!({}), CancellationToken::new(), None)
@@ -167,7 +167,7 @@ async fn subagent_parent_abort_cascades() {
         Arc::new(|_| Vec::new()),
         test_launch_resolver(),
         vec!["general".to_string()],
-        theway_core::runtime::subagents::registry::SubagentJobRegistry::new(),
+        theway_core::runtime::multiagent::registry::AgentJobRegistry::new(),
     );
     let cancel = CancellationToken::new();
     let cancel2 = cancel.clone();
@@ -190,15 +190,15 @@ async fn subagent_parent_abort_cascades() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Turn-level control: interrupt (stop the current turn) + steer (inject at the
-// next natural turn boundary), exercised through `run_subagent` + registry.
+// next natural turn boundary), exercised through `run_agent` + registry.
 // ─────────────────────────────────────────────────────────────────────────────
 
 use std::sync::Arc as StdArc;
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::time::Duration;
 
-use theway_core::runtime::subagents::registry::{JobStatus, SubagentJobRegistry};
-use theway_core::runtime::subagents::runner::{SubagentRunOptions, run_subagent};
+use theway_core::runtime::multiagent::registry::{AgentJobRegistry, JobStatus};
+use theway_core::runtime::multiagent::runner::{AgentRunOptions, run_agent};
 
 /// Per-call scripted stream: `(text, delay_ms)` for each LLM call; calls past the
 /// last entry repeat it. Empty text = stall `delay_ms` then end without emitting
@@ -246,7 +246,7 @@ fn stall_then_reply(text: &'static str) -> StreamFn {
     sequence_stream(vec![("", 30_000), (text, 0)])
 }
 
-async fn wait_for_job(registry: &SubagentJobRegistry) -> String {
+async fn wait_for_job(registry: &AgentJobRegistry) -> String {
     for _ in 0..100 {
         if let Some(job) = registry.list().first() {
             return job.id.clone();
@@ -257,11 +257,11 @@ async fn wait_for_job(registry: &SubagentJobRegistry) -> String {
 }
 
 fn run_options(
-    registry: SubagentJobRegistry,
+    registry: AgentJobRegistry,
     stream: StreamFn,
     cancel: CancellationToken,
-) -> SubagentRunOptions {
-    SubagentRunOptions {
+) -> AgentRunOptions {
+    AgentRunOptions {
         launch: test_launch_resolver()("general").unwrap(),
         tools: Vec::new(),
         prompt: "explore X".into(),
@@ -282,9 +282,9 @@ fn run_options(
 
 #[tokio::test]
 async fn interrupt_without_steer_ends_run_interrupted() {
-    let registry = SubagentJobRegistry::new();
+    let registry = AgentJobRegistry::new();
     let cancel = CancellationToken::new();
-    let handle = tokio::spawn(run_subagent(run_options(
+    let handle = tokio::spawn(run_agent(run_options(
         registry.clone(),
         stall_then_reply("done"),
         cancel,
@@ -306,9 +306,9 @@ async fn interrupt_without_steer_ends_run_interrupted() {
 
 #[tokio::test]
 async fn interrupt_with_steer_continues_into_next_turn() {
-    let registry = SubagentJobRegistry::new();
+    let registry = AgentJobRegistry::new();
     let cancel = CancellationToken::new();
-    let handle = tokio::spawn(run_subagent(run_options(
+    let handle = tokio::spawn(run_agent(run_options(
         registry.clone(),
         stall_then_reply("done after steer"),
         cancel,
@@ -347,9 +347,9 @@ async fn interrupt_with_steer_continues_into_next_turn() {
 async fn steer_mid_turn_lands_at_next_natural_turn() {
     // Steer without interrupt: queued while the first turn is in flight (300 ms
     // scripted delay), drained at the natural turn boundary, next turn carries it.
-    let registry = SubagentJobRegistry::new();
+    let registry = AgentJobRegistry::new();
     let cancel = CancellationToken::new();
-    let handle = tokio::spawn(run_subagent(run_options(
+    let handle = tokio::spawn(run_agent(run_options(
         registry.clone(),
         sequence_stream(vec![("first turn", 300), ("second turn", 0)]),
         cancel,

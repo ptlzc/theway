@@ -22,9 +22,9 @@ use base64::Engine as _;
 use tokio::sync::{Mutex, broadcast, mpsc};
 
 use theway_core::SkillSource;
-use theway_core::runtime::graph_engineering::engine::DagEngine;
-use theway_core::runtime::graph_engineering::types::DagEvent;
-use theway_core::runtime::subagents::registry::{SubagentEvent, SubagentJobRegistry};
+use theway_core::runtime::multiagent::graph::engine::DagEngine;
+use theway_core::runtime::multiagent::graph::types::DagEvent;
+use theway_core::runtime::multiagent::registry::{AgentJobEvent, AgentJobRegistry};
 
 use crate::commands::{CommandCtx, CommandOutcome};
 use crate::mentions;
@@ -66,13 +66,13 @@ pub struct TransportEndpoints {
     /// Latest snapshot (served by `GET /state` / `GetState`).
     pub latest: Arc<Mutex<WebStatus>>,
     /// Event plane (graph mode): subagent started/output/metrics/completed.
-    pub events: broadcast::Sender<SubagentEvent>,
+    pub events: broadcast::Sender<AgentJobEvent>,
     /// Event plane (graph mode): DAG engine node_status / run_status.
     pub dag_events: broadcast::Sender<DagEvent>,
     /// Slash-command completer backing `POST /complete`.
     pub completer: SlashCompleter,
     /// Subagent job registry (GetNodeOutput / snapshot source).
-    pub registry: SubagentJobRegistry,
+    pub registry: AgentJobRegistry,
     /// DAG orchestration engine (graph cancel/retry/skip/checkpoint/restore).
     pub dag_engine: Arc<DagEngine>,
     /// session-resource-model: session lifecycle ops (list/create/rename/delete) for the
@@ -94,7 +94,7 @@ impl App {
         let (snapshot_tx, _) = broadcast::channel::<WebStatus>(128);
         let latest = Arc::new(Mutex::new(self.web_snapshot()));
         // Event plane (graph mode) shared with /ws; the registry broadcasts into it.
-        let (event_tx, _) = broadcast::channel::<SubagentEvent>(256);
+        let (event_tx, _) = broadcast::channel::<AgentJobEvent>(256);
         self.subagent_registry
             .set_event_sender(Some(event_tx.clone()));
         // DAG engine broadcasts node_status / run_status (goal runs + DAG runs).

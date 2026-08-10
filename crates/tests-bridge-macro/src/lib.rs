@@ -14,9 +14,9 @@
 //!
 //! ```ignore
 //! #[cfg(test)]
-//! tests_bridge_macro::tests_bridge!("runtime/graph_engineering/engine");
+//! tests_bridge_macro::tests_bridge!("runtime/multiagent/graph/engine");
 //! // expands to:
-//! //   #[cfg(test)] #[path = "/abs/<CARGO_MANIFEST_DIR>/tests/runtime/graph_engineering/engine/mod.rs"] mod tests;
+//! //   #[cfg(test)] #[path = "/abs/<CARGO_MANIFEST_DIR>/tests/runtime/multiagent/graph/engine/mod.rs"] mod tests;
 //! ```
 //!
 //! The call site keeps the `#[cfg(test)]` prefix so plain `cargo build` skips

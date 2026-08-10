@@ -148,9 +148,9 @@ pub struct AppConfig {
     pub panel_status: PanelStatus,
     /// DAG orchestration engine (graph mode). Shared with the dag_* tools;
     /// used by the transport snapshots to expose run/node state.
-    pub dag_engine: std::sync::Arc<theway_core::runtime::graph_engineering::engine::DagEngine>,
+    pub dag_engine: std::sync::Arc<theway_core::runtime::multiagent::graph::engine::DagEngine>,
     /// Subagent job registry (graph mode). Task tool + DAG nodes register here.
-    pub subagent_registry: theway_core::runtime::subagents::registry::SubagentJobRegistry,
+    pub subagent_registry: theway_core::runtime::multiagent::registry::AgentJobRegistry,
     /// session-resource-model: builds a fresh harness for any session id (resume
     /// semantics). Drives [`App::switch_session`] from the serialized event loop;
     /// the CLI crate extracts its harness-construction path into this closure.
@@ -187,7 +187,7 @@ pub struct App {
 
     feed: Feed,
     latest_trigger_poll: Option<TriggerPollStatus>,
-    latest_goal: Option<theway_core::runtime::goal::GoalState>,
+    latest_goal: Option<theway_core::runtime::multiagent::goal::GoalState>,
     feed_rx: Option<UnboundedReceiver<FeedUpdate>>,
     main_run_rx: Option<UnboundedReceiver<String>>,
     control_plane_prompt_rx: Option<UnboundedReceiver<UiControlPlanePrompt>>,
@@ -198,9 +198,9 @@ pub struct App {
     model_catalog: Vec<crate::model_picker::ProviderGroup>,
     panel_status: PanelStatus,
     /// DAG orchestration engine, shared with the dag_* tools (graph mode state).
-    dag_engine: std::sync::Arc<theway_core::runtime::graph_engineering::engine::DagEngine>,
+    dag_engine: std::sync::Arc<theway_core::runtime::multiagent::graph::engine::DagEngine>,
     /// Subagent job registry (graph mode). Task tool + DAG nodes register here.
-    subagent_registry: theway_core::runtime::subagents::registry::SubagentJobRegistry,
+    subagent_registry: theway_core::runtime::multiagent::registry::AgentJobRegistry,
     /// session-resource-model: rebuilds a harness for another session (switch).
     session_factory: crate::session_ops::SessionFactory,
     /// cwd-scoped session repo (SessionOps + switch validation).
@@ -1281,7 +1281,8 @@ impl App {
     }
 
     async fn refresh_goal_state(&mut self) {
-        self.latest_goal = theway_core::runtime::goal::current(self.kernel.harness()).await;
+        self.latest_goal =
+            theway_core::runtime::multiagent::goal::current(self.kernel.harness()).await;
     }
 
     /// session-resource-model: swap the runtime to a different session.
@@ -1979,11 +1980,13 @@ impl App {
             lines.push(Line::raw(""));
             lines.push(panel_line("Goal".to_string(), Color::Cyan, width));
             let color = match goal.status {
-                theway_core::runtime::goal::GoalStatus::Pursuing => Color::Yellow,
-                theway_core::runtime::goal::GoalStatus::Achieved => Color::Green,
-                theway_core::runtime::goal::GoalStatus::Paused
-                | theway_core::runtime::goal::GoalStatus::BudgetLimited => Color::DarkGray,
-                theway_core::runtime::goal::GoalStatus::Cleared => Color::DarkGray,
+                theway_core::runtime::multiagent::goal::GoalStatus::Pursuing => Color::Yellow,
+                theway_core::runtime::multiagent::goal::GoalStatus::Achieved => Color::Green,
+                theway_core::runtime::multiagent::goal::GoalStatus::Paused
+                | theway_core::runtime::multiagent::goal::GoalStatus::BudgetLimited => {
+                    Color::DarkGray
+                }
+                theway_core::runtime::multiagent::goal::GoalStatus::Cleared => Color::DarkGray,
             };
             lines.push(panel_line(goal.status.as_str().to_string(), color, width));
             lines.push(panel_line(
@@ -2570,10 +2573,9 @@ mod tests {
             control_plane_prompt_rx: None,
             panel_status: PanelStatus::default(),
             dag_engine: std::sync::Arc::new(
-                theway_core::runtime::graph_engineering::engine::DagEngine::new(),
+                theway_core::runtime::multiagent::graph::engine::DagEngine::new(),
             ),
-            subagent_registry: theway_core::runtime::subagents::registry::SubagentJobRegistry::new(
-            ),
+            subagent_registry: theway_core::runtime::multiagent::registry::AgentJobRegistry::new(),
             // UI tests never switch sessions: the factory always errors if reached.
             session_factory: std::sync::Arc::new(|id| {
                 Box::pin(
@@ -3091,7 +3093,7 @@ mod tests {
     #[tokio::test]
     async fn finished_turn_refreshes_goal_panel_state() {
         let mut app = test_app();
-        theway_core::runtime::goal::set(
+        theway_core::runtime::multiagent::goal::set(
             app.kernel.harness(),
             "run verification before stopping".into(),
         )
@@ -3111,7 +3113,7 @@ mod tests {
         assert_eq!(goal.condition, "run verification before stopping");
         assert_eq!(
             goal.status,
-            theway_core::runtime::goal::GoalStatus::Pursuing
+            theway_core::runtime::multiagent::goal::GoalStatus::Pursuing
         );
         assert!(
             turn.fut.is_none(),

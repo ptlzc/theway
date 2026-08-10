@@ -29,8 +29,8 @@ use serde_json::{Value, json};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
-use theway_core::runtime::graph_engineering::types::DagEvent;
-use theway_core::runtime::subagents::registry::SubagentEvent;
+use theway_core::runtime::multiagent::graph::types::DagEvent;
+use theway_core::runtime::multiagent::registry::AgentJobEvent;
 
 use super::http::HttpState;
 use crate::wire::{WebCommand, WebPromptImage, dag_status_str, node_status_str};
@@ -252,9 +252,9 @@ async fn handle_client_frame(text: &str, state: &HttpState) -> Option<Message> {
 
 /// Serialize an event-plane message to the tagged-JSON wire shape (mirrors the
 /// gRPC `StreamEvent` oneof fields, snake_case).
-pub(crate) fn event_json(event: &SubagentEvent) -> Value {
+pub(crate) fn event_json(event: &AgentJobEvent) -> Value {
     match event {
-        SubagentEvent::Started {
+        AgentJobEvent::Started {
             id,
             agent,
             source,
@@ -268,12 +268,12 @@ pub(crate) fn event_json(event: &SubagentEvent) -> Value {
             "run_id": run_id,
             "node_id": node_id,
         }),
-        SubagentEvent::Output { id, chunk } => json!({
+        AgentJobEvent::Output { id, chunk } => json!({
             "event": "subagent_output",
             "id": id,
             "chunk": chunk,
         }),
-        SubagentEvent::Metrics {
+        AgentJobEvent::Metrics {
             id,
             tps,
             cps,
@@ -293,7 +293,7 @@ pub(crate) fn event_json(event: &SubagentEvent) -> Value {
             "tools_called": tools_called,
             "turn": turn,
         }),
-        SubagentEvent::Completed {
+        AgentJobEvent::Completed {
             id,
             status,
             error,

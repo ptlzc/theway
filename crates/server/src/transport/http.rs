@@ -25,8 +25,8 @@ use crate::session_ops::SessionOps;
 use crate::ui::App;
 use crate::ui::web_loop::TransportMode;
 use crate::wire::*;
-use theway_core::runtime::graph_engineering::types::DagEvent;
-use theway_core::runtime::subagents::registry::{SubagentEvent, SubagentJobRegistry};
+use theway_core::runtime::multiagent::graph::types::DagEvent;
+use theway_core::runtime::multiagent::registry::{AgentJobEvent, AgentJobRegistry};
 
 use crate::transport::ws::ws_upgrade;
 
@@ -38,10 +38,10 @@ pub struct HttpState {
     pub snapshots: broadcast::Sender<WebStatus>,
     pub latest: Arc<Mutex<WebStatus>>,
     pub completer: SlashCompleter,
-    pub events: broadcast::Sender<SubagentEvent>,
+    pub events: broadcast::Sender<AgentJobEvent>,
     /// DAG engine event plane (node_status / run_status), shared with /ws.
     pub dag_events: broadcast::Sender<DagEvent>,
-    pub registry: SubagentJobRegistry,
+    pub registry: AgentJobRegistry,
     /// session-resource-model: session lifecycle ops behind the `/sessions` routes.
     /// *Switching* the current session goes through `WebCommand::SwitchSession`.
     pub session_ops: Arc<dyn SessionOps>,

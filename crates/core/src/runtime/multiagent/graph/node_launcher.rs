@@ -3,7 +3,7 @@
 //! [`NodeLauncherImpl`] implements the engine's [`NodeLauncher`] contract: each launched
 //! node is executed by the shared [`runner`](super::runner) (one fresh
 //! in-memory harness per node, nothing touches disk), spawned by the node's `agent` name
-//! resolved through the injected [`LaunchResolver`](crate::runtime::subagents::types). The outcome (success, error, duration, tokens,
+//! resolved through the injected [`AgentRunResolver`](crate::runtime::multiagent::types). The outcome (success, error, duration, tokens,
 //! final text) is reported back to the engine via [`DagEngine::on_node_completed`]; live
 //! token/preview sync runs through [`DagEngine::on_node_update`] via the runner's
 //! per-turn callback. 1:1 port of the dag-orchestrator extension's `defaultLauncher`
@@ -28,9 +28,9 @@ use theway_core::{AgentTool, StreamFn};
 use theway_llm_provider::Model;
 use tokio_util::sync::CancellationToken;
 
-use crate::runtime::subagents::registry::SubagentJobRegistry;
-use crate::runtime::subagents::runner::{SubagentRunOptions, run_subagent};
-use crate::runtime::subagents::types::{LaunchResolver, SubagentLaunch, ToolSetResolver};
+use crate::runtime::multiagent::registry::AgentJobRegistry;
+use crate::runtime::multiagent::runner::{AgentRunOptions, run_agent};
+use crate::runtime::multiagent::types::{AgentRunParams, AgentRunResolver, ToolSetResolver};
 
 /// Everything a single node job needs, captured at launch time so the spawned task never
 /// re-reads mutable engine state (the node may be retried/cancelled meanwhile).
@@ -38,7 +38,7 @@ struct NodeJob {
     engine: DagEngine,
     run_id: String,
     node_id: String,
-    launch: SubagentLaunch,
+    launch: AgentRunParams,
     /// Resolved tool set for this node's subagent (from the launcher's resolver).
     tools: Vec<Arc<dyn AgentTool>>,
     model: Model,
@@ -50,7 +50,7 @@ struct NodeJob {
     /// counter on retry, so this is 1 for a fresh launch).
     attempt: u32,
     /// Subagent job registry (graph mode metrics/output).
-    registry: SubagentJobRegistry,
+    registry: AgentJobRegistry,
 }
 
 /// Real subagent launcher for the DAG engine. Cheap to clone via [`Arc`].
@@ -65,11 +65,11 @@ pub struct NodeLauncherImpl {
     /// path is recorded for diagnostics and future per-node cwd support).
     cwd: PathBuf,
     /// Subagent job registry (graph mode metrics/output).
-    registry: SubagentJobRegistry,
+    registry: AgentJobRegistry,
     /// App-layer tool-set resolver (spec name → tools), injected at construction.
     tools_resolver: ToolSetResolver,
     /// App-layer launch resolver (spec name → launch params), injected at construction.
-    launch_resolver: LaunchResolver,
+    launch_resolver: AgentRunResolver,
 }
 
 impl NodeLauncher for NodeLauncherImpl {
@@ -149,9 +149,9 @@ pub fn node_launcher(
     model: Model,
     stream_fn: Option<StreamFn>,
     cwd: PathBuf,
-    registry: SubagentJobRegistry,
+    registry: AgentJobRegistry,
     tools_resolver: ToolSetResolver,
-    launch_resolver: LaunchResolver,
+    launch_resolver: AgentRunResolver,
 ) -> Arc<NodeLauncherImpl> {
     Arc::new(NodeLauncherImpl {
         engine,
@@ -179,7 +179,7 @@ async fn run_node(job: NodeJob, cancel: CancellationToken) {
     let engine_cb = engine.clone();
     let run_id_cb = run_id.clone();
     let node_id_cb = node_id.clone();
-    let result = run_subagent(SubagentRunOptions {
+    let result = run_agent(AgentRunOptions {
         launch: job.launch,
         tools: job.tools,
         prompt: job.task_text,
@@ -260,7 +260,7 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
 
-    use crate::runtime::graph_engineering::types::{DagNodeDef, DagRunDef, DagStatus, NodeStatus};
+    use crate::runtime::multiagent::graph::types::{DagNodeDef, DagRunDef, DagStatus, NodeStatus};
     use theway_llm_provider::{
         AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, AssistantRole,
         ContentBlock, DoneReason, ModelCost, StopReason, Usage,
@@ -334,7 +334,7 @@ mod tests {
             model,
             Some(stream),
             PathBuf::from("."),
-            theway_core::runtime::subagents::registry::SubagentJobRegistry::new(),
+            theway_core::runtime::multiagent::registry::AgentJobRegistry::new(),
             // Tool-set resolver: these tests drive the engine with a faux stream that
             // never calls tools, so an empty tool set per spec suffices.
             Arc::new(|_| Vec::new()),
@@ -346,8 +346,8 @@ mod tests {
         engine
     }
 
-    fn test_launch_resolver() -> super::LaunchResolver {
-        let launch = super::SubagentLaunch {
+    fn test_launch_resolver() -> super::AgentRunResolver {
+        let launch = super::AgentRunParams {
             name: "general",
             description: "test",
             system_prompt: "You are a test subagent.",

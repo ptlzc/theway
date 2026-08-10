@@ -29,8 +29,8 @@ use crate::transport::proto::{
     dag_event_wire, dag_run_wire, resolve_session_id, session_state, session_summary_wire,
     stream_event_wire,
 };
-use theway_core::runtime::graph_engineering::types::DagEvent;
-use theway_core::runtime::subagents::registry::{SubagentEvent, SubagentJobRegistry};
+use theway_core::runtime::multiagent::graph::types::DagEvent;
+use theway_core::runtime::multiagent::registry::{AgentJobEvent, AgentJobRegistry};
 
 use theway_grpc::theway_grpc_server::{ThewayGrpc, ThewayGrpcServer};
 use theway_grpc::{
@@ -56,13 +56,13 @@ pub struct GrpcState {
     pub snapshots: broadcast::Sender<WebStatus>,
     pub latest: Arc<Mutex<WebStatus>>,
     /// Event plane (graph mode): subagent started/output/metrics/completed.
-    pub events: broadcast::Sender<SubagentEvent>,
+    pub events: broadcast::Sender<AgentJobEvent>,
     /// Event plane (graph mode): DAG engine node_status / run_status.
     pub dag_events: broadcast::Sender<DagEvent>,
     /// Job registry backing GetNodeOutput.
-    pub registry: SubagentJobRegistry,
+    pub registry: AgentJobRegistry,
     /// DAG orchestration engine (graph engineering mode): GraphCancel/Retry/…
-    pub dag_engine: Arc<theway_core::runtime::graph_engineering::engine::DagEngine>,
+    pub dag_engine: Arc<theway_core::runtime::multiagent::graph::engine::DagEngine>,
     /// session-resource-model: session lifecycle ops (list/create/rename/delete).
     /// Switching the *current* session goes through `WebCommand::SwitchSession`.
     pub session_ops: Arc<dyn SessionOps>,
@@ -310,8 +310,8 @@ impl ThewayGrpc for GrpcState {
         &self,
         request: Request<GraphCheckpointRequest>,
     ) -> Result<Response<GraphCheckpointResponse>, Status> {
-        use theway_core::runtime::graph_engineering::persist::to_persisted;
-        use theway_core::runtime::graph_engineering::types::RunKind;
+        use theway_core::runtime::multiagent::graph::persist::to_persisted;
+        use theway_core::runtime::multiagent::graph::types::RunKind;
         let request = request.into_inner();
         let session_id = request
             .session_id
@@ -319,7 +319,7 @@ impl ThewayGrpc for GrpcState {
             .unwrap_or_else(|| self.session_id.read().unwrap().clone());
 
         // Single-run export, or every run owned by the session.
-        let runs: Vec<theway_core::runtime::graph_engineering::types::DagRun> = match request.run_id
+        let runs: Vec<theway_core::runtime::multiagent::graph::types::DagRun> = match request.run_id
         {
             Some(run_id) => self
                 .dag_engine
@@ -366,7 +366,7 @@ impl ThewayGrpc for GrpcState {
         request: Request<GraphRestoreRequest>,
     ) -> Result<Response<GraphRestoreResponse>, Status> {
         let request = request.into_inner();
-        let mut persisted: theway_core::runtime::graph_engineering::persist::PersistedRun =
+        let mut persisted: theway_core::runtime::multiagent::graph::persist::PersistedRun =
             serde_json::from_str(&request.snapshot)
                 .map_err(|e| Status::invalid_argument(format!("invalid snapshot: {e}")))?;
         // Re-attach to the requesting session (snapshots are portable).

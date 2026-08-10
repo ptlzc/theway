@@ -42,9 +42,9 @@ async fn spawn_sessions_server(
         snapshots: snapshot_tx,
         latest: Arc::new(Mutex::new(web_status(current))),
         completer: SlashCompleter::from_registry(&crate::commands::Registry::with_builtins()),
-        events: broadcast::channel::<SubagentEvent>(16).0,
+        events: broadcast::channel::<AgentJobEvent>(16).0,
         dag_events: broadcast::channel::<DagEvent>(16).0,
-        registry: SubagentJobRegistry::new(),
+        registry: AgentJobRegistry::new(),
         session_ops: ops,
     };
     let router = web_router(state);

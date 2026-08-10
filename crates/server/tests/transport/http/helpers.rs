@@ -15,13 +15,13 @@ pub(crate) fn test_router(latest: WebStatus) -> Router {
         snapshots: snapshot_tx,
         latest: Arc::new(Mutex::new(latest)),
         completer: SlashCompleter::from_registry(&crate::commands::Registry::with_builtins()),
-        events: broadcast::channel::<theway_core::runtime::subagents::registry::SubagentEvent>(16)
+        events: broadcast::channel::<theway_core::runtime::multiagent::registry::AgentJobEvent>(16)
             .0,
-        dag_events: broadcast::channel::<theway_core::runtime::graph_engineering::types::DagEvent>(
+        dag_events: broadcast::channel::<theway_core::runtime::multiagent::graph::types::DagEvent>(
             16,
         )
         .0,
-        registry: theway_core::runtime::subagents::registry::SubagentJobRegistry::new(),
+        registry: theway_core::runtime::multiagent::registry::AgentJobRegistry::new(),
         session_ops: std::sync::Arc::new(crate::transport::testing::FakeSessionOps::new()),
     })
 }

@@ -23,10 +23,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use theway_core::AgentTool;
-use theway_core::runtime::graph_engineering::engine::DagEngine;
-use theway_core::runtime::graph_engineering::node_launcher;
-use theway_core::runtime::subagents::registry::SubagentJobRegistry;
-use theway_core::runtime::subagents::types::ToolSetResolver;
+use theway_core::runtime::multiagent::graph::engine::DagEngine;
+use theway_core::runtime::multiagent::graph::node_launcher;
+use theway_core::runtime::multiagent::registry::AgentJobRegistry;
+use theway_core::runtime::multiagent::types::ToolSetResolver;
 use theway_core::tools::skill::SkillHarnessCell;
 use theway_core::tools::subagent;
 
@@ -94,7 +94,7 @@ pub fn local_tools() -> Vec<Arc<dyn AgentTool>> {
 pub fn subagent_tool(
     model: theway_llm_provider::Model,
     stream_fn: Option<theway_core::StreamFn>,
-    registry: SubagentJobRegistry,
+    registry: AgentJobRegistry,
     memory_dir: PathBuf,
     skill_harness_cell: SkillHarnessCell,
     session_id: Option<String>,
@@ -104,8 +104,8 @@ pub fn subagent_tool(
             model,
             stream_fn,
             subagent_tool_sets(memory_dir, skill_harness_cell),
-            crate::subagent_specs::launch_resolver(),
-            crate::subagent_specs::spec_names(),
+            crate::agent_specs::launch_resolver(),
+            crate::agent_specs::spec_names(),
             registry,
         )
         .with_session_id(session_id),
@@ -134,7 +134,7 @@ pub fn node_launcher(
     model: theway_llm_provider::Model,
     stream_fn: Option<theway_core::StreamFn>,
     cwd: PathBuf,
-    registry: SubagentJobRegistry,
+    registry: AgentJobRegistry,
     memory_dir: PathBuf,
     skill_harness_cell: SkillHarnessCell,
 ) -> Arc<node_launcher::NodeLauncherImpl> {
@@ -145,7 +145,7 @@ pub fn node_launcher(
         cwd,
         registry,
         subagent_tool_sets(memory_dir, skill_harness_cell),
-        crate::subagent_specs::launch_resolver(),
+        crate::agent_specs::launch_resolver(),
     )
 }
 
@@ -159,7 +159,7 @@ pub fn node_launcher(
 pub fn session_tool_set(
     memory_dir: &std::path::Path,
     dag_engine: &Arc<DagEngine>,
-    subagent_registry: &SubagentJobRegistry,
+    subagent_registry: &AgentJobRegistry,
     model: &theway_llm_provider::Model,
     stream_fn: Option<&theway_core::StreamFn>,
     skill_harness_cell: &SkillHarnessCell,
@@ -173,8 +173,8 @@ pub fn session_tool_set(
         dag_engine,
         subagent_registry,
         subagent_tool_sets(memory_dir.to_path_buf(), skill_harness_cell.clone()),
-        crate::subagent_specs::launch_resolver(),
-        crate::subagent_specs::spec_names(),
+        crate::agent_specs::launch_resolver(),
+        crate::agent_specs::spec_names(),
         model,
         stream_fn,
         skill_harness_cell,

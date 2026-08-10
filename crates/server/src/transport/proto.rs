@@ -21,8 +21,8 @@ pub mod health {
 
 use crate::ui::feed::{self, WebFeedBlock};
 use crate::wire::WebStatus;
-use theway_core::runtime::graph_engineering::types::DagEvent;
-use theway_core::runtime::subagents::registry::SubagentEvent;
+use theway_core::runtime::multiagent::graph::types::DagEvent;
+use theway_core::runtime::multiagent::registry::AgentJobEvent;
 use theway_grpc as wire;
 
 /// Convert the internal snapshot into the structured wire model.
@@ -231,10 +231,10 @@ fn dag_node_wire(node: &crate::wire::WebDagNodeSnapshot) -> wire::DagNodeSnapsho
 }
 
 /// Convert an event-plane message into the wire `StreamEvent`.
-pub fn stream_event_wire(event: &SubagentEvent) -> wire::StreamEvent {
+pub fn stream_event_wire(event: &AgentJobEvent) -> wire::StreamEvent {
     use wire::stream_event::Kind;
     let kind = match event {
-        SubagentEvent::Started {
+        AgentJobEvent::Started {
             id,
             agent,
             source,
@@ -247,11 +247,11 @@ pub fn stream_event_wire(event: &SubagentEvent) -> wire::StreamEvent {
             run_id: run_id.clone(),
             node_id: node_id.clone(),
         }),
-        SubagentEvent::Output { id, chunk } => Kind::SubagentOutput(wire::SubagentOutput {
+        AgentJobEvent::Output { id, chunk } => Kind::SubagentOutput(wire::SubagentOutput {
             id: id.clone(),
             chunk: chunk.clone(),
         }),
-        SubagentEvent::Metrics {
+        AgentJobEvent::Metrics {
             id,
             tps,
             cps,
@@ -270,7 +270,7 @@ pub fn stream_event_wire(event: &SubagentEvent) -> wire::StreamEvent {
             tools_called: *tools_called,
             turn: *turn,
         }),
-        SubagentEvent::Completed {
+        AgentJobEvent::Completed {
             id,
             status,
             error,
@@ -324,7 +324,7 @@ pub fn dag_event_wire(event: &DagEvent) -> wire::StreamEvent {
     wire::StreamEvent { kind: Some(kind) }
 }
 
-fn subagent_wire(job: &crate::wire::WebSubagentJobSnapshot) -> wire::SubagentJobSnapshot {
+fn subagent_wire(job: &crate::wire::WebAgentJobSnapshot) -> wire::SubagentJobSnapshot {
     wire::SubagentJobSnapshot {
         id: job.id.clone(),
         agent: job.agent.clone(),

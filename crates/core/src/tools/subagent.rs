@@ -15,7 +15,7 @@
 //!   its inner harness immediately.
 //!
 //! The sub-harness lifecycle itself (harness construction, metrics registry, final-text
-//! collection, cancel watcher) lives in [`crate::runtime::subagents::runner`], shared with the DAG
+//! collection, cancel watcher) lives in [`crate::runtime::multiagent::runner`], shared with the DAG
 //! node launcher.
 //!
 //! Out of scope (follow-ups under #11):
@@ -25,19 +25,19 @@
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use theway_core::runtime::subagents::registry::SubagentJobRegistry;
+use theway_core::runtime::multiagent::registry::AgentJobRegistry;
 use theway_core::{
     AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate, StreamFn, ToolExecutionMode,
 };
 use theway_llm_provider::{Model, Tool, UserContentBlock};
 use tokio_util::sync::CancellationToken;
 
-use crate::runtime::subagents::runner::{SubagentRunOptions, run_subagent};
-use crate::runtime::subagents::types::LaunchResolver;
-use crate::runtime::subagents::types::ToolSetResolver;
+use crate::runtime::multiagent::runner::{AgentRunOptions, run_agent};
+use crate::runtime::multiagent::types::AgentRunResolver;
+use crate::runtime::multiagent::types::ToolSetResolver;
 
 /// Closure that resolves the tool set a subagent should have access to from its spec
-/// name. Same shape as the DAG node launcher's [`ToolSetResolver`](crate::runtime::subagents::types::ToolSetResolver) — `task` and DAG
+/// name. Same shape as the DAG node launcher's [`ToolSetResolver`](crate::runtime::multiagent::types::ToolSetResolver) — `task` and DAG
 /// share one mechanism (and one app-layer instance). App-layer injection: the engine
 /// does not know which tools exist — the server supplies this via `subagent_tool`
 /// (`server/src/tools.rs`) / e2e tests.
@@ -54,7 +54,7 @@ pub struct SubagentTool {
     subagent_tools: SubagentToolsFn,
     /// App-layer launch resolver (spec name → launch params). The spec table lives
     /// app-side; this tool only consumes it.
-    launch_resolver: LaunchResolver,
+    launch_resolver: AgentRunResolver,
     /// Known spec names (for the `subagent_type` enum in the tool definition),
     /// captured at construction from the app's spec table.
     spec_names: Vec<String>,
@@ -62,7 +62,7 @@ pub struct SubagentTool {
     /// populated from the app's spec table (not static).
     definition: Tool,
     /// Subagent job registry (graph mode metrics/output).
-    registry: SubagentJobRegistry,
+    registry: AgentJobRegistry,
     /// Owning session stamped on every spawned job (session-resource-model). `None` for
     /// session-less construction (e2e tests); the CLI wires `Some(current)` via
     /// the CLI's session factory.
@@ -74,9 +74,9 @@ impl SubagentTool {
         model: Model,
         stream_fn: Option<StreamFn>,
         subagent_tools: SubagentToolsFn,
-        launch_resolver: LaunchResolver,
+        launch_resolver: AgentRunResolver,
         spec_names: Vec<String>,
-        registry: SubagentJobRegistry,
+        registry: AgentJobRegistry,
     ) -> Self {
         Self {
             definition: build_definition(&spec_names),
@@ -150,7 +150,7 @@ impl AgentTool for SubagentTool {
         let launch = (self.launch_resolver)(subagent_type).ok_or_else(|| {
             AgentToolError::Message(format!("unknown subagent_type: {subagent_type}"))
         })?;
-        let result = run_subagent(SubagentRunOptions {
+        let result = run_agent(AgentRunOptions {
             launch,
             tools: (self.subagent_tools)(subagent_type),
             prompt,
