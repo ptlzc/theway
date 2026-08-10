@@ -197,7 +197,7 @@ X-Theway-Harness-Test = "webhook-e2e"
     assert!(
         raw_request
             .to_ascii_lowercase()
-            .contains("x-theway-test: webhook-e2e"),
+            .contains("x-theway-harness-test: webhook-e2e"),
         "custom header missing: {raw_request}"
     );
 
