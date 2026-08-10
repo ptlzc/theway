@@ -137,7 +137,9 @@ impl ThewayGrpc for GrpcState {
         let request = request.into_inner();
         // Transcript first (memory, then disk — a finished node's messages
         // survive a process restart via the per-node file), text tail second.
-        let messages = self.registry.node_messages(&request.run_id, &request.node_id);
+        let messages = self
+            .registry
+            .node_messages(&request.run_id, &request.node_id);
         let messages_json = messages
             .as_ref()
             .map(|m| serde_json::to_string(m).unwrap_or_default())
@@ -604,4 +606,4 @@ pub fn serve_grpc(listener: TcpListener, state: GrpcState) -> tokio::task::JoinH
 #[cfg(test)]
 // Test files live in `tests/transport/grpc/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
-tests_bridge!("../../tests/transport/grpc/mod.rs");
+tests_bridge_macro::tests_bridge!("transport/grpc");

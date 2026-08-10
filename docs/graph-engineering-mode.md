@@ -81,8 +81,13 @@ the whole run in `tokio::time::timeout`.
   validator rejects cycles anyway).
 - mermaid rendering honors the parsed `graph LR` direction (TS ignored it and used the
   `direction` param only).
-- No BgJob registry/telemetry: node output tails and token counts live on the node
-  itself (launcher-reported) instead of a job registry.
+- Subagent transcripts: every `AgentEvent::MessageEnd` (user prompts, assistant turns
+  with tool calls, tool results) is captured into the job registry as JSON and served
+  through `GetNodeOutput.messages_json` (gRPC) / the ws `node_output` reply. Finished
+  jobs' transcripts are persisted to `<cwd>/.pi/subagent-jobs/<run_id>/<node_id>.json`
+  on completion, so a node's conversation survives a process restart and is served
+  from disk when the in-memory job is gone. `messages_truncated` is set when the
+  512 KB cap dropped the oldest messages.
 - No TUI widget (`/dag` slash command); `dag_status` covers monitoring.
 
 ## Implementation notes

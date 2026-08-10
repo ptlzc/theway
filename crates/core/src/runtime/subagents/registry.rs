@@ -437,11 +437,19 @@ pub fn agent_message_to_json(m: &AgentMessage) -> serde_json::Value {
         AgentMessage::Custom(c) => match &c.payload {
             serde_json::Value::Object(map) => {
                 let mut obj = map.clone();
-                obj.insert("role".to_string(), serde_json::Value::String(c.role.clone()));
-                obj.insert("timestamp".to_string(), serde_json::Value::from(c.timestamp));
+                obj.insert(
+                    "role".to_string(),
+                    serde_json::Value::String(c.role.clone()),
+                );
+                obj.insert(
+                    "timestamp".to_string(),
+                    serde_json::Value::from(c.timestamp),
+                );
                 serde_json::Value::Object(obj)
             }
-            other => serde_json::json!({ "role": c.role, "timestamp": c.timestamp, "payload": other }),
+            other => {
+                serde_json::json!({ "role": c.role, "timestamp": c.timestamp, "payload": other })
+            }
         },
     }
 }
@@ -807,7 +815,10 @@ mod tests {
             session_id: None,
         });
         registry.update(&id, |job| {
-            append_message(job, &serde_json::json!({"role": "note", "text": "recover me"}));
+            append_message(
+                job,
+                &serde_json::json!({"role": "note", "text": "recover me"}),
+            );
         });
         registry.finish(&id, JobStatus::Succeeded, None);
         // Disk copy exists.
@@ -842,7 +853,10 @@ mod tests {
             session_id: None,
         });
         registry.update(&id, |job| {
-            append_message(job, &serde_json::json!({"role": "note", "text": "task transcript"}));
+            append_message(
+                job,
+                &serde_json::json!({"role": "note", "text": "task transcript"}),
+            );
         });
         registry.finish(&id, JobStatus::Succeeded, None);
         assert!(messages_path_for_task(&dir.path().join("subagent-jobs"), &id).exists());
