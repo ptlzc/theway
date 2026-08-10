@@ -25,8 +25,8 @@ use std::sync::Arc;
 use theway_llm_provider::Model;
 
 use crate::runtime::graph_engineering::engine::DagEngine;
+use crate::runtime::subagents::node_launcher::ToolSetResolver;
 use crate::runtime::subagents::registry::SubagentJobRegistry;
-use crate::tools::node_launcher::ToolSetResolver;
 use crate::{AgentTool, StreamFn};
 
 use super::dag_tools;
@@ -37,7 +37,7 @@ use super::set_skill_state;
 use super::skill::{self, SkillHarnessCell};
 use super::skill_builder;
 use super::subagent::{SubagentTool, SubagentToolsFn};
-use super::subagent_launch::LaunchResolver;
+use crate::runtime::subagents::launch::LaunchResolver;
 
 /// App-layer factory producing the LOCAL execution tools (bash / fs / git / web / …) —
 /// the part the engine cannot know about. Injected once at assembly; every harness

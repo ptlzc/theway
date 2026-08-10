@@ -21,7 +21,8 @@ use tokio_util::sync::CancellationToken;
 
 // Tool modules under test, via the engine's lib surface (the `#[path]` include
 // trick is no longer needed — everything the e2e drives is pub API).
-use theway_core::tools::{dag_tools, node_launcher};
+use theway_core::runtime::subagents::node_launcher;
+use theway_core::tools::dag_tools;
 
 fn faux_model() -> theway_llm_provider::Model {
     theway_llm_provider::Model {
@@ -100,7 +101,7 @@ async fn dag_plan_wait_status_completes_2_node_dag_with_real_launcher() {
         Arc::new(|_| Vec::new()),
         // Spec resolver: minimal app-side table (the plan uses `explorer`).
         Arc::new(|name: &str| {
-            let launch = theway_core::tools::subagent_launch::SubagentLaunch {
+            let launch = theway_core::runtime::subagents::launch::SubagentLaunch {
                 name: "explorer",
                 description: "test",
                 system_prompt: "You are a test subagent.",

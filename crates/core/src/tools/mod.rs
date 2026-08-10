@@ -5,9 +5,9 @@
 //!
 //! - **graph / DAG orchestration**: [`dag_tools`] (model-facing dag_* tools), backed by
 //!   `crate::runtime::graph_engineering`.
-//! - **subagents**: [`subagent_launch`] (launch data channel), [`subagent_runner`]
-//!   (shared sub-harness lifecycle), [`node_launcher`] (DAG node execution), [`subagent`]
-//!   (model-facing Task delegation tool).
+//! - **subagents**: [`subagent`] (model-facing delegation tool). The runtime side
+//!   (launch data channel, shared sub-harness lifecycle, DAG node execution) lives in
+//!   `crate::runtime::subagents`.
 //! - **skills**: [`skill`], [`install_skill`], [`remove_skill`], [`set_skill_state`],
 //!   [`skill_builder`].
 //! - **memory**: [`memory`].
@@ -25,11 +25,9 @@ pub mod dag_tools;
 pub mod install_skill;
 pub mod mcp_adapter;
 pub mod memory;
-pub mod node_launcher;
+
 pub mod remove_skill;
 pub mod set_skill_state;
 pub mod skill;
 pub mod skill_builder;
 pub mod subagent;
-pub mod subagent_launch;
-pub mod subagent_runner;

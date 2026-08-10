@@ -24,10 +24,11 @@ use std::sync::Arc;
 
 use theway_core::AgentTool;
 use theway_core::runtime::graph_engineering::engine::DagEngine;
+use theway_core::runtime::subagents::node_launcher;
+use theway_core::runtime::subagents::node_launcher::ToolSetResolver;
 use theway_core::runtime::subagents::registry::SubagentJobRegistry;
-use theway_core::tools::node_launcher::ToolSetResolver;
 use theway_core::tools::skill::SkillHarnessCell;
-use theway_core::tools::{node_launcher, subagent};
+use theway_core::tools::subagent;
 
 // ── tool bodies (app-layer: local execution + web) ──────────────────────────
 //

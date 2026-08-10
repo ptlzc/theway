@@ -15,7 +15,7 @@
 //!   its inner harness immediately.
 //!
 //! The sub-harness lifecycle itself (harness construction, metrics registry, final-text
-//! collection, cancel watcher) lives in [`super::subagent_runner`], shared with the DAG
+//! collection, cancel watcher) lives in [`crate::runtime::subagents::runner`], shared with the DAG
 //! node launcher.
 //!
 //! Out of scope (follow-ups under #11):
@@ -32,9 +32,9 @@ use theway_core::{
 use theway_llm_provider::{Model, Tool, UserContentBlock};
 use tokio_util::sync::CancellationToken;
 
-use super::node_launcher::ToolSetResolver;
-use super::subagent_launch::LaunchResolver;
-use super::subagent_runner::{SubagentRunOptions, run_subagent};
+use crate::runtime::subagents::launch::LaunchResolver;
+use crate::runtime::subagents::node_launcher::ToolSetResolver;
+use crate::runtime::subagents::runner::{SubagentRunOptions, run_subagent};
 
 /// Closure that resolves the tool set a subagent should have access to from its spec
 /// name. Same shape as the DAG node launcher's [`ToolSetResolver`] — `task` and DAG

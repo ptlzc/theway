@@ -1,9 +1,9 @@
 //! `node_launcher` — real subagent execution for DAG nodes.
 //!
 //! [`NodeLauncherImpl`] implements the engine's [`NodeLauncher`] contract: each launched
-//! node is executed by the shared [`subagent_runner`](super::subagent_runner) (one fresh
+//! node is executed by the shared [`runner`](super::runner) (one fresh
 //! in-memory harness per node, nothing touches disk), spawned by the node's `agent` name
-//! resolved through the injected [`LaunchResolver`](super::subagent_launch). The outcome (success, error, duration, tokens,
+//! resolved through the injected [`LaunchResolver`](super::launch). The outcome (success, error, duration, tokens,
 //! final text) is reported back to the engine via [`DagEngine::on_node_completed`]; live
 //! token/preview sync runs through [`DagEngine::on_node_update`] via the runner's
 //! per-turn callback. 1:1 port of the dag-orchestrator extension's `defaultLauncher`
@@ -28,9 +28,9 @@ use theway_core::{AgentTool, StreamFn};
 use theway_llm_provider::Model;
 use tokio_util::sync::CancellationToken;
 
-use super::subagent_launch::{LaunchResolver, SubagentLaunch};
-use super::subagent_runner::{SubagentRunOptions, run_subagent};
-use theway_core::runtime::subagents::registry::SubagentJobRegistry;
+use super::launch::{LaunchResolver, SubagentLaunch};
+use super::registry::SubagentJobRegistry;
+use super::runner::{SubagentRunOptions, run_subagent};
 
 /// Resolves a subagent's tool set from its spec name. App-layer injection: the engine
 /// does not know which tools exist (local tools live in the `theway` crate, and may

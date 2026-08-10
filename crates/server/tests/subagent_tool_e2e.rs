@@ -35,8 +35,8 @@ fn faux_model() -> theway_llm_provider::Model {
     }
 }
 
-fn test_launch_resolver() -> theway_core::tools::subagent_launch::LaunchResolver {
-    let launch = theway_core::tools::subagent_launch::SubagentLaunch {
+fn test_launch_resolver() -> theway_core::runtime::subagents::launch::LaunchResolver {
+    let launch = theway_core::runtime::subagents::launch::SubagentLaunch {
         name: "general",
         description: "test",
         system_prompt: "You are a test subagent.",
