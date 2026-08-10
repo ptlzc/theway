@@ -406,8 +406,17 @@ fn join_env_path(base: &str, child: &str) -> String {
     format!("{base}/{child}")
 }
 
+/// Normalize a native path to `/`-separated form (Windows uses `\`). The
+/// skill loader's path math (basename/dirname/relative/ignore matching) is
+/// separator-agnostic by design — normalize at the boundary so both platforms
+/// produce the same `SKILL.md` semantics. Unconditional (not `cfg!(windows)`)
+/// so the behavior — and its tests — are identical on every host.
+fn normalize_sep(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
 fn dirname_env_path(path: &str) -> String {
-    let normalized = path.trim_end_matches('/');
+    let normalized = normalize_sep(path).trim_end_matches('/').to_string();
     match normalized.rfind('/') {
         Some(i) if i > 0 => normalized[..i].to_string(),
         _ => "/".to_string(),
@@ -415,13 +424,13 @@ fn dirname_env_path(path: &str) -> String {
 }
 
 fn basename_env_path(path: &str) -> String {
-    let normalized = path.trim_end_matches('/');
+    let normalized = normalize_sep(path).trim_end_matches('/').to_string();
     normalized.rsplit('/').next().unwrap_or("").to_string()
 }
 
 fn relative_env_path(root: &str, path: &str) -> String {
-    let root = root.trim_end_matches('/');
-    let path = path.trim_end_matches('/');
+    let root = normalize_sep(root).trim_end_matches('/').to_string();
+    let path = normalize_sep(path).trim_end_matches('/').to_string();
     if path == root {
         return String::new();
     }
@@ -564,5 +573,22 @@ mod tests {
         assert_eq!(basename_env_path("/a/b/c"), "c");
         assert_eq!(relative_env_path("/root", "/root/a/b"), "a/b");
         assert_eq!(relative_env_path("/root", "/root"), "");
+    }
+
+    #[test]
+    fn env_path_helpers_handle_windows_separators() {
+        // NativeEnv returns `\`-separated paths on Windows; the loader's path
+        // math must normalize them so skill name/parent-dir validation and
+        // ignore matching behave identically on both platforms.
+        assert_eq!(dirname_env_path("C:\\a\\b\\c"), "C:/a/b");
+        assert_eq!(basename_env_path("C:\\a\\b\\c"), "c");
+        assert_eq!(
+            relative_env_path("C:\\root", "C:\\root\\a\\b"),
+            "a/b"
+        );
+        assert_eq!(
+            basename_env_path("C:\\Users\\x\\Temp\\tmp1\\my-skill"),
+            "my-skill"
+        );
     }
 }
