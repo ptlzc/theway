@@ -21,7 +21,7 @@ use tokio_util::sync::CancellationToken;
 
 // Tool modules under test, via the engine's lib surface (the `#[path]` include
 // trick is no longer needed — everything the e2e drives is pub API).
-use theway_core::runtime::subagents::node_launcher;
+use theway_core::runtime::graph_engineering::node_launcher;
 use theway_core::tools::dag_tools;
 
 fn faux_model() -> theway_llm_provider::Model {

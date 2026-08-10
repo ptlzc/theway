@@ -3,7 +3,7 @@
 //! [`NodeLauncherImpl`] implements the engine's [`NodeLauncher`] contract: each launched
 //! node is executed by the shared [`runner`](super::runner) (one fresh
 //! in-memory harness per node, nothing touches disk), spawned by the node's `agent` name
-//! resolved through the injected [`LaunchResolver`](super::types). The outcome (success, error, duration, tokens,
+//! resolved through the injected [`LaunchResolver`](crate::runtime::subagents::types). The outcome (success, error, duration, tokens,
 //! final text) is reported back to the engine via [`DagEngine::on_node_completed`]; live
 //! token/preview sync runs through [`DagEngine::on_node_update`] via the runner's
 //! per-turn callback. 1:1 port of the dag-orchestrator extension's `defaultLauncher`
@@ -23,14 +23,14 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use theway_core::runtime::graph_engineering::engine::{DagEngine, NodeLauncher, NodeOutcome};
+use super::engine::{DagEngine, NodeLauncher, NodeOutcome};
 use theway_core::{AgentTool, StreamFn};
 use theway_llm_provider::Model;
 use tokio_util::sync::CancellationToken;
 
-use super::registry::SubagentJobRegistry;
-use super::runner::{SubagentRunOptions, run_subagent};
-use super::types::{LaunchResolver, SubagentLaunch, ToolSetResolver};
+use crate::runtime::subagents::registry::SubagentJobRegistry;
+use crate::runtime::subagents::runner::{SubagentRunOptions, run_subagent};
+use crate::runtime::subagents::types::{LaunchResolver, SubagentLaunch, ToolSetResolver};
 
 /// Everything a single node job needs, captured at launch time so the spawned task never
 /// re-reads mutable engine state (the node may be retried/cancelled meanwhile).
@@ -260,9 +260,7 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
 
-    use theway_core::runtime::graph_engineering::types::{
-        DagNodeDef, DagRunDef, DagStatus, NodeStatus,
-    };
+    use crate::runtime::graph_engineering::types::{DagNodeDef, DagRunDef, DagStatus, NodeStatus};
     use theway_llm_provider::{
         AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, AssistantRole,
         ContentBlock, DoneReason, ModelCost, StopReason, Usage,

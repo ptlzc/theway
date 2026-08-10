@@ -4,7 +4,7 @@
 //! `tools.ts`, driving the engine in
 //! `theway_core::runtime::graph_engineering::engine` (which owns the
 //! scheduler/state machine; the real subagent launcher lives in
-//! `crate::runtime::subagents::node_launcher` and is wired in by the app layer).
+//! `crate::runtime::graph_engineering::node_launcher` and is wired in by the app layer).
 //!
 //! Session isolation: runs are stamped with the owning pi session id, and every
 //! tool refuses runs owned by another session (multiple concurrent agents in
