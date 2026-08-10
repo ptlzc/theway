@@ -30,6 +30,52 @@ fn rule(event: HookEvent) -> HookRule {
     }
 }
 
+/// Hook command that writes `<event> <extra vars...> ` to `out` and runs a
+/// payload check. The runner spawns `sh -c` on Unix and `cmd /C` on Windows,
+/// so the command syntax is platform-specific (`$VAR`/`printf`/`;` vs
+/// `%VAR%`/`echo`/`&`); `echo` writes a trailing CRLF on Windows, hence the
+/// CRLF-tolerant assertions.
+fn hook_capture_command(out: &std::path::Path, var_names: &[&str], payload_check: &str) -> String {
+    #[cfg(unix)]
+    {
+        let mut vars = vec!["$THEWAY_HOOK_EVENT".to_string()];
+        vars.extend(var_names.iter().map(|v| format!("${v}")));
+        let fmt = "%s ".repeat(vars.len());
+        format!(
+            "printf '{fmt}' {} > '{}'; {payload_check}",
+            vars.join(" "),
+            out.display()
+        )
+    }
+    #[cfg(windows)]
+    {
+        let mut vars = vec!["%THEWAY_HOOK_EVENT%".to_string()];
+        vars.extend(var_names.iter().map(|v| format!("%{v}%")));
+        // `cmd /C` one-liners mis-parse QUOTED redirect targets and args
+        // ("filename, directory name, or volume label syntax is incorrect") —
+        // keep the paths unquoted. Temp dirs on CI/test hosts have no spaces.
+        format!("echo {}> {} & {payload_check}", vars.join(" "), out.display())
+    }
+}
+
+/// Platform-appropriate payload check: non-empty (None) or contains a needle.
+fn hook_payload_check(needle: Option<&str>) -> String {
+    #[cfg(unix)]
+    {
+        match needle {
+            Some(n) => format!("grep -q '{n}' \"$THEWAY_HOOK_PAYLOAD\""),
+            None => "test -s \"$THEWAY_HOOK_PAYLOAD\"".to_string(),
+        }
+    }
+    #[cfg(windows)]
+    {
+        match needle {
+            Some(n) => format!("findstr {n} %THEWAY_HOOK_PAYLOAD% >nul"),
+            None => "findstr /R . %THEWAY_HOOK_PAYLOAD% >nul".to_string(),
+        }
+    }
+}
+
 #[test]
 fn parses_hook_rules_and_skips_bad_entries() {
     let file: HooksFile = toml::from_str(
@@ -66,9 +112,10 @@ async fn command_hook_receives_env_and_payload() {
     let dir = tempfile::tempdir().unwrap();
     let out = dir.path().join("hook.out");
     let mut r = rule(HookEvent::ToolEnd);
-    r.command = Some(format!(
-        "printf '%s %s ' \"$THEWAY_HOOK_EVENT\" \"$THEWAY_TOOL_NAME\" > {}; test -s \"$THEWAY_HOOK_PAYLOAD\"",
-        out.display()
+    r.command = Some(hook_capture_command(
+        &out,
+        &["THEWAY_TOOL_NAME"],
+        &hook_payload_check(None),
     ));
     r.cwd = HookCwd::Project;
     let runner = runner(vec![r]);
@@ -84,7 +131,8 @@ async fn command_hook_receives_env_and_payload() {
     };
     runner.handle_event(&ev, CancellationToken::new()).await;
     let body = tokio::fs::read_to_string(out).await.unwrap();
-    assert_eq!(body, "tool_end bash ");
+    // `cmd /C echo` appends CRLF on Windows; strip it before comparing.
+    assert_eq!(body.trim_end_matches(['\r', '\n']), "tool_end bash ");
 }
 
 #[tokio::test]
@@ -92,9 +140,10 @@ async fn compaction_command_hook_receives_env_and_payload() {
     let dir = tempfile::tempdir().unwrap();
     let out = dir.path().join("hook.out");
     let mut r = rule(HookEvent::Compaction);
-    r.command = Some(format!(
-        "printf '%s %s %s ' \"$THEWAY_HOOK_EVENT\" \"$THEWAY_COMPACTION_TRIGGER\" \"$THEWAY_COMPACTION_TOKENS_BEFORE\" > {}; grep -q '\"compaction_summary\":\"summary text\"' \"$THEWAY_HOOK_PAYLOAD\"",
-        out.display()
+    r.command = Some(hook_capture_command(
+        &out,
+        &["THEWAY_COMPACTION_TRIGGER", "THEWAY_COMPACTION_TOKENS_BEFORE"],
+        &hook_payload_check(Some("compaction_summary")),
     ));
     let runner = runner(vec![r]);
     let ev = HarnessEvent::Compaction {
@@ -106,7 +155,11 @@ async fn compaction_command_hook_receives_env_and_payload() {
         .handle_harness_event(&ev, CancellationToken::new())
         .await;
     let body = tokio::fs::read_to_string(out).await.unwrap();
-    assert_eq!(body, "compaction manual 42 ");
+    // `cmd /C echo` appends CRLF on Windows; strip it before comparing.
+    assert_eq!(
+        body.trim_end_matches(['\r', '\n']),
+        "compaction manual 42 "
+    );
 }
 
 #[tokio::test]

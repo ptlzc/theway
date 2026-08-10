@@ -440,9 +440,11 @@ async fn wait_with_optional_timeout(child: &mut Child, timeout_secs: Option<u64>
 
 /// Best-effort teardown of the child *and any descendants it spawned*. On Unix the child was
 /// placed in its own session/process group via `setsid()`, so a single `killpg(-pid, SIGKILL)`
-/// reaches background jobs and detached children. On non-Unix targets we fall back to the
-/// direct `kill_on_drop` + `Child::kill` path (no descendants problem because Windows job
-/// objects aren't wired up here — that's the larger Windows port story).
+/// reaches background jobs and detached children. On Windows the direct child (`sh` from Git
+/// Bash, or `cmd`) forks real child processes that survive the parent's death and keep the
+/// piped stdout/stderr write ends open — without killing them the drain tasks below hang until
+/// the orphan exits on its own (the pre-existing `exec_timeout` Windows failure). `taskkill /T`
+/// walks the whole process tree, matching what the server's shell tool does.
 async fn terminate_child_tree(child: &mut Child, pid: Option<u32>) {
     #[cfg(unix)]
     if let Some(pid) = pid {
@@ -452,6 +454,18 @@ async fn terminate_child_tree(child: &mut Child, pid: Option<u32>) {
         unsafe {
             libc::killpg(pid as libc::pid_t, libc::SIGKILL);
         }
+    }
+    #[cfg(windows)]
+    if let Some(pid) = pid {
+        use std::os::windows::process::CommandExt;
+        // `taskkill /PID <pid> /T /F` kills the whole tree rooted at the direct child, not
+        // just the child itself. CREATE_NO_WINDOW (0x08000000) avoids a console flash.
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .creation_flags(0x08000000)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .output();
     }
     // Always also issue `Child::start_kill` so tokio considers the handle terminated. On
     // Unix the SIGKILL above already did the work; this is the cross-platform reaper. The
