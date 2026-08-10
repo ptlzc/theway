@@ -266,6 +266,102 @@ async fn get_node_output_returns_fragment_from_offset() {
 }
 
 #[tokio::test]
+async fn get_node_output_includes_messages_json() {
+    let (state, _command_rx) = grpc_state();
+    let job_id = state
+        .registry
+        .register(theway_core::runtime::subagents::registry::JobInit {
+            agent: "explorer".into(),
+            source: "dag".into(),
+            run_id: Some("run-1".into()),
+            node_id: Some("node-1".into()),
+            session_id: None,
+        });
+    state.registry.update(&job_id, |job| {
+        theway_core::runtime::subagents::registry::append_message(
+            job,
+            &serde_json::json!({"role": "user", "content": "explore"}),
+        );
+        theway_core::runtime::subagents::registry::append_message(
+            job,
+            &serde_json::json!({"role": "assistant", "content": [{"type": "text", "text": "done"}]}),
+        );
+    });
+
+    let response = state
+        .get_node_output(Request::new(GetNodeOutputRequest {
+            run_id: "run-1".into(),
+            node_id: "node-1".into(),
+            offset: 0,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    let messages: Vec<serde_json::Value> =
+        serde_json::from_str(response.messages_json.as_deref().unwrap()).unwrap();
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0]["role"], serde_json::json!("user"));
+    assert_eq!(messages[1]["content"][0]["text"], serde_json::json!("done"));
+    assert!(!response.messages_truncated);
+}
+
+#[tokio::test]
+async fn get_node_output_recovers_messages_from_disk_after_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    // First process: job runs, finishes, transcript written to disk.
+    let registry = SubagentJobRegistry::new();
+    registry.set_messages_dir(Some(dir.path().join("subagent-jobs")));
+    let job_id = registry.register(theway_core::runtime::subagents::registry::JobInit {
+        agent: "explorer".into(),
+        source: "dag".into(),
+        run_id: Some("run-1".into()),
+        node_id: Some("node-1".into()),
+        session_id: None,
+    });
+    registry.update(&job_id, |job| {
+        theway_core::runtime::subagents::registry::append_message(
+            job,
+            &serde_json::json!({"role": "assistant", "content": [{"type": "text", "text": "survives"}]}),
+        );
+    });
+    registry.finish(
+        &job_id,
+        theway_core::runtime::subagents::registry::JobStatus::Succeeded,
+        None,
+    );
+
+    // Restart: fresh GrpcState with a fresh registry, same messages dir.
+    let (mut state, _command_rx) = grpc_state();
+    state.registry.set_messages_dir(Some(dir.path().join("subagent-jobs")));
+    let response = state
+        .get_node_output(Request::new(GetNodeOutputRequest {
+            run_id: "run-1".into(),
+            node_id: "node-1".into(),
+            offset: 0,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    // No live job (404 path avoided) — the disk transcript is served.
+    assert_eq!(response.total, 0);
+    let messages: Vec<serde_json::Value> =
+        serde_json::from_str(response.messages_json.as_deref().unwrap()).unwrap();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0]["content"][0]["text"], serde_json::json!("survives"));
+
+    // Unknown node still 404s even with a messages dir configured.
+    let err = state
+        .get_node_output(Request::new(GetNodeOutputRequest {
+            run_id: "run-1".into(),
+            node_id: "nope".into(),
+            offset: 0,
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::NotFound);
+}
+
+#[tokio::test]
 async fn stream_events_merges_snapshot_and_event_payloads() {
     let (state, _command_rx) = grpc_state();
     let response = state

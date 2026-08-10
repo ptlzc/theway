@@ -263,6 +263,12 @@ message GetNodeOutputResponse {
   uint64 offset = 2; // start offset of this fragment
   uint64 total = 3; // full length
   bool truncated = 4; // server buffer capped
+  // Full conversation transcript (user prompts + assistant turns with tool
+  // calls + tool results) as a JSON array of serde_json::Value — the same
+  // shape the registry keeps in memory and on disk. "" when unavailable
+  // (e.g. unknown node). Optional so older clients keep working.
+  optional string messages_json = 5;
+  bool messages_truncated = 6; // transcript buffer was capped (oldest dropped)
 }
 
 // ─────────────────────────── event plane ───────────────────────────

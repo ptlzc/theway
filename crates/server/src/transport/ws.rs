@@ -184,11 +184,23 @@ async fn handle_client_frame(text: &str, state: &HttpState) -> Option<Message> {
             .is_ok()
             .then(|| Message::Text(json!({ "type": "accepted" }).to_string().into())),
         // Full-text output as a one-shot reply (mirrors gRPC GetNodeOutput).
+        // Transcript rides along: memory first, then the per-node disk copy
+        // (survives a process restart).
         ClientFrame::GetNodeOutput {
             run_id,
             node_id,
             offset,
         } => {
+            let messages = state.registry.node_messages(&run_id, &node_id);
+            let messages_json = messages
+                .as_ref()
+                .map(|m| serde_json::to_string(m).unwrap_or_default())
+                .unwrap_or_default();
+            let messages_truncated = state
+                .registry
+                .find_node(&run_id, &node_id)
+                .map(|job| job.messages_truncated)
+                .unwrap_or(false);
             let job = state.registry.find_node(&run_id, &node_id);
             match job {
                 Some(job) => {
@@ -206,16 +218,32 @@ async fn handle_client_frame(text: &str, state: &HttpState) -> Option<Message> {
                             "offset": offset,
                             "total": output.len(),
                             "truncated": job.truncated,
+                            "messages": serde_json::from_str::<serde_json::Value>(&messages_json).unwrap_or(serde_json::Value::Null),
+                            "messages_truncated": messages_truncated,
                         })
                         .to_string()
                         .into(),
                     ))
                 }
-                None => Some(Message::Text(
-                    json!({ "type": "node_output", "text": "", "offset": offset, "total": 0, "truncated": false })
+                None => {
+                    // Recovery path: job is gone (restart) but a disk transcript
+                    // may still exist — serve it instead of an empty reply.
+                    let messages = serde_json::from_str::<serde_json::Value>(&messages_json)
+                        .unwrap_or(serde_json::Value::Null);
+                    Some(Message::Text(
+                        json!({
+                            "type": "node_output",
+                            "text": "",
+                            "offset": offset,
+                            "total": 0,
+                            "truncated": false,
+                            "messages": messages,
+                            "messages_truncated": messages_truncated,
+                        })
                         .to_string()
                         .into(),
-                )),
+                    ))
+                }
             }
         }
         ClientFrame::Ping => Some(Message::Text(json!({ "type": "pong" }).to_string().into())),

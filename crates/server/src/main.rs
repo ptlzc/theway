@@ -608,7 +608,10 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
     // immediately and their ready nodes need a launcher to re-schedule into.
     let dag_engine = Arc::new(DagEngine::new());
     // Subagent job registry (graph mode): task tool + DAG node launches both register.
+    // Finished jobs' full transcripts are persisted under `<cwd>/.pi/subagent-jobs`
+    // (per-node files keyed run/node) so they survive a process restart.
     let subagent_registry = theway_core::runtime::subagents::registry::SubagentJobRegistry::new();
+    subagent_registry.set_messages_dir(Some(cwd.join(".pi").join("subagent-jobs")));
     dag_engine.set_launcher(Some(crate::tools::node_launcher(
         dag_engine.clone(),
         model.clone(),

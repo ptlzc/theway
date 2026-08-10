@@ -135,7 +135,31 @@ impl ThewayGrpc for GrpcState {
         request: Request<GetNodeOutputRequest>,
     ) -> Result<Response<GetNodeOutputResponse>, Status> {
         let request = request.into_inner();
+        // Transcript first (memory, then disk — a finished node's messages
+        // survive a process restart via the per-node file), text tail second.
+        let messages = self.registry.node_messages(&request.run_id, &request.node_id);
+        let messages_json = messages
+            .as_ref()
+            .map(|m| serde_json::to_string(m).unwrap_or_default())
+            .unwrap_or_default();
+        let messages_truncated = self
+            .registry
+            .find_node(&request.run_id, &request.node_id)
+            .map(|job| job.messages_truncated)
+            .unwrap_or(false);
         let Some(job) = self.registry.find_node(&request.run_id, &request.node_id) else {
+            // Recovery path: job is gone (restart) but a disk transcript may
+            // still exist — serve it instead of 404-ing.
+            if !messages_json.is_empty() {
+                return Ok(Response::new(GetNodeOutputResponse {
+                    text: String::new(),
+                    offset: request.offset,
+                    total: 0,
+                    truncated: false,
+                    messages_json: Some(messages_json),
+                    messages_truncated,
+                }));
+            }
             return Err(Status::not_found(format!(
                 "no job for node {} in run {}",
                 request.node_id, request.run_id
@@ -153,6 +177,8 @@ impl ThewayGrpc for GrpcState {
             offset: request.offset,
             total: text.len() as u64,
             truncated: job.truncated,
+            messages_json: (!messages_json.is_empty()).then_some(messages_json),
+            messages_truncated,
         }))
     }
 
