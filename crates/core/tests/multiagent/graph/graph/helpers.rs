@@ -1,0 +1,26 @@
+use super::*;
+
+#[test]
+fn fmt_dur_cases() {
+    assert_eq!(fmt_dur(1_500), "1.5s");
+    assert_eq!(fmt_dur(150_000), "2m30s");
+    assert_eq!(fmt_dur(3_720_000), "1h2m");
+    assert_eq!(fmt_dur(-1), "–");
+}
+
+#[test]
+fn status_tags_and_prefix() {
+    assert_eq!(status_tag(&NodeStatus::Pending), "[wait]");
+    assert_eq!(status_tag(&NodeStatus::Succeeded), "[done]");
+    assert_eq!(status_tag(&NodeStatus::Running), "[run]");
+    assert_eq!(node_status_label(&NodeStatus::Running), "running");
+    let def = run_def("t", vec![node_def("b", "x", "t", &["a", "c"])]);
+    let run = build_run(&def);
+    assert_eq!(deps_prefix(run.node("b").unwrap()), "[a,c] ");
+}
+
+#[test]
+fn escape_label_handles_quotes_backslashes_newlines() {
+    assert_eq!(escape_mermaid_label("a\"b\\c"), "a\\\"b\\\\c");
+    assert_eq!(escape_mermaid_label("x\ny\n z"), "x y z");
+}
