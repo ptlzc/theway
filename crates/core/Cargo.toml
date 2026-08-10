@@ -13,7 +13,7 @@ name = "theway_core"
 path = "src/lib.rs"
 
 [features]
-default = ["harness", "native-env", "ts-extensions"]
+default = ["harness", "native-env"]
 
 # Bare Agent + agent-loop. Always on.
 # Harness layer (skills, prompt templates, sessions, compaction, system prompt). Opt-out for
@@ -21,20 +21,6 @@ default = ["harness", "native-env", "ts-extensions"]
 harness = []
 # Native filesystem adapter (std::fs). Default for native targets; turn off for wasm.
 native-env = []
-# TS extension host (`crate::extensions`): oxc TS→JS transpilation + embedded QuickJS
-# (rquickjs). Heavy dependencies, hence opt-in; compaction's custom-algorithm extension
-# point (issue #4) is the first consumer.
-ts-extensions = [
-    "dep:rquickjs",
-    "dep:oxc_allocator",
-    "dep:oxc_ast",
-    "dep:oxc_codegen",
-    "dep:oxc_parser",
-    "dep:oxc_semantic",
-    "dep:oxc_span",
-    "dep:oxc_transformer",
-    "dep:oxc-browserslist",
-]
 
 [dependencies]
 theway-llm-provider = { path = "../llm-provider" }
@@ -78,15 +64,6 @@ anyhow = "1"
 # / authentication primitive. SHA-256 is overkill cryptographically for this purpose
 # but avoids the "two hashers disagree" footgun of non-deterministic stdlib hashers.
 sha2 = "0.10"
-rquickjs = { version = "0.11.0", features = ["full"], optional = true }
-oxc_allocator = { version = "0.75.1", optional = true }
-oxc_ast = { version = "0.75.1", optional = true }
-oxc_codegen = { version = "0.75.1", optional = true }
-oxc_parser = { version = "0.75.1", optional = true }
-oxc_semantic = { version = "0.75.1", optional = true }
-oxc_span = { version = "0.75.1", optional = true }
-oxc_transformer = { version = "0.75.1", optional = true }
-oxc-browserslist = { version = "=2.0.13", default-features = false, optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

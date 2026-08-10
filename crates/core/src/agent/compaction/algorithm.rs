@@ -7,10 +7,10 @@
 //! - [`BuiltinCompactAlgorithm`] is the shipped default: the 80%-window trigger heuristic,
 //!   the turn-boundary-safe `keep_recent_tokens` cut, and LLM summarization (with the
 //!   overflow-budget retry loop).
-//! - Custom algorithms implement the same trait. The TS path comes from the core-level
-//!   extension system ([`crate::extensions`]): extensions declaring
-//!   `export const kind = "compaction"` are wrapped by [`TsCompactAlgorithm`] and
-//!   registered here. Hooks the TS file doesn't export fall back to the builtin behavior.
+//! - Custom algorithms implement the same trait. The TS path is host-wired: the CLI
+//!   (`crates/server/src/ts_extensions`) discovers `kind = "compaction"` extensions,
+//!   adapts them to [`CompactAlgorithm`], and injects the registry via
+//!   `AgentHarnessOptions.compact_algorithms` — the core never loads extensions itself.
 //!
 //! The trait methods carry defaults that delegate to the same free functions the builtin
 //! uses, so a custom algorithm that overrides only `select_cut_point` still gets the builtin
@@ -104,7 +104,8 @@ impl CompactAlgorithm for BuiltinCompactAlgorithm {
 }
 
 /// Resolves `CompactionSettings.algorithm` names to implementations. Holds the custom
-/// algorithms (TS extensions); the builtin is always available as fallback.
+/// algorithms (host-injected, e.g. TS extensions); the builtin is always available as
+/// fallback.
 pub struct CompactAlgorithmRegistry {
     custom: HashMap<String, Arc<dyn CompactAlgorithm>>,
 }
@@ -152,162 +153,5 @@ impl CompactAlgorithmRegistry {
         let mut names: Vec<String> = self.custom.keys().cloned().collect();
         names.sort();
         names
-    }
-
-    /// Build the registry from the core-level extension system: every extension declaring
-    /// `kind = "compaction"` becomes a registered algorithm (see [`crate::extensions`]).
-    #[cfg(feature = "ts-extensions")]
-    pub fn from_extensions(extensions: &crate::extensions::ExtensionRegistry) -> Self {
-        let mut registry = Self::new();
-        for ext in extensions.by_kind("compaction") {
-            registry.register(Arc::new(TsCompactAlgorithm::new(ext)));
-        }
-        registry
-    }
-}
-
-/// A `kind = "compaction"` TS extension adapted to the [`CompactAlgorithm`] trait. Hooks
-/// the extension doesn't export (or declines) fall back to the builtin algorithm.
-#[cfg(feature = "ts-extensions")]
-pub struct TsCompactAlgorithm {
-    ext: Arc<crate::extensions::TsExtension>,
-    builtin: BuiltinCompactAlgorithm,
-}
-
-#[cfg(feature = "ts-extensions")]
-impl TsCompactAlgorithm {
-    pub fn new(ext: Arc<crate::extensions::TsExtension>) -> Self {
-        Self {
-            ext,
-            builtin: BuiltinCompactAlgorithm,
-        }
-    }
-}
-
-/// Serialized settings passed to every hook (snake_case, matching the TS contract).
-#[cfg(feature = "ts-extensions")]
-#[derive(serde::Serialize)]
-struct SettingsJson<'a> {
-    enabled: bool,
-    reserve_tokens: u32,
-    keep_recent_tokens: u32,
-    algorithm: &'a str,
-}
-
-#[cfg(feature = "ts-extensions")]
-impl<'a> SettingsJson<'a> {
-    fn new(settings: &'a CompactionSettings) -> Self {
-        Self {
-            enabled: settings.enabled,
-            reserve_tokens: settings.reserve_tokens,
-            keep_recent_tokens: settings.keep_recent_tokens,
-            algorithm: &settings.algorithm,
-        }
-    }
-}
-
-#[cfg(feature = "ts-extensions")]
-#[async_trait]
-impl CompactAlgorithm for TsCompactAlgorithm {
-    fn name(&self) -> &str {
-        self.ext.name()
-    }
-
-    async fn decide_compact(
-        &self,
-        context_tokens: u64,
-        context_window: u32,
-        settings: &CompactionSettings,
-    ) -> bool {
-        let arg = serde_json::json!({
-            "context_tokens": context_tokens,
-            "context_window": context_window,
-            "settings": SettingsJson::new(settings),
-        });
-        match self.ext.run_hook("decide_compact", &arg) {
-            Ok(Some(v)) => v.as_bool().unwrap_or_else(|| {
-                tracing::warn!(
-                    algorithm = self.name(),
-                    "decide_compact returned a non-boolean value, treating as decline"
-                );
-                false
-            }),
-            // Missing hook / declined: builtin decision.
-            _ => {
-                self.builtin
-                    .decide_compact(context_tokens, context_window, settings)
-                    .await
-            }
-        }
-    }
-
-    async fn select_cut_point(
-        &self,
-        entries: &[SessionTreeEntry],
-        settings: &CompactionSettings,
-    ) -> CutPointResult {
-        let arg = match serde_json::to_value(entries) {
-            Ok(entries) => serde_json::json!({
-                "entries": entries,
-                "settings": SettingsJson::new(settings),
-            }),
-            Err(e) => {
-                tracing::warn!(algorithm = self.name(), "failed to serialize entries: {e}");
-                return self.builtin.select_cut_point(entries, settings).await;
-            }
-        };
-        match self.ext.run_hook("select_cut_point", &arg) {
-            Ok(Some(v)) => {
-                let Some(cut_index) = v.get("cut_index").and_then(|c| c.as_u64()) else {
-                    tracing::warn!(
-                        algorithm = self.name(),
-                        "select_cut_point returned no valid cut_index, falling back to builtin"
-                    );
-                    return self.builtin.select_cut_point(entries, settings).await;
-                };
-                // Clamp into bounds; out-of-range is a bug in the extension, not fatal.
-                let cut_index = (cut_index as usize).min(entries.len());
-                let first_kept_entry_id = entries.get(cut_index).map(|e| e.id().to_string());
-                CutPointResult {
-                    cut_index,
-                    first_kept_entry_id,
-                }
-            }
-            _ => self.builtin.select_cut_point(entries, settings).await,
-        }
-    }
-
-    async fn summarize_prefix(
-        &self,
-        request: &SummarizeRequest<'_>,
-    ) -> Result<SummaryOutcome, SummarizeError> {
-        let arg = match serde_json::to_value(request.messages) {
-            Ok(messages) => serde_json::json!({
-                "messages": messages,
-                "settings": SettingsJson::new(request.settings),
-                "custom_instructions": request.custom_instructions,
-            }),
-            Err(e) => {
-                tracing::warn!(algorithm = self.name(), "failed to serialize messages: {e}");
-                return self.builtin.summarize_prefix(request).await;
-            }
-        };
-        match self.ext.run_hook("summarize_prefix", &arg) {
-            Ok(Some(v)) => match v.as_str() {
-                Some(summary) => Ok(SummaryOutcome {
-                    summary: summary.to_string(),
-                    usage: Usage::default(),
-                }),
-                None => {
-                    tracing::warn!(
-                        algorithm = self.name(),
-                        "summarize_prefix returned a non-string value, falling back to builtin"
-                    );
-                    self.builtin.summarize_prefix(request).await
-                }
-            },
-            // Missing hook / declined: builtin LLM summarization.
-            _ => self.builtin.summarize_prefix(request).await,
-        }
     }
 }

@@ -25,12 +25,6 @@ pub mod skills_state;
 #[cfg(feature = "harness")]
 pub mod tools;
 
-/// Core-level TS extension system (issue #4): discover, transpile (oxc) and execute
-/// (embedded QuickJS) user-authored single-file TS extensions, routed to extension points
-/// by their `kind` export. First consumer: compaction algorithms (`kind = "compaction"`).
-#[cfg(all(feature = "harness", feature = "ts-extensions"))]
-pub mod extensions;
-
 // Public surface — mirrors `packages/agent/src/index.ts`.
 pub use agent::{Agent, AgentListener, AgentOptions, AgentRunError};
 pub use types::{

@@ -786,10 +786,10 @@ pub struct AgentHarnessOptions {
     pub stream_fn: Option<StreamFn>,
     /// Auto-compaction thresholds. Defaults to [`DEFAULT_COMPACTION_SETTINGS`].
     pub compaction: CompactionSettings,
-    /// Custom compaction algorithm registry. Defaults to discovery via the core-level TS
-    /// extension system ([`crate::extensions`]): `<cwd>/.theway/extensions/*.ts` +
-    /// `$THEWAY_DIR/extensions/*.ts` with `kind = "compaction"`. The builtin algorithm is
-    /// always available regardless of discovery.
+    /// Custom compaction algorithm registry. Empty by default (builtin only); embedders
+    /// (e.g. the CLI) discover TS extensions host-side and inject the registry here via
+    /// `ts_extensions::compact_algorithm_registry`. The builtin algorithm is always
+    /// available regardless.
     pub compact_algorithms: Arc<CompactAlgorithmRegistry>,
     /// Optional `before_tool_call` hook. Wire a `PermissionPolicy::as_before_tool_call()` here
     /// to apply danger-detection to tool calls before the loop runs them.
@@ -848,24 +848,6 @@ pub struct AgentHarnessOptions {
     pub turn_continuation_cap: Option<u32>,
 }
 
-/// Default compaction algorithm registry: discover TS extensions via the core-level
-/// extension system (`<cwd>/.theway/extensions/` + `$THEWAY_DIR/extensions/`) and
-/// register every `kind = "compaction"` file. Discovery diagnostics are logged, not
-/// fatal.
-#[cfg(feature = "ts-extensions")]
-fn default_compact_algorithms() -> CompactAlgorithmRegistry {
-    let extensions = crate::extensions::ExtensionRegistry::discover(std::path::Path::new("."));
-    for error in &extensions.errors {
-        tracing::warn!(target: "extensions", "{error}");
-    }
-    CompactAlgorithmRegistry::from_extensions(&extensions)
-}
-
-#[cfg(not(feature = "ts-extensions"))]
-fn default_compact_algorithms() -> CompactAlgorithmRegistry {
-    CompactAlgorithmRegistry::new()
-}
-
 impl AgentHarnessOptions {
     pub fn new(model: Model, session: Session) -> Self {
         Self {
@@ -878,7 +860,7 @@ impl AgentHarnessOptions {
             session,
             stream_fn: None,
             compaction: DEFAULT_COMPACTION_SETTINGS.clone(),
-            compact_algorithms: Arc::new(default_compact_algorithms()),
+            compact_algorithms: Arc::new(CompactAlgorithmRegistry::new()),
             before_tool_call: None,
             after_tool_call: None,
             on_control_plane_prompt: None,

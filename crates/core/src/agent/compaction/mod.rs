@@ -11,6 +11,3 @@ pub use algorithm::{
     SummaryOutcome,
 };
 pub use compaction::{CompactionSettings, DEFAULT_COMPACTION_SETTINGS};
-
-#[cfg(feature = "ts-extensions")]
-pub use algorithm::TsCompactAlgorithm;
