@@ -16,12 +16,15 @@ crates/<name>/tests/    # 所有测试文件 (多文件模块测试 + 独立集�
 | 测试类型 | 位置 | 说明 |
 |----------|------|------|
 | 内联单测 (`mod tests { }` 同文件) | `src/` 内联 | Rust 惯例, 轻量断言贴近被测代码; 超过 ~30 行或需要 fixture 时**必须**拆出 |
-| 多文件模块测试 (`mod tests;` 引 `tests/` 子目录) | `tests/<镜像路径>/` | 需要私有访问的较大测试套件, 经 `#[path]` 从 src 引入 (见 §2) |
+| 多文件模块测试 | `tests/<镜像路径>/` | 需要私有访问的较大测试套件, src 模块末尾一行桥接 (见 §2) |
 | 独立集成测试 / e2e (独立二进制 target) | `tests/` 顶层 `<name>.rs` | 只能访问 pub API, 经进程/网络/CLI 驱动 |
 
-> 为什么 src 里还能看到 `#[path] mod tests` 一行? Rust 中只有 `#[path]` 能
-> 让 `tests/` 下的文件以**单元测试语义** (可访问私有项) 编译。那**一行桥接声明**
-> 是语言要求, 测试文件本身不在 src 下。
+> 为什么 src 里还能看到一行桥接? 测试文件物理在 `tests/` 下, 但需要以**单元
+> 测试语义** (可访问被测模块私有项) 编译 — Rust 的 `#[path]` 属性是唯一机制。
+> 而 `#[path]` 只接受字符串字面量 (属性求值早于宏展开, `concat!`/`env!` 不可用,
+> 相关 RFC 2320 已关闭), 所以用 `tests-bridge-macro` 的 proc-macro 在展开阶段
+> 生成绝对路径 — 这是语言限制下唯一可行的"顶层锚定"方案。**那**一行桥接调用
+> 是必要的, 测试文件本身不在 src 下。
 
 ## 2. 1:1 镜像: tests/ 内部目录镜像 src/ 路径
 
@@ -35,20 +38,31 @@ crates/server/src/transport/http.rs                   ←→  crates/server/test
 ```
 
 桥接声明 (src 模块末尾, 用 `tests-bridge-macro` 的 proc-macro — 展开时以
-`CARGO_MANIFEST_DIR` 为锚点生成绝对路径, 等价 TS `@/` 顶层锚定; 语言级
-`#[path]` 不接受宏计算路径, 这是社区唯一可行方案):
+`CARGO_MANIFEST_DIR` 为锚点生成绝对路径, 等价 TS `@/` 顶层锚定):
 
 ```rust
 #[cfg(test)]
-tests_bridge_macro::tests_bridge!("tools/dag_tools");  // 路径相对 crate 根
+tests_bridge_macro::tests_bridge!("tools/dag_tools");  // 路径相对 crate 根, 不含 ../../
 ```
 
-镜像目录内的 `mod.rs` 声明子模块 (`mod plan;` 等), 每个子模块文件对应一个
-测试面。**禁止**在 src 下新建 `tests/` 目录。
+- **`#[cfg(test)]` 前缀必须保留**: 桥接宏是 dev-dependency, 普通 `cargo build`
+  时不可用; `cfg(test)` 让非测试构建直接跳过展开。
+- 参数是镜像路径 (**相对 crate 根**, 不含 `tests/` 前缀和 `/mod.rs` 后缀), 禁止 `..`。
+- 镜像目录内的 `mod.rs` 声明子模块 (`mod plan;` 等), 每个子模块文件对应一个
+  测试面。**禁止**在 src 下新建 `tests/` 目录。
 
 > cargo 只把 `tests/` **顶层** `.rs` 自动编译为集成测试 target; 镜像子目录
 > 下的文件不会成为独立 target (仅被宏生成的 `#[path]` 引用), 因此可以安全
 > 存放依赖 `super::` 私有项的测试代码。
+
+### e2e 引用被测代码: 优先 lib crate, include 仅限同 crate
+
+- e2e 优先通过 **lib crate 路径**引用被测代码 (`theway_core::tools::dag_tools`),
+  只用 pub API — 不要在 e2e 里 `#[path]` include 其他 crate 的源码。
+- 仅在必须访问 `cfg(test)`-only 接口时 (如 `tests/commands.rs` 需要
+  `clear_for_tests`) 才 `#[path]` include **同 crate** 源码。注意桥接宏的
+  `CARGO_MANIFEST_DIR` 是**编译上下文 crate** — include 同 crate 源码路径正确,
+  include 其他 crate 源码会生成错误路径 (这是 e2e 用 lib 路径的硬理由)。
 
 ## 3. 命名规范
 
@@ -103,4 +117,6 @@ fn resolve_spec_rejects_unknown_agent() {
 
 - 迁移/新增后: `cargo build --workspace` + `cargo test --workspace --no-fail-fast` +
   `cargo clippy --workspace --all-targets -- -D warnings` + `cargo fmt --all --check`。
-- 测试数量不因迁移减少 (git mv 保留历史, 迁移前后 `test result` 计数一致)。
+- 测试总数以 **crate 级 lib target** 为准 (单测在 `cargo test -p <crate> --lib`
+  中跑); e2e target 只含自身用例 — 不要用"总数不变"校验迁移, 而是核对每个
+  target 的计数与迁移前一致 (e2e 曾因 include 源码重复跑单测, 已消除)。
