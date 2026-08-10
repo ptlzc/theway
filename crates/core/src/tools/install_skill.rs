@@ -814,7 +814,6 @@ static DEFINITION: Lazy<Tool> = Lazy::new(|| Tool {
 // Tests
 // ──────────────────────────────────────────────────────────────────────────────────────────
 
-
 #[cfg(test)]
 // Test files live in `tests/tools/install_skill/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
