@@ -266,9 +266,7 @@ impl SubagentJobRegistry {
             job.error = error.clone();
             job.completed_at = Some(now_ms());
         });
-        eprintln!("DBG finish: job={} exists={}", id, self.job(id).is_some());
         if let Some(job) = self.job(id) {
-            eprintln!("DBG finish: messages.len={}", job.messages.len());
             // Persist the transcript for terminal jobs (crash-safe recovery:
             // the in-memory registry dies with the process, the disk copy
             // survives a restart and is served by `node_messages` / `job_messages`).
@@ -312,32 +310,23 @@ impl SubagentJobRegistry {
     /// Write the job's transcript to disk (best-effort, failures are silent).
     fn persist_messages(&self, job: &SubagentJob) {
         if job.messages.is_empty() {
-            eprintln!("DBG persist: no messages");
             return;
         }
         let Some(dir) = self.inner.lock().messages_dir.clone() else {
-            eprintln!("DBG persist: no messages_dir");
             return;
         };
         let path = match (&job.run_id, &job.node_id) {
             (Some(run), Some(node)) => messages_path_for_node(&dir, run, node),
             _ => messages_path_for_task(&dir, &job.id),
         };
-        eprintln!("DBG persist: path={:?}", path);
         let json = match serde_json::to_string_pretty(&job.messages) {
             Ok(j) => j,
-            Err(e) => {
-                eprintln!("DBG persist: serialize err {e}");
-                return;
-            }
+            Err(_) => return,
         };
-        eprintln!("DBG persist: json {} bytes", json.len());
         if let Some(parent) = path.parent() {
-            let r = std::fs::create_dir_all(parent);
-            eprintln!("DBG persist: create_dir_all {:?}", r);
+            let _ = std::fs::create_dir_all(parent);
         }
-        let r = std::fs::write(&path, json);
-        eprintln!("DBG persist: write {:?}", r);
+        let _ = std::fs::write(path, json);
     }
 
     /// Broadcast an event-plane message (no-op without a sender).
