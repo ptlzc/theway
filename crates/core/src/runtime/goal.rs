@@ -525,21 +525,7 @@ fn tail_chars(text: &str, max_chars: usize) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_json_decision_inside_text() {
-        let decision = parse_decision("```json\n{\"ok\":false,\"reason\":\"missing tests\"}\n```")
-            .expect("decision");
-        assert!(!decision.ok);
-        assert_eq!(decision.reason, "missing tests");
-    }
-
-    #[test]
-    fn transcript_tail_is_bounded() {
-        let text = tail_chars("abcdef", 3);
-        assert!(text.contains("def"));
-        assert!(!text.ends_with("abcdef"));
-    }
-}
+// Test files live in `tests/runtime/goal/` (mirror of `src/runtime/`), pulled in by
+// path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
+#[path = "../../tests/runtime/goal/mod.rs"]
+mod tests;
