@@ -280,6 +280,18 @@ impl DagEngine {
         true
     }
 
+    /// goal.rs hook: record the evaluator job id on the goal run's `main` node.
+    /// Goal nodes are hook-driven (never engine-dispatched), so this is what
+    /// links the graph surface to the evaluator's registry job / transcript.
+    pub fn on_goal_evaluator_finished(&self, run_id: &str, job_id: String) {
+        let mut inner = self.inner.lock();
+        if let Some(run) = inner.runs.get_mut(run_id) {
+            if let Some(node) = run.node_mut("main") {
+                node.job_id = Some(job_id);
+            }
+        }
+    }
+
     /// goal.rs hook: force the run to a terminal state (Failed/Cancelled)
     /// from the outside. The main node mirrors the run status, both get
     /// `reason` + completed_at; emits NodeStatus + RunStatus.

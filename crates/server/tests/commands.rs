@@ -592,9 +592,26 @@ async fn goal_evaluator_false_returns_continuation_and_audits_reason() {
     let harness = Arc::new(AgentHarness::new(opts));
     let harness_cell = Arc::new(OnceLock::new());
     assert!(harness_cell.set(harness.clone()).is_ok());
+    let registry = theway_core::runtime::multiagent::registry::AgentJobRegistry::new();
     let hook = goal::stop_hook(
         harness_cell,
         std::sync::Arc::new(theway_core::runtime::multiagent::graph::engine::DagEngine::new()),
+        std::sync::Arc::new(|name: &str| {
+            (name == "goal-evaluator").then_some(
+                theway_core::runtime::multiagent::types::AgentRunParams {
+                    name: "goal-evaluator",
+                    description: "test",
+                    system_prompt: goal::evaluator_system_prompt(),
+                    max_iterations: 1,
+                },
+            )
+        }),
+        registry,
+        Some(Arc::new(|_, _, _| {
+            stream_one(assistant_text(
+                "{\"ok\":false,\"reason\":\"missing cargo test output\"}",
+            ))
+        })),
     );
     goal::set(&harness, "finish only after cargo test passes".into())
         .await

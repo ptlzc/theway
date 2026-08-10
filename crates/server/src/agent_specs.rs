@@ -26,7 +26,7 @@ pub struct SubagentSpec {
 }
 
 /// The built-in spec table, in declaration order.
-pub static SUBAGENT_SPECS: [SubagentSpec; 5] = [
+pub static SUBAGENT_SPECS: [SubagentSpec; 6] = [
     SubagentSpec {
         name: "explorer",
         description: "Investigation: search and read local context.",
@@ -65,6 +65,12 @@ pub static SUBAGENT_SPECS: [SubagentSpec; 5] = [
         system_prompt: "You are a research subagent dispatched by a coding agent. \
                         Stay focused on the prompt; return a concise final answer.",
         max_iterations: DEFAULT_MAX_ITERATIONS,
+    },
+    SubagentSpec {
+        name: "goal-evaluator",
+        description: "Goal stop-condition judge (tool-less, single turn).",
+        system_prompt: theway_core::runtime::multiagent::goal::evaluator_system_prompt(),
+        max_iterations: 1,
     },
 ];
 
@@ -106,7 +112,8 @@ mod tests {
                 "planner",
                 "executor-coder",
                 "checker",
-                "general"
+                "general",
+                "goal-evaluator"
             ]
         );
         let unique: HashSet<&str> = names.iter().map(String::as_str).collect();

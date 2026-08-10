@@ -71,6 +71,10 @@ pub struct AgentRunResult {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub duration_ms: u64,
+    /// The registry job id for this run (registered at start). Callers link it
+    /// to engine nodes / control surfaces (e.g. the goal hook sets the node's
+    /// `job_id` so the graph UI can pull the evaluator's transcript).
+    pub job_id: String,
 }
 
 /// Run one subagent to completion: fresh in-memory session (nothing touches disk), the
@@ -212,6 +216,7 @@ pub async fn run_agent(opts: AgentRunOptions) -> AgentRunResult {
             input_tokens: snap.tokens.input,
             output_tokens: snap.tokens.output,
             duration_ms,
+            job_id,
         };
     }
 
@@ -236,5 +241,6 @@ pub async fn run_agent(opts: AgentRunOptions) -> AgentRunResult {
         input_tokens: snap.tokens.input,
         output_tokens: snap.tokens.output,
         duration_ms,
+        job_id,
     }
 }

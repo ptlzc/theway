@@ -10,9 +10,9 @@
 //! Trimmed scope: no extensions, no themes, no print/rpc/json modes.
 
 use theway::{
-    agent_session, builtin_skills, commands, config, control_plane_prompt, debug, history, inbox,
-    local_models, logging, lsp_supervisor, mcp_loader, model, resume_picker, session,
-    session_archive, skills, skills_state, templates, tools, triggers, ui,
+    agent_session, agent_specs, builtin_skills, commands, config, control_plane_prompt, debug,
+    history, inbox, local_models, logging, lsp_supervisor, mcp_loader, model, resume_picker,
+    session, session_archive, skills, skills_state, templates, tools, triggers, ui,
 };
 use theway_core::runtime::{hooks, multiagent::goal};
 
@@ -755,6 +755,9 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
     opts.on_turn_end = Some(goal::stop_hook(
         goal_harness_cell.clone(),
         dag_engine.clone(),
+        crate::agent_specs::launch_resolver(),
+        subagent_registry.clone(),
+        Some(stream_fn.clone()),
     ));
     opts.turn_continuation_cap = Some(goal::MAX_CONTINUATIONS);
     opts.before_tool_call =
@@ -1252,6 +1255,9 @@ impl SessionHarnessFactory {
         opts.on_turn_end = Some(goal::stop_hook(
             goal_harness_cell.clone(),
             self.dag_engine.clone(),
+            crate::agent_specs::launch_resolver(),
+            self.subagent_registry.clone(),
+            Some(self.stream_fn.clone()),
         ));
         opts.turn_continuation_cap = Some(goal::MAX_CONTINUATIONS);
         opts.before_tool_call =

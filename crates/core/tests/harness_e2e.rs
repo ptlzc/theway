@@ -5359,70 +5359,11 @@ async fn on_turn_end_continuation_cap_emits_budget_limited_without_invoking_hook
     assert_eq!(audits[2]["decision"], "budget_limited");
 }
 
-#[tokio::test]
-async fn run_evaluator_returns_last_assistant_text_from_isolated_sub_agent() {
-    let storage = Arc::new(MemorySessionStorage::new());
-    let session = Session::new(storage.clone() as Arc<dyn SessionStorage>);
-
-    let mut opts = AgentHarnessOptions::new(faux_model(), session.clone());
-    opts.stream_fn = Some(faux_stream_fn(
-        r#"{"ok":false,"reason":"insufficient evidence"}"#,
-    ));
-    let harness = AgentHarness::new(opts);
-
-    let out = harness
-        .run_evaluator(
-            "You are an evaluator. Return JSON.".into(),
-            "Has the user's goal been met?".into(),
-            faux_model(),
-            ThinkingLevel::Off,
-            tokio_util::sync::CancellationToken::new(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(
-        out.last_assistant_text.as_deref(),
-        Some(r#"{"ok":false,"reason":"insufficient evidence"}"#),
-        "evaluator returns the model's text verbatim",
-    );
-
-    // Parent session is untouched — the evaluator ran on an isolated in-memory session.
-    let entries = session.branch(None).await.unwrap();
-    assert!(
-        entries.is_empty(),
-        "evaluator must not write into the parent session, got {} entries",
-        entries.len()
-    );
-}
-
-#[tokio::test]
-async fn run_evaluator_returns_cancelled_when_token_tripped_pre_dispatch() {
-    let storage = Arc::new(MemorySessionStorage::new());
-    let session = Session::new(storage.clone() as Arc<dyn SessionStorage>);
-
-    let mut opts = AgentHarnessOptions::new(faux_model(), session.clone());
-    opts.stream_fn = Some(faux_stream_fn("never returns"));
-    let harness = AgentHarness::new(opts);
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    cancel.cancel(); // pre-trip
-
-    let result = harness
-        .run_evaluator(
-            "system".into(),
-            "user".into(),
-            faux_model(),
-            ThinkingLevel::Off,
-            cancel,
-        )
-        .await;
-
-    assert!(
-        matches!(result, Err(theway_core::EvaluatorError::Cancelled)),
-        "pre-tripped cancel surfaces as Cancelled, got {result:?}",
-    );
-}
+// The in-harness `run_evaluator` API was removed in the multiagent rework: the goal
+// evaluator now runs as the goal run's node via `runtime::multiagent::runner::run_agent`
+// (tool-less judge, isolated in-memory session). Behavior is covered end-to-end in
+// `crates/server/tests/goal_hook_e2e.rs` (node job registration, transcript capture,
+// interrupt -> goal pause, parent-session isolation).
 
 // ─────────────────────────────────────────────────────────────────────────────────────────
 // Issue #110 sub-PR 1.5 — harness `control_plane_prompt` Custom audit emission

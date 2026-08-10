@@ -1,8 +1,10 @@
 //! Session-level `/goal` stop hook.
 //!
 //! A goal is stored as append-only session metadata, then evaluated after each successful
-//! model turn. The evaluator is a separate model call with no tools and only a bounded text
-//! transcript. It returns structured JSON; missing evidence defaults to "not done".
+//! model turn. The evaluator runs as the goal run's node — a real agent run via the
+//! multiagent runner ([`run_agent`]), tool-less, with only a bounded text transcript, so
+//! the graph surface sees a live node job (transcript, interrupt/steer, GetNodeOutput).
+//! It returns structured JSON; missing evidence defaults to "not done".
 
 use std::sync::{Arc, OnceLock};
 
@@ -10,9 +12,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use theway_core::runtime::multiagent::graph::engine::DagEngine;
 use theway_core::runtime::multiagent::graph::types::{DagStatus, RunKind};
+use theway_core::runtime::multiagent::registry::AgentJobRegistry;
+use theway_core::runtime::multiagent::runner::{AgentRunOptions, run_agent};
+use theway_core::runtime::multiagent::types::AgentRunResolver;
 use theway_core::{
-    AgentHarness, AgentMessage, EvaluatorError, OnTurnEndContext, OnTurnEndHook, SessionTreeEntry,
-    ThinkingLevel, TurnEndAction, TurnEndDecision,
+    AgentHarness, AgentMessage, OnTurnEndContext, OnTurnEndHook, SessionTreeEntry, TurnEndAction,
+    TurnEndDecision,
 };
 use theway_llm_provider::{ContentBlock, Message, UserContent, UserContentBlock};
 
@@ -227,17 +232,32 @@ fn user_content_text(content: &UserContent) -> String {
 pub fn stop_hook(
     harness_cell: Arc<OnceLock<Arc<AgentHarness>>>,
     dag_engine: std::sync::Arc<DagEngine>,
+    run_resolver: AgentRunResolver,
+    registry: AgentJobRegistry,
+    stream_fn: Option<theway_core::StreamFn>,
 ) -> OnTurnEndHook {
     Arc::new(move |ctx, cancel| {
         let harness_cell = harness_cell.clone();
         let dag_engine = dag_engine.clone();
+        let run_resolver = run_resolver.clone();
+        let registry = registry.clone();
+        let stream_fn = stream_fn.clone();
         Box::pin(async move {
             let Some(harness) = harness_cell.get().cloned() else {
                 return TurnEndDecision::from(TurnEndAction::Pause {
                     reason: "goal hook was not initialized".into(),
                 });
             };
-            evaluate_stop_hook(harness, dag_engine, ctx, cancel).await
+            evaluate_stop_hook(
+                harness,
+                dag_engine,
+                run_resolver,
+                registry,
+                stream_fn,
+                ctx,
+                cancel,
+            )
+            .await
         })
     })
 }
@@ -322,6 +342,9 @@ async fn pause_for(
 async fn evaluate_stop_hook(
     harness: Arc<AgentHarness>,
     dag_engine: Arc<DagEngine>,
+    run_resolver: AgentRunResolver,
+    registry: AgentJobRegistry,
+    stream_fn: Option<theway_core::StreamFn>,
     ctx: OnTurnEndContext,
     cancel: tokio_util::sync::CancellationToken,
 ) -> TurnEndDecision {
@@ -348,30 +371,51 @@ async fn evaluate_stop_hook(
         }
     };
 
-    let output = match harness
-        .run_evaluator(
-            evaluator_system_prompt().to_string(),
-            evaluator_user_prompt(&state.condition, &transcript),
-            model,
-            ThinkingLevel::Off,
-            cancel,
-        )
-        .await
-    {
-        Ok(output) => output,
-        Err(EvaluatorError::Cancelled) => {
-            let reason = "goal evaluator cancelled".to_string();
-            return pause_for(&harness, &dag_engine, run_id.as_deref(), &mut state, reason).await;
-        }
-        Err(e) => {
-            let reason = format!("goal evaluator failed: {e}");
+    // The evaluator is the goal run's node: a real agent run (tool-less judge) so
+    // the graph surface sees a live node job — transcript via GetNodeOutput,
+    // GraphNodeInterrupt/GraphNodeSteer, retry semantics, all for free.
+    let launch = match run_resolver("goal-evaluator") {
+        Some(launch) => launch,
+        None => {
+            let reason = "no goal-evaluator spec registered (app-side agent_specs)".to_string();
             return pause_for(&harness, &dag_engine, run_id.as_deref(), &mut state, reason).await;
         }
     };
-    let Some(text) = output.last_assistant_text else {
-        let reason = "goal evaluator returned no text".to_string();
+    let session_id = session_id_from_harness(&harness).await;
+    let result = run_agent(AgentRunOptions {
+        launch,
+        tools: Vec::new(),
+        prompt: evaluator_user_prompt(&state.condition, &transcript),
+        model,
+        stream_fn,
+        timeout: None,
+        thinking: Some("off".into()),
+        registry,
+        source: "dag".into(),
+        run_id: run_id.clone(),
+        node_id: Some("main".into()),
+        session_id,
+        cancel,
+        system_prompt_extra: None,
+        on_turn_end: None,
+    })
+    .await;
+    // Link the evaluator's job to the goal node so the graph surface can pull
+    // its transcript after the fact.
+    if let Some(run_id) = run_id.as_deref() {
+        dag_engine.on_goal_evaluator_finished(run_id, result.job_id.clone());
+    }
+    if result.error.as_deref() == Some("cancelled") {
+        let reason = "goal evaluator cancelled".to_string();
         return pause_for(&harness, &dag_engine, run_id.as_deref(), &mut state, reason).await;
-    };
+    }
+    if !result.success {
+        let reason = result
+            .error
+            .unwrap_or_else(|| "goal evaluator failed".to_string());
+        return pause_for(&harness, &dag_engine, run_id.as_deref(), &mut state, reason).await;
+    }
+    let text = result.text;
     let decision = match parse_decision(&text) {
         Ok(decision) => decision,
         Err(reason) => {
@@ -475,7 +519,9 @@ fn evaluator_user_prompt(condition: &str, transcript: &str) -> String {
     format!("Goal condition:\n{condition}\n\nConversation transcript:\n{transcript}")
 }
 
-fn evaluator_system_prompt() -> &'static str {
+/// The goal evaluator's system prompt. App-side specs reference this for the
+/// `goal-evaluator` agent (`theway` crate's `agent_specs.rs`).
+pub const fn evaluator_system_prompt() -> &'static str {
     r#"You are evaluating a stop-condition hook in theway.
 Read the conversation transcript carefully, then judge whether the user-provided condition is satisfied.
 You cannot call tools. Only use explicit evidence in the transcript.

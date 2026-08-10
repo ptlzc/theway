@@ -775,31 +775,6 @@ pub type OnTurnEndHook = Arc<
 /// hook again. Embedders override via [`AgentHarnessOptions::turn_continuation_cap`].
 pub const DEFAULT_TURN_CONTINUATION_CAP: u32 = 25;
 
-/// Result of [`AgentHarness::run_evaluator`]. The evaluator is a sub-agent with
-/// `tools: []` and an in-memory session, so its only durable artifact is the assistant
-/// text it produced. Callers (e.g. the `/goal` `GoalStopHook`) typically parse this as
-/// JSON; the helper does not attempt to parse — that keeps the evaluator's prompt and
-/// expected response shape entirely embedder-owned.
-#[derive(Clone, Debug)]
-pub struct EvaluatorOutput {
-    /// Text content of the evaluator's last assistant message, truncated to 4 KiB on a
-    /// char boundary (same cap [`compute_sub_agent_outcome`] applies to trigger
-    /// summaries). `None` when the evaluator produced no assistant text (e.g. the run
-    /// was cancelled before the first token).
-    pub last_assistant_text: Option<String>,
-}
-
-/// Why [`AgentHarness::run_evaluator`] could not return a usable output. Distinct from
-/// `AgentRunError` so callers can render policy-specific messages ("evaluator failed —
-/// goal paused").
-#[derive(Debug, thiserror::Error)]
-pub enum EvaluatorError {
-    #[error("evaluator agent failed: {0}")]
-    Run(#[from] AgentRunError),
-    #[error("evaluator cancelled")]
-    Cancelled,
-}
-
 pub struct AgentHarnessOptions {
     /// Base system prompt prepended to the rendered skill catalog.
     pub system_prompt: String,
@@ -1968,73 +1943,6 @@ impl AgentHarness {
         self.do_compact(true, custom_instructions).await
     }
 
-    /// Run a tool-less, in-memory evaluator sub-agent and return its last assistant
-    /// text. Used by `OnTurnEndHook` implementations (e.g. the `/goal` stop hook) that
-    /// need to ask a separate model "is the user's goal met by this transcript?"
-    /// without contaminating the parent session, cost tracker, or audit log.
-    ///
-    /// Behavior:
-    /// - The sub-agent has `tools: []`. The evaluator is a judge, not an actor — it
-    ///   must never invoke a tool, even if the embedder accidentally leaves tool
-    ///   hooks on. Mirrors the `disable_model_invocation` posture for evaluators.
-    /// - The sub-agent uses [`MemorySessionStorage`] so its conversation is discarded
-    ///   when this call returns. No `--resume` artifact is created.
-    /// - `system_prompt` and `user_prompt` are passed verbatim — the caller owns the
-    ///   evaluator's JSON-output contract.
-    /// - `cancel` is honored on the sub-agent's `Agent::abort()` path: the call
-    ///   returns [`EvaluatorError::Cancelled`] if the token is tripped (typically by
-    ///   the surrounding hook getting `cancel.cancelled()` from
-    ///   [`AgentHarness::abort`]).
-    /// - Cost is **not** attributed to the parent `CostTracker`. The evaluator runs
-    ///   on a bare `Agent` without a tracker subscriber — same honesty rule the
-    ///   `trigger_result.cost_usd: null` audit follows. Embedders that need cost
-    ///   accounting on evaluators should subscribe their own listener.
-    pub async fn run_evaluator(
-        &self,
-        system_prompt: String,
-        user_prompt: String,
-        model: Model,
-        thinking_level: ThinkingLevel,
-        cancel: tokio_util::sync::CancellationToken,
-    ) -> Result<EvaluatorOutput, EvaluatorError> {
-        let mut state = AgentState::default();
-        state.model = Some(model);
-        state.thinking_level = Some(thinking_level);
-        state.tools = Vec::new();
-        state.system_prompt = system_prompt;
-
-        let eval_agent = Agent::new(AgentOptions {
-            initial_state: Some(state),
-            stream_fn: self.stream_fn.clone(),
-            // Intentionally no before/after_tool_call hooks — evaluator has no tools.
-            ..Default::default()
-        });
-
-        let user_message = AgentMessage::Llm(PiMessage::User(theway_llm_provider::UserMessage {
-            role: theway_llm_provider::UserRole::User,
-            content: theway_llm_provider::UserContent::Text(user_prompt),
-            timestamp: chrono::Utc::now().timestamp_millis(),
-        }));
-
-        let run_outcome: Result<(), AgentRunError> = tokio::select! {
-            biased;
-            _ = cancel.cancelled() => {
-                eval_agent.abort();
-                return Err(EvaluatorError::Cancelled);
-            }
-            res = eval_agent.prompt(user_message) => res,
-        };
-        run_outcome?;
-
-        let last_assistant_text = {
-            let state = eval_agent.state();
-            last_assistant_text(&state)
-        };
-        Ok(EvaluatorOutput {
-            last_assistant_text,
-        })
-    }
-
     async fn run_auto_compaction(&self) -> Result<(), AgentRunError> {
         let settings = self.compaction_settings.lock().clone();
         if !settings.enabled {
@@ -2051,7 +1959,7 @@ impl AgentHarness {
         };
         let algorithm = self.compact_algorithms.algorithm(&settings.algorithm);
         if !algorithm
-            .should_compact(context_tokens, context_window, &settings)
+            .decide_compact(context_tokens, context_window, &settings)
             .await
         {
             return Ok(());
