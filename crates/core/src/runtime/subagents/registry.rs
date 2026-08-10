@@ -113,8 +113,11 @@ pub struct SubagentJob {
     pub truncated: bool,
     /// Full conversation transcript (user prompts + assistant messages with
     /// tool calls + tool results), captured from every `AgentEvent::MessageEnd`
-    /// in emission order. Capped at MAX_MESSAGES_BYTES (oldest dropped).
-    pub messages: Vec<AgentMessage>,
+    /// in emission order as JSON values (see [`agent_message_to_json`] —
+    /// `AgentMessage` itself is `#[serde(untagged)]` with a flatten inside
+    /// `CustomMessage`, which serde refuses to serialize). Capped at
+    /// MAX_MESSAGES_BYTES (oldest dropped).
+    pub messages: Vec<serde_json::Value>,
     /// Set when the transcript exceeded MAX_MESSAGES_BYTES (oldest dropped).
     pub messages_truncated: bool,
 }
@@ -286,7 +289,7 @@ impl SubagentJobRegistry {
     /// Look up a DAG node's transcript: in-memory job first, then the disk copy
     /// (a finished node's messages survive a process restart via the per-node
     /// file written by [`Self::finish`]). Returns `None` when neither exists.
-    pub fn node_messages(&self, run_id: &str, node_id: &str) -> Option<Vec<AgentMessage>> {
+    pub fn node_messages(&self, run_id: &str, node_id: &str) -> Option<Vec<serde_json::Value>> {
         if let Some(job) = self.find_node(run_id, node_id) {
             if !job.messages.is_empty() {
                 return Some(job.messages);
@@ -297,7 +300,7 @@ impl SubagentJobRegistry {
     }
 
     /// Look up a task-tool job's transcript (in-memory, then disk).
-    pub fn job_messages(&self, job_id: &str) -> Option<Vec<AgentMessage>> {
+    pub fn job_messages(&self, job_id: &str) -> Option<Vec<serde_json::Value>> {
         if let Some(job) = self.job(job_id) {
             if !job.messages.is_empty() {
                 return Some(job.messages);
@@ -403,7 +406,7 @@ pub fn append_output(job: &mut SubagentJob, chunk: &str) {
 /// Oversized transcripts drop the oldest messages and keep the tail (the
 /// newest messages are the ones a recovery/inspection flow cares about); the
 /// newest message is never dropped even if it alone exceeds the cap.
-pub fn append_message(job: &mut SubagentJob, message: &AgentMessage) {
+pub fn append_message(job: &mut SubagentJob, message: &serde_json::Value) {
     job.messages.push(message.clone());
     let mut total = 0usize;
     for m in &job.messages {
@@ -421,6 +424,28 @@ pub fn append_message(job: &mut SubagentJob, message: &AgentMessage) {
     }
 }
 
+/// Project an `AgentMessage` onto a persistable JSON value. `AgentMessage`
+/// cannot be serialized directly (untagged enum + `#[serde(flatten)]` inside
+/// `CustomMessage` is rejected by serde at runtime), so every captured message
+/// is converted here: LLM messages keep their external-tag shape
+/// (`{"assistant": …}` / `{"user": …}` / `{"toolResult": …}` — role is the
+/// outer key), custom messages mirror `CustomMessage`'s flatten semantics
+/// (payload keys merged with `role`/`timestamp`).
+pub fn agent_message_to_json(m: &AgentMessage) -> serde_json::Value {
+    match m {
+        AgentMessage::Llm(msg) => serde_json::to_value(msg).unwrap_or(serde_json::Value::Null),
+        AgentMessage::Custom(c) => match &c.payload {
+            serde_json::Value::Object(map) => {
+                let mut obj = map.clone();
+                obj.insert("role".to_string(), serde_json::Value::String(c.role.clone()));
+                obj.insert("timestamp".to_string(), serde_json::Value::from(c.timestamp));
+                serde_json::Value::Object(obj)
+            }
+            other => serde_json::json!({ "role": c.role, "timestamp": c.timestamp, "payload": other }),
+        },
+    }
+}
+
 /// Disk path for a DAG node's transcript file.
 pub fn messages_path_for_node(dir: &Path, run_id: &str, node_id: &str) -> PathBuf {
     dir.join(sanitize_path_segment(run_id))
@@ -434,7 +459,7 @@ pub fn messages_path_for_task(dir: &Path, job_id: &str) -> PathBuf {
 }
 
 /// Best-effort read of a transcript file (missing / corrupt → `None`).
-pub fn load_messages(path: &Path) -> Option<Vec<AgentMessage>> {
+pub fn load_messages(path: &Path) -> Option<Vec<serde_json::Value>> {
     let raw = std::fs::read_to_string(path).ok()?;
     serde_json::from_str(&raw).ok()
 }
@@ -499,7 +524,7 @@ pub fn metrics_listener(registry: SubagentJobRegistry, job_id: String) -> crate:
                         _ => None,
                     };
                     registry.update(&job_id, |job| {
-                        append_message(job, &message);
+                        append_message(job, &agent_message_to_json(&message));
                         if let Some((input, output)) = usage_tokens {
                             job.input_tokens = job.input_tokens.saturating_add(input);
                             job.output_tokens = job.output_tokens.saturating_add(output);
@@ -727,18 +752,16 @@ mod tests {
             3,
             "user + assistant + tool result transcript"
         );
-        let AgentMessage::Llm(PiMessage::User(u)) = &job.messages[0] else {
-            panic!("first message should be the user prompt");
-        };
-        assert!(matches!(u.content, UserContent::Text(ref t) if t == "explore the repo"));
-        let AgentMessage::Llm(PiMessage::Assistant(a)) = &job.messages[1] else {
-            panic!("second message should be the assistant turn");
-        };
-        assert_eq!(a.content.len(), 1);
-        let AgentMessage::Llm(PiMessage::ToolResult(tr)) = &job.messages[2] else {
-            panic!("third message should be the tool result");
-        };
-        assert_eq!(tr.tool_name, "grep");
+        // User prompt: external tag is the role key.
+        let m0 = &job.messages[0];
+        assert_eq!(m0["user"]["content"], serde_json::json!("explore the repo"));
+        // Assistant turn: content + usage preserved.
+        let m1 = &job.messages[1];
+        assert_eq!(m1["assistant"]["content"][0]["text"], serde_json::json!("found it"));
+        assert_eq!(m1["assistant"]["usage"]["input"], serde_json::json!(10));
+        // Tool result.
+        let m2 = &job.messages[2];
+        assert_eq!(m2["toolResult"]["toolName"], serde_json::json!("grep"));
         assert!(!job.messages_truncated);
         // Usage still accumulated from the assistant turn.
         assert_eq!(job.input_tokens, 10);
