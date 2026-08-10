@@ -1,9 +1,13 @@
-//! General TS extension system for theway-core (issue #4).
+//! TS extension host for the CLI (moved out of theway-core).
 //!
-//! `extensions` is a **core-level module**: any runtime capability can declare an
-//! extension point and consume user-authored TypeScript extensions. Today one extension
-//! point exists — compaction algorithms (`kind = "compaction"`, see
-//! [`crate::agent::compaction::algorithm`]) — but the mechanism is generic: load,
+//! `extensions` is a **host-level concern**: the core runtime only maintains state and
+//! exposes extension-point contracts ([`CompactAlgorithm`]); discovering, transpiling
+//! and executing user-authored TypeScript extensions is the embedder's (CLI's) job.
+//! Extensions subscribe to those contracts via hooks and can modify core state through
+//! them — they are not part of the core.
+//!
+//! Today one extension point exists — compaction algorithms (`kind = "compaction"`, see
+//! [`theway_core::agent::compaction::algorithm`]) — but the mechanism is generic: load,
 //! transpile and execute single-file TS extensions, then route them to extension points
 //! by their declared `kind`.
 //!
@@ -54,6 +58,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde_json::Value;
+use theway_core::agent::compaction::algorithm::CompactAlgorithmRegistry;
 
 mod ts;
 
@@ -131,7 +136,7 @@ impl ExtensionRegistry {
         }
     }
 
-    /// The theway base dir: `${THEWAY_DIR}` or `~/.theway`. Mirrors `runtime/hooks.rs`.
+    /// The theway base dir: `${THEWAY_DIR}` or `~/.theway`.
     fn base_dir() -> PathBuf {
         if let Ok(p) = std::env::var("THEWAY_DIR") {
             return PathBuf::from(p);
@@ -208,5 +213,164 @@ impl ExtensionRegistry {
         let mut names: Vec<String> = self.extensions.keys().cloned().collect();
         names.sort();
         names
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────────────────
+// Compaction extension point adapter
+// ──────────────────────────────────────────────────────────────────────────────────────────
+
+/// Build the core `CompactAlgorithmRegistry` from every discovered extension declaring
+/// `kind = "compaction"`. Host-side wiring: the CLI injects the result into
+/// `AgentHarnessOptions.compact_algorithms` — the core never discovers extensions itself.
+pub fn compact_algorithm_registry(extensions: &ExtensionRegistry) -> CompactAlgorithmRegistry {
+    let mut registry = CompactAlgorithmRegistry::new();
+    for ext in extensions.by_kind("compaction") {
+        registry.register(Arc::new(TsCompactAlgorithm::new(ext)));
+    }
+    registry
+}
+
+/// A `kind = "compaction"` TS extension adapted to the core [`CompactAlgorithm`] trait.
+/// Hooks the extension doesn't export (or declines) fall back to the builtin algorithm.
+pub struct TsCompactAlgorithm {
+    ext: Arc<TsExtension>,
+    builtin: theway_core::agent::compaction::algorithm::BuiltinCompactAlgorithm,
+}
+
+impl TsCompactAlgorithm {
+    pub fn new(ext: Arc<TsExtension>) -> Self {
+        Self {
+            ext,
+            builtin: theway_core::agent::compaction::algorithm::BuiltinCompactAlgorithm,
+        }
+    }
+}
+
+/// Serialized settings passed to every hook (snake_case, matching the TS contract).
+#[derive(serde::Serialize)]
+struct SettingsJson<'a> {
+    enabled: bool,
+    reserve_tokens: u32,
+    keep_recent_tokens: u32,
+    algorithm: &'a str,
+}
+
+impl<'a> SettingsJson<'a> {
+    fn new(settings: &'a theway_core::agent::compaction::compaction::CompactionSettings) -> Self {
+        Self {
+            enabled: settings.enabled,
+            reserve_tokens: settings.reserve_tokens,
+            keep_recent_tokens: settings.keep_recent_tokens,
+            algorithm: &settings.algorithm,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl theway_core::agent::compaction::algorithm::CompactAlgorithm for TsCompactAlgorithm {
+    fn name(&self) -> &str {
+        self.ext.name()
+    }
+
+    async fn decide_compact(
+        &self,
+        context_tokens: u64,
+        context_window: u32,
+        settings: &theway_core::agent::compaction::compaction::CompactionSettings,
+    ) -> bool {
+        let arg = serde_json::json!({
+            "context_tokens": context_tokens,
+            "context_window": context_window,
+            "settings": SettingsJson::new(settings),
+        });
+        match self.ext.run_hook("decide_compact", &arg) {
+            Ok(Some(v)) => v.as_bool().unwrap_or_else(|| {
+                tracing::warn!(
+                    algorithm = self.name(),
+                    "decide_compact returned a non-boolean value, treating as decline"
+                );
+                false
+            }),
+            // Missing hook / declined: builtin decision.
+            _ => {
+                self.builtin
+                    .decide_compact(context_tokens, context_window, settings)
+                    .await
+            }
+        }
+    }
+
+    async fn select_cut_point(
+        &self,
+        entries: &[theway_core::agent::session::session::SessionTreeEntry],
+        settings: &theway_core::agent::compaction::compaction::CompactionSettings,
+    ) -> theway_core::agent::compaction::compaction::CutPointResult {
+        let arg = match serde_json::to_value(entries) {
+            Ok(entries) => serde_json::json!({
+                "entries": entries,
+                "settings": SettingsJson::new(settings),
+            }),
+            Err(e) => {
+                tracing::warn!(algorithm = self.name(), "failed to serialize entries: {e}");
+                return self.builtin.select_cut_point(entries, settings).await;
+            }
+        };
+        match self.ext.run_hook("select_cut_point", &arg) {
+            Ok(Some(v)) => {
+                let Some(cut_index) = v.get("cut_index").and_then(|c| c.as_u64()) else {
+                    tracing::warn!(
+                        algorithm = self.name(),
+                        "select_cut_point returned no valid cut_index, falling back to builtin"
+                    );
+                    return self.builtin.select_cut_point(entries, settings).await;
+                };
+                // Clamp into bounds; out-of-range is a bug in the extension, not fatal.
+                let cut_index = (cut_index as usize).min(entries.len());
+                let first_kept_entry_id = entries.get(cut_index).map(|e| e.id().to_string());
+                theway_core::agent::compaction::compaction::CutPointResult {
+                    cut_index,
+                    first_kept_entry_id,
+                }
+            }
+            _ => self.builtin.select_cut_point(entries, settings).await,
+        }
+    }
+
+    async fn summarize_prefix(
+        &self,
+        request: &theway_core::agent::compaction::algorithm::SummarizeRequest<'_>,
+    ) -> Result<
+        theway_core::agent::compaction::algorithm::SummaryOutcome,
+        theway_core::agent::compaction::compaction::SummarizeError,
+    > {
+        let arg = match serde_json::to_value(request.messages) {
+            Ok(messages) => serde_json::json!({
+                "messages": messages,
+                "settings": SettingsJson::new(request.settings),
+                "custom_instructions": request.custom_instructions,
+            }),
+            Err(e) => {
+                tracing::warn!(algorithm = self.name(), "failed to serialize messages: {e}");
+                return self.builtin.summarize_prefix(request).await;
+            }
+        };
+        match self.ext.run_hook("summarize_prefix", &arg) {
+            Ok(Some(v)) => match v.as_str() {
+                Some(summary) => Ok(theway_core::agent::compaction::algorithm::SummaryOutcome {
+                    summary: summary.to_string(),
+                    usage: theway_llm_provider::Usage::default(),
+                }),
+                None => {
+                    tracing::warn!(
+                        algorithm = self.name(),
+                        "summarize_prefix returned a non-string value, falling back to builtin"
+                    );
+                    self.builtin.summarize_prefix(request).await
+                }
+            },
+            // Missing hook / declined: builtin LLM summarization.
+            _ => self.builtin.summarize_prefix(request).await,
+        }
     }
 }

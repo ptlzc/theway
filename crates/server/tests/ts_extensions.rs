@@ -1,12 +1,12 @@
-//! Integration tests for the core-level TS extension system (issue #4): discovery from
-//! `.theway/extensions/*.ts`, `kind` routing, hook execution via the embedded QuickJS
-//! host, and the compaction-algorithm adapter wired through `CompactAlgorithmRegistry`.
+//! Integration tests for the CLI TS extension host (`theway::ts_extensions`, moved out of
+//! theway-core): discovery from `.theway/extensions/*.ts`, `kind` routing, hook execution
+//! via the embedded QuickJS host, and the compaction-algorithm adapter wired through the
+//! core `CompactAlgorithmRegistry` (host-injected, as the CLI does at startup).
 
 use tempfile::tempdir;
-use theway_core::agent::compaction::algorithm::CompactAlgorithmRegistry;
+use theway::ts_extensions::{ExtensionRegistry, compact_algorithm_registry};
 use theway_core::agent::compaction::compaction::DEFAULT_COMPACTION_SETTINGS;
 use theway_core::agent::session::session::SessionTreeEntry;
-use theway_core::extensions::ExtensionRegistry;
 use theway_core::types::AgentMessage;
 
 /// `THEWAY_DIR` is process-global, so discovery tests that point it at a tempdir must be
@@ -173,7 +173,7 @@ fn registry_resolves_builtin_and_custom_algorithms() {
     write_extension(dir.path(), "my-algo", FULL_EXT);
 
     let extensions = discover_with_user_dir(dir.path(), None);
-    let registry = CompactAlgorithmRegistry::from_extensions(&extensions);
+    let registry = compact_algorithm_registry(&extensions);
 
     assert_eq!(registry.custom_names(), vec!["my-algo".to_string()]);
     // Custom algorithm selected by name.
@@ -189,7 +189,7 @@ async fn compaction_adapter_dispatches_through_ts_hooks() {
     let dir = tempdir().unwrap();
     write_extension(dir.path(), "my-algo", FULL_EXT);
     let extensions = discover_with_user_dir(dir.path(), None);
-    let registry = CompactAlgorithmRegistry::from_extensions(&extensions);
+    let registry = compact_algorithm_registry(&extensions);
     let algorithm = registry.algorithm("my-algo");
     let settings = DEFAULT_COMPACTION_SETTINGS.clone();
 
@@ -244,7 +244,7 @@ export function select_cut_point(ctx: { entries: unknown[] }): { cut_index: numb
 "#,
     );
     let extensions = discover_with_user_dir(dir.path(), None);
-    let registry = CompactAlgorithmRegistry::from_extensions(&extensions);
+    let registry = compact_algorithm_registry(&extensions);
     let algorithm = registry.algorithm("cut-only");
 
     // No decide_compact export → builtin 80% heuristic.

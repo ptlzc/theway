@@ -12,7 +12,7 @@
 use theway::{
     agent_session, agent_specs, builtin_skills, commands, config, control_plane_prompt, debug,
     history, inbox, local_models, logging, lsp_supervisor, mcp_loader, model, resume_picker,
-    session, session_archive, skills, skills_state, templates, tools, triggers, ui,
+    session, session_archive, skills, skills_state, templates, tools, triggers, ts_extensions, ui,
 };
 use theway_core::{agent::hooks, multiagent::goal};
 
@@ -679,6 +679,17 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
     let loaded_skills = skills::load_all(&cwd).await;
     let loaded_templates = templates::load_all(&cwd).await;
 
+    // TS extensions: host-level discovery (`<cwd>/.theway/extensions/*.ts` +
+    // `$THEWAY_DIR/extensions/*.ts`). The core never discovers extensions — the CLI
+    // (host) loads them and injects the wired compaction-algorithm registry into the
+    // harness options. Discovery diagnostics are logged, not fatal.
+    let ts_extensions = ts_extensions::ExtensionRegistry::discover(&cwd);
+    for error in &ts_extensions.errors {
+        tracing::warn!(target: "extensions", "{error}");
+    }
+    let compact_algorithms =
+        std::sync::Arc::new(ts_extensions::compact_algorithm_registry(&ts_extensions));
+
     // Built-in skill resolution (issue #32). The CLI flag `--builtin-skill <name>` is the
     // one-time enable path; `~/.theway/config.toml [builtin_skills] enabled = [...]` is the
     // persistent path. Unknown names from the CLI hard-fail with a non-zero exit; unknown
@@ -718,6 +729,7 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
     opts.tools = tools;
     opts.skills = combined_skills.clone();
     opts.prompt_templates = loaded_templates.templates.clone();
+    opts.compact_algorithms = compact_algorithms.clone();
     opts.stream_fn = Some(stream_fn.clone());
     // Skill catalog hot-reload. `AgentHarness::reload_skills_from_disk()` invokes this
     // closure, so every reload entry point (the future `InstallSkillTool`, `/skills
@@ -890,6 +902,7 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
             system_prompt,
             skills: combined_skills.clone(),
             templates: loaded_templates.templates.clone(),
+            compact_algorithms: compact_algorithms.clone(),
             memory_dir: memory_dir.clone(),
             dag_engine: dag_engine.clone(),
             subagent_registry: subagent_registry.clone(),
@@ -1183,6 +1196,8 @@ struct SessionHarnessFactory {
     system_prompt: String,
     skills: Vec<theway_core::Skill>,
     templates: Vec<theway_core::PromptTemplate>,
+    compact_algorithms:
+        std::sync::Arc<theway_core::agent::compaction::algorithm::CompactAlgorithmRegistry>,
     memory_dir: std::path::PathBuf,
     dag_engine: Arc<DagEngine>,
     subagent_registry: theway_core::multiagent::registry::AgentJobRegistry,
@@ -1248,6 +1263,7 @@ impl SessionHarnessFactory {
         opts.tools = tools;
         opts.skills = self.skills.clone();
         opts.prompt_templates = self.templates.clone();
+        opts.compact_algorithms = self.compact_algorithms.clone();
         opts.stream_fn = Some(self.stream_fn.clone());
         opts.reload_skills_fn = Some(self.reload_skills_fn.clone());
         opts.on_turn_end = Some(goal::stop_hook(
