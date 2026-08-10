@@ -1,4 +1,4 @@
-//! Global registry of subagent jobs — the `task` tool and DAG node launches.
+//! Global registry of subagent jobs — the `subagent` tool and DAG node launches.
 //!
 //! Mirrors the dag-orchestrator extension's BgJob registry semantics: every job
 //! gets a stable id, a status, token/chars/tools metrics (from the sub-harness
@@ -90,7 +90,7 @@ impl JobStatus {
 pub struct SubagentJob {
     pub id: String,
     pub agent: String,
-    /// "task" (independent task tool) or "dag" (DAG node).
+    /// "subagent" (independent subagent tool) or "dag" (DAG node).
     pub source: String,
     pub run_id: Option<String>,
     pub node_id: Option<String>,
@@ -462,7 +462,7 @@ pub fn messages_path_for_node(dir: &Path, run_id: &str, node_id: &str) -> PathBu
 
 /// Disk path for a task-tool job's transcript file.
 pub fn messages_path_for_task(dir: &Path, job_id: &str) -> PathBuf {
-    dir.join("task")
+    dir.join("subagent")
         .join(format!("{}.json", sanitize_path_segment(job_id)))
 }
 
@@ -580,14 +580,14 @@ mod tests {
         let registry = SubagentJobRegistry::new();
         let id = registry.register(JobInit {
             agent: "general".into(),
-            source: "task".into(),
+            source: "subagent".into(),
             run_id: None,
             node_id: None,
             session_id: None,
         });
         let job = registry.job(&id).unwrap();
         assert_eq!(job.status, JobStatus::Running);
-        assert_eq!(job.source, "task");
+        assert_eq!(job.source, "subagent");
 
         registry.update(&id, |job| {
             job.chars = 10;
@@ -609,7 +609,7 @@ mod tests {
         let mut job = SubagentJob::new(
             "j1".into(),
             "general".into(),
-            "task".into(),
+            "subagent".into(),
             None,
             None,
             None,
@@ -629,7 +629,7 @@ mod tests {
         for i in 0..(MAX_JOBS + 5) {
             let id = registry.register(JobInit {
                 agent: "general".into(),
-                source: "task".into(),
+                source: "subagent".into(),
                 run_id: None,
                 node_id: None,
                 session_id: None,
@@ -663,7 +663,7 @@ mod tests {
         let registry = SubagentJobRegistry::new();
         let id = registry.register(JobInit {
             agent: "general".into(),
-            source: "task".into(),
+            source: "subagent".into(),
             run_id: None,
             node_id: None,
             session_id: None,
@@ -784,7 +784,7 @@ mod tests {
         let mut job = SubagentJob::new(
             "j1".into(),
             "general".into(),
-            "task".into(),
+            "subagent".into(),
             None,
             None,
             None,
@@ -847,7 +847,7 @@ mod tests {
         registry.set_messages_dir(Some(dir.path().join("subagent-jobs")));
         let id = registry.register(JobInit {
             agent: "general".into(),
-            source: "task".into(),
+            source: "subagent".into(),
             run_id: None,
             node_id: None,
             session_id: None,

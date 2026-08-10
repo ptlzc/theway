@@ -6,7 +6,7 @@
 //! - **graph / DAG orchestration**: [`dag_tools`] (model-facing dag_* tools), backed by
 //!   `crate::runtime::graph_engineering`.
 //! - **subagents**: [`subagent_specs`] (built-in agent specs), [`subagent_runner`]
-//!   (shared sub-harness lifecycle), [`node_launcher`] (DAG node execution), [`task`]
+//!   (shared sub-harness lifecycle), [`node_launcher`] (DAG node execution), [`subagent`]
 //!   (model-facing Task delegation tool).
 //! - **skills**: [`skill`], [`install_skill`], [`remove_skill`], [`set_skill_state`],
 //!   [`skill_builder`].
@@ -32,4 +32,4 @@ pub mod skill;
 pub mod skill_builder;
 pub mod subagent_runner;
 pub mod subagent_specs;
-pub mod task;
+pub mod subagent;

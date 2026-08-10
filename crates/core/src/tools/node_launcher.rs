@@ -18,7 +18,7 @@
 //! - `node.timeout` wraps the whole run with `tokio::time::timeout` (in the runner) — a
 //!   simplified idle timeout (the TS runner's per-turn idle watchdog is not ported).
 //! - The spec's `max_iterations` is logged only: the agent loop has no hard iteration
-//!   cap yet, same as the `task` tool.
+//!   cap yet, same as the `subagent` tool.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -62,7 +62,7 @@ struct NodeJob {
 /// Real subagent launcher for the DAG engine. Cheap to clone via [`Arc`].
 pub struct NodeLauncherImpl {
     engine: Arc<DagEngine>,
-    /// Parent agent's model, cloned at construction (same as `TaskTool`) so a later
+    /// Parent agent's model, cloned at construction (same as `SubagentTool`) so a later
     /// `/model` switch doesn't change in-flight node settings.
     model: Model,
     /// Stream fn shared with the parent. `None` falls back to `theway_llm_provider::stream_simple`.

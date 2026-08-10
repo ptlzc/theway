@@ -16,7 +16,7 @@
 //!   local-execution tools and the server-side trigger/cron family.
 //!
 //! Subagent tool sets are injected into the engine (`SubagentSpec` carries no tool
-//! factory): [`subagent_tool_sets`] builds the ONE resolver both `task_tool` and the
+//! factory): [`subagent_tool_sets`] builds the ONE resolver both `subagent_tool` and the
 //! DAG node launcher are constructed with — task and DAG share one subagent mechanism.
 
 use std::path::PathBuf;
@@ -27,7 +27,7 @@ use theway_core::runtime::graph_engineering::engine::DagEngine;
 use theway_core::runtime::subagents::registry::SubagentJobRegistry;
 use theway_core::tools::node_launcher::ToolSetResolver;
 use theway_core::tools::skill::SkillHarnessCell;
-use theway_core::tools::{node_launcher, task};
+use theway_core::tools::{node_launcher, subagent};
 
 // ── tool bodies (app-layer: local execution + web) ──────────────────────────
 //
@@ -86,7 +86,7 @@ pub fn default_tools(memory_dir: PathBuf) -> Vec<Arc<dyn AgentTool>> {
 /// the parent agent should run the write itself. No web tools either (research is
 /// intentionally scoped to local reads).
 ///
-/// NOTE: the `task` tool's subagent is NOT bound to this set anymore — it ships the
+/// NOTE: the `subagent` tool's subagent is NOT bound to this set anymore — it ships the
 /// full [`default_tools`] (same as the DAG `executor-coder`), so the main agent defines
 /// in the task prompt what the subagent may do (mutate, run commands, etc.).
 pub fn subagent_read_only_tools() -> Vec<Arc<dyn AgentTool>> {
@@ -99,16 +99,16 @@ pub fn subagent_read_only_tools() -> Vec<Arc<dyn AgentTool>> {
     ]
 }
 
-/// Build the `Task` tool. Separate from `default_tools` because Task needs the model handle to
+/// Build the `Subagent` tool. Separate from `default_tools` because the tool needs the model handle to
 /// spawn its inner harness; the caller wires it in at construction time. `session_id`
 /// (session-resource-model) stamps the owning session on every spawned job — each harness
-/// build gets its own TaskTool stamped with that harness's session.
+/// build gets its own SubagentTool stamped with that harness's session.
 ///
 /// The subagent tool set comes from [`subagent_tool_sets`] — the SAME resolver the DAG
 /// node launcher gets, so `task` and DAG subagents share one mechanism. The main agent
 /// picks the spec (explorer / planner / executor-coder / checker / general) and defines
 /// in the prompt what the subagent may do.
-pub fn task_tool(
+pub fn subagent_tool(
     model: theway_llm_provider::Model,
     stream_fn: Option<theway_core::StreamFn>,
     registry: SubagentJobRegistry,
@@ -116,7 +116,7 @@ pub fn task_tool(
     session_id: Option<String>,
 ) -> Arc<dyn AgentTool> {
     Arc::new(
-        task::TaskTool::new(model, stream_fn, subagent_tool_sets(memory_dir), registry)
+        subagent::SubagentTool::new(model, stream_fn, subagent_tool_sets(memory_dir), registry)
             .with_session_id(session_id),
     )
 }

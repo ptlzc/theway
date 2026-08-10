@@ -1,6 +1,6 @@
-//! End-to-end test for the subagent / Task tool (issue #11).
+//! End-to-end test for the subagent tool (issue #11).
 //!
-//! Drives `TaskTool::execute` with a faux StreamFn shared with the inner subagent harness.
+//! Drives `SubagentTool::execute` with a faux StreamFn shared with the inner subagent harness.
 //! Verifies:
 //!   1. The tool returns the subagent's final assistant text.
 //!   2. Unknown subagent_type errors clearly.
@@ -15,7 +15,7 @@ use theway_llm_provider::{
 };
 use tokio_util::sync::CancellationToken;
 
-use theway_core::tools::task;
+use theway_core::tools::subagent;
 
 fn faux_model() -> theway_llm_provider::Model {
     theway_llm_provider::Model {
@@ -66,8 +66,8 @@ fn faux_stream(text: &'static str) -> StreamFn {
 }
 
 #[tokio::test]
-async fn task_returns_subagent_final_text() {
-    let tool = task::TaskTool::new(
+async fn subagent_returns_final_text() {
+    let tool = subagent::SubagentTool::new(
         faux_model(),
         Some(faux_stream("subagent result")),
         Arc::new(|_| Vec::new()),
@@ -94,8 +94,8 @@ async fn task_returns_subagent_final_text() {
 }
 
 #[tokio::test]
-async fn task_unknown_subagent_type_errors() {
-    let tool = task::TaskTool::new(
+async fn subagent_unknown_type_errors() {
+    let tool = subagent::SubagentTool::new(
         faux_model(),
         Some(faux_stream("nope")),
         Arc::new(|_| Vec::new()),
@@ -118,8 +118,8 @@ async fn task_unknown_subagent_type_errors() {
 }
 
 #[tokio::test]
-async fn task_missing_prompt_errors() {
-    let tool = task::TaskTool::new(
+async fn subagent_missing_prompt_errors() {
+    let tool = subagent::SubagentTool::new(
         faux_model(),
         Some(faux_stream("nope")),
         Arc::new(|_| Vec::new()),
@@ -134,7 +134,7 @@ async fn task_missing_prompt_errors() {
 }
 
 #[tokio::test]
-async fn task_parent_abort_cascades_to_subagent() {
+async fn subagent_parent_abort_cascades() {
     // Stalled subagent stream: subagent never finishes on its own; only parent abort can
     // unblock it.
     let stalled: StreamFn = Arc::new(move |_, _, _| {
@@ -145,7 +145,7 @@ async fn task_parent_abort_cascades_to_subagent() {
         });
         stream
     });
-    let tool = task::TaskTool::new(
+    let tool = subagent::SubagentTool::new(
         faux_model(),
         Some(stalled),
         Arc::new(|_| Vec::new()),

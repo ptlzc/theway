@@ -14,7 +14,7 @@
 //! `theway_core::tools` module docs for the split rationale.
 //!
 //! v1 scope: static built-in table only. User-defined specs via `~/.theway/subagents/*.toml`
-//! are a follow-up (same line as the `task` tool's issue #11 out-of-scope note).
+//! are a follow-up (same line as the `subagent` tool's issue #11 out-of-scope note).
 
 use once_cell::sync::Lazy;
 
@@ -22,15 +22,15 @@ use once_cell::sync::Lazy;
 pub struct SubagentSpec {
     pub name: &'static str,
     pub description: &'static str,
-    /// Short (1–3 sentences) system prompt, same style as the `task` tool's.
+    /// Short (1–3 sentences) system prompt, same style as the `subagent` tool's.
     pub system_prompt: &'static str,
     /// Iteration budget. The harness has no hard per-run cap today (the agent loop runs
-    /// until the model stops); the field mirrors the `task` tool's documented budget and
+    /// until the model stops); the field mirrors the `subagent` tool's documented budget and
     /// is reserved for future enforcement.
     pub max_iterations: u32,
 }
 
-/// Default iteration budget, matching the `task` tool's "max 16 iterations" doc.
+/// Default iteration budget, matching the `subagent` tool's "max 16 iterations" doc.
 const DEFAULT_MAX_ITERATIONS: u32 = 16;
 
 static SPECS: Lazy<[SubagentSpec; 5]> = Lazy::new(|| {
@@ -69,7 +69,7 @@ static SPECS: Lazy<[SubagentSpec; 5]> = Lazy::new(|| {
         },
         SubagentSpec {
             name: "general",
-            description: "Read-only research subagent (same as the task tool).",
+            description: "Read-only research subagent (same as the subagent tool).",
             system_prompt: "You are a research subagent dispatched by a coding agent. \
                             Stay focused on the prompt; return a concise final answer.",
             max_iterations: DEFAULT_MAX_ITERATIONS,

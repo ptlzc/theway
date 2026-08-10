@@ -40,10 +40,10 @@ The current history only shows an initial commit, so no strict commit convention
 
 Do not commit API keys or local session data. The CLI reads provider keys from environment variables such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and related provider-specific keys. Runtime data is written under `~/.theway/` by default, or under `$THEWAY_DIR` when set.
 
-## Subagent Orchestration Ops (DAG / task tool)
+## Subagent Orchestration Ops (DAG / subagent tool)
 
 Hard-won lessons from multi-repo orchestration runs (theway-public, 2026-08). Applies to
-any orchestrator driving the built-in subagents (task tool / dag_*):
+any orchestrator driving the built-in subagents (subagent tool / dag_*):
 
 1. **Multi-directory tasks must pin the target directory.** Subagents default to the
    orchestrator's cwd. When a task targets a different repo/directory, the task prompt

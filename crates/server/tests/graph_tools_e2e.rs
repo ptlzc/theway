@@ -2,7 +2,7 @@
 //! `dag_plan` a 2-node DAG (A→B) → `dag_wait` harvests both nodes → `dag_status` reports
 //! `done 2/2`.
 //!
-//! Mirrors `task_tool_e2e.rs`: drives the tools directly with a faux model + faux StreamFn,
+//! Mirrors `subagent_tool_e2e.rs`: drives the tools directly with a faux model + faux StreamFn,
 //! so the full path — tool → engine → `NodeLauncherImpl` → one real `AgentHarness` per node
 //! → node completion → harvest — runs deterministically with no provider key. The spec
 //! tool-set factories are never executed (the faux model stops after one turn), so the

@@ -1,4 +1,4 @@
-//! `task` tool — subagent / Task delegation. Spawns a fresh AgentHarness with an in-memory
+//! `subagent` tool — sub-agent delegation. Spawns a fresh AgentHarness with an in-memory
 //! session, runs a sub-prompt to completion (its own loop, its own iteration budget), and
 //! returns the final assistant text to the parent agent as a single tool result.
 //!
@@ -8,7 +8,7 @@
 //!   as parent, tool set injected from the app layer at construction (full default set —
 //!   the parent defines in the prompt what the subagent may do), max 16 iterations,
 //!   MemorySessionStorage so nothing leaks to disk.
-//! - Concurrent execution mode (Parallel) so the parent can fire multiple Task calls in one
+//! - Concurrent execution mode (Parallel) so the parent can fire multiple subagent calls in one
 //!   turn and they run together.
 //! - Parent abort cascades: the tool listens on the parent's cancellation token and aborts
 //!   its inner harness immediately.
@@ -39,11 +39,11 @@ use super::subagent_specs::{builtin_spec_names, resolve_spec};
 /// Closure that resolves the tool set a subagent should have access to from its spec
 /// name. Same shape as the DAG node launcher's [`ToolSetResolver`] — `task` and DAG
 /// share one mechanism (and one app-layer instance). App-layer injection: the engine
-/// does not know which tools exist — the server supplies this via `task_tool`
+/// does not know which tools exist — the server supplies this via `subagent_tool`
 /// (`server/src/tools.rs`) / e2e tests.
 pub type SubagentToolsFn = ToolSetResolver;
 
-pub struct TaskTool {
+pub struct SubagentTool {
     /// Model used by spawned subagents. Cloned from the parent at construction time so a
     /// later `/model` switch doesn't change in-flight subagent settings.
     model: Model,
@@ -56,11 +56,11 @@ pub struct TaskTool {
     registry: SubagentJobRegistry,
     /// Owning session stamped on every spawned job (session-resource-model). `None` for
     /// session-less construction (e2e tests); the CLI wires `Some(current)` via
-    /// [`super::task_tool`].
+    /// the CLI's session factory.
     session_id: Option<String>,
 }
 
-impl TaskTool {
+impl SubagentTool {
     pub fn new(
         model: Model,
         stream_fn: Option<StreamFn>,
@@ -77,7 +77,7 @@ impl TaskTool {
     }
 
     /// Stamp the owning session on jobs this tool spawns (session-resource-model). Each
-    /// harness build gets its own TaskTool stamped with that harness's session, so jobs
+    /// harness build gets its own SubagentTool stamped with that harness's session, so jobs
     /// started after an in-process session switch belong to the new session.
     //
     // Called only from the CLI's session factory (src/main.rs) — invisible to the app
@@ -90,12 +90,12 @@ impl TaskTool {
 }
 
 #[async_trait]
-impl AgentTool for TaskTool {
+impl AgentTool for SubagentTool {
     fn definition(&self) -> &Tool {
         &DEFINITION
     }
     fn label(&self) -> &str {
-        "task"
+        "subagent"
     }
     fn execution_mode(&self) -> Option<ToolExecutionMode> {
         Some(ToolExecutionMode::Parallel)
@@ -130,7 +130,7 @@ impl AgentTool for TaskTool {
             .unwrap_or("")
             .to_string();
 
-        // All builtin specs are valid task subagents; the shared runner drives the
+        // All builtin specs are valid subagents; the shared runner drives the
         // harness from the resolved spec (system prompt); the tool set comes from the
         // app-layer resolver injected at construction (same one the DAG launcher uses).
         let spec = resolve_spec(subagent_type)
@@ -144,10 +144,10 @@ impl AgentTool for TaskTool {
             timeout: None,
             thinking: None,
             registry: self.registry.clone(),
-            source: "task".into(),
+            source: "subagent".into(),
             run_id: None,
             node_id: None,
-            // session-resource-model: jobs spawned by the task tool belong to the session
+            // session-resource-model: jobs spawned by the subagent tool belong to the session
             // whose harness owns this tool instance (stamped at construction).
             session_id: self.session_id.clone(),
             cancel: parent_cancel.clone(),
@@ -186,7 +186,7 @@ impl AgentTool for TaskTool {
 static DEFINITION: Lazy<Tool> = Lazy::new(|| {
     let subagent_types: Vec<&str> = builtin_spec_names();
     Tool {
-    name: "task".into(),
+    name: "subagent".into(),
     description:
         "Delegate a self-contained task to a fresh sub-agent. The subagent gets its own context window and the tool set of its spec (resolved app-side; full default set for executor-coder, read-only for explorer/planner/checker/general); this tool returns a single text result from the subagent. Use this when you need to inspect a large surface area (search, file reads) or run a contained change without polluting the main conversation.".into(),
     parameters: json!({

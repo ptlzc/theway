@@ -1,12 +1,12 @@
-//! `subagent_runner` — the shared sub-harness execution core behind the `task` tool and
+//! `subagent_runner` — the shared sub-harness execution core behind the `subagent` tool and
 //! the DAG node launcher.
 //!
 //! Both callers used to duplicate the same pipeline: a fresh [`AgentHarness`] on an
 //! in-memory session, a [`metrics_listener`] registry subscription, final-text
 //! collection, a cancel watcher, an optional timeout wrapper, and the registry
 //! `finish`. This module is that pipeline, parameterized by a [`SubagentSpec`], so
-//! `task` and `node_launcher` behave identically (same harness shape, same registry
-//! semantics: `source` is "task" or "dag", run/node ids carried through).
+//! `subagent` and `node_launcher` behave identically (same harness shape, same registry
+//! semantics: `source` is "subagent" or "dag", run/node ids carried through).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -35,12 +35,12 @@ pub struct SubagentRunOptions {
     pub model: Model,
     pub stream_fn: Option<StreamFn>,
     /// Optional whole-run timeout; on expiry the harness is aborted. DAG nodes use it;
-    /// the `task` tool passes `None`.
+    /// the `subagent` tool passes `None`.
     pub timeout: Option<u64>,
     pub thinking: Option<String>,
     /// Subagent job registry (graph mode metrics/output).
     pub registry: SubagentJobRegistry,
-    /// "task" or "dag" — the registry job's `source` field.
+    /// "subagent" or "dag" — the registry job's `source` field.
     pub source: String,
     pub run_id: Option<String>,
     pub node_id: Option<String>,
@@ -50,11 +50,11 @@ pub struct SubagentRunOptions {
     /// Parent/engine abort token; fires the inner harness's abort.
     pub cancel: CancellationToken,
     /// Extra system-prompt lines appended after the spec's static prompt (e.g. the
-    /// `task` tool's "Description of your task: …"). `None` uses the spec verbatim.
+    /// the `subagent` tool's "Description of your task: …"). `None` uses the spec verbatim.
     pub system_prompt_extra: Option<String>,
     /// Called on every assistant MessageEnd with (turn text, cumulative input tokens,
     /// cumulative output tokens). DAG nodes use it to sync the engine (idle watchdog +
-    /// live preview); the `task` tool passes `None`.
+    /// live preview); the `subagent` tool passes `None`.
     pub on_turn_end: Option<Arc<dyn Fn(&str, u64, u64) + Send + Sync>>,
 }
 

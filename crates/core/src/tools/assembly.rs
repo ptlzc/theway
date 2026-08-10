@@ -1,7 +1,7 @@
 //! `assembly` — engine-side tool assembly for the harness-runtime tools.
 //!
 //! Mirrors the app-layer assembly in the `theway` server crate, but for the tools the
-//! ENGINE itself owns: DAG orchestration (`dag_*`), the `task` subagent tool, the skill
+//! ENGINE itself owns: DAG orchestration (`dag_*`), the `subagent` delegation tool, the skill
 //! family (skill / install / builder / state / remove), and memory. These are runtime
 //! capabilities — they do not depend on the execution environment — so the engine knows
 //! how to wire them. The app layer only adds its local-execution tools
@@ -9,7 +9,7 @@
 //!
 //! The single app-layer injection point is the subagent tool-set resolver ([`SubagentToolsFn`]):
 //! the engine cannot know which tools exist, so the app supplies the resolver and the
-//! engine hands it to both the `task` tool and (via [`super::node_launcher`]) the DAG
+//! engine hands it to both the `subagent` tool and (via [`super::node_launcher`]) the DAG
 //! launcher — one mechanism, one resolver instance.
 //!
 //! # Skill harness-cell timing
@@ -37,9 +37,9 @@ use super::remove_skill;
 use super::set_skill_state;
 use super::skill::{self, SkillHarnessCell};
 use super::skill_builder;
-use super::task::{SubagentToolsFn, TaskTool};
+use super::subagent::{SubagentToolsFn, SubagentTool};
 
-/// Assemble the engine-owned session tool set: DAG tools, the `task` delegation tool,
+/// Assemble the engine-owned session tool set: DAG tools, the `subagent` delegation tool,
 /// the skill family, and memory. The app layer calls this and appends its local tools.
 #[allow(clippy::too_many_arguments)]
 pub fn session_engine_tools(
@@ -61,7 +61,7 @@ pub fn session_engine_tools(
     // Task delegation tool: shares the parent's model + stream backend; jobs are
     // stamped with this session.
     tools.push(Arc::new(
-        TaskTool::new(
+        SubagentTool::new(
             model.clone(),
             stream_fn.cloned(),
             subagent_tools,
