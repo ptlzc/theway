@@ -29,7 +29,7 @@ use theway_llm_provider::Model;
 use tokio_util::sync::CancellationToken;
 
 use super::subagent_runner::{SubagentRunOptions, run_subagent};
-use super::subagent_specs::{SubagentSpec, resolve_spec};
+use super::subagent_specs::{SpecResolver, SubagentSpec};
 use theway_core::runtime::subagents::registry::SubagentJobRegistry;
 
 /// Resolves a subagent's tool set from its spec name. App-layer injection: the engine
@@ -44,7 +44,7 @@ struct NodeJob {
     engine: DagEngine,
     run_id: String,
     node_id: String,
-    spec: &'static SubagentSpec,
+    spec: SubagentSpec,
     /// Resolved tool set for this node's subagent (from the launcher's resolver).
     tools: Vec<Arc<dyn AgentTool>>,
     model: Model,
@@ -74,6 +74,8 @@ pub struct NodeLauncherImpl {
     registry: SubagentJobRegistry,
     /// App-layer tool-set resolver (spec name → tools), injected at construction.
     tools_resolver: ToolSetResolver,
+    /// App-layer spec resolver (spec name → spec), injected at construction.
+    spec_resolver: SpecResolver,
 }
 
 impl NodeLauncher for NodeLauncherImpl {
@@ -86,7 +88,7 @@ impl NodeLauncher for NodeLauncherImpl {
         let Some(node) = run.node(node_id) else {
             return;
         };
-        let Some(spec) = resolve_spec(&node.agent) else {
+        let Some(spec) = (self.spec_resolver)(&node.agent) else {
             self.engine.on_node_completed(
                 run_id,
                 node_id,
@@ -147,7 +149,7 @@ impl NodeLauncher for NodeLauncherImpl {
 }
 
 /// Build a launcher wired to `engine`, using the parent agent's model and stream fn and
-/// the app-layer tool-set resolver (spec name → tools).
+/// the app-layer tool-set + spec resolvers (spec name → tools / spec).
 pub fn node_launcher(
     engine: Arc<DagEngine>,
     model: Model,
@@ -155,6 +157,7 @@ pub fn node_launcher(
     cwd: PathBuf,
     registry: SubagentJobRegistry,
     tools_resolver: ToolSetResolver,
+    spec_resolver: SpecResolver,
 ) -> Arc<NodeLauncherImpl> {
     Arc::new(NodeLauncherImpl {
         engine,
@@ -163,6 +166,7 @@ pub fn node_launcher(
         cwd,
         registry,
         tools_resolver,
+        spec_resolver,
     })
 }
 
@@ -342,9 +346,22 @@ mod tests {
             // Tool-set resolver: these tests drive the engine with a faux stream that
             // never calls tools, so an empty tool set per spec suffices.
             Arc::new(|_| Vec::new()),
+            // Spec resolver: minimal app-side table for the tests (general only;
+            // unknown names must fail the node synchronously).
+            test_spec_resolver(),
         );
         engine.set_launcher(Some(launcher));
         engine
+    }
+
+    fn test_spec_resolver() -> super::SpecResolver {
+        let spec = super::SubagentSpec {
+            name: "general",
+            description: "test",
+            system_prompt: "You are a test subagent.",
+            max_iterations: 16,
+        };
+        Arc::new(move |name: &str| (name == "general").then_some(spec))
     }
 
     fn plan_single_node(

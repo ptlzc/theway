@@ -26,8 +26,9 @@ use super::subagent_specs::SubagentSpec;
 
 /// Everything a single subagent run needs, captured at launch time by the caller.
 pub struct SubagentRunOptions {
-    /// Resolved built-in spec (`subagent_specs::resolve_spec`): system prompt + metadata.
-    pub spec: &'static SubagentSpec,
+    /// Resolved spec (via the app-layer [`SpecResolver`](super::subagent_specs::SpecResolver)):
+    /// system prompt + metadata.
+    pub spec: SubagentSpec,
     /// Tool set the sub-harness runs with. Resolved by the caller from the app-layer
     /// tool-set resolver (specs carry no tool factory — see `subagent_specs` docs).
     pub tools: Vec<Arc<dyn AgentTool>>,

@@ -24,7 +24,6 @@
 //! - Cost rollup into the parent CostTracker (each subagent has its own tracker for now).
 
 use async_trait::async_trait;
-use once_cell::sync::Lazy;
 use serde_json::{Value, json};
 use theway_core::runtime::subagents::registry::SubagentJobRegistry;
 use theway_core::{
@@ -35,7 +34,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::node_launcher::ToolSetResolver;
 use super::subagent_runner::{SubagentRunOptions, run_subagent};
-use super::subagent_specs::{builtin_spec_names, resolve_spec};
+use super::subagent_specs::SpecResolver;
 
 /// Closure that resolves the tool set a subagent should have access to from its spec
 /// name. Same shape as the DAG node launcher's [`ToolSetResolver`] — `task` and DAG
@@ -53,6 +52,15 @@ pub struct SubagentTool {
     /// App-layer tool-set resolver for subagents, keyed by spec name (see
     /// [`SubagentToolsFn`]). Shared with the DAG node launcher — one mechanism.
     subagent_tools: SubagentToolsFn,
+    /// App-layer spec resolver (spec name → spec). The spec table lives app-side;
+    /// this tool only consumes it.
+    spec_resolver: SpecResolver,
+    /// Known spec names (for the `subagent_type` enum in the tool definition),
+    /// captured at construction from the app's spec table.
+    spec_names: Vec<String>,
+    /// Tool definition. Built at construction because the `subagent_type` enum is
+    /// populated from the app's spec table (not static).
+    definition: Tool,
     /// Subagent job registry (graph mode metrics/output).
     registry: SubagentJobRegistry,
     /// Owning session stamped on every spawned job (session-resource-model). `None` for
@@ -66,12 +74,17 @@ impl SubagentTool {
         model: Model,
         stream_fn: Option<StreamFn>,
         subagent_tools: SubagentToolsFn,
+        spec_resolver: SpecResolver,
+        spec_names: Vec<String>,
         registry: SubagentJobRegistry,
     ) -> Self {
         Self {
+            definition: build_definition(&spec_names),
             model,
             stream_fn,
             subagent_tools,
+            spec_resolver,
+            spec_names,
             registry,
             session_id: None,
         }
@@ -93,7 +106,7 @@ impl SubagentTool {
 #[async_trait]
 impl AgentTool for SubagentTool {
     fn definition(&self) -> &Tool {
-        &DEFINITION
+        &self.definition
     }
     fn label(&self) -> &str {
         "subagent"
@@ -113,11 +126,10 @@ impl AgentTool for SubagentTool {
             .get("subagent_type")
             .and_then(|v| v.as_str())
             .unwrap_or("general");
-        let allowed = builtin_spec_names();
-        if !allowed.contains(&subagent_type) {
+        if !self.spec_names.iter().any(|n| n == subagent_type) {
             return Err(AgentToolError::Message(format!(
                 "unknown subagent_type: {subagent_type} (allowed: {})",
-                allowed.join(", ")
+                self.spec_names.join(", ")
             )));
         }
         let prompt = params
@@ -131,11 +143,13 @@ impl AgentTool for SubagentTool {
             .unwrap_or("")
             .to_string();
 
-        // All builtin specs are valid subagents; the shared runner drives the
-        // harness from the resolved spec (system prompt); the tool set comes from the
-        // app-layer resolver injected at construction (same one the DAG launcher uses).
-        let spec = resolve_spec(subagent_type)
-            .expect("builtin_spec_names must resolve through subagent_specs");
+        // All specs in the app's table are valid subagents; the shared runner drives
+        // the harness from the resolved spec (system prompt); the tool set comes from
+        // the app-layer resolver injected at construction (same one the DAG launcher
+        // uses).
+        let spec = (self.spec_resolver)(subagent_type).ok_or_else(|| {
+            AgentToolError::Message(format!("unknown subagent_type: {subagent_type}"))
+        })?;
         let result = run_subagent(SubagentRunOptions {
             spec,
             tools: (self.subagent_tools)(subagent_type),
@@ -183,33 +197,33 @@ impl AgentTool for SubagentTool {
         })
     }
 }
-
-static DEFINITION: Lazy<Tool> = Lazy::new(|| {
-    let subagent_types: Vec<&str> = builtin_spec_names();
+/// Build the tool definition. The `subagent_type` enum is populated from the app's
+/// spec table at construction (the engine does not know which specs exist).
+fn build_definition(spec_names: &[String]) -> Tool {
     Tool {
-    name: "subagent".into(),
-    description:
-        "Delegate a self-contained task to a fresh sub-agent. The subagent gets its own context window and the uniform subagent tool set (engine tools minus subagent/dag_* plus local tools); this tool returns a single text result from the subagent. Use this when you need to inspect a large surface area (search, file reads) or run a contained change without polluting the main conversation.".into(),
-    parameters: json!({
-        "type": "object",
-        "properties": {
-            "subagent_type": {
-                "type": "string",
-                "enum": subagent_types,
-                "description": "Which subagent spec to spawn. All builtin specs share ONE uniform tool set (engine tools minus subagent/dag_* plus local tools: read/write/edit/bash/exec/git/web/skills/memory); the spec's system prompt defines the role (explorer: research, planner: planning, executor-coder: implementation, checker: verification, general: research).",
-                "default": "general",
+        name: "subagent".into(),
+        description:
+            "Delegate a self-contained task to a fresh sub-agent. The subagent gets its own context window and the uniform subagent tool set (engine tools minus subagent/dag_* plus local tools); this tool returns a single text result from the subagent. Use this when you need to inspect a large surface area (search, file reads) or run a contained change without polluting the main conversation.".into(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "subagent_type": {
+                    "type": "string",
+                    "enum": spec_names,
+                    "description": "Which subagent spec to spawn. All specs share ONE uniform tool set (engine tools minus subagent/dag_* plus local tools); the spec's system prompt defines the role (e.g. explorer: research, planner: planning, executor-coder: implementation, checker: verification, general: research).",
+                    "default": "general",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Short label for the task (visible in UI logs).",
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "Full prompt the subagent will receive as its user message.",
+                },
             },
-            "description": {
-                "type": "string",
-                "description": "Short label for the task (visible in UI logs).",
-            },
-            "prompt": {
-                "type": "string",
-                "description": "Full prompt the subagent will receive as its user message.",
-            },
-        },
-        "required": ["prompt"],
-        "additionalProperties": false,
-    }),
+            "required": ["prompt"],
+            "additionalProperties": false,
+        }),
+    }
 }
-});

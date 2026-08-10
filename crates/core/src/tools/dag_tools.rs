@@ -30,8 +30,6 @@ use theway_core::{AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate, T
 use theway_llm_provider::{Tool, UserContentBlock};
 use tokio_util::sync::CancellationToken;
 
-use super::subagent_specs::builtin_spec_names;
-
 // ── constants ────────────────────────────────────────────────────────────────
 
 const DAG_WAIT_DEFAULT_TIMEOUT_SECS: u64 = 120;
@@ -49,11 +47,16 @@ impl DagTools {
     /// Returns the tool vec rather than Self by contract — p3c-wire calls this to
     /// build the dag_* tool set for the binary.
     #[allow(clippy::new_ret_no_self)]
-    pub fn new(engine: Arc<DagEngine>, session_id: Option<String>) -> Vec<Arc<dyn AgentTool>> {
+    pub fn new(
+        engine: Arc<DagEngine>,
+        session_id: Option<String>,
+        spec_names: Vec<String>,
+    ) -> Vec<Arc<dyn AgentTool>> {
         vec![
             Arc::new(DagPlanTool {
                 engine: engine.clone(),
                 session_id: session_id.clone(),
+                spec_names: spec_names.clone(),
             }),
             Arc::new(DagStatusTool {
                 engine: engine.clone(),
@@ -90,7 +93,14 @@ macro_rules! dag_tool_struct {
     };
 }
 
-dag_tool_struct!(DagPlanTool);
+/// `dag_plan` additionally carries the known spec names (app-side table) so the
+/// agent field is validated against the real spec registry.
+pub struct DagPlanTool {
+    engine: Arc<DagEngine>,
+    session_id: Option<String>,
+    spec_names: Vec<String>,
+}
+
 dag_tool_struct!(DagStatusTool);
 dag_tool_struct!(DagInspectTool);
 dag_tool_struct!(DagWaitTool);
@@ -430,8 +440,10 @@ impl DagPlanTool {
             Err(e) => return Ok(ok_text(e)),
         };
 
-        let known: Vec<String> = builtin_spec_names().into_iter().map(String::from).collect();
-        match self.engine.plan(def, Some(&known), self.session_id.clone()) {
+        match self
+            .engine
+            .plan(def, Some(&self.spec_names), self.session_id.clone())
+        {
             Err(errors) => Ok(ok_text(format!("DAG 校验失败:\n{}", errors.join("\n")))),
             Ok(run) => {
                 let run_id = run.id.clone();

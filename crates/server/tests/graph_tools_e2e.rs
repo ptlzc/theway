@@ -98,8 +98,28 @@ async fn dag_plan_wait_status_completes_2_node_dag_with_real_launcher() {
         // Tool-set resolver: subagents never call tools in this e2e (the faux model
         // stops after one turn), so an empty tool set per spec suffices.
         Arc::new(|_| Vec::new()),
+        // Spec resolver: minimal app-side table (the plan uses `explorer`).
+        Arc::new(|name: &str| {
+            let spec = theway_core::tools::subagent_specs::SubagentSpec {
+                name: "explorer",
+                description: "test",
+                system_prompt: "You are a test subagent.",
+                max_iterations: 16,
+            };
+            (name == "explorer").then_some(spec)
+        }),
     )));
-    let tools = dag_tools::DagTools::new(engine.clone(), Some("e2e-session".to_string()));
+    let tools = dag_tools::DagTools::new(
+        engine.clone(),
+        Some("e2e-session".to_string()),
+        vec![
+            "explorer".into(),
+            "planner".into(),
+            "executor-coder".into(),
+            "checker".into(),
+            "general".into(),
+        ],
+    );
 
     // dag_plan: 2-node mermaid DAG (A → B), both nodes are `explorer` subagents.
     let plan = tool_by(&tools, "dag_plan")

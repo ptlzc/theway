@@ -112,7 +112,17 @@ fn engine_with(launcher: FakeLauncher) -> (Arc<DagEngine>, Arc<FakeLauncher>) {
 }
 
 fn tools(engine: Arc<DagEngine>, session_id: Option<&str>) -> Vec<Arc<dyn AgentTool>> {
-    DagTools::new(engine, session_id.map(String::from))
+    DagTools::new(
+        engine,
+        session_id.map(String::from),
+        vec![
+            "explorer".into(),
+            "planner".into(),
+            "executor-coder".into(),
+            "checker".into(),
+            "general".into(),
+        ],
+    )
 }
 
 fn tool_by<'a>(tools: &'a [Arc<dyn AgentTool>], name: &str) -> &'a dyn AgentTool {

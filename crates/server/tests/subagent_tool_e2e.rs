@@ -35,6 +35,16 @@ fn faux_model() -> theway_llm_provider::Model {
     }
 }
 
+fn test_spec_resolver() -> theway_core::tools::subagent_specs::SpecResolver {
+    let spec = theway_core::tools::subagent_specs::SubagentSpec {
+        name: "general",
+        description: "test",
+        system_prompt: "You are a test subagent.",
+        max_iterations: 16,
+    };
+    std::sync::Arc::new(move |name: &str| (name == "general").then_some(spec))
+}
+
 fn faux_stream(text: &'static str) -> StreamFn {
     Arc::new(move |_, _, _| {
         let (stream, mut sender) = AssistantMessageEventStream::new();
@@ -71,6 +81,8 @@ async fn subagent_returns_final_text() {
         faux_model(),
         Some(faux_stream("subagent result")),
         Arc::new(|_| Vec::new()),
+        test_spec_resolver(),
+        vec!["general".to_string()],
         theway_core::runtime::subagents::registry::SubagentJobRegistry::new(),
     );
     let res = tool
@@ -99,6 +111,8 @@ async fn subagent_unknown_type_errors() {
         faux_model(),
         Some(faux_stream("nope")),
         Arc::new(|_| Vec::new()),
+        test_spec_resolver(),
+        vec!["general".to_string()],
         theway_core::runtime::subagents::registry::SubagentJobRegistry::new(),
     );
     let err = tool
@@ -123,6 +137,8 @@ async fn subagent_missing_prompt_errors() {
         faux_model(),
         Some(faux_stream("nope")),
         Arc::new(|_| Vec::new()),
+        test_spec_resolver(),
+        vec!["general".to_string()],
         theway_core::runtime::subagents::registry::SubagentJobRegistry::new(),
     );
     let err = tool
@@ -149,6 +165,8 @@ async fn subagent_parent_abort_cascades() {
         faux_model(),
         Some(stalled),
         Arc::new(|_| Vec::new()),
+        test_spec_resolver(),
+        vec!["general".to_string()],
         theway_core::runtime::subagents::registry::SubagentJobRegistry::new(),
     );
     let cancel = CancellationToken::new();

@@ -37,6 +37,7 @@ use super::set_skill_state;
 use super::skill::{self, SkillHarnessCell};
 use super::skill_builder;
 use super::subagent::{SubagentTool, SubagentToolsFn};
+use super::subagent_specs::SpecResolver;
 
 /// App-layer factory producing the LOCAL execution tools (bash / fs / git / web / …) —
 /// the part the engine cannot know about. Injected once at assembly; every harness
@@ -52,6 +53,8 @@ pub fn engine_tools(
     dag_engine: &Arc<DagEngine>,
     subagent_registry: &SubagentJobRegistry,
     subagent_tools: SubagentToolsFn,
+    spec_resolver: SpecResolver,
+    spec_names: Vec<String>,
     model: &Model,
     stream_fn: Option<&StreamFn>,
     skill_harness_cell: &SkillHarnessCell,
@@ -62,6 +65,7 @@ pub fn engine_tools(
     tools.extend(dag_tools::DagTools::new(
         dag_engine.clone(),
         Some(session_id.to_string()),
+        spec_names.clone(),
     ));
     // Subagent delegation tool: shares the parent's model + stream backend; jobs are
     // stamped with this session.
@@ -70,6 +74,8 @@ pub fn engine_tools(
             model.clone(),
             stream_fn.cloned(),
             subagent_tools,
+            spec_resolver,
+            spec_names,
             subagent_registry.clone(),
         )
         .with_session_id(Some(session_id.to_string())),

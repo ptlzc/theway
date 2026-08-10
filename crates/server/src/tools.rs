@@ -103,6 +103,8 @@ pub fn subagent_tool(
             model,
             stream_fn,
             subagent_tool_sets(memory_dir, skill_harness_cell),
+            crate::subagent_specs::spec_resolver(),
+            crate::subagent_specs::spec_names(),
             registry,
         )
         .with_session_id(session_id),
@@ -142,6 +144,7 @@ pub fn node_launcher(
         cwd,
         registry,
         subagent_tool_sets(memory_dir, skill_harness_cell),
+        crate::subagent_specs::spec_resolver(),
     )
 }
 
@@ -169,6 +172,8 @@ pub fn session_tool_set(
         dag_engine,
         subagent_registry,
         subagent_tool_sets(memory_dir.to_path_buf(), skill_harness_cell.clone()),
+        crate::subagent_specs::spec_resolver(),
+        crate::subagent_specs::spec_names(),
         model,
         stream_fn,
         skill_harness_cell,

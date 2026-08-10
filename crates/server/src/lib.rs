@@ -42,6 +42,7 @@ pub mod session;
 pub mod session_archive;
 pub mod session_ops;
 pub mod skills;
+pub mod subagent_specs;
 // Skill enable/disable overlay moved into the engine crate with the builtin tools
 // (openspec tools-into-core); re-exported so `crate::skills_state` paths keep working.
 pub use theway_core::skills_state;
