@@ -25,7 +25,12 @@ Use standard `rustfmt` formatting and Rust 2024 idioms. Keep module and file nam
 
 ## Testing Guidelines
 
-Place integration tests in the relevant crate’s `tests/` directory and keep unit tests close to the code they exercise. Tests should avoid real network calls unless explicitly gated; CI clears provider API-key environment variables to catch accidental live calls. Before opening a PR, run `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo fmt --all --check`.
+Test file layout, naming, and structure follow [`docs/RUST_TEST_FILES.md`](docs/RUST_TEST_FILES.md) — the single source of truth (adapted from .NET conventions: src/test separation, 1:1 mirroring, `被测方法_场景_预期` naming, AAA). Key rules:
+
+- **No `tests/` directories under `src/`**: multi-file module suites live in `crates/<name>/tests/<mirrored-src-path>/`, bridged from the src module by a single `#[path]` line (unit-test semantics preserved).
+- **Tests stay in `tests/`** (crate-level); inline `mod tests { }` is allowed only for lightweight unit assertions.
+- Tests should avoid real network calls unless explicitly gated; CI clears provider API-key environment variables to catch accidental live calls.
+- Before opening a PR, run `cargo test --workspace --no-fail-fast`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo fmt --all --check`.
 
 ## Commit & Pull Request Guidelines
 

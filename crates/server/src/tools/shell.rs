@@ -773,4 +773,5 @@ static WRITE_TO_PROCESS_DEFINITION: Lazy<Tool> = Lazy::new(|| {
 }
 });
 #[cfg(test)]
+#[path = "../../tests/tools/shell/mod.rs"]
 mod tests;

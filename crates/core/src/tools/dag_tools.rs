@@ -1039,5 +1039,5 @@ static CANCEL_DEFINITION: Lazy<Tool> = Lazy::new(|| {
 // ── tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-#[path = "dag_tools/tests/mod.rs"]
+#[path = "../../tests/tools/dag_tools/mod.rs"]
 mod tests;

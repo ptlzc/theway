@@ -477,4 +477,5 @@ fn open_browser_command(url: &str) -> std::process::Command {
 }
 
 #[cfg(test)]
+#[path = "../../tests/transport/http/mod.rs"]
 mod tests;
