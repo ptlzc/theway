@@ -3,8 +3,9 @@
 //! returns the final assistant text to the parent agent as a single tool result.
 //!
 //! v1 scope:
-//! - One subagent spec, "general": same model as parent, read-only tools (read/grep/find/ls/git),
-//!   max 16 iterations, MemorySessionStorage so nothing leaks to disk.
+//! - One subagent spec, "general": same model as parent, tool set injected from the app
+//!   layer at construction (read-only by default), max 16 iterations, MemorySessionStorage
+//!   so nothing leaks to disk.
 //! - Concurrent execution mode (Parallel) so the parent can fire multiple Task calls in one
 //!   turn and they run together.
 //! - Parent abort cascades: the tool listens on the parent's cancellation token and aborts
@@ -38,9 +39,8 @@ const SUBAGENT_TYPES: &[&str] = &["general"];
 
 /// Closure that builds the tool set a subagent should have access to. Built at parent-harness
 /// construction so each subagent starts with the same set of (read-only) capabilities.
-/// Retained on the constructor for factory-signature stability (`mod.rs::task_tool` and the
-/// e2e tests construct `TaskTool` with it); the shared runner takes tools from the resolved
-/// spec instead.
+/// App-layer injection: the engine does not know which tools exist — the server supplies
+/// this via `task_tool` (`server/src/tools.rs`) / e2e tests.
 pub type SubagentToolsFn = Arc<dyn Fn() -> Vec<Arc<dyn AgentTool>> + Send + Sync>;
 
 pub struct TaskTool {
@@ -49,8 +49,8 @@ pub struct TaskTool {
     model: Model,
     /// Optional stream_fn shared with the parent. `None` falls back to `theway_llm_provider::stream_simple`.
     stream_fn: Option<StreamFn>,
-    /// Unused by the runner (see [`SubagentToolsFn`]); kept for the constructor signature.
-    _subagent_tools: SubagentToolsFn,
+    /// App-layer tool-set factory for the "general" subagent (see [`SubagentToolsFn`]).
+    subagent_tools: SubagentToolsFn,
     /// Subagent job registry (graph mode metrics/output).
     registry: SubagentJobRegistry,
     /// Owning session stamped on every spawned job (session-resource-model). `None` for
@@ -69,7 +69,7 @@ impl TaskTool {
         Self {
             model,
             stream_fn,
-            _subagent_tools: subagent_tools,
+            subagent_tools,
             registry,
             session_id: None,
         }
@@ -129,11 +129,13 @@ impl AgentTool for TaskTool {
             .to_string();
 
         // SUBAGENT_TYPES is a subset of the builtin spec table, so the shared runner
-        // drives the harness from the resolved spec (system prompt + tool set).
+        // drives the harness from the resolved spec (system prompt); the tool set comes
+        // from the app-layer factory injected at construction.
         let spec = resolve_spec(subagent_type)
             .expect("SUBAGENT_TYPES must resolve through subagent_specs");
         let result = run_subagent(SubagentRunOptions {
             spec,
+            tools: (self.subagent_tools)(),
             prompt,
             model: self.model.clone(),
             stream_fn: self.stream_fn.clone(),

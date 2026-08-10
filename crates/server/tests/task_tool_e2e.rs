@@ -15,56 +15,12 @@ use theway_llm_provider::{
 };
 use tokio_util::sync::CancellationToken;
 
-#[path = "../../core/src/runtime/tools/subagent_runner.rs"]
+#[path = "../../core/src/tools/subagent_runner.rs"]
 mod subagent_runner;
-#[path = "../../core/src/runtime/tools/subagent_specs.rs"]
+#[path = "../../core/src/tools/subagent_specs.rs"]
 mod subagent_specs;
-#[path = "../../core/src/runtime/tools/task.rs"]
+#[path = "../../core/src/tools/task.rs"]
 mod task;
-
-macro_rules! stub_tool {
-    ($mod:ident, $ty:ident, $label:literal) => {
-        pub mod $mod {
-            use async_trait::async_trait;
-            use serde_json::{Value, json};
-            use theway_core::{AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate};
-            use tokio_util::sync::CancellationToken;
-
-            pub struct $ty;
-            #[async_trait]
-            impl AgentTool for $ty {
-                fn definition(&self) -> &theway_llm_provider::Tool {
-                    static DEF: std::sync::OnceLock<theway_llm_provider::Tool> =
-                        std::sync::OnceLock::new();
-                    DEF.get_or_init(|| theway_llm_provider::Tool {
-                        name: stringify!($ty).into(),
-                        description: "e2e stub (spec tool-set factory never runs)".into(),
-                        parameters: json!({}),
-                    })
-                }
-                fn label(&self) -> &str {
-                    $label
-                }
-                async fn execute(
-                    &self,
-                    _id: &str,
-                    _params: Value,
-                    _cancel: CancellationToken,
-                    _on_update: Option<AgentToolUpdate>,
-                ) -> Result<AgentToolResult, AgentToolError> {
-                    Err(AgentToolError::Message("e2e stub tool executed".into()))
-                }
-            }
-        }
-    };
-}
-
-stub_tool!(read, ReadTool, "read");
-stub_tool!(ls, LsTool, "ls");
-stub_tool!(grep, GrepTool, "grep");
-stub_tool!(find, FindTool, "find");
-stub_tool!(bash, BashTool, "bash");
-stub_tool!(git, GitTool, "git");
 
 fn faux_model() -> theway_llm_provider::Model {
     theway_llm_provider::Model {

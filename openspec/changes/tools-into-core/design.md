@@ -2,13 +2,31 @@
 
 ## 修订记录 (2026-08-17)
 
-最终分层在原提案基础上做了修正 (commit `f290c0b`):
+最终分层在原提案基础上做了两轮修正。
+
+**第二轮 (commit `f290c0b` 之后的本轮重构)**:
+
+- **core (引擎) 一个 tools 目录**: 取消 runtime/tools vs core/tools 之分,合并为 `core/src/tools/`,
+  只保留**引擎能力**: graph/DAG (dag_tools)、subagents (subagent_runner/subagent_specs/node_launcher/task)、
+  skills (skill/install_skill/remove_skill/set_skill_state/skill_builder)、memory、mcp (mcp_adapter)。
+- **server (应用/环境层)**: 本地操作工具 (bash/shell/fs/read/write/edit/ls/grep/find/git/outline/truncate)
+  + web (web_fetch/web_search) — 本地工具不属引擎:**执行环境是应用层决策**(未来可能对接远程沙箱执行命令),
+  引擎不该持有本地实现。
+- **subagent 工具集注入化**: `SubagentSpec` 不再带工具集工厂 (纯元数据: name/description/prompt/iterations);
+  `node_launcher` 构造注入 `ToolSetResolver (spec 名 → 工具集)`,`TaskTool` 构造注入 `SubagentToolsFn`;
+  server 的 `subagent_tool_sets()` 提供 5 个内置 agent 的工具集 (含本地工具)。
+- **feature 门控**: `core::tools` 挂 `harness` (引擎能力);mcp_adapter 随之挂 harness。
+- **装配拆分**: cron/trigger 装配函数移到 `server/src/triggers/tool_assembly.rs`
+  (tests/tools.rs 经 `#[path]` 引入以访问 cfg(test) 的 registry clear)。
+
+**第一轮 (commit `f290c0b`)**:
 
 - **runtime/tools (core)** = harness 支撑: dag_tools/skill*/memory/subagent_runner/subagent_specs/task/node_launcher。
 - **core/tools (core)** = 引擎通用能力: bash/fs/git/grep/find/ls/outline/mcp/truncate/shell + 装配 `default_tools`/`subagent_read_only_tools`。
 - **server (应用层)** = agent 能力: **web_fetch/web_search 移回 `server/src/tools/`** — web 是 agent 的联网调研能力,不是 harness 运行支撑,不应在引擎里;subagent 工具集随之移除 web 能力 (纯本地)。
 
-分层判据: 该工具是否支撑 harness 运行 (subagents 编排/DAG/skill/memory) → runtime;是否引擎通用能力 → core/tools;是否应用级 agent 能力 (如 web, 需外部 API key 配置) → server。
+最终分层判据: 支撑 harness 运行/引擎能力 (graph/subagents/skills/memory/mcp) → core;
+环境相关执行能力 (本地进程/文件/git/outline/truncate) + 外部服务集成 (web) → server。
 
 ## Context
 

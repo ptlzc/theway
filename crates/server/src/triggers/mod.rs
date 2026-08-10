@@ -13,6 +13,7 @@
 pub mod cron;
 pub mod dynamic;
 pub mod mcp_notification_hook;
+pub mod tool_assembly;
 
 #[allow(unused_imports)]
 pub use cron::{

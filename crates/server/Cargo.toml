@@ -48,6 +48,15 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 tokio-tungstenite = { version = "0.26", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 base64 = "0.22"
 
+# Local-execution tools (`src/tools/`): outline.rs drives tree-sitter structural
+# outlines. Versions stay in lockstep with the engine's former copy.
+tree-sitter = "0.25"
+tree-sitter-typescript = "0.23"
+tree-sitter-javascript = "0.25"
+tree-sitter-python = "0.25"
+tree-sitter-rust = "0.24"
+tree-sitter-go = "0.25"
+
 # Transport server stack (feature `server`, consolidated from theway-server).
 # HTTP/WS server: axum router + SSE + WebSocket upgrade.
 axum = { version = "0.8", features = ["ws"] }

@@ -17,12 +17,12 @@ pub mod types;
 #[cfg(feature = "harness")]
 pub mod skills_state;
 
-/// Core capability tools — agent-facing generic capabilities (process/files/git/MCP)
-/// that do not support the harness runtime itself. Native-only (they
-/// spawn processes / touch the filesystem / dial the network). Web tools
-/// (`web_fetch`/`web_search`) are app-layer (the `theway` crate) — see the
-/// module docs for the split rationale.
-#[cfg(feature = "native-env")]
+/// Engine tools — capabilities that support the harness runtime itself: graph/DAG
+/// orchestration, subagent orchestration, skills, memory, MCP. One flat module (no
+/// runtime-tools / core-tools split). Local-execution tools (bash/fs/git/grep/find/ls/
+/// outline) and web tools are app-layer capabilities in the `theway` server crate.
+/// Harness feature-gated (these all operate on harness concepts); see the module docs.
+#[cfg(feature = "harness")]
 pub mod tools;
 
 #[cfg(feature = "harness")]

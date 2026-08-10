@@ -21,59 +21,14 @@ use tokio_util::sync::CancellationToken;
 
 // Tool modules under test, pulled in exactly like `task_tool_e2e` pulls `task.rs`.
 // (Bodies moved into theway-core by openspec tools-into-core; assembly stayed server-side.)
-#[path = "../../core/src/runtime/tools/dag_tools.rs"]
+#[path = "../../core/src/tools/dag_tools.rs"]
 mod dag_tools;
-#[path = "../../core/src/runtime/tools/node_launcher.rs"]
+#[path = "../../core/src/tools/node_launcher.rs"]
 mod node_launcher;
-#[path = "../../core/src/runtime/tools/subagent_runner.rs"]
+#[path = "../../core/src/tools/subagent_runner.rs"]
 mod subagent_runner;
-#[path = "../../core/src/runtime/tools/subagent_specs.rs"]
+#[path = "../../core/src/tools/subagent_specs.rs"]
 mod subagent_specs;
-
-// ── shims for the spec tool-set factories (never executed by this e2e) ─────
-macro_rules! stub_tool {
-    ($mod:ident, $ty:ident, $label:literal) => {
-        pub mod $mod {
-            use async_trait::async_trait;
-            use serde_json::{Value, json};
-            use theway_core::{AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate};
-            use tokio_util::sync::CancellationToken;
-
-            pub struct $ty;
-            #[async_trait]
-            impl AgentTool for $ty {
-                fn definition(&self) -> &theway_llm_provider::Tool {
-                    static DEF: std::sync::OnceLock<theway_llm_provider::Tool> =
-                        std::sync::OnceLock::new();
-                    DEF.get_or_init(|| theway_llm_provider::Tool {
-                        name: stringify!($ty).into(),
-                        description: "e2e stub (spec tool-set factory never runs)".into(),
-                        parameters: json!({}),
-                    })
-                }
-                fn label(&self) -> &str {
-                    $label
-                }
-                async fn execute(
-                    &self,
-                    _id: &str,
-                    _params: Value,
-                    _cancel: CancellationToken,
-                    _on_update: Option<AgentToolUpdate>,
-                ) -> Result<AgentToolResult, AgentToolError> {
-                    Err(AgentToolError::Message("e2e stub tool executed".into()))
-                }
-            }
-        }
-    };
-}
-
-stub_tool!(read, ReadTool, "read");
-stub_tool!(ls, LsTool, "ls");
-stub_tool!(grep, GrepTool, "grep");
-stub_tool!(find, FindTool, "find");
-stub_tool!(bash, BashTool, "bash");
-stub_tool!(git, GitTool, "git");
 
 fn faux_model() -> theway_llm_provider::Model {
     theway_llm_provider::Model {
@@ -147,6 +102,9 @@ async fn dag_plan_wait_status_completes_2_node_dag_with_real_launcher() {
         Some(faux_stream("node result")),
         std::env::temp_dir(),
         theway_core::runtime::subagents::registry::SubagentJobRegistry::new(),
+        // Tool-set resolver: subagents never call tools in this e2e (the faux model
+        // stops after one turn), so an empty tool set per spec suffices.
+        Arc::new(|_| Vec::new()),
     )));
     let tools = dag_tools::DagTools::new(engine.clone(), Some("e2e-session".to_string()));
 

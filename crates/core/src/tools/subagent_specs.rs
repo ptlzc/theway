@@ -2,20 +2,23 @@
 //!
 //! Rust-side counterpart of the TS `.pi/subagents/config.yaml` agent registry the
 //! dag-orchestrator extension resolves DAG node `agent` fields against. Each spec names a
-//! built-in agent type, a short system prompt, a tool-set factory and an iteration budget.
+//! built-in agent type, a short system prompt, and an iteration budget.
 //! [`node_launcher`](super::node_launcher) resolves a node's `agent` field through
 //! [`resolve_spec`]; unknown names fail the node with `unknown agent "..."` (mirrors the
 //! TS `defaultLauncher`).
+//!
+//! Specs carry **metadata only** — no tool-set factory. Tool sets are an app-layer
+//! decision (the local tools live in the `theway` server crate and may become remote
+//! sandbox execution later), so the engine takes a tool-set *resolver* at launcher /
+//! task-tool construction time and supplies the resolved tools per run. See
+//! `theway_core::tools` module docs for the split rationale.
 //!
 //! v1 scope: static built-in table only. User-defined specs via `~/.theway/subagents/*.toml`
 //! are a follow-up (same line as the `task` tool's issue #11 out-of-scope note).
 
 #![allow(dead_code)] // consumed by node_launcher/dag_tools (p3c-wire) once wired into the binary.
 
-use std::sync::Arc;
-
 use once_cell::sync::Lazy;
-use theway_core::AgentTool;
 
 /// Static description of a built-in subagent.
 pub struct SubagentSpec {
@@ -23,8 +26,6 @@ pub struct SubagentSpec {
     pub description: &'static str,
     /// Short (1–3 sentences) system prompt, same style as the `task` tool's.
     pub system_prompt: &'static str,
-    /// Tool-set factory, reused at every launch so each node starts with the same tools.
-    pub tools: fn() -> Vec<Arc<dyn AgentTool>>,
     /// Iteration budget. The harness has no hard per-run cap today (the agent loop runs
     /// until the model stops); the field mirrors the `task` tool's documented budget and
     /// is reserved for future enforcement.
@@ -42,16 +43,14 @@ static SPECS: Lazy<[SubagentSpec; 5]> = Lazy::new(|| {
             system_prompt: "You are an exploration subagent dispatched by a coding agent. \
                             Gather facts from the codebase and context you are given. \
                             Stay focused on the prompt; return a concise findings summary.",
-            tools: explorer_tools,
             max_iterations: DEFAULT_MAX_ITERATIONS,
         },
         SubagentSpec {
             name: "planner",
-            description: "Read-only planning from local context (no web).",
+            description: "Read-only planning from local context.",
             system_prompt: "You are a planning subagent dispatched by a coding agent. \
                             Turn the given task into a concrete, step-by-step plan. \
                             Stay focused on the prompt; return the plan as your final answer.",
-            tools: planner_tools,
             max_iterations: DEFAULT_MAX_ITERATIONS,
         },
         SubagentSpec {
@@ -60,7 +59,6 @@ static SPECS: Lazy<[SubagentSpec; 5]> = Lazy::new(|| {
             system_prompt: "You are a coding subagent dispatched by a coding agent. \
                             Implement the requested change using your tools. \
                             Stay focused on the prompt; return a concise summary of what you changed.",
-            tools: executor_coder_tools,
             max_iterations: DEFAULT_MAX_ITERATIONS,
         },
         SubagentSpec {
@@ -69,7 +67,6 @@ static SPECS: Lazy<[SubagentSpec; 5]> = Lazy::new(|| {
             system_prompt: "You are a verification subagent dispatched by a coding agent. \
                             Check the given work against the task and report pass/fail with evidence. \
                             Stay focused on the prompt; return a concise verdict.",
-            tools: checker_tools,
             max_iterations: DEFAULT_MAX_ITERATIONS,
         },
         SubagentSpec {
@@ -77,7 +74,6 @@ static SPECS: Lazy<[SubagentSpec; 5]> = Lazy::new(|| {
             description: "Read-only research subagent (same as the task tool).",
             system_prompt: "You are a research subagent dispatched by a coding agent. \
                             Stay focused on the prompt; return a concise final answer.",
-            tools: general_tools,
             max_iterations: DEFAULT_MAX_ITERATIONS,
         },
     ]
@@ -97,54 +93,6 @@ pub fn builtin_spec_names() -> Vec<&'static str> {
 /// Look up a spec by name. `None` for unknown names — the launcher fails the node.
 pub fn resolve_spec(name: &str) -> Option<&'static SubagentSpec> {
     builtin_specs().iter().find(|s| s.name == name)
-}
-
-// ── tool-set factories ──────────────────────────────────────────────────────
-
-fn explorer_tools() -> Vec<Arc<dyn AgentTool>> {
-    theway_core::tools::subagent_read_only_tools()
-}
-
-fn planner_tools() -> Vec<Arc<dyn AgentTool>> {
-    vec![
-        Arc::new(theway_core::tools::read::ReadTool),
-        Arc::new(theway_core::tools::ls::LsTool),
-        Arc::new(theway_core::tools::grep::GrepTool),
-        Arc::new(theway_core::tools::find::FindTool),
-    ]
-}
-
-fn executor_coder_tools() -> Vec<Arc<dyn AgentTool>> {
-    // Same store as the parent agent: DAG subagents share the parent's memory dir.
-    theway_core::tools::default_tools(default_memory_dir())
-}
-
-/// The theway memory dir: `${THEWAY_DIR:-$HOME/.theway}/memory`. Inlined (not via the CLI's
-/// `config` module, which lives one layer up) so this module stays engine-self-contained and
-/// can be pulled into integration tests through `#[path]` includes. Mirrors the CLI's
-/// `config::memory_dir()`.
-fn default_memory_dir() -> std::path::PathBuf {
-    if let Ok(p) = std::env::var("THEWAY_DIR") {
-        return std::path::PathBuf::from(p).join("memory");
-    }
-    directories::BaseDirs::new()
-        .map(|d| d.home_dir().join(".theway").join("memory"))
-        .unwrap_or_else(|| std::path::PathBuf::from(".theway").join("memory"))
-}
-
-fn checker_tools() -> Vec<Arc<dyn AgentTool>> {
-    vec![
-        Arc::new(theway_core::tools::read::ReadTool),
-        Arc::new(theway_core::tools::ls::LsTool),
-        Arc::new(theway_core::tools::grep::GrepTool),
-        Arc::new(theway_core::tools::find::FindTool),
-        Arc::new(theway_core::tools::bash::BashTool),
-        Arc::new(theway_core::tools::git::GitTool),
-    ]
-}
-
-fn general_tools() -> Vec<Arc<dyn AgentTool>> {
-    theway_core::tools::subagent_read_only_tools()
 }
 
 #[cfg(test)]
@@ -181,36 +129,5 @@ mod tests {
         }
         assert!(resolve_spec("no-such-agent").is_none());
         assert!(resolve_spec("").is_none());
-    }
-
-    #[test]
-    fn tool_sets_are_non_empty() {
-        for spec in builtin_specs() {
-            let tools = (spec.tools)();
-            assert!(
-                !tools.is_empty(),
-                "{} must have a non-empty tool set",
-                spec.name
-            );
-            for tool in &tools {
-                assert!(!tool.label().is_empty());
-            }
-        }
-    }
-
-    #[test]
-    fn explorer_and_general_are_read_only() {
-        let labels = |spec: &SubagentSpec| {
-            let mut l: Vec<String> = (spec.tools)()
-                .iter()
-                .map(|t| t.label().to_string())
-                .collect();
-            l.sort();
-            l
-        };
-        let general = labels(resolve_spec("general").unwrap());
-        assert_eq!(general, vec!["find", "git", "grep", "ls", "read"]);
-        let explorer = labels(resolve_spec("explorer").unwrap());
-        assert_eq!(explorer, vec!["find", "git", "grep", "ls", "read"]);
     }
 }

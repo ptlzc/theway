@@ -16,7 +16,7 @@ use theway_core::runtime::subagents::registry::{
     JobInit, JobStatus, SubagentJobRegistry, metrics_listener,
 };
 use theway_core::{
-    AgentEvent, AgentHarness, AgentHarnessOptions, AgentMessage, AgentRunError,
+    AgentEvent, AgentHarness, AgentHarnessOptions, AgentMessage, AgentRunError, AgentTool,
     MemorySessionStorage, Session, SessionStorage, StreamFn, ThinkingLevel,
 };
 use theway_llm_provider::{Message as PiMessage, Model};
@@ -26,8 +26,11 @@ use super::subagent_specs::SubagentSpec;
 
 /// Everything a single subagent run needs, captured at launch time by the caller.
 pub struct SubagentRunOptions {
-    /// Resolved built-in spec (`subagent_specs::resolve_spec`): system prompt + tool set.
+    /// Resolved built-in spec (`subagent_specs::resolve_spec`): system prompt + metadata.
     pub spec: &'static SubagentSpec,
+    /// Tool set the sub-harness runs with. Resolved by the caller from the app-layer
+    /// tool-set resolver (specs carry no tool factory — see `subagent_specs` docs).
+    pub tools: Vec<Arc<dyn AgentTool>>,
     pub prompt: String,
     pub model: Model,
     pub stream_fn: Option<StreamFn>,
@@ -91,7 +94,7 @@ pub async fn run_subagent(opts: SubagentRunOptions) -> SubagentRunResult {
         Some(extra) => format!("{}\n{extra}", opts.spec.system_prompt),
         None => opts.spec.system_prompt.to_string(),
     };
-    harness_opts.tools = (opts.spec.tools)();
+    harness_opts.tools = opts.tools;
     harness_opts.stream_fn = opts.stream_fn;
     if let Some(level) = opts
         .thinking

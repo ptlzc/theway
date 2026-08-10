@@ -608,15 +608,14 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
     let dag_engine = Arc::new(DagEngine::new());
     // Subagent job registry (graph mode): task tool + DAG node launches both register.
     let subagent_registry = theway_core::runtime::subagents::registry::SubagentJobRegistry::new();
-    dag_engine.set_launcher(Some(
-        theway_core::runtime::tools::node_launcher::node_launcher(
-            dag_engine.clone(),
-            model.clone(),
-            Some(stream_fn.clone()),
-            cwd.clone(),
-            subagent_registry.clone(),
-        ),
-    ));
+    dag_engine.set_launcher(Some(crate::tools::node_launcher(
+        dag_engine.clone(),
+        model.clone(),
+        Some(stream_fn.clone()),
+        cwd.clone(),
+        subagent_registry.clone(),
+        memory_dir.clone(),
+    )));
     // Resume in-flight DAG runs from this session's state file (crash recovery). Restored
     // ids are logged; a clean shutdown flushes the file at exit, so a file here means the
     // previous process died before aborting its runs.
@@ -633,7 +632,7 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
     // session factory below (`SessionHarnessFactory`): dag_* / task are stamped with this
     // session; the skill family wires a harness cell filled right after construction.
     // Process-level groups (MCP tools) are appended after they load.
-    let skill_harness_cell: theway_core::runtime::tools::skill::SkillHarnessCell =
+    let skill_harness_cell: theway_core::tools::skill::SkillHarnessCell =
         std::sync::Arc::new(once_cell::sync::OnceCell::new());
     let mut tools = tools::session_tool_set(
         &memory_dir,
@@ -667,7 +666,7 @@ async fn run_repl(mut cli: Cli, cwd: std::path::PathBuf, repo: JsonlSessionRepo)
         .iter()
         .map(|tool| tool.definition().name.clone())
         .collect::<Vec<_>>();
-    let memory_block = theway_core::runtime::tools::memory::load_memory_block(&memory_dir).await;
+    let memory_block = theway_core::tools::memory::load_memory_block(&memory_dir).await;
     let system_prompt = compose_system_prompt(&cwd, &memory_block, &tool_names);
 
     let loaded_skills = skills::load_all(&cwd).await;
@@ -1219,7 +1218,7 @@ impl SessionHarnessFactory {
 
         // Fresh per-session tool set (dag_* / task stamped with the target session; the
         // skill family gets a brand-new harness cell filled right after construction).
-        let skill_harness_cell: theway_core::runtime::tools::skill::SkillHarnessCell =
+        let skill_harness_cell: theway_core::tools::skill::SkillHarnessCell =
             std::sync::Arc::new(once_cell::sync::OnceCell::new());
         let mut tools = tools::session_tool_set(
             &self.memory_dir,

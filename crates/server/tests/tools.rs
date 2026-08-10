@@ -6,18 +6,16 @@ use tempfile::tempdir;
 use theway_core::AgentTool;
 use tokio_util::sync::CancellationToken;
 
-// Tool BODIES moved into the engine crate (openspec tools-into-core) — use the real lib
-// copy so the types match what the assembly layer below consumes.
-use theway_core::runtime::tools;
+// Tool BODIES live in the engine crate + the app layer (openspec tools-into-core) — use
+// the real lib copy so the types match what the assembly layer below consumes.
+use theway_core::tools;
 
-// The ASSEMBLY layer (`src/tools.rs`) and `triggers` are still pulled in by path: the
-// assembly's cron/trigger builders reference `crate::triggers`, which must resolve to the
-// SAME registry instances this test clears through the cfg(test)-only `clear_for_tests` —
-// only a path-included copy compiles with cfg(test). Their `crate::` siblings (config,
-// inbox, bug_report, ...) come along for the same reason.
-#[path = "../src/auth.rs"]
-#[allow(dead_code)]
-mod auth;
+// The trigger/cron ASSEMBLY (`triggers/tool_assembly.rs`) and `triggers` are still pulled
+// in by path: the assembly's cron/trigger builders reference `crate::triggers`, which must
+// resolve to the SAME registry instances this test clears through the cfg(test)-only
+// `clear_for_tests` — only a path-included copy compiles with cfg(test). `cron.rs` pulls
+// in `crate::inbox` / `crate::bug_report` siblings along the way; `bug_report.rs` pulls
+// in `crate::config`.
 #[path = "../src/bug_report.rs"]
 #[allow(dead_code)]
 mod bug_report;
@@ -30,12 +28,12 @@ mod export;
 #[path = "../src/inbox.rs"]
 #[allow(dead_code)]
 mod inbox;
-#[path = "../src/tools.rs"]
-#[allow(dead_code)]
-mod tools_asm;
 #[path = "../src/triggers/mod.rs"]
 #[allow(dead_code)]
 mod triggers;
+// `triggers::tool_assembly` resolves through the `mod triggers` include above (the
+// assembly's `crate::triggers` refs hit the SAME registry instances this test clears).
+use triggers::tool_assembly as tools_asm;
 
 static DYNAMIC_TRIGGER_LOCK: Mutex<()> = Mutex::new(());
 static CRON_LOCK: Mutex<()> = Mutex::new(());
@@ -45,8 +43,8 @@ async fn read_writes_then_reads() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("hello.txt");
 
-    let write = theway_core::tools::write::WriteTool;
-    let read = theway_core::tools::read::ReadTool;
+    let write = theway::tools::write::WriteTool;
+    let read = theway::tools::read::ReadTool;
 
     write
         .execute(
@@ -81,7 +79,7 @@ async fn ls_lists_entries() {
     std::fs::write(dir.path().join("a.txt"), "a").unwrap();
     std::fs::create_dir(dir.path().join("sub")).unwrap();
 
-    let ls = theway_core::tools::ls::LsTool;
+    let ls = theway::tools::ls::LsTool;
     let r = ls
         .execute(
             "l1",
@@ -101,7 +99,7 @@ async fn ls_lists_entries() {
 
 #[tokio::test]
 async fn bash_captures_stdout_and_exit() {
-    let bash = theway_core::tools::bash::BashTool;
+    let bash = theway::tools::bash::BashTool;
     let r = bash
         .execute(
             "b1",
@@ -492,7 +490,7 @@ async fn set_trigger_state_tool_disables_and_enables_rule() {
 
 #[tokio::test]
 async fn bash_reports_nonzero_exit() {
-    let bash = theway_core::tools::bash::BashTool;
+    let bash = theway::tools::bash::BashTool;
     let r = bash
         .execute(
             "b2",

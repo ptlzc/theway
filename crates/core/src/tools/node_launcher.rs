@@ -25,14 +25,20 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use theway_core::StreamFn;
 use theway_core::runtime::graph_engineering::engine::{DagEngine, NodeLauncher, NodeOutcome};
+use theway_core::{AgentTool, StreamFn};
 use theway_llm_provider::Model;
 use tokio_util::sync::CancellationToken;
 
 use super::subagent_runner::{SubagentRunOptions, run_subagent};
 use super::subagent_specs::{SubagentSpec, resolve_spec};
 use theway_core::runtime::subagents::registry::SubagentJobRegistry;
+
+/// Resolves a subagent's tool set from its spec name. App-layer injection: the engine
+/// does not know which tools exist (local tools live in the `theway` crate, and may
+/// become remote sandbox execution later); the launcher asks the app layer at launch
+/// time. `(&str)` — the spec name, e.g. "explorer".
+pub type ToolSetResolver = Arc<dyn Fn(&str) -> Vec<Arc<dyn AgentTool>> + Send + Sync>;
 
 /// Everything a single node job needs, captured at launch time so the spawned task never
 /// re-reads mutable engine state (the node may be retried/cancelled meanwhile).
@@ -41,6 +47,8 @@ struct NodeJob {
     run_id: String,
     node_id: String,
     spec: &'static SubagentSpec,
+    /// Resolved tool set for this node's subagent (from the launcher's resolver).
+    tools: Vec<Arc<dyn AgentTool>>,
     model: Model,
     stream_fn: Option<StreamFn>,
     task_text: String,
@@ -66,6 +74,8 @@ pub struct NodeLauncherImpl {
     cwd: PathBuf,
     /// Subagent job registry (graph mode metrics/output).
     registry: SubagentJobRegistry,
+    /// App-layer tool-set resolver (spec name → tools), injected at construction.
+    tools_resolver: ToolSetResolver,
 }
 
 impl NodeLauncher for NodeLauncherImpl {
@@ -125,6 +135,7 @@ impl NodeLauncher for NodeLauncherImpl {
             run_id: run_id.to_string(),
             node_id: node_id.to_string(),
             spec,
+            tools: (self.tools_resolver)(&node.agent),
             model,
             stream_fn: self.stream_fn.clone(),
             task_text: node.task.clone(),
@@ -137,13 +148,15 @@ impl NodeLauncher for NodeLauncherImpl {
     }
 }
 
-/// Build a launcher wired to `engine`, using the parent agent's model and stream fn.
+/// Build a launcher wired to `engine`, using the parent agent's model and stream fn and
+/// the app-layer tool-set resolver (spec name → tools).
 pub fn node_launcher(
     engine: Arc<DagEngine>,
     model: Model,
     stream_fn: Option<StreamFn>,
     cwd: PathBuf,
     registry: SubagentJobRegistry,
+    tools_resolver: ToolSetResolver,
 ) -> Arc<NodeLauncherImpl> {
     Arc::new(NodeLauncherImpl {
         engine,
@@ -151,6 +164,7 @@ pub fn node_launcher(
         stream_fn,
         cwd,
         registry,
+        tools_resolver,
     })
 }
 
@@ -171,6 +185,7 @@ async fn run_node(job: NodeJob, cancel: CancellationToken) {
     let node_id_cb = node_id.clone();
     let result = run_subagent(SubagentRunOptions {
         spec: job.spec,
+        tools: job.tools,
         prompt: job.task_text,
         model: job.model,
         stream_fn: job.stream_fn,
@@ -326,6 +341,9 @@ mod tests {
             Some(stream),
             PathBuf::from("."),
             theway_core::runtime::subagents::registry::SubagentJobRegistry::new(),
+            // Tool-set resolver: these tests drive the engine with a faux stream that
+            // never calls tools, so an empty tool set per spec suffices.
+            Arc::new(|_| Vec::new()),
         );
         engine.set_launcher(Some(launcher));
         engine

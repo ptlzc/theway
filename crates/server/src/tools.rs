@@ -1,35 +1,107 @@
-//! Tool ASSEMBLY layer (openspec tools-into-core): injection-style constructors that wire
-//! runtime objects (model / stream backend / DAG engine / subagent registry / skill harness
-//! cell / cron+trigger registries) into the builtin tool bodies. The tool bodies themselves
-//! live in the engine crate at [`theway_core::runtime::tools`]; this module is the
-//! application-layer composition half of that split.
+//! Tool ASSEMBLY layer. The engine (`theway_core`) supplies the harness-runtime tools
+//! (graph/DAG, subagents, skills, memory, MCP — see `theway_core::tools`); this module
+//! is the application-layer half:
 //!
-//! Pure tool-set constructors shared with engine code (`default_tools`,
-//! `subagent_read_only_tools`) stayed in [`theway_core::runtime::tools`] and are
-//! re-exported here so call sites keep one import path.
+//! - **Local-execution tool bodies** (bash / shell / fs / git / grep / find / ls /
+//!   outline / truncate) live HERE, not in the engine: they are environment-specific
+//!   agent capabilities — the local ones may become remote sandbox execution later —
+//!   so the engine must not depend on them.
+//! - **Web tools** (`web_fetch` / `web_search`) are app-layer capabilities too (they
+//!   need external credentials/configuration).
+//! - **Assembly**: `default_tools` / `subagent_read_only_tools` / the per-subagent
+//!   tool-set resolver / `session_tool_set` wire engine tools + local tools together.
+//!
+//! Subagent tool sets are injected into the engine (`SubagentSpec` carries no tool
+//! factory): [`subagent_tool_sets`] builds the resolver `task_tool` and the DAG node
+//! launcher are constructed with.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use theway_core::AgentTool;
-use theway_core::runtime::tools::{
-    dag_tools, install_skill, remove_skill, set_skill_state, skill, skill_builder, task,
+use theway_core::runtime::graph_engineering::engine::DagEngine;
+use theway_core::runtime::subagents::registry::SubagentJobRegistry;
+use theway_core::tools::node_launcher::ToolSetResolver;
+use theway_core::tools::skill::SkillHarnessCell;
+use theway_core::tools::{
+    dag_tools, install_skill, node_launcher, remove_skill, set_skill_state, skill, skill_builder,
+    task,
 };
 
-#[path = "tools/web_fetch.rs"]
+// ── tool bodies (app-layer: local execution + web) ──────────────────────────
+//
+// Plain module declarations: `tests/tools.rs` pulls in only `triggers/tool_assembly.rs`
+// by `#[path]`, so nothing here needs `#[path]` re-routing — a plain `pub mod shell;`
+// resolves `src/tools/shell.rs` and lets `shell.rs`'s own `mod tests;` find
+// `src/tools/shell/tests/` (a `#[path]`-included module would break that resolution).
+
+pub mod bash;
+pub mod edit;
+pub mod find;
+pub mod git;
+pub mod grep;
+pub mod ls;
+pub mod outline;
+pub mod read;
+pub mod shell;
+pub mod truncate;
 pub mod web_fetch;
-#[path = "tools/web_search.rs"]
 pub mod web_search;
+pub mod write;
 
-pub use theway_core::tools::{default_tools, subagent_read_only_tools};
+// Trigger/cron model-facing constructors live in `triggers::tool_assembly` (kept
+// out of this file so `tests/tools.rs` can `#[path]`-include just those).
+pub use crate::triggers::tool_assembly::{
+    list_cron_jobs_tool, list_triggers_tool, new_cron_job_tool, new_trigger_tool,
+    remove_cron_job_tool, remove_trigger_tool, set_cron_job_state_tool, set_trigger_state_tool,
+};
 
-/// Build the Task tool. Separate from `default_tools` because Task needs the model handle to
+/// Default tool set the main coding agent ships with: local-execution tools, web tools,
+/// and the engine's memory tool. This is the app-layer composition — the engine itself
+/// (`theway_core::tools`) has no opinion about which local tools exist.
+pub fn default_tools(memory_dir: PathBuf) -> Vec<Arc<dyn AgentTool>> {
+    vec![
+        Arc::new(read::ReadTool),
+        Arc::new(write::WriteTool),
+        Arc::new(edit::EditTool),
+        Arc::new(bash::BashTool),
+        Arc::new(shell::ExecTool),
+        Arc::new(shell::GetOutputTool),
+        Arc::new(shell::KillShellTool),
+        Arc::new(shell::WriteToProcessTool),
+        Arc::new(ls::LsTool),
+        Arc::new(grep::GrepTool),
+        Arc::new(find::FindTool),
+        Arc::new(outline::OutlineTool),
+        Arc::new(git::GitTool),
+        Arc::new(web_fetch::WebFetchTool),
+        Arc::new(web_search::WebSearchTool::new()),
+        Arc::new(theway_core::tools::memory::MemoryTool::new(memory_dir)),
+    ]
+}
+
+/// Read-only tool set used by spawned subagents (issue #11). No `write`/`edit`/`bash` —
+/// a subagent should not mutate the workspace; if it needs to, the parent agent should
+/// run the write itself. No web tools either (subagents are intentionally scoped to
+/// local read-only research).
+pub fn subagent_read_only_tools() -> Vec<Arc<dyn AgentTool>> {
+    vec![
+        Arc::new(read::ReadTool),
+        Arc::new(ls::LsTool),
+        Arc::new(grep::GrepTool),
+        Arc::new(find::FindTool),
+        Arc::new(git::GitTool),
+    ]
+}
+
+/// Build the `Task` tool. Separate from `default_tools` because Task needs the model handle to
 /// spawn its inner harness; the caller wires it in at construction time. `session_id`
 /// (session-resource-model) stamps the owning session on every spawned job — each harness
 /// build gets its own TaskTool stamped with that harness's session.
 pub fn task_tool(
     model: theway_llm_provider::Model,
     stream_fn: Option<theway_core::StreamFn>,
-    registry: theway_core::runtime::subagents::registry::SubagentJobRegistry,
+    registry: SubagentJobRegistry,
     session_id: Option<String>,
 ) -> Arc<dyn AgentTool> {
     Arc::new(
@@ -43,30 +115,91 @@ pub fn task_tool(
     )
 }
 
+/// Subagent tool-set factories, one per built-in spec name (mirrors the old engine-side
+/// factories; they moved here because they compose LOCAL tools). The executor-coder
+/// shares the parent's memory dir so DAG subagents use the same store as the parent.
+fn explorer_tools() -> Vec<Arc<dyn AgentTool>> {
+    subagent_read_only_tools()
+}
+
+fn planner_tools() -> Vec<Arc<dyn AgentTool>> {
+    vec![
+        Arc::new(read::ReadTool),
+        Arc::new(ls::LsTool),
+        Arc::new(grep::GrepTool),
+        Arc::new(find::FindTool),
+    ]
+}
+
+fn executor_coder_tools(memory_dir: PathBuf) -> Vec<Arc<dyn AgentTool>> {
+    default_tools(memory_dir)
+}
+
+fn checker_tools() -> Vec<Arc<dyn AgentTool>> {
+    vec![
+        Arc::new(read::ReadTool),
+        Arc::new(ls::LsTool),
+        Arc::new(grep::GrepTool),
+        Arc::new(find::FindTool),
+        Arc::new(bash::BashTool),
+        Arc::new(git::GitTool),
+    ]
+}
+
+fn general_tools() -> Vec<Arc<dyn AgentTool>> {
+    subagent_read_only_tools()
+}
+
+/// Build the app-layer tool-set resolver injected into the DAG node launcher: spec name
+/// → tool set. Unknown names yield an empty set (the engine rejects unknown agents via
+/// `resolve_spec` before the resolver is ever consulted).
+pub fn subagent_tool_sets(memory_dir: PathBuf) -> ToolSetResolver {
+    Arc::new(move |name| match name {
+        "explorer" => explorer_tools(),
+        "planner" => planner_tools(),
+        "executor-coder" => executor_coder_tools(memory_dir.clone()),
+        "checker" => checker_tools(),
+        "general" => general_tools(),
+        _ => Vec::new(),
+    })
+}
+
+/// Build a DAG node launcher wired to `engine`, with the app-layer tool-set resolver.
+pub fn node_launcher(
+    engine: Arc<DagEngine>,
+    model: theway_llm_provider::Model,
+    stream_fn: Option<theway_core::StreamFn>,
+    cwd: PathBuf,
+    registry: SubagentJobRegistry,
+    memory_dir: PathBuf,
+) -> Arc<node_launcher::NodeLauncherImpl> {
+    node_launcher::node_launcher(
+        engine,
+        model,
+        stream_fn,
+        cwd,
+        registry,
+        subagent_tool_sets(memory_dir),
+    )
+}
+
 /// Build the per-session tool set (session-resource-model). One source of truth shared by
 /// the CLI's initial harness build and the session factory ([`crate::session_ops::SessionFactory`]):
 /// everything here is either session-stamped (`dag_*` / `task`) or must be rebuilt per
 /// harness (the skill family wires a fresh harness cell per build). Process-level tool
 /// groups (`default_tools`, MCP tools) are the caller's to add.
-///
-/// Web tools (`web_fetch` / `web_search`) are app-layer capabilities — they are appended
-/// here, not part of the engine's `default_tools` (see `theway_core::tools` module docs).
 pub fn session_tool_set(
     memory_dir: &std::path::Path,
-    dag_engine: &std::sync::Arc<theway_core::runtime::graph_engineering::engine::DagEngine>,
-    subagent_registry: &theway_core::runtime::subagents::registry::SubagentJobRegistry,
+    dag_engine: &Arc<DagEngine>,
+    subagent_registry: &SubagentJobRegistry,
     model: &theway_llm_provider::Model,
     stream_fn: Option<&theway_core::StreamFn>,
-    skill_harness_cell: &skill::SkillHarnessCell,
+    skill_harness_cell: &SkillHarnessCell,
     session_id: &str,
 ) -> Vec<Arc<dyn AgentTool>> {
     let mut tools = default_tools(memory_dir.to_path_buf());
-    // Web capabilities are app-layer: appended here, not in the engine's default set.
-    tools.push(Arc::new(web_fetch::WebFetchTool));
-    tools.push(Arc::new(web_search::WebSearchTool::new()));
-    // DAG + outline tools, main agent only — the read-only subagent tool set stays
-    // deliberately untouched (shell/exec already ship via `default_tools`).
-    tools.push(Arc::new(theway_core::tools::outline::OutlineTool));
+    // DAG tools, main agent only — the read-only subagent tool set stays deliberately
+    // untouched (shell/exec already ship via `default_tools`).
     tools.extend(dag_tools::DagTools::new(
         dag_engine.clone(),
         Some(session_id.to_string()),
@@ -103,7 +236,7 @@ pub fn session_tool_set(
 /// crucially — sets the cell immediately after the harness is constructed and *before* the
 /// REPL accepts any input. If the cell is unset at execute time the tool returns a recoverable
 /// `AgentToolError`, never a panic.
-pub fn skill_tool(harness_cell: skill::SkillHarnessCell) -> Arc<dyn AgentTool> {
+pub fn skill_tool(harness_cell: SkillHarnessCell) -> Arc<dyn AgentTool> {
     Arc::new(skill::SkillTool::new(harness_cell))
 }
 
@@ -112,7 +245,7 @@ pub fn skill_tool(harness_cell: skill::SkillHarnessCell) -> Arc<dyn AgentTool> {
 /// See `install_skill::InstallSkillTool` for the two-phase safety model
 /// (preview → confirm) and the security note about the in-flight
 /// `PermissionCategory::ControlPlaneWrite` plumbing.
-pub fn install_skill_tool(harness_cell: skill::SkillHarnessCell) -> Arc<dyn AgentTool> {
+pub fn install_skill_tool(harness_cell: SkillHarnessCell) -> Arc<dyn AgentTool> {
     Arc::new(install_skill::InstallSkillTool::new(harness_cell))
 }
 
@@ -121,7 +254,7 @@ pub fn install_skill_tool(harness_cell: skill::SkillHarnessCell) -> Arc<dyn Agen
 /// atomic-write path and hot-reloads the catalog after writing. Where InstallSkill ingests
 /// an existing `SKILL.md`, SkillBuilder renders the canonical template itself. See
 /// `skill_builder::SkillBuilderTool` for the two-phase preview → confirm model.
-pub fn skill_builder_tool(harness_cell: skill::SkillHarnessCell) -> Arc<dyn AgentTool> {
+pub fn skill_builder_tool(harness_cell: SkillHarnessCell) -> Arc<dyn AgentTool> {
     Arc::new(skill_builder::SkillBuilderTool::new(harness_cell))
 }
 
@@ -129,69 +262,13 @@ pub fn skill_builder_tool(harness_cell: skill::SkillHarnessCell) -> Arc<dyn Agen
 /// harness-cell wiring as `skill_tool` / `install_skill_tool` — it reads the live catalog,
 /// writes the `~/.theway/skills-state.json` overlay, and hot-reloads via
 /// `reload_skills_from_disk`. See `set_skill_state::SetSkillStateTool` for the overlay model.
-pub fn set_skill_state_tool(harness_cell: skill::SkillHarnessCell) -> Arc<dyn AgentTool> {
+pub fn set_skill_state_tool(harness_cell: SkillHarnessCell) -> Arc<dyn AgentTool> {
     Arc::new(set_skill_state::SetSkillStateTool::new(harness_cell))
 }
 
 /// Build the `RemoveSkill` tool (delete a user-installed skill). Same harness-cell wiring;
 /// deletes `~/.theway/skills/<name>/`, clears the overlay entry, and hot-reloads. Builtin/project
 /// skills are refused (disable instead). See `remove_skill::RemoveSkillTool`.
-pub fn remove_skill_tool(harness_cell: skill::SkillHarnessCell) -> Arc<dyn AgentTool> {
+pub fn remove_skill_tool(harness_cell: SkillHarnessCell) -> Arc<dyn AgentTool> {
     Arc::new(remove_skill::RemoveSkillTool::new(harness_cell))
-}
-
-/// Build the session-scoped cron creation tool. This is the model-facing counterpart to
-/// `/cron add`: when the user asks in ordinary conversation for a scheduled / recurring
-/// job, the model can register it without falling back to a dynamic trigger.
-pub fn new_cron_job_tool(harness_cell: skill::SkillHarnessCell) -> Arc<dyn AgentTool> {
-    Arc::new(crate::triggers::NewCronJobTool::new(Some(harness_cell)))
-}
-
-/// Build the session-scoped cron listing tool. This is the model-facing counterpart to
-/// `/cron list` and returns redacted previews rather than raw action text.
-pub fn list_cron_jobs_tool() -> Arc<dyn AgentTool> {
-    Arc::new(crate::triggers::ListCronJobsTool)
-}
-
-/// Build the session-scoped cron removal tool. This is the model-facing counterpart to
-/// `/cron remove`: it previews by default and only removes after explicit confirmation,
-/// then writes the same control-plane audit as slash commands.
-pub fn remove_cron_job_tool(harness_cell: skill::SkillHarnessCell) -> Arc<dyn AgentTool> {
-    Arc::new(crate::triggers::RemoveCronJobTool::new(Some(harness_cell)))
-}
-
-/// Build the session-scoped cron state tool. This lets the model disable a cron job without
-/// deleting the schedule/action text; enable fails closed to `/cron enable` until
-/// control-plane confirmation is wired for model-facing writes.
-pub fn set_cron_job_state_tool(harness_cell: skill::SkillHarnessCell) -> Arc<dyn AgentTool> {
-    Arc::new(crate::triggers::SetCronJobStateTool::new(Some(
-        harness_cell,
-    )))
-}
-
-/// Build the dynamic trigger creation tool. This is model-facing counterpart to the
-/// `/new-trigger` slash command: when the user asks in ordinary conversation to create an
-/// automation, the model can register the rule without requiring slash-command syntax.
-pub fn new_trigger_tool() -> Arc<dyn AgentTool> {
-    Arc::new(crate::triggers::NewTriggerTool)
-}
-
-/// Build the dynamic trigger listing tool. This is the model-facing counterpart to
-/// `/triggers rules`: it lets the assistant inspect current rule ids before answering or
-/// removing a rule.
-pub fn list_triggers_tool() -> Arc<dyn AgentTool> {
-    Arc::new(crate::triggers::ListTriggersTool)
-}
-
-/// Build the dynamic trigger removal tool. This is the model-facing counterpart to
-/// `/triggers remove`: when the user asks in ordinary conversation to delete a trigger,
-/// the model can remove the rule by id or clear all rules when explicitly requested.
-pub fn remove_trigger_tool() -> Arc<dyn AgentTool> {
-    Arc::new(crate::triggers::RemoveTriggerTool)
-}
-
-/// Build the dynamic trigger state tool. This lets the model pause/resume a trigger without
-/// deleting the rule and losing its condition/action text.
-pub fn set_trigger_state_tool() -> Arc<dyn AgentTool> {
-    Arc::new(crate::triggers::SetTriggerStateTool)
 }
