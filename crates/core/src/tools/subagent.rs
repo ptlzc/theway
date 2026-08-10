@@ -32,12 +32,12 @@ use theway_core::{
 use theway_llm_provider::{Model, Tool, UserContentBlock};
 use tokio_util::sync::CancellationToken;
 
-use crate::runtime::subagents::launch::LaunchResolver;
-use crate::runtime::subagents::node_launcher::ToolSetResolver;
 use crate::runtime::subagents::runner::{SubagentRunOptions, run_subagent};
+use crate::runtime::subagents::types::LaunchResolver;
+use crate::runtime::subagents::types::ToolSetResolver;
 
 /// Closure that resolves the tool set a subagent should have access to from its spec
-/// name. Same shape as the DAG node launcher's [`ToolSetResolver`] — `task` and DAG
+/// name. Same shape as the DAG node launcher's [`ToolSetResolver`](crate::runtime::subagents::types::ToolSetResolver) — `task` and DAG
 /// share one mechanism (and one app-layer instance). App-layer injection: the engine
 /// does not know which tools exist — the server supplies this via `subagent_tool`
 /// (`server/src/tools.rs`) / e2e tests.

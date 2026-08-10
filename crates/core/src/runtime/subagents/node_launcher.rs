@@ -3,7 +3,7 @@
 //! [`NodeLauncherImpl`] implements the engine's [`NodeLauncher`] contract: each launched
 //! node is executed by the shared [`runner`](super::runner) (one fresh
 //! in-memory harness per node, nothing touches disk), spawned by the node's `agent` name
-//! resolved through the injected [`LaunchResolver`](super::launch). The outcome (success, error, duration, tokens,
+//! resolved through the injected [`LaunchResolver`](super::types). The outcome (success, error, duration, tokens,
 //! final text) is reported back to the engine via [`DagEngine::on_node_completed`]; live
 //! token/preview sync runs through [`DagEngine::on_node_update`] via the runner's
 //! per-turn callback. 1:1 port of the dag-orchestrator extension's `defaultLauncher`
@@ -28,15 +28,9 @@ use theway_core::{AgentTool, StreamFn};
 use theway_llm_provider::Model;
 use tokio_util::sync::CancellationToken;
 
-use super::launch::{LaunchResolver, SubagentLaunch};
 use super::registry::SubagentJobRegistry;
 use super::runner::{SubagentRunOptions, run_subagent};
-
-/// Resolves a subagent's tool set from its spec name. App-layer injection: the engine
-/// does not know which tools exist (local tools live in the `theway` crate, and may
-/// become remote sandbox execution later); the launcher asks the app layer at launch
-/// time. `(&str)` — the spec name, e.g. "explorer".
-pub type ToolSetResolver = Arc<dyn Fn(&str) -> Vec<Arc<dyn AgentTool>> + Send + Sync>;
+use super::types::{LaunchResolver, SubagentLaunch, ToolSetResolver};
 
 /// Everything a single node job needs, captured at launch time so the spawned task never
 /// re-reads mutable engine state (the node may be retried/cancelled meanwhile).

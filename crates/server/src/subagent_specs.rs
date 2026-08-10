@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use theway_core::runtime::subagents::launch::{LaunchResolver, SubagentLaunch};
+use theway_core::runtime::subagents::types::{LaunchResolver, SubagentLaunch};
 
 /// Iteration budget default, mirroring the `subagent` tool's "max 16 iterations" doc.
 pub const DEFAULT_MAX_ITERATIONS: u32 = 16;

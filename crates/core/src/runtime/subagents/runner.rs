@@ -22,11 +22,11 @@ use theway_core::{
 use theway_llm_provider::{Message as PiMessage, Model};
 use tokio_util::sync::CancellationToken;
 
-use super::launch::SubagentLaunch;
+use super::types::SubagentLaunch;
 
 /// Everything a single subagent run needs, captured at launch time by the caller.
 pub struct SubagentRunOptions {
-    /// Resolved launch parameters (via the app-layer [`LaunchResolver`](super::launch::LaunchResolver)):
+    /// Resolved launch parameters (via the app-layer [`LaunchResolver`](super::types::LaunchResolver)):
     /// system prompt + metadata.
     pub launch: SubagentLaunch,
     /// Tool set the sub-harness runs with. Resolved by the caller from the app-layer

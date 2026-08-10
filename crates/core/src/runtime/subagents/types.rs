@@ -1,4 +1,4 @@
-//! `subagent_launch` — the launch DATA channel between the engine and the app.
+//! Subagent data contract — the types shared between the engine and the app.
 //!
 //! The engine provides the subagent CAPABILITY (shared runner, DAG node launcher,
 //! `subagent` tool); it does not define what a "spec" is. The spec concept — its
@@ -9,6 +9,8 @@
 //! the injected [`LaunchResolver`] (same pattern as the tool-set resolver).
 
 use std::sync::Arc;
+
+use theway_core::AgentTool;
 
 /// Launch parameters for one subagent run — pure data, resolved app-side from the
 /// app's spec table.
@@ -28,3 +30,9 @@ pub struct SubagentLaunch {
 /// (same pattern as the tool-set resolver); the app owns the spec table and how its
 /// specs map to launch parameters.
 pub type LaunchResolver = Arc<dyn Fn(&str) -> Option<SubagentLaunch> + Send + Sync>;
+
+/// App-layer tool-set resolver: spec name -> tool set for the sub-harness. Injected at
+/// construction (same pattern as [`LaunchResolver`]); the app owns which tools each spec
+/// gets. The engine does not know which tools exist (local tools live in the `theway`
+/// crate, and may become remote sandbox execution later).
+pub type ToolSetResolver = Arc<dyn Fn(&str) -> Vec<Arc<dyn AgentTool>> + Send + Sync>;
