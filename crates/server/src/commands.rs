@@ -1920,6 +1920,12 @@ impl SlashCommand for SessionsCommand {
 
 struct ShareCommand;
 
+/// The `gh` binary to use for `/share`. Defaults to `gh` on PATH; `THEWAY_GH_BIN`
+/// overrides it (gh installed outside PATH, or a test shim).
+fn gh_bin() -> String {
+    std::env::var("THEWAY_GH_BIN").unwrap_or_else(|_| "gh".to_string())
+}
+
 #[async_trait]
 impl SlashCommand for ShareCommand {
     fn name(&self) -> &'static str {
@@ -1944,7 +1950,7 @@ impl SlashCommand for ShareCommand {
             return CommandOutcome::Error(format!("save transcript: {e}"));
         }
 
-        let mut cmd = tokio::process::Command::new("gh");
+        let mut cmd = tokio::process::Command::new(gh_bin());
         cmd.arg("gist").arg("create");
         if public {
             cmd.arg("--public");

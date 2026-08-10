@@ -19,7 +19,7 @@ use theway_llm_provider::{
     ContentBlock, Context, DoneReason, Message, StopReason, ToolCall, Usage,
 };
 
-static PATH_ENV_LOCK: Mutex<()> = Mutex::new(());
+static GH_BIN_ENV_LOCK: Mutex<()> = Mutex::new(());
 static THEWAY_DIR_ENV_LOCK: Mutex<()> = Mutex::new(());
 static DYNAMIC_TRIGGER_LOCK: Mutex<()> = Mutex::new(());
 static CRON_LOCK: Mutex<()> = Mutex::new(());
@@ -1434,20 +1434,14 @@ async fn save_api_key_persists_without_printing_secret_material() {
 
 #[tokio::test]
 async fn dispatch_share_default_uses_gh_private_default_without_secret_flag() {
-    let _guard = PATH_ENV_LOCK.lock().unwrap();
+    let _guard = GH_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let temp = tempfile::tempdir().unwrap();
     let argv_log = temp.path().join("argv.txt");
-    write_fake_gh(
+    let shim = write_fake_gh(
         temp.path(),
-        &format!(
-            r#"#!/bin/sh
-printf '%s\n' "$*" > '{}'
-printf '%s\n' 'https://gist.github.com/example/private'
-"#,
-            argv_log.display()
-        ),
+        &fake_gh_argv_and_url(&argv_log, "https://gist.github.com/example/private"),
     );
-    let _path_guard = prepend_path(temp.path());
+    let _gh_bin_guard = EnvGuard::set("THEWAY_GH_BIN", shim);
 
     let storage = Arc::new(MemorySessionStorage::new());
     let session = Session::new(storage as Arc<dyn SessionStorage>);
@@ -1480,20 +1474,14 @@ printf '%s\n' 'https://gist.github.com/example/private'
 
 #[tokio::test]
 async fn dispatch_share_public_passes_public_flag() {
-    let _guard = PATH_ENV_LOCK.lock().unwrap();
+    let _guard = GH_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let temp = tempfile::tempdir().unwrap();
     let argv_log = temp.path().join("argv.txt");
-    write_fake_gh(
+    let shim = write_fake_gh(
         temp.path(),
-        &format!(
-            r#"#!/bin/sh
-printf '%s\n' "$*" > '{}'
-printf '%s\n' 'https://gist.github.com/example/public'
-"#,
-            argv_log.display()
-        ),
+        &fake_gh_argv_and_url(&argv_log, "https://gist.github.com/example/public"),
     );
-    let _path_guard = prepend_path(temp.path());
+    let _gh_bin_guard = EnvGuard::set("THEWAY_GH_BIN", shim);
 
     let storage = Arc::new(MemorySessionStorage::new());
     let session = Session::new(storage as Arc<dyn SessionStorage>);
@@ -1522,16 +1510,10 @@ printf '%s\n' 'https://gist.github.com/example/public'
 
 #[tokio::test]
 async fn dispatch_share_preserves_gh_stderr_on_failure() {
-    let _guard = PATH_ENV_LOCK.lock().unwrap();
+    let _guard = GH_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let temp = tempfile::tempdir().unwrap();
-    write_fake_gh(
-        temp.path(),
-        r#"#!/bin/sh
-printf '%s\n' 'unknown flag: --secret' >&2
-exit 1
-"#,
-    );
-    let _path_guard = prepend_path(temp.path());
+    let shim = write_fake_gh(temp.path(), &fake_gh_fail_stderr());
+    let _gh_bin_guard = EnvGuard::set("THEWAY_GH_BIN", shim);
 
     let storage = Arc::new(MemorySessionStorage::new());
     let session = Session::new(storage as Arc<dyn SessionStorage>);
@@ -1978,41 +1960,61 @@ async fn dispatch_skill_unknown_name_suggests_prefix_matches() {
 #[allow(dead_code)]
 fn _path_check(_p: &Path) {}
 
-fn write_fake_gh(dir: &Path, body: &str) {
-    let path = dir.join("gh");
-    std::fs::write(&path, body).unwrap();
+/// Body of the fake `gh` shim that records argv and prints a gist URL.
+/// POSIX script on Unix; `.bat` on Windows — `Command` only executes `.bat`/
+/// `.cmd` when given the full path, which is why the tests drive the shim
+/// through `THEWAY_GH_BIN` instead of PATH (Windows PATH search never finds
+/// extensionless scripts or `.bat` files).
+fn fake_gh_argv_and_url(argv_log: &Path, url: &str) -> String {
     #[cfg(unix)]
     {
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" > '{}'\nprintf '%s\\n' '{url}'\n",
+            argv_log.display()
+        )
+    }
+    #[cfg(windows)]
+    {
+        format!(
+            "@echo off\r\necho %* > \"{}\"\r\necho {url}\r\n",
+            argv_log.display()
+        )
+    }
+}
+
+/// Body of the fake `gh` shim that fails on stderr with exit code 1.
+fn fake_gh_fail_stderr() -> String {
+    #[cfg(unix)]
+    {
+        "#!/bin/sh\nprintf '%s\\n' 'unknown flag: --secret' >&2\nexit 1\n".to_string()
+    }
+    #[cfg(windows)]
+    {
+        "@echo off\r\necho unknown flag: --secret 1>&2\r\nexit /b 1\r\n".to_string()
+    }
+}
+
+/// Write the fake `gh` shim into `dir` and return its full path (spawned via
+/// `THEWAY_GH_BIN`).
+fn write_fake_gh(dir: &Path, body: &str) -> std::path::PathBuf {
+    #[cfg(unix)]
+    {
+        let path = dir.join("gh");
+        std::fs::write(&path, body).unwrap();
         use std::os::unix::fs::PermissionsExt;
         let mut permissions = std::fs::metadata(&path).unwrap().permissions();
         permissions.set_mode(0o755);
         std::fs::set_permissions(&path, permissions).unwrap();
+        path
+    }
+    #[cfg(windows)]
+    {
+        let path = dir.join("gh.cmd");
+        std::fs::write(&path, body).unwrap();
+        path
     }
 }
 
-struct PathGuard {
-    original: Option<std::ffi::OsString>,
-}
-
-impl Drop for PathGuard {
-    fn drop(&mut self) {
-        match self.original.take() {
-            Some(value) => unsafe { std::env::set_var("PATH", value) },
-            None => unsafe { std::env::remove_var("PATH") },
-        }
-    }
-}
-
-fn prepend_path(dir: &Path) -> PathGuard {
-    let original = std::env::var_os("PATH");
-    let mut paths = vec![dir.to_path_buf()];
-    if let Some(value) = original.as_ref() {
-        paths.extend(std::env::split_paths(value));
-    }
-    let joined = std::env::join_paths(paths).unwrap();
-    unsafe { std::env::set_var("PATH", joined) };
-    PathGuard { original }
-}
 
 struct EnvGuard {
     key: &'static str,
