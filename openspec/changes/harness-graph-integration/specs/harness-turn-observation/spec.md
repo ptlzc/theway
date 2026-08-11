@@ -21,17 +21,22 @@
 
 ### Requirement: prompt 系列返回 RunSummary
 
-`prompt` / `prompt_with_images` / `continue_` / `prompt_from_template` SHALL 返回 `Result<RunSummary, AgentRunError>`;`RunSummary` SHALL 含最终 assistant 文本(`text`,无文本输出为空串)、累计 `input_tokens` / `output_tokens`、`interrupted`(turn 被中断提前结束)。**BREAKING**: 所有调用方适配新返回类型。
+`prompt` / `prompt_with_images` / `continue_` / `prompt_from_template` SHALL 返回 `Result<RunSummary, AgentRunError>`;`RunSummary` SHALL 含最终 assistant 文本(`text`,无文本输出为空串)、累计 `input_tokens` / `output_tokens`、总工具调用次数 `tool_calls`、按工具名聚合的 `tools: Vec<ToolUseSummary>`(name/calls)、`interrupted`(turn 被中断提前结束)。工具统计 SHALL 来自 `AgentEvent::ToolExecutionStart`(与 registry `metrics_listener` 同一事件源)。**BREAKING**: 所有调用方适配新返回类型。
 
 #### Scenario: 节点产出记录
 
 - **WHEN** `run_agent` 调用 `sub.prompt(task)` 完成
-- **THEN** 返回的 `RunSummary` 提供最终文本与 tokens,runner 无需订阅 `AgentEvent::MessageEnd` 或 post-hoc 读取 agent state 即可记录节点产出
+- **THEN** 返回的 `RunSummary` 提供最终文本、tokens 与工具调用统计,runner 无需订阅 `AgentEvent::MessageEnd` 或 post-hoc 读取 agent state 即可记录节点产出
+
+#### Scenario: 工具调用计数与聚合
+
+- **WHEN** 一次 run 中调用 `bash` 3 次、`read` 2 次
+- **THEN** `RunSummary.tool_calls == 5`,`tools` 含 `{bash, 3}` 与 `{read, 2}`
 
 #### Scenario: 中断的 run
 
 - **WHEN** 节点被 cancel 级联导致 `TurnInterrupted`
-- **THEN** `RunSummary.interrupted == true`,文本为中断前已产出的部分(若有),runner 据此标记节点状态
+- **THEN** `RunSummary.interrupted == true`,文本为中断前已产出的部分(若有),工具统计为已执行部分,runner 据此标记节点状态
 
 #### Scenario: 无文本输出
 

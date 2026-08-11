@@ -4,7 +4,7 @@
 
 - [ ] 1.1 `assembly.rs`: 新增 `TurnObservation` 类型 (turn_index / text / input_tokens / output_tokens) 与 `TurnObserver` 类型别名;`AgentHarnessOptions` 增加 `turn_observer: Option<TurnObserver>` 字段 + `new()` 默认 None。
 - [ ] 1.2 `assembly.rs` `run_turn_with_continuation`: 每次 agent turn 完成后 (`finish_persisted_run` 之后、hook 之前) 触发 `turn_observer`;文档注明 observer 先于 hook 触发。
-- [ ] 1.3 `assembly.rs`: 新增 `RunSummary` (text / input_tokens / output_tokens / interrupted);`prompt` / `prompt_with_images` / `continue_` / `prompt_from_template` 返回 `Result<RunSummary, AgentRunError>`;text 取自本周期最后一次 assistant 消息。
+- [ ] 1.3 `assembly.rs`: 新增 `RunSummary` (text / input_tokens / output_tokens / tool_calls / tools: Vec<ToolUseSummary> / interrupted) 与 `ToolUseSummary` (name/calls);工具统计经 harness 内部订阅 `AgentEvent::ToolExecutionStart` (同 registry metrics_listener 口径);`prompt` / `prompt_with_images` / `continue_` / `prompt_from_template` 返回 `Result<RunSummary, AgentRunError>`;text 取自本周期最后一次 assistant 消息。
 - [ ] 1.4 `multiagent/runner.rs`: 删除 final_text 收集器 (Arc<Mutex<String>> + MessageEnd 订阅) 与 post-hoc `sub.cost()` hack;改用 `harness_opts.turn_observer` (每 turn 回调给 engine) + `sub.prompt()` 的 `RunSummary` (记录节点产出)。
 - [ ] 1.5 server 调用方适配: grep `\.prompt(` / `\.continue_(` / `prompt_from_template` (session_factory / trigger_engine / ui / commands) 适配 `RunSummary` 返回 (忽略或取 text)。
 - [ ] 1.6 测试: core 新增 TurnObserver 触发顺序/次数测试 (tests/harness_e2e/ 或 run_loop 套件);runner 相关测试适配;`cargo test -p theway-core --no-fail-fast` 全绿。

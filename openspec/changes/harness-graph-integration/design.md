@@ -63,9 +63,19 @@ pub struct RunSummary {
     pub text: String,             // 最终 assistant 文本(空 = 无文本输出)
     pub input_tokens: u64,
     pub output_tokens: u64,
+    pub tool_calls: u64,          // 总工具调用次数
+    pub tools: Vec<ToolUseSummary>, // 按工具名聚合(审计/展示)
     pub interrupted: bool,        // TurnInterrupted 提前结束
 }
+pub struct ToolUseSummary {
+    pub name: String,
+    pub calls: u64,
+}
 ```
+
+工具统计来源: harness 内部订阅 `AgentEvent::ToolExecutionStart`(事件已带 `tool_name`,`types.rs:351`)计数,与 registry `metrics_listener` 同一事件源,口径一致。
+
+**为什么不做工具 token 计数**: `AssistantMessage.usage` 是消息级(input/output/cache 四数),provider 不返回 per-content-block usage — 一条 assistant 消息可含多个 tool_use block,token 无法按工具精确拆分;能做的只有"参数/结果字符数估计",对成本归因无意义(USD 按总量),故不进 RunSummary。如未来需要,放 registry per-tool 字符统计并标注估计。
 
 `prompt` / `prompt_with_images` / `continue_` / `prompt_from_template` 返回 `Result<RunSummary, AgentRunError>`。**BREAKING**: 调用方需适配(server 的 session_factory/trigger_engine/UI 与 runner)。
 
