@@ -1,6 +1,6 @@
 //! Free helper functions of the harness layer: system-prompt assembly, the session
 //! persistence listener, audit-label capping, banner previews, and user-prompt text
-//! extraction. Split out of `agent_harness/mod.rs` by domain.
+//! extraction. Split out of `assembly/mod.rs` by domain.
 
 use std::sync::Arc;
 

@@ -41,7 +41,7 @@ pub use types::{
 pub mod multiagent;
 
 #[cfg(feature = "harness")]
-pub use agent::agent_harness::{
+pub use agent::assembly::{
     AgentHarness, AgentHarnessOptions, DEFAULT_TURN_CONTINUATION_CAP, HarnessEvent,
     HarnessListener, OnTurnEndContext, OnTurnEndHook, ReloadSkillsError, ReloadSkillsFn,
     TurnEndAction, TurnEndDecision,

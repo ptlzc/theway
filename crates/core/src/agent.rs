@@ -17,7 +17,7 @@
 //! - `prepareNextTurn` model/thinking-level rewrite mid-run
 
 // Harness layer (feature-gated): the bare Agent stays always-on.
-pub mod agent_harness;
+pub mod assembly;
 #[cfg(feature = "harness")]
 pub mod agent_loop;
 #[cfg(feature = "harness")]

@@ -102,9 +102,9 @@ struct Inner {
     accepted_total: u64,
 }
 
-/// Point-in-time view of the runtime's dedup + cycle bookkeeping. Cheap to copy; used by
-/// [`super::agent_harness::AgentHarness::notification_status_snapshot`] for status banners
-/// and `/triggers` rendering.
+/// Point-in-time view of the runtime's dedup + cycle bookkeeping. Cheap to copy; surfaced
+/// via `TriggerExecutor::notification_status_snapshot` for status banners and `/triggers`
+/// rendering.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TriggerRuntimeSnapshot {
     /// Number of distinct `idempotency_key` entries currently inside the dedup window.

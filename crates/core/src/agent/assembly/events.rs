@@ -1,6 +1,6 @@
 //! Harness lifecycle events + the `OnTurnEnd` hook contract. Split out of
-//! `agent_harness/mod.rs` by domain — re-exported at the `agent_harness` module root so
-//! `crate::agent::agent_harness::HarnessEvent` (and friends) keep their paths.
+//! `assembly/mod.rs` by domain — re-exported at the `assembly` module root so
+//! `crate::agent::assembly::HarnessEvent` (and friends) keep their paths.
 
 use std::sync::Arc;
 
