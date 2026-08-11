@@ -24,7 +24,6 @@ use crate::types::*;
 #[allow(unused_imports)]
 use crate::types::AfterToolCallHook;
 
-pub mod compaction;
 pub mod events;
 pub mod utils;
 
@@ -145,16 +144,18 @@ pub enum ReloadSkillsError {
 }
 
 pub struct AgentHarness {
-    agent: Arc<Agent>,
-    session: Session,
+    /// `pub(crate)`: the harness-side compaction triggers live in `agent/compaction/`
+    /// (impl block in `compaction::triggers`) and need access to these internals.
+    pub(crate) agent: Arc<Agent>,
+    pub(crate) session: Session,
     skills: Mutex<Vec<Skill>>,
     base_system_prompt: String,
     templates: Mutex<Vec<PromptTemplate>>,
-    compaction_settings: Mutex<CompactionSettings>,
+    pub(crate) compaction_settings: Mutex<CompactionSettings>,
     /// Resolves `compaction_settings.algorithm` to an implementation (builtin + TS ext).
-    compact_algorithms: Arc<CompactAlgorithmRegistry>,
+    pub(crate) compact_algorithms: Arc<CompactAlgorithmRegistry>,
     /// Used by auto-compaction to call the LLM for summarization.
-    stream_fn: Option<StreamFn>,
+    pub(crate) stream_fn: Option<StreamFn>,
     /// Harness-level lifecycle listeners. Separate from `Agent::listeners` — those cover
     /// per-turn events; this covers cross-turn / session-level decisions. Held behind an
     /// `Arc` so an unsubscriber closure can drop its captured handle independently of the
@@ -255,7 +256,7 @@ impl AgentHarness {
         })
     }
 
-    fn emit_harness_event(&self, event: HarnessEvent) {
+    pub(crate) fn emit_harness_event(&self, event: HarnessEvent) {
         let listeners = self.harness_listeners.lock().clone();
         for l in listeners {
             // Each listener runs isolated so one panic doesn't poison the rest.

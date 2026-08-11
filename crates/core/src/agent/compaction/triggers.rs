@@ -1,20 +1,18 @@
-//! Compaction methods of [`super::AgentHarness`]: manual `/compact`-style forced compaction
-//! and the auto-threshold compaction that runs before each prompt. Split out of
-//! `agent_harness/mod.rs` by domain.
-//!
-//! Note: `crate::agent::compaction` (the session-level compaction algorithm layer) is the
-//! *sibling* module of `agent_harness`; paths below are absolute to avoid confusion with
-//! this module's own name.
+//! Harness-side compaction *triggers*: manual `/compact`-style forced compaction and the
+//! auto-threshold compaction that runs before each prompt. Lives with the rest of the
+//! compaction layer (`algorithm.rs` / `compaction.rs` / `branch_summarization.rs`) because
+//! it is the agent-runtime integration of that layer; the impl block extends
+//! [`crate::agent::assembly::AgentHarness`] but Rust impl blocks may live in any module.
+//! Split out of `assembly/mod.rs` by domain.
 
+use crate::agent::assembly::HarnessEvent;
 use crate::agent::AgentRunError;
 use crate::agent::compaction::compaction::{SummarizeError, compact, estimate_context_tokens};
 use crate::agent::messages::compaction_summary;
 use crate::agent::session::session::SessionTreeEntry;
 use crate::types::AgentMessage;
 
-use super::HarnessEvent;
-
-impl super::AgentHarness {
+impl crate::agent::assembly::AgentHarness {
     /// Force a compaction immediately, regardless of token thresholds. Useful for `/compact`-
     /// style slash commands.
     pub async fn force_compact(
@@ -24,7 +22,7 @@ impl super::AgentHarness {
         self.do_compact(true, custom_instructions).await
     }
 
-    pub(super) async fn run_auto_compaction(&self) -> Result<(), AgentRunError> {
+    pub(crate) async fn run_auto_compaction(&self) -> Result<(), AgentRunError> {
         let settings = self.compaction_settings.lock().clone();
         if !settings.enabled {
             return Ok(());
