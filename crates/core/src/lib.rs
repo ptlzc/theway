@@ -7,7 +7,6 @@ extern crate self as theway_core;
 
 pub mod agent;
 pub mod node;
-pub mod proxy;
 pub mod types;
 
 /// Runtime skill enable/disable overlay (`~/.theway/skills-state.json`), shared by the
