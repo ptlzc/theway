@@ -117,4 +117,4 @@ emit 点 (run_loop / assembly)
 
 - `AgentJobEvent` 的分发机制是否需要在下一轮统一为 broadcast 通道?(默认是,本轮仅文档标记为后续演进)
 - 同步回调的 50μs 硬约束是否需要 benchmark 验证?(默认 code review 足矣,不做 CI benchmark)
-- `SessionEvent::TurnDecision` 是否需要在 `dag_inspect` 中展示?(默认本期不做,留待 UI 需求确认)
+- ~~`SessionEvent::TurnDecision` 是否需要在 `dag_inspect` 中展示?(默认本期不做,留待 UI 需求确认)~~ — 已撤销:该条系撰写时误挂,`TurnDecision` 是会话层回合决策审计,与 `dag_inspect`(DAG 节点视角)无直接关系;且 server `ui/listener.rs` 已在消费该事件,无悬而未决的 UI 需求。
