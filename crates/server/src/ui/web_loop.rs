@@ -81,6 +81,10 @@ pub struct TransportEndpoints {
     pub session_ops: Arc<dyn crate::session_ops::SessionOps>,
     /// Owning session id (checkpoint scope / mount key).
     pub session_id: String,
+    /// Abort handle for the registry→events forwarder task spawned in
+    /// [`transport_endpoints`](App::transport_endpoints). Clone it before moving
+    /// `TransportEndpoints` into [`run_transport_loop`](App::run_transport_loop).
+    pub agent_fwd: tokio::task::AbortHandle,
 }
 
 impl App {
@@ -95,8 +99,27 @@ impl App {
         let latest = Arc::new(Mutex::new(self.web_snapshot()));
         // Event plane (graph mode) shared with /ws; the registry broadcasts into it.
         let (event_tx, _) = broadcast::channel::<AgentJobEvent>(256);
-        self.subagent_registry
-            .set_event_sender(Some(event_tx.clone()));
+        // Forward registry built-in broadcast → event_tx (merged stream for web/gRPC clients).
+        let agent_fwd = {
+            let mut rx = self.subagent_registry.subscribe();
+            let fwd_tx = event_tx.clone();
+            tokio::spawn(async move {
+                loop {
+                    match rx.recv().await {
+                        Ok(event) => {
+                            let _ = fwd_tx.send(event);
+                        }
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            tracing::warn!("AgentJobEvent broadcast lagged by {n}, skipping");
+                            continue;
+                        }
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+                tracing::debug!("AgentJobEvent registry channel closed; forwarder task exiting");
+            })
+            .abort_handle()
+        };
         // DAG engine broadcasts node_status / run_status (goal runs + DAG runs).
         let (dag_event_tx, _) = broadcast::channel::<DagEvent>(256);
         self.dag_engine.set_event_sender(Some(dag_event_tx.clone()));
@@ -116,6 +139,7 @@ impl App {
                 self.current_session_state.clone(),
             )),
             session_id: self.session_id.clone(),
+            agent_fwd,
         }
     }
 

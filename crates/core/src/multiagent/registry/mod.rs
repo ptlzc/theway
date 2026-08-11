@@ -24,7 +24,7 @@ mod events;
 mod metrics;
 mod persist;
 
-pub use events::{AgentJobEvent, JobStatus};
+pub use events::{AGENT_JOB_EVENT_BROADCAST_CAPACITY, AgentJobEvent, JobStatus};
 pub use metrics::metrics_listener;
 pub use persist::{
     agent_message_to_json, append_message, append_output, load_messages, messages_path_for_node,
@@ -169,12 +169,13 @@ struct Inner {
 }
 
 /// Thread-safe registry (cheap clone via `Arc`).
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct AgentJobRegistry {
     inner: Arc<Mutex<Inner>>,
-    /// Event-plane sink (graph mode). Set once by the transport layer; `None`
-    /// silently drops events (headless runs without a transport).
-    events: Arc<Mutex<Option<tokio::sync::broadcast::Sender<AgentJobEvent>>>>,
+    /// Built-in broadcast channel for [`AgentJobEvent`]s. Receivers subscribe
+    /// via [`subscribe()`](Self::subscribe); when nobody is listening, `send`
+    /// fails silently — no external wiring needed.
+    events: tokio::sync::broadcast::Sender<AgentJobEvent>,
 }
 
 pub struct JobInit {
@@ -188,13 +189,17 @@ pub struct JobInit {
 
 impl AgentJobRegistry {
     pub fn new() -> Self {
-        Self::default()
+        let (events, _) = tokio::sync::broadcast::channel(AGENT_JOB_EVENT_BROADCAST_CAPACITY);
+        Self {
+            inner: Arc::new(Mutex::new(Inner::default())),
+            events,
+        }
     }
 
-    /// Wire the event-plane broadcast (called once by the transport setup);
-    /// `None` detaches (used by tests to close the merged stream).
-    pub fn set_event_sender(&self, tx: Option<tokio::sync::broadcast::Sender<AgentJobEvent>>) {
-        *self.events.lock() = tx;
+    /// Subscribe to the built-in broadcast channel. Each call returns a fresh
+    /// receiver that picks up events from this point forward (not historic).
+    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<AgentJobEvent> {
+        self.events.subscribe()
     }
 
     /// Set the directory where finished jobs' full transcripts are persisted
@@ -369,11 +374,10 @@ impl AgentJobRegistry {
         let _ = std::fs::write(path, json);
     }
 
-    /// Broadcast an event-plane message (no-op without a sender).
+    /// Broadcast an event-plane message (no receiver → silently dropped, same
+    /// as [`LoopEvent`]'s built-in plane).
     pub(crate) fn emit(&self, event: AgentJobEvent) {
-        if let Some(tx) = self.events.lock().as_ref() {
-            let _ = tx.send(event);
-        }
+        let _ = self.events.send(event);
     }
 
     /// Look up a DAG node job by run/node (GetNodeOutput).

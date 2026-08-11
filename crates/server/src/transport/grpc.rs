@@ -66,6 +66,8 @@ pub struct GrpcState {
     /// session-resource-model: session lifecycle ops (list/create/rename/delete).
     /// Switching the *current* session goes through `WebCommand::SwitchSession`.
     pub session_ops: Arc<dyn SessionOps>,
+    /// Abort handle for the registry→events forwarder task spawned at startup.
+    pub agent_fwd: tokio::task::AbortHandle,
     /// Owning session id: default scope for GraphCheckpoint and the mount key
     /// under which `SessionState.dags` is served. Mutable: SwitchSession (and
     /// the DeleteSession fallback) rebind it; the event loop re-syncs it via
@@ -592,6 +594,7 @@ pub async fn run_grpc(mut app: App, options: GrpcOptions) -> Result<()> {
     let actual = listener.local_addr()?;
 
     let endpoints = app.transport_endpoints();
+    let agent_fwd = endpoints.agent_fwd.clone();
     let grpc_state = GrpcState {
         commands: endpoints.command_tx.clone(),
         snapshots: endpoints.snapshot_tx.clone(),
@@ -601,6 +604,7 @@ pub async fn run_grpc(mut app: App, options: GrpcOptions) -> Result<()> {
         registry: endpoints.registry.clone(),
         dag_engine: endpoints.dag_engine.clone(),
         session_ops: endpoints.session_ops.clone(),
+        agent_fwd,
         session_id: Arc::new(std::sync::RwLock::new(endpoints.session_id.clone())),
     };
     let server_task = serve_grpc(listener, grpc_state);

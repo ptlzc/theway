@@ -40,7 +40,26 @@ fn grpc_state_with_ops() -> (
     let latest = Arc::new(Mutex::new(fixture_snapshot("ready")));
     let (event_tx, _) = broadcast::channel::<AgentJobEvent>(16);
     let registry = AgentJobRegistry::new();
-    registry.set_event_sender(Some(event_tx.clone()));
+    // Forward registry built-in broadcast → event_tx (merged stream for tests).
+    let agent_fwd = {
+        let mut rx = registry.subscribe();
+        let fwd_tx = event_tx.clone();
+        tokio::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        let _ = fwd_tx.send(event);
+                    }
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        eprintln!("AgentJobEvent broadcast lagged by {n}, skipping");
+                        continue;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        })
+        .abort_handle()
+    };
     let (dag_event_tx, _) = broadcast::channel::<DagEvent>(16);
     let session_ops = Arc::new(FakeSessionOps::new());
     session_ops.add_session("test-session");
@@ -55,6 +74,7 @@ fn grpc_state_with_ops() -> (
             dag_engine: Arc::new(theway_core::multiagent::graph::engine::DagEngine::new()),
             session_ops: session_ops.clone(),
             session_id: Arc::new(std::sync::RwLock::new("test-session".into())),
+            agent_fwd,
         },
         command_rx,
         session_ops,
@@ -198,7 +218,7 @@ async fn stream_events_emits_published_snapshots() {
 
     // Stream ends once all three broadcast senders are dropped (merged stream).
     drop(state.snapshots);
-    state.registry.set_event_sender(None);
+    state.agent_fwd.abort();
     drop(state.events);
     drop(state.dag_events);
     assert!(
