@@ -15,6 +15,7 @@ Each crate keeps implementation in `src/`, integration tests in `tests/`, and ru
 Source and test files must stay under ~800 lines; larger files must be split into a **directory** (`foo.rs` → `foo/mod.rs` + domain submodules for src; `tests/<name>/mod.rs` + domain submodule files for tests), splitting by domain/module, never mechanically. Exceptions (third-party vendored/extracted code that must stay monolithic):
 
 - `crates/mermaid-parser/src/parser.rs` — extracted from the third-party `mmdr` parser (vendored mermaid parse stage); kept as one file to stay diff-compatible with upstream extraction. Do NOT split it; do not re-apply the 800-line rule to it.
+- `crates/core/src/agent/assembly.rs` — the `AgentHarness` composer (Agent + Session + skills + compaction + permission + lifecycle events), flattened from `agent/assembly/` by owner decision; kept monolithic so the composed agent API reads as one unit. Do NOT split it; do not re-apply the 800-line rule to it.
 
 ## Build, Test, and Development Commands
 
