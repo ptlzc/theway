@@ -1,5 +1,42 @@
 //! `run_agent_loop`. 1:1 port of `packages/agent/src/agent-loop.ts` (~742 lines).
 //!
+//! ## LoopEvent — responsibilities
+//!
+//! [`LoopEvent`] is the run_loop-internal event plane: it represents per-turn lifecycle
+//! events within a single agent execution run — streaming progress, tool invocation,
+//! turn boundaries, and terminal conditions. It is scoped to one `run_agent_loop()`
+//! call; a new set of events begins with each prompt/continue.
+//!
+//! ## Three-segment dispatch
+//!
+//! The [`emit`] function in [`utils`] dispatches every [`LoopEvent`] through three segments
+//! in order:
+//!
+//! 1. **Sync callbacks** — `Vec<Arc<dyn Fn(&LoopEvent) + Send + Sync>>`. Each is
+//!    `catch_unwind`-wrapped. Reserved for <50 µs, memory-only observers (cost tracker,
+//!    metrics accumulator). **Hard constraint: ≤3 registered callbacks.** Register via
+//!    [`Agent::subscribe_sync`].
+//! 2. **Critical sync await** — `Vec<LoopListener>`. Sequential `.await` for the
+//!    persistence/I/O path (session listener, audit append). This is the synchronous
+//!    critical path: persistence completes before the broadcast send, ensuring external
+//!    subscribers never see events ahead of durable storage. Each listener receives the
+//!    cancellation token to short-circuit on abort.
+//! 3. **Broadcast** — `tokio::sync::broadcast::Sender<LoopEvent>` (capacity 256).
+//!    Non-blocking `send`; slow consumers receive `Lagged(n)`. For external subscribers:
+//!    UI incremental render, gRPC streaming, hook runners.
+//!
+//! ## Subscription guide
+//!
+//! | Use case | API | Returns |
+//! |----------|-----|---------|
+//! | External streaming (UI, gRPC) | [`Agent::subscribe_broadcast`] | `broadcast::Receiver<LoopEvent>` |
+//! | Sync lightweight observer (cost, metrics, ≤50 µs) | [`Agent::subscribe_sync`] | unregister handle |
+//! | Persistence / I/O listener | [`Agent::subscribe`] | `LoopListener` handle |
+//!
+//! Sync callbacks are capped at **3** total; registering a fourth replaces the oldest.
+//! Broadcast receivers are unlimited but slow consumers get `Lagged` — size your
+//! channel capacity (256) for the expected inflow rate.
+//!
 //! Implemented:
 //! - Stream from `theway-llm-provider`, accumulate events into the final `AssistantMessage`
 //! - Tool execution (sequential or parallel based on `ToolExecutionMode` + per-tool override)

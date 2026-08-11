@@ -583,10 +583,6 @@ mod tests {
 
     #[test]
     fn metrics_listener_counts_tools_and_turns() {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
         let registry = AgentJobRegistry::new();
         let id = registry.register(JobInit {
             agent: "general".into(),
@@ -595,17 +591,13 @@ mod tests {
             node_id: None,
             session_id: None,
         });
-        let emit = |event: LoopEvent| {
-            let listener = metrics_listener(registry.clone(), id.clone());
-            let fut = listener(event, Default::default());
-            rt.block_on(fut);
-        };
-        emit(LoopEvent::ToolExecutionStart {
+        let listener = metrics_listener(registry.clone(), id.clone());
+        listener(&LoopEvent::ToolExecutionStart {
             tool_call_id: "t1".into(),
             tool_name: "read".into(),
             args: serde_json::Value::Null,
         });
-        emit(LoopEvent::TurnStart);
+        listener(&LoopEvent::TurnStart);
 
         let job = registry.job(&id).unwrap();
         assert_eq!(job.tools_called, 1);
@@ -621,10 +613,6 @@ mod tests {
             AssistantMessage, ContentBlock, StopReason, ToolResultMessage, ToolResultRole, Usage,
             UserContent, UserContentBlock, UserMessage, UserRole,
         };
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
         let registry = AgentJobRegistry::new();
         let id = registry.register(JobInit {
             agent: "explorer".into(),
@@ -633,14 +621,10 @@ mod tests {
             node_id: Some("node-1".into()),
             session_id: None,
         });
-        let emit = |event: LoopEvent| {
-            let listener = metrics_listener(registry.clone(), id.clone());
-            let fut = listener(event, Default::default());
-            rt.block_on(fut);
-        };
+        let listener = metrics_listener(registry.clone(), id.clone());
 
         // User prompt (run_loop replays new_messages through MessageStart/MessageEnd).
-        emit(LoopEvent::MessageEnd {
+        listener(&LoopEvent::MessageEnd {
             message: AgentMessage::Llm(PiMessage::User(UserMessage {
                 role: UserRole::User,
                 content: UserContent::Text("explore the repo".into()),
@@ -648,7 +632,7 @@ mod tests {
             })),
         });
         // Assistant turn with a text block + usage (tokens must still accumulate).
-        emit(LoopEvent::MessageEnd {
+        listener(&LoopEvent::MessageEnd {
             message: AgentMessage::Llm(PiMessage::Assistant(AssistantMessage {
                 role: theway_llm_provider::AssistantRole::Assistant,
                 content: vec![ContentBlock::text("found it")],
@@ -669,7 +653,7 @@ mod tests {
             })),
         });
         // Tool result (also replayed through MessageStart/MessageEnd).
-        emit(LoopEvent::MessageEnd {
+        listener(&LoopEvent::MessageEnd {
             message: AgentMessage::Llm(PiMessage::ToolResult(ToolResultMessage {
                 role: ToolResultRole::ToolResult,
                 tool_call_id: "t1".into(),

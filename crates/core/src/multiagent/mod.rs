@@ -8,6 +8,16 @@
 //! and never the reverse. The spec concept and the tool-set policy live app-side
 //! (`theway` crate); model-facing tools live in `crate::tools` (`dag_tools`,
 //! `subagent`).
+//!
+//! ## Event plane
+//!
+//! This module owns the third event plane, [`AgentJobEvent`], broadcast via
+//! `AgentJobRegistry::set_event_sender`. Its scope is multi-agent job telemetry
+//! (graph mode): job start, streaming output chunks, per-turn metrics, and
+//! completion status. It is independent of the single-agent planes
+//! ([`LoopEvent`] in `crate::agent::run_loop` and [`SessionEvent`] in
+//! `crate::agent::assembly`); external consumers wire all three through the
+//! transport layer into a unified gRPC `StreamEvent`.
 
 pub mod goal;
 pub mod graph;

@@ -25,7 +25,10 @@ pub mod skills_state;
 pub mod tools;
 
 // Public surface — mirrors `packages/agent/src/index.ts`.
-pub use agent::{Agent, AgentOptions, AgentRunError, LoopListener};
+pub use agent::{
+    Agent, AgentOptions, AgentRunError, LOOP_EVENT_BROADCAST_CAPACITY, LoopListener,
+    LoopSyncCallback,
+};
 pub use types::{
     AfterToolCallContext, AfterToolCallHook, AfterToolCallResult, AgentContext, AgentLoopConfig,
     AgentLoopTurnUpdate, AgentMessage, AgentState, AgentTool, AgentToolCall, AgentToolError,
@@ -43,8 +46,8 @@ pub mod multiagent;
 #[cfg(feature = "harness")]
 pub use agent::assembly::{
     AgentHarness, AgentHarnessOptions, DEFAULT_TURN_CONTINUATION_CAP, OnTurnEndContext,
-    OnTurnEndHook, ReloadSkillsError, ReloadSkillsFn, SessionEvent, SessionListener, TurnEndAction,
-    TurnEndDecision,
+    OnTurnEndHook, ReloadSkillsError, ReloadSkillsFn, SESSION_EVENT_BROADCAST_CAPACITY,
+    SessionEvent, SessionListener, TurnEndAction, TurnEndDecision,
 };
 #[cfg(feature = "harness")]
 pub use agent::compaction::{

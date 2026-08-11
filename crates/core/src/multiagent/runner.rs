@@ -135,45 +135,40 @@ pub async fn run_agent(opts: AgentRunOptions) -> AgentRunResult {
         );
     }
 
-    // Metrics + output accumulation into the job registry.
+    // Metrics + output accumulation into the job registry (sync callback — memory-only ops).
     let _metrics_sub = sub
         .agent()
-        .subscribe(metrics_listener(opts.registry.clone(), job_id.clone()));
+        .subscribe_sync(metrics_listener(opts.registry.clone(), job_id.clone()));
 
     // Collect the final assistant text (MessageEnd fires per assistant turn; keep the
     // latest non-empty text) and, for DAG nodes, sync live tokens/preview to the engine
-    // (refreshes the engine's idle-watchdog clock).
+    // (refreshes the engine's idle-watchdog clock). Sync callback — memory-only ops.
     let final_text: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
     let collector = final_text.clone();
     let on_turn_end = opts.on_turn_end.clone();
     let sub_for_events = sub.clone();
-    let _unsub = sub.agent().subscribe(Arc::new(move |event, _| {
-        let collector = collector.clone();
-        let on_turn_end = on_turn_end.clone();
-        let sub = sub_for_events.clone();
-        Box::pin(async move {
-            if let LoopEvent::MessageEnd {
-                message: AgentMessage::Llm(PiMessage::Assistant(a)),
-            } = event
-            {
-                let text = a
-                    .content
-                    .iter()
-                    .filter_map(|b| match b {
-                        theway_llm_provider::ContentBlock::Text(t) => Some(t.text.clone()),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                if !text.is_empty() {
-                    *collector.lock() = text.clone();
-                }
-                if let Some(cb) = on_turn_end.as_ref() {
-                    let snap = sub.cost();
-                    cb(&text, snap.tokens.input, snap.tokens.output);
-                }
+    let _unsub = sub.agent().subscribe_sync(Arc::new(move |event| {
+        if let LoopEvent::MessageEnd {
+            message: AgentMessage::Llm(PiMessage::Assistant(a)),
+        } = event
+        {
+            let text = a
+                .content
+                .iter()
+                .filter_map(|b| match b {
+                    theway_llm_provider::ContentBlock::Text(t) => Some(t.text.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            if !text.is_empty() {
+                *collector.lock() = text.clone();
             }
-        })
+            if let Some(cb) = on_turn_end.as_ref() {
+                let snap = sub_for_events.cost();
+                cb(&text, snap.tokens.input, snap.tokens.output);
+            }
+        }
     }));
 
     // Parent/engine abort cascades to the subagent: a tiny watcher flips the inner

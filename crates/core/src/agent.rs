@@ -47,7 +47,7 @@ pub mod utils;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use tokio::sync::Notify;
+use tokio::sync::{Notify, broadcast};
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::run_loop::{run_agent_loop, run_agent_loop_continue};
@@ -55,7 +55,9 @@ use crate::types::*;
 
 use theway_llm_provider::Message;
 
-/// Listener type. Receives lifecycle events and the active cancellation token for the run.
+/// Async listener for lifecycle events. Receives an event and the active cancellation token
+/// for the run. Used for subscribers that need to perform I/O (e.g. session persistence).
+/// For memory-only, sub-microsecond operations prefer [`LoopSyncCallback`].
 pub type LoopListener = Arc<
     dyn Fn(
             LoopEvent,
@@ -64,6 +66,14 @@ pub type LoopListener = Arc<
         + Send
         + Sync,
 >;
+
+/// Lightweight synchronous callback for lifecycle events. MUST complete in <50µs — no I/O,
+/// no blocking, no allocation beyond simple atomic/counter updates. Each callback is wrapped
+/// in `catch_unwind` during emission so a panic in one does not affect others.
+pub type LoopSyncCallback = Arc<dyn Fn(&LoopEvent) + Send + Sync>;
+
+/// Capacity of the [`LoopEvent`] broadcast channel.
+pub const LOOP_EVENT_BROADCAST_CAPACITY: usize = 256;
 
 /// Options accepted by [`Agent::new`].
 #[derive(Default)]
@@ -91,7 +101,12 @@ pub struct Agent {
 
 pub(crate) struct AgentInner {
     pub state: Mutex<AgentState>,
-    pub listeners: Mutex<Vec<LoopListener>>,
+    /// Segment 1: synchronous callbacks (memory-only, <50µs). Each wrapped in `catch_unwind`.
+    pub sync_callbacks: Mutex<Vec<LoopSyncCallback>>,
+    /// Segment 2: async await-listeners (persistence, I/O). Emitted sequentially.
+    pub await_listeners: Mutex<Vec<LoopListener>>,
+    /// Segment 3: broadcast channel for external subscribers (UI, gRPC, hooks). Non-blocking send.
+    pub broadcast_tx: broadcast::Sender<LoopEvent>,
     pub steering: Mutex<PendingMessageQueue>,
     pub follow_up: Mutex<PendingMessageQueue>,
     pub options: AgentOptions,
@@ -139,9 +154,12 @@ impl Agent {
         if options.convert_to_llm.is_none() {
             options.convert_to_llm = Some(default_convert_to_llm());
         }
+        let (broadcast_tx, _) = broadcast::channel(LOOP_EVENT_BROADCAST_CAPACITY);
         let inner = AgentInner {
             state: Mutex::new(state),
-            listeners: Mutex::new(Vec::new()),
+            sync_callbacks: Mutex::new(Vec::new()),
+            await_listeners: Mutex::new(Vec::new()),
+            broadcast_tx,
             steering: Mutex::new(PendingMessageQueue::new(options.steering_mode)),
             follow_up: Mutex::new(PendingMessageQueue::new(options.follow_up_mode)),
             options,
@@ -154,16 +172,40 @@ impl Agent {
         }
     }
 
-    /// Subscribe to lifecycle events. Returns an unsubscribe closure.
+    /// Subscribe an async listener (segment 2 — await path). For persistence/I/O subscribers
+    /// that need the cancellation token. Returns an unsubscribe closure.
+    ///
+    /// For memory-only callbacks (<50µs), use [`Self::subscribe_sync`]. For external
+    /// subscribers that want a broadcast [`tokio::sync::broadcast::Receiver`], use
+    /// [`Self::subscribe_broadcast`].
     pub fn subscribe(&self, listener: LoopListener) -> impl FnOnce() {
         let inner = self.inner.clone();
-        inner.listeners.lock().push(listener.clone());
+        inner.await_listeners.lock().push(listener.clone());
         move || {
-            let mut listeners = inner.listeners.lock();
+            let mut listeners = inner.await_listeners.lock();
             if let Some(pos) = listeners.iter().position(|l| Arc::ptr_eq(l, &listener)) {
                 listeners.remove(pos);
             }
         }
+    }
+
+    /// Register a synchronous callback (segment 1 — catch_unwind path). The callback MUST
+    /// complete in <50µs — no I/O, no blocking. Returns an unsubscribe closure.
+    pub fn subscribe_sync(&self, callback: LoopSyncCallback) -> impl FnOnce() {
+        let inner = self.inner.clone();
+        inner.sync_callbacks.lock().push(callback.clone());
+        move || {
+            let mut cbs = inner.sync_callbacks.lock();
+            if let Some(pos) = cbs.iter().position(|c| Arc::ptr_eq(c, &callback)) {
+                cbs.remove(pos);
+            }
+        }
+    }
+
+    /// Obtain a new [`tokio::sync::broadcast::Receiver`] for the LoopEvent broadcast
+    /// channel (segment 3). The receiver sees all events emitted after subscription.
+    pub fn subscribe_broadcast(&self) -> broadcast::Receiver<LoopEvent> {
+        self.inner.broadcast_tx.subscribe()
     }
 
     /// Inspect the current agent state. The lock guards against concurrent loop mutations.

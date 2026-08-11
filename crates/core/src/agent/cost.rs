@@ -73,20 +73,18 @@ impl CostTracker {
         g.turn_count += 1;
     }
 
-    /// Build an [`crate::agent::LoopListener`] that records every assistant `MessageEnd`. The
-    /// listener clones the tracker (cheap — `Arc` bump) so the harness can keep its handle.
-    pub fn as_listener(&self) -> crate::agent::LoopListener {
+    /// Build a synchronous [`crate::agent::LoopSyncCallback`] that records every assistant
+    /// `MessageEnd`. The callback clones the tracker (cheap — `Arc` bump) so the harness
+    /// can keep its handle. Registered via [`crate::Agent::subscribe_sync`].
+    pub fn as_callback(&self) -> crate::agent::LoopSyncCallback {
         let tracker = self.clone();
-        Arc::new(move |event, _cancel| {
-            let tracker = tracker.clone();
-            Box::pin(async move {
-                if let LoopEvent::MessageEnd {
-                    message: AgentMessage::Llm(PiMessage::Assistant(a)),
-                } = event
-                {
-                    tracker.record(&a.usage);
-                }
-            })
+        Arc::new(move |event| {
+            if let LoopEvent::MessageEnd {
+                message: AgentMessage::Llm(PiMessage::Assistant(a)),
+            } = event
+            {
+                tracker.record(&a.usage);
+            }
         })
     }
 }

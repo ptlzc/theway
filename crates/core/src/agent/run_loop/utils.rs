@@ -32,12 +32,33 @@ pub(super) fn snapshot_context(inner: &Arc<AgentInner>) -> AgentContext {
     }
 }
 
+/// Three-segment event emission:
+///
+/// 1. **Sync callbacks** — `catch_unwind`-wrapped, memory-only (<50µs): cost tracker,
+///    metrics accumulator. One panic does not poison others.
+/// 2. **Await listeners** — sequential async dispatch for persistence/I/O subscribers
+///    (e.g. `make_session_listener`). Each receives the cancellation token.
+/// 3. **Broadcast** — non-blocking `tokio::sync::broadcast::Sender::send`. Slow consumers
+///    receive `Lagged(n)` errors; the sender never blocks.
 pub(super) async fn emit(inner: &Arc<AgentInner>, event: LoopEvent, cancel: &CancellationToken) {
-    let listeners = inner.listeners.lock().clone();
-    for listener in listeners {
+    // Segment 1: sync callbacks (catch_unwind per callback).
+    let sync_cbs = inner.sync_callbacks.lock().clone();
+    for cb in &sync_cbs {
+        let cb = Arc::clone(cb);
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            cb(&event);
+        }));
+    }
+
+    // Segment 2: await listeners (persistence, I/O).
+    let await_listeners = inner.await_listeners.lock().clone();
+    for listener in await_listeners {
         let token = cancel.clone();
         listener(event.clone(), token).await;
     }
+
+    // Segment 3: broadcast (non-blocking; ignore Lagged).
+    let _ = inner.broadcast_tx.send(event);
 }
 
 pub(super) async fn finalize(inner: &Arc<AgentInner>, cancel: CancellationToken) {

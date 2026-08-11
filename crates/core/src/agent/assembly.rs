@@ -5,6 +5,30 @@
 //! the composed agent API (struct + options + lifecycle events + session-listener
 //! helpers) reads as one unit. Do NOT split it back into a directory.
 //!
+//! ## Three event planes
+//!
+//! The runtime surfaces events through three distinct planes, each with a clear scope and
+//! consumer contract:
+//!
+//! | Plane | Scope | Transport |
+//! |-------|-------|-----------|
+//! | [`LoopEvent`] | Single turn-loop internals (tool calls, LLM streaming, turn boundaries) | Internal to `run_loop`; emitted per-turn then drained |
+//! | [`SessionEvent`] | Session lifecycle (start/done/cost/setup, per-turn decisions, fork/mutate) | `broadcast::Sender<SessionEvent>` capacity 128 + sync callbacks |
+//! | [`AgentJobEvent`] | Multi-agent job telemetry (graph mode): started, output chunks, metrics, completed | `broadcast::Sender<AgentJobEvent>` via `AgentJobRegistry` |
+//!
+//! ### Consumer guidance
+//!
+//! - **External consumers** (UI, gRPC streaming, telemetry): subscribe via
+//!   [`AgentHarness::subscribe_session_broadcast`] → `broadcast::Receiver<SessionEvent>`.
+//!   Receivers are cheap to clone; each subscriber gets its own lagged-receive semantics.
+//! - **Sync callbacks** (registered via [`AgentHarness::subscribe_harness`]): reserved for
+//!   <50 µs, memory-only operations (cost tracker, in-process metrics). Each callback is
+//!   `catch_unwind`-wrapped; panics are caught and logged, never propagated.
+//! - **Persistence** (audit log, session store): the persistence path is on the synchronous
+//!   critical path — it runs inline during [`emit_harness_event`] (segment 2, after sync
+//!   callbacks, before broadcast send). Do **not** spawn or detach; it must complete before
+//!   the next event is visible to external subscribers.
+//!
 //! Implemented:
 //! - Compose `Agent` + `Session` + skills catalog + compaction settings
 //! - `prompt(text)` / `prompt_with_images` / `continue_()`
@@ -20,6 +44,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use theway_llm_provider::{ImageContent, Message as PiMessage, Model};
+use tokio::sync::broadcast;
 
 use crate::agent::session::session::{BranchSummaryInput, Session};
 use crate::agent::system_prompt::format_skills_for_system_prompt;
@@ -34,6 +59,9 @@ use super::compaction::algorithm::CompactAlgorithmRegistry;
 use super::compaction::compaction::{CompactionSettings, DEFAULT_COMPACTION_SETTINGS};
 use super::cost::{CostSnapshot, CostTracker};
 use super::types::{PromptTemplate, Skill};
+
+/// Capacity of the [`SessionEvent`] broadcast channel.
+pub const SESSION_EVENT_BROADCAST_CAPACITY: usize = 128;
 
 pub struct AgentHarnessOptions {
     /// Base system prompt prepended to the rendered skill catalog.
@@ -149,14 +177,16 @@ pub struct AgentHarness {
     pub(crate) compact_algorithms: Arc<CompactAlgorithmRegistry>,
     /// Used by auto-compaction to call the LLM for summarization.
     pub(crate) stream_fn: Option<StreamFn>,
-    /// Harness-level lifecycle listeners. Separate from `Agent::listeners` — those cover
-    /// per-turn events; this covers cross-turn / session-level decisions. Held behind an
-    /// `Arc` so an unsubscriber closure can drop its captured handle independently of the
-    /// `AgentHarness` lifetime.
+    /// Segment 1: synchronous session-level lifecycle listeners. Held behind an `Arc` so an
+    /// unsubscriber closure can drop its captured handle independently of the `AgentHarness`
+    /// lifetime. Dispatched with `catch_unwind` in `emit_harness_event`.
     harness_listeners: Arc<Mutex<Vec<SessionListener>>>,
+    /// Segment 3: broadcast channel for external SessionEvent subscribers (UI, gRPC, telemetry).
+    /// Non-blocking send; capacity 128.
+    session_broadcast_tx: broadcast::Sender<SessionEvent>,
     session_start_emitted: Mutex<bool>,
     /// Running token / cost totals for this harness lifetime. Updated automatically by an
-    /// internal listener subscribed to `Agent::MessageEnd`. Snapshot via [`Self::cost`].
+    /// internal callback subscribed to `Agent::subscribe_sync`. Snapshot via [`Self::cost`].
     cost: CostTracker,
     budget_cap_usd: Option<f64>,
     /// Embedder-supplied skill catalog loader. See [`AgentHarnessOptions::reload_skills_fn`]
@@ -192,9 +222,12 @@ impl AgentHarness {
         });
 
         let cost = CostTracker::new();
-        // Subscribe the cost tracker to assistant MessageEnd events. Listener is wired against
-        // the inner Agent so the harness has no per-prompt setup cost.
-        let _ = agent.subscribe(cost.as_listener());
+        // Subscribe the cost tracker to assistant MessageEnd events via sync callback
+        // (segment 1 — memory-only atomic counter update). Registered against the inner
+        // Agent so the harness has no per-prompt setup cost.
+        let _ = agent.subscribe_sync(cost.as_callback());
+
+        let (session_broadcast_tx, _) = broadcast::channel(SESSION_EVENT_BROADCAST_CAPACITY);
 
         Self {
             agent: Arc::new(agent),
@@ -206,6 +239,7 @@ impl AgentHarness {
             compact_algorithms: options.compact_algorithms,
             stream_fn: options.stream_fn,
             harness_listeners: Arc::new(Mutex::new(Vec::new())),
+            session_broadcast_tx,
             session_start_emitted: Mutex::new(false),
             cost,
             budget_cap_usd: options.budget_cap_usd,
@@ -249,14 +283,29 @@ impl AgentHarness {
         })
     }
 
+    /// Obtain a new [`tokio::sync::broadcast::Receiver`] for the [`SessionEvent`] broadcast
+    /// channel (segment 3). The receiver sees all events emitted after subscription.
+    pub fn subscribe_session_broadcast(&self) -> broadcast::Receiver<SessionEvent> {
+        self.session_broadcast_tx.subscribe()
+    }
+
+    /// Three-segment session event emission:
+    ///
+    /// 1. Sync callbacks — `catch_unwind`-wrapped per-callback isolation.
+    /// 2. Await path — not routed through listeners; persistence/audit handlers
+    ///    (`append_custom` etc.) are called directly at their call sites.
+    /// 3. Broadcast — non-blocking `broadcast::Sender::send`.
     pub(crate) fn emit_harness_event(&self, event: SessionEvent) {
+        // Segment 1: sync callbacks with catch_unwind isolation.
         let listeners = self.harness_listeners.lock().clone();
         for l in listeners {
-            // Each listener runs isolated so one panic doesn't poison the rest.
             let l = l.clone();
             let ev = event.clone();
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || l(ev)));
         }
+
+        // Segment 3: broadcast (non-blocking; ignore Lagged).
+        let _ = self.session_broadcast_tx.send(event);
     }
 
     fn ensure_session_start_emitted(&self) {
