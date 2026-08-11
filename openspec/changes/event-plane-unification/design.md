@@ -102,7 +102,7 @@ emit 点 (run_loop / assembly)
 
 - [BREAKING 全域重命名] 改名触及所有消费者 → grep+sed 机械替换 + `cargo check --workspace` 兜底;core 与 server 的所有测试覆盖改名路径。
 - [broadcast 通道 lag] 慢消费者导致消息丢失 → `Lagged(n)` 错误传递给 Receiver,文档注明消费者职责(处理 Lagged 或提升消费速度);256 容量在正常负载下不丢消息。
-- [同步回调阻塞] 开发者误将耗时操作注册为同步回调 → 文档硬约束(同步回调 MUST <50μs) + code review 把关;不做运行时超时检测(过度设计)。
+- [同步回调阻塞] 开发者误将耗时操作注册为同步回调 → 文档硬约束(同步回调 MUST <1μs) + code review 把关;不做运行时超时检测(过度设计)。
 - [TurnCompleted vs TurnDecision 混淆期] 改名后旧代码可能残留旧名 → grep 复核 + CI clippy 覆盖,确保零残留。
 - [AgentJobEvent 保持同步分发] `AgentJobEvent` 的 registry 内部分发(metrics_listener 等)本轮不改 → 理由:registry 的 emit 已在 `tokio::spawn` 内,不阻塞调用方;等下一轮统一。
 
@@ -116,5 +116,5 @@ emit 点 (run_loop / assembly)
 ## Open Questions
 
 - `AgentJobEvent` 的分发机制是否需要在下一轮统一为 broadcast 通道?(默认是,本轮仅文档标记为后续演进)
-- 同步回调的 50μs 硬约束是否需要 benchmark 验证?(默认 code review 足矣,不做 CI benchmark)
+- 同步回调硬约束值: 初定 50µs 在 benchmark 落地后(实测 52.75ns/3回调)被修正为 **单回调 <1µs、路径合计 ≤5µs**(实测值 ~60 倍余量,恰好挡住系统调用/等锁;`emit_sync_only` 均值若超 1µs 即触发架构审查)。
 - ~~`SessionEvent::TurnDecision` 是否需要在 `dag_inspect` 中展示?(默认本期不做,留待 UI 需求确认)~~ — 已撤销:该条系撰写时误挂,`TurnDecision` 是会话层回合决策审计,与 `dag_inspect`(DAG 节点视角)无直接关系;且 server `ui/listener.rs` 已在消费该事件,无悬而未决的 UI 需求。

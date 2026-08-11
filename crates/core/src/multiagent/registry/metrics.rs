@@ -12,7 +12,7 @@ use super::{
 
 /// Build a synchronous [`crate::agent::LoopSyncCallback`] that accumulates metrics + output
 /// for a registered job. All internal operations are memory-only (lock + counter update +
-/// non-blocking broadcast send), satisfying the <50µs sync-callback contract.
+/// non-blocking broadcast send), satisfying the <1µs sync-callback contract.
 ///
 /// Attach to the sub-harness (`sub.agent().subscribe_sync(...)`) right after registering.
 pub fn metrics_listener(

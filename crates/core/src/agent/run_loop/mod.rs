@@ -30,7 +30,7 @@
 //! | Use case | API | Returns |
 //! |----------|-----|---------|
 //! | External streaming (UI, gRPC) | [`Agent::subscribe_broadcast`] | `broadcast::Receiver<LoopEvent>` |
-//! | Sync lightweight observer (cost, metrics, ≤50 µs) | [`Agent::subscribe_sync`] | unregister handle |
+//! | Sync lightweight observer (cost, metrics, <1 µs) | [`Agent::subscribe_sync`] | unregister handle |
 //! | Persistence / I/O listener | [`Agent::subscribe`] | `LoopListener` handle |
 //!
 //! Sync callbacks are capped at **3** total; registering a fourth replaces the oldest.

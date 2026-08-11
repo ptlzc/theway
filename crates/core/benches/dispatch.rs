@@ -1,20 +1,20 @@
 //! Benchmarks for the event dispatch architecture.
 //!
 //! Verification targets:
-//! - Sync callbacks: <50µs hard constraint (emit_sync_only)
+//! - Sync callbacks: <1µs hard constraint (emit_sync_only)
 //! - Broadcast: non-blocking send (broadcast_multi_receiver)
 //! - Three-segment dispatch vs legacy for-await: the three-segment design
-//!   separates sync observers (≤50µs, memory-only) from async I/O listeners
+//!   separates sync observers (<1µs, memory-only) from async I/O listeners
 //!   and broadcast subscribers, whereas the legacy pattern sequentially
 //!   awaits all listeners, coupling fast observers to slow I/O.
 
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use parking_lot::Mutex;
 use tokio_util::sync::CancellationToken;
 
@@ -72,8 +72,7 @@ fn bench_emit_three_segment(c: &mut Criterion) {
                 // Segment 1: sync callbacks (catch_unwind per callback).
                 let cbs = sync_callbacks.lock().clone();
                 for cb in &cbs {
-                    let _ =
-                        std::panic::catch_unwind(AssertUnwindSafe(|| cb(&event)));
+                    let _ = std::panic::catch_unwind(AssertUnwindSafe(|| cb(&event)));
                 }
 
                 // Segment 2: async await listeners.
@@ -146,7 +145,7 @@ fn bench_emit_legacy_for_await(c: &mut Criterion) {
 //
 // Bare sync path: 3 sync callbacks, no await / broadcast.
 // This measures the minimal dispatch overhead and validates
-// the <50µs hard constraint on sync observers.
+// the <1µs hard constraint on sync observers.
 
 fn bench_emit_sync_only(c: &mut Criterion) {
     c.bench_function("emit_sync_only", |b| {

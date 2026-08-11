@@ -67,7 +67,7 @@ pub type LoopListener = Arc<
         + Sync,
 >;
 
-/// Lightweight synchronous callback for lifecycle events. MUST complete in <50µs — no I/O,
+/// Lightweight synchronous callback for lifecycle events. MUST complete in <1µs — no I/O,
 /// no blocking, no allocation beyond simple atomic/counter updates. Each callback is wrapped
 /// in `catch_unwind` during emission so a panic in one does not affect others.
 pub type LoopSyncCallback = Arc<dyn Fn(&LoopEvent) + Send + Sync>;
@@ -101,7 +101,7 @@ pub struct Agent {
 
 pub(crate) struct AgentInner {
     pub state: Mutex<AgentState>,
-    /// Segment 1: synchronous callbacks (memory-only, <50µs). Each wrapped in `catch_unwind`.
+    /// Segment 1: synchronous callbacks (memory-only, <1µs). Each wrapped in `catch_unwind`.
     pub sync_callbacks: Mutex<Vec<LoopSyncCallback>>,
     /// Segment 2: async await-listeners (persistence, I/O). Emitted sequentially.
     pub await_listeners: Mutex<Vec<LoopListener>>,
@@ -175,7 +175,7 @@ impl Agent {
     /// Subscribe an async listener (segment 2 — await path). For persistence/I/O subscribers
     /// that need the cancellation token. Returns an unsubscribe closure.
     ///
-    /// For memory-only callbacks (<50µs), use [`Self::subscribe_sync`]. For external
+    /// For memory-only callbacks (<1µs), use [`Self::subscribe_sync`]. For external
     /// subscribers that want a broadcast [`tokio::sync::broadcast::Receiver`], use
     /// [`Self::subscribe_broadcast`].
     pub fn subscribe(&self, listener: LoopListener) -> impl FnOnce() {
@@ -190,7 +190,7 @@ impl Agent {
     }
 
     /// Register a synchronous callback (segment 1 — catch_unwind path). The callback MUST
-    /// complete in <50µs — no I/O, no blocking. Returns an unsubscribe closure.
+    /// complete in <1µs — no I/O, no blocking. Returns an unsubscribe closure.
     pub fn subscribe_sync(&self, callback: LoopSyncCallback) -> impl FnOnce() {
         let inner = self.inner.clone();
         inner.sync_callbacks.lock().push(callback.clone());

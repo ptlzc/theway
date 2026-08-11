@@ -34,7 +34,7 @@ pub(super) fn snapshot_context(inner: &Arc<AgentInner>) -> AgentContext {
 
 /// Three-segment event emission:
 ///
-/// 1. **Sync callbacks** — `catch_unwind`-wrapped, memory-only (<50µs): cost tracker,
+/// 1. **Sync callbacks** — `catch_unwind`-wrapped, memory-only (<1µs): cost tracker,
 ///    metrics accumulator. One panic does not poison others.
 /// 2. **Await listeners** — sequential async dispatch for persistence/I/O subscribers
 ///    (e.g. `make_session_listener`). Each receives the cancellation token.
