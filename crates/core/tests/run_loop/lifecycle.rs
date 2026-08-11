@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use theway_core::{Agent, AgentEvent, AgentMessage, AgentOptions, AgentState, AgentTool};
+use theway_core::{Agent, AgentMessage, AgentOptions, AgentState, AgentTool, LoopEvent};
 use theway_llm_provider::{ContentBlock, StopReason, ToolCall};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -33,17 +33,17 @@ async fn single_turn_no_tools_emits_lifecycle_events() {
         let events = events_clone.clone();
         Box::pin(async move {
             let tag = match ev {
-                AgentEvent::AgentStart => "agent_start",
-                AgentEvent::AgentEnd { .. } => "agent_end",
-                AgentEvent::TurnStart => "turn_start",
-                AgentEvent::TurnEnd { .. } => "turn_end",
-                AgentEvent::MessageStart { .. } => "message_start",
-                AgentEvent::MessageEnd { .. } => "message_end",
-                AgentEvent::MessageUpdate { .. } => "message_update",
-                AgentEvent::ToolExecutionStart { .. } => "tool_execution_start",
-                AgentEvent::ToolExecutionEnd { .. } => "tool_execution_end",
-                AgentEvent::ToolExecutionUpdate { .. } => "tool_execution_update",
-                AgentEvent::ControlPlanePromptResolved { .. } => "control_plane_prompt_resolved",
+                LoopEvent::RunStarted => "agent_start",
+                LoopEvent::RunEnded { .. } => "agent_end",
+                LoopEvent::TurnStart => "turn_start",
+                LoopEvent::TurnCompleted { .. } => "turn_end",
+                LoopEvent::MessageStart { .. } => "message_start",
+                LoopEvent::MessageEnd { .. } => "message_end",
+                LoopEvent::MessageUpdate { .. } => "message_update",
+                LoopEvent::ToolExecutionStart { .. } => "tool_execution_start",
+                LoopEvent::ToolExecutionEnd { .. } => "tool_execution_end",
+                LoopEvent::ToolExecutionUpdate { .. } => "tool_execution_update",
+                LoopEvent::ControlPlanePromptResolved { .. } => "control_plane_prompt_resolved",
             };
             events.lock().unwrap().push(tag.to_string());
         })

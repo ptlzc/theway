@@ -32,7 +32,7 @@ pub(super) fn snapshot_context(inner: &Arc<AgentInner>) -> AgentContext {
     }
 }
 
-pub(super) async fn emit(inner: &Arc<AgentInner>, event: AgentEvent, cancel: &CancellationToken) {
+pub(super) async fn emit(inner: &Arc<AgentInner>, event: LoopEvent, cancel: &CancellationToken) {
     let listeners = inner.listeners.lock().clone();
     for listener in listeners {
         let token = cancel.clone();
@@ -42,7 +42,7 @@ pub(super) async fn emit(inner: &Arc<AgentInner>, event: AgentEvent, cancel: &Ca
 
 pub(super) async fn finalize(inner: &Arc<AgentInner>, cancel: CancellationToken) {
     let messages = inner.state.lock().messages.clone();
-    emit(inner, AgentEvent::AgentEnd { messages }, &cancel).await;
+    emit(inner, LoopEvent::RunEnded { messages }, &cancel).await;
     inner.state.lock().is_streaming = false;
     *inner.active_cancel.lock() = None;
     *inner.turn_cancel.lock() = None;

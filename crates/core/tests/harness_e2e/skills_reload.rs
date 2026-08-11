@@ -151,7 +151,7 @@ async fn reload_skills_from_disk_emits_skills_reloaded_event() {
     }));
     let harness = AgentHarness::new(opts);
 
-    let received: Arc<Mutex<Vec<HarnessEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let received: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
     let received_for_listener = received.clone();
     let _unsubscribe = harness.subscribe_harness(Arc::new(move |event| {
         received_for_listener.lock().unwrap().push(event);
@@ -166,7 +166,7 @@ async fn reload_skills_from_disk_emits_skills_reloaded_event() {
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, HarnessEvent::SkillsReloaded { total: 1 })),
+            .any(|e| matches!(e, SessionEvent::SkillsReloaded { total: 1 })),
         "reload must emit SkillsReloaded with the new catalog size; got {} event(s)",
         events.len()
     );

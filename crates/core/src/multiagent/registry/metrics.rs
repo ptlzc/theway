@@ -4,21 +4,21 @@ use std::sync::Arc;
 
 use theway_llm_provider::Message as PiMessage;
 
-use crate::{AgentEvent, AgentMessage};
+use crate::{AgentMessage, LoopEvent};
 
 use super::{
     AgentJobEvent, AgentJobRegistry, agent_message_to_json, append_message, append_output,
 };
 
-/// Build an `AgentListener` that accumulates metrics + output for a registered job.
+/// Build an `LoopListener` that accumulates metrics + output for a registered job.
 /// Attach to the sub-harness (`sub.agent().subscribe(...)`) right after registering.
-pub fn metrics_listener(registry: AgentJobRegistry, job_id: String) -> crate::AgentListener {
+pub fn metrics_listener(registry: AgentJobRegistry, job_id: String) -> crate::LoopListener {
     Arc::new(move |event, _cancel| {
         let registry = registry.clone();
         let job_id = job_id.clone();
         Box::pin(async move {
             match event {
-                AgentEvent::MessageUpdate {
+                LoopEvent::MessageUpdate {
                     assistant_message_event:
                         theway_llm_provider::AssistantMessageEvent::TextDelta { delta, .. },
                     ..
@@ -33,7 +33,7 @@ pub fn metrics_listener(registry: AgentJobRegistry, job_id: String) -> crate::Ag
                         chunk: delta,
                     });
                 }
-                AgentEvent::MessageEnd { message } => {
+                LoopEvent::MessageEnd { message } => {
                     // Token usage only exists on assistant messages; the
                     // transcript capture below covers every message kind
                     // (user prompts, assistant turns w/ tool calls, tool results).
@@ -68,12 +68,12 @@ pub fn metrics_listener(registry: AgentJobRegistry, job_id: String) -> crate::Ag
                         });
                     }
                 }
-                AgentEvent::ToolExecutionStart { .. } => {
+                LoopEvent::ToolExecutionStart { .. } => {
                     registry.update(&job_id, |job| {
                         job.tools_called = job.tools_called.saturating_add(1);
                     });
                 }
-                AgentEvent::TurnStart => {
+                LoopEvent::TurnStart => {
                     registry.update(&job_id, |job| {
                         job.turn = job.turn.saturating_add(1);
                     });

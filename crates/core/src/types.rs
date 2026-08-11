@@ -3,7 +3,7 @@
 //! The agent runtime sits on top of `theway-llm-provider` and adds:
 //! - `AgentMessage`: superset of `theway_llm_provider::Message` plus user-defined custom variants
 //! - `AgentTool`: tool definition with executor, label, and execution-mode hint
-//! - `AgentEvent`: lifecycle events for UI subscribers
+//! - `LoopEvent`: lifecycle events for UI subscribers
 //! - `AgentLoopConfig`: per-run callbacks (`convert_to_llm`, `transform_context`, before/after tool
 //!   hooks, steering/follow-up queue providers, etc.)
 //!
@@ -230,7 +230,7 @@ pub trait AgentTool: Send + Sync {
     ///
     /// `on_update`, when `Some`, is the per-call streaming-progress callback. It is bound to
     /// the lifetime of this `execute` call — the agent loop builds a pump that consumes
-    /// updates in send order and emits them as [`crate::AgentEvent::ToolExecutionUpdate`].
+    /// updates in send order and emits them as [`crate::LoopEvent::ToolExecutionUpdate`].
     ///
     /// Contract: do not retain `on_update` past `execute`'s return — e.g. by cloning the
     /// `Arc` into a `tokio::spawn`ed task that outlives this call. The agent loop caps the
@@ -314,12 +314,12 @@ pub struct AgentState {
 
 /// Events emitted by the Agent for UI updates.
 #[derive(Clone, Debug)]
-pub enum AgentEvent {
+pub enum LoopEvent {
     /// A tool call's [`PermissionClassification::Prompt`] surfaced through the
     /// `on_control_plane_prompt` hook (or fell back to fail-closed deny when no hook was
     /// configured). Fires after the hook returns; the decision is final by this point.
     /// Issue #110 design v0.2 — observability for prompt resolution. Harness layer
-    /// translates this into [`crate::HarnessEvent::ControlPlanePromptResolved`] and writes
+    /// translates this into [`crate::LoopEvent::ControlPlanePromptResolved`] and writes
     /// the canonical `control_plane_prompt` Custom audit entry.
     ControlPlanePromptResolved {
         tool_call_id: String,
@@ -329,12 +329,12 @@ pub enum AgentEvent {
         decision: String,
         reason: Option<String>,
     },
-    AgentStart,
-    AgentEnd {
+    RunStarted,
+    RunEnded {
         messages: Vec<AgentMessage>,
     },
     TurnStart,
-    TurnEnd {
+    TurnCompleted {
         message: AgentMessage,
         tool_results: Vec<ToolResultMessage>,
     },

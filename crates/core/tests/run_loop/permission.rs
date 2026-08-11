@@ -252,7 +252,7 @@ async fn permission_classification_prompt_with_hook_allow_executes_and_emits_aud
 
     use cpw_test_util::*;
     use theway_core::{
-        AgentEvent, AgentTool, ControlPlanePromptDecision, OnControlPlanePromptHook,
+        AgentTool, ControlPlanePromptDecision, LoopEvent, OnControlPlanePromptHook,
         PermissionClassification,
     };
 
@@ -292,10 +292,10 @@ async fn permission_classification_prompt_with_hook_allow_executes_and_emits_aud
 
     let events: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
     let events_clone = events.clone();
-    let listener: theway_core::AgentListener = Arc::new(move |ev, _cancel| {
+    let listener: theway_core::LoopListener = Arc::new(move |ev, _cancel| {
         let events = events_clone.clone();
         Box::pin(async move {
-            if let AgentEvent::ControlPlanePromptResolved {
+            if let LoopEvent::ControlPlanePromptResolved {
                 tool_name,
                 decision,
                 args_hash,
@@ -369,7 +369,7 @@ async fn permission_classification_prompt_with_hook_deny_blocks_and_emits_audit_
 
     use cpw_test_util::*;
     use theway_core::{
-        AgentEvent, AgentTool, ControlPlanePromptDecision, OnControlPlanePromptHook,
+        AgentTool, ControlPlanePromptDecision, LoopEvent, OnControlPlanePromptHook,
         PermissionClassification,
     };
 
@@ -401,10 +401,10 @@ async fn permission_classification_prompt_with_hook_deny_blocks_and_emits_audit_
     });
     let events: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
     let ec = events.clone();
-    let listener: theway_core::AgentListener = Arc::new(move |ev, _cancel| {
+    let listener: theway_core::LoopListener = Arc::new(move |ev, _cancel| {
         let ec = ec.clone();
         Box::pin(async move {
-            if let AgentEvent::ControlPlanePromptResolved { decision, .. } = ev {
+            if let LoopEvent::ControlPlanePromptResolved { decision, .. } = ev {
                 ec.lock().unwrap().push(decision);
             }
         })

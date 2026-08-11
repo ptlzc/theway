@@ -36,19 +36,19 @@ pub(crate) async fn run_agent_loop(
     }
     *inner.active_cancel.lock() = Some(cancel.clone());
 
-    emit(&inner, AgentEvent::AgentStart, &cancel).await;
+    emit(&inner, LoopEvent::RunStarted, &cancel).await;
 
     for msg in new_messages.into_iter() {
         inner.state.lock().messages.push(msg.clone());
         emit(
             &inner,
-            AgentEvent::MessageStart {
+            LoopEvent::MessageStart {
                 message: msg.clone(),
             },
             &cancel,
         )
         .await;
-        emit(&inner, AgentEvent::MessageEnd { message: msg }, &cancel).await;
+        emit(&inner, LoopEvent::MessageEnd { message: msg }, &cancel).await;
     }
 
     let result = drive_loop(&inner, cancel.clone()).await;
@@ -67,7 +67,7 @@ pub(crate) async fn run_agent_loop_continue(inner: Arc<AgentInner>) -> Result<()
         g.error_message = None;
     }
     *inner.active_cancel.lock() = Some(cancel.clone());
-    emit(&inner, AgentEvent::AgentStart, &cancel).await;
+    emit(&inner, LoopEvent::RunStarted, &cancel).await;
 
     let result = drive_loop(&inner, cancel.clone()).await;
     finalize(&inner, cancel).await;
@@ -82,7 +82,7 @@ async fn drive_loop(
         if cancel.is_cancelled() {
             return Ok(());
         }
-        emit(inner, AgentEvent::TurnStart, &cancel).await;
+        emit(inner, LoopEvent::TurnStart, &cancel).await;
 
         // Fresh per-turn cancel token: `interrupt()` targets the in-flight LLM call
         // only, leaving the run alive to pick up queued steering on the next turn.
@@ -106,13 +106,13 @@ async fn drive_loop(
                         inner.state.lock().messages.push(msg.clone());
                         emit(
                             inner,
-                            AgentEvent::MessageStart {
+                            LoopEvent::MessageStart {
                                 message: msg.clone(),
                             },
                             &cancel,
                         )
                         .await;
-                        emit(inner, AgentEvent::MessageEnd { message: msg }, &cancel).await;
+                        emit(inner, LoopEvent::MessageEnd { message: msg }, &cancel).await;
                     }
                     continue;
                 }
@@ -130,7 +130,7 @@ async fn drive_loop(
         inner.state.lock().messages.push(assistant_agent.clone());
         emit(
             inner,
-            AgentEvent::MessageEnd {
+            LoopEvent::MessageEnd {
                 message: assistant_agent.clone(),
             },
             &cancel,
@@ -143,16 +143,16 @@ async fn drive_loop(
             inner.state.lock().messages.push(m.clone());
             emit(
                 inner,
-                AgentEvent::MessageStart { message: m.clone() },
+                LoopEvent::MessageStart { message: m.clone() },
                 &cancel,
             )
             .await;
-            emit(inner, AgentEvent::MessageEnd { message: m }, &cancel).await;
+            emit(inner, LoopEvent::MessageEnd { message: m }, &cancel).await;
         }
 
         emit(
             inner,
-            AgentEvent::TurnEnd {
+            LoopEvent::TurnCompleted {
                 message: assistant_agent.clone(),
                 tool_results: tool_results.clone(),
             },
@@ -204,13 +204,13 @@ async fn drive_loop(
                 inner.state.lock().messages.push(msg.clone());
                 emit(
                     inner,
-                    AgentEvent::MessageStart {
+                    LoopEvent::MessageStart {
                         message: msg.clone(),
                     },
                     &cancel,
                 )
                 .await;
-                emit(inner, AgentEvent::MessageEnd { message: msg }, &cancel).await;
+                emit(inner, LoopEvent::MessageEnd { message: msg }, &cancel).await;
             }
             continue;
         }
@@ -229,7 +229,7 @@ async fn finalize_partial_turn(inner: &Arc<AgentInner>, cancel: &CancellationTok
             matches!(&m, AgentMessage::Llm(PiMessage::Assistant(a)) if !a.content.is_empty());
         if has_content {
             inner.state.lock().messages.push(m.clone());
-            emit(inner, AgentEvent::MessageEnd { message: m }, cancel).await;
+            emit(inner, LoopEvent::MessageEnd { message: m }, cancel).await;
         }
     }
 }
@@ -281,7 +281,7 @@ async fn run_one(
                     while let Some(partial) = rx.recv().await {
                         emit(
                             &pump_inner,
-                            AgentEvent::ToolExecutionUpdate {
+                            LoopEvent::ToolExecutionUpdate {
                                 tool_call_id: pump_id.clone(),
                                 tool_name: pump_name.clone(),
                                 args: pump_args.clone(),

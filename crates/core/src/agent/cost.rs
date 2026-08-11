@@ -11,7 +11,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use theway_llm_provider::{Message as PiMessage, Usage};
 
-use crate::types::{AgentEvent, AgentMessage};
+use crate::types::{AgentMessage, LoopEvent};
 
 /// Snapshot of the running totals. Cheap to clone — plain `Copy`-able fields.
 #[derive(Clone, Debug, Default)]
@@ -73,14 +73,14 @@ impl CostTracker {
         g.turn_count += 1;
     }
 
-    /// Build an [`crate::agent::AgentListener`] that records every assistant `MessageEnd`. The
+    /// Build an [`crate::agent::LoopListener`] that records every assistant `MessageEnd`. The
     /// listener clones the tracker (cheap — `Arc` bump) so the harness can keep its handle.
-    pub fn as_listener(&self) -> crate::agent::AgentListener {
+    pub fn as_listener(&self) -> crate::agent::LoopListener {
         let tracker = self.clone();
         Arc::new(move |event, _cancel| {
             let tracker = tracker.clone();
             Box::pin(async move {
-                if let AgentEvent::MessageEnd {
+                if let LoopEvent::MessageEnd {
                     message: AgentMessage::Llm(PiMessage::Assistant(a)),
                 } = event
                 {

@@ -56,9 +56,9 @@ use crate::types::*;
 use theway_llm_provider::Message;
 
 /// Listener type. Receives lifecycle events and the active cancellation token for the run.
-pub type AgentListener = Arc<
+pub type LoopListener = Arc<
     dyn Fn(
-            AgentEvent,
+            LoopEvent,
             CancellationToken,
         ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
         + Send
@@ -91,7 +91,7 @@ pub struct Agent {
 
 pub(crate) struct AgentInner {
     pub state: Mutex<AgentState>,
-    pub listeners: Mutex<Vec<AgentListener>>,
+    pub listeners: Mutex<Vec<LoopListener>>,
     pub steering: Mutex<PendingMessageQueue>,
     pub follow_up: Mutex<PendingMessageQueue>,
     pub options: AgentOptions,
@@ -155,7 +155,7 @@ impl Agent {
     }
 
     /// Subscribe to lifecycle events. Returns an unsubscribe closure.
-    pub fn subscribe(&self, listener: AgentListener) -> impl FnOnce() {
+    pub fn subscribe(&self, listener: LoopListener) -> impl FnOnce() {
         let inner = self.inner.clone();
         inner.listeners.lock().push(listener.clone());
         move || {

@@ -3,7 +3,7 @@
 //! Split out of `hooks.rs`; the [`super::HookRunner`] that consumes this data and the
 //! rule definitions live in the parent module.
 
-use theway_core::{AgentEvent, HarnessEvent};
+use theway_core::{LoopEvent, SessionEvent};
 
 use super::utils::{
     assistant_event_name, compaction_trigger, message_kind, message_summary, result_summary,
@@ -76,24 +76,24 @@ pub(super) struct EventData {
 }
 
 impl EventData {
-    pub(super) fn from_agent_event(event: &AgentEvent) -> Option<Self> {
+    pub(super) fn from_agent_event(event: &LoopEvent) -> Option<Self> {
         match event {
-            AgentEvent::AgentStart => Some(Self::basic(HookEvent::AgentStart)),
-            AgentEvent::AgentEnd { .. } => Some(Self::basic(HookEvent::AgentEnd)),
-            AgentEvent::TurnStart => Some(Self::basic(HookEvent::TurnStart)),
-            AgentEvent::TurnEnd { message, .. } => {
+            LoopEvent::RunStarted => Some(Self::basic(HookEvent::AgentStart)),
+            LoopEvent::RunEnded { .. } => Some(Self::basic(HookEvent::AgentEnd)),
+            LoopEvent::TurnStart => Some(Self::basic(HookEvent::TurnStart)),
+            LoopEvent::TurnCompleted { message, .. } => {
                 let mut d = Self::basic(HookEvent::TurnEnd);
                 d.message_kind = Some(message_kind(message));
                 d.message_summary = Some(message_summary(message));
                 Some(d)
             }
-            AgentEvent::MessageStart { message } => {
+            LoopEvent::MessageStart { message } => {
                 let mut d = Self::basic(HookEvent::MessageStart);
                 d.message_kind = Some(message_kind(message));
                 d.message_summary = Some(message_summary(message));
                 Some(d)
             }
-            AgentEvent::MessageUpdate {
+            LoopEvent::MessageUpdate {
                 message,
                 assistant_message_event,
             } => {
@@ -103,13 +103,13 @@ impl EventData {
                 d.assistant_event = Some(assistant_event_name(assistant_message_event).into());
                 Some(d)
             }
-            AgentEvent::MessageEnd { message } => {
+            LoopEvent::MessageEnd { message } => {
                 let mut d = Self::basic(HookEvent::MessageEnd);
                 d.message_kind = Some(message_kind(message));
                 d.message_summary = Some(message_summary(message));
                 Some(d)
             }
-            AgentEvent::ToolExecutionStart {
+            LoopEvent::ToolExecutionStart {
                 tool_call_id,
                 tool_name,
                 args,
@@ -120,7 +120,7 @@ impl EventData {
                 d.tool_args = Some(args.clone());
                 Some(d)
             }
-            AgentEvent::ToolExecutionUpdate {
+            LoopEvent::ToolExecutionUpdate {
                 tool_call_id,
                 tool_name,
                 args,
@@ -133,7 +133,7 @@ impl EventData {
                 d.tool_result_summary = Some(result_summary(partial_result));
                 Some(d)
             }
-            AgentEvent::ToolExecutionEnd {
+            LoopEvent::ToolExecutionEnd {
                 tool_call_id,
                 tool_name,
                 result,
@@ -149,7 +149,7 @@ impl EventData {
             // Issue #110: control-plane prompt observability event. Embedder-side
             // hook-script bridge does not currently surface this; defer to a follow-up
             // PR once we have a concrete bridge consumer that wants it.
-            AgentEvent::ControlPlanePromptResolved { .. } => None,
+            LoopEvent::ControlPlanePromptResolved { .. } => None,
         }
     }
 
@@ -170,9 +170,9 @@ impl EventData {
         }
     }
 
-    pub(super) fn from_harness_event(event: &HarnessEvent) -> Option<Self> {
+    pub(super) fn from_harness_event(event: &SessionEvent) -> Option<Self> {
         match event {
-            HarnessEvent::Compaction {
+            SessionEvent::Compaction {
                 from_hook,
                 summary,
                 tokens_before,
@@ -183,11 +183,11 @@ impl EventData {
                 d.compaction_summary = Some(truncate(summary));
                 Some(d)
             }
-            HarnessEvent::SessionStart { .. }
-            | HarnessEvent::Branch { .. }
-            | HarnessEvent::PersistenceError { .. }
-            | HarnessEvent::TurnEnded { .. }
-            | HarnessEvent::SkillsReloaded { .. } => None,
+            SessionEvent::Started { .. }
+            | SessionEvent::Branch { .. }
+            | SessionEvent::PersistenceError { .. }
+            | SessionEvent::TurnDecision { .. }
+            | SessionEvent::SkillsReloaded { .. } => None,
         }
     }
 }

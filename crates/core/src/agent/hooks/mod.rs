@@ -1,7 +1,7 @@
 //! User-configured CLI hooks.
 //!
 //! Hooks are intentionally a coding-agent concern, not an agent-core behavior modifier:
-//! they observe `AgentEvent`s and run best-effort side effects (shell commands and/or HTTP
+//! they observe `LoopEvent`s and run best-effort side effects (shell commands and/or HTTP
 //! webhooks). They never mutate agent state and failures are surfaced as diagnostics/logs,
 //! not prompt failures.
 //!
@@ -22,7 +22,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 #[cfg(test)] // Only used by the bridged unit tests (`tests/agent/hooks`) via `use super::*`.
 use theway_core::AgentMessage;
-use theway_core::{AgentEvent, AgentListener, HarnessEvent, HarnessListener, ThinkingLevel};
+use theway_core::{LoopEvent, LoopListener, SessionEvent, SessionListener, ThinkingLevel};
 use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
@@ -281,7 +281,7 @@ impl HookRunner {
         self.rules.len()
     }
 
-    pub fn listener(self: &Arc<Self>) -> AgentListener {
+    pub fn listener(self: &Arc<Self>) -> LoopListener {
         let me = self.clone();
         Arc::new(move |event, cancel| {
             let me = me.clone();
@@ -291,7 +291,7 @@ impl HookRunner {
         })
     }
 
-    pub fn harness_listener(self: &Arc<Self>) -> HarnessListener {
+    pub fn harness_listener(self: &Arc<Self>) -> SessionListener {
         let me = self.clone();
         Arc::new(move |event| {
             let me = me.clone();
@@ -302,14 +302,14 @@ impl HookRunner {
         })
     }
 
-    pub async fn handle_event(&self, event: &AgentEvent, cancel: CancellationToken) {
+    pub async fn handle_event(&self, event: &LoopEvent, cancel: CancellationToken) {
         let Some(data) = EventData::from_agent_event(event) else {
             return;
         };
         self.handle_data(data, cancel).await;
     }
 
-    pub async fn handle_harness_event(&self, event: &HarnessEvent, cancel: CancellationToken) {
+    pub async fn handle_harness_event(&self, event: &SessionEvent, cancel: CancellationToken) {
         let Some(data) = EventData::from_harness_event(event) else {
             return;
         };

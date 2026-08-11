@@ -1,4 +1,4 @@
-//! Terminal output helpers + AgentEvent renderer. Modeled on the TS interactive mode but kept
+//! Terminal output helpers + LoopEvent renderer. Modeled on the TS interactive mode but kept
 //! deliberately spartan: no widgets, no scrollback, just colored line-stream output.
 //!
 //! All formatting goes through crossterm so it's cross-platform and degrades gracefully on
@@ -14,7 +14,7 @@ use crate::trigger_engine::types::TriggerState;
 use crossterm::ExecutableCommand;
 use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor};
 use parking_lot::Mutex;
-use theway_core::{AgentEvent, AgentListener, AgentMessage, HarnessEvent, HarnessListener};
+use theway_core::{AgentMessage, LoopEvent, LoopListener, SessionEvent, SessionListener};
 use theway_llm_provider::{
     AssistantMessageEvent, ContentBlock, ImageContent, Message, UserContent, UserContentBlock,
 };
@@ -99,9 +99,9 @@ impl Tui {
         let _ = out.execute(ResetColor);
     }
 
-    /// Build an `AgentListener` that prints lifecycle events. Holds onto `self` (cheaply
+    /// Build an `LoopListener` that prints lifecycle events. Holds onto `self` (cheaply
     /// clonable Arc state) so deltas accumulate across events.
-    pub fn listener(&self) -> AgentListener {
+    pub fn listener(&self) -> LoopListener {
         let me = self.clone();
         Arc::new(move |event, _cancel| {
             let me = me.clone();
@@ -111,7 +111,7 @@ impl Tui {
         })
     }
 
-    pub fn harness_listener(&self) -> HarnessListener {
+    pub fn harness_listener(&self) -> SessionListener {
         let me = self.clone();
         Arc::new(move |event| {
             me.handle_harness_event(&event);
@@ -132,12 +132,12 @@ impl Tui {
         self.render_trigger_event(event, &mut out);
     }
 
-    fn handle_event(&self, event: &AgentEvent) {
+    fn handle_event(&self, event: &LoopEvent) {
         let mut out = std::io::stdout();
         self.render_event(event, &mut out);
     }
 
-    fn handle_harness_event(&self, event: &HarnessEvent) {
+    fn handle_harness_event(&self, event: &SessionEvent) {
         let mut out = std::io::stdout();
         self.render_harness_event(event, &mut out);
     }
@@ -155,19 +155,19 @@ impl Tui {
     /// - Every state transition (thinking→text, thinking→tool, tool-result→text) emits a
     ///   single explicit `\n` then resets color/attrs so subsequent text never carries
     ///   stale formatting.
-    pub fn render_event(&self, event: &AgentEvent, out: &mut dyn std::io::Write) {
+    pub fn render_event(&self, event: &LoopEvent, out: &mut dyn std::io::Write) {
         match event {
-            AgentEvent::AgentStart => {
+            LoopEvent::RunStarted => {
                 let mut s = self.state.lock();
                 s.text_open = false;
                 s.trim_text_prefix = true;
                 s.thinking_open = false;
             }
-            AgentEvent::AgentEnd { .. } => {
+            LoopEvent::RunEnded { .. } => {
                 // Close the open content line so the next REPL prompt isn't glued onto it.
                 self.close_open_block(out);
             }
-            AgentEvent::MessageUpdate {
+            LoopEvent::MessageUpdate {
                 assistant_message_event,
                 ..
             } => match assistant_message_event {
@@ -197,7 +197,7 @@ impl Tui {
                 }
                 _ => {}
             },
-            AgentEvent::ToolExecutionStart {
+            LoopEvent::ToolExecutionStart {
                 tool_name, args, ..
             } => {
                 self.close_thinking(out);
@@ -206,7 +206,7 @@ impl Tui {
                 let _ = writeln!(out, "{YELLOW}⚙ {tool_name}{arg_preview}{RESET}");
                 let _ = out.flush();
             }
-            AgentEvent::ToolExecutionEnd {
+            LoopEvent::ToolExecutionEnd {
                 tool_name: _,
                 result,
                 is_error,
@@ -226,7 +226,7 @@ impl Tui {
         }
     }
 
-    pub fn render_harness_event(&self, event: &HarnessEvent, out: &mut dyn std::io::Write) {
+    pub fn render_harness_event(&self, event: &SessionEvent, out: &mut dyn std::io::Write) {
         let _ = (event, out);
     }
 

@@ -2,7 +2,7 @@
 //!
 //! Mirrors the dag-orchestrator extension's BgJob registry semantics: every job
 //! gets a stable id, a status, token/chars/tools metrics (from the sub-harness
-//! `AgentEvent` stream), and a full-text output buffer (capped) that later feeds
+//! `LoopEvent` stream), and a full-text output buffer (capped) that later feeds
 //! the graph mode output panel (`GetNodeOutput`) and the streamed `subagent_output`
 //! events. Snapshot accessors are cheap clones — the registry is a small Vec.
 
@@ -14,9 +14,9 @@ use parking_lot::Mutex;
 use uuid::Uuid;
 
 #[cfg(test)]
-use crate::AgentEvent;
-#[cfg(test)]
 use crate::AgentMessage;
+#[cfg(test)]
+use crate::LoopEvent;
 #[cfg(test)]
 use theway_llm_provider::Message as PiMessage;
 
@@ -88,7 +88,7 @@ pub struct AgentJob {
     pub output: String,
     pub truncated: bool,
     /// Full conversation transcript (user prompts + assistant messages with
-    /// tool calls + tool results), captured from every `AgentEvent::MessageEnd`
+    /// tool calls + tool results), captured from every `LoopEvent::MessageEnd`
     /// in emission order as JSON values (see [`agent_message_to_json`] —
     /// `AgentMessage` itself is `#[serde(untagged)]` with a flatten inside
     /// `CustomMessage`, which serde refuses to serialize). Capped at
@@ -595,17 +595,17 @@ mod tests {
             node_id: None,
             session_id: None,
         });
-        let emit = |event: AgentEvent| {
+        let emit = |event: LoopEvent| {
             let listener = metrics_listener(registry.clone(), id.clone());
             let fut = listener(event, Default::default());
             rt.block_on(fut);
         };
-        emit(AgentEvent::ToolExecutionStart {
+        emit(LoopEvent::ToolExecutionStart {
             tool_call_id: "t1".into(),
             tool_name: "read".into(),
             args: serde_json::Value::Null,
         });
-        emit(AgentEvent::TurnStart);
+        emit(LoopEvent::TurnStart);
 
         let job = registry.job(&id).unwrap();
         assert_eq!(job.tools_called, 1);
@@ -633,14 +633,14 @@ mod tests {
             node_id: Some("node-1".into()),
             session_id: None,
         });
-        let emit = |event: AgentEvent| {
+        let emit = |event: LoopEvent| {
             let listener = metrics_listener(registry.clone(), id.clone());
             let fut = listener(event, Default::default());
             rt.block_on(fut);
         };
 
         // User prompt (run_loop replays new_messages through MessageStart/MessageEnd).
-        emit(AgentEvent::MessageEnd {
+        emit(LoopEvent::MessageEnd {
             message: AgentMessage::Llm(PiMessage::User(UserMessage {
                 role: UserRole::User,
                 content: UserContent::Text("explore the repo".into()),
@@ -648,7 +648,7 @@ mod tests {
             })),
         });
         // Assistant turn with a text block + usage (tokens must still accumulate).
-        emit(AgentEvent::MessageEnd {
+        emit(LoopEvent::MessageEnd {
             message: AgentMessage::Llm(PiMessage::Assistant(AssistantMessage {
                 role: theway_llm_provider::AssistantRole::Assistant,
                 content: vec![ContentBlock::text("found it")],
@@ -669,7 +669,7 @@ mod tests {
             })),
         });
         // Tool result (also replayed through MessageStart/MessageEnd).
-        emit(AgentEvent::MessageEnd {
+        emit(LoopEvent::MessageEnd {
             message: AgentMessage::Llm(PiMessage::ToolResult(ToolResultMessage {
                 role: ToolResultRole::ToolResult,
                 tool_call_id: "t1".into(),

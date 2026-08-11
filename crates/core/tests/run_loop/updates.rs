@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use theway_core::{Agent, AgentEvent, AgentMessage, AgentOptions};
+use theway_core::{Agent, AgentMessage, AgentOptions, LoopEvent};
 use theway_llm_provider::{ContentBlock, StopReason, ToolCall};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -84,7 +84,7 @@ async fn tool_execution_update_callback_emits_listener_events_in_order() {
     let _unsub = agent.subscribe(Arc::new(move |ev, _| {
         let sink = sink.clone();
         Box::pin(async move {
-            if let AgentEvent::ToolExecutionUpdate {
+            if let LoopEvent::ToolExecutionUpdate {
                 tool_call_id,
                 partial_result,
                 ..

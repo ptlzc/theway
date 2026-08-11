@@ -490,7 +490,7 @@ impl TriggerExecutor {
         self.notification_hooks.lock().push(hook.clone());
 
         // Driver task: the hook owns transport-side work; we only care about its
-        // completion to free task resources. Errors aren't surfaced to a HarnessEvent
+        // completion to free task resources. Errors aren't surfaced to a SessionEvent
         // here (RFC 1 §4 puts that on the next sub-PR's HookStatusChanged event); the
         // hook reflects them through its own `status()` call.
         let hook_driver = hook.clone();

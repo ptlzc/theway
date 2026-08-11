@@ -1,10 +1,10 @@
 //! Shared fixtures for the TUI render e2e suite: faux assistant-message builders, an
-//! `AgentEvent::MessageUpdate` wrapper, and an ANSI-stripping helper so assertions can
+//! `LoopEvent::MessageUpdate` wrapper, and an ANSI-stripping helper so assertions can
 //! read the textual content directly.
 
 use std::sync::Arc;
 
-use theway_core::{AgentEvent, AgentMessage, AgentTool};
+use theway_core::{AgentMessage, AgentTool, LoopEvent};
 use theway_llm_provider::{
     AssistantMessage, AssistantMessageEvent, AssistantRole, ContentBlock, ImageContent, Message,
     StopReason, ToolResultMessage, ToolResultRole, Usage,
@@ -27,8 +27,8 @@ pub fn assistant(content: Vec<ContentBlock>) -> AssistantMessage {
     }
 }
 
-pub fn message_update(ev: AssistantMessageEvent, partial: AssistantMessage) -> AgentEvent {
-    AgentEvent::MessageUpdate {
+pub fn message_update(ev: AssistantMessageEvent, partial: AssistantMessage) -> LoopEvent {
+    LoopEvent::MessageUpdate {
         message: AgentMessage::Llm(Message::Assistant(partial)),
         assistant_message_event: ev,
     }

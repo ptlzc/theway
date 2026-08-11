@@ -119,7 +119,7 @@ async fn command_hook_receives_env_and_payload() {
     ));
     r.cwd = HookCwd::Project;
     let runner = runner(vec![r]);
-    let ev = AgentEvent::ToolExecutionEnd {
+    let ev = LoopEvent::ToolExecutionEnd {
         tool_call_id: "call-1".into(),
         tool_name: "bash".into(),
         result: AgentToolResult {
@@ -146,7 +146,7 @@ async fn compaction_command_hook_receives_env_and_payload() {
         &hook_payload_check(Some("compaction_summary")),
     ));
     let runner = runner(vec![r]);
-    let ev = HarnessEvent::Compaction {
+    let ev = SessionEvent::Compaction {
         from_hook: true,
         summary: "summary text".into(),
         tokens_before: 42,
@@ -181,7 +181,7 @@ async fn webhook_hook_posts_json_payload() {
     let mut r = rule(HookEvent::TurnEnd);
     r.webhook = Some(format!("http://{addr}/hook"));
     let runner = runner(vec![r]);
-    let ev = AgentEvent::TurnEnd {
+    let ev = LoopEvent::TurnCompleted {
         message: AgentMessage::Llm(theway_llm_provider::Message::ToolResult(
             ToolResultMessage {
                 role: ToolResultRole::ToolResult,
@@ -210,7 +210,7 @@ async fn tool_filter_skips_non_matching_tool() {
     r.tool = Some("bash".into());
     r.command = Some(format!("touch {}", out.display()));
     let runner = runner(vec![r]);
-    let ev = AgentEvent::ToolExecutionEnd {
+    let ev = LoopEvent::ToolExecutionEnd {
         tool_call_id: "call-1".into(),
         tool_name: "read".into(),
         result: AgentToolResult::default(),
@@ -240,7 +240,7 @@ async fn command_hook_timeout_kills_descendant_process() {
     let runner = runner(vec![r]);
 
     let started = Instant::now();
-    let ev = AgentEvent::ToolExecutionEnd {
+    let ev = LoopEvent::ToolExecutionEnd {
         tool_call_id: "call-1".into(),
         tool_name: "bash".into(),
         result: AgentToolResult::default(),
@@ -296,7 +296,7 @@ async fn command_hook_cancellation_kills_descendant_process() {
     });
 
     let started = Instant::now();
-    let ev = AgentEvent::ToolExecutionEnd {
+    let ev = LoopEvent::ToolExecutionEnd {
         tool_call_id: "call-1".into(),
         tool_name: "bash".into(),
         result: AgentToolResult::default(),

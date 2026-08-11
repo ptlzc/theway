@@ -25,13 +25,13 @@ pub mod skills_state;
 pub mod tools;
 
 // Public surface — mirrors `packages/agent/src/index.ts`.
-pub use agent::{Agent, AgentListener, AgentOptions, AgentRunError};
+pub use agent::{Agent, AgentOptions, AgentRunError, LoopListener};
 pub use types::{
-    AfterToolCallContext, AfterToolCallHook, AfterToolCallResult, AgentContext, AgentEvent,
-    AgentLoopConfig, AgentLoopTurnUpdate, AgentMessage, AgentState, AgentTool, AgentToolCall,
-    AgentToolError, AgentToolResult, AgentToolUpdate, BeforeToolCallContext, BeforeToolCallHook,
+    AfterToolCallContext, AfterToolCallHook, AfterToolCallResult, AgentContext, AgentLoopConfig,
+    AgentLoopTurnUpdate, AgentMessage, AgentState, AgentTool, AgentToolCall, AgentToolError,
+    AgentToolResult, AgentToolUpdate, BeforeToolCallContext, BeforeToolCallHook,
     BeforeToolCallResult, ControlPlanePromptDecision, ControlPlanePromptRequest, ConvertToLlm,
-    CustomMessage, GetApiKey, MessageQueueProvider, OnControlPlanePromptHook,
+    CustomMessage, GetApiKey, LoopEvent, MessageQueueProvider, OnControlPlanePromptHook,
     PermissionClassification, PrepareNextTurnContext, PrepareNextTurnHook, QueueMode,
     ShouldStopAfterTurnContext, ShouldStopHook, StreamFn, ThinkingLevel, ToolExecutionMode,
     TransformContext, default_convert_to_llm,
@@ -42,9 +42,9 @@ pub mod multiagent;
 
 #[cfg(feature = "harness")]
 pub use agent::assembly::{
-    AgentHarness, AgentHarnessOptions, DEFAULT_TURN_CONTINUATION_CAP, HarnessEvent,
-    HarnessListener, OnTurnEndContext, OnTurnEndHook, ReloadSkillsError, ReloadSkillsFn,
-    TurnEndAction, TurnEndDecision,
+    AgentHarness, AgentHarnessOptions, DEFAULT_TURN_CONTINUATION_CAP, OnTurnEndContext,
+    OnTurnEndHook, ReloadSkillsError, ReloadSkillsFn, SessionEvent, SessionListener, TurnEndAction,
+    TurnEndDecision,
 };
 #[cfg(feature = "harness")]
 pub use agent::compaction::{

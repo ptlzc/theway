@@ -16,9 +16,9 @@ async fn harness_event_bus_delivers_session_and_branch() {
     opts.stream_fn = Some(faux_stream_fn("ack"));
     let harness = AgentHarness::new(opts);
 
-    let received: Arc<Mutex<Vec<HarnessEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let received: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
     let r2 = received.clone();
-    let listener: HarnessListener = Arc::new(move |ev| {
+    let listener: SessionListener = Arc::new(move |ev| {
         r2.lock().push(ev);
     });
     let _unsub = harness.subscribe_harness(listener);
@@ -30,12 +30,12 @@ async fn harness_event_bus_delivers_session_and_branch() {
     let kinds: Vec<&'static str> = events
         .iter()
         .map(|e| match e {
-            HarnessEvent::SessionStart { .. } => "SessionStart",
-            HarnessEvent::Compaction { .. } => "Compaction",
-            HarnessEvent::Branch { .. } => "Branch",
-            HarnessEvent::PersistenceError { .. } => "PersistenceError",
-            HarnessEvent::TurnEnded { .. } => "TurnEnded",
-            HarnessEvent::SkillsReloaded { .. } => "SkillsReloaded",
+            SessionEvent::Started { .. } => "SessionStart",
+            SessionEvent::Compaction { .. } => "Compaction",
+            SessionEvent::Branch { .. } => "Branch",
+            SessionEvent::PersistenceError { .. } => "PersistenceError",
+            SessionEvent::TurnDecision { .. } => "TurnEnded",
+            SessionEvent::SkillsReloaded { .. } => "SkillsReloaded",
         })
         .collect();
     assert!(
@@ -48,7 +48,7 @@ async fn harness_event_bus_delivers_session_and_branch() {
     let count_after = received
         .lock()
         .iter()
-        .filter(|e| matches!(e, HarnessEvent::SessionStart { .. }))
+        .filter(|e| matches!(e, SessionEvent::Started { .. }))
         .count();
     assert_eq!(
         count_after, 1,
@@ -363,7 +363,7 @@ async fn harness_event_bus_isolates_panicking_listener() {
 
     let received: Arc<Mutex<usize>> = Arc::new(Mutex::new(0));
     let r2 = received.clone();
-    let good: HarnessListener = Arc::new(move |_ev| {
+    let good: SessionListener = Arc::new(move |_ev| {
         *r2.lock() += 1;
     });
     let _unsub_good = harness.subscribe_harness(good);
@@ -391,7 +391,7 @@ async fn subscribe_harness_unsub_stops_delivery() {
 
     let count: Arc<Mutex<usize>> = Arc::new(Mutex::new(0));
     let c2 = count.clone();
-    let listener: HarnessListener = Arc::new(move |_ev| {
+    let listener: SessionListener = Arc::new(move |_ev| {
         *c2.lock() += 1;
     });
     let unsub = harness.subscribe_harness(listener);

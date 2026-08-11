@@ -13,7 +13,7 @@ use theway_core::types::{
     AfterToolCallHook, AgentMessage, BeforeToolCallHook, StreamFn, ThinkingLevel,
 };
 use theway_core::{
-    Agent, AgentEvent, AgentOptions, AgentRunError, AgentState, AgentTool, SessionError,
+    Agent, AgentOptions, AgentRunError, AgentState, AgentTool, LoopEvent, SessionError,
 };
 use theway_llm_provider::{Message as PiMessage, Model};
 
@@ -320,7 +320,7 @@ pub(super) async fn run_trigger_action(
         let session = persist_session.clone();
         let sink = persist_errors_listener.clone();
         Box::pin(async move {
-            if let AgentEvent::MessageEnd { message } = event {
+            if let LoopEvent::MessageEnd { message } = event {
                 if let Err(e) = session.append_message(message).await {
                     sink.lock().push(e);
                 }

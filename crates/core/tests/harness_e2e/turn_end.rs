@@ -45,13 +45,13 @@ fn faux_stream_fn_sequence(texts: Vec<&'static str>) -> StreamFn {
 }
 
 fn collect_turn_end_decisions(
-    received: &Arc<parking_lot::Mutex<Vec<HarnessEvent>>>,
+    received: &Arc<parking_lot::Mutex<Vec<SessionEvent>>>,
 ) -> Vec<(&'static str, u32, Option<String>)> {
     received
         .lock()
         .iter()
         .filter_map(|e| match e {
-            HarnessEvent::TurnEnded {
+            SessionEvent::TurnDecision {
                 decision,
                 continuation_count,
                 reason,
@@ -91,9 +91,9 @@ async fn on_turn_end_hook_unset_keeps_legacy_single_cycle_behavior() {
     // No on_turn_end set — legacy path.
 
     let harness = AgentHarness::new(opts);
-    let received: Arc<Mutex<Vec<HarnessEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let received: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
     let r2 = received.clone();
-    let listener: HarnessListener = Arc::new(move |ev| r2.lock().push(ev));
+    let listener: SessionListener = Arc::new(move |ev| r2.lock().push(ev));
     let _unsub = harness.subscribe_harness(listener);
 
     harness.prompt("hi").await.unwrap();
@@ -101,7 +101,7 @@ async fn on_turn_end_hook_unset_keeps_legacy_single_cycle_behavior() {
     let turn_end_count = received
         .lock()
         .iter()
-        .filter(|e| matches!(e, HarnessEvent::TurnEnded { .. }))
+        .filter(|e| matches!(e, SessionEvent::TurnDecision { .. }))
         .count();
     assert_eq!(turn_end_count, 0, "no TurnEnded event when hook is unset",);
 
@@ -140,9 +140,9 @@ async fn on_turn_end_hook_noop_writes_no_audit_no_event() {
     opts.on_turn_end = Some(hook);
 
     let harness = AgentHarness::new(opts);
-    let received: Arc<Mutex<Vec<HarnessEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let received: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
     let r2 = received.clone();
-    let listener: HarnessListener = Arc::new(move |ev| r2.lock().push(ev));
+    let listener: SessionListener = Arc::new(move |ev| r2.lock().push(ev));
     let _unsub = harness.subscribe_harness(listener);
 
     harness.prompt("hi").await.unwrap();
@@ -155,7 +155,7 @@ async fn on_turn_end_hook_noop_writes_no_audit_no_event() {
     let turn_end_count = received
         .lock()
         .iter()
-        .filter(|e| matches!(e, HarnessEvent::TurnEnded { .. }))
+        .filter(|e| matches!(e, SessionEvent::TurnDecision { .. }))
         .count();
     assert_eq!(turn_end_count, 0, "Noop emits no TurnEnded event");
 
@@ -189,9 +189,9 @@ async fn on_turn_end_hook_stop_emits_event_and_audits_payload() {
     opts.on_turn_end = Some(hook);
 
     let harness = AgentHarness::new(opts);
-    let received: Arc<Mutex<Vec<HarnessEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let received: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
     let r2 = received.clone();
-    let listener: HarnessListener = Arc::new(move |ev| r2.lock().push(ev));
+    let listener: SessionListener = Arc::new(move |ev| r2.lock().push(ev));
     let _unsub = harness.subscribe_harness(listener);
 
     harness.prompt("what is 2+2?").await.unwrap();
@@ -260,9 +260,9 @@ async fn on_turn_end_continue_runs_second_turn_then_stops() {
     opts.on_turn_end = Some(hook);
 
     let harness = AgentHarness::new(opts);
-    let received: Arc<Mutex<Vec<HarnessEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let received: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
     let r2 = received.clone();
-    let listener: HarnessListener = Arc::new(move |ev| r2.lock().push(ev));
+    let listener: SessionListener = Arc::new(move |ev| r2.lock().push(ev));
     let _unsub = harness.subscribe_harness(listener);
 
     harness.prompt("start").await.unwrap();
@@ -351,9 +351,9 @@ async fn on_turn_end_continuation_cap_emits_budget_limited_without_invoking_hook
     opts.on_turn_end = Some(hook);
 
     let harness = AgentHarness::new(opts);
-    let received: Arc<Mutex<Vec<HarnessEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let received: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
     let r2 = received.clone();
-    let listener: HarnessListener = Arc::new(move |ev| r2.lock().push(ev));
+    let listener: SessionListener = Arc::new(move |ev| r2.lock().push(ev));
     let _unsub = harness.subscribe_harness(listener);
 
     harness.prompt("go").await.unwrap();

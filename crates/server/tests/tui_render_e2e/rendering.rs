@@ -4,7 +4,7 @@
 
 use super::helpers::{assistant, message_update, strip_ansi};
 use super::tui;
-use theway_core::{AgentEvent, AgentToolResult};
+use theway_core::{AgentToolResult, LoopEvent};
 use theway_llm_provider::{AssistantMessageEvent, ContentBlock, ToolCall, UserContentBlock};
 
 #[test]
@@ -20,7 +20,7 @@ fn renders_thinking_then_text_with_clean_transition() {
         },
     )]);
 
-    tui.render_event(&AgentEvent::AgentStart, &mut buf);
+    tui.render_event(&LoopEvent::RunStarted, &mut buf);
     tui.render_event(
         &message_update(
             AssistantMessageEvent::ThinkingDelta {
@@ -52,7 +52,7 @@ fn renders_thinking_then_text_with_clean_transition() {
         &mut buf,
     );
     tui.render_event(
-        &AgentEvent::AgentEnd {
+        &LoopEvent::RunEnded {
             messages: Vec::new(),
         },
         &mut buf,
@@ -106,7 +106,7 @@ fn tool_call_prints_exactly_once_not_duplicated() {
     };
     let partial = assistant(vec![ContentBlock::ToolCall(tool_call.clone())]);
 
-    tui.render_event(&AgentEvent::AgentStart, &mut buf);
+    tui.render_event(&LoopEvent::RunStarted, &mut buf);
     // MessageUpdate::ToolCallStart used to print the tool name. Verify we DON'T duplicate
     // it — only ToolExecutionStart should print.
     tui.render_event(
@@ -120,7 +120,7 @@ fn tool_call_prints_exactly_once_not_duplicated() {
         &mut buf,
     );
     tui.render_event(
-        &AgentEvent::ToolExecutionStart {
+        &LoopEvent::ToolExecutionStart {
             tool_call_id: "call-1".into(),
             tool_name: "read".into(),
             args: serde_json::json!({ "path": "/tmp/x.rs" }),
@@ -128,7 +128,7 @@ fn tool_call_prints_exactly_once_not_duplicated() {
         &mut buf,
     );
     tui.render_event(
-        &AgentEvent::ToolExecutionEnd {
+        &LoopEvent::ToolExecutionEnd {
             tool_call_id: "call-1".into(),
             tool_name: "read".into(),
             result: AgentToolResult {
@@ -141,7 +141,7 @@ fn tool_call_prints_exactly_once_not_duplicated() {
         &mut buf,
     );
     tui.render_event(
-        &AgentEvent::AgentEnd {
+        &LoopEvent::RunEnded {
             messages: Vec::new(),
         },
         &mut buf,
@@ -172,7 +172,7 @@ fn text_to_tool_to_text_transitions_have_clean_line_breaks() {
     let mut buf: Vec<u8> = Vec::new();
 
     // Round 1: text "first reply" → tool call → text "second reply" → end.
-    tui.render_event(&AgentEvent::AgentStart, &mut buf);
+    tui.render_event(&LoopEvent::RunStarted, &mut buf);
     let mut partial = assistant(vec![ContentBlock::text("")]);
     tui.render_event(
         &message_update(
@@ -186,7 +186,7 @@ fn text_to_tool_to_text_transitions_have_clean_line_breaks() {
         &mut buf,
     );
     tui.render_event(
-        &AgentEvent::ToolExecutionStart {
+        &LoopEvent::ToolExecutionStart {
             tool_call_id: "t1".into(),
             tool_name: "ls".into(),
             args: serde_json::json!({}),
@@ -194,7 +194,7 @@ fn text_to_tool_to_text_transitions_have_clean_line_breaks() {
         &mut buf,
     );
     tui.render_event(
-        &AgentEvent::ToolExecutionEnd {
+        &LoopEvent::ToolExecutionEnd {
             tool_call_id: "t1".into(),
             tool_name: "ls".into(),
             result: AgentToolResult {
@@ -219,7 +219,7 @@ fn text_to_tool_to_text_transitions_have_clean_line_breaks() {
         &mut buf,
     );
     tui.render_event(
-        &AgentEvent::AgentEnd {
+        &LoopEvent::RunEnded {
             messages: Vec::new(),
         },
         &mut buf,
@@ -255,7 +255,7 @@ fn pure_text_output_drops_single_prefix_space() {
     let tui = tui::Tui::new();
     let mut buf: Vec<u8> = Vec::new();
 
-    tui.render_event(&AgentEvent::AgentStart, &mut buf);
+    tui.render_event(&LoopEvent::RunStarted, &mut buf);
     let partial = assistant(vec![ContentBlock::text("")]);
     tui.render_event(
         &message_update(
@@ -280,7 +280,7 @@ fn pure_text_output_drops_single_prefix_space() {
         &mut buf,
     );
     tui.render_event(
-        &AgentEvent::AgentEnd {
+        &LoopEvent::RunEnded {
             messages: Vec::new(),
         },
         &mut buf,
@@ -295,7 +295,7 @@ fn pure_text_output_drops_prefix_space_after_empty_delta() {
     let tui = tui::Tui::new();
     let mut buf: Vec<u8> = Vec::new();
 
-    tui.render_event(&AgentEvent::AgentStart, &mut buf);
+    tui.render_event(&LoopEvent::RunStarted, &mut buf);
     let partial = assistant(vec![ContentBlock::text("")]);
     tui.render_event(
         &message_update(
@@ -320,7 +320,7 @@ fn pure_text_output_drops_prefix_space_after_empty_delta() {
         &mut buf,
     );
     tui.render_event(
-        &AgentEvent::AgentEnd {
+        &LoopEvent::RunEnded {
             messages: Vec::new(),
         },
         &mut buf,
@@ -335,7 +335,7 @@ fn pure_text_output_drops_prefix_whitespace_split_across_deltas() {
     let tui = tui::Tui::new();
     let mut buf: Vec<u8> = Vec::new();
 
-    tui.render_event(&AgentEvent::AgentStart, &mut buf);
+    tui.render_event(&LoopEvent::RunStarted, &mut buf);
     let partial = assistant(vec![ContentBlock::text("")]);
     for delta in [" ", "\n", "\t", " dongxu!"] {
         tui.render_event(
@@ -351,7 +351,7 @@ fn pure_text_output_drops_prefix_whitespace_split_across_deltas() {
         );
     }
     tui.render_event(
-        &AgentEvent::AgentEnd {
+        &LoopEvent::RunEnded {
             messages: Vec::new(),
         },
         &mut buf,
@@ -373,7 +373,7 @@ fn chinese_content_renders_unchanged() {
     let reply_text = "答案是：你好，世界！这是一个混合的回复，包含 ASCII and 中文。";
     let tool_result_lines = "第一行\n第二行 with mixed ASCII\n第三行";
 
-    tui.render_event(&AgentEvent::AgentStart, &mut buf);
+    tui.render_event(&LoopEvent::RunStarted, &mut buf);
 
     let partial = assistant(vec![ContentBlock::Thinking(
         theway_llm_provider::ThinkingContent {
@@ -395,7 +395,7 @@ fn chinese_content_renders_unchanged() {
     );
 
     tui.render_event(
-        &AgentEvent::ToolExecutionStart {
+        &LoopEvent::ToolExecutionStart {
             tool_call_id: "t1".into(),
             tool_name: "read".into(),
             args: serde_json::json!({ "path": "/tmp/中文文件.rs", "query": "查找" }),
@@ -403,7 +403,7 @@ fn chinese_content_renders_unchanged() {
         &mut buf,
     );
     tui.render_event(
-        &AgentEvent::ToolExecutionEnd {
+        &LoopEvent::ToolExecutionEnd {
             tool_call_id: "t1".into(),
             tool_name: "read".into(),
             result: AgentToolResult {
@@ -429,7 +429,7 @@ fn chinese_content_renders_unchanged() {
         &mut buf,
     );
     tui.render_event(
-        &AgentEvent::AgentEnd {
+        &LoopEvent::RunEnded {
             messages: Vec::new(),
         },
         &mut buf,
@@ -461,9 +461,9 @@ fn long_chinese_tool_arg_does_not_panic() {
     // Construct a >60-char Chinese string. Each char is 3 bytes UTF-8 so the byte length
     // is 3× the char count — `String::truncate(60)` would have panicked.
     let long_chinese: String = "中文测试".repeat(30); // 120 chars, 360 bytes
-    tui.render_event(&AgentEvent::AgentStart, &mut buf);
+    tui.render_event(&LoopEvent::RunStarted, &mut buf);
     tui.render_event(
-        &AgentEvent::ToolExecutionStart {
+        &LoopEvent::ToolExecutionStart {
             tool_call_id: "t1".into(),
             tool_name: "search".into(),
             args: serde_json::json!({ "query": long_chinese }),
@@ -471,7 +471,7 @@ fn long_chinese_tool_arg_does_not_panic() {
         &mut buf,
     );
     tui.render_event(
-        &AgentEvent::AgentEnd {
+        &LoopEvent::RunEnded {
             messages: Vec::new(),
         },
         &mut buf,
@@ -494,7 +494,7 @@ fn streaming_chunks_preserve_chinese() {
     let tui = tui::Tui::new();
     let mut buf: Vec<u8> = Vec::new();
 
-    tui.render_event(&AgentEvent::AgentStart, &mut buf);
+    tui.render_event(&LoopEvent::RunStarted, &mut buf);
     let partial = assistant(vec![ContentBlock::text("")]);
     // Emit one character at a time — every single Chinese char survives the per-delta
     // write path.
@@ -512,7 +512,7 @@ fn streaming_chunks_preserve_chinese() {
         );
     }
     tui.render_event(
-        &AgentEvent::AgentEnd {
+        &LoopEvent::RunEnded {
             messages: Vec::new(),
         },
         &mut buf,

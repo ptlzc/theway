@@ -219,7 +219,7 @@ pub enum TriggerDelivery {
     /// The runtime never runs the single-tenant parent agent from the detached trigger task.
     /// Instead: if the parent is mid-turn it enqueues a follow-up (the running loop picks it
     /// up at the next boundary); if the parent is idle it appends the message and emits
-    /// [`HarnessEvent::TriggerRequestsMainRun`] so the embedder — which owns the parent agent
+    /// [`SessionEvent::TriggerRequestsMainRun`] so the embedder — which owns the parent agent
     /// — can schedule the turn on its own serialized loop. The model turn itself is a normal
     /// parent-loop event, not attributed to this trigger's `trigger_result`.
     InjectAndRun,

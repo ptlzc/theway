@@ -5,7 +5,7 @@ use super::helpers::{assistant, message_update, strip_ansi};
 use super::tui;
 use crate::trigger_engine::event::TriggerEvent;
 use crate::trigger_engine::types::{SourceKind, TriggerState};
-use theway_core::AgentEvent;
+use theway_core::LoopEvent;
 use theway_llm_provider::{AssistantMessageEvent, ContentBlock};
 
 #[test]
@@ -13,7 +13,7 @@ fn trigger_completion_renders_live_result_line() {
     let tui = tui::Tui::new();
     let mut buf: Vec<u8> = Vec::new();
 
-    tui.render_event(&AgentEvent::AgentStart, &mut buf);
+    tui.render_event(&LoopEvent::RunStarted, &mut buf);
     let partial = assistant(vec![ContentBlock::text("")]);
     tui.render_event(
         &message_update(

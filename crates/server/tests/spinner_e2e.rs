@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use theway_core::{
-    AgentEvent, AgentHarness, AgentHarnessOptions, MemorySessionStorage, Session, SessionStorage,
+    AgentHarness, AgentHarnessOptions, LoopEvent, MemorySessionStorage, Session, SessionStorage,
     StreamFn,
 };
 use theway_llm_provider::{
@@ -107,11 +107,11 @@ fn delayed_thinking_then_text_stream(
 }
 
 /// Predicate matching what main.rs installs.
-fn should_stop_on(ev: &AgentEvent) -> bool {
+fn should_stop_on(ev: &LoopEvent) -> bool {
     use theway_llm_provider::AssistantMessageEvent;
     match ev {
-        AgentEvent::ToolExecutionStart { .. } | AgentEvent::ToolExecutionEnd { .. } => true,
-        AgentEvent::MessageUpdate {
+        LoopEvent::ToolExecutionStart { .. } | LoopEvent::ToolExecutionEnd { .. } => true,
+        LoopEvent::MessageUpdate {
             assistant_message_event,
             ..
         } => matches!(

@@ -18,7 +18,7 @@ use std::sync::Arc;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use theway_core::{
-    AgentEvent, AgentHarness, AgentListener, AgentMessage, AgentRunError, SessionTreeEntry,
+    AgentHarness, AgentMessage, AgentRunError, LoopEvent, LoopListener, SessionTreeEntry,
 };
 use theway_llm_provider::{AssistantMessage as PiAssistantMessage, Message as PiMessage};
 
@@ -77,7 +77,7 @@ impl AgentSession {
 
     /// Subscribe to underlying lifecycle events. Useful for UI listeners.
     #[allow(dead_code)] // public API for embedders; not used by the binary itself.
-    pub fn subscribe(&self, listener: AgentListener) -> impl FnOnce() {
+    pub fn subscribe(&self, listener: LoopListener) -> impl FnOnce() {
         self.harness.subscribe(listener)
     }
 
@@ -235,9 +235,9 @@ pub enum AgentSessionEvent {
     },
 }
 
-/// Convert a base `AgentEvent` listener type into the kind we use here for symmetry.
+/// Convert a base `LoopEvent` listener type into the kind we use here for symmetry.
 #[allow(dead_code)]
-pub fn forward_to_listener(_: AgentEvent) {}
+pub fn forward_to_listener(_: LoopEvent) {}
 
 #[cfg(test)]
 mod tests {

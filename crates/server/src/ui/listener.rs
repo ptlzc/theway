@@ -1,4 +1,4 @@
-//! Adapters that turn live `AgentEvent`/`HarnessEvent` streams into [`FeedUpdate`]s and push
+//! Adapters that turn live `LoopEvent`/`SessionEvent` streams into [`FeedUpdate`]s and push
 //! them onto the UI channel. These replace the old stdout-writing `tui::Tui` listeners: the
 //! full-screen app owns the only writer (the ratatui terminal), so listeners must never touch
 //! stdout — they only enqueue structured updates that the run loop drains and renders.
@@ -10,7 +10,7 @@ use crate::trigger_engine::event::{TriggerEvent, TriggerListener};
 use crate::trigger_engine::types::{SourceKind, TriggerState};
 use chrono::Local;
 use parking_lot::Mutex;
-use theway_core::{AgentEvent, AgentListener, HarnessEvent, HarnessListener};
+use theway_core::{LoopEvent, LoopListener, SessionEvent, SessionListener};
 use theway_llm_provider::AssistantMessageEvent;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -20,7 +20,7 @@ use super::feed::{
 
 /// Build the per-turn agent listener. Maps streaming deltas, tool calls, and turn boundaries
 /// into feed updates.
-pub fn agent_listener(tx: UnboundedSender<FeedUpdate>) -> AgentListener {
+pub fn agent_listener(tx: UnboundedSender<FeedUpdate>) -> LoopListener {
     Arc::new(move |event, _cancel| {
         let tx = tx.clone();
         Box::pin(async move {
@@ -31,11 +31,11 @@ pub fn agent_listener(tx: UnboundedSender<FeedUpdate>) -> AgentListener {
     })
 }
 
-fn map_agent_event(event: &AgentEvent) -> Vec<FeedUpdate> {
+fn map_agent_event(event: &LoopEvent) -> Vec<FeedUpdate> {
     match event {
-        AgentEvent::AgentStart => vec![FeedUpdate::TurnStart],
-        AgentEvent::AgentEnd { .. } => vec![FeedUpdate::TurnEnd],
-        AgentEvent::MessageUpdate {
+        LoopEvent::RunStarted => vec![FeedUpdate::TurnStart],
+        LoopEvent::RunEnded { .. } => vec![FeedUpdate::TurnEnd],
+        LoopEvent::MessageUpdate {
             assistant_message_event,
             ..
         } => match assistant_message_event {
@@ -47,13 +47,13 @@ fn map_agent_event(event: &AgentEvent) -> Vec<FeedUpdate> {
             }
             _ => Vec::new(),
         },
-        AgentEvent::ToolExecutionStart {
+        LoopEvent::ToolExecutionStart {
             tool_name, args, ..
         } => {
             let (name, args) = tool_start_display(tool_name, args);
             vec![FeedUpdate::ToolStart { name, args }]
         }
-        AgentEvent::ToolExecutionUpdate {
+        LoopEvent::ToolExecutionUpdate {
             tool_call_id,
             partial_result,
             ..
@@ -64,7 +64,7 @@ fn map_agent_event(event: &AgentEvent) -> Vec<FeedUpdate> {
                 is_error: false,
             }]
         }
-        AgentEvent::ToolExecutionEnd {
+        LoopEvent::ToolExecutionEnd {
             tool_call_id,
             result,
             is_error,
@@ -94,7 +94,7 @@ fn tool_start_display(tool_name: &str, args: &serde_json::Value) -> (String, Str
 
 /// Build the harness listener for trigger lifecycle lines. Keeps the same "stay quiet unless a
 /// dynamic periodic check actually matched" behavior the old renderer had.
-pub fn harness_listener(tx: UnboundedSender<FeedUpdate>, debug: bool) -> HarnessListener {
+pub fn harness_listener(tx: UnboundedSender<FeedUpdate>, debug: bool) -> SessionListener {
     Arc::new(move |event| {
         if let Some(update) = map_harness_event(&event, debug) {
             let _ = tx.send(update);
@@ -102,9 +102,9 @@ pub fn harness_listener(tx: UnboundedSender<FeedUpdate>, debug: bool) -> Harness
     })
 }
 
-fn map_harness_event(event: &HarnessEvent, debug: bool) -> Option<FeedUpdate> {
+fn map_harness_event(event: &SessionEvent, debug: bool) -> Option<FeedUpdate> {
     match event {
-        HarnessEvent::TurnEnded {
+        SessionEvent::TurnDecision {
             decision,
             reason,
             next_prompt_preview,
@@ -135,7 +135,7 @@ fn map_harness_event(event: &HarnessEvent, debug: bool) -> Option<FeedUpdate> {
         // Display-only sidebar refresh: the catalog can change with no other feed
         // activity (sub-agent installs a skill while the parent is idle), so the reload
         // must drive a repaint itself.
-        HarnessEvent::SkillsReloaded { total } => {
+        SessionEvent::SkillsReloaded { total } => {
             Some(FeedUpdate::SkillsReloaded { total: *total })
         }
         _ => None,
@@ -143,7 +143,7 @@ fn map_harness_event(event: &HarnessEvent, debug: bool) -> Option<FeedUpdate> {
 }
 
 /// Build the trigger-engine listener. Maps trigger lifecycle events into feed updates,
-/// mirroring the old `HarnessEvent::Trigger*` branches (the trigger pipeline now lives in
+/// mirroring the old `SessionEvent::Trigger*` branches (the trigger pipeline now lives in
 /// the CLI host, not the core harness event bus).
 pub fn trigger_listener(tx: UnboundedSender<FeedUpdate>, debug: bool) -> TriggerListener {
     let quiet: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
@@ -310,7 +310,7 @@ fn is_no_match_dynamic_summary(summary: &str) -> bool {
 }
 
 #[cfg(test)]
-fn map_harness_event_for_test(event: &HarnessEvent) -> Option<FeedUpdate> {
+fn map_harness_event_for_test(event: &SessionEvent) -> Option<FeedUpdate> {
     map_harness_event(event, false)
 }
 

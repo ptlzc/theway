@@ -279,7 +279,7 @@ async fn cut_point_anchors_on_user_message_even_around_trigger_custom() {
 
 /// `session.branch(None)` failure during compaction must short-circuit cleanly: no
 /// `Compaction` entry appended, no agent state mutation, no panic, and the harness emits a
-/// diagnostic `HarnessEvent::Compaction` whose summary starts with `compaction skipped:` so
+/// diagnostic `SessionEvent::Compaction` whose summary starts with `compaction skipped:` so
 /// observers know why. This is the issue #19 acceptance item for runtime fallback.
 #[tokio::test]
 async fn force_compact_fallback_when_session_branch_read_fails() {
@@ -371,12 +371,12 @@ async fn force_compact_fallback_when_session_branch_read_fails() {
     let pre_entries = storage.inner.get_entries().await.unwrap();
     let pre_state_len = harness.agent().state().messages.len();
 
-    // Collect HarnessEvent::Compaction emissions.
-    let events: Arc<PlMutex<Vec<HarnessEvent>>> = Arc::new(PlMutex::new(Vec::new()));
+    // Collect SessionEvent::Compaction emissions.
+    let events: Arc<PlMutex<Vec<SessionEvent>>> = Arc::new(PlMutex::new(Vec::new()));
     let events_clone = events.clone();
-    let _unsub = harness.subscribe_harness(Arc::new(move |ev: HarnessEvent| {
+    let _unsub = harness.subscribe_harness(Arc::new(move |ev: SessionEvent| {
         events_clone.lock().push(ev);
-    }) as HarnessListener);
+    }) as SessionListener);
 
     // Arm the failure and force compaction. Must not panic, must return Ok(false).
     storage.arm();
@@ -412,7 +412,7 @@ async fn force_compact_fallback_when_session_branch_read_fails() {
     // prefix so observers can tell why.
     let events_snapshot = events.lock().clone();
     let saw_diagnostic = events_snapshot.iter().any(|ev| match ev {
-        HarnessEvent::Compaction {
+        SessionEvent::Compaction {
             summary,
             tokens_before,
             ..
@@ -421,7 +421,7 @@ async fn force_compact_fallback_when_session_branch_read_fails() {
     });
     assert!(
         saw_diagnostic,
-        "expected a diagnostic HarnessEvent::Compaction (summary starts with 'compaction skipped:') — events: {:?}",
+        "expected a diagnostic SessionEvent::Compaction (summary starts with 'compaction skipped:') — events: {:?}",
         events_snapshot
     );
 }

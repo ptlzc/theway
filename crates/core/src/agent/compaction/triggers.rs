@@ -6,7 +6,7 @@
 //! Split out of `assembly/mod.rs` by domain.
 
 use crate::agent::AgentRunError;
-use crate::agent::assembly::HarnessEvent;
+use crate::agent::assembly::SessionEvent;
 use crate::agent::compaction::compaction::{SummarizeError, compact, estimate_context_tokens};
 use crate::agent::messages::compaction_summary;
 use crate::agent::session::session::SessionTreeEntry;
@@ -73,7 +73,7 @@ impl crate::agent::assembly::AgentHarness {
                 // Read failure is non-fatal: skip this compaction attempt; the loop will try
                 // again next time. We do not append a `Compaction` record and do not mutate
                 // agent state.
-                self.emit_harness_event(HarnessEvent::Compaction {
+                self.emit_harness_event(SessionEvent::Compaction {
                     from_hook,
                     summary: format!("compaction skipped: session branch read failed: {e}"),
                     tokens_before: 0,
@@ -117,7 +117,7 @@ impl crate::agent::assembly::AgentHarness {
             .await
             .map_err(|e| AgentRunError::Other(format!("session append compaction: {e}")))?;
 
-        self.emit_harness_event(HarnessEvent::Compaction {
+        self.emit_harness_event(SessionEvent::Compaction {
             from_hook,
             summary: result.summary.clone(),
             tokens_before: result.tokens_before,

@@ -101,7 +101,7 @@ pub(super) async fn call_llm(
                 let m = AgentMessage::Llm(PiMessage::Assistant(partial.clone()));
                 emit(
                     inner,
-                    AgentEvent::MessageStart { message: m.clone() },
+                    LoopEvent::MessageStart { message: m.clone() },
                     cancel,
                 )
                 .await;
@@ -118,7 +118,7 @@ pub(super) async fn call_llm(
                 inner.state.lock().streaming_message = Some(m.clone());
                 emit(
                     inner,
-                    AgentEvent::MessageUpdate {
+                    LoopEvent::MessageUpdate {
                         message: m,
                         assistant_message_event: ev.clone(),
                     },

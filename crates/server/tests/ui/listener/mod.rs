@@ -18,7 +18,7 @@ fn tool_update_output_is_compacted_for_display() {
         .map(|i| format!("line {i}"))
         .collect::<Vec<_>>()
         .join("\n");
-    let event = AgentEvent::ToolExecutionUpdate {
+    let event = LoopEvent::ToolExecutionUpdate {
         tool_call_id: "call-1".into(),
         tool_name: "bash".into(),
         args: serde_json::Value::Null,
@@ -45,7 +45,7 @@ fn tool_update_output_is_compacted_for_display() {
 fn tool_result_output_is_compacted_without_mutating_result() {
     let original = "x".repeat(400);
     let result = text_result(original.clone());
-    let event = AgentEvent::ToolExecutionEnd {
+    let event = LoopEvent::ToolExecutionEnd {
         tool_call_id: "call-1".into(),
         tool_name: "bash".into(),
         result: result.clone(),
@@ -64,7 +64,7 @@ fn tool_result_output_is_compacted_without_mutating_result() {
 
 #[test]
 fn short_tool_output_display_stays_unchanged() {
-    let event = AgentEvent::ToolExecutionEnd {
+    let event = LoopEvent::ToolExecutionEnd {
         tool_call_id: "call-1".into(),
         tool_name: "read".into(),
         result: text_result("short\noutput"),
@@ -80,7 +80,7 @@ fn short_tool_output_display_stays_unchanged() {
 
 #[test]
 fn skill_tool_start_uses_bounded_label_without_body() {
-    let event = AgentEvent::ToolExecutionStart {
+    let event = LoopEvent::ToolExecutionStart {
         tool_call_id: "call-skill".into(),
         tool_name: "Skill".into(),
         args: serde_json::json!({
@@ -104,7 +104,7 @@ fn skill_tool_start_uses_bounded_label_without_body() {
 /// repaints and the web snapshot republishes) without appending a conversation line.
 #[test]
 fn skills_reloaded_maps_to_sidebar_refresh_update() {
-    let update = map_harness_event_for_test(&HarnessEvent::SkillsReloaded { total: 3 })
+    let update = map_harness_event_for_test(&SessionEvent::SkillsReloaded { total: 3 })
         .expect("skills reload must produce a feed update");
     assert!(
         matches!(update, FeedUpdate::SkillsReloaded { total: 3 }),
@@ -183,7 +183,7 @@ fn trigger_completed_summary_is_not_display_truncated() {
 
 #[test]
 fn turn_end_continue_surfaces_goal_status_line() {
-    let update = map_harness_event_for_test(&HarnessEvent::TurnEnded {
+    let update = map_harness_event_for_test(&SessionEvent::TurnDecision {
         decision: "continue",
         continuation_count: 1,
         reason: None,
@@ -201,7 +201,7 @@ fn turn_end_continue_surfaces_goal_status_line() {
 
 #[test]
 fn turn_end_stop_stays_quiet() {
-    let update = map_harness_event_for_test(&HarnessEvent::TurnEnded {
+    let update = map_harness_event_for_test(&SessionEvent::TurnDecision {
         decision: "stop",
         continuation_count: 0,
         reason: None,

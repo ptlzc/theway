@@ -75,7 +75,7 @@ pub(super) async fn execute_tools(
 
         emit(
             inner,
-            AgentEvent::ToolExecutionStart {
+            LoopEvent::ToolExecutionStart {
                 tool_call_id: tool_id.clone(),
                 tool_name: tool_name.clone(),
                 args: args.clone(),
@@ -221,7 +221,7 @@ pub(super) async fn execute_tools(
             };
             emit(
                 inner,
-                AgentEvent::ControlPlanePromptResolved {
+                LoopEvent::ControlPlanePromptResolved {
                     tool_call_id: prompt_req.tool_call_id.clone(),
                     tool_name: prompt_req.tool_name.clone(),
                     args_hash: prompt_req.args_hash.clone(),
@@ -368,7 +368,7 @@ pub(super) async fn execute_tools(
 
         emit(
             inner,
-            AgentEvent::ToolExecutionEnd {
+            LoopEvent::ToolExecutionEnd {
                 tool_call_id: id.clone(),
                 tool_name: name.clone(),
                 result: result.clone(),

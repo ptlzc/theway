@@ -23,7 +23,7 @@ use theway_llm_provider::{ImageContent, Message as PiMessage, Model};
 
 use crate::agent::session::session::{BranchSummaryInput, Session};
 use crate::agent::system_prompt::format_skills_for_system_prompt;
-use crate::agent::{Agent, AgentEvent, AgentListener, AgentOptions, AgentRunError};
+use crate::agent::{Agent, AgentOptions, AgentRunError, LoopEvent, LoopListener};
 use crate::types::*;
 // AfterToolCallHook is re-exported under types::* via `pub use` in the module; if it isn't
 // directly visible here, fall back to the absolute path inside Agent::new.
@@ -153,7 +153,7 @@ pub struct AgentHarness {
     /// per-turn events; this covers cross-turn / session-level decisions. Held behind an
     /// `Arc` so an unsubscriber closure can drop its captured handle independently of the
     /// `AgentHarness` lifetime.
-    harness_listeners: Arc<Mutex<Vec<HarnessListener>>>,
+    harness_listeners: Arc<Mutex<Vec<SessionListener>>>,
     session_start_emitted: Mutex<bool>,
     /// Running token / cost totals for this harness lifetime. Updated automatically by an
     /// internal listener subscribed to `Agent::MessageEnd`. Snapshot via [`Self::cost`].
@@ -230,9 +230,9 @@ impl AgentHarness {
 
     /// Register a harness-level lifecycle listener. Returns an unsubscriber closure.
     ///
-    /// Listener panics are caught — see [`HarnessEvent`] for the isolation contract. The
+    /// Listener panics are caught — see [`SessionEvent`] for the isolation contract. The
     /// returned closure removes the listener; calling it twice is a no-op.
-    pub fn subscribe_harness(&self, listener: HarnessListener) -> Box<dyn FnOnce() + Send> {
+    pub fn subscribe_harness(&self, listener: SessionListener) -> Box<dyn FnOnce() + Send> {
         self.harness_listeners.lock().push(listener.clone());
         // Identity-match the listener for removal. Capture the data-pointer address as a
         // `usize` (Send) so the unsubscriber doesn't carry a raw pointer across threads.
@@ -249,7 +249,7 @@ impl AgentHarness {
         })
     }
 
-    pub(crate) fn emit_harness_event(&self, event: HarnessEvent) {
+    pub(crate) fn emit_harness_event(&self, event: SessionEvent) {
         let listeners = self.harness_listeners.lock().clone();
         for l in listeners {
             // Each listener runs isolated so one panic doesn't poison the rest.
@@ -267,7 +267,7 @@ impl AgentHarness {
         *g = true;
         let count = self.agent.state().messages.len();
         drop(g);
-        self.emit_harness_event(HarnessEvent::SessionStart {
+        self.emit_harness_event(SessionEvent::Started {
             messages_replayed: count,
         });
     }
@@ -284,7 +284,7 @@ impl AgentHarness {
     /// Accept an incoming [`Trigger`] from a notification adapter. Evaluates it against the
     /// runtime's dedup + cycle bookkeeping, persists a
     /// `SessionTreeEntry::Custom { custom_type: "trigger" }` audit entry summarizing the
-    /// decision, and emits [`HarnessEvent::TriggerHandlingStart`] / [`HarnessEvent::TriggerHandled`].
+    /// decision, and emits [`SessionEvent::TriggerHandlingStart`] / [`SessionEvent::TriggerHandled`].
     ///
     /// Returns the [`EvaluationOutcome`] so adapters that synchronously dispatched the
     /// trigger know whether downstream rule evaluation should proceed. In this PR `Accept`
@@ -292,7 +292,7 @@ impl AgentHarness {
     /// permission evaluator extension and the running-state machine in sub-PR 3.
     ///
     /// Persistence is best-effort: if the audit write fails, this method still returns the
-    /// evaluator outcome and emits a [`HarnessEvent::PersistenceError`] alongside the
+    /// evaluator outcome and emits a [`SessionEvent::PersistenceError`] alongside the
     /// `TriggerHandled` event (with `audit_entry_id = None`). The trigger evaluation is
     /// authoritative; the audit record is observability.
     pub fn session(&self) -> &Session {
@@ -346,7 +346,7 @@ impl AgentHarness {
             .clone();
         let out = loader().await;
         self.replace_skills(out.skills.clone());
-        self.emit_harness_event(HarnessEvent::SkillsReloaded {
+        self.emit_harness_event(SessionEvent::SkillsReloaded {
             total: out.skills.len(),
         });
         Ok(out)
@@ -376,7 +376,7 @@ impl AgentHarness {
         self.agent.enqueue_follow_up(message);
     }
 
-    pub fn subscribe(&self, listener: AgentListener) -> impl FnOnce() {
+    pub fn subscribe(&self, listener: LoopListener) -> impl FnOnce() {
         self.agent.subscribe(listener)
     }
 
@@ -412,7 +412,7 @@ impl AgentHarness {
         let from = self.session.leaf_id().await.ok().flatten();
         let result = self.session.move_to(entry_id, summary).await?;
         self.rehydrate_from_session().await?;
-        self.emit_harness_event(HarnessEvent::Branch {
+        self.emit_harness_event(SessionEvent::Branch {
             from_entry_id: from,
             to_entry_id: entry_id.map(|s| s.to_string()),
             summary_entry_id: result.clone(),
@@ -697,7 +697,7 @@ impl AgentHarness {
     }
 
     /// Persist a `turn_end_decision` audit entry and emit the matching
-    /// [`HarnessEvent::TurnEnded`] event. Best-effort: persistence failures do not
+    /// [`SessionEvent::TurnDecision`] event. Best-effort: persistence failures do not
     /// abort the surrounding prompt cycle (the event still fires so observers can
     /// flag the lost audit), matching the trigger audit reflux pattern.
     async fn record_turn_end_decision(
@@ -720,12 +720,12 @@ impl AgentHarness {
             .append_custom("turn_end_decision", Some(data))
             .await
         {
-            self.emit_harness_event(HarnessEvent::PersistenceError {
+            self.emit_harness_event(SessionEvent::PersistenceError {
                 context: "turn_end_decision".into(),
                 message: format!("turn_end_decision append failed: {:?}", e.code),
             });
         }
-        self.emit_harness_event(HarnessEvent::TurnEnded {
+        self.emit_harness_event(SessionEvent::TurnDecision {
             decision,
             continuation_count,
             reason,
@@ -738,7 +738,7 @@ impl AgentHarness {
 // Harness lifecycle events + the OnTurnEnd hook contract
 // ─────────────────────────────────────────────────────────────────────────────────────────
 
-/// Harness-level lifecycle events. These are emitted in addition to the per-turn `AgentEvent`s
+/// Harness-level lifecycle events. These are emitted in addition to the per-turn `LoopEvent`s
 /// the inner `Agent` already publishes — they cover the cross-turn lifecycle decisions the
 /// harness is responsible for (compaction, branching, session boundaries).
 ///
@@ -746,11 +746,11 @@ impl AgentHarness {
 /// subscribers are isolated via `catch_unwind` so one bad observer cannot break the harness;
 /// the offending listener is dropped from the registry.
 #[derive(Clone, Debug)]
-pub enum HarnessEvent {
+pub enum SessionEvent {
     /// First call to `prompt`/`continue_`/`prompt_from_template` after `AgentHarness::new`
     /// fires this once. `messages_replayed` reflects how many session messages were already on
     /// the active branch (e.g. a `--resume` start vs a fresh session).
-    SessionStart { messages_replayed: usize },
+    Started { messages_replayed: usize },
     /// Auto- or manual compaction ran. `from_hook = true` currently means it came from
     /// `force_compact` (the CLI `/compact` path); `false` means the internal threshold check
     /// triggered it before a prompt.
@@ -779,7 +779,7 @@ pub enum HarnessEvent {
         message: String,
     },
     /// the count of `Continue` decisions that fired earlier in the same prompt cycle.
-    TurnEnded {
+    TurnDecision {
         decision: &'static str,
         continuation_count: u32,
         reason: Option<String>,
@@ -792,9 +792,9 @@ pub enum HarnessEvent {
     SkillsReloaded { total: usize },
 }
 
-/// Listener for [`HarnessEvent`]. Shape mirrors `crate::agent::AgentListener` so the same Fn
+/// Listener for [`SessionEvent`]. Shape mirrors `crate::agent::LoopListener` so the same Fn
 /// helpers translate.
-pub type HarnessListener = Arc<dyn Fn(HarnessEvent) + Send + Sync>;
+pub type SessionListener = Arc<dyn Fn(SessionEvent) + Send + Sync>;
 
 // ─────────────────────────────────────────────────────────────────────────────────────────
 // OnTurnEnd hook (powers `/goal` and other turn-completion driven orchestrators)
@@ -842,7 +842,7 @@ pub struct OnTurnEndContext {
 pub enum TurnEndAction {
     /// Hook is currently inactive and has nothing to record for this turn. Behaves
     /// identically to "no `on_turn_end` configured": **no `turn_end_decision` audit
-    /// entry is written, and no [`HarnessEvent::TurnEnded`] is emitted**. Use when the
+    /// entry is written, and no [`SessionEvent::TurnDecision`] is emitted**. Use when the
     /// hook is permanently registered but only meaningful in specific session states
     /// — e.g. `/goal` returns `Noop` when there is no active goal, when the goal is
     /// already `achieved`, or when the user has paused it externally — so untouched
@@ -852,11 +852,11 @@ pub enum TurnEndAction {
     Noop,
     /// Normal completion. Runtime returns control to the caller. Records
     /// `decision: "stop"` in the `turn_end_decision` audit and emits
-    /// [`HarnessEvent::TurnEnded`].
+    /// [`SessionEvent::TurnDecision`].
     Stop,
     /// Soft stop with an explanatory reason (e.g. "evaluator unavailable", "user
     /// requested pause"). Persisted in `turn_end_decision.data.reason` and surfaced
-    /// through [`HarnessEvent::TurnEnded`]. Runtime returns control to the caller.
+    /// through [`SessionEvent::TurnDecision`]. Runtime returns control to the caller.
     Pause { reason: String },
     /// Run another prompt cycle in the same conversation. The runtime appends `prompt`
     /// as a user `AgentMessage`, runs auto-compaction again, then drives the inner
@@ -951,26 +951,26 @@ fn build_system_prompt(base: &str, skills: &[Skill]) -> String {
     format!("{base}\n\n{skills_block}")
 }
 
-/// Build an `AgentListener` that persists every emitted `MessageEnd` to the session log.
+/// Build an `LoopListener` that persists every emitted `MessageEnd` to the session log.
 fn make_session_listener(
     session: Session,
 ) -> (
-    crate::agent::AgentListener,
+    crate::agent::LoopListener,
     Arc<Mutex<Vec<crate::agent::types::SessionError>>>,
 ) {
     let errors = Arc::new(Mutex::new(Vec::new()));
     let listener_errors = errors.clone();
-    let listener: crate::agent::AgentListener = Arc::new(move |event, _cancel| {
+    let listener: crate::agent::LoopListener = Arc::new(move |event, _cancel| {
         let session = session.clone();
         let listener_errors = listener_errors.clone();
         Box::pin(async move {
             match event {
-                AgentEvent::MessageEnd { message } => {
+                LoopEvent::MessageEnd { message } => {
                     if let Err(e) = session.append_message(message).await {
                         listener_errors.lock().push(e);
                     }
                 }
-                AgentEvent::ControlPlanePromptResolved {
+                LoopEvent::ControlPlanePromptResolved {
                     tool_call_id,
                     tool_name,
                     args_hash,
@@ -1043,7 +1043,7 @@ fn finish_persisted_run(
 // Sub-agent execution (RFC 1 sub-PR 5a)
 // ─────────────────────────────────────────────────────────────────────────────────────────
 
-/// Emit a [`HarnessEvent`] to a snapshot of the listener registry, isolating each listener
+/// Emit a [`SessionEvent`] to a snapshot of the listener registry, isolating each listener
 /// with `catch_unwind` so a single panicking listener cannot poison the others. Mirrors
 /// the contract of `AgentHarness::emit_harness_event` but operates on a cloned `Arc` of
 /// listeners (so the spawned sub-agent task does not need an `AgentHarness` reference).

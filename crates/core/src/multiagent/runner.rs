@@ -16,7 +16,7 @@ use theway_core::multiagent::registry::{
     AgentControlHandle, AgentJobRegistry, JobInit, JobStatus, metrics_listener,
 };
 use theway_core::{
-    AgentEvent, AgentHarness, AgentHarnessOptions, AgentMessage, AgentRunError, AgentTool,
+    AgentHarness, AgentHarnessOptions, AgentMessage, AgentRunError, AgentTool, LoopEvent,
     MemorySessionStorage, Session, SessionStorage, StreamFn, ThinkingLevel,
 };
 use theway_llm_provider::{Message as PiMessage, Model};
@@ -152,7 +152,7 @@ pub async fn run_agent(opts: AgentRunOptions) -> AgentRunResult {
         let on_turn_end = on_turn_end.clone();
         let sub = sub_for_events.clone();
         Box::pin(async move {
-            if let AgentEvent::MessageEnd {
+            if let LoopEvent::MessageEnd {
                 message: AgentMessage::Llm(PiMessage::Assistant(a)),
             } = event
             {

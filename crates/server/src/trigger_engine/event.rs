@@ -1,5 +1,5 @@
 //! Trigger lifecycle events emitted by the [`TriggerExecutor`](super::execution::TriggerExecutor)
-//! (moved out of `theway_core::HarnessEvent`). The CLI subscribes to these alongside the
+//! (moved out of `theway_core::SessionEvent`). The CLI subscribes to these alongside the
 //! core harness event stream: the executor is host-owned, so its event surface is a
 //! host-level contract — the TUI banner, `/triggers` command and JSONL listeners all
 //! consume this stream.
@@ -15,7 +15,7 @@ use std::sync::Arc;
 use super::types::{SourceKind, TriggerState};
 use crate::trigger_engine::execution::types::TriggerPromptRequest;
 
-/// Listener for [`TriggerEvent`]. Same shape as `HarnessListener` so UI adapters can mix
+/// Listener for [`TriggerEvent`]. Same shape as `SessionListener` so UI adapters can mix
 /// both streams with the same closure style.
 pub type TriggerListener = Arc<dyn Fn(TriggerEvent) + Send + Sync>;
 
