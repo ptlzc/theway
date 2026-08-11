@@ -19,6 +19,7 @@
 
 ## 3. run 级成本 (P7)
 
+- [ ] 3.0 前置: llm-provider 计算 `Usage::cost` — 在 assistant usage 解析处按 `tokens × model.cost.<kind> / 1_000_000` 填充 (provider 自带 cost 字段则优先解析);新增单测 (1M input + 0.5M output 的美元断言);修正 `core/src/agent/cost.rs` 注释 (不再声称 provider 已填充)。
 - [ ] 3.1 registry: job 记录增加 `cost_usd: Option<f64>`;`AgentJobEvent::Completed` / Metrics 增加 `cost_usd`;`metrics_listener` 或 runner 在 finish 时从 `sub.cost()` 快照写入。
 - [ ] 3.2 engine: run 记录 (graph/types.rs 运行时状态) 增加 `run_cost_usd: Option<f64>`;`on_node_completed` 时累计节点成本。
 - [ ] 3.3 `AgentRunOptions` 增加 `budget_cap_usd: Option<f64>` (run 级);engine 调度点在节点完成时检查累计成本,超限 → 后续节点不启动、运行中节点完成、run 标记预算受限 (DagStatus 复用或新增状态)。

@@ -99,11 +99,13 @@ pub struct RunSummary {
 
 ### D5: run 级成本(P7)
 
-- `runner.rs` 聚合本 run 各节点 `RunSummary`(或 registry job)的 USD:新增 `run_cost_usd: Option<f64>` 字段到 run 记录(graph/types.rs DagRunDef 运行时状态或 registry)。
-- `AgentRunOptions` 增加 `budget_cap_usd: Option<f64>`(run 级):`run_agent` 每节点完成后累计,超限 → 后续节点不启动(engine 侧在 `on_node_completed` 检查,标记 run `BudgetLimited` 状态 — 复用 `DagStatus` 或新增)。
-- registry `JobStatus`/metrics 增加 `cost_usd`(CostTracker 已有 USD 计算,节点结束 snapshot 即可)。
+**现状缺口(本设计新增前置)**: `Usage::cost` 目前**无运行时计算** — `core/src/agent/cost.rs:14-15` 注释声称 provider 按目录价格表填充,但全仓库无一处 `tokens × ModelCost / 1e6` 的乘法(anthropic `update_usage` 只填 token 数),`Usage::cost` 运行时恒为 0。后果:`/cost` 美元显示为 0、`budget_cap_usd` 检查(`assembly.rs:678`)永不触发。
 
-**为什么**: 成本是 harness 资产(`CostTracker` 在 assembly),run 级预算是 graph 编排的天然需求;assembly 的 per-harness `budget_cap_usd` 保留(单会话场景),run 级在 runner/engine 层聚合,不侵入 assembly 的成本模型。
+**D5a(前置)**: llm-provider 在解析每条 assistant usage 时计算 `Usage::cost`(input/output/cache_read/cache_write 各自 `tokens × model.cost.<kind> / 1_000_000`,`total` 为四者之和;provider 响应自带 cost 字段时优先解析)。core 的 `cost.rs` 注释修正为如实描述。
+
+**D5b(聚合)**: `runner.rs` 聚合本 run 各节点 USD 成本:每个节点完成时从 harness `CostTracker` 取 `CostSnapshot`,累计到 run 记录;run 状态面(graph/types.rs 运行时状态)提供 `run_cost_usd: Option<f64>`;registry 的 job 记录与 `AgentJobEvent::Completed` 增加 `cost_usd` 字段。
+
+**D5c(预算)**: `AgentRunOptions` 增加 run 级 `budget_cap_usd`;engine 在每个节点完成时累计已发生成本,超限后:后续未启动节点不启动,运行中节点照常完成(不中途 kill),run 标记预算受限状态(复用 `DagStatus` 语义或新增状态)。assembly 的 per-harness `budget_cap_usd`(单会话场景)保留,依赖 D5a 生效。
 
 ### D6: 执行模型边界文档化(P3)
 
