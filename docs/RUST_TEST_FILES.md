@@ -120,3 +120,69 @@ fn resolve_spec_rejects_unknown_agent() {
 - 测试总数以 **crate 级 lib target** 为准 (单测在 `cargo test -p <crate> --lib`
   中跑); e2e target 只含自身用例 — 不要用"总数不变"校验迁移, 而是核对每个
   target 的计数与迁移前一致 (e2e 曾因 include 源码重复跑单测, 已消除)。
+
+## 6. 性能测试 (bench)
+
+> bench 在整个测试体系中的定位与完整细则见 [TESTING.md §L4](TESTING.md)。
+> 本章仅覆盖 bench 独有的**文件布局与命令规范**，其余 (分层模型/门禁矩阵/基线管理/防回归判据) 以上游 TESTING.md 为准。
+
+### 位置
+
+```
+crates/<name>/benches/<object>.rs   # bench 源码
+crates/<name>/Cargo.toml            # [dev-dependencies] criterion = "0.5"
+                                    # [[bench]] name = "<object>"  harness = false
+```
+
+bench 文件与 `src/`、`tests/` 平级，不参与 1:1 镜像规则 — bench 是对架构级路径的性能验证，不与被测模块的目录结构耦合。
+
+### 配置
+
+每个 bench 文件必须在 crate 的 `Cargo.toml` 中声明：
+
+```toml
+[[bench]]
+name = "dispatch"      # 对应 crates/<name>/benches/dispatch.rs
+harness = false        # criterion 提供自己的 main(), 不使用 Rust 默认 bench harness
+```
+
+- `harness = false` **必须设置** — criterion 通过 `criterion_main!` 宏生成入口。
+- criterion 放在 `[dev-dependencies]`，不进入生产构建。
+
+### 命名
+
+| 层级 | 规范 | 示例 |
+|------|------|------|
+| bench 文件 | `<被测对象>.rs` (snake_case) | `dispatch.rs` |
+| bench 函数 | `bench_<被测对象>_<场景>` | `bench_emit_sync_only`、`bench_broadcast_10_receivers` |
+| criterion group | 按文件聚合 | `benches`（含该文件所有 bench 函数，由 `criterion_group!` 声明） |
+
+### 内容规范
+
+1. **优先黑盒公开 API** — bench 通过 crate pub API 触发被测路径，不侵入私有实现。
+2. **需复刻内部结构时注释标注来源** — 如 `// Replicates the three-segment dispatch from \`crate::agent::run_loop::utils::emit\`.`，确保后续维护者能追溯。
+3. **每个 bench 函数文件头注释声明验证对象** — 硬约束 / 基线 / 对比项。
+
+### 基线命令速查
+
+```bash
+# 保存基线
+cargo bench -p theway-core --bench dispatch -- --save-baseline v0.1
+
+# 对比基线
+cargo bench -p theway-core --bench dispatch -- --load-baseline v0.1
+
+# PR 编译验证 (不实际跑)
+cargo bench -p theway-core --bench dispatch -- --test
+```
+
+基线存储在 `target/criterion/` (不提交到 Git)。
+
+### CI 策略
+
+| 触发 | 命令 | 目的 |
+|------|------|------|
+| PR | `cargo bench -p theway-core --bench dispatch -- --test` | 仅编译验证，确保 bench 代码不腐烂 |
+| 手动 / 发布前 | `cargo bench -p theway-core --bench dispatch` | 完整跑，对比基线 |
+
+> bench 编译验证已纳入 PR 门禁矩阵，见 [TESTING.md 门禁矩阵](TESTING.md)。
