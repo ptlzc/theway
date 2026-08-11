@@ -17,8 +17,9 @@
 //! - `prepareNextTurn` model/thinking-level rewrite mid-run
 
 // Harness layer (feature-gated): the bare Agent stays always-on.
-#[cfg(feature = "harness")]
 pub mod agent_harness;
+#[cfg(feature = "harness")]
+pub mod agent_loop;
 #[cfg(feature = "harness")]
 pub mod compaction;
 #[cfg(feature = "harness")]
@@ -48,7 +49,7 @@ use parking_lot::Mutex;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
-use crate::agent_loop::{run_agent_loop, run_agent_loop_continue};
+use crate::agent::agent_loop::{run_agent_loop, run_agent_loop_continue};
 use crate::types::*;
 
 use theway_llm_provider::Message;

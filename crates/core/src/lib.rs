@@ -6,7 +6,6 @@
 extern crate self as theway_core;
 
 pub mod agent;
-pub mod agent_loop;
 pub mod node;
 pub mod proxy;
 pub mod types;

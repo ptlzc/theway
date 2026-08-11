@@ -554,7 +554,7 @@ pub type TransformContext = Arc<
 /// Resolves an API key dynamically per LLM call. Useful for short-lived OAuth tokens.
 pub type GetApiKey = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
-/// Configuration for one run of [`crate::agent_loop::run_agent_loop`]. Matches `AgentLoopConfig`
+/// Configuration for one run of [`crate::agent::agent_loop::run_agent_loop`]. Matches `AgentLoopConfig`
 /// in TS field-for-field, with Rust closure types for the callbacks.
 pub struct AgentLoopConfig {
     pub model: Model,
