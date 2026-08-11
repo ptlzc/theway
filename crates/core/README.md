@@ -15,7 +15,7 @@ against a synthetic stream.
 | Core types (`types.rs`) | implemented |
 | `Agent` + `run_agent_loop` | implemented (sequential tool execution, lifecycle events, abort, queues) |
 | `AgentHarness` | implemented (composes Agent + Session + skills + system prompt, persists to session) |
-| Skills (`harness/skills.rs`) | implemented + tested against tempdirs |
+| Skills (`agent/skills.rs`) | implemented + tested against tempdirs |
 | System-prompt builder | implemented |
 | Prompt templates | implemented (loader stub + `{{var}}` interpolation) |
 | Session repo (jsonl + memory) | implemented; both backends share `SessionStorage` trait |
@@ -23,39 +23,34 @@ against a synthetic stream.
 | Native env adapter | implemented (std::fs + tokio::process) |
 
 ```
-cargo test     # 28 tests across 5 binaries (lib + agent_loop + harness_e2e + session + skills)
+cargo test     # lib unit tests + run_loop / harness_e2e / session / skills / permission suites
 ```
 
 ## Layout
 
 ```
 src/
-  lib.rs                 barrel
+  lib.rs                 barrel + re-exports (AgentHarness, compaction, …)
   types.rs               AgentMessage / AgentState / AgentEvent / AgentTool / AgentLoopConfig
-  agent.rs               Agent state machine
-  agent_loop.rs          runAgentLoop
+  agent.rs               bare Agent state machine (always on)
+  agent/
+    assembly/            AgentHarness composer (mod.rs + events.rs + utils.rs)
+    run_loop/            runAgentLoop (llm.rs / tools.rs / utils.rs)
+    compaction/          auto-compaction + cut point
+                         (algorithm.rs / compaction.rs / triggers.rs / branch_summarization.rs)
+    session/             session shape + jsonl/memory repos + uuid + repo_utils
+    env/                 native std::fs ExecutionEnv adapter
+    hooks/               lifecycle hooks
+    utils/               truncate.rs
+    cost.rs              token/cost tracking
+    messages.rs          custom AgentMessage variant helpers
+    permission.rs        dangerous-tool permission policy
+    skills.rs            loadSkills (SKILL.md discovery)
+    system_prompt.rs     formatSkillsForSystemPrompt
+    types.rs             ExecutionEnv, Skill, repo interfaces
+  multiagent/            DAG orchestration (graph/ + registry/)
   proxy.rs               re-exports from theway-llm-provider (HTTP_PROXY helpers)
   node.rs                native entry wiring the std::fs env adapter
-  harness/
-    types.rs             ExecutionEnv, Skill, repo interfaces
-    agent_harness.rs     AgentHarness composer
-    system_prompt.rs     formatSkillsForSystemPrompt
-    skills.rs            loadSkills (SKILL.md discovery)
-    prompt_templates.rs  template loader + interpolation
-    messages.rs          custom AgentMessage variant helpers
-    compaction/
-      compaction.rs      auto-compaction + cut point
-      branch_summarization.rs
-      utils.rs
-    session/
-      session.rs         on-disk session shape
-      jsonl_repo.rs / jsonl_storage.rs
-      memory_repo.rs / memory_storage.rs
-      uuid.rs            UUIDv7 helper
-      repo_utils.rs      parent-chain reconstruction
-    env/
-      native.rs          std::fs ExecutionEnv adapter
-    utils/
-      shell_output.rs
-      truncate.rs
+  skills_state.rs
+  tools/                 core tool implementations (dag_tools/, install_skill/)
 ```
