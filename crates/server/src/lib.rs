@@ -19,6 +19,7 @@ pub mod clipboard_image;
 pub mod commands;
 pub mod config;
 pub mod control_plane_prompt;
+pub mod dag_persist;
 pub mod debug;
 pub mod export;
 pub mod extensions;

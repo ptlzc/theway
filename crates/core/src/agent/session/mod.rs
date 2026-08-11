@@ -6,4 +6,6 @@ pub mod memory_repo;
 pub mod memory_storage;
 pub mod repo_utils;
 pub mod session;
+pub mod sqlite_repo;
+pub mod sqlite_storage;
 pub mod uuid;

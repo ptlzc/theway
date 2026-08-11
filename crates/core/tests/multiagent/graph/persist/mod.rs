@@ -47,7 +47,3 @@ pub(super) fn sample_run(id: &str, status: DagStatus) -> DagRun {
         error: None,
     }
 }
-
-pub(super) fn temp_file(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("dag-persist-{name}-{}.json", std::process::id()))
-}

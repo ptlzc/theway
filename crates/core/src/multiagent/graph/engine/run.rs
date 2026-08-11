@@ -175,6 +175,7 @@ impl DagEngine {
         if applied.0 {
             self.emit(applied.1);
             self.after_node_terminal(run_id, node_id);
+            self.notify_persist();
         }
     }
 
@@ -206,6 +207,8 @@ impl DagEngine {
             node.live_preview = Some(cap_chars(&p, 2048));
         }
         node.last_active_at = Some(now_ms());
+        drop(inner);
+        self.notify_persist();
     }
 
     /// Re-derive non-terminal node states after a dependency flipped.
@@ -278,6 +281,7 @@ impl DagEngine {
             self.emit(event);
             self.wake_waiters(run_id);
         }
+        self.notify_persist();
     }
 
     /// Resume persisted runs (running nodes demoted to ready and re-scheduled
@@ -303,6 +307,9 @@ impl DagEngine {
         for id in &restored {
             self.reconcile(id);
             self.tick(id);
+        }
+        if !restored.is_empty() {
+            self.notify_persist();
         }
         restored
     }

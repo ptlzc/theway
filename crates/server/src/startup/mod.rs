@@ -22,9 +22,11 @@ use theway::{
     skills_state, templates, tools, triggers, ts_extensions, ui,
 };
 use theway_core::multiagent::graph::engine::DagEngine;
-use theway_core::multiagent::graph::persist::{load_runs, save_runs, state_path_for_project};
+use theway_core::multiagent::graph::persist::DagPersistSink;
 use theway_core::{AgentHarness, AgentHarnessOptions, JsonlSessionRepo, PermissionPolicy};
 use theway_core::{agent::hooks, multiagent::goal};
+
+use theway::dag_persist::{DagPersistHandle, load_session_runs};
 
 use self::config_readers::{read_builtin_skills_config, read_trigger_poll_interval_secs};
 use self::prompt::compose_system_prompt;
@@ -149,8 +151,7 @@ pub(crate) async fn run_repl(
     // Resume in-flight DAG runs from this session's state file (crash recovery). Restored
     // ids are logged; a clean shutdown flushes the file at exit, so a file here means the
     // previous process died before aborting its runs.
-    let dag_state_path = state_path_for_project(&cwd.join(".pi"), Some(&session_id));
-    let restored_dags = dag_engine.restore(load_runs(&dag_state_path));
+    let restored_dags = dag_engine.restore(load_session_runs(&cwd, &session_id).await);
     if !restored_dags.is_empty() {
         tracing::info!(
             "restored {} in-flight DAG run(s): {}",
@@ -158,6 +159,10 @@ pub(crate) async fn run_repl(
             restored_dags.join(", ")
         );
     }
+    // Wire the debounced async persistence sink: every engine state change marks the
+    // store dirty; the background task coalesces and writes per session. Kept alive for
+    // the process lifetime (flush is the shutdown path below).
+    let _dag_persist = DagPersistHandle::spawn(dag_engine.clone(), cwd.clone());
     // Per-session tool set (session-resource-model). One source of truth shared with the
     // session factory below (`SessionHarnessFactory`): dag_* / subagent are stamped with
     // this session; the skill family wires a harness cell filled right after construction.
@@ -707,10 +712,12 @@ pub(crate) async fn run_repl(
     } else {
         app.run().await
     };
-    // Session shutdown: abort in-flight DAG runs and flush the state file (best-effort —
-    // node jobs are tokio tasks and die with the process anyway). Aborted runs are terminal
-    // so they drop off the file; a crash leaves it intact for the next session's `restore`.
+    // Session shutdown: flush the state file FIRST (running runs are persisted as
+    // Running — the next `restore` demotes them to ready and re-launches), then abort
+    // in-flight jobs (their tokio tasks die with the process anyway). Aborting before
+    // flushing would make every run terminal and drop them off the store, losing the
+    // recovery state.
+    _dag_persist.flush().await;
     dag_engine.abort_all_runs("session shutdown");
-    save_runs(&dag_state_path, &dag_engine.list_runs());
     run_result
 }

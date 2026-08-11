@@ -10,7 +10,6 @@ use std::sync::{Arc, OnceLock};
 use anyhow::{Context, Result};
 use theway::{agent_specs, inbox, session, tools, triggers, ui};
 use theway_core::multiagent::graph::engine::DagEngine;
-use theway_core::multiagent::graph::persist::{load_runs, state_path_for_project};
 use theway_core::{AgentHarness, AgentHarnessOptions, JsonlSessionRepo, ThinkingLevel};
 use theway_core::{agent::hooks, multiagent::goal};
 
@@ -84,8 +83,9 @@ impl SessionHarnessFactory {
         // Crash-recovery parity with startup: restore this session's persisted DAG runs.
         // `restore` skips ids already live in the engine, so switching back and forth is
         // idempotent.
-        let dag_state_path = state_path_for_project(&self.cwd.join(".pi"), Some(&session_id));
-        let restored = self.dag_engine.restore(load_runs(&dag_state_path));
+        let restored = self
+            .dag_engine
+            .restore(theway::dag_persist::load_session_runs(&self.cwd, &session_id).await);
         if !restored.is_empty() {
             tracing::info!(
                 "session {session_id}: restored {} in-flight DAG run(s): {}",

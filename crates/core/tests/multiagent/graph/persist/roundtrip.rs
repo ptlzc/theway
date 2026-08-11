@@ -1,11 +1,23 @@
 use super::*;
 
-#[test]
-fn save_load_round_trip() {
-    let path = temp_file("roundtrip");
+fn temp_db(name: &str) -> PathBuf {
+    std::env::temp_dir().join(format!("dag-persist-{name}-{}.db", std::process::id()))
+}
+
+async fn open_clean(name: &str) -> SqliteDagStore {
+    let path = temp_db(name);
     let _ = std::fs::remove_file(&path);
-    save_runs(&path, &[sample_run("dag-1", DagStatus::Running)]);
-    let loaded = load_runs(&path);
+    SqliteDagStore::open(&path).await.unwrap()
+}
+
+#[tokio::test]
+async fn save_load_round_trip() {
+    let store = open_clean("roundtrip").await;
+    store
+        .save(&[sample_run("dag-1", DagStatus::Running)])
+        .await
+        .unwrap();
+    let loaded = store.load().await.unwrap();
     assert_eq!(loaded.len(), 1);
     let p = &loaded[0];
     assert_eq!(p.id, "dag-1");
@@ -33,15 +45,20 @@ fn save_load_round_trip() {
     assert_eq!(n.live_preview.as_deref(), Some("preview"));
     assert_eq!(p.nodes[1].status, NodeStatus::Running);
     assert_eq!(p.nodes[2].status, NodeStatus::Pending);
-    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(temp_db("roundtrip"));
 }
 
-#[test]
-fn disk_shape_matches_ts() {
-    let path = temp_file("shape");
-    let _ = std::fs::remove_file(&path);
-    save_runs(&path, &[sample_run("dag-1", DagStatus::Running)]);
-    let raw = std::fs::read_to_string(&path).unwrap();
+#[tokio::test]
+async fn payload_shape_matches_ts_projection() {
+    let store = open_clean("shape").await;
+    store
+        .save(&[sample_run("dag-1", DagStatus::Running)])
+        .await
+        .unwrap();
+    let loaded = store.load().await.unwrap();
+    // Serialize the loaded PersistedRun and check camelCase keys (the TS
+    // projection shape).
+    let raw = serde_json::to_string(&loaded[0]).unwrap();
     for key in [
         "dependsOn",
         "maxConcurrency",
@@ -60,11 +77,11 @@ fn disk_shape_matches_ts() {
     // lowercase enum values + TD/LR direction
     assert!(raw.contains("\"running\""));
     assert!(raw.contains("\"TD\""));
-    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(temp_db("shape"));
 }
 
-#[test]
-fn hydrate_demotes_running_nodes() {
+#[tokio::test]
+async fn hydrate_demotes_running_nodes() {
     let p = PersistedRun {
         id: "dag-9".to_string(),
         name: "n".to_string(),
@@ -140,101 +157,75 @@ fn hydrate_demotes_running_nodes() {
     assert_eq!(run.created_at, 1);
 }
 
-#[test]
-fn only_running_runs_saved() {
-    let path = temp_file("onlyrunning");
-    let _ = std::fs::remove_file(&path);
+#[tokio::test]
+async fn only_running_runs_saved() {
+    let store = open_clean("onlyrunning").await;
     let runs = vec![
         sample_run("dag-1", DagStatus::Running),
         sample_run("dag-2", DagStatus::Completed),
         sample_run("dag-3", DagStatus::Failed),
     ];
-    save_runs(&path, &runs);
-    let loaded = load_runs(&path);
+    store.save(&runs).await.unwrap();
+    let loaded = store.load().await.unwrap();
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].id, "dag-1");
-    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(temp_db("onlyrunning"));
 }
 
-#[test]
-fn kind_round_trips_and_old_files_default_to_dag() {
+#[tokio::test]
+async fn kind_round_trips() {
     // Goal kind survives save → load → hydrate.
-    let path = temp_file("kind");
-    let _ = std::fs::remove_file(&path);
+    let store = open_clean("kind").await;
     let mut run = sample_run("goal-1", DagStatus::Running);
     run.kind = RunKind::Goal;
-    save_runs(&path, &[run]);
-    let loaded = load_runs(&path);
+    store.save(&[run]).await.unwrap();
+    let loaded = store.load().await.unwrap();
     assert_eq!(loaded[0].kind, RunKind::Goal);
     assert_eq!(
         hydrate(loaded.into_iter().next().unwrap()).kind,
         RunKind::Goal
     );
-    let _ = std::fs::remove_file(&path);
-
-    // A state file written before the kind field existed must load as Dag
-    // (serde default on the field — no migration code needed).
-    let path = temp_file("legacy");
-    let _ = std::fs::remove_file(&path);
-    std::fs::write(
-        &path,
-        r#"{"version":1,"runs":[{"id":"dag-1","name":"n","maxConcurrency":1,"failFast":false,"direction":"TD","createdAt":1,"sessionId":null,"nodes":[]}]}"#,
-    )
-    .unwrap();
-    let loaded = load_runs(&path);
-    assert_eq!(loaded.len(), 1);
-    assert_eq!(loaded[0].kind, RunKind::Dag);
-    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(temp_db("kind"));
 }
 
-#[test]
-fn corrupt_or_missing_file_yields_empty() {
-    let path = temp_file("corrupt");
+#[tokio::test]
+async fn missing_file_yields_empty() {
+    let path = temp_db("missing");
     let _ = std::fs::remove_file(&path);
-    // missing
-    assert!(load_runs(&path).is_empty());
-    // corrupt JSON
-    std::fs::write(&path, "{ not json !!!").unwrap();
-    assert!(load_runs(&path).is_empty());
-    // wrong version
-    std::fs::write(&path, r#"{"version": 2, "runs": []}"#).unwrap();
-    assert!(load_runs(&path).is_empty());
-    // right version, wrong type for runs
-    std::fs::write(&path, r#"{"version": 1, "runs": "nope"}"#).unwrap();
-    assert!(load_runs(&path).is_empty());
-    let _ = std::fs::remove_file(&path);
+    let store = SqliteDagStore::open(&path).await.unwrap();
+    assert!(store.load().await.unwrap().is_empty());
 }
 
-#[test]
-fn state_path_for_project_sanitizes() {
+#[tokio::test]
+async fn state_path_for_project_sanitizes() {
     let pi = Path::new("/tmp/.pi");
     assert_eq!(
         state_path_for_project(pi, None),
-        PathBuf::from("/tmp/.pi/graph-engineering-state.json")
+        PathBuf::from("/tmp/.pi/graph-engineering-state.db")
     );
     assert_eq!(
         state_path_for_project(pi, Some("sess-1")),
-        PathBuf::from("/tmp/.pi/graph-engineering-state-sess-1.json")
+        PathBuf::from("/tmp/.pi/graph-engineering-state-sess-1.db")
     );
     // non-alnum → '_'
     assert_eq!(
         state_path_for_project(pi, Some("a/b c?d")),
-        PathBuf::from("/tmp/.pi/graph-engineering-state-a_b_c_d.json")
+        PathBuf::from("/tmp/.pi/graph-engineering-state-a_b_c_d.db")
     );
     // truncation to 60 chars
     let long = "x".repeat(100);
     assert_eq!(
         state_path_for_project(pi, Some(&long)).file_name().unwrap(),
-        format!("graph-engineering-state-{}.json", "x".repeat(60)).as_str()
+        format!("graph-engineering-state-{}.db", "x".repeat(60)).as_str()
     );
     // empty → "default"; non-empty garbage is only char-mapped, kept
     assert_eq!(
         state_path_for_project(pi, Some("")),
-        PathBuf::from("/tmp/.pi/graph-engineering-state-default.json")
+        PathBuf::from("/tmp/.pi/graph-engineering-state-default.db")
     );
     assert_eq!(
         state_path_for_project(pi, Some("!!!")),
-        PathBuf::from("/tmp/.pi/graph-engineering-state-___.json")
+        PathBuf::from("/tmp/.pi/graph-engineering-state-___.db")
     );
 }
 

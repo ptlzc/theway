@@ -1,16 +1,44 @@
-//! Disk persistence for running DAG runs (JSON, 1:1 port of the
-//! dag-orchestrator extension's `persist.ts`). Only non-terminal runs are
-//! saved; terminal runs drop off naturally. Running nodes are persisted as
-//! "running" and demoted to "ready" on resume — their jobs died with the
-//! process and must be re-launched. Best-effort IO: a corrupt or missing file
-//! reads as empty, write failures are swallowed.
+//! Disk persistence for running DAG runs (SQLite via Turso; the JSON-file
+//! approach was replaced because running nodes were never actually persisted —
+//! `save_runs` only ran once at shutdown, and it ran *after* `abort_all_runs`
+//! had already demoted every running run to a terminal state, so the file was
+//! always empty on the one path that could have written it).
+//!
+//! Design:
+//! - One Turso database file per session: `<project>/.pi/graph-engineering-state-<sessionId>.db`.
+//! - Two tables: `dag_runs` (one row per run, full `DagRun` JSON payload +
+//!   status column) and `dag_nodes` (one row per node, full `DagNode` JSON
+//!   payload + status column). Status columns let `load` filter cheaply.
+//! - `save_runs` is transactional (DELETE-all + INSERT live runs): atomic,
+//!   idempotent, best-effort (write errors are logged, never fatal).
+//! - Only non-terminal runs are saved; terminal runs drop off naturally.
+//!   Running nodes are persisted as "running" and demoted to "ready" on
+//!   resume — their jobs died with the process and must be re-launched.
+//! - The engine drives saves through a [`DagPersistSink`]: every state change
+//!   calls `notify_dirty()` (non-blocking, safe under the engine lock), the
+//!   app layer debounces and flushes asynchronously.
 
 use std::path::{Path, PathBuf};
 
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use turso::{Builder, Connection, Database};
 
 use super::graph::now_ms;
 use super::types::{DagNode, DagRun, DagStatus, Direction, NodeResult, NodeStatus, RunKind};
+
+/// Sink contract the engine uses to signal "something changed, persist me".
+/// Implementations are app-layer (they own the debounce loop and the store);
+/// the engine only ever calls `notify_dirty` (non-blocking) and `flush`
+/// (blocking save of the current state, used at shutdown *before* aborting
+/// runs so running state survives).
+#[async_trait]
+pub trait DagPersistSink: Send + Sync {
+    fn notify_dirty(&self);
+    /// Synchronously persist the current engine state (shutdown path). Must
+    /// return only after the write is durable.
+    async fn flush(&self);
+}
 
 /// Persisted projection of a node (snake_case fields, camelCase JSON keys —
 /// matches the TS `PersistedNode` shape on disk).
@@ -55,24 +83,16 @@ pub struct PersistedRun {
     pub nodes: Vec<PersistedNode>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PersistedStateFile {
-    pub version: u32,
-    pub runs: Vec<PersistedRun>,
-}
-
-const STATE_VERSION: u32 = 1;
-
-/// State file for a project's `.pi` dir (caller passes `<cwd>/.pi`). With a
-/// session id the file is session-scoped so concurrent agent sessions in the
+/// State file path for a project's `.pi` dir (caller passes `<cwd>/.pi`). With
+/// a session id the file is session-scoped so concurrent agent sessions in the
 /// same project never resume/overwrite each other's runs.
 pub fn state_path_for_project(pi_dir: &Path, session_id: Option<&str>) -> PathBuf {
     match session_id {
         Some(id) => pi_dir.join(format!(
-            "graph-engineering-state-{}.json",
+            "graph-engineering-state-{}.db",
             sanitize_session_id(id)
         )),
-        None => pi_dir.join("graph-engineering-state.json"),
+        None => pi_dir.join("graph-engineering-state.db"),
     }
 }
 
@@ -95,25 +115,7 @@ fn sanitize_session_id(session_id: &str) -> String {
     }
 }
 
-/// Best-effort read: missing or corrupt file, or wrong version → empty vec.
-pub fn load_runs(path: &Path) -> Vec<PersistedRun> {
-    let raw = match std::fs::read_to_string(path) {
-        Ok(s) => s,
-        Err(_) => return Vec::new(),
-    };
-    let parsed: PersistedStateFile = match serde_json::from_str(&raw) {
-        Ok(p) => p,
-        Err(_) => return Vec::new(),
-    };
-    if parsed.version != STATE_VERSION {
-        return Vec::new();
-    }
-    parsed.runs
-}
-
-/// Project a run onto its persisted form (definition + node progress). Terminal
-/// runs persist too when exported directly; [`save_runs`] filters to Running.
-/// Exposed for the gRPC GraphCheckpoint / GraphRestore surface.
+/// Project a run onto its persisted form (definition + node progress).
 pub fn to_persisted(run: &DagRun) -> PersistedRun {
     PersistedRun {
         id: run.id.clone(),
@@ -149,27 +151,6 @@ pub fn to_persisted(run: &DagRun) -> PersistedRun {
             })
             .collect(),
     }
-}
-
-/// Best-effort write of only the Running runs; terminal runs drop off
-/// naturally. Creates parent dirs; failures are silent.
-pub fn save_runs(path: &Path, runs: &[DagRun]) {
-    let live: Vec<PersistedRun> = runs
-        .iter()
-        .filter(|r| r.status == DagStatus::Running)
-        .map(to_persisted)
-        .collect();
-    let state = PersistedStateFile {
-        version: STATE_VERSION,
-        runs: live,
-    };
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let _ = std::fs::write(
-        path,
-        serde_json::to_string_pretty(&state).unwrap_or_default(),
-    );
 }
 
 /// Rebuild a `DagRun` from persisted state. Running nodes are demoted to
@@ -236,6 +217,155 @@ pub fn max_run_counter(runs: &[DagRun]) -> u64 {
         })
         .max()
         .unwrap_or(0)
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// SQLite store (Turso)
+// ──────────────────────────────────────────────────────────────────────────────
+
+const SCHEMA: &str = "
+CREATE TABLE IF NOT EXISTS dag_runs (
+    id      TEXT PRIMARY KEY,
+    status  TEXT NOT NULL,
+    payload TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS dag_nodes (
+    run_id  TEXT NOT NULL,
+    id      TEXT NOT NULL,
+    seq     INTEGER NOT NULL,
+    status  TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (run_id, id)
+);
+CREATE INDEX IF NOT EXISTS idx_dag_nodes_run ON dag_nodes(run_id);
+CREATE INDEX IF NOT EXISTS idx_dag_runs_status ON dag_runs(status);
+";
+
+/// SQLite-backed DAG state store. Cheap to clone (`Database` is an Arc inside);
+/// all methods are `&self` async, so a single handle can be shared between the
+/// debounce task and the shutdown flush path.
+#[derive(Clone)]
+pub struct SqliteDagStore {
+    db: Database,
+}
+
+impl SqliteDagStore {
+    /// Open (creating if needed) the state database at `path`, ensuring the
+    /// schema exists.
+    pub async fn open(path: impl AsRef<Path>) -> Result<Self, String> {
+        let p = path.as_ref();
+        if let Some(parent) = p.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let db = Builder::new_local(&p.to_string_lossy())
+            .build()
+            .await
+            .map_err(|e| e.to_string())?;
+        db.connect()
+            .map_err(|e| e.to_string())?
+            .execute_batch(SCHEMA)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(Self { db })
+    }
+
+    fn conn(&self) -> Result<Connection, String> {
+        self.db.connect().map_err(|e| e.to_string())
+    }
+
+    /// Load all persisted runs (any status; the caller filters — `restore`
+    /// skips ids already live and hydrates the rest). Corrupt rows are
+    /// skipped, never fatal (best-effort read).
+    pub async fn load(&self) -> Result<Vec<PersistedRun>, String> {
+        let conn = self.conn()?;
+        let mut run_rows = conn
+            .query("SELECT payload FROM dag_runs ORDER BY id", ())
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut runs: Vec<PersistedRun> = Vec::new();
+        while let Some(row) = run_rows.next().await.map_err(|e| e.to_string())? {
+            let payload: String = row.get(0).map_err(|e| e.to_string())?;
+            match serde_json::from_str::<PersistedRun>(&payload) {
+                Ok(r) => runs.push(r),
+                Err(e) => tracing::warn!("skip corrupt dag run row: {e}"),
+            }
+        }
+        // Attach nodes per run.
+        for run in &mut runs {
+            let mut node_rows = conn
+                .query(
+                    "SELECT payload FROM dag_nodes WHERE run_id = ?1 ORDER BY seq",
+                    [run.id.as_str()],
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+            let mut nodes: Vec<PersistedNode> = Vec::new();
+            while let Some(row) = node_rows.next().await.map_err(|e| e.to_string())? {
+                let payload: String = row.get(0).map_err(|e| e.to_string())?;
+                match serde_json::from_str::<PersistedNode>(&payload) {
+                    Ok(n) => nodes.push(n),
+                    Err(e) => tracing::warn!("skip corrupt dag node row: {e}"),
+                }
+            }
+            run.nodes = nodes;
+        }
+        Ok(runs)
+    }
+
+    /// Transactional save of only the Running runs (terminal runs drop off
+    /// naturally). Full-table rewrite inside one transaction: atomic,
+    /// idempotent, cheap at this scale (a handful of runs). Best-effort —
+    /// write errors are logged, never fatal.
+    pub async fn save(&self, runs: &[DagRun]) -> Result<(), String> {
+        let mut conn = self.conn()?;
+        let tx = conn.transaction().await.map_err(|e| e.to_string())?;
+        tx.execute_batch("DELETE FROM dag_nodes; DELETE FROM dag_runs;")
+            .await
+            .map_err(|e| e.to_string())?;
+        for run in runs.iter().filter(|r| r.status == DagStatus::Running) {
+            let persisted = to_persisted(run);
+            let run_payload = serde_json::to_string(&persisted).map_err(|e| e.to_string())?;
+            tx.execute(
+                "INSERT INTO dag_runs (id, status, payload) VALUES (?1, ?2, ?3)",
+                [run.id.as_str(), "running", run_payload.as_str()],
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+            for (seq, node) in persisted.nodes.iter().enumerate() {
+                let node_payload = serde_json::to_string(&node).map_err(|e| e.to_string())?;
+                tx.execute(
+                    "INSERT INTO dag_nodes (run_id, id, seq, status, payload) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    [
+                        run.id.as_str(),
+                        node.id.as_str(),
+                        &seq.to_string(),
+                        node.status.as_str(),
+                        node_payload.as_str(),
+                    ],
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+            }
+        }
+        tx.commit().await.map_err(|e| e.to_string())?;
+        Ok(())
+    }
+}
+
+/// Node status as a lowercase string (mirrors the serde rename on
+/// [`NodeStatus`]).
+impl NodeStatus {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Ready => "ready",
+            Self::Running => "running",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::Skipped => "skipped",
+            Self::Cancelled => "cancelled",
+        }
+    }
 }
 
 #[cfg(test)]

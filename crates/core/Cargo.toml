@@ -64,6 +64,10 @@ anyhow = "1"
 # / authentication primitive. SHA-256 is overkill cryptographically for this purpose
 # but avoids the "two hashers disagree" footgun of non-deterministic stdlib hashers.
 sha2 = "0.10"
+# Pure-Rust SQLite-compatible database (Turso, formerly Limbo) for the session
+# backend: async API, MVCC concurrent writes, SQLite file format. Locked to the
+# 0.7 stable line (0.8 is pre-release).
+turso = "0.7"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

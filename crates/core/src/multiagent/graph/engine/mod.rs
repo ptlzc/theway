@@ -20,6 +20,7 @@ use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
 use super::graph::{build_run, downstream_closure, is_blocked, now_ms, validate_graph};
+use super::persist::DagPersistSink;
 // Glob-imported by the bridged tests (`tests/multiagent/graph/engine/`).
 #[cfg(test)]
 use super::persist::PersistedRun;
@@ -52,6 +53,10 @@ pub trait NodeLauncher: Send + Sync {
 /// Shared scheduler handle (cheap clone, same as the TS module singleton).
 pub struct DagEngine {
     inner: Arc<Mutex<EngineInner>>,
+    /// Persistence sink (app-layer debounced writer), stored OUTSIDE the
+    /// engine lock so `notify_persist` can fire from any state-change point
+    /// without deadlocking (parking_lot is not reentrant).
+    persist_sink: Arc<parking_lot::Mutex<Option<Arc<dyn DagPersistSink>>>>,
 }
 
 pub(super) struct EngineInner {
@@ -72,6 +77,7 @@ impl Clone for DagEngine {
     fn clone(&self) -> Self {
         Self {
             inner: Arc::clone(&self.inner),
+            persist_sink: Arc::clone(&self.persist_sink),
         }
     }
 }
@@ -103,6 +109,7 @@ impl DagEngine {
                 jobs: HashMap::new(),
                 waiters: HashMap::new(),
             })),
+            persist_sink: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -115,6 +122,21 @@ impl DagEngine {
     /// `None` detaches (same contract as AgentJobRegistry).
     pub fn set_event_sender(&self, tx: Option<tokio::sync::broadcast::Sender<DagEvent>>) {
         self.inner.lock().events = tx;
+    }
+
+    /// Wire the persistence sink (app layer debounces + writes). `None` = no
+    /// persistence (tests, embedders).
+    pub fn set_persist_sink(&self, sink: Option<Arc<dyn DagPersistSink>>) {
+        *self.persist_sink.lock() = sink;
+    }
+
+    /// Non-blocking dirty notification to the persistence sink (if any).
+    /// Takes only the sink lock (never the engine lock), so it is safe to
+    /// call from any state-change point, including while `inner` is held.
+    fn notify_persist(&self) {
+        if let Some(sink) = self.persist_sink.lock().clone() {
+            sink.notify_dirty();
+        }
     }
 
     /// Broadcast an event-plane message (no-op without a sender).
@@ -149,6 +171,7 @@ impl DagEngine {
         }
         self.reconcile(&run.id);
         self.tick(&run.id);
+        self.notify_persist();
         Ok(self.get_run(&run.id).unwrap_or(run))
     }
 
@@ -212,6 +235,7 @@ impl DagEngine {
             status: DagStatus::Running,
             error: None,
         });
+        self.notify_persist();
         id
     }
 
@@ -280,6 +304,7 @@ impl DagEngine {
         for event in events {
             self.emit(event);
         }
+        self.notify_persist();
         if done {
             self.wake_waiters(run_id);
         }
@@ -344,6 +369,7 @@ impl DagEngine {
         for event in events {
             self.emit(event);
         }
+        self.notify_persist();
         self.wake_waiters(run_id);
     }
 
@@ -436,6 +462,7 @@ impl DagEngine {
             status: DagStatus::Cancelled,
             error: Some(reason.unwrap_or("cancelled by orchestrator").to_string()),
         });
+        self.notify_persist();
         self.wake_waiters(run_id);
     }
 
@@ -491,6 +518,7 @@ impl DagEngine {
         self.reconcile(run_id);
         self.tick(run_id);
         self.maybe_complete(run_id);
+        self.notify_persist();
         to_reset
     }
 
@@ -564,6 +592,7 @@ impl DagEngine {
         }
         self.emit(to_abort.1);
         self.after_node_terminal(run_id, node_id);
+        self.notify_persist();
         true
     }
 
