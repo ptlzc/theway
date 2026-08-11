@@ -5,8 +5,8 @@
 //! [`crate::agent::assembly::AgentHarness`] but Rust impl blocks may live in any module.
 //! Split out of `assembly/mod.rs` by domain.
 
-use crate::agent::assembly::HarnessEvent;
 use crate::agent::AgentRunError;
+use crate::agent::assembly::HarnessEvent;
 use crate::agent::compaction::compaction::{SummarizeError, compact, estimate_context_tokens};
 use crate::agent::messages::compaction_summary;
 use crate::agent::session::session::SessionTreeEntry;

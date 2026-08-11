@@ -19,8 +19,6 @@
 // Harness layer (feature-gated): the bare Agent stays always-on.
 #[cfg(feature = "harness")]
 pub mod assembly;
-// The loop engine is part of the bare Agent (prompt()/continue_() call it) — always on.
-pub mod run_loop;
 #[cfg(feature = "harness")]
 pub mod compaction;
 #[cfg(feature = "harness")]
@@ -33,6 +31,8 @@ pub mod hooks;
 pub mod messages;
 #[cfg(feature = "harness")]
 pub mod permission;
+// The loop engine is part of the bare Agent (prompt()/continue_() call it) — always on.
+pub mod run_loop;
 #[cfg(feature = "harness")]
 pub mod session;
 #[cfg(feature = "harness")]
