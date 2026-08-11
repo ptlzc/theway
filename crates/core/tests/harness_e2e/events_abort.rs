@@ -131,7 +131,7 @@ async fn budget_cap_blocks_new_prompts_after_cap_reached() {
 }
 
 /// Regression test for c4pt0r/theway#18. Prior behaviour: `Agent::abort()` cancelled the token
-/// but `agent_loop` only re-checked it after `stream.next()` returned, so an LLM stream that
+/// but `run_loop` only re-checked it after `stream.next()` returned, so an LLM stream that
 /// stalled mid-flight kept the prompt future blocked. The fix races `stream.next()` against
 /// `cancel.cancelled()` with a `biased` select.
 ///

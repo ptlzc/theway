@@ -430,12 +430,12 @@ mod tests {
 
     #[test]
     fn rust_real_file_entries_are_nonempty_and_ordered() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../core/src/agent/agent_loop/mod.rs");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../core/src/agent/run_loop/mod.rs");
         let o = outline_file(path.to_str().unwrap()).unwrap();
         assert_eq!(o.language, "rust");
         assert!(
             !o.entries.is_empty(),
-            "agent/agent_loop/mod.rs should yield entries"
+            "agent/run_loop/mod.rs should yield entries"
         );
         assert!(o.entries.iter().any(|e| e.kind == "function"));
         // DFS pre-order over tree-sitter children is source order: start lines

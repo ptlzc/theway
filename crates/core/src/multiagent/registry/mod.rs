@@ -639,7 +639,7 @@ mod tests {
             rt.block_on(fut);
         };
 
-        // User prompt (agent_loop replays new_messages through MessageStart/MessageEnd).
+        // User prompt (run_loop replays new_messages through MessageStart/MessageEnd).
         emit(AgentEvent::MessageEnd {
             message: AgentMessage::Llm(PiMessage::User(UserMessage {
                 role: UserRole::User,

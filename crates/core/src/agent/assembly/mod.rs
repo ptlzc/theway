@@ -69,7 +69,7 @@ pub struct AgentHarnessOptions {
     /// Routes through the bare `Agent`'s `on_control_plane_prompt` slot. `None` is
     /// fail-closed deny — any tool whose `permission_classification` returns `Prompt`
     /// (and no user `before_tool_call` hook hard-blocks) will receive a synthesized deny
-    /// at runtime rather than executing. See `crates/core/src/agent_loop.rs` for the
+    /// at runtime rather than executing. See `crate::agent::run_loop` for the
     /// merge semantics.
     pub on_control_plane_prompt: Option<crate::types::OnControlPlanePromptHook>,
     /// Per-session USD cap. When set, the harness refuses to start a new prompt once the
