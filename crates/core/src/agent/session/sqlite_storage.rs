@@ -124,10 +124,51 @@ impl SqliteSessionStorage {
 
     /// Open an existing session database. Parses the header from `meta` to
     /// recover metadata; the db is opened lazily on first use.
+    ///
+    /// Corruption handling (session transcripts are high-value, so we NEVER
+    /// auto-rebuild or discard): the file is checked for header + page
+    /// integrity; on damage `Corrupted` is returned and the file is left
+    /// untouched in place — the caller surfaces the error and the user
+    /// decides (e.g. delete and start fresh, or recover offline). No backup
+    /// copies: harness state is a working transcript, not a data asset.
     pub async fn open(path: impl Into<PathBuf>) -> Result<Self, SessionError> {
         let path = path.into();
-        let db = open_db(&path).await?;
-        let metadata = read_meta(&db).await?;
+        let db = match open_db(&path).await {
+            Ok(db) => db,
+            Err(e) => {
+                // Header-level damage (turso fails fast with e.g. "invalid
+                // page size in database header"). Report; leave the file.
+                return Err(SessionError {
+                    code: SessionErrorCode::Corrupted,
+                    message: format!("session db {} corrupt: {e}", path.display()),
+                });
+            }
+        };
+        if !integrity_ok(&db).await? {
+            return Err(SessionError {
+                code: SessionErrorCode::Corrupted,
+                message: format!(
+                    "session db {} failed integrity check (left in place)",
+                    path.display()
+                ),
+            });
+        }
+        // Reading the header can also hit damaged pages that quick_check
+        // missed (e.g. a clobbered meta row) — surface as Corrupted too, since
+        // on the open path an unreadable file IS the damage.
+        let metadata = match read_meta(&db).await {
+            Ok(m) => m,
+            Err(e) => {
+                return Err(SessionError {
+                    code: SessionErrorCode::Corrupted,
+                    message: format!(
+                        "session db {} unreadable ({}), left in place",
+                        path.display(),
+                        e.message
+                    ),
+                });
+            }
+        };
         Ok(Self {
             path,
             db: tokio::sync::Mutex::new(Some(db)),
@@ -188,7 +229,42 @@ async fn open_db(path: &Path) -> Result<Database, SessionError> {
     Builder::new_local(&path.to_string_lossy())
         .build()
         .await
-        .map_err(map_err)
+        .map_err(|e| SessionError {
+            // A failed open on an existing file is almost always corruption
+            // (turso fails fast on a damaged header). Surface it as such so
+            // the caller can distinguish "can't open" from "db is damaged".
+            code: SessionErrorCode::Corrupted,
+            message: e.to_string(),
+        })
+}
+
+/// Run `PRAGMA quick_check` (cheap page-level integrity scan) and report
+/// whether the database is sound. A healthy db returns exactly one row with
+/// value `"ok"`; anything else (error, no rows, or a damage report) is
+/// treated as corrupt.
+async fn integrity_ok(db: &Database) -> Result<bool, SessionError> {
+    let conn = db.connect().map_err(map_err)?;
+    let mut rows = match conn.query("PRAGMA quick_check", ()).await {
+        Ok(rows) => rows,
+        // A corrupt file can make even the PRAGMA itself fail ("database
+        // disk image is malformed"); that IS the damage signal.
+        Err(_) => return Ok(false),
+    };
+    let mut values: Vec<String> = Vec::new();
+    loop {
+        let row = match rows.next().await {
+            Ok(Some(row)) => row,
+            Ok(None) => break,
+            // Iterating can hit damaged pages quick_check did not flag
+            // upfront; any read failure counts as corrupt.
+            Err(_) => return Ok(false),
+        };
+        match row.get::<String>(0) {
+            Ok(v) => values.push(v),
+            Err(_) => return Ok(false),
+        }
+    }
+    Ok(values == ["ok"])
 }
 
 async fn write_meta(db: &Database, meta: &JsonlSessionMetadata) -> Result<(), SessionError> {

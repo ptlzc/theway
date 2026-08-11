@@ -247,3 +247,88 @@ async fn sqlite_compaction_summary_replaces_history_up_to_first_kept() {
         _ => panic!("expected compaction_summary custom message"),
     }
 }
+
+// ── SQLite corruption handling ─────────────────────────────────────────────
+
+/// A session db with a clobbered header must fail open with Corrupted and
+/// leave the file in place (no auto-rebuild, no delete — the transcript is the
+/// user's data; they decide).
+#[tokio::test]
+async fn sqlite_corrupt_header_reports_corrupted_and_keeps_file() {
+    use std::io::{Seek, SeekFrom, Write};
+    let dir = tempdir().unwrap();
+    let repo = SqliteSessionRepo::new(dir.path());
+
+    let files = {
+        let session = repo.create("/some/cwd").await.unwrap();
+        session
+            .append_message(user_message("precious"))
+            .await
+            .unwrap();
+        let files = repo.list().await.unwrap();
+        assert_eq!(files.len(), 1);
+        files
+    };
+    // Drop the session so the process-local turso handle is released, then
+    // clobber the header (first 64 bytes) — simulates a damaged file on disk
+    // that a fresh open must detect.
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&files[0])
+        .unwrap();
+    let zeros = [0u8; 64];
+    f.seek(SeekFrom::Start(0)).unwrap();
+    f.write_all(&zeros).unwrap();
+    drop(f);
+
+    match repo.open(&files[0]).await {
+        Err(e) => {
+            assert_eq!(e.code, theway_core::SessionErrorCode::Corrupted);
+        }
+        Ok(_) => panic!("corrupt db must not open"),
+    }
+    // File still exists (we never delete user data).
+    assert!(files[0].exists());
+}
+
+/// A session db with a damaged data page (but intact header) must be caught
+/// by the quick_check integrity scan on open.
+#[tokio::test]
+async fn sqlite_corrupt_data_page_caught_by_integrity_check() {
+    use std::io::{Seek, SeekFrom, Write};
+    let dir = tempdir().unwrap();
+    let repo = SqliteSessionRepo::new(dir.path());
+
+    let path = {
+        let session = repo.create("/some/cwd").await.unwrap();
+        // Enough messages to spill past page 1 (4096 B) so a middle data
+        // page exists to corrupt.
+        for i in 0..300 {
+            session
+                .append_message(user_message(&format!("msg {i} {}", "x".repeat(200))))
+                .await
+                .unwrap();
+        }
+        let files = repo.list().await.unwrap();
+        assert_eq!(files.len(), 1);
+        files[0].clone()
+    };
+    // Sanity: the db really has >1 page (else the corruption below would
+    // land past EOF and be ignored).
+    let len = std::fs::metadata(&path).unwrap().len();
+    assert!(len > 4096, "db too small for page-corruption test: {len} B");
+    // Corrupt page 2 (a data page; page 1 is the root — turso tolerates
+    // root-page damage, so we hit a real data page).
+    let mut f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+    let garbage = [0xFFu8; 4096];
+    f.seek(SeekFrom::Start(4096)).unwrap();
+    f.write_all(&garbage).unwrap();
+    drop(f);
+
+    match repo.open(&path).await {
+        Err(e) => assert_eq!(e.code, theway_core::SessionErrorCode::Corrupted),
+        Ok(_) => panic!("corrupt data page must be caught by quick_check"),
+    }
+    // File untouched (never deleted).
+    assert!(path.exists());
+}

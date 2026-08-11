@@ -255,3 +255,81 @@ fn max_run_counter_parses_dag_n() {
     );
     assert_eq!(max_run_counter(&[mk("dag-0")]), 0);
 }
+
+// ── corruption handling ─────────────────────────────────────────────────────
+
+/// Clobber the db header (first 64 bytes) — turso fails with "invalid page
+/// size in database header" on open, which is exactly the corruption path
+/// `SqliteDagStore::open` must recover from by discarding + rebuilding.
+#[tokio::test]
+async fn open_rebuilds_after_header_corruption() {
+    let path = temp_db("corrupt-header");
+    let _ = std::fs::remove_file(&path);
+    {
+        let store = SqliteDagStore::open(&path).await.unwrap();
+        let run = sample_run("dag-1", DagStatus::Running);
+        store.save(&[run]).await.unwrap();
+    }
+    // Corrupt the header.
+    {
+        use std::io::{Seek, SeekFrom, Write};
+        let mut f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        let zeros = [0u8; 64];
+        f.seek(SeekFrom::Start(0)).unwrap();
+        f.write_all(&zeros).unwrap();
+    }
+    // Open must discard + rebuild: file exists again, schema valid, empty.
+    let store = SqliteDagStore::open(&path).await.unwrap();
+    assert!(path.exists());
+    assert!(store.load().await.unwrap().is_empty());
+    // And a subsequent save works on the fresh db.
+    let run = sample_run("dag-2", DagStatus::Running);
+    store.save(&[run]).await.unwrap();
+    let loaded = store.load().await.unwrap();
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].id, "dag-2");
+    let _ = std::fs::remove_file(&path);
+}
+
+/// A zero-byte file is a legit "never written" state — must open fine (not be
+/// mistaken for corruption).
+#[tokio::test]
+async fn empty_file_opens_clean() {
+    let path = temp_db("empty-file");
+    let _ = std::fs::remove_file(&path);
+    std::fs::write(&path, b"").unwrap();
+    let store = SqliteDagStore::open(&path).await.unwrap();
+    assert!(store.load().await.unwrap().is_empty());
+    let _ = std::fs::remove_file(&path);
+}
+
+/// Write failure on a corrupt store must rebuild and retry (once) so the save
+/// eventually lands.
+#[tokio::test]
+async fn save_rebuilds_and_retries_on_write_failure() {
+    let path = temp_db("corrupt-save");
+    let _ = std::fs::remove_file(&path);
+    let store = SqliteDagStore::open(&path).await.unwrap();
+    // Corrupt the file behind the store's back (drop all handles first so the
+    // file is not locked, then re-open the store — open rebuilds, so instead
+    // corrupt AFTER open by clobbering the on-disk file; the store keeps its
+    // open handle and the next write hits the damaged file).
+    let run = sample_run("dag-1", DagStatus::Running);
+    store.save(&[run]).await.unwrap();
+    // Clobber the file mid-write: truncate + garbage (this simulates the file
+    // on disk being damaged between saves).
+    {
+        use std::io::{Seek, SeekFrom, Write};
+        let mut f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        let garbage = [0xFFu8; 4096];
+        f.seek(SeekFrom::Start(0)).unwrap();
+        f.write_all(&garbage).unwrap();
+    }
+    // The store's next save must rebuild + retry and succeed.
+    let run2 = sample_run("dag-2", DagStatus::Running);
+    store.save(&[run2]).await.unwrap();
+    let loaded = store.load().await.unwrap();
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].id, "dag-2");
+    let _ = std::fs::remove_file(&path);
+}

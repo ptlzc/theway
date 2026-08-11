@@ -260,9 +260,9 @@ fn ts_kind(node: TSNode) -> Option<&'static str> {
                     }
                 }
             }
-            let declarator = match declarator_idx {
-                Some(idx) => node.child(idx).unwrap(),
-                None => return None,
+            let declarator = {
+                let idx = declarator_idx?;
+                node.child(idx).unwrap()
             };
 
             // Check if init is a function/arrow/call (using named_child to skip punctuation)

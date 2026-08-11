@@ -19,8 +19,10 @@
 //!   app layer debounces and flushes asynchronously.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use async_trait::async_trait;
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use turso::{Builder, Connection, Database};
 
@@ -243,34 +245,82 @@ CREATE INDEX IF NOT EXISTS idx_dag_runs_status ON dag_runs(status);
 
 /// SQLite-backed DAG state store. Cheap to clone (`Database` is an Arc inside);
 /// all methods are `&self` async, so a single handle can be shared between the
-/// debounce task and the shutdown flush path.
+/// debounce task and the shutdown flush path. The inner `Database` is behind a
+/// mutex so a corrupt file can be quarantined and rebuilt in place.
 #[derive(Clone)]
 pub struct SqliteDagStore {
-    db: Database,
+    db: Arc<Mutex<Database>>,
+    /// Path of the database file (for quarantine on corruption).
+    path: PathBuf,
 }
 
 impl SqliteDagStore {
     /// Open (creating if needed) the state database at `path`, ensuring the
     /// schema exists.
+    ///
+    /// Corruption recovery: DAG state is rebuildable process data — if the
+    /// file exists but cannot be opened (e.g. clobbered header — turso fails
+    /// with "invalid page size" on open), the damaged file is discarded and a
+    /// fresh database is created. No backup: harness state is re-derived from
+    /// the running engine, not a data asset.
     pub async fn open(path: impl AsRef<Path>) -> Result<Self, String> {
         let p = path.as_ref();
         if let Some(parent) = p.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        let db = Builder::new_local(&p.to_string_lossy())
+        // Retry loop (max 2 iterations): a damaged file is discarded once and
+        // the open retried on a fresh database. Written as a loop instead of
+        // recursion to keep the future sized.
+        for attempt in 0..2 {
+            match Builder::new_local(&p.to_string_lossy()).build().await {
+                Ok(db) => {
+                    db.connect()
+                        .map_err(|e| e.to_string())?
+                        .execute_batch(SCHEMA)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    return Ok(Self {
+                        db: Arc::new(Mutex::new(db)),
+                        path: p.to_path_buf(),
+                    });
+                }
+                Err(e) if attempt == 0 && p.exists() && file_nonempty(p) => {
+                    // Damaged file: discard + rebuild once. A zero-byte file
+                    // is a legit "never written" state and opens fine;
+                    // header errors imply real damage.
+                    tracing::warn!(
+                        "dag state {} corrupt, discarding and rebuilding: {e}",
+                        p.display()
+                    );
+                    let _ = std::fs::remove_file(p);
+                }
+                Err(e) => return Err(e.to_string()),
+            }
+        }
+        unreachable!("open loop exits on first successful build or error")
+    }
+
+    fn conn(&self) -> Result<Connection, String> {
+        self.db.lock().connect().map_err(|e| e.to_string())
+    }
+
+    /// Rebuild the store in place after a corrupt file was detected (write
+    /// failure). DAG state is disposable: the damaged file is discarded and a
+    /// fresh database takes its place so subsequent saves succeed.
+    async fn rebuild(&self) -> Result<(), String> {
+        let _ = std::fs::remove_file(&self.path);
+        let fresh = Builder::new_local(&self.path.to_string_lossy())
             .build()
             .await
             .map_err(|e| e.to_string())?;
-        db.connect()
+        fresh
+            .connect()
             .map_err(|e| e.to_string())?
             .execute_batch(SCHEMA)
             .await
             .map_err(|e| e.to_string())?;
-        Ok(Self { db })
-    }
-
-    fn conn(&self) -> Result<Connection, String> {
-        self.db.connect().map_err(|e| e.to_string())
+        *self.db.lock() = fresh;
+        Ok(())
     }
 
     /// Load all persisted runs (any status; the caller filters — `restore`
@@ -315,8 +365,24 @@ impl SqliteDagStore {
     /// Transactional save of only the Running runs (terminal runs drop off
     /// naturally). Full-table rewrite inside one transaction: atomic,
     /// idempotent, cheap at this scale (a handful of runs). Best-effort —
-    /// write errors are logged, never fatal.
+    /// write errors are logged, never fatal. If the write fails, the store is
+    /// rebuilt once (a corrupt file is discarded; harness state is
+    /// re-derivable from the live engine) and the save retried.
     pub async fn save(&self, runs: &[DagRun]) -> Result<(), String> {
+        match self.save_once(runs).await {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                tracing::warn!(
+                    "dag state {} write failed, rebuilding and retrying: {e}",
+                    self.path.display()
+                );
+                self.rebuild().await?;
+                self.save_once(runs).await
+            }
+        }
+    }
+
+    async fn save_once(&self, runs: &[DagRun]) -> Result<(), String> {
         let mut conn = self.conn()?;
         let tx = conn.transaction().await.map_err(|e| e.to_string())?;
         tx.execute_batch("DELETE FROM dag_nodes; DELETE FROM dag_runs;")
@@ -350,6 +416,12 @@ impl SqliteDagStore {
         tx.commit().await.map_err(|e| e.to_string())?;
         Ok(())
     }
+}
+
+/// True when the file exists and holds at least one byte (a zero-byte file is
+/// a legit "never written" state, not corruption).
+fn file_nonempty(p: &Path) -> bool {
+    std::fs::metadata(p).map(|m| m.len() > 0).unwrap_or(false)
 }
 
 /// Node status as a lowercase string (mirrors the serde rename on
