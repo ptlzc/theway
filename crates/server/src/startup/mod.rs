@@ -633,13 +633,19 @@ pub(crate) async fn run_repl(
         app.replay(&ctx.messages);
     }
 
-    // Stream agent + harness events into the feed. These listeners never touch stdout — they
-    // only enqueue structured updates that the UI loop renders.
-    let _unsub = harness
-        .agent()
-        .subscribe(ui::listener::agent_listener(feed_tx.clone()));
-    let _unsub_harness_tui =
-        harness.subscribe_harness(ui::listener::harness_listener(feed_tx.clone(), cli.debug));
+    // Stream agent + harness events into the feed via the core broadcast channel
+    // (segment 3). Each spawned task receives from the broadcast Receiver and forwards
+    // structured FeedUpdates to the UI loop. This replaces the old synchronous
+    // `agent.subscribe()` / `harness.subscribe_harness()` pattern.
+    let _agent_broadcast = ui::listener::spawn_agent_broadcast_listener(
+        harness.agent().subscribe_broadcast(),
+        feed_tx.clone(),
+    );
+    let _harness_broadcast = ui::listener::spawn_harness_broadcast_listener(
+        harness.subscribe_session_broadcast(),
+        feed_tx.clone(),
+        cli.debug,
+    );
     let _unsub_trigger_tui =
         trigger_executor.subscribe(ui::listener::trigger_listener(feed_tx.clone(), cli.debug));
     let _unsub_dynamic_fire_once = trigger_executor.subscribe(

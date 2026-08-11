@@ -12,7 +12,9 @@ use chrono::Local;
 use parking_lot::Mutex;
 use theway_core::{LoopEvent, LoopListener, SessionEvent, SessionListener};
 use theway_llm_provider::AssistantMessageEvent;
+use tokio::sync::broadcast;
 use tokio::sync::mpsc::UnboundedSender;
+use tokio::task::JoinHandle;
 
 use super::feed::{
     FeedUpdate, Level, TriggerPollStatus, compact_tool_content_blocks, preview, truncate_chars,
@@ -28,6 +30,59 @@ pub fn agent_listener(tx: UnboundedSender<FeedUpdate>) -> LoopListener {
                 let _ = tx.send(update);
             }
         })
+    })
+}
+
+/// Spawn a tokio task that receives [`LoopEvent`]s from the core broadcast channel
+/// (segment 3) and forwards them as [`FeedUpdate`]s to the UI channel. Replaces the
+/// old synchronous `agent_listener` + `agent.subscribe()` pattern.
+pub fn spawn_agent_broadcast_listener(
+    mut rx: broadcast::Receiver<LoopEvent>,
+    tx: UnboundedSender<FeedUpdate>,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(event) => {
+                    for update in map_agent_event(&event) {
+                        let _ = tx.send(update);
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!("LoopEvent broadcast lagged by {n}, skipping");
+                    continue;
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+        tracing::debug!("LoopEvent broadcast channel closed; listener task exiting");
+    })
+}
+
+/// Spawn a tokio task that receives [`SessionEvent`]s from the core broadcast channel
+/// (segment 3) and forwards them as [`FeedUpdate`]s to the UI channel. Replaces the
+/// old synchronous `harness_listener` + `harness.subscribe_harness()` pattern.
+pub fn spawn_harness_broadcast_listener(
+    mut rx: broadcast::Receiver<SessionEvent>,
+    tx: UnboundedSender<FeedUpdate>,
+    debug: bool,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(event) => {
+                    if let Some(update) = map_harness_event(&event, debug) {
+                        let _ = tx.send(update);
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!("SessionEvent broadcast lagged by {n}, skipping");
+                    continue;
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+        tracing::debug!("SessionEvent broadcast channel closed; listener task exiting");
     })
 }
 

@@ -171,16 +171,20 @@ impl SessionHarnessFactory {
             triggers::DynamicTriggerCheckHook::new(self.dynamic_trigger_registry.clone()),
         ));
 
-        // Feed + main-run listeners. The unsubscribe handles are dropped WITHOUT being
-        // called, which keeps the subscriptions alive for the harness's lifetime (they
-        // only detach when invoked).
-        let _ = harness
-            .agent()
-            .subscribe(ui::listener::agent_listener(self.feed_tx.clone()));
-        let _ = harness.subscribe_harness(ui::listener::harness_listener(
+        // Feed listeners via the core broadcast channel (segment 3). Each spawned task
+        // receives from the broadcast Receiver and forwards structured FeedUpdates to
+        // the UI loop. This replaces the old `agent.subscribe()` /
+        // `harness.subscribe_harness()` pattern. The JoinHandle is dropped without being
+        // awaited — the task runs for the harness's lifetime.
+        let _agent_broadcast = ui::listener::spawn_agent_broadcast_listener(
+            harness.agent().subscribe_broadcast(),
+            self.feed_tx.clone(),
+        );
+        let _harness_broadcast = ui::listener::spawn_harness_broadcast_listener(
+            harness.subscribe_session_broadcast(),
             self.feed_tx.clone(),
             self.debug,
-        ));
+        );
         let _ = trigger_executor.subscribe(ui::listener::trigger_listener(
             self.feed_tx.clone(),
             self.debug,
