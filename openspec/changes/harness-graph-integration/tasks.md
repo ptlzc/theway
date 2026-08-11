@@ -17,14 +17,14 @@
 - [ ] 2.4 `runner.rs`: 节点 harness 用 `ephemeral` 构造 + 传 `run_id` / `node_id`;registry 的 session_id 元数据保留 (现有逻辑)。
 - [ ] 2.5 事件消费者适配 (server ui/listener、goal.rs、harness_e2e 测试) + 新增 ephemeral 行为测试 (无 session 时 move_to 报错、set_model 不写审计)。
 
-## 3. run 级成本 (P7)
+## 3. 成本分层 (P7) — core 中性统计, server 应用层能力
 
-- [ ] 3.0 前置: llm-provider 计算 `Usage::cost` — 在 assistant usage 解析处按 `tokens × model.cost.<kind> / 1_000_000` 填充 (provider 自带 cost 字段则优先解析);新增单测 (1M input + 0.5M output 的美元断言);修正 `core/src/agent/cost.rs` 注释 (不再声称 provider 已填充)。
-- [ ] 3.1 registry: job 记录增加 `cost_usd: Option<f64>`;`AgentJobEvent::Completed` / Metrics 增加 `cost_usd`;`metrics_listener` 或 runner 在 finish 时从 `sub.cost()` 快照写入。
-- [ ] 3.2 engine: run 记录 (graph/types.rs 运行时状态) 增加 `run_cost_usd: Option<f64>`;`on_node_completed` 时累计节点成本。
-- [ ] 3.3 `AgentRunOptions` 增加 `budget_cap_usd: Option<f64>` (run 级);engine 调度点在节点完成时检查累计成本,超限 → 后续节点不启动、运行中节点完成、run 标记预算受限 (DagStatus 复用或新增状态)。
-- [ ] 3.4 展示: dag_tools 渲染 (dag_inspect/status) 与 server UI 展示 run 总成本 / 单节点成本 (若有 UI 消费点)。
-- [ ] 3.5 测试: 多节点 run 成本累计、预算超限中止后续节点 (engine 测试套件);单会话 per-harness budget 行为不变测试。
+- [ ] 3.1 core 去美元化 — `core/src/agent/cost.rs`: `CostTracker`/`CostSnapshot` 移除 USD 聚合 (`total_cost()` 删除, `one_line_summary`/`full_breakdown` 去成本行), 只留 token 统计;修正注释 (不再声称 provider 填充 cost)。
+- [ ] 3.2 core 去预算 — `assembly.rs`: 删 `AgentHarnessOptions::budget_cap_usd` 字段与 `check_budget_cap` 调用 (`prompt`/`continue_`/continuation 三处);`CostSnapshot` 引用方适配 (server 侧)。
+- [ ] 3.3 llm-provider: 确认 `Usage::cost` 无填充承诺 (anthropic `update_usage` 保持只填 token);`ModelCost` 价格表保留;无 provider 改动。
+- [ ] 3.4 server 成本模块 — 新建 `server/src/cost.rs`: `usd_cost(model, usage) -> f64` (读 theway-llm-provider 模型目录价格, tokens × 单价 / 1e6);`/cost` 命令、debug.rs (`usage.cost.total` 消费点)、UI 成本展示改用 server 换算。
+- [ ] 3.5 server 预算工具 — run 级预算: 新工具/命令 (组合 `dag_status` 拿节点 token 统计 → server 换算 USD 累计 → 超限调 `dag_cancel`);文档注明 core 零预算概念。
+- [ ] 3.6 测试: core 无 USD/预算残留 (grep `budget_cap_usd`/`cost.total` 为空);server `usd_cost` 单测 (1M input + 0.5M output 美元断言、零价格不 panic);`/cost` e2e 显示真实美元;预算工具超限中止测试。
 
 ## 4. 事件面 + 执行模型文档 (P6/P3)
 

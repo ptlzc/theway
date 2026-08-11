@@ -9,7 +9,7 @@ graph(DAG 编排)已是 harness 的核心能力:每个节点 = `multiagent/runne
 - **P4 子运行装配收口**: runner 的组合逻辑(text/tokens/状态摘要、cancel 级联)下沉为 assembly 可复用能力(经 P2 的 run 摘要 + 现有 abort 契约),runner 只保留 registry/engine 专属逻辑(注册、控制句柄、metrics)。
 - **P5 graph 身份 + ephemeral session**: `AgentHarnessOptions` 增加 `run_id` / `node_id` 身份字段;`HarnessEvent` 携带身份;Session 支持 ephemeral 模式(`session: Option<Session>`,无 session 时 `set_model`/`set_thinking_level` 仅改内存状态)。
 - **P6 事件面归属**: 定义 `HarnessEvent`(会话生命周期)与 `AgentJobEvent`(高频作业事件,registry)的职责边界并文档化;`HarnessEvent` 增加 graph 生命周期变体(节点开始/结束),节点事件可溯源到 run/node。
-- **P7 run 级成本**: runner 汇总节点 `CostSnapshot` 到 run;`budget_cap_usd` 支持 run 级(节点完成后累计,超限中止后续节点);registry/engine 增加 USD 字段。
+- **P7 成本与预算分层**: core 移除 USD/预算概念(只保留 token/char 中性统计,`Usage::cost` 不再承诺填充);USD 换算为 server 能力(`/cost` 展示、成本报表用真实美元);预算上限移到 server 侧工具层(累计节点成本,超限经 `dag_cancel` 中止后续节点)。
 
 ## Capabilities
 
@@ -18,7 +18,7 @@ graph(DAG 编排)已是 harness 的核心能力:每个节点 = `multiagent/runne
 - `harness-turn-observation`: 统一 turn 结束观测 — assembly 内置 per-turn 观察者 + `prompt()` 运行摘要,替代 multiagent 层的裸订阅与文本收集。
 - `harness-graph-identity`: AgentHarness 携带 run/node 身份,HarnessEvent 可溯源;Session 支持 ephemeral 模式。
 - `harness-event-ownership`: 事件面职责边界 — HarnessEvent(生命周期/低频)与 AgentJobEvent(高频作业)的归属与映射,节点级事件可溯源。
-- `run-level-cost`: 跨节点 USD 成本聚合与 run 级预算上限。
+- `run-level-cost`: 成本分层 — core 只统计 token/char(中性),USD 换算与预算判定在 server 工具层。
 
 ### Modified Capabilities
 
@@ -26,7 +26,7 @@ graph(DAG 编排)已是 harness 的核心能力:每个节点 = `multiagent/runne
 
 ## Impact
 
-- **代码**: `crates/core/src/agent/assembly.rs`(options + run_turn_with_continuation + HarnessEvent + prompt 签名)、`crates/core/src/multiagent/runner.rs`(删收集器、改 TurnObserver)、`crates/core/src/multiagent/registry/*`(USD 字段)、`crates/core/src/multiagent/graph/engine/*`(run 级预算)、`crates/server/src/*`(装配处传身份/预算,若有)。
-- **API**: `AgentHarnessOptions` 增字段(非破坏);`prompt()` 返回类型 `Result<(), AgentRunError>` → `Result<RunSummary, AgentRunError>`(**BREAKING**,影响 server 调用方与 runner)。
-- **行为**: 节点/run 可溯源、run 级预算生效;turn 观测语义不变(观测者被动,不改变执行)。
-- **不改变**: `OnTurnEndHook` 契约(goal 模式)、graph engine 调度语义、依赖方向(multiagent → assembly 单向)。
+- **代码**: `crates/core/src/agent/assembly.rs`(删 budget_cap_usd + check_budget_cap)、`crates/core/src/agent/cost.rs`(去 USD)、`crates/server/src/*`(新成本换算模块 + /cost 改造 + 预算工具)、`crates/llm-provider`(不填充 Usage::cost)。
+- **API**: `AgentHarnessOptions` 删 `budget_cap_usd`(**BREAKING**);`prompt()` 返回类型 `Result<(), AgentRunError>` → `Result<RunSummary, AgentRunError>`(**BREAKING**,影响 server 调用方与 runner)。
+- **行为**: 节点/run 可溯源、/cost 显示真实美元、run 级预算由 server 工具层经 dag_cancel 中止;turn 观测语义不变(观测者被动,不改变执行)。
+- **不改变**: `OnTurnEndHook` 契约(goal 模式)、graph engine 调度语义、依赖方向(multiagent → assembly 单向)、llm-provider 模型目录价格表(保留为数据)。

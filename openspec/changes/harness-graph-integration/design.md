@@ -24,7 +24,7 @@ graph(DAG 编排)是 harness 的核心能力:每个节点由 `multiagent/runner.
 - AgentHarness 携带 graph 身份(run_id/node_id),HarnessEvent 可溯源(P5)。
 - Session 支持 ephemeral 模式,一次性节点不强制会话持久化机制(P5)。
 - 事件面职责边界明确:HarnessEvent(低频生命周期)与 AgentJobEvent(高频作业)归属单一化,节点事件可溯源(P6)。
-- run 级 USD 成本聚合 + run 级预算上限(P7)。
+- 成本分层:core 只统计 token/char(中性),USD 换算与预算判定在 server(P7)。
 - 文档化执行模型边界:内联 hook(goal)vs detached 引擎(graph)(P3)。
 
 **Non-Goals:**
@@ -97,15 +97,22 @@ pub struct RunSummary {
 
 **为什么**: 不合并事件类型(频率/传输需求不同),但职责边界必须有文档 + 身份可溯源,否则"graph 核心化"后观测者依然要猜。
 
-### D5: run 级成本(P7)
+### D5: 成本与预算分层 — core 中性统计,server 应用层能力(P7)
 
-**现状缺口(本设计新增前置)**: `Usage::cost` 目前**无运行时计算** — `core/src/agent/cost.rs:14-15` 注释声称 provider 按目录价格表填充,但全仓库无一处 `tokens × ModelCost / 1e6` 的乘法(anthropic `update_usage` 只填 token 数),`Usage::cost` 运行时恒为 0。后果:`/cost` 美元显示为 0、`budget_cap_usd` 检查(`assembly.rs:678`)永不触发。
+**现状缺口**: `Usage::cost` 目前**无运行时计算** — `core/src/agent/cost.rs:14-15` 注释声称 provider 按目录价格表填充,但全仓库无一处 `tokens × ModelCost / 1e6` 的乘法(anthropic `update_usage` 只填 token 数),`Usage::cost` 运行时恒为 0。后果:`/cost` 美元显示为 0、`budget_cap_usd` 检查(`assembly.rs:678`)永不触发。
 
-**D5a(前置)**: llm-provider 在解析每条 assistant usage 时计算 `Usage::cost`(input/output/cache_read/cache_write 各自 `tokens × model.cost.<kind> / 1_000_000`,`total` 为四者之和;provider 响应自带 cost 字段时优先解析)。core 的 `cost.rs` 注释修正为如实描述。
+**更深的问题(分层错误)**: 美元定价、换算、预算判定都是**应用层派生概念**,却由引擎持有 — `ModelCost` 价格在 llm-provider、`CostTracker` 的 USD 聚合与 `budget_cap_usd` 在 core 的 assembly。修正原则:**core 只做中性统计(token/char),美元是 server 的能力**。
 
-**D5b(聚合)**: `runner.rs` 聚合本 run 各节点 USD 成本:每个节点完成时从 harness `CostTracker` 取 `CostSnapshot`,累计到 run 记录;run 状态面(graph/types.rs 运行时状态)提供 `run_cost_usd: Option<f64>`;registry 的 job 记录与 `AgentJobEvent::Completed` 增加 `cost_usd` 字段。
+**D5a(core 去美元化)**:
+- llm-provider:`ModelCost` 价格表**保留**(模型目录数据,server 消费),但**不承诺填充** `Usage::cost`(删除 `cost.rs` 注释中"providers populate"的声称;`Usage::cost` 字段保留为 default 0,不动序列化兼容)。
+- `CostTracker`/`CostSnapshot`(`core/src/agent/cost.rs`): 只保留 token 统计,移除 USD 聚合字段与 `total_cost()`;`one_line_summary`/`full_breakdown` 的成本行删除(server 自行换算展示)。
+- `AgentHarnessOptions::budget_cap_usd` 与 `check_budget_cap`(`assembly.rs:70/160/509-659`): **删除**(per-harness 预算不再由引擎判定)。
 
-**D5c(预算)**: `AgentRunOptions` 增加 run 级 `budget_cap_usd`;engine 在每个节点完成时累计已发生成本,超限后:后续未启动节点不启动,运行中节点照常完成(不中途 kill),run 标记预算受限状态(复用 `DagStatus` 语义或新增状态)。assembly 的 per-harness `budget_cap_usd`(单会话场景)保留,依赖 D5a 生效。
+**D5b(server 成本能力)**: server 新增成本换算模块(如 `server/src/cost.rs`):`usd_cost(model, usage) -> f64`(input/output/cache_read/cache_write 各自 `tokens × 目录价格 / 1_000_000`,合计);`/cost` 命令、UI 成本展示、debug 输出改用 server 侧换算(消费 core 的 token 统计)。
+
+**D5c(预算在 server 工具层)**: run 级预算上限由 server 工具层实现 — server 新增预算工具(组合 core dag 工具):轮询/监听节点完成(经 `dag_status` 或引擎状态)拿各节点 token 统计 → server 换算 USD 累计 → 超限调用 `dag_cancel`(dag-orchestrator 既有中止语义)停止后续节点;已运行节点自然完成。**core 零预算概念**(engine 不加预算逻辑、run 记录不加 USD 字段)。
+
+**为什么**: 引擎(含 graph engine)不知道"钱" — token/char 是中性度量,美元是定价×用量派生的应用概念;预算策略(超限怎么办)是产品决策,属应用层。与现有注入风格不同,这里不注入换算函数,而是**整体移出**:core 的 token 统计已足够,server 消费后自行派生。
 
 ### D6: 执行模型边界文档化(P3)
 
@@ -120,7 +127,7 @@ pub struct RunSummary {
 - [BREAKING API(proposal.md 已标)] `prompt()` 返回类型 + HarnessEvent 字段变化 → 一次性适配(server 调用方约 10 处 + runner),CI 全量测试兜底。
 - [TurnObserver 与 OnTurnEndHook 触发点相邻] 两个回调顺序依赖 → 文档明确"observer 先于 hook 触发"(观测先于决策),测试固定该顺序。
 - [ephemeral session 路径未全覆盖] `move_to`/`rehydrate` 在无 session 时行为需定义 → 返回类型化错误,server 的 resume/分支功能只在有 session 时启用(现有调用方均带 session,不受影响)。
-- [run 级预算的竞态] 并行节点同时完成 → 累计用 engine 内部 Mutex(现有状态已 Mutex 化),超限判定在调度点(on_node_completed)串行执行,天然无竞态。
+- [server 预算工具轮询延迟] 工具层轮询节点完成有间隔,超限中止存在延迟 → 接受:预算本是软上限(产品决策),dag_cancel 语义下已运行节点本就会跑完;文档注明延迟特性。
 - [事件面桥接过度] D4 的 HarnessEvent→AgentJobEvent 桥接若不需要可不做 → 标记为可选任务,默认只做文档 + 身份。
 
 ## Migration Plan
@@ -136,5 +143,5 @@ pub struct RunSummary {
 ## Open Questions
 
 - D4 的 HarnessEvent→AgentJobEvent 桥接是否本期需要?(默认否,先文档 + 身份)
-- run 级预算超限后的语义:标记 run `BudgetLimited` 并取消后续节点,还是允许已完成节点保留?(默认前者,复用 dag_cancel 语义)
 - `RunSummary.text` 是否需要与 `dag_inspect` 相同的 8KB tail 截断?(默认不截断,截断是工具层展示职责)
+- server 预算工具的触发方式:轮询 `dag_status` vs 订阅节点完成事件?(默认轮询 + dag_wait 空闲看门狗节奏,事件订阅等 UI 需求确认)

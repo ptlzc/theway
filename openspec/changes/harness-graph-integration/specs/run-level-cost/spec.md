@@ -1,43 +1,43 @@
 ## ADDED Requirements
 
-### Requirement: Usage::cost 运行时计算
+### Requirement: core 成本统计中性化
 
-llm-provider SHALL 在解析每条 assistant usage 时计算 `Usage::cost`:input/output/cache_read/cache_write 各自按 `tokens × model.cost.<kind> / 1_000_000`(模型目录的 USD-per-million 价格表)计算,`total` SHALL 为四者之和;provider 响应自带 cost 字段时优先解析该字段。`CostTracker` 的 sum-only fold 语义保持不变(provider 负责填充)。
+core(含 llm-provider)SHALL 只持有中性统计:token 数(input/output/cache)、char 数(registry 作业指标)。`CostTracker`/`CostSnapshot` SHALL 移除 USD 聚合(`total_cost()` 与成本行删除);`AgentHarnessOptions::budget_cap_usd` 与 `check_budget_cap` SHALL 删除;llm-provider SHALL NOT 填充 `Usage::cost`(保持 default 0,`ModelCost` 价格表保留为目录数据供 server 消费)。
 
-#### Scenario: assistant 消息带美元成本
+#### Scenario: 引擎不含美元逻辑
 
-- **WHEN** 一次流式响应完成,assistant 消息含 input=1M tokens、output=0.5M tokens,模型目录 input=$3/M、output=$15/M
-- **THEN** `usage.cost.input == 3.0`、`usage.cost.output == 7.5`、`usage.cost.total == 10.5`,`/cost` 显示 `$10.5000`
+- **WHEN** 检查 core 的 CostTracker / assembly / llm-provider 代码
+- **THEN** 无 USD 计算、无 `budget_cap_usd` 字段、无价格表换算逻辑;`Usage::cost` 恒为 default 0
+
+#### Scenario: 模型目录价格仍可用
+
+- **WHEN** server 需要换算美元
+- **THEN** 仍可从 theway-llm-provider 模型目录读取 `ModelCost`(每百万 token 美元价格),价格数据未随计算逻辑移除
+
+### Requirement: server USD 换算能力
+
+server SHALL 提供 token → USD 换算(读 llm-provider 模型目录价格,input/output/cache 各自 `tokens × 单价 / 1_000_000` 合计);`/cost` 命令、UI 成本展示、debug 输出 SHALL 经此换算显示真实美元(消费 core 的 token 统计)。
+
+#### Scenario: /cost 显示真实美元
+
+- **WHEN** 会话累计 input=1M tokens、output=0.5M tokens,模型目录 input=$3/M、output=$15/M
+- **THEN** `/cost` 显示 `$10.5000`(而非恒为 $0.0000)
 
 #### Scenario: 目录价格为零的模型
 
 - **WHEN** 模型目录未配置价格(`ModelCost` 全 0)
-- **THEN** `usage.cost` 为 0,不 panic,`/cost` 显示 `$0.0000`
+- **THEN** server 换算结果为 $0,不 panic,展示 `$0.0000`
 
-### Requirement: run 级 USD 成本聚合
+### Requirement: 预算在 server 工具层
 
-`multiagent` 层 SHALL 聚合单个 DAG run 下所有节点的 USD 成本:每个节点完成时从 harness `CostTracker` 取 `CostSnapshot`,累计到 run 记录;run 状态面(graph/types.rs 运行时状态)SHALL 提供 `run_cost_usd: Option<f64>`;registry 的 job 记录与 `AgentJobEvent::Completed` SHALL 增加 `cost_usd` 字段。
-
-#### Scenario: run 完成后查询总成本
-
-- **WHEN** 一个含多个节点的 DAG run 全部完成
-- **THEN** run 记录与每个节点 job 记录均带 USD 成本,UI/`dag_inspect` 可展示 run 总成本与单节点成本
-
-#### Scenario: 节点失败的成本保留
-
-- **WHEN** 某节点失败但已产生 tokens
-- **THEN** 该节点已发生成本仍计入 run 累计(成本是已发生事实,不因失败回滚)
-
-### Requirement: run 级预算上限
-
-`AgentRunOptions` SHALL 提供 run 级 `budget_cap_usd`;engine 在每个节点完成时累计已发生成本,超限后:后续未启动节点不启动,运行中节点照常完成(不中途 kill),run 标记预算受限状态(复用 `DagStatus` 语义或新增状态)。assembly 的 per-harness `budget_cap_usd`(单会话场景)SHALL 保留不变。
+per-harness `budget_cap_usd` SHALL 从 core 移除(引擎不做预算判定);run 级预算上限 SHALL 由 server 工具层实现:累计已完成节点成本(节点 token 统计 × server 换算),超限 SHALL 经 `dag_cancel` 中止后续节点,已运行节点自然完成。core 的 engine/registry SHALL NOT 增加预算或 USD 字段。
 
 #### Scenario: 预算超限中止后续节点
 
-- **WHEN** run 级 `budget_cap_usd` 为 $2,已完成的节点累计成本达 $2.1
-- **THEN** 后续 ready/pending 节点不启动,运行中节点正常完成,run 结束状态标记预算受限
+- **WHEN** server 预算工具监控的 run 累计成本超过上限(如 $2,已耗 $2.1)
+- **THEN** 工具调用 `dag_cancel`,后续未启动节点不启动,运行中节点自然完成,run 结束状态为 cancelled(沿用 dag-orchestrator 语义)
 
-#### Scenario: 单会话预算不受影响
+#### Scenario: 单会话成本控制
 
-- **WHEN** CLI 主会话使用 per-harness `budget_cap_usd`
-- **THEN** 行为与现状一致(在 prompt/continue 前检查,超限拒绝启动新 turn)
+- **WHEN** 主会话(非 graph)需要成本上限
+- **THEN** 由 server 侧实现(如 `/cost` 展示 + 用户决策或 server 会话层检查),core 无 per-harness 预算机制
