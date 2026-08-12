@@ -188,8 +188,8 @@ impl App {
         // SIGTERM handler, the process ignores the signal and gets force-killed,
         // skipping the session flush + run abort shutdown path.
         #[cfg(unix)]
-        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .ok();
+        let mut sigterm =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).ok();
 
         loop {
             tokio::select! {

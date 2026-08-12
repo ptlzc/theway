@@ -25,8 +25,8 @@ pub mod theway_grpc {
     tonic::include_proto!("theway.grpc.v1");
 }
 
-use health::health_client::HealthClient;
 use health::HealthCheckRequest;
+use health::health_client::HealthClient;
 use theway_grpc::theway_grpc_client::ThewayGrpcClient;
 use theway_grpc::{CreateSessionRequest, Empty, ListSessionsResponse, SendMessageRequest};
 
@@ -132,7 +132,10 @@ async fn test_health_check(addr: &str) -> TestResult {
     match run_health_check(addr).await {
         Ok(status) => {
             if status == health::health_check_response::ServingStatus::Serving as i32 {
-                TestResult::pass("health-check", "Check returns SERVING for all service names")
+                TestResult::pass(
+                    "health-check",
+                    "Check returns SERVING for all service names",
+                )
             } else {
                 TestResult::fail(
                     "health-check",
@@ -173,7 +176,9 @@ async fn test_health_watch(addr: &str) -> TestResult {
             } else {
                 TestResult::fail(
                     "health-watch",
-                    &format!("Watch stream emitted only {frames} frame(s), then ended (expected continuous stream, ≥2 frames over 3s)"),
+                    &format!(
+                        "Watch stream emitted only {frames} frame(s), then ended (expected continuous stream, ≥2 frames over 3s)"
+                    ),
                     "HealthService::watch emits one frame then ends — not a continuous stream. gRPC load balancers / grpc_health_probe expect Watch to stay open and periodically re-emit SERVING.",
                     None,
                 )
@@ -276,8 +281,14 @@ async fn run_multi_session(addr: &str) -> Result<(usize, usize)> {
     let after_create = list_resp2.sessions.len();
 
     // Verify each session appears in the list
-    let has_a = list_resp2.sessions.iter().any(|s| s.session_id == session_a_id);
-    let has_b = list_resp2.sessions.iter().any(|s| s.session_id == session_b_id);
+    let has_a = list_resp2
+        .sessions
+        .iter()
+        .any(|s| s.session_id == session_a_id);
+    let has_b = list_resp2
+        .sessions
+        .iter()
+        .any(|s| s.session_id == session_b_id);
 
     if !has_a || !has_b {
         anyhow::bail!(
@@ -327,7 +338,9 @@ async fn run_multi_session(addr: &str) -> Result<(usize, usize)> {
     match send_to_other {
         Ok(resp) => {
             if resp.into_inner().accepted {
-                anyhow::bail!("SendMessage to non-current session unexpectedly accepted (session isolation broken)");
+                anyhow::bail!(
+                    "SendMessage to non-current session unexpectedly accepted (session isolation broken)"
+                );
             }
         }
         Err(status) => {
