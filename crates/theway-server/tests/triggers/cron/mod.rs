@@ -136,7 +136,7 @@ fn listener_persists_state_and_inbox_for_stateful_job_completion() {
 
     let state_path = loop_state_path(&sidecar, &job.id);
     assert_eq!(read_loop_state(&state_path).as_deref(), Some("seen: #9"));
-    let entries = crate::inbox::list_new(&inbox_path).unwrap();
+    let entries = theway_transport::inbox::list_new(&inbox_path).unwrap();
     assert_eq!(entries.len(), 1);
     assert!(entries[0].text.contains("issue #9"), "{:?}", entries[0]);
     assert!(entries[0].source.starts_with("cron:"), "{:?}", entries[0]);

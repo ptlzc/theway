@@ -28,6 +28,7 @@ theway-llm-provider = { path = "../theway-llm-provider", default-features = fals
 theway-core = { path = "../theway-core" }
 theway-storage = { path = "../theway-storage" }
 theway-mcp = { path = "../theway-mcp" }
+theway-transport = { path = "../theway-transport" }
 # MCP server SDK (industry standard) — replaces the hand-written JSON-RPC server loop.
 rmcp = { version = "3", features = ["server", "transport-io"] }
 
@@ -51,15 +52,6 @@ tree-sitter-rust = "0.24"
 tree-sitter-go = "0.25"
 
 # Transport server stack (feature `server`, consolidated from theway-server).
-# HTTP/WS server: axum router + SSE + WebSocket upgrade.
-axum = { version = "0.8", features = ["ws"] }
-# gRPC wire stack: tonic "server" is the runtime mode; "channel" backs the
-# generated client; "codegen" supports tonic::include_proto!; tonic-prost
-# supplies the ProstCodec the generated code references.
-prost = "0.14"
-tonic = { version = "0.14", features = ["server", "channel", "codegen"] }
-tonic-prost = "0.14"
-tokio-stream = { version = "0.1", features = ["net", "sync"] }
 
 toml = "0.8"
 futures = "0.3"
@@ -108,12 +100,6 @@ directories = "5"
 # and shell hooks (PR #58).
 libc = "0.2"
 
-[build-dependencies]
-# Pure-Rust proto compiler (no system protoc required) + tonic codegen bridge
-# for the `server` feature's proto wire codecs (build.rs).
-protox = "0.9"
-tonic-prost-build = "0.14"
-
 [dev-dependencies]
 tests-bridge-macro = { path = "../tests-bridge-macro" }
 tempfile = "3"
@@ -121,8 +107,3 @@ tempfile = "3"
 [lints]
 workspace = true
 
-# cargo-machete false positive: prost/tonic-prost are referenced by the proto
-# generated code (tonic::include_proto! in transport/proto.rs) which lives in
-# OUT_DIR and is invisible to machete's source scan.
-[package.metadata.cargo-machete]
-ignored = ["prost", "tonic-prost"]

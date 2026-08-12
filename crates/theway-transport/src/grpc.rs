@@ -10,22 +10,23 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
 use futures::{Stream, StreamExt as _};
+use parking_lot::Mutex;
 use tokio::net::TcpListener;
-use tokio::sync::{Mutex, broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc};
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::{BroadcastStream, TcpListenerStream};
 use tonic::{Request, Response, Status};
 
-use crate::session_ops::SessionOps;
-use crate::ui::App;
-use crate::ui::web_loop::TransportMode;
+use crate::host::TransportHost;
+use crate::transport::SessionOps;
+use crate::transport::TransportMode;
 use crate::wire::{WebCommand, WebPromptImage, WebStatus};
 
-use crate::transport::proto::health::health_check_response::ServingStatus;
-use crate::transport::proto::health::health_server::{Health, HealthServer};
-use crate::transport::proto::health::{HealthCheckRequest, HealthCheckResponse};
-use crate::transport::proto::theway_grpc;
-use crate::transport::proto::{
+use crate::proto::health::health_check_response::ServingStatus;
+use crate::proto::health::health_server::{Health, HealthServer};
+use crate::proto::health::{HealthCheckRequest, HealthCheckResponse};
+use crate::proto::theway_grpc;
+use crate::proto::{
     dag_event_wire, dag_run_wire, resolve_session_id, session_state, session_summary_wire,
     stream_event_wire,
 };
@@ -80,7 +81,7 @@ impl ThewayGrpc for GrpcState {
     type StreamEventsStream = Pin<Box<dyn Stream<Item = Result<StreamFrame, Status>> + Send>>;
 
     async fn get_state(&self, _request: Request<Empty>) -> Result<Response<SessionState>, Status> {
-        let latest = self.latest.lock().await;
+        let latest = self.latest.lock();
         Ok(Response::new(session_state(&latest)))
     }
 
@@ -462,7 +463,7 @@ impl ThewayGrpc for GrpcState {
             // Rebind the connection-level current session; the event loop applies
             // the same change on the serialized loop and re-publishes snapshots.
             *self.session_id.write().unwrap() = target.clone();
-            self.latest.lock().await.session_id = target;
+            self.latest.lock().session_id = target;
         }
         Ok(Response::new(CommandResult { accepted }))
     }
@@ -523,7 +524,7 @@ impl ThewayGrpc for GrpcState {
                 .map(|s| s.session_id.clone())
                 .unwrap_or_default();
             *self.session_id.write().unwrap() = fallback.clone();
-            self.latest.lock().await.session_id = fallback.clone();
+            self.latest.lock().session_id = fallback.clone();
             if !fallback.is_empty() {
                 let _ = self
                     .commands
@@ -591,8 +592,8 @@ impl Health for HealthService {
 
 /// Full `--grpc` driver: bind, wire the transport channels, spawn the tonic
 /// server, then hand the App into the shared event loop.
-pub async fn run_grpc(mut app: App, options: GrpcOptions) -> Result<()> {
-    let addr = crate::transport::http::bind_addr(&options.host, options.port)?;
+pub async fn run_grpc(mut app: Box<dyn TransportHost>, options: GrpcOptions) -> Result<()> {
+    let addr = crate::http::bind_addr(&options.host, options.port)?;
     let listener = TcpListener::bind(addr)
         .await
         .with_context(|| format!("bind grpc ui on {addr}"))?;
@@ -637,4 +638,4 @@ pub fn serve_grpc(listener: TcpListener, state: GrpcState) -> tokio::task::JoinH
 #[cfg(test)]
 // Test files live in `tests/transport/grpc/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
-tests_bridge_macro::tests_bridge!("transport/grpc");
+tests_bridge_macro::tests_bridge!("grpc");

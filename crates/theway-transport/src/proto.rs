@@ -19,7 +19,7 @@ pub mod health {
     tonic::include_proto!("grpc.health.v1");
 }
 
-use crate::ui::feed::{self, WebFeedBlock};
+use crate::feed::{self, WebFeedBlock};
 use crate::wire::WebStatus;
 use theway_core::multiagent::graph::types::DagEvent;
 use theway_core::multiagent::registry::AgentJobEvent;
@@ -412,4 +412,4 @@ fn level_str(level: &feed::Level) -> &'static str {
 #[cfg(test)]
 // Test files live in `tests/transport/proto/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
-tests_bridge_macro::tests_bridge!("transport/proto");
+tests_bridge_macro::tests_bridge!("proto");

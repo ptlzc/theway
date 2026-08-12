@@ -18,13 +18,14 @@ use std::sync::{Arc, OnceLock};
 use anyhow::Result;
 use theway::{
     agent_session, agent_specs, builtin_skills, commands, config, control_plane_prompt, debug,
-    history, inbox, local_models, logging, lsp_supervisor, mcp_loader, model, session,
-    skill_overrides, skills, templates, tools, triggers, ts_extensions, ui,
+    history, local_models, logging, lsp_supervisor, mcp_loader, model, session, skill_overrides,
+    skills, templates, tools, triggers, ts_extensions, ui,
 };
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::persist::DagPersistSink;
 use theway_core::{AgentHarness, AgentHarnessOptions, JsonlSessionRepo, PermissionPolicy};
 use theway_core::{agent::hooks, multiagent::goal};
+use theway_transport::inbox;
 
 use theway::dag_persist::{DagPersistHandle, load_session_runs};
 
@@ -693,22 +694,22 @@ pub(crate) async fn run_repl(
     // `theway::ui::web_loop::TransportEndpoints` channel surface (openspec
     // consolidate-server-cli 2.x: bin consolidated back into the `theway` crate).
     let run_result = if run_mcp {
-        theway::transport::mcp::run_mcp_server(theway::tools::local_tools())
+        theway_transport::mcp::run_mcp_server(theway::tools::local_tools())
             .await
             .map_err(|e| anyhow::anyhow!("mcp server: {e}"))
     } else if run_grpc {
-        theway::transport::grpc::run_grpc(
-            app,
-            theway::transport::grpc::GrpcOptions {
+        theway_transport::grpc::run_grpc(
+            Box::new(app),
+            theway_transport::grpc::GrpcOptions {
                 host: cli.http_host.clone(),
                 port: cli.http_port,
             },
         )
         .await
     } else if run_http {
-        theway::transport::http::run_web(
-            app,
-            theway::wire::WebOptions {
+        theway_transport::http::run_web(
+            Box::new(app),
+            theway_transport::wire::WebOptions {
                 host: cli.http_host.clone(),
                 port: cli.http_port,
             },

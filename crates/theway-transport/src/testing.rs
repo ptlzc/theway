@@ -1,6 +1,6 @@
 //! Test fakes for the transport servers (session-resource-model N4).
 //!
-//! [`FakeSessionOps`] is an in-memory [`crate::session_ops::SessionOps`] so the gRPC/HTTP
+//! [`FakeSessionOps`] is an in-memory [`crate::transport::SessionOps`] so the gRPC/HTTP
 //! session tests exercise the transport surface without a real `JsonlSessionRepo` on disk.
 //! Delete protection is simulated by mapping a session id to its "running" run ids.
 
@@ -9,11 +9,12 @@ use std::sync::Mutex;
 
 use crate::wire::SessionSummary;
 use anyhow::Result;
+use async_trait::async_trait;
 
 /// In-memory `SessionOps`: sessions live in a `Vec` (oldest → newest, like the repo-backed
 /// impl), ids for `create` come from a counter.
 #[derive(Default)]
-pub(crate) struct FakeSessionOps {
+pub struct FakeSessionOps {
     inner: Mutex<FakeInner>,
 }
 
@@ -26,19 +27,19 @@ struct FakeInner {
 }
 
 impl FakeSessionOps {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self::default()
     }
 
     /// Seed an existing session; returns its id.
-    pub(crate) fn add_session(&self, id: &str) -> String {
+    pub fn add_session(&self, id: &str) -> String {
         let mut inner = self.inner.lock().unwrap();
         inner.sessions.push(summary(id));
         id.to_string()
     }
 
     /// Mark a session as having running graphs (blocks `delete`, ids reported back).
-    pub(crate) fn set_running(&self, session_id: &str, run_ids: &[&str]) {
+    pub fn set_running(&self, session_id: &str, run_ids: &[&str]) {
         let mut inner = self.inner.lock().unwrap();
         inner.running.insert(
             session_id.to_string(),
@@ -62,8 +63,8 @@ fn summary(id: &str) -> SessionSummary {
     }
 }
 
-#[tonic::async_trait]
-impl crate::session_ops::SessionOps for FakeSessionOps {
+#[async_trait]
+impl crate::transport::SessionOps for FakeSessionOps {
     async fn list(&self) -> Result<Vec<SessionSummary>> {
         Ok(self.inner.lock().unwrap().sessions.clone())
     }

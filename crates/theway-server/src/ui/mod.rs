@@ -87,7 +87,6 @@ use crate::control_plane_prompt::UiControlPlanePrompt;
 use crate::history::HistoryStore;
 #[cfg(feature = "tui")]
 use crate::mentions;
-use crate::readline::SlashCompleter;
 use feed::{Feed, Level, TriggerPollStatus};
 #[cfg(feature = "tui")]
 use kernel::poll_turn;
@@ -96,6 +95,7 @@ use kernel::{QueuedTurn, ReplKernel, TurnState};
 use theway_core::SkillSource;
 use theway_core::{AgentHarness, AgentMessage, AgentRunError};
 use theway_llm_provider::{ContentBlock, ImageContent, Message, UserContent, UserContentBlock};
+use theway_transport::transport::SlashCompleter;
 
 use render_utils::user_facing_run_error;
 #[cfg(feature = "tui")]
@@ -166,7 +166,7 @@ pub struct AppConfig {
     /// semantics). Drives [`App::switch_session`] from the serialized event loop;
     /// the CLI crate extracts its harness-construction path into this closure.
     pub session_factory: crate::session_ops::SessionFactory,
-    /// cwd-scoped session repo backing [`crate::session_ops::SessionOps`] (list / create /
+    /// cwd-scoped session repo backing [`theway_transport::transport::SessionOps`] (list / create /
     /// rename / delete) and cheap "does this id exist" checks before a switch.
     pub session_repo: Arc<theway_core::JsonlSessionRepo>,
 }
@@ -282,8 +282,10 @@ fn current_model_label(harness: &Arc<AgentHarness>) -> String {
 
 impl App {
     pub fn new(config: AppConfig) -> Self {
-        let completer =
-            SlashCompleter::from_registry_and_skills(&config.registry, &config.harness.skills());
+        let completer = SlashCompleter::from_commands(collect_slash_commands(
+            &config.registry,
+            &config.harness.skills(),
+        ));
         // session-resource-model: live "current session" state shared with SessionOps.
         // Bound before the struct literal below because that literal moves fields out of
         // `config` (harness / session_id / cwd) in declaration order.
@@ -1034,7 +1036,8 @@ impl App {
         }
 
         lines.push(Line::raw(""));
-        let inbox_new = crate::inbox::new_count(&crate::inbox::default_inbox_path());
+        let inbox_new =
+            theway_transport::inbox::new_count(&theway_transport::inbox::default_inbox_path());
         if inbox_new > 0 {
             lines.push(panel_line(
                 format!("Inbox  {inbox_new} new — /inbox"),
@@ -2477,4 +2480,26 @@ mod tests {
         assert!(text.contains("Select provider"));
         assert!(text.contains("anthropic (1)"));
     }
+}
+
+/// Assemble the slash-command completion list (registry commands + skill shortcuts).
+fn collect_slash_commands(
+    registry: &crate::commands::Registry,
+    skills: &[theway_core::Skill],
+) -> Vec<String> {
+    let mut commands: Vec<String> = registry
+        .commands()
+        .iter()
+        .flat_map(|c| {
+            let mut names = vec![format!("/{}", c.name())];
+            names.extend(c.aliases().iter().map(|a| format!("/{a}")));
+            names
+        })
+        .collect();
+    commands.extend(
+        crate::commands::skill_shortcuts(skills, registry)
+            .into_iter()
+            .map(|sc| sc.command),
+    );
+    commands
 }

@@ -18,74 +18,22 @@
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, bail};
+use async_trait::async_trait;
 use base64::Engine as _;
-use tokio::sync::{Mutex, broadcast, mpsc};
+use parking_lot::Mutex;
+use tokio::sync::{broadcast, mpsc};
 
 use theway_core::SkillSource;
-use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::types::DagEvent;
-use theway_core::multiagent::registry::{AgentJobEvent, AgentJobRegistry};
+use theway_core::multiagent::registry::AgentJobEvent;
 
 use crate::commands::{CommandCtx, CommandOutcome};
 use crate::mentions;
-use crate::readline::SlashCompleter;
 use crate::ui::App;
 use crate::ui::kernel::{QueuedTurn, TurnState, poll_turn};
 use crate::ui::{feed, prompt_display};
-use crate::wire::*;
-
-/// Which transport drives the loop (only affects log/error labels).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TransportMode {
-    Web,
-    Grpc,
-}
-
-impl TransportMode {
-    pub fn label(self) -> &'static str {
-        match self {
-            TransportMode::Web => "web",
-            TransportMode::Grpc => "grpc",
-        }
-    }
-}
-
-/// Public channel/state surface shared with the `theway-server` crate.
-///
-/// Built by [`App::transport_endpoints`]: the server side takes the senders /
-/// shared state it needs to build its `HttpState` / `GrpcState`, while the
-/// receiver half (`command_rx`) plus `snapshot_tx`/`latest` feed the event
-/// loop ([`App::run_transport_loop`]).
-pub struct TransportEndpoints {
-    /// Browser/client commands into the serialized event loop.
-    pub command_tx: mpsc::UnboundedSender<WebCommand>,
-    /// Event-loop side of the command queue.
-    pub command_rx: mpsc::UnboundedReceiver<WebCommand>,
-    /// Full `WebStatus` snapshots broadcast to SSE / WS / gRPC subscribers.
-    pub snapshot_tx: broadcast::Sender<WebStatus>,
-    /// Latest snapshot (served by `GET /state` / `GetState`).
-    pub latest: Arc<Mutex<WebStatus>>,
-    /// Event plane (graph mode): subagent started/output/metrics/completed.
-    pub events: broadcast::Sender<AgentJobEvent>,
-    /// Event plane (graph mode): DAG engine node_status / run_status.
-    pub dag_events: broadcast::Sender<DagEvent>,
-    /// Slash-command completer backing `POST /complete`.
-    pub completer: SlashCompleter,
-    /// Subagent job registry (GetNodeOutput / snapshot source).
-    pub registry: AgentJobRegistry,
-    /// DAG orchestration engine (graph cancel/retry/skip/checkpoint/restore).
-    pub dag_engine: Arc<DagEngine>,
-    /// session-resource-model: session lifecycle ops (list/create/rename/delete) for the
-    /// gRPC/HTTP session surfaces. Sync query/mutation only — *switching* the current
-    /// session goes through `WebCommand::SwitchSession` on the serialized event loop.
-    pub session_ops: Arc<dyn crate::session_ops::SessionOps>,
-    /// Owning session id (checkpoint scope / mount key).
-    pub session_id: String,
-    /// Abort handle for the registry→events forwarder task spawned in
-    /// [`transport_endpoints`](App::transport_endpoints). Clone it before moving
-    /// `TransportEndpoints` into [`run_transport_loop`](App::run_transport_loop).
-    pub agent_fwd: tokio::task::AbortHandle,
-}
+use theway_transport::wire::*;
+use theway_transport::{TransportEndpoints, TransportMode};
 
 impl App {
     /// Build the public transport channels and wire the event planes.
@@ -93,7 +41,7 @@ impl App {
     /// Registers the subagent-registry and DAG-engine event senders (graph
     /// mode) and snapshots the current state; the server crate consumes the
     /// sender side, the event loop ([`App::run_transport_loop`]) the receiver.
-    pub fn transport_endpoints(&mut self) -> TransportEndpoints {
+    pub fn transport_endpoints(&mut self) -> theway_transport::TransportEndpoints {
         let (command_tx, command_rx) = mpsc::unbounded_channel::<WebCommand>();
         let (snapshot_tx, _) = broadcast::channel::<WebStatus>(128);
         let latest = Arc::new(Mutex::new(self.web_snapshot()));
@@ -555,7 +503,7 @@ impl App {
                 .list()
                 .iter()
                 .filter(|job| job.session_id.as_deref() == Some(self.session_id.as_str()))
-                .map(crate::wire::subagent_job_snapshot)
+                .map(theway_transport::wire::subagent_job_snapshot)
                 .collect(),
         }
     }
@@ -602,7 +550,9 @@ impl App {
             .collect::<Vec<_>>();
 
         WebSidebarSnapshot {
-            inbox_new: crate::inbox::new_count(&crate::inbox::default_inbox_path()),
+            inbox_new: theway_transport::inbox::new_count(
+                &theway_transport::inbox::default_inbox_path(),
+            ),
             skills: WebSkillsSnapshot {
                 total: skills.len(),
                 enabled,
@@ -658,7 +608,7 @@ impl App {
         // point.
         self.sync_current_session_state();
         let snapshot = self.web_snapshot();
-        *latest.lock().await = snapshot.clone();
+        *latest.lock() = snapshot.clone();
         if let Some(active) = &self.relay {
             active.push_snapshot(snapshot.clone());
         }
@@ -721,6 +671,28 @@ fn load_web_prompt_images(
         out.push(crate::images::load_bytes(&label, &bytes)?);
     }
     Ok(out)
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// TransportHost impl (theway-transport drives the App through this surface)
+// ──────────────────────────────────────────────────────────────────────────
+
+#[async_trait(?Send)]
+impl theway_transport::host::TransportHost for App {
+    fn transport_endpoints(&mut self) -> theway_transport::TransportEndpoints {
+        App::transport_endpoints(self)
+    }
+
+    async fn run_transport_loop(
+        self: Box<Self>,
+        mode: theway_transport::TransportMode,
+        endpoints: theway_transport::TransportEndpoints,
+        server_task: tokio::task::JoinHandle<anyhow::Result<()>>,
+    ) -> anyhow::Result<()> {
+        (*self)
+            .run_transport_loop(mode, endpoints, server_task)
+            .await
+    }
 }
 
 #[cfg(test)]

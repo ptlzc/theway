@@ -354,10 +354,10 @@ impl SlashCommand for InboxCommand {
         "[all|claim <id|n>|dismiss <id|n>|clear]"
     }
     async fn run(&self, argv: &[String], _ctx: &CommandCtx<'_>) -> CommandOutcome {
-        let path = crate::inbox::default_inbox_path();
+        let path = theway_transport::inbox::default_inbox_path();
         match argv.first().map(String::as_str) {
             None | Some("list") => {
-                let entries = match crate::inbox::list_new(&path) {
+                let entries = match theway_transport::inbox::list_new(&path) {
                     Ok(entries) => entries,
                     Err(e) => return CommandOutcome::Error(format!("inbox: {e}")),
                 };
@@ -382,16 +382,16 @@ impl SlashCommand for InboxCommand {
                 CommandOutcome::Handled
             }
             Some("all") => {
-                let entries = match crate::inbox::list(&path) {
+                let entries = match theway_transport::inbox::list(&path) {
                     Ok(entries) => entries,
                     Err(e) => return CommandOutcome::Error(format!("inbox: {e}")),
                 };
                 cprintln!("Inbox history ({} total):", entries.len());
                 for entry in &entries {
                     let status = match entry.status {
-                        crate::inbox::InboxStatus::New => "new",
-                        crate::inbox::InboxStatus::Claimed => "claimed",
-                        crate::inbox::InboxStatus::Dismissed => "dismissed",
+                        theway_transport::inbox::InboxStatus::New => "new",
+                        theway_transport::inbox::InboxStatus::Claimed => "claimed",
+                        theway_transport::inbox::InboxStatus::Dismissed => "dismissed",
                     };
                     cprintln!("  [{status}] {}  ({})", entry.text, entry.source);
                 }
@@ -399,10 +399,10 @@ impl SlashCommand for InboxCommand {
             }
             Some("claim") => match resolve_inbox_target(&path, argv.get(1)) {
                 Ok(entry) => {
-                    if let Err(e) = crate::inbox::set_status(
+                    if let Err(e) = theway_transport::inbox::set_status(
                         &path,
                         &entry.id,
-                        crate::inbox::InboxStatus::Claimed,
+                        theway_transport::inbox::InboxStatus::Claimed,
                     ) {
                         return CommandOutcome::Error(format!("inbox: {e}"));
                     }
@@ -418,10 +418,10 @@ impl SlashCommand for InboxCommand {
             },
             Some("dismiss") => match resolve_inbox_target(&path, argv.get(1)) {
                 Ok(entry) => {
-                    match crate::inbox::set_status(
+                    match theway_transport::inbox::set_status(
                         &path,
                         &entry.id,
-                        crate::inbox::InboxStatus::Dismissed,
+                        theway_transport::inbox::InboxStatus::Dismissed,
                     ) {
                         Ok(_) => {
                             cprintln!("dismissed: {}", entry.text);
@@ -432,7 +432,7 @@ impl SlashCommand for InboxCommand {
                 }
                 Err(e) => CommandOutcome::Error(e),
             },
-            Some("clear") => match crate::inbox::dismiss_all_new(&path) {
+            Some("clear") => match theway_transport::inbox::dismiss_all_new(&path) {
                 Ok(n) => {
                     cprintln!(
                         "dismissed {n} inbox entr{}",
@@ -453,11 +453,11 @@ impl SlashCommand for InboxCommand {
 fn resolve_inbox_target(
     path: &std::path::Path,
     arg: Option<&String>,
-) -> Result<crate::inbox::InboxEntry, String> {
+) -> Result<theway_transport::inbox::InboxEntry, String> {
     let Some(arg) = arg else {
         return Err("usage: /inbox claim|dismiss <n or inb-id>".into());
     };
-    let entries = crate::inbox::list_new(path).map_err(|e| format!("inbox: {e}"))?;
+    let entries = theway_transport::inbox::list_new(path).map_err(|e| format!("inbox: {e}"))?;
     if let Ok(n) = arg.parse::<usize>() {
         return entries
             .get(n.saturating_sub(1))

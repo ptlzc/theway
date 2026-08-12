@@ -17,18 +17,19 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::routing::{get, patch, post};
 use axum::{Json, Router};
 use futures::Stream;
+use parking_lot::Mutex;
 use tokio::net::TcpListener;
-use tokio::sync::{Mutex, broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc};
 
-use crate::readline::SlashCompleter;
-use crate::session_ops::SessionOps;
-use crate::ui::App;
-use crate::ui::web_loop::TransportMode;
+use crate::host::TransportHost;
+use crate::transport::SessionOps;
+use crate::transport::SlashCompleter;
+use crate::transport::TransportMode;
 use crate::wire::*;
 use theway_core::multiagent::graph::types::DagEvent;
 use theway_core::multiagent::registry::{AgentJobEvent, AgentJobRegistry};
 
-use crate::transport::ws::ws_upgrade;
+use crate::ws::ws_upgrade;
 
 /// Shared axum state: command queue + snapshot/event broadcasts + the
 /// completer/registry backing `/complete` and `/ws` node-output.
@@ -49,7 +50,7 @@ pub struct HttpState {
 
 /// Full `--http` driver: bind, wire the transport channels, spawn the axum
 /// server, then hand the App into the shared event loop.
-pub async fn run_web(mut app: App, options: WebOptions) -> Result<()> {
+pub async fn run_web(mut app: Box<dyn TransportHost>, options: WebOptions) -> Result<()> {
     let addr = bind_addr(&options.host, options.port)?;
     let listener = TcpListener::bind(addr)
         .await
@@ -119,7 +120,7 @@ async fn healthz() -> &'static str {
 }
 
 async fn state_snapshot(State(state): State<HttpState>) -> Json<WebStatus> {
-    Json(state.latest.lock().await.clone())
+    Json(state.latest.lock().clone())
 }
 
 async fn events(
@@ -149,7 +150,7 @@ async fn prompt(
     // Explicit session targeting: only the active session can receive prompts
     // (single live agent loop); other sessions must be switched to first.
     if let Some(target) = req.session_id.as_deref() {
-        let current = state.latest.lock().await.session_id.clone();
+        let current = state.latest.lock().session_id.clone();
         if target != current {
             return (
                 StatusCode::CONFLICT,
@@ -248,7 +249,7 @@ fn session_error(status: StatusCode, message: String) -> (StatusCode, Json<serde
 }
 
 async fn list_sessions(State(state): State<HttpState>) -> axum::response::Response {
-    let current_session_id = state.latest.lock().await.session_id.clone();
+    let current_session_id = state.latest.lock().session_id.clone();
     match state.session_ops.list().await {
         Ok(sessions) => Json(SessionsResponse {
             sessions,
@@ -308,7 +309,7 @@ async fn switch_session_route(
             return session_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
     };
-    let Some(target) = crate::transport::proto::resolve_session_id(&sessions, &id) else {
+    let Some(target) = crate::proto::resolve_session_id(&sessions, &id) else {
         return session_error(StatusCode::NOT_FOUND, format!("no session matches id {id}"))
             .into_response();
     };
@@ -317,7 +318,7 @@ async fn switch_session_route(
         .send(WebCommand::SwitchSession { id: target.clone() })
         .is_ok();
     if accepted {
-        state.latest.lock().await.session_id = target;
+        state.latest.lock().session_id = target;
     }
     Json(CommandAccepted { accepted }).into_response()
 }
@@ -334,7 +335,7 @@ async fn rename_session_route(
             return session_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
     };
-    let Some(target) = crate::transport::proto::resolve_session_id(&sessions, &id) else {
+    let Some(target) = crate::proto::resolve_session_id(&sessions, &id) else {
         return session_error(StatusCode::NOT_FOUND, format!("no session matches id {id}"))
             .into_response();
     };
@@ -356,7 +357,7 @@ async fn delete_session_route(
             return session_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
     };
-    let Some(target) = crate::transport::proto::resolve_session_id(&sessions, &id) else {
+    let Some(target) = crate::proto::resolve_session_id(&sessions, &id) else {
         return session_error(StatusCode::NOT_FOUND, format!("no session matches id {id}"))
             .into_response();
     };
@@ -370,14 +371,14 @@ async fn delete_session_route(
         )
         .into_response(),
         Ok(_) => {
-            let was_current = state.latest.lock().await.session_id == target;
+            let was_current = state.latest.lock().session_id == target;
             if was_current {
                 let remaining = state.session_ops.list().await.unwrap_or_default();
                 let fallback = remaining
                     .last()
                     .map(|s| s.session_id.clone())
                     .unwrap_or_default();
-                state.latest.lock().await.session_id = fallback.clone();
+                state.latest.lock().session_id = fallback.clone();
                 if !fallback.is_empty() {
                     let _ = state
                         .commands
@@ -477,4 +478,4 @@ fn open_browser_command(url: &str) -> std::process::Command {
 }
 
 #[cfg(test)]
-tests_bridge_macro::tests_bridge!("transport/http");
+tests_bridge_macro::tests_bridge!("http");

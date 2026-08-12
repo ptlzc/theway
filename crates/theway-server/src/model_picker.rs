@@ -6,7 +6,6 @@
 //! `openai-codex-responses`) and Claude-compatible (`anthropic-messages`).
 //! `/model <provider:model-id>` remains the uncurated escape hatch.
 
-use serde::Serialize;
 use std::collections::BTreeMap;
 
 const SUPPORTED_APIS: [&str; 4] = [
@@ -16,18 +15,7 @@ const SUPPORTED_APIS: [&str; 4] = [
     "anthropic-messages",
 ];
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct ModelEntry {
-    pub id: String,
-    pub name: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct ProviderGroup {
-    pub provider: String,
-    pub has_credential: bool,
-    pub models: Vec<ModelEntry>,
-}
+pub use theway_transport::wire::{ModelEntry, ProviderGroup};
 
 /// Filtered + grouped catalog with live credential detection.
 pub(crate) fn catalog() -> Vec<ProviderGroup> {

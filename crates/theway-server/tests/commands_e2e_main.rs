@@ -34,9 +34,6 @@ mod export;
 #[path = "../src/history.rs"]
 mod history;
 #[allow(dead_code)]
-#[path = "../src/inbox.rs"]
-mod inbox;
-#[allow(dead_code)]
 #[path = "../src/mcp_loader.rs"]
 mod mcp_loader;
 #[allow(dead_code)]

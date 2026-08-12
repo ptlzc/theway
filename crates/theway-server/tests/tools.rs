@@ -14,7 +14,7 @@ use theway_core::tools;
 // in by path: the assembly's cron/trigger builders reference `crate::triggers`, which must
 // resolve to the SAME registry instances this test clears through the cfg(test)-only
 // `clear_for_tests` — only a path-included copy compiles with cfg(test). `cron.rs` pulls
-// in `crate::inbox` / `crate::bug_report` siblings along the way; `bug_report.rs` pulls
+// in `theway_transport::inbox` / `crate::bug_report` siblings along the way; `bug_report.rs` pulls
 // in `crate::config`.
 #[path = "../src/bug_report.rs"]
 #[allow(dead_code)]
@@ -25,9 +25,6 @@ mod config;
 #[path = "../src/export.rs"]
 #[allow(dead_code)]
 mod export;
-#[path = "../src/inbox.rs"]
-#[allow(dead_code)]
-mod inbox;
 #[allow(dead_code)]
 #[path = "../src/triggers/mod.rs"]
 mod triggers;

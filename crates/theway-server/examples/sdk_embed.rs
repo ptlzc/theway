@@ -14,11 +14,11 @@ use std::sync::Arc;
 use theway::agent_session::{AgentSession, RetrySettings};
 use theway::commands::Registry;
 use theway::ui::{App, AppConfig};
-use theway::wire::WebOptions;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::registry::AgentJobRegistry;
 use theway_core::{AgentHarness, AgentHarnessOptions, JsonlSessionRepo};
 use theway_llm_provider::{Api, Model, ModelCost, Provider};
+use theway_transport::wire::WebOptions;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

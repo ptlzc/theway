@@ -8,6 +8,7 @@ members = [
     "crates/theway-server",
     "crates/theway-tui",
     "crates/theway-mcp",
+    "crates/theway-transport",
     "crates/theway-probe",
     "crates/tests-bridge-macro",
 ]

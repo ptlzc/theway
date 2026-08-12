@@ -1,7 +1,7 @@
 //! Tests for `grpc` — split out of src (see docs/RUST_TEST_FILES.md).
 
 use super::*;
-use crate::transport::testing::FakeSessionOps;
+use crate::testing::FakeSessionOps;
 use std::time::Duration;
 
 fn fixture_snapshot(feed_line: &str) -> WebStatus {
@@ -15,7 +15,7 @@ fn fixture_snapshot(feed_line: &str) -> WebStatus {
         latest_trigger_poll: None,
         goal: None,
         control_plane_prompt: None,
-        sidebar: crate::transport::http::empty_sidebar_snapshot(),
+        sidebar: crate::http::empty_sidebar_snapshot(),
         feed_blocks: Vec::new(),
         feed_lines: vec![feed_line.into()],
         dags: Vec::new(),
@@ -517,7 +517,7 @@ async fn health_service_serves_serving_over_transport() {
     let addr = listener.local_addr().unwrap();
     let server = serve_grpc(listener, state);
 
-    let mut client = crate::transport::proto::health::health_client::HealthClient::connect(
+    let mut client = crate::proto::health::health_client::HealthClient::connect(
         format!("http://{addr}"),
     )
     .await
@@ -525,7 +525,7 @@ async fn health_service_serves_serving_over_transport() {
 
     // Check answers SERVING.
     let response = client
-        .check(crate::transport::proto::health::HealthCheckRequest {
+        .check(crate::proto::health::HealthCheckRequest {
             service: String::new(),
         })
         .await
@@ -538,7 +538,7 @@ async fn health_service_serves_serving_over_transport() {
     // streaming; a single-frame stream would mark the endpoint dead after
     // the first frame completes.
     let mut watch = client
-        .watch(crate::transport::proto::health::HealthCheckRequest {
+        .watch(crate::proto::health::HealthCheckRequest {
             service: String::new(),
         })
         .await

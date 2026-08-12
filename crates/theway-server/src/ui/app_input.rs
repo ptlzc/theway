@@ -16,7 +16,7 @@ use crate::commands;
 #[cfg(feature = "tui")]
 use crate::images;
 #[cfg(feature = "tui")]
-use crate::readline::SlashCompleter;
+use theway_transport::transport::SlashCompleter;
 
 use super::App;
 #[cfg(feature = "tui")]
@@ -335,9 +335,24 @@ impl App {
 
     #[cfg(feature = "tui")]
     pub(super) fn refresh_completions(&mut self) {
-        self.completer = SlashCompleter::from_registry_and_skills(
-            &self.registry,
-            &self.kernel.harness().skills(),
+        self.completer = SlashCompleter::from_commands(
+            self.registry
+                .commands()
+                .iter()
+                .flat_map(|c| {
+                    let mut names = vec![format!("/{}", c.name())];
+                    names.extend(c.aliases().iter().map(|a| format!("/{a}")));
+                    names
+                })
+                .chain(
+                    crate::commands::skill_shortcuts(
+                        &self.kernel.harness().skills(),
+                        &self.registry,
+                    )
+                    .into_iter()
+                    .map(|sc| sc.command),
+                )
+                .collect(),
         );
         self.completions = if self.input_is_single_line() {
             self.completer.matches(&self.input_text())

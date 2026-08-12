@@ -40,7 +40,16 @@ pub struct InboxEntry {
 static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 pub fn default_inbox_path() -> PathBuf {
-    crate::config::base_dir().join("inbox.jsonl")
+    std::env::var_os("THEWAY_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| dirs_home().join(".theway"))
+        .join("inbox.jsonl")
+}
+
+fn dirs_home() -> PathBuf {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/root"))
 }
 
 /// Append a finding. Text is trimmed and capped at [`MAX_ENTRY_TEXT_CHARS`].

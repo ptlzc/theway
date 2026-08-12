@@ -7,6 +7,21 @@
 
 use serde::{Deserialize, Serialize};
 
+/// One model entry in the picker group.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ModelEntry {
+    pub id: String,
+    pub name: String,
+}
+
+/// Filtered + grouped catalog with live credential detection.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ProviderGroup {
+    pub provider: String,
+    pub has_credential: bool,
+    pub models: Vec<ModelEntry>,
+}
+
 use theway_core::multiagent::graph::types::{DagNode, DagRun, Direction, NodeResult, NodeStatus};
 
 #[derive(Clone, Debug)]
@@ -138,15 +153,15 @@ pub struct WebAgentJobSnapshot {
 pub struct WebStatus {
     pub session_id: String,
     pub model: String,
-    pub model_catalog: Vec<crate::model_picker::ProviderGroup>,
+    pub model_catalog: Vec<ProviderGroup>,
     pub cwd: String,
     pub busy: bool,
     pub queued_count: usize,
-    pub latest_trigger_poll: Option<crate::ui::feed::TriggerPollStatus>,
+    pub latest_trigger_poll: Option<crate::feed::TriggerPollStatus>,
     pub goal: Option<WebGoalSnapshot>,
     pub control_plane_prompt: Option<WebControlPlanePromptSnapshot>,
     pub sidebar: WebSidebarSnapshot,
-    pub feed_blocks: Vec<crate::ui::feed::WebFeedBlock>,
+    pub feed_blocks: Vec<crate::feed::WebFeedBlock>,
     pub feed_lines: Vec<String>,
     pub dags: Vec<WebDagRunSnapshot>,
     pub subagents: Vec<WebAgentJobSnapshot>,

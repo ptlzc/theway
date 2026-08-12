@@ -15,6 +15,7 @@ path = "src/main.rs"
 [dependencies]
 theway = { path = "../theway-server", features = ["tui"] }
 theway-core = { path = "../theway-core" }
+theway-transport = { path = "../theway-transport" }
 theway-llm-provider = { path = "../theway-llm-provider" }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 

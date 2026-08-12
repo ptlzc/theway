@@ -25,7 +25,6 @@ pub mod export;
 pub mod extensions;
 pub mod history;
 pub mod images;
-pub mod inbox;
 pub mod local_models;
 pub mod logging;
 pub mod lsp;
@@ -52,7 +51,5 @@ pub mod tools;
 pub mod trigger_engine;
 pub mod ts_extensions;
 // Server-first: transport is always on (theway IS an agent server).
-pub mod transport;
 pub mod triggers;
 pub mod ui;
-pub mod wire;

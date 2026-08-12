@@ -8,10 +8,11 @@
 use std::sync::{Arc, OnceLock};
 
 use anyhow::{Context, Result};
-use theway::{agent_specs, inbox, session, tools, triggers, ui};
+use theway::{agent_specs, session, tools, triggers, ui};
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::{AgentHarness, AgentHarnessOptions, JsonlSessionRepo, ThinkingLevel};
 use theway_core::{agent::hooks, multiagent::goal};
+use theway_transport::inbox;
 
 /// session-resource-model: rebuilds a fully-wired [`AgentHarness`] for any session id —
 /// the in-process version of the CLI `--resume-id` path. Constructed once in `run_repl`

@@ -69,7 +69,7 @@ enum ClientFrame {
 
 async fn run_ws(mut socket: WebSocket, state: HttpState) {
     // Send the current full state first, then stream snapshot/event increments.
-    let latest = state.latest.lock().await.clone();
+    let latest = state.latest.lock().clone();
     let _ = socket
         .send(Message::Text(
             json!({ "type": "status", "json": latest })
@@ -350,4 +350,4 @@ pub(crate) fn dag_event_json(event: &DagEvent) -> Value {
 #[cfg(test)]
 // Test files live in `tests/transport/ws/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
-tests_bridge_macro::tests_bridge!("transport/ws");
+tests_bridge_macro::tests_bridge!("ws");

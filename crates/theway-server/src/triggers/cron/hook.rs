@@ -347,9 +347,13 @@ pub fn cron_trigger_listener(registry: CronRegistry, inbox_path: PathBuf) -> Tri
                 .unwrap_or_default();
             let source = format!("cron:{}", job.id.chars().take(13).collect::<String>());
             for finding in extract_tag_all(&summary, "inbox", INBOX_TAGS_PER_RUN) {
-                if let Err(err) =
-                    crate::inbox::append(&inbox_path, &source, &finding, &trace_id, &session_stem)
-                {
+                if let Err(err) = theway_transport::inbox::append(
+                    &inbox_path,
+                    &source,
+                    &finding,
+                    &trace_id,
+                    &session_stem,
+                ) {
                     tracing::warn!(error = %err, "inbox append failed");
                 }
             }

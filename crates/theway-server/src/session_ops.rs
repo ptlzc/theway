@@ -13,7 +13,7 @@
 //!   through `WebCommand::SwitchSession` on the serialized loop.
 //!
 //! The server crate holds an `Arc<dyn SessionOps>` (via
-//! [`crate::ui::web_loop::TransportEndpoints`]) and never touches the session repo
+//! [`theway_transport::TransportEndpoints`]) and never touches the session repo
 //! directly, keeping the "server programs only against the app's public surface" boundary.
 
 use std::sync::Arc;
@@ -25,7 +25,8 @@ use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::types::DagStatus;
 use theway_core::{JsonlSessionRepo, SessionTreeEntry};
 
-use crate::wire::SessionSummary;
+use theway_transport::transport::SessionOps;
+use theway_transport::wire::SessionSummary;
 
 /// Builds a fresh, fully-wired [`theway_core::AgentHarness`] for the session identified by
 /// the given id (resume semantics: full id or unique prefix, same as CLI `--resume-id`).
@@ -59,29 +60,7 @@ pub struct CurrentSessionState {
 /// Session lifecycle ops exposed to the transport servers (session-resource-model tasks
 /// 3.5/3.6). All ops are repo-backed; `delete` additionally consults the DAG engine for
 /// the delete-protection rule.
-#[async_trait]
-pub trait SessionOps: Send + Sync {
-    /// Every session in the cwd-scoped repo, oldest → newest, enriched with live graph
-    /// counts from the shared DAG engine.
-    async fn list(&self) -> Result<Vec<SessionSummary>>;
-
-    /// Create a new session (cwd inherited from the current one). Returns the new id;
-    /// *becoming current* is a separate `SwitchSession` command through the event loop.
-    async fn create(&self) -> Result<String>;
-
-    /// Rename a session (full id or unique prefix). Recorded as a `session_info` entry in
-    /// the transcript, so it survives export/import.
-    async fn rename(&self, id: &str, name: &str) -> Result<()>;
-
-    /// Delete a session (full id or unique prefix) plus its automation sidecars.
-    ///
-    /// Delete protection: when the session still has active (running) DAG runs, nothing is
-    /// deleted and their run ids are returned — `Ok(non_empty)` means "refused, here is
-    /// what is still running". `Ok(empty)` means the session was deleted. Error semantics
-    /// (mapping the refusal onto an RPC/HTTP error) are the caller's job.
-    async fn delete(&self, id: &str) -> Result<Vec<String>>;
-}
-
+///
 /// `SessionOps` over the cwd-scoped [`JsonlSessionRepo`] + the process-wide [`DagEngine`].
 pub struct AppSessionOps {
     repo: Arc<JsonlSessionRepo>,

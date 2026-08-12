@@ -1,8 +1,8 @@
 //! Tests for `proto` — split out of src (see docs/RUST_TEST_FILES.md).
 
 use super::*;
-use crate::model_picker::{ModelEntry, ProviderGroup};
-use crate::ui::feed::{Level, TriggerPollStatus};
+use crate::wire::{ModelEntry, ProviderGroup};
+use crate::feed::{Level, TriggerPollStatus};
 use crate::wire::{
     WebCronSnapshot, WebMcpSnapshot, WebSidebarSnapshot, WebSkillsSnapshot, WebToolsSnapshot,
     WebTriggersSnapshot,
