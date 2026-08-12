@@ -1,10 +1,8 @@
 //! Free rendering / display helpers for the TUI surface (split out of `ui/mod.rs`).
 //!
-//! Panel/overlay line builders, control-plane-prompt redaction, queued-prompt previews,
-//! textarea construction, terminal enter/leave sequences, and the headless feed printer.
-//! Everything here is a free function — no `App` state.
-
-use std::io::Write as _;
+//! Panel/overlay line builders, control-plane-prompt redaction, textarea
+//! construction, and terminal enter/leave sequences. Everything here is a free
+//! function — no `App` state.
 
 use anyhow::Result;
 use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
@@ -19,10 +17,7 @@ use ratatui::text::Line;
 use regex::Regex;
 use tui_textarea::TextArea;
 
-use super::FeedUpdate;
 use theway::app::feed;
-
-const QUEUED_PREVIEW_CHARS: usize = 80;
 
 pub(super) fn panel_line(text: String, color: Color, width: usize) -> Line<'static> {
     Line::styled(
@@ -52,10 +47,6 @@ pub(super) fn safe_control_prompt_text(text: &str, cap: usize) -> String {
     feed::truncate_chars(&redacted, cap.max(1)).replace('\n', " ")
 }
 
-pub(super) fn safe_control_prompt_payload(value: &serde_json::Value, cap: usize) -> String {
-    let text = serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string());
-    safe_control_prompt_text(&text, cap)
-}
 fn redact_control_prompt_secrets(text: &str) -> String {
     static TOKENISH_FIELD: Lazy<Regex> = Lazy::new(|| {
         Regex::new(
@@ -74,30 +65,6 @@ pub(super) fn panel_rule_preview(text: &str, width: usize) -> String {
     feed::truncate_chars(&redacted, width.max(1))
 }
 
-pub(super) fn queue_preview(text: &str) -> String {
-    let redacted = theway::bug_report::redact(text).replace('\n', " ");
-    feed::truncate_chars(&redacted, QUEUED_PREVIEW_CHARS)
-}
-
-pub(super) fn prompt_display(text: &str, image_count: usize) -> String {
-    if image_count == 0 {
-        return text.to_string();
-    }
-    let suffix = image_attachment_display(image_count);
-    if text.is_empty() {
-        suffix
-    } else {
-        format!("{text}\n{suffix}")
-    }
-}
-
-fn image_attachment_display(image_count: usize) -> String {
-    match image_count {
-        1 => "[1 image attachment]".to_string(),
-        n => format!("[{n} image attachments]"),
-    }
-}
-
 pub(super) fn human_bytes(bytes: usize) -> String {
     const KIB: usize = 1024;
     const MIB: usize = 1024 * 1024;
@@ -108,23 +75,6 @@ pub(super) fn human_bytes(bytes: usize) -> String {
     } else {
         format!("{bytes} B")
     }
-}
-
-pub(super) fn user_facing_run_error(error: &str) -> String {
-    let Some(rest) = error.strip_prefix("no API key for provider: ") else {
-        return error.to_string();
-    };
-    let provider = rest.split(';').next().unwrap_or(rest).trim();
-    if provider.is_empty() {
-        return error.to_string();
-    }
-    let vars = theway_llm_provider::env_api_keys::env_var_names(provider);
-    let credential_hint = if vars.is_empty() {
-        "configure a provider-specific credential".to_string()
-    } else {
-        format!("set {}", vars.join(" or "))
-    };
-    format!("no API key for provider: {provider}; run /login {provider} or {credential_hint}")
 }
 
 pub(super) fn new_textarea() -> TextArea<'static> {
@@ -165,46 +115,4 @@ pub(super) fn write_leave_tui_commands(out: &mut impl std::io::Write) -> std::io
     write!(out, "\x1b[?1006l\x1b[?1000l")?;
     execute!(out, DisableBracketedPaste, LeaveAlternateScreen)?;
     Ok(())
-}
-
-pub(super) fn print_headless_update(update: &FeedUpdate, at_line_start: &mut bool) {
-    let mut out = std::io::stdout();
-    match update {
-        FeedUpdate::TextDelta(delta) => {
-            let _ = write!(out, "{delta}");
-            *at_line_start = delta.ends_with('\n');
-        }
-        FeedUpdate::ThinkingDelta(_) => {}
-        FeedUpdate::ToolStart { name, args } => {
-            if !*at_line_start {
-                let _ = writeln!(out);
-            }
-            let _ = writeln!(out, "⚙ {name}{args}");
-            *at_line_start = true;
-        }
-        FeedUpdate::ToolProgress { .. } => {}
-        FeedUpdate::ToolEnd { lines, .. } => {
-            for line in lines {
-                let _ = writeln!(out, "    {line}");
-            }
-            *at_line_start = true;
-        }
-        FeedUpdate::Plain { text, .. } => {
-            if !*at_line_start {
-                let _ = writeln!(out);
-            }
-            let _ = writeln!(out, "{text}");
-            *at_line_start = true;
-        }
-        FeedUpdate::TriggerPollStatus(_) => {}
-        FeedUpdate::SkillsReloaded { .. } => {}
-        FeedUpdate::TurnStart => {}
-        FeedUpdate::TurnEnd => {
-            if !*at_line_start {
-                let _ = writeln!(out);
-                *at_line_start = true;
-            }
-        }
-    }
-    let _ = out.flush();
 }

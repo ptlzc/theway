@@ -57,6 +57,46 @@ impl Feed {
         self.trim_text = true;
     }
 
+    /// Replace the whole feed with finished wire blocks (client mode: the
+    /// daemon owns the transcript and publishes full snapshots; the TUI
+    /// rebuilds its feed from `WireStatus.feed_blocks` on every snapshot).
+    pub fn replace_blocks(&mut self, blocks: &[WireFeedBlock]) {
+        self.clear();
+        for block in blocks {
+            match block {
+                WireFeedBlock::User { text, timestamp } => {
+                    self.push_user_with_timestamp(text.clone(), timestamp.clone())
+                }
+                WireFeedBlock::Assistant { text, timestamp } => {
+                    self.push_assistant_with_timestamp(text.clone(), timestamp.clone())
+                }
+                WireFeedBlock::Thinking { text, timestamp } => {
+                    self.push_thinking_with_timestamp(text.clone(), timestamp.clone())
+                }
+                WireFeedBlock::Tool {
+                    name,
+                    args,
+                    timestamp,
+                } => self.push_tool_with_timestamp(name.clone(), args.clone(), timestamp.clone()),
+                WireFeedBlock::ToolResult {
+                    lines,
+                    is_error,
+                    timestamp,
+                } => self.push_tool_result_with_timestamp(
+                    String::new(),
+                    lines.clone(),
+                    *is_error,
+                    timestamp.clone(),
+                ),
+                WireFeedBlock::Plain {
+                    text,
+                    level,
+                    timestamp,
+                } => self.push_plain_with_timestamp(text.clone(), *level, timestamp.clone()),
+            }
+        }
+    }
+
     /// Push a user prompt block. Called directly by the loop on submit / on resume replay.
     pub fn push_user(&mut self, text: impl Into<String>) {
         self.push_user_with_timestamp(text, current_time_label());

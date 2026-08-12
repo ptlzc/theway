@@ -1,31 +1,31 @@
 //! Turn lifecycle (`App` methods split out of `ui/mod.rs`).
 //!
-//! Submit + slash dispatch, the queued-turn FIFO, the per-kind turn starters, OAuth
-//! login, and abort/exit semantics (Ctrl-C / Ctrl-D while a turn runs).
+//! Client mode: the daemon owns the turn loop. Submit maps to
+//! `send_message`, Ctrl-C to `cancel`, the control-plane card to `approve`,
+//! the model picker to `set_model`. Slash commands split into a small local
+//! surface (quit/clear/help/login + session export/import over the local
+//! SQLite repo) and everything else forwarded to the daemon as a message
+//! (the daemon dispatches the full registry and publishes the result).
 
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use theway_llm_provider::ImageContent;
 
 use theway::commands;
-use theway::commands::{CommandCtx, CommandOutcome};
 use theway::images;
 use theway::mentions;
 
 use super::App;
-use super::render_utils::queue_preview;
-use super::render_utils::{enter_tui, leave_tui, prompt_display};
-use theway::app::kernel::{QueuedTurn, TurnState};
+use super::render_utils::{enter_tui, leave_tui};
+use theway::session_archive;
 
 impl App {
     // ── submit / dispatch ───────────────────────────────────────────────────────────────
 
     pub(super) async fn submit(
         &mut self,
-        turn: &mut TurnState,
         terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     ) -> Result<()> {
         let text = self.input_text();
@@ -41,8 +41,7 @@ impl App {
             self.last_ctrlc = None;
             self.history.append(&trimmed);
             self.follow = true;
-            self.feed.push_user(&trimmed);
-            self.dispatch_slash(&trimmed, terminal, turn).await;
+            self.dispatch_slash(&trimmed, terminal).await;
             return Ok(());
         }
 
@@ -84,255 +83,173 @@ impl App {
             return Ok(());
         }
 
-        let display = prompt_display(&trimmed, loaded_images.len());
-
-        if turn.fut.is_some() {
-            self.queue_user_prompt(display, prompt_text, loaded_images);
-        } else {
-            self.feed.push_user(display);
-            self.start_user_prompt_turn(prompt_text, loaded_images, turn);
+        // The daemon pushes the user block into its own feed and publishes a
+        // snapshot; the client feed follows on the next frame.
+        let images = loaded_images
+            .into_iter()
+            .map(|image| theway_transport::wire::WirePromptImage {
+                data: image.data,
+                name: None,
+            })
+            .collect();
+        match self.client.send_message(prompt_text, images, false).await {
+            Ok(true) => {}
+            Ok(false) => self.error_line("daemon rejected the message"),
+            Err(e) => self.error_line(e.to_string()),
         }
         Ok(())
-    }
-
-    pub(super) fn start_triggered_turn(&mut self, trace_id: String, turn: &mut TurnState) {
-        // The kernel emits this only for an idle parent, but a user prompt may have started in
-        // the gap; `continue_` would return AlreadyStreaming. Skip rather than error.
-        if self.kernel.is_streaming() {
-            return;
-        }
-        let short: String = trace_id.chars().take(8).collect();
-        self.system_line(format!("running triggered turn (trace {short})"));
-        self.follow = true;
-        turn.fut = Some(self.kernel.continue_turn());
-        turn.aborted = false;
-        turn.prefix = "triggered turn: ";
-        self.busy = true;
-    }
-
-    pub(super) fn queue_user_prompt(
-        &mut self,
-        display: String,
-        prompt: String,
-        images: Vec<ImageContent>,
-    ) {
-        self.enqueue_turn(QueuedTurn::UserPrompt {
-            display,
-            prompt,
-            images,
-        });
-    }
-
-    pub(super) fn enqueue_turn(&mut self, job: QueuedTurn) {
-        let preview = queue_preview(job.display());
-        self.queued_turns.push_back(job);
-        self.system_line(format!(
-            "queued next message #{}: {preview}",
-            self.queued_turns.len()
-        ));
-    }
-
-    pub(super) fn cancel_last_queued_turn(&mut self) {
-        let Some(job) = self.queued_turns.pop_back() else {
-            self.system_line("queue is empty");
-            return;
-        };
-        let preview = queue_preview(job.display());
-        self.system_line(format!("removed queued message: {preview}"));
-    }
-
-    pub(super) fn start_next_queued_turn(&mut self, turn: &mut TurnState) -> bool {
-        if turn.fut.is_some() {
-            return true;
-        }
-        let Some(job) = self.queued_turns.pop_front() else {
-            return false;
-        };
-        let remaining = self.queued_turns.len();
-        self.system_line(if remaining == 0 {
-            "running queued message".to_string()
-        } else {
-            format!("running queued message ({remaining} still queued)")
-        });
-        match job {
-            QueuedTurn::UserPrompt {
-                display,
-                prompt,
-                images,
-            } => {
-                self.feed.push_user(display);
-                self.start_user_prompt_turn(prompt, images, turn);
-            }
-            QueuedTurn::AgentPrompt {
-                display,
-                prompt,
-                error_context,
-            } => {
-                self.feed.push_user(display);
-                self.start_prompt_turn(prompt, error_context, turn);
-            }
-            QueuedTurn::PromptTemplate {
-                display,
-                name,
-                vars,
-            } => {
-                self.feed.push_user(display);
-                self.start_template_turn(name, vars, turn);
-            }
-            QueuedTurn::Compaction { display, custom } => {
-                self.feed.push_user(display);
-                self.start_compaction_turn(custom, turn);
-            }
-        }
-        true
     }
 
     pub(super) async fn dispatch_slash(
         &mut self,
         input: &str,
         terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
-        turn: &mut TurnState,
     ) {
-        let outcome = {
-            let ctx = CommandCtx {
-                harness: self.kernel.harness(),
-                trigger_executor: self.kernel.trigger_executor(),
-                session_id: &self.session_id,
-                log_path: self.log_path.as_ref(),
-                tool_count: self.tool_count,
-                cwd: &self.cwd,
-            };
-            commands::dispatch(input, &self.registry, &ctx).await
-        };
-        match outcome {
-            CommandOutcome::Quit => self.quit = true,
-            CommandOutcome::ClearScreen => {
+        let trimmed = input.trim();
+        let (command, args) = trimmed
+            .split_once(char::is_whitespace)
+            .map_or((trimmed, ""), |(c, a)| (c, a.trim()));
+        match command {
+            "/quit" | "/exit" => self.quit = true,
+            "/clear" => {
                 self.feed.clear();
                 self.follow = true;
             }
-            CommandOutcome::Error(e) => self.error_line(e),
-            CommandOutcome::AttachSkill { name } => {
-                self.pending_skill = Some(name);
-            }
-            CommandOutcome::RunAgentPrompt {
-                prompt,
-                error_context,
-            } => {
-                if turn.fut.is_some() {
-                    self.enqueue_turn(QueuedTurn::AgentPrompt {
-                        display: input.to_string(),
-                        prompt,
-                        error_context,
-                    });
-                } else {
-                    self.start_prompt_turn(prompt, error_context, turn);
+            "/help" => self.system_line(
+                "theway client · send messages to the thewayd daemon · local: /login /quit /clear /session export|import · everything else forwards to the daemon (/model /goal /triggers /cron …)",
+            ),
+            "/login" => self.login(args, terminal).await,
+            "/session" => self.local_session_command(args).await,
+            _ => {
+                // Forward to the daemon: it dispatches the full slash registry
+                // (model/goal/triggers/cron/skills/…) and publishes the result.
+                match self
+                    .client
+                    .send_message(trimmed.to_string(), vec![], false)
+                    .await
+                {
+                    Ok(true) => {}
+                    Ok(false) => self.error_line("daemon rejected the command"),
+                    Err(e) => self.error_line(e.to_string()),
                 }
             }
-            CommandOutcome::RunPromptTemplate { name, vars } => {
-                if turn.fut.is_some() {
-                    self.enqueue_turn(QueuedTurn::PromptTemplate {
-                        display: input.to_string(),
-                        name,
-                        vars,
-                    });
-                } else {
-                    self.start_template_turn(name, vars, turn);
-                }
-            }
-            CommandOutcome::RunCompaction { custom } => {
-                if turn.fut.is_some() {
-                    self.enqueue_turn(QueuedTurn::Compaction {
-                        display: input.to_string(),
-                        custom,
-                    });
-                } else {
-                    self.start_compaction_turn(custom, turn);
-                }
-            }
-            CommandOutcome::WebRelay(action) => self.handle_web_relay(action).await,
-            CommandOutcome::SessionImportActivation {
-                session_path,
-                trigger_ids,
-                cron_ids,
-            } => self.prompt_import_activation(session_path, trigger_ids, cron_ids),
-            CommandOutcome::LoginSecret {
-                provider,
-                storage_key,
-                recovery_command: _,
-            } => {
-                self.login(&provider, storage_key.as_deref(), terminal)
-                    .await;
-            }
-            CommandOutcome::OpenModelPicker => self.open_model_picker(),
-            CommandOutcome::Handled => {}
-        }
-        if input.trim_start().starts_with("/goal") {
-            self.refresh_goal_state().await;
         }
     }
 
-    pub(super) fn start_prompt_turn(
-        &mut self,
-        prompt: String,
-        error_context: &'static str,
-        turn: &mut TurnState,
-    ) {
-        turn.fut = Some(self.kernel.prompt_turn(prompt));
-        turn.aborted = false;
-        turn.prefix = error_context;
-        self.busy = true;
-    }
-
-    pub(super) fn start_user_prompt_turn(
-        &mut self,
-        prompt_text: String,
-        loaded_images: Vec<ImageContent>,
-        turn: &mut TurnState,
-    ) {
-        turn.fut = Some(self.kernel.user_prompt_turn(prompt_text, loaded_images));
-        turn.aborted = false;
-        turn.prefix = "";
-        self.busy = true;
-    }
-
-    pub(super) fn start_template_turn(
-        &mut self,
-        name: String,
-        vars: serde_json::Map<String, serde_json::Value>,
-        turn: &mut TurnState,
-    ) {
-        turn.fut = Some(self.kernel.template_turn(name, vars));
-        turn.aborted = false;
-        turn.prefix = "template run failed: ";
-        self.busy = true;
-    }
-
-    pub(super) fn start_compaction_turn(&mut self, custom: Option<String>, turn: &mut TurnState) {
-        turn.fut = Some(self.kernel.compaction_turn(custom));
-        turn.aborted = false;
-        turn.prefix = "compaction failed: ";
-        self.busy = true;
+    /// Local-only `/session` surface: export/import operate on the local SQLite
+    /// repo (same machine, shared sessions) without touching the daemon.
+    async fn local_session_command(&mut self, args: &str) {
+        let mut parts = args.split_whitespace();
+        match parts.next() {
+            Some("export") => {
+                let output = parts.next();
+                let exclude_triggers = parts.any(|p| p == "--exclude-triggers");
+                let output_path = match output {
+                    Some(path) => std::path::PathBuf::from(path),
+                    None => session_archive::default_export_path(&self.cwd, &self.session_id),
+                };
+                let output_path = if output_path.is_absolute() {
+                    output_path
+                } else {
+                    self.cwd.join(output_path)
+                };
+                self.system_line(
+                    "warning: .theway-session archives include transcript and tool history. They do not include separate auth stores, provider credentials, OAuth tokens, or MCP config.",
+                );
+                let result = async {
+                    let Some(path) = theway::session::find_path_by_id(&self.session_repo, &self.session_id).await? else {
+                        anyhow::bail!("current session {} not found in repo", self.session_id);
+                    };
+                    let session = self.session_repo.open(&path).await?;
+                    session_archive::export_session(&session, &output_path, exclude_triggers).await
+                }
+                .await;
+                match result {
+                    Ok(summary) => self.system_line(format!(
+                        "exported session archive: {} (entries={})",
+                        summary.output_path.display(),
+                        summary.entry_count
+                    )),
+                    Err(e) => self.error_line(format!("session export failed: {e}")),
+                }
+            }
+            Some("import") => {
+                let Some(path) = parts.next() else {
+                    self.error_line("usage: /session import <path>");
+                    return;
+                };
+                let archive_path = if std::path::Path::new(path).is_absolute() {
+                    std::path::PathBuf::from(path)
+                } else {
+                    self.cwd.join(path)
+                };
+                self.system_line(
+                    "warning: .theway-session archives include transcript and tool history. They do not include separate auth stores, provider credentials, OAuth tokens, or MCP config.",
+                );
+                match session_archive::import_session(
+                    &self.session_repo,
+                    &archive_path,
+                    &self.cwd,
+                    session_archive::ActivateTriggers::Off,
+                )
+                .await
+                {
+                    Ok(summary) => {
+                        self.system_line(format!(
+                            "imported session: {} (entries={})",
+                            &summary.session_id[..16.min(summary.session_id.len())],
+                            summary.entry_count
+                        ));
+                        if !summary.originally_enabled_triggers.is_empty()
+                            || !summary.originally_enabled_cron.is_empty()
+                        {
+                            self.prompt_import_activation(
+                                summary.session_path,
+                                summary.originally_enabled_triggers,
+                                summary.originally_enabled_cron,
+                            );
+                        }
+                    }
+                    Err(e) => self.error_line(format!("session import failed: {e}")),
+                }
+            }
+            Some("switch") => {
+                let Some(id) = parts.next() else {
+                    self.error_line("usage: /session switch <id>");
+                    return;
+                };
+                let id = id.to_string();
+                match self.switch_session(id).await {
+                    Ok(()) => {}
+                    Err(e) => self.error_line(format!("switch session failed: {e}")),
+                }
+            }
+            _ => self.error_line(
+                "usage: /session export [path] [--exclude-triggers] | /session import <path> | /session switch <id>",
+            ),
+        }
     }
 
     pub(super) async fn login(
         &mut self,
         provider: &str,
-        storage_key: Option<&str>,
         terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     ) {
+        let provider = provider.trim().to_string();
         // rpassword needs a cooked terminal with echo control, so drop out of the full-screen
-        // UI for the prompt, then restore.
+        // UI for the prompt, then restore. The daemon picks the key up on its next turn via
+        // the auth-store stream fn — no protocol change (design decision 6).
         leave_tui().ok();
-        let result = theway::auth::prompt_for_api_key(provider).await;
+        let result = theway::auth::prompt_for_api_key(&provider).await;
         let _ = enter_tui();
         let _ = terminal.clear();
         match result {
             Ok(token) if token.trim().is_empty() => {
                 self.error_line("empty api key; login cancelled")
             }
-            Ok(token) => match commands::save_api_key(storage_key.unwrap_or(provider), &token) {
+            Ok(token) => match commands::save_api_key(&provider, &token) {
                 Ok(path) => self.system_line(format!(
-                    "saved api key for `{provider}` to {}",
+                    "saved api key for `{provider}` to {} — the daemon picks it up on its next turn",
                     path.display()
                 )),
                 Err(e) => self.error_line(e),
@@ -341,17 +258,22 @@ impl App {
         }
     }
 
-    pub(super) fn request_abort(&mut self, turn: &mut TurnState) {
-        if turn.fut.is_some() {
-            turn.aborted = true;
-            self.kernel.abort();
+    pub(super) fn request_abort(&mut self) {
+        if self.busy {
             self.system_line("aborting current turn…");
+            let client = self.client.clone();
+            tokio::spawn(async move {
+                let mut client = client;
+                if let Err(e) = client.cancel().await {
+                    eprintln!("cancel: {e}");
+                }
+            });
         }
     }
 
-    pub(super) fn handle_ctrl_d(&mut self, turn: &mut TurnState) -> bool {
-        if turn.fut.is_some() {
-            self.request_abort(turn);
+    pub(super) fn handle_ctrl_d(&mut self) -> bool {
+        if self.busy {
+            self.request_abort();
             true
         } else {
             false

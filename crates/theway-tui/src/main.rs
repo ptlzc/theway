@@ -10,20 +10,16 @@
 //! Trimmed scope: no extensions, no themes, no print/rpc/json modes.
 //!
 //! The bin entry is split into submodule directories: [`cli`] (CLI argument types +
-//! standalone session commands), [`startup`] (`run_repl` startup assembly),
-//! [`session_factory`] (per-session harness rebuild), and [`ui_mode`] (UI mode
-//! resolution + small CLI-level helpers). This file keeps `fn main` and the CLI
-//! command dispatch.
+//! standalone session commands), [`startup`] (`run_repl`: daemon discovery/spawn +
+//! connect), and [`ui_mode`] (UI mode resolution + small CLI-level helpers). This file
+//! keeps `fn main` and the CLI command dispatch.
 
 mod cli;
 mod clipboard_image;
-mod debug;
 mod model_picker;
 mod resume_picker;
-mod session_factory;
 mod startup;
 pub mod ui;
-mod ui_mode;
 
 use std::io::IsTerminal as _;
 

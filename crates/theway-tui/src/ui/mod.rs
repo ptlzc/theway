@@ -1,4 +1,5 @@
-//! Full-screen terminal UI for the `theway` REPL.
+//! Full-screen terminal UI for the `theway` REPL — a **pure client** of the
+//! `thewayd` daemon (openspec `tui-connect-daemon`).
 //!
 //! Layout is a fixed bottom **input box** with a scrolling **conversation feed** above it:
 //!
@@ -14,20 +15,18 @@
 //! └─────────────────────────────────────────────────────────────────────────┘
 //! ```
 //!
-//! The model turn runs as a local future polled by the event loop's `select!`, so the feed
-//! streams and the input box stays live while the assistant responds; Ctrl-C/Esc aborts the
-//! in-flight turn (raw mode delivers Ctrl-C as a key, not a signal). Inject-and-run triggered
-//! turns funnel through the same single serialized run slot as user prompts, so they never race.
+//! No harness / kernel / turn scheduling lives here: the daemon owns the
+//! transcript and the turn loop, and publishes full [`WireStatus`] snapshots
+//! over gRPC. The App keeps a `latest` snapshot cache, rebuilds its feed from
+//! `feed_blocks` on every snapshot frame, and maps every UI action to a typed
+//! RPC call (`send_message` / `cancel` / `approve` / `set_model` /
+//! `switch_session`). The stream is watched for drops; a reconnect timer
+//! restores the connection (offline banner while down).
 //!
-//! Agent/harness events never write to stdout directly — they arrive as [`FeedUpdate`]s on a
-//! channel (see [`listener`]) and slash-command output arrives via the console sink
-//! (`commands::console`). The ratatui terminal is the single writer.
-//!
-//! `App`'s methods are split by domain across submodules (`app_turns`, `app_input`,
-//! `app_import`, `app_goal`), with the free rendering helpers in `render_utils`; this file
-//! keeps the types, construction, the event-loop skeleton, and rendering.
-
-pub mod web_loop;
+//! `App`'s methods are split by domain across submodules (`app_turns`,
+//! `app_input`, `app_import`, `app_goal`), with the free rendering helpers in
+//! `render_utils`; this file keeps the types, construction, the event-loop
+//! skeleton, and rendering.
 
 mod app_goal;
 mod app_import;
@@ -36,9 +35,6 @@ mod app_turns;
 mod render_utils;
 
 pub use theway::app::feed::FeedUpdate;
-// `crate::ui::prompt_display` is consumed by `web_loop`; keep the path valid after the
-// move into `render_utils` (private re-import keeps the original ui-subtree scope).
-use render_utils::prompt_display;
 
 use std::io::IsTerminal;
 use std::io::Write as _;
@@ -56,28 +52,23 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap};
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tui_textarea::TextArea;
 
-use theway::agent_session::RetrySettings;
 use theway::app::feed::{Feed, Level, TriggerPollStatus};
-use theway::app::kernel::poll_turn;
-use theway::app::kernel::{QueuedTurn, ReplKernel, TurnState};
 use theway::commands;
 use theway::commands::Registry;
-use theway::commands::{CommandCtx, CommandOutcome};
-use theway::control_plane_prompt::UiControlPlanePrompt;
 use theway::history::HistoryStore;
 use theway::mentions;
-use theway_core::SkillSource;
-use theway_core::{AgentHarness, AgentMessage, AgentRunError};
-use theway_llm_provider::{ContentBlock, ImageContent, Message, UserContent, UserContentBlock};
+use theway_transport::client::GrpcClient;
+use theway_transport::proto::theway_grpc::stream_frame;
+use theway_transport::proto::{theway_grpc, wire_status};
 use theway_transport::transport::SlashCompleter;
+use theway_transport::wire::{WireStatus};
+use theway_llm_provider::ImageContent;
 
-use render_utils::user_facing_run_error;
+use render_utils::{enter_tui, leave_tui, new_textarea};
 use render_utils::{
-    centered_rect, enter_tui, leave_tui, new_textarea, panel_line, panel_rule_preview,
-    print_headless_update, safe_control_prompt_label, safe_control_prompt_payload,
+    centered_rect, panel_line, panel_rule_preview, safe_control_prompt_label,
     safe_control_prompt_text,
 };
 
@@ -109,50 +100,56 @@ pub struct PanelStatus {
     pub trigger_features: Vec<String>,
 }
 
-/// Everything the app needs to run a session, assembled by `main.rs` after the harness is built.
-pub struct AppConfig {
-    pub harness: Arc<AgentHarness>,
-    pub trigger_executor: Arc<theway::trigger_engine::execution::TriggerExecutor>,
-    pub retry: RetrySettings,
-    pub registry: Registry,
-    pub cwd: PathBuf,
-    pub session_id: String,
-    pub log_path: Option<PathBuf>,
-    pub tool_count: usize,
-    pub history: HistoryStore,
-    /// `--image` payloads attached to the first prompt only.
-    pub pending_images: Vec<PathBuf>,
-    pub feed_rx: UnboundedReceiver<FeedUpdate>,
-    pub main_run_rx: UnboundedReceiver<String>,
-    pub control_plane_prompt_rx: Option<UnboundedReceiver<UiControlPlanePrompt>>,
-    pub panel_status: PanelStatus,
-    /// DAG orchestration engine (graph mode). Shared with the dag_* tools;
-    /// used by the transport snapshots to expose run/node state.
-    pub dag_engine: std::sync::Arc<theway_core::multiagent::graph::engine::DagEngine>,
-    /// Subagent job registry (graph mode). Task tool + DAG nodes register here.
-    pub subagent_registry: theway_core::multiagent::registry::AgentJobRegistry,
-    /// session-resource-model: builds a fresh harness for any session id (resume
-    /// semantics). Drives [`App::switch_session`] from the serialized event loop;
-    /// the CLI crate extracts its harness-construction path into this closure.
-    pub session_factory: theway::session_ops::SessionFactory,
-    /// cwd-scoped session repo backing [`theway_transport::transport::SessionOps`] (list / create /
-    /// rename / delete) and cheap "does this id exist" checks before a switch.
-    pub session_repo: Arc<theway::SqliteSessionRepo>,
+impl PanelStatus {
+    /// Build from a wire sidebar snapshot (client mode: the daemon assembles
+    /// the panel inventory; the TUI only renders it).
+    fn from_sidebar(sidebar: &theway_transport::wire::WireSidebarSnapshot) -> Self {
+        Self {
+            mcp_servers: sidebar.mcp.servers,
+            mcp_tools: sidebar.mcp.tools,
+            mcp_server_names: sidebar.mcp.server_names.clone(),
+            mcp_tool_names: sidebar.mcp.tool_names.clone(),
+            tool_names: sidebar.tools.names.clone(),
+            mcp_notification_hooks: sidebar.mcp.notification_hooks,
+            hook_points: sidebar.hooks.clone(),
+            trigger_features: sidebar.runtime.clone(),
+        }
+    }
 }
 
-// Everything here is private to the `ui` subtree: the TUI event loop and the
-// transport event loop (`ui::web_loop`) share it internally. The `theway-server`
-// crate never touches App internals — it programs against the public
-// `web_loop::TransportEndpoints` channel surface plus `transport_endpoints()` /
-// `run_transport_loop()`.
+/// Everything the client App needs, assembled by `main.rs` after the daemon
+/// is discovered/spawned and the initial snapshot is fetched.
+pub struct AppConfig {
+    /// Connected gRPC client (the only way to reach the runtime).
+    pub client: GrpcClient,
+    /// Initial snapshot (`get_state` result) — seeds the feed, the panel and
+    /// the status line before the first stream frame arrives.
+    pub initial: WireStatus,
+    pub cwd: PathBuf,
+    /// cwd-scoped session repo backing the local-only surfaces (`/session`
+    /// export/import, --list-sessions) — same machine, shared SQLite sessions.
+    pub session_repo: Arc<theway::SqliteSessionRepo>,
+    pub history: HistoryStore,
+    /// Local slash-command registry (quit/clear/help/login + session
+    /// export/import). Everything else forwards to the daemon.
+    pub registry: Registry,
+    /// `--image` payloads attached to the first prompt only.
+    pub pending_images: Vec<PathBuf>,
+}
+
+/// Client-side App state: a snapshot cache plus local UI concerns (input,
+/// history, scroll, model picker, offline banner). No harness, no kernel, no
+/// turn scheduling — the daemon owns all of it.
 pub struct App {
-    kernel: ReplKernel,
+    client: GrpcClient,
+    /// Latest snapshot cache: updated from the initial `get_state` and every
+    /// stream snapshot frame; everything renderable reads from here.
+    latest: WireStatus,
+
     registry: Registry,
     completer: SlashCompleter,
     cwd: PathBuf,
     session_id: String,
-    log_path: Option<PathBuf>,
-    tool_count: usize,
 
     history: HistoryStore,
     history_idx: Option<usize>,
@@ -161,28 +158,18 @@ pub struct App {
     pending_images: Vec<PathBuf>,
     pending_pasted_images: Vec<ImageContent>,
 
-    feed: Feed,
-    latest_trigger_poll: Option<TriggerPollStatus>,
-    latest_goal: Option<theway_core::multiagent::goal::GoalState>,
-    feed_rx: Option<UnboundedReceiver<FeedUpdate>>,
-    main_run_rx: Option<UnboundedReceiver<String>>,
-    control_plane_prompt_rx: Option<UnboundedReceiver<UiControlPlanePrompt>>,
-    control_plane_prompt: Option<UiControlPlanePrompt>,
-    model_picker: Option<crate::model_picker::ModelPickerState>,
-    /// Cached for web snapshots; refreshed on picker open and model switch.
-    model_catalog: Vec<crate::model_picker::ProviderGroup>,
-    panel_status: PanelStatus,
-    /// DAG orchestration engine, shared with the dag_* tools (graph mode state).
-    dag_engine: std::sync::Arc<theway_core::multiagent::graph::engine::DagEngine>,
-    /// Subagent job registry (graph mode). Task tool + DAG nodes register here.
-    subagent_registry: theway_core::multiagent::registry::AgentJobRegistry,
-    /// session-resource-model: rebuilds a harness for another session (switch).
-    session_factory: theway::session_ops::SessionFactory,
-    /// cwd-scoped session repo (SessionOps + switch validation).
+    /// cwd-scoped session repo backing the local-only `/session` export/import.
     session_repo: Arc<theway::SqliteSessionRepo>,
-    /// Live "current session" state shared with [`theway::session_ops::AppSessionOps`];
-    /// synced on every published snapshot and on session switch.
-    current_session_state: Arc<parking_lot::Mutex<theway::session_ops::CurrentSessionState>>,
+
+    feed: Feed,
+    panel_status: PanelStatus,
+    model_catalog: Vec<theway_transport::wire::ProviderGroup>,
+    /// UI-only mirrors of snapshot fields (kept as fields so the render paths
+    /// and the model picker stay untouched); synced on every snapshot.
+    model_picker: Option<crate::model_picker::ModelPickerState>,
+    control_plane_prompt: Option<theway_transport::wire::WireControlPlanePromptSnapshot>,
+    latest_goal: Option<theway_transport::wire::WireGoalSnapshot>,
+    latest_trigger_poll: Option<TriggerPollStatus>,
 
     input: TextArea<'static>,
     completions: Vec<String>,
@@ -194,27 +181,14 @@ pub struct App {
     last_feed_area: Option<Rect>,
 
     busy: bool,
-    queued_turns: std::collections::VecDeque<QueuedTurn>,
     spinner_frame: usize,
     last_ctrlc: Option<Instant>,
     quit: bool,
 
-    // Remote relay (issue #22). The channels exist from construction so the event loops
-    // can always select on them; they only carry traffic while a relay is connected.
-    relay: Option<theway::app::relay::RelayHandle>,
-    /// Render a QR code of the relay URL into the feed on connect. Only useful where a
-    /// real terminal shows the feed (TUI); off for web/headless modes.
-    relay_qr_in_feed: bool,
-    relay_prompt_tx: UnboundedSender<String>,
-    relay_prompt_rx: Option<UnboundedReceiver<String>>,
-    relay_abort_tx: UnboundedSender<()>,
-    relay_abort_rx: Option<UnboundedReceiver<()>>,
-    relay_resolve_tx: UnboundedSender<bool>,
-    relay_resolve_rx: Option<UnboundedReceiver<bool>>,
-    relay_model_tx: UnboundedSender<String>,
-    relay_model_rx: Option<UnboundedReceiver<String>>,
-    /// Imported-but-disabled automation awaiting the user's "activate now?" answer on the
-    /// shared confirm surface (TUI keys, local web modal, or the relay viewer).
+    /// Stream connection state: `Some` while the frame stream is open.
+    connected: bool,
+    /// Imported-but-disabled automation awaiting the user's "activate now?"
+    /// answer on the shared confirm surface (TUI keys).
     pending_import_activation: Option<PendingImportActivation>,
 }
 
@@ -224,67 +198,36 @@ struct PendingImportActivation {
     cron_ids: Vec<String>,
 }
 
-/// `provider:model-id` label of the harness's active model, or "no-model". Shared by the
-/// web snapshot header and the SessionOps current-session state.
-fn current_model_label(harness: &Arc<AgentHarness>) -> String {
-    let state = harness.agent().state();
-    state
-        .model
-        .as_ref()
-        .map(|m| format!("{}:{}", m.provider.0, m.id))
-        .unwrap_or_else(|| "no-model".to_string())
-}
-
 impl App {
     pub fn new(config: AppConfig) -> Self {
+        let initial = config.initial;
+        let mut feed = Feed::new();
+        feed.replace_blocks(&initial.feed_blocks);
         let completer = SlashCompleter::from_commands(collect_slash_commands(
             &config.registry,
-            &config.harness.skills(),
+            &initial.sidebar.skills.items,
         ));
-        // session-resource-model: live "current session" state shared with SessionOps.
-        // Bound before the struct literal below because that literal moves fields out of
-        // `config` (harness / session_id / cwd) in declaration order.
-        let current_session_state = Arc::new(parking_lot::Mutex::new(
-            theway::session_ops::CurrentSessionState {
-                session_id: config.session_id.clone(),
-                busy: false,
-                model: current_model_label(&config.harness),
-                cwd: config.cwd.display().to_string(),
-            },
-        ));
-        let (relay_prompt_tx, relay_prompt_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (relay_abort_tx, relay_abort_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (relay_resolve_tx, relay_resolve_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (relay_model_tx, relay_model_rx) = tokio::sync::mpsc::unbounded_channel();
         Self {
-            kernel: ReplKernel::new(config.harness, config.trigger_executor, config.retry),
+            client: config.client,
+            session_id: initial.session_id.clone(),
+            cwd: config.cwd,
             registry: config.registry,
             completer,
-            cwd: config.cwd,
-            session_id: config.session_id,
-            log_path: config.log_path,
-            tool_count: config.tool_count,
             history: config.history,
             history_idx: None,
             draft: String::new(),
             pending_skill: None,
             pending_images: config.pending_images,
             pending_pasted_images: Vec::new(),
-            feed: Feed::new(),
-            latest_trigger_poll: None,
-            latest_goal: None,
-            feed_rx: Some(config.feed_rx),
-            main_run_rx: Some(config.main_run_rx),
-            control_plane_prompt_rx: config.control_plane_prompt_rx,
-            control_plane_prompt: None,
-            model_picker: None,
-            model_catalog: crate::model_picker::catalog(),
-            panel_status: config.panel_status,
-            dag_engine: config.dag_engine,
-            subagent_registry: config.subagent_registry,
-            session_factory: config.session_factory,
             session_repo: config.session_repo.clone(),
-            current_session_state,
+            feed,
+            panel_status: PanelStatus::from_sidebar(&initial.sidebar),
+            model_catalog: initial.model_catalog.clone(),
+            model_picker: None,
+            control_plane_prompt: initial.control_plane_prompt.clone(),
+            latest_goal: initial.goal.clone(),
+            latest_trigger_poll: initial.latest_trigger_poll.clone(),
+            latest: initial,
             input: new_textarea(),
             completions: Vec::new(),
             completion_idx: 0,
@@ -293,56 +236,38 @@ impl App {
             last_viewport_h: 1,
             last_feed_area: None,
             busy: false,
-            queued_turns: std::collections::VecDeque::new(),
             spinner_frame: 0,
             last_ctrlc: None,
             quit: false,
-            relay: None,
-            relay_qr_in_feed: false,
-            relay_prompt_tx,
-            relay_prompt_rx: Some(relay_prompt_rx),
-            relay_abort_tx,
-            relay_abort_rx: Some(relay_abort_rx),
-            relay_resolve_tx,
-            relay_resolve_rx: Some(relay_resolve_rx),
-            relay_model_tx,
-            relay_model_rx: Some(relay_model_rx),
+            connected: true,
             pending_import_activation: None,
         }
     }
 
     // ── startup feed seeding (called by main.rs before run) ─────────────────────────────
 
-    pub fn banner(
-        &mut self,
-        model: &theway_llm_provider::Model,
-        session_id: &str,
-        resumed: bool,
-        tools: &[String],
-    ) {
+    /// Daemon address this client is connected to (for the banner / diagnostics).
+    pub fn client_addr(&self) -> &str {
+        self.client.addr()
+    }
+
+    pub fn banner(&mut self) {
         self.feed
             .push_plain_untimed("──────── theway ────────", Level::Header);
         self.feed.push_plain_untimed(
-            format!(
-                "model:   {} ({}/{})",
-                model.name, model.provider.0, model.id
-            ),
+            format!("model:   {} (daemon: {})", self.latest.model, self.client.addr()),
             Level::Output,
         );
         self.feed.push_plain_untimed(
-            format!(
-                "session: {session_id}{}",
-                if resumed { "  [resumed]" } else { "" }
-            ),
+            format!("session: {}", self.session_id),
             Level::Output,
         );
-        let tools = if tools.is_empty() {
+        let tools = if self.latest.sidebar.tools.names.is_empty() {
             "(none)".to_string()
         } else {
-            tools.join(", ")
+            self.latest.sidebar.tools.names.join(", ")
         };
-        self.feed
-            .push_plain_untimed(format!("tools:   {tools}"), Level::Output);
+        self.feed.push_plain_untimed(format!("tools:   {tools}"), Level::Output);
         self.feed.push_plain_untimed(
             "Enter send · Ctrl-V paste text/images · Ctrl-C abort/exit · /help",
             Level::System,
@@ -358,64 +283,35 @@ impl App {
             .push_plain(format!("error: {}", text.as_ref()), Level::Error);
     }
 
-    /// Push a replayed transcript (from `--resume`) into the feed as finished blocks.
-    pub fn replay(&mut self, messages: &[AgentMessage]) {
-        if messages.is_empty() {
-            return;
-        }
-        self.system_line(format!("resumed — replaying {} messages", messages.len()));
-        for message in messages {
-            self.replay_message(message);
+    // ── snapshot application (the daemon owns the transcript) ──────────────────────────
+
+    /// Apply a full snapshot: refresh the cache, rebuild the feed when the
+    /// transcript changed, and resync every renderable status field.
+    pub(super) fn apply_snapshot(&mut self, status: WireStatus) {
+        let feed_changed = self.latest.feed_blocks != status.feed_blocks;
+        self.latest = status;
+        self.session_id = self.latest.session_id.clone();
+        self.busy = self.latest.busy;
+        self.panel_status = PanelStatus::from_sidebar(&self.latest.sidebar);
+        self.model_catalog = self.latest.model_catalog.clone();
+        self.control_plane_prompt = self.latest.control_plane_prompt.clone();
+        self.latest_goal = self.latest.goal.clone();
+        self.latest_trigger_poll = self.latest.latest_trigger_poll.clone();
+        self.connected = true;
+        if feed_changed {
+            self.feed.replace_blocks(&self.latest.feed_blocks);
+            self.follow = true;
         }
     }
 
-    fn replay_message(&mut self, message: &AgentMessage) {
-        match message {
-            AgentMessage::Llm(Message::User(u)) => {
-                let text = match &u.content {
-                    UserContent::Text(s) => s.clone(),
-                    UserContent::Blocks(blocks) => blocks
-                        .iter()
-                        .map(|b| match b {
-                            UserContentBlock::Text(t) => t.text.clone(),
-                            UserContentBlock::Image(ImageContent { mime_type, .. }) => {
-                                format!("<image {mime_type}>")
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                };
-                self.feed.push_user_at(text, u.timestamp);
+    /// Apply one stream frame (snapshot → full replace; event increments are
+    /// ignored — the next snapshot carries the whole state).
+    pub(super) fn apply_frame(&mut self, frame: theway_grpc::StreamFrame) {
+        match frame.payload {
+            Some(stream_frame::Payload::Snapshot(state)) => {
+                self.apply_snapshot(wire_status(&state));
             }
-            AgentMessage::Llm(Message::Assistant(a)) => {
-                for b in &a.content {
-                    match b {
-                        ContentBlock::Text(t) => {
-                            self.feed.push_assistant_at(t.text.clone(), a.timestamp)
-                        }
-                        ContentBlock::Thinking(t) => {
-                            self.feed.push_thinking_at(t.thinking.clone(), a.timestamp)
-                        }
-                        ContentBlock::ToolCall(tc) => self.feed.push_tool_at(
-                            tc.name.clone(),
-                            theway::app::feed::preview(&serde_json::Value::Object(
-                                tc.arguments.clone(),
-                            )),
-                            a.timestamp,
-                        ),
-                        ContentBlock::Image(_) => {}
-                    }
-                }
-            }
-            AgentMessage::Llm(Message::ToolResult(tr)) => {
-                self.feed.push_tool_result_at(
-                    tr.tool_call_id.clone(),
-                    theway::app::feed::compact_tool_content_blocks(&tr.content, tr.is_error),
-                    tr.is_error,
-                    tr.timestamp,
-                );
-            }
-            AgentMessage::Custom(_) => {}
+            Some(stream_frame::Payload::Event(_)) | None => {}
         }
     }
 
@@ -425,7 +321,6 @@ impl App {
         if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
             return self.run_headless().await;
         }
-        self.relay_qr_in_feed = true;
         enter_tui()?;
         let backend = CrosstermBackend::new(std::io::stdout());
         let mut terminal = Terminal::new(backend)?;
@@ -435,87 +330,79 @@ impl App {
         result
     }
 
+    /// Client event loop: select over terminal events + the daemon's frame
+    /// stream + a reconnect timer. The stream drop flips the offline banner
+    /// and arms the reconnect path; a live snapshot resyncs the whole UI.
     async fn event_loop(
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     ) -> Result<()> {
         let mut reader = EventStream::new();
         let mut tick = tokio::time::interval(Duration::from_millis(100));
-        let mut feed_rx = self.feed_rx.take().expect("feed_rx taken once");
-        let mut main_run_rx = self.main_run_rx.take().expect("main_run_rx taken once");
-        let mut control_plane_prompt_rx = self.control_plane_prompt_rx.take();
-        let mut relay_prompt_rx = self
-            .relay_prompt_rx
-            .take()
-            .expect("relay_prompt_rx taken once");
-        let mut relay_abort_rx = self
-            .relay_abort_rx
-            .take()
-            .expect("relay_abort_rx taken once");
-        let mut relay_resolve_rx = self
-            .relay_resolve_rx
-            .take()
-            .expect("relay_resolve_rx taken once");
-        let mut relay_model_rx = self
-            .relay_model_rx
-            .take()
-            .expect("relay_model_rx taken once");
-        let mut turn = TurnState::default();
-        self.refresh_goal_state().await;
+        let mut reconnect = tokio::time::interval(Duration::from_secs(1));
+        let mut stream = match self.client.stream_events().await {
+            Ok(stream) => Some(stream),
+            Err(e) => {
+                self.connected = false;
+                self.error_line(format!("daemon stream: {e}"));
+                None
+            }
+        };
 
         loop {
             terminal.draw(|f| self.render(f))?;
-            self.push_relay_snapshot();
             if self.quit {
                 break;
             }
             tokio::select! {
                 biased;
-                result = poll_turn(&mut turn.fut), if turn.fut.is_some() => {
-                    self.finish_turn(&mut turn, result).await;
-                }
                 maybe_event = reader.next() => {
                     match maybe_event {
-                        Some(Ok(event)) => self.handle_event(event, &mut turn, terminal).await?,
+                        Some(Ok(event)) => self.handle_event(event, terminal).await?,
                         Some(Err(_)) => {}
                         None => self.quit = true,
                     }
                 }
-                Some(update) = feed_rx.recv() => {
-                    self.apply_feed_update(update);
-                    while let Ok(update) = feed_rx.try_recv() {
-                        self.apply_feed_update(update);
+                frame = async { stream.as_mut()?.next().await }, if stream.is_some() => {
+                    match frame {
+                        Some(Ok(frame)) => self.apply_frame(frame),
+                        Some(Err(e)) => {
+                            self.connected = false;
+                            self.error_line(format!("daemon stream: {e}"));
+                            stream = None;
+                        }
+                        None => {
+                            // Stream closed (daemon died or event loop exited).
+                            self.connected = false;
+                            stream = None;
+                            if !self.quit {
+                                self.system_line(
+                                    "daemon connection lost — reconnecting…",
+                                );
+                            }
+                        }
                     }
                 }
-                Some(trace_id) = main_run_rx.recv(), if turn.fut.is_none() => {
-                    self.start_triggered_turn(trace_id, &mut turn);
-                }
-                Some(text) = relay_prompt_rx.recv() => {
-                    self.submit_remote_text(text, &mut turn);
-                }
-                Some(()) = relay_abort_rx.recv() => {
-                    if turn.fut.is_some() {
-                        self.system_line("[web] abort requested");
-                        self.request_abort(&mut turn);
+                _ = reconnect.tick(), if stream.is_none() => {
+                    if !self.quit {
+                        match self.client.stream_events().await {
+                            Ok(s) => {
+                                self.connected = true;
+                                self.system_line("reconnected to daemon");
+                                // Re-fetch the full state in case we missed
+                                // snapshots while down.
+                                match self.client.get_state().await {
+                                    Ok(state) => self.apply_snapshot(wire_status(&state)),
+                                    Err(e) => self.error_line(format!("get_state: {e}")),
+                                }
+                                stream = Some(s);
+                            }
+                            Err(_) => {}
+                        }
                     }
-                }
-                Some(approve) = relay_resolve_rx.recv() => {
-                    self.resolve_from_relay(approve);
-                }
-                Some(spec) = relay_model_rx.recv() => {
-                    self.system_line(format!("[web] set model: {spec}"));
-                    self.set_model_from_spec(&spec).await;
-                }
-                Some(prompt) = async {
-                    match control_plane_prompt_rx.as_mut() {
-                        Some(rx) => rx.recv().await,
-                        None => None,
-                    }
-                }, if self.control_plane_prompt.is_none() && control_plane_prompt_rx.is_some() => {
-                    self.show_control_plane_prompt(prompt);
                 }
                 _ = tick.tick() => {
-                    if turn.fut.is_some() {
+                    if self.busy {
                         self.spinner_frame = self.spinner_frame.wrapping_add(1);
                     }
                 }
@@ -524,45 +411,16 @@ impl App {
         Ok(())
     }
 
-    /// Wrap up a finished turn: clear the busy state and surface an aborted/error line.
-    async fn finish_turn(
-        &mut self,
-        turn: &mut TurnState,
-        result: Result<Option<String>, AgentRunError>,
-    ) {
-        turn.fut = None;
-        self.busy = false;
-        self.spinner_frame = 0;
-        if turn.aborted {
-            self.system_line("[aborted]");
-        } else {
-            match result {
-                Ok(Some(message)) => self.system_line(message),
-                Ok(None) => {}
-                Err(e) => self.error_line(format!(
-                    "{}{}",
-                    turn.prefix,
-                    user_facing_run_error(&e.to_string())
-                )),
-            }
-        }
-        turn.aborted = false;
-        turn.prefix = "";
-        self.refresh_goal_state().await;
-        self.start_next_queued_turn(turn);
-    }
-
     // ── event handling ──────────────────────────────────────────────────────────────────
 
     async fn handle_event(
         &mut self,
         event: Event,
-        turn: &mut TurnState,
         terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     ) -> Result<()> {
         match event {
             Event::Key(key) if key.kind != KeyEventKind::Release => {
-                self.handle_key(key, turn, terminal).await?;
+                self.handle_key(key, terminal).await?;
             }
             Event::Mouse(m) => match m.kind {
                 MouseEventKind::ScrollUp => self.handle_mouse_scroll(m.column, m.row, true),
@@ -758,7 +616,6 @@ impl App {
         let width = area.width.clamp(40, 78);
         let height = area.height.clamp(8, 14);
         let rect = centered_rect(area, width, height);
-        let request = &prompt.request;
         let text = vec![
             Line::styled(
                 "Control-plane approval required",
@@ -767,23 +624,23 @@ impl App {
             Line::raw(""),
             Line::raw(format!(
                 "Action: {}",
-                safe_control_prompt_label(&request.label)
+                safe_control_prompt_label(&prompt.label)
             )),
             Line::raw(format!(
                 "Tool: {}",
-                safe_control_prompt_text(&request.tool_name, 80)
+                safe_control_prompt_text(&prompt.tool_name, 80)
             )),
             Line::raw(format!(
                 "Reason: {}",
-                safe_control_prompt_text(&request.reason, CONTROL_PROMPT_TEXT_WIDTH)
+                safe_control_prompt_text(&prompt.reason, CONTROL_PROMPT_TEXT_WIDTH)
             )),
             Line::raw(format!(
                 "Args hash: {}",
-                request.args_hash.chars().take(12).collect::<String>()
+                prompt.args_hash.chars().take(12).collect::<String>()
             )),
             Line::raw(format!(
                 "Preview: {}",
-                safe_control_prompt_payload(&request.payload, CONTROL_PROMPT_TEXT_WIDTH)
+                theway::app::feed::truncate_chars(&prompt.payload, CONTROL_PROMPT_TEXT_WIDTH)
             )),
             Line::raw(""),
             Line::styled(
@@ -817,30 +674,29 @@ impl App {
     }
 
     fn should_show_side_panel(&self) -> bool {
-        !self.kernel.harness().skills().is_empty()
-            || !theway::triggers::global_registry().list().is_empty()
-            || !theway::triggers::global_cron_registry().list().is_empty()
-            || self.latest_trigger_poll.is_some()
-            || self.latest_goal.is_some()
-            || self.panel_status.mcp_servers > 0
-            || self.panel_status.mcp_notification_hooks > 0
+        let sidebar = &self.latest.sidebar;
+        !sidebar.skills.items.is_empty()
+            || !sidebar.triggers.rules.is_empty()
+            || !sidebar.cron.jobs.is_empty()
+            || self.latest.latest_trigger_poll.is_some()
+            || self.latest.goal.is_some()
+            || sidebar.mcp.servers > 0
+            || sidebar.mcp.notification_hooks > 0
     }
 
     fn trigger_panel_lines(&self, width: usize, height: usize) -> Vec<Line<'static>> {
         let width = width.max(1);
-        let rules = theway::triggers::global_registry().list();
-        let cron_jobs = theway::triggers::global_cron_registry().list();
+        let sidebar = &self.latest.sidebar;
+        let skills = &sidebar.skills.items;
+        let rules = &sidebar.triggers.rules;
+        let cron_jobs = &sidebar.cron.jobs;
 
         let mut lines = Vec::new();
-        let skills = self.kernel.harness().skills();
         lines.push(panel_line("Skills".to_string(), Color::Cyan, width));
         if skills.is_empty() {
             lines.push(panel_line("none".to_string(), Color::DarkGray, width));
         } else {
-            let disabled = skills
-                .iter()
-                .filter(|skill| skill.disable_model_invocation)
-                .count();
+            let disabled = skills.iter().filter(|skill| !skill.enabled).count();
             let enabled = skills.len().saturating_sub(disabled);
             lines.push(panel_line(
                 format!("enabled {enabled} · disabled {disabled}"),
@@ -856,9 +712,9 @@ impl App {
             lines.push(panel_line(
                 format!(
                     "builtin {} · user {} · project {}",
-                    source_count(SkillSource::Builtin),
-                    source_count(SkillSource::User),
-                    source_count(SkillSource::Project)
+                    source_count("builtin"),
+                    source_count("user"),
+                    source_count("project")
                 ),
                 Color::DarkGray,
                 width,
@@ -872,15 +728,13 @@ impl App {
         } else {
             for rule in rules.iter().take(TRIGGER_PANEL_RULE_LIMIT) {
                 let state_flag = if rule.enabled { "enabled" } else { "disabled" };
-                let mode = if rule.fire_once { "once" } else { "repeat" };
-                let id = theway::app::feed::truncate_chars(&rule.id, 12);
                 let color = if rule.enabled {
                     Color::Green
                 } else {
                     Color::DarkGray
                 };
                 lines.push(panel_line(
-                    format!("{id} [{state_flag}, {mode}]"),
+                    format!("{id} [{state_flag}, {mode}]", id = rule.id, mode = rule.mode),
                     color,
                     width,
                 ));
@@ -904,7 +758,7 @@ impl App {
             }
         }
 
-        if let Some(status) = &self.latest_trigger_poll {
+        if let Some(status) = &self.latest.latest_trigger_poll {
             lines.push(Line::raw(""));
             lines.push(panel_line("Polling".to_string(), Color::Cyan, width));
             lines.push(panel_line(
@@ -933,17 +787,16 @@ impl App {
             ));
         }
 
-        if let Some(goal) = &self.latest_goal {
+        if let Some(goal) = &self.latest.goal {
             lines.push(Line::raw(""));
             lines.push(panel_line("Goal".to_string(), Color::Cyan, width));
-            let color = match goal.status {
-                theway_core::multiagent::goal::GoalStatus::Pursuing => Color::Yellow,
-                theway_core::multiagent::goal::GoalStatus::Achieved => Color::Green,
-                theway_core::multiagent::goal::GoalStatus::Paused
-                | theway_core::multiagent::goal::GoalStatus::BudgetLimited => Color::DarkGray,
-                theway_core::multiagent::goal::GoalStatus::Cleared => Color::DarkGray,
+            let color = match goal.status.as_str() {
+                "pursuing" => Color::Yellow,
+                "achieved" => Color::Green,
+                "paused" | "budget_limited" | "cleared" => Color::DarkGray,
+                _ => Color::DarkGray,
             };
-            lines.push(panel_line(goal.status.as_str().to_string(), color, width));
+            lines.push(panel_line(goal.status.clone(), color, width));
             lines.push(panel_line(
                 panel_rule_preview(&goal.condition, width),
                 Color::DarkGray,
@@ -966,11 +819,9 @@ impl App {
         }
 
         lines.push(Line::raw(""));
-        let inbox_new =
-            theway_transport::inbox::new_count(&theway_transport::inbox::default_inbox_path());
-        if inbox_new > 0 {
+        if sidebar.inbox_new > 0 {
             lines.push(panel_line(
-                format!("Inbox  {inbox_new} new — /inbox"),
+                format!("Inbox  {} new — /inbox", sidebar.inbox_new),
                 Color::Yellow,
                 width,
             ));
@@ -993,14 +844,13 @@ impl App {
             ));
             for job in cron_jobs.iter().take(TRIGGER_PANEL_RULE_LIMIT) {
                 let state_flag = if job.enabled { "enabled" } else { "disabled" };
-                let id = theway::app::feed::truncate_chars(&job.id, 12);
                 let color = if job.enabled {
                     Color::Green
                 } else {
                     Color::DarkGray
                 };
                 lines.push(panel_line(
-                    format!("{id} [{state_flag}] {}", job.schedule),
+                    format!("{id} [{state_flag}] {schedule}", id = job.id, schedule = job.schedule),
                     color,
                     width,
                 ));
@@ -1081,24 +931,23 @@ impl App {
     }
 
     fn status_line(&self, width: usize, max_scroll: usize) -> Paragraph<'static> {
-        let model = {
-            let state = self.kernel.harness().agent().state();
-            state
-                .model
-                .as_ref()
-                .map(|m| format!("{}:{}", m.provider.0, m.id))
-                .unwrap_or_else(|| "no-model".into())
+        let model = if self.latest.model.is_empty() {
+            "no-model".to_string()
+        } else {
+            self.latest.model.clone()
         };
-        let queue = if self.queued_turns.is_empty() {
+        let queue = if self.latest.queued_count == 0 {
             String::new()
         } else {
-            format!(" · {} queued", self.queued_turns.len())
+            format!(" · {} queued", self.latest.queued_count)
         };
         let status = if self.busy {
             format!(
                 "{} working (Ctrl-C aborts){queue}",
                 SPINNER_FRAMES[self.spinner_frame % SPINNER_FRAMES.len()],
             )
+        } else if !self.connected {
+            format!("daemon offline{queue}")
         } else {
             format!("ready{queue}")
         };
@@ -1155,23 +1004,35 @@ impl App {
 
     // ── non-interactive fallback ──────────────────────────────────────────────────────────
 
-    /// Line-based fallback for non-TTY stdin/stdout (e.g. `echo prompt | theway`). No fixed input
-    /// box — just read prompts from stdin and stream feed updates to stdout.
+    /// Line-based fallback for non-TTY stdin/stdout (e.g. `echo prompt | theway`).
+    /// No fixed input box — read prompts from stdin, forward them to the daemon
+    /// via `send_message`, and print the feed as snapshots arrive.
     async fn run_headless(mut self) -> Result<()> {
         use tokio::io::{AsyncBufReadExt as _, BufReader};
 
-        // Flush startup feed (banner/diagnostics) first.
+        // Flush startup feed (banner from the initial snapshot) first.
         for line in self.feed.plain_lines(100) {
             println!("{line}");
         }
         let _ = std::io::stdout().flush();
 
-        // A background printer drains feed updates (agent stream + command output) to stdout.
-        let mut feed_rx = self.feed_rx.take().expect("feed_rx");
-        tokio::spawn(async move {
-            let mut at_line_start = true;
-            while let Some(update) = feed_rx.recv().await {
-                print_headless_update(&update, &mut at_line_start);
+        // A background printer drains stream snapshots to stdout, printing only
+        // rows the headless view has not emitted yet.
+        let mut stream = self.client.stream_events().await?;
+        let mut printed: usize = 0;
+        let printer = tokio::spawn(async move {
+            while let Some(frame) = stream.next().await {
+                let Ok(frame) = frame else { continue };
+                if let Some(stream_frame::Payload::Snapshot(state)) = frame.payload {
+                    let lines = state.feed_lines;
+                    if lines.len() > printed {
+                        for line in &lines[printed..] {
+                            println!("{line}");
+                        }
+                        printed = lines.len();
+                        let _ = std::io::stdout().flush();
+                    }
+                }
             }
         });
 
@@ -1182,93 +1043,63 @@ impl App {
             if input.is_empty() {
                 continue;
             }
+            // Local-only surfaces (login needs a TTY; quit ends this process;
+            // clear/help are UI concerns). Everything else goes to the daemon.
             if input.starts_with('/') {
-                let ctx = CommandCtx {
-                    harness: self.kernel.harness(),
-                    trigger_executor: self.kernel.trigger_executor(),
-                    session_id: &self.session_id,
-                    log_path: self.log_path.as_ref(),
-                    tool_count: self.tool_count,
-                    cwd: &self.cwd,
-                };
-                match commands::dispatch(input, &self.registry, &ctx).await {
-                    CommandOutcome::Quit => break,
-                    CommandOutcome::Error(e) => eprintln!("error: {e}"),
-                    CommandOutcome::LoginSecret {
-                        provider,
-                        recovery_command,
-                        ..
-                    } => {
-                        eprintln!(
-                            "error: {}",
-                            theway::auth::login_requires_tty_message(
-                                &provider,
-                                recovery_command.as_deref()
-                            )
-                        );
+                match input {
+                    "/quit" | "/exit" => break,
+                    "/clear" => {
+                        self.feed.clear();
+                        continue;
                     }
-                    CommandOutcome::RunAgentPrompt {
-                        prompt,
-                        error_context,
-                    } => {
-                        if let Err(e) = self.kernel.harness().prompt(prompt).await {
-                            eprintln!("error: {error_context}{e}");
+                    "/help" => {
+                        println!("theway client — send messages to the thewayd daemon; local commands: /login /quit /clear /session");
+                        continue;
+                    }
+                    _ if input.starts_with("/login") => {
+                        let provider = input
+                            .split_whitespace()
+                            .nth(1)
+                            .unwrap_or("anthropic")
+                            .to_string();
+                        let result = theway::auth::prompt_for_api_key(&provider).await;
+                        match result {
+                            Ok(token) if token.trim().is_empty() => {
+                                println!("login cancelled (empty key)");
+                            }
+                            Ok(token) => match theway::commands::save_api_key(&provider, &token) {
+                                Ok(path) => println!(
+                                    "saved api key for `{provider}` to {}",
+                                    path.display()
+                                ),
+                                Err(e) => println!("error: {e}"),
+                            },
+                            Err(e) => println!("error: {e}"),
                         }
-                    }
-                    CommandOutcome::RunPromptTemplate { name, vars } => {
-                        if let Err(e) = self
-                            .kernel
-                            .harness()
-                            .prompt_from_template(&name, vars)
-                            .await
-                        {
-                            eprintln!("error: template run failed: {e}");
-                        }
-                    }
-                    CommandOutcome::RunCompaction { custom } => {
-                        match self.kernel.harness().force_compact(custom).await {
-                            Ok(true) => println!("compaction ran"),
-                            Ok(false) => println!("nothing to compact"),
-                            Err(e) => eprintln!("error: compaction failed: {e}"),
-                        }
-                    }
-                    CommandOutcome::WebRelay(_) => {
-                        eprintln!(
-                            "error: /web-connect requires the interactive TUI or --http mode"
-                        );
-                    }
-                    CommandOutcome::SessionImportActivation { .. } => {
-                        println!(
-                            "imported automation left disabled (no interactive confirm in this mode); re-import with `theway session import --activate-triggers=on` or enable via /triggers enable and /cron enable"
-                        );
-                    }
-                    CommandOutcome::OpenModelPicker => {
-                        match self.kernel.harness().agent().state().model.clone() {
-                            Some(m) => println!("active model: {}:{}", m.provider.0, m.id),
-                            None => println!("(no model active)"),
-                        }
-                        println!(
-                            "interactive picker needs the TUI; use /model <provider:model-id> or /model list"
-                        );
+                        continue;
                     }
                     _ => {}
                 }
-                continue;
             }
             let (expanded, _) = mentions::expand(input, &self.cwd).await;
             let prompt = commands::attach_skill_prompt(expanded, None);
-            if let Err(e) = self.kernel.user_prompt_turn(prompt, Vec::new()).await {
-                eprintln!("error: {e}");
+            match self.client.send_message(prompt, vec![], false).await {
+                Ok(true) => {}
+                Ok(false) => println!("error: daemon rejected the message"),
+                Err(e) => println!("error: {e}"),
             }
         }
+        printer.abort();
         Ok(())
     }
 }
 
-/// Assemble the slash-command completion list (registry commands + skill shortcuts).
+/// Assemble the slash-command completion list: local commands + the daemon-side
+/// command surface (the daemon owns the full registry; the client forwards
+/// slash text via `send_message`) + skill shortcuts from the snapshot sidebar.
 fn collect_slash_commands(
     registry: &theway::commands::Registry,
-    skills: &[theway_core::Skill],
+    skills: &[theway_transport::wire::WireSkillSnapshot],
 ) -> Vec<String> {
     let mut commands: Vec<String> = registry
         .commands()
@@ -1280,1152 +1111,23 @@ fn collect_slash_commands(
         })
         .collect();
     commands.extend(
-        theway::commands::skill_shortcuts(skills, registry)
-            .into_iter()
-            .map(|sc| sc.command),
+        DAEMON_COMMANDS
+            .iter()
+            .map(|name| format!("/{name}")),
     );
+    for skill in skills {
+        if let Some(shortcut) = skill.name.split('/').next() {
+            commands.push(format!("/{shortcut}"));
+        }
+    }
     commands
 }
-#[cfg(test)]
-mod tests {
-    use super::render_utils::{write_enter_tui_commands, write_leave_tui_commands};
-    use super::*;
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use ratatui::backend::TestBackend;
-    use ratatui::buffer::Buffer;
-    use theway_core::{AgentHarnessOptions, MemorySessionStorage, Session, SessionStorage};
-    use theway_llm_provider::{ToolResultMessage, ToolResultRole};
-    use tokio_util::sync::CancellationToken;
 
-    fn faux_model() -> theway_llm_provider::Model {
-        theway_llm_provider::Model {
-            id: "faux".into(),
-            name: "Faux".into(),
-            api: theway_llm_provider::Api::from("faux"),
-            provider: theway_llm_provider::Provider::from("faux"),
-            base_url: String::new(),
-            reasoning: false,
-            thinking_level_map: None,
-            input: vec![],
-            cost: theway_llm_provider::ModelCost::default(),
-            context_window: 0,
-            max_tokens: 0,
-            headers: None,
-            compat: None,
-        }
-    }
+/// Daemon-side slash commands the client forwards (the daemon's registry is not
+/// exposed over RPC; keep this list in sync with `commands::Registry` builtins).
+const DAEMON_COMMANDS: &[&str] = &[
+    "goal", "goal-start", "diag", "template", "compact", "bug-report", "model", "thinking",
+    "cost", "save", "undo", "name", "sessions", "share", "logout", "skill", "skills",
+    "triggers", "new-trigger", "cron", "inbox", "web-connect", "web-disconnect", "find",
+];
 
-    fn faux_vision_model() -> theway_llm_provider::Model {
-        let mut model = faux_model();
-        model.input = vec![
-            theway_llm_provider::InputModality::Text,
-            theway_llm_provider::InputModality::Image,
-        ];
-        model
-    }
-
-    static TRIGGER_REGISTRY_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    fn test_app() -> App {
-        test_app_with_model(faux_model())
-    }
-
-    fn test_app_with_model(model: theway_llm_provider::Model) -> App {
-        let storage = Arc::new(MemorySessionStorage::new());
-        let session = Session::new(storage as Arc<dyn SessionStorage>);
-        let opts = AgentHarnessOptions::new(model, session);
-        test_app_with_options(opts)
-    }
-
-    fn test_app_with_options(opts: AgentHarnessOptions) -> App {
-        let harness = Arc::new(AgentHarness::new(opts));
-        let trigger_executor =
-            std::sync::Arc::new(theway::trigger_engine::execution::TriggerExecutor::new(
-                harness.agent_arc(),
-                harness.session().clone(),
-                theway::trigger_engine::runtime::TriggerRuntimeConfig::default(),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            ));
-        let (_ftx, feed_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (_mtx, main_run_rx) = tokio::sync::mpsc::unbounded_channel();
-        App::new(AppConfig {
-            harness,
-            trigger_executor,
-            retry: RetrySettings::default(),
-            registry: Registry::with_builtins(),
-            cwd: std::path::PathBuf::from("."),
-            session_id: "test".into(),
-            log_path: None,
-            tool_count: 0,
-            history: HistoryStore::load_from(std::path::Path::new("/nonexistent-theway-history")),
-            pending_images: vec![],
-            feed_rx,
-            main_run_rx,
-            control_plane_prompt_rx: None,
-            panel_status: PanelStatus::default(),
-            dag_engine: std::sync::Arc::new(
-                theway_core::multiagent::graph::engine::DagEngine::new(),
-            ),
-            subagent_registry: theway_core::multiagent::registry::AgentJobRegistry::new(),
-            // UI tests never switch sessions: the factory always errors if reached.
-            session_factory: std::sync::Arc::new(|id| {
-                Box::pin(
-                    async move { Err(anyhow::anyhow!("no session factory in UI tests ({id})")) },
-                )
-            }),
-            session_repo: std::sync::Arc::new(theway::SqliteSessionRepo::new(
-                std::path::PathBuf::from("/nonexistent-theway-sessions"),
-            )),
-        })
-    }
-
-    fn ui_skill(
-        name: &str,
-        source: theway_core::SkillSource,
-        disabled: bool,
-    ) -> theway_core::Skill {
-        theway_core::Skill {
-            name: name.into(),
-            description: format!("description for {name}"),
-            file_path: format!("/tmp/{name}/SKILL.md"),
-            content: "SECRET SKILL BODY".into(),
-            disable_model_invocation: disabled,
-            source,
-        }
-    }
-
-    fn one_pixel_clipboard_image() -> crate::clipboard_image::ClipboardImage {
-        crate::clipboard_image::encode_rgba_clipboard_image(1, 1, vec![255, 0, 0, 255]).unwrap()
-    }
-
-    fn buffer_text(buf: &Buffer) -> String {
-        let area = *buf.area();
-        let mut rows = Vec::new();
-        for y in 0..area.height {
-            let mut row = String::new();
-            for x in 0..area.width {
-                row.push_str(buf[(x, y)].symbol());
-            }
-            rows.push(row.trim_end().to_string());
-        }
-        rows.join("\n")
-    }
-
-    fn feed_text(app: &App) -> String {
-        app.feed
-            .lines(100)
-            .into_iter()
-            .map(|line| {
-                line.spans
-                    .into_iter()
-                    .map(|span| span.content.into_owned())
-                    .collect::<String>()
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-
-    fn feed_lines_text(lines: &[Line<'_>]) -> String {
-        lines
-            .iter()
-            .map(|line| {
-                line.spans
-                    .iter()
-                    .map(|span| span.content.as_ref())
-                    .collect::<String>()
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-
-    /// The whole point of the refactor: the input box is pinned at the bottom with the
-    /// conversation feed scrolling above it. Render to an off-screen backend and assert the
-    /// spatial layout — feed content near the top, the status rule + input box at the bottom.
-    #[test]
-    fn renders_feed_above_pinned_input_box() {
-        let mut app = test_app();
-        app.feed.push_user("hello world");
-        app.feed.push_assistant("hi there, the box is pinned");
-
-        let backend = TestBackend::new(50, 12);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| app.render(f)).unwrap();
-        let text = buffer_text(terminal.backend().buffer());
-        let lines: Vec<&str> = text.lines().collect();
-
-        // Feed content rendered (somewhere in the upper region).
-        assert!(
-            text.contains("you ▸ hello world"),
-            "feed user line missing:\n{text}"
-        );
-        let user_row = text.lines().find(|line| line.contains("you ▸ hello world"));
-        let user_row = user_row.expect("feed user row");
-        assert_full_timestamp_prefix(user_row, &text);
-        assert!(
-            text.contains("ai ▸ hi there, the box is pinned"),
-            "assistant line missing:\n{text}"
-        );
-        // The status rule (separator above the input) carries the model + ready state.
-        assert!(text.contains("theway ·"), "status rule missing:\n{text}");
-        assert!(
-            text.contains("ready"),
-            "status should read ready when idle:\n{text}"
-        );
-        // The status rule and the hint line live in the bottom five rows — the bordered input
-        // box is between them, pinned to the bottom.
-        let status_row = lines.iter().position(|l| l.contains("theway ·")).unwrap();
-        assert!(
-            status_row >= lines.len() - 5,
-            "status rule should be pinned near the bottom (row {status_row} of {}):\n{text}",
-            lines.len()
-        );
-    }
-
-    #[test]
-    fn input_box_has_breathing_room_and_prompt() {
-        let mut app = test_app();
-        let backend = TestBackend::new(50, 8);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| app.render(f)).unwrap();
-        let text = buffer_text(terminal.backend().buffer());
-
-        assert!(text.contains("┌"), "input border missing:\n{text}");
-        assert!(text.contains("└"), "input border missing:\n{text}");
-        assert!(
-            text.contains("│>  type a message, or /help"),
-            "input should have a prompt and horizontal padding:\n{text}"
-        );
-        assert!(
-            text.contains("Ctrl-V paste"),
-            "idle hint should advertise paste support:\n{text}"
-        );
-    }
-
-    #[test]
-    fn wide_layout_renders_trigger_panel() {
-        let _guard = TRIGGER_REGISTRY_TEST_LOCK.lock().unwrap();
-        theway::triggers::global_registry().clear_for_tests();
-        theway::triggers::global_cron_registry().clear_for_tests();
-        let mut app = test_app();
-        app.panel_status = PanelStatus {
-            mcp_servers: 1,
-            mcp_tools: 2,
-            mcp_server_names: Vec::new(),
-            mcp_tool_names: Vec::new(),
-            tool_names: Vec::new(),
-            mcp_notification_hooks: 1,
-            hook_points: vec!["before_tool_call".into(), "after_tool_call".into()],
-            trigger_features: vec!["dedup".into(), "cycle suppress".into()],
-        };
-        theway::triggers::global_registry()
-            .add_rule("a build finishes", "summarize the result")
-            .unwrap();
-
-        // Tall enough that all three sections (MCP / Hooks / Runtime) clear the
-        // right-rail clip — see `trigger_panel_lines`'s `status_rows` budget. The Trigger
-        // runtime bullets render at the bottom of the panel; a 20-row buffer cuts them off.
-        let backend = TestBackend::new(120, 30);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| app.render(f)).unwrap();
-        let text = buffer_text(terminal.backend().buffer());
-
-        assert!(text.contains("Automation"), "panel title missing:\n{text}");
-        assert!(text.contains("Triggers"), "trigger list missing:\n{text}");
-        assert!(
-            text.contains("[enabled, once]"),
-            "trigger flags missing:\n{text}"
-        );
-        assert!(
-            text.contains("when a build finishes"),
-            "rule condition missing:\n{text}"
-        );
-        assert!(text.contains("MCP"), "mcp section missing:\n{text}");
-        assert!(
-            text.contains("servers 1 · tools 2"),
-            "mcp status missing:\n{text}"
-        );
-        assert!(
-            text.contains("notification hooks 1"),
-            "renamed mcp notification-hook label missing:\n{text}"
-        );
-        assert!(text.contains("Hooks"), "hooks section missing:\n{text}");
-        assert!(
-            text.contains("before_tool_call"),
-            "hook point status missing:\n{text}"
-        );
-        assert!(
-            !text.contains("✓ before_tool_call"),
-            "hook point rows should not use success checkmarks:\n{text}"
-        );
-        // Runtime features render as their own section, separate from `Hooks`, so users
-        // can't mistake `dedup` / `cycle suppress` etc. for pluggable callbacks.
-        assert!(
-            text.contains("Runtime"),
-            "runtime feature section title missing:\n{text}"
-        );
-        assert!(
-            text.contains("dedup"),
-            "trigger-runtime feature label missing:\n{text}"
-        );
-    }
-
-    #[test]
-    fn wide_layout_hides_empty_static_trigger_panel() {
-        let _guard = TRIGGER_REGISTRY_TEST_LOCK.lock().unwrap();
-        theway::triggers::global_registry().clear_for_tests();
-        theway::triggers::global_cron_registry().clear_for_tests();
-        let mut app = test_app();
-        app.panel_status = PanelStatus {
-            mcp_servers: 0,
-            mcp_tools: 0,
-            mcp_server_names: Vec::new(),
-            mcp_tool_names: Vec::new(),
-            tool_names: Vec::new(),
-            mcp_notification_hooks: 0,
-            hook_points: vec!["before_tool_call".into(), "after_tool_call".into()],
-            trigger_features: vec!["dedup".into(), "cycle suppress".into()],
-        };
-
-        let backend = TestBackend::new(120, 20);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| app.render(f)).unwrap();
-        let text = buffer_text(terminal.backend().buffer());
-
-        assert!(
-            !text.contains("Triggers"),
-            "empty static trigger panel should not consume width:\n{text}"
-        );
-        assert!(
-            !text.contains("before_tool_call"),
-            "static hook rows belong in /triggers status, not the default side panel:\n{text}"
-        );
-        assert!(
-            !text.contains("cycle suppress"),
-            "static trigger-runtime rows belong in /triggers status, not the default side panel:\n{text}"
-        );
-    }
-
-    #[test]
-    fn wide_layout_shows_latest_poll_status_without_feed_line() {
-        let _guard = TRIGGER_REGISTRY_TEST_LOCK.lock().unwrap();
-        theway::triggers::global_registry().clear_for_tests();
-        theway::triggers::global_cron_registry().clear_for_tests();
-        let mut app = test_app();
-        app.latest_trigger_poll = Some(TriggerPollStatus {
-            checked_at: "11:22:33".into(),
-            trace_id: "trace-chrome-check".into(),
-            source_label: "local:dynamic".into(),
-            event_label: "dynamic periodic check".into(),
-            summary: "Checked Chrome tabs; no matching rule found.".into(),
-        });
-
-        let backend = TestBackend::new(120, 20);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| app.render(f)).unwrap();
-        let text = buffer_text(terminal.backend().buffer());
-
-        assert!(text.contains("Automation"), "panel title missing:\n{text}");
-        assert!(text.contains("Polling"), "polling section missing:\n{text}");
-        assert!(
-            text.contains("11:22:33 · no match"),
-            "poll status missing:\n{text}"
-        );
-        assert!(
-            text.contains("local:dynamic / dynamic periodic c"),
-            "poll source missing:\n{text}"
-        );
-        assert!(
-            text.contains("trace trace-chrome-check"),
-            "poll trace missing:\n{text}"
-        );
-        assert!(
-            text.contains("no matching"),
-            "poll summary missing:\n{text}"
-        );
-        assert!(
-            !text.contains("[trigger completed]"),
-            "poll status should not be appended to the feed:\n{text}"
-        );
-    }
-
-    #[test]
-    fn wide_layout_renders_compact_skills_panel_summary() {
-        let _guard = TRIGGER_REGISTRY_TEST_LOCK.lock().unwrap();
-        theway::triggers::global_registry().clear_for_tests();
-        theway::triggers::global_cron_registry().clear_for_tests();
-        let mut app = test_app();
-        app.kernel.harness().replace_skills(vec![
-            ui_skill("builtin-review", theway_core::SkillSource::Builtin, false),
-            ui_skill("user-format", theway_core::SkillSource::User, true),
-            ui_skill("project-plan", theway_core::SkillSource::Project, false),
-        ]);
-
-        let backend = TestBackend::new(120, 20);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| app.render(f)).unwrap();
-        let text = buffer_text(terminal.backend().buffer());
-
-        assert!(text.contains("Automation"), "panel title missing:\n{text}");
-        assert!(text.contains("Skills"), "skills section missing:\n{text}");
-        assert!(
-            text.contains("enabled 2 · disabled 1"),
-            "skills enabled/disabled summary missing:\n{text}"
-        );
-        assert!(
-            text.contains("builtin 1 · user 1 · project 1"),
-            "skills source summary missing:\n{text}"
-        );
-        assert!(
-            !text.contains("SECRET SKILL BODY"),
-            "skills panel must not render skill body:\n{text}"
-        );
-    }
-
-    #[test]
-    fn trigger_panel_redacts_rule_preview_secrets() {
-        let _guard = TRIGGER_REGISTRY_TEST_LOCK.lock().unwrap();
-        theway::triggers::global_registry().clear_for_tests();
-        theway::triggers::global_cron_registry().clear_for_tests();
-        let mut app = test_app();
-        let secret = "sk-panel-secret-should-not-render-1234567890";
-        theway::triggers::global_registry()
-            .add_rule(
-                &format!("when header is Bearer {secret}"),
-                &format!("call API with {secret}"),
-            )
-            .unwrap();
-
-        let backend = TestBackend::new(120, 20);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| app.render(f)).unwrap();
-        let text = buffer_text(terminal.backend().buffer());
-
-        assert!(
-            !text.contains(secret),
-            "trigger panel leaked secret:\n{text}"
-        );
-        assert!(
-            text.contains("[REDACTED:"),
-            "trigger panel should show redaction marker:\n{text}"
-        );
-    }
-
-    #[test]
-    fn narrow_layout_hides_trigger_panel() {
-        let _guard = TRIGGER_REGISTRY_TEST_LOCK.lock().unwrap();
-        theway::triggers::global_registry().clear_for_tests();
-        theway::triggers::global_cron_registry().clear_for_tests();
-        let mut app = test_app();
-        theway::triggers::global_registry()
-            .add_rule("a build finishes", "summarize the result")
-            .unwrap();
-
-        let backend = TestBackend::new(80, 10);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| app.render(f)).unwrap();
-        let text = buffer_text(terminal.backend().buffer());
-
-        assert!(
-            !text.contains("Triggers"),
-            "trigger panel should be hidden on narrow terminals:\n{text}"
-        );
-    }
-
-    #[test]
-    fn wide_layout_renders_cron_jobs_in_automation_panel() {
-        let _guard = TRIGGER_REGISTRY_TEST_LOCK.lock().unwrap();
-        theway::triggers::global_registry().clear_for_tests();
-        theway::triggers::global_cron_registry().clear_for_tests();
-        let mut app = test_app();
-        let secret = "sk-cron-panel-secret-12345678901234567890";
-        theway::triggers::global_cron_registry()
-            .add_job("*/10 * * * *", &format!("call API with {secret}"))
-            .unwrap();
-
-        let backend = TestBackend::new(120, 26);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| app.render(f)).unwrap();
-        let text = buffer_text(terminal.backend().buffer());
-
-        assert!(text.contains("Automation"), "panel title missing:\n{text}");
-        assert!(
-            text.contains("Cron (session)"),
-            "cron scope label missing:\n{text}"
-        );
-        assert!(
-            text.contains("enabled 1 · disabled 0"),
-            "cron count summary missing:\n{text}"
-        );
-        assert!(
-            text.contains("*/10 * * *"),
-            "cron schedule missing:\n{text}"
-        );
-        assert!(!text.contains(secret), "cron panel leaked secret:\n{text}");
-        assert!(
-            text.contains("[REDACTED:"),
-            "cron panel should show redaction marker:\n{text}"
-        );
-    }
-
-    #[test]
-    fn tab_cycles_slash_command_completions() {
-        let mut app = test_app();
-        app.set_input("/");
-        let options = app.completions.clone();
-        assert!(
-            options.len() > 1,
-            "slash prefix should expose multiple command completions"
-        );
-
-        app.cycle_completion();
-        let first = app.input_text();
-        app.cycle_completion();
-        let second = app.input_text();
-
-        assert_eq!(first, options[0]);
-        assert_eq!(second, options[1]);
-        assert_ne!(first, second);
-    }
-
-    #[test]
-    fn tab_completion_includes_hot_loaded_skill_commands() {
-        let mut app = test_app();
-        app.kernel.harness().replace_skills(vec![ui_skill(
-            "db9",
-            theway_core::SkillSource::User,
-            false,
-        )]);
-
-        app.set_input("/d");
-
-        assert!(
-            app.completions.contains(&"/db9".to_string()),
-            "skill command should be offered after hot catalog update: {:?}",
-            app.completions
-        );
-    }
-
-    #[test]
-    fn ctrl_d_aborts_active_turn_before_exiting() {
-        let mut app = test_app();
-        let mut turn = TurnState {
-            fut: Some(Box::pin(std::future::pending())),
-            aborted: false,
-            prefix: "",
-        };
-
-        assert!(app.handle_ctrl_d(&mut turn));
-
-        assert!(turn.aborted);
-        assert!(!app.quit, "Ctrl-D during work should abort, not exit");
-    }
-
-    #[test]
-    fn mouse_wheel_scrolls_only_inside_feed_area() {
-        let mut app = test_app();
-        app.last_feed_area = Some(Rect::new(2, 1, 20, 6));
-        app.scroll = 10;
-        app.follow = true;
-
-        app.handle_mouse_scroll(5, 3, true);
-        assert_eq!(app.scroll, 7);
-        assert!(!app.follow);
-
-        app.handle_mouse_scroll(5, 8, true);
-        assert_eq!(
-            app.scroll, 7,
-            "wheel events outside the feed should not move the conversation scroll"
-        );
-
-        app.handle_mouse_scroll(5, 3, false);
-        assert_eq!(app.scroll, 10);
-    }
-
-    #[test]
-    fn status_rule_shows_working_spinner_when_busy() {
-        let mut app = test_app();
-        app.busy = true;
-        app.spinner_frame = 2;
-        let backend = TestBackend::new(60, 6);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| app.render(f)).unwrap();
-        let text = buffer_text(terminal.backend().buffer());
-        assert!(
-            text.contains("working"),
-            "busy status should say working:\n{text}"
-        );
-    }
-
-    #[tokio::test]
-    async fn finished_turn_starts_next_queued_prompt_fifo() {
-        let mut app = test_app();
-        let mut turn = TurnState {
-            fut: Some(Box::pin(async {
-                Ok::<Option<String>, AgentRunError>(None)
-            })),
-            aborted: false,
-            prefix: "",
-        };
-
-        app.queue_user_prompt("next question".into(), "next question".into(), Vec::new());
-        assert_eq!(app.queued_turns.len(), 1);
-
-        app.finish_turn(&mut turn, Ok(None)).await;
-
-        assert!(turn.fut.is_some(), "queued prompt should start immediately");
-        assert!(app.busy, "starting queued prompt should mark UI busy");
-        assert!(app.queued_turns.is_empty());
-        let text = feed_text(&app);
-        assert!(text.contains("queued next message #1: next question"));
-        assert!(text.contains("running queued message"));
-        assert!(text.contains("you ▸ next question"));
-    }
-
-    #[tokio::test]
-    async fn finished_turn_refreshes_goal_panel_state() {
-        let mut app = test_app();
-        theway_core::multiagent::goal::set(
-            app.kernel.harness(),
-            "run verification before stopping".into(),
-        )
-        .await
-        .unwrap();
-        let mut turn = TurnState {
-            fut: Some(Box::pin(async {
-                Ok::<Option<String>, AgentRunError>(None)
-            })),
-            aborted: false,
-            prefix: "",
-        };
-
-        app.finish_turn(&mut turn, Ok(None)).await;
-
-        let goal = app.latest_goal.as_ref().expect("goal state");
-        assert_eq!(goal.condition, "run verification before stopping");
-        assert_eq!(
-            goal.status,
-            theway_core::multiagent::goal::GoalStatus::Pursuing
-        );
-        assert!(
-            turn.fut.is_none(),
-            "runtime OnTurnEndHook, not the UI, owns continuation"
-        );
-    }
-
-    #[test]
-    fn status_rule_shows_queued_count_while_busy() {
-        let mut app = test_app();
-        app.busy = true;
-        app.queue_user_prompt("queued one".into(), "queued one".into(), Vec::new());
-
-        let backend = TestBackend::new(80, 6);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| app.render(f)).unwrap();
-        let text = buffer_text(terminal.backend().buffer());
-
-        assert!(text.contains("working"), "{text}");
-        assert!(text.contains("1 queued"), "{text}");
-    }
-
-    #[test]
-    fn empty_ctrl_u_removes_last_queued_prompt_while_busy() {
-        let mut app = test_app();
-        let turn = TurnState {
-            fut: Some(Box::pin(async {
-                Ok::<Option<String>, AgentRunError>(None)
-            })),
-            aborted: false,
-            prefix: "",
-        };
-        app.queue_user_prompt("first".into(), "first".into(), Vec::new());
-        app.queue_user_prompt("second".into(), "second".into(), Vec::new());
-
-        app.cancel_last_queued_turn();
-
-        assert_eq!(app.queued_turns.len(), 1);
-        assert_eq!(app.queued_turns[0].display(), "first");
-        assert!(
-            feed_text(&app).contains("removed queued message: second"),
-            "feed should explain queue cancellation"
-        );
-        assert!(
-            turn.fut.is_some(),
-            "canceling queued item must not abort current turn"
-        );
-    }
-
-    #[test]
-    fn attaching_clipboard_image_requires_vision_model() {
-        let mut app = test_app();
-        app.attach_clipboard_image(one_pixel_clipboard_image());
-
-        assert!(app.pending_pasted_images.is_empty());
-        let text = feed_text(&app);
-        assert!(
-            text.contains("current model does not support image input"),
-            "{text}"
-        );
-    }
-
-    #[test]
-    fn pending_path_image_requires_vision_model_without_dropping_attachment() {
-        let mut app = test_app();
-        app.pending_images
-            .push(std::path::PathBuf::from("/tmp/screenshot.png"));
-
-        assert!(!app.validate_pending_image_support());
-
-        assert_eq!(app.pending_images.len(), 1);
-        let text = feed_text(&app);
-        assert!(
-            text.contains("current model does not support image input"),
-            "{text}"
-        );
-        assert!(
-            text.contains("1 image attachment"),
-            "error should mention pending attachment count: {text}"
-        );
-    }
-
-    #[test]
-    fn pending_path_image_allowed_for_vision_model() {
-        let mut app = test_app_with_model(faux_vision_model());
-        app.pending_images
-            .push(std::path::PathBuf::from("/tmp/screenshot.png"));
-
-        assert!(app.validate_pending_image_support());
-        assert!(feed_text(&app).is_empty());
-    }
-
-    #[test]
-    fn missing_api_key_error_uses_cli_recovery_action() {
-        let text = user_facing_run_error(
-            "no API key for provider: deepseek; set DEEPSEEK_API_KEY or pass options.api_key",
-        );
-
-        assert!(text.contains("/login deepseek"), "{text}");
-        assert!(text.contains("DEEPSEEK_API_KEY"), "{text}");
-        assert!(!text.contains("options.api_key"), "{text}");
-    }
-
-    #[test]
-    fn attaching_clipboard_image_adds_pending_image_without_blob_echo() {
-        let mut app = test_app_with_model(faux_vision_model());
-        app.attach_clipboard_image(one_pixel_clipboard_image());
-
-        assert_eq!(app.pending_pasted_images.len(), 1);
-        let text = feed_text(&app);
-        assert!(text.contains("attached clipboard image #1"), "{text}");
-        assert!(text.contains("1x1"), "{text}");
-        assert!(
-            !text.contains(&app.pending_pasted_images[0].data),
-            "clipboard image base64 leaked into feed"
-        );
-    }
-
-    #[test]
-    fn queued_prompt_carries_pending_clipboard_image() {
-        let mut app = test_app_with_model(faux_vision_model());
-        app.attach_clipboard_image(one_pixel_clipboard_image());
-        let data = app.pending_pasted_images[0].data.clone();
-        let images = std::mem::take(&mut app.pending_pasted_images);
-
-        app.queue_user_prompt(
-            "describe this image".into(),
-            "describe this image".into(),
-            images,
-        );
-
-        assert!(app.pending_pasted_images.is_empty());
-        let Some(QueuedTurn::UserPrompt { images, .. }) = app.queued_turns.front() else {
-            panic!("expected queued user prompt");
-        };
-        assert_eq!(images.len(), 1);
-        assert_eq!(images[0].mime_type, "image/png");
-        assert_eq!(images[0].data, data);
-    }
-
-    #[test]
-    fn prompt_display_surfaces_image_only_attachment_without_blob() {
-        assert_eq!(
-            prompt_display("", 1),
-            "[1 image attachment]",
-            "image-only prompts need a visible feed label"
-        );
-        assert_eq!(
-            prompt_display("describe this", 2),
-            "describe this\n[2 image attachments]"
-        );
-    }
-
-    #[test]
-    fn queued_prompt_preview_redacts_token_like_text() {
-        let mut app = test_app();
-        app.queue_user_prompt(
-            "use sk-abcdefghijklmnopqrstuvwxyz123456".into(),
-            "use sk-abcdefghijklmnopqrstuvwxyz123456".into(),
-            Vec::new(),
-        );
-
-        let text = feed_text(&app);
-        assert!(text.contains("[REDACTED:openai_anthropic_key]"), "{text}");
-        assert!(
-            !text.contains("sk-abcdefghijklmnopqrstuvwxyz123456"),
-            "{text}"
-        );
-    }
-
-    #[test]
-    fn control_plane_prompt_card_redacts_payload_and_denies_without_clearing_queue() {
-        use theway_core::ControlPlanePromptRequest;
-        use tokio::sync::oneshot;
-
-        let mut app = test_app();
-        app.queue_user_prompt(
-            "queued secret=should-redact".into(),
-            "queued".into(),
-            Vec::new(),
-        );
-        let (tx, mut rx) = oneshot::channel();
-        app.show_control_plane_prompt(UiControlPlanePrompt {
-            request: ControlPlanePromptRequest {
-                tool_call_id: "call_1".into(),
-                tool_name: "InstallSkill".into(),
-                args_hash: "abcdef1234567890".repeat(4),
-                label: "Install https://example.com/?token=SECRET_TOKEN".into(),
-                payload: serde_json::json!({
-                    "url": "https://example.com/?token=SECRET_TOKEN",
-                    "args_hash": "abcdef1234567890"
-                }),
-                reason: "writes skill files with password=SECRET_TOKEN".into(),
-            },
-            responder: tx,
-        });
-
-        let backend = TestBackend::new(90, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| app.render(f)).unwrap();
-        let rendered = buffer_text(terminal.backend().buffer());
-        assert!(rendered.contains("Control-plane approval required"));
-        assert!(
-            !rendered.contains("SECRET_TOKEN"),
-            "prompt card must redact token-like payloads:\n{rendered}"
-        );
-        assert!(
-            app.handle_control_plane_prompt_key(&KeyEvent::new(
-                KeyCode::Esc,
-                KeyModifiers::empty()
-            ))
-        );
-        assert!(app.control_plane_prompt.is_none());
-        let decision = rx.try_recv().expect("deny decision should be sent");
-        match decision {
-            theway_core::ControlPlanePromptDecision::Deny { reason } => {
-                assert_eq!(reason.as_deref(), Some("denied by user"));
-            }
-            other => panic!("expected deny decision, got {other:?}"),
-        }
-        assert_eq!(
-            app.queued_turns.len(),
-            1,
-            "denying a prompt must not clear unrelated queued user input"
-        );
-    }
-
-    #[test]
-    fn control_plane_prompt_enter_sends_allow_decision() {
-        use theway_core::ControlPlanePromptRequest;
-        use tokio::sync::oneshot;
-
-        let mut app = test_app();
-        let (tx, mut rx) = oneshot::channel();
-        app.show_control_plane_prompt(UiControlPlanePrompt {
-            request: ControlPlanePromptRequest {
-                tool_call_id: "call_1".into(),
-                tool_name: "InstallSkill".into(),
-                args_hash: "abcdef1234567890".repeat(4),
-                label: "Install skill".into(),
-                payload: serde_json::json!({
-                    "source": "user",
-                    "args_hash": "abcdef1234567890"
-                }),
-                reason: "writes skill files".into(),
-            },
-            responder: tx,
-        });
-
-        assert!(app.handle_control_plane_prompt_key(&KeyEvent::new(
-            KeyCode::Enter,
-            KeyModifiers::empty()
-        )));
-        assert!(app.control_plane_prompt.is_none());
-        let decision = rx.try_recv().expect("allow decision should be sent");
-        assert!(matches!(
-            decision,
-            theway_core::ControlPlanePromptDecision::Allow
-        ));
-    }
-
-    #[test]
-    fn headless_control_plane_prompt_hook_denies_with_recovery() {
-        let hook = theway::control_plane_prompt::deny_hook(
-            "control-plane prompt requires an interactive terminal; run theway in a TTY to approve this action",
-        );
-        let decision = futures::executor::block_on(hook(
-            theway_core::ControlPlanePromptRequest {
-                tool_call_id: "call_1".into(),
-                tool_name: "InstallSkill".into(),
-                args_hash: "a".repeat(64),
-                label: "Install skill".into(),
-                payload: serde_json::json!({ "url": "https://example.com/?token=SECRET" }),
-                reason: "writes skill files".into(),
-            },
-            CancellationToken::new(),
-        ));
-        match decision {
-            theway_core::ControlPlanePromptDecision::Deny { reason } => {
-                let reason = reason.unwrap_or_default();
-                assert!(reason.contains("interactive terminal"));
-                assert!(!reason.contains("SECRET"));
-            }
-            other => panic!("expected deny, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn headless_yes_control_plane_prompt_hook_allows_without_rendering_payload() {
-        let hook = theway::control_plane_prompt::allow_hook();
-        let decision = futures::executor::block_on(hook(
-            theway_core::ControlPlanePromptRequest {
-                tool_call_id: "call_1".into(),
-                tool_name: "InstallSkill".into(),
-                args_hash: "a".repeat(64),
-                label: "Install skill".into(),
-                payload: serde_json::json!({ "url": "https://example.com/?token=SECRET" }),
-                reason: "writes skill files".into(),
-            },
-            CancellationToken::new(),
-        ));
-        assert!(matches!(
-            decision,
-            theway_core::ControlPlanePromptDecision::Allow
-        ));
-    }
-
-    #[test]
-    fn login_requires_tty_message_is_bounded_and_secret_free() {
-        let msg = theway::auth::login_requires_tty_message("ds4", None);
-        assert!(msg.contains("interactive terminal"));
-        assert!(msg.contains("/login ds4"));
-        assert!(!msg.contains("api key for"));
-        assert!(!msg.contains("sk-"));
-    }
-
-    #[test]
-    fn tui_enter_leave_enable_mouse_capture_for_feed_wheel_scroll() {
-        let mut enter = Vec::new();
-        write_enter_tui_commands(&mut enter).unwrap();
-        let enter = String::from_utf8(enter).unwrap();
-        assert!(enter.contains("\x1b[?1049h"));
-        assert!(enter.contains("\x1b[?2004h"));
-        assert!(
-            enter.contains("\x1b[?1000h") && enter.contains("\x1b[?1006h"),
-            "TUI must capture mouse events so wheel scroll reaches the feed: {enter:?}"
-        );
-
-        let mut leave = Vec::new();
-        write_leave_tui_commands(&mut leave).unwrap();
-        let leave = String::from_utf8(leave).unwrap();
-        assert!(leave.contains("\x1b[?2004l"));
-        assert!(leave.contains("\x1b[?1049l"));
-        assert!(
-            leave.contains("\x1b[?1000l") && leave.contains("\x1b[?1006l"),
-            "leave path should restore terminal mouse handling: {leave:?}"
-        );
-    }
-
-    #[test]
-    fn replayed_tool_results_are_compacted_for_display() {
-        let mut app = test_app();
-        let text = (0..50)
-            .map(|i| format!("line {i}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let message = AgentMessage::Llm(Message::ToolResult(ToolResultMessage {
-            role: ToolResultRole::ToolResult,
-            tool_call_id: "tool-1".into(),
-            tool_name: "bash".into(),
-            content: vec![UserContentBlock::text(text)],
-            details: None,
-            is_error: false,
-            timestamp: 0,
-        }));
-
-        app.replay_message(&message);
-
-        let rendered = feed_lines_text(&app.feed.lines(120));
-        assert!(rendered.contains("line 0"));
-        assert!(rendered.contains("line 49"));
-        assert!(rendered.contains("truncated"));
-        assert!(
-            !rendered.contains("line 25"),
-            "middle of long tool output should be hidden in replay display:\n{rendered}"
-        );
-    }
-
-    #[test]
-    fn replayed_messages_render_with_message_timestamps() {
-        let mut app = test_app();
-        let timestamp = chrono::Utc::now().timestamp_millis();
-        app.replay_message(&AgentMessage::Llm(Message::User(
-            theway_llm_provider::UserMessage {
-                role: theway_llm_provider::UserRole::User,
-                content: UserContent::Text("historical question".into()),
-                timestamp,
-            },
-        )));
-        app.replay_message(&AgentMessage::Llm(Message::Assistant(
-            theway_llm_provider::AssistantMessage {
-                role: theway_llm_provider::AssistantRole::Assistant,
-                content: vec![ContentBlock::Text(theway_llm_provider::TextContent {
-                    text: "historical answer".into(),
-                    ..Default::default()
-                })],
-                api: theway_llm_provider::Api::from("faux"),
-                provider: theway_llm_provider::Provider::from("faux"),
-                model: "faux".into(),
-                response_model: None,
-                response_id: None,
-                diagnostics: None,
-                usage: theway_llm_provider::Usage::default(),
-                stop_reason: theway_llm_provider::StopReason::Stop,
-                error_message: None,
-                timestamp,
-            },
-        )));
-
-        let rendered = feed_lines_text(&app.feed.lines(120));
-        let user_row = rendered
-            .lines()
-            .find(|line| line.contains("you ▸ historical question"))
-            .expect("user row");
-        let assistant_row = rendered
-            .lines()
-            .find(|line| line.contains("ai ▸ historical answer"))
-            .expect("assistant row");
-
-        assert_full_timestamp_prefix(user_row, &rendered);
-        assert_full_timestamp_prefix(assistant_row, &rendered);
-    }
-
-    fn assert_full_timestamp_prefix(row: &str, rendered: &str) {
-        assert_eq!(row.chars().nth(4), Some('-'), "{rendered}");
-        assert_eq!(row.chars().nth(7), Some('-'), "{rendered}");
-        assert_eq!(row.chars().nth(10), Some(' '), "{rendered}");
-        assert_eq!(row.chars().nth(13), Some(':'), "{rendered}");
-    }
-
-    fn picker_groups() -> Vec<crate::model_picker::ProviderGroup> {
-        vec![crate::model_picker::ProviderGroup {
-            provider: "anthropic".into(),
-            has_credential: true,
-            models: vec![crate::model_picker::ModelEntry {
-                id: "claude-haiku-4-5".into(),
-                name: "Claude Haiku 4.5".into(),
-            }],
-        }]
-    }
-
-    fn key(code: KeyCode) -> KeyEvent {
-        KeyEvent::new(code, KeyModifiers::NONE)
-    }
-
-    #[tokio::test]
-    async fn model_picker_keys_are_modal_and_navigate() {
-        let mut app = test_app();
-        app.model_picker = Some(crate::model_picker::ModelPickerState::new(
-            picker_groups(),
-            None,
-        ));
-        // Modal: keys are consumed while open.
-        assert!(app.handle_model_picker_key(&key(KeyCode::Down)).await);
-        // Esc at the top level closes.
-        assert!(app.handle_model_picker_key(&key(KeyCode::Esc)).await);
-        assert!(app.model_picker.is_none());
-        // Closed: keys pass through.
-        assert!(!app.handle_model_picker_key(&key(KeyCode::Down)).await);
-    }
-
-    #[tokio::test]
-    async fn model_picker_esc_at_model_level_returns_to_provider_level() {
-        let mut app = test_app();
-        app.model_picker = Some(crate::model_picker::ModelPickerState::new(
-            picker_groups(),
-            None,
-        ));
-        // Descend into the model list.
-        assert!(app.handle_model_picker_key(&key(KeyCode::Enter)).await);
-        assert!(matches!(
-            app.model_picker.as_ref().unwrap().level,
-            crate::model_picker::PickerLevel::Models { .. }
-        ));
-        // Esc goes back to provider level — picker stays open.
-        assert!(app.handle_model_picker_key(&key(KeyCode::Esc)).await);
-        assert!(
-            app.model_picker.is_some(),
-            "picker should still be open after Esc at model level"
-        );
-        assert_eq!(
-            app.model_picker.as_ref().unwrap().level,
-            crate::model_picker::PickerLevel::Providers,
-            "Esc at model level should return to provider level"
-        );
-    }
-
-    #[tokio::test]
-    async fn model_picker_enter_descends_then_switches_model() {
-        let mut app = test_app();
-        app.model_picker = Some(crate::model_picker::ModelPickerState::new(
-            picker_groups(),
-            None,
-        ));
-        assert!(app.handle_model_picker_key(&key(KeyCode::Enter)).await); // descend
-        assert!(app.handle_model_picker_key(&key(KeyCode::Enter)).await); // select
-        assert!(app.model_picker.is_none());
-        let model = app.kernel.harness().agent().state().model.clone().unwrap();
-        assert_eq!(model.provider.0, "anthropic");
-        assert_eq!(model.id, "claude-haiku-4-5");
-        // In envs with ANTHROPIC_API_KEY set the message is "switched to …"; without it
-        // the credential hint fires and the message is "selected …, but login is required: …".
-        // Either way the model spec appears in the feed.
-        let feed = feed_text(&app);
-        assert!(
-            feed.contains("anthropic:claude-haiku-4-5"),
-            "feed should mention the model: {feed}"
-        );
-        assert!(
-            feed.contains("switched to") || feed.contains("selected"),
-            "feed should contain a switch/selected verb: {feed}"
-        );
-    }
-
-    #[test]
-    fn model_picker_renders_centered_overlay() {
-        let mut app = test_app();
-        app.model_picker = Some(crate::model_picker::ModelPickerState::new(
-            picker_groups(),
-            None,
-        ));
-        let backend = TestBackend::new(80, 20);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| app.render(f)).unwrap();
-        let text = buffer_text(terminal.backend().buffer());
-        assert!(text.contains("Select provider"));
-        assert!(text.contains("anthropic (1)"));
-    }
-}

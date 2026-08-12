@@ -6,49 +6,7 @@
 //! `openai-codex-responses`) and Claude-compatible (`anthropic-messages`).
 //! `/model <provider:model-id>` remains the uncurated escape hatch.
 
-use std::collections::BTreeMap;
-
-const SUPPORTED_APIS: [&str; 4] = [
-    "openai-completions",
-    "openai-responses",
-    "openai-codex-responses",
-    "anthropic-messages",
-];
-
-pub use theway_transport::wire::{ModelEntry, ProviderGroup};
-
-/// Filtered + grouped catalog with live credential detection.
-pub(crate) fn catalog() -> Vec<ProviderGroup> {
-    catalog_with(|provider| theway::commands::model_credential_hint(provider).is_none())
-}
-
-/// Testable core: credential detection injected.
-fn catalog_with(has_credential: impl Fn(&str) -> bool) -> Vec<ProviderGroup> {
-    let mut groups: BTreeMap<String, Vec<ModelEntry>> = BTreeMap::new();
-    for model in theway_llm_provider::list_models() {
-        if !SUPPORTED_APIS.contains(&model.api.0.as_str()) {
-            continue;
-        }
-        groups
-            .entry(model.provider.0.clone())
-            .or_default()
-            .push(ModelEntry {
-                id: model.id,
-                name: model.name,
-            });
-    }
-    groups
-        .into_iter()
-        .map(|(provider, mut models)| {
-            models.sort_by(|a, b| a.id.cmp(&b.id));
-            ProviderGroup {
-                has_credential: has_credential(&provider),
-                provider,
-                models,
-            }
-        })
-        .collect()
-}
+pub use theway_transport::wire::ProviderGroup;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum PickerLevel {
@@ -185,72 +143,8 @@ impl ModelPickerState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use theway_transport::wire::ModelEntry;
 
-    fn custom_model(provider: &str, id: &str, api: &str) -> theway_llm_provider::Model {
-        theway_llm_provider::Model {
-            id: id.into(),
-            name: id.into(),
-            api: theway_llm_provider::Api::from(api),
-            provider: theway_llm_provider::Provider::from(provider),
-            base_url: "http://localhost:9999/v1".into(),
-            reasoning: false,
-            thinking_level_map: None,
-            input: vec![],
-            cost: theway_llm_provider::ModelCost::default(),
-            context_window: 8192,
-            max_tokens: 1024,
-            headers: None,
-            compat: None,
-        }
-    }
-
-    #[test]
-    fn catalog_keeps_openai_and_anthropic_families_only() {
-        theway_llm_provider::register_custom_model(custom_model(
-            "picker-test-ds4",
-            "deepseek-v4-flash",
-            "openai-completions",
-        ));
-        theway_llm_provider::register_custom_model(custom_model(
-            "picker-test-bedrock",
-            "claude-x",
-            "bedrock-converse-stream",
-        ));
-
-        let groups = catalog_with(|_| true);
-        let providers: Vec<&str> = groups.iter().map(|g| g.provider.as_str()).collect();
-        assert!(providers.contains(&"picker-test-ds4"));
-        assert!(!providers.contains(&"picker-test-bedrock"));
-
-        theway_llm_provider::unregister_custom_model(
-            &theway_llm_provider::Provider::from("picker-test-ds4"),
-            "deepseek-v4-flash",
-        );
-        theway_llm_provider::unregister_custom_model(
-            &theway_llm_provider::Provider::from("picker-test-bedrock"),
-            "claude-x",
-        );
-    }
-
-    #[test]
-    fn catalog_sorts_models_and_flags_credentials() {
-        let groups = catalog_with(|provider| provider == "anthropic");
-        let anthropic = groups
-            .iter()
-            .find(|g| g.provider == "anthropic")
-            .expect("embedded anthropic models present");
-        assert!(anthropic.has_credential);
-        assert!(!anthropic.models.is_empty());
-        let mut sorted = anthropic.models.clone();
-        sorted.sort_by(|a, b| a.id.cmp(&b.id));
-        assert_eq!(anthropic.models, sorted);
-
-        let openai = groups
-            .iter()
-            .find(|g| g.provider == "openai")
-            .expect("embedded openai models present");
-        assert!(!openai.has_credential);
-    }
 
     fn two_groups() -> Vec<ProviderGroup> {
         vec![

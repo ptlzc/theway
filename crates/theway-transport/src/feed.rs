@@ -2,7 +2,7 @@
 
 use serde::Serialize;
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub enum WireFeedBlock {
     User {
         text: String,

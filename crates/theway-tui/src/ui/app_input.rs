@@ -2,6 +2,8 @@
 //!
 //! Key dispatch, modal overlay keys (control-plane prompt, model picker), clipboard
 //! paste + image attachments, the input textarea, completions, and history navigation.
+//! Every action that touches the runtime maps to a gRPC call: Ctrl-C → `cancel`,
+//! control-plane keys → `approve`, picker select → `set_model`.
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -13,8 +15,8 @@ use theway::images;
 use theway_transport::transport::SlashCompleter;
 
 use super::App;
+use super::collect_slash_commands;
 use super::render_utils::{human_bytes, new_textarea};
-use theway::app::kernel::TurnState;
 
 impl App {
     // ── event handling ──────────────────────────────────────────────────────────────────
@@ -22,7 +24,6 @@ impl App {
     pub(super) async fn handle_key(
         &mut self,
         key: KeyEvent,
-        turn: &mut TurnState,
         terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     ) -> Result<()> {
         if self.handle_control_plane_prompt_key(&key) {
@@ -36,14 +37,14 @@ impl App {
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
         match key.code {
             KeyCode::Char('c') if ctrl => {
-                if turn.fut.is_some() {
-                    self.request_abort(turn);
+                if self.busy {
+                    self.request_abort();
                 } else if self.on_idle_ctrlc() {
                     self.quit = true;
                 }
             }
             KeyCode::Char('d') if ctrl => {
-                if self.handle_ctrl_d(turn) {
+                if self.handle_ctrl_d() {
                     return Ok(());
                 }
                 if self.input_text().is_empty() {
@@ -57,8 +58,8 @@ impl App {
             KeyCode::Esc => {
                 if !self.completions.is_empty() {
                     self.completions.clear();
-                } else if turn.fut.is_some() {
-                    self.request_abort(turn);
+                } else if self.busy {
+                    self.request_abort();
                 } else {
                     self.clear_input();
                 }
@@ -68,10 +69,13 @@ impl App {
                 self.refresh_completions();
             }
             KeyCode::Enter => {
-                self.submit(turn, terminal).await?;
+                self.submit(terminal).await?;
             }
             KeyCode::Char('v') if ctrl => {
                 self.paste_clipboard().await;
+            }
+            KeyCode::Char('m') if alt => {
+                self.open_model_picker();
             }
             KeyCode::Tab => self.cycle_completion(),
             KeyCode::PageUp => self.scroll_up(self.last_viewport_h.max(1)),
@@ -79,8 +83,8 @@ impl App {
             KeyCode::Up if self.input_is_single_line() => self.history_prev(),
             KeyCode::Down if self.input_is_single_line() => self.history_next(),
             KeyCode::Char('u') if ctrl => {
-                if self.input_text().is_empty() && turn.fut.is_some() {
-                    self.cancel_last_queued_turn();
+                if self.input_text().is_empty() {
+                    self.system_line("the queue lives on the daemon; Ctrl-C aborts the current turn");
                 } else {
                     self.clear_input();
                 }
@@ -119,31 +123,24 @@ impl App {
                 | KeyCode::Char('D')
         ) || (ctrl && matches!(key.code, KeyCode::Char('c')));
         if allow {
-            self.resolve_control_plane_prompt(theway_core::ControlPlanePromptDecision::Allow);
+            self.resolve_control_plane_prompt(true);
         } else if deny {
-            self.resolve_control_plane_prompt(theway_core::ControlPlanePromptDecision::Deny {
-                reason: Some("denied by user".into()),
-            });
+            self.resolve_control_plane_prompt(false);
         }
         true
     }
 
     pub(super) fn open_model_picker(&mut self) {
-        self.model_catalog = crate::model_picker::catalog();
+        // The catalog comes from the daemon's snapshot (credential detection is
+        // daemon-side); refresh it from the latest cache before opening.
+        self.model_catalog = self.latest.model_catalog.clone();
         if self.model_catalog.is_empty() {
             self.system_line(
                 "no openai/anthropic-compatible models registered; use /model <provider:model-id>",
             );
             return;
         }
-        let active = self
-            .kernel
-            .harness()
-            .agent()
-            .state()
-            .model
-            .clone()
-            .map(|m| (m.provider.0, m.id));
+        let active = parse_model_label(&self.latest.model);
         self.model_picker = Some(crate::model_picker::ModelPickerState::new(
             self.model_catalog.clone(),
             active,
@@ -208,16 +205,10 @@ impl App {
             self.error_line(format!("invalid model spec: {spec}"));
             return;
         };
-        let (provider, id) = (provider.to_string(), id.to_string());
-        let Some(model) = theway_llm_provider::get_model(
-            &theway_llm_provider::Provider::from(provider.as_str()),
-            &id,
-        ) else {
-            self.error_line(format!("unknown model: {provider}:{id}"));
-            return;
-        };
-        match self.kernel.harness().set_model(model).await {
-            Ok(_) => {
+        let provider = provider.to_string();
+        let id = id.to_string();
+        match self.client.set_model(&format!("{provider}:{id}")).await {
+            Ok(true) => {
                 if let Some(hint) = commands::model_credential_hint(&provider) {
                     self.system_line(format!(
                         "selected {provider}:{id}, but login is required: {hint}"
@@ -225,8 +216,10 @@ impl App {
                 } else {
                     self.system_line(format!("switched to {provider}:{id}"));
                 }
-                self.model_catalog = crate::model_picker::catalog();
+                // The daemon republishes with the new catalog; the picker's
+                // next open reads it from the snapshot.
             }
+            Ok(false) => self.error_line("daemon rejected the model change"),
             Err(e) => self.error_line(format!("set_model failed: {e}")),
         }
     }
@@ -252,10 +245,6 @@ impl App {
     }
 
     pub(super) fn attach_clipboard_image(&mut self, image: crate::clipboard_image::ClipboardImage) {
-        if !self.current_model_accepts_images() {
-            self.error_line("current model does not support image input; switch to a vision-capable model before pasting an image");
-            return;
-        }
         if self.pending_pasted_images.len() + self.pending_images.len()
             >= images::MAX_IMAGES_PER_MESSAGE
         {
@@ -276,19 +265,10 @@ impl App {
         self.system_line(label);
     }
 
-    pub(super) fn current_model_accepts_images(&self) -> bool {
-        self.kernel.current_model_accepts_images()
-    }
-
+    /// Image support is validated daemon-side (it knows the active model's
+    /// modalities); the client always allows and surfaces the daemon's error.
     pub(super) fn validate_pending_image_support(&mut self) -> bool {
-        let count = self.pending_images.len() + self.pending_pasted_images.len();
-        if count == 0 || self.current_model_accepts_images() {
-            return true;
-        }
-        self.error_line(format!(
-            "current model does not support image input; switch to a vision-capable model before sending {count} image attachment(s)"
-        ));
-        false
+        true
     }
 
     // ── input helpers ───────────────────────────────────────────────────────────────────
@@ -315,25 +295,10 @@ impl App {
     }
 
     pub(super) fn refresh_completions(&mut self) {
-        self.completer = SlashCompleter::from_commands(
-            self.registry
-                .commands()
-                .iter()
-                .flat_map(|c| {
-                    let mut names = vec![format!("/{}", c.name())];
-                    names.extend(c.aliases().iter().map(|a| format!("/{a}")));
-                    names
-                })
-                .chain(
-                    theway::commands::skill_shortcuts(
-                        &self.kernel.harness().skills(),
-                        &self.registry,
-                    )
-                    .into_iter()
-                    .map(|sc| sc.command),
-                )
-                .collect(),
-        );
+        self.completer = SlashCompleter::from_commands(collect_slash_commands(
+            &self.registry,
+            &self.latest.sidebar.skills.items,
+        ));
         self.completions = if self.input_is_single_line() {
             self.completer.matches(&self.input_text())
         } else {
@@ -395,4 +360,13 @@ impl App {
             self.set_input(&draft);
         }
     }
+}
+
+/// Parse a `provider:model-id` label from a snapshot into picker `active`.
+fn parse_model_label(label: &str) -> Option<(String, String)> {
+    let (provider, id) = label.split_once(':')?;
+    if provider.is_empty() || id.is_empty() {
+        return None;
+    }
+    Some((provider.to_string(), id.to_string()))
 }
