@@ -32,9 +32,9 @@ RELEASE="${RELEASE:-1}"
 cargo_build() {
     local profile="$1"
     if [ "$profile" = "release" ]; then
-        cargo build --release -p theway -p theway-probe --features tui 2>&1
+        cargo build --release -p theway-daemon -p theway-probe 2>&1
     else
-        cargo build -p theway -p theway-probe --features tui 2>&1
+        cargo build -p theway-daemon -p theway-probe 2>&1
     fi
 }
 
@@ -334,8 +334,8 @@ cat >> "${REPORT_FILE}" << 'EOF'
 
 | 缺陷 | 修复 | 文件 |
 |------|------|------|
-| Health Watch 非持续流 | `HealthService::watch` 从单帧改为 5s 间隔持续流 | `crates/theway-server/src/transport/grpc.rs` |
-| 无 SIGTERM handler | `run_transport_loop` select! 增加 SIGTERM 分支 | `crates/theway-server/src/ui/web_loop.rs` |
+| Health Watch 非持续流 | `HealthService::watch` 从单帧改为 5s 间隔持续流 | `crates/theway-transport/src/grpc.rs` |
+| 无 SIGTERM handler | `run_transport_loop` select! 增加 SIGTERM 分支 | `crates/theway-daemon/src/app/daemon.rs` |
 
 若需 gRPC 生态集成 (grpc_health_probe, gRPC gateway, 统一微服务治理),
 仅需补齐 gRPC reflection (低优先级, loopback-only 场景影响小)。

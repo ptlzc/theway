@@ -1103,9 +1103,11 @@ impl App {
     }
 }
 
-/// Assemble the slash-command completion list: local commands + the daemon-side
-/// command surface (the daemon owns the full registry; the client forwards
-/// slash text via `send_message`) + skill shortcuts from the snapshot sidebar.
+/// Assemble the slash-command completion list: the SDK local command set from
+/// `registry` (`Registry::local()` — quit/clear/help/login/logout/sessions) +
+/// the daemon-side command surface (the daemon owns the full registry; the
+/// client forwards slash text via `send_message`) + skill shortcuts from the
+/// snapshot sidebar.
 fn collect_slash_commands(
     registry: &theway::commands::Registry,
     skills: &[theway_transport::wire::WireSkillSnapshot],
@@ -1129,32 +1131,39 @@ fn collect_slash_commands(
 }
 
 /// Daemon-side slash commands the client forwards (the daemon's registry is not
-/// exposed over RPC; keep this list in sync with `commands::Registry` builtins).
+/// exposed over RPC). Hint list only — completion, no dispatch. Keep in sync
+/// with the commands `theway_daemon::Registry::with_daemon_commands()` adds on
+/// top of the SDK's `Registry::local()` (crates/theway-daemon/src/commands/mod.rs).
+/// The SDK-local commands (help/clear/quit/login/logout/sessions) are NOT
+/// listed here: they come from the `registry` argument above (node 9
+/// switched the TUI to `Registry::local()`, so listing them would duplicate).
+/// `crontab` is the daemon's alias for `/cron`.
 const DAEMON_COMMANDS: &[&str] = &[
-    "goal",
-    "goal-start",
-    "diag",
-    "template",
-    "compact",
-    "bug-report",
+    "skills",
+    "skill",
     "model",
     "thinking",
     "cost",
+    "diag",
+    "template",
     "save",
+    "compact",
     "undo",
+    "bug-report",
     "name",
-    "sessions",
+    "session",
+    "web-connect",
+    "web-disconnect",
     "share",
-    "logout",
-    "skill",
-    "skills",
+    "find",
+    "history",
+    "goal",
+    "goal-start",
     "triggers",
     "new-trigger",
     "cron",
+    "crontab",
     "inbox",
-    "web-connect",
-    "web-disconnect",
-    "find",
 ];
 
 #[cfg(test)]

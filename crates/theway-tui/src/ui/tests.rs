@@ -104,7 +104,7 @@ async fn test_app() -> (App, mpsc::UnboundedReceiver<WireCommand>) {
             "/nonexistent-theway-sessions",
         ))),
         history: HistoryStore::load_from(std::path::Path::new("/nonexistent-theway-history")),
-        registry: Registry::with_builtins(),
+        registry: Registry::local(),
         pending_images: vec![],
     });
     (app, command_rx)

@@ -3,7 +3,7 @@
 //! `sdk-split-local-sandbox` (design decision 1/6: local editing mode, the default).
 //!
 //! Behavior mirrors the daemon's tool implementations
-//! (`theway-server/src/tools/{read,write,bash,ls,grep,find,git}.rs`):
+//! (`theway-daemon/src/tools/{read,write,bash,ls,grep,find,git}.rs`):
 //!
 //! - `read_file` reads UTF-8 text; `write_file` overwrites and creates missing
 //!   parent directories (like the `write` tool).

@@ -1,0 +1,645 @@
+//! End-to-end tool tests. The tools are simple enough that we can exercise them directly
+//! through their `AgentTool::execute` method without going through the agent loop.
+
+use std::sync::{Arc, Mutex};
+use tempfile::tempdir;
+use theway_core::AgentTool;
+use tokio_util::sync::CancellationToken;
+
+// Tool BODIES live in the engine crate + the app layer (openspec tools-into-core) — use
+// the real lib copy so the types match what the assembly layer below consumes.
+use theway_core::tools;
+
+// The trigger/cron ASSEMBLY (`triggers/tool_assembly.rs`) and `triggers` are still pulled
+// in by path: the assembly's cron/trigger builders reference `crate::triggers`, which must
+// resolve to the SAME registry instances this test clears through the cfg(test)-only
+// `clear_for_tests` — only a path-included copy compiles with cfg(test). `cron.rs` pulls
+// in `theway_transport::inbox` / `crate::bug_report` siblings along the way; `bug_report.rs` pulls
+// in `crate::config`.
+#[path = "../src/bug_report.rs"]
+#[allow(dead_code)]
+mod bug_report;
+#[allow(dead_code)]
+mod config {
+    #[allow(unused_imports)]
+    pub use theway::config::*;
+}
+#[path = "../src/export.rs"]
+#[allow(dead_code)]
+mod export;
+#[allow(dead_code)]
+#[path = "../src/triggers/mod.rs"]
+mod triggers;
+// The src `triggers` module references `crate::trigger_engine::...`; forward to the
+// lib crate so all code sees ONE type identity.
+mod trigger_engine {
+    pub use theway_daemon::trigger_engine::*;
+}
+// `triggers::tool_assembly` resolves through the `mod triggers` include above (the
+// assembly's `crate::triggers` refs hit the SAME registry instances this test clears).
+use triggers::tool_assembly as tools_asm;
+
+static DYNAMIC_TRIGGER_LOCK: Mutex<()> = Mutex::new(());
+static CRON_LOCK: Mutex<()> = Mutex::new(());
+
+#[tokio::test]
+async fn read_writes_then_reads() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("hello.txt");
+
+    let write = theway_daemon::tools::write::WriteTool;
+    let read = theway_daemon::tools::read::ReadTool;
+
+    write
+        .execute(
+            "w1",
+            serde_json::json!({ "path": path.to_str().unwrap(), "content": "hi\nthere\n" }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+
+    let r = read
+        .execute(
+            "r1",
+            serde_json::json!({ "path": path.to_str().unwrap() }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+    let text = match &r.content[0] {
+        theway_llm_provider::UserContentBlock::Text(t) => t.text.clone(),
+        _ => panic!("expected text"),
+    };
+    assert!(text.contains("hi"));
+    assert!(text.contains("there"));
+}
+
+#[tokio::test]
+async fn ls_lists_entries() {
+    let dir = tempdir().unwrap();
+    std::fs::write(dir.path().join("a.txt"), "a").unwrap();
+    std::fs::create_dir(dir.path().join("sub")).unwrap();
+
+    let ls = theway_daemon::tools::ls::LsTool;
+    let r = ls
+        .execute(
+            "l1",
+            serde_json::json!({ "path": dir.path().to_str().unwrap() }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+    let text = match &r.content[0] {
+        theway_llm_provider::UserContentBlock::Text(t) => t.text.clone(),
+        _ => panic!("expected text"),
+    };
+    assert!(text.contains("a.txt"));
+    assert!(text.contains("sub/"));
+}
+
+#[tokio::test]
+async fn bash_captures_stdout_and_exit() {
+    let bash = theway_daemon::tools::bash::BashTool;
+    let r = bash
+        .execute(
+            "b1",
+            serde_json::json!({ "command": "echo hello && exit 0" }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+    let text = match &r.content[0] {
+        theway_llm_provider::UserContentBlock::Text(t) => t.text.clone(),
+        _ => panic!("expected text"),
+    };
+    assert!(text.contains("hello"));
+    assert!(text.contains("[exit 0]"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn new_trigger_tool_registers_dynamic_rule() {
+    let _guard = DYNAMIC_TRIGGER_LOCK.lock().unwrap();
+    triggers::global_registry().clear_for_tests();
+
+    let tool = tools_asm::new_trigger_tool();
+    let result = tool
+        .execute(
+            "new-trigger-1",
+            serde_json::json!({
+                "condition": "any future event matches this condition",
+                "action": "echo fired"
+            }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect("tool should create rule");
+
+    let rules = triggers::global_registry().list();
+    assert_eq!(rules.len(), 1);
+    assert_eq!(
+        rules[0].condition,
+        "any future event matches this condition"
+    );
+    assert_eq!(rules[0].action, "echo fired");
+
+    let text = match &result.content[0] {
+        theway_llm_provider::UserContentBlock::Text(t) => t.text.clone(),
+        _ => panic!("expected text"),
+    };
+    assert!(text.contains("created dynamic trigger"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn new_trigger_tool_rejects_fixed_schedule_jobs() {
+    let _guard = DYNAMIC_TRIGGER_LOCK.lock().unwrap();
+    triggers::global_registry().clear_for_tests();
+
+    let tool = tools_asm::new_trigger_tool();
+    let err = tool
+        .execute(
+            "new-trigger-scheduled-1",
+            serde_json::json!({
+                "condition": "Every hour",
+                "action": "Check Hacker News"
+            }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect_err("fixed schedules should be routed to cron");
+
+    assert!(
+        format!("{err}").contains("NewCronJob"),
+        "error should point model to cron tool: {err}"
+    );
+    assert!(triggers::global_registry().list().is_empty());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn new_trigger_tool_rejects_fixed_schedule_in_action_or_spec() {
+    let _guard = DYNAMIC_TRIGGER_LOCK.lock().unwrap();
+    triggers::global_registry().clear_for_tests();
+
+    let tool = tools_asm::new_trigger_tool();
+    let err = tool
+        .execute(
+            "new-trigger-scheduled-bypass-1",
+            serde_json::json!({
+                "condition": "Hacker News should be checked",
+                "action": "Every hour, check Hacker News",
+                "spec": "Every hour, check Hacker News"
+            }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect_err("fixed schedule in action/spec should be routed to cron");
+
+    assert!(
+        format!("{err}").contains("NewCronJob"),
+        "error should point model to cron tool: {err}"
+    );
+    assert!(triggers::global_registry().list().is_empty());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn new_cron_job_tool_registers_session_cron_job() {
+    let _guard = CRON_LOCK.lock().unwrap();
+    triggers::global_cron_registry().clear_for_tests();
+
+    let tool = triggers::NewCronJobTool::new(None);
+    let result = tool
+        .execute(
+            "new-cron-1",
+            serde_json::json!({
+                "schedule": "每小时",
+                "action": "Check the Hacker News front page"
+            }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect("tool should create cron job");
+
+    let jobs = triggers::global_cron_registry().list();
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(jobs[0].schedule, "0 * * * *");
+    assert_eq!(jobs[0].action, "Check the Hacker News front page");
+    assert!(jobs[0].enabled);
+    assert_eq!(result.details["scope"], "session");
+
+    let text = match &result.content[0] {
+        theway_llm_provider::UserContentBlock::Text(t) => t.text.clone(),
+        _ => panic!("expected text"),
+    };
+    assert!(text.contains("created cron job"));
+}
+
+#[test]
+fn cron_management_tool_builders_expose_expected_catalog_names() {
+    let cell: tools::skill::SkillHarnessCell = Arc::new(once_cell::sync::OnceCell::new());
+    let new = tools_asm::new_cron_job_tool(cell.clone());
+    let list = tools_asm::list_cron_jobs_tool();
+    let remove = tools_asm::remove_cron_job_tool(cell.clone());
+    let state = tools_asm::set_cron_job_state_tool(cell);
+    let names = [
+        new.definition().name.as_str(),
+        list.definition().name.as_str(),
+        remove.definition().name.as_str(),
+        state.definition().name.as_str(),
+    ];
+    assert_eq!(
+        names,
+        [
+            "NewCronJob",
+            "ListCronJobs",
+            "RemoveCronJob",
+            "SetCronJobState"
+        ]
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn list_cron_jobs_tool_returns_redacted_session_jobs() {
+    let _guard = CRON_LOCK.lock().unwrap();
+    triggers::global_cron_registry().clear_for_tests();
+    let secret = "Bearer sk-cron-secret-token";
+    let job = triggers::global_cron_registry()
+        .add_job("0 * * * *", &format!("fetch Hacker News with {secret}"))
+        .unwrap();
+
+    let tool = tools_asm::list_cron_jobs_tool();
+    let result = tool
+        .execute(
+            "list-cron-1",
+            serde_json::json!({}),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect("tool should list cron jobs");
+
+    let text = match &result.content[0] {
+        theway_llm_provider::UserContentBlock::Text(t) => t.text.clone(),
+        _ => panic!("expected text"),
+    };
+    assert!(text.contains("session cron jobs: 1"));
+    assert!(text.contains(&job.id));
+    assert!(!text.contains(secret));
+    assert_eq!(result.details["scope"], "session");
+    assert_eq!(result.details["jobs"][0]["id"], job.id);
+    assert!(result.details["jobs"][0].get("action").is_none());
+    assert!(!result.details.to_string().contains(secret));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn remove_cron_job_tool_removes_session_job() {
+    let _guard = CRON_LOCK.lock().unwrap();
+    triggers::global_cron_registry().clear_for_tests();
+    let job = triggers::global_cron_registry()
+        .add_job("0 * * * *", "Check the Hacker News front page")
+        .unwrap();
+
+    let tool = triggers::RemoveCronJobTool::new(None);
+    let preview = tool
+        .execute(
+            "preview-remove-cron-1",
+            serde_json::json!({ "id": job.id }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect("tool should preview cron job removal");
+    assert_eq!(preview.details["confirmation_required"], true);
+    assert_eq!(triggers::global_cron_registry().list().len(), 1);
+
+    let result = tool
+        .execute(
+            "remove-cron-1",
+            serde_json::json!({ "id": job.id, "confirm": true }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect("tool should remove cron job");
+
+    assert!(triggers::global_cron_registry().list().is_empty());
+    assert_eq!(result.details["removed_count"], 1);
+    let text = match &result.content[0] {
+        theway_llm_provider::UserContentBlock::Text(t) => t.text.clone(),
+        _ => panic!("expected text"),
+    };
+    assert!(text.contains("removed cron job"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn set_cron_job_state_tool_disables_and_fails_closed_on_enable() {
+    let _guard = CRON_LOCK.lock().unwrap();
+    triggers::global_cron_registry().clear_for_tests();
+    let job = triggers::global_cron_registry()
+        .add_job("0 * * * *", "Check the Hacker News front page")
+        .unwrap();
+    let tool = triggers::SetCronJobStateTool::new(None);
+
+    let disabled = tool
+        .execute(
+            "disable-cron-1",
+            serde_json::json!({ "id": job.id, "enabled": false }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect("tool should disable cron job");
+    assert_eq!(disabled.details["enabled"], false);
+    assert!(!triggers::global_cron_registry().list()[0].enabled);
+
+    let enable_err = tool
+        .execute(
+            "enable-cron-1",
+            serde_json::json!({ "id": job.id, "enabled": true }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect_err("model-facing enable should fail closed");
+    assert!(
+        format!("{enable_err}").contains("/cron enable"),
+        "enable error should point at slash confirmation path: {enable_err}"
+    );
+    assert!(!triggers::global_cron_registry().list()[0].enabled);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn new_trigger_tool_can_request_chat_promotion() {
+    let _guard = DYNAMIC_TRIGGER_LOCK.lock().unwrap();
+    triggers::global_registry().clear_for_tests();
+
+    let tool = tools_asm::new_trigger_tool();
+    let result = tool
+        .execute(
+            "new-trigger-promote-1",
+            serde_json::json!({
+                "condition": "event says promote",
+                "action": "echo promote",
+                "promote_to_chat": true
+            }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect("tool should register promoted rule");
+
+    let rules = triggers::global_registry().list();
+    assert_eq!(rules.len(), 1);
+    assert!(rules[0].promote_to_chat);
+    assert_eq!(result.details["promote_to_chat"], true);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn list_triggers_tool_returns_dynamic_rules() {
+    let _guard = DYNAMIC_TRIGGER_LOCK.lock().unwrap();
+    triggers::global_registry().clear_for_tests();
+    let rule = triggers::global_registry()
+        .add_rule("event says list me", "echo listed")
+        .expect("rule");
+
+    let tool = tools_asm::list_triggers_tool();
+    let result = tool
+        .execute(
+            "list-triggers-1",
+            serde_json::json!({}),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect("tool should list rules");
+
+    let text = match &result.content[0] {
+        theway_llm_provider::UserContentBlock::Text(t) => t.text.clone(),
+        _ => panic!("expected text"),
+    };
+    assert!(text.contains("dynamic trigger rules: 1"));
+    assert!(text.contains(&rule.id));
+    assert!(text.contains("event says list me"));
+    assert_eq!(result.details["count"], 1);
+    assert_eq!(result.details["rules"][0]["id"], rule.id);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn remove_trigger_tool_removes_dynamic_rule() {
+    let _guard = DYNAMIC_TRIGGER_LOCK.lock().unwrap();
+    triggers::global_registry().clear_for_tests();
+    let rule = triggers::global_registry()
+        .add_rule("event says remove me", "echo removed")
+        .expect("rule");
+
+    let tool = tools_asm::remove_trigger_tool();
+    let result = tool
+        .execute(
+            "remove-trigger-1",
+            serde_json::json!({ "id": rule.id }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect("tool should remove rule");
+
+    assert!(triggers::global_registry().list().is_empty());
+    let text = match &result.content[0] {
+        theway_llm_provider::UserContentBlock::Text(t) => t.text.clone(),
+        _ => panic!("expected text"),
+    };
+    assert!(text.contains("removed dynamic trigger"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn set_trigger_state_tool_disables_and_enables_rule() {
+    let _guard = DYNAMIC_TRIGGER_LOCK.lock().unwrap();
+    triggers::global_registry().clear_for_tests();
+    let rule = triggers::global_registry()
+        .add_rule("event says pause me", "echo paused")
+        .expect("rule");
+
+    let tool = tools_asm::set_trigger_state_tool();
+    let disabled = tool
+        .execute(
+            "set-trigger-state-1",
+            serde_json::json!({ "id": rule.id, "enabled": false }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect("tool should disable rule");
+    assert_eq!(disabled.details["enabled"], false);
+    assert!(!triggers::global_registry().list()[0].enabled);
+
+    let enabled = tool
+        .execute(
+            "set-trigger-state-2",
+            serde_json::json!({ "id": rule.id, "enabled": true }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect("tool should enable rule");
+    assert_eq!(enabled.details["enabled"], true);
+    assert!(triggers::global_registry().list()[0].enabled);
+}
+
+#[tokio::test]
+async fn bash_reports_nonzero_exit() {
+    let bash = theway_daemon::tools::bash::BashTool;
+    let r = bash
+        .execute(
+            "b2",
+            serde_json::json!({ "command": "exit 3" }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+    let text = match &r.content[0] {
+        theway_llm_provider::UserContentBlock::Text(t) => t.text.clone(),
+        _ => panic!("expected text"),
+    };
+    assert!(text.contains("[exit 3]"));
+}
+
+#[tokio::test]
+async fn skill_tool_returns_wrapped_body_on_hit() {
+    // Integration acceptance for issue #25 PR A: when a model issues `Skill { name: "..." }`
+    // for a real registered skill, the tool result content is the body wrapped in a
+    // `<skill name="...">` block (same shape `format_skills_for_system_prompt` advertises).
+    use once_cell::sync::OnceCell as SyncOnceCell;
+    use theway_core::{
+        AgentHarness, AgentHarnessOptions, MemorySessionStorage, Session, SessionStorage, Skill,
+        SkillSource,
+    };
+
+    let storage = Arc::new(MemorySessionStorage::new()) as Arc<dyn SessionStorage>;
+    let session = Session::new(storage);
+    let mut opts = AgentHarnessOptions::new(faux_model_for_skill_test(), session);
+    opts.skills = vec![Skill {
+        name: "test-skill".into(),
+        description: "description for the test skill".into(),
+        file_path: "/tmp/skills/test-skill/SKILL.md".into(),
+        content: "# test-skill\n\nDo the test thing.".into(),
+        disable_model_invocation: false,
+        source: SkillSource::User,
+    }];
+    let harness: Arc<AgentHarness> = Arc::new(AgentHarness::new(opts));
+
+    let cell: tools::skill::SkillHarnessCell = Arc::new(SyncOnceCell::new());
+    assert!(cell.set(harness).is_ok(), "set once");
+
+    let tool = tools::skill::SkillTool::new(cell);
+    let result = tool
+        .execute(
+            "call-1",
+            serde_json::json!({ "name": "test-skill" }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect("hit");
+
+    let text = match &result.content[0] {
+        theway_llm_provider::UserContentBlock::Text(t) => t.text.clone(),
+        _ => panic!("expected text content"),
+    };
+    assert!(text.contains("<skill name=\"test-skill\""));
+    assert!(text.contains("Do the test thing."));
+}
+
+fn faux_model_for_skill_test() -> theway_llm_provider::Model {
+    theway_llm_provider::Model {
+        id: "faux".into(),
+        name: "Faux".into(),
+        api: theway_llm_provider::Api::from("faux"),
+        provider: theway_llm_provider::Provider::from("faux"),
+        base_url: String::new(),
+        reasoning: false,
+        thinking_level_map: None,
+        input: vec![],
+        cost: theway_llm_provider::ModelCost::default(),
+        context_window: 0,
+        max_tokens: 0,
+        headers: None,
+        compat: None,
+    }
+}
+
+#[tokio::test]
+async fn memory_save_then_load_block() {
+    let dir = tempdir().unwrap();
+    let dir_path = dir.path().to_path_buf();
+    let mem: Arc<dyn AgentTool> = Arc::new(tools::memory::MemoryTool::new(dir_path.clone()));
+
+    mem.execute(
+        "m1",
+        serde_json::json!({
+            "action": "save",
+            "name": "User Likes Tabs",
+            "description": "indentation preference",
+            "content": "The user prefers tabs over spaces.",
+            "type": "user",
+        }),
+        CancellationToken::new(),
+        None,
+    )
+    .await
+    .unwrap();
+
+    let block = tools::memory::load_memory_block(&dir_path).await;
+    assert!(block.contains("<memory>"));
+    assert!(block.contains("tabs"));
+    assert!(block.contains("</memory>"));
+}
+
+/// `load_memory_block` must skip `MEMORY.md` so the index file isn't folded into the
+/// system-prompt memory block alongside its actual entries. The MEMORY.md file is loaded
+/// separately by the harness; duplicating it into this block surfaces the same content
+/// twice. Code-review item #10 (2026-05-22).
+#[tokio::test]
+async fn memory_block_excludes_memory_md_index_file() {
+    let dir = tempdir().unwrap();
+    let dir_path = dir.path().to_path_buf();
+    // Hand-write a MEMORY.md with a recognizable string we'd see if it leaks into the
+    // block, and one real entry so the block actually opens.
+    tokio::fs::write(
+        dir_path.join("MEMORY.md"),
+        "INDEX_SENTINEL_SHOULD_NOT_LEAK\n- [User Likes Tabs](user_likes_tabs.md)\n",
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(
+        dir_path.join("user_likes_tabs.md"),
+        "---\nname: user-likes-tabs\ndescription: indentation\nmetadata:\n  type: user\n---\n\nThe user prefers tabs.\n",
+    )
+    .await
+    .unwrap();
+
+    let block = tools::memory::load_memory_block(&dir_path).await;
+    assert!(
+        block.contains("<memory>"),
+        "block should be populated by the user entry: {block}"
+    );
+    assert!(
+        block.contains("prefers tabs"),
+        "real entry must appear in block: {block}"
+    );
+    assert!(
+        !block.contains("INDEX_SENTINEL_SHOULD_NOT_LEAK"),
+        "MEMORY.md index must not leak into the injected memory block: {block}"
+    );
+    assert!(
+        !block.contains("--- MEMORY.md ---"),
+        "MEMORY.md should not appear as a section header: {block}"
+    );
+}

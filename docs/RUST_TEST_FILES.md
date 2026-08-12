@@ -33,8 +33,8 @@ crates/<name>/tests/    # 所有测试文件 (多文件模块测试 + 独立集�
 ```
 crates/theway-core/src/runtime/graph_engineering/engine.rs   ←→  crates/theway-core/tests/runtime/graph_engineering/engine/
 crates/theway-core/src/tools/dag_tools.rs                    ←→  crates/theway-core/tests/tools/dag_tools/
-crates/theway-server/src/tools/shell.rs                      ←→  crates/theway-server/tests/tools/shell/
-crates/theway-server/src/transport/http.rs                   ←→  crates/theway-server/tests/transport/http/
+crates/theway-daemon/src/tools/bash.rs                       ←→  crates/theway-daemon/tests/tools/bash/
+crates/theway-transport/src/http.rs                          ←→  crates/theway-transport/tests/http/
 ```
 
 桥接声明 (src 模块末尾, 用 `tests-bridge-macro` 的 proc-macro — 展开时以

@@ -6,7 +6,7 @@ members = [
     "crates/theway-core",
     "crates/theway-storage",
     "crates/theway-sdk",
-    "crates/theway-server",
+    "crates/theway-daemon",
     "crates/theway-tui",
     "crates/theway-mcp",
     "crates/theway-transport",

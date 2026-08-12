@@ -1,16 +1,16 @@
-//! theway SDK — the client-facing surface split out of the daemon crate.
+//! theway SDK — the client-facing surface of the theway agent runtime.
 //!
 //! Three layers:
 //!
-//! - [`common`]: shared wire/session/config/feed types and the command framework
-//!   (populated by later nodes of the `sdk-split-local-sandbox` change).
+//! - [`common`]: shared wire/session/config/feed types and the command framework.
 //! - [`local`]: local-execution surface — session repo wrappers, auth, history,
 //!   images, mentions, bug reporting, local commands, and the `LocalExecutor`.
 //! - [`sandbox`]: sandboxed-execution surface (stub executor for now).
 //!
-//! Bridge-period note: this crate is published as package `theway-sdk` / lib
-//! `theway_sdk` because the daemon crate still owns the `theway` package name;
-//! the daemon rename (node 7) flips this lib back to `theway`.
+//! Path compatibility (sdk-split-local-sandbox): this lib keeps the crate name
+//! `theway`, so pre-split client paths (`theway::session`, `theway::config`,
+//! `theway::app::feed`, …) resolve unchanged. The daemon runtime lives in the
+//! `theway-daemon` crate (lib `theway_daemon`, bin `thewayd`).
 
 pub mod common;
 pub mod local;
@@ -21,7 +21,7 @@ pub mod sandbox;
 pub use common::commands;
 pub use common::config;
 pub use common::{config_readers, session_archive};
-pub use local::{auth, history, images, mentions, session, stream_auth};
+pub use local::{auth, bug_report, history, images, mentions, session, stream_auth};
 
 // Session repo used by the CLI layer (theway-tui): hybrid JSONL+SQLite, new sessions
 // minted as SQLite. Re-exported from the composition root so binaries don't need to

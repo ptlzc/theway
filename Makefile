@@ -39,8 +39,8 @@ test: ## run every workspace test (full CLI surface)
 	$(CARGO) test --workspace
 
 .PHONY: test-coding-agent
-test-coding-agent: ## run only the harness crate's tests
-	$(CARGO) test -p theway
+test-coding-agent: ## run only the daemon crate's tests
+	$(CARGO) test -p theway-daemon
 
 .PHONY: test-agent
 test-agent: ## run only the harness-core crate's tests

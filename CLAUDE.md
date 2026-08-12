@@ -8,7 +8,8 @@ Rust 2024 Cargo workspace. Four crates; no non-crate workspace members.
 
 - `crates/theway-llm-provider` (`theway-llm-provider`) — unified streaming LLM client. Provider implementations live under `src/providers/`; model + image catalogs are generated (`models.generated.json`, `models_generated.rs`, `image_models_generated.rs` — regenerate via `crates/theway-llm-provider/scripts/regen_models.sh`). Anthropic/OAuth, AWS SigV4, Vertex ADC, SSE/event-stream helpers, and retry/overflow utilities are here. Public surface is re-exported through `src/lib.rs`.
 - `crates/theway-core` (`theway-core`) — agent runtime layered on `theway-llm-provider`. The bare `Agent` in `src/agent.rs` is IO-free and owns conversation state, listeners, queues, and the cancellation token. The agent loop is `src/agent_loop.rs`. The `runtime` module (feature `harness`) assembles opinionated extras: session storage (JSONL + in-memory), cost tracker, compaction, permission policy, prompt templates, skills loading, system prompt, and the trigger runtime / notification-hook abstraction. Filesystem IO is in the runtime module, not the bare agent.
-- `crates/theway-server` (`theway`, server-first) — the `theway` CLI binary, REPL/TUI, slash-command registry, hooks, LSP supervisor, tool implementations under `src/tools/`, and trigger source adapters under `src/triggers/`. Entry point is `src/main.rs`.
+- `crates/theway-sdk` (`theway`) — client SDK: session/config/auth/history types, the slash-command framework (`Registry::local()`), and the `LocalExecutor`. The TUI and external embedders depend on this crate.
+- `crates/theway-daemon` (`theway-daemon`, server-first) — the headless `thewayd` daemon binary (`src/bin/thewayd.rs`): harness assembly, hooks, LSP supervisor, tool implementations under `src/tools/`, and trigger source adapters under `src/triggers/`. Consumes the `theway` SDK for the client-facing surface.
 - `crates/theway-mcp` (`theway-mcp`) — minimal MCP client: stdio transport, JSON-RPC framing, `tools/list` / `tools/call`. The coding-agent wraps server tools as `AgentTool`s via `tools/mcp_adapter.rs`.
 - `examples/` — runnable demos, not workspace members. `examples/mcp-notify-python/` is a stdlib-only Python MCP server that pushes a synthetic heartbeat into theway's trigger runtime; `examples/mcp-weather-python/` is the same shape but polls a live weather API and pushes a one-line summary for the runtime to act on. See each README for wiring.
 
@@ -44,14 +45,14 @@ CI does **not** set `RUSTFLAGS=-D warnings` (it would break `cargo test` on tran
 ## Key conventions
 
 - Module / file / function / test names: `snake_case`. Public types and traits: `PascalCase`.
-- Provider-specific code goes under `crates/theway-llm-provider/src/providers/`; CLI tools go under `crates/theway-server/src/tools/`. Don't mix layers.
+- Provider-specific code goes under `crates/theway-llm-provider/src/providers/`; daemon tool implementations go under `crates/theway-daemon/src/tools/`. Don't mix layers.
 - Workspace-pinned deps live in `[workspace.dependencies]` at the root. Prefer `dep.workspace = true` over re-declaring versions per crate.
 - Versions are kept in lockstep across all workspace crates (see `AGENTS.md`).
 - Generated files in `crates/theway-llm-provider/src/` (model and image catalogs) are not hand-edited — regenerate via the script in `crates/theway-llm-provider/scripts/`.
 
 ## Triggers
 
-Triggers are a first-class runtime concept, not a feature flag. The runtime lives in `crates/theway-core/src/runtime/trigger_runtime.rs` and `trigger.rs`; source adapters (MCP push notifications, dynamic file/command polling) live in `crates/theway-server/src/triggers/`. Rules are session-scoped (stored next to the active session JSONL), fire-once by default, and execute in a sub-agent that inherits the parent harness config but starts with a fresh context. Trigger output is only promoted into the main chat when the rule has `promote_to_chat=true`. The `/triggers` slash command surfaces runtime state.
+Triggers are a first-class runtime concept, not a feature flag. The runtime lives in `crates/theway-core/src/runtime/trigger_runtime.rs` and `trigger.rs`; source adapters (MCP push notifications, dynamic file/command polling) live in `crates/theway-daemon/src/triggers/`. Rules are session-scoped (stored next to the active session JSONL), fire-once by default, and execute in a sub-agent that inherits the parent harness config but starts with a fresh context. Trigger output is only promoted into the main chat when the rule has `promote_to_chat=true`. The `/triggers` slash command surfaces runtime state.
 
 An accepted trigger's delivery is chosen by the `before_trigger_action` hook, which returns a `TriggerAction` whose `delivery: TriggerDelivery` is one of: `SubAgent` (default — run the sub-agent in a fresh context); `InjectSummary` (skip the sub-agent, inject `trigger.payload_summary` straight into the parent chat via the promotion path, no model call); or `InjectAndRun` (inject `action.prompt` into the parent chat AND run one model turn in the parent's full context). For `InjectAndRun` the runtime never drives the single-tenant parent agent itself: when the parent is streaming it enqueues a follow-up; when idle it emits `HarnessEvent::TriggerRequestsMainRun`, which the coding-agent REPL funnels into a single serialized run channel (shared with user input) so triggered turns and user prompts never race. MCP servers marked `inject_summary` / `inject_and_run` in `mcp.toml` are treated as notification feeds and take those paths (see `triggers::direct_inject_action_hook`). The runtime stays domain-agnostic across all modes — it only moves the opaque `payload_summary` / prompt strings.
 
@@ -64,5 +65,9 @@ This is not a runtime correctness bug — it's a deliberate consequence of treat
 - **Configure intent**: prefer `inject_summary` (no model call, no tools) for pure notification feeds. Use `inject_and_run` only when the server's pushes are infrequent enough that a per-push agent turn won't loop.
 - **Server-side throttling**: a well-behaved `inject_and_run` server should de-dup or throttle its own pushes after observing related tool calls.
 - **Operational**: `/triggers abort <trace_id>` can stop an in-flight chain; `inject_and_run` in `mcp.toml` is the only way these chains can start.
+
+When adding a new MCP server config, the binary question for the author is "would my tool calls cause my own push events?" If yes, prefer `inject_summary`. If no, `inject_and_run` is safe.
+and_run` is safe.
+run` in `mcp.toml` is the only way these chains can start.
 
 When adding a new MCP server config, the binary question for the author is "would my tool calls cause my own push events?" If yes, prefer `inject_summary`. If no, `inject_and_run` is safe.

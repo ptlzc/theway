@@ -1,41 +1,38 @@
 [package]
-name = "theway-sdk"
+name = "theway"
 version = "0.75.0"
 edition = "2024"
 rust-version = "1.85"
-description = "theway SDK — client-facing surface split out of the daemon crate: common wire/session/config types, local (session repo, auth, history, commands) and sandbox layers."
+description = "theway client SDK — the client-facing surface of the theway agent runtime: common wire/session/config/feed types and the command framework, a local layer (session repo, auth, history, images, mentions, local commands, LocalExecutor) and a sandbox layer (stub executor). Embeddable library consumed by the TUI and external projects; the daemon runtime lives in theway-daemon."
 license = "MIT"
 authors = ["theway contributors"]
 
-# Bridge-period naming: the workspace already has package `theway` (crates/theway-server);
-# two same-named packages are a hard error. The lib is renamed back to `theway` in node 7
-# (daemon rename), restoring `use theway::…` client paths.
 [lib]
-name = "theway_sdk"
+name = "theway"
 path = "src/lib.rs"
 
 [dependencies]
 theway-core = { path = "../theway-core" }
 theway-storage = { path = "../theway-storage" }
 theway-transport = { path = "../theway-transport" }
-# Same feature posture as theway-server: every wire-protocol provider enabled so the
-# auth/config/model-catalog layers (moved here in later nodes) see the full catalog.
+# Same feature posture as theway-daemon: every wire-protocol provider enabled so the
+# auth/config/model-catalog layers see the full catalog.
 theway-llm-provider = { path = "../theway-llm-provider", default-features = false, features = ["all-providers"] }
 
-# Local-surface modules moved from theway-server (node 3-move-modules of
+# Local-surface modules moved out of the daemon crate (node 3-move-modules of
 # sdk-split-local-sandbox): config/session/auth/stream_auth/history/images/mentions
-# under `local/`, config + feed under `common/`. Versions mirror theway-server.
+# under `local/`, config + feed under `common/`. Versions mirror theway-daemon.
 # fs/session modules + LocalExecutor (node 4-local-executor of sdk-split-local-sandbox):
 # `process` for run_command/git, `time` for the run_command timeout kill.
 tokio = { version = "1", features = ["macros", "rt", "fs", "process", "time"] }
 # LocalExecutor tool surface: `async_trait` to implement theway_core::executor::ToolExecutor,
 # `ignore` for .gitignore-aware grep/find walks, `regex` for grep patterns
-# (versions mirror theway-server).
+# (versions mirror theway-daemon).
 async-trait = "0.1"
 ignore = "0.4"
 regex = "1"
 # Command framework (node 5-commands-layer of sdk-split-local-sandbox): the console
-# output sink guards its global slot with parking_lot (mirrors theway-server).
+# output sink guards its global slot with parking_lot (mirrors theway-daemon).
 parking_lot = "0.12"
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
@@ -45,7 +42,7 @@ sha2 = "0.10"
 hex = "0.4"
 directories = "5"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
-# session_archive: `.theway-session` tar export/import (mirrors theway-server).
+# session_archive: `.theway-session` tar export/import (mirrors theway-daemon).
 tar = "0.4"
 rpassword = "7"
 base64 = "0.22"

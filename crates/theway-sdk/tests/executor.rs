@@ -6,9 +6,9 @@
 use std::time::{Duration, Instant};
 
 use tempfile::tempdir;
+use theway::local::executor::LocalExecutor;
+use theway::sandbox::executor::SandboxExecutor;
 use theway_core::executor::{ExecutorError, ExecutorKind, ToolExecutor};
-use theway_sdk::local::executor::LocalExecutor;
-use theway_sdk::sandbox::executor::SandboxExecutor;
 
 fn argv(parts: &[&str]) -> Vec<String> {
     parts.iter().map(|s| (*s).to_string()).collect()
