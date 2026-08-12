@@ -120,7 +120,10 @@ with `/cost`.
 ## Quick start
 
 `theway` is a **pure client**: it connects to the `thewayd` daemon, which owns the
-agent runtime (harness, session, tools, triggers). On startup the TUI reuses a
+agent runtime (harness, session, tools, triggers). The client/daemon split mirrors
+the crate layout — the TUI depends on the `theway` SDK crate only, never on the
+daemon runtime; see [Workspace layout](#workspace-layout) and
+[docs/architecture.md](docs/architecture.md). On startup the TUI reuses a
 running daemon (discovered via `~/.theway/daemon-port` or the default port
 `44777`), or spawns `thewayd` in the current directory and waits for readiness.
 The daemon stays running after the TUI exits (multi-client sharing); stop it
@@ -334,6 +337,27 @@ By default, `theway` stores local state under `~/.theway`:
 | `~/.theway/config.toml` | Optional user config, including trigger poll interval |
 
 Set `THEWAY_DIR` to use a different base directory.
+
+## Workspace layout
+
+| Crate | Package | What |
+|-------|---------|------|
+| `crates/theway-sdk` | `theway` | Client SDK — layered by execution environment: `common/` (session/config/feed types + slash-command framework), `local/` (`LocalExecutor`, session repos, auth, history, images, mentions, local commands), `sandbox/` (remote-sandbox executor seam, stub for now). The TUI and external embedders depend on this crate. |
+| `crates/theway-daemon` | `theway-daemon` | Headless daemon runtime (bin `thewayd`): harness assembly, local tool bodies bound to the `ToolExecutor` trait, trigger engine, skills/templates, MCP loader, LSP supervisor. Consumes the `theway` SDK for the client-facing surface. |
+| `crates/theway-tui` | `theway-tui` | Terminal UI (the `theway` CLI binary) — a pure client of the daemon; depends on the SDK only, so its dependency graph contains no daemon runtime code. |
+| `crates/theway-core` | `theway-core` | Agent engine: bare `Agent` + loop, runtime/harness extras, engine tools (DAG/subagents/memory/MCP), and the `ToolExecutor` trait (`theway_core::executor`). |
+| `crates/theway-llm-provider` | `theway-llm-provider` | Unified streaming LLM client and provider integrations. |
+| `crates/theway-storage` | `theway-storage` | Session storage (hybrid JSONL + SQLite repositories). |
+| `crates/theway-transport` | `theway-transport` | Wire surfaces served by the daemon (gRPC / HTTP). |
+| `crates/theway-mcp` | `theway-mcp` | Minimal MCP client (stdio transport, JSON-RPC framing). |
+| `crates/mermaid-parser` | `mermaid-rs-parser` | Vendored mermaid parser for DAG specs. |
+
+Tool effects flow through the `ToolExecutor` trait: the daemon assembles with the
+SDK's `LocalExecutor` (local editing mode, today); the SDK's `sandbox/` layer is
+the seam for a future remote-sandbox mode (e2b) — swapping the executor swaps the
+execution environment without touching the client, harness, or wire model. See
+[docs/architecture.md](docs/architecture.md) for the full layout, path-compat
+notes, and command layering.
 
 ## Development
 
