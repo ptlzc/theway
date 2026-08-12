@@ -5,13 +5,37 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use theway_core::{Session, SessionError, SessionErrorCode, uuidv7};
+use async_trait::async_trait;
+use theway_core::{Session, SessionError, SessionErrorCode, SessionRepo, uuidv7};
 
 use crate::sqlite_storage::SqliteSessionStorage;
 
 pub struct SqliteSessionRepo {
     /// Root sessions dir, e.g. `~/.theway/sessions/<cwd-hash>`.
     root: PathBuf,
+}
+
+#[async_trait]
+impl SessionRepo for SqliteSessionRepo {
+    fn root(&self) -> &Path {
+        &self.root
+    }
+
+    async fn create(&self, cwd: String) -> Result<Session, SessionError> {
+        self.create(cwd).await
+    }
+
+    async fn open(&self, path: &Path) -> Result<Session, SessionError> {
+        self.open(path).await
+    }
+
+    async fn list(&self) -> Result<Vec<PathBuf>, SessionError> {
+        self.list().await
+    }
+
+    async fn delete(&self, path: &Path) -> Result<bool, SessionError> {
+        self.delete(path).await
+    }
 }
 
 impl SqliteSessionRepo {

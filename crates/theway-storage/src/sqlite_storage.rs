@@ -36,8 +36,9 @@ pub struct SqliteSessionStorage {
     /// Lazily-opened database handle. `None` until the first operation (keeps
     /// `open` cheap and lets `create` fail fast on existing files).
     db: tokio::sync::Mutex<Option<Database>>,
-    /// Session header metadata, loaded at open/create.
-    metadata: JsonlSessionMetadata,
+    /// Session header metadata, loaded at open/create. Mutex-protected so import
+    /// provenance can be recorded after creation (see [`Self::set_import_origin`]).
+    metadata: parking_lot::Mutex<JsonlSessionMetadata>,
 }
 
 const SCHEMA: &str = "
@@ -85,6 +86,17 @@ impl SqliteSessionStorage {
         path: impl Into<PathBuf>,
         cwd: impl Into<String>,
     ) -> Result<Self, SessionError> {
+        Self::create_with_id(path, cwd, None).await
+    }
+
+    /// Like [`Self::create`], but with an explicit session id instead of deriving
+    /// it from the file name. Archive import uses this: the staging file is
+    /// `<id>.db.tmp`, whose `file_stem` would derive the wrong id (`<id>.db`).
+    pub async fn create_with_id(
+        path: impl Into<PathBuf>,
+        cwd: impl Into<String>,
+        id: Option<String>,
+    ) -> Result<Self, SessionError> {
         let path = path.into();
         if path.exists() {
             return Err(SessionError {
@@ -92,12 +104,13 @@ impl SqliteSessionStorage {
                 message: format!("{} already exists", path.display()),
             });
         }
-        let id = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-            .unwrap_or_else(uuidv7);
+        let id = id.unwrap_or_else(|| {
+            path.file_stem()
+                .and_then(|s| s.to_str())
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(uuidv7)
+        });
         let metadata = JsonlSessionMetadata {
             base: SessionMetadata {
                 id,
@@ -119,7 +132,7 @@ impl SqliteSessionStorage {
         Ok(Self {
             path,
             db: tokio::sync::Mutex::new(Some(db)),
-            metadata,
+            metadata: parking_lot::Mutex::new(metadata),
         })
     }
 
@@ -173,7 +186,7 @@ impl SqliteSessionStorage {
         Ok(Self {
             path,
             db: tokio::sync::Mutex::new(Some(db)),
-            metadata,
+            metadata: parking_lot::Mutex::new(metadata),
         })
     }
 
@@ -181,8 +194,59 @@ impl SqliteSessionStorage {
         &self.path
     }
 
-    pub fn metadata(&self) -> &JsonlSessionMetadata {
-        &self.metadata
+    pub fn metadata(&self) -> parking_lot::MutexGuard<'_, JsonlSessionMetadata> {
+        self.metadata.lock()
+    }
+
+    /// Update the session's recorded transcript path. Archive import stages the
+    /// database at a temporary name and renames it into place afterwards; the
+    /// header must point at the *final* path (sidecar derivation and export rely
+    /// on it). Persists to the `meta` table.
+    pub async fn set_session_path(&self, path: &Path) -> Result<(), SessionError> {
+        let value = path.to_string_lossy().to_string();
+        {
+            let mut m = self.metadata.lock();
+            m.path = value.clone();
+        }
+        let conn = self.conn().await?;
+        conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('path', ?1)",
+            [serde_json::to_string(&value).map_err(json_err)?],
+        )
+        .await
+        .map_err(map_err)?;
+        Ok(())
+    }
+
+    /// Record import provenance (`.theway-session` archive import), mirroring what
+    /// `rewrite_session_jsonl` does for the JSONL backend: the header gains an
+    /// `importedFrom` entry pointing at the source session. Persists to the `meta`
+    /// table; `None` clears the field.
+    pub async fn set_import_origin(
+        &self,
+        origin: Option<theway_core::SessionImportOrigin>,
+    ) -> Result<(), SessionError> {
+        {
+            let mut m = self.metadata.lock();
+            m.imported_from = origin.clone();
+        }
+        let conn = self.conn().await?;
+        match origin {
+            Some(o) => {
+                conn.execute(
+                    "INSERT OR REPLACE INTO meta (key, value) VALUES ('importedFrom', ?1)",
+                    [serde_json::to_string(&o).map_err(json_err)?],
+                )
+                .await
+                .map_err(map_err)?;
+            }
+            None => {
+                conn.execute("DELETE FROM meta WHERE key = 'importedFrom'", ())
+                    .await
+                    .map_err(map_err)?;
+            }
+        }
+        Ok(())
     }
 
     async fn db(&self) -> Result<Database, SessionError> {
@@ -223,6 +287,22 @@ impl SqliteSessionStorage {
             let entry: SessionTreeEntry = serde_json::from_str(&payload).map_err(json_err)?;
             Ok(Some(entry.id().to_string()))
         }
+    }
+
+    /// Force a WAL checkpoint so every pending page lands in the main database
+    /// file. Call *before* renaming the db file away from its `-wal`/`-shm`
+    /// companions (e.g. archive-import staging): turso runs in WAL mode by
+    /// default, and a renamed file loses everything still sitting in the WAL.
+    pub async fn checkpoint(&self) -> Result<(), SessionError> {
+        let conn = self.conn().await?;
+        // `wal_checkpoint` returns a result row; consume it via `query`
+        // (turso's `execute` rejects statements that produce rows).
+        let mut rows = conn
+            .query("PRAGMA wal_checkpoint(TRUNCATE)", ())
+            .await
+            .map_err(map_err)?;
+        while let Some(_row) = rows.next().await.map_err(map_err)? {}
+        Ok(())
     }
 }
 
@@ -307,7 +387,7 @@ async fn read_meta(db: &Database) -> Result<JsonlSessionMetadata, SessionError> 
 #[async_trait]
 impl SessionStorage for SqliteSessionStorage {
     async fn get_metadata_json(&self) -> Result<Value, SessionError> {
-        Ok(serde_json::to_value(&self.metadata).unwrap())
+        Ok(serde_json::to_value(&*self.metadata.lock()).unwrap())
     }
 
     async fn get_leaf_id(&self) -> Result<Option<String>, SessionError> {

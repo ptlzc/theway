@@ -9,6 +9,7 @@
 //! One-way dependency: theway-storage → theway-core (traits + types). The core
 //! never references this crate, so there is no cycle.
 
+pub mod hybrid_repo;
 pub mod sqlite_dag;
 pub mod sqlite_repo;
 pub mod sqlite_storage;

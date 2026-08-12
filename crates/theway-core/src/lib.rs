@@ -75,6 +75,7 @@ pub use agent::session::{
     jsonl_storage::JsonlSessionStorage,
     memory_repo::MemorySessionRepo,
     memory_storage::MemorySessionStorage,
+    repo::SessionRepo,
     repo_utils::{
         ForkOptions, ForkPosition, create_session_id, create_timestamp, get_entries_to_fork,
         to_session,

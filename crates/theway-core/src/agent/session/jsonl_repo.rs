@@ -9,20 +9,41 @@ use std::sync::Arc;
 
 use super::super::types::{SessionError, SessionErrorCode};
 use super::jsonl_storage::JsonlSessionStorage;
+use super::repo::SessionRepo;
 use super::session::Session;
+use async_trait::async_trait;
 
 pub struct JsonlSessionRepo {
     /// Root sessions dir, e.g. `~/.pi/agent/sessions/<cwd-hash>`.
     root: PathBuf,
 }
 
+#[async_trait]
+impl SessionRepo for JsonlSessionRepo {
+    fn root(&self) -> &Path {
+        &self.root
+    }
+
+    async fn create(&self, cwd: String) -> Result<Session, SessionError> {
+        self.create(cwd).await
+    }
+
+    async fn open(&self, path: &Path) -> Result<Session, SessionError> {
+        self.open(path).await
+    }
+
+    async fn list(&self) -> Result<Vec<PathBuf>, SessionError> {
+        self.list().await
+    }
+
+    async fn delete(&self, path: &Path) -> Result<bool, SessionError> {
+        self.delete(path).await
+    }
+}
+
 impl JsonlSessionRepo {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
-    }
-
-    pub fn root(&self) -> &Path {
-        &self.root
     }
 
     /// Mint a new session file under `root` for the given `cwd`. The file is named
