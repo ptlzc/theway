@@ -11,7 +11,7 @@ authors = ["theway contributors"]
 [dependencies]
 # Engine contracts + types come from theway-core; this crate only implements
 # them. No reverse dependency (core never sees this crate).
-theway-core = { path = "../core" }
+theway-core = { path = "../theway-core" }
 turso = "0.7"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "fs"] }
 async-trait = "0.1"
@@ -22,7 +22,7 @@ tracing = "0.1"
 
 [dev-dependencies]
 tempfile = "3"
-theway-llm-provider = { path = "../llm-provider" }
+theway-llm-provider = { path = "../theway-llm-provider" }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 [lints]

@@ -31,10 +31,10 @@ crates/<name>/tests/    # 所有测试文件 (多文件模块测试 + 独立集�
 多文件模块测试的目录结构**完全镜像**被测模块的 src 路径:
 
 ```
-crates/core/src/runtime/graph_engineering/engine.rs   ←→  crates/core/tests/runtime/graph_engineering/engine/
-crates/core/src/tools/dag_tools.rs                    ←→  crates/core/tests/tools/dag_tools/
-crates/server/src/tools/shell.rs                      ←→  crates/server/tests/tools/shell/
-crates/server/src/transport/http.rs                   ←→  crates/server/tests/transport/http/
+crates/theway-core/src/runtime/graph_engineering/engine.rs   ←→  crates/theway-core/tests/runtime/graph_engineering/engine/
+crates/theway-core/src/tools/dag_tools.rs                    ←→  crates/theway-core/tests/tools/dag_tools/
+crates/theway-server/src/tools/shell.rs                      ←→  crates/theway-server/tests/tools/shell/
+crates/theway-server/src/transport/http.rs                   ←→  crates/theway-server/tests/transport/http/
 ```
 
 桥接声明 (src 模块末尾, 用 `tests-bridge-macro` 的 proc-macro — 展开时以

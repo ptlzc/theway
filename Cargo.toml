@@ -1,13 +1,13 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/llm-provider",
+    "crates/theway-llm-provider",
     "crates/mermaid-parser",
-    "crates/core",
-    "crates/storage",
-    "crates/server",
-    "crates/mcp",
-    "crates/probe",
+    "crates/theway-core",
+    "crates/theway-storage",
+    "crates/theway-server",
+    "crates/theway-mcp",
+    "crates/theway-probe",
     "crates/tests-bridge-macro",
 ]
 

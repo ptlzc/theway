@@ -32,10 +32,10 @@ path = "src/main.rs"
 # Enable every wire-protocol provider so model auto-detection isn't bottlenecked by feature
 # flags. The cost is compile time, not runtime — only the registered provider for the chosen
 # model's `api` actually gets exercised.
-theway-llm-provider = { path = "../llm-provider", default-features = false, features = ["all-providers"] }
-theway-core = { path = "../core" }
-theway-storage = { path = "../storage" }
-theway-mcp = { path = "../mcp" }
+theway-llm-provider = { path = "../theway-llm-provider", default-features = false, features = ["all-providers"] }
+theway-core = { path = "../theway-core" }
+theway-storage = { path = "../theway-storage" }
+theway-mcp = { path = "../theway-mcp" }
 
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "fs", "io-util", "io-std", "process", "signal"] }
 tokio-util = { version = "0.7", features = ["io"] }

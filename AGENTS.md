@@ -4,18 +4,18 @@
 
 This repository is a Rust 2024 Cargo workspace. The root `Cargo.toml` lists four members:
 
-- `crates/llm-provider`: `theway-llm-provider`, the unified streaming LLM client, provider integrations, OAuth helpers, model catalogs, and utilities.
-- `crates/core`: `theway-core`, the agent runtime, harness, session storage, skills loading, compaction, and lifecycle hooks.
-- `crates/server`: `theway`, the `theway` CLI binary (bin, server-first, `tui` optional), REPL TUI, transport servers, tools, config, and session handling.
+- `crates/theway-llm-provider`: `theway-llm-provider`, the unified streaming LLM client, provider integrations, OAuth helpers, model catalogs, and utilities.
+- `crates/theway-core`: `theway-core`, the agent runtime, harness, session storage, skills loading, compaction, and lifecycle hooks.
+- `crates/theway-server`: `theway`, the `theway` CLI binary (bin, server-first, `tui` optional), REPL TUI, transport servers, tools, config, and session handling.
 
-Each crate keeps implementation in `src/`, integration tests in `tests/`, and runnable examples in `examples/` where present. Provider model data and generated Rust live under `crates/llm-provider/src/`; use `crates/llm-provider/scripts/regen_models.sh` when regenerating model catalogs.
+Each crate keeps implementation in `src/`, integration tests in `tests/`, and runnable examples in `examples/` where present. Provider model data and generated Rust live under `crates/theway-llm-provider/src/`; use `crates/theway-llm-provider/scripts/regen_models.sh` when regenerating model catalogs.
 
 ## File Size Governance (>800 lines)
 
 Source and test files must stay under ~800 lines; larger files must be split into a **directory** (`foo.rs` → `foo/mod.rs` + domain submodules for src; `tests/<name>/mod.rs` + domain submodule files for tests), splitting by domain/module, never mechanically. Exceptions (third-party vendored/extracted code that must stay monolithic):
 
 - `crates/mermaid-parser/src/parser.rs` — extracted from the third-party `mmdr` parser (vendored mermaid parse stage); kept as one file to stay diff-compatible with upstream extraction. Do NOT split it; do not re-apply the 800-line rule to it.
-- `crates/core/src/agent/assembly.rs` — the `AgentHarness` composer (Agent + Session + skills + compaction + permission + lifecycle events), flattened from `agent/assembly/` by owner decision; kept monolithic so the composed agent API reads as one unit. Do NOT split it; do not re-apply the 800-line rule to it.
+- `crates/theway-core/src/agent/assembly.rs` — the `AgentHarness` composer (Agent + Session + skills + compaction + permission + lifecycle events), flattened from `agent/assembly/` by owner decision; kept monolithic so the composed agent API reads as one unit. Do NOT split it; do not re-apply the 800-line rule to it.
 
 ## Build, Test, and Development Commands
 
@@ -28,7 +28,7 @@ Source and test files must stay under ~800 lines; larger files must be split int
 
 ## Coding Style & Naming Conventions
 
-Use standard `rustfmt` formatting and Rust 2024 idioms. Keep module and file names in `snake_case`; public types and traits in `PascalCase`; functions, variables, and test names in `snake_case`. Prefer crate-local patterns and shared workspace dependencies before adding new dependencies. Keep provider-specific code under `crates/llm-provider/src/providers/` and CLI tools under ``crates/server/src/tools`/`.
+Use standard `rustfmt` formatting and Rust 2024 idioms. Keep module and file names in `snake_case`; public types and traits in `PascalCase`; functions, variables, and test names in `snake_case`. Prefer crate-local patterns and shared workspace dependencies before adding new dependencies. Keep provider-specific code under `crates/theway-llm-provider/src/providers/` and CLI tools under ``crates/theway-server/src/tools`/`.
 
 ## Testing Guidelines
 
@@ -68,7 +68,7 @@ any orchestrator driving the built-in subagents (subagent tool / dag_*):
    must (a) start with an explicit `cd <absolute target>`, (b) forbid touching the
    default cwd, and (c) name the files it may modify. Built-in subagent prompts already
    carry this operating discipline (see `OPERATING_DISCIPLINE` in
-   ``crates/server/src/tools`/subagent_specs.rs`); the orchestrator still must supply the
+   ``crates/theway-server/src/tools`/subagent_specs.rs`); the orchestrator still must supply the
    concrete target path — subagents cannot guess it.
 2. **Stalled nodes are the orchestrator's to handle.** A node whose token/round counter
    stops growing across two inspection cycles is stalled. Don't wait on it: skip the node

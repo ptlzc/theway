@@ -14,10 +14,10 @@ QuickJS** 中执行 — 无外部运行时、无 npm、无构建步骤。
 ## 目录结构
 
 ```
-crates/core/src/extensions/        # 插件系统本体 (core 级模块)
+crates/theway-core/src/extensions/        # 插件系统本体 (core 级模块)
   mod.rs      TsExtension + ExtensionRegistry (发现 / kind 路由 / 契约)
   ts.rs       oxc TS→JS 转译 + rquickjs (嵌入式 QuickJS) hook 执行
-crates/core/src/runtime/compaction/
+crates/theway-core/src/runtime/compaction/
   algorithm.rs   CompactAlgorithm trait + 内置默认 + TsCompactAlgorithm 适配器
   compaction.rs  compact() 编排 — 通过 trait 分发
 ```
@@ -167,5 +167,5 @@ export function summarize_prefix(ctx: {
 
 ## 测试
 
-`crates/core/tests/ts_extensions.rs` — 发现、kind 路由、JSON 契约、项目>用户遮蔽、
+`crates/theway-core/tests/ts_extensions.rs` — 发现、kind 路由、JSON 契约、项目>用户遮蔽、
 坏文件诊断、注册表分发与内置回退。

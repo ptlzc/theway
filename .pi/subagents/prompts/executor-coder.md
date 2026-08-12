@@ -14,6 +14,6 @@
 
 ## Rust 提示
 
-- workspace: `crates/llm-provider` `crates/core` `crates/mcp` `crates/harness` (theway)。
+- workspace: `crates/theway-llm-provider` `crates/theway-core` `crates/theway-mcp` `crates/harness` (theway)。
 - 验证: `cargo check --workspace` (增量, target/ 已存在);单 crate 用 `cargo check -p theway`。
 - `git mv` 可用 (git bash),用于目录/文件改名,保留历史。

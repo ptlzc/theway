@@ -154,7 +154,7 @@ versions sync across all workspace crates per the lockstep policy in `AGENTS.md`
 
 ### Added — Tier 8 (MCP transport)
 
-- **Streamable HTTP MCP transport.** `crates/mcp` now adapts POST request/response
+- **Streamable HTTP MCP transport.** `crates/theway-mcp` now adapts POST request/response
   bodies plus long-lived SSE pushes into the existing line-oriented `Transport` queue, so
   `McpClient` can reuse the same inflight, cancel, `tools/list`, `tools/call`, and
   notification pump logic as stdio servers. `~/.theway/mcp.toml` entries can set
@@ -473,7 +473,7 @@ versions sync across all workspace crates per the lockstep policy in `AGENTS.md`
   HashMap entries on cancel/dropped futures (an `InflightGuard` RAII covers every exit
   path), and (c) gives the MCP server a chance to stop work instead of running to
   completion. Late responses to an already-cancelled id are silently dropped by the read
-  pump. Tests in `crates/mcp/tests/client_fixture.rs` and `mcp_adapter::tests` pin the wire
+  pump. Tests in `crates/theway-mcp/tests/client_fixture.rs` and `mcp_adapter::tests` pin the wire
   shape, bounded return time, no-spurious-cancel-on-success, and adapter-level plumbing.
 - Slash commands that start an agent turn (`/new-trigger` and `/template <name>`) now route
   through the same REPL-owned Ctrl-C abort path as normal prompts, so thinking/streaming/tool

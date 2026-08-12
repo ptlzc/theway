@@ -6,7 +6,7 @@
 `graph engineering mode` is the Rust port of the pi `dag-orchestrator` extension: an
 in-process DAG engine that runs subagent tasks as a dependency graph and exposes it to
 the agent through the `dag_*` tool set. The engine lives in
-`crates/core/src/runtime/graph_engineering/` (pure logic — the coding-agent side drives
+`crates/theway-core/src/runtime/graph_engineering/` (pure logic — the coding-agent side drives
 it through a `NodeLauncher`), the tools in `crates/coding-agent/src/tools/dag_tools.rs`,
 and the subagent execution in `tools/{subagent_specs,node_launcher}.rs`.
 
@@ -99,7 +99,7 @@ the whole run in `tokio::time::timeout`.
 
 ## Implementation notes
 
-- Engine (`crates/core/src/runtime/graph_engineering/`): `types.rs` (node/run model),
+- Engine (`crates/theway-core/src/runtime/graph_engineering/`): `types.rs` (node/run model),
   `graph.rs` (mermaid parse/render, validation, reconcile — the "auto-trigger" state
   derivation), `engine.rs` (scheduler: plan/tick/terminal handling/failFast/retry/skip/
   cancel/wait, `Notify`-based event-driven waiting with a ≤30s idle watchdog),

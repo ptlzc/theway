@@ -430,7 +430,8 @@ mod tests {
 
     #[test]
     fn rust_real_file_entries_are_nonempty_and_ordered() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../core/src/agent/run_loop/mod.rs");
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../theway-core/src/agent/run_loop/mod.rs");
         let o = outline_file(path.to_str().unwrap()).unwrap();
         assert_eq!(o.language, "rust");
         assert!(

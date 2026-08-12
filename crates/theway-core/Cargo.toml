@@ -23,10 +23,10 @@ harness = []
 native-env = []
 
 [dependencies]
-theway-llm-provider = { path = "../llm-provider" }
+theway-llm-provider = { path = "../theway-llm-provider" }
 # MCP client/adapter for the builtin tools (`runtime/tools/mcp_adapter.rs`). One-way
 # dependency: theway-mcp does NOT depend on theway-core (no cycle).
-theway-mcp = { path = "../mcp" }
+theway-mcp = { path = "../theway-mcp" }
 
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "fs", "io-util", "process"] }
 tokio-util = { version = "0.7", features = ["io"] }
