@@ -1,15 +1,21 @@
-//! Slash-command registry. Tracks a small set of REPL builtins and dispatches by name.
+//! Slash-command registry — daemon layer.
 //!
-//! Built-in commands today: `/help`, `/clear`, `/skills`, `/skill`, `/quit` (and aliases),
-//! `/model`, `/thinking`. The trait is shaped so future extensions (issue #10 Part B) can
-//! register additional commands without touching this file.
+//! The command framework (Registry / SlashCommand / CommandOutcome / CommandCtx, console
+//! sink, `parse`, pure helpers) and the local command set (quit/clear/help/login/logout/
+//! sessions) moved to `theway-sdk` (sdk-split-local-sandbox, node 5-commands-layer); this
+//! module keeps the daemon-side surface:
 //!
-//! Command families live in submodules: [`skills`] / [`skill_cmd`] (skill management),
-//! [`model`] (`/model`, `/thinking`, `/cost` + model-catalog help), [`goal`] (`/goal`,
-//! `/goal-start`), [`session`] (session lifecycle), [`triggers`] (automation), and
-//! [`misc`] (everything else). This module keeps the shared surface: the output sink,
-//! [`CommandOutcome`], [`CommandCtx`], the [`SlashCommand`] trait, [`Registry`], [`parse`],
-//! and [`dispatch`].
+//! - re-exports of the SDK framework so existing `crate::commands::…` / `theway::commands::…`
+//!   paths keep resolving (TUI, readline, tests);
+//! - the daemon command implementations in submodules: [`skills`] / [`skill_cmd`] (skill
+//!   management), [`model`] (`/model`, `/thinking`, `/cost` + model-catalog help), [`goal`]
+//!   (`/goal`, `/goal-start`), [`session`] (session lifecycle), [`triggers`] (automation),
+//!   and [`misc`] (everything else);
+//! - the compatibility [`Registry`] wrapper whose `with_builtins()` assembles the full set
+//!   (SDK local commands + daemon commands) — node 6 replaces it with
+//!   `with_daemon_commands` over a `DaemonCtx` extras type;
+//! - [`dispatch`], which converts the daemon-shaped [`CommandCtx`] into the SDK's generic
+//!   context and routes `/help` + skill shortcuts.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -21,44 +27,25 @@ use crate::trigger_engine::notification_hook::{HookState, NotificationHookStatus
 use async_trait::async_trait;
 use serde_json::json;
 use theway_core::{AgentHarness, AgentTool, SessionTreeEntry, Skill, SkillSource, ThinkingLevel};
-use theway_llm_provider::{Model, Provider, UserContentBlock, get_model, list_models};
+use theway_llm_provider::{Model, Provider, UserContentBlock, get_model};
 use tokio_util::sync::CancellationToken;
 
-/// Sink for slash-command output. The full-screen TUI owns the only terminal writer, so
-/// commands must not `println!` straight to stdout — they route through here. The app installs
-/// a sink that forwards each line into the conversation feed; when none is installed (unit
-/// tests, non-interactive shells) output falls back to stdout.
-pub mod console {
-    use parking_lot::Mutex;
-
-    type Sink = Box<dyn Fn(String) + Send + Sync>;
-    static SINK: Mutex<Option<Sink>> = Mutex::new(None);
-
-    /// Install the line sink. Called once by the UI at startup. Unused when `commands.rs` is
-    /// path-included by integration tests (which never install a sink).
-    #[cfg_attr(test, allow(dead_code))]
-    pub fn set_sink(sink: Sink) {
-        *SINK.lock() = Some(sink);
-    }
-
-    /// Clear the active line sink. Used by tests to avoid leaking capture sinks across cases.
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub fn clear_sink() {
-        *SINK.lock() = None;
-    }
-
-    /// Emit one line of command output through the active sink (or stdout when unset).
-    pub fn emit_line(line: String) {
-        match SINK.lock().as_ref() {
-            Some(sink) => sink(line),
-            None => println!("{line}"),
-        }
-    }
-}
+// Framework moved to the SDK (node 5-commands-layer). Re-exported so existing
+// `commands::…` call sites (ui, main, readline, model_picker, tests) keep their paths.
+// The allow keeps the pre-split `commands::…` paths alive in the path-included e2e test
+// crate, where this module is private and some re-exports have no in-tree user.
+/// The SDK's console sink is the single process-wide output sink: daemon commands route
+//  through it too (see the `cprintln!` macro below).
+pub use theway_sdk::commands::console;
+#[allow(unused_imports)]
+pub use theway_sdk::commands::{
+    CommandOutcome, SlashCommand, THINKING_LEVEL_VALUES, WebRelayAction, attach_skill_prompt,
+    cli_model_help_text, model_credential_hint, parse, parse_model_spec, save_api_key,
+};
 
 /// Drop-in replacement for `println!` inside this module: same call syntax, but the formatted
-/// line is routed through [`console::emit_line`] instead of straight to stdout.
+/// line is routed through the (SDK-owned, process-wide) [`console::emit_line`] instead of
+/// straight to stdout. Defined before the command submodules so they see it.
 macro_rules! cprintln {
     () => { $crate::commands::console::emit_line(String::new()) };
     ($($arg:tt)*) => { $crate::commands::console::emit_line(std::format!($($arg)*)) };
@@ -79,25 +66,20 @@ pub use misc::print_help_with_skills;
 // No in-tree callers, but keep the pre-split `commands::print_help` path alive.
 #[allow(unused_imports)]
 pub use misc::print_help;
-pub use model::{cli_model_help_text, model_credential_hint, parse_model_spec};
 // Only `tests/commands.rs` calls through these `commands::…` paths; the allow keeps the
 // pre-split pub(crate) surface without tripping unused_imports in non-test builds.
-pub use session::save_api_key;
-pub use skill_cmd::attach_skill_prompt;
 #[allow(unused_imports)]
 pub(crate) use triggers::{render_cron_jobs, render_dynamic_trigger_rules, render_triggers_status};
 
-// Command implementations registered by `Registry::with_builtins`.
+// Command implementations registered by `Registry::with_builtins` (the local set comes from
+// `theway_sdk::commands::Registry::local()`).
 use goal::{GoalCommand, GoalStartCommand};
 use misc::{
-    BugReportCommand, ClearCommand, CompactCommand, DiagCommand, FindCommand, HelpCommand,
-    HistoryCommand, QuitCommand, TemplateCommand, WebConnectCommand, WebDisconnectCommand,
+    BugReportCommand, CompactCommand, DiagCommand, FindCommand, HistoryCommand, TemplateCommand,
+    WebConnectCommand, WebDisconnectCommand,
 };
 use model::{CostCommand, ModelCommand, ThinkingCommand};
-use session::{
-    LoginCommand, LogoutCommand, NameCommand, SaveCommand, SessionCommand, SessionsCommand,
-    ShareCommand, UndoCommand,
-};
+use session::{NameCommand, SaveCommand, SessionCommand, ShareCommand, UndoCommand};
 use skill_cmd::SkillCommand;
 use skills::SkillsCommand;
 use triggers::{CronCommand, InboxCommand, NewTriggerCommand, TriggersCommand};
@@ -115,125 +97,13 @@ use triggers::{
     render_trigger_sources, trigger_decision_details,
 };
 
-#[cfg_attr(test, allow(dead_code))]
-pub const THINKING_LEVEL_VALUES: [&str; 6] = ["off", "minimal", "low", "medium", "high", "xhigh"];
 pub const THINKING_LEVEL_USAGE: &str = "[off|minimal|low|medium|high|xhigh]";
 
-/// Outcome of running a command. Drives the REPL's next action.
-#[cfg_attr(test, allow(dead_code))]
-pub enum CommandOutcome {
-    /// Continue the REPL loop normally.
-    Handled,
-    /// Quit the REPL cleanly.
-    Quit,
-    /// Clear the screen — REPL handles the ANSI escape so we don't bake it into commands.
-    ClearScreen,
-    /// Command surfaced an error message; REPL renders it via `tui.error_line`.
-    Error(String),
-    /// Attach the named skill to the next user prompt. The REPL owns prompt assembly, so this
-    /// stays explicit instead of going through the agent steering queue.
-    AttachSkill { name: String },
-    /// Ask the REPL to run a prompt through the same active-turn path as normal user input.
-    /// Commands return this instead of awaiting the harness directly so Ctrl-C/Esc can abort
-    /// thinking, streaming, and tool execution consistently.
-    RunAgentPrompt {
-        prompt: String,
-        error_context: &'static str,
-    },
-    /// Ask the REPL to render and run a prompt template through the active-turn path.
-    RunPromptTemplate {
-        name: String,
-        vars: serde_json::Map<String, serde_json::Value>,
-    },
-    /// Ask the REPL to run compaction through the active-turn path so Ctrl-C/Esc can abort
-    /// the model summarization request.
-    RunCompaction { custom: Option<String> },
-    /// Prompt for a credential without echoing the secret in the terminal input line.
-    ///
-    /// `provider` is the user-facing label used in prompts. `storage_key` is the optional auth
-    /// store key when the internal lookup key must not be echoed back to the user.
-    LoginSecret {
-        provider: String,
-        storage_key: Option<String>,
-        recovery_command: Option<String>,
-    },
-    /// Bare `/model` — the REPL owns the interactive picker UI, so the
-    /// command requests it instead of printing the catalog.
-    OpenModelPicker,
-    /// `/web-connect` family — the relay lives on the UI `App`, so the REPL layer
-    /// performs the action (issue #22).
-    WebRelay(WebRelayAction),
-    /// A `/session import` brought disabled automation along; ask the user (via the
-    /// shared confirm surface) whether to re-enable what the source had enabled.
-    SessionImportActivation {
-        session_path: std::path::PathBuf,
-        trigger_ids: Vec<String>,
-        cron_ids: Vec<String>,
-    },
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WebRelayAction {
-    Connect,
-    Status,
-    Disconnect,
-}
-
-impl std::fmt::Debug for CommandOutcome {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Handled => f.write_str("Handled"),
-            Self::Quit => f.write_str("Quit"),
-            Self::ClearScreen => f.write_str("ClearScreen"),
-            Self::Error(message) => f.debug_tuple("Error").field(message).finish(),
-            Self::AttachSkill { name } => {
-                f.debug_struct("AttachSkill").field("name", name).finish()
-            }
-            Self::RunAgentPrompt {
-                prompt,
-                error_context,
-            } => f
-                .debug_struct("RunAgentPrompt")
-                .field("prompt", prompt)
-                .field("error_context", error_context)
-                .finish(),
-            Self::RunPromptTemplate { name, vars } => f
-                .debug_struct("RunPromptTemplate")
-                .field("name", name)
-                .field("vars", vars)
-                .finish(),
-            Self::RunCompaction { custom } => f
-                .debug_struct("RunCompaction")
-                .field("custom", custom)
-                .finish(),
-            Self::LoginSecret {
-                provider,
-                storage_key,
-                recovery_command,
-            } => f
-                .debug_struct("LoginSecret")
-                .field("provider", provider)
-                .field("storage_key", storage_key)
-                .field("recovery_command", recovery_command)
-                .finish(),
-            Self::OpenModelPicker => f.write_str("OpenModelPicker"),
-            Self::WebRelay(action) => f.debug_tuple("WebRelay").field(action).finish(),
-            Self::SessionImportActivation {
-                session_path,
-                trigger_ids,
-                cron_ids,
-            } => f
-                .debug_struct("SessionImportActivation")
-                .field("session_path", session_path)
-                .field("trigger_ids", &trigger_ids.len())
-                .field("cron_ids", &cron_ids.len())
-                .finish(),
-        }
-    }
-}
-
-/// Context handed to a command at runtime. Kept narrow so each command's dependencies are
-/// explicit.
+/// Context handed to a command at runtime — daemon-shaped view kept for the assembly layer
+/// (`DaemonApp`) and the integration tests: it still carries the `trigger_executor`
+/// reference. [`dispatch`] converts it into the SDK's generic [`theway_sdk::commands::CommandCtx`]
+/// (extras `()`); `/triggers` reaches the executor through [`current_trigger_executor`].
+/// Node 6 replaces this with a proper `DaemonCtx` extras type.
 pub struct CommandCtx<'a> {
     pub harness: &'a Arc<AgentHarness>,
     pub trigger_executor: &'a Arc<TriggerExecutor>,
@@ -243,41 +113,47 @@ pub struct CommandCtx<'a> {
     pub cwd: &'a std::path::Path,
 }
 
-#[async_trait]
-pub trait SlashCommand: Send + Sync {
-    /// Canonical name without the leading `/`.
-    fn name(&self) -> &'static str;
-    /// Optional aliases (also without leading `/`).
-    fn aliases(&self) -> &'static [&'static str] {
-        &[]
-    }
-    fn description(&self) -> &'static str;
-    /// Optional argument hint shown in `/help`. Empty when the command takes no arguments.
-    fn usage(&self) -> &'static str {
-        ""
-    }
-    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_>) -> CommandOutcome;
+// Node-5 compat bridge: the SDK framework's `CommandCtx<'a, ()>` carries no trigger
+// executor, but `/triggers` still needs one. `dispatch` stashes the daemon's executor here
+// right before running a command; node 6 replaces this slot with the `DaemonCtx` extras.
+static TRIGGER_EXECUTOR_SLOT: parking_lot::Mutex<Option<Arc<TriggerExecutor>>> =
+    parking_lot::Mutex::new(None);
+
+pub(crate) fn install_trigger_executor(executor: Arc<TriggerExecutor>) {
+    *TRIGGER_EXECUTOR_SLOT.lock() = Some(executor);
 }
 
-/// In-memory registry. Lookups are linear scans over a small set — `O(n)` is fine.
+pub(crate) fn current_trigger_executor() -> Option<Arc<TriggerExecutor>> {
+    TRIGGER_EXECUTOR_SLOT.lock().clone()
+}
+
+/// Slash-command registry: the SDK's generic [`theway_sdk::commands::Registry<()>`] plus the
+/// daemon assembly entry point. Thin wrapper so `Registry::with_builtins()` can keep
+/// returning the *full* builtin set (local + daemon commands) while the SDK's inherent
+/// constructors only know the local set.
 pub struct Registry {
-    commands: Vec<Arc<dyn SlashCommand>>,
+    inner: theway_sdk::commands::Registry<()>,
 }
 
 impl Registry {
+    // Part of the pre-split public surface (embedding); no in-tree caller outside
+    // `with_builtins`-style assembly.
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
-            commands: Vec::new(),
+            inner: theway_sdk::commands::Registry::new(),
         }
     }
 
+    /// Full builtin set: SDK local commands (`Registry::local()`) plus the daemon runtime
+    /// commands. Compatibility assembly — node 6 splits this into
+    /// `with_daemon_commands()` over `DaemonCtx`.
     pub fn with_builtins() -> Self {
-        let mut r = Self::new();
-        r.register(Arc::new(HelpCommand));
-        r.register(Arc::new(ClearCommand));
+        let mut r = Self {
+            inner: theway_sdk::commands::Registry::local(),
+        };
         r.register(Arc::new(SkillsCommand));
         r.register(Arc::new(SkillCommand));
-        r.register(Arc::new(QuitCommand));
         r.register(Arc::new(ModelCommand));
         r.register(Arc::new(ThinkingCommand));
         r.register(Arc::new(CostCommand));
@@ -291,10 +167,7 @@ impl Registry {
         r.register(Arc::new(SessionCommand));
         r.register(Arc::new(WebConnectCommand));
         r.register(Arc::new(WebDisconnectCommand));
-        r.register(Arc::new(SessionsCommand));
         r.register(Arc::new(ShareCommand));
-        r.register(Arc::new(LoginCommand));
-        r.register(Arc::new(LogoutCommand));
         r.register(Arc::new(FindCommand));
         r.register(Arc::new(HistoryCommand));
         r.register(Arc::new(GoalCommand));
@@ -306,20 +179,16 @@ impl Registry {
         r
     }
 
-    pub fn register(&mut self, command: Arc<dyn SlashCommand>) {
-        self.commands.push(command);
+    pub fn register(&mut self, command: Arc<dyn SlashCommand<()>>) {
+        self.inner.register(command);
     }
+}
 
-    pub fn commands(&self) -> &[Arc<dyn SlashCommand>] {
-        &self.commands
-    }
+impl std::ops::Deref for Registry {
+    type Target = theway_sdk::commands::Registry<()>;
 
-    /// Lookup by name or alias. `name` is the bare command without `/`.
-    pub fn find(&self, name: &str) -> Option<Arc<dyn SlashCommand>> {
-        self.commands
-            .iter()
-            .find(|c| c.name() == name || c.aliases().contains(&name))
-            .cloned()
+    fn deref(&self) -> &Self::Target {
+        &self.inner
     }
 }
 
@@ -327,36 +196,6 @@ impl Default for Registry {
     fn default() -> Self {
         Self::with_builtins()
     }
-}
-
-/// Split `/cmd arg1 "arg with spaces"` into `(cmd, [arg1, arg with spaces])`. Returns `None`
-/// if `input` doesn't start with `/`. Quoting is minimal: balanced double quotes only.
-pub fn parse(input: &str) -> Option<(String, Vec<String>)> {
-    let trimmed = input.trim_start();
-    let body = trimmed.strip_prefix('/')?;
-    let mut argv: Vec<String> = Vec::new();
-    let mut current = String::new();
-    let mut in_quotes = false;
-    for c in body.chars() {
-        match c {
-            '"' => in_quotes = !in_quotes,
-            ' ' | '\t' if !in_quotes => {
-                if !current.is_empty() {
-                    argv.push(std::mem::take(&mut current));
-                }
-            }
-            other => current.push(other),
-        }
-    }
-    if !current.is_empty() {
-        argv.push(current);
-    }
-    if argv.is_empty() {
-        // Bare `/` — no command name.
-        return None;
-    }
-    let name = argv.remove(0);
-    Some((name, argv))
 }
 
 fn preview_text(text: &str, max_chars: usize) -> String {
@@ -454,6 +293,8 @@ fn run_skill_shortcut(
 }
 
 pub async fn dispatch(input: &str, registry: &Registry, ctx: &CommandCtx<'_>) -> CommandOutcome {
+    // Compat bridge for `/triggers` (see TRIGGER_EXECUTOR_SLOT); node 6 introduces DaemonCtx.
+    install_trigger_executor(ctx.trigger_executor.clone());
     let (name, argv) = match parse(input) {
         Some(parts) => parts,
         None => return CommandOutcome::Error("not a slash command".into()),
@@ -472,7 +313,15 @@ pub async fn dispatch(input: &str, registry: &Registry, ctx: &CommandCtx<'_>) ->
             CommandOutcome::Error(format!("unknown command: /{name} (try /help)"))
         });
     };
-    cmd.run(&argv, ctx).await
+    let sdk_ctx = theway_sdk::commands::CommandCtx {
+        harness: ctx.harness,
+        session_id: ctx.session_id,
+        log_path: ctx.log_path,
+        tool_count: ctx.tool_count,
+        cwd: ctx.cwd,
+        extra: &(),
+    };
+    cmd.run(&argv, &sdk_ctx).await
 }
 
 #[cfg(test)]

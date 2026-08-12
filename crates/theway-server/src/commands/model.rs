@@ -1,6 +1,13 @@
 //! `/model`, `/thinking`, `/cost` and the model-catalog help text they render.
+//! (The pure helpers `parse_model_spec`, `model_credential_hint`, `cli_model_help_text`
+//! and the catalog grouping helpers moved to the SDK — sdk-split-local-sandbox,
+//! node 5-commands-layer.)
 
 use super::*;
+
+use theway_sdk::commands::CommandCtx;
+use theway_sdk::commands::provider_summary;
+pub(super) use theway_sdk::commands::{model_groups, model_help_summary_lines};
 
 pub struct ModelCommand;
 
@@ -56,47 +63,6 @@ impl SlashCommand for ModelCommand {
     }
 }
 
-pub fn parse_model_spec(spec: &str) -> Option<(&str, &str)> {
-    let spec = spec.trim();
-    let (provider, id) = spec
-        .split_once(':')
-        .or_else(|| spec.split_once('/'))
-        .or_else(|| spec.split_once(char::is_whitespace))?;
-    let provider = provider.trim();
-    let id = id.trim();
-    if provider.is_empty() || id.is_empty() {
-        return None;
-    }
-    Some((provider, id))
-}
-
-pub fn model_credential_hint(provider: &str) -> Option<String> {
-    let vars = theway_llm_provider::env_api_keys::env_var_names(provider);
-    let has_env = vars.iter().any(|var| {
-        std::env::var(var)
-            .ok()
-            .map(|v| !v.trim().is_empty())
-            .unwrap_or(false)
-    });
-    if has_env {
-        return None;
-    }
-    let has_stored = theway_sdk::auth::AuthStore::load()
-        .ok()
-        .and_then(|store| store.get(provider).cloned())
-        .is_some();
-    if has_stored {
-        return None;
-    }
-
-    let env_hint = if vars.is_empty() {
-        "set the provider API key env var".to_string()
-    } else {
-        format!("set {}", vars.join(" or "))
-    };
-    Some(format!("{env_hint} or run /login {provider}"))
-}
-
 pub struct ThinkingCommand;
 
 #[async_trait]
@@ -133,37 +99,10 @@ impl SlashCommand for ThinkingCommand {
     }
 }
 
-pub fn cli_model_help_text() -> String {
-    let mut out = String::new();
-    out.push_str("Model catalog:\n");
-    for line in model_help_summary_lines() {
-        out.push_str("  ");
-        out.push_str(line.trim_start());
-        out.push('\n');
-    }
-    out
-}
-
 pub(super) fn emit_multiline(text: &str) {
     for line in text.lines() {
         cprintln!("{line}");
     }
-}
-
-pub(super) fn model_help_summary_lines() -> Vec<String> {
-    let groups = model_groups();
-    let total = groups.values().map(Vec::len).sum::<usize>();
-    vec![
-        format!(
-            "  Supported providers ({}), models ({}): {}",
-            groups.len(),
-            total,
-            provider_summary(&groups)
-        ),
-        "  Full list: /help models or /model list [provider]".into(),
-        "  Custom models: ~/.theway/models.json and <cwd>/.theway/models.json".into(),
-        "  Credentials: set provider env vars or run /login <provider>.".into(),
-    ]
 }
 
 pub(super) fn model_catalog_text(provider_filter: Option<&str>) -> Result<String, String> {
@@ -198,28 +137,6 @@ pub(super) fn model_catalog_text(provider_filter: Option<&str>) -> Result<String
         }
     }
     Ok(out.join("\n"))
-}
-
-pub(super) fn model_groups() -> BTreeMap<String, Vec<Model>> {
-    let mut groups: BTreeMap<String, Vec<Model>> = BTreeMap::new();
-    for model in list_models() {
-        groups
-            .entry(model.provider.0.clone())
-            .or_default()
-            .push(model);
-    }
-    for models in groups.values_mut() {
-        models.sort_by(|a, b| a.id.cmp(&b.id));
-    }
-    groups
-}
-
-fn provider_summary(groups: &BTreeMap<String, Vec<Model>>) -> String {
-    groups
-        .iter()
-        .map(|(provider, models)| format!("{provider}({})", models.len()))
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 fn append_model_lines(out: &mut Vec<String>, models: &[Model]) {

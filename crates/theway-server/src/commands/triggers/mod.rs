@@ -4,6 +4,8 @@ mod render;
 
 use super::*;
 
+use theway_sdk::commands::CommandCtx;
+
 use render::preview_cron_action;
 pub(crate) use render::{render_cron_jobs, render_dynamic_trigger_rules, render_triggers_status};
 // Audit-row helpers the `tests/commands/` mirror reaches through `use super::*` in mod.rs.
@@ -28,10 +30,18 @@ impl SlashCommand for TriggersCommand {
         "[status|rules|sources|enable <id>|disable <id>|remove <id>|remove --all|running|audit [N]|abort <trace_id>|abort --all]"
     }
     async fn run(&self, argv: &[String], ctx: &CommandCtx<'_>) -> CommandOutcome {
+        // Node-5 compat: the SDK framework ctx carries no trigger executor; `dispatch`
+        // stashes the daemon's executor in the slot before running commands. Node 6
+        // replaces this with `DaemonCtx` extras.
+        let Some(trigger_executor) = current_trigger_executor() else {
+            return CommandOutcome::Error(
+                "trigger executor unavailable (triggers require the daemon runtime)".into(),
+            );
+        };
         let subcommand = argv.first().map(String::as_str).unwrap_or("status");
         match subcommand {
             "status" => {
-                let snapshot = ctx.trigger_executor.notification_status_snapshot();
+                let snapshot = trigger_executor.notification_status_snapshot();
                 for line in render_triggers_status(&snapshot) {
                     cprintln!("{line}");
                 }
@@ -79,14 +89,14 @@ impl SlashCommand for TriggersCommand {
             "enable" | "resume" => set_dynamic_trigger_enabled(argv.get(1), true),
             "disable" | "pause" => set_dynamic_trigger_enabled(argv.get(1), false),
             "sources" | "hooks" => {
-                let snapshot = ctx.trigger_executor.notification_status_snapshot();
+                let snapshot = trigger_executor.notification_status_snapshot();
                 for line in render_trigger_sources(&snapshot.hooks) {
                     cprintln!("{line}");
                 }
                 CommandOutcome::Handled
             }
             "running" => {
-                let snapshot = ctx.trigger_executor.notification_status_snapshot();
+                let snapshot = trigger_executor.notification_status_snapshot();
                 for line in render_running_triggers(&snapshot.running) {
                     cprintln!("{line}");
                 }
@@ -108,10 +118,10 @@ impl SlashCommand for TriggersCommand {
                 let Some(target) = argv.get(1) else {
                     return CommandOutcome::Error("usage: /triggers abort <trace_id>|--all".into());
                 };
-                let snapshot = ctx.trigger_executor.notification_status_snapshot();
+                let snapshot = trigger_executor.notification_status_snapshot();
                 if target == "--all" {
                     let count = snapshot.running.len();
-                    ctx.trigger_executor.abort_all_triggers();
+                    trigger_executor.abort_all_triggers();
                     cprintln!("requested abort for {count} running trigger(s)");
                 } else {
                     if !snapshot.running.iter().any(|t| t.trace_id == *target) {
@@ -119,7 +129,7 @@ impl SlashCommand for TriggersCommand {
                             "no running trigger with trace_id '{target}'"
                         ));
                     }
-                    ctx.trigger_executor.abort_trigger(target);
+                    trigger_executor.abort_trigger(target);
                     cprintln!("requested abort for trigger {target}");
                 }
                 CommandOutcome::Handled

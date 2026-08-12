@@ -1,6 +1,9 @@
 //! `/skill` — attach a loaded skill to the next prompt.
+//! (`attach_skill_prompt` moved to the SDK — sdk-split-local-sandbox, node 5-commands-layer.)
 
 use super::*;
+
+use theway_sdk::commands::CommandCtx;
 
 pub struct SkillCommand;
 
@@ -57,14 +60,4 @@ impl SlashCommand for SkillCommand {
         );
         CommandOutcome::AttachSkill { name: name.clone() }
     }
-}
-
-pub fn attach_skill_prompt(text: impl Into<String>, skill_name: Option<&str>) -> String {
-    let text = text.into();
-    let Some(skill_name) = skill_name else {
-        return text;
-    };
-    format!(
-        "Before answering, invoke the Skill tool with name \"{skill_name}\" and use that skill's instructions for this turn.\n\nUser request:\n{text}"
-    )
 }

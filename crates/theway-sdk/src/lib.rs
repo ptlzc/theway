@@ -18,6 +18,7 @@ pub mod sandbox;
 
 // Path-compatibility root re-exports: client code keeps using the pre-split paths
 // (`theway::session`, `theway::config`, `theway::session_archive`, …) unchanged.
+pub use common::commands;
 pub use common::config;
 pub use common::{config_readers, session_archive};
 pub use local::{auth, history, images, mentions, session, stream_auth};

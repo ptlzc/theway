@@ -1,7 +1,10 @@
-//! Session lifecycle commands: `/save`, `/undo`, `/name`, `/session`, `/sessions`,
-//! `/share`, `/login`, `/logout`.
+//! Session lifecycle commands: `/save`, `/undo`, `/name`, `/session`, `/share`.
+//! (`/sessions`, `/login`, `/logout` moved to the SDK local command set —
+//! sdk-split-local-sandbox, node 5-commands-layer.)
 
 use super::*;
+
+use theway_sdk::commands::CommandCtx;
 
 pub struct SaveCommand;
 
@@ -266,36 +269,6 @@ fn yes_no(value: bool) -> &'static str {
     if value { "yes" } else { "no" }
 }
 
-pub struct SessionsCommand;
-
-#[async_trait]
-impl SlashCommand for SessionsCommand {
-    fn name(&self) -> &'static str {
-        "sessions"
-    }
-    fn description(&self) -> &'static str {
-        "list sessions for this cwd"
-    }
-    async fn run(&self, _argv: &[String], ctx: &CommandCtx<'_>) -> CommandOutcome {
-        let repo = theway_sdk::session::open_repo(ctx.cwd).await;
-        let entries = match theway_sdk::session::list_entries(&repo).await {
-            Ok(e) => e,
-            Err(e) => return CommandOutcome::Error(format!("list sessions: {e}")),
-        };
-        if entries.is_empty() {
-            cprintln!("(no sessions for this cwd)");
-            return CommandOutcome::Handled;
-        }
-        cprintln!("Sessions:");
-        for e in entries {
-            let preview = e.preview.as_deref().unwrap_or("");
-            let id_short: String = e.id.chars().take(16).collect();
-            cprintln!("  {}  {}  {}", id_short, e.created_at, preview);
-        }
-        CommandOutcome::Handled
-    }
-}
-
 pub struct ShareCommand;
 
 /// The `gh` binary to use for `/share`. Defaults to `gh` on PATH; `THEWAY_GH_BIN`
@@ -355,89 +328,5 @@ impl SlashCommand for ShareCommand {
         let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
         cprintln!("shared: {url}");
         CommandOutcome::Handled
-    }
-}
-
-pub struct LoginCommand;
-
-#[async_trait]
-impl SlashCommand for LoginCommand {
-    fn name(&self) -> &'static str {
-        "login"
-    }
-    fn description(&self) -> &'static str {
-        "store an API key for a provider in ~/.theway/auth.json"
-    }
-    fn usage(&self) -> &'static str {
-        "<provider>"
-    }
-    async fn run(&self, argv: &[String], _ctx: &CommandCtx<'_>) -> CommandOutcome {
-        if argv.len() != 1 {
-            return CommandOutcome::Error(
-                "usage: /login <provider>  (theway will prompt for the API key without echoing it)"
-                    .into(),
-            );
-        }
-        CommandOutcome::LoginSecret {
-            provider: argv[0].clone(),
-            storage_key: None,
-            recovery_command: None,
-        }
-    }
-}
-
-#[cfg_attr(test, allow(dead_code))]
-pub fn save_api_key(provider: &str, token: &str) -> Result<PathBuf, String> {
-    let mut store = match theway_sdk::auth::AuthStore::load() {
-        Ok(s) => s,
-        Err(e) => return Err(format!("load auth store: {e}")),
-    };
-    store.set(
-        provider.to_string(),
-        theway_sdk::auth::ProviderCredential::ApiKey {
-            value: token.to_string(),
-        },
-    );
-    if let Err(e) = store.save() {
-        return Err(format!("save auth store: {e}"));
-    }
-    Ok(theway_sdk::auth::auth_path())
-}
-
-pub struct LogoutCommand;
-
-#[async_trait]
-impl SlashCommand for LogoutCommand {
-    fn name(&self) -> &'static str {
-        "logout"
-    }
-    fn description(&self) -> &'static str {
-        "remove a stored credential from ~/.theway/auth.json"
-    }
-    fn usage(&self) -> &'static str {
-        "<provider>"
-    }
-    async fn run(&self, argv: &[String], _ctx: &CommandCtx<'_>) -> CommandOutcome {
-        if argv.is_empty() {
-            return CommandOutcome::Error("usage: /logout <provider>".into());
-        }
-        let provider = &argv[0];
-        let mut store = match theway_sdk::auth::AuthStore::load() {
-            Ok(s) => s,
-            Err(e) => return CommandOutcome::Error(format!("load auth store: {e}")),
-        };
-        match store.remove(provider) {
-            Some(_) => match store.save() {
-                Ok(()) => {
-                    cprintln!("removed credential for `{provider}`");
-                    CommandOutcome::Handled
-                }
-                Err(e) => CommandOutcome::Error(format!("save auth store: {e}")),
-            },
-            None => {
-                cprintln!("no credential stored for `{provider}`");
-                CommandOutcome::Handled
-            }
-        }
     }
 }

@@ -1,64 +1,12 @@
-//! Assorted REPL builtins: `/help`, `/clear`, `/quit`, `/diag`, `/template`, `/compact`,
-//! `/bug-report`, `/web-connect`, `/web-disconnect`, `/find`, `/history`, and the
-//! `/help` text builders.
+//! Assorted REPL builtins: `/diag`, `/template`, `/compact`, `/bug-report`,
+//! `/web-connect`, `/web-disconnect`, `/find`, `/history`, and the `/help` text builders.
+//! (`/help`, `/clear`, `/quit` moved to the SDK local command set — sdk-split-local-sandbox,
+//! node 5-commands-layer.)
 
 use super::*;
 
 use super::model::{emit_multiline, model_catalog_text, model_help_summary_lines};
-
-pub struct HelpCommand;
-
-#[async_trait]
-impl SlashCommand for HelpCommand {
-    fn name(&self) -> &'static str {
-        "help"
-    }
-    fn description(&self) -> &'static str {
-        "show available commands and model catalog help"
-    }
-    fn usage(&self) -> &'static str {
-        "[models|<command>]"
-    }
-    async fn run(&self, _argv: &[String], _ctx: &CommandCtx<'_>) -> CommandOutcome {
-        // The REPL's `print_help` walks the registry — see main.rs. This handler is a stub
-        // because Help needs the Registry itself, which we don't pass into commands. The
-        // REPL detects `/help` before dispatch.
-        CommandOutcome::Handled
-    }
-}
-
-pub struct ClearCommand;
-
-#[async_trait]
-impl SlashCommand for ClearCommand {
-    fn name(&self) -> &'static str {
-        "clear"
-    }
-    fn description(&self) -> &'static str {
-        "clear screen (keeps conversation history)"
-    }
-    async fn run(&self, _argv: &[String], _ctx: &CommandCtx<'_>) -> CommandOutcome {
-        CommandOutcome::ClearScreen
-    }
-}
-
-pub struct QuitCommand;
-
-#[async_trait]
-impl SlashCommand for QuitCommand {
-    fn name(&self) -> &'static str {
-        "quit"
-    }
-    fn aliases(&self) -> &'static [&'static str] {
-        &["exit", "q"]
-    }
-    fn description(&self) -> &'static str {
-        "exit the REPL"
-    }
-    async fn run(&self, _argv: &[String], _ctx: &CommandCtx<'_>) -> CommandOutcome {
-        CommandOutcome::Quit
-    }
-}
+use theway_sdk::commands::CommandCtx;
 
 pub struct DiagCommand;
 

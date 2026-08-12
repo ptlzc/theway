@@ -2,6 +2,8 @@
 
 use super::*;
 
+use theway_sdk::commands::CommandCtx;
+
 pub struct SkillsCommand;
 
 #[async_trait]
@@ -247,9 +249,13 @@ async fn set_skill_enabled(argv: &[String], ctx: &CommandCtx<'_>, enabled: bool)
         return CommandOutcome::Handled;
     }
 
-    if let Err(e) =
-        crate::skill_overrides::set_and_save(&theway_sdk::config::base_dir(), &name, source, enabled)
-            .await
+    if let Err(e) = crate::skill_overrides::set_and_save(
+        &theway_sdk::config::base_dir(),
+        &name,
+        source,
+        enabled,
+    )
+    .await
     {
         return CommandOutcome::Error(format!("persist skill state failed: {e}"));
     }

@@ -2,6 +2,8 @@
 
 use super::*;
 
+use theway_sdk::commands::CommandCtx;
+
 pub struct GoalCommand;
 
 fn goal_start_prompt(argv: &[String]) -> String {
