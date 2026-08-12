@@ -45,10 +45,10 @@
 - [x] 4.1 Remove now-dead TUI code (web_loop, transport methods, kernel
       imports) and unused deps (ratatui stays for rendering; kernel/feed stay
       in server for the daemon)
-- [ ] 4.2 Rewrite TUI e2e tests: spawn `thewayd` + `GrpcClient` where they
+- [x] 4.2 Rewrite TUI e2e tests: spawn `thewayd` + `GrpcClient` where they
       previously drove the in-process App; keep CLI-surface tests local
-- [ ] 4.3 Docs: README/CLI help updated (`theway` connects to daemon; daemon
+- [x] 4.3 Docs: README/CLI help updated (`theway` connects to daemon; daemon
       lifecycle; tool-cwd semantics)
-- [ ] 4.4 Full verification: `cargo test --workspace`, clippy -D warnings,
+- [x] 4.4 Full verification: `cargo test --workspace`, clippy -D warnings,
       fmt; smoke: `thewayd & theway` interactive session, tool runs in daemon
       cwd, Ctrl-C abort, session switch, daemon-death reconnect banner
