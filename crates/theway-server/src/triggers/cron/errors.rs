@@ -6,7 +6,7 @@ use chrono::{DateTime, Datelike, Local, Timelike, Utc};
 use serde_json::{Value, json};
 use theway_core::AgentToolError;
 
-use super::{CronJob, HarnessCell, MAX_ACTION_PREVIEW_CHARS};
+use super::{CronJob, CronJobExt, HarnessCell, MAX_ACTION_PREVIEW_CHARS};
 
 #[derive(Clone, Debug, thiserror::Error, PartialEq, Eq)]
 pub enum AddCronJobError {

@@ -15,8 +15,10 @@ use theway_llm_provider::{
 };
 
 #[allow(dead_code)]
-#[path = "../src/config.rs"]
-mod config;
+mod config {
+    #[allow(unused_imports)]
+    pub use theway_sdk::config::*;
+}
 #[allow(dead_code)]
 #[path = "../src/export.rs"]
 mod export;

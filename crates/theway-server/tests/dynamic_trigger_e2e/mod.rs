@@ -10,14 +10,18 @@
 //! home fixture flow).
 
 #[allow(dead_code)]
-#[path = "../../src/auth.rs"]
-pub mod auth;
+pub mod auth {
+    #[allow(unused_imports)]
+    pub use theway_sdk::auth::*;
+}
 #[allow(dead_code)]
 #[path = "../../src/bug_report.rs"]
 pub mod bug_report;
 #[allow(dead_code)]
-#[path = "../../src/config.rs"]
-pub mod config;
+pub mod config {
+    #[allow(unused_imports)]
+    pub use theway_sdk::config::*;
+}
 #[allow(dead_code)]
 #[path = "../../src/export.rs"]
 pub mod export;

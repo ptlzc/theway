@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use once_cell::sync::OnceCell;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -53,28 +53,9 @@ use theway_core::{AgentTool, PermissionClassification};
 use tokio::time::Duration;
 #[cfg(test)]
 use tokio_util::sync::CancellationToken;
-pub const DEFAULT_DYNAMIC_TRIGGER_POLL_INTERVAL_SECS: u64 = 10 * 60;
+pub use theway_sdk::common::triggers::{DEFAULT_DYNAMIC_TRIGGER_POLL_INTERVAL_SECS, DynamicTriggerRule};
 static CONFIGURED_DYNAMIC_TRIGGER_POLL_INTERVAL_SECS: AtomicU64 =
     AtomicU64::new(DEFAULT_DYNAMIC_TRIGGER_POLL_INTERVAL_SECS);
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DynamicTriggerRule {
-    pub id: String,
-    pub condition: String,
-    pub action: String,
-    pub enabled: bool,
-    #[serde(default = "default_fire_once")]
-    pub fire_once: bool,
-    #[serde(default)]
-    pub fired_at: Option<DateTime<Utc>>,
-    #[serde(default)]
-    pub promote_to_chat: bool,
-    pub created_at: DateTime<Utc>,
-}
-
-fn default_fire_once() -> bool {
-    true
-}
 
 #[derive(Clone, Debug, Default)]
 pub struct DynamicTriggerRegistry {

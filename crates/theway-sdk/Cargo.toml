@@ -33,7 +33,9 @@ toml = "0.8"
 sha2 = "0.10"
 hex = "0.4"
 directories = "5"
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+# session_archive: `.theway-session` tar export/import (mirrors theway-server).
+tar = "0.4"
 rpassword = "7"
 base64 = "0.22"
 # common/feed renders width-aware ratatui lines (shared transcript model for the

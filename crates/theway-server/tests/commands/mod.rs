@@ -3,6 +3,11 @@
 use super::*;
 use theway_core::SkillSource;
 
+/// Serializes env-var mutations within this test binary. The SDK keeps its own
+/// lock for its suites (tests run in separate processes, so no cross-binary
+/// coordination is needed).
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 struct EnvGuard {
     key: &'static str,
     original: Option<std::ffi::OsString>,
@@ -91,7 +96,7 @@ fn model_spec_accepts_colon_slash_and_two_args() {
 
 #[test]
 fn model_credential_hint_uses_only_selected_provider_credentials() {
-    let _guard = crate::auth::ENV_LOCK.lock().unwrap();
+    let _guard = ENV_LOCK.lock().unwrap();
     let temp = tempfile::tempdir().unwrap();
     let _theway_dir = EnvGuard::set("THEWAY_DIR", temp.path());
     let _deepseek = EnvGuard::remove("DEEPSEEK_API_KEY");
@@ -106,7 +111,7 @@ fn model_credential_hint_uses_only_selected_provider_credentials() {
 
 #[test]
 fn model_credential_hint_accepts_env_or_auth_store_for_selected_provider() {
-    let _guard = crate::auth::ENV_LOCK.lock().unwrap();
+    let _guard = ENV_LOCK.lock().unwrap();
     let temp = tempfile::tempdir().unwrap();
     let _theway_dir = EnvGuard::set("THEWAY_DIR", temp.path());
     let _deepseek = EnvGuard::set("DEEPSEEK_API_KEY", "sk-deepseek-present");

@@ -10,3 +10,4 @@ pub mod config;
 pub mod config_readers;
 pub mod feed;
 pub mod session_archive;
+pub mod triggers;

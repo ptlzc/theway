@@ -138,3 +138,24 @@ poll_interval_secs = 0
         assert!(parse_trigger_poll_interval_secs(text).is_err());
     }
 }
+
+/// Parse the `[builtin_skills] enabled = [...]` list from `~/.theway/config.toml`
+/// text. Malformed TOML or a missing section yields an empty list (soft fail-closed,
+/// per the builtin-skills enablement posture).
+pub fn parse_builtin_skills_config(toml_text: &str) -> Vec<String> {
+    let Ok(parsed) = toml::from_str::<BuiltinSkillsConfigFile>(toml_text) else {
+        return Vec::new();
+    };
+    parsed.builtin_skills.map(|s| s.enabled).unwrap_or_default()
+}
+
+#[derive(Default, serde::Deserialize)]
+struct BuiltinSkillsConfigFile {
+    builtin_skills: Option<BuiltinSkillsConfigSection>,
+}
+
+#[derive(Default, serde::Deserialize)]
+struct BuiltinSkillsConfigSection {
+    #[serde(default)]
+    enabled: Vec<String>,
+}

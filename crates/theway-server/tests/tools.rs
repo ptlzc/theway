@@ -19,9 +19,11 @@ use theway_core::tools;
 #[path = "../src/bug_report.rs"]
 #[allow(dead_code)]
 mod bug_report;
-#[path = "../src/config.rs"]
 #[allow(dead_code)]
-mod config;
+mod config {
+    #[allow(unused_imports)]
+    pub use theway_sdk::config::*;
+}
 #[path = "../src/export.rs"]
 #[allow(dead_code)]
 mod export;

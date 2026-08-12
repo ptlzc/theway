@@ -35,6 +35,22 @@ use uuid::Uuid;
 
 use errors::CronExpression;
 
+// The `CronJob` data model lives in the SDK (`theway_sdk::common::triggers`) so the
+// session-archive surface shares one type identity; this module re-exports it for
+// `crate::triggers::cron::CronJob` paths and adds the daemon-side schedule helpers.
+pub use theway_sdk::common::triggers::CronJob;
+
+/// Daemon-side schedule helpers on the SDK `CronJob` data model.
+pub trait CronJobExt {
+    fn next_run_after(&self, after: DateTime<Utc>) -> Option<DateTime<Utc>>;
+}
+
+impl CronJobExt for CronJob {
+    fn next_run_after(&self, after: DateTime<Utc>) -> Option<DateTime<Utc>> {
+        CronExpression::parse(&self.schedule).ok()?.next_after(after)
+    }
+}
+
 // The bridged test mirror (`tests/triggers/cron/mod.rs`) pulls everything it needs via
 // `use super::*`; names it uses but this module's own code does not are re-imported here
 // for test builds only.
@@ -56,40 +72,6 @@ use tokio_util::sync::CancellationToken;
 
 const MAX_ACTION_PREVIEW_CHARS: usize = 120;
 const MAX_ACTION_BYTES: usize = 4096;
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CronJob {
-    pub id: String,
-    /// Standard 5-field cron expression: minute hour day-of-month month day-of-week.
-    pub schedule: String,
-    pub action: String,
-    pub enabled: bool,
-    #[serde(default)]
-    pub running_trace_id: Option<String>,
-    #[serde(default)]
-    pub last_due_at: Option<DateTime<Utc>>,
-    #[serde(default)]
-    pub last_fired_at: Option<DateTime<Utc>>,
-    #[serde(default)]
-    pub last_completed_at: Option<DateTime<Utc>>,
-    #[serde(default)]
-    pub last_error: Option<String>,
-    #[serde(default)]
-    pub skipped_overlap_count: u64,
-    /// Loop mode (issue #23): run in a fresh sub-agent with persistent cross-run state
-    /// and the inbox output protocol instead of injecting into the parent conversation.
-    #[serde(default)]
-    pub stateful: bool,
-    pub created_at: DateTime<Utc>,
-}
-
-impl CronJob {
-    pub fn next_run_after(&self, after: DateTime<Utc>) -> Option<DateTime<Utc>> {
-        CronExpression::parse(&self.schedule)
-            .ok()?
-            .next_after(after)
-    }
-}
 
 #[derive(Clone, Debug, Default)]
 pub struct CronRegistry {

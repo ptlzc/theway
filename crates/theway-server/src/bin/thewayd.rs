@@ -18,7 +18,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use theway::app::daemon::{DaemonApp, DaemonConfig, PanelStatus};
 use theway::app::session_factory::SessionHarnessFactory;
-use theway::config_readers::{read_builtin_skills_config, read_trigger_poll_interval_secs};
+use theway_sdk::config_readers::{read_builtin_skills_config, read_trigger_poll_interval_secs};
 use theway_sdk::stream_auth::stream_fn_with_auth_store;
 use theway::system_prompt::compose_system_prompt;
 use theway::{

@@ -12,9 +12,15 @@
 // exercises the actual code path without restructuring the crate as a [lib]. `commands.rs`
 // references sibling modules through `crate::...`, so we include those siblings too. They appear unused-from-tests
 // (no items are called directly here) — that's fine; the commands module reaches into them.
+// Moved to the SDK (sdk-split-local-sandbox): forwarded instead of path-included.
 #[allow(dead_code)]
-#[path = "../src/auth.rs"]
-mod auth;
+mod auth {
+    #[allow(unused_imports)]
+    pub use theway_sdk::auth::*;
+    // Test-only env serialization lock. The SDK keeps a `pub(crate)` one for its own
+    // suites; each test binary serializes its own env mutations with this copy.
+    pub static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+}
 #[allow(dead_code)]
 #[path = "../src/bug_report.rs"]
 mod bug_report;
@@ -25,23 +31,31 @@ mod commands;
 mod trigger_engine;
 
 #[allow(dead_code)]
-#[path = "../src/config.rs"]
-mod config;
+mod config {
+    #[allow(unused_imports)]
+    pub use theway_sdk::config::*;
+}
 #[allow(dead_code)]
 #[path = "../src/export.rs"]
 mod export;
 #[allow(dead_code)]
-#[path = "../src/history.rs"]
-mod history;
+mod history {
+    #[allow(unused_imports)]
+    pub use theway_sdk::history::*;
+}
 #[allow(dead_code)]
 #[path = "../src/mcp_loader.rs"]
 mod mcp_loader;
 #[allow(dead_code)]
-#[path = "../src/session/mod.rs"]
-mod session;
+mod session {
+    #[allow(unused_imports)]
+    pub use theway_sdk::session::*;
+}
 #[allow(dead_code)]
-#[path = "../src/session_archive.rs"]
-mod session_archive;
+mod session_archive {
+    #[allow(unused_imports)]
+    pub use theway_sdk::session_archive::*;
+}
 #[allow(dead_code)]
 #[path = "../../theway-core/src/skill_overrides.rs"]
 mod skill_overrides;

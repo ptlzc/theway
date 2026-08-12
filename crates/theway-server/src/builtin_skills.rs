@@ -211,24 +211,10 @@ pub fn merge_with_user_project(mut builtins: Vec<Skill>, user_project: &[Skill])
 /// unknown names as a startup diagnostic, but a malformed config never prevents `theway` from
 /// running at all.
 ///
-/// Extracted from `main.rs` so the parser can be unit-tested directly.
-pub fn parse_builtin_skills_config(toml_text: &str) -> Vec<String> {
-    let Ok(parsed) = toml::from_str::<ConfigFile>(toml_text) else {
-        return Vec::new();
-    };
-    parsed.builtin_skills.map(|s| s.enabled).unwrap_or_default()
-}
-
-#[derive(Default, serde::Deserialize)]
-struct ConfigFile {
-    builtin_skills: Option<ConfigSection>,
-}
-
-#[derive(Default, serde::Deserialize)]
-struct ConfigSection {
-    #[serde(default)]
-    enabled: Vec<String>,
-}
+/// The parser lives in the SDK (`theway_sdk::config::parse_builtin_skills_config`),
+/// re-imported here so this module's unit tests keep the unqualified call sites.
+#[cfg(test)]
+use theway_sdk::config::parse_builtin_skills_config;
 
 /// Error returned when the CLI enabled a built-in skill name that this binary does not
 /// recognise. The caller is expected to print the message and exit with a non-zero status
