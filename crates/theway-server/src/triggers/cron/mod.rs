@@ -294,7 +294,6 @@ impl CronRegistry {
         state.jobs = next;
     }
 
-    #[cfg(test)]
     #[allow(dead_code)]
     pub fn clear_for_tests(&self) {
         *self.inner.lock() = CronRegistryState::default();

@@ -5,15 +5,14 @@
 
 use std::path::PathBuf;
 
-use crate::commands;
-use crate::control_plane_prompt::UiControlPlanePrompt;
+use theway::commands;
+use theway::control_plane_prompt::UiControlPlanePrompt;
 
 use super::kernel::TurnState;
 use super::relay;
 use super::render_utils::{safe_control_prompt_label, safe_control_prompt_text};
 use super::{App, CONTROL_PROMPT_TEXT_WIDTH, FeedUpdate, PendingImportActivation};
 
-#[cfg(feature = "tui")]
 use super::feed::Level;
 
 const IMPORT_ACTIVATION_PROMPT_ID: &str = "session-import-activation";
@@ -28,7 +27,7 @@ impl App {
                     self.system_line(format!("web relay already active: {}", active.url));
                     return;
                 }
-                let base = match crate::config::relay_base_url().await {
+                let base = match theway::config::relay_base_url().await {
                     Ok(base) => base,
                     Err(e) => {
                         self.error_line(format!("web-connect: {e}"));
@@ -48,7 +47,6 @@ impl App {
                             "warning: anyone with this URL can watch the full conversation, \
                              send prompts, AND approve permission requests until /web-disconnect",
                         );
-                        #[cfg(feature = "tui")]
                         if self.relay_qr_in_feed {
                             match relay::qr_lines(&handle.url) {
                                 Ok(lines) => {
@@ -114,7 +112,7 @@ impl App {
             cron_ids.len()
         );
         let (responder, _discarded) = tokio::sync::oneshot::channel();
-        let prompt = crate::control_plane_prompt::UiControlPlanePrompt {
+        let prompt = theway::control_plane_prompt::UiControlPlanePrompt {
             request: theway_core::ControlPlanePromptRequest {
                 tool_call_id: IMPORT_ACTIVATION_PROMPT_ID.to_string(),
                 tool_name: "SessionImport".to_string(),
@@ -217,7 +215,7 @@ impl App {
         self.system_line(message);
         if is_import_activation && let Some(pending) = self.pending_import_activation.take() {
             if approved {
-                match crate::session_archive::activate_imported(
+                match theway::session_archive::activate_imported(
                     &pending.session_path,
                     &pending.trigger_ids,
                     &pending.cron_ids,

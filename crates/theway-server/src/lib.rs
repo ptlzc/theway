@@ -2,11 +2,12 @@
 //!
 //! Embeddable library surface of the `theway` CLI: agent session management,
 //! slash-command dispatch, REPL kernel, tools, triggers, skills, MCP client wiring,
-//! hooks, session archive, and the transport event loop (`ui::web_loop`); the
-//! HTTP / gRPC / WebSocket protocol servers live in the `theway-server` crate.
+//! hooks, and session archive. The terminal UI and the transport event loop
+//! (`ui::web_loop`) live in the `theway-tui` crate; the HTTP / gRPC / WebSocket
+//! protocol servers live in the `theway-transport` crate.
 //!
-//! The `theway` binary (`src/main.rs`) is a thin assembly layer on top of this
-//! crate; external projects (e.g. workmate-local) can depend on `theway`
+//! The `theway` binary (`crates/theway-tui`) is a thin assembly layer on top of
+//! this crate; external projects (e.g. workmate-local) can depend on `theway`
 //! directly and embed the runtime in-process.
 
 pub mod agent_session;
@@ -14,13 +15,10 @@ pub mod agent_specs;
 pub mod auth;
 pub mod bug_report;
 pub mod builtin_skills;
-#[cfg(feature = "tui")]
-pub mod clipboard_image;
 pub mod commands;
 pub mod config;
 pub mod control_plane_prompt;
 pub mod dag_persist;
-pub mod debug;
 pub mod export;
 pub mod extensions;
 pub mod history;
@@ -33,12 +31,9 @@ pub mod markdown;
 pub mod mcp_loader;
 pub mod mentions;
 pub mod model;
-pub mod model_picker;
 pub mod oauth;
 pub mod otlp;
 pub mod readline;
-#[cfg(feature = "tui")]
-pub mod resume_picker;
 pub mod session;
 pub mod session_archive;
 pub mod session_ops;
@@ -52,4 +47,3 @@ pub mod trigger_engine;
 pub mod ts_extensions;
 // Server-first: transport is always on (theway IS an agent server).
 pub mod triggers;
-pub mod ui;

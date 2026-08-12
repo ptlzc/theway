@@ -13,11 +13,26 @@ name = "theway"
 path = "src/main.rs"
 
 [dependencies]
-theway = { path = "../theway-server", features = ["tui"] }
+theway = { path = "../theway-server" }
 theway-core = { path = "../theway-core" }
 theway-transport = { path = "../theway-transport" }
 theway-llm-provider = { path = "../theway-llm-provider" }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+
+# Terminal UI surface (moved out of theway-server; the ratatui full-screen REPL,
+# web/grpc transport event loop, feed, listener and relay all live in this crate).
+crossterm = { version = "0.28", features = ["event-stream"] }
+ratatui = { version = "0.29" }
+tui-textarea = { version = "0.7" }
+unicode-width = "0.2"
+arboard = { version = "3" }
+image = { version = "0.25", default-features = false, features = ["png"] }
+qrcode = { version = "0.14", default-features = false }
+base64 = "0.22"
+tokio-tungstenite = { version = "0.26", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+async-trait = "0.1"
+regex = "1"
+uuid = { version = "1", features = ["v7", "v4", "serde"] }
 
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "fs", "io-util", "io-std", "process", "signal"] }
 tokio-util = { version = "0.7", features = ["io"] }

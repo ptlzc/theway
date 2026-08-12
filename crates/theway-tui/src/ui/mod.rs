@@ -44,80 +44,53 @@ pub use feed::FeedUpdate;
 // move into `render_utils` (private re-import keeps the original ui-subtree scope).
 use render_utils::prompt_display;
 
-#[cfg(feature = "tui")]
 use std::io::IsTerminal;
-#[cfg(feature = "tui")]
 use std::io::Write as _;
 use std::path::PathBuf;
 use std::sync::Arc;
-#[cfg(feature = "tui")]
 use std::time::Duration;
-#[cfg(feature = "tui")]
 use std::time::Instant;
 
-#[cfg(feature = "tui")]
 use anyhow::Result;
-#[cfg(feature = "tui")]
 use crossterm::event::{Event, EventStream, KeyEventKind, MouseEventKind};
-#[cfg(feature = "tui")]
 use futures::StreamExt as _;
-#[cfg(feature = "tui")]
 use ratatui::Terminal;
-#[cfg(feature = "tui")]
 use ratatui::backend::CrosstermBackend;
-#[cfg(feature = "tui")]
 use ratatui::layout::{Constraint, Layout, Rect};
-#[cfg(feature = "tui")]
 use ratatui::style::{Color, Style};
-#[cfg(feature = "tui")]
 use ratatui::text::Line;
-#[cfg(feature = "tui")]
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-#[cfg(feature = "tui")]
 use tui_textarea::TextArea;
 
-use crate::agent_session::RetrySettings;
-#[cfg(feature = "tui")]
-use crate::commands;
-use crate::commands::Registry;
-#[cfg(feature = "tui")]
-use crate::commands::{CommandCtx, CommandOutcome};
-use crate::control_plane_prompt::UiControlPlanePrompt;
-use crate::history::HistoryStore;
-#[cfg(feature = "tui")]
-use crate::mentions;
 use feed::{Feed, Level, TriggerPollStatus};
-#[cfg(feature = "tui")]
 use kernel::poll_turn;
 use kernel::{QueuedTurn, ReplKernel, TurnState};
-#[cfg(feature = "tui")]
+use theway::agent_session::RetrySettings;
+use theway::commands;
+use theway::commands::Registry;
+use theway::commands::{CommandCtx, CommandOutcome};
+use theway::control_plane_prompt::UiControlPlanePrompt;
+use theway::history::HistoryStore;
+use theway::mentions;
 use theway_core::SkillSource;
 use theway_core::{AgentHarness, AgentMessage, AgentRunError};
 use theway_llm_provider::{ContentBlock, ImageContent, Message, UserContent, UserContentBlock};
 use theway_transport::transport::SlashCompleter;
 
 use render_utils::user_facing_run_error;
-#[cfg(feature = "tui")]
 use render_utils::{
     centered_rect, enter_tui, leave_tui, new_textarea, panel_line, panel_rule_preview,
     print_headless_update, safe_control_prompt_label, safe_control_prompt_payload,
     safe_control_prompt_text,
 };
 
-#[cfg(feature = "tui")]
 const SPINNER_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-#[cfg(feature = "tui")]
 const MAX_INPUT_ROWS: usize = 6;
-#[cfg(feature = "tui")]
 const SCROLL_STEP: usize = 3;
-#[cfg(feature = "tui")]
 const COMPLETION_POPUP_MAX: usize = 8;
-#[cfg(feature = "tui")]
 const TRIGGER_PANEL_MIN_TOTAL_WIDTH: u16 = 100;
-#[cfg(feature = "tui")]
 const TRIGGER_PANEL_WIDTH: u16 = 36;
-#[cfg(feature = "tui")]
 const TRIGGER_PANEL_RULE_LIMIT: usize = 5;
 const CONTROL_PROMPT_TEXT_WIDTH: usize = 68;
 
@@ -143,7 +116,7 @@ pub struct PanelStatus {
 /// Everything the app needs to run a session, assembled by `main.rs` after the harness is built.
 pub struct AppConfig {
     pub harness: Arc<AgentHarness>,
-    pub trigger_executor: Arc<crate::trigger_engine::execution::TriggerExecutor>,
+    pub trigger_executor: Arc<theway::trigger_engine::execution::TriggerExecutor>,
     pub retry: RetrySettings,
     pub registry: Registry,
     pub cwd: PathBuf,
@@ -165,7 +138,7 @@ pub struct AppConfig {
     /// session-resource-model: builds a fresh harness for any session id (resume
     /// semantics). Drives [`App::switch_session`] from the serialized event loop;
     /// the CLI crate extracts its harness-construction path into this closure.
-    pub session_factory: crate::session_ops::SessionFactory,
+    pub session_factory: theway::session_ops::SessionFactory,
     /// cwd-scoped session repo backing [`theway_transport::transport::SessionOps`] (list / create /
     /// rename / delete) and cheap "does this id exist" checks before a switch.
     pub session_repo: Arc<theway_core::JsonlSessionRepo>,
@@ -186,14 +159,10 @@ pub struct App {
     tool_count: usize,
 
     history: HistoryStore,
-    #[cfg(feature = "tui")]
     history_idx: Option<usize>,
-    #[cfg(feature = "tui")]
     draft: String,
     pending_skill: Option<String>,
-    #[cfg(feature = "tui")]
     pending_images: Vec<PathBuf>,
-    #[cfg(feature = "tui")]
     pending_pasted_images: Vec<ImageContent>,
 
     feed: Feed,
@@ -203,7 +172,6 @@ pub struct App {
     main_run_rx: Option<UnboundedReceiver<String>>,
     control_plane_prompt_rx: Option<UnboundedReceiver<UiControlPlanePrompt>>,
     control_plane_prompt: Option<UiControlPlanePrompt>,
-    #[cfg(feature = "tui")]
     model_picker: Option<crate::model_picker::ModelPickerState>,
     /// Cached for web snapshots; refreshed on picker open and model switch.
     model_catalog: Vec<crate::model_picker::ProviderGroup>,
@@ -213,34 +181,26 @@ pub struct App {
     /// Subagent job registry (graph mode). Task tool + DAG nodes register here.
     subagent_registry: theway_core::multiagent::registry::AgentJobRegistry,
     /// session-resource-model: rebuilds a harness for another session (switch).
-    session_factory: crate::session_ops::SessionFactory,
+    session_factory: theway::session_ops::SessionFactory,
     /// cwd-scoped session repo (SessionOps + switch validation).
     session_repo: Arc<theway_core::JsonlSessionRepo>,
-    /// Live "current session" state shared with [`crate::session_ops::AppSessionOps`];
+    /// Live "current session" state shared with [`theway::session_ops::AppSessionOps`];
     /// synced on every published snapshot and on session switch.
-    current_session_state: Arc<parking_lot::Mutex<crate::session_ops::CurrentSessionState>>,
+    current_session_state: Arc<parking_lot::Mutex<theway::session_ops::CurrentSessionState>>,
 
-    #[cfg(feature = "tui")]
     input: TextArea<'static>,
-    #[cfg(feature = "tui")]
     completions: Vec<String>,
-    #[cfg(feature = "tui")]
     completion_idx: usize,
 
-    #[cfg(feature = "tui")]
     scroll: usize,
     follow: bool,
-    #[cfg(feature = "tui")]
     last_viewport_h: usize,
-    #[cfg(feature = "tui")]
     last_feed_area: Option<Rect>,
 
     busy: bool,
     queued_turns: std::collections::VecDeque<QueuedTurn>,
     spinner_frame: usize,
-    #[cfg(feature = "tui")]
     last_ctrlc: Option<Instant>,
-    #[cfg(feature = "tui")]
     quit: bool,
 
     // Remote relay (issue #22). The channels exist from construction so the event loops
@@ -248,7 +208,6 @@ pub struct App {
     relay: Option<relay::RelayHandle>,
     /// Render a QR code of the relay URL into the feed on connect. Only useful where a
     /// real terminal shows the feed (TUI); off for web/headless modes.
-    #[cfg(feature = "tui")]
     relay_qr_in_feed: bool,
     relay_prompt_tx: UnboundedSender<String>,
     relay_prompt_rx: Option<UnboundedReceiver<String>>,
@@ -290,7 +249,7 @@ impl App {
         // Bound before the struct literal below because that literal moves fields out of
         // `config` (harness / session_id / cwd) in declaration order.
         let current_session_state = Arc::new(parking_lot::Mutex::new(
-            crate::session_ops::CurrentSessionState {
+            theway::session_ops::CurrentSessionState {
                 session_id: config.session_id.clone(),
                 busy: false,
                 model: current_model_label(&config.harness),
@@ -310,14 +269,10 @@ impl App {
             log_path: config.log_path,
             tool_count: config.tool_count,
             history: config.history,
-            #[cfg(feature = "tui")]
             history_idx: None,
-            #[cfg(feature = "tui")]
             draft: String::new(),
             pending_skill: None,
-            #[cfg(feature = "tui")]
             pending_images: config.pending_images,
-            #[cfg(feature = "tui")]
             pending_pasted_images: Vec::new(),
             feed: Feed::new(),
             latest_trigger_poll: None,
@@ -326,7 +281,6 @@ impl App {
             main_run_rx: Some(config.main_run_rx),
             control_plane_prompt_rx: config.control_plane_prompt_rx,
             control_plane_prompt: None,
-            #[cfg(feature = "tui")]
             model_picker: None,
             model_catalog: crate::model_picker::catalog(),
             panel_status: config.panel_status,
@@ -335,28 +289,19 @@ impl App {
             session_factory: config.session_factory,
             session_repo: config.session_repo.clone(),
             current_session_state,
-            #[cfg(feature = "tui")]
             input: new_textarea(),
-            #[cfg(feature = "tui")]
             completions: Vec::new(),
-            #[cfg(feature = "tui")]
             completion_idx: 0,
-            #[cfg(feature = "tui")]
             scroll: 0,
             follow: true,
-            #[cfg(feature = "tui")]
             last_viewport_h: 1,
-            #[cfg(feature = "tui")]
             last_feed_area: None,
             busy: false,
             queued_turns: std::collections::VecDeque::new(),
             spinner_frame: 0,
-            #[cfg(feature = "tui")]
             last_ctrlc: None,
-            #[cfg(feature = "tui")]
             quit: false,
             relay: None,
-            #[cfg(feature = "tui")]
             relay_qr_in_feed: false,
             relay_prompt_tx,
             relay_prompt_rx: Some(relay_prompt_rx),
@@ -478,7 +423,6 @@ impl App {
 
     // ── main entry ──────────────────────────────────────────────────────────────────────
 
-    #[cfg(feature = "tui")]
     pub async fn run(mut self) -> Result<()> {
         if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
             return self.run_headless().await;
@@ -493,7 +437,6 @@ impl App {
         result
     }
 
-    #[cfg(feature = "tui")]
     async fn event_loop(
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
@@ -613,7 +556,6 @@ impl App {
 
     // ── event handling ──────────────────────────────────────────────────────────────────
 
-    #[cfg(feature = "tui")]
     async fn handle_event(
         &mut self,
         event: Event,
@@ -638,19 +580,16 @@ impl App {
         Ok(())
     }
 
-    #[cfg(feature = "tui")]
     fn scroll_up(&mut self, n: usize) {
         self.follow = false;
         self.scroll = self.scroll.saturating_sub(n);
     }
 
-    #[cfg(feature = "tui")]
     fn scroll_down(&mut self, n: usize) {
         self.scroll = self.scroll.saturating_add(n);
         // render() clamps and re-enables follow when we reach the bottom.
     }
 
-    #[cfg(feature = "tui")]
     fn handle_mouse_scroll(&mut self, column: u16, row: u16, up: bool) {
         if !self.mouse_in_feed(column, row) {
             return;
@@ -662,7 +601,6 @@ impl App {
         }
     }
 
-    #[cfg(feature = "tui")]
     fn mouse_in_feed(&self, column: u16, row: u16) -> bool {
         let Some(area) = self.last_feed_area else {
             return false;
@@ -675,7 +613,6 @@ impl App {
 
     // ── rendering ───────────────────────────────────────────────────────────────────────
 
-    #[cfg(feature = "tui")]
     fn render(&mut self, frame: &mut ratatui::Frame) {
         let area = frame.area();
         let input_rows = self.input.lines().len().clamp(1, MAX_INPUT_ROWS) as u16;
@@ -778,7 +715,6 @@ impl App {
         self.render_control_plane_prompt(frame);
     }
 
-    #[cfg(feature = "tui")]
     fn render_model_picker(&self, frame: &mut ratatui::Frame) {
         let Some(picker) = self.model_picker.as_ref() else {
             return;
@@ -816,7 +752,6 @@ impl App {
         frame.render_widget(Paragraph::new(text).block(block), rect);
     }
 
-    #[cfg(feature = "tui")]
     fn render_control_plane_prompt(&self, frame: &mut ratatui::Frame) {
         let Some(prompt) = self.control_plane_prompt.as_ref() else {
             return;
@@ -869,7 +804,6 @@ impl App {
         );
     }
 
-    #[cfg(feature = "tui")]
     fn render_trigger_panel(&self, frame: &mut ratatui::Frame, area: Rect) {
         let lines =
             self.trigger_panel_lines(area.width.saturating_sub(2) as usize, area.height as usize);
@@ -884,22 +818,20 @@ impl App {
         frame.render_widget(panel, area);
     }
 
-    #[cfg(feature = "tui")]
     fn should_show_side_panel(&self) -> bool {
         !self.kernel.harness().skills().is_empty()
-            || !crate::triggers::global_registry().list().is_empty()
-            || !crate::triggers::global_cron_registry().list().is_empty()
+            || !theway::triggers::global_registry().list().is_empty()
+            || !theway::triggers::global_cron_registry().list().is_empty()
             || self.latest_trigger_poll.is_some()
             || self.latest_goal.is_some()
             || self.panel_status.mcp_servers > 0
             || self.panel_status.mcp_notification_hooks > 0
     }
 
-    #[cfg(feature = "tui")]
     fn trigger_panel_lines(&self, width: usize, height: usize) -> Vec<Line<'static>> {
         let width = width.max(1);
-        let rules = crate::triggers::global_registry().list();
-        let cron_jobs = crate::triggers::global_cron_registry().list();
+        let rules = theway::triggers::global_registry().list();
+        let cron_jobs = theway::triggers::global_cron_registry().list();
 
         let mut lines = Vec::new();
         let skills = self.kernel.harness().skills();
@@ -1150,7 +1082,6 @@ impl App {
         lines
     }
 
-    #[cfg(feature = "tui")]
     fn status_line(&self, width: usize, max_scroll: usize) -> Paragraph<'static> {
         let model = {
             let state = self.kernel.harness().agent().state();
@@ -1184,7 +1115,6 @@ impl App {
         Paragraph::new(Line::styled(text, Style::default().fg(Color::DarkGray)))
     }
 
-    #[cfg(feature = "tui")]
     fn render_completions(&self, frame: &mut ratatui::Frame, status_area: Rect) {
         if self.completions.is_empty() {
             return;
@@ -1229,7 +1159,6 @@ impl App {
 
     /// Line-based fallback for non-TTY stdin/stdout (e.g. `echo prompt | theway`). No fixed input
     /// box — just read prompts from stdin and stream feed updates to stdout.
-    #[cfg(feature = "tui")]
     async fn run_headless(mut self) -> Result<()> {
         use tokio::io::{AsyncBufReadExt as _, BufReader};
 
@@ -1274,7 +1203,7 @@ impl App {
                     } => {
                         eprintln!(
                             "error: {}",
-                            crate::auth::login_requires_tty_message(
+                            theway::auth::login_requires_tty_message(
                                 &provider,
                                 recovery_command.as_deref()
                             )
@@ -1338,7 +1267,28 @@ impl App {
     }
 }
 
-#[cfg(all(test, feature = "tui"))]
+/// Assemble the slash-command completion list (registry commands + skill shortcuts).
+fn collect_slash_commands(
+    registry: &theway::commands::Registry,
+    skills: &[theway_core::Skill],
+) -> Vec<String> {
+    let mut commands: Vec<String> = registry
+        .commands()
+        .iter()
+        .flat_map(|c| {
+            let mut names = vec![format!("/{}", c.name())];
+            names.extend(c.aliases().iter().map(|a| format!("/{a}")));
+            names
+        })
+        .collect();
+    commands.extend(
+        theway::commands::skill_shortcuts(skills, registry)
+            .into_iter()
+            .map(|sc| sc.command),
+    );
+    commands
+}
+#[cfg(test)]
 mod tests {
     use super::render_utils::{write_enter_tui_commands, write_leave_tui_commands};
     use super::*;
@@ -1392,10 +1342,10 @@ mod tests {
     fn test_app_with_options(opts: AgentHarnessOptions) -> App {
         let harness = Arc::new(AgentHarness::new(opts));
         let trigger_executor =
-            std::sync::Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+            std::sync::Arc::new(theway::trigger_engine::execution::TriggerExecutor::new(
                 harness.agent_arc(),
                 harness.session().clone(),
-                crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+                theway::trigger_engine::runtime::TriggerRuntimeConfig::default(),
                 None,
                 None,
                 None,
@@ -1561,8 +1511,8 @@ mod tests {
     #[test]
     fn wide_layout_renders_trigger_panel() {
         let _guard = TRIGGER_REGISTRY_TEST_LOCK.lock().unwrap();
-        crate::triggers::global_registry().clear_for_tests();
-        crate::triggers::global_cron_registry().clear_for_tests();
+        theway::triggers::global_registry().clear_for_tests();
+        theway::triggers::global_cron_registry().clear_for_tests();
         let mut app = test_app();
         app.panel_status = PanelStatus {
             mcp_servers: 1,
@@ -1574,7 +1524,7 @@ mod tests {
             hook_points: vec!["before_tool_call".into(), "after_tool_call".into()],
             trigger_features: vec!["dedup".into(), "cycle suppress".into()],
         };
-        crate::triggers::global_registry()
+        theway::triggers::global_registry()
             .add_rule("a build finishes", "summarize the result")
             .unwrap();
 
@@ -1629,8 +1579,8 @@ mod tests {
     #[test]
     fn wide_layout_hides_empty_static_trigger_panel() {
         let _guard = TRIGGER_REGISTRY_TEST_LOCK.lock().unwrap();
-        crate::triggers::global_registry().clear_for_tests();
-        crate::triggers::global_cron_registry().clear_for_tests();
+        theway::triggers::global_registry().clear_for_tests();
+        theway::triggers::global_cron_registry().clear_for_tests();
         let mut app = test_app();
         app.panel_status = PanelStatus {
             mcp_servers: 0,
@@ -1665,8 +1615,8 @@ mod tests {
     #[test]
     fn wide_layout_shows_latest_poll_status_without_feed_line() {
         let _guard = TRIGGER_REGISTRY_TEST_LOCK.lock().unwrap();
-        crate::triggers::global_registry().clear_for_tests();
-        crate::triggers::global_cron_registry().clear_for_tests();
+        theway::triggers::global_registry().clear_for_tests();
+        theway::triggers::global_cron_registry().clear_for_tests();
         let mut app = test_app();
         app.latest_trigger_poll = Some(TriggerPollStatus {
             checked_at: "11:22:33".into(),
@@ -1708,8 +1658,8 @@ mod tests {
     #[test]
     fn wide_layout_renders_compact_skills_panel_summary() {
         let _guard = TRIGGER_REGISTRY_TEST_LOCK.lock().unwrap();
-        crate::triggers::global_registry().clear_for_tests();
-        crate::triggers::global_cron_registry().clear_for_tests();
+        theway::triggers::global_registry().clear_for_tests();
+        theway::triggers::global_cron_registry().clear_for_tests();
         let mut app = test_app();
         app.kernel.harness().replace_skills(vec![
             ui_skill("builtin-review", theway_core::SkillSource::Builtin, false),
@@ -1741,11 +1691,11 @@ mod tests {
     #[test]
     fn trigger_panel_redacts_rule_preview_secrets() {
         let _guard = TRIGGER_REGISTRY_TEST_LOCK.lock().unwrap();
-        crate::triggers::global_registry().clear_for_tests();
-        crate::triggers::global_cron_registry().clear_for_tests();
+        theway::triggers::global_registry().clear_for_tests();
+        theway::triggers::global_cron_registry().clear_for_tests();
         let mut app = test_app();
         let secret = "sk-panel-secret-should-not-render-1234567890";
-        crate::triggers::global_registry()
+        theway::triggers::global_registry()
             .add_rule(
                 &format!("when header is Bearer {secret}"),
                 &format!("call API with {secret}"),
@@ -1770,10 +1720,10 @@ mod tests {
     #[test]
     fn narrow_layout_hides_trigger_panel() {
         let _guard = TRIGGER_REGISTRY_TEST_LOCK.lock().unwrap();
-        crate::triggers::global_registry().clear_for_tests();
-        crate::triggers::global_cron_registry().clear_for_tests();
+        theway::triggers::global_registry().clear_for_tests();
+        theway::triggers::global_cron_registry().clear_for_tests();
         let mut app = test_app();
-        crate::triggers::global_registry()
+        theway::triggers::global_registry()
             .add_rule("a build finishes", "summarize the result")
             .unwrap();
 
@@ -1791,11 +1741,11 @@ mod tests {
     #[test]
     fn wide_layout_renders_cron_jobs_in_automation_panel() {
         let _guard = TRIGGER_REGISTRY_TEST_LOCK.lock().unwrap();
-        crate::triggers::global_registry().clear_for_tests();
-        crate::triggers::global_cron_registry().clear_for_tests();
+        theway::triggers::global_registry().clear_for_tests();
+        theway::triggers::global_cron_registry().clear_for_tests();
         let mut app = test_app();
         let secret = "sk-cron-panel-secret-12345678901234567890";
-        crate::triggers::global_cron_registry()
+        theway::triggers::global_cron_registry()
             .add_job("*/10 * * * *", &format!("call API with {secret}"))
             .unwrap();
 
@@ -2225,7 +2175,7 @@ mod tests {
 
     #[test]
     fn headless_control_plane_prompt_hook_denies_with_recovery() {
-        let hook = crate::control_plane_prompt::deny_hook(
+        let hook = theway::control_plane_prompt::deny_hook(
             "control-plane prompt requires an interactive terminal; run theway in a TTY to approve this action",
         );
         let decision = futures::executor::block_on(hook(
@@ -2251,7 +2201,7 @@ mod tests {
 
     #[test]
     fn headless_yes_control_plane_prompt_hook_allows_without_rendering_payload() {
-        let hook = crate::control_plane_prompt::allow_hook();
+        let hook = theway::control_plane_prompt::allow_hook();
         let decision = futures::executor::block_on(hook(
             theway_core::ControlPlanePromptRequest {
                 tool_call_id: "call_1".into(),
@@ -2271,7 +2221,7 @@ mod tests {
 
     #[test]
     fn login_requires_tty_message_is_bounded_and_secret_free() {
-        let msg = crate::auth::login_requires_tty_message("ds4", None);
+        let msg = theway::auth::login_requires_tty_message("ds4", None);
         assert!(msg.contains("interactive terminal"));
         assert!(msg.contains("/login ds4"));
         assert!(!msg.contains("api key for"));
@@ -2480,26 +2430,4 @@ mod tests {
         assert!(text.contains("Select provider"));
         assert!(text.contains("anthropic (1)"));
     }
-}
-
-/// Assemble the slash-command completion list (registry commands + skill shortcuts).
-fn collect_slash_commands(
-    registry: &crate::commands::Registry,
-    skills: &[theway_core::Skill],
-) -> Vec<String> {
-    let mut commands: Vec<String> = registry
-        .commands()
-        .iter()
-        .flat_map(|c| {
-            let mut names = vec![format!("/{}", c.name())];
-            names.extend(c.aliases().iter().map(|a| format!("/{a}")));
-            names
-        })
-        .collect();
-    commands.extend(
-        crate::commands::skill_shortcuts(skills, registry)
-            .into_iter()
-            .map(|sc| sc.command),
-    );
-    commands
 }

@@ -3,8 +3,8 @@
 
 use super::helpers::{assistant, message_update, strip_ansi};
 use super::tui;
-use crate::trigger_engine::event::TriggerEvent;
-use crate::trigger_engine::types::{SourceKind, TriggerState};
+use theway::trigger_engine::event::TriggerEvent;
+use theway::trigger_engine::types::{SourceKind, TriggerState};
 use theway_core::LoopEvent;
 use theway_llm_provider::{AssistantMessageEvent, ContentBlock};
 

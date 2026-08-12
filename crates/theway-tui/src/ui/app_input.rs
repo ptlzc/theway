@@ -3,31 +3,22 @@
 //! Key dispatch, modal overlay keys (control-plane prompt, model picker), clipboard
 //! paste + image attachments, the input textarea, completions, and history navigation.
 
-#[cfg(feature = "tui")]
 use anyhow::Result;
-#[cfg(feature = "tui")]
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-#[cfg(feature = "tui")]
 use ratatui::Terminal;
-#[cfg(feature = "tui")]
 use ratatui::backend::CrosstermBackend;
 
-use crate::commands;
-#[cfg(feature = "tui")]
-use crate::images;
-#[cfg(feature = "tui")]
+use theway::commands;
+use theway::images;
 use theway_transport::transport::SlashCompleter;
 
 use super::App;
-#[cfg(feature = "tui")]
 use super::kernel::TurnState;
-#[cfg(feature = "tui")]
 use super::render_utils::{human_bytes, new_textarea};
 
 impl App {
     // ── event handling ──────────────────────────────────────────────────────────────────
 
-    #[cfg(feature = "tui")]
     pub(super) async fn handle_key(
         &mut self,
         key: KeyEvent,
@@ -103,7 +94,6 @@ impl App {
         Ok(())
     }
 
-    #[cfg(feature = "tui")]
     pub(super) fn handle_control_plane_prompt_key(&mut self, key: &KeyEvent) -> bool {
         if self.control_plane_prompt.is_none() {
             return false;
@@ -138,7 +128,6 @@ impl App {
         true
     }
 
-    #[cfg(feature = "tui")]
     pub(super) fn open_model_picker(&mut self) {
         self.model_catalog = crate::model_picker::catalog();
         if self.model_catalog.is_empty() {
@@ -161,7 +150,6 @@ impl App {
         ));
     }
 
-    #[cfg(feature = "tui")]
     pub(super) async fn handle_model_picker_key(&mut self, key: &KeyEvent) -> bool {
         if self.model_picker.is_none() {
             return false;
@@ -245,7 +233,6 @@ impl App {
 
     // ── clipboard ───────────────────────────────────────────────────────────────────────
 
-    #[cfg(feature = "tui")]
     pub(super) async fn paste_clipboard(&mut self) {
         match crate::clipboard_image::read_clipboard().await {
             Ok(crate::clipboard_image::ClipboardPaste::Image(image)) => {
@@ -264,7 +251,6 @@ impl App {
         }
     }
 
-    #[cfg(feature = "tui")]
     pub(super) fn attach_clipboard_image(&mut self, image: crate::clipboard_image::ClipboardImage) {
         if !self.current_model_accepts_images() {
             self.error_line("current model does not support image input; switch to a vision-capable model before pasting an image");
@@ -294,7 +280,6 @@ impl App {
         self.kernel.current_model_accepts_images()
     }
 
-    #[cfg(feature = "tui")]
     pub(super) fn validate_pending_image_support(&mut self) -> bool {
         let count = self.pending_images.len() + self.pending_pasted_images.len();
         if count == 0 || self.current_model_accepts_images() {
@@ -308,24 +293,20 @@ impl App {
 
     // ── input helpers ───────────────────────────────────────────────────────────────────
 
-    #[cfg(feature = "tui")]
     pub(super) fn input_text(&self) -> String {
         self.input.lines().join("\n")
     }
 
-    #[cfg(feature = "tui")]
     pub(super) fn input_is_single_line(&self) -> bool {
         self.input.lines().len() <= 1
     }
 
-    #[cfg(feature = "tui")]
     pub(super) fn clear_input(&mut self) {
         self.input = new_textarea();
         self.completions.clear();
         self.completion_idx = 0;
     }
 
-    #[cfg(feature = "tui")]
     pub(super) fn set_input(&mut self, text: &str) {
         let mut input = new_textarea();
         input.insert_str(text);
@@ -333,7 +314,6 @@ impl App {
         self.refresh_completions();
     }
 
-    #[cfg(feature = "tui")]
     pub(super) fn refresh_completions(&mut self) {
         self.completer = SlashCompleter::from_commands(
             self.registry
@@ -345,7 +325,7 @@ impl App {
                     names
                 })
                 .chain(
-                    crate::commands::skill_shortcuts(
+                    theway::commands::skill_shortcuts(
                         &self.kernel.harness().skills(),
                         &self.registry,
                     )
@@ -362,7 +342,6 @@ impl App {
         self.completion_idx = 0;
     }
 
-    #[cfg(feature = "tui")]
     pub(super) fn cycle_completion(&mut self) {
         if self.completions.is_empty() {
             return;
@@ -383,7 +362,6 @@ impl App {
         }
     }
 
-    #[cfg(feature = "tui")]
     pub(super) fn history_prev(&mut self) {
         let entries = self.history.entries();
         if entries.is_empty() {
@@ -402,7 +380,6 @@ impl App {
         self.set_input(&text);
     }
 
-    #[cfg(feature = "tui")]
     pub(super) fn history_next(&mut self) {
         let Some(idx) = self.history_idx else {
             return;

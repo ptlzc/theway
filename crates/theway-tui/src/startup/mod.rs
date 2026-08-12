@@ -15,11 +15,12 @@ mod stream_auth;
 use std::io::IsTerminal as _;
 use std::sync::{Arc, OnceLock};
 
+use crate::{debug, ui};
 use anyhow::Result;
 use theway::{
-    agent_session, agent_specs, builtin_skills, commands, config, control_plane_prompt, debug,
-    history, local_models, logging, lsp_supervisor, mcp_loader, model, session, skill_overrides,
-    skills, templates, tools, triggers, ts_extensions, ui,
+    agent_session, agent_specs, builtin_skills, commands, config, control_plane_prompt, history,
+    local_models, logging, lsp_supervisor, mcp_loader, model, session, skill_overrides, skills,
+    templates, tools, triggers, ts_extensions,
 };
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::persist::DagPersistSink;
@@ -691,7 +692,7 @@ pub(crate) async fn run_repl(
     // `--http` / `--grpc`: the protocol servers live in the `theway` lib's `transport` module
     // (`server` feature). Each driver binds the listener, spawns the protocol server and runs
     // the shared transport event loop (`App::run_transport_loop`) on the public
-    // `theway::ui::web_loop::TransportEndpoints` channel surface (openspec
+    // `crate::ui::web_loop::TransportEndpoints` channel surface (openspec
     // consolidate-server-cli 2.x: bin consolidated back into the `theway` crate).
     let run_result = if run_mcp {
         theway_transport::mcp::run_mcp_server(theway::tools::local_tools())

@@ -5,7 +5,7 @@
 //!
 //! * [`SessionFactory`] — builds a fresh, fully-wired `AgentHarness` for any session id
 //!   (resume semantics, the in-process version of CLI `--resume-id`). Provided by the CLI
-//!   crate through [`crate::ui::AppConfig`]; consumed by [`crate::ui::App::switch_session`]
+//!   crate (`theway-tui`) through `ui::AppConfig`; consumed by `ui::App::switch_session`
 //!   inside the serialized event loop.
 //! * [`SessionOps`] — sync query/mutation ops that do NOT need the event loop
 //!   (list / create / rename / delete). Switching the *current* session is deliberately

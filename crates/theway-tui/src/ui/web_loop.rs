@@ -27,11 +27,11 @@ use theway_core::SkillSource;
 use theway_core::multiagent::graph::types::DagEvent;
 use theway_core::multiagent::registry::AgentJobEvent;
 
-use crate::commands::{CommandCtx, CommandOutcome};
-use crate::mentions;
 use crate::ui::App;
 use crate::ui::kernel::{QueuedTurn, TurnState, poll_turn};
 use crate::ui::{feed, prompt_display};
+use theway::commands::{CommandCtx, CommandOutcome};
+use theway::mentions;
 use theway_transport::wire::*;
 use theway_transport::{TransportEndpoints, TransportMode};
 
@@ -81,7 +81,7 @@ impl App {
             completer: self.completer.clone(),
             registry: self.subagent_registry.clone(),
             dag_engine: self.dag_engine.clone(),
-            session_ops: Arc::new(crate::session_ops::AppSessionOps::new(
+            session_ops: Arc::new(theway::session_ops::AppSessionOps::new(
                 self.session_repo.clone(),
                 self.dag_engine.clone(),
                 self.current_session_state.clone(),
@@ -257,7 +257,7 @@ impl App {
             self.system_line(format!("already on session {id}"));
             return;
         }
-        match crate::session::find_path_by_id(&self.session_repo, &id).await {
+        match theway::session::find_path_by_id(&self.session_repo, &id).await {
             Ok(Some(_)) => {}
             Ok(None) => {
                 self.error_line(format!("switch session: no session matches id {id}"));
@@ -283,7 +283,7 @@ impl App {
             return;
         }
 
-        let Some(rule) = crate::triggers::global_registry()
+        let Some(rule) = theway::triggers::global_registry()
             .list()
             .into_iter()
             .find(|rule| rule.id == id)
@@ -348,7 +348,7 @@ impl App {
             mentions::expand(&trimmed, &self.cwd).await.0
         };
         let prompt_text =
-            crate::commands::attach_skill_prompt(expanded, self.pending_skill.take().as_deref());
+            theway::commands::attach_skill_prompt(expanded, self.pending_skill.take().as_deref());
         let display = prompt_display(&trimmed, loaded_images.len());
         if interrupt {
             // INTERRUPT mode: stop the in-flight turn and drop anything queued
@@ -375,7 +375,7 @@ impl App {
                 tool_count: self.tool_count,
                 cwd: &self.cwd,
             };
-            crate::commands::dispatch(input, &self.registry, &ctx).await
+            theway::commands::dispatch(input, &self.registry, &ctx).await
         };
         match outcome {
             CommandOutcome::Quit => {
@@ -474,10 +474,10 @@ impl App {
             queued_count: self.queued_turns.len(),
             latest_trigger_poll: self.latest_trigger_poll.clone(),
             goal: self.latest_goal.as_ref().map(|goal| WebGoalSnapshot {
-                condition: crate::bug_report::redact(&goal.condition),
+                condition: theway::bug_report::redact(&goal.condition),
                 status: goal.status.as_str().to_string(),
                 iterations: goal.iterations,
-                last_reason: goal.last_reason.as_deref().map(crate::bug_report::redact),
+                last_reason: goal.last_reason.as_deref().map(theway::bug_report::redact),
             }),
             control_plane_prompt: self
                 .control_plane_prompt
@@ -519,7 +519,7 @@ impl App {
         let enabled = skills.len().saturating_sub(disabled);
         let source_count = |source| skills.iter().filter(|skill| skill.source == source).count();
 
-        let rules = crate::triggers::global_registry().list();
+        let rules = theway::triggers::global_registry().list();
         let trigger_enabled = rules.iter().filter(|rule| rule.enabled).count();
         let trigger_rules = rules
             .iter()
@@ -534,7 +534,7 @@ impl App {
             })
             .collect::<Vec<_>>();
 
-        let cron_jobs = crate::triggers::global_cron_registry().list();
+        let cron_jobs = theway::triggers::global_cron_registry().list();
         let cron_enabled = cron_jobs.iter().filter(|job| job.enabled).count();
         let cron_job_rows = cron_jobs
             .iter()
@@ -621,7 +621,7 @@ fn web_feed_lines(feed: &feed::Feed) -> Vec<String> {
 }
 
 fn web_preview(text: &str) -> String {
-    feed::truncate_chars(&crate::bug_report::redact(text), 120)
+    feed::truncate_chars(&theway::bug_report::redact(text), 120)
 }
 
 fn web_control_plane_prompt_snapshot(
@@ -639,17 +639,17 @@ fn web_control_plane_prompt_snapshot(
 }
 
 fn web_prompt_text(text: &str, cap: usize) -> String {
-    feed::truncate_chars(&crate::bug_report::redact(text), cap)
+    feed::truncate_chars(&theway::bug_report::redact(text), cap)
 }
 
 fn load_web_prompt_images(
     images: &[WebPromptImage],
 ) -> Result<Vec<theway_llm_provider::ImageContent>> {
-    if images.len() > crate::images::MAX_IMAGES_PER_MESSAGE {
+    if images.len() > theway::images::MAX_IMAGES_PER_MESSAGE {
         bail!(
             "{} images exceeds per-message cap of {}",
             images.len(),
-            crate::images::MAX_IMAGES_PER_MESSAGE
+            theway::images::MAX_IMAGES_PER_MESSAGE
         );
     }
     let mut out = Vec::with_capacity(images.len());
@@ -668,7 +668,7 @@ fn load_web_prompt_images(
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(data)
             .with_context(|| format!("decode {label}"))?;
-        out.push(crate::images::load_bytes(&label, &bytes)?);
+        out.push(theway::images::load_bytes(&label, &bytes)?);
     }
     Ok(out)
 }
@@ -750,7 +750,7 @@ mod tests {
                 data: String::new(),
                 name: None,
             };
-            crate::images::MAX_IMAGES_PER_MESSAGE + 1
+            theway::images::MAX_IMAGES_PER_MESSAGE + 1
         ];
         let err = load_web_prompt_images(&images).unwrap_err().to_string();
         assert!(err.contains("exceeds per-message cap"), "{err}");

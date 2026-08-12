@@ -3,22 +3,20 @@
 //!
 //! Run: `cargo run -p theway --example sdk_embed`
 //!
-//! The example shows the three embedding levels:
+//! The example shows the embedding levels available from the `theway` library:
 //!   1. `AgentHarness` (core crate) — the raw agent runtime.
 //!   2. `AgentSession` — auto-retry wrapper for headless prompt loops.
-//!   3. `App` + `AppConfig` — the full interactive surface (TUI, `--web`, `--grpc`),
-//!      assembled exactly like the `theway` binary does.
+//!
+//! The full interactive surface (`App` + `AppConfig`, TUI / `--web` / `--grpc`)
+//! moved to the `theway-tui` crate together with the terminal UI; embed it from
+//! there when you need the in-process REPL.
 
 use std::sync::Arc;
 
 use theway::agent_session::{AgentSession, RetrySettings};
 use theway::commands::Registry;
-use theway::ui::{App, AppConfig};
-use theway_core::multiagent::graph::engine::DagEngine;
-use theway_core::multiagent::registry::AgentJobRegistry;
 use theway_core::{AgentHarness, AgentHarnessOptions, JsonlSessionRepo};
 use theway_llm_provider::{Api, Model, ModelCost, Provider};
-use theway_transport::wire::WebOptions;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -51,52 +49,13 @@ async fn main() -> anyhow::Result<()> {
         Arc::strong_count(&harness)
     );
 
-    // 3. Full interactive surface: App + transport options (same assembly as the CLI).
-    let (_feed_tx, feed_rx) = tokio::sync::mpsc::unbounded_channel();
-    let (_main_run_tx, main_run_rx) = tokio::sync::mpsc::unbounded_channel();
-    let trigger_executor =
-        std::sync::Arc::new(theway::trigger_engine::execution::TriggerExecutor::new(
-            harness.agent_arc(),
-            harness.session().clone(),
-            theway::trigger_engine::runtime::TriggerRuntimeConfig::default(),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        ));
-    let _app = App::new(AppConfig {
-        harness,
-        trigger_executor,
-        retry: RetrySettings::default(),
-        registry: Registry::with_builtins(),
-        cwd: std::env::current_dir()?,
-        session_id: "sdk-demo".into(),
-        log_path: None,
-        tool_count: 0,
-        history: theway::history::HistoryStore::load(),
-        pending_images: vec![],
-        feed_rx,
-        main_run_rx,
-        control_plane_prompt_rx: None,
-        panel_status: Default::default(),
-        dag_engine: Arc::new(DagEngine::new()),
-        subagent_registry: AgentJobRegistry::new(),
-        // SDK demo: no in-process session switching; the factory is only
-        // exercised by the CLI's `--resume-id`/SwitchSession path.
-        session_factory: Arc::new(|_id| {
-            Box::pin(async { anyhow::bail!("sdk_embed: no session factory") })
-        }),
-        session_repo: Arc::new(JsonlSessionRepo::new(
-            std::env::temp_dir().join("theway-sdk-demo-sessions"),
-        )),
-    });
-    let _opts = WebOptions {
-        host: "127.0.0.1".into(),
-        port: 0,
-    };
-    println!("sdk: App + WebOptions OK — SDK usable from external project");
+    // 3. Headless command surface: slash-command registry + session repo are usable
+    //    without any UI (the interactive `App` lives in the `theway-tui` crate).
+    let _registry = Registry::with_builtins();
+    let _repo = Arc::new(JsonlSessionRepo::new(
+        std::env::temp_dir().join("theway-sdk-demo-sessions"),
+    ));
+    println!("sdk: registry + session repo OK — SDK usable from external project");
     let _ = agent;
     Ok(())
 }

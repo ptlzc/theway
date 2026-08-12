@@ -3,14 +3,11 @@
 //! `Feed::plain_lines`.
 
 use chrono::{DateTime, Local, TimeZone, Utc};
-#[cfg(feature = "tui")]
 use ratatui::style::{Color, Modifier, Style};
-#[cfg(feature = "tui")]
 use ratatui::text::Line;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::types::Block;
-#[cfg(feature = "tui")]
 use super::types::Level;
 
 pub(super) fn should_separate(previous: Option<&Block>, current: &Block, has_output: bool) -> bool {
@@ -27,7 +24,6 @@ pub(super) fn should_separate(previous: Option<&Block>, current: &Block, has_out
     )
 }
 
-#[cfg(feature = "tui")]
 pub(super) fn style_for_level(level: Level) -> Style {
     match level {
         Level::Output => Style::default(),
@@ -68,7 +64,6 @@ pub(super) fn format_timestamp_label(timestamp: DateTime<Utc>, _now: DateTime<Lo
 
 /// Split `text` on newlines, word-wrap each paragraph to `width`, and push styled lines. An
 /// optional `prefix` is prepended to the very first paragraph (e.g. `you ▸ `).
-#[cfg(feature = "tui")]
 pub(super) fn push_paragraphs(
     out: &mut Vec<Line<'static>>,
     text: &str,

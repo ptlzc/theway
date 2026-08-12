@@ -79,8 +79,7 @@ pub use misc::print_help_with_skills;
 // No in-tree callers, but keep the pre-split `commands::print_help` path alive.
 #[allow(unused_imports)]
 pub use misc::print_help;
-pub use model::cli_model_help_text;
-pub(crate) use model::{model_credential_hint, parse_model_spec};
+pub use model::{cli_model_help_text, model_credential_hint, parse_model_spec};
 // Only `tests/commands.rs` calls through these `commands::…` paths; the allow keeps the
 // pre-split pub(crate) surface without tripping unused_imports in non-test builds.
 pub use session::save_api_key;

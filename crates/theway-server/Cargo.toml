@@ -3,18 +3,9 @@ name = "theway"
 version = "0.75.0"
 edition = "2024"
 rust-version = "1.85"
-description = "theway: agent server (fork of theway) — REPL TUI, graph engineering mode, goal loops, cron/triggers, gRPC/HTTP/WS transport servers (server-first; the `theway` binary is the server entry, `tui` optional for terminal UI)."
+description = "theway: agent server (fork of theway) — graph engineering mode, goal loops, cron/triggers, gRPC/HTTP/WS transport servers (server-first; terminal UI lives in the theway-tui crate)."
 license = "MIT"
 authors = ["theway contributors"]
-
-[features]
-# Server-first: transport servers (gRPC/HTTP/WS) are always on — theway IS an
-# agent server. `tui` stays optional (terminal UI); embeds that only want the
-# headless server set default-features = false.
-default = ["tui"]
-# Terminal UI (ratatui TUI + terminal input). Optional: headless server embeds
-# (or CI) can use default-features = false.
-tui = ["dep:crossterm", "dep:ratatui", "dep:tui-textarea", "dep:arboard", "dep:qrcode", "dep:image"]
 
 [lib]
 name = "theway"
@@ -80,13 +71,7 @@ anyhow = "1"
 thiserror = "2"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 uuid = { version = "1", features = ["v7", "v4", "serde"] }
-crossterm = { version = "0.28", features = ["event-stream"], optional = true }
-ratatui = { version = "0.29", optional = true }
-tui-textarea = { version = "0.7", optional = true }
 unicode-width = "0.2"
-arboard = { version = "3", optional = true }
-image = { version = "0.25", default-features = false, features = ["png"], optional = true }
-qrcode = { version = "0.14", default-features = false, optional = true }
 ignore = "0.4"
 sha2 = "0.10"
 hex = "0.4"

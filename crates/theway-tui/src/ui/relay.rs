@@ -152,7 +152,6 @@ pub(super) fn viewer_url(base_url: &str, view_token: &str) -> String {
 /// Render the viewer URL as a scannable QR code for the TUI feed. Unicode half-block
 /// rendering, inverted so modules read dark-on-light on dark terminal themes (phone
 /// cameras accept inverted QR codes).
-#[cfg(feature = "tui")]
 pub(super) fn qr_lines(url: &str) -> Result<Vec<String>> {
     use qrcode::render::unicode;
     let code =

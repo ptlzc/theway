@@ -6,9 +6,10 @@
 
 use std::io::IsTerminal as _;
 
+use crate::resume_picker;
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
-use theway::{commands, config, resume_picker, session, session_archive};
+use theway::{commands, config, session, session_archive};
 use theway_core::JsonlSessionRepo;
 
 #[derive(Parser, Debug)]

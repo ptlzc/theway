@@ -9,7 +9,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use crate::agent_session::{AgentSession, RetrySettings};
+use theway::agent_session::{AgentSession, RetrySettings};
 use theway_core::{AgentHarness, AgentRunError};
 use theway_llm_provider::{ImageContent, InputModality};
 
@@ -69,14 +69,14 @@ impl QueuedTurn {
 #[derive(Clone)]
 pub(super) struct ReplKernel {
     harness: Arc<AgentHarness>,
-    trigger_executor: Arc<crate::trigger_engine::execution::TriggerExecutor>,
+    trigger_executor: Arc<theway::trigger_engine::execution::TriggerExecutor>,
     retry: RetrySettings,
 }
 
 impl ReplKernel {
     pub(super) fn new(
         harness: Arc<AgentHarness>,
-        trigger_executor: Arc<crate::trigger_engine::execution::TriggerExecutor>,
+        trigger_executor: Arc<theway::trigger_engine::execution::TriggerExecutor>,
         retry: RetrySettings,
     ) -> Self {
         Self {
@@ -88,7 +88,7 @@ impl ReplKernel {
 
     pub(super) fn trigger_executor(
         &self,
-    ) -> &Arc<crate::trigger_engine::execution::TriggerExecutor> {
+    ) -> &Arc<theway::trigger_engine::execution::TriggerExecutor> {
         &self.trigger_executor
     }
 

@@ -7,12 +7,12 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 pub struct UiControlPlanePrompt {
-    pub(crate) request: ControlPlanePromptRequest,
-    pub(crate) responder: oneshot::Sender<ControlPlanePromptDecision>,
+    pub request: ControlPlanePromptRequest,
+    pub responder: oneshot::Sender<ControlPlanePromptDecision>,
 }
 
 impl UiControlPlanePrompt {
-    pub(crate) fn resolve(self, decision: ControlPlanePromptDecision) {
+    pub fn resolve(self, decision: ControlPlanePromptDecision) {
         let _ = self.responder.send(decision);
     }
 }

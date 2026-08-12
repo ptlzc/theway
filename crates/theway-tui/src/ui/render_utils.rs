@@ -4,37 +4,26 @@
 //! textarea construction, terminal enter/leave sequences, and the headless feed printer.
 //! Everything here is a free function — no `App` state.
 
-#[cfg(feature = "tui")]
 use std::io::Write as _;
 
-#[cfg(feature = "tui")]
 use anyhow::Result;
-#[cfg(feature = "tui")]
 use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
-#[cfg(feature = "tui")]
 use crossterm::execute;
-#[cfg(feature = "tui")]
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use once_cell::sync::Lazy;
-#[cfg(feature = "tui")]
 use ratatui::layout::Rect;
-#[cfg(feature = "tui")]
 use ratatui::style::{Color, Style};
-#[cfg(feature = "tui")]
 use ratatui::text::Line;
 use regex::Regex;
-#[cfg(feature = "tui")]
 use tui_textarea::TextArea;
 
-#[cfg(feature = "tui")]
 use super::FeedUpdate;
 use super::feed;
 
 const QUEUED_PREVIEW_CHARS: usize = 80;
 
-#[cfg(feature = "tui")]
 pub(super) fn panel_line(text: String, color: Color, width: usize) -> Line<'static> {
     Line::styled(
         feed::truncate_chars(&text, width.max(1)),
@@ -42,7 +31,6 @@ pub(super) fn panel_line(text: String, color: Color, width: usize) -> Line<'stat
     )
 }
 
-#[cfg(feature = "tui")]
 pub(super) fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
     let width = width.min(area.width);
     let height = height.min(area.height);
@@ -64,7 +52,6 @@ pub(super) fn safe_control_prompt_text(text: &str, cap: usize) -> String {
     feed::truncate_chars(&redacted, cap.max(1)).replace('\n', " ")
 }
 
-#[cfg(feature = "tui")]
 pub(super) fn safe_control_prompt_payload(value: &serde_json::Value, cap: usize) -> String {
     let text = serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string());
     safe_control_prompt_text(&text, cap)
@@ -76,20 +63,19 @@ fn redact_control_prompt_secrets(text: &str) -> String {
         )
         .expect("control prompt redaction regex must compile")
     });
-    let redacted = crate::bug_report::redact(text);
+    let redacted = theway::bug_report::redact(text);
     TOKENISH_FIELD
         .replace_all(&redacted, "$1$2[REDACTED]")
         .into_owned()
 }
 
-#[cfg(feature = "tui")]
 pub(super) fn panel_rule_preview(text: &str, width: usize) -> String {
-    let redacted = crate::bug_report::redact(text).replace('\n', " ");
+    let redacted = theway::bug_report::redact(text).replace('\n', " ");
     feed::truncate_chars(&redacted, width.max(1))
 }
 
 pub(super) fn queue_preview(text: &str) -> String {
-    let redacted = crate::bug_report::redact(text).replace('\n', " ");
+    let redacted = theway::bug_report::redact(text).replace('\n', " ");
     feed::truncate_chars(&redacted, QUEUED_PREVIEW_CHARS)
 }
 
@@ -112,7 +98,6 @@ fn image_attachment_display(image_count: usize) -> String {
     }
 }
 
-#[cfg(feature = "tui")]
 pub(super) fn human_bytes(bytes: usize) -> String {
     const KIB: usize = 1024;
     const MIB: usize = 1024 * 1024;
@@ -142,7 +127,6 @@ pub(super) fn user_facing_run_error(error: &str) -> String {
     format!("no API key for provider: {provider}; run /login {provider} or {credential_hint}")
 }
 
-#[cfg(feature = "tui")]
 pub(super) fn new_textarea() -> TextArea<'static> {
     let mut textarea = TextArea::default();
     textarea.set_cursor_line_style(Style::default());
@@ -150,21 +134,18 @@ pub(super) fn new_textarea() -> TextArea<'static> {
     textarea
 }
 
-#[cfg(feature = "tui")]
 pub(super) fn enter_tui() -> Result<()> {
     enable_raw_mode()?;
     write_enter_tui_commands(&mut std::io::stdout())?;
     Ok(())
 }
 
-#[cfg(feature = "tui")]
 pub(super) fn leave_tui() -> Result<()> {
     write_leave_tui_commands(&mut std::io::stdout())?;
     disable_raw_mode()?;
     Ok(())
 }
 
-#[cfg(feature = "tui")]
 pub(super) fn write_enter_tui_commands(out: &mut impl std::io::Write) -> std::io::Result<()> {
     execute!(out, EnterAlternateScreen, EnableBracketedPaste)?;
     // Mouse capture is written explicitly instead of via crossterm's
@@ -180,14 +161,12 @@ pub(super) fn write_enter_tui_commands(out: &mut impl std::io::Write) -> std::io
     out.flush()
 }
 
-#[cfg(feature = "tui")]
 pub(super) fn write_leave_tui_commands(out: &mut impl std::io::Write) -> std::io::Result<()> {
     write!(out, "\x1b[?1006l\x1b[?1000l")?;
     execute!(out, DisableBracketedPaste, LeaveAlternateScreen)?;
     Ok(())
 }
 
-#[cfg(feature = "tui")]
 pub(super) fn print_headless_update(update: &FeedUpdate, at_line_start: &mut bool) {
     let mut out = std::io::stdout();
     match update {

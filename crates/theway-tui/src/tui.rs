@@ -8,11 +8,11 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::trigger_engine::event::{TriggerEvent, TriggerListener};
-use crate::trigger_engine::types::TriggerState;
 use crossterm::ExecutableCommand;
 use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor};
 use parking_lot::Mutex;
+use theway::trigger_engine::event::{TriggerEvent, TriggerListener};
+use theway::trigger_engine::types::TriggerState;
 use theway_core::{AgentMessage, LoopEvent, LoopListener, SessionEvent, SessionListener};
 use theway_llm_provider::{
     AssistantMessageEvent, ContentBlock, ImageContent, Message, UserContent, UserContentBlock,
@@ -249,11 +249,11 @@ impl Tui {
             TriggerEvent::TriggerHandled {
                 trace_id, state, ..
             } => match state {
-                crate::trigger_engine::types::TriggerState::Accepted => {}
-                crate::trigger_engine::types::TriggerState::Deduped
-                | crate::trigger_engine::types::TriggerState::CycleSuppressed
-                | crate::trigger_engine::types::TriggerState::PermissionDenied
-                | crate::trigger_engine::types::TriggerState::NeedsApproval => {
+                theway::trigger_engine::types::TriggerState::Accepted => {}
+                theway::trigger_engine::types::TriggerState::Deduped
+                | theway::trigger_engine::types::TriggerState::CycleSuppressed
+                | theway::trigger_engine::types::TriggerState::PermissionDenied
+                | theway::trigger_engine::types::TriggerState::NeedsApproval => {
                     self.state
                         .lock()
                         .quiet_dynamic_trigger_traces
@@ -368,15 +368,15 @@ impl Tui {
 
 fn trigger_state_label(state: TriggerState) -> &'static str {
     match state {
-        crate::trigger_engine::types::TriggerState::Deduped => "deduped",
-        crate::trigger_engine::types::TriggerState::CycleSuppressed => "cycle-suppressed",
-        crate::trigger_engine::types::TriggerState::PermissionDenied => "permission-denied",
-        crate::trigger_engine::types::TriggerState::NeedsApproval => "needs-approval",
-        crate::trigger_engine::types::TriggerState::Received => "received",
-        crate::trigger_engine::types::TriggerState::Accepted => "accepted",
-        crate::trigger_engine::types::TriggerState::Running => "running",
-        crate::trigger_engine::types::TriggerState::Failed => "failed",
-        crate::trigger_engine::types::TriggerState::Completed => "completed",
+        theway::trigger_engine::types::TriggerState::Deduped => "deduped",
+        theway::trigger_engine::types::TriggerState::CycleSuppressed => "cycle-suppressed",
+        theway::trigger_engine::types::TriggerState::PermissionDenied => "permission-denied",
+        theway::trigger_engine::types::TriggerState::NeedsApproval => "needs-approval",
+        theway::trigger_engine::types::TriggerState::Received => "received",
+        theway::trigger_engine::types::TriggerState::Accepted => "accepted",
+        theway::trigger_engine::types::TriggerState::Running => "running",
+        theway::trigger_engine::types::TriggerState::Failed => "failed",
+        theway::trigger_engine::types::TriggerState::Completed => "completed",
     }
 }
 
@@ -395,16 +395,16 @@ fn is_no_match_dynamic_summary(summary: &str) -> bool {
 
 fn trigger_state_color(state: TriggerState) -> &'static str {
     match state {
-        crate::trigger_engine::types::TriggerState::PermissionDenied
-        | crate::trigger_engine::types::TriggerState::NeedsApproval => RED,
+        theway::trigger_engine::types::TriggerState::PermissionDenied
+        | theway::trigger_engine::types::TriggerState::NeedsApproval => RED,
         _ => DARK_GREY,
     }
 }
 
-fn source_kind_label(kind: crate::trigger_engine::types::SourceKind) -> &'static str {
+fn source_kind_label(kind: theway::trigger_engine::types::SourceKind) -> &'static str {
     match kind {
-        crate::trigger_engine::types::SourceKind::Local => "local",
-        crate::trigger_engine::types::SourceKind::Mcp => "mcp",
+        theway::trigger_engine::types::SourceKind::Local => "local",
+        theway::trigger_engine::types::SourceKind::Mcp => "mcp",
     }
 }
 

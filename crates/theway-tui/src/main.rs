@@ -16,8 +16,13 @@
 //! command dispatch.
 
 mod cli;
+mod clipboard_image;
+mod debug;
+mod model_picker;
+mod resume_picker;
 mod session_factory;
 mod startup;
+pub mod ui;
 mod ui_mode;
 
 use std::io::IsTerminal as _;

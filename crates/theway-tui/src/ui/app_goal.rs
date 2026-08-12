@@ -1,7 +1,7 @@
 //! Goal + session state (`App` methods split out of `ui/mod.rs`).
 //!
 //! Goal-state refresh, session switch (harness rebuild), and the live current-session
-//! state cell shared with [`crate::session_ops::AppSessionOps`].
+//! state cell shared with [`theway::session_ops::AppSessionOps`].
 
 use anyhow::{Context as _, Result};
 
@@ -15,7 +15,7 @@ impl App {
 
     /// session-resource-model: swap the runtime to a different session.
     ///
-    /// Builds a fresh harness via the [`crate::session_ops::SessionFactory`] (resume
+    /// Builds a fresh harness via the [`theway::session_ops::SessionFactory`] (resume
     /// semantics — the factory rehydrates the transcript and re-wires session-stamped
     /// tools), replaces the kernel's harness, and resets every piece of per-session UI
     /// state. Must run inside the serialized event loop (it is driven by
@@ -43,7 +43,7 @@ impl App {
     }
 
     /// Push the live current-session state (id / busy / model / cwd) into the shared cell
-    /// that backs [`crate::session_ops::AppSessionOps`]. Called on every published snapshot
+    /// that backs [`theway::session_ops::AppSessionOps`]. Called on every published snapshot
     /// and on session switch.
     pub(super) fn sync_current_session_state(&self) {
         let mut state = self.current_session_state.lock();

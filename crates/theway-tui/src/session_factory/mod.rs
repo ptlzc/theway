@@ -7,8 +7,9 @@
 
 use std::sync::{Arc, OnceLock};
 
+use crate::ui;
 use anyhow::{Context, Result};
-use theway::{agent_specs, session, tools, triggers, ui};
+use theway::{agent_specs, session, tools, triggers};
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::{AgentHarness, AgentHarnessOptions, JsonlSessionRepo, ThinkingLevel};
 use theway_core::{agent::hooks, multiagent::goal};

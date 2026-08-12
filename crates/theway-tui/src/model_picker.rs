@@ -19,7 +19,7 @@ pub use theway_transport::wire::{ModelEntry, ProviderGroup};
 
 /// Filtered + grouped catalog with live credential detection.
 pub(crate) fn catalog() -> Vec<ProviderGroup> {
-    catalog_with(|provider| crate::commands::model_credential_hint(provider).is_none())
+    catalog_with(|provider| theway::commands::model_credential_hint(provider).is_none())
 }
 
 /// Testable core: credential detection injected.
@@ -50,7 +50,6 @@ fn catalog_with(has_credential: impl Fn(&str) -> bool) -> Vec<ProviderGroup> {
         .collect()
 }
 
-#[cfg(feature = "tui")]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum PickerLevel {
     Providers,
@@ -58,7 +57,6 @@ pub(crate) enum PickerLevel {
 }
 
 /// Pure two-level navigation state. Rendering and IO live in `ui/`.
-#[cfg(feature = "tui")]
 pub(crate) struct ModelPickerState {
     pub groups: Vec<ProviderGroup>,
     pub level: PickerLevel,
@@ -67,7 +65,6 @@ pub(crate) struct ModelPickerState {
     pub active: Option<(String, String)>,
 }
 
-#[cfg(feature = "tui")]
 impl ModelPickerState {
     pub fn new(groups: Vec<ProviderGroup>, active: Option<(String, String)>) -> Self {
         Self {

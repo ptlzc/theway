@@ -3,36 +3,26 @@
 //! Submit + slash dispatch, the queued-turn FIFO, the per-kind turn starters, OAuth
 //! login, and abort/exit semantics (Ctrl-C / Ctrl-D while a turn runs).
 
-#[cfg(feature = "tui")]
 use std::time::{Duration, Instant};
 
-#[cfg(feature = "tui")]
 use anyhow::Result;
-#[cfg(feature = "tui")]
 use ratatui::Terminal;
-#[cfg(feature = "tui")]
 use ratatui::backend::CrosstermBackend;
 use theway_llm_provider::ImageContent;
 
-#[cfg(feature = "tui")]
-use crate::commands;
-#[cfg(feature = "tui")]
-use crate::commands::{CommandCtx, CommandOutcome};
-#[cfg(feature = "tui")]
-use crate::images;
-#[cfg(feature = "tui")]
-use crate::mentions;
+use theway::commands;
+use theway::commands::{CommandCtx, CommandOutcome};
+use theway::images;
+use theway::mentions;
 
 use super::App;
 use super::kernel::{QueuedTurn, TurnState};
 use super::render_utils::queue_preview;
-#[cfg(feature = "tui")]
 use super::render_utils::{enter_tui, leave_tui, prompt_display};
 
 impl App {
     // ── submit / dispatch ───────────────────────────────────────────────────────────────
 
-    #[cfg(feature = "tui")]
     pub(super) async fn submit(
         &mut self,
         turn: &mut TurnState,
@@ -142,7 +132,6 @@ impl App {
         ));
     }
 
-    #[cfg(feature = "tui")]
     pub(super) fn cancel_last_queued_turn(&mut self) {
         let Some(job) = self.queued_turns.pop_back() else {
             self.system_line("queue is empty");
@@ -198,7 +187,6 @@ impl App {
         true
     }
 
-    #[cfg(feature = "tui")]
     pub(super) async fn dispatch_slash(
         &mut self,
         input: &str,
@@ -326,7 +314,6 @@ impl App {
         self.busy = true;
     }
 
-    #[cfg(feature = "tui")]
     pub(super) async fn login(
         &mut self,
         provider: &str,
@@ -336,7 +323,7 @@ impl App {
         // rpassword needs a cooked terminal with echo control, so drop out of the full-screen
         // UI for the prompt, then restore.
         leave_tui().ok();
-        let result = crate::auth::prompt_for_api_key(provider).await;
+        let result = theway::auth::prompt_for_api_key(provider).await;
         let _ = enter_tui();
         let _ = terminal.clear();
         match result {
@@ -362,7 +349,6 @@ impl App {
         }
     }
 
-    #[cfg(feature = "tui")]
     pub(super) fn handle_ctrl_d(&mut self, turn: &mut TurnState) -> bool {
         if turn.fut.is_some() {
             self.request_abort(turn);
@@ -372,7 +358,6 @@ impl App {
         }
     }
 
-    #[cfg(feature = "tui")]
     pub(super) fn on_idle_ctrlc(&mut self) -> bool {
         let now = Instant::now();
         if self

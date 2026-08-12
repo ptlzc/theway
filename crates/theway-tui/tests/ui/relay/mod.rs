@@ -43,7 +43,6 @@ fn viewer_url_is_session_path_with_trailing_slash() {
 }
 
 #[test]
-#[cfg(feature = "tui")]
 fn qr_lines_render_a_scannable_block_grid() {
     let lines = qr_lines("https://pie.0xfefe.me/session/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/")
         .expect("urls of this shape must encode");

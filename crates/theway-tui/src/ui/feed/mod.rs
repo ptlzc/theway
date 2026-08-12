@@ -12,9 +12,7 @@
 
 #[cfg(test)]
 use chrono::{Local, TimeZone, Utc};
-#[cfg(feature = "tui")]
 use ratatui::style::{Color, Modifier, Style};
-#[cfg(feature = "tui")]
 use ratatui::text::Line;
 #[cfg(test)]
 use unicode_width::UnicodeWidthStr;
@@ -32,7 +30,6 @@ use render::{
     current_time_label, display_prefix, message_timestamp_label, push_plain_paragraphs,
     should_separate, wrap_str,
 };
-#[cfg(feature = "tui")]
 use render::{push_paragraphs, style_for_level};
 use types::{Block, Open};
 pub use types::{FeedUpdate, Level, TriggerPollStatus, WebFeedBlock};
@@ -358,7 +355,6 @@ impl Feed {
     }
 
     /// Render the whole feed to width-wrapped `ratatui` lines, ready to scroll/draw.
-    #[cfg(feature = "tui")]
     pub fn lines(&self, width: usize) -> Vec<Line<'static>> {
         let width = width.max(1);
         let mut out: Vec<Line<'static>> = Vec::new();
@@ -488,13 +484,10 @@ impl Default for Feed {
     }
 }
 
-#[cfg(feature = "tui")]
 const USER_STYLE: Style = Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD);
-#[cfg(feature = "tui")]
 const THINKING_STYLE: Style = Style::new()
     .fg(Color::DarkGray)
     .add_modifier(Modifier::ITALIC);
-#[cfg(feature = "tui")]
 const TOOL_STYLE: Style = Style::new().fg(Color::Yellow);
 pub const TOOL_OUTPUT_HEAD_LINES: usize = 20;
 pub const TOOL_OUTPUT_TAIL_LINES: usize = 4;

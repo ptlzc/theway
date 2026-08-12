@@ -6,10 +6,10 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::trigger_engine::event::{TriggerEvent, TriggerListener};
-use crate::trigger_engine::types::{SourceKind, TriggerState};
 use chrono::Local;
 use parking_lot::Mutex;
+use theway::trigger_engine::event::{TriggerEvent, TriggerListener};
+use theway::trigger_engine::types::{SourceKind, TriggerState};
 use theway_core::{LoopEvent, LoopListener, SessionEvent, SessionListener};
 use theway_llm_provider::AssistantMessageEvent;
 use tokio::sync::broadcast;
@@ -265,7 +265,7 @@ fn map_trigger_event(
             // the conversation line.
             let summary = summary
                 .as_deref()
-                .map(crate::triggers::cron::strip_loop_protocol_tags)
+                .map(theway::triggers::cron::strip_loop_protocol_tags)
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| "completed".to_string());
             let summary = summary.as_str();
@@ -347,7 +347,7 @@ fn dynamic_poll_status_update(
         trace_id: truncate_chars(trace_id, 24),
         source_label: truncate_chars(source_label, 48),
         event_label: truncate_chars(event_label, 64),
-        summary: truncate_chars(&crate::bug_report::redact(summary).replace('\n', " "), 120),
+        summary: truncate_chars(&theway::bug_report::redact(summary).replace('\n', " "), 120),
     })
 }
 

@@ -20,23 +20,23 @@ help: ## show this help
 # --- build ------------------------------------------------------------------
 
 .PHONY: build
-build: ## cargo build --workspace --features tui (full CLI; SDK-only consumers need neither)
-	$(CARGO) build --workspace --features tui --target-dir $(OUTPUT_DIR)
+build: ## cargo build --workspace (full CLI; SDK-only consumers use -p theway)
+	$(CARGO) build --workspace --target-dir $(OUTPUT_DIR)
 	cp $(THEWAY_BINARY) $(dir $(THEWAY_BINARY))tw$(EXE)
 
 .PHONY: release
-release: ## cargo build --release --features tui (optimized binary at (THEWAY_RELEASE_BINARY))
-	$(CARGO) build --workspace --release --features tui --target-dir $(OUTPUT_DIR)
+release: ## cargo build --release (optimized binary at (THEWAY_RELEASE_BINARY))
+	$(CARGO) build --workspace --release --target-dir $(OUTPUT_DIR)
 
 .PHONY: check
-check: ## fast type-check without producing artifacts (full workspace incl. tui)
-	$(CARGO) check --workspace --all-targets --features tui
+check: ## fast type-check without producing artifacts (full workspace incl. TUI crate)
+	$(CARGO) check --workspace --all-targets
 
 # --- tests ------------------------------------------------------------------
 
 .PHONY: test
 test: ## run every workspace test (full CLI surface)
-	$(CARGO) test --workspace --features tui
+	$(CARGO) test --workspace
 
 .PHONY: test-coding-agent
 test-coding-agent: ## run only the harness crate's tests
@@ -66,7 +66,7 @@ fmt-check: ## rustfmt --check (CI uses this)
 
 .PHONY: lint
 lint: ## clippy with -D warnings (matches CI)
-	$(CARGO) clippy --workspace --all-targets --features tui -- -D warnings
+	$(CARGO) clippy --workspace --all-targets -- -D warnings
 
 .PHONY: ci
 ci: fmt-check lint test ## run the full CI pipeline locally
@@ -75,11 +75,11 @@ ci: fmt-check lint test ## run the full CI pipeline locally
 
 .PHONY: run
 run: ## build + run theway in dev mode (interactive)
-	$(CARGO) run --workspace --features tui -p theway
+	$(CARGO) run --workspace -p theway-tui --bin theway
 
 .PHONY: install
 install: ## install theway binary into ~/.cargo/bin
-	$(CARGO) install --path crates/server --features tui --force
+	$(CARGO) install --path crates/theway-tui --force
 	cp ~/.cargo/bin/theway$(EXE) ~/.cargo/bin/tw$(EXE)
 
 # --- docs / housekeeping ----------------------------------------------------

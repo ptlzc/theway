@@ -72,7 +72,7 @@ pub(crate) fn encode_rgba_clipboard_image(
         .context("encode clipboard image as PNG")?;
     let png = cursor.into_inner();
     let encoded_bytes = png.len();
-    let image = crate::images::load_bytes("clipboard image", &png)?;
+    let image = theway::images::load_bytes("clipboard image", &png)?;
 
     Ok(ClipboardImage {
         image,

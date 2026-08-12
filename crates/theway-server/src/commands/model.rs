@@ -56,7 +56,7 @@ impl SlashCommand for ModelCommand {
     }
 }
 
-pub(crate) fn parse_model_spec(spec: &str) -> Option<(&str, &str)> {
+pub fn parse_model_spec(spec: &str) -> Option<(&str, &str)> {
     let spec = spec.trim();
     let (provider, id) = spec
         .split_once(':')
@@ -70,7 +70,7 @@ pub(crate) fn parse_model_spec(spec: &str) -> Option<(&str, &str)> {
     Some((provider, id))
 }
 
-pub(crate) fn model_credential_hint(provider: &str) -> Option<String> {
+pub fn model_credential_hint(provider: &str) -> Option<String> {
     let vars = theway_llm_provider::env_api_keys::env_var_names(provider);
     let has_env = vars.iter().any(|var| {
         std::env::var(var)

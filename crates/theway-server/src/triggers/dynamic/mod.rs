@@ -257,7 +257,6 @@ impl DynamicTriggerRegistry {
         Ok(changed)
     }
 
-    #[cfg(test)]
     #[allow(dead_code)]
     pub fn clear_for_tests(&self) {
         *self.inner.lock() = DynamicTriggerRegistryState::default();

@@ -224,7 +224,7 @@ fn assistant_log(message: &AssistantMessage) -> String {
 }
 
 fn debug_preview(input: &str) -> String {
-    bounded_preview(&crate::bug_report::redact(input))
+    bounded_preview(&theway::bug_report::redact(input))
 }
 
 fn bounded_preview(input: &str) -> String {
