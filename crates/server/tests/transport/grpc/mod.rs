@@ -533,7 +533,10 @@ async fn health_service_serves_serving_over_transport() {
         .into_inner();
     assert_eq!(response.status, ServingStatus::Serving as i32);
 
-    // Watch emits one SERVING frame, then ends.
+    // Watch stays open and re-emits SERVING every 5 seconds. gRPC load
+    // balancers, grpc_health_probe, and k8s probes expect Watch to keep
+    // streaming; a single-frame stream would mark the endpoint dead after
+    // the first frame completes.
     let mut watch = client
         .watch(crate::transport::proto::health::HealthCheckRequest {
             service: String::new(),
@@ -541,12 +544,13 @@ async fn health_service_serves_serving_over_transport() {
         .await
         .unwrap()
         .into_inner();
+    // First frame arrives immediately (the interval's initial tick).
     let first = watch.message().await.unwrap().expect("first frame");
     assert_eq!(first.status, ServingStatus::Serving as i32);
-    assert!(
-        watch.message().await.unwrap().is_none(),
-        "watch stream should end after the single SERVING frame"
-    );
+    // The stream stays open: a second SERVING frame arrives after the 5s
+    // interval instead of the stream ending.
+    let second = watch.message().await.unwrap().expect("second frame");
+    assert_eq!(second.status, ServingStatus::Serving as i32);
 
     server.abort();
 }
