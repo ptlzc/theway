@@ -13,7 +13,6 @@ pub mod client;
 pub mod errors;
 pub mod http;
 pub mod protocol;
-pub mod server;
 pub mod stdio;
 pub mod transport;
 
@@ -21,6 +20,5 @@ pub use client::{ClientCapabilities, McpClient};
 pub use errors::McpError;
 pub use http::{HttpMcpAuth, HttpMcpTransport, HttpMcpTransportOptions, ReconnectPolicy};
 pub use protocol::{InitializeResult, McpTool, McpToolCallResult, ServerInfo};
-pub use server::{McpDispatcher, run_stdio_server};
 pub use stdio::StdioTransport;
 pub use transport::Transport;

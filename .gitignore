@@ -15,5 +15,5 @@ workers/fefe-hub/.wrangler/
 .se/
 
 # pi runtime state (never committed)
-.pi/dag-orchestrator-state-*.json
-.pi/graph-engineering-state-*.db*
+**/.pi/dag-orchestrator-state-*.json
+**/.pi/graph-engineering-state-*.db*

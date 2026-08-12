@@ -28,6 +28,8 @@ theway-llm-provider = { path = "../theway-llm-provider", default-features = fals
 theway-core = { path = "../theway-core" }
 theway-storage = { path = "../theway-storage" }
 theway-mcp = { path = "../theway-mcp" }
+# MCP server SDK (industry standard) — replaces the hand-written JSON-RPC server loop.
+rmcp = { version = "3", features = ["server", "transport-io"] }
 
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "fs", "io-util", "io-std", "process", "signal"] }
 tokio-util = { version = "0.7", features = ["io"] }
