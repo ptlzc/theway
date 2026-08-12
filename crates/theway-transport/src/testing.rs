@@ -7,7 +7,11 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use crate::wire::SessionSummary;
+use crate::wire::{
+    SessionSummary, WireCronJobSnapshot, WireCronSnapshot, WireMcpSnapshot, WireSidebarSnapshot,
+    WireSkillSnapshot, WireSkillsSnapshot, WireToolsSnapshot, WireTriggerRuleSnapshot,
+    WireTriggersSnapshot,
+};
 use anyhow::Result;
 use async_trait::async_trait;
 
@@ -103,5 +107,47 @@ impl crate::transport::SessionOps for FakeSessionOps {
         inner.sessions.remove(pos);
         inner.running.remove(id);
         Ok(Vec::new())
+    }
+}
+
+
+/// Minimal sidebar used by snapshot fixtures (transport tests + client tests).
+pub fn empty_sidebar_snapshot() -> WireSidebarSnapshot {
+    WireSidebarSnapshot {
+        inbox_new: crate::inbox::new_count(&crate::inbox::default_inbox_path()),
+        skills: WireSkillsSnapshot {
+            total: 0,
+            enabled: 0,
+            disabled: 0,
+            builtin: 0,
+            user: 0,
+            project: 0,
+            items: Vec::new(),
+        },
+        triggers: WireTriggersSnapshot {
+            total: 0,
+            enabled: 0,
+            disabled: 0,
+            rules: Vec::new(),
+        },
+        cron: WireCronSnapshot {
+            total: 0,
+            enabled: 0,
+            disabled: 0,
+            jobs: Vec::new(),
+        },
+        mcp: WireMcpSnapshot {
+            servers: 0,
+            tools: 0,
+            notification_hooks: 0,
+            server_names: Vec::new(),
+            tool_names: Vec::new(),
+        },
+        tools: WireToolsSnapshot {
+            total: 0,
+            names: Vec::new(),
+        },
+        hooks: Vec::new(),
+        runtime: Vec::new(),
     }
 }

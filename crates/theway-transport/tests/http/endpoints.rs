@@ -3,7 +3,7 @@
 
 use super::super::*;
 use super::helpers::rpc_call;
-use crate::testing::FakeSessionOps;
+use crate::testing::{FakeSessionOps, empty_sidebar_snapshot};
 use base64::Engine as _;
 use futures::{SinkExt as _, StreamExt};
 use serde_json::json;

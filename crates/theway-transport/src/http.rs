@@ -454,47 +454,6 @@ pub(crate) fn bind_addr(host: &str, port: u16) -> Result<SocketAddr> {
     Ok(SocketAddr::new(ip, port))
 }
 
-/// Minimal sidebar used by snapshot fixtures in tests (web + grpc).
-#[cfg(test)]
-pub(crate) fn empty_sidebar_snapshot() -> WireSidebarSnapshot {
-    WireSidebarSnapshot {
-        inbox_new: crate::inbox::new_count(&crate::inbox::default_inbox_path()),
-        skills: WireSkillsSnapshot {
-            total: 0,
-            enabled: 0,
-            disabled: 0,
-            builtin: 0,
-            user: 0,
-            project: 0,
-            items: Vec::new(),
-        },
-        triggers: WireTriggersSnapshot {
-            total: 0,
-            enabled: 0,
-            disabled: 0,
-            rules: Vec::new(),
-        },
-        cron: WireCronSnapshot {
-            total: 0,
-            enabled: 0,
-            disabled: 0,
-            jobs: Vec::new(),
-        },
-        mcp: WireMcpSnapshot {
-            servers: 0,
-            tools: 0,
-            notification_hooks: 0,
-            server_names: Vec::new(),
-            tool_names: Vec::new(),
-        },
-        tools: WireToolsSnapshot {
-            total: 0,
-            names: Vec::new(),
-        },
-        hooks: Vec::new(),
-        runtime: Vec::new(),
-    }
-}
 
 fn open_web_browser(url: &str) -> Result<()> {
     let mut command = open_browser_command(url);

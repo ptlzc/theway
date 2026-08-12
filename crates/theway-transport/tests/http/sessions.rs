@@ -4,7 +4,7 @@
 
 use super::super::*;
 use super::helpers::{rpc_call, rpc_error};
-use crate::testing::FakeSessionOps;
+use crate::testing::{FakeSessionOps, empty_sidebar_snapshot};
 use serde_json::json;
 
 fn wire_status(session_id: &str) -> WireStatus {

@@ -3,7 +3,7 @@
 use super::*;
 use crate::grpc::{serve_grpc, GrpcState};
 use crate::proto::{session_state, wire_status};
-use crate::testing::FakeSessionOps;
+use crate::testing::{FakeSessionOps, empty_sidebar_snapshot};
 use crate::feed::WireFeedBlock;
 use crate::wire::{ModelEntry, ProviderGroup, WireStatus};
 use std::sync::Arc;
@@ -32,7 +32,7 @@ fn fixture_status(feed_line: &str) -> WireStatus {
         latest_trigger_poll: None,
         goal: None,
         control_plane_prompt: None,
-        sidebar: crate::http::empty_sidebar_snapshot(),
+        sidebar: empty_sidebar_snapshot(),
         feed_blocks: vec![WireFeedBlock::User {
             text: feed_line.into(),
             timestamp: None,

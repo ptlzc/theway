@@ -42,6 +42,7 @@ once_cell = "1"
 tests-bridge-macro = { path = "../tests-bridge-macro" }
 tempfile = "3"
 theway-mcp = { path = "../theway-mcp" }
+parking_lot = "0.12"
 
 [lints]
 workspace = true
