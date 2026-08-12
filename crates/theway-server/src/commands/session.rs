@@ -165,17 +165,6 @@ async fn session_export_command(argv: &[String], ctx: &CommandCtx<'_>) -> Comman
         }
     }
 
-    let metadata = match ctx.harness.session().storage().get_metadata_json().await {
-        Ok(metadata) => metadata,
-        Err(err) => return CommandOutcome::Error(format!("read session metadata: {err}")),
-    };
-    let Some(session_path) = metadata
-        .get("path")
-        .and_then(|value| value.as_str())
-        .map(std::path::PathBuf::from)
-    else {
-        return CommandOutcome::Error("session metadata is missing transcript path".into());
-    };
     let output_path = match path_arg {
         Some(path) => std::path::PathBuf::from(path),
         None => crate::session_archive::default_export_path(ctx.cwd, ctx.session_id),
@@ -187,8 +176,12 @@ async fn session_export_command(argv: &[String], ctx: &CommandCtx<'_>) -> Comman
     };
 
     emit_session_archive_warning();
-    match crate::session_archive::export_session(&session_path, &output_path, exclude_triggers)
-        .await
+    match crate::session_archive::export_session(
+        ctx.harness.session(),
+        &output_path,
+        exclude_triggers,
+    )
+    .await
     {
         Ok(summary) => {
             cprintln!(

@@ -21,9 +21,10 @@ use std::sync::Arc;
 use anyhow::{Context as _, Result, bail};
 use async_trait::async_trait;
 use parking_lot::Mutex;
+use theway_core::SessionTreeEntry;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::types::DagStatus;
-use theway_core::{JsonlSessionRepo, SessionTreeEntry};
+use theway_storage::hybrid_repo::HybridSessionRepo;
 
 use theway_transport::transport::SessionOps;
 use theway_transport::wire::SessionSummary;
@@ -61,16 +62,16 @@ pub struct CurrentSessionState {
 /// 3.5/3.6). All ops are repo-backed; `delete` additionally consults the DAG engine for
 /// the delete-protection rule.
 ///
-/// `SessionOps` over the cwd-scoped [`JsonlSessionRepo`] + the process-wide [`DagEngine`].
+/// `SessionOps` over the cwd-scoped [`HybridSessionRepo`] + the process-wide [`DagEngine`].
 pub struct AppSessionOps {
-    repo: Arc<JsonlSessionRepo>,
+    repo: Arc<HybridSessionRepo>,
     dag_engine: Arc<DagEngine>,
     current: Arc<Mutex<CurrentSessionState>>,
 }
 
 impl AppSessionOps {
     pub fn new(
-        repo: Arc<JsonlSessionRepo>,
+        repo: Arc<HybridSessionRepo>,
         dag_engine: Arc<DagEngine>,
         current: Arc<Mutex<CurrentSessionState>>,
     ) -> Self {
@@ -260,7 +261,7 @@ mod tests {
     use tempfile::tempdir;
 
     fn ops(
-        repo: Arc<JsonlSessionRepo>,
+        repo: Arc<HybridSessionRepo>,
         current_id: &str,
     ) -> (AppSessionOps, Arc<Mutex<CurrentSessionState>>) {
         let engine = Arc::new(DagEngine::new());
@@ -289,7 +290,7 @@ mod tests {
     #[tokio::test]
     async fn list_reports_current_session_busy_with_live_model() {
         let dir = tempdir().unwrap();
-        let repo = Arc::new(JsonlSessionRepo::new(dir.path()));
+        let repo = Arc::new(HybridSessionRepo::new(dir.path()));
         let session = repo.create("/cwd").await.unwrap();
         let id = session_id_of(&session).await;
 
@@ -306,7 +307,7 @@ mod tests {
     #[tokio::test]
     async fn create_makes_new_session_with_inherited_cwd() {
         let dir = tempdir().unwrap();
-        let repo = Arc::new(JsonlSessionRepo::new(dir.path()));
+        let repo = Arc::new(HybridSessionRepo::new(dir.path()));
         let first = repo.create("/cwd").await.unwrap();
         let first_id = session_id_of(&first).await;
 
@@ -321,7 +322,7 @@ mod tests {
     #[tokio::test]
     async fn rename_round_trips_through_list() {
         let dir = tempdir().unwrap();
-        let repo = Arc::new(JsonlSessionRepo::new(dir.path()));
+        let repo = Arc::new(HybridSessionRepo::new(dir.path()));
         let session = repo.create("/cwd").await.unwrap();
         let id = session_id_of(&session).await;
 
@@ -343,7 +344,7 @@ mod tests {
     #[tokio::test]
     async fn delete_removes_session_when_no_active_graphs() {
         let dir = tempdir().unwrap();
-        let repo = Arc::new(JsonlSessionRepo::new(dir.path()));
+        let repo = Arc::new(HybridSessionRepo::new(dir.path()));
         let session = repo.create("/cwd").await.unwrap();
         let id = session_id_of(&session).await;
 
@@ -356,7 +357,7 @@ mod tests {
     #[tokio::test]
     async fn delete_refuses_session_with_active_dag_run() {
         let dir = tempdir().unwrap();
-        let repo = Arc::new(JsonlSessionRepo::new(dir.path()));
+        let repo = Arc::new(HybridSessionRepo::new(dir.path()));
         let session = repo.create("/cwd").await.unwrap();
         let id = session_id_of(&session).await;
 

@@ -13,15 +13,16 @@
 
 use std::sync::Arc;
 
+use theway::HybridSessionRepo;
 use theway::agent_session::{AgentSession, RetrySettings};
 use theway::commands::Registry;
-use theway_core::{AgentHarness, AgentHarnessOptions, JsonlSessionRepo};
+use theway_core::{AgentHarness, AgentHarnessOptions};
 use theway_llm_provider::{Api, Model, ModelCost, Provider};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // 1. Build the harness (core crate) the same way the CLI does.
-    let repo = Arc::new(JsonlSessionRepo::new(
+    let repo = Arc::new(HybridSessionRepo::new(
         std::env::temp_dir().join("sdk-demo-sessions"),
     ));
     let session = theway::session::create(&repo, std::env::current_dir()?.as_path()).await?;
@@ -52,7 +53,7 @@ async fn main() -> anyhow::Result<()> {
     // 3. Headless command surface: slash-command registry + session repo are usable
     //    without any UI (the interactive `App` lives in the `theway-tui` crate).
     let _registry = Registry::with_builtins();
-    let _repo = Arc::new(JsonlSessionRepo::new(
+    let _repo = Arc::new(HybridSessionRepo::new(
         std::env::temp_dir().join("theway-sdk-demo-sessions"),
     ));
     println!("sdk: registry + session repo OK — SDK usable from external project");

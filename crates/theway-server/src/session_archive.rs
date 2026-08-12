@@ -8,12 +8,17 @@ use std::collections::{BTreeMap, HashSet};
 use std::fs::File;
 use std::io::{Cursor, Read};
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use theway_core::{JsonlSessionMetadata, JsonlSessionRepo, SessionTreeEntry, uuidv7};
+use theway_core::{
+    JsonlSessionMetadata, Session, SessionImportOrigin, SessionStorage, SessionTreeEntry, uuidv7,
+};
+use theway_storage::hybrid_repo::HybridSessionRepo;
+use theway_storage::sqlite_storage::SqliteSessionStorage;
 
 use crate::triggers::cron::CronJob;
 use crate::triggers::dynamic::DynamicTriggerRule;
@@ -94,9 +99,7 @@ struct ManifestSensitivity {
 
 #[derive(Debug)]
 struct ParsedSession {
-    metadata: JsonlSessionMetadata,
     entries: Vec<SessionTreeEntry>,
-    original_entry_lines: Vec<String>,
     active_leaf_id: Option<String>,
 }
 
@@ -113,22 +116,39 @@ struct CronJobsFile {
 }
 
 pub async fn export_session(
-    session_path: &Path,
+    session: &Session,
     output_path: &Path,
     exclude_triggers: bool,
 ) -> Result<ExportSummary> {
-    let session_jsonl = tokio::fs::read_to_string(session_path)
+    let metadata = session
+        .storage()
+        .get_metadata_json()
         .await
-        .with_context(|| format!("read session {}", session_path.display()))?;
+        .context("read session metadata")?;
+    let session_path = metadata
+        .get("path")
+        .and_then(|v| v.as_str())
+        .map(PathBuf::from)
+        .ok_or_else(|| anyhow!("session metadata is missing transcript path"))?;
+    let (session_jsonl, entry_count) = render_session_jsonl(&metadata, session).await?;
     if session_jsonl.len() > MAX_SESSION_BYTES {
         bail!("session transcript is too large to export");
     }
-    let parsed = parse_session_jsonl(&session_jsonl)?;
-    let session_id = parsed.metadata.base.id.clone();
+    let session_id = metadata
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let session_cwd = metadata
+        .get("cwd")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
     let session_hash = sha256_hex(session_jsonl.as_bytes());
+    let active_leaf_id = session.leaf_id().await.context("read active leaf")?;
 
-    let trigger_path = crate::session::trigger_sidecar_path(session_path);
-    let cron_path = crate::session::cron_sidecar_path(session_path);
+    let trigger_path = crate::session::trigger_sidecar_path(&session_path);
+    let cron_path = crate::session::cron_sidecar_path(&session_path);
     let trigger_bytes = if !exclude_triggers {
         read_optional_sidecar(&trigger_path).await?
     } else {
@@ -146,13 +166,13 @@ pub async fn export_session(
         theway_version: env!("CARGO_PKG_VERSION").into(),
         source: ManifestSource {
             session_id: session_id.clone(),
-            cwd: parsed.metadata.cwd.clone(),
-            session_path: parsed.metadata.path.clone(),
+            cwd: session_cwd,
+            session_path: session_path.to_string_lossy().to_string(),
         },
         content: ManifestContent {
             session_jsonl_sha256: session_hash,
-            entry_count: parsed.entries.len(),
-            active_leaf_id: parsed.active_leaf_id.clone(),
+            entry_count,
+            active_leaf_id: active_leaf_id.clone(),
             has_triggers: trigger_bytes.is_some(),
             has_cron: cron_bytes.is_some(),
         },
@@ -193,14 +213,50 @@ pub async fn export_session(
     Ok(ExportSummary {
         output_path: output_path.to_path_buf(),
         session_id,
-        entry_count: parsed.entries.len(),
+        entry_count,
         has_triggers: trigger_bytes.is_some(),
         has_cron: cron_bytes.is_some(),
     })
 }
 
+/// Render the canonical `session.jsonl` text for an archive: the header line
+/// (metadata) followed by one line per tree entry, plus the entry count.
+/// Backend-agnostic — works for JSONL and SQLite sessions alike; the archive
+/// format itself stays JSONL so old archives and old tooling keep working.
+async fn render_session_jsonl(
+    metadata: &serde_json::Value,
+    session: &Session,
+) -> Result<(String, usize)> {
+    let header: JsonlSessionMetadata = serde_json::from_value(metadata.clone())
+        .context("session metadata is not a valid header")?;
+    let mut out = serde_json::to_string(&header)?;
+    out.push('\n');
+    let entries = session.entries().await.context("read session entries")?;
+    let mut seen = HashSet::new();
+    for entry in &entries {
+        let id = entry.id().to_string();
+        if !seen.insert(id.clone()) {
+            bail!("session transcript contains duplicate entry id");
+        }
+        if let Some(parent) = entry.parent_id()
+            && !seen.contains(parent)
+        {
+            bail!("session transcript contains dangling parent reference");
+        }
+        if let SessionTreeEntry::Leaf { target_id, .. } = entry
+            && let Some(target) = target_id
+            && !seen.contains(target)
+        {
+            bail!("session transcript contains dangling leaf target");
+        }
+        out.push_str(&serde_json::to_string(entry)?);
+        out.push('\n');
+    }
+    Ok((out, entries.len()))
+}
+
 pub async fn import_session(
-    repo: &JsonlSessionRepo,
+    repo: &HybridSessionRepo,
     archive_path: &Path,
     cwd: &Path,
     activate_triggers: ActivateTriggers,
@@ -273,12 +329,17 @@ pub async fn import_session(
         .await
         .with_context(|| format!("create {}", repo.root().display()))?;
     let new_id = uuidv7();
-    let session_path = repo.root().join(format!("{new_id}.jsonl"));
+    let session_path = repo.root().join(format!("{new_id}.db"));
     if tokio::fs::try_exists(&session_path).await? {
         bail!("import destination already exists");
     }
-    let rewritten = rewrite_session_jsonl(&parsed, &manifest, &new_id, cwd, &session_path)?;
-    let temp_path = repo.root().join(format!("{new_id}.jsonl.tmp"));
+    let temp_path = repo.root().join(format!("{new_id}.db.tmp"));
+    let origin = Some(theway_core::SessionImportOrigin {
+        session_id: manifest.source.session_id.clone(),
+        cwd: manifest.source.cwd.clone(),
+        exported_at: manifest.created_at.clone(),
+        theway_version: manifest.theway_version.clone(),
+    });
 
     let mut sidecars: Vec<(PathBuf, String)> = Vec::new();
     let triggers_imported = match &trigger_sidecar {
@@ -301,7 +362,15 @@ pub async fn import_session(
         }
         None => 0,
     };
-    commit_import(repo, &session_path, &temp_path, &rewritten, &sidecars).await?;
+    commit_import(
+        &session_path,
+        &temp_path,
+        &parsed.entries,
+        cwd,
+        origin,
+        &sidecars,
+    )
+    .await?;
 
     Ok(ImportSummary {
         session_id: new_id,
@@ -373,7 +442,6 @@ fn parse_session_jsonl(text: &str) -> Result<ParsedSession> {
         bail!("session metadata is missing id");
     }
     let mut entries = Vec::new();
-    let mut original_entry_lines = Vec::new();
     let mut seen = HashSet::new();
     let mut active_leaf_id = None;
     for (idx, line) in lines.enumerate() {
@@ -402,67 +470,64 @@ fn parse_session_jsonl(text: &str) -> Result<ParsedSession> {
             _ => Some(id),
         };
         entries.push(entry);
-        original_entry_lines.push(line.to_string());
     }
     Ok(ParsedSession {
-        metadata,
         entries,
-        original_entry_lines,
         active_leaf_id,
     })
 }
 
-fn rewrite_session_jsonl(
-    parsed: &ParsedSession,
-    manifest: &Manifest,
-    new_id: &str,
-    cwd: &Path,
-    path: &Path,
-) -> Result<String> {
-    let metadata = JsonlSessionMetadata {
-        base: theway_core::SessionMetadata {
-            id: new_id.to_string(),
-            created_at: Utc::now().to_rfc3339(),
-        },
-        cwd: cwd.to_string_lossy().to_string(),
-        path: path.to_string_lossy().to_string(),
-        parent_session_path: None,
-        imported_from: Some(theway_core::SessionImportOrigin {
-            session_id: manifest.source.session_id.clone(),
-            cwd: manifest.source.cwd.clone(),
-            exported_at: manifest.created_at.clone(),
-            theway_version: manifest.theway_version.clone(),
-        }),
-    };
-    let mut out = serde_json::to_string(&metadata)?;
-    out.push('\n');
-    for line in &parsed.original_entry_lines {
-        out.push_str(line);
-        out.push('\n');
-    }
-    Ok(out)
-}
-
-/// Write all imported files with the session rename as the commit point. The session is
-/// staged at `temp_path` (a non-`.jsonl` name, invisible to repo listings), replay-validated
-/// there, and only renamed into place after every sidecar landed. Any failure removes
-/// everything written so a failed import leaves no orphan or partial session behind.
+/// Write all imported files with the session rename as the commit point. The
+/// SQLite database is staged at `temp_path` (a non-`.db` name, invisible to repo
+/// listings), populated, replay-validated there, and only renamed into place
+/// after every sidecar landed. Any failure removes everything written so a
+/// failed import leaves no orphan or partial session behind.
 async fn commit_import(
-    repo: &JsonlSessionRepo,
     session_path: &Path,
     temp_path: &Path,
-    session_content: &str,
+    entries: &[SessionTreeEntry],
+    cwd: &Path,
+    origin: Option<SessionImportOrigin>,
     sidecars: &[(PathBuf, String)],
 ) -> Result<()> {
     let result = async {
-        tokio::fs::write(temp_path, session_content)
+        let storage = SqliteSessionStorage::create_with_id(
+            temp_path,
+            cwd.to_string_lossy().to_string(),
+            session_path
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned()),
+        )
+        .await
+        .map_err(|e| anyhow!("create session db: {e}"))?;
+        for entry in entries {
+            storage
+                .append_entry(entry.clone())
+                .await
+                .map_err(|e| anyhow!("write session db: {e}"))?;
+        }
+        if let Some(o) = &origin {
+            storage
+                .set_import_origin(Some(o.clone()))
+                .await
+                .map_err(|e| anyhow!("write session db: {e}"))?;
+        }
+        storage
+            .set_session_path(session_path)
             .await
-            .with_context(|| format!("write {}", temp_path.display()))?;
-        let staged = repo.open(temp_path).await?;
-        staged
+            .map_err(|e| anyhow!("write session db: {e}"))?;
+        // WAL mode keeps pages in `-wal` until checkpoint; without this the
+        // rename below would drop everything not yet flushed into the main file.
+        storage
+            .checkpoint()
+            .await
+            .map_err(|e| anyhow!("checkpoint session db: {e}"))?;
+        let session = Session::new(Arc::new(storage) as Arc<dyn SessionStorage>);
+        session
             .build_context()
             .await
             .context("validate imported session")?;
+        drop(session);
         for (path, content) in sidecars {
             tokio::fs::write(path, content)
                 .await
@@ -470,7 +535,12 @@ async fn commit_import(
         }
         tokio::fs::rename(temp_path, session_path)
             .await
-            .with_context(|| format!("rename into {}", session_path.display()))
+            .with_context(|| format!("rename into {}", session_path.display()))?;
+        // The WAL companion stays behind (now empty after TRUNCATE); sweep it
+        // so the sessions dir doesn't accumulate `-wal` litter.
+        let _ = tokio::fs::remove_file(format!("{}-wal", temp_path.display())).await;
+        let _ = tokio::fs::remove_file(format!("{}-shm", temp_path.display())).await;
+        Ok(())
     }
     .await;
     if result.is_err() {

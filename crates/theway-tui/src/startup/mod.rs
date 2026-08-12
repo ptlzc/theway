@@ -17,6 +17,7 @@ use std::sync::{Arc, OnceLock};
 
 use crate::{debug, ui};
 use anyhow::Result;
+use theway::HybridSessionRepo;
 use theway::{
     agent_session, agent_specs, builtin_skills, commands, config, control_plane_prompt, history,
     local_models, logging, lsp_supervisor, mcp_loader, model, session, skill_overrides, skills,
@@ -24,7 +25,7 @@ use theway::{
 };
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::persist::DagPersistSink;
-use theway_core::{AgentHarness, AgentHarnessOptions, JsonlSessionRepo, PermissionPolicy};
+use theway_core::{AgentHarness, AgentHarnessOptions, PermissionPolicy};
 use theway_core::{agent::hooks, multiagent::goal};
 use theway_transport::inbox;
 
@@ -47,7 +48,7 @@ pub use self::stream_auth::user_message;
 pub(crate) async fn run_repl(
     mut cli: Cli,
     cwd: std::path::PathBuf,
-    repo: JsonlSessionRepo,
+    repo: HybridSessionRepo,
 ) -> Result<()> {
     // Arc'd so the session factory (session-resource-model) can share the cwd-scoped repo
     // with the App / SessionOps; every existing call site keeps working through Deref.

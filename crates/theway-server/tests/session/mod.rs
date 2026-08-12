@@ -62,7 +62,7 @@ fn automation_badge_renders_each_shape() {
 #[tokio::test]
 async fn automation_elsewhere_hint_names_newest_session_with_enabled_automation() {
     let dir = tempdir().unwrap();
-    let repo = JsonlSessionRepo::new(dir.path());
+    let repo = HybridSessionRepo::new(dir.path());
     let older = repo.create("/cwd").await.unwrap();
     let older_meta = older.storage().get_metadata_json().await.unwrap();
     let older_path = PathBuf::from(older_meta["path"].as_str().unwrap());
@@ -113,7 +113,7 @@ async fn automation_elsewhere_hint_names_newest_session_with_enabled_automation(
 #[tokio::test]
 async fn resume_matches_legacy_metadata_id_when_file_stem_differs() {
     let dir = tempdir().unwrap();
-    let repo = JsonlSessionRepo::new(dir.path());
+    let repo = HybridSessionRepo::new(dir.path());
     let path = dir.path().join("file-id.jsonl");
     std::fs::write(
         &path,
@@ -139,7 +139,7 @@ async fn resume_with_no_id_picks_most_recent_session() {
     // the newest one. Verify resume() picks it when called with no explicit id (which is
     // what `theway -c / --continue` ends up doing).
     let dir = tempdir().unwrap();
-    let repo = JsonlSessionRepo::new(dir.path());
+    let repo = HybridSessionRepo::new(dir.path());
 
     // First, older session.
     let older = repo.create("/cwd").await.unwrap();
@@ -186,7 +186,7 @@ async fn resume_with_no_id_picks_most_recent_session() {
 #[tokio::test]
 async fn delete_matches_legacy_metadata_id_when_file_stem_differs() {
     let dir = tempdir().unwrap();
-    let repo = JsonlSessionRepo::new(dir.path());
+    let repo = HybridSessionRepo::new(dir.path());
     let path = dir.path().join("file-id.jsonl");
     std::fs::write(
         &path,
@@ -222,7 +222,7 @@ fn trigger_sidecar_path_lives_next_to_session_file() {
 #[tokio::test]
 async fn sidecar_paths_survive_session_resume() {
     let dir = tempdir().unwrap();
-    let repo = JsonlSessionRepo::new(dir.path());
+    let repo = HybridSessionRepo::new(dir.path());
     let created = repo.create("/cwd").await.unwrap();
     let metadata = created.storage().get_metadata_json().await.unwrap();
     let session_id = metadata.get("id").and_then(|v| v.as_str()).unwrap();
@@ -251,7 +251,7 @@ async fn sidecar_paths_survive_session_resume() {
 #[tokio::test]
 async fn cron_sidecar_is_session_specific() {
     let dir = tempdir().unwrap();
-    let repo = JsonlSessionRepo::new(dir.path());
+    let repo = HybridSessionRepo::new(dir.path());
     let first = repo.create("/cwd").await.unwrap();
     let second = repo.create("/cwd").await.unwrap();
 
@@ -279,7 +279,7 @@ fn endpoint_sidecar_path_lives_next_to_session_file() {
 #[tokio::test]
 async fn delete_removes_endpoint_sidecar() {
     let dir = tempdir().unwrap();
-    let repo = JsonlSessionRepo::new(dir.path());
+    let repo = HybridSessionRepo::new(dir.path());
     let session = repo.create("/cwd").await.unwrap();
     let id = session
         .storage()
@@ -303,7 +303,7 @@ async fn delete_removes_endpoint_sidecar() {
 #[tokio::test]
 async fn delete_removes_session_sidecars() {
     let dir = tempdir().unwrap();
-    let repo = JsonlSessionRepo::new(dir.path());
+    let repo = HybridSessionRepo::new(dir.path());
     let session = repo.create("/cwd").await.unwrap();
     let id = session
         .storage()

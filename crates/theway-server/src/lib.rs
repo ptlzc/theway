@@ -41,6 +41,10 @@ pub mod skills;
 // Skill enable/disable overlay moved into the engine crate with the builtin tools
 // (openspec tools-into-core); re-exported so `crate::skill_overrides` paths keep working.
 pub use theway_core::skill_overrides;
+// Session repo used by the CLI layer (theway-tui): hybrid JSONL+SQLite, new sessions
+// minted as SQLite. Re-exported from the composition root so binaries don't need to
+// depend on theway-storage directly.
+pub use theway_storage::hybrid_repo::HybridSessionRepo;
 pub mod templates;
 pub mod tools;
 pub mod trigger_engine;

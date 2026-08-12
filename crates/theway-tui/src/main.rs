@@ -29,8 +29,8 @@ use std::io::IsTerminal as _;
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use theway::HybridSessionRepo;
 use theway::{session, session_archive};
-use theway_core::JsonlSessionRepo;
 
 use cli::{
     ActivateTriggersArg, Cli, CliCommand, SessionCliCommand, delete_session_cmd,
@@ -69,7 +69,7 @@ async fn main() -> Result<()> {
 
 async fn run_cli_command(
     command: &CliCommand,
-    repo: &JsonlSessionRepo,
+    repo: &HybridSessionRepo,
     cwd: &std::path::Path,
 ) -> Result<()> {
     match command {
@@ -79,7 +79,7 @@ async fn run_cli_command(
 
 async fn run_session_cli_command(
     command: &SessionCliCommand,
-    repo: &JsonlSessionRepo,
+    repo: &HybridSessionRepo,
     cwd: &std::path::Path,
 ) -> Result<()> {
     match command {
@@ -119,8 +119,7 @@ async fn run_session_cli_command(
             };
             print_session_archive_warning();
             let summary =
-                session_archive::export_session(&session_path, &output_path, *exclude_triggers)
-                    .await?;
+                session_archive::export_session(&session, &output_path, *exclude_triggers).await?;
             println!(
                 "exported session archive: {}",
                 summary.output_path.display()

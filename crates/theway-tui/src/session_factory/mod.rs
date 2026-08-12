@@ -9,9 +9,10 @@ use std::sync::{Arc, OnceLock};
 
 use crate::ui;
 use anyhow::{Context, Result};
+use theway::HybridSessionRepo;
 use theway::{agent_specs, session, tools, triggers};
 use theway_core::multiagent::graph::engine::DagEngine;
-use theway_core::{AgentHarness, AgentHarnessOptions, JsonlSessionRepo, ThinkingLevel};
+use theway_core::{AgentHarness, AgentHarnessOptions, ThinkingLevel};
 use theway_core::{agent::hooks, multiagent::goal};
 use theway_transport::inbox;
 
@@ -68,7 +69,7 @@ impl SessionHarnessFactory {
     /// Build (and rehydrate) a harness for `id` (full session id or unique prefix).
     pub(crate) async fn build(
         &self,
-        repo: &JsonlSessionRepo,
+        repo: &HybridSessionRepo,
         id: &str,
     ) -> Result<Arc<AgentHarness>> {
         // Resume semantics: same lookup as CLI --resume-id.

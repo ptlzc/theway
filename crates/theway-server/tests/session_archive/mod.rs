@@ -2,7 +2,7 @@
 
 use super::*;
 use chrono::Utc;
-use theway_core::JsonlSessionRepo;
+use theway_storage::hybrid_repo::HybridSessionRepo;
 
 #[tokio::test]
 async fn export_import_rewrites_metadata_and_disables_automation() {
@@ -11,7 +11,7 @@ async fn export_import_rewrites_metadata_and_disables_automation() {
     let dest_cwd = temp.path().join("dest");
     tokio::fs::create_dir_all(&source_cwd).await.unwrap();
     tokio::fs::create_dir_all(&dest_cwd).await.unwrap();
-    let source_repo = JsonlSessionRepo::new(temp.path().join("source-sessions"));
+    let source_repo = HybridSessionRepo::new(temp.path().join("source-sessions"));
     let source = source_repo
         .create(source_cwd.to_string_lossy().to_string())
         .await
@@ -69,12 +69,12 @@ async fn export_import_rewrites_metadata_and_disables_automation() {
         .unwrap();
 
     let archive = temp.path().join("backup.theway-session");
-    let export = export_session(&source_path, &archive, false).await.unwrap();
+    let export = export_session(&source, &archive, false).await.unwrap();
     assert_eq!(export.entry_count, 1);
     assert!(export.has_triggers);
     assert!(export.has_cron);
 
-    let dest_repo = JsonlSessionRepo::new(temp.path().join("dest-sessions"));
+    let dest_repo = HybridSessionRepo::new(temp.path().join("dest-sessions"));
     let imported = import_session(&dest_repo, &archive, &dest_cwd, ActivateTriggers::Off)
         .await
         .unwrap();
@@ -120,7 +120,7 @@ async fn export_import_rewrites_metadata_and_disables_automation() {
     assert_eq!(job.skipped_overlap_count, 0);
 
     let excluded_archive = temp.path().join("backup-no-automation.theway-session");
-    let export_without_automation = export_session(&source_path, &excluded_archive, true)
+    let export_without_automation = export_session(&source, &excluded_archive, true)
         .await
         .unwrap();
     assert!(!export_without_automation.has_triggers);
@@ -151,7 +151,7 @@ fn rejects_unsafe_archive_paths() {
 #[tokio::test]
 async fn ask_activation_is_explicitly_rejected_until_interactive_confirm_exists() {
     let temp = tempfile::tempdir().unwrap();
-    let repo = JsonlSessionRepo::new(temp.path().join("sessions"));
+    let repo = HybridSessionRepo::new(temp.path().join("sessions"));
     let err = import_session(
         &repo,
         &temp.path().join("missing.theway-session"),
@@ -170,7 +170,7 @@ async fn export_manifest_uses_last_entry_as_leaf_without_explicit_leaf_row() {
     let temp = tempfile::tempdir().unwrap();
     let source_cwd = temp.path().join("source");
     tokio::fs::create_dir_all(&source_cwd).await.unwrap();
-    let source_repo = JsonlSessionRepo::new(temp.path().join("source-sessions"));
+    let source_repo = HybridSessionRepo::new(temp.path().join("source-sessions"));
     let source = source_repo
         .create(source_cwd.to_string_lossy().to_string())
         .await
@@ -183,11 +183,8 @@ async fn export_manifest_uses_last_entry_as_leaf_without_explicit_leaf_row() {
         .append_custom("second", Some(serde_json::json!({"n": 2})))
         .await
         .unwrap();
-    let source_meta = source.storage().get_metadata_json().await.unwrap();
-    let source_path = PathBuf::from(source_meta["path"].as_str().unwrap());
-
     let archive = temp.path().join("backup.theway-session");
-    export_session(&source_path, &archive, false).await.unwrap();
+    export_session(&source, &archive, false).await.unwrap();
 
     let manifest = manifest_from_archive(&archive);
     assert_eq!(
@@ -201,7 +198,7 @@ async fn export_manifest_uses_explicit_leaf_target_not_leaf_row_id() {
     let temp = tempfile::tempdir().unwrap();
     let source_cwd = temp.path().join("source");
     tokio::fs::create_dir_all(&source_cwd).await.unwrap();
-    let source_repo = JsonlSessionRepo::new(temp.path().join("source-sessions"));
+    let source_repo = HybridSessionRepo::new(temp.path().join("source-sessions"));
     let source = source_repo
         .create(source_cwd.to_string_lossy().to_string())
         .await
@@ -215,26 +212,17 @@ async fn export_manifest_uses_explicit_leaf_target_not_leaf_row_id() {
         .await
         .unwrap();
     source.move_to(Some(&first_id), None).await.unwrap();
-    let source_meta = source.storage().get_metadata_json().await.unwrap();
-    let source_path = PathBuf::from(source_meta["path"].as_str().unwrap());
 
     let archive = temp.path().join("backup.theway-session");
-    export_session(&source_path, &archive, false).await.unwrap();
+    export_session(&source, &archive, false).await.unwrap();
 
     let manifest = manifest_from_archive(&archive);
     assert_eq!(
         manifest.content.active_leaf_id.as_deref(),
         Some(first_id.as_str())
     );
-    let session_text = tokio::fs::read_to_string(&source_path).await.unwrap();
-    let last_entry: SessionTreeEntry = serde_json::from_str(
-        session_text
-            .lines()
-            .rev()
-            .find(|line| !line.trim().is_empty())
-            .unwrap(),
-    )
-    .unwrap();
+    let session_text = source.entries().await.unwrap();
+    let last_entry = session_text.last().unwrap();
     assert_ne!(
         manifest.content.active_leaf_id.as_deref(),
         Some(last_entry.id())
@@ -248,7 +236,7 @@ async fn import_rejects_manifest_active_leaf_that_does_not_match_session_jsonl()
     let dest_cwd = temp.path().join("dest");
     tokio::fs::create_dir_all(&source_cwd).await.unwrap();
     tokio::fs::create_dir_all(&dest_cwd).await.unwrap();
-    let source_repo = JsonlSessionRepo::new(temp.path().join("source-sessions"));
+    let source_repo = HybridSessionRepo::new(temp.path().join("source-sessions"));
     let source = source_repo
         .create(source_cwd.to_string_lossy().to_string())
         .await
@@ -257,11 +245,8 @@ async fn import_rejects_manifest_active_leaf_that_does_not_match_session_jsonl()
         .append_custom("entry", Some(serde_json::json!({"n": 1})))
         .await
         .unwrap();
-    let source_meta = source.storage().get_metadata_json().await.unwrap();
-    let source_path = PathBuf::from(source_meta["path"].as_str().unwrap());
-
     let archive = temp.path().join("backup.theway-session");
-    export_session(&source_path, &archive, false).await.unwrap();
+    export_session(&source, &archive, false).await.unwrap();
     let mut files = read_archive(&archive).unwrap();
     let mut manifest: Manifest = serde_json::from_slice(files.get(MANIFEST_PATH).unwrap()).unwrap();
     manifest.content.active_leaf_id = Some("stale-leaf-id".into());
@@ -270,7 +255,7 @@ async fn import_rejects_manifest_active_leaf_that_does_not_match_session_jsonl()
     let tampered_archive = temp.path().join("tampered.theway-session");
     write_test_archive(&tampered_archive, &files);
 
-    let dest_repo = JsonlSessionRepo::new(temp.path().join("dest-sessions"));
+    let dest_repo = HybridSessionRepo::new(temp.path().join("dest-sessions"));
     let err = import_session(
         &dest_repo,
         &tampered_archive,
@@ -290,7 +275,7 @@ async fn make_exported_session(
 ) -> (String, PathBuf) {
     let source_cwd = temp.join("source");
     tokio::fs::create_dir_all(&source_cwd).await.unwrap();
-    let source_repo = JsonlSessionRepo::new(temp.join("source-sessions"));
+    let source_repo = HybridSessionRepo::new(temp.join("source-sessions"));
     let source = source_repo
         .create(source_cwd.to_string_lossy().to_string())
         .await
@@ -320,7 +305,7 @@ async fn make_exported_session(
         .unwrap();
     }
     let archive = temp.join("backup.theway-session");
-    let export = export_session(&source_path, &archive, false).await.unwrap();
+    let export = export_session(&source, &archive, false).await.unwrap();
     (export.session_id, archive)
 }
 
@@ -368,11 +353,12 @@ async fn export_archive_is_owner_only() {
 async fn export_refuses_to_overwrite_existing_output() {
     let temp = tempfile::tempdir().unwrap();
     let (_, archive) = make_exported_session(temp.path(), vec![], vec![]).await;
-    let source_path = {
-        let source_repo = JsonlSessionRepo::new(temp.path().join("source-sessions"));
-        source_repo.list().await.unwrap().pop().unwrap()
-    };
-    let err = export_session(&source_path, &archive, false)
+    let source_repo = HybridSessionRepo::new(temp.path().join("source-sessions"));
+    let source = source_repo
+        .open(&source_repo.list().await.unwrap().pop().unwrap())
+        .await
+        .unwrap();
+    let err = export_session(&source, &archive, false)
         .await
         .unwrap_err()
         .to_string();
@@ -390,7 +376,7 @@ async fn import_records_source_provenance_in_metadata() {
     let (source_id, archive) = make_exported_session(temp.path(), vec![], vec![]).await;
     let dest_cwd = temp.path().join("dest");
     tokio::fs::create_dir_all(&dest_cwd).await.unwrap();
-    let dest_repo = JsonlSessionRepo::new(temp.path().join("dest-sessions"));
+    let dest_repo = HybridSessionRepo::new(temp.path().join("dest-sessions"));
     let imported = import_session(&dest_repo, &archive, &dest_cwd, ActivateTriggers::Off)
         .await
         .unwrap();
@@ -425,7 +411,7 @@ async fn activation_on_preserves_source_disabled_automation() {
     let (_, archive) = make_exported_session(temp.path(), rules, jobs).await;
     let dest_cwd = temp.path().join("dest");
     tokio::fs::create_dir_all(&dest_cwd).await.unwrap();
-    let dest_repo = JsonlSessionRepo::new(temp.path().join("dest-sessions"));
+    let dest_repo = HybridSessionRepo::new(temp.path().join("dest-sessions"));
     let imported = import_session(&dest_repo, &archive, &dest_cwd, ActivateTriggers::On)
         .await
         .unwrap();
@@ -473,18 +459,13 @@ async fn failed_sidecar_write_cleans_up_partial_import() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("sessions");
     tokio::fs::create_dir_all(&root).await.unwrap();
-    let repo = JsonlSessionRepo::new(&root);
 
-    // Valid one-line session content for the destination.
-    let staging = JsonlSessionRepo::new(temp.path().join("staging"));
+    let staging = HybridSessionRepo::new(temp.path().join("staging"));
     let session = staging.create("/tmp").await.unwrap();
-    let meta = session.storage().get_metadata_json().await.unwrap();
-    let content = tokio::fs::read_to_string(meta["path"].as_str().unwrap())
-        .await
-        .unwrap();
+    let entries = session.entries().await.unwrap();
 
-    let session_path = root.join("imported.jsonl");
-    let temp_path = root.join("imported.jsonl.tmp");
+    let session_path = root.join("imported.db");
+    let temp_path = root.join("imported.db.tmp");
     let good_sidecar = root.join("imported.triggers.json");
     // A directory at the cron sidecar path makes its write fail mid-commit.
     let bad_sidecar = root.join("imported.cron.toml");
@@ -497,10 +478,17 @@ async fn failed_sidecar_write_cleans_up_partial_import() {
         ),
         (bad_sidecar.clone(), "jobs = []".to_string()),
     ];
-    let err = commit_import(&repo, &session_path, &temp_path, &content, &sidecars)
-        .await
-        .unwrap_err()
-        .to_string();
+    let err = commit_import(
+        &session_path,
+        &temp_path,
+        &entries,
+        Path::new("/tmp"),
+        None,
+        &sidecars,
+    )
+    .await
+    .unwrap_err()
+    .to_string();
     assert!(err.contains("imported.cron.toml"), "{err}");
 
     assert!(
@@ -528,7 +516,7 @@ async fn import_summary_records_originally_enabled_automation_and_activates_it()
     let (_, archive) = make_exported_session(temp.path(), rules, jobs).await;
     let dest_cwd = temp.path().join("dest");
     tokio::fs::create_dir_all(&dest_cwd).await.unwrap();
-    let dest_repo = JsonlSessionRepo::new(temp.path().join("dest-sessions"));
+    let dest_repo = HybridSessionRepo::new(temp.path().join("dest-sessions"));
     let imported = import_session(&dest_repo, &archive, &dest_cwd, ActivateTriggers::Off)
         .await
         .unwrap();
@@ -590,7 +578,7 @@ async fn successful_import_leaves_no_temp_files() {
     let (_, archive) = make_exported_session(temp.path(), vec![], vec![]).await;
     let dest_cwd = temp.path().join("dest");
     tokio::fs::create_dir_all(&dest_cwd).await.unwrap();
-    let dest_repo = JsonlSessionRepo::new(temp.path().join("dest-sessions"));
+    let dest_repo = HybridSessionRepo::new(temp.path().join("dest-sessions"));
     import_session(&dest_repo, &archive, &dest_cwd, ActivateTriggers::Off)
         .await
         .unwrap();
