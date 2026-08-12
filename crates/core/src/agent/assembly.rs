@@ -192,8 +192,8 @@ pub struct AgentHarness {
     /// Embedder-supplied skill catalog loader. See [`AgentHarnessOptions::reload_skills_fn`]
     /// for ownership of source directories + dedup policy.
     reload_skills_fn: Option<ReloadSkillsFn>,
-    /// Optional turn-completion hook. See [`OnTurnEndHook`]. `None` keeps the legacy
-    /// "one prompt cycle per call" behavior.
+    /// Optional turn-completion hook. See [`OnTurnEndHook`]. `None` (the default) means
+    /// no hook-driven continuations: exactly one prompt cycle per call.
     on_turn_end: Option<OnTurnEndHook>,
     /// Resolved continuation cap — defaults to [`DEFAULT_TURN_CONTINUATION_CAP`] when
     /// `AgentHarnessOptions::turn_continuation_cap` is `None`.
@@ -616,9 +616,9 @@ impl AgentHarness {
             finish_persisted_run(result, persist_errors)?;
             is_first_iteration = false;
 
-            // No hook configured → behave like the legacy single-cycle path. Skip event
-            // and audit emission so embedders that never opt in pay zero overhead and
-            // see no schema change in their session jsonl.
+            // No hook configured → single-cycle path: one prompt cycle, then done. Skip
+            // event and audit emission so embedders that never opt in pay zero overhead
+            // and see no schema change in their session jsonl.
             let Some(hook) = self.on_turn_end.clone() else {
                 return Ok(());
             };

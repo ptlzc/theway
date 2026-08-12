@@ -6,7 +6,6 @@
 //! which means Ctrl-C interrupts the whole process — fine for a "simple" agent.
 
 use std::collections::HashSet;
-use std::io::Write as _;
 use std::sync::Arc;
 
 use crate::trigger_engine::event::{TriggerEvent, TriggerListener};
@@ -72,17 +71,6 @@ impl Tui {
         };
         println!("tools:   {tools}");
         println!("type a message and press Enter. Ctrl-C to quit.\n");
-    }
-
-    /// Legacy prompt marker. rustyline now renders the prompt directly, but the method is
-    /// kept available for tests + non-rustyline embedders.
-    #[allow(dead_code)]
-    pub fn user_prompt_marker(&self) {
-        let mut out = std::io::stdout();
-        let _ = out.execute(SetForegroundColor(Color::Cyan));
-        let _ = out.execute(Print("\nyou> "));
-        let _ = out.execute(ResetColor);
-        let _ = out.flush();
     }
 
     pub fn system_line(&self, text: &str) {

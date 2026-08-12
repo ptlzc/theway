@@ -80,7 +80,7 @@ pub(crate) async fn read_custom_entries(
 }
 
 #[tokio::test]
-async fn on_turn_end_hook_unset_keeps_legacy_single_cycle_behavior() {
+async fn on_turn_end_hook_unset_keeps_single_cycle_behavior() {
     use parking_lot::Mutex;
 
     let storage = Arc::new(MemorySessionStorage::new());
@@ -88,7 +88,7 @@ async fn on_turn_end_hook_unset_keeps_legacy_single_cycle_behavior() {
 
     let mut opts = AgentHarnessOptions::new(faux_model(), session.clone());
     opts.stream_fn = Some(faux_stream_fn("only-turn"));
-    // No on_turn_end set — legacy path.
+    // No on_turn_end set — default single-cycle path.
 
     let harness = AgentHarness::new(opts);
     let received: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
