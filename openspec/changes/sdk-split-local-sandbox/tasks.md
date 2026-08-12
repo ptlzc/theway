@@ -10,7 +10,7 @@
 
 ## Phase 1 — 并行根节点
 
-- [ ] **`1-core-executor`** · agent: executor · [depends: -]
+ - [x] **`1-core-executor`** · agent: executor · [depends: -]
       Add `theway-core::executor`: `ToolExecutor` trait (`kind`,
       read_file, write_file, run_command with cwd+timeout, list_dir, grep,
       find, git), `ExecutorKind`, `CommandOutput`/result types;
@@ -20,7 +20,7 @@
       只改: `crates/theway-core/src/executor/*` (+ lib.rs mod 声明)。
       验收: `cargo test -p theway-core` 通过。
 
-- [ ] **`2-sdk-scaffold`** · agent: executor · [depends: -]
+ - [x] **`2-sdk-scaffold`** · agent: executor · [depends: -]
       Scaffold `crates/theway-sdk` (package+lib `theway`, workspace member,
       lints, dev-deps tests-bridge/tempfile); deps: theway-core,
       theway-storage, theway-transport, theway-llm-provider. lib.rs 三层骨架:
@@ -31,7 +31,7 @@
 
 ## Phase 2 — 并行: 模块搬迁 ∥ 本地执行器
 
-- [ ] **`3-move-modules`** · agent: executor · [depends: 2-sdk-scaffold]
+ - [x] **`3-move-modules`** · agent: executor · [depends: 2-sdk-scaffold]
       Move the local-surface modules + tests from theway-server → SDK
       `common/` (依赖 lib.rs 骨架已由 2 建好): `session`,
       `session_archive`, `auth`, `stream_auth`, `history`, `images`,
@@ -42,7 +42,7 @@
       (删减), 两端 lib.rs 模块声明。
       验收: `cargo check -p theway -p theway-tui` 通过 (TUI 路径不变)。
 
-- [ ] **`4-local-executor`** · agent: executor · [depends: 1-core-executor, 2-sdk-scaffold]
+ - [x] **`4-local-executor`** · agent: executor · [depends: 1-core-executor, 2-sdk-scaffold]
       `LocalExecutor` in SDK `local/executor` (std fs + process, cwd +
       timeout semantics matching current tool behavior) + sandbox stub
       `sandbox/executor` (unsupported error, 不挂起) + tests (temp dir
@@ -53,7 +53,7 @@
 
 ## Phase 3 — 命令分层
 
-- [ ] **`5-commands-layer`** · agent: executor · [depends: 3-move-modules]
+ - [x] **`5-commands-layer`** · agent: executor · [depends: 3-move-modules]
       Command framework to SDK `common/commands`: `Registry`,
       `SlashCommand` trait, `CommandOutcome`, `CommandCtx` types + pure
       helpers (parse_model_spec, save_api_key, attach_skill_prompt,
@@ -69,7 +69,7 @@
 
 ## Phase 4 — daemon 瘦身
 
-- [ ] **`6-daemon-slim`** · agent: executor · [depends: 3-move-modules, 5-commands-layer]
+ - [x] **`6-daemon-slim`** · agent: executor · [depends: 3-move-modules, 5-commands-layer]
       theway-server: 删除已搬模块, 共享代码从 `theway` (SDK) 导入;
       `Registry::with_daemon_commands()` 在 `Registry::local()` 之上追加
       daemon 命令; thewayd 装配切换到它。daemon-only 代码保留:
@@ -81,14 +81,14 @@
 
 ## Phase 5 — 并行: 改名 ∥ executor 装配
 
-- [ ] **`7-rename-daemon`** · agent: executor · [depends: 6-daemon-slim]
+ - [x] **`7-rename-daemon`** · agent: executor · [depends: 6-daemon-slim]
       Rename `crates/theway-server` → `crates/theway-daemon` (package
       `theway-daemon`, lib `theway_daemon`, bin `thewayd` unchanged);
       workspace members + 所有 path 引用 (Cargo.toml, CI, Makefile, docs)。
       只改: 目录名, workspace `Cargo.toml`, CI/Makefile/docs 路径。
       验收: `cargo build --workspace` 通过。
 
-- [ ] **`8-executor-assembly`** · agent: executor · [depends: 4-local-executor, 6-daemon-slim]
+ - [x] **`8-executor-assembly`** · agent: executor · [depends: 4-local-executor, 6-daemon-slim]
       Daemon tool 装配绑定 `LocalExecutor` (via `theway_core::executor`);
       先 adapter (std-backed, 行为一致) 再机械迁移 tool bodies 从直接
       std 调用到 `&dyn ToolExecutor`; sandbox 模式选择是配置缝
@@ -99,7 +99,7 @@
 
 ## Phase 6 — TUI 依赖边界
 
-- [ ] **`9-tui-boundary`** · agent: executor · [depends: 7-rename-daemon]
+ - [x] **`9-tui-boundary`** · agent: executor · [depends: 7-rename-daemon]
       theway-tui Cargo.toml: dependency `theway-server` → `theway` (SDK
       path); 源码路径不变 (crate 名 theway 保留)。cargo tree 验证:
       TUI 依赖图无 theway-daemon / tools / trigger_engine。TUI completer
@@ -111,7 +111,7 @@
 
 ## Phase 7 — 终态验收
 
-- [ ] **`10-verify`** · agent: verify · [depends: 8-executor-assembly, 9-tui-boundary]
+ - [x] **`10-verify`** · agent: verify · [depends: 8-executor-assembly, 9-tui-boundary]
       Full verification (基于最新 HEAD 复核, 不照单全收节点报告):
       `cargo test --workspace`, `clippy --workspace --all-targets -- -D
       warnings`, `cargo fmt --all --check`; 冒烟 — `thewayd & theway`
@@ -122,9 +122,20 @@
 
 ## Phase 8 — 收尾
 
-- [ ] **`11-docs-close`** · agent: writer · [depends: 10-verify]
+ - [x] **`11-docs-close`** · agent: writer · [depends: 10-verify]
       Docs: README crate 表 + 架构说明 (SDK common/local/sandbox, daemon
       crate, executor 缝, 未来 e2b); 确认 `tools-into-core` change 兼容
       (工具定义在 core 绑 `theway_core::executor`); close issue #14。
       只改: README.md, docs/*, issue #14。
       验收: 文档与实现一致; issue #14 closed。
+
+---
+
+## 执行注记 (2026-08-12)
+
+- 节点 4 追加 depends 3-move-modules (两者共享 SDK Cargo.toml, 按编排原则串行)。
+- 节点 8 追加 depends 7-rename-daemon (其文件清单为 `crates/theway-daemon/...`, 仅改名后存在; tasks.md P5 的并行与文件清单自相矛盾)。
+- Cargo 约束: package `theway` (server) 与 SDK 不能同名共存于 workspace → SDK 桥接期用 package `theway-sdk` / lib `theway_sdk`, node 7 原子改回 `theway`。
+- node 3 遗留 (config_readers / session_archive 依赖 daemon 类型) 由 orchestrator 直接修复: 抽取 CronJob/DynamicTriggerRule 数据模型入 SDK common/triggers, session_archive + config_readers 完整搬迁 (commit c95f040)。
+- node 7 将 bug_report 拆分为 SDK redactor + daemon builder (TUI 需要 `theway::bug_report::redact` 走 SDK 依赖)。
+- 11 节点全部完成; 全量验证: cargo test --workspace 全绿, clippy -D warnings 零告警, fmt --all --check 干净, cargo tree -p theway-tui 无 daemon。
