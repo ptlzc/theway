@@ -1,4 +1,4 @@
-//! Local WebSocket transport (`--web` + `/ws`) for browser/web-shell clients.
+//! Local WebSocket transport (`--http` + `/ws`) for browser/web-shell clients.
 //!
 //! Frame protocol (tagged JSON, see docs/PROTOCOL.md §5.2):
 //!

@@ -1,7 +1,7 @@
 //! `WebStatus` ↔ `SessionState` conversion (transport layer).
 //!
 //! `WebStatus` (serde, `crate::wire`) is the internal model shared by the
-//! `--web` JSON surface and the UI event loop; `SessionState` (prost, generated
+//! `--http` JSON surface and the UI event loop; `SessionState` (prost, generated
 //! from `proto/theway_grpc.proto` by this crate's build.rs) is the structured
 //! wire model for gRPC. The gRPC server serializes `SessionState` as binary
 //! protobuf; JSON channels keep using `WebStatus` until the protojson migration

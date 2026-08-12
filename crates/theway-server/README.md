@@ -34,7 +34,7 @@ Three embedding levels (see `examples/sdk_embed.rs` for a complete walkthrough):
    (auto-retry with exponential backoff + optional fallback model) for headless
    prompt loops.
 3. **Full surface** — `theway_ai_harness::ui::App` assembled from `AppConfig`:
-   TUI, `--web` HTTP/SSE server, `--grpc` server, control-plane approval,
+   TUI, `--http` HTTP/SSE server, `--grpc` server, control-plane approval,
    triggers, relay. The `theway` binary is just the CLI assembly of this.
 
 Transport servers are methods on `App`:

@@ -1303,7 +1303,9 @@ impl App {
                         }
                     }
                     CommandOutcome::WebRelay(_) => {
-                        eprintln!("error: /web-connect requires the interactive TUI or --web mode");
+                        eprintln!(
+                            "error: /web-connect requires the interactive TUI or --http mode"
+                        );
                     }
                     CommandOutcome::SessionImportActivation { .. } => {
                         println!(

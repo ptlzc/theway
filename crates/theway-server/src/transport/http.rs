@@ -1,4 +1,4 @@
-//! Local browser HTTP transport for the coding-agent REPL (`--web` mode).
+//! Local browser HTTP transport for the coding-agent REPL (`--http` mode).
 //!
 //! This is intentionally a small loopback-only surface. The browser layer sends commands into the
 //! single-turn event loop owned by [`crate::ui::App`] (`run_transport_loop`) and receives full
@@ -47,7 +47,7 @@ pub struct HttpState {
     pub session_ops: Arc<dyn SessionOps>,
 }
 
-/// Full `--web` driver: bind, wire the transport channels, spawn the axum
+/// Full `--http` driver: bind, wire the transport channels, spawn the axum
 /// server, then hand the App into the shared event loop.
 pub async fn run_web(mut app: App, options: WebOptions) -> Result<()> {
     let addr = bind_addr(&options.host, options.port)?;

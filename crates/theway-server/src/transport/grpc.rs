@@ -1,6 +1,6 @@
 //! Local gRPC server for the coding-agent REPL (`--grpc` mode).
 //!
-//! The gRPC surface mirrors the `--web` (axum) surface: commands are queued
+//! The gRPC surface mirrors the `--http` (axum) surface: commands are queued
 //! into the same single-turn event loop via [`WebCommand`], and state is served
 //! as structured binary protobuf ([`SessionState`]) streamed over server-streaming
 //! RPC instead of SSE. Loopback-only, same bind policy as the web UI.

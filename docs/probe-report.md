@@ -39,7 +39,7 @@
 
 ### 结论
 
-`--web` 完全可作为常驻服务使用, 成熟度高于 `--grpc`:
+`--http` 完全可作为常驻服务使用, 成熟度高于 `--grpc`:
 - HTTP `/healthz` + SSE `/events` 已覆盖全部运维需求
 - 浏览器原生 EventSource 无需客户端依赖
 - 与 `--grpc` 共享同一 `run_transport_loop` 事件循环, 行为一致
@@ -55,4 +55,4 @@
 
 若需 gRPC 生态集成 (grpc_health_probe, gRPC gateway, 统一微服务治理),
 仅需补齐 gRPC reflection (低优先级, loopback-only 场景影响小)。
-为 workmate UI 服务, `--web` 已覆盖全部需求。
+为 workmate UI 服务, `--http` 已覆盖全部需求。

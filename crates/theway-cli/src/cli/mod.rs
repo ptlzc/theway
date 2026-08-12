@@ -89,23 +89,23 @@ pub(crate) struct Cli {
     #[arg(long = "always-allow")]
     pub(crate) always_allow: bool,
 
-    /// Run the local browser UI instead of the terminal UI. Defaults to loopback-only.
-    #[arg(long, conflicts_with = "tui")]
-    pub(crate) web: bool,
+    /// Run the local HTTP UI (browser) instead of the terminal UI. Defaults to loopback-only.
+    #[arg(long = "http", conflicts_with = "tui")]
+    pub(crate) http: bool,
     /// Run a local gRPC server instead of the terminal UI. Loopback-only; exposes the same
-    /// command/snapshot surface as `--web` (state, events stream, prompt, model, abort,
+    /// command/snapshot surface as `--http` (state, events stream, prompt, model, abort,
     /// control-plane resolve) over tonic.
-    #[arg(long, conflicts_with = "web")]
+    #[arg(long, conflicts_with = "http")]
     pub(crate) grpc: bool,
-    /// Run the terminal UI even when local defaults would open the Web UI.
-    #[arg(long, conflicts_with = "web")]
+    /// Run the terminal UI even when local defaults would open the HTTP UI.
+    #[arg(long, conflicts_with = "http")]
     pub(crate) tui: bool,
-    /// Host for `--web`/`--grpc`. Must be a loopback address.
-    #[arg(long = "web-host", default_value = "127.0.0.1", value_name = "HOST")]
-    pub(crate) web_host: String,
-    /// Port for `--web`/`--grpc`; use 0 to bind a random free port.
-    #[arg(long = "web-port", default_value_t = 0, value_name = "PORT")]
-    pub(crate) web_port: u16,
+    /// Host for `--http`/`--grpc`. Must be a loopback address.
+    #[arg(long = "http-host", default_value = "127.0.0.1", value_name = "HOST")]
+    pub(crate) http_host: String,
+    /// Port for `--http`/`--grpc`; use 0 to bind a random free port.
+    #[arg(long = "http-port", default_value_t = 0, value_name = "PORT")]
+    pub(crate) http_port: u16,
 }
 
 #[derive(Subcommand, Debug)]
@@ -368,10 +368,10 @@ mod tests {
 
         // --resume followed by another flag must not swallow the flag as its value.
         let with_flag =
-            Cli::try_parse_from(["theway", "--resume", "--web"]).expect("flag not swallowed");
+            Cli::try_parse_from(["theway", "--resume", "--http"]).expect("flag not swallowed");
         assert_eq!(with_flag.effective_resume_id(), None);
         assert!(with_flag.resume.is_some());
-        assert!(with_flag.web);
+        assert!(with_flag.http);
 
         // Absent entirely.
         let none = Cli::try_parse_from(["theway"]).expect("no flags");

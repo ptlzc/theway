@@ -1,4 +1,4 @@
-//! UI mode resolution (`--web` / `--grpc` / TUI / headless) plus small CLI-level
+//! UI mode resolution (`--http` / `--grpc` / TUI / headless) plus small CLI-level
 //! helpers (thinking-level parsing, `--base-url` validation, panel hook/trigger
 //! inventory).
 //!
@@ -14,24 +14,24 @@ use crate::cli::Cli;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum UiMode {
     Grpc,
-    Web,
+    Http,
     Tui,
     Headless,
 }
 
-pub(crate) fn should_run_web(cli: &Cli) -> bool {
+pub(crate) fn should_run_http(cli: &Cli) -> bool {
     resolve_ui_mode(
-        cli.web,
+        cli.http,
         cli.tui,
         cli.grpc,
         std::io::stdin().is_terminal() && std::io::stdout().is_terminal(),
         is_remote_tty_env(|name| std::env::var_os(name).is_some()),
-    ) == UiMode::Web
+    ) == UiMode::Http
 }
 
 pub(crate) fn should_run_grpc(cli: &Cli) -> bool {
     resolve_ui_mode(
-        cli.web,
+        cli.http,
         cli.tui,
         cli.grpc,
         std::io::stdin().is_terminal() && std::io::stdout().is_terminal(),
@@ -40,7 +40,7 @@ pub(crate) fn should_run_grpc(cli: &Cli) -> bool {
 }
 
 fn resolve_ui_mode(
-    web: bool,
+    http: bool,
     tui: bool,
     grpc: bool,
     interactive_tty: bool,
@@ -49,8 +49,8 @@ fn resolve_ui_mode(
     if grpc {
         return UiMode::Grpc;
     }
-    if web {
-        return UiMode::Web;
+    if http {
+        return UiMode::Http;
     }
     if tui {
         return UiMode::Tui;
@@ -58,7 +58,11 @@ fn resolve_ui_mode(
     if !interactive_tty {
         return UiMode::Headless;
     }
-    if remote_tty { UiMode::Tui } else { UiMode::Web }
+    if remote_tty {
+        UiMode::Tui
+    } else {
+        UiMode::Http
+    }
 }
 
 fn is_remote_tty_env(mut has_env: impl FnMut(&str) -> bool) -> bool {
@@ -152,11 +156,11 @@ mod tests {
             debug: false,
             yes: false,
             always_allow: false,
-            web: false,
+            http: false,
             grpc: false,
             tui: false,
-            web_host: "127.0.0.1".into(),
-            web_port: 0,
+            http_host: "127.0.0.1".into(),
+            http_port: 0,
         };
         let err = validate_base_url_override(&cli).unwrap_err().to_string();
         assert!(
@@ -177,7 +181,7 @@ mod tests {
     fn ui_mode_defaults_to_web_for_local_tty() {
         assert_eq!(
             resolve_ui_mode(false, false, false, true, false),
-            UiMode::Web
+            UiMode::Http
         );
     }
 
@@ -199,7 +203,10 @@ mod tests {
 
     #[test]
     fn explicit_ui_flags_override_default() {
-        assert_eq!(resolve_ui_mode(true, false, false, true, true), UiMode::Web);
+        assert_eq!(
+            resolve_ui_mode(true, false, false, true, true),
+            UiMode::Http
+        );
         assert_eq!(
             resolve_ui_mode(false, true, false, true, false),
             UiMode::Tui

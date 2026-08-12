@@ -1,6 +1,6 @@
 //! theway — coding agent CLI binary (`[[bin]]` of the `theway` crate). Thin assembly layer
 //! on top of the `theway` SDK library; all runtime logic lives in the library so external
-//! projects can embed it in-process. `--web` / `--grpc` dispatch into the `transport::http`
+//! projects can embed it in-process. `--http` / `--grpc` dispatch into the `transport::http`
 //! / `transport::grpc` drivers (crate `server` feature). The bin target requires features
 //! `tui` + `server`, so both are compile-time constants here.
 //!

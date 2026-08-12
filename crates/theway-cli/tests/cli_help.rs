@@ -57,17 +57,17 @@ fn help_lists_control_plane_yes_flag() {
 }
 
 #[test]
-fn help_lists_web_and_tui_mode_flags() {
+fn help_lists_http_and_tui_mode_flags() {
     let output = Command::new(env!("CARGO_BIN_EXE_theway"))
         .arg("--help")
         .output()
         .expect("run theway --help");
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("--web"), "{stdout}");
+    assert!(stdout.contains("--http"), "{stdout}");
     assert!(stdout.contains("--tui"), "{stdout}");
     assert!(
-        stdout.contains("Run the terminal UI even when local defaults would open the Web UI"),
+        stdout.contains("Run the terminal UI even when local defaults would open the HTTP UI"),
         "{stdout}"
     );
 }

@@ -35,7 +35,7 @@ use crate::cli::{Cli, select_resume_session};
 use crate::session_factory::SessionHarnessFactory;
 use crate::ui_mode::{
     active_hook_registrations, active_trigger_features, parse_thinking, should_run_grpc,
-    should_run_web, validate_base_url_override,
+    should_run_http, validate_base_url_override,
 };
 
 // Kept at crate-root visibility via `pub use startup::user_message;` in `main.rs`
@@ -50,7 +50,7 @@ pub(crate) async fn run_repl(
     // Arc'd so the session factory (session-resource-model) can share the cwd-scoped repo
     // with the App / SessionOps; every existing call site keeps working through Deref.
     let repo = std::sync::Arc::new(repo);
-    let run_web = should_run_web(&cli);
+    let run_http = should_run_http(&cli);
     let run_grpc = should_run_grpc(&cli);
     let cli_base_url = cli.base_url.clone();
     validate_base_url_override(&cli)?;
@@ -299,13 +299,13 @@ pub(crate) async fn run_repl(
     let before_tool_call = PermissionPolicy::default_for_coding_agent().as_before_tool_call();
     opts.before_tool_call = Some(before_tool_call.clone());
     let interactive_tui =
-        !run_web && !run_grpc && std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+        !run_http && !run_grpc && std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
     // Control-plane prompt policy: decided once, then shared with every harness the
     // session factory builds — the interactive hook is Arc'd internally, so all clones
     // feed the same receiver that the App drains.
     let (control_plane_hook, control_plane_prompt_rx) = if cli.always_allow || cli.yes {
         (Some(control_plane_prompt::allow_hook()), None)
-    } else if interactive_tui || run_web || run_grpc {
+    } else if interactive_tui || run_http || run_grpc {
         let (hook, rx) = control_plane_prompt::interactive_hook();
         (Some(hook), Some(rx))
     } else {
@@ -686,7 +686,7 @@ pub(crate) async fn run_repl(
     // Hand off to the UI layer. The TUI owns the terminal, the input box, the scrolling feed,
     // and the serialized run slot (user prompts + inject-and-run triggered turns) until quit.
     //
-    // `--web` / `--grpc`: the protocol servers live in this crate's `transport` module
+    // `--http` / `--grpc`: the protocol servers live in the `theway` lib's `transport` module
     // (`server` feature). Each driver binds the listener, spawns the protocol server and runs
     // the shared transport event loop (`App::run_transport_loop`) on the public
     // `theway::ui::web_loop::TransportEndpoints` channel surface (openspec
@@ -695,17 +695,17 @@ pub(crate) async fn run_repl(
         theway::transport::grpc::run_grpc(
             app,
             theway::transport::grpc::GrpcOptions {
-                host: cli.web_host.clone(),
-                port: cli.web_port,
+                host: cli.http_host.clone(),
+                port: cli.http_port,
             },
         )
         .await
-    } else if run_web {
+    } else if run_http {
         theway::transport::http::run_web(
             app,
             theway::wire::WebOptions {
-                host: cli.web_host.clone(),
-                port: cli.web_port,
+                host: cli.http_host.clone(),
+                port: cli.http_port,
             },
         )
         .await
