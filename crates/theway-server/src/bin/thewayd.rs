@@ -57,9 +57,14 @@ struct Cli {
     /// Bind host (loopback recommended). Defaults to 127.0.0.1.
     #[arg(long = "host", default_value = "127.0.0.1")]
     host: String,
-    /// Bind port. 0 = random free port (printed on startup).
-    #[arg(long = "port", default_value = "0")]
+    /// Bind port. Defaults to 44777; 0 = random free port (published to the
+    /// port file so clients can find it).
+    #[arg(long = "port", default_value = "44777")]
     port: u16,
+    /// Working directory for the daemon (session repo + tool execution). Defaults
+    /// to the current directory.
+    #[arg(long)]
+    cwd: Option<std::path::PathBuf>,
     /// Provider id (anthropic, openai, openrouter, …). When unset, auto-detected from env.
     #[arg(long)]
     provider: Option<String>,
@@ -105,6 +110,10 @@ async fn main() -> Result<()> {
     } else {
         Mode::Grpc
     };
+    if let Some(dir) = &cli.cwd {
+        std::env::set_current_dir(dir)
+            .with_context(|| format!("cd into {}", dir.display()))?;
+    }
     let cwd = std::env::current_dir().context("getting cwd")?;
     let repo = Arc::new(session::open_repo(&cwd).await);
 
@@ -492,16 +501,32 @@ async fn main() -> Result<()> {
         cli.port
     );
 
+    // Publish the actual bound port to a well-known file so clients (theway TUI,
+    // scripts) can discover the daemon without a fixed port. Written on bind.
+    let port_file = config::base_dir().join("daemon-port");
+    let on_listen: std::sync::Arc<dyn Fn(std::net::SocketAddr) + Send + Sync> = {
+        let port_file = port_file.clone();
+        std::sync::Arc::new(move |addr| {
+            if let Err(e) = std::fs::write(&port_file, addr.port().to_string()) {
+                tracing::warn!("write daemon port file {}: {e}", port_file.display());
+            }
+        })
+    };
+
     let result = match mode {
-        Mode::Mcp => theway_transport::mcp::run_mcp_server(theway::tools::local_tools())
-            .await
-            .map_err(|e| anyhow::anyhow!("mcp server: {e}")),
+        Mode::Mcp => {
+            let _ = std::fs::remove_file(&port_file);
+            theway_transport::mcp::run_mcp_server(theway::tools::local_tools())
+                .await
+                .map_err(|e| anyhow::anyhow!("mcp server: {e}"))
+        }
         Mode::Grpc => {
             theway_transport::grpc::run_grpc(
                 Box::new(app),
                 theway_transport::grpc::GrpcOptions {
                     host: cli.host.clone(),
                     port: cli.port,
+                    on_listen: Some(on_listen.clone()),
                 },
             )
             .await
@@ -512,6 +537,7 @@ async fn main() -> Result<()> {
                 theway_transport::wire::WebOptions {
                     host: cli.host.clone(),
                     port: cli.port,
+                    on_listen: Some(on_listen.clone()),
                 },
             )
             .await

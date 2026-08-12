@@ -24,10 +24,13 @@ pub struct ProviderGroup {
 
 use theway_core::multiagent::graph::types::{DagNode, DagRun, Direction, NodeResult, NodeStatus};
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct WebOptions {
     pub host: String,
     pub port: u16,
+    /// Called with the actual bound address after the listener is up (used to
+    /// publish the port when `port: 0` requested a random one).
+    pub on_listen: Option<std::sync::Arc<dyn Fn(std::net::SocketAddr) + Send + Sync>>,
 }
 
 #[derive(Debug)]

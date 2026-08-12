@@ -45,10 +45,13 @@ use theway_grpc::{
     SwitchSessionRequest,
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct GrpcOptions {
     pub host: String,
     pub port: u16,
+    /// Called with the actual bound address after the listener is up (used to
+    /// publish the port when `port: 0` requested a random one).
+    pub on_listen: Option<std::sync::Arc<dyn Fn(std::net::SocketAddr) + Send + Sync>>,
 }
 
 #[derive(Clone)]
@@ -598,6 +601,9 @@ pub async fn run_grpc(mut app: Box<dyn TransportHost>, options: GrpcOptions) -> 
         .await
         .with_context(|| format!("bind grpc ui on {addr}"))?;
     let actual = listener.local_addr()?;
+    if let Some(on_listen) = &options.on_listen {
+        on_listen(actual);
+    }
 
     let endpoints = app.transport_endpoints();
     let agent_fwd = endpoints.agent_fwd.clone();
