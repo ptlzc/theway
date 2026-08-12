@@ -71,8 +71,6 @@ pub use agent::messages;
 pub use agent::permission::{PermissionCategory, PermissionDecision, PermissionPolicy};
 #[cfg(feature = "harness")]
 pub use agent::session::{
-    jsonl_repo::JsonlSessionRepo,
-    jsonl_storage::JsonlSessionStorage,
     memory_repo::MemorySessionRepo,
     memory_storage::MemorySessionStorage,
     repo::SessionRepo,

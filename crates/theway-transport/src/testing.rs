@@ -1,7 +1,7 @@
 //! Test fakes for the transport servers (session-resource-model N4).
 //!
 //! [`FakeSessionOps`] is an in-memory [`crate::transport::SessionOps`] so the gRPC/HTTP
-//! session tests exercise the transport surface without a real `JsonlSessionRepo` on disk.
+//! session tests exercise the transport surface without a real session repo on disk.
 //! Delete protection is simulated by mapping a session id to its "running" run ids.
 
 use std::collections::HashMap;

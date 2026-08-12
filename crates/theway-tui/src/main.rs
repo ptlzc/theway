@@ -29,7 +29,7 @@ use std::io::IsTerminal as _;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use theway::HybridSessionRepo;
+use theway::SqliteSessionRepo;
 use theway::{session, session_archive};
 
 use cli::{
@@ -69,7 +69,7 @@ async fn main() -> Result<()> {
 
 async fn run_cli_command(
     command: &CliCommand,
-    repo: &HybridSessionRepo,
+    repo: &SqliteSessionRepo,
     cwd: &std::path::Path,
 ) -> Result<()> {
     match command {
@@ -79,7 +79,7 @@ async fn run_cli_command(
 
 async fn run_session_cli_command(
     command: &SessionCliCommand,
-    repo: &HybridSessionRepo,
+    repo: &SqliteSessionRepo,
     cwd: &std::path::Path,
 ) -> Result<()> {
     match command {

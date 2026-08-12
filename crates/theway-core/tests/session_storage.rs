@@ -1,11 +1,8 @@
-//! End-to-end session storage. Exercises both the memory and jsonl backends through the
-//! `SessionStorage` trait surface.
+//! End-to-end session storage over the in-memory backend, through the `SessionStorage`
+//! trait surface. Durable (SQLite) persistence is covered in theway-storage tests.
 
 use std::sync::Arc;
-use tempfile::tempdir;
-use theway_core::{
-    JsonlSessionRepo, MemorySessionStorage, Session, SessionStorage, build_session_context,
-};
+use theway_core::{MemorySessionStorage, Session, SessionStorage, build_session_context};
 
 fn user_message(text: &str) -> theway_core::AgentMessage {
     theway_core::AgentMessage::Llm(theway_llm_provider::Message::User(
@@ -41,76 +38,6 @@ async fn memory_session_roundtrips_messages() {
 
     let ctx = build_session_context(&branch);
     assert_eq!(ctx.messages.len(), 2);
-}
-
-#[tokio::test]
-async fn jsonl_session_persists_across_open() {
-    let dir = tempdir().unwrap();
-    let repo = JsonlSessionRepo::new(dir.path());
-
-    let session = repo.create("/some/cwd").await.unwrap();
-    session.append_message(user_message("hello")).await.unwrap();
-    let leaf = session.leaf_id().await.unwrap().expect("leaf id");
-
-    // Re-open the file and verify the message is still there.
-    let files = repo.list().await.unwrap();
-    assert_eq!(files.len(), 1);
-    let reopened = repo.open(&files[0]).await.unwrap();
-    let entries = reopened.entries().await.unwrap();
-    assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].id(), leaf);
-}
-
-#[tokio::test]
-async fn jsonl_metadata_id_matches_session_file_stem() {
-    let dir = tempdir().unwrap();
-    let repo = JsonlSessionRepo::new(dir.path());
-
-    let session = repo.create("/some/cwd").await.unwrap();
-    let files = repo.list().await.unwrap();
-    let stem = files[0].file_stem().and_then(|s| s.to_str()).unwrap();
-    let meta = session.storage().get_metadata_json().await.unwrap();
-
-    assert_eq!(meta.get("id").and_then(|v| v.as_str()), Some(stem));
-}
-
-#[tokio::test]
-async fn jsonl_explicit_leaf_moves_are_overridden_by_new_entries() {
-    let dir = tempdir().unwrap();
-    let repo = JsonlSessionRepo::new(dir.path());
-
-    let session = repo.create("/some/cwd").await.unwrap();
-    let id_a = session.append_message(user_message("a")).await.unwrap();
-    let _id_b = session.append_message(user_message("b")).await.unwrap();
-
-    session.move_to(Some(&id_a), None).await.unwrap();
-    let id_c = session.append_message(user_message("c")).await.unwrap();
-
-    let files = repo.list().await.unwrap();
-    let reopened = repo.open(&files[0]).await.unwrap();
-    assert_eq!(
-        reopened.leaf_id().await.unwrap().as_deref(),
-        Some(id_c.as_str())
-    );
-
-    let branch = reopened.branch(None).await.unwrap();
-    let ids: Vec<&str> = branch.iter().map(|e| e.id()).collect();
-    assert_eq!(ids, vec![id_a.as_str(), id_c.as_str()]);
-}
-
-#[tokio::test]
-async fn jsonl_can_move_leaf_to_root() {
-    let dir = tempdir().unwrap();
-    let repo = JsonlSessionRepo::new(dir.path());
-
-    let session = repo.create("/some/cwd").await.unwrap();
-    session.append_message(user_message("a")).await.unwrap();
-    session.move_to(None, None).await.unwrap();
-
-    let files = repo.list().await.unwrap();
-    let reopened = repo.open(&files[0]).await.unwrap();
-    assert_eq!(reopened.leaf_id().await.unwrap(), None);
-    assert!(reopened.branch(None).await.unwrap().is_empty());
 }
 
 #[tokio::test]

@@ -81,7 +81,7 @@ fn json_err(e: serde_json::Error) -> SessionError {
 
 impl SqliteSessionStorage {
     /// Create a fresh session database at `path`, writing the header. Errors if
-    /// the file exists (same contract as `JsonlSessionStorage::create`).
+    /// the file exists.
     pub async fn create(
         path: impl Into<PathBuf>,
         cwd: impl Into<String>,

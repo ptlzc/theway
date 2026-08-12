@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256};
 use theway_core::{
     JsonlSessionMetadata, Session, SessionImportOrigin, SessionStorage, SessionTreeEntry, uuidv7,
 };
-use theway_storage::hybrid_repo::HybridSessionRepo;
+use theway_storage::sqlite_repo::SqliteSessionRepo;
 use theway_storage::sqlite_storage::SqliteSessionStorage;
 
 use crate::triggers::cron::CronJob;
@@ -256,7 +256,7 @@ async fn render_session_jsonl(
 }
 
 pub async fn import_session(
-    repo: &HybridSessionRepo,
+    repo: &SqliteSessionRepo,
     archive_path: &Path,
     cwd: &Path,
     activate_triggers: ActivateTriggers,

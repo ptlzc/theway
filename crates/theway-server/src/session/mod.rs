@@ -1,11 +1,11 @@
-//! Session helpers — wraps `theway_core::HybridSessionRepo` with resume / list / delete
+//! Session helpers — wraps `theway_storage::SqliteSessionRepo` with resume / list / delete
 //! semantics scoped to the current cwd hash.
 
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 use theway_core::Session;
-use theway_storage::hybrid_repo::HybridSessionRepo;
+use theway_storage::sqlite_repo::SqliteSessionRepo;
 
 use crate::config::sessions_dir_for_cwd;
 
@@ -18,8 +18,8 @@ pub struct SessionEntry {
     pub automation: AutomationCounts,
 }
 
-pub async fn open_repo(cwd: &std::path::Path) -> HybridSessionRepo {
-    HybridSessionRepo::new(sessions_dir_for_cwd(cwd))
+pub async fn open_repo(cwd: &std::path::Path) -> SqliteSessionRepo {
+    SqliteSessionRepo::new(sessions_dir_for_cwd(cwd))
 }
 
 /// Dynamic trigger rules are session-scoped sidecars next to the jsonl transcript.
@@ -38,7 +38,7 @@ pub fn cron_sidecar_path(session_path: &std::path::Path) -> PathBuf {
 /// sessions may not have that field, so keep a deterministic fallback under the repo root.
 pub async fn trigger_sidecar_path_for_session(
     session: &Session,
-    repo: &HybridSessionRepo,
+    repo: &SqliteSessionRepo,
 ) -> Result<PathBuf> {
     let metadata = session.storage().get_metadata_json().await?;
     if let Some(path) = metadata.get("path").and_then(|v| v.as_str()) {
@@ -60,7 +60,7 @@ pub fn endpoint_sidecar_path(session_path: &std::path::Path) -> PathBuf {
 /// Return the cron sidecar for a live session.
 pub async fn cron_sidecar_path_for_session(
     session: &Session,
-    repo: &HybridSessionRepo,
+    repo: &SqliteSessionRepo,
 ) -> Result<PathBuf> {
     let metadata = session.storage().get_metadata_json().await?;
     if let Some(path) = metadata.get("path").and_then(|v| v.as_str()) {
@@ -75,12 +75,12 @@ pub async fn cron_sidecar_path_for_session(
 }
 
 /// Create a brand-new session under the current cwd's sessions dir.
-pub async fn create(repo: &HybridSessionRepo, cwd: &std::path::Path) -> Result<Session> {
+pub async fn create(repo: &SqliteSessionRepo, cwd: &std::path::Path) -> Result<Session> {
     Ok(repo.create(cwd.to_string_lossy().to_string()).await?)
 }
 
 /// Resume the most recent session for this cwd, or a specific one by id when supplied.
-pub async fn resume(repo: &HybridSessionRepo, explicit_id: Option<&str>) -> Result<Session> {
+pub async fn resume(repo: &SqliteSessionRepo, explicit_id: Option<&str>) -> Result<Session> {
     let files = repo.list().await?;
     if files.is_empty() {
         bail!("no sessions to resume in {}", repo.root().display());
@@ -90,7 +90,7 @@ pub async fn resume(repo: &HybridSessionRepo, explicit_id: Option<&str>) -> Resu
             .await?
             .with_context(|| format!("no session matches id {id}"))?
     } else {
-        // HybridSessionRepo::list() sorts ascending by name (UUIDv7), so the tail is newest.
+        // SqliteSessionRepo::list() sorts ascending by name (UUIDv7), so the tail is newest.
         files.last().cloned().unwrap()
     };
     Ok(repo.open(&chosen).await?)
@@ -98,7 +98,7 @@ pub async fn resume(repo: &HybridSessionRepo, explicit_id: Option<&str>) -> Resu
 
 /// List sessions for this cwd, oldest → newest, with a short preview from the first user
 /// message when available.
-pub async fn list_entries(repo: &HybridSessionRepo) -> Result<Vec<SessionEntry>> {
+pub async fn list_entries(repo: &SqliteSessionRepo) -> Result<Vec<SessionEntry>> {
     let mut out = Vec::new();
     for path in repo.list().await? {
         let session = repo.open(&path).await?;
@@ -162,7 +162,7 @@ pub(crate) async fn first_user_text(session: &Session) -> Option<String> {
 }
 
 /// Delete a session by id (full UUIDv7) or a unique prefix.
-pub async fn delete_by_id(repo: &HybridSessionRepo, id: &str) -> Result<PathBuf> {
+pub async fn delete_by_id(repo: &SqliteSessionRepo, id: &str) -> Result<PathBuf> {
     let files = repo.list().await?;
     let path = find_session_path(repo, &files, id)
         .await?
@@ -190,7 +190,7 @@ pub async fn delete_by_id(repo: &HybridSessionRepo, id: &str) -> Result<PathBuf>
 }
 
 async fn find_session_path(
-    repo: &HybridSessionRepo,
+    repo: &SqliteSessionRepo,
     files: &[PathBuf],
     id: &str,
 ) -> Result<Option<PathBuf>> {
@@ -220,13 +220,13 @@ async fn find_session_path(
 }
 
 /// Resolve a session id (full UUIDv7 or unique prefix) to its transcript path.
-pub async fn find_path_by_id(repo: &HybridSessionRepo, id: &str) -> Result<Option<PathBuf>> {
+pub async fn find_path_by_id(repo: &SqliteSessionRepo, id: &str) -> Result<Option<PathBuf>> {
     let files = repo.list().await?;
     find_session_path(repo, &files, id).await
 }
 
 /// Return the newest session transcript path for this cwd-scoped repo.
-pub async fn newest_path(repo: &HybridSessionRepo) -> Result<Option<PathBuf>> {
+pub async fn newest_path(repo: &SqliteSessionRepo) -> Result<Option<PathBuf>> {
     let files = repo.list().await?;
     Ok(files.last().cloned())
 }
@@ -314,7 +314,7 @@ pub async fn automation_counts(session_path: &std::path::Path) -> AutomationCoun
 /// naming the newest such session so the user can resume it. `current` (the active
 /// session's transcript path) is excluded from the scan.
 pub async fn automation_elsewhere_hint(
-    repo: &HybridSessionRepo,
+    repo: &SqliteSessionRepo,
     current: Option<&std::path::Path>,
 ) -> Option<String> {
     let files = repo.list().await.ok()?;

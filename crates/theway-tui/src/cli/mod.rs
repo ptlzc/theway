@@ -9,7 +9,7 @@ use std::io::IsTerminal as _;
 use crate::resume_picker;
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
-use theway::HybridSessionRepo;
+use theway::SqliteSessionRepo;
 use theway::{commands, config, session, session_archive};
 
 #[derive(Parser, Debug)]
@@ -228,7 +228,7 @@ where
     has_help
 }
 
-pub(crate) async fn list_sessions_cmd(repo: &HybridSessionRepo) -> Result<()> {
+pub(crate) async fn list_sessions_cmd(repo: &SqliteSessionRepo) -> Result<()> {
     let entries = session::list_entries(repo).await?;
     if entries.is_empty() {
         println!("(no sessions for this cwd)");
@@ -275,7 +275,7 @@ pub(crate) async fn list_all_sessions_cmd() -> Result<()> {
 
     let mut all = Vec::new();
     for b in &buckets {
-        let repo = theway::HybridSessionRepo::new(b);
+        let repo = theway::SqliteSessionRepo::new(b);
         // list_entries may return Err if the bucket is empty/malformed; skip those gracefully.
         let entries = session::list_entries(&repo).await.unwrap_or_default();
         for e in entries {
@@ -306,14 +306,14 @@ pub(crate) async fn list_all_sessions_cmd() -> Result<()> {
     Ok(())
 }
 
-pub(crate) async fn delete_session_cmd(repo: &HybridSessionRepo, id: &str) -> Result<()> {
+pub(crate) async fn delete_session_cmd(repo: &SqliteSessionRepo, id: &str) -> Result<()> {
     let path = session::delete_by_id(repo, id).await?;
     println!("deleted {}", path.display());
     Ok(())
 }
 
 pub(crate) async fn select_resume_session(
-    repo: &HybridSessionRepo,
+    repo: &SqliteSessionRepo,
     cwd: &std::path::Path,
 ) -> Result<(theway_core::Session, bool)> {
     let mut entries = session::list_entries(repo).await?;
@@ -442,7 +442,7 @@ mod tests {
         // Off, and the interactive offer happens afterwards (TTY only). With a missing
         // archive the failure is the archive read — not an "ask unsupported" error.
         let temp = tempfile::tempdir().unwrap();
-        let repo = HybridSessionRepo::new(temp.path().join("sessions"));
+        let repo = SqliteSessionRepo::new(temp.path().join("sessions"));
         let command = SessionCliCommand::Import {
             file: std::path::PathBuf::from("missing.theway-session"),
             cwd: None,

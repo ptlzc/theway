@@ -69,7 +69,7 @@ async fn dispatch_session_export_writes_archive_with_bounded_output() {
     let temp = tempfile::tempdir().unwrap();
     let cwd = temp.path().join("repo");
     tokio::fs::create_dir_all(&cwd).await.unwrap();
-    let repo = theway_core::JsonlSessionRepo::new(temp.path().join("sessions"));
+    let repo = theway_storage::sqlite_repo::SqliteSessionRepo::new(temp.path().join("sessions"));
     let session = repo
         .create(cwd.to_string_lossy().to_string())
         .await

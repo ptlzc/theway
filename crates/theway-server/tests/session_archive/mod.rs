@@ -2,7 +2,7 @@
 
 use super::*;
 use chrono::Utc;
-use theway_storage::hybrid_repo::HybridSessionRepo;
+use theway_storage::sqlite_repo::SqliteSessionRepo;
 
 #[tokio::test]
 async fn export_import_rewrites_metadata_and_disables_automation() {
@@ -11,7 +11,7 @@ async fn export_import_rewrites_metadata_and_disables_automation() {
     let dest_cwd = temp.path().join("dest");
     tokio::fs::create_dir_all(&source_cwd).await.unwrap();
     tokio::fs::create_dir_all(&dest_cwd).await.unwrap();
-    let source_repo = HybridSessionRepo::new(temp.path().join("source-sessions"));
+    let source_repo = SqliteSessionRepo::new(temp.path().join("source-sessions"));
     let source = source_repo
         .create(source_cwd.to_string_lossy().to_string())
         .await
@@ -74,7 +74,7 @@ async fn export_import_rewrites_metadata_and_disables_automation() {
     assert!(export.has_triggers);
     assert!(export.has_cron);
 
-    let dest_repo = HybridSessionRepo::new(temp.path().join("dest-sessions"));
+    let dest_repo = SqliteSessionRepo::new(temp.path().join("dest-sessions"));
     let imported = import_session(&dest_repo, &archive, &dest_cwd, ActivateTriggers::Off)
         .await
         .unwrap();
@@ -151,7 +151,7 @@ fn rejects_unsafe_archive_paths() {
 #[tokio::test]
 async fn ask_activation_is_explicitly_rejected_until_interactive_confirm_exists() {
     let temp = tempfile::tempdir().unwrap();
-    let repo = HybridSessionRepo::new(temp.path().join("sessions"));
+    let repo = SqliteSessionRepo::new(temp.path().join("sessions"));
     let err = import_session(
         &repo,
         &temp.path().join("missing.theway-session"),
@@ -170,7 +170,7 @@ async fn export_manifest_uses_last_entry_as_leaf_without_explicit_leaf_row() {
     let temp = tempfile::tempdir().unwrap();
     let source_cwd = temp.path().join("source");
     tokio::fs::create_dir_all(&source_cwd).await.unwrap();
-    let source_repo = HybridSessionRepo::new(temp.path().join("source-sessions"));
+    let source_repo = SqliteSessionRepo::new(temp.path().join("source-sessions"));
     let source = source_repo
         .create(source_cwd.to_string_lossy().to_string())
         .await
@@ -198,7 +198,7 @@ async fn export_manifest_uses_explicit_leaf_target_not_leaf_row_id() {
     let temp = tempfile::tempdir().unwrap();
     let source_cwd = temp.path().join("source");
     tokio::fs::create_dir_all(&source_cwd).await.unwrap();
-    let source_repo = HybridSessionRepo::new(temp.path().join("source-sessions"));
+    let source_repo = SqliteSessionRepo::new(temp.path().join("source-sessions"));
     let source = source_repo
         .create(source_cwd.to_string_lossy().to_string())
         .await
@@ -236,7 +236,7 @@ async fn import_rejects_manifest_active_leaf_that_does_not_match_session_jsonl()
     let dest_cwd = temp.path().join("dest");
     tokio::fs::create_dir_all(&source_cwd).await.unwrap();
     tokio::fs::create_dir_all(&dest_cwd).await.unwrap();
-    let source_repo = HybridSessionRepo::new(temp.path().join("source-sessions"));
+    let source_repo = SqliteSessionRepo::new(temp.path().join("source-sessions"));
     let source = source_repo
         .create(source_cwd.to_string_lossy().to_string())
         .await
@@ -255,7 +255,7 @@ async fn import_rejects_manifest_active_leaf_that_does_not_match_session_jsonl()
     let tampered_archive = temp.path().join("tampered.theway-session");
     write_test_archive(&tampered_archive, &files);
 
-    let dest_repo = HybridSessionRepo::new(temp.path().join("dest-sessions"));
+    let dest_repo = SqliteSessionRepo::new(temp.path().join("dest-sessions"));
     let err = import_session(
         &dest_repo,
         &tampered_archive,
@@ -275,7 +275,7 @@ async fn make_exported_session(
 ) -> (String, PathBuf) {
     let source_cwd = temp.join("source");
     tokio::fs::create_dir_all(&source_cwd).await.unwrap();
-    let source_repo = HybridSessionRepo::new(temp.join("source-sessions"));
+    let source_repo = SqliteSessionRepo::new(temp.join("source-sessions"));
     let source = source_repo
         .create(source_cwd.to_string_lossy().to_string())
         .await
@@ -353,7 +353,7 @@ async fn export_archive_is_owner_only() {
 async fn export_refuses_to_overwrite_existing_output() {
     let temp = tempfile::tempdir().unwrap();
     let (_, archive) = make_exported_session(temp.path(), vec![], vec![]).await;
-    let source_repo = HybridSessionRepo::new(temp.path().join("source-sessions"));
+    let source_repo = SqliteSessionRepo::new(temp.path().join("source-sessions"));
     let source = source_repo
         .open(&source_repo.list().await.unwrap().pop().unwrap())
         .await
@@ -376,7 +376,7 @@ async fn import_records_source_provenance_in_metadata() {
     let (source_id, archive) = make_exported_session(temp.path(), vec![], vec![]).await;
     let dest_cwd = temp.path().join("dest");
     tokio::fs::create_dir_all(&dest_cwd).await.unwrap();
-    let dest_repo = HybridSessionRepo::new(temp.path().join("dest-sessions"));
+    let dest_repo = SqliteSessionRepo::new(temp.path().join("dest-sessions"));
     let imported = import_session(&dest_repo, &archive, &dest_cwd, ActivateTriggers::Off)
         .await
         .unwrap();
@@ -411,7 +411,7 @@ async fn activation_on_preserves_source_disabled_automation() {
     let (_, archive) = make_exported_session(temp.path(), rules, jobs).await;
     let dest_cwd = temp.path().join("dest");
     tokio::fs::create_dir_all(&dest_cwd).await.unwrap();
-    let dest_repo = HybridSessionRepo::new(temp.path().join("dest-sessions"));
+    let dest_repo = SqliteSessionRepo::new(temp.path().join("dest-sessions"));
     let imported = import_session(&dest_repo, &archive, &dest_cwd, ActivateTriggers::On)
         .await
         .unwrap();
@@ -460,7 +460,7 @@ async fn failed_sidecar_write_cleans_up_partial_import() {
     let root = temp.path().join("sessions");
     tokio::fs::create_dir_all(&root).await.unwrap();
 
-    let staging = HybridSessionRepo::new(temp.path().join("staging"));
+    let staging = SqliteSessionRepo::new(temp.path().join("staging"));
     let session = staging.create("/tmp").await.unwrap();
     let entries = session.entries().await.unwrap();
 
@@ -516,7 +516,7 @@ async fn import_summary_records_originally_enabled_automation_and_activates_it()
     let (_, archive) = make_exported_session(temp.path(), rules, jobs).await;
     let dest_cwd = temp.path().join("dest");
     tokio::fs::create_dir_all(&dest_cwd).await.unwrap();
-    let dest_repo = HybridSessionRepo::new(temp.path().join("dest-sessions"));
+    let dest_repo = SqliteSessionRepo::new(temp.path().join("dest-sessions"));
     let imported = import_session(&dest_repo, &archive, &dest_cwd, ActivateTriggers::Off)
         .await
         .unwrap();
@@ -578,7 +578,7 @@ async fn successful_import_leaves_no_temp_files() {
     let (_, archive) = make_exported_session(temp.path(), vec![], vec![]).await;
     let dest_cwd = temp.path().join("dest");
     tokio::fs::create_dir_all(&dest_cwd).await.unwrap();
-    let dest_repo = HybridSessionRepo::new(temp.path().join("dest-sessions"));
+    let dest_repo = SqliteSessionRepo::new(temp.path().join("dest-sessions"));
     import_session(&dest_repo, &archive, &dest_cwd, ActivateTriggers::Off)
         .await
         .unwrap();

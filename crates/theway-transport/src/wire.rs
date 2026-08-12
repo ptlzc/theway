@@ -60,7 +60,7 @@ pub enum WebCommand {
 
 /// session-resource-model: one session as a managed resource (mirrors
 /// `theway_grpc.proto` SessionSummary). Produced by the app-side SessionOps
-/// from the JsonlSessionRepo plus live DagEngine state; served verbatim on
+/// from the SqliteSessionRepo plus live DagEngine state; served verbatim on
 /// the JSON surface and mapped onto the proto message by `theway-server`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionSummary {

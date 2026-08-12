@@ -2,20 +2,21 @@
 //!
 //! Exercises the full happy path without going through `main.rs` or the TUI: THEWAY_DIR-scoped
 //! sessions dir, harness assembly mirroring the binary, faux StreamFn for deterministic
-//! responses, then drop everything and reopen via `JsonlSessionRepo` to verify the active
+//! responses, then drop everything and reopen via `SqliteSessionRepo` to verify the active
 //! branch survived persistence.
 
 use std::sync::Arc;
 
 use tempfile::tempdir;
 use theway_core::{
-    AgentHarness, AgentHarnessOptions, JsonlSessionRepo, MemorySessionStorage, Session,
-    SessionStorage, StreamFn, ThinkingLevel,
+    AgentHarness, AgentHarnessOptions, MemorySessionStorage, Session, SessionStorage, StreamFn,
+    ThinkingLevel,
 };
 use theway_llm_provider::{
     AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, AssistantRole,
     ContentBlock, DoneReason, ModelCost, StopReason, Usage,
 };
+use theway_storage::sqlite_repo::SqliteSessionRepo;
 
 fn faux_model() -> theway_llm_provider::Model {
     theway_llm_provider::Model {
@@ -76,7 +77,7 @@ async fn create_persist_reopen_resume_round_trips() {
     let session_id;
 
     {
-        let repo = JsonlSessionRepo::new(dir.path());
+        let repo = SqliteSessionRepo::new(dir.path());
         let session = repo
             .create("/some/cwd")
             .await
@@ -100,7 +101,7 @@ async fn create_persist_reopen_resume_round_trips() {
     }
 
     // Drop everything above, then reopen by id and verify the persisted branch.
-    let repo = JsonlSessionRepo::new(dir.path());
+    let repo = SqliteSessionRepo::new(dir.path());
     let files = repo.list().await.unwrap();
     assert_eq!(files.len(), 1, "expected exactly one session file");
 

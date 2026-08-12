@@ -44,7 +44,7 @@ pub use theway_core::skill_overrides;
 // Session repo used by the CLI layer (theway-tui): hybrid JSONL+SQLite, new sessions
 // minted as SQLite. Re-exported from the composition root so binaries don't need to
 // depend on theway-storage directly.
-pub use theway_storage::hybrid_repo::HybridSessionRepo;
+pub use theway_storage::sqlite_repo::SqliteSessionRepo;
 pub mod templates;
 pub mod tools;
 pub mod trigger_engine;

@@ -141,7 +141,7 @@ pub struct AppConfig {
     pub session_factory: theway::session_ops::SessionFactory,
     /// cwd-scoped session repo backing [`theway_transport::transport::SessionOps`] (list / create /
     /// rename / delete) and cheap "does this id exist" checks before a switch.
-    pub session_repo: Arc<theway::HybridSessionRepo>,
+    pub session_repo: Arc<theway::SqliteSessionRepo>,
 }
 
 // Everything here is private to the `ui` subtree: the TUI event loop and the
@@ -183,7 +183,7 @@ pub struct App {
     /// session-resource-model: rebuilds a harness for another session (switch).
     session_factory: theway::session_ops::SessionFactory,
     /// cwd-scoped session repo (SessionOps + switch validation).
-    session_repo: Arc<theway::HybridSessionRepo>,
+    session_repo: Arc<theway::SqliteSessionRepo>,
     /// Live "current session" state shared with [`theway::session_ops::AppSessionOps`];
     /// synced on every published snapshot and on session switch.
     current_session_state: Arc<parking_lot::Mutex<theway::session_ops::CurrentSessionState>>,
@@ -1380,7 +1380,7 @@ mod tests {
                     async move { Err(anyhow::anyhow!("no session factory in UI tests ({id})")) },
                 )
             }),
-            session_repo: std::sync::Arc::new(theway::HybridSessionRepo::new(
+            session_repo: std::sync::Arc::new(theway::SqliteSessionRepo::new(
                 std::path::PathBuf::from("/nonexistent-theway-sessions"),
             )),
         })

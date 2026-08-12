@@ -9,18 +9,14 @@ use super::*;
 // ──────────────────────────────────────────────────────────────────────────────────────────
 
 /// Round-trip: drive the harness through a few turns + force_compact, then drop the harness,
-/// reopen the same session jsonl, and verify `build_session_context` reproduces what was in
-/// in-memory state after compaction. The pre-fix bug was that `first_kept_entry_id` written to
-/// the session jsonl referenced a synthetic id that no real entry carried, so the rebuilt
-/// branch dropped the entire pre-compaction tail.
+/// rebuild the context from the session entries, and verify `build_session_context` reproduces
+/// what was in in-memory state after compaction. The pre-fix bug was that
+/// `first_kept_entry_id` written to the session referenced a synthetic id that no real entry
+/// carried, so the rebuilt branch dropped the entire pre-compaction tail.
 #[tokio::test]
 async fn force_compact_writes_reachable_first_kept_entry_id_and_resume_preserves_tail() {
-    let dir = tempfile::tempdir().unwrap();
-    let repo = JsonlSessionRepo::new(dir.path());
-    let session = repo.create("/tmp/test-cwd").await.unwrap();
-    let session_files = repo.list().await.unwrap();
-    assert_eq!(session_files.len(), 1);
-    let session_path = session_files[0].clone();
+    let storage = std::sync::Arc::new(MemorySessionStorage::new());
+    let session = Session::new(storage as std::sync::Arc<dyn SessionStorage>);
 
     // Build a harness with a low keep_recent_tokens so a small transcript triggers compaction.
     let mut opts = AgentHarnessOptions::new(faux_model(), session.clone());
@@ -96,10 +92,9 @@ async fn force_compact_writes_reachable_first_kept_entry_id_and_resume_preserves
     let in_memory_after = harness.agent().state().messages.clone();
     drop(harness);
 
-    // Reopen the session from disk and rebuild the context.
-    let reopened = repo.open(&session_path).await.unwrap();
-    let branch = reopened.branch(None).await.unwrap();
-    let rebuilt = build_session_context(&branch);
+    // Rebuild the context from the session entries (same data a resume would replay).
+    let entries = session.entries().await.unwrap();
+    let rebuilt = build_session_context(&entries);
 
     // The rebuilt message list must be non-trivial (the bug dropped everything except the
     // summary) and must contain the same tail messages the live agent kept.

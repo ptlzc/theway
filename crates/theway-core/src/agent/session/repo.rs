@@ -1,10 +1,11 @@
 //! `SessionRepo` — the repository contract for session backends.
 //!
-//! The engine ships two concrete implementations: [`super::jsonl_repo::JsonlSessionRepo`]
-//! (default, in this crate) and the SQLite backend in `theway-storage`
-//! (`SqliteSessionRepo`). Backends may also be *combined* — see `HybridSessionRepo` in
-//! `theway-storage`, which lists `.jsonl` and `.db` files side by side and routes `open`
-//! by extension, so a backend switch never hides existing sessions.
+//! The engine ships one lightweight in-memory implementation
+//! ([`super::memory_repo::MemorySessionRepo`]) and defines the contract that
+//! the durable backend implements: `SqliteSessionRepo` in `theway-storage`
+//! (SQLite via Turso, one `.db` file per session) — the backend the `theway`
+//! server uses. The engine crate stays free of the turso dependency; the
+//! composition root (server/tui) picks the backend.
 //!
 //! Note: `#[async_trait]` cannot erase generic methods, so the trait uses concrete
 //! argument types (`String` / `&Path`). Concrete repos keep their generic convenience
