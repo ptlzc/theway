@@ -23,9 +23,6 @@ use theway_core::{Skill, SkillSource};
 
 /// Filename under the theway base dir (`~/.theway/`).
 pub const OVERRIDES_FILE: &str = "skill-overrides.json";
-/// Legacy pre-rename file name, read as a fallback so existing installs keep
-/// their overrides after the `skills-state.json` → `skill-overrides.json` rename.
-pub const LEGACY_OVERRIDES_FILE: &str = "skills-state.json";
 
 /// One explicit enable/disable override for a `{source, name}` skill. Presence of an entry
 /// means the user made an explicit runtime choice that overrides the skill's frontmatter
@@ -88,11 +85,6 @@ pub fn state_path(base_dir: &Path) -> PathBuf {
 
 /// Load the overlay. A missing file is an empty overlay; a malformed file is treated as empty
 /// (the disable/enable state simply isn't applied) rather than failing skill loading entirely.
-///
-/// Backward compatibility: if the new `skill-overrides.json` does not exist but the pre-rename
-/// `skills-state.json` does, the legacy file is read (same shape — the rename only changed the
-/// file name, not the format). `save` always writes the new name; the legacy file is left in
-/// place untouched.
 pub async fn load(base_dir: &Path) -> SkillOverrides {
     let path = state_path(base_dir);
     match tokio::fs::read_to_string(&path).await {
@@ -100,17 +92,7 @@ pub async fn load(base_dir: &Path) -> SkillOverrides {
             tracing::warn!(path = %path.display(), error = %e, "malformed skill-overrides.json; ignoring overlay");
             SkillOverrides::default()
         }),
-        Err(_) => {
-            // Legacy pre-rename file (`skills-state.json`). Same JSON shape.
-            let legacy = base_dir.join(LEGACY_OVERRIDES_FILE);
-            if let Ok(s) = tokio::fs::read_to_string(&legacy).await {
-                if let Ok(parsed) = serde_json::from_str::<SkillOverrides>(&s) {
-                    tracing::info!(path = %legacy.display(), "loading legacy skill-overrides file");
-                    return parsed;
-                }
-            }
-            SkillOverrides::default()
-        },
+        Err(_) => SkillOverrides::default(),
     }
 }
 
@@ -311,41 +293,6 @@ mod tests {
             names.push(e.file_name().into_string().unwrap_or_default());
         }
         assert_eq!(names, vec![OVERRIDES_FILE.to_string()]);
-    }
-
-    #[tokio::test]
-    async fn legacy_skills_state_file_is_read_as_fallback() {
-        // Pre-rename installs have `skills-state.json`; loading must pick it up
-        // even though the new file name does not exist yet.
-        let dir = tempfile::tempdir().unwrap();
-        let legacy_path = dir.path().join(LEGACY_OVERRIDES_FILE);
-        tokio::fs::write(
-            &legacy_path,
-            r#"{ "overrides": [{ "name": "foo", "source": "user", "enabled": false }] }"#,
-        )
-        .await
-        .unwrap();
-        let loaded = load(dir.path()).await;
-        assert_eq!(
-            loaded.lookup("foo", SkillSource::User).map(|e| e.enabled),
-            Some(false)
-        );
-        // New file takes precedence when both exist — and `set_and_save` migrates
-        // the legacy entry into the new file on the first write (its internal load
-        // picks up the legacy file), so the legacy disable survives the rename.
-        set_and_save(dir.path(), "bar", SkillSource::User, true)
-            .await
-            .unwrap();
-        let loaded = load(dir.path()).await;
-        assert_eq!(
-            loaded.lookup("foo", SkillSource::User).map(|e| e.enabled),
-            Some(false),
-            "legacy entry migrated into the new file"
-        );
-        assert_eq!(
-            loaded.lookup("bar", SkillSource::User).map(|e| e.enabled),
-            Some(true)
-        );
     }
 
     #[tokio::test]
