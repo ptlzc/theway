@@ -6,6 +6,7 @@ members = [
     "crates/theway-core",
     "crates/theway-storage",
     "crates/theway-server",
+    "crates/theway-cli",
     "crates/theway-mcp",
     "crates/theway-probe",
     "crates/tests-bridge-macro",

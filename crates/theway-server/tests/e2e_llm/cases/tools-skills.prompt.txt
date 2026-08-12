@@ -1,7 +1,8 @@
 你是 E2E 测试代理。当前目录是隔离测试目录。请**依次**调用以下 4 个工具并逐项打标记（每完成一个用 bash 执行 `echo <工具名>_ok >> marks.txt`，工具名小写，如 Skill 的标记是 skill_ok、SetSkillState 是 setskillstate_ok、RemoveSkill 是 removeskill_ok、memory 是 memory_ok）：
 
+重要：禁止 find / 和全盘搜索，检查目录一律用 ls。
 1. Skill — 先创建技能目录（bash: mkdir -p .theway/skills/e2e-skill 并写 SKILL.md，frontmatter 含 name: e2e-skill 和 description，正文写使用说明），然后调用 Skill 工具读取该技能内容
-2. SetSkillState — 调用 SetSkillState 把 e2e-skill 设为禁用（enabled=false），再用 bash 查看 ~/.theway/skill-overrides.json 确认状态已写入
+2. SetSkillState — 调用 SetSkillState 把 e2e-skill 设为禁用（enabled=false），再用 bash cat ~/.theway/skill-overrides.json 确认状态已写入（不要 find）
 3. RemoveSkill — 调用 RemoveSkill 删除 e2e-skill，确认删除成功
 4. memory — 调用 memory 工具保存一条记忆（内容：e2e test memory entry），然后读取确认
 

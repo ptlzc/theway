@@ -179,7 +179,7 @@ const CASES: &[Case] = &[
         marks: &["goal_ok"],
         optional_marks: &[],
         files: &["goal.txt"],
-        log_evidence: &["/goal "],
+        log_evidence: &["goal set:"],
         optional_log: &[],
         prompt_file: "cases/goal.prompt.txt",
     },
@@ -253,37 +253,45 @@ fn e2e_config() -> Option<E2eConfig> {
     })
 }
 
-/// 确保 ~/.theway/models.json 注册了目标模型 (OpenAI 兼容端点)。
+/// 确保 ~/.theway/models.json 注册了目标模型且 baseUrl 指向当前网关
+/// (OpenAI 兼容端点)。模型存在但 baseUrl 不匹配时更新其 baseUrl, 不丢其他模型。
 fn ensure_model_registered(cfg: &E2eConfig) {
     let dir = home_dir().join(".theway");
     fs::create_dir_all(&dir).unwrap();
     let file = dir.join("models.json");
-    let registered = fs::read_to_string(&file)
+
+    let mut doc: serde_json::Value = fs::read_to_string(&file)
         .ok()
-        .map(|s| s.contains(&format!("\"{}\"", cfg.model)))
-        .unwrap_or(false);
-    if !registered {
-        let json = serde_json::json!({
-            "models": [{
-                "id": cfg.model,
-                "name": format!("{} (e2e)", cfg.model),
-                "api": "openai-completions",
-                "provider": "openai",
-                "baseUrl": cfg.base_url,
-                "reasoning": false,
-                "input": ["text"],
-                "cost": {"input": 0.0, "output": 0.0, "cacheRead": 0.0, "cacheWrite": 0.0},
-                "contextWindow": 128000,
-                "maxTokens": 8192,
-            }]
-        });
-        fs::write(&file, serde_json::to_string_pretty(&json).unwrap()).unwrap();
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({ "models": [] }));
+
+    let models = doc["models"].as_array_mut().expect("models array");
+    if let Some(m) = models.iter_mut().find(|m| m["id"] == cfg.model) {
+        if m["baseUrl"].as_str() != Some(cfg.base_url.as_str()) {
+            m["baseUrl"] = serde_json::json!(cfg.base_url);
+        }
+    } else {
+        models.push(serde_json::json!({
+            "id": cfg.model,
+            "name": format!("{} (e2e)", cfg.model),
+            "api": "openai-completions",
+            "provider": "openai",
+            "baseUrl": cfg.base_url,
+            "reasoning": false,
+            "input": ["text"],
+            "cost": {"input": 0.0, "output": 0.0, "cacheRead": 0.0, "cacheWrite": 0.0},
+            "contextWindow": 128000,
+            "maxTokens": 8192,
+        }));
     }
+    fs::write(&file, serde_json::to_string_pretty(&doc).unwrap()).unwrap();
 }
 
 // ── 单 case 执行 ───────────────────────────────────────────────────────
 
 async fn run_case(cfg: &E2eConfig, case: &Case) {
+    eprintln!("[E2E] START {}", case.name);
+    let started = std::time::Instant::now();
     let prompt = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/e2e_llm")
@@ -296,6 +304,9 @@ async fn run_case(cfg: &E2eConfig, case: &Case) {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
 
+    // stdout 实时落文件 (tail /tmp/e2e-llm/<case>/log.txt 可观察进度)
+    let log_path = dir.join("log.txt");
+    let log_file = fs::File::create(&log_path).expect("create log");
     let mut child = Command::new(&cfg.bin)
         .args([
             "--provider",
@@ -308,8 +319,8 @@ async fn run_case(cfg: &E2eConfig, case: &Case) {
         .env("OPENAI_API_KEY", &cfg.api_key)
         .current_dir(&dir)
         .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stdout(Stdio::from(log_file))
+        .stderr(Stdio::null())
         .spawn()
         .expect("spawn theway");
 
@@ -320,30 +331,22 @@ async fn run_case(cfg: &E2eConfig, case: &Case) {
         stdin.shutdown().await.unwrap();
     }
 
-    // 读管道 + 等退出; child.wait() 是 &mut self, 超时后仍可 kill
-    let mut stdout = child.stdout.take().unwrap();
-    let mut stderr = child.stderr.take().unwrap();
-    let fut = async {
-        let status = child.wait().await?;
-        use tokio::io::AsyncReadExt;
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-        stdout.read_to_end(&mut out).await?;
-        stderr.read_to_end(&mut err).await?;
-        Ok::<_, std::io::Error>((status, out, err))
-    };
-    let (_status, out, err) = match timeout(Duration::from_secs(case.timeout_secs), fut).await {
-        Ok(res) => res.expect("io"),
+    let status = match timeout(Duration::from_secs(case.timeout_secs), child.wait()).await {
+        Ok(res) => res.expect("wait"),
         Err(_) => {
             let _ = child.kill().await;
-            panic!("TIMEOUT after {}s", case.timeout_secs);
+            panic!(
+                "TIMEOUT after {}s (log: {})",
+                case.timeout_secs,
+                log_path.display()
+            );
         }
     };
-
-    fs::write(dir.join("log.txt"), out.clone()).unwrap();
-    if !err.is_empty() {
-        fs::write(dir.join("stderr.txt"), err).unwrap();
+    if !status.success() {
+        eprintln!("[E2E] WARN {} exit {status:?}", case.name);
     }
+
+    let log = fs::read_to_string(&log_path).unwrap_or_default();
 
     let mut failures: Vec<String> = Vec::new();
 
@@ -373,7 +376,6 @@ async fn run_case(cfg: &E2eConfig, case: &Case) {
     }
 
     // 3) 日志工具痕迹 ("⚙ <ev>")
-    let log = String::from_utf8_lossy(&out);
     for ev in case.log_evidence {
         if !log.contains(&format!("⚙ {ev}")) {
             failures.push(format!("no-log-evidence:{ev}"));
@@ -392,6 +394,7 @@ async fn run_case(cfg: &E2eConfig, case: &Case) {
     if !failures.is_empty() {
         panic!("FAIL {} — {}", case.name, failures.join(" "));
     }
+    eprintln!("[E2E] DONE {} ({:?})", case.name, started.elapsed());
     println!("PASS {}", case.name);
 }
 
