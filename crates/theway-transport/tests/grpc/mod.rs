@@ -382,6 +382,55 @@ async fn get_node_output_recovers_messages_from_disk_after_restart() {
 }
 
 #[tokio::test]
+async fn two_simultaneous_subscribers_both_receive_frames() {
+    // Multi-client sanity (daemon-client 2.2): the snapshot broadcast fans out
+    // to every subscriber — a second client must not starve the first.
+    let (state, _command_rx) = grpc_state();
+    let first = state
+        .stream_events(Request::new(Empty {}))
+        .await
+        .unwrap()
+        .into_inner();
+    let second = state
+        .stream_events(Request::new(Empty {}))
+        .await
+        .unwrap()
+        .into_inner();
+    tokio::pin!(first);
+    tokio::pin!(second);
+
+    state.snapshots.send(fixture_snapshot("fan-out")).unwrap();
+
+    for (label, stream) in [("first", &mut first), ("second", &mut second)] {
+        let item = tokio::time::timeout(Duration::from_secs(2), stream.next())
+            .await
+            .expect("timed out")
+            .expect("stream ended");
+        let frame = item.unwrap();
+        match frame.payload {
+            Some(theway_grpc::stream_frame::Payload::Snapshot(state)) => {
+                assert_eq!(state.feed_lines, vec!["fan-out"], "{label} subscriber");
+            }
+            other => panic!("{label} subscriber: expected snapshot, got {other:?}"),
+        }
+    }
+
+    // A lagging subscriber catches up on the next publish instead of hanging.
+    state.snapshots.send(fixture_snapshot("second-wave")).unwrap();
+    let item = tokio::time::timeout(Duration::from_secs(2), first.next())
+        .await
+        .expect("timed out")
+        .expect("stream ended")
+        .unwrap();
+    match item.payload {
+        Some(theway_grpc::stream_frame::Payload::Snapshot(state)) => {
+            assert_eq!(state.feed_lines, vec!["second-wave"]);
+        }
+        other => panic!("expected snapshot, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn stream_events_merges_snapshot_and_event_payloads() {
     let (state, _command_rx) = grpc_state();
     let response = state
