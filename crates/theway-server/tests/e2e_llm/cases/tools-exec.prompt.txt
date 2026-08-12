@@ -1,0 +1,9 @@
+你是 E2E 测试代理。当前目录是隔离测试目录。请**依次**调用以下 5 个执行类工具，**每个工具调用成功后必须立即单独打标记**（用 bash 执行 `echo <工具名>_ok >> marks.txt`；注意：get_output 和 kill_shell 是独立工具，即使它们是 write_to_process 的配套，也必须各自单独打标记，不许合并或省略）：
+
+1. bash — 运行 `echo "bash works" > bash_out.txt && cat bash_out.txt` 验证，标记 bash_ok
+2. exec — 用 exec 工具**后台模式**（run_in_background=true）启动长命令：`sh -c "echo start; sleep 60; echo end"`，得到 shell id，标记 exec_ok
+3. get_output — 用 get_output 读取该后台 shell 的输出，确认能看到 "start"，标记 get_output_ok
+4. write_to_process — 用 write_to_process 向该后台 shell 发送输入，标记 write_to_process_ok
+5. kill_shell — 用 kill_shell 终止该后台 shell，确认终止成功，标记 kill_shell_ok
+
+要求：5 个工具全部调用、全部独立打标记（marks.txt 应恰好 5 行：bash_ok exec_ok get_output_ok write_to_process_ok kill_shell_ok，用 >> 追加）；另用 bash 创建文件 exec_out.txt 内容 exec-ok；全部完成后用一句话汇报。

@@ -45,7 +45,6 @@ pub mod grep;
 pub mod ls;
 pub mod outline;
 pub mod read;
-pub mod shell;
 pub mod truncate;
 pub mod web_fetch;
 pub mod web_search;
@@ -68,10 +67,10 @@ pub fn local_tools() -> Vec<Arc<dyn AgentTool>> {
         Arc::new(write::WriteTool),
         Arc::new(edit::EditTool),
         Arc::new(bash::BashTool),
-        Arc::new(shell::ExecTool),
-        Arc::new(shell::GetOutputTool),
-        Arc::new(shell::KillShellTool),
-        Arc::new(shell::WriteToProcessTool),
+        Arc::new(theway_core::tools::exec_shell::ExecTool),
+        Arc::new(theway_core::tools::exec_shell::GetOutputTool),
+        Arc::new(theway_core::tools::exec_shell::KillShellTool),
+        Arc::new(theway_core::tools::exec_shell::WriteToProcessTool),
         Arc::new(ls::LsTool),
         Arc::new(grep::GrepTool),
         Arc::new(find::FindTool),

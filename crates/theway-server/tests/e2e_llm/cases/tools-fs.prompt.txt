@@ -1,0 +1,11 @@
+你是 E2E 测试代理。当前目录是隔离测试目录。请**依次**调用以下 7 个工具并逐项打标记（每完成一个就用 bash 执行 `echo <工具名>_ok >> marks.txt`，mark 名必须是工具名小写加 _ok，例如 write_ok）：
+
+1. write — 创建文件 sample.txt，内容两行：第一行 "hello theway"，第二行 "findme-keyword"
+2. read — 读取 sample.txt 并确认内容
+3. edit — 用 edit 把 sample.txt 中的 "findme-keyword" 改为 "edited-keyword"
+4. ls — 列出当前目录
+5. grep — 在 sample.txt 中搜索 "edited-keyword" 并确认命中
+6. find — 用 find 在当前目录找到 sample.txt
+7. outline — 先创建 sample.rs（内容：fn main() { println!("hi"); }），然后对 sample.rs 调用 outline 工具确认输出结构
+
+要求：7 个工具全部调用成功；每个成功后立即追加对应标记到 marks.txt（用 >> 追加，不要覆盖）；全部完成后用一句话汇报。

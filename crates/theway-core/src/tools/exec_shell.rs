@@ -15,6 +15,7 @@
 //! 3. Exited shells stay queryable for [`EXITED_KEEP_ALIVE`] so the model can still read
 //!    their final output, then their registry entry is reaped.
 
+use crate::{AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate};
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use serde_json::{Value, json};
@@ -23,7 +24,6 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
-use theway_core::{AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate};
 use theway_llm_provider::{Tool, UserContentBlock};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Notify;
@@ -31,7 +31,8 @@ use tokio::sync::Notify;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
-use super::bash::BashTool;
+/// Default foreground-command timeout (exec without explicit `timeout` param).
+const DEFAULT_FG_TIMEOUT_SECS: u64 = 60;
 
 /// Per-stream output cap. Oldest chunks are dropped from the head (the most recent output
 /// survives); `get_output` reports how many characters were dropped.
@@ -278,14 +279,14 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 // ──────────────────────────────────────────────────────────────────────────────────────────
 
 /// Descriptor of a freshly spawned background shell.
-pub(crate) struct BackgroundShell {
+pub struct BackgroundShell {
     pub id: String,
     pub pid: u32,
 }
 
 /// Spawn `command` in a background shell and register it. Returns immediately with the
 /// shell's id; the process keeps running across agent turns.
-pub(crate) async fn run_in_background(command: &str) -> Result<BackgroundShell, AgentToolError> {
+pub async fn run_in_background(command: &str) -> Result<BackgroundShell, AgentToolError> {
     let mut cmd = tokio::process::Command::new(shell_program());
     cmd.arg(shell_flag())
         .arg(command)
@@ -533,10 +534,10 @@ impl AgentTool for ExecTool {
 
     async fn execute(
         &self,
-        tool_call_id: &str,
+        _tool_call_id: &str,
         params: Value,
         cancel: CancellationToken,
-        on_update: Option<AgentToolUpdate>,
+        _on_update: Option<AgentToolUpdate>,
     ) -> Result<AgentToolResult, AgentToolError> {
         let command = params
             .get("command")
@@ -557,15 +558,50 @@ impl AgentTool for ExecTool {
             });
         }
 
-        // Foreground mode is `bash` semantics by construction — delegate so the two can
-        // never drift apart.
-        let mut fg_params = json!({ "command": command });
-        if let Some(secs) = params.get("timeout").and_then(|v| v.as_u64()) {
-            fg_params["timeout"] = json!(secs);
+        // Foreground mode is `bash` semantics by construction — both delegate to the
+        // same core primitive (`exec::run_with_kill_on_timeout_or_cancel`), so
+        // timeout/cancel/kill-the-tree behavior can never drift apart. Default timeout
+        // guards runaway commands, same as the bash tool.
+        let timeout_secs = Some(
+            params
+                .get("timeout")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(DEFAULT_FG_TIMEOUT_SECS),
+        );
+        let outcome =
+            super::exec::run_with_kill_on_timeout_or_cancel(command, timeout_secs, None, &cancel)
+                .await?;
+        let exit = outcome.rendered_exit();
+        let mut stderr_full = outcome.stderr;
+        if let Some(suffix) = &outcome.stderr_suffix {
+            if !stderr_full.is_empty() && !stderr_full.ends_with('\n') {
+                stderr_full.push('\n');
+            }
+            stderr_full.push_str(suffix);
         }
-        BashTool
-            .execute(tool_call_id, fg_params, cancel, on_update)
-            .await
+        let mut text = format!("$ {command}\n");
+        if !outcome.stdout.is_empty() {
+            text.push_str(&outcome.stdout);
+            if !outcome.stdout.ends_with('\n') {
+                text.push('\n');
+            }
+        }
+        if !stderr_full.is_empty() {
+            text.push_str(&stderr_full);
+            if !stderr_full.ends_with('\n') {
+                text.push('\n');
+            }
+        }
+        text.push_str(&format!("[exit {exit}]"));
+        Ok(AgentToolResult {
+            content: vec![UserContentBlock::text(text)],
+            details: json!({
+                "command": command,
+                "exitCode": exit,
+                "isError": exit != 0,
+            }),
+            terminate: None,
+        })
     }
 }
 
@@ -774,4 +810,4 @@ static WRITE_TO_PROCESS_DEFINITION: Lazy<Tool> = Lazy::new(|| {
 }
 });
 #[cfg(test)]
-tests_bridge_macro::tests_bridge!("tools/shell");
+tests_bridge_macro::tests_bridge!("tools/exec_shell");

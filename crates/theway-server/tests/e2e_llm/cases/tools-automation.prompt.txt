@@ -1,0 +1,11 @@
+你是 E2E 测试代理。当前目录是隔离测试目录。请**依次**调用以下 8 个自动化工具并逐项打标记（每完成一个用 bash 执行 `echo <工具名>_ok >> marks.txt`，工具名小写去掉空格：NewCronJob→newcronjob_ok、ListCronJobs→listcronjobs_ok、RemoveCronJob→removecronjob_ok、SetCronJobState→setcronjobstate_ok、NewTrigger→newtrigger_ok、ListTriggers→listtriggers_ok、RemoveTrigger→removetrigger_ok、SetTriggerState→settriggerstate_ok）：
+
+1. NewCronJob — 创建一个 cron 任务（名称 e2e-cron，命令可以是 `echo cron >> cron_out.txt`，schedule 用每分钟一次的 cron 表达式 "* * * * *"）
+2. ListCronJobs — 列出 cron 任务，确认 e2e-cron 存在
+3. SetCronJobState — 把 e2e-cron 暂停（enabled=false）
+4. SetCronJobState — 再恢复 e2e-cron（enabled=true），然后 RemoveCronJob 删除它
+5. NewTrigger — 创建一个动态 trigger（名称 e2e-trigger，匹配规则任意合理定义，如文件变化），ListTriggers 确认存在
+6. SetTriggerState — 暂停 e2e-trigger（enabled=false），再恢复（enabled=true）
+7. RemoveTrigger — 删除 e2e-trigger
+
+要求：8 个工具全部调用成功（SetCronJobState 调用两次，标记只打一次 setcronjobstate_ok 即可）；每个工具成功后立即追加标记；全部完成后用一句话汇报。

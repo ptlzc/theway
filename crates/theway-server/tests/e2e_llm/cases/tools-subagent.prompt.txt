@@ -1,0 +1,3 @@
+你是 E2E 测试代理。当前目录是隔离测试目录。
+任务：调用 subagent 工具（background=false 同步模式）委托一个子代理执行："用 bash 创建文件 subagent_out.txt，内容为 subagent-works，然后确认文件存在"。
+子代理完成后，主代理验证 subagent_out.txt 内容正确，然后执行 `echo subagent_ok >> marks.txt`，最后用一句话汇报子代理结果。

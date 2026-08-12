@@ -1,8 +1,17 @@
 //! Tests for `bash` — split out of src (see docs/RUST_TEST_FILES.md).
 
 use super::*;
+use std::process::Stdio;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+use tokio::io::AsyncReadExt;
+
+fn text_of(result: &AgentToolResult) -> String {
+    match &result.content[0] {
+        UserContentBlock::Text(t) => t.text.clone(),
+        _ => panic!("expected text content"),
+    }
+}
 
 /// Spawn a long-running command, hit the timeout, and assert the child process is
 /// gone afterwards. The previous implementation marked the result `[timed out]` but
@@ -266,4 +275,41 @@ fn resolve_timeout_defaults_and_override() {
     // Explicit param wins.
     assert_eq!(resolve_timeout(&json!({ "timeout": 7 })), 7);
     assert_eq!(resolve_timeout(&json!({ "timeout": 0 })), 0);
+}
+
+#[tokio::test]
+async fn bash_run_in_background_returns_shell_id() {
+    // Relative on purpose: this module also compiles inside integration tests that pull
+    // `tools/` in via `#[path]` at a different crate-root depth (server tests/tools.rs).
+    let tool = BashTool;
+    let result = tool
+        .execute(
+            "b1",
+            json!({ "command": "echo bg", "run_in_background": true }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect("bash");
+    let text = text_of(&result);
+    assert!(
+        text.contains("background shell started: shell-"),
+        "got: {text}"
+    );
+
+    // Foreground path is untouched.
+    let fg = tool
+        .execute(
+            "b2",
+            json!({ "command": "echo fg" }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect("bash");
+    let fg_text = text_of(&fg);
+    assert!(
+        fg_text.contains("fg") && fg_text.contains("[exit 0]"),
+        "got: {fg_text}"
+    );
 }

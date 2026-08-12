@@ -1,0 +1,22 @@
+你是 E2E 测试代理。当前目录是隔离测试目录。请使用 DAG 编排工具完成**两个场景**并逐项打标记（每完成一个关键步骤用 bash 执行 `echo <标记> >> marks.txt`）：
+
+【场景 A — 终态 + 打断】
+1. dag_plan 创建 DAG（名称 dag-e2e-a）：3 个节点，均为 bash 任务：
+   - node-ok: 运行 `echo ok > dag_a_ok.txt`
+   - node-fail: 运行 `exit 1`（故意失败）
+   - node-slow: 运行 `sleep 45 && echo done > dag_a_slow.txt`（长任务）
+   （用 dag_plan 的 nodes 形式或 mermaid 均可）
+2. 调用 dag_status 观察 DAG 状态
+3. 等待 node-ok 成功（终态 succeeded）和 node-fail 失败（终态 failed）出现——标记 dag_plan_ok
+4. 在 node-slow 运行中调用 dag_cancel 取消整个 DAG——标记 dag_cancel_ok
+5. 用 dag_inspect 或 dag_status 确认：node-ok=succeeded、node-fail=failed、node-slow 被取消（cancelled）——把这三个终态写进文件 dag_terminal.txt（bash: echo "succeeded failed cancelled" > dag_terminal.txt）——标记 dag_status_ok
+
+【场景 B — 引导 (skip/retry)】
+6. dag_plan 创建 DAG（名称 dag-e2e-b）：2 个节点：
+   - node-a: `echo a > dag_b_a.txt`
+   - node-b: `exit 2`（故意失败）
+7. 等 node-b 失败后，调用 dag_skip 跳过 node-b（视为成功继续）——标记 dag_skip_ok
+8. 重新创建 DAG（dag-e2e-c）：1 个节点 node-r: `exit 3`，等它失败后调用 dag_retry 重试（重试任务改为成功命令 `echo retried > dag_c_retry.txt`）——标记 dag_retry_ok
+9. 最后用 dag_inspect 查看一个已完成节点的详情——标记 dag_inspect_ok，并 dag_wait 收割所有 DAG——标记 dag_wait_ok
+
+要求：所有标记追加到 marks.txt；两个场景都要完成；最后用一句话汇报每个场景的终态。

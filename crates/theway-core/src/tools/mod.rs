@@ -22,6 +22,8 @@
 
 pub mod assembly;
 pub mod dag_tools;
+pub mod exec;
+pub mod exec_shell;
 pub mod install_skill;
 pub mod mcp_adapter;
 pub mod memory;

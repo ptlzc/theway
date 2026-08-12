@@ -1,4 +1,4 @@
-//! Tests for `shell` — split out of shell.rs (issue #11).
+//! Tests for `exec_shell` — split out of exec_shell.rs (issue #11).
 
 use super::*;
 
