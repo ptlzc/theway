@@ -29,6 +29,21 @@ use tokio_util::sync::CancellationToken;
 
 use super::truncate::{DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, truncate_tail};
 
+/// Default command timeout when the agent does not pass `timeout`.
+///
+/// Runaway commands (e.g. an agent spawning a full-disk `find /` in a tool call) must not
+/// run unbounded: the whole process group is killed (killpg via the setsid group) when
+/// this fires. Callers can still pass an explicit `timeout` param to override.
+const DEFAULT_TIMEOUT_SECS: u64 = 60;
+
+/// Resolve the effective timeout: explicit `timeout` param wins, otherwise the default.
+fn resolve_timeout(params: &Value) -> u64 {
+    params
+        .get("timeout")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(DEFAULT_TIMEOUT_SECS)
+}
+
 pub struct BashTool;
 
 /// What we collected from a single run, regardless of whether the child finished cleanly,
@@ -72,7 +87,7 @@ impl AgentTool for BashTool {
             .get("command")
             .and_then(|v| v.as_str())
             .ok_or_else(|| AgentToolError::from("missing `command`"))?;
-        let timeout_secs = params.get("timeout").and_then(|v| v.as_u64());
+        let timeout_secs = Some(resolve_timeout(&params));
         let run_in_background = params
             .get("run_in_background")
             .and_then(|v| v.as_bool())

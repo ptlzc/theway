@@ -257,3 +257,13 @@ async fn concurrent_invocations_do_not_serialize() {
         "concurrent bash calls serialized? elapsed = {elapsed:?}"
     );
 }
+
+#[test]
+fn resolve_timeout_defaults_and_override() {
+    // No `timeout` param → the default kicks in (runaway commands must not run unbounded).
+    assert_eq!(resolve_timeout(&json!({})), 60);
+    assert_eq!(resolve_timeout(&json!({ "command": "x" })), 60);
+    // Explicit param wins.
+    assert_eq!(resolve_timeout(&json!({ "timeout": 7 })), 7);
+    assert_eq!(resolve_timeout(&json!({ "timeout": 0 })), 0);
+}
