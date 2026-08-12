@@ -1,0 +1,30 @@
+[package]
+name = "theway-sdk"
+version = "0.75.0"
+edition = "2024"
+rust-version = "1.85"
+description = "theway SDK — client-facing surface split out of the daemon crate: common wire/session/config types, local (session repo, auth, history, commands) and sandbox layers."
+license = "MIT"
+authors = ["theway contributors"]
+
+# Bridge-period naming: the workspace already has package `theway` (crates/theway-server);
+# two same-named packages are a hard error. The lib is renamed back to `theway` in node 7
+# (daemon rename), restoring `use theway::…` client paths.
+[lib]
+name = "theway_sdk"
+path = "src/lib.rs"
+
+[dependencies]
+theway-core = { path = "../theway-core" }
+theway-storage = { path = "../theway-storage" }
+theway-transport = { path = "../theway-transport" }
+# Same feature posture as theway-server: every wire-protocol provider enabled so the
+# auth/config/model-catalog layers (moved here in later nodes) see the full catalog.
+theway-llm-provider = { path = "../theway-llm-provider", default-features = false, features = ["all-providers"] }
+
+[dev-dependencies]
+tests-bridge-macro = { path = "../tests-bridge-macro" }
+tempfile = "3"
+
+[lints]
+workspace = true
