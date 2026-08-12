@@ -1,0 +1,29 @@
+[package]
+name = "theway-storage"
+version = "0.75.0"
+edition = "2024"
+rust-version = "1.85"
+description = "theway storage backends — concrete SessionStorage / DAG-persist implementations (SQLite via Turso) for theway-core contracts."
+license = "MIT"
+repository = "https://github.com/ptlzc/theway"
+authors = ["theway contributors"]
+
+[dependencies]
+# Engine contracts + types come from theway-core; this crate only implements
+# them. No reverse dependency (core never sees this crate).
+theway-core = { path = "../core" }
+turso = "0.7"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "fs"] }
+async-trait = "0.1"
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+parking_lot = "0.12"
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
+theway-llm-provider = { path = "../llm-provider" }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+[lints]
+workspace = true

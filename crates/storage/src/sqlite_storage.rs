@@ -22,9 +22,10 @@ use async_trait::async_trait;
 use serde_json::Value;
 use turso::{Builder, Connection, Database};
 
-use super::super::types::{SessionError, SessionErrorCode};
-use super::session::{JsonlSessionMetadata, SessionMetadata, SessionStorage, SessionTreeEntry};
-use super::uuid::uuidv7;
+use theway_core::{
+    JsonlSessionMetadata, SessionError, SessionErrorCode, SessionMetadata, SessionStorage,
+    SessionTreeEntry, uuidv7,
+};
 
 /// SQLite-backed session storage. `Connection` is cheap to clone (shared
 /// Arc inside) and all turso operations are `&self` async — the same shape as

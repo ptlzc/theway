@@ -34,6 +34,7 @@ path = "src/main.rs"
 # model's `api` actually gets exercised.
 theway-llm-provider = { path = "../llm-provider", default-features = false, features = ["all-providers"] }
 theway-core = { path = "../core" }
+theway-storage = { path = "../storage" }
 theway-mcp = { path = "../mcp" }
 
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "fs", "io-util", "io-std", "process", "signal"] }

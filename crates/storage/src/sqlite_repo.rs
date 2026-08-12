@@ -5,9 +5,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use super::super::types::{SessionError, SessionErrorCode};
-use super::session::Session;
-use super::sqlite_storage::SqliteSessionStorage;
+use theway_core::{Session, SessionError, SessionErrorCode, uuidv7};
+
+use crate::sqlite_storage::SqliteSessionStorage;
 
 pub struct SqliteSessionRepo {
     /// Root sessions dir, e.g. `~/.theway/sessions/<cwd-hash>`.
@@ -29,10 +29,10 @@ impl SqliteSessionRepo {
         tokio::fs::create_dir_all(&self.root)
             .await
             .map_err(io_err)?;
-        let file = self.root.join(format!("{}.db", super::uuid::uuidv7()));
+        let file = self.root.join(format!("{}.db", uuidv7()));
         let storage = SqliteSessionStorage::create(file, cwd).await?;
         Ok(Session::new(
-            Arc::new(storage) as Arc<dyn super::session::SessionStorage>
+            Arc::new(storage) as Arc<dyn theway_core::SessionStorage>
         ))
     }
 
@@ -47,7 +47,7 @@ impl SqliteSessionRepo {
         };
         let storage = SqliteSessionStorage::open(abs).await?;
         Ok(Session::new(
-            Arc::new(storage) as Arc<dyn super::session::SessionStorage>
+            Arc::new(storage) as Arc<dyn theway_core::SessionStorage>
         ))
     }
 

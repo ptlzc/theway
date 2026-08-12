@@ -84,8 +84,6 @@ pub use agent::session::{
         SessionImportOrigin, SessionMetadata, SessionStorage, SessionTreeEntry,
         build_session_context,
     },
-    sqlite_repo::SqliteSessionRepo,
-    sqlite_storage::SqliteSessionStorage,
     uuid::uuidv7,
 };
 #[cfg(feature = "harness")]

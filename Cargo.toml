@@ -4,6 +4,7 @@ members = [
     "crates/llm-provider",
     "crates/mermaid-parser",
     "crates/core",
+    "crates/storage",
     "crates/server",
     "crates/mcp",
     "crates/tests-bridge-macro",

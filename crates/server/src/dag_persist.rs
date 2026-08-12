@@ -24,9 +24,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use theway_core::multiagent::graph::engine::DagEngine;
-use theway_core::multiagent::graph::persist::{
-    DagPersistSink, SqliteDagStore, state_path_for_project,
-};
+use theway_core::multiagent::graph::persist::{DagPersistSink, state_path_for_project};
+use theway_storage::sqlite_dag::SqliteDagStore;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
