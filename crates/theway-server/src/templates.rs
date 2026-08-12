@@ -15,7 +15,7 @@ use theway_core::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::config::base_dir;
+use theway_sdk::config::base_dir;
 
 pub struct LoadedTemplates {
     pub templates: Vec<PromptTemplate>,

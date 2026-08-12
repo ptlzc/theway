@@ -8,8 +8,9 @@
 use std::sync::{Arc, OnceLock};
 
 use crate::SqliteSessionRepo;
-use crate::app::feed::FeedUpdate;
-use crate::{agent_specs, session, tools, triggers};
+use crate::{agent_specs, tools, triggers};
+use theway_sdk::app::feed::FeedUpdate;
+use theway_sdk::session;
 use anyhow::{Context, Result};
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::{AgentHarness, AgentHarnessOptions, ThinkingLevel};

@@ -17,6 +17,9 @@ path = "src/lib.rs"
 # model's `api` actually gets exercised.
 theway-llm-provider = { path = "../theway-llm-provider", default-features = false, features = ["all-providers"] }
 theway-core = { path = "../theway-core" }
+# Local-surface SDK split (sdk-split-local-sandbox): session/auth/config/feed etc.
+# live in theway-sdk; bridge-period lib name is `theway_sdk`.
+theway-sdk = { path = "../theway-sdk" }
 theway-storage = { path = "../theway-storage" }
 theway-mcp = { path = "../theway-mcp" }
 theway-transport = { path = "../theway-transport" }

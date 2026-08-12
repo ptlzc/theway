@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
-use crate::config::base_dir;
+use theway_sdk::config::base_dir;
 
 pub struct LoggingHandle {
     /// Background-writer guard. Drops on process exit.

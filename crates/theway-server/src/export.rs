@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use theway_core::{AgentMessage, Session, SessionContext};
 
-use crate::config::base_dir;
+use theway_sdk::config::base_dir;
 
 pub async fn render(session: &Session) -> Result<String> {
     let ctx = session.build_context().await?;

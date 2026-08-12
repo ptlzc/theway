@@ -1,6 +1,7 @@
 //! `~/.theway/config.toml` readers used at startup (built-in skills, trigger poll interval).
 
-use crate::{builtin_skills, config, triggers};
+use crate::{builtin_skills, triggers};
+use theway_sdk::config;
 
 /// Read `<base_dir>/config.toml` and extract the `[builtin_skills] enabled = [...]` list.
 /// Missing file → empty list. Parse error / missing section → empty list (the parser itself

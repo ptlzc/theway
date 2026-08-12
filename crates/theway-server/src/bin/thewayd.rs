@@ -19,7 +19,7 @@ use clap::Parser;
 use theway::app::daemon::{DaemonApp, DaemonConfig, PanelStatus};
 use theway::app::session_factory::SessionHarnessFactory;
 use theway::config_readers::{read_builtin_skills_config, read_trigger_poll_interval_secs};
-use theway::stream_auth::stream_fn_with_auth_store;
+use theway_sdk::stream_auth::stream_fn_with_auth_store;
 use theway::system_prompt::compose_system_prompt;
 use theway::{
     agent_specs, config, session, session_ops, skills, templates, triggers, ui_mode_panel,
@@ -177,7 +177,7 @@ async fn main() -> Result<()> {
 
     let _logging = theway::logging::init(&session_id);
     let (feed_tx, feed_rx) =
-        tokio::sync::mpsc::unbounded_channel::<theway::app::feed::FeedUpdate>();
+        tokio::sync::mpsc::unbounded_channel::<theway_sdk::app::feed::FeedUpdate>();
 
     let stream_fn = stream_fn_with_auth_store();
     let dynamic_trigger_registry = triggers::global_registry().clone();
@@ -377,9 +377,9 @@ async fn main() -> Result<()> {
     {
         let tx = feed_tx.clone();
         theway::commands::console::set_sink(Box::new(move |line| {
-            let _ = tx.send(theway::app::feed::FeedUpdate::Plain {
+            let _ = tx.send(theway_sdk::app::feed::FeedUpdate::Plain {
                 text: line,
-                level: theway::app::feed::Level::Output,
+                level: theway_sdk::app::feed::Level::Output,
             });
         }));
     }

@@ -119,7 +119,7 @@ impl SessionOps for AppSessionOps {
                 .ok()
                 .flatten()
                 .unwrap_or_default();
-            let preview = crate::session::first_user_text(&session).await;
+            let preview = theway_sdk::session::first_user_text(&session).await;
             let model = last_model_change(&session).await;
 
             // Last activity: transcript mtime (epoch millis). Cheap, and a session is only
@@ -188,7 +188,7 @@ impl SessionOps for AppSessionOps {
         if name.is_empty() {
             bail!("session name must not be empty");
         }
-        let path = crate::session::find_path_by_id(&self.repo, id)
+        let path = theway_sdk::session::find_path_by_id(&self.repo, id)
             .await?
             .with_context(|| format!("no session matches id {id}"))?;
         let session = self.repo.open(&path).await.map_err(repo_err)?;
@@ -197,7 +197,7 @@ impl SessionOps for AppSessionOps {
     }
 
     async fn delete(&self, id: &str) -> Result<Vec<String>> {
-        let path = crate::session::find_path_by_id(&self.repo, id)
+        let path = theway_sdk::session::find_path_by_id(&self.repo, id)
             .await?
             .with_context(|| format!("no session matches id {id}"))?;
         // Resolve the metadata id first: DAG runs are stamped with it, not the file stem.
@@ -228,7 +228,7 @@ impl SessionOps for AppSessionOps {
             return Ok(active);
         }
 
-        crate::session::delete_by_id(&self.repo, id).await?;
+        theway_sdk::session::delete_by_id(&self.repo, id).await?;
         Ok(Vec::new())
     }
 }

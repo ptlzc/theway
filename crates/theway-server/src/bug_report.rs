@@ -17,7 +17,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use theway_core::Session;
 
-use crate::config::base_dir;
+use theway_sdk::config::base_dir;
 
 const MAX_LOG_LINES: usize = 200;
 

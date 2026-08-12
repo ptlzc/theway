@@ -18,7 +18,7 @@ use theway_llm_provider::UserContentBlock;
 use tokio::sync::OnceCell;
 use tokio_util::sync::CancellationToken;
 
-use crate::config::base_dir;
+use theway_sdk::config::base_dir;
 use crate::lsp::{Diagnostic, LspClient};
 
 const DIAG_WAIT_MS: u64 = 800;

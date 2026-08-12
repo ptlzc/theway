@@ -28,7 +28,7 @@ use super::kernel::{QueuedTurn, ReplKernel, TurnState, poll_turn};
 use crate::agent_session::RetrySettings;
 use crate::commands::{self, CommandCtx, CommandOutcome, Registry};
 use crate::control_plane_prompt::UiControlPlanePrompt;
-use crate::mentions;
+use theway_sdk::mentions;
 use crate::session_ops::{CurrentSessionState, SessionFactory};
 use crate::triggers;
 use crate::{SqliteSessionRepo, bug_report};
@@ -376,7 +376,7 @@ impl DaemonApp {
             self.system_line(format!("already on session {id}"));
             return;
         }
-        match crate::session::find_path_by_id(&self.session_repo, &id).await {
+        match theway_sdk::session::find_path_by_id(&self.session_repo, &id).await {
             Ok(Some(_)) => {}
             Ok(None) => {
                 self.error_line(format!("switch session: no session matches id {id}"));
@@ -1021,11 +1021,11 @@ fn wire_prompt_text(text: &str, cap: usize) -> String {
 }
 
 fn load_web_prompt_images(images: &[WirePromptImage]) -> Result<Vec<ImageContent>> {
-    if images.len() > crate::images::MAX_IMAGES_PER_MESSAGE {
+    if images.len() > theway_sdk::images::MAX_IMAGES_PER_MESSAGE {
         bail!(
             "{} images exceeds per-message cap of {}",
             images.len(),
-            crate::images::MAX_IMAGES_PER_MESSAGE
+            theway_sdk::images::MAX_IMAGES_PER_MESSAGE
         );
     }
     let mut out = Vec::with_capacity(images.len());
@@ -1044,7 +1044,7 @@ fn load_web_prompt_images(images: &[WirePromptImage]) -> Result<Vec<ImageContent
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(data)
             .with_context(|| format!("decode {label}"))?;
-        out.push(crate::images::load_bytes(&label, &bytes)?);
+        out.push(theway_sdk::images::load_bytes(&label, &bytes)?);
     }
     Ok(out)
 }

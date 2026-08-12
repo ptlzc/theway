@@ -16,8 +16,8 @@ use theway_mcp::{
     StdioTransport,
 };
 
-use crate::auth::AuthStore;
-use crate::config::base_dir;
+use theway_sdk::auth::AuthStore;
+use theway_sdk::config::base_dir;
 use crate::triggers::McpNotificationHook;
 use theway_core::tools::mcp_adapter::McpAgentTool;
 
@@ -483,10 +483,10 @@ body_cap_bytes = 1048576
     #[test]
     fn streamable_http_auth_resolves_from_auth_store_without_debug_leak() {
         let token = "mcp_token_should_not_leak";
-        let mut store = crate::auth::AuthStore::default();
+        let mut store = theway_sdk::auth::AuthStore::default();
         store.set(
             "remote-docs:default",
-            crate::auth::ProviderCredential::ApiKey {
+            theway_sdk::auth::ProviderCredential::ApiKey {
                 value: token.into(),
             },
         );
@@ -506,7 +506,7 @@ body_cap_bytes = 1048576
 
     #[test]
     fn streamable_http_missing_auth_diagnostic_does_not_echo_token_ref() {
-        let store = crate::auth::AuthStore::default();
+        let store = theway_sdk::auth::AuthStore::default();
 
         let secret_like_ref = "secret_ref_should_not_leak";
         let err = resolve_http_auth_from_store(

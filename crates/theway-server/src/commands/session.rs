@@ -211,7 +211,7 @@ async fn session_import_command(argv: &[String], ctx: &CommandCtx<'_>) -> Comman
     } else {
         ctx.cwd.join(archive_path)
     };
-    let repo = crate::session::open_repo(ctx.cwd).await;
+    let repo = theway_sdk::session::open_repo(ctx.cwd).await;
 
     emit_session_archive_warning();
     match crate::session_archive::import_session(
@@ -277,8 +277,8 @@ impl SlashCommand for SessionsCommand {
         "list sessions for this cwd"
     }
     async fn run(&self, _argv: &[String], ctx: &CommandCtx<'_>) -> CommandOutcome {
-        let repo = crate::session::open_repo(ctx.cwd).await;
-        let entries = match crate::session::list_entries(&repo).await {
+        let repo = theway_sdk::session::open_repo(ctx.cwd).await;
+        let entries = match theway_sdk::session::list_entries(&repo).await {
             Ok(e) => e,
             Err(e) => return CommandOutcome::Error(format!("list sessions: {e}")),
         };
@@ -388,20 +388,20 @@ impl SlashCommand for LoginCommand {
 
 #[cfg_attr(test, allow(dead_code))]
 pub fn save_api_key(provider: &str, token: &str) -> Result<PathBuf, String> {
-    let mut store = match crate::auth::AuthStore::load() {
+    let mut store = match theway_sdk::auth::AuthStore::load() {
         Ok(s) => s,
         Err(e) => return Err(format!("load auth store: {e}")),
     };
     store.set(
         provider.to_string(),
-        crate::auth::ProviderCredential::ApiKey {
+        theway_sdk::auth::ProviderCredential::ApiKey {
             value: token.to_string(),
         },
     );
     if let Err(e) = store.save() {
         return Err(format!("save auth store: {e}"));
     }
-    Ok(crate::auth::auth_path())
+    Ok(theway_sdk::auth::auth_path())
 }
 
 pub struct LogoutCommand;
@@ -422,7 +422,7 @@ impl SlashCommand for LogoutCommand {
             return CommandOutcome::Error("usage: /logout <provider>".into());
         }
         let provider = &argv[0];
-        let mut store = match crate::auth::AuthStore::load() {
+        let mut store = match theway_sdk::auth::AuthStore::load() {
             Ok(s) => s,
             Err(e) => return CommandOutcome::Error(format!("load auth store: {e}")),
         };

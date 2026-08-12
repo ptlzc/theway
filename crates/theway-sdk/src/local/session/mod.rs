@@ -126,7 +126,9 @@ pub async fn list_entries(repo: &SqliteSessionRepo) -> Result<Vec<SessionEntry>>
     Ok(out)
 }
 
-pub(crate) async fn first_user_text(session: &Session) -> Option<String> {
+/// First user message text, truncated to a short preview. Public so the daemon's
+/// session-ops layer (which no longer owns this module) can build listings from it.
+pub async fn first_user_text(session: &Session) -> Option<String> {
     let entries = session.entries().await.ok()?;
     for e in entries {
         if let theway_core::SessionTreeEntry::Message {

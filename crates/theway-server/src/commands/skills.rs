@@ -248,7 +248,7 @@ async fn set_skill_enabled(argv: &[String], ctx: &CommandCtx<'_>, enabled: bool)
     }
 
     if let Err(e) =
-        crate::skill_overrides::set_and_save(&crate::config::base_dir(), &name, source, enabled)
+        crate::skill_overrides::set_and_save(&theway_sdk::config::base_dir(), &name, source, enabled)
             .await
     {
         return CommandOutcome::Error(format!("persist skill state failed: {e}"));

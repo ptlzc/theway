@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use theway_core::{NativeEnv, Skill, SkillDiagnostic, SkillSource, load_skills};
 use tokio_util::sync::CancellationToken;
 
-use crate::config::base_dir;
+use theway_sdk::config::base_dir;
 
 /// Returns (project_root, user_root) in the order they should be consulted.
 ///

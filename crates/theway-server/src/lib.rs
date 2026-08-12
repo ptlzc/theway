@@ -13,35 +13,35 @@
 pub mod agent_session;
 pub mod agent_specs;
 pub mod app;
-pub mod auth;
 pub mod bug_report;
 pub mod builtin_skills;
 pub mod commands;
-pub mod config;
 pub mod config_readers;
 pub mod control_plane_prompt;
 pub mod dag_persist;
 pub mod export;
 pub mod extensions;
-pub mod history;
-pub mod images;
 pub mod local_models;
 pub mod logging;
 pub mod lsp;
 pub mod lsp_supervisor;
 pub mod markdown;
 pub mod mcp_loader;
-pub mod mentions;
 pub mod model;
 pub mod oauth;
 pub mod otlp;
 pub mod readline;
-pub mod session;
 pub mod session_archive;
 pub mod session_ops;
 pub mod skills;
-pub mod stream_auth;
 pub mod system_prompt;
+
+// Bridge re-exports (sdk-split-local-sandbox, node 3-move-modules): the local-surface
+// modules now live in theway-sdk; client paths (`theway::session`, `theway::config`, …)
+// stay valid through these re-exports until the daemon rename (node 7) flips the SDK lib
+// name back to `theway`. `session_archive` / `config_readers` / `bug_report` are still
+// daemon-side (coupled to triggers/builtin_skills/export — see the node 3 report).
+pub use theway_sdk::{auth, config, history, images, mentions, session, stream_auth};
 // Skill enable/disable overlay moved into the engine crate with the builtin tools
 // (openspec tools-into-core); re-exported so `crate::skill_overrides` paths keep working.
 pub use theway_core::skill_overrides;

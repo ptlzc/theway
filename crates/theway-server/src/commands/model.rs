@@ -81,7 +81,7 @@ pub fn model_credential_hint(provider: &str) -> Option<String> {
     if has_env {
         return None;
     }
-    let has_stored = crate::auth::AuthStore::load()
+    let has_stored = theway_sdk::auth::AuthStore::load()
         .ok()
         .and_then(|store| store.get(provider).cloned())
         .is_some();

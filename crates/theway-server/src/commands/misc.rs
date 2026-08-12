@@ -273,7 +273,7 @@ impl SlashCommand for FindCommand {
             return CommandOutcome::Error("usage: /find <query>".into());
         }
         let query = argv.join(" ").to_lowercase();
-        let repo = crate::session::open_repo(ctx.cwd).await;
+        let repo = theway_sdk::session::open_repo(ctx.cwd).await;
         let files = match repo.list().await {
             Ok(f) => f,
             Err(e) => return CommandOutcome::Error(format!("list sessions: {e}")),
@@ -353,7 +353,7 @@ impl SlashCommand for HistoryCommand {
     }
     async fn run(&self, argv: &[String], _ctx: &CommandCtx<'_>) -> CommandOutcome {
         let limit: usize = argv.first().and_then(|s| s.parse().ok()).unwrap_or(20);
-        let store = crate::history::HistoryStore::load();
+        let store = theway_sdk::history::HistoryStore::load();
         let entries = store.entries();
         if entries.is_empty() {
             cprintln!("(no history yet)");

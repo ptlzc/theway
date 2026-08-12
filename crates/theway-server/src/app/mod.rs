@@ -12,7 +12,9 @@
 //! - [`relay`]: remote relay client (`/web-connect`).
 
 pub mod daemon;
-pub mod feed;
+// The feed model moved to theway-sdk (`common::feed`) in sdk-split-local-sandbox
+// node 3; the `crate::app::feed` path stays valid through this re-export.
+pub use theway_sdk::common::feed;
 pub mod kernel;
 pub mod listener;
 pub mod relay;

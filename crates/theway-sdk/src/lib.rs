@@ -15,3 +15,22 @@
 pub mod common;
 pub mod local;
 pub mod sandbox;
+
+// Path-compatibility root re-exports: client code keeps using the pre-split paths
+// (`theway::session`, `theway::config`, `theway::auth`, …) unchanged. Modules that
+// remain coupled to daemon-only code (`session_archive`, `config_readers`,
+// `bug_report`) stay in the daemon crate for now — see openspec change
+// `sdk-split-local-sandbox`, node 3-move-modules.
+pub use common::config;
+pub use local::{auth, history, images, mentions, session, stream_auth};
+
+// Session repo used by the CLI layer (theway-tui): hybrid JSONL+SQLite, new sessions
+// minted as SQLite. Re-exported from the composition root so binaries don't need to
+// depend on theway-storage directly.
+pub use theway_storage::sqlite_repo::SqliteSessionRepo;
+
+/// Path-compat shim: the conversation feed keeps its pre-split path
+/// (`theway::app::feed`) even though it now lives in `common::feed`.
+pub mod app {
+    pub use crate::common::feed;
+}
