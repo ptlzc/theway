@@ -92,6 +92,11 @@ pub(crate) struct Cli {
     /// Run the local HTTP UI (browser) instead of the terminal UI. Defaults to loopback-only.
     #[arg(long = "http", conflicts_with = "tui")]
     pub(crate) http: bool,
+    /// Run as an MCP server over stdio (Model Context Protocol, JSON-RPC 2.0): MCP
+    /// clients (Claude Code, Codex, IDEs) can call theway's local-execution tools as
+    /// standard MCP tools. Mutually exclusive with the other UI modes.
+    #[arg(long = "mcp", conflicts_with_all = ["http", "grpc", "tui"])]
+    pub(crate) mcp: bool,
     /// Run a local gRPC server instead of the terminal UI. Loopback-only; exposes the same
     /// command/snapshot surface as `--http` (state, events stream, prompt, model, abort,
     /// control-plane resolve) over tonic.

@@ -164,3 +164,37 @@ pub fn make_notification<P: Serialize>(
         params,
     }
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// Server side (incoming dispatch)
+// ──────────────────────────────────────────────────────────────────────────
+
+/// Incoming JSON-RPC message (request or notification). `id` present ⇒ request
+/// (must be answered); absent ⇒ notification (no response).
+#[derive(Debug, Clone, Deserialize)]
+pub struct IncomingRpc {
+    #[allow(dead_code)]
+    pub jsonrpc: Option<String>,
+    pub id: Option<u64>,
+    pub method: String,
+    #[serde(default)]
+    pub params: Option<serde_json::Value>,
+}
+
+/// JSON-RPC 2.0 success response.
+pub fn make_response(id: u64, result: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": result })
+}
+
+/// JSON-RPC 2.0 error response (standard codes: -32700 parse, -32601 method,
+/// -32602 params, -32603 internal).
+pub fn make_error_response(id: Option<u64>, code: i64, message: &str) -> serde_json::Value {
+    let mut v =
+        serde_json::json!({ "jsonrpc": "2.0", "error": { "code": code, "message": message } });
+    if let Some(id) = id {
+        v["id"] = serde_json::json!(id);
+    } else {
+        v["id"] = serde_json::Value::Null;
+    }
+    v
+}

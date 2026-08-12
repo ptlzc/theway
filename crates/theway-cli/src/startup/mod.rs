@@ -35,7 +35,7 @@ use crate::cli::{Cli, select_resume_session};
 use crate::session_factory::SessionHarnessFactory;
 use crate::ui_mode::{
     active_hook_registrations, active_trigger_features, parse_thinking, should_run_grpc,
-    should_run_http, validate_base_url_override,
+    should_run_http, should_run_mcp, validate_base_url_override,
 };
 
 // Kept at crate-root visibility via `pub use startup::user_message;` in `main.rs`
@@ -51,6 +51,7 @@ pub(crate) async fn run_repl(
     // with the App / SessionOps; every existing call site keeps working through Deref.
     let repo = std::sync::Arc::new(repo);
     let run_http = should_run_http(&cli);
+    let run_mcp = should_run_mcp(&cli);
     let run_grpc = should_run_grpc(&cli);
     let cli_base_url = cli.base_url.clone();
     validate_base_url_override(&cli)?;
@@ -691,7 +692,11 @@ pub(crate) async fn run_repl(
     // the shared transport event loop (`App::run_transport_loop`) on the public
     // `theway::ui::web_loop::TransportEndpoints` channel surface (openspec
     // consolidate-server-cli 2.x: bin consolidated back into the `theway` crate).
-    let run_result = if run_grpc {
+    let run_result = if run_mcp {
+        theway::transport::mcp::run_mcp_server(theway::tools::local_tools())
+            .await
+            .map_err(|e| anyhow::anyhow!("mcp server: {e}"))
+    } else if run_grpc {
         theway::transport::grpc::run_grpc(
             app,
             theway::transport::grpc::GrpcOptions {
