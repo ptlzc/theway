@@ -3,7 +3,7 @@
 //! `gh` shims, and the process-wide serialization locks.
 //!
 //! Everything here is `pub` so the sibling domain modules can glob-import it
-//! (`use super::helpers::*;`). The `commands` / `skills_state` names refer to
+//! (`use super::helpers::*;`). The `commands` / `skill_overrides` names refer to
 //! the `#[path]`-included `src/` modules at the test-crate root (see
 //! `commands_e2e_main.rs`).
 
@@ -22,7 +22,7 @@ use theway_llm_provider::{
 };
 
 use crate::commands;
-use crate::skills_state;
+use crate::skill_overrides;
 
 pub static GH_BIN_ENV_LOCK: Mutex<()> = Mutex::new(());
 pub static THEWAY_DIR_ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -174,8 +174,8 @@ pub fn harness_with_reloadable_skills(base_dir: &Path, seed: Vec<Skill>) -> Arc<
         let base = base.clone();
         Box::pin(async move {
             let mut skills = source.lock().unwrap().clone();
-            let state = skills_state::load(&base).await;
-            skills_state::apply(&state, &mut skills);
+            let state = skill_overrides::load(&base).await;
+            skill_overrides::apply(&state, &mut skills);
             LoadSkillsOutput {
                 skills,
                 diagnostics: Vec::new(),
@@ -210,8 +210,8 @@ pub fn harness_with_disk_skill_reload(base_dir: &Path, seed: Vec<Skill>) -> Arc<
             for skill in out.skills.iter_mut() {
                 skill.source = SkillSource::User;
             }
-            let state = skills_state::load(&base).await;
-            skills_state::apply(&state, &mut out.skills);
+            let state = skill_overrides::load(&base).await;
+            skill_overrides::apply(&state, &mut out.skills);
             out
         })
     });

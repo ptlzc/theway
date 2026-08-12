@@ -46,8 +46,8 @@ mod session;
 #[path = "../src/session_archive.rs"]
 mod session_archive;
 #[allow(dead_code)]
-#[path = "../../core/src/skills_state.rs"]
-mod skills_state;
+#[path = "../../core/src/skill_overrides.rs"]
+mod skill_overrides;
 #[allow(dead_code)]
 #[path = "../src/triggers/mod.rs"]
 mod triggers;

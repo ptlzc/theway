@@ -34,7 +34,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::set_skill_state::default_base_dir;
 use super::skill::SkillHarnessCell;
-use crate::skills_state;
+use crate::skill_overrides;
 
 pub struct RemoveSkillTool {
     harness: SkillHarnessCell,
@@ -214,11 +214,12 @@ impl AgentTool for RemoveSkillTool {
 
         // Forget any disabled-state overlay entry for this skill so a future reinstall of the
         // same name starts fresh.
-        if let Err(e) = skills_state::remove_and_save(&self.base_dir, &input.name, source).await {
+        if let Err(e) = skill_overrides::remove_and_save(&self.base_dir, &input.name, source).await
+        {
             tracing::warn!(
                 skill = %input.name,
                 error = %e,
-                "failed to clear skills-state overlay entry after remove"
+                "failed to clear skill-overrides overlay entry after remove"
             );
         }
 

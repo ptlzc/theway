@@ -11,7 +11,7 @@ use theway_core::{
 use super::helpers::*;
 use crate::auth;
 use crate::commands;
-use crate::skills_state;
+use crate::skill_overrides;
 
 #[tokio::test]
 async fn dynamic_skill_slash_command_attaches_skill_without_body_echo() {
@@ -322,7 +322,7 @@ async fn dispatch_skills_disable_persists_overlay_and_reloads() {
         "reload should apply overlay"
     );
 
-    let state = skills_state::load(temp.path()).await;
+    let state = skill_overrides::load(temp.path()).await;
     assert_eq!(
         state
             .lookup("review-pr", SkillSource::User)
@@ -388,7 +388,7 @@ async fn dispatch_skills_enable_is_user_mediated_and_reuses_overlay() {
         "user slash command may explicitly enable a frontmatter-disabled skill"
     );
 
-    let state = skills_state::load(temp.path()).await;
+    let state = skill_overrides::load(temp.path()).await;
     assert_eq!(
         state
             .lookup("formatter", SkillSource::User)

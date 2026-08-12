@@ -1,4 +1,4 @@
-//! Runtime skill enable/disable overlay, persisted at `~/.theway/skills-state.json`.
+//! Runtime skill enable/disable overlay, persisted at `~/.theway/skill-overrides.json`.
 //!
 //! Why an overlay instead of editing `SKILL.md`: a skill's `SKILL.md` is the author's
 //! read-only source of truth (often vendored or project-shared). Flipping
@@ -22,13 +22,16 @@ use serde::{Deserialize, Serialize};
 use theway_core::{Skill, SkillSource};
 
 /// Filename under the theway base dir (`~/.theway/`).
-pub const STATE_FILE: &str = "skills-state.json";
+pub const OVERRIDES_FILE: &str = "skill-overrides.json";
+/// Legacy pre-rename file name, read as a fallback so existing installs keep
+/// their overrides after the `skills-state.json` → `skill-overrides.json` rename.
+pub const LEGACY_OVERRIDES_FILE: &str = "skills-state.json";
 
 /// One explicit enable/disable override for a `{source, name}` skill. Presence of an entry
 /// means the user made an explicit runtime choice that overrides the skill's frontmatter
 /// `disable_model_invocation` default.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SkillStateEntry {
+pub struct SkillOverrideEntry {
     pub name: String,
     pub source: SkillSource,
     /// `true` = explicitly enabled (overrides a frontmatter disable); `false` = disabled.
@@ -37,14 +40,14 @@ pub struct SkillStateEntry {
 
 /// The persisted overlay. Forward-compatible: unknown fields are ignored, missing file = empty.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct SkillsState {
+pub struct SkillOverrides {
     #[serde(default)]
-    pub overrides: Vec<SkillStateEntry>,
+    pub overrides: Vec<SkillOverrideEntry>,
 }
 
-impl SkillsState {
+impl SkillOverrides {
     /// Look up the explicit override for `{source, name}`, if any.
-    pub fn lookup(&self, name: &str, source: SkillSource) -> Option<&SkillStateEntry> {
+    pub fn lookup(&self, name: &str, source: SkillSource) -> Option<&SkillOverrideEntry> {
         self.overrides
             .iter()
             .find(|e| e.name == name && e.source == source)
@@ -59,7 +62,7 @@ impl SkillsState {
         {
             e.enabled = enabled;
         } else {
-            self.overrides.push(SkillStateEntry {
+            self.overrides.push(SkillOverrideEntry {
                 name: name.to_string(),
                 source,
                 enabled,
@@ -80,29 +83,44 @@ impl SkillsState {
 
 /// Absolute path to the overlay file under `base_dir` (`~/.theway/`).
 pub fn state_path(base_dir: &Path) -> PathBuf {
-    base_dir.join(STATE_FILE)
+    base_dir.join(OVERRIDES_FILE)
 }
 
 /// Load the overlay. A missing file is an empty overlay; a malformed file is treated as empty
 /// (the disable/enable state simply isn't applied) rather than failing skill loading entirely.
-pub async fn load(base_dir: &Path) -> SkillsState {
+///
+/// Backward compatibility: if the new `skill-overrides.json` does not exist but the pre-rename
+/// `skills-state.json` does, the legacy file is read (same shape — the rename only changed the
+/// file name, not the format). `save` always writes the new name; the legacy file is left in
+/// place untouched.
+pub async fn load(base_dir: &Path) -> SkillOverrides {
     let path = state_path(base_dir);
     match tokio::fs::read_to_string(&path).await {
         Ok(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
-            tracing::warn!(path = %path.display(), error = %e, "malformed skills-state.json; ignoring overlay");
-            SkillsState::default()
+            tracing::warn!(path = %path.display(), error = %e, "malformed skill-overrides.json; ignoring overlay");
+            SkillOverrides::default()
         }),
-        Err(_) => SkillsState::default(),
+        Err(_) => {
+            // Legacy pre-rename file (`skills-state.json`). Same JSON shape.
+            let legacy = base_dir.join(LEGACY_OVERRIDES_FILE);
+            if let Ok(s) = tokio::fs::read_to_string(&legacy).await {
+                if let Ok(parsed) = serde_json::from_str::<SkillOverrides>(&s) {
+                    tracing::info!(path = %legacy.display(), "loading legacy skill-overrides file");
+                    return parsed;
+                }
+            }
+            SkillOverrides::default()
+        },
     }
 }
 
 /// Atomically persist the overlay (tempfile + rename within the same dir).
-pub async fn save(base_dir: &Path, state: &SkillsState) -> std::io::Result<()> {
+pub async fn save(base_dir: &Path, state: &SkillOverrides) -> std::io::Result<()> {
     tokio::fs::create_dir_all(base_dir).await?;
     let json = serde_json::to_string_pretty(state)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     let tmp = base_dir.join(format!(
-        ".{STATE_FILE}.{}.{}.tmp",
+        ".{OVERRIDES_FILE}.{}.{}.tmp",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -121,7 +139,7 @@ pub async fn save(base_dir: &Path, state: &SkillsState) -> std::io::Result<()> {
 /// `{source, name}` override, set `disable_model_invocation = !enabled`. Skills with no
 /// override keep their frontmatter value. Called both at startup and on
 /// `reload_skills_from_disk` so a disabled skill stays disabled across reloads.
-pub fn apply(state: &SkillsState, skills: &mut [Skill]) {
+pub fn apply(state: &SkillOverrides, skills: &mut [Skill]) {
     for skill in skills.iter_mut() {
         if let Some(entry) = state.lookup(&skill.name, skill.source) {
             skill.disable_model_invocation = !entry.enabled;
@@ -137,7 +155,7 @@ pub async fn set_and_save(
     name: &str,
     source: SkillSource,
     enabled: bool,
-) -> std::io::Result<SkillsState> {
+) -> std::io::Result<SkillOverrides> {
     let mut state = load(base_dir).await;
     state.set(name, source, enabled);
     save(base_dir, &state).await?;
@@ -147,7 +165,7 @@ pub async fn set_and_save(
 /// Convenience: load → remove the `{source, name}` override → save. Used by `RemoveSkill` so
 /// removing a skill also forgets any disabled state for it. A no-op (no entry) still rewrites
 /// the file harmlessly; callers that want to skip the write on no-op can check
-/// [`SkillsState::remove`] directly.
+/// [`SkillOverrides::remove`] directly.
 pub async fn remove_and_save(
     base_dir: &Path,
     name: &str,
@@ -177,7 +195,7 @@ mod tests {
 
     #[test]
     fn apply_disables_matching_source_name() {
-        let mut state = SkillsState::default();
+        let mut state = SkillOverrides::default();
         state.set("foo", SkillSource::User, false); // explicitly disabled
         let mut skills = vec![skill("foo", SkillSource::User, false)];
         apply(&state, &mut skills);
@@ -189,7 +207,7 @@ mod tests {
 
     #[test]
     fn apply_enable_overrides_frontmatter_disable() {
-        let mut state = SkillsState::default();
+        let mut state = SkillOverrides::default();
         state.set("foo", SkillSource::User, true); // explicitly enabled
         let mut skills = vec![skill("foo", SkillSource::User, true)]; // frontmatter disabled
         apply(&state, &mut skills);
@@ -202,7 +220,7 @@ mod tests {
     #[test]
     fn apply_is_source_aware() {
         // Disable only the User `foo`; a Project `foo` must be untouched.
-        let mut state = SkillsState::default();
+        let mut state = SkillOverrides::default();
         state.set("foo", SkillSource::User, false);
         let mut skills = vec![
             skill("foo", SkillSource::User, false),
@@ -218,7 +236,7 @@ mod tests {
 
     #[test]
     fn no_override_keeps_frontmatter_value() {
-        let state = SkillsState::default();
+        let state = SkillOverrides::default();
         let mut skills = vec![
             skill("a", SkillSource::User, false),
             skill("b", SkillSource::User, true),
@@ -233,7 +251,7 @@ mod tests {
 
     #[test]
     fn set_upserts_not_duplicates() {
-        let mut state = SkillsState::default();
+        let mut state = SkillOverrides::default();
         state.set("foo", SkillSource::User, false);
         state.set("foo", SkillSource::User, true);
         assert_eq!(state.overrides.len(), 1, "same {{source,name}} upserts");
@@ -242,7 +260,7 @@ mod tests {
 
     #[test]
     fn remove_drops_matching_entry_and_is_source_aware() {
-        let mut state = SkillsState::default();
+        let mut state = SkillOverrides::default();
         state.set("foo", SkillSource::User, false);
         state.set("foo", SkillSource::Project, false);
         // Removing the user entry leaves the project entry intact.
@@ -269,7 +287,7 @@ mod tests {
     #[tokio::test]
     async fn save_then_load_round_trips() {
         let dir = tempfile::tempdir().unwrap();
-        let mut state = SkillsState::default();
+        let mut state = SkillOverrides::default();
         state.set("foo", SkillSource::Project, false);
         state.set("bar", SkillSource::User, true);
         save(dir.path(), &state).await.unwrap();
@@ -292,7 +310,42 @@ mod tests {
         while let Some(e) = entries.next_entry().await.unwrap() {
             names.push(e.file_name().into_string().unwrap_or_default());
         }
-        assert_eq!(names, vec![STATE_FILE.to_string()]);
+        assert_eq!(names, vec![OVERRIDES_FILE.to_string()]);
+    }
+
+    #[tokio::test]
+    async fn legacy_skills_state_file_is_read_as_fallback() {
+        // Pre-rename installs have `skills-state.json`; loading must pick it up
+        // even though the new file name does not exist yet.
+        let dir = tempfile::tempdir().unwrap();
+        let legacy_path = dir.path().join(LEGACY_OVERRIDES_FILE);
+        tokio::fs::write(
+            &legacy_path,
+            r#"{ "overrides": [{ "name": "foo", "source": "user", "enabled": false }] }"#,
+        )
+        .await
+        .unwrap();
+        let loaded = load(dir.path()).await;
+        assert_eq!(
+            loaded.lookup("foo", SkillSource::User).map(|e| e.enabled),
+            Some(false)
+        );
+        // New file takes precedence when both exist — and `set_and_save` migrates
+        // the legacy entry into the new file on the first write (its internal load
+        // picks up the legacy file), so the legacy disable survives the rename.
+        set_and_save(dir.path(), "bar", SkillSource::User, true)
+            .await
+            .unwrap();
+        let loaded = load(dir.path()).await;
+        assert_eq!(
+            loaded.lookup("foo", SkillSource::User).map(|e| e.enabled),
+            Some(false),
+            "legacy entry migrated into the new file"
+        );
+        assert_eq!(
+            loaded.lookup("bar", SkillSource::User).map(|e| e.enabled),
+            Some(true)
+        );
     }
 
     #[tokio::test]

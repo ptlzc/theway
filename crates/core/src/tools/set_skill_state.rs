@@ -1,7 +1,7 @@
 //! `SetSkillState` builtin tool (skill-lifecycle task #23, S-A2): enable or disable a loaded
 //! skill at runtime without editing its `SKILL.md`.
 //!
-//! Persistence is the `~/.theway/skills-state.json` overlay (see [`crate::skills_state`]) keyed
+//! Persistence is the `~/.theway/skill-overrides.json` overlay (see [`crate::skill_overrides`]) keyed
 //! by `{source, name}` — the user's SKILL.md stays pristine and the choice survives restarts
 //! and reloads. Works for ANY source: a builtin or project skill that can't be deleted can
 //! still be disabled. (Removal of user-installed skills is the separate `RemoveSkill` tool.)
@@ -43,11 +43,11 @@ use theway_llm_provider::{Tool, UserContentBlock};
 use tokio_util::sync::CancellationToken;
 
 use super::skill::SkillHarnessCell;
-use crate::skills_state;
+use crate::skill_overrides;
 
 pub struct SetSkillStateTool {
     harness: SkillHarnessCell,
-    /// The theway base dir (`~/.theway`) that holds `skills-state.json`. Injected so tests use a
+    /// The theway base dir (`~/.theway`) that holds `skill-overrides.json`. Injected so tests use a
     /// temp dir instead of the user's real home.
     base_dir: PathBuf,
 }
@@ -209,7 +209,7 @@ impl AgentTool for SetSkillStateTool {
         }
 
         // Apply: write the overlay, then reload so the catalog reflects the new state.
-        skills_state::set_and_save(&self.base_dir, &input.name, resolved_source, target_enabled)
+        skill_overrides::set_and_save(&self.base_dir, &input.name, resolved_source, target_enabled)
             .await
             .map_err(|e| AgentToolError::Message(format!("persist skill state: {e}")))?;
 
@@ -295,7 +295,7 @@ fn enabled_word(enabled: bool) -> &'static str {
 static DEFINITION: Lazy<Tool> = Lazy::new(|| Tool {
     name: "SetSkillState".into(),
     description: "Enable or disable a loaded skill at runtime without editing its SKILL.md. \
-         The choice is recorded in a local overlay (~/.theway/skills-state.json) keyed by \
+         The choice is recorded in a local overlay (~/.theway/skill-overrides.json) keyed by \
          source+name and survives restarts. Works for any source — a builtin or project skill \
          that can't be removed can still be disabled. Two-phase: first call previews (current \
          vs target state); call again with `confirm: true` to apply. Disabling prevents the \

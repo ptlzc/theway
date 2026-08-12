@@ -52,8 +52,8 @@ fn build(seed: Vec<Skill>, base_dir: PathBuf) -> (Arc<AgentHarness>, SkillHarnes
         let mut skills = seed_for_reload.clone();
         let base = base_for_reload.clone();
         Box::pin(async move {
-            let state = skills_state::load(&base).await;
-            skills_state::apply(&state, &mut skills);
+            let state = skill_overrides::load(&base).await;
+            skill_overrides::apply(&state, &mut skills);
             theway_core::LoadSkillsOutput {
                 skills,
                 diagnostics: vec![],
@@ -88,7 +88,7 @@ async fn preview_does_not_write_overlay() {
     assert_eq!(res.details["currently_enabled"], true);
     assert_eq!(res.details["target_enabled"], false);
     // No overlay file written.
-    assert!(!skills_state::state_path(dir.path()).exists());
+    assert!(!skill_overrides::state_path(dir.path()).exists());
 }
 
 #[tokio::test]
@@ -110,7 +110,7 @@ async fn disable_then_reload_reflects_state() {
     assert_eq!(res.details["enabled"], false);
     assert_eq!(res.details["effective_enabled_after_reload"], false);
     // Overlay persisted.
-    let state = skills_state::load(dir.path()).await;
+    let state = skill_overrides::load(dir.path()).await;
     assert_eq!(
         state.lookup("foo", SkillSource::User).map(|e| e.enabled),
         Some(false)

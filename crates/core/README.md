@@ -51,6 +51,6 @@ src/
   multiagent/            DAG orchestration (graph/ + registry/)
   proxy.rs               re-exports from theway-llm-provider (HTTP_PROXY helpers)
   node.rs                native entry wiring the std::fs env adapter
-  skills_state.rs
+  skill_overrides.rs
   tools/                 core tool implementations (dag_tools/, install_skill/)
 ```

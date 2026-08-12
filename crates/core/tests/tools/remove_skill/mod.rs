@@ -75,8 +75,8 @@ fn build(seed: Vec<Skill>, base: PathBuf) -> (Arc<AgentHarness>, SkillHarnessCel
             for s in out.skills.iter_mut() {
                 s.source = SkillSource::User;
             }
-            let state = skills_state::load(&base).await;
-            skills_state::apply(&state, &mut out.skills);
+            let state = skill_overrides::load(&base).await;
+            skill_overrides::apply(&state, &mut out.skills);
             out
         })
     });
@@ -201,7 +201,7 @@ async fn remove_clears_overlay_entry() {
     let dir = tempfile::tempdir().unwrap();
     let fp = write_user_skill(dir.path(), "foo").await;
     // Pre-existing disabled overlay entry for foo.
-    skills_state::set_and_save(dir.path(), "foo", SkillSource::User, false)
+    skill_overrides::set_and_save(dir.path(), "foo", SkillSource::User, false)
         .await
         .unwrap();
     let (_h, cell) = build(
@@ -215,7 +215,7 @@ async fn remove_clears_overlay_entry() {
         .expect("remove ok");
 
     // Overlay no longer carries the stale entry.
-    let state = skills_state::load(dir.path()).await;
+    let state = skill_overrides::load(dir.path()).await;
     assert!(
         state.lookup("foo", SkillSource::User).is_none(),
         "remove must clear the overlay entry so reinstall starts fresh"

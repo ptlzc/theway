@@ -18,8 +18,8 @@ use std::sync::{Arc, OnceLock};
 use anyhow::Result;
 use theway::{
     agent_session, agent_specs, builtin_skills, commands, config, control_plane_prompt, debug,
-    history, inbox, local_models, logging, lsp_supervisor, mcp_loader, model, session, skills,
-    skills_state, templates, tools, triggers, ts_extensions, ui,
+    history, inbox, local_models, logging, lsp_supervisor, mcp_loader, model, session,
+    skill_overrides, skills, templates, tools, triggers, ts_extensions, ui,
 };
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::persist::DagPersistSink;
@@ -240,12 +240,12 @@ pub(crate) async fn run_repl(
         resolved_builtins.skills.clone(),
         &loaded_skills.skills,
     );
-    // Apply the runtime enable/disable overlay (`~/.theway/skills-state.json`). A user who ran
+    // Apply the runtime enable/disable overlay (`~/.theway/skill-overrides.json`). A user who ran
     // `/skills disable <name>` (or the SetSkillState tool) sees that choice survive across
     // restarts without their SKILL.md being edited. Keyed by {source, name}.
     {
-        let state = skills_state::load(&config::base_dir()).await;
-        skills_state::apply(&state, &mut combined_skills);
+        let state = skill_overrides::load(&config::base_dir()).await;
+        skill_overrides::apply(&state, &mut combined_skills);
     }
 
     let goal_harness_cell: Arc<OnceLock<Arc<AgentHarness>>> = Arc::new(OnceLock::new());
@@ -278,8 +278,8 @@ pub(crate) async fn run_repl(
                 // Re-apply the enable/disable overlay on every reload so a disabled skill
                 // stays disabled after an install/remove/reload. Same source-of-truth as the
                 // startup path above.
-                let state = skills_state::load(&config::base_dir()).await;
-                skills_state::apply(&state, &mut merged);
+                let state = skill_overrides::load(&config::base_dir()).await;
+                skill_overrides::apply(&state, &mut merged);
                 theway_core::LoadSkillsOutput {
                     skills: merged,
                     diagnostics: loaded.diagnostics,
