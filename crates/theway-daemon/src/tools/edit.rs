@@ -298,12 +298,16 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    fn local_exec() -> Arc<dyn ToolExecutor> {
+        Arc::new(theway::local::executor::LocalExecutor::new())
+    }
+
     #[tokio::test]
     async fn replaces_unique_substring() {
         let dir = tempdir().unwrap();
         let p = dir.path().join("a.txt");
         std::fs::write(&p, "hello world\nfoo bar\n").unwrap();
-        let tool = EditTool;
+        let tool = EditTool::new(local_exec());
         tool.execute(
             "e",
             json!({ "path": p.to_str().unwrap(), "old_string": "hello", "new_string": "hey" }),
@@ -321,7 +325,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let p = dir.path().join("a.txt");
         std::fs::write(&p, "foo\nfoo\n").unwrap();
-        let tool = EditTool;
+        let tool = EditTool::new(local_exec());
         let r = tool
             .execute(
                 "e",
@@ -340,7 +344,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let p = dir.path().join("a.txt");
         std::fs::write(&p, "foo\nfoo\nfoo\n").unwrap();
-        let tool = EditTool;
+        let tool = EditTool::new(local_exec());
         tool.execute(
             "e",
             json!({
@@ -362,7 +366,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let p = dir.path().join("a.txt");
         std::fs::write(&p, "foo\nfoo\nfoo\n").unwrap();
-        let tool = EditTool;
+        let tool = EditTool::new(local_exec());
         tool.execute(
             "e",
             json!({
@@ -384,7 +388,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let p = dir.path().join("a.txt");
         std::fs::write(&p, "needle\nother\nother\n").unwrap();
-        let tool = EditTool;
+        let tool = EditTool::new(local_exec());
         let r = tool
             .execute(
                 "e",
@@ -408,7 +412,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let p = dir.path().join("a.txt");
         std::fs::write(&p, "a\nb\nc\nd\n").unwrap();
-        let tool = EditTool;
+        let tool = EditTool::new(local_exec());
         tool.execute(
             "e",
             json!({
@@ -430,7 +434,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let p = dir.path().join("a.txt");
         std::fs::write(&p, "a\nb\nc\nd\n").unwrap();
-        let tool = EditTool;
+        let tool = EditTool::new(local_exec());
         let r = tool
             .execute(
                 "e",
@@ -453,7 +457,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let p = dir.path().join("a.txt");
         std::fs::write(&p, "foo\nfoo\nfoo\n").unwrap();
-        let tool = EditTool;
+        let tool = EditTool::new(local_exec());
         tool.execute(
             "e",
             json!({
@@ -476,7 +480,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let p = dir.path().join("a.txt");
         std::fs::write(&p, "foo\nfoo\nfoo\n").unwrap();
-        let tool = EditTool;
+        let tool = EditTool::new(local_exec());
         for range in [[2, 1], [0, 2], [2, 9]] {
             let r = tool
                 .execute(
@@ -486,17 +490,6 @@ mod tests {
                         "old_string": "foo",
                         "new_string": "bar",
                         "range": range,
-                    }),
-                    CancellationToken::new(),
-                    None,
-                )
-                .await;
-            let err = format!("{}", r.unwrap_err());
-            assert!(err.contains("Invalid range"), "{err}");
-        }
-    }
-}
-                  "range": range,
                     }),
                     CancellationToken::new(),
                     None,

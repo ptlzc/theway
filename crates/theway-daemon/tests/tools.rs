@@ -42,13 +42,18 @@ use triggers::tool_assembly as tools_asm;
 static DYNAMIC_TRIGGER_LOCK: Mutex<()> = Mutex::new(());
 static CRON_LOCK: Mutex<()> = Mutex::new(());
 
+/// Std-backed local executor for tool tests (sdk-split-local-sandbox node 8 injection).
+fn local_exec() -> Arc<dyn theway_core::executor::ToolExecutor> {
+    Arc::new(theway::local::executor::LocalExecutor::new())
+}
+
 #[tokio::test]
 async fn read_writes_then_reads() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("hello.txt");
 
-    let write = theway_daemon::tools::write::WriteTool;
-    let read = theway_daemon::tools::read::ReadTool;
+    let write = theway_daemon::tools::write::WriteTool::new(local_exec());
+    let read = theway_daemon::tools::read::ReadTool::new(local_exec());
 
     write
         .execute(

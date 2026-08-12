@@ -23,6 +23,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use theway_core::AgentTool;
+use theway_core::executor::ToolExecutor;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::node_launcher;
 use theway_core::multiagent::registry::AgentJobRegistry;
@@ -61,11 +62,20 @@ pub use crate::triggers::tool_assembly::{
 /// git / grep / web — everything that depends on the execution environment. No engine
 /// tools here (DAG / subagent / skills / memory come from the engine's own assembly,
 /// [`theway_core::tools::assembly`]); no duplicate-memory risk.
-pub fn local_tools() -> Vec<Arc<dyn AgentTool>> {
+///
+/// Executor binding (sdk-split-local-sandbox node 8): file-content and process tools
+/// (read / write / edit / outline / git) dispatch their effects through the injected
+/// [`ToolExecutor`] — the SDK's `LocalExecutor` for local editing mode; a sandbox
+/// executor swaps the execution environment without touching tool definitions. The
+/// remaining local tools are not yet wired through the executor: `bash` keeps its
+/// process-group-kill + cancel semantics (the executor's `run_command` kills only the
+/// direct child), and `ls` / `grep` / `find` / the engine `exec_shell` family use richer
+/// directory/walk surfaces than the executor trait's first cut exposes.
+pub fn local_tools(executor: Arc<dyn ToolExecutor>) -> Vec<Arc<dyn AgentTool>> {
     vec![
-        Arc::new(read::ReadTool),
-        Arc::new(write::WriteTool),
-        Arc::new(edit::EditTool),
+        Arc::new(read::ReadTool::new(executor.clone())),
+        Arc::new(write::WriteTool::new(executor.clone())),
+        Arc::new(edit::EditTool::new(executor.clone())),
         Arc::new(bash::BashTool),
         Arc::new(theway_core::tools::exec_shell::ExecTool),
         Arc::new(theway_core::tools::exec_shell::GetOutputTool),
@@ -74,8 +84,8 @@ pub fn local_tools() -> Vec<Arc<dyn AgentTool>> {
         Arc::new(ls::LsTool),
         Arc::new(grep::GrepTool),
         Arc::new(find::FindTool),
-        Arc::new(outline::OutlineTool),
-        Arc::new(git::GitTool),
+        Arc::new(outline::OutlineTool::new(executor.clone())),
+        Arc::new(git::GitTool::new(executor)),
         Arc::new(web_fetch::WebFetchTool),
         Arc::new(web_search::WebSearchTool::new()),
     ]
@@ -97,12 +107,13 @@ pub fn subagent_tool(
     memory_dir: PathBuf,
     skill_harness_cell: SkillHarnessCell,
     session_id: Option<String>,
+    executor: Arc<dyn ToolExecutor>,
 ) -> Arc<dyn AgentTool> {
     Arc::new(
         subagent::SubagentTool::new(
             model,
             stream_fn,
-            subagent_tool_sets(memory_dir, skill_harness_cell),
+            subagent_tool_sets(memory_dir, skill_harness_cell, executor),
             crate::agent_specs::launch_resolver(),
             crate::agent_specs::spec_names(),
             registry,
@@ -119,11 +130,14 @@ pub fn subagent_tool(
 pub fn subagent_tool_sets(
     memory_dir: PathBuf,
     skill_harness_cell: SkillHarnessCell,
+    executor: Arc<dyn ToolExecutor>,
 ) -> ToolSetResolver {
     theway_core::tools::assembly::subagent_tools(
         &memory_dir,
         &skill_harness_cell,
-        Arc::new(local_tools),
+        // The engine-side local-tools factory closes over the daemon's executor, so every
+        // subagent / DAG-node tool set dispatches through the same execution environment.
+        Arc::new(move || local_tools(executor.clone())),
     )
 }
 
@@ -136,6 +150,7 @@ pub fn node_launcher(
     registry: AgentJobRegistry,
     memory_dir: PathBuf,
     skill_harness_cell: SkillHarnessCell,
+    executor: Arc<dyn ToolExecutor>,
 ) -> Arc<node_launcher::NodeLauncherImpl> {
     node_launcher::node_launcher(
         engine,
@@ -143,7 +158,7 @@ pub fn node_launcher(
         stream_fn,
         cwd,
         registry,
-        subagent_tool_sets(memory_dir, skill_harness_cell),
+        subagent_tool_sets(memory_dir, skill_harness_cell, executor),
         crate::agent_specs::launch_resolver(),
     )
 }
@@ -163,15 +178,20 @@ pub fn session_tool_set(
     stream_fn: Option<&theway_core::StreamFn>,
     skill_harness_cell: &SkillHarnessCell,
     session_id: &str,
+    executor: Arc<dyn ToolExecutor>,
 ) -> Vec<Arc<dyn AgentTool>> {
-    let mut tools = local_tools();
+    let mut tools = local_tools(executor.clone());
     // Engine-owned tools (DAG / subagent / skills / memory), assembled core-side with the
     // same subagent tool-set resolver the DAG node launcher uses.
     tools.extend(theway_core::tools::assembly::engine_tools(
         memory_dir,
         dag_engine,
         subagent_registry,
-        subagent_tool_sets(memory_dir.to_path_buf(), skill_harness_cell.clone()),
+        subagent_tool_sets(
+            memory_dir.to_path_buf(),
+            skill_harness_cell.clone(),
+            executor,
+        ),
         crate::agent_specs::launch_resolver(),
         crate::agent_specs::spec_names(),
         model,

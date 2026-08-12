@@ -7,20 +7,36 @@
 //! followed by the rendered output, so the LLM can rely on a consistent format without
 //! parsing git porcelain.
 
-use std::process::Stdio;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use serde_json::{Value, json};
+use theway_core::executor::ToolExecutor;
 use theway_core::{AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate, ToolExecutionMode};
 use theway_llm_provider::{Tool, UserContentBlock};
-use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
 const SUBCOMMANDS: &[&str] = &["status", "diff", "log"];
 const MAX_OUTPUT_BYTES: usize = 64 * 1024;
 
-pub struct GitTool;
+/// Wall-clock bound for a git invocation — mirrors the `LocalExecutor` git timeout
+/// (cwd/timeout semantics align with the executor, sdk-split-local-sandbox node 8).
+const GIT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Git invocations dispatch through the injected [`ToolExecutor`]
+/// (sdk-split-local-sandbox node 8).
+pub struct GitTool {
+    executor: Arc<dyn ToolExecutor>,
+}
+
+impl GitTool {
+    pub fn new(executor: Arc<dyn ToolExecutor>) -> Self {
+        Self { executor }
+    }
+}
 
 #[async_trait]
 impl AgentTool for GitTool {
@@ -66,37 +82,35 @@ impl AgentTool for GitTool {
             .unwrap_or_default();
 
         let argv = build_argv(subcommand, &extra);
+        let mut cmd_argv = Vec::with_capacity(argv.len() + 1);
+        cmd_argv.push("git".to_string());
+        cmd_argv.extend(argv.iter().cloned());
 
-        let mut cmd = Command::new("git");
-        cmd.args(&argv);
-        if let Some(d) = &cwd {
-            cmd.current_dir(d);
-        }
-        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        // An explicit `cwd` param wins; when absent, "." resolves against the executor's
+        // repository context (matches the previous "inherit the process cwd" default).
+        let cwd_path: PathBuf = match &cwd {
+            Some(d) => PathBuf::from(d),
+            None => PathBuf::from("."),
+        };
 
-        let child = cmd
-            .spawn()
-            .map_err(|e| AgentToolError::Message(format!("spawn git: {e}")))?;
-
-        let output_fut = child.wait_with_output();
+        let run_fut = self.executor.run_command(&cwd_path, &cmd_argv, GIT_TIMEOUT);
         let output = tokio::select! {
-            r = output_fut => r.map_err(|e| AgentToolError::Message(format!("git wait: {e}")))?,
+            r = run_fut => r.map_err(|e| AgentToolError::Message(format!("git: {e}")))?,
             _ = cancel.cancelled() => {
                 return Err(AgentToolError::Message("cancelled".into()));
             }
         };
 
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        let body = if !output.status.success() {
+        let exit_code = output.exit_code;
+        let body = if exit_code != 0 {
             format!(
                 "git {} exited with status {}\n--- stderr ---\n{}",
                 subcommand,
-                output.status.code().unwrap_or(-1),
-                stderr.trim()
+                exit_code,
+                output.stderr.trim()
             )
         } else {
-            stdout
+            output.stdout
         };
         let (body, truncated) = truncate(&body);
 
@@ -110,7 +124,7 @@ impl AgentTool for GitTool {
             content: vec![UserContentBlock::text(format!("{header}{body}{suffix}"))],
             details: json!({
                 "subcommand": subcommand,
-                "exit_status": output.status.code().unwrap_or(-1),
+                "exit_status": output.exit_code,
                 "argv": argv,
                 "truncated": truncated,
             }),

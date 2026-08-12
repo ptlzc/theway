@@ -36,6 +36,13 @@ fn init_repo(dir: &std::path::Path) {
     std::fs::write(dir.join("b.txt"), "draft\n").unwrap();
 }
 
+/// Build the git tool wired to a std-backed local executor (node 8 executor injection).
+fn git_tool() -> git::GitTool {
+    git::GitTool::new(std::sync::Arc::new(
+        theway::local::executor::LocalExecutor::new(),
+    ))
+}
+
 fn ensure_git_available() -> bool {
     Command::new("git")
         .arg("--version")
@@ -53,7 +60,7 @@ async fn git_status_reports_untracked_file() {
     let dir = TempDir::new().unwrap();
     init_repo(dir.path());
 
-    let tool = git::GitTool;
+    let tool = git_tool();
     let res = tool
         .execute(
             "call-1",
@@ -83,7 +90,7 @@ async fn git_log_caps_at_twenty_entries_and_uses_pretty_format() {
     }
     let dir = TempDir::new().unwrap();
     init_repo(dir.path());
-    let tool = git::GitTool;
+    let tool = git_tool();
     let res = tool
         .execute(
             "call-2",
@@ -110,7 +117,7 @@ async fn git_log_caps_at_twenty_entries_and_uses_pretty_format() {
 
 #[tokio::test]
 async fn git_unsupported_subcommand_errors() {
-    let tool = git::GitTool;
+    let tool = git_tool();
     let err = tool
         .execute(
             "call-3",

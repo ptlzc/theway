@@ -194,6 +194,11 @@ async fn main() -> Result<()> {
     let dag_engine = Arc::new(DagEngine::new());
     let subagent_registry = theway_core::multiagent::registry::AgentJobRegistry::new();
     subagent_registry.set_messages_dir(Some(cwd.join(".pi").join("subagent-jobs")));
+    // Execution-environment seam (sdk-split-local-sandbox node 8): local tool bodies
+    // dispatch through a `ToolExecutor`; the daemon is assembled with the reference
+    // local executor (local filesystem + process table, rooted at the process cwd).
+    let executor: Arc<dyn theway_core::executor::ToolExecutor> =
+        Arc::new(theway::local::executor::LocalExecutor::default());
     dag_engine.set_launcher(Some(theway_daemon::tools::node_launcher(
         dag_engine.clone(),
         model.clone(),
@@ -202,6 +207,7 @@ async fn main() -> Result<()> {
         subagent_registry.clone(),
         memory_dir.clone(),
         skill_harness_cell.clone(),
+        executor.clone(),
     )));
     let restored_dags =
         dag_engine.restore(theway_daemon::dag_persist::load_session_runs(&cwd, &session_id).await);
@@ -222,6 +228,7 @@ async fn main() -> Result<()> {
         Some(&stream_fn),
         &skill_harness_cell,
         &session_id,
+        executor.clone(),
     );
 
     let mcp = theway_daemon::mcp_loader::load_all(&cwd).await;
@@ -396,6 +403,7 @@ async fn main() -> Result<()> {
     let session_factory: session_ops::SessionFactory = {
         let plan = Arc::new(SessionHarnessFactory {
             cwd: cwd.clone(),
+            executor: executor.clone(),
             model: model.clone(),
             thinking,
             stream_fn: stream_fn.clone(),
@@ -522,9 +530,11 @@ async fn main() -> Result<()> {
     let result = match mode {
         Mode::Mcp => {
             let _ = std::fs::remove_file(&port_file);
-            theway_transport::mcp::run_mcp_server(theway_daemon::tools::local_tools())
-                .await
-                .map_err(|e| anyhow::anyhow!("mcp server: {e}"))
+            theway_transport::mcp::run_mcp_server(theway_daemon::tools::local_tools(
+                executor.clone(),
+            ))
+            .await
+            .map_err(|e| anyhow::anyhow!("mcp server: {e}"))
         }
         Mode::Grpc => {
             theway_transport::grpc::run_grpc(

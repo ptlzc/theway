@@ -41,6 +41,9 @@ use theway_transport::inbox;
 /// rehydrated transcript restores the session's own last recorded model when it has one).
 pub struct SessionHarnessFactory {
     pub cwd: std::path::PathBuf,
+    /// Execution environment the rebuilt harness's tools dispatch through
+    /// (sdk-split-local-sandbox node 8); process-level, shared by every session build.
+    pub executor: Arc<dyn theway_core::executor::ToolExecutor>,
     pub model: theway_llm_provider::Model,
     pub thinking: ThinkingLevel,
     pub stream_fn: theway_core::StreamFn,
@@ -106,6 +109,7 @@ impl SessionHarnessFactory {
             Some(&self.stream_fn),
             &skill_harness_cell,
             &session_id,
+            self.executor.clone(),
         );
         tools.extend(self.mcp_tools.iter().cloned());
 

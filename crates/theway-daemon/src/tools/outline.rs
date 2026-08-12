@@ -6,15 +6,27 @@
 #![allow(dead_code)] // exported as a module; wired into default_tools by a later step.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use theway_core::executor::ToolExecutor;
 use theway_core::{AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate, ToolExecutionMode};
 use theway_llm_provider::{Tool, UserContentBlock};
 use tokio_util::sync::CancellationToken;
 use tree_sitter::Node as TSNode;
 
-pub struct OutlineTool;
+/// The source read dispatches through the injected [`ToolExecutor`]
+/// (sdk-split-local-sandbox node 8); parsing/walking stays synchronous CPU work.
+pub struct OutlineTool {
+    executor: Arc<dyn ToolExecutor>,
+}
+
+impl OutlineTool {
+    pub fn new(executor: Arc<dyn ToolExecutor>) -> Self {
+        Self { executor }
+    }
+}
 
 #[async_trait]
 impl AgentTool for OutlineTool {
@@ -46,12 +58,35 @@ impl AgentTool for OutlineTool {
             return Err(AgentToolError::from("cancelled"));
         }
 
-        // Parse + walk is synchronous CPU work; run in spawn_blocking like grep.
-        let path = path.to_string();
-        let outline = tokio::task::spawn_blocking(move || outline_file(&path))
+        // Validation + language detection run before any read, preserving the original
+        // error ordering of the direct-std implementation (`File not found` / `Not a file`
+        // / `Unsupported language` all precede a content-read failure). Metadata checks use
+        // `Path` directly — the executor trait has no stat surface; only the content read
+        // below dispatches through the injected executor (sdk-split-local-sandbox node 8).
+        let std_path = Path::new(path);
+        if !std_path.exists() {
+            return Err(AgentToolError::from(format!("File not found: {path}")));
+        }
+        if !std_path.is_file() {
+            return Err(AgentToolError::from(format!("Not a file: {path}")));
+        }
+        let (parser, lang_name) = get_parser(std_path)
+            .ok_or_else(|| AgentToolError::from(format!("Unsupported language for: {path}")))?;
+
+        let source = self
+            .executor
+            .read_file(std_path)
             .await
-            .map_err(|e| AgentToolError::from(format!("spawn_blocking: {e}")))?
-            .map_err(AgentToolError::from)?;
+            .map_err(|e| AgentToolError::from(format!("Failed to read file: {e}")))?;
+
+        // Parse + walk is synchronous CPU work; run in spawn_blocking like grep.
+        let path_owned = path.to_string();
+        let outline = tokio::task::spawn_blocking(move || {
+            outline_from_source(path_owned, parser, lang_name, source)
+        })
+        .await
+        .map_err(|e| AgentToolError::from(format!("spawn_blocking: {e}")))?
+        .map_err(AgentToolError::from)?;
 
         let entries_len = outline.entries.len();
         let language = outline.language.clone();
@@ -108,20 +143,14 @@ impl Outline {
     }
 }
 
-fn outline_file(file_path: &str) -> Result<Outline, String> {
-    let path = Path::new(file_path);
-    if !path.exists() {
-        return Err(format!("File not found: {file_path}"));
-    }
-    if !path.is_file() {
-        return Err(format!("Not a file: {file_path}"));
-    }
-
-    let (mut parser, lang_name) =
-        get_parser(path).ok_or_else(|| format!("Unsupported language for: {file_path}"))?;
-
-    let source = std::fs::read_to_string(path).map_err(|e| format!("Failed to read file: {e}"))?;
-
+/// Pure parse + walk over an already-read `source` (no file I/O). The caller supplies the
+/// language parser; `execute` reads the content through the injected executor first.
+fn outline_from_source(
+    file_path: String,
+    mut parser: tree_sitter::Parser,
+    lang_name: &'static str,
+    source: String,
+) -> Result<Outline, String> {
     let tree = parser
         .parse(&source, None)
         .ok_or_else(|| "Failed to parse file".to_string())?;
@@ -130,7 +159,7 @@ fn outline_file(file_path: &str) -> Result<Outline, String> {
     walk_node(tree.root_node(), &source, lang_name, 0, &mut entries);
 
     Ok(Outline {
-        file_path: file_path.to_string(),
+        file_path,
         language: lang_name.to_string(),
         entries,
     })
@@ -428,11 +457,23 @@ mod tests {
         p.to_str().unwrap().to_string()
     }
 
-    #[test]
-    fn rust_real_file_entries_are_nonempty_and_ordered() {
+    fn local_exec() -> Arc<dyn ToolExecutor> {
+        Arc::new(theway::local::executor::LocalExecutor::new())
+    }
+
+    /// Test helper mirroring `execute`'s runtime path: read through the local executor,
+    /// then parse.
+    async fn outline_via_executor(file_path: &str) -> Outline {
+        let source = local_exec().read_file(Path::new(file_path)).await.unwrap();
+        let (parser, lang_name) = get_parser(Path::new(file_path)).unwrap();
+        outline_from_source(file_path.to_string(), parser, lang_name, source).unwrap()
+    }
+
+    #[tokio::test]
+    async fn rust_real_file_entries_are_nonempty_and_ordered() {
         let path =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../theway-core/src/agent/run_loop/mod.rs");
-        let o = outline_file(path.to_str().unwrap()).unwrap();
+        let o = outline_via_executor(path.to_str().unwrap()).await;
         assert_eq!(o.language, "rust");
         assert!(
             !o.entries.is_empty(),
@@ -449,8 +490,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn ts_fixture_kinds_and_indent() {
+    #[tokio::test]
+    async fn ts_fixture_kinds_and_indent() {
         let dir = tempdir().unwrap();
         let path = fixture_path(
             &dir,
@@ -472,7 +513,7 @@ class Foo {
 }
 "#,
         );
-        let o = outline_file(&path).unwrap();
+        let o = outline_via_executor(&path).await;
         assert_eq!(o.language, "tsx");
         let text = o.render();
         assert!(text.contains("function helper ["));
@@ -482,15 +523,15 @@ class Foo {
         assert!(text.contains("const tick ["));
     }
 
-    #[test]
-    fn py_fixture_kinds_and_indent() {
+    #[tokio::test]
+    async fn py_fixture_kinds_and_indent() {
         let dir = tempdir().unwrap();
         let path = fixture_path(
             &dir,
             "sample.py",
             "import os\n\n\ndef helper(x):\n    return x * 2\n\n\nclass Foo:\n    def bar(self):\n        pass\n",
         );
-        let o = outline_file(&path).unwrap();
+        let o = outline_via_executor(&path).await;
         assert_eq!(o.language, "python");
         let text = o.render();
         assert!(text.contains("function helper ["));
@@ -498,15 +539,15 @@ class Foo {
         assert!(text.contains("  function bar ["));
     }
 
-    #[test]
-    fn go_fixture_kinds() {
+    #[tokio::test]
+    async fn go_fixture_kinds() {
         let dir = tempdir().unwrap();
         let path = fixture_path(
             &dir,
             "sample.go",
             "package main\n\ntype Person struct {\n    Name string\n}\n\nfunc (p Person) Greet() string {\n    return \"hi\"\n}\n\nfunc main() {}\n",
         );
-        let o = outline_file(&path).unwrap();
+        let o = outline_via_executor(&path).await;
         assert_eq!(o.language, "go");
         let text = o.render();
         assert!(text.contains("struct Person ["));
@@ -514,11 +555,11 @@ class Foo {
         assert!(text.contains("function main ["));
     }
 
-    #[test]
-    fn empty_outline_shows_placeholder() {
+    #[tokio::test]
+    async fn empty_outline_shows_placeholder() {
         let dir = tempdir().unwrap();
         let path = fixture_path(&dir, "empty.py", "# just a comment\n");
-        let o = outline_file(&path).unwrap();
+        let o = outline_via_executor(&path).await;
         assert!(o.entries.is_empty());
         assert!(o.render().contains("(no structural entries found)"));
     }
@@ -527,7 +568,7 @@ class Foo {
     async fn unknown_extension_is_error() {
         let dir = tempdir().unwrap();
         let path = fixture_path(&dir, "data.txt", "hello\n");
-        let tool = OutlineTool;
+        let tool = OutlineTool::new(local_exec());
         let err = tool
             .execute(
                 "o",
@@ -544,7 +585,7 @@ class Foo {
     async fn missing_file_is_error() {
         let dir = tempdir().unwrap();
         let missing = dir.path().join("nope.rs");
-        let tool = OutlineTool;
+        let tool = OutlineTool::new(local_exec());
         let err = tool
             .execute(
                 "o",
