@@ -23,7 +23,6 @@ use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use futures::StreamExt as _;
-use serde::Deserialize;
 use serde_json::{Value, json};
 
 use tokio_stream::wrappers::BroadcastStream;
@@ -33,7 +32,7 @@ use theway_core::multiagent::graph::types::DagEvent;
 use theway_core::multiagent::registry::AgentJobEvent;
 
 use super::http::HttpState;
-use crate::wire::{WebCommand, WebPromptImage, dag_status_str, node_status_str};
+use crate::wire::{dag_status_str, node_status_str};
 
 /// `GET /ws` upgrade handler.
 pub(crate) async fn ws_upgrade(
@@ -43,36 +42,12 @@ pub(crate) async fn ws_upgrade(
     ws.on_upgrade(move |socket| run_ws(socket, state))
 }
 
-/// Server-side client frame (tagged, snake_case).
-#[derive(Debug, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum ClientFrame {
-    Prompt {
-        text: String,
-        #[serde(default)]
-        images: Vec<WebPromptImage>,
-    },
-    Abort,
-    SetModel {
-        spec: String,
-    },
-    ResolveControlPlane {
-        approve: bool,
-    },
-    GetNodeOutput {
-        run_id: String,
-        node_id: String,
-        offset: u64,
-    },
-    Ping,
-}
-
 async fn run_ws(mut socket: WebSocket, state: HttpState) {
     // Send the current full state first, then stream snapshot/event increments.
     let latest = state.latest.lock().clone();
     let _ = socket
         .send(Message::Text(
-            json!({ "type": "status", "json": latest })
+            json!({ "jsonrpc": "2.0", "method": "status", "params": latest })
                 .to_string()
                 .into(),
         ))
@@ -83,7 +58,7 @@ async fn run_ws(mut socket: WebSocket, state: HttpState) {
         BroadcastStream::new(state.snapshots.subscribe()).filter_map(|item| async move {
             match item {
                 Ok(snapshot) => Some(Ok::<Message, ()>(Message::Text(
-                    json!({ "type": "status", "json": snapshot })
+                    json!({ "jsonrpc": "2.0", "method": "status", "params": snapshot })
                         .to_string()
                         .into(),
                 ))),
@@ -94,8 +69,9 @@ async fn run_ws(mut socket: WebSocket, state: HttpState) {
         match item {
             Ok(event) => Some(Ok::<Message, ()>(Message::Text(
                 json!({
-                    "type": "event",
-                    "json": event_json(&event),
+                    "jsonrpc": "2.0",
+                    "method": "event",
+                    "params": event_json(&event),
                 })
                 .to_string()
                 .into(),
@@ -108,8 +84,9 @@ async fn run_ws(mut socket: WebSocket, state: HttpState) {
             match item {
                 Ok(event) => Some(Ok::<Message, ()>(Message::Text(
                     json!({
-                        "type": "event",
-                        "json": dag_event_json(&event),
+                        "jsonrpc": "2.0",
+                        "method": "event",
+                        "params": dag_event_json(&event),
                     })
                     .to_string()
                     .into(),
@@ -152,102 +129,23 @@ async fn run_ws(mut socket: WebSocket, state: HttpState) {
     }
 }
 
-/// Handle one client frame; returns an optional reply frame (`None` = no reply).
+/// Handle one JSON-RPC 2.0 request frame; returns the response frame (or `None`
+/// for notifications / malformed frames). Dispatch is shared with `POST /rpc`.
 async fn handle_client_frame(text: &str, state: &HttpState) -> Option<Message> {
-    let frame: ClientFrame = match serde_json::from_str(text) {
-        Ok(frame) => frame,
-        Err(_) => return None, // ignore malformed frames
-    };
-    match frame {
-        ClientFrame::Prompt { text, images } => state
-            .commands
-            .send(WebCommand::Submit {
-                text,
-                images,
-                interrupt: false,
-            })
-            .is_ok()
-            .then(|| Message::Text(json!({ "type": "accepted" }).to_string().into())),
-        ClientFrame::Abort => state
-            .commands
-            .send(WebCommand::Abort)
-            .is_ok()
-            .then(|| Message::Text(json!({ "type": "accepted" }).to_string().into())),
-        ClientFrame::SetModel { spec } => state
-            .commands
-            .send(WebCommand::SetModel { spec })
-            .is_ok()
-            .then(|| Message::Text(json!({ "type": "accepted" }).to_string().into())),
-        ClientFrame::ResolveControlPlane { approve } => state
-            .commands
-            .send(WebCommand::ResolveControlPlane { approve })
-            .is_ok()
-            .then(|| Message::Text(json!({ "type": "accepted" }).to_string().into())),
-        // Full-text output as a one-shot reply (mirrors gRPC GetNodeOutput).
-        // Transcript rides along: memory first, then the per-node disk copy
-        // (survives a process restart).
-        ClientFrame::GetNodeOutput {
-            run_id,
-            node_id,
-            offset,
-        } => {
-            let messages = state.registry.node_messages(&run_id, &node_id);
-            let messages_json = messages
-                .as_ref()
-                .map(|m| serde_json::to_string(m).unwrap_or_default())
-                .unwrap_or_default();
-            let messages_truncated = state
-                .registry
-                .find_node(&run_id, &node_id)
-                .map(|job| job.messages_truncated)
-                .unwrap_or(false);
-            let job = state.registry.find_node(&run_id, &node_id);
-            match job {
-                Some(job) => {
-                    let output = job.output;
-                    let start = offset as usize;
-                    let text = if start < output.len() {
-                        output[start..].to_string()
-                    } else {
-                        String::new()
-                    };
-                    Some(Message::Text(
-                        json!({
-                            "type": "node_output",
-                            "text": text,
-                            "offset": offset,
-                            "total": output.len(),
-                            "truncated": job.truncated,
-                            "messages": serde_json::from_str::<serde_json::Value>(&messages_json).unwrap_or(serde_json::Value::Null),
-                            "messages_truncated": messages_truncated,
-                        })
-                        .to_string()
-                        .into(),
-                    ))
-                }
-                None => {
-                    // Recovery path: job is gone (restart) but a disk transcript
-                    // may still exist — serve it instead of an empty reply.
-                    let messages = serde_json::from_str::<serde_json::Value>(&messages_json)
-                        .unwrap_or(serde_json::Value::Null);
-                    Some(Message::Text(
-                        json!({
-                            "type": "node_output",
-                            "text": "",
-                            "offset": offset,
-                            "total": 0,
-                            "truncated": false,
-                            "messages": messages,
-                            "messages_truncated": messages_truncated,
-                        })
-                        .to_string()
-                        .into(),
-                    ))
-                }
-            }
-        }
-        ClientFrame::Ping => Some(Message::Text(json!({ "type": "pong" }).to_string().into())),
+    #[derive(serde::Deserialize)]
+    struct WsRpcIn {
+        id: Option<u64>,
+        method: String,
+        #[serde(default)]
+        params: Option<serde_json::Value>,
     }
+    let req: WsRpcIn = serde_json::from_str(text).ok()?;
+    let id = req.id?; // notifications get no reply
+    let reply = match crate::http::dispatch(state, &req.method, req.params.as_ref()).await {
+        Ok(result) => crate::http::rpc_ok(id, result),
+        Err((code, message)) => crate::http::rpc_err(id, code, &message),
+    };
+    Some(Message::Text(reply.to_string().into()))
 }
 
 /// Serialize an event-plane message to the tagged-JSON wire shape (mirrors the

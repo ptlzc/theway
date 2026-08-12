@@ -10,11 +10,9 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, bail};
-use axum::extract::{Path, State};
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
+use axum::extract::State;
 use axum::response::sse::{Event, KeepAlive, Sse};
-use axum::routing::{get, patch, post};
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::Stream;
 use parking_lot::Mutex;
@@ -95,22 +93,9 @@ pub fn serve_web(listener: TcpListener, state: HttpState) -> tokio::task::JoinHa
 pub(crate) fn web_router(state: HttpState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
-        .route("/state", get(state_snapshot))
+        .route("/rpc", post(rpc))
         .route("/events", get(events))
         .route("/ws", get(ws_upgrade))
-        .route("/prompt", post(prompt))
-        .route("/model", post(set_model))
-        .route("/complete", post(complete))
-        .route("/abort", post(abort))
-        .route("/trigger/immediate", post(trigger_immediate))
-        .route("/control-plane/resolve", post(resolve_control_plane))
-        // session-resource-model: sessions as first-class resources.
-        .route("/sessions", get(list_sessions).post(create_session))
-        .route("/sessions/{id}/switch", post(switch_session_route))
-        .route(
-            "/sessions/{id}",
-            patch(rename_session_route).delete(delete_session_route),
-        )
         .with_state(state)
 }
 
@@ -119,258 +104,297 @@ async fn healthz() -> &'static str {
     "ok"
 }
 
-async fn state_snapshot(State(state): State<HttpState>) -> Json<WebStatus> {
-    Json(state.latest.lock().clone())
-}
-
-async fn events(
-    State(state): State<HttpState>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let rx = state.snapshots.subscribe();
-    let stream = futures::stream::unfold(rx, |mut rx| async move {
-        loop {
-            match rx.recv().await {
-                Ok(snapshot) => {
-                    let data = serde_json::to_string(&snapshot)
-                        .unwrap_or_else(|_| "{\"error\":\"serialize\"}".to_string());
-                    return Some((Ok(Event::default().event("status").data(data)), rx));
-                }
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(broadcast::error::RecvError::Closed) => return None,
-            }
-        }
-    });
-    Sse::new(stream).keep_alive(KeepAlive::default())
-}
-
-async fn prompt(
-    State(state): State<HttpState>,
-    Json(req): Json<PromptRequest>,
-) -> impl IntoResponse {
-    // Explicit session targeting: only the active session can receive prompts
-    // (single live agent loop); other sessions must be switched to first.
-    if let Some(target) = req.session_id.as_deref() {
-        let current = state.latest.lock().session_id.clone();
-        if target != current {
-            return (
-                StatusCode::CONFLICT,
-                Json(serde_json::json!({
-                    "error": format!(
-                        "session {target} is not the active session ({current}); switch first"
-                    )
-                })),
-            )
-                .into_response();
-        }
-    }
-    let accepted = state
-        .commands
-        .send(WebCommand::Submit {
-            text: req.text,
-            images: req.images,
-            interrupt: false,
-        })
-        .is_ok();
-    Json(CommandAccepted { accepted }).into_response()
-}
-
-async fn complete(
-    State(state): State<HttpState>,
-    Json(req): Json<CompleteRequest>,
-) -> impl IntoResponse {
-    Json(CompleteResponse {
-        completions: state.completer.matches(&req.text),
-    })
-}
-
-async fn abort(State(state): State<HttpState>) -> impl IntoResponse {
-    let accepted = state.commands.send(WebCommand::Abort).is_ok();
-    Json(CommandAccepted { accepted })
-}
-
-async fn trigger_immediate(
-    State(state): State<HttpState>,
-    Json(req): Json<TriggerRuleRequest>,
-) -> impl IntoResponse {
-    let accepted = state
-        .commands
-        .send(WebCommand::TriggerRuleNow { id: req.id })
-        .is_ok();
-    Json(CommandAccepted { accepted })
-}
-
-async fn set_model(
-    State(state): State<HttpState>,
-    Json(request): Json<SetModelRequest>,
-) -> impl IntoResponse {
-    let accepted = state
-        .commands
-        .send(WebCommand::SetModel {
-            spec: request.model,
-        })
-        .is_ok();
-    Json(CommandAccepted { accepted })
-}
-
-async fn resolve_control_plane(
-    State(state): State<HttpState>,
-    Json(req): Json<ControlPlaneDecisionRequest>,
-) -> impl IntoResponse {
-    let accepted = state
-        .commands
-        .send(WebCommand::ResolveControlPlane {
-            approve: req.approve,
-        })
-        .is_ok();
-    Json(CommandAccepted { accepted })
-}
-
-// ── session resources (session-resource-model) ──────────────────────────
-
-/// `GET /sessions` body: `{ sessions: SessionSummary[], current_session_id }`.
-#[derive(serde::Serialize)]
-struct SessionsResponse {
-    sessions: Vec<SessionSummary>,
-    current_session_id: String,
-}
-
-#[derive(serde::Deserialize, Default)]
-struct CreateSessionBody {
-    name: Option<String>,
-}
+// ── JSON-RPC 2.0 surface ────────────────────────────────────────────────
+//
+// The HTTP API speaks JSON-RPC 2.0 over `POST /rpc` (requests/responses) plus
+// server-pushed JSON-RPC notifications on `/events` (SSE) and `/ws` (WebSocket).
+// Method names mirror the pre-JSON-RPC endpoints:
+//
+//   get_state | send_message | set_model | complete | abort |
+//   trigger_immediate | control_plane_resolve | list_sessions |
+//   create_session | switch_session | rename_session | delete_session
 
 #[derive(serde::Deserialize)]
-struct RenameSessionBody {
-    name: String,
+struct RpcIn {
+    id: Option<u64>,
+    method: String,
+    #[serde(default)]
+    params: Option<serde_json::Value>,
 }
 
-fn session_error(status: StatusCode, message: String) -> (StatusCode, Json<serde_json::Value>) {
-    (status, Json(serde_json::json!({ "error": message })))
+pub(crate) fn rpc_ok(id: u64, result: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": result })
 }
 
-async fn list_sessions(State(state): State<HttpState>) -> axum::response::Response {
-    let current_session_id = state.latest.lock().session_id.clone();
-    match state.session_ops.list().await {
-        Ok(sessions) => Json(SessionsResponse {
-            sessions,
-            current_session_id,
-        })
-        .into_response(),
-        Err(e) => session_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+pub(crate) fn rpc_err(id: u64, code: i64, message: &str) -> serde_json::Value {
+    serde_json::json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
+}
+
+type RpcResult = Result<serde_json::Value, (i64, String)>;
+
+async fn rpc(State(state): State<HttpState>, Json(req): Json<RpcIn>) -> Json<serde_json::Value> {
+    let Some(id) = req.id else {
+        return Json(serde_json::json!({
+            "jsonrpc": "2.0",
+            "error": { "code": -32600, "message": "invalid request: missing id" }
+        }));
+    };
+    match dispatch(&state, &req.method, req.params.as_ref()).await {
+        Ok(result) => Json(rpc_ok(id, result)),
+        Err((code, message)) => Json(rpc_err(id, code, &message)),
     }
 }
 
-/// `POST /sessions` (body optional `{ name }`): create, then make current through the
-/// serialized event loop (same as the gRPC `CreateSession`).
-async fn create_session(
-    State(state): State<HttpState>,
-    body: Option<Json<CreateSessionBody>>,
-) -> axum::response::Response {
-    let name = body.and_then(|Json(b)| b.name);
-    let new_id = match state.session_ops.create().await {
-        Ok(id) => id,
-        Err(e) => {
-            return session_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+/// Param lookup helper: `-32602 invalid params` on missing key.
+fn param<'a>(
+    params: Option<&'a serde_json::Value>,
+    key: &str,
+) -> Result<&'a serde_json::Value, (i64, String)> {
+    params
+        .and_then(|p| p.get(key))
+        .ok_or_else(|| (-32602, format!("missing param `{key}`")))
+}
+
+pub(crate) async fn dispatch(
+    state: &HttpState,
+    method: &str,
+    params: Option<&serde_json::Value>,
+) -> RpcResult {
+    match method {
+        "get_state" => Ok(serde_json::json!(state.latest.lock().clone())),
+        "ping" => Ok(serde_json::Value::Null),
+        "get_node_output" => {
+            let run_id = param(params, "run_id")?
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            let node_id = param(params, "node_id")?
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            let offset = params
+                .and_then(|p| p.get("offset"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let messages = state
+                .registry
+                .node_messages(&run_id, &node_id)
+                .map(|m| serde_json::to_value(m).unwrap_or_default())
+                .unwrap_or(serde_json::Value::Null);
+            let messages_truncated = state
+                .registry
+                .find_node(&run_id, &node_id)
+                .map(|job| job.messages_truncated)
+                .unwrap_or(false);
+            match state.registry.find_node(&run_id, &node_id) {
+                Some(job) => {
+                    let output = job.output;
+                    let start = offset as usize;
+                    let text = if start < output.len() {
+                        output[start..].to_string()
+                    } else {
+                        String::new()
+                    };
+                    Ok(serde_json::json!({
+                        "text": text,
+                        "offset": offset,
+                        "total": output.len(),
+                        "truncated": job.truncated,
+                        "messages": messages,
+                        "messages_truncated": messages_truncated,
+                    }))
+                }
+                None => Ok(serde_json::json!({
+                    "text": "",
+                    "offset": offset,
+                    "total": 0,
+                    "truncated": false,
+                    "messages": messages,
+                    "messages_truncated": messages_truncated,
+                })),
+            }
         }
-    };
-    if let Some(name) = name.as_deref()
-        && !name.trim().is_empty()
-        && let Err(e) = state.session_ops.rename(&new_id, name).await
-    {
-        return session_error(StatusCode::BAD_REQUEST, e.to_string()).into_response();
-    }
-    let _ = state
-        .commands
-        .send(WebCommand::SwitchSession { id: new_id.clone() });
-    let session = state
-        .session_ops
-        .list()
-        .await
-        .ok()
-        .and_then(|sessions| sessions.into_iter().find(|s| s.session_id == new_id));
-    match session {
-        Some(session) => (StatusCode::CREATED, Json(session)).into_response(),
-        None => session_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("created session {new_id} missing from list"),
-        )
-        .into_response(),
-    }
-}
-
-/// `POST /sessions/{id}/switch`: rebind the current session (resume semantics).
-async fn switch_session_route(
-    State(state): State<HttpState>,
-    Path(id): Path<String>,
-) -> axum::response::Response {
-    let sessions = match state.session_ops.list().await {
-        Ok(sessions) => sessions,
-        Err(e) => {
-            return session_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+        "send_message" => {
+            let text = param(params, "text")?
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            let images = params
+                .and_then(|p| p.get("images"))
+                .and_then(|v| serde_json::from_value::<Vec<WebPromptImage>>(v.clone()).ok())
+                .unwrap_or_default();
+            let session_id = params
+                .and_then(|p| p.get("session_id"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            if let Some(target) = session_id.as_deref() {
+                let current = state.latest.lock().session_id.clone();
+                if target != current {
+                    return Err((
+                        -32001,
+                        format!(
+                            "session {target} is not the active session ({current}); switch first"
+                        ),
+                    ));
+                }
+            }
+            let accepted = state
+                .commands
+                .send(WebCommand::Submit {
+                    text,
+                    images,
+                    interrupt: false,
+                })
+                .is_ok();
+            Ok(serde_json::json!({ "accepted": accepted }))
         }
-    };
-    let Some(target) = crate::proto::resolve_session_id(&sessions, &id) else {
-        return session_error(StatusCode::NOT_FOUND, format!("no session matches id {id}"))
-            .into_response();
-    };
-    let accepted = state
-        .commands
-        .send(WebCommand::SwitchSession { id: target.clone() })
-        .is_ok();
-    if accepted {
-        state.latest.lock().session_id = target;
-    }
-    Json(CommandAccepted { accepted }).into_response()
-}
-
-/// `PATCH /sessions/{id}` (body `{ name }`): rename.
-async fn rename_session_route(
-    State(state): State<HttpState>,
-    Path(id): Path<String>,
-    Json(body): Json<RenameSessionBody>,
-) -> axum::response::Response {
-    let sessions = match state.session_ops.list().await {
-        Ok(sessions) => sessions,
-        Err(e) => {
-            return session_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+        "set_model" => {
+            let spec = param(params, "model")?
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            let accepted = state.commands.send(WebCommand::SetModel { spec }).is_ok();
+            Ok(serde_json::json!({ "accepted": accepted }))
         }
-    };
-    let Some(target) = crate::proto::resolve_session_id(&sessions, &id) else {
-        return session_error(StatusCode::NOT_FOUND, format!("no session matches id {id}"))
-            .into_response();
-    };
-    match state.session_ops.rename(&target, &body.name).await {
-        Ok(()) => Json(CommandAccepted { accepted: true }).into_response(),
-        Err(e) => session_error(StatusCode::BAD_REQUEST, e.to_string()).into_response(),
-    }
-}
-
-/// `DELETE /sessions/{id}`: 409 while the session still has running graphs;
-/// deleting the current session falls back to the most recent remaining one.
-async fn delete_session_route(
-    State(state): State<HttpState>,
-    Path(id): Path<String>,
-) -> axum::response::Response {
-    let sessions = match state.session_ops.list().await {
-        Ok(sessions) => sessions,
-        Err(e) => {
-            return session_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+        "complete" => {
+            let text = param(params, "text")?
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            Ok(serde_json::json!({ "completions": state.completer.matches(&text) }))
         }
-    };
-    let Some(target) = crate::proto::resolve_session_id(&sessions, &id) else {
-        return session_error(StatusCode::NOT_FOUND, format!("no session matches id {id}"))
-            .into_response();
-    };
-    match state.session_ops.delete(&target).await {
-        Ok(running) if !running.is_empty() => session_error(
-            StatusCode::CONFLICT,
-            format!(
-                "session {target} still has running graphs: {}; cancel them before deleting",
-                running.join(", ")
-            ),
-        )
-        .into_response(),
-        Ok(_) => {
+        "abort" => {
+            let accepted = state.commands.send(WebCommand::Abort).is_ok();
+            Ok(serde_json::json!({ "accepted": accepted }))
+        }
+        "trigger_immediate" => {
+            let id = param(params, "id")?
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            let accepted = state
+                .commands
+                .send(WebCommand::TriggerRuleNow { id })
+                .is_ok();
+            Ok(serde_json::json!({ "accepted": accepted }))
+        }
+        "control_plane_resolve" => {
+            let approve = param(params, "approve")?.as_bool().unwrap_or(false);
+            let accepted = state
+                .commands
+                .send(WebCommand::ResolveControlPlane { approve })
+                .is_ok();
+            Ok(serde_json::json!({ "accepted": accepted }))
+        }
+        "list_sessions" => {
+            let current_session_id = state.latest.lock().session_id.clone();
+            let sessions = state
+                .session_ops
+                .list()
+                .await
+                .map_err(|e| (-32000, e.to_string()))?;
+            Ok(
+                serde_json::json!({ "sessions": sessions, "current_session_id": current_session_id }),
+            )
+        }
+        "create_session" => {
+            let name = params
+                .and_then(|p| p.get("name"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let new_id = state
+                .session_ops
+                .create()
+                .await
+                .map_err(|e| (-32000, e.to_string()))?;
+            if let Some(name) = name.as_deref()
+                && !name.trim().is_empty()
+                && let Err(e) = state.session_ops.rename(&new_id, name).await
+            {
+                return Err((-32602, e.to_string()));
+            }
+            let _ = state
+                .commands
+                .send(WebCommand::SwitchSession { id: new_id.clone() });
+            let summary = state
+                .session_ops
+                .list()
+                .await
+                .map_err(|e| (-32000, e.to_string()))?
+                .into_iter()
+                .find(|s| s.session_id == new_id)
+                .map(|s| serde_json::json!({ "session_id": s.session_id, "name": s.name }))
+                .unwrap_or_else(|| serde_json::json!({ "session_id": new_id }));
+            Ok(summary)
+        }
+        "switch_session" => {
+            let id = param(params, "id")?
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            let sessions = state
+                .session_ops
+                .list()
+                .await
+                .map_err(|e| (-32000, e.to_string()))?;
+            let target = crate::proto::resolve_session_id(&sessions, &id)
+                .ok_or_else(|| (-32004, format!("no session matches id {id}")))?;
+            state.latest.lock().session_id = target.clone();
+            let accepted = state
+                .commands
+                .send(WebCommand::SwitchSession { id: target })
+                .is_ok();
+            Ok(serde_json::json!({ "accepted": accepted }))
+        }
+        "rename_session" => {
+            let id = param(params, "id")?
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            let name = param(params, "name")?
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            let sessions = state
+                .session_ops
+                .list()
+                .await
+                .map_err(|e| (-32000, e.to_string()))?;
+            let target = crate::proto::resolve_session_id(&sessions, &id)
+                .ok_or_else(|| (-32004, format!("no session matches id {id}")))?;
+            state
+                .session_ops
+                .rename(&target, &name)
+                .await
+                .map_err(|e| (-32602, e.to_string()))?;
+            Ok(serde_json::json!({ "accepted": true }))
+        }
+        "delete_session" => {
+            let id = param(params, "id")?
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            let sessions = state
+                .session_ops
+                .list()
+                .await
+                .map_err(|e| (-32000, e.to_string()))?;
+            let target = crate::proto::resolve_session_id(&sessions, &id)
+                .ok_or_else(|| (-32004, format!("no session matches id {id}")))?;
+            let running = state
+                .session_ops
+                .delete(&target)
+                .await
+                .map_err(|e| (-32000, e.to_string()))?;
+            if !running.is_empty() {
+                return Err((
+                    -32009,
+                    format!(
+                        "session {target} still has running graphs: {}; cancel them before deleting",
+                        running.join(", ")
+                    ),
+                ));
+            }
             let was_current = state.latest.lock().session_id == target;
             if was_current {
                 let remaining = state.session_ops.list().await.unwrap_or_default();
@@ -385,10 +409,36 @@ async fn delete_session_route(
                         .send(WebCommand::SwitchSession { id: fallback });
                 }
             }
-            StatusCode::NO_CONTENT.into_response()
+            Ok(serde_json::json!({ "deleted": true }))
         }
-        Err(e) => session_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        _ => Err((-32601, format!("method not found: {method}"))),
     }
+}
+
+/// SSE event stream as JSON-RPC notifications: `event: message` frames with
+/// `{"jsonrpc":"2.0","method":"status","params":{...WebStatus}}`.
+async fn events(
+    State(state): State<HttpState>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let rx = state.snapshots.subscribe();
+    let stream = futures::stream::unfold(rx, |mut rx| async move {
+        loop {
+            match rx.recv().await {
+                Ok(snapshot) => {
+                    let data = serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "method": "status",
+                        "params": snapshot,
+                    })
+                    .to_string();
+                    return Some((Ok(Event::default().event("message").data(data)), rx));
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => return None,
+            }
+        }
+    });
+    Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
 pub(crate) fn bind_addr(host: &str, port: u16) -> Result<SocketAddr> {

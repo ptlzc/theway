@@ -3,6 +3,7 @@
 //! HTTP against a router wired with the in-memory [`FakeSessionOps`].
 
 use super::super::*;
+use super::helpers::{rpc_call, rpc_error};
 use crate::testing::FakeSessionOps;
 use serde_json::json;
 
@@ -66,9 +67,7 @@ async fn get_sessions_lists_all_and_marks_current() {
     let (base, _rx, server) = spawn_sessions_server(ops, "sess-a").await;
     let client = reqwest::Client::new();
 
-    let response = client.get(format!("{base}/sessions")).send().await.unwrap();
-    assert_eq!(response.status(), 200);
-    let body: serde_json::Value = response.json().await.unwrap();
+    let body = rpc_call(&client, &base, 1, "list_sessions", None).await;
     assert_eq!(body["current_session_id"], "sess-a");
     let sessions = body["sessions"].as_array().unwrap();
     assert_eq!(sessions.len(), 2);
@@ -85,14 +84,8 @@ async fn post_sessions_creates_renames_and_switches() {
     let (base, mut rx, server) = spawn_sessions_server(ops.clone(), "sess-a").await;
     let client = reqwest::Client::new();
 
-    // Body optional: create without a name.
-    let response = client
-        .post(format!("{base}/sessions"))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 201);
-    let created: serde_json::Value = response.json().await.unwrap();
+    // Params optional: create without a name.
+    let created = rpc_call(&client, &base, 1, "create_session", None).await;
     let first_id = created["session_id"].as_str().unwrap().to_string();
     assert!(first_id.starts_with("sess-new-"), "{first_id}");
     match rx.recv().await.unwrap() {
@@ -101,14 +94,14 @@ async fn post_sessions_creates_renames_and_switches() {
     }
 
     // With a name: created summary carries it.
-    let response = client
-        .post(format!("{base}/sessions"))
-        .json(&json!({ "name": "brand new" }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 201);
-    let created: serde_json::Value = response.json().await.unwrap();
+    let created = rpc_call(
+        &client,
+        &base,
+        2,
+        "create_session",
+        Some(json!({ "name": "brand new" })),
+    )
+    .await;
     assert_eq!(created["name"], "brand new");
     let second_id = created["session_id"].as_str().unwrap().to_string();
     assert_ne!(second_id, first_id);
@@ -117,14 +110,7 @@ async fn post_sessions_creates_renames_and_switches() {
         other => panic!("unexpected command: {other:?}"),
     }
     // Visible in the list.
-    let body: serde_json::Value = client
-        .get(format!("{base}/sessions"))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
+    let body = rpc_call(&client, &base, 3, "list_sessions", None).await;
     assert!(
         body["sessions"]
             .as_array()
@@ -144,46 +130,36 @@ async fn switch_route_rebinds_current_and_404s_unknown() {
     let (base, mut rx, server) = spawn_sessions_server(ops, "sess-a").await;
     let client = reqwest::Client::new();
 
-    let response = client
-        .post(format!("{base}/sessions/sess-b/switch"))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 200);
-    let body: serde_json::Value = response.json().await.unwrap();
+    let body = rpc_call(
+        &client,
+        &base,
+        4,
+        "switch_session",
+        Some(json!({ "id": "sess-b" })),
+    )
+    .await;
     assert_eq!(body["accepted"], true);
     match rx.recv().await.unwrap() {
         WebCommand::SwitchSession { id } => assert_eq!(id, "sess-b"),
         other => panic!("unexpected command: {other:?}"),
     }
     // /state now reports the switched session.
-    let state: serde_json::Value = client
-        .get(format!("{base}/state"))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
+    let state = rpc_call(&client, &base, 5, "get_state", None).await;
     assert_eq!(state["session_id"], "sess-b");
     // And GET /sessions marks it current.
-    let body: serde_json::Value = client
-        .get(format!("{base}/sessions"))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
+    let body = rpc_call(&client, &base, 6, "list_sessions", None).await;
     assert_eq!(body["current_session_id"], "sess-b");
 
-    // Unknown id → 404.
-    let response = client
-        .post(format!("{base}/sessions/nope/switch"))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 404);
+    // Unknown id → -32004.
+    let (code, _msg) = rpc_error(
+        &client,
+        &base,
+        7,
+        "switch_session",
+        Some(json!({ "id": "nope" })),
+    )
+    .await;
+    assert_eq!(code, -32004);
 
     server.abort();
 }
@@ -195,21 +171,16 @@ async fn patch_route_renames_and_404s_unknown() {
     let (base, _rx, server) = spawn_sessions_server(ops, "sess-a").await;
     let client = reqwest::Client::new();
 
-    let response = client
-        .patch(format!("{base}/sessions/sess-a"))
-        .json(&json!({ "name": "renamed" }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 200);
-    let body: serde_json::Value = client
-        .get(format!("{base}/sessions"))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
+    let renamed = rpc_call(
+        &client,
+        &base,
+        8,
+        "rename_session",
+        Some(json!({ "id": "sess-a", "name": "renamed" })),
+    )
+    .await;
+    assert_eq!(renamed["accepted"], true);
+    let body = rpc_call(&client, &base, 9, "list_sessions", None).await;
     let session = body["sessions"]
         .as_array()
         .unwrap()
@@ -219,21 +190,25 @@ async fn patch_route_renames_and_404s_unknown() {
         .unwrap();
     assert_eq!(session["name"], "renamed");
 
-    // Empty name → 400; unknown id → 404.
-    let response = client
-        .patch(format!("{base}/sessions/sess-a"))
-        .json(&json!({ "name": "   " }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 400);
-    let response = client
-        .patch(format!("{base}/sessions/nope"))
-        .json(&json!({ "name": "x" }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 404);
+    // Empty name → -32602; unknown id → -32004.
+    let (code, _m) = rpc_error(
+        &client,
+        &base,
+        10,
+        "rename_session",
+        Some(json!({ "id": "sess-a", "name": "   " })),
+    )
+    .await;
+    assert_eq!(code, -32602);
+    let (code, _m) = rpc_error(
+        &client,
+        &base,
+        11,
+        "rename_session",
+        Some(json!({ "id": "nope", "name": "x" })),
+    )
+    .await;
+    assert_eq!(code, -32004);
 
     server.abort();
 }
@@ -247,23 +222,18 @@ async fn delete_route_removes_conflicts_on_active_and_404s_unknown() {
     let (base, mut rx, server) = spawn_sessions_server(ops, "sess-a").await;
     let client = reqwest::Client::new();
 
-    // 409 while graphs are running (error body carries the run ids).
-    let response = client
-        .delete(format!("{base}/sessions/sess-busy"))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 409);
-    let body: serde_json::Value = response.json().await.unwrap();
-    assert!(body["error"].as_str().unwrap().contains("run-1"), "{body}");
-    let body: serde_json::Value = client
-        .get(format!("{base}/sessions"))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
+    // -32009 while graphs are running (error message carries the run ids).
+    let (code, msg) = rpc_error(
+        &client,
+        &base,
+        12,
+        "delete_session",
+        Some(json!({ "id": "sess-busy" })),
+    )
+    .await;
+    assert_eq!(code, -32009);
+    assert!(msg.contains("run-1"), "{msg}");
+    let body = rpc_call(&client, &base, 13, "list_sessions", None).await;
     assert!(
         body["sessions"]
             .as_array()
@@ -272,25 +242,21 @@ async fn delete_route_removes_conflicts_on_active_and_404s_unknown() {
             .any(|s| s["session_id"] == "sess-busy")
     );
 
-    // Deleting the current session → 204, fallback becomes current.
-    let response = client
-        .delete(format!("{base}/sessions/sess-a"))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 204);
+    // Deleting the current session → fallback becomes current.
+    let deleted = rpc_call(
+        &client,
+        &base,
+        14,
+        "delete_session",
+        Some(json!({ "id": "sess-a" })),
+    )
+    .await;
+    assert_eq!(deleted["deleted"], true);
     match rx.recv().await.unwrap() {
         WebCommand::SwitchSession { id } => assert_eq!(id, "sess-busy"),
         other => panic!("unexpected command: {other:?}"),
     }
-    let body: serde_json::Value = client
-        .get(format!("{base}/sessions"))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
+    let body = rpc_call(&client, &base, 15, "list_sessions", None).await;
     assert_eq!(body["current_session_id"], "sess-busy");
     assert!(
         !body["sessions"]
@@ -300,13 +266,16 @@ async fn delete_route_removes_conflicts_on_active_and_404s_unknown() {
             .any(|s| s["session_id"] == "sess-a")
     );
 
-    // Unknown id → 404.
-    let response = client
-        .delete(format!("{base}/sessions/nope"))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 404);
+    // Unknown id → -32004.
+    let (code, _m) = rpc_error(
+        &client,
+        &base,
+        16,
+        "delete_session",
+        Some(json!({ "id": "nope" })),
+    )
+    .await;
+    assert_eq!(code, -32004);
 
     server.abort();
 }

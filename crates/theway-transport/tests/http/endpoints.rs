@@ -2,6 +2,7 @@
 //! shared event loop, and `/events` streams snapshot frames over SSE.
 
 use super::super::*;
+use super::helpers::rpc_call;
 use crate::testing::FakeSessionOps;
 use base64::Engine as _;
 use futures::{SinkExt as _, StreamExt};
@@ -52,27 +53,19 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
     let client = reqwest::Client::new();
     let base = format!("http://{addr}");
 
-    let state: serde_json::Value = client
-        .get(format!("{base}/state"))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
+    let state = rpc_call(&client, &base, 1, "get_state", None).await;
     assert_eq!(state["session_id"], "sess-1");
     assert_eq!(state["cwd"], "/tmp/theway");
     assert_eq!(state["feed_lines"][0], "ready");
 
-    let accepted: serde_json::Value = client
-        .post(format!("{base}/prompt"))
-        .json(&json!({ "text": "hello" }))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
+    let accepted = rpc_call(
+        &client,
+        &base,
+        2,
+        "send_message",
+        Some(json!({ "text": "hello" })),
+    )
+    .await;
     assert_eq!(accepted["accepted"], true);
     match command_rx.recv().await.unwrap() {
         WebCommand::Submit {
@@ -86,21 +79,20 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
         other => panic!("unexpected command: {other:?}"),
     }
 
-    let accepted: serde_json::Value = client
-        .post(format!("{base}/prompt"))
-        .json(&json!({
+    let accepted = rpc_call(
+        &client,
+        &base,
+        3,
+        "send_message",
+        Some(json!({
             "text": "describe",
             "images": [{
                 "name": "clip.png",
                 "data": base64::engine::general_purpose::STANDARD.encode(b"\x89PNG\r\n\x1a\npng")
             }]
-        }))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
+        })),
+    )
+    .await;
     assert_eq!(accepted["accepted"], true);
     match command_rx.recv().await.unwrap() {
         WebCommand::Submit {
@@ -115,74 +107,63 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
         other => panic!("unexpected command: {other:?}"),
     }
 
-    let accepted: serde_json::Value = client
-        .post(format!("{base}/abort"))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
+    let accepted = rpc_call(&client, &base, 4, "abort", None).await;
     assert_eq!(accepted["accepted"], true);
     match command_rx.recv().await.unwrap() {
         WebCommand::Abort => {}
         other => panic!("unexpected command: {other:?}"),
     }
 
-    let accepted: serde_json::Value = client
-        .post(format!("{base}/trigger/immediate"))
-        .json(&json!({ "id": "rule-123" }))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
+    let accepted = rpc_call(
+        &client,
+        &base,
+        5,
+        "trigger_immediate",
+        Some(json!({ "id": "rule-123" })),
+    )
+    .await;
     assert_eq!(accepted["accepted"], true);
     match command_rx.recv().await.unwrap() {
         WebCommand::TriggerRuleNow { id } => assert_eq!(id, "rule-123"),
         other => panic!("unexpected command: {other:?}"),
     }
 
-    let accepted: serde_json::Value = client
-        .post(format!("{base}/control-plane/resolve"))
-        .json(&json!({ "approve": true }))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
+    let accepted = rpc_call(
+        &client,
+        &base,
+        6,
+        "control_plane_resolve",
+        Some(json!({ "approve": true })),
+    )
+    .await;
     assert_eq!(accepted["accepted"], true);
     match command_rx.recv().await.unwrap() {
         WebCommand::ResolveControlPlane { approve } => assert!(approve),
         other => panic!("unexpected command: {other:?}"),
     }
 
-    let accepted: serde_json::Value = client
-        .post(format!("{base}/model"))
-        .json(&json!({ "model": "anthropic:claude-haiku-4-5" }))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
+    let accepted = rpc_call(
+        &client,
+        &base,
+        7,
+        "set_model",
+        Some(json!({ "model": "anthropic:claude-haiku-4-5" })),
+    )
+    .await;
     assert_eq!(accepted["accepted"], true);
     match command_rx.recv().await.unwrap() {
         WebCommand::SetModel { spec } => assert_eq!(spec, "anthropic:claude-haiku-4-5"),
         other => panic!("unexpected command: {other:?}"),
     }
 
-    let completions: serde_json::Value = client
-        .post(format!("{base}/complete"))
-        .json(&json!({ "text": "/he" }))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
+    let completions = rpc_call(
+        &client,
+        &base,
+        8,
+        "complete",
+        Some(json!({ "text": "/he" })),
+    )
+    .await;
     assert!(
         completions["completions"]
             .as_array()
@@ -217,7 +198,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
         .unwrap()
         .unwrap();
     let text = String::from_utf8_lossy(&chunk);
-    assert!(text.contains("event: status"), "{text}");
+    assert!(text.contains("event: message"), "{text}");
     assert!(text.contains("streamed"), "{text}");
 
     server.abort();
@@ -278,12 +259,13 @@ async fn websocket_serves_snapshot_and_accepts_commands() {
         tokio_tungstenite::tungstenite::Message::Text(t) => t.to_string(),
         other => panic!("expected text frame, got {other:?}"),
     };
-    assert!(text.contains(r#""type":"status""#), "{text}");
+    assert!(text.contains(r#""jsonrpc":"2.0""#), "{text}");
+    assert!(text.contains(r#""method":"status""#), "{text}");
     assert!(text.contains("sess-1"), "{text}");
 
     // Prompt round-trips into the command queue with an accepted reply.
     ws.send(tokio_tungstenite::tungstenite::Message::Text(
-        json!({"type": "prompt", "text": "hello ws"})
+        json!({"jsonrpc": "2.0", "id": 1, "method": "send_message", "params": {"text": "hello ws"}})
             .to_string()
             .into(),
     ))
@@ -302,11 +284,11 @@ async fn websocket_serves_snapshot_and_accepts_commands() {
         tokio_tungstenite::tungstenite::Message::Text(t) => t.to_string(),
         other => panic!("expected text frame, got {other:?}"),
     };
-    assert!(text.contains(r#""type":"accepted""#), "{text}");
+    assert!(text.contains(r#""accepted":true"#), "{text}");
 
     // Ping → pong.
     ws.send(tokio_tungstenite::tungstenite::Message::Text(
-        json!({"type": "ping"}).to_string().into(),
+        json!({"jsonrpc": "2.0", "id": 2, "method": "ping"}).to_string().into(),
     ))
     .await
     .unwrap();
@@ -319,7 +301,7 @@ async fn websocket_serves_snapshot_and_accepts_commands() {
         tokio_tungstenite::tungstenite::Message::Text(t) => t.to_string(),
         other => panic!("expected text frame, got {other:?}"),
     };
-    assert!(text.contains(r#""type":"pong""#), "{text}");
+    assert!(text.contains(r#""result":null"#), "{text}");
 
     ws.close(None).await.unwrap();
     server.abort();

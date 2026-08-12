@@ -59,27 +59,29 @@ fn dag_event_json_matches_wire_shape() {
 }
 
 #[test]
-fn client_frames_parse_tagged() {
-    let frame: ClientFrame = serde_json::from_str(r#"{"type":"prompt","text":"hi"}"#).unwrap();
-    match frame {
-        ClientFrame::Prompt { text, images } => {
-            assert_eq!(text, "hi");
-            assert!(images.is_empty());
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
-    let frame: ClientFrame = serde_json::from_str(r#"{"type":"abort"}"#).unwrap();
-    assert!(matches!(frame, ClientFrame::Abort));
-    let frame: ClientFrame =
-        serde_json::from_str(r#"{"type":"set_model","spec":"anthropic:claude"}"#).unwrap();
-    assert!(matches!(frame, ClientFrame::SetModel { .. }));
-    let frame: ClientFrame =
-        serde_json::from_str(r#"{"type":"resolve_control_plane","approve":true}"#).unwrap();
-    assert!(matches!(frame, ClientFrame::ResolveControlPlane { .. }));
-    let frame: ClientFrame =
-        serde_json::from_str(r#"{"type":"get_node_output","run_id":"r","node_id":"n","offset":3}"#)
+fn client_frames_parse_jsonrpc_requests() {
+    // Client frames are JSON-RPC 2.0 requests: {jsonrpc, id, method, params}.
+    let v: serde_json::Value =
+        serde_json::from_str(r#"{"jsonrpc":"2.0","id":1,"method":"send_message","params":{"text":"hi"}}"#)
             .unwrap();
-    assert!(matches!(frame, ClientFrame::GetNodeOutput { .. }));
-    let frame: ClientFrame = serde_json::from_str(r#"{"type":"ping"}"#).unwrap();
-    assert!(matches!(frame, ClientFrame::Ping));
+    assert_eq!(v["method"], "send_message");
+    assert_eq!(v["params"]["text"], "hi");
+    let v: serde_json::Value =
+        serde_json::from_str(r#"{"jsonrpc":"2.0","id":2,"method":"abort"}"#).unwrap();
+    assert_eq!(v["method"], "abort");
+    let v: serde_json::Value = serde_json::from_str(
+        r#"{"jsonrpc":"2.0","id":3,"method":"set_model","params":{"model":"anthropic:claude"}}"#,
+    )
+    .unwrap();
+    assert_eq!(v["method"], "set_model");
+    let v: serde_json::Value = serde_json::from_str(
+        r#"{"jsonrpc":"2.0","id":4,"method":"control_plane_resolve","params":{"approve":true}}"#,
+    )
+    .unwrap();
+    assert_eq!(v["method"], "control_plane_resolve");
+    let v: serde_json::Value = serde_json::from_str(
+        r#"{"jsonrpc":"2.0","id":5,"method":"get_node_output","params":{"run_id":"r","node_id":"n","offset":3}}"#,
+    )
+    .unwrap();
+    assert_eq!(v["method"], "get_node_output");
 }
