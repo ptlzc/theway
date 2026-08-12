@@ -12,6 +12,7 @@
 
 pub mod agent_session;
 pub mod agent_specs;
+pub mod app;
 pub mod auth;
 pub mod bug_report;
 pub mod builtin_skills;

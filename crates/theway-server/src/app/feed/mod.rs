@@ -75,7 +75,6 @@ impl Feed {
     }
 
     /// Push a finished assistant text block (used by resume replay where we have whole turns).
-    #[cfg(test)]
     pub fn push_assistant(&mut self, text: impl Into<String>) {
         self.push_assistant_with_timestamp(text, current_time_label());
     }

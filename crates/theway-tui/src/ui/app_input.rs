@@ -13,8 +13,8 @@ use theway::images;
 use theway_transport::transport::SlashCompleter;
 
 use super::App;
-use super::kernel::TurnState;
 use super::render_utils::{human_bytes, new_textarea};
+use theway::app::kernel::TurnState;
 
 impl App {
     // ── event handling ──────────────────────────────────────────────────────────────────

@@ -20,7 +20,7 @@ use regex::Regex;
 use tui_textarea::TextArea;
 
 use super::FeedUpdate;
-use super::feed;
+use theway::app::feed;
 
 const QUEUED_PREVIEW_CHARS: usize = 80;
 

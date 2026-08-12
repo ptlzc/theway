@@ -28,8 +28,9 @@ use theway_core::multiagent::graph::types::DagEvent;
 use theway_core::multiagent::registry::AgentJobEvent;
 
 use crate::ui::App;
-use crate::ui::kernel::{QueuedTurn, TurnState, poll_turn};
-use crate::ui::{feed, prompt_display};
+use crate::ui::prompt_display;
+use theway::app::feed;
+use theway::app::kernel::{QueuedTurn, TurnState, poll_turn};
 use theway::commands::{CommandCtx, CommandOutcome};
 use theway::mentions;
 use theway_transport::wire::*;

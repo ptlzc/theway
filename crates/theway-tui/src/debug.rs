@@ -13,7 +13,7 @@ use theway_llm_provider::{
 };
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::ui::feed::{FeedUpdate, Level};
+use theway::app::feed::{FeedUpdate, Level};
 
 const DEBUG_PREVIEW_MAX_CHARS: usize = 4_000;
 const DEBUG_PREVIEW_MAX_LINES: usize = 80;

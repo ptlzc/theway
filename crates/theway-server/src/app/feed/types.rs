@@ -48,7 +48,7 @@ pub use theway_transport::feed::TriggerPollStatus;
 
 /// One renderable unit in the feed.
 #[derive(Clone, Debug)]
-pub(super) enum Block {
+pub(crate) enum Block {
     User {
         text: String,
         timestamp: Option<String>,
@@ -81,7 +81,7 @@ pub(super) enum Block {
 
 /// Which streaming block (if any) is currently open for appends.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum Open {
+pub(crate) enum Open {
     None,
     Text,
     Thinking,

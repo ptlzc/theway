@@ -8,12 +8,12 @@ use std::path::PathBuf;
 use theway::commands;
 use theway::control_plane_prompt::UiControlPlanePrompt;
 
-use super::kernel::TurnState;
-use super::relay;
 use super::render_utils::{safe_control_prompt_label, safe_control_prompt_text};
 use super::{App, CONTROL_PROMPT_TEXT_WIDTH, FeedUpdate, PendingImportActivation};
+use theway::app::kernel::TurnState;
+use theway::app::relay;
 
-use super::feed::Level;
+use theway::app::feed::Level;
 
 const IMPORT_ACTIVATION_PROMPT_ID: &str = "session-import-activation";
 

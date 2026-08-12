@@ -27,7 +27,6 @@ pub(crate) fn should_run_mcp(cli: &Cli) -> bool {
         cli.tui,
         cli.grpc,
         std::io::stdin().is_terminal() && std::io::stdout().is_terminal(),
-        is_remote_tty_env(|name| std::env::var_os(name).is_some()),
     ) == UiMode::Mcp
 }
 
@@ -38,7 +37,6 @@ pub(crate) fn should_run_http(cli: &Cli) -> bool {
         cli.tui,
         cli.grpc,
         std::io::stdin().is_terminal() && std::io::stdout().is_terminal(),
-        is_remote_tty_env(|name| std::env::var_os(name).is_some()),
     ) == UiMode::Http
 }
 
@@ -49,18 +47,10 @@ pub(crate) fn should_run_grpc(cli: &Cli) -> bool {
         cli.tui,
         cli.grpc,
         std::io::stdin().is_terminal() && std::io::stdout().is_terminal(),
-        is_remote_tty_env(|name| std::env::var_os(name).is_some()),
     ) == UiMode::Grpc
 }
 
-fn resolve_ui_mode(
-    mcp: bool,
-    http: bool,
-    tui: bool,
-    grpc: bool,
-    interactive_tty: bool,
-    remote_tty: bool,
-) -> UiMode {
+fn resolve_ui_mode(mcp: bool, http: bool, tui: bool, grpc: bool, interactive_tty: bool) -> UiMode {
     if mcp {
         return UiMode::Mcp;
     }
@@ -76,17 +66,7 @@ fn resolve_ui_mode(
     if !interactive_tty {
         return UiMode::Headless;
     }
-    if remote_tty {
-        UiMode::Tui
-    } else {
-        UiMode::Http
-    }
-}
-
-fn is_remote_tty_env(mut has_env: impl FnMut(&str) -> bool) -> bool {
-    ["SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY", "MOSH_CONNECTION"]
-        .into_iter()
-        .any(&mut has_env)
+    UiMode::Tui
 }
 
 /// Real `*Hook` trait registrations active in this binary. Only names that map to an actual
@@ -197,17 +177,9 @@ mod tests {
     }
 
     #[test]
-    fn ui_mode_defaults_to_web_for_local_tty() {
+    fn ui_mode_defaults_to_tui_on_local_terminal() {
         assert_eq!(
-            resolve_ui_mode(false, false, false, false, true, false),
-            UiMode::Http
-        );
-    }
-
-    #[test]
-    fn ui_mode_defaults_to_tui_for_remote_tty() {
-        assert_eq!(
-            resolve_ui_mode(false, false, false, false, true, true),
+            resolve_ui_mode(false, false, false, false, true),
             UiMode::Tui
         );
     }
@@ -215,7 +187,7 @@ mod tests {
     #[test]
     fn ui_mode_keeps_headless_for_non_tty() {
         assert_eq!(
-            resolve_ui_mode(false, false, false, false, false, false),
+            resolve_ui_mode(false, false, false, false, false),
             UiMode::Headless
         );
     }
@@ -223,23 +195,20 @@ mod tests {
     #[test]
     fn explicit_ui_flags_override_default() {
         assert_eq!(
-            resolve_ui_mode(false, true, false, false, true, true),
+            resolve_ui_mode(false, true, false, false, true),
             UiMode::Http
         );
         assert_eq!(
-            resolve_ui_mode(false, false, true, false, true, false),
+            resolve_ui_mode(false, false, true, false, true),
             UiMode::Tui
         );
         assert_eq!(
-            resolve_ui_mode(false, false, true, true, true, false),
+            resolve_ui_mode(false, false, true, true, true),
             UiMode::Grpc
         );
-    }
-
-    #[test]
-    fn remote_tty_env_detects_ssh_and_mosh() {
-        assert!(is_remote_tty_env(|name| name == "SSH_CONNECTION"));
-        assert!(is_remote_tty_env(|name| name == "MOSH_CONNECTION"));
-        assert!(!is_remote_tty_env(|_| false));
+        assert_eq!(
+            resolve_ui_mode(true, false, false, false, true),
+            UiMode::Mcp
+        );
     }
 }

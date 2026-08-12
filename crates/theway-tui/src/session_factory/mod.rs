@@ -179,16 +179,16 @@ impl SessionHarnessFactory {
         // the UI loop. This replaces the old `agent.subscribe()` /
         // `harness.subscribe_harness()` pattern. The JoinHandle is dropped without being
         // awaited — the task runs for the harness's lifetime.
-        let _agent_broadcast = ui::listener::spawn_agent_broadcast_listener(
+        let _agent_broadcast = theway::app::listener::spawn_agent_broadcast_listener(
             harness.agent().subscribe_broadcast(),
             self.feed_tx.clone(),
         );
-        let _harness_broadcast = ui::listener::spawn_harness_broadcast_listener(
+        let _harness_broadcast = theway::app::listener::spawn_harness_broadcast_listener(
             harness.subscribe_session_broadcast(),
             self.feed_tx.clone(),
             self.debug,
         );
-        let _ = trigger_executor.subscribe(ui::listener::trigger_listener(
+        let _ = trigger_executor.subscribe(theway::app::listener::trigger_listener(
             self.feed_tx.clone(),
             self.debug,
         ));

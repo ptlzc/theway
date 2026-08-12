@@ -90,7 +90,8 @@ pub(crate) struct Cli {
     #[arg(long = "always-allow")]
     pub(crate) always_allow: bool,
 
-    /// Run the local HTTP UI (browser) instead of the terminal UI. Defaults to loopback-only.
+    /// Run the local HTTP UI (browser) instead of the terminal UI (default).
+    /// Defaults to loopback-only.
     #[arg(long = "http", conflicts_with = "tui")]
     pub(crate) http: bool,
     /// Run as an MCP server over stdio (Model Context Protocol, JSON-RPC 2.0): MCP
@@ -103,7 +104,7 @@ pub(crate) struct Cli {
     /// control-plane resolve) over tonic.
     #[arg(long, conflicts_with = "http")]
     pub(crate) grpc: bool,
-    /// Run the terminal UI even when local defaults would open the HTTP UI.
+    /// Explicitly run the terminal UI (the default on a TTY).
     #[arg(long, conflicts_with = "http")]
     pub(crate) tui: bool,
     /// Host for `--http`/`--grpc`. Must be a loopback address.

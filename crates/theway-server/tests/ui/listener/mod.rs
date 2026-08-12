@@ -116,7 +116,7 @@ fn skills_reloaded_maps_to_sidebar_refresh_update() {
 fn trigger_handling_start_renders_preview_safe_live_line() {
     let update = map_trigger_event_for_test(&TriggerEvent::TriggerHandlingStart {
         idempotency_key: "idem-key".into(),
-        source_kind: theway::trigger_engine::types::SourceKind::Mcp,
+        source_kind: crate::trigger_engine::types::SourceKind::Mcp,
         source_label: "mcp:github".into(),
         event_label: "pr.merged".into(),
         trace_id: "trace-start".into(),
@@ -138,7 +138,7 @@ fn debug_mode_renders_dynamic_periodic_trigger_lines() {
     let update = map_trigger_event(
         &TriggerEvent::TriggerHandlingStart {
             idempotency_key: "idem-key".into(),
-            source_kind: theway::trigger_engine::types::SourceKind::Local,
+            source_kind: crate::trigger_engine::types::SourceKind::Local,
             source_label: "local:dynamic".into(),
             event_label: "dynamic periodic check".into(),
             trace_id: "trace-debug".into(),

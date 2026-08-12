@@ -426,7 +426,7 @@ pub(crate) async fn run_repl(
         commands::console::set_sink(Box::new(move |line| {
             let _ = tx.send(ui::FeedUpdate::Plain {
                 text: line,
-                level: ui::feed::Level::Output,
+                level: theway::app::feed::Level::Output,
             });
         }));
     }
@@ -646,17 +646,19 @@ pub(crate) async fn run_repl(
     // (segment 3). Each spawned task receives from the broadcast Receiver and forwards
     // structured FeedUpdates to the UI loop. This replaces the old synchronous
     // `agent.subscribe()` / `harness.subscribe_harness()` pattern.
-    let _agent_broadcast = ui::listener::spawn_agent_broadcast_listener(
+    let _agent_broadcast = theway::app::listener::spawn_agent_broadcast_listener(
         harness.agent().subscribe_broadcast(),
         feed_tx.clone(),
     );
-    let _harness_broadcast = ui::listener::spawn_harness_broadcast_listener(
+    let _harness_broadcast = theway::app::listener::spawn_harness_broadcast_listener(
         harness.subscribe_session_broadcast(),
         feed_tx.clone(),
         cli.debug,
     );
-    let _unsub_trigger_tui =
-        trigger_executor.subscribe(ui::listener::trigger_listener(feed_tx.clone(), cli.debug));
+    let _unsub_trigger_tui = trigger_executor.subscribe(theway::app::listener::trigger_listener(
+        feed_tx.clone(),
+        cli.debug,
+    ));
     let _unsub_dynamic_fire_once = trigger_executor.subscribe(
         triggers::fire_once_trigger_listener(dynamic_trigger_registry.clone()),
     );

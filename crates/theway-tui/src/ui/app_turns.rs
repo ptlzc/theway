@@ -16,9 +16,9 @@ use theway::images;
 use theway::mentions;
 
 use super::App;
-use super::kernel::{QueuedTurn, TurnState};
 use super::render_utils::queue_preview;
 use super::render_utils::{enter_tui, leave_tui, prompt_display};
+use theway::app::kernel::{QueuedTurn, TurnState};
 
 impl App {
     // ── submit / dispatch ───────────────────────────────────────────────────────────────

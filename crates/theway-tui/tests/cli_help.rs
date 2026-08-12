@@ -67,7 +67,7 @@ fn help_lists_http_and_tui_mode_flags() {
     assert!(stdout.contains("--http"), "{stdout}");
     assert!(stdout.contains("--tui"), "{stdout}");
     assert!(
-        stdout.contains("Run the terminal UI even when local defaults would open the HTTP UI"),
+        stdout.contains("Explicitly run the terminal UI (the default on a TTY)"),
         "{stdout}"
     );
 }

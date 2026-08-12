@@ -27,10 +27,6 @@
 //! `app_import`, `app_goal`), with the free rendering helpers in `render_utils`; this file
 //! keeps the types, construction, the event-loop skeleton, and rendering.
 
-pub mod feed;
-mod kernel;
-pub mod listener;
-mod relay;
 pub mod web_loop;
 
 mod app_goal;
@@ -39,7 +35,7 @@ mod app_input;
 mod app_turns;
 mod render_utils;
 
-pub use feed::FeedUpdate;
+pub use theway::app::feed::FeedUpdate;
 // `crate::ui::prompt_display` is consumed by `web_loop`; keep the path valid after the
 // move into `render_utils` (private re-import keeps the original ui-subtree scope).
 use render_utils::prompt_display;
@@ -63,10 +59,10 @@ use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Padding, Paragraph
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tui_textarea::TextArea;
 
-use feed::{Feed, Level, TriggerPollStatus};
-use kernel::poll_turn;
-use kernel::{QueuedTurn, ReplKernel, TurnState};
 use theway::agent_session::RetrySettings;
+use theway::app::feed::{Feed, Level, TriggerPollStatus};
+use theway::app::kernel::poll_turn;
+use theway::app::kernel::{QueuedTurn, ReplKernel, TurnState};
 use theway::commands;
 use theway::commands::Registry;
 use theway::commands::{CommandCtx, CommandOutcome};
@@ -205,7 +201,7 @@ pub struct App {
 
     // Remote relay (issue #22). The channels exist from construction so the event loops
     // can always select on them; they only carry traffic while a relay is connected.
-    relay: Option<relay::RelayHandle>,
+    relay: Option<theway::app::relay::RelayHandle>,
     /// Render a QR code of the relay URL into the feed on connect. Only useful where a
     /// real terminal shows the feed (TUI); off for web/headless modes.
     relay_qr_in_feed: bool,
@@ -402,7 +398,9 @@ impl App {
                         }
                         ContentBlock::ToolCall(tc) => self.feed.push_tool_at(
                             tc.name.clone(),
-                            feed::preview(&serde_json::Value::Object(tc.arguments.clone())),
+                            theway::app::feed::preview(&serde_json::Value::Object(
+                                tc.arguments.clone(),
+                            )),
                             a.timestamp,
                         ),
                         ContentBlock::Image(_) => {}
@@ -412,7 +410,7 @@ impl App {
             AgentMessage::Llm(Message::ToolResult(tr)) => {
                 self.feed.push_tool_result_at(
                     tr.tool_call_id.clone(),
-                    feed::compact_tool_content_blocks(&tr.content, tr.is_error),
+                    theway::app::feed::compact_tool_content_blocks(&tr.content, tr.is_error),
                     tr.is_error,
                     tr.timestamp,
                 );
@@ -703,7 +701,7 @@ impl App {
         };
         frame.render_widget(
             Paragraph::new(Line::styled(
-                feed::truncate_chars(hint, hint_area.width as usize),
+                theway::app::feed::truncate_chars(hint, hint_area.width as usize),
                 Style::default().fg(Color::DarkGray),
             )),
             hint_area,
@@ -875,7 +873,7 @@ impl App {
             for rule in rules.iter().take(TRIGGER_PANEL_RULE_LIMIT) {
                 let state_flag = if rule.enabled { "enabled" } else { "disabled" };
                 let mode = if rule.fire_once { "once" } else { "repeat" };
-                let id = feed::truncate_chars(&rule.id, 12);
+                let id = theway::app::feed::truncate_chars(&rule.id, 12);
                 let color = if rule.enabled {
                     Color::Green
                 } else {
@@ -995,7 +993,7 @@ impl App {
             ));
             for job in cron_jobs.iter().take(TRIGGER_PANEL_RULE_LIMIT) {
                 let state_flag = if job.enabled { "enabled" } else { "disabled" };
-                let id = feed::truncate_chars(&job.id, 12);
+                let id = theway::app::feed::truncate_chars(&job.id, 12);
                 let color = if job.enabled {
                     Color::Green
                 } else {
