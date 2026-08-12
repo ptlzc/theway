@@ -471,7 +471,7 @@ async fn main() -> Result<()> {
         harness: harness.clone(),
         trigger_executor,
         retry: theway::agent_session::RetrySettings::default(),
-        registry: theway::commands::Registry::with_builtins(),
+        registry: theway::commands::Registry::with_daemon_commands(),
         cwd,
         session_id,
         log_path: _logging.as_ref().map(|l| l.log_path.clone()),

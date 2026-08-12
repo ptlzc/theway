@@ -8,7 +8,7 @@ use theway_sdk::commands::CommandCtx;
 pub struct SkillCommand;
 
 #[async_trait]
-impl SlashCommand for SkillCommand {
+impl SlashCommand<DaemonCtx> for SkillCommand {
     fn name(&self) -> &'static str {
         "skill"
     }
@@ -18,7 +18,7 @@ impl SlashCommand for SkillCommand {
     fn usage(&self) -> &'static str {
         "<name>"
     }
-    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_>) -> CommandOutcome {
+    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
         if argv.len() != 1 {
             return CommandOutcome::Error("usage: /skill <name>".into());
         }

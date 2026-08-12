@@ -12,7 +12,7 @@ pub(super) use theway_sdk::commands::{model_groups, model_help_summary_lines};
 pub struct ModelCommand;
 
 #[async_trait]
-impl SlashCommand for ModelCommand {
+impl SlashCommand<DaemonCtx> for ModelCommand {
     fn name(&self) -> &'static str {
         "model"
     }
@@ -22,7 +22,7 @@ impl SlashCommand for ModelCommand {
     fn usage(&self) -> &'static str {
         "[provider:model-id|list [provider]]"
     }
-    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_>) -> CommandOutcome {
+    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
         if argv.is_empty() {
             return CommandOutcome::OpenModelPicker;
         }
@@ -66,7 +66,7 @@ impl SlashCommand for ModelCommand {
 pub struct ThinkingCommand;
 
 #[async_trait]
-impl SlashCommand for ThinkingCommand {
+impl SlashCommand<DaemonCtx> for ThinkingCommand {
     fn name(&self) -> &'static str {
         "thinking"
     }
@@ -76,7 +76,7 @@ impl SlashCommand for ThinkingCommand {
     fn usage(&self) -> &'static str {
         THINKING_LEVEL_USAGE
     }
-    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_>) -> CommandOutcome {
+    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
         if argv.is_empty() {
             let lvl = ctx.harness.agent().state().thinking_level;
             cprintln!("thinking level: {}", lvl.map(|l| l.as_str()).unwrap_or("?"));
@@ -184,7 +184,7 @@ pub(super) fn unknown_model_error(provider: &str, id: &str) -> String {
 pub struct CostCommand;
 
 #[async_trait]
-impl SlashCommand for CostCommand {
+impl SlashCommand<DaemonCtx> for CostCommand {
     fn name(&self) -> &'static str {
         "cost"
     }
@@ -194,7 +194,7 @@ impl SlashCommand for CostCommand {
     fn usage(&self) -> &'static str {
         "[reset]"
     }
-    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_>) -> CommandOutcome {
+    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
         if argv.first().map(|s| s.as_str()) == Some("reset") {
             ctx.harness.reset_cost();
             cprintln!("cost counters reset");

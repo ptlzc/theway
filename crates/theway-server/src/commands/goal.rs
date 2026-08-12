@@ -10,7 +10,7 @@ fn goal_start_prompt(argv: &[String]) -> String {
     argv.join(" ").trim().to_string()
 }
 
-async fn run_goal_start(prompt: String, ctx: &CommandCtx<'_>) -> CommandOutcome {
+async fn run_goal_start(prompt: String, ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
     if prompt.is_empty() {
         return CommandOutcome::Error("usage: /goal-start <prompt>".into());
     }
@@ -28,7 +28,7 @@ async fn run_goal_start(prompt: String, ctx: &CommandCtx<'_>) -> CommandOutcome 
 }
 
 #[async_trait]
-impl SlashCommand for GoalCommand {
+impl SlashCommand<DaemonCtx> for GoalCommand {
     fn name(&self) -> &'static str {
         "goal"
     }
@@ -41,7 +41,7 @@ impl SlashCommand for GoalCommand {
         "[<condition>|start <prompt>|pause|resume|clear]"
     }
 
-    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_>) -> CommandOutcome {
+    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
         match argv.first().map(String::as_str) {
             None => {
                 print_goal_status(ctx).await;
@@ -99,7 +99,7 @@ impl SlashCommand for GoalCommand {
 pub struct GoalStartCommand;
 
 #[async_trait]
-impl SlashCommand for GoalStartCommand {
+impl SlashCommand<DaemonCtx> for GoalStartCommand {
     fn name(&self) -> &'static str {
         "goal-start"
     }
@@ -112,12 +112,12 @@ impl SlashCommand for GoalStartCommand {
         "<prompt>"
     }
 
-    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_>) -> CommandOutcome {
+    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
         run_goal_start(goal_start_prompt(argv), ctx).await
     }
 }
 
-async fn print_goal_status(ctx: &CommandCtx<'_>) {
+async fn print_goal_status(ctx: &CommandCtx<'_, DaemonCtx>) {
     match theway_core::multiagent::goal::current(ctx.harness).await {
         Some(state)
             if state.active()

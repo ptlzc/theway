@@ -9,7 +9,7 @@ use theway_sdk::commands::CommandCtx;
 pub struct SaveCommand;
 
 #[async_trait]
-impl SlashCommand for SaveCommand {
+impl SlashCommand<DaemonCtx> for SaveCommand {
     fn name(&self) -> &'static str {
         "save"
     }
@@ -19,7 +19,7 @@ impl SlashCommand for SaveCommand {
     fn usage(&self) -> &'static str {
         "[path]"
     }
-    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_>) -> CommandOutcome {
+    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
         let dest = if let Some(path) = argv.first() {
             std::path::PathBuf::from(path)
         } else {
@@ -45,14 +45,14 @@ impl SlashCommand for SaveCommand {
 pub struct UndoCommand;
 
 #[async_trait]
-impl SlashCommand for UndoCommand {
+impl SlashCommand<DaemonCtx> for UndoCommand {
     fn name(&self) -> &'static str {
         "undo"
     }
     fn description(&self) -> &'static str {
         "remove the most recent user+assistant turn from the active branch"
     }
-    async fn run(&self, _argv: &[String], ctx: &CommandCtx<'_>) -> CommandOutcome {
+    async fn run(&self, _argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
         let session = ctx.harness.session();
         let path = match session.branch(None).await {
             Ok(p) => p,
@@ -90,7 +90,7 @@ impl SlashCommand for UndoCommand {
 pub struct NameCommand;
 
 #[async_trait]
-impl SlashCommand for NameCommand {
+impl SlashCommand<DaemonCtx> for NameCommand {
     fn name(&self) -> &'static str {
         "name"
     }
@@ -100,7 +100,7 @@ impl SlashCommand for NameCommand {
     fn usage(&self) -> &'static str {
         "[slug]"
     }
-    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_>) -> CommandOutcome {
+    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
         let session = ctx.harness.session();
         if argv.is_empty() {
             match session.session_name().await {
@@ -128,7 +128,7 @@ impl SlashCommand for NameCommand {
 pub struct SessionCommand;
 
 #[async_trait]
-impl SlashCommand for SessionCommand {
+impl SlashCommand<DaemonCtx> for SessionCommand {
     fn name(&self) -> &'static str {
         "session"
     }
@@ -138,7 +138,7 @@ impl SlashCommand for SessionCommand {
     fn usage(&self) -> &'static str {
         "export [path] [--exclude-triggers] | import <path>"
     }
-    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_>) -> CommandOutcome {
+    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
         match argv.first().map(String::as_str) {
             Some("export") => session_export_command(&argv[1..], ctx).await,
             Some("import") => session_import_command(&argv[1..], ctx).await,
@@ -153,7 +153,10 @@ impl SlashCommand for SessionCommand {
     }
 }
 
-async fn session_export_command(argv: &[String], ctx: &CommandCtx<'_>) -> CommandOutcome {
+async fn session_export_command(
+    argv: &[String],
+    ctx: &CommandCtx<'_, DaemonCtx>,
+) -> CommandOutcome {
     let mut exclude_triggers = false;
     let mut path_arg: Option<&str> = None;
     for arg in argv {
@@ -204,7 +207,10 @@ async fn session_export_command(argv: &[String], ctx: &CommandCtx<'_>) -> Comman
     }
 }
 
-async fn session_import_command(argv: &[String], ctx: &CommandCtx<'_>) -> CommandOutcome {
+async fn session_import_command(
+    argv: &[String],
+    ctx: &CommandCtx<'_, DaemonCtx>,
+) -> CommandOutcome {
     if argv.len() != 1 {
         return CommandOutcome::Error("usage: /session import <path>".into());
     }
@@ -278,7 +284,7 @@ fn gh_bin() -> String {
 }
 
 #[async_trait]
-impl SlashCommand for ShareCommand {
+impl SlashCommand<DaemonCtx> for ShareCommand {
     fn name(&self) -> &'static str {
         "share"
     }
@@ -288,7 +294,7 @@ impl SlashCommand for ShareCommand {
     fn usage(&self) -> &'static str {
         "[--public]"
     }
-    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_>) -> CommandOutcome {
+    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
         let public = argv.iter().any(|a| a == "--public");
 
         // Render and write to a temp file so gh gist create can ingest it.

@@ -19,7 +19,7 @@ pub(in crate::commands) use render::{
 pub struct TriggersCommand;
 
 #[async_trait]
-impl SlashCommand for TriggersCommand {
+impl SlashCommand<DaemonCtx> for TriggersCommand {
     fn name(&self) -> &'static str {
         "triggers"
     }
@@ -29,15 +29,10 @@ impl SlashCommand for TriggersCommand {
     fn usage(&self) -> &'static str {
         "[status|rules|sources|enable <id>|disable <id>|remove <id>|remove --all|running|audit [N]|abort <trace_id>|abort --all]"
     }
-    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_>) -> CommandOutcome {
-        // Node-5 compat: the SDK framework ctx carries no trigger executor; `dispatch`
-        // stashes the daemon's executor in the slot before running commands. Node 6
-        // replaces this with `DaemonCtx` extras.
-        let Some(trigger_executor) = current_trigger_executor() else {
-            return CommandOutcome::Error(
-                "trigger executor unavailable (triggers require the daemon runtime)".into(),
-            );
-        };
+    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
+        // The daemon's trigger executor rides in the `DaemonCtx` extras (sdk-split-local-sandbox,
+        // node 6): no global slot, the registry is only ever run with daemon context.
+        let trigger_executor = ctx.extra.trigger_executor.as_ref();
         let subcommand = argv.first().map(String::as_str).unwrap_or("status");
         match subcommand {
             "status" => {
@@ -145,7 +140,7 @@ impl SlashCommand for TriggersCommand {
 pub struct NewTriggerCommand;
 
 #[async_trait]
-impl SlashCommand for NewTriggerCommand {
+impl SlashCommand<DaemonCtx> for NewTriggerCommand {
     fn name(&self) -> &'static str {
         "new-trigger"
     }
@@ -158,7 +153,7 @@ impl SlashCommand for NewTriggerCommand {
         "<natural-language trigger request>"
     }
 
-    async fn run(&self, argv: &[String], _ctx: &CommandCtx<'_>) -> CommandOutcome {
+    async fn run(&self, argv: &[String], _ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
         let spec = argv.join(" ");
         if spec.trim().is_empty() {
             return CommandOutcome::Error(
@@ -179,7 +174,7 @@ impl SlashCommand for NewTriggerCommand {
 pub struct CronCommand;
 
 #[async_trait]
-impl SlashCommand for CronCommand {
+impl SlashCommand<DaemonCtx> for CronCommand {
     fn name(&self) -> &'static str {
         "cron"
     }
@@ -196,7 +191,7 @@ impl SlashCommand for CronCommand {
         "[list|add \"<5-field-cron>\" <prompt>|enable <id>|disable <id>|remove <id>]"
     }
 
-    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_>) -> CommandOutcome {
+    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
         let subcommand = argv.first().map(String::as_str).unwrap_or("list");
         match subcommand {
             "list" | "ls" | "status" => {
@@ -273,7 +268,7 @@ impl SlashCommand for CronCommand {
 }
 
 async fn set_cron_enabled(
-    ctx: &CommandCtx<'_>,
+    ctx: &CommandCtx<'_, DaemonCtx>,
     id: Option<&String>,
     enabled: bool,
 ) -> CommandOutcome {
@@ -309,7 +304,7 @@ async fn set_cron_enabled(
 }
 
 async fn write_cron_control_plane_audit(
-    ctx: &CommandCtx<'_>,
+    ctx: &CommandCtx<'_, DaemonCtx>,
     op: &str,
     before: Option<&crate::triggers::cron::CronJob>,
     after: Option<&crate::triggers::cron::CronJob>,
@@ -334,7 +329,7 @@ async fn write_cron_control_plane_audit(
 /// Hint at enabled automation living in sibling sessions of this cwd. Used by the empty
 /// states of `/cron list` and `/triggers rules`, where "none" otherwise reads as data loss
 /// when the user's jobs simply live in another session.
-async fn automation_elsewhere_hint_for_ctx(ctx: &CommandCtx<'_>) -> Option<String> {
+async fn automation_elsewhere_hint_for_ctx(ctx: &CommandCtx<'_, DaemonCtx>) -> Option<String> {
     let metadata = ctx
         .harness
         .session()
@@ -353,7 +348,7 @@ async fn automation_elsewhere_hint_for_ctx(ctx: &CommandCtx<'_>) -> Option<Strin
 pub struct InboxCommand;
 
 #[async_trait]
-impl SlashCommand for InboxCommand {
+impl SlashCommand<DaemonCtx> for InboxCommand {
     fn name(&self) -> &'static str {
         "inbox"
     }
@@ -363,7 +358,7 @@ impl SlashCommand for InboxCommand {
     fn usage(&self) -> &'static str {
         "[all|claim <id|n>|dismiss <id|n>|clear]"
     }
-    async fn run(&self, argv: &[String], _ctx: &CommandCtx<'_>) -> CommandOutcome {
+    async fn run(&self, argv: &[String], _ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
         let path = theway_transport::inbox::default_inbox_path();
         match argv.first().map(String::as_str) {
             None | Some("list") => {

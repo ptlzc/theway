@@ -7,7 +7,7 @@ use theway_sdk::commands::CommandCtx;
 pub struct SkillsCommand;
 
 #[async_trait]
-impl SlashCommand for SkillsCommand {
+impl SlashCommand<DaemonCtx> for SkillsCommand {
     fn name(&self) -> &'static str {
         "skills"
     }
@@ -17,7 +17,7 @@ impl SlashCommand for SkillsCommand {
     fn usage(&self) -> &'static str {
         "[install [--confirm] [--overwrite] <url|path>|show <name>|reload|enable <name> [source]|disable <name> [source]|remove [--confirm] <name> [source]]"
     }
-    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_>) -> CommandOutcome {
+    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
         match argv.first().map(String::as_str) {
             None | Some("list" | "ls") => {
                 print_skills_list(&ctx.harness.skills());
@@ -59,7 +59,7 @@ fn print_skills_list(skills: &[Skill]) {
     }
 }
 
-fn show_skill(argv: &[String], ctx: &CommandCtx<'_>) -> CommandOutcome {
+fn show_skill(argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
     let Some(name) = argv.first() else {
         return CommandOutcome::Error("usage: /skills show <name> [source]".into());
     };
@@ -89,7 +89,7 @@ fn show_skill(argv: &[String], ctx: &CommandCtx<'_>) -> CommandOutcome {
     CommandOutcome::Handled
 }
 
-async fn reload_skills(ctx: &CommandCtx<'_>) -> CommandOutcome {
+async fn reload_skills(ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
     match ctx.harness.reload_skills_from_disk().await {
         Ok(out) => {
             cprintln!(
@@ -103,7 +103,7 @@ async fn reload_skills(ctx: &CommandCtx<'_>) -> CommandOutcome {
     }
 }
 
-async fn install_skill(argv: &[String], ctx: &CommandCtx<'_>) -> CommandOutcome {
+async fn install_skill(argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
     let parsed = match parse_skill_install_args(argv) {
         Ok(parsed) => parsed,
         Err(e) => return CommandOutcome::Error(e),
@@ -221,7 +221,11 @@ fn print_install_skill_result(result: &theway_core::AgentToolResult, args: &Inst
     }
 }
 
-async fn set_skill_enabled(argv: &[String], ctx: &CommandCtx<'_>, enabled: bool) -> CommandOutcome {
+async fn set_skill_enabled(
+    argv: &[String],
+    ctx: &CommandCtx<'_, DaemonCtx>,
+    enabled: bool,
+) -> CommandOutcome {
     let Some(name) = argv.first() else {
         let verb = if enabled { "enable" } else { "disable" };
         return CommandOutcome::Error(format!("usage: /skills {verb} <name> [source]"));
@@ -280,7 +284,7 @@ async fn set_skill_enabled(argv: &[String], ctx: &CommandCtx<'_>, enabled: bool)
     }
 }
 
-async fn remove_skill(argv: &[String], ctx: &CommandCtx<'_>) -> CommandOutcome {
+async fn remove_skill(argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
     let parsed = match parse_skill_remove_args(argv) {
         Ok(parsed) => parsed,
         Err(e) => return CommandOutcome::Error(e),
@@ -366,7 +370,9 @@ fn print_remove_skill_result(result: &theway_core::AgentToolResult) {
     }
 }
 
-fn skill_harness_cell(ctx: &CommandCtx<'_>) -> theway_core::tools::skill::SkillHarnessCell {
+fn skill_harness_cell(
+    ctx: &CommandCtx<'_, DaemonCtx>,
+) -> theway_core::tools::skill::SkillHarnessCell {
     let cell = std::sync::Arc::new(once_cell::sync::OnceCell::new());
     // This is a fresh cell scoped to a single slash command invocation, so set() can only fail
     // if this helper is called incorrectly inside the same invocation.
@@ -387,7 +393,7 @@ fn tool_result_text(result: &theway_core::AgentToolResult) -> String {
 }
 
 async fn write_skill_state_audit(
-    ctx: &CommandCtx<'_>,
+    ctx: &CommandCtx<'_, DaemonCtx>,
     name: &str,
     source: SkillSource,
     before_enabled: bool,

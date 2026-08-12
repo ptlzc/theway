@@ -2,20 +2,24 @@
 //!
 //! The command framework (Registry / SlashCommand / CommandOutcome / CommandCtx, console
 //! sink, `parse`, pure helpers) and the local command set (quit/clear/help/login/logout/
-//! sessions) moved to `theway-sdk` (sdk-split-local-sandbox, node 5-commands-layer); this
+//! sessions) live in `theway-sdk` (sdk-split-local-sandbox, node 5-commands-layer); this
 //! module keeps the daemon-side surface:
 //!
 //! - re-exports of the SDK framework so existing `crate::commands::…` / `theway::commands::…`
 //!   paths keep resolving (TUI, readline, tests);
+//! - [`DaemonCtx`] — the daemon-only context extras carried by the SDK's generic
+//!   `CommandCtx<'_, DaemonCtx>` (the trigger executor handle);
 //! - the daemon command implementations in submodules: [`skills`] / [`skill_cmd`] (skill
 //!   management), [`model`] (`/model`, `/thinking`, `/cost` + model-catalog help), [`goal`]
 //!   (`/goal`, `/goal-start`), [`session`] (session lifecycle), [`triggers`] (automation),
-//!   and [`misc`] (everything else);
-//! - the compatibility [`Registry`] wrapper whose `with_builtins()` assembles the full set
-//!   (SDK local commands + daemon commands) — node 6 replaces it with
-//!   `with_daemon_commands` over a `DaemonCtx` extras type;
+//!   and [`misc`] (everything else); all implement `SlashCommand<DaemonCtx>`;
+//! - the [`Registry`] wrapper over the SDK's generic registry with
+//!   [`Registry::with_daemon_commands`]: starts from the SDK local command set
+//!   (`Registry::<DaemonCtx>::local()` — local commands implement `SlashCommand<X>` for
+//!   every extras type, so they register unchanged) and appends the daemon runtime
+//!   commands;
 //! - [`dispatch`], which converts the daemon-shaped [`CommandCtx`] into the SDK's generic
-//!   context and routes `/help` + skill shortcuts.
+//!   context (extras = [`DaemonCtx`]) and routes `/help` + skill shortcuts.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -71,8 +75,8 @@ pub use misc::print_help;
 #[allow(unused_imports)]
 pub(crate) use triggers::{render_cron_jobs, render_dynamic_trigger_rules, render_triggers_status};
 
-// Command implementations registered by `Registry::with_builtins` (the local set comes from
-// `theway_sdk::commands::Registry::local()`).
+// Daemon command implementations registered by `Registry::with_daemon_commands` (the local
+// set comes from `theway_sdk::commands::Registry::<DaemonCtx>::local()`).
 use goal::{GoalCommand, GoalStartCommand};
 use misc::{
     BugReportCommand, CompactCommand, DiagCommand, FindCommand, HistoryCommand, TemplateCommand,
@@ -100,10 +104,10 @@ use triggers::{
 pub const THINKING_LEVEL_USAGE: &str = "[off|minimal|low|medium|high|xhigh]";
 
 /// Context handed to a command at runtime — daemon-shaped view kept for the assembly layer
-/// (`DaemonApp`) and the integration tests: it still carries the `trigger_executor`
-/// reference. [`dispatch`] converts it into the SDK's generic [`theway_sdk::commands::CommandCtx`]
-/// (extras `()`); `/triggers` reaches the executor through [`current_trigger_executor`].
-/// Node 6 replaces this with a proper `DaemonCtx` extras type.
+/// (`DaemonApp`) and the integration tests: it carries the `trigger_executor` reference.
+/// [`dispatch`] converts it into the SDK's generic [`theway_sdk::commands::CommandCtx`]
+/// with [`DaemonCtx`] extras; daemon commands (e.g. `/triggers`) reach the executor through
+/// `ctx.extra.trigger_executor`.
 pub struct CommandCtx<'a> {
     pub harness: &'a Arc<AgentHarness>,
     pub trigger_executor: &'a Arc<TriggerExecutor>,
@@ -113,31 +117,28 @@ pub struct CommandCtx<'a> {
     pub cwd: &'a std::path::Path,
 }
 
-// Node-5 compat bridge: the SDK framework's `CommandCtx<'a, ()>` carries no trigger
-// executor, but `/triggers` still needs one. `dispatch` stashes the daemon's executor here
-// right before running a command; node 6 replaces this slot with the `DaemonCtx` extras.
-static TRIGGER_EXECUTOR_SLOT: parking_lot::Mutex<Option<Arc<TriggerExecutor>>> =
-    parking_lot::Mutex::new(None);
-
-pub(crate) fn install_trigger_executor(executor: Arc<TriggerExecutor>) {
-    *TRIGGER_EXECUTOR_SLOT.lock() = Some(executor);
+/// Daemon-only context extras handed to command implementations through the SDK
+/// framework's generic `CommandCtx::extra` slot (sdk-split-local-sandbox, node 6).
+/// Local commands implement `SlashCommand<X>` for every `X` and ignore it; the daemon
+/// runtime commands read the handles they need here instead of reaching for globals.
+pub struct DaemonCtx {
+    /// Trigger executor of the running daemon session; `/triggers` reads status
+    /// snapshots and aborts running trigger actions through it.
+    pub trigger_executor: Arc<TriggerExecutor>,
 }
 
-pub(crate) fn current_trigger_executor() -> Option<Arc<TriggerExecutor>> {
-    TRIGGER_EXECUTOR_SLOT.lock().clone()
-}
-
-/// Slash-command registry: the SDK's generic [`theway_sdk::commands::Registry<()>`] plus the
-/// daemon assembly entry point. Thin wrapper so `Registry::with_builtins()` can keep
-/// returning the *full* builtin set (local + daemon commands) while the SDK's inherent
-/// constructors only know the local set.
+/// Slash-command registry: the SDK's generic registry parameterized by the daemon's
+/// [`DaemonCtx`] extras, plus the daemon assembly entry point
+/// ([`Registry::with_daemon_commands`]). Thin wrapper so the daemon can keep its concrete
+/// `Registry` type in the assembly layer while the SDK's constructors only know the local
+/// command set.
 pub struct Registry {
-    inner: theway_sdk::commands::Registry<()>,
+    inner: theway_sdk::commands::Registry<DaemonCtx>,
 }
 
 impl Registry {
     // Part of the pre-split public surface (embedding); no in-tree caller outside
-    // `with_builtins`-style assembly.
+    // `with_daemon_commands`-style assembly.
     #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
@@ -145,12 +146,13 @@ impl Registry {
         }
     }
 
-    /// Full builtin set: SDK local commands (`Registry::local()`) plus the daemon runtime
-    /// commands. Compatibility assembly — node 6 splits this into
-    /// `with_daemon_commands()` over `DaemonCtx`.
-    pub fn with_builtins() -> Self {
+    /// Full builtin set for the daemon process: starts from the SDK local command set
+    /// (`Registry::<DaemonCtx>::local()` — the local commands are generic over the extras
+    /// type, so they register unchanged), then appends the daemon runtime commands
+    /// (skills/model/goal/session lifecycle/triggers/…).
+    pub fn with_daemon_commands() -> Self {
         let mut r = Self {
-            inner: theway_sdk::commands::Registry::local(),
+            inner: theway_sdk::commands::Registry::<DaemonCtx>::local(),
         };
         r.register(Arc::new(SkillsCommand));
         r.register(Arc::new(SkillCommand));
@@ -179,13 +181,20 @@ impl Registry {
         r
     }
 
-    pub fn register(&mut self, command: Arc<dyn SlashCommand<()>>) {
+    /// Compatibility alias for [`Registry::with_daemon_commands`] — the pre-split name,
+    /// still used by the TUI (which switches to the SDK's `Registry::local()` in
+    /// node 9-tui-boundary) and the command e2e suites.
+    pub fn with_builtins() -> Self {
+        Self::with_daemon_commands()
+    }
+
+    pub fn register(&mut self, command: Arc<dyn SlashCommand<DaemonCtx>>) {
         self.inner.register(command);
     }
 }
 
 impl std::ops::Deref for Registry {
-    type Target = theway_sdk::commands::Registry<()>;
+    type Target = theway_sdk::commands::Registry<DaemonCtx>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -194,7 +203,7 @@ impl std::ops::Deref for Registry {
 
 impl Default for Registry {
     fn default() -> Self {
-        Self::with_builtins()
+        Self::with_daemon_commands()
     }
 }
 
@@ -293,8 +302,6 @@ fn run_skill_shortcut(
 }
 
 pub async fn dispatch(input: &str, registry: &Registry, ctx: &CommandCtx<'_>) -> CommandOutcome {
-    // Compat bridge for `/triggers` (see TRIGGER_EXECUTOR_SLOT); node 6 introduces DaemonCtx.
-    install_trigger_executor(ctx.trigger_executor.clone());
     let (name, argv) = match parse(input) {
         Some(parts) => parts,
         None => return CommandOutcome::Error("not a slash command".into()),
@@ -313,13 +320,16 @@ pub async fn dispatch(input: &str, registry: &Registry, ctx: &CommandCtx<'_>) ->
             CommandOutcome::Error(format!("unknown command: /{name} (try /help)"))
         });
     };
+    let extra = DaemonCtx {
+        trigger_executor: ctx.trigger_executor.clone(),
+    };
     let sdk_ctx = theway_sdk::commands::CommandCtx {
         harness: ctx.harness,
         session_id: ctx.session_id,
         log_path: ctx.log_path,
         tool_count: ctx.tool_count,
         cwd: ctx.cwd,
-        extra: &(),
+        extra: &extra,
     };
     cmd.run(&argv, &sdk_ctx).await
 }

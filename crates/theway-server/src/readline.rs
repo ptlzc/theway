@@ -88,7 +88,7 @@ mod tests {
     }
 
     fn completer() -> SlashCompleter {
-        SlashCompleter::from_registry(&Registry::with_builtins())
+        SlashCompleter::from_registry(&Registry::with_daemon_commands())
     }
 
     #[test]
@@ -122,7 +122,7 @@ mod tests {
 
     #[test]
     fn includes_enabled_skill_commands_and_hides_disabled_or_conflicting() {
-        let registry = Registry::with_builtins();
+        let registry = Registry::with_daemon_commands();
         let completer = SlashCompleter::from_registry_and_skills(
             &registry,
             &[

@@ -11,14 +11,14 @@ use theway_sdk::commands::CommandCtx;
 pub struct DiagCommand;
 
 #[async_trait]
-impl SlashCommand for DiagCommand {
+impl SlashCommand<DaemonCtx> for DiagCommand {
     fn name(&self) -> &'static str {
         "diag"
     }
     fn description(&self) -> &'static str {
         "show diagnostic info (model, thinking, cost, log path)"
     }
-    async fn run(&self, _argv: &[String], ctx: &CommandCtx<'_>) -> CommandOutcome {
+    async fn run(&self, _argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
         let state = ctx.harness.agent().state();
         let model = state
             .model
@@ -56,7 +56,7 @@ impl SlashCommand for DiagCommand {
 pub struct TemplateCommand;
 
 #[async_trait]
-impl SlashCommand for TemplateCommand {
+impl SlashCommand<DaemonCtx> for TemplateCommand {
     fn name(&self) -> &'static str {
         "template"
     }
@@ -66,7 +66,7 @@ impl SlashCommand for TemplateCommand {
     fn usage(&self) -> &'static str {
         "[name] [k=v ...]"
     }
-    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_>) -> CommandOutcome {
+    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
         if argv.is_empty() {
             let templates = ctx.harness.templates();
             if templates.is_empty() {
@@ -99,7 +99,7 @@ impl SlashCommand for TemplateCommand {
 pub struct CompactCommand;
 
 #[async_trait]
-impl SlashCommand for CompactCommand {
+impl SlashCommand<DaemonCtx> for CompactCommand {
     fn name(&self) -> &'static str {
         "compact"
     }
@@ -109,7 +109,7 @@ impl SlashCommand for CompactCommand {
     fn usage(&self) -> &'static str {
         "[\"custom instructions\"]"
     }
-    async fn run(&self, argv: &[String], _ctx: &CommandCtx<'_>) -> CommandOutcome {
+    async fn run(&self, argv: &[String], _ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
         let custom = if argv.is_empty() {
             None
         } else {
@@ -122,14 +122,14 @@ impl SlashCommand for CompactCommand {
 pub struct BugReportCommand;
 
 #[async_trait]
-impl SlashCommand for BugReportCommand {
+impl SlashCommand<DaemonCtx> for BugReportCommand {
     fn name(&self) -> &'static str {
         "bug-report"
     }
     fn description(&self) -> &'static str {
         "write a redacted diagnostic dump for issue attachment"
     }
-    async fn run(&self, _argv: &[String], ctx: &CommandCtx<'_>) -> CommandOutcome {
+    async fn run(&self, _argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
         // Snapshot the model + thinking with the lock held briefly; the MutexGuard cannot
         // cross an .await so we copy what we need and drop it.
         let (model, thinking) = {
@@ -169,7 +169,7 @@ impl SlashCommand for BugReportCommand {
 pub struct WebConnectCommand;
 
 #[async_trait]
-impl SlashCommand for WebConnectCommand {
+impl SlashCommand<DaemonCtx> for WebConnectCommand {
     fn name(&self) -> &'static str {
         "web-connect"
     }
@@ -179,7 +179,7 @@ impl SlashCommand for WebConnectCommand {
     fn usage(&self) -> &'static str {
         "[status]"
     }
-    async fn run(&self, argv: &[String], _ctx: &CommandCtx<'_>) -> CommandOutcome {
+    async fn run(&self, argv: &[String], _ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
         match argv.first().map(String::as_str) {
             None => CommandOutcome::WebRelay(WebRelayAction::Connect),
             Some("status") => CommandOutcome::WebRelay(WebRelayAction::Status),
@@ -191,14 +191,14 @@ impl SlashCommand for WebConnectCommand {
 pub struct WebDisconnectCommand;
 
 #[async_trait]
-impl SlashCommand for WebDisconnectCommand {
+impl SlashCommand<DaemonCtx> for WebDisconnectCommand {
     fn name(&self) -> &'static str {
         "web-disconnect"
     }
     fn description(&self) -> &'static str {
         "disconnect the public relay and invalidate the session URL"
     }
-    async fn run(&self, _argv: &[String], _ctx: &CommandCtx<'_>) -> CommandOutcome {
+    async fn run(&self, _argv: &[String], _ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
         CommandOutcome::WebRelay(WebRelayAction::Disconnect)
     }
 }
@@ -206,7 +206,7 @@ impl SlashCommand for WebDisconnectCommand {
 pub struct FindCommand;
 
 #[async_trait]
-impl SlashCommand for FindCommand {
+impl SlashCommand<DaemonCtx> for FindCommand {
     fn name(&self) -> &'static str {
         "find"
     }
@@ -216,7 +216,7 @@ impl SlashCommand for FindCommand {
     fn usage(&self) -> &'static str {
         "<query>"
     }
-    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_>) -> CommandOutcome {
+    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
         if argv.is_empty() {
             return CommandOutcome::Error("usage: /find <query>".into());
         }
@@ -289,7 +289,7 @@ impl SlashCommand for FindCommand {
 pub struct HistoryCommand;
 
 #[async_trait]
-impl SlashCommand for HistoryCommand {
+impl SlashCommand<DaemonCtx> for HistoryCommand {
     fn name(&self) -> &'static str {
         "history"
     }
@@ -299,7 +299,7 @@ impl SlashCommand for HistoryCommand {
     fn usage(&self) -> &'static str {
         "[N]"
     }
-    async fn run(&self, argv: &[String], _ctx: &CommandCtx<'_>) -> CommandOutcome {
+    async fn run(&self, argv: &[String], _ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
         let limit: usize = argv.first().and_then(|s| s.parse().ok()).unwrap_or(20);
         let store = theway_sdk::history::HistoryStore::load();
         let entries = store.entries();
