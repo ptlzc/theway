@@ -1,12 +1,12 @@
 //! `~/.theway/config.toml` readers used at startup (built-in skills, trigger poll interval).
 
-use theway::{builtin_skills, config, triggers};
+use crate::{builtin_skills, config, triggers};
 
 /// Read `<base_dir>/config.toml` and extract the `[builtin_skills] enabled = [...]` list.
 /// Missing file → empty list. Parse error / missing section → empty list (the parser itself
 /// returns empty per #32's soft fail-closed posture; see
 /// [`builtin_skills::parse_builtin_skills_config`]).
-pub(super) async fn read_builtin_skills_config(base_dir: &std::path::Path) -> Vec<String> {
+pub async fn read_builtin_skills_config(base_dir: &std::path::Path) -> Vec<String> {
     let path = base_dir.join("config.toml");
     let Ok(text) = tokio::fs::read_to_string(&path).await else {
         return Vec::new();
@@ -16,7 +16,7 @@ pub(super) async fn read_builtin_skills_config(base_dir: &std::path::Path) -> Ve
 
 /// Resolve the local dynamic trigger poll interval. CLI overrides config; config overrides
 /// the built-in default. A malformed config reports a diagnostic but does not block startup.
-pub(super) async fn read_trigger_poll_interval_secs(
+pub async fn read_trigger_poll_interval_secs(
     base_dir: &std::path::Path,
     cli_override: Option<u64>,
 ) -> (u64, Option<String>) {
@@ -54,7 +54,7 @@ mod tests {
         let (default_secs, diagnostic) = read_trigger_poll_interval_secs(base_dir, None).await;
         assert_eq!(
             default_secs,
-            theway::triggers::dynamic::DEFAULT_DYNAMIC_TRIGGER_POLL_INTERVAL_SECS
+            crate::triggers::dynamic::DEFAULT_DYNAMIC_TRIGGER_POLL_INTERVAL_SECS
         );
         assert_eq!(default_secs, 600);
         assert!(diagnostic.is_none());

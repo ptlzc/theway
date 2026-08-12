@@ -8,10 +8,6 @@
 //! `theway` imports. Startup helpers live in the [`prompt`] / [`stream_auth`] /
 //! [`config_readers`] submodules (file-size governance split).
 
-mod config_readers;
-mod prompt;
-mod stream_auth;
-
 use std::io::IsTerminal as _;
 use std::sync::{Arc, OnceLock};
 
@@ -31,19 +27,18 @@ use theway_transport::inbox;
 
 use theway::dag_persist::{DagPersistHandle, load_session_runs};
 
-use self::config_readers::{read_builtin_skills_config, read_trigger_poll_interval_secs};
-use self::prompt::compose_system_prompt;
-use self::stream_auth::stream_fn_with_auth_store;
 use crate::cli::{Cli, select_resume_session};
 use crate::session_factory::SessionHarnessFactory;
 use crate::ui_mode::{
-    active_hook_registrations, active_trigger_features, parse_thinking, should_run_grpc,
-    should_run_http, should_run_mcp, validate_base_url_override,
+    active_hook_registrations, active_trigger_features, parse_thinking, validate_base_url_override,
 };
+use theway::config_readers::{read_builtin_skills_config, read_trigger_poll_interval_secs};
+use theway::stream_auth::stream_fn_with_auth_store;
+use theway::system_prompt::compose_system_prompt;
 
 // Kept at crate-root visibility via `pub use startup::user_message;` in `main.rs`
 // (it was `pub` on the old monolithic `main.rs`).
-pub use self::stream_auth::user_message;
+pub use theway::stream_auth::user_message;
 
 pub(crate) async fn run_repl(
     mut cli: Cli,
@@ -53,9 +48,6 @@ pub(crate) async fn run_repl(
     // Arc'd so the session factory (session-resource-model) can share the cwd-scoped repo
     // with the App / SessionOps; every existing call site keeps working through Deref.
     let repo = std::sync::Arc::new(repo);
-    let run_http = should_run_http(&cli);
-    let run_mcp = should_run_mcp(&cli);
-    let run_grpc = should_run_grpc(&cli);
     let cli_base_url = cli.base_url.clone();
     validate_base_url_override(&cli)?;
     let local_models = local_models::load_all(&cwd, cli_base_url.as_deref()).await?;
@@ -302,14 +294,13 @@ pub(crate) async fn run_repl(
     opts.turn_continuation_cap = Some(goal::MAX_CONTINUATIONS);
     let before_tool_call = PermissionPolicy::default_for_coding_agent().as_before_tool_call();
     opts.before_tool_call = Some(before_tool_call.clone());
-    let interactive_tui =
-        !run_http && !run_grpc && std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    let interactive_tui = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
     // Control-plane prompt policy: decided once, then shared with every harness the
     // session factory builds — the interactive hook is Arc'd internally, so all clones
     // feed the same receiver that the App drains.
     let (control_plane_hook, control_plane_prompt_rx) = if cli.always_allow || cli.yes {
         (Some(control_plane_prompt::allow_hook()), None)
-    } else if interactive_tui || run_http || run_grpc {
+    } else if interactive_tui {
         let (hook, rx) = control_plane_prompt::interactive_hook();
         (Some(hook), Some(rx))
     } else {
@@ -689,39 +680,13 @@ pub(crate) async fn run_repl(
         },
     ));
 
-    // Hand off to the UI layer. The TUI owns the terminal, the input box, the scrolling feed,
-    // and the serialized run slot (user prompts + inject-and-run triggered turns) until quit.
+    // Hand off to the UI layer. The TUI owns the terminal, the input box, the scrolling
+    // feed, and the serialized run slot (user prompts + inject-and-run triggered turns)
+    // until quit.
     //
-    // `--http` / `--grpc`: the protocol servers live in the `theway` lib's `transport` module
-    // (`server` feature). Each driver binds the listener, spawns the protocol server and runs
-    // the shared transport event loop (`App::run_transport_loop`) on the public
-    // `crate::ui::web_loop::TransportEndpoints` channel surface (openspec
-    // consolidate-server-cli 2.x: bin consolidated back into the `theway` crate).
-    let run_result = if run_mcp {
-        theway_transport::mcp::run_mcp_server(theway::tools::local_tools())
-            .await
-            .map_err(|e| anyhow::anyhow!("mcp server: {e}"))
-    } else if run_grpc {
-        theway_transport::grpc::run_grpc(
-            Box::new(app),
-            theway_transport::grpc::GrpcOptions {
-                host: cli.http_host.clone(),
-                port: cli.http_port,
-            },
-        )
-        .await
-    } else if run_http {
-        theway_transport::http::run_web(
-            Box::new(app),
-            theway_transport::wire::WebOptions {
-                host: cli.http_host.clone(),
-                port: cli.http_port,
-            },
-        )
-        .await
-    } else {
-        app.run().await
-    };
+    // Transport modes (gRPC / HTTP / MCP) live in the separate `thewayd` daemon binary —
+    // see `theway-server/src/bin/thewayd.rs`.
+    let run_result = app.run().await;
     // Session shutdown: flush the state file FIRST (running runs are persisted as
     // Running — the next `restore` demotes them to ready and re-launches), then abort
     // in-flight jobs (their tokio tasks die with the process anyway). Aborting before

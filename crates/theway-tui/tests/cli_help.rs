@@ -57,19 +57,23 @@ fn help_lists_control_plane_yes_flag() {
 }
 
 #[test]
-fn help_lists_http_and_tui_mode_flags() {
+fn help_lists_tui_flag_and_no_transport_flags() {
     let output = Command::new(env!("CARGO_BIN_EXE_theway"))
         .arg("--help")
         .output()
         .expect("run theway --help");
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("--http"), "{stdout}");
     assert!(stdout.contains("--tui"), "{stdout}");
     assert!(
         stdout.contains("Explicitly run the terminal UI (the default on a TTY)"),
         "{stdout}"
     );
+    // Transport modes moved to the `thewayd` daemon binary — the TUI binary must not
+    // offer to start a web/gRPC/MCP server.
+    assert!(!stdout.contains("--http"), "{stdout}");
+    assert!(!stdout.contains("--grpc"), "{stdout}");
+    assert!(!stdout.contains("--mcp"), "{stdout}");
 }
 
 #[test]

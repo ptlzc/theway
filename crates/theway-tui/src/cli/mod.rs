@@ -90,29 +90,9 @@ pub(crate) struct Cli {
     #[arg(long = "always-allow")]
     pub(crate) always_allow: bool,
 
-    /// Run the local HTTP UI (browser) instead of the terminal UI (default).
-    /// Defaults to loopback-only.
-    #[arg(long = "http", conflicts_with = "tui")]
-    pub(crate) http: bool,
-    /// Run as an MCP server over stdio (Model Context Protocol, JSON-RPC 2.0): MCP
-    /// clients (Claude Code, Codex, IDEs) can call theway's local-execution tools as
-    /// standard MCP tools. Mutually exclusive with the other UI modes.
-    #[arg(long = "mcp", conflicts_with_all = ["http", "grpc", "tui"])]
-    pub(crate) mcp: bool,
-    /// Run a local gRPC server instead of the terminal UI. Loopback-only; exposes the same
-    /// command/snapshot surface as `--http` (state, events stream, prompt, model, abort,
-    /// control-plane resolve) over tonic.
-    #[arg(long, conflicts_with = "http")]
-    pub(crate) grpc: bool,
     /// Explicitly run the terminal UI (the default on a TTY).
-    #[arg(long, conflicts_with = "http")]
+    #[arg(long)]
     pub(crate) tui: bool,
-    /// Host for `--http`/`--grpc`. Must be a loopback address.
-    #[arg(long = "http-host", default_value = "127.0.0.1", value_name = "HOST")]
-    pub(crate) http_host: String,
-    /// Port for `--http`/`--grpc`; use 0 to bind a random free port.
-    #[arg(long = "http-port", default_value_t = 0, value_name = "PORT")]
-    pub(crate) http_port: u16,
 }
 
 #[derive(Subcommand, Debug)]
@@ -375,10 +355,10 @@ mod tests {
 
         // --resume followed by another flag must not swallow the flag as its value.
         let with_flag =
-            Cli::try_parse_from(["theway", "--resume", "--http"]).expect("flag not swallowed");
+            Cli::try_parse_from(["theway", "--resume", "--tui"]).expect("flag not swallowed");
         assert_eq!(with_flag.effective_resume_id(), None);
         assert!(with_flag.resume.is_some());
-        assert!(with_flag.http);
+        assert!(with_flag.tui);
 
         // Absent entirely.
         let none = Cli::try_parse_from(["theway"]).expect("no flags");

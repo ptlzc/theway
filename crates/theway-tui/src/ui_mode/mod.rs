@@ -1,78 +1,14 @@
-//! UI mode resolution (`--http` / `--grpc` / TUI / headless) plus small CLI-level
-//! helpers (thinking-level parsing, `--base-url` validation, panel hook/trigger
-//! inventory).
+//! Small CLI-level helpers (thinking-level parsing, `--base-url` validation, panel
+//! hook/trigger inventory) shared with the daemon binary. UI-mode resolution moved
+//! out: the terminal UI is the default, the daemon (`thewayd`) owns transport modes.
 //!
 //! Split out of `main.rs`. Mechanical module extraction — behavior is unchanged.
-
-use std::io::IsTerminal as _;
 
 use anyhow::Result;
 use theway_core::ThinkingLevel;
 
 use crate::cli::Cli;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum UiMode {
-    Mcp,
-    Grpc,
-    Http,
-    Tui,
-    Headless,
-}
-
-pub(crate) fn should_run_mcp(cli: &Cli) -> bool {
-    resolve_ui_mode(
-        cli.mcp,
-        cli.http,
-        cli.tui,
-        cli.grpc,
-        std::io::stdin().is_terminal() && std::io::stdout().is_terminal(),
-    ) == UiMode::Mcp
-}
-
-pub(crate) fn should_run_http(cli: &Cli) -> bool {
-    resolve_ui_mode(
-        cli.mcp,
-        cli.http,
-        cli.tui,
-        cli.grpc,
-        std::io::stdin().is_terminal() && std::io::stdout().is_terminal(),
-    ) == UiMode::Http
-}
-
-pub(crate) fn should_run_grpc(cli: &Cli) -> bool {
-    resolve_ui_mode(
-        cli.mcp,
-        cli.http,
-        cli.tui,
-        cli.grpc,
-        std::io::stdin().is_terminal() && std::io::stdout().is_terminal(),
-    ) == UiMode::Grpc
-}
-
-fn resolve_ui_mode(mcp: bool, http: bool, tui: bool, grpc: bool, interactive_tty: bool) -> UiMode {
-    if mcp {
-        return UiMode::Mcp;
-    }
-    if grpc {
-        return UiMode::Grpc;
-    }
-    if http {
-        return UiMode::Http;
-    }
-    if tui {
-        return UiMode::Tui;
-    }
-    if !interactive_tty {
-        return UiMode::Headless;
-    }
-    UiMode::Tui
-}
-
-/// Real `*Hook` trait registrations active in this binary. Only names that map to an actual
-/// `AgentHarness` extension point — so users reading the panel learn what hooks they could
-/// plug into. `dedup` / `cycle suppress` / `fire-once rules` / `inject-and-run` are
-/// trigger-runtime *features*, not hooks, and live in [`active_trigger_features`] instead.
 pub(crate) fn active_hook_registrations(
     lsp_lang_count: usize,
     cli_hooks_loaded: bool,
@@ -154,12 +90,7 @@ mod tests {
             debug: false,
             yes: false,
             always_allow: false,
-            http: false,
-            mcp: false,
-            grpc: false,
             tui: false,
-            http_host: "127.0.0.1".into(),
-            http_port: 0,
         };
         let err = validate_base_url_override(&cli).unwrap_err().to_string();
         assert!(
@@ -174,41 +105,5 @@ mod tests {
 
         cli.provider = Some("ds4".into());
         validate_base_url_override(&cli).unwrap();
-    }
-
-    #[test]
-    fn ui_mode_defaults_to_tui_on_local_terminal() {
-        assert_eq!(
-            resolve_ui_mode(false, false, false, false, true),
-            UiMode::Tui
-        );
-    }
-
-    #[test]
-    fn ui_mode_keeps_headless_for_non_tty() {
-        assert_eq!(
-            resolve_ui_mode(false, false, false, false, false),
-            UiMode::Headless
-        );
-    }
-
-    #[test]
-    fn explicit_ui_flags_override_default() {
-        assert_eq!(
-            resolve_ui_mode(false, true, false, false, true),
-            UiMode::Http
-        );
-        assert_eq!(
-            resolve_ui_mode(false, false, true, false, true),
-            UiMode::Tui
-        );
-        assert_eq!(
-            resolve_ui_mode(false, false, true, true, true),
-            UiMode::Grpc
-        );
-        assert_eq!(
-            resolve_ui_mode(true, false, false, false, true),
-            UiMode::Mcp
-        );
     }
 }

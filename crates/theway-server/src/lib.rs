@@ -18,6 +18,7 @@ pub mod bug_report;
 pub mod builtin_skills;
 pub mod commands;
 pub mod config;
+pub mod config_readers;
 pub mod control_plane_prompt;
 pub mod dag_persist;
 pub mod export;
@@ -39,6 +40,8 @@ pub mod session;
 pub mod session_archive;
 pub mod session_ops;
 pub mod skills;
+pub mod stream_auth;
+pub mod system_prompt;
 // Skill enable/disable overlay moved into the engine crate with the builtin tools
 // (openspec tools-into-core); re-exported so `crate::skill_overrides` paths keep working.
 pub use theway_core::skill_overrides;
@@ -50,5 +53,6 @@ pub mod templates;
 pub mod tools;
 pub mod trigger_engine;
 pub mod ts_extensions;
+pub mod ui_mode_panel;
 // Server-first: transport is always on (theway IS an agent server).
 pub mod triggers;

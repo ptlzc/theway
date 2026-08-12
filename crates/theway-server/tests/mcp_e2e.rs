@@ -1,4 +1,4 @@
-//! MCP server end-to-end test: spawn `theway --mcp` and exercise it through the
+//! MCP server end-to-end test: spawn `thewayd --mcp` and exercise it through the
 //! theway-mcp client (full initialize + initialized handshake), verifying the
 //! stdio JSON-RPC surface: initialize, tools/list (the 15 local-execution tools),
 //! tools/call (bash executes), and unknown-tool error.
@@ -6,14 +6,14 @@
 use serde_json::json;
 use theway_mcp::{McpClient, StdioTransport};
 
-fn theway_bin() -> &'static str {
-    env!("CARGO_BIN_EXE_theway")
+fn thewayd_bin() -> &'static str {
+    env!("CARGO_BIN_EXE_thewayd")
 }
 
 #[tokio::test]
 async fn mcp_server_initialize_tools_list_and_call() {
     let transport = Arc::new(
-        StdioTransport::spawn(theway_bin(), &["--mcp"])
+        StdioTransport::spawn(thewayd_bin(), &["--mcp"])
             .await
             .expect("spawn theway --mcp"),
     );

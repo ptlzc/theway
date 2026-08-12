@@ -11,7 +11,9 @@
 //! - [`listener`]: harness/trigger/session event adapters → feed updates.
 //! - [`relay`]: remote relay client (`/web-connect`).
 
+pub mod daemon;
 pub mod feed;
 pub mod kernel;
 pub mod listener;
 pub mod relay;
+pub mod session_factory;

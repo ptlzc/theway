@@ -1,10 +1,6 @@
 //! System prompt composition for the startup harness.
 
-pub(super) fn compose_system_prompt(
-    cwd: &std::path::Path,
-    memory: &str,
-    tool_names: &[String],
-) -> String {
+pub fn compose_system_prompt(cwd: &std::path::Path, memory: &str, tool_names: &[String]) -> String {
     let mut s = String::new();
     s.push_str(&render_base_prompt(tool_names));
     s.push_str("\n\n");
