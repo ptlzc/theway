@@ -29,8 +29,8 @@
 //!   (`tools` / `resources` / `prompts`) own the un-prefixed slot; everything user-provided
 //!   lives under `custom:`.
 //!
-//! A custom notification that provides neither dedup key form is dropped at the adapter
-//! with `dropped_count += 1`; the runtime never sees it. Adapters do **not** dedup
+//! A custom notification that provides no `_meta.theway_dedup_key` is dropped at the
+//! adapter with `dropped_count += 1`; the runtime never sees it. Adapters do **not** dedup
 //! themselves — the runtime owns the dedup window. We surface a stable, server-scoped key
 //! per source/method so the runtime can do its job.
 //!
@@ -142,7 +142,7 @@ impl NotificationHook for McpNotificationHook {
                     let mut st = self.status.lock();
                     st.dropped_count = st.dropped_count.saturating_add(1);
                     st.last_error = Some(format!(
-                        "dropped custom notification {:?}: missing `_meta.theway_dedup_key` or `_theway_dedup_key`",
+                        "dropped custom notification {:?}: missing `_meta.theway_dedup_key`",
                         notification.method
                     ));
                     continue;
@@ -177,7 +177,7 @@ impl NotificationHook for McpNotificationHook {
 }
 
 /// Translate one MCP push frame to a `Trigger`, or `None` if the frame should be dropped at
-/// the adapter (custom method without `_theway_dedup_key` / `_meta.theway_dedup_key`).
+/// the adapter (custom method without `_meta.theway_dedup_key`).
 ///
 /// Pure function so the test suite can pin every row of the §4.2.3 table without spinning
 /// up a real `McpClient`.
@@ -290,10 +290,9 @@ fn idempotency_for(
             ))
         }
         _ => {
-            // Custom notification — require an explicit dedup key. Prefer `_meta.theway_dedup_key`
-            // (canonical going forward) over `_theway_dedup_key` (legacy, kept for adapters
-            // already in the wild). Either form is treated as `Drop` semantics: every
-            // explicit key represents one logical event, no replacement.
+            // Custom notification — require an explicit dedup key in the canonical
+            // `_meta.theway_dedup_key` location. Every explicit key is treated as `Drop`
+            // semantics: one logical event per key, no replacement.
             //
             // The `custom:` segment after the server prefix keeps custom keys in their
             // own namespace within the server so a user supplying
@@ -311,18 +310,12 @@ fn idempotency_for(
     }
 }
 
-/// Pull a dedup key out of a custom notification's params, preferring the new
-/// `_meta.theway_dedup_key` location and falling back to the older top-level `_theway_dedup_key`.
+/// Pull a dedup key out of a custom notification's params, reading only the canonical
+/// `_meta.theway_dedup_key` location.
 fn extract_dedup_key(params: &serde_json::Value) -> Option<String> {
-    if let Some(k) = params
+    params
         .get("_meta")
         .and_then(|m| m.get("theway_dedup_key"))
-        .and_then(|v| v.as_str())
-    {
-        return Some(k.to_string());
-    }
-    params
-        .get("_theway_dedup_key")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
 }

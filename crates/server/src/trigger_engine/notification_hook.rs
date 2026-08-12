@@ -110,7 +110,7 @@ pub struct NotificationHookStatus {
     /// v1 hooks expose their own queue depth so `/triggers hooks` can show it.
     pub queued_count: u64,
     /// Count of events the adapter intentionally dropped (e.g. unsigned custom MCP
-    /// notification without `_theway_dedup_key`).
+    /// notification without `_meta.theway_dedup_key`).
     pub dropped_count: u64,
     /// Count of events the adapter dedup-suppressed before pushing into the sink. Distinct
     /// from runtime-side dedup, which is separate and counted in `TriggerRecord`.

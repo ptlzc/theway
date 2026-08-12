@@ -261,7 +261,7 @@ impl TriggerAction {
 /// the parent session immediately. `PromoteSummaryWhenResultDetailsMatch` is the
 /// dynamic-rule path: promotion is gated on **structured** sub-agent result details, never
 /// on free-form summary text — eliminates the prompt-injection / authorization-channel risk
-/// of the older `PromoteSummaryWhenSummaryContains` variant (still present for transition).
+/// of the older free-form summary-substring variant (since removed).
 /// `InjectNextTurn` per the issue #20 amendment is deferred to sub-PR 6 / RFC 4 work.
 #[derive(Clone, Debug, Default)]
 pub enum PromoteAction {
@@ -275,19 +275,6 @@ pub enum PromoteAction {
         /// because the audit contract reserves `template_name` for a registry-style identity,
         /// not the body content.
         template_body: Option<String>,
-    },
-    /// Deprecated: free-form `summary` substring matching cannot safely gate promotion —
-    /// the sub-agent's natural-language output becomes an authorization channel a custom
-    /// rule action or model paraphrase can manipulate. Prefer
-    /// [`PromoteAction::PromoteSummaryWhenResultDetailsMatch`] which evaluates a
-    /// `PromotionCondition` against structured `trigger_result.details` instead. Kept here
-    /// during the transition; downstream PRs remove it once all callers have migrated.
-    #[deprecated(
-        note = "promotes on free-form summary substring; use PromoteSummaryWhenResultDetailsMatch with structured PromotionCondition::AnyOf instead"
-    )]
-    PromoteSummaryWhenSummaryContains {
-        template_body: Option<String>,
-        required_substrings: Vec<String>,
     },
     /// Promotion is gated on a [`PromotionCondition`] evaluated against the sub-agent's
     /// **structured** `trigger_result.details` (populated by the sub-agent via marker tools,

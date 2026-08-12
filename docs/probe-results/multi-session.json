@@ -1,0 +1,7 @@
+{
+  "name": "multi-session",
+  "passed": true,
+  "evidence": "Created 2 sessions, ListSessions returned 3 total; each session independently addressable",
+  "gap": null,
+  "detail": null
+}

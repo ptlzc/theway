@@ -1,5 +1,6 @@
-//! Promoted dynamic trigger results entering the parent chat context, and the
-//! trigger sub-agent inheriting the parent skill catalog.
+//! Chat-promotion gating for dynamic trigger results (fail-closed until the marker
+//! tool wires structured `trigger_result.details`), and the trigger sub-agent
+//! inheriting the parent skill catalog.
 
 use std::sync::Arc;
 
@@ -13,7 +14,7 @@ use super::helpers::*;
 use super::triggers;
 
 #[tokio::test(flavor = "current_thread")]
-async fn promoted_dynamic_trigger_result_enters_parent_chat_context() {
+async fn promoted_dynamic_trigger_fails_closed_until_marker_details_are_wired() {
     let _guard = DYNAMIC_TRIGGER_LOCK.lock().unwrap();
     triggers::global_registry().clear_for_tests();
 
@@ -69,16 +70,23 @@ async fn promoted_dynamic_trigger_result_enters_parent_chat_context() {
         "dynamic trigger sub-agent should complete"
     );
 
+    // The sub-agent still runs the matched rule action…
+    assert_eq!(bash_calls.lock().as_slice(), ["echo dynamic-fired"]);
+
+    // …but promotion fails closed: `trigger_result.details` stays `Null` until the
+    // `mark_dynamic_rule_matched` marker tool is wired into the sub-agent, so the
+    // structured `AnyOf` condition reports `result_details_missing` and nothing may be
+    // injected into the parent transcript.
     let parent_messages = harness.agent().state().messages.clone();
     assert!(
-        parent_messages.iter().any(|message| {
+        !parent_messages.iter().any(|message| {
             matches!(
                 message,
                 theway_core::AgentMessage::Llm(Message::User(user))
-                    if matches!(&user.content, UserContent::Text(text) if text.contains("[Trigger trace-dynamic-e2e]") && text.contains("matched dyn-"))
+                    if matches!(&user.content, UserContent::Text(text) if text.contains("[Trigger trace-dynamic-e2e]"))
             )
         }),
-        "promoted trigger result should be present in parent agent context: {parent_messages:#?}"
+        "no promoted trigger result may enter the parent context while result details are missing: {parent_messages:#?}"
     );
 
     let entries = session.entries().await.expect("session entries");
@@ -92,10 +100,15 @@ async fn promoted_dynamic_trigger_result_enters_parent_chat_context() {
                             .as_ref()
                             .and_then(|d| d.get("state"))
                             .and_then(|v| v.as_str())
-                            == Some("success")
+                            == Some("skipped")
+                        && data
+                            .as_ref()
+                            .and_then(|d| d.get("reason"))
+                            .and_then(|v| v.as_str())
+                            == Some("result_details_missing")
             )
         }),
-        "promotion audit should be written: {entries:#?}"
+        "fail-closed promotion audit should be written: {entries:#?}"
     );
 }
 

@@ -242,20 +242,6 @@ pub(super) async fn apply_promotion(
         PromoteAction::PromoteSummaryNow { template_body } => {
             (template_body.clone(), "promote_summary_now")
         }
-        #[allow(deprecated)]
-        PromoteAction::PromoteSummaryWhenSummaryContains {
-            template_body,
-            required_substrings,
-        } => {
-            let summary_text = summary.as_deref().unwrap_or_default();
-            if !required_substrings
-                .iter()
-                .any(|needle| summary_text.contains(needle))
-            {
-                return;
-            }
-            (template_body.clone(), "promote_summary_now")
-        }
         PromoteAction::PromoteSummaryWhenResultDetailsMatch {
             template_body,
             condition,

@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use crate::trigger_engine::event::{TriggerEvent, TriggerListener};
 use crate::trigger_engine::execution::{
-    BeforeTriggerActionContext, BeforeTriggerActionHook, PromoteAction, TriggerAction,
-    TriggerDelivery,
+    BeforeTriggerActionContext, BeforeTriggerActionHook, PromoteAction, PromotionCondition,
+    TriggerAction, TriggerDelivery,
 };
 use crate::trigger_engine::notification_hook::{
     HookError, HookState, NotificationHook, NotificationHookStatus, TriggerSink,
@@ -157,15 +157,18 @@ pub fn before_trigger_action_hook(registry: DynamicTriggerRegistry) -> BeforeTri
                     promote: if promote_rule_ids.is_empty() {
                         PromoteAction::None
                     } else {
-                        // Transitional: still uses the deprecated summary-substring path.
-                        // Tools-MCP's follow-up PR migrates this to
-                        // `PromoteAction::PromoteSummaryWhenResultDetailsMatch` with
-                        // `PromotionCondition::AnyOf` once the `mark_dynamic_rule_matched`
-                        // tool is wired into the sub-agent. Allowed locally until then.
-                        #[allow(deprecated)]
-                        PromoteAction::PromoteSummaryWhenSummaryContains {
+                        // Structured gate: promotion fires only when the sub-agent's
+                        // `trigger_result.details` records a matched rule ID from this
+                        // promote-allowlist (written by the marker tool, never parsed from
+                        // free-form output). Until `mark_dynamic_rule_matched` is wired
+                        // into the sub-agent, `details` stays `Null` and promotion fails
+                        // closed with `result_details_missing` — the safe default.
+                        PromoteAction::PromoteSummaryWhenResultDetailsMatch {
                             template_body: None,
-                            required_substrings: promote_rule_ids,
+                            condition: PromotionCondition::AnyOf {
+                                json_pointer: "/dynamic_trigger/matched_rule_ids".to_string(),
+                                any_of: promote_rule_ids,
+                            },
                         }
                     },
                     promote_requires_approval: false,

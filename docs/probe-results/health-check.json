@@ -1,0 +1,7 @@
+{
+  "name": "health-check",
+  "passed": true,
+  "evidence": "Check returns SERVING for all service names",
+  "gap": null,
+  "detail": null
+}

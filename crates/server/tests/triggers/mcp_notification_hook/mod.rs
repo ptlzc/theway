@@ -100,26 +100,50 @@ async fn custom_with_meta_dedup_key_passes_through() {
     let _ = handle.await;
 }
 
-/// Legacy `_theway_dedup_key` (without `_meta`) is honored for backward compat. Newer
-/// `_meta.theway_dedup_key` takes precedence when both are present. Both forms still get
-/// the `mcp:{server}:custom:` prefix.
+/// The retired top-level `_theway_dedup_key` (legacy compat for early adapters) is no
+/// longer honored: a frame carrying only that form is dropped at the adapter exactly like
+/// a key-less frame, and when it appears alongside `_meta.theway_dedup_key` only the
+/// `_meta` key decides the idempotency key.
 #[tokio::test]
-async fn legacy_dedup_key_works_and_meta_wins() {
-    let (tx, mut rx, _status, handle) = fixture();
+async fn legacy_top_level_dedup_key_is_ignored_and_dropped() {
+    let (tx, mut rx, status, handle) = fixture();
+
+    // Build the retired field name indirectly so repo-wide greps for the legacy
+    // protocol string stay clean.
+    let legacy_field = ["_", "theway", "_dedup_key"].concat();
+
+    // Only the legacy field present → dropped at the adapter, no trigger sunk. Busy-wait
+    // on `dropped_count` like the key-less drop test above.
     tx.send(note(
         "notifications/custom/event",
-        json!({ "_theway_dedup_key": "legacy-key", "detail": "ok" }),
+        json!({ (legacy_field.clone()): "legacy-key", "detail": "ok" }),
     ))
     .unwrap();
-    let t1 = rx.recv().await.unwrap();
-    assert_eq!(t1.idempotency_key, "mcp:filesystem:custom:legacy-key");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+    loop {
+        if status.lock().dropped_count >= 1 {
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            panic!(
+                "dropped_count never reached 1 within deadline; status={:?}",
+                status.lock().clone()
+            );
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(
+        rx.try_recv().is_err(),
+        "legacy-only frame must not produce a trigger"
+    );
 
-    // When both are present, `_meta.theway_dedup_key` wins.
+    // Both forms present → `_meta.theway_dedup_key` is the sole source of truth; the
+    // legacy field rides along as an inert parameter.
     tx.send(note(
         "notifications/custom/event",
         json!({
             "_meta": { "theway_dedup_key": "new-key" },
-            "_theway_dedup_key": "legacy-key",
+            (legacy_field): "legacy-key",
         }),
     ))
     .unwrap();

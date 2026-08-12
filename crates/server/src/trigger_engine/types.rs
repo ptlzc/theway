@@ -143,7 +143,7 @@ pub struct TriggerAuthority {
 /// - MCP `notifications/tools/listChanged` / `notifications/resources/listChanged` →
 ///   [`Self::LatestReplaces`] (the latest catalog snapshot supersedes earlier ones).
 /// - MCP `notifications/resources/updated` per resource URI → [`Self::LatestReplaces`].
-/// - Custom MCP notifications without a `_theway_dedup_key` agreement → [`Self::Drop`].
+/// - Custom MCP notifications without a `_meta.theway_dedup_key` agreement → [`Self::Drop`].
 /// - Webhook-style events where every occurrence matters (e.g. PR comments) →
 ///   [`Self::Drop`] keyed by a per-event id.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -574,8 +574,13 @@ impl Health for HealthService {
         &self,
         _request: Request<HealthCheckRequest>,
     ) -> Result<Response<Self::WatchStream>, Status> {
-        // Emit a single SERVING frame, then end the stream.
-        let stream = futures::stream::once(async {
+        // Continuous health stream: emit SERVING every 5 seconds. gRPC load
+        // balancers, grpc_health_probe, and k8s probes expect Watch to stay
+        // open and periodically re-emit the serving status; a single-frame
+        // stream would mark the endpoint as transient/dead after the first
+        // frame completes.
+        let interval = tokio::time::interval(std::time::Duration::from_secs(5));
+        let stream = tokio_stream::wrappers::IntervalStream::new(interval).map(|_| {
             Ok(HealthCheckResponse {
                 status: ServingStatus::Serving as i32,
             })

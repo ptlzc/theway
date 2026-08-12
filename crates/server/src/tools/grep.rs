@@ -9,8 +9,8 @@
 //!   - `files_with_matches`: just the file paths (deduped).
 //!   - `count`: `count<TAB>path` per file (ripgrep `--count` style).
 //!
-//! Result count is capped (`max_results`, legacy alias `limit`); long lines are previewed
-//! around the match with `[line truncated]` markers.
+//! Result count is capped (`max_results`); long lines are previewed around the match with
+//! `[line truncated]` markers.
 
 use async_trait::async_trait;
 use ignore::WalkBuilder;
@@ -72,17 +72,10 @@ impl AgentTool for GrepTool {
             .and_then(|v| v.as_u64())
             .map(|n| n as usize)
             .unwrap_or(0);
-        // `max_results` is the canonical cap; `limit` is kept as a legacy alias.
         let max_matches = params
             .get("max_results")
             .and_then(|v| v.as_u64())
             .map(|n| n as usize)
-            .or_else(|| {
-                params
-                    .get("limit")
-                    .and_then(|v| v.as_u64())
-                    .map(|n| n as usize)
-            })
             .unwrap_or(DEFAULT_MAX_RESULTS);
         let mut builder = regex::RegexBuilder::new(pattern);
         builder.case_insensitive(case_insensitive);
@@ -354,7 +347,6 @@ static DEFINITION: Lazy<Tool> = Lazy::new(|| Tool {
             "case_insensitive": { "type": "boolean", "description": "Case-insensitive match" },
             "context_lines": { "type": "number", "description": "Lines of context before/after each match (content mode)" },
             "max_results": { "type": "number", "description": "Max matches to return (default: 100)" },
-            "limit": { "type": "integer", "description": "Max match count (legacy alias for max_results)" },
         },
         "required": ["pattern"],
     }),

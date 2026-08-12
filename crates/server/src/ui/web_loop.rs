@@ -183,6 +183,14 @@ impl App {
         self.refresh_goal_state().await;
         self.publish_snapshot(&latest, &snapshot_tx).await;
 
+        // SIGTERM handler (Unix): docker stop / k8s pod termination / systemd
+        // send SIGTERM first, then SIGKILL after a grace period. Without a
+        // SIGTERM handler, the process ignores the signal and gets force-killed,
+        // skipping the session flush + run abort shutdown path.
+        #[cfg(unix)]
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .ok();
+
         loop {
             tokio::select! {
                 biased;
@@ -235,6 +243,14 @@ impl App {
                     self.publish_snapshot(&latest, &snapshot_tx).await;
                 }
                 _ = tokio::signal::ctrl_c() => {
+                    if turn.fut.is_some() {
+                        self.request_abort(&mut turn);
+                        self.publish_snapshot(&latest, &snapshot_tx).await;
+                    }
+                    break;
+                }
+                _ = async { sigterm.as_mut().unwrap().recv().await }, if sigterm.is_some() => {
+                    self.system_line(format!("[{label}] received SIGTERM, shutting down"));
                     if turn.fut.is_some() {
                         self.request_abort(&mut turn);
                         self.publish_snapshot(&latest, &snapshot_tx).await;

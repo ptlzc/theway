@@ -1,0 +1,28 @@
+[package]
+name = "theway-probe"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "gRPC serviceability probe for theway --grpc: health check, multi-session, graceful shutdown"
+license = "MIT"
+
+[[bin]]
+name = "theway-probe"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "signal"] }
+tonic = { version = "0.14", features = ["channel", "codegen"] }
+tonic-prost = "0.14"
+prost = "0.14"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[build-dependencies]
+protox = "0.9"
+tonic-prost-build = "0.14"
+
+[lints]
+workspace = true
