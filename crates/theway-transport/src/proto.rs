@@ -1,10 +1,10 @@
-//! `WebStatus` ↔ `SessionState` conversion (transport layer).
+//! `WireStatus` ↔ `SessionState` conversion (transport layer).
 //!
-//! `WebStatus` (serde, `crate::wire`) is the internal model shared by the
+//! `WireStatus` (serde, `crate::wire`) is the internal model shared by the
 //! `--http` JSON surface and the UI event loop; `SessionState` (prost, generated
 //! from `proto/theway_grpc.proto` by this crate's build.rs) is the structured
 //! wire model for gRPC. The gRPC server serializes `SessionState` as binary
-//! protobuf; JSON channels keep using `WebStatus` until the protojson migration
+//! protobuf; JSON channels keep using `WireStatus` until the protojson migration
 //! (see docs/PROTOCOL.md).
 
 /// Generated protobuf code for `proto/theway_grpc.proto` (package
@@ -19,14 +19,14 @@ pub mod health {
     tonic::include_proto!("grpc.health.v1");
 }
 
-use crate::feed::{self, WebFeedBlock};
-use crate::wire::WebStatus;
+use crate::feed::{self, WireFeedBlock};
+use crate::wire::WireStatus;
 use theway_core::multiagent::graph::types::DagEvent;
 use theway_core::multiagent::registry::AgentJobEvent;
 use theway_grpc as wire;
 
 /// Convert the internal snapshot into the structured wire model.
-pub fn session_state(snapshot: &WebStatus) -> wire::SessionState {
+pub fn session_state(snapshot: &WireStatus) -> wire::SessionState {
     wire::SessionState {
         session_id: snapshot.session_id.clone(),
         model: snapshot.model.clone(),
@@ -154,6 +154,309 @@ pub fn session_state(snapshot: &WebStatus) -> wire::SessionState {
     }
 }
 
+/// Convert a `SessionState` (proto, from a gRPC client) back into the internal
+/// serde snapshot model. The client half of the protocol (TUI, future local
+/// clients) renders from `WireStatus` exactly like the JSON surface does, so
+/// every snapshot frame round-trips through this conversion.
+pub fn wire_status(state: &wire::SessionState) -> WireStatus {
+    WireStatus {
+        session_id: state.session_id.clone(),
+        model: state.model.clone(),
+        model_catalog: state
+            .model_catalog
+            .iter()
+            .map(|group| crate::wire::ProviderGroup {
+                provider: group.provider.clone(),
+                has_credential: group.has_credential,
+                models: group
+                    .models
+                    .iter()
+                    .map(|entry| crate::wire::ModelEntry {
+                        id: entry.id.clone(),
+                        name: entry.name.clone(),
+                    })
+                    .collect(),
+            })
+            .collect(),
+        cwd: state.cwd.clone(),
+        busy: state.busy,
+        queued_count: state.queued_count as usize,
+        latest_trigger_poll: state.latest_trigger_poll.as_ref().map(|status| {
+            crate::feed::TriggerPollStatus {
+                checked_at: status.checked_at.clone(),
+                trace_id: status.trace_id.clone(),
+                source_label: status.source_label.clone(),
+                event_label: status.event_label.clone(),
+                summary: status.summary.clone(),
+            }
+        }),
+        goal: state.goal.as_ref().map(|goal| crate::wire::WireGoalSnapshot {
+            condition: goal.condition.clone(),
+            status: goal.status.clone(),
+            iterations: goal.iterations,
+            last_reason: goal.last_reason.clone(),
+        }),
+        control_plane_prompt: state.control_plane_prompt.as_ref().map(|prompt| {
+            crate::wire::WireControlPlanePromptSnapshot {
+                tool_name: prompt.tool_name.clone(),
+                label: prompt.label.clone(),
+                reason: prompt.reason.clone(),
+                args_hash: prompt.args_hash.clone(),
+                payload: prompt.payload.clone(),
+            }
+        }),
+        sidebar: sidebar_wire(state.sidebar.as_ref()),
+        feed_blocks: state.feed_blocks.iter().map(wire_feed_block).collect(),
+        feed_lines: state.feed_lines.clone(),
+        dags: state.dags.iter().map(wire_dag_run).collect(),
+        subagents: state.subagents.iter().map(wire_subagent_job).collect(),
+    }
+}
+
+fn sidebar_wire(sidebar: Option<&wire::SidebarSnapshot>) -> crate::wire::WireSidebarSnapshot {
+    let sidebar = sidebar.cloned().unwrap_or_default();
+    crate::wire::WireSidebarSnapshot {
+        inbox_new: sidebar.inbox_new as usize,
+        skills: crate::wire::WireSkillsSnapshot {
+            total: sidebar.skills.as_ref().map(|s| s.total as usize).unwrap_or(0),
+            enabled: sidebar.skills.as_ref().map(|s| s.enabled as usize).unwrap_or(0),
+            disabled: sidebar
+                .skills
+                .as_ref()
+                .map(|s| s.disabled as usize)
+                .unwrap_or(0),
+            builtin: sidebar.skills.as_ref().map(|s| s.builtin as usize).unwrap_or(0),
+            user: sidebar.skills.as_ref().map(|s| s.user as usize).unwrap_or(0),
+            project: sidebar
+                .skills
+                .as_ref()
+                .map(|s| s.project as usize)
+                .unwrap_or(0),
+            items: sidebar
+                .skills
+                .as_ref()
+                .map(|s| {
+                    s.items
+                        .iter()
+                        .map(|skill| crate::wire::WireSkillSnapshot {
+                            name: skill.name.clone(),
+                            source: skill.source.clone(),
+                            file_path: skill.file_path.clone(),
+                            enabled: skill.enabled,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+        },
+        triggers: crate::wire::WireTriggersSnapshot {
+            total: sidebar
+                .triggers
+                .as_ref()
+                .map(|t| t.total as usize)
+                .unwrap_or(0),
+            enabled: sidebar
+                .triggers
+                .as_ref()
+                .map(|t| t.enabled as usize)
+                .unwrap_or(0),
+            disabled: sidebar
+                .triggers
+                .as_ref()
+                .map(|t| t.disabled as usize)
+                .unwrap_or(0),
+            rules: sidebar
+                .triggers
+                .as_ref()
+                .map(|t| {
+                    t.rules
+                        .iter()
+                        .map(|rule| crate::wire::WireTriggerRuleSnapshot {
+                            id: rule.id.clone(),
+                            full_id: rule.full_id.clone(),
+                            enabled: rule.enabled,
+                            mode: rule.mode.clone(),
+                            condition: rule.condition.clone(),
+                            action: rule.action.clone(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+        },
+        cron: crate::wire::WireCronSnapshot {
+            total: sidebar.cron.as_ref().map(|c| c.total as usize).unwrap_or(0),
+            enabled: sidebar.cron.as_ref().map(|c| c.enabled as usize).unwrap_or(0),
+            disabled: sidebar.cron.as_ref().map(|c| c.disabled as usize).unwrap_or(0),
+            jobs: sidebar
+                .cron
+                .as_ref()
+                .map(|c| {
+                    c.jobs
+                        .iter()
+                        .map(|job| crate::wire::WireCronJobSnapshot {
+                            id: job.id.clone(),
+                            enabled: job.enabled,
+                            schedule: job.schedule.clone(),
+                            action: job.action.clone(),
+                            skipped_overlap_count: job.skipped_overlap_count,
+                            last_error: job.last_error.clone(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+        },
+        mcp: crate::wire::WireMcpSnapshot {
+            servers: sidebar.mcp.as_ref().map(|m| m.servers as usize).unwrap_or(0),
+            tools: sidebar.mcp.as_ref().map(|m| m.tools as usize).unwrap_or(0),
+            notification_hooks: sidebar
+                .mcp
+                .as_ref()
+                .map(|m| m.notification_hooks as usize)
+                .unwrap_or(0),
+            server_names: sidebar
+                .mcp
+                .as_ref()
+                .map(|m| m.server_names.clone())
+                .unwrap_or_default(),
+            tool_names: sidebar
+                .mcp
+                .as_ref()
+                .map(|m| m.tool_names.clone())
+                .unwrap_or_default(),
+        },
+        tools: crate::wire::WireToolsSnapshot {
+            total: sidebar.tools.as_ref().map(|t| t.total as usize).unwrap_or(0),
+            names: sidebar
+                .tools
+                .as_ref()
+                .map(|t| t.names.clone())
+                .unwrap_or_default(),
+        },
+        hooks: sidebar.hooks.clone(),
+        runtime: sidebar.runtime.clone(),
+    }
+}
+
+fn wire_feed_block(block: &wire::FeedBlock) -> WireFeedBlock {
+    use wire::feed_block::Kind;
+    let Some(kind) = block.kind.as_ref() else {
+        return WireFeedBlock::Plain {
+            text: String::new(),
+            level: feed::Level::Output,
+            timestamp: None,
+        };
+    };
+    match kind {
+        Kind::User(block) => WireFeedBlock::User {
+            text: block.text.clone(),
+            timestamp: block.timestamp.clone(),
+        },
+        Kind::Assistant(block) => WireFeedBlock::Assistant {
+            text: block.text.clone(),
+            timestamp: block.timestamp.clone(),
+        },
+        Kind::Thinking(block) => WireFeedBlock::Thinking {
+            text: block.text.clone(),
+            timestamp: block.timestamp.clone(),
+        },
+        Kind::Tool(block) => WireFeedBlock::Tool {
+            name: block.name.clone(),
+            args: block.args.clone(),
+            timestamp: block.timestamp.clone(),
+        },
+        Kind::ToolResult(block) => WireFeedBlock::ToolResult {
+            lines: block.lines.clone(),
+            is_error: block.is_error,
+            timestamp: block.timestamp.clone(),
+        },
+        Kind::Plain(block) => WireFeedBlock::Plain {
+            text: block.text.clone(),
+            level: level_from_str(&block.level),
+            timestamp: block.timestamp.clone(),
+        },
+    }
+}
+
+/// `PlainBlock.level` serializes as snake_case variant names on the JSON surface.
+fn level_from_str(level: &str) -> feed::Level {
+    match level {
+        "system" => feed::Level::System,
+        "error" => feed::Level::Error,
+        "note" => feed::Level::Note,
+        "header" => feed::Level::Header,
+        "qr" => feed::Level::Qr,
+        _ => feed::Level::Output,
+    }
+}
+
+fn wire_dag_run(run: &wire::DagRunSnapshot) -> crate::wire::WireDagRunSnapshot {
+    crate::wire::WireDagRunSnapshot {
+        id: run.id.clone(),
+        name: run.name.clone(),
+        kind: run.kind.clone(),
+        status: run.status.clone(),
+        fail_fast: run.fail_fast,
+        max_concurrency: run.max_concurrency as usize,
+        direction: run.direction.clone(),
+        created_at: run.created_at,
+        completed_at: run.completed_at,
+        error: run.error.clone(),
+        nodes: run
+            .nodes
+            .iter()
+            .map(|node| crate::wire::WireDagNodeSnapshot {
+                id: node.id.clone(),
+                agent: node.agent.clone(),
+                status: node.status.clone(),
+                depends_on: node.depends_on.clone(),
+                job_id: node.job_id.clone(),
+                attempt: node.attempt,
+                started_at: node.started_at,
+                completed_at: node.completed_at,
+                error: node.error.clone(),
+                input_tokens: node.input_tokens,
+                output_tokens: node.output_tokens,
+                result: node.result.as_ref().map(|result| {
+                    crate::wire::WireNodeResultSnapshot {
+                        success: result.success,
+                        error: result.error.clone(),
+                        duration_ms: result.duration_ms,
+                        attempt: result.attempt,
+                        total_attempts: result.total_attempts,
+                    }
+                }),
+                output_tail: node.output_tail.clone(),
+                live_preview: node.live_preview.clone(),
+            })
+            .collect(),
+    }
+}
+
+fn wire_subagent_job(job: &wire::SubagentJobSnapshot) -> crate::wire::WireAgentJobSnapshot {
+    crate::wire::WireAgentJobSnapshot {
+        id: job.id.clone(),
+        agent: job.agent.clone(),
+        source: job.source.clone(),
+        run_id: job.run_id.clone(),
+        node_id: job.node_id.clone(),
+        status: job.status.clone(),
+        started_at: job.started_at,
+        completed_at: job.completed_at,
+        duration_ms: job.duration_ms,
+        attempt: job.attempt,
+        total_attempts: job.total_attempts,
+        input_tokens: job.input_tokens,
+        output_tokens: job.output_tokens,
+        error: job.error.clone(),
+        output_tail: job.output_tail.clone(),
+        live_preview: job.live_preview.clone(),
+        tps: job.tps,
+        cps: job.cps,
+        chars: job.chars,
+        tools_called: job.tools_called,
+        turn: job.turn,
+    }
+}
+
 /// Convert the internal session summary (session-resource-model) into the
 /// structured wire model.
 pub fn session_summary_wire(summary: &crate::wire::SessionSummary) -> wire::SessionSummary {
@@ -189,7 +492,7 @@ pub(crate) fn resolve_session_id(
 }
 
 /// Convert one DAG run snapshot into the wire form.
-pub fn dag_run_wire(run: &crate::wire::WebDagRunSnapshot) -> wire::DagRunSnapshot {
+pub fn dag_run_wire(run: &crate::wire::WireDagRunSnapshot) -> wire::DagRunSnapshot {
     wire::DagRunSnapshot {
         id: run.id.clone(),
         name: run.name.clone(),
@@ -205,7 +508,7 @@ pub fn dag_run_wire(run: &crate::wire::WebDagRunSnapshot) -> wire::DagRunSnapsho
     }
 }
 
-fn dag_node_wire(node: &crate::wire::WebDagNodeSnapshot) -> wire::DagNodeSnapshot {
+fn dag_node_wire(node: &crate::wire::WireDagNodeSnapshot) -> wire::DagNodeSnapshot {
     wire::DagNodeSnapshot {
         id: node.id.clone(),
         agent: node.agent.clone(),
@@ -324,7 +627,7 @@ pub fn dag_event_wire(event: &DagEvent) -> wire::StreamEvent {
     wire::StreamEvent { kind: Some(kind) }
 }
 
-fn subagent_wire(job: &crate::wire::WebAgentJobSnapshot) -> wire::SubagentJobSnapshot {
+fn subagent_wire(job: &crate::wire::WireAgentJobSnapshot) -> wire::SubagentJobSnapshot {
     wire::SubagentJobSnapshot {
         id: job.id.clone(),
         agent: job.agent.clone(),
@@ -351,22 +654,22 @@ fn subagent_wire(job: &crate::wire::WebAgentJobSnapshot) -> wire::SubagentJobSna
 }
 
 /// Convert one serde-tagged feed block into the proto oneof form.
-fn feed_block(block: &WebFeedBlock) -> wire::FeedBlock {
+fn feed_block(block: &WireFeedBlock) -> wire::FeedBlock {
     use wire::feed_block::Kind;
     let kind = match block {
-        WebFeedBlock::User { text, timestamp } => Kind::User(wire::UserBlock {
+        WireFeedBlock::User { text, timestamp } => Kind::User(wire::UserBlock {
             text: text.clone(),
             timestamp: timestamp.clone(),
         }),
-        WebFeedBlock::Assistant { text, timestamp } => Kind::Assistant(wire::AssistantBlock {
+        WireFeedBlock::Assistant { text, timestamp } => Kind::Assistant(wire::AssistantBlock {
             text: text.clone(),
             timestamp: timestamp.clone(),
         }),
-        WebFeedBlock::Thinking { text, timestamp } => Kind::Thinking(wire::ThinkingBlock {
+        WireFeedBlock::Thinking { text, timestamp } => Kind::Thinking(wire::ThinkingBlock {
             text: text.clone(),
             timestamp: timestamp.clone(),
         }),
-        WebFeedBlock::Tool {
+        WireFeedBlock::Tool {
             name,
             args,
             timestamp,
@@ -375,7 +678,7 @@ fn feed_block(block: &WebFeedBlock) -> wire::FeedBlock {
             args: args.clone(),
             timestamp: timestamp.clone(),
         }),
-        WebFeedBlock::ToolResult {
+        WireFeedBlock::ToolResult {
             lines,
             is_error,
             timestamp,
@@ -384,7 +687,7 @@ fn feed_block(block: &WebFeedBlock) -> wire::FeedBlock {
             is_error: *is_error,
             timestamp: timestamp.clone(),
         }),
-        WebFeedBlock::Plain {
+        WireFeedBlock::Plain {
             text,
             level,
             timestamp,

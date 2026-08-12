@@ -34,10 +34,10 @@ pub struct WebOptions {
 }
 
 #[derive(Debug)]
-pub enum WebCommand {
+pub enum WireCommand {
     Submit {
         text: String,
-        images: Vec<WebPromptImage>,
+        images: Vec<WirePromptImage>,
         /// true = stop the current turn and run this message now (INTERRUPT);
         /// false = queue after the current turn (GUIDE, default).
         interrupt: bool,
@@ -82,7 +82,7 @@ pub struct SessionSummary {
 /// graph mode: one DAG run (mirrors `theway_grpc.proto` DagRunSnapshot; task text is
 /// deliberately excluded from the wire model — full text goes through GetNodeOutput).
 #[derive(Clone, Debug, Serialize)]
-pub struct WebDagRunSnapshot {
+pub struct WireDagRunSnapshot {
     pub id: String,
     pub name: String,
     /// "dag" | "goal" — goal runs are single-node self-loops (condition-terminated).
@@ -94,11 +94,11 @@ pub struct WebDagRunSnapshot {
     pub created_at: i64,
     pub completed_at: Option<i64>,
     pub error: Option<String>,
-    pub nodes: Vec<WebDagNodeSnapshot>,
+    pub nodes: Vec<WireDagNodeSnapshot>,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct WebDagNodeSnapshot {
+pub struct WireDagNodeSnapshot {
     pub id: String,
     pub agent: String,
     pub status: String,
@@ -110,13 +110,13 @@ pub struct WebDagNodeSnapshot {
     pub error: Option<String>,
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
-    pub result: Option<WebNodeResultSnapshot>,
+    pub result: Option<WireNodeResultSnapshot>,
     pub output_tail: Option<String>,
     pub live_preview: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct WebNodeResultSnapshot {
+pub struct WireNodeResultSnapshot {
     pub success: bool,
     pub error: Option<String>,
     pub duration_ms: Option<u64>,
@@ -128,7 +128,7 @@ pub struct WebNodeResultSnapshot {
 /// Populated from the AgentJobRegistry in P2; the type ships now so the wire
 /// shape is stable.
 #[derive(Clone, Debug, Serialize)]
-pub struct WebAgentJobSnapshot {
+pub struct WireAgentJobSnapshot {
     pub id: String,
     pub agent: String,
     pub source: String,
@@ -153,7 +153,7 @@ pub struct WebAgentJobSnapshot {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct WebStatus {
+pub struct WireStatus {
     pub session_id: String,
     pub model: String,
     pub model_catalog: Vec<ProviderGroup>,
@@ -161,19 +161,19 @@ pub struct WebStatus {
     pub busy: bool,
     pub queued_count: usize,
     pub latest_trigger_poll: Option<crate::feed::TriggerPollStatus>,
-    pub goal: Option<WebGoalSnapshot>,
-    pub control_plane_prompt: Option<WebControlPlanePromptSnapshot>,
-    pub sidebar: WebSidebarSnapshot,
-    pub feed_blocks: Vec<crate::feed::WebFeedBlock>,
+    pub goal: Option<WireGoalSnapshot>,
+    pub control_plane_prompt: Option<WireControlPlanePromptSnapshot>,
+    pub sidebar: WireSidebarSnapshot,
+    pub feed_blocks: Vec<crate::feed::WireFeedBlock>,
     pub feed_lines: Vec<String>,
-    pub dags: Vec<WebDagRunSnapshot>,
-    pub subagents: Vec<WebAgentJobSnapshot>,
+    pub dags: Vec<WireDagRunSnapshot>,
+    pub subagents: Vec<WireAgentJobSnapshot>,
 }
 
-impl WebStatus {
+impl WireStatus {
     /// Convert a `DagRun` (engine state) into the wire snapshot form.
-    pub fn from_dag_run(run: &DagRun) -> WebDagRunSnapshot {
-        WebDagRunSnapshot {
+    pub fn from_dag_run(run: &DagRun) -> WireDagRunSnapshot {
+        WireDagRunSnapshot {
             id: run.id.clone(),
             name: run.name.clone(),
             kind: run.kind.as_str().to_string(),
@@ -187,12 +187,12 @@ impl WebStatus {
             created_at: run.created_at,
             completed_at: run.completed_at,
             error: run.error.clone(),
-            nodes: run.nodes.iter().map(WebStatus::from_dag_node).collect(),
+            nodes: run.nodes.iter().map(WireStatus::from_dag_node).collect(),
         }
     }
 
-    fn from_dag_node(node: &DagNode) -> WebDagNodeSnapshot {
-        WebDagNodeSnapshot {
+    fn from_dag_node(node: &DagNode) -> WireDagNodeSnapshot {
+        WireDagNodeSnapshot {
             id: node.id.clone(),
             agent: node.agent.clone(),
             status: node_status_str(&node.status).to_string(),
@@ -204,14 +204,14 @@ impl WebStatus {
             error: node.error.clone(),
             input_tokens: node.input_tokens,
             output_tokens: node.output_tokens,
-            result: node.result.as_ref().map(WebStatus::from_node_result),
+            result: node.result.as_ref().map(WireStatus::from_node_result),
             output_tail: node.output.clone(),
             live_preview: node.live_preview.clone(),
         }
     }
 
-    fn from_node_result(result: &NodeResult) -> WebNodeResultSnapshot {
-        WebNodeResultSnapshot {
+    fn from_node_result(result: &NodeResult) -> WireNodeResultSnapshot {
+        WireNodeResultSnapshot {
             success: result.success,
             error: result.error.clone(),
             duration_ms: result.duration_ms,
@@ -224,8 +224,8 @@ impl WebStatus {
 /// Convert one subagent job (registry state) into the wire snapshot form.
 pub fn subagent_job_snapshot(
     job: &theway_core::multiagent::registry::AgentJob,
-) -> WebAgentJobSnapshot {
-    WebAgentJobSnapshot {
+) -> WireAgentJobSnapshot {
+    WireAgentJobSnapshot {
         id: job.id.clone(),
         agent: job.agent.clone(),
         source: job.source.clone(),
@@ -279,7 +279,7 @@ pub fn dag_status_str(status: &theway_core::multiagent::graph::types::DagStatus)
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct WebGoalSnapshot {
+pub struct WireGoalSnapshot {
     pub condition: String,
     pub status: String,
     pub iterations: u32,
@@ -287,7 +287,7 @@ pub struct WebGoalSnapshot {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct WebControlPlanePromptSnapshot {
+pub struct WireControlPlanePromptSnapshot {
     pub tool_name: String,
     pub label: String,
     pub reason: String,
@@ -296,30 +296,30 @@ pub struct WebControlPlanePromptSnapshot {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct WebSidebarSnapshot {
+pub struct WireSidebarSnapshot {
     pub inbox_new: usize,
-    pub skills: WebSkillsSnapshot,
-    pub triggers: WebTriggersSnapshot,
-    pub cron: WebCronSnapshot,
-    pub mcp: WebMcpSnapshot,
-    pub tools: WebToolsSnapshot,
+    pub skills: WireSkillsSnapshot,
+    pub triggers: WireTriggersSnapshot,
+    pub cron: WireCronSnapshot,
+    pub mcp: WireMcpSnapshot,
+    pub tools: WireToolsSnapshot,
     pub hooks: Vec<String>,
     pub runtime: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct WebSkillsSnapshot {
+pub struct WireSkillsSnapshot {
     pub total: usize,
     pub enabled: usize,
     pub disabled: usize,
     pub builtin: usize,
     pub user: usize,
     pub project: usize,
-    pub items: Vec<WebSkillSnapshot>,
+    pub items: Vec<WireSkillSnapshot>,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct WebSkillSnapshot {
+pub struct WireSkillSnapshot {
     pub name: String,
     pub source: String,
     pub file_path: String,
@@ -327,15 +327,15 @@ pub struct WebSkillSnapshot {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct WebTriggersSnapshot {
+pub struct WireTriggersSnapshot {
     pub total: usize,
     pub enabled: usize,
     pub disabled: usize,
-    pub rules: Vec<WebTriggerRuleSnapshot>,
+    pub rules: Vec<WireTriggerRuleSnapshot>,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct WebTriggerRuleSnapshot {
+pub struct WireTriggerRuleSnapshot {
     pub id: String,
     pub full_id: String,
     pub enabled: bool,
@@ -345,15 +345,15 @@ pub struct WebTriggerRuleSnapshot {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct WebCronSnapshot {
+pub struct WireCronSnapshot {
     pub total: usize,
     pub enabled: usize,
     pub disabled: usize,
-    pub jobs: Vec<WebCronJobSnapshot>,
+    pub jobs: Vec<WireCronJobSnapshot>,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct WebCronJobSnapshot {
+pub struct WireCronJobSnapshot {
     pub id: String,
     pub enabled: bool,
     pub schedule: String,
@@ -363,7 +363,7 @@ pub struct WebCronJobSnapshot {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct WebMcpSnapshot {
+pub struct WireMcpSnapshot {
     pub servers: usize,
     pub tools: usize,
     pub notification_hooks: usize,
@@ -372,7 +372,7 @@ pub struct WebMcpSnapshot {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct WebToolsSnapshot {
+pub struct WireToolsSnapshot {
     pub total: usize,
     pub names: Vec<String>,
 }
@@ -381,7 +381,7 @@ pub struct WebToolsSnapshot {
 pub struct PromptRequest {
     pub text: String,
     #[serde(default)]
-    pub images: Vec<WebPromptImage>,
+    pub images: Vec<WirePromptImage>,
     /// Target session (optional; must be the active session — see
     /// `POST /prompt` validation in theway-server).
     #[serde(default)]
@@ -389,7 +389,7 @@ pub struct PromptRequest {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-pub struct WebPromptImage {
+pub struct WirePromptImage {
     pub data: String,
     pub name: Option<String>,
 }

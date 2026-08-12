@@ -3,7 +3,7 @@
 use serde::Serialize;
 
 #[derive(Clone, Debug, Serialize)]
-pub enum WebFeedBlock {
+pub enum WireFeedBlock {
     User {
         text: String,
         timestamp: Option<String>,

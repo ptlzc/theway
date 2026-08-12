@@ -4,8 +4,8 @@ use super::*;
 use crate::testing::FakeSessionOps;
 use std::time::Duration;
 
-fn fixture_snapshot(feed_line: &str) -> WebStatus {
-    WebStatus {
+fn fixture_snapshot(feed_line: &str) -> WireStatus {
+    WireStatus {
         session_id: "sess-1".into(),
         model: "provider:model".into(),
         model_catalog: Vec::new(),
@@ -23,7 +23,7 @@ fn fixture_snapshot(feed_line: &str) -> WebStatus {
     }
 }
 
-fn grpc_state() -> (GrpcState, mpsc::UnboundedReceiver<WebCommand>) {
+fn grpc_state() -> (GrpcState, mpsc::UnboundedReceiver<WireCommand>) {
     let (state, command_rx, _ops) = grpc_state_with_ops();
     (state, command_rx)
 }
@@ -32,11 +32,11 @@ fn grpc_state() -> (GrpcState, mpsc::UnboundedReceiver<WebCommand>) {
 /// session) so session RPC tests can mutate the resource set.
 fn grpc_state_with_ops() -> (
     GrpcState,
-    mpsc::UnboundedReceiver<WebCommand>,
+    mpsc::UnboundedReceiver<WireCommand>,
     Arc<FakeSessionOps>,
 ) {
-    let (command_tx, command_rx) = mpsc::unbounded_channel::<WebCommand>();
-    let (snapshot_tx, _) = broadcast::channel::<WebStatus>(16);
+    let (command_tx, command_rx) = mpsc::unbounded_channel::<WireCommand>();
+    let (snapshot_tx, _) = broadcast::channel::<WireStatus>(16);
     let latest = Arc::new(Mutex::new(fixture_snapshot("ready")));
     let (event_tx, _) = broadcast::channel::<AgentJobEvent>(16);
     let registry = AgentJobRegistry::new();
@@ -113,7 +113,7 @@ async fn commands_queue_with_accepted_semantics() {
         .into_inner();
     assert!(result.accepted);
     match command_rx.recv().await.unwrap() {
-        WebCommand::Submit {
+        WireCommand::Submit {
             text,
             images,
             interrupt: _,
@@ -134,7 +134,7 @@ async fn commands_queue_with_accepted_semantics() {
     assert!(result.accepted);
     assert!(matches!(
         command_rx.recv().await.unwrap(),
-        WebCommand::Abort
+        WireCommand::Abort
     ));
 
     let result = state
@@ -146,7 +146,7 @@ async fn commands_queue_with_accepted_semantics() {
         .into_inner();
     assert!(result.accepted);
     match command_rx.recv().await.unwrap() {
-        WebCommand::SetModel { spec } => assert_eq!(spec, "anthropic:claude-haiku-4-5"),
+        WireCommand::SetModel { spec } => assert_eq!(spec, "anthropic:claude-haiku-4-5"),
         other => panic!("unexpected command: {other:?}"),
     }
 
@@ -157,7 +157,7 @@ async fn commands_queue_with_accepted_semantics() {
         .into_inner();
     assert!(result.accepted);
     match command_rx.recv().await.unwrap() {
-        WebCommand::ResolveControlPlane { approve } => assert!(approve),
+        WireCommand::ResolveControlPlane { approve } => assert!(approve),
         other => panic!("unexpected command: {other:?}"),
     }
 }
@@ -503,7 +503,7 @@ async fn grpc_server_over_transport_serves_client() {
         .into_inner();
     assert!(result.accepted);
     match command_rx.recv().await.unwrap() {
-        WebCommand::Submit { text, .. } => assert_eq!(text, "via transport"),
+        WireCommand::Submit { text, .. } => assert_eq!(text, "via transport"),
         other => panic!("unexpected command: {other:?}"),
     }
 
@@ -596,7 +596,7 @@ async fn create_session_returns_summary_and_queues_switch() {
     assert_eq!(session.name, "brand new");
     // Becoming current flows through the event-loop command channel.
     match rx.recv().await.unwrap() {
-        WebCommand::SwitchSession { id } => assert_eq!(id, session.session_id),
+        WireCommand::SwitchSession { id } => assert_eq!(id, session.session_id),
         other => panic!("unexpected command: {other:?}"),
     }
 }
@@ -614,7 +614,7 @@ async fn switch_session_rebinds_current_and_get_state_reflects_it() {
         .into_inner();
     assert!(result.accepted);
     match rx.recv().await.unwrap() {
-        WebCommand::SwitchSession { id } => assert_eq!(id, "target-session"),
+        WireCommand::SwitchSession { id } => assert_eq!(id, "target-session"),
         other => panic!("unexpected command: {other:?}"),
     }
     assert_eq!(*state.session_id.read().unwrap(), "target-session");
@@ -725,7 +725,7 @@ async fn delete_current_session_falls_back_to_most_recent() {
     // Current rebinds to the most recent remaining session + switch queued.
     assert_eq!(*state.session_id.read().unwrap(), "next-session");
     match rx.recv().await.unwrap() {
-        WebCommand::SwitchSession { id } => assert_eq!(id, "next-session"),
+        WireCommand::SwitchSession { id } => assert_eq!(id, "next-session"),
         other => panic!("unexpected command: {other:?}"),
     }
     let response = state

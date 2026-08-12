@@ -1,7 +1,7 @@
 //! Remote relay client (`/web-connect`, issue #22).
 //!
 //! Maintains one outbound WebSocket to the relay worker (default
-//! `pie.0xfefe.me`), pushing [`theway_transport::wire::WebStatus`] frames and receiving remote
+//! `pie.0xfefe.me`), pushing [`theway_transport::wire::WireStatus`] frames and receiving remote
 //! prompt frames. The view token in the public URL is a capability: watch + prompt +
 //! abort, never control-plane approval (see docs/issues/22-web-relay.md). The agent key
 //! authenticates this process as the snapshot source and never appears in the URL.
@@ -22,7 +22,7 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_util::sync::CancellationToken;
 
-use theway_transport::wire::WebStatus;
+use theway_transport::wire::WireStatus;
 
 /// Snapshot frames above this size are dropped (and counted) instead of sent.
 const MAX_SNAPSHOT_BYTES: usize = 1024 * 1024;
@@ -87,14 +87,14 @@ struct RelayShared {
 pub struct RelayHandle {
     /// Public viewer URL (`https://…/session/<token>`).
     pub url: String,
-    snapshot_tx: mpsc::UnboundedSender<WebStatus>,
+    snapshot_tx: mpsc::UnboundedSender<WireStatus>,
     cancel: CancellationToken,
     shared: Arc<Mutex<RelayShared>>,
 }
 
 impl RelayHandle {
     /// Queue a snapshot for the relay. Cheap; the task debounces on the wire.
-    pub fn push_snapshot(&self, snapshot: WebStatus) {
+    pub fn push_snapshot(&self, snapshot: WireStatus) {
         let _ = self.snapshot_tx.send(snapshot);
     }
 
@@ -211,7 +211,7 @@ pub fn start(
 async fn relay_task(
     ws_url: String,
     agent_key: String,
-    mut snapshot_rx: mpsc::UnboundedReceiver<WebStatus>,
+    mut snapshot_rx: mpsc::UnboundedReceiver<WireStatus>,
     prompt_tx: mpsc::UnboundedSender<String>,
     abort_tx: mpsc::UnboundedSender<()>,
     resolve_tx: mpsc::UnboundedSender<bool>,
@@ -254,7 +254,7 @@ async fn relay_task(
         shared.lock().state = RelayState::Connected;
 
         let mut last_sent = tokio::time::Instant::now() - SNAPSHOT_DEBOUNCE;
-        let mut pending: Option<WebStatus> = None;
+        let mut pending: Option<WireStatus> = None;
         let mut flush = tokio::time::interval(SNAPSHOT_DEBOUNCE);
         flush.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -332,7 +332,7 @@ async fn relay_task(
 }
 
 /// Serialize a snapshot frame, or `None` when it exceeds [`MAX_SNAPSHOT_BYTES`].
-fn snapshot_frame(snapshot: &WebStatus) -> Option<String> {
+fn snapshot_frame(snapshot: &WireStatus) -> Option<String> {
     let data = serde_json::to_value(snapshot).ok()?;
     let frame = serde_json::to_string(&AgentFrame::Snapshot { data }).ok()?;
     (frame.len() <= MAX_SNAPSHOT_BYTES).then_some(frame)

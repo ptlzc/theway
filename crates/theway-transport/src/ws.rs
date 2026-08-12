@@ -4,7 +4,7 @@
 //!
 //! ```jsonc
 //! // server → client
-//! { "type": "status", "json": { ...WebStatus serde... } }
+//! { "type": "status", "json": { ...WireStatus serde... } }
 //! { "type": "event",    "json": { "event": "subagent_output", "id": "…", "chunk": "…" } }
 //! { "type": "pong" }
 //! // client → server
@@ -15,8 +15,8 @@
 //! { "type": "ping" }
 //! ```
 //!
-//! Shares the same `WebCommand` queue and snapshot/event broadcasts as the SSE
-//! surface; snapshots are the serde `WebStatus` JSON (same shape as SSE), so a
+//! Shares the same `WireCommand` queue and snapshot/event broadcasts as the SSE
+//! surface; snapshots are the serde `WireStatus` JSON (same shape as SSE), so a
 //! browser client can switch transports without changing its parsing.
 
 use axum::extract::State;

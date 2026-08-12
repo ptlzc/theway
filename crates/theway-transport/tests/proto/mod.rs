@@ -4,12 +4,12 @@ use super::*;
 use crate::wire::{ModelEntry, ProviderGroup};
 use crate::feed::{Level, TriggerPollStatus};
 use crate::wire::{
-    WebCronSnapshot, WebMcpSnapshot, WebSidebarSnapshot, WebSkillsSnapshot, WebToolsSnapshot,
-    WebTriggersSnapshot,
+    WireCronSnapshot, WireMcpSnapshot, WireSidebarSnapshot, WireSkillsSnapshot, WireToolsSnapshot,
+    WireTriggersSnapshot,
 };
 
-fn fixture_snapshot() -> WebStatus {
-    WebStatus {
+fn fixture_snapshot() -> WireStatus {
+    WireStatus {
         session_id: "sess-1".into(),
         model: "provider:model".into(),
         model_catalog: vec![ProviderGroup {
@@ -32,9 +32,9 @@ fn fixture_snapshot() -> WebStatus {
         }),
         goal: None,
         control_plane_prompt: None,
-        sidebar: WebSidebarSnapshot {
+        sidebar: WireSidebarSnapshot {
             inbox_new: 1,
-            skills: WebSkillsSnapshot {
+            skills: WireSkillsSnapshot {
                 total: 2,
                 enabled: 1,
                 disabled: 1,
@@ -43,26 +43,26 @@ fn fixture_snapshot() -> WebStatus {
                 project: 0,
                 items: Vec::new(),
             },
-            triggers: WebTriggersSnapshot {
+            triggers: WireTriggersSnapshot {
                 total: 0,
                 enabled: 0,
                 disabled: 0,
                 rules: Vec::new(),
             },
-            cron: WebCronSnapshot {
+            cron: WireCronSnapshot {
                 total: 0,
                 enabled: 0,
                 disabled: 0,
                 jobs: Vec::new(),
             },
-            mcp: WebMcpSnapshot {
+            mcp: WireMcpSnapshot {
                 servers: 0,
                 tools: 0,
                 notification_hooks: 0,
                 server_names: Vec::new(),
                 tool_names: Vec::new(),
             },
-            tools: WebToolsSnapshot {
+            tools: WireToolsSnapshot {
                 total: 1,
                 names: vec!["read".into()],
             },
@@ -70,11 +70,11 @@ fn fixture_snapshot() -> WebStatus {
             runtime: vec!["ok".into()],
         },
         feed_blocks: vec![
-            WebFeedBlock::User {
+            WireFeedBlock::User {
                 text: "hi".into(),
                 timestamp: None,
             },
-            WebFeedBlock::Plain {
+            WireFeedBlock::Plain {
                 text: "note".into(),
                 level: Level::Note,
                 timestamp: Some("ts".into()),
@@ -169,7 +169,7 @@ fn dag_run_converts_to_wire_shape() {
         error: None,
     };
 
-    let web = crate::wire::WebStatus::from_dag_run(&run);
+    let web = crate::wire::WireStatus::from_dag_run(&run);
     assert_eq!(web.id, "dag-1");
     assert_eq!(web.kind, "dag");
     assert_eq!(web.status, "running");
@@ -242,7 +242,7 @@ fn goal_run_round_trips_kind_and_dag_event_wire() {
     let engine = DagEngine::new();
     let id = engine.plan_goal("finish the migration", Some("sess-1".into()));
     let run = engine.get_run(&id).expect("goal run");
-    let web = crate::wire::WebStatus::from_dag_run(&run);
+    let web = crate::wire::WireStatus::from_dag_run(&run);
     assert_eq!(web.kind, "goal");
     let state = session_state(&{
         let mut snap = fixture_snapshot();

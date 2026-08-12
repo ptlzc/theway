@@ -32,7 +32,7 @@ use render::{
 };
 use render::{push_paragraphs, style_for_level};
 use types::{Block, Open};
-pub use types::{FeedUpdate, Level, TriggerPollStatus, WebFeedBlock};
+pub use types::{FeedUpdate, Level, TriggerPollStatus, WireFeedBlock};
 
 pub struct Feed {
     blocks: Vec<Block>,
@@ -428,19 +428,19 @@ impl Feed {
         out
     }
 
-    pub fn web_blocks(&self) -> Vec<WebFeedBlock> {
+    pub fn wire_blocks(&self) -> Vec<WireFeedBlock> {
         self.blocks
             .iter()
             .map(|block| match block {
-                Block::User { text, timestamp } => WebFeedBlock::User {
+                Block::User { text, timestamp } => WireFeedBlock::User {
                     text: text.clone(),
                     timestamp: timestamp.clone(),
                 },
-                Block::Assistant { text, timestamp } => WebFeedBlock::Assistant {
+                Block::Assistant { text, timestamp } => WireFeedBlock::Assistant {
                     text: text.clone(),
                     timestamp: timestamp.clone(),
                 },
-                Block::Thinking { text, timestamp } => WebFeedBlock::Thinking {
+                Block::Thinking { text, timestamp } => WireFeedBlock::Thinking {
                     text: text.clone(),
                     timestamp: timestamp.clone(),
                 },
@@ -448,7 +448,7 @@ impl Feed {
                     name,
                     args,
                     timestamp,
-                } => WebFeedBlock::Tool {
+                } => WireFeedBlock::Tool {
                     name: name.clone(),
                     args: args.clone(),
                     timestamp: timestamp.clone(),
@@ -458,7 +458,7 @@ impl Feed {
                     is_error,
                     timestamp,
                     ..
-                } => WebFeedBlock::ToolResult {
+                } => WireFeedBlock::ToolResult {
                     lines: lines.clone(),
                     is_error: *is_error,
                     timestamp: timestamp.clone(),
@@ -467,7 +467,7 @@ impl Feed {
                     text,
                     level,
                     timestamp,
-                } => WebFeedBlock::Plain {
+                } => WireFeedBlock::Plain {
                     text: text.clone(),
                     level: *level,
                     timestamp: timestamp.clone(),

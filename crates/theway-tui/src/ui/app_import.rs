@@ -86,7 +86,7 @@ impl App {
     /// relay task debounces actual sends.
     pub(super) fn push_relay_snapshot(&self) {
         if let Some(active) = &self.relay {
-            active.push_snapshot(self.web_snapshot());
+            active.push_snapshot(self.wire_snapshot());
         }
     }
 

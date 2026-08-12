@@ -10,7 +10,7 @@
 //! * [`SessionOps`] — sync query/mutation ops that do NOT need the event loop
 //!   (list / create / rename / delete). Switching the *current* session is deliberately
 //!   NOT here: it mutates App runtime state (kernel harness, feed, busy flag) and must go
-//!   through `WebCommand::SwitchSession` on the serialized loop.
+//!   through `WireCommand::SwitchSession` on the serialized loop.
 //!
 //! The server crate holds an `Arc<dyn SessionOps>` (via
 //! [`theway_transport::TransportEndpoints`]) and never touches the session repo

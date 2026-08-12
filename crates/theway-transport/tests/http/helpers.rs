@@ -8,9 +8,9 @@ use serde_json::json;
 
 /// Router wired with throwaway transport channels, for endpoint-level tests
 /// that only need a snapshot fixture.
-pub(crate) fn test_router(latest: WebStatus) -> Router {
-    let (command_tx, _) = mpsc::unbounded_channel::<WebCommand>();
-    let (snapshot_tx, _) = broadcast::channel::<WebStatus>(16);
+pub(crate) fn test_router(latest: WireStatus) -> Router {
+    let (command_tx, _) = mpsc::unbounded_channel::<WireCommand>();
+    let (snapshot_tx, _) = broadcast::channel::<WireStatus>(16);
     web_router(HttpState {
         commands: command_tx,
         snapshots: snapshot_tx,

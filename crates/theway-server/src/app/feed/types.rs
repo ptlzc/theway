@@ -40,7 +40,7 @@ pub enum FeedUpdate {
     },
 }
 
-pub use theway_transport::feed::WebFeedBlock;
+pub use theway_transport::feed::WireFeedBlock;
 
 /// Bounded, display-only status for periodic trigger checks that should stay visible in the
 /// main UI without appending a line to the conversation feed.

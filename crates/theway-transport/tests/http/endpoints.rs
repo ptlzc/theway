@@ -11,9 +11,9 @@ use std::time::Duration;
 
 #[tokio::test]
 async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
-    let (command_tx, mut command_rx) = mpsc::unbounded_channel::<WebCommand>();
-    let (snapshot_tx, _) = broadcast::channel::<WebStatus>(16);
-    let latest = Arc::new(Mutex::new(WebStatus {
+    let (command_tx, mut command_rx) = mpsc::unbounded_channel::<WireCommand>();
+    let (snapshot_tx, _) = broadcast::channel::<WireStatus>(16);
+    let latest = Arc::new(Mutex::new(WireStatus {
         session_id: "sess-1".into(),
         model: "provider:model".into(),
         model_catalog: Vec::new(),
@@ -68,7 +68,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
     .await;
     assert_eq!(accepted["accepted"], true);
     match command_rx.recv().await.unwrap() {
-        WebCommand::Submit {
+        WireCommand::Submit {
             text,
             images,
             interrupt: _,
@@ -95,7 +95,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
     .await;
     assert_eq!(accepted["accepted"], true);
     match command_rx.recv().await.unwrap() {
-        WebCommand::Submit {
+        WireCommand::Submit {
             text,
             images,
             interrupt: _,
@@ -110,7 +110,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
     let accepted = rpc_call(&client, &base, 4, "abort", None).await;
     assert_eq!(accepted["accepted"], true);
     match command_rx.recv().await.unwrap() {
-        WebCommand::Abort => {}
+        WireCommand::Abort => {}
         other => panic!("unexpected command: {other:?}"),
     }
 
@@ -124,7 +124,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
     .await;
     assert_eq!(accepted["accepted"], true);
     match command_rx.recv().await.unwrap() {
-        WebCommand::TriggerRuleNow { id } => assert_eq!(id, "rule-123"),
+        WireCommand::TriggerRuleNow { id } => assert_eq!(id, "rule-123"),
         other => panic!("unexpected command: {other:?}"),
     }
 
@@ -138,7 +138,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
     .await;
     assert_eq!(accepted["accepted"], true);
     match command_rx.recv().await.unwrap() {
-        WebCommand::ResolveControlPlane { approve } => assert!(approve),
+        WireCommand::ResolveControlPlane { approve } => assert!(approve),
         other => panic!("unexpected command: {other:?}"),
     }
 
@@ -152,7 +152,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
     .await;
     assert_eq!(accepted["accepted"], true);
     match command_rx.recv().await.unwrap() {
-        WebCommand::SetModel { spec } => assert_eq!(spec, "anthropic:claude-haiku-4-5"),
+        WireCommand::SetModel { spec } => assert_eq!(spec, "anthropic:claude-haiku-4-5"),
         other => panic!("unexpected command: {other:?}"),
     }
 
@@ -175,7 +175,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
     assert!(response.status().is_success());
     let mut stream = response.bytes_stream();
     snapshot_tx
-        .send(WebStatus {
+        .send(WireStatus {
             session_id: "sess-1".into(),
             model: "provider:model".into(),
             model_catalog: Vec::new(),
@@ -206,9 +206,9 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
 
 #[tokio::test]
 async fn websocket_serves_snapshot_and_accepts_commands() {
-    let (command_tx, mut command_rx) = mpsc::unbounded_channel::<WebCommand>();
-    let (snapshot_tx, _) = broadcast::channel::<WebStatus>(16);
-    let latest = Arc::new(Mutex::new(WebStatus {
+    let (command_tx, mut command_rx) = mpsc::unbounded_channel::<WireCommand>();
+    let (snapshot_tx, _) = broadcast::channel::<WireStatus>(16);
+    let latest = Arc::new(Mutex::new(WireStatus {
         session_id: "sess-1".into(),
         model: "provider:model".into(),
         model_catalog: Vec::new(),
@@ -272,7 +272,7 @@ async fn websocket_serves_snapshot_and_accepts_commands() {
     .await
     .unwrap();
     match command_rx.recv().await.unwrap() {
-        WebCommand::Submit { text, .. } => assert_eq!(text, "hello ws"),
+        WireCommand::Submit { text, .. } => assert_eq!(text, "hello ws"),
         other => panic!("unexpected command: {other:?}"),
     }
     let frame = tokio::time::timeout(Duration::from_secs(2), ws.next())
@@ -311,7 +311,7 @@ async fn websocket_serves_snapshot_and_accepts_commands() {
 async fn healthz_answers_ok_without_snapshot_and_root_404s() {
     use super::helpers::test_router;
 
-    let router = test_router(WebStatus {
+    let router = test_router(WireStatus {
         session_id: "sess-1".into(),
         model: "provider:model".into(),
         model_catalog: Vec::new(),

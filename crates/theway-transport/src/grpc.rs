@@ -1,7 +1,7 @@
 //! Local gRPC server for the coding-agent REPL (`--grpc` mode).
 //!
 //! The gRPC surface mirrors the `--http` (axum) surface: commands are queued
-//! into the same single-turn event loop via [`WebCommand`], and state is served
+//! into the same single-turn event loop via [`WireCommand`], and state is served
 //! as structured binary protobuf ([`SessionState`]) streamed over server-streaming
 //! RPC instead of SSE. Loopback-only, same bind policy as the web UI.
 
@@ -20,7 +20,7 @@ use tonic::{Request, Response, Status};
 use crate::host::TransportHost;
 use crate::transport::SessionOps;
 use crate::transport::TransportMode;
-use crate::wire::{WebCommand, WebPromptImage, WebStatus};
+use crate::wire::{WireCommand, WirePromptImage, WireStatus};
 
 use crate::proto::health::health_check_response::ServingStatus;
 use crate::proto::health::health_server::{Health, HealthServer};
@@ -56,9 +56,9 @@ pub struct GrpcOptions {
 
 #[derive(Clone)]
 pub struct GrpcState {
-    pub commands: mpsc::UnboundedSender<WebCommand>,
-    pub snapshots: broadcast::Sender<WebStatus>,
-    pub latest: Arc<Mutex<WebStatus>>,
+    pub commands: mpsc::UnboundedSender<WireCommand>,
+    pub snapshots: broadcast::Sender<WireStatus>,
+    pub latest: Arc<Mutex<WireStatus>>,
     /// Event plane (graph mode): subagent started/output/metrics/completed.
     pub events: broadcast::Sender<AgentJobEvent>,
     /// Event plane (graph mode): DAG engine node_status / run_status.
@@ -68,7 +68,7 @@ pub struct GrpcState {
     /// DAG orchestration engine (graph engineering mode): GraphCancel/Retry/…
     pub dag_engine: Arc<theway_core::multiagent::graph::engine::DagEngine>,
     /// session-resource-model: session lifecycle ops (list/create/rename/delete).
-    /// Switching the *current* session goes through `WebCommand::SwitchSession`.
+    /// Switching the *current* session goes through `WireCommand::SwitchSession`.
     pub session_ops: Arc<dyn SessionOps>,
     /// Abort handle for the registry→events forwarder task spawned at startup.
     pub agent_fwd: tokio::task::AbortHandle,
@@ -210,12 +210,12 @@ impl ThewayGrpc for GrpcState {
         let interrupt = request.mode() == MessageMode::Interrupt;
         let accepted = self
             .commands
-            .send(WebCommand::Submit {
+            .send(WireCommand::Submit {
                 text: request.text,
                 images: request
                     .images
                     .into_iter()
-                    .map(|image| WebPromptImage {
+                    .map(|image| WirePromptImage {
                         data: image.data,
                         name: image.name,
                     })
@@ -232,7 +232,7 @@ impl ThewayGrpc for GrpcState {
     ) -> Result<Response<CommandResult>, Status> {
         let accepted = self
             .commands
-            .send(WebCommand::SetModel {
+            .send(WireCommand::SetModel {
                 spec: request.into_inner().spec,
             })
             .is_ok();
@@ -240,7 +240,7 @@ impl ThewayGrpc for GrpcState {
     }
 
     async fn cancel(&self, _request: Request<Empty>) -> Result<Response<CommandResult>, Status> {
-        let accepted = self.commands.send(WebCommand::Abort).is_ok();
+        let accepted = self.commands.send(WireCommand::Abort).is_ok();
         Ok(Response::new(CommandResult { accepted }))
     }
 
@@ -250,7 +250,7 @@ impl ThewayGrpc for GrpcState {
     ) -> Result<Response<CommandResult>, Status> {
         let accepted = self
             .commands
-            .send(WebCommand::ResolveControlPlane {
+            .send(WireCommand::ResolveControlPlane {
                 approve: request.into_inner().approve,
             })
             .is_ok();
@@ -429,7 +429,7 @@ impl ThewayGrpc for GrpcState {
         // marker in ListSessions follows on the next snapshot.
         let accepted = self
             .commands
-            .send(WebCommand::SwitchSession { id: new_id.clone() })
+            .send(WireCommand::SwitchSession { id: new_id.clone() })
             .is_ok();
         if !accepted {
             return Err(Status::unavailable("event loop command channel closed"));
@@ -460,7 +460,7 @@ impl ThewayGrpc for GrpcState {
             .ok_or_else(|| Status::not_found(format!("no session matches id {requested}")))?;
         let accepted = self
             .commands
-            .send(WebCommand::SwitchSession { id: target.clone() })
+            .send(WireCommand::SwitchSession { id: target.clone() })
             .is_ok();
         if accepted {
             // Rebind the connection-level current session; the event loop applies
@@ -531,7 +531,7 @@ impl ThewayGrpc for GrpcState {
             if !fallback.is_empty() {
                 let _ = self
                     .commands
-                    .send(WebCommand::SwitchSession { id: fallback });
+                    .send(WireCommand::SwitchSession { id: fallback });
             }
         }
         Ok(Response::new(DeleteSessionResponse {
@@ -549,7 +549,7 @@ impl ThewayGrpc for GrpcState {
             .list_runs()
             .into_iter()
             .filter(|run| run.session_id.as_deref() == Some(session_id.as_str()))
-            .map(|run| dag_run_wire(&WebStatus::from_dag_run(&run)))
+            .map(|run| dag_run_wire(&WireStatus::from_dag_run(&run)))
             .collect();
         Ok(Response::new(GraphListResponse { runs }))
     }

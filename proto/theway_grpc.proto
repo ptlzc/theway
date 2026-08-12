@@ -12,7 +12,7 @@ package theway.grpc.v1;
 
 // ─────────────────────────── state plane ───────────────────────────
 
-// Full session state (the structured form of the former WebSnapshot JSON).
+// Full session state (the structured form of the former WireSnapshot JSON).
 // Low-frequency, whole-replacement: GetState / stream snapshot frames.
 message SessionState {
   string session_id = 1;
@@ -139,7 +139,7 @@ message ToolsSnapshot {
   repeated string names = 2;
 }
 
-// One renderable feed entry. oneof mirrors the serde tagged enum WebFeedBlock;
+// One renderable feed entry. oneof mirrors the serde tagged enum WireFeedBlock;
 // JSON channels keep serde shape until the protojson migration.
 message FeedBlock {
   oneof kind {

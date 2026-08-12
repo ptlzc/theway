@@ -7,8 +7,8 @@ use super::helpers::{rpc_call, rpc_error};
 use crate::testing::FakeSessionOps;
 use serde_json::json;
 
-fn web_status(session_id: &str) -> WebStatus {
-    WebStatus {
+fn wire_status(session_id: &str) -> WireStatus {
+    WireStatus {
         session_id: session_id.into(),
         model: "provider:model".into(),
         model_catalog: Vec::new(),
@@ -33,15 +33,15 @@ async fn spawn_sessions_server(
     current: &str,
 ) -> (
     String,
-    mpsc::UnboundedReceiver<WebCommand>,
+    mpsc::UnboundedReceiver<WireCommand>,
     tokio::task::JoinHandle<()>,
 ) {
-    let (command_tx, command_rx) = mpsc::unbounded_channel::<WebCommand>();
-    let (snapshot_tx, _) = broadcast::channel::<WebStatus>(16);
+    let (command_tx, command_rx) = mpsc::unbounded_channel::<WireCommand>();
+    let (snapshot_tx, _) = broadcast::channel::<WireStatus>(16);
     let state = HttpState {
         commands: command_tx,
         snapshots: snapshot_tx,
-        latest: Arc::new(Mutex::new(web_status(current))),
+        latest: Arc::new(Mutex::new(wire_status(current))),
         completer: SlashCompleter::from_commands(vec!["/help".into(), "/model".into(), "/goal".into()]),
         events: broadcast::channel::<AgentJobEvent>(16).0,
         dag_events: broadcast::channel::<DagEvent>(16).0,
@@ -89,7 +89,7 @@ async fn post_sessions_creates_renames_and_switches() {
     let first_id = created["session_id"].as_str().unwrap().to_string();
     assert!(first_id.starts_with("sess-new-"), "{first_id}");
     match rx.recv().await.unwrap() {
-        WebCommand::SwitchSession { id } => assert_eq!(id, first_id),
+        WireCommand::SwitchSession { id } => assert_eq!(id, first_id),
         other => panic!("unexpected command: {other:?}"),
     }
 
@@ -106,7 +106,7 @@ async fn post_sessions_creates_renames_and_switches() {
     let second_id = created["session_id"].as_str().unwrap().to_string();
     assert_ne!(second_id, first_id);
     match rx.recv().await.unwrap() {
-        WebCommand::SwitchSession { id } => assert_eq!(id, second_id),
+        WireCommand::SwitchSession { id } => assert_eq!(id, second_id),
         other => panic!("unexpected command: {other:?}"),
     }
     // Visible in the list.
@@ -140,7 +140,7 @@ async fn switch_route_rebinds_current_and_404s_unknown() {
     .await;
     assert_eq!(body["accepted"], true);
     match rx.recv().await.unwrap() {
-        WebCommand::SwitchSession { id } => assert_eq!(id, "sess-b"),
+        WireCommand::SwitchSession { id } => assert_eq!(id, "sess-b"),
         other => panic!("unexpected command: {other:?}"),
     }
     // /state now reports the switched session.
@@ -253,7 +253,7 @@ async fn delete_route_removes_conflicts_on_active_and_404s_unknown() {
     .await;
     assert_eq!(deleted["deleted"], true);
     match rx.recv().await.unwrap() {
-        WebCommand::SwitchSession { id } => assert_eq!(id, "sess-busy"),
+        WireCommand::SwitchSession { id } => assert_eq!(id, "sess-busy"),
         other => panic!("unexpected command: {other:?}"),
     }
     let body = rpc_call(&client, &base, 15, "list_sessions", None).await;

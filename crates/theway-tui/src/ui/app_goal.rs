@@ -19,7 +19,7 @@ impl App {
     /// semantics — the factory rehydrates the transcript and re-wires session-stamped
     /// tools), replaces the kernel's harness, and resets every piece of per-session UI
     /// state. Must run inside the serialized event loop (it is driven by
-    /// `WebCommand::SwitchSession`); a turn in flight on the old harness must be aborted
+    /// `WireCommand::SwitchSession`); a turn in flight on the old harness must be aborted
     /// by the caller before this runs.
     pub(crate) async fn switch_session(&mut self, id: String) -> Result<()> {
         let harness = (self.session_factory)(id.clone())

@@ -33,16 +33,16 @@ use crate::ws::ws_upgrade;
 /// completer/registry backing `/complete` and `/ws` node-output.
 #[derive(Clone)]
 pub struct HttpState {
-    pub commands: mpsc::UnboundedSender<WebCommand>,
-    pub snapshots: broadcast::Sender<WebStatus>,
-    pub latest: Arc<Mutex<WebStatus>>,
+    pub commands: mpsc::UnboundedSender<WireCommand>,
+    pub snapshots: broadcast::Sender<WireStatus>,
+    pub latest: Arc<Mutex<WireStatus>>,
     pub completer: SlashCompleter,
     pub events: broadcast::Sender<AgentJobEvent>,
     /// DAG engine event plane (node_status / run_status), shared with /ws.
     pub dag_events: broadcast::Sender<DagEvent>,
     pub registry: AgentJobRegistry,
     /// session-resource-model: session lifecycle ops behind the `/sessions` routes.
-    /// *Switching* the current session goes through `WebCommand::SwitchSession`.
+    /// *Switching* the current session goes through `WireCommand::SwitchSession`.
     pub session_ops: Arc<dyn SessionOps>,
 }
 
@@ -221,7 +221,7 @@ pub(crate) async fn dispatch(
                 .to_string();
             let images = params
                 .and_then(|p| p.get("images"))
-                .and_then(|v| serde_json::from_value::<Vec<WebPromptImage>>(v.clone()).ok())
+                .and_then(|v| serde_json::from_value::<Vec<WirePromptImage>>(v.clone()).ok())
                 .unwrap_or_default();
             let session_id = params
                 .and_then(|p| p.get("session_id"))
@@ -240,7 +240,7 @@ pub(crate) async fn dispatch(
             }
             let accepted = state
                 .commands
-                .send(WebCommand::Submit {
+                .send(WireCommand::Submit {
                     text,
                     images,
                     interrupt: false,
@@ -253,7 +253,7 @@ pub(crate) async fn dispatch(
                 .as_str()
                 .unwrap_or_default()
                 .to_string();
-            let accepted = state.commands.send(WebCommand::SetModel { spec }).is_ok();
+            let accepted = state.commands.send(WireCommand::SetModel { spec }).is_ok();
             Ok(serde_json::json!({ "accepted": accepted }))
         }
         "complete" => {
@@ -264,7 +264,7 @@ pub(crate) async fn dispatch(
             Ok(serde_json::json!({ "completions": state.completer.matches(&text) }))
         }
         "abort" => {
-            let accepted = state.commands.send(WebCommand::Abort).is_ok();
+            let accepted = state.commands.send(WireCommand::Abort).is_ok();
             Ok(serde_json::json!({ "accepted": accepted }))
         }
         "trigger_immediate" => {
@@ -274,7 +274,7 @@ pub(crate) async fn dispatch(
                 .to_string();
             let accepted = state
                 .commands
-                .send(WebCommand::TriggerRuleNow { id })
+                .send(WireCommand::TriggerRuleNow { id })
                 .is_ok();
             Ok(serde_json::json!({ "accepted": accepted }))
         }
@@ -282,7 +282,7 @@ pub(crate) async fn dispatch(
             let approve = param(params, "approve")?.as_bool().unwrap_or(false);
             let accepted = state
                 .commands
-                .send(WebCommand::ResolveControlPlane { approve })
+                .send(WireCommand::ResolveControlPlane { approve })
                 .is_ok();
             Ok(serde_json::json!({ "accepted": accepted }))
         }
@@ -315,7 +315,7 @@ pub(crate) async fn dispatch(
             }
             let _ = state
                 .commands
-                .send(WebCommand::SwitchSession { id: new_id.clone() });
+                .send(WireCommand::SwitchSession { id: new_id.clone() });
             let summary = state
                 .session_ops
                 .list()
@@ -342,7 +342,7 @@ pub(crate) async fn dispatch(
             state.latest.lock().session_id = target.clone();
             let accepted = state
                 .commands
-                .send(WebCommand::SwitchSession { id: target })
+                .send(WireCommand::SwitchSession { id: target })
                 .is_ok();
             Ok(serde_json::json!({ "accepted": accepted }))
         }
@@ -406,7 +406,7 @@ pub(crate) async fn dispatch(
                 if !fallback.is_empty() {
                     let _ = state
                         .commands
-                        .send(WebCommand::SwitchSession { id: fallback });
+                        .send(WireCommand::SwitchSession { id: fallback });
                 }
             }
             Ok(serde_json::json!({ "deleted": true }))
@@ -416,7 +416,7 @@ pub(crate) async fn dispatch(
 }
 
 /// SSE event stream as JSON-RPC notifications: `event: message` frames with
-/// `{"jsonrpc":"2.0","method":"status","params":{...WebStatus}}`.
+/// `{"jsonrpc":"2.0","method":"status","params":{...WireStatus}}`.
 async fn events(
     State(state): State<HttpState>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
@@ -456,10 +456,10 @@ pub(crate) fn bind_addr(host: &str, port: u16) -> Result<SocketAddr> {
 
 /// Minimal sidebar used by snapshot fixtures in tests (web + grpc).
 #[cfg(test)]
-pub(crate) fn empty_sidebar_snapshot() -> WebSidebarSnapshot {
-    WebSidebarSnapshot {
+pub(crate) fn empty_sidebar_snapshot() -> WireSidebarSnapshot {
+    WireSidebarSnapshot {
         inbox_new: crate::inbox::new_count(&crate::inbox::default_inbox_path()),
-        skills: WebSkillsSnapshot {
+        skills: WireSkillsSnapshot {
             total: 0,
             enabled: 0,
             disabled: 0,
@@ -468,26 +468,26 @@ pub(crate) fn empty_sidebar_snapshot() -> WebSidebarSnapshot {
             project: 0,
             items: Vec::new(),
         },
-        triggers: WebTriggersSnapshot {
+        triggers: WireTriggersSnapshot {
             total: 0,
             enabled: 0,
             disabled: 0,
             rules: Vec::new(),
         },
-        cron: WebCronSnapshot {
+        cron: WireCronSnapshot {
             total: 0,
             enabled: 0,
             disabled: 0,
             jobs: Vec::new(),
         },
-        mcp: WebMcpSnapshot {
+        mcp: WireMcpSnapshot {
             servers: 0,
             tools: 0,
             notification_hooks: 0,
             server_names: Vec::new(),
             tool_names: Vec::new(),
         },
-        tools: WebToolsSnapshot {
+        tools: WireToolsSnapshot {
             total: 0,
             names: Vec::new(),
         },

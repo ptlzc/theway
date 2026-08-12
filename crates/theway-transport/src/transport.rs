@@ -25,7 +25,7 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use tokio::sync::{broadcast, mpsc};
 
-use crate::wire::{SessionSummary, WebCommand, WebStatus};
+use crate::wire::{SessionSummary, WireCommand, WireStatus};
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::types::DagEvent;
 use theway_core::multiagent::registry::{AgentJobEvent, AgentJobRegistry};
@@ -124,13 +124,13 @@ impl TransportMode {
 /// loop ([`App::run_transport_loop`]).
 pub struct TransportEndpoints {
     /// Browser/client commands into the serialized event loop.
-    pub command_tx: mpsc::UnboundedSender<WebCommand>,
+    pub command_tx: mpsc::UnboundedSender<WireCommand>,
     /// Event-loop side of the command queue.
-    pub command_rx: mpsc::UnboundedReceiver<WebCommand>,
-    /// Full `WebStatus` snapshots broadcast to SSE / WS / gRPC subscribers.
-    pub snapshot_tx: broadcast::Sender<WebStatus>,
+    pub command_rx: mpsc::UnboundedReceiver<WireCommand>,
+    /// Full `WireStatus` snapshots broadcast to SSE / WS / gRPC subscribers.
+    pub snapshot_tx: broadcast::Sender<WireStatus>,
     /// Latest snapshot (served by `GET /state` / `GetState`).
-    pub latest: Arc<Mutex<WebStatus>>,
+    pub latest: Arc<Mutex<WireStatus>>,
     /// Event plane (graph mode): subagent started/output/metrics/completed.
     pub events: broadcast::Sender<AgentJobEvent>,
     /// Event plane (graph mode): DAG engine node_status / run_status.
@@ -143,7 +143,7 @@ pub struct TransportEndpoints {
     pub dag_engine: Arc<DagEngine>,
     /// session-resource-model: session lifecycle ops (list/create/rename/delete) for the
     /// gRPC/HTTP session surfaces. Sync query/mutation only — *switching* the current
-    /// session goes through `WebCommand::SwitchSession` on the serialized event loop.
+    /// session goes through `WireCommand::SwitchSession` on the serialized event loop.
     pub session_ops: Arc<dyn crate::transport::SessionOps>,
     /// Owning session id (checkpoint scope / mount key).
     pub session_id: String,

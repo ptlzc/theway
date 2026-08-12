@@ -43,9 +43,9 @@ impl App {
     /// mode) and snapshots the current state; the server crate consumes the
     /// sender side, the event loop ([`App::run_transport_loop`]) the receiver.
     pub fn transport_endpoints(&mut self) -> theway_transport::TransportEndpoints {
-        let (command_tx, command_rx) = mpsc::unbounded_channel::<WebCommand>();
-        let (snapshot_tx, _) = broadcast::channel::<WebStatus>(128);
-        let latest = Arc::new(Mutex::new(self.web_snapshot()));
+        let (command_tx, command_rx) = mpsc::unbounded_channel::<WireCommand>();
+        let (snapshot_tx, _) = broadcast::channel::<WireStatus>(128);
+        let latest = Arc::new(Mutex::new(self.wire_snapshot()));
         // Event plane (graph mode) shared with /ws; the registry broadcasts into it.
         let (event_tx, _) = broadcast::channel::<AgentJobEvent>(256);
         // Forward registry built-in broadcast → event_tx (merged stream for web/gRPC clients).
@@ -219,16 +219,16 @@ impl App {
         Ok(())
     }
 
-    async fn handle_web_command(&mut self, command: WebCommand, turn: &mut TurnState) {
+    async fn handle_web_command(&mut self, command: WireCommand, turn: &mut TurnState) {
         match command {
-            WebCommand::Submit {
+            WireCommand::Submit {
                 text,
                 images,
                 interrupt,
             } => self.submit_web_text(text, images, interrupt, turn).await,
-            WebCommand::TriggerRuleNow { id } => self.trigger_web_rule_now(id, turn),
-            WebCommand::Abort => self.request_abort(turn),
-            WebCommand::ResolveControlPlane { approve } => {
+            WireCommand::TriggerRuleNow { id } => self.trigger_web_rule_now(id, turn),
+            WireCommand::Abort => self.request_abort(turn),
+            WireCommand::ResolveControlPlane { approve } => {
                 let decision = if approve {
                     theway_core::ControlPlanePromptDecision::Allow
                 } else {
@@ -238,8 +238,8 @@ impl App {
                 };
                 self.resolve_control_plane_prompt(decision);
             }
-            WebCommand::SetModel { spec } => self.set_model_from_spec(&spec).await,
-            WebCommand::SwitchSession { id } => self.handle_switch_session(id, turn).await,
+            WireCommand::SetModel { spec } => self.set_model_from_spec(&spec).await,
+            WireCommand::SwitchSession { id } => self.handle_switch_session(id, turn).await,
         }
     }
 
@@ -296,7 +296,7 @@ impl App {
         let display = format!(
             "trigger now {}: {}",
             feed::truncate_chars(&rule.id, 18),
-            web_preview(&rule.action)
+            wire_preview(&rule.action)
         );
         self.follow = true;
         if turn.fut.is_some() {
@@ -310,7 +310,7 @@ impl App {
     async fn submit_web_text(
         &mut self,
         text: String,
-        images: Vec<WebPromptImage>,
+        images: Vec<WirePromptImage>,
         interrupt: bool,
         turn: &mut TurnState,
     ) {
@@ -457,7 +457,7 @@ impl App {
         }
     }
 
-    pub(super) fn web_snapshot(&self) -> WebStatus {
+    pub(super) fn wire_snapshot(&self) -> WireStatus {
         let model = {
             let state = self.kernel.harness().agent().state();
             state
@@ -466,7 +466,7 @@ impl App {
                 .map(|m| format!("{}:{}", m.provider.0, m.id))
                 .unwrap_or_else(|| "no-model".to_string())
         };
-        WebStatus {
+        WireStatus {
             session_id: self.session_id.clone(),
             model,
             model_catalog: self.model_catalog.clone(),
@@ -474,7 +474,7 @@ impl App {
             busy: self.busy,
             queued_count: self.queued_turns.len(),
             latest_trigger_poll: self.latest_trigger_poll.clone(),
-            goal: self.latest_goal.as_ref().map(|goal| WebGoalSnapshot {
+            goal: self.latest_goal.as_ref().map(|goal| WireGoalSnapshot {
                 condition: theway::bug_report::redact(&goal.condition),
                 status: goal.status.as_str().to_string(),
                 iterations: goal.iterations,
@@ -483,10 +483,10 @@ impl App {
             control_plane_prompt: self
                 .control_plane_prompt
                 .as_ref()
-                .map(|prompt| web_control_plane_prompt_snapshot(&prompt.request)),
-            sidebar: self.web_sidebar_snapshot(),
-            feed_blocks: self.feed.web_blocks(),
-            feed_lines: web_feed_lines(&self.feed),
+                .map(|prompt| wire_control_plane_prompt_snapshot(&prompt.request)),
+            sidebar: self.wire_sidebar_snapshot(),
+            feed_blocks: self.feed.wire_blocks(),
+            feed_lines: wire_feed_lines(&self.feed),
             // graph mode: DAG run/node state from the shared engine (P1). Session-scoped:
             // only runs belonging to the current session are surfaced (the engine is
             // process-wide and outlives session switches).
@@ -495,7 +495,7 @@ impl App {
                 .list_runs()
                 .iter()
                 .filter(|run| run.session_id.as_deref() == Some(self.session_id.as_str()))
-                .map(WebStatus::from_dag_run)
+                .map(WireStatus::from_dag_run)
                 .collect(),
             // graph mode: subagent jobs (task tool + DAG nodes) from the registry,
             // session-scoped the same way (jobs are stamped with their owning session).
@@ -509,7 +509,7 @@ impl App {
         }
     }
 
-    fn web_sidebar_snapshot(&self) -> WebSidebarSnapshot {
+    fn wire_sidebar_snapshot(&self) -> WireSidebarSnapshot {
         const ITEM_LIMIT: usize = 8;
 
         let skills = self.kernel.harness().skills();
@@ -525,13 +525,13 @@ impl App {
         let trigger_rules = rules
             .iter()
             .take(ITEM_LIMIT)
-            .map(|rule| WebTriggerRuleSnapshot {
+            .map(|rule| WireTriggerRuleSnapshot {
                 id: feed::truncate_chars(&rule.id, 18),
                 full_id: rule.id.clone(),
                 enabled: rule.enabled,
                 mode: if rule.fire_once { "once" } else { "repeat" }.to_string(),
-                condition: web_preview(&rule.condition),
-                action: web_preview(&rule.action),
+                condition: wire_preview(&rule.condition),
+                action: wire_preview(&rule.action),
             })
             .collect::<Vec<_>>();
 
@@ -540,21 +540,21 @@ impl App {
         let cron_job_rows = cron_jobs
             .iter()
             .take(ITEM_LIMIT)
-            .map(|job| WebCronJobSnapshot {
+            .map(|job| WireCronJobSnapshot {
                 id: feed::truncate_chars(&job.id, 18),
                 enabled: job.enabled,
                 schedule: job.schedule.clone(),
-                action: web_preview(&job.action),
+                action: wire_preview(&job.action),
                 skipped_overlap_count: job.skipped_overlap_count,
-                last_error: job.last_error.as_deref().map(web_preview),
+                last_error: job.last_error.as_deref().map(wire_preview),
             })
             .collect::<Vec<_>>();
 
-        WebSidebarSnapshot {
+        WireSidebarSnapshot {
             inbox_new: theway_transport::inbox::new_count(
                 &theway_transport::inbox::default_inbox_path(),
             ),
-            skills: WebSkillsSnapshot {
+            skills: WireSkillsSnapshot {
                 total: skills.len(),
                 enabled,
                 disabled,
@@ -563,7 +563,7 @@ impl App {
                 project: source_count(SkillSource::Project),
                 items: skills
                     .iter()
-                    .map(|skill| WebSkillSnapshot {
+                    .map(|skill| WireSkillSnapshot {
                         name: skill.name.clone(),
                         source: skill.source.label().to_string(),
                         file_path: skill.file_path.clone(),
@@ -571,26 +571,26 @@ impl App {
                     })
                     .collect(),
             },
-            triggers: WebTriggersSnapshot {
+            triggers: WireTriggersSnapshot {
                 total: rules.len(),
                 enabled: trigger_enabled,
                 disabled: rules.len().saturating_sub(trigger_enabled),
                 rules: trigger_rules,
             },
-            cron: WebCronSnapshot {
+            cron: WireCronSnapshot {
                 total: cron_jobs.len(),
                 enabled: cron_enabled,
                 disabled: cron_jobs.len().saturating_sub(cron_enabled),
                 jobs: cron_job_rows,
             },
-            mcp: WebMcpSnapshot {
+            mcp: WireMcpSnapshot {
                 servers: self.panel_status.mcp_servers,
                 tools: self.panel_status.mcp_tools,
                 notification_hooks: self.panel_status.mcp_notification_hooks,
                 server_names: self.panel_status.mcp_server_names.clone(),
                 tool_names: self.panel_status.mcp_tool_names.clone(),
             },
-            tools: WebToolsSnapshot {
+            tools: WireToolsSnapshot {
                 total: self.panel_status.tool_names.len(),
                 names: self.panel_status.tool_names.clone(),
             },
@@ -601,14 +601,14 @@ impl App {
 
     async fn publish_snapshot(
         &self,
-        latest: &Arc<Mutex<WebStatus>>,
-        snapshots: &broadcast::Sender<WebStatus>,
+        latest: &Arc<Mutex<WireStatus>>,
+        snapshots: &broadcast::Sender<WireStatus>,
     ) {
         // Keep the SessionOps view of "current session" in lockstep with the loop state;
         // every state mutation on this loop is followed by a publish, so this is the sync
         // point.
         self.sync_current_session_state();
-        let snapshot = self.web_snapshot();
+        let snapshot = self.wire_snapshot();
         *latest.lock() = snapshot.clone();
         if let Some(active) = &self.relay {
             active.push_snapshot(snapshot.clone());
@@ -617,34 +617,34 @@ impl App {
     }
 }
 
-fn web_feed_lines(feed: &feed::Feed) -> Vec<String> {
+fn wire_feed_lines(feed: &feed::Feed) -> Vec<String> {
     feed.plain_lines(100)
 }
 
-fn web_preview(text: &str) -> String {
+fn wire_preview(text: &str) -> String {
     feed::truncate_chars(&theway::bug_report::redact(text), 120)
 }
 
-fn web_control_plane_prompt_snapshot(
+fn wire_control_plane_prompt_snapshot(
     request: &theway_core::ControlPlanePromptRequest,
-) -> WebControlPlanePromptSnapshot {
+) -> WireControlPlanePromptSnapshot {
     let payload = serde_json::to_string_pretty(&request.payload)
         .unwrap_or_else(|_| request.payload.to_string());
-    WebControlPlanePromptSnapshot {
-        tool_name: web_prompt_text(&request.tool_name, 80),
-        label: web_prompt_text(&request.label, 160),
-        reason: web_prompt_text(&request.reason, 180),
+    WireControlPlanePromptSnapshot {
+        tool_name: wire_prompt_text(&request.tool_name, 80),
+        label: wire_prompt_text(&request.label, 160),
+        reason: wire_prompt_text(&request.reason, 180),
         args_hash: request.args_hash.chars().take(12).collect(),
-        payload: web_prompt_text(&payload, 800),
+        payload: wire_prompt_text(&payload, 800),
     }
 }
 
-fn web_prompt_text(text: &str, cap: usize) -> String {
+fn wire_prompt_text(text: &str, cap: usize) -> String {
     feed::truncate_chars(&theway::bug_report::redact(text), cap)
 }
 
 fn load_web_prompt_images(
-    images: &[WebPromptImage],
+    images: &[WirePromptImage],
 ) -> Result<Vec<theway_llm_provider::ImageContent>> {
     if images.len() > theway::images::MAX_IMAGES_PER_MESSAGE {
         bail!(
@@ -713,7 +713,7 @@ mod tests {
             });
         }
 
-        let lines = web_feed_lines(&feed);
+        let lines = wire_feed_lines(&feed);
         assert_eq!(lines.len(), 250);
         assert!(
             lines.first().is_some_and(|line| line.contains("line 0")),
@@ -733,7 +733,7 @@ mod tests {
     #[test]
     fn web_prompt_images_decode_to_image_content() {
         let data = base64::engine::general_purpose::STANDARD.encode(b"\x89PNG\r\n\x1a\npng");
-        let images = load_web_prompt_images(&[WebPromptImage {
+        let images = load_web_prompt_images(&[WirePromptImage {
             data,
             name: Some("clip.png".into()),
         }])
@@ -747,7 +747,7 @@ mod tests {
     #[test]
     fn web_prompt_images_enforce_count_limit() {
         let images = vec![
-            WebPromptImage {
+            WirePromptImage {
                 data: String::new(),
                 name: None,
             };
