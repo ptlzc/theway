@@ -8,9 +8,8 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use crate::wire::{
-    SessionSummary, WireCronJobSnapshot, WireCronSnapshot, WireMcpSnapshot, WireSidebarSnapshot,
-    WireSkillSnapshot, WireSkillsSnapshot, WireToolsSnapshot, WireTriggerRuleSnapshot,
-    WireTriggersSnapshot,
+    SessionSummary, WireCronSnapshot, WireMcpSnapshot, WireSidebarSnapshot, WireSkillsSnapshot,
+    WireToolsSnapshot, WireTriggersSnapshot,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -109,7 +108,6 @@ impl crate::transport::SessionOps for FakeSessionOps {
         Ok(Vec::new())
     }
 }
-
 
 /// Minimal sidebar used by snapshot fixtures (transport tests + client tests).
 pub fn empty_sidebar_snapshot() -> WireSidebarSnapshot {

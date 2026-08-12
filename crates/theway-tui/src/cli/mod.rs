@@ -16,7 +16,7 @@ use theway::{commands, config, session, session_archive};
 #[command(
     name = "theway",
     version,
-    about = "Simple coding agent on top of theway-core"
+    about = "theway client — connects to the thewayd daemon (spawns one when absent); the daemon owns the agent runtime"
 )]
 pub(crate) struct Cli {
     #[command(subcommand)]

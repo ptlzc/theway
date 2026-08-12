@@ -59,18 +59,18 @@ use theway::commands;
 use theway::commands::Registry;
 use theway::history::HistoryStore;
 use theway::mentions;
+use theway_llm_provider::ImageContent;
 use theway_transport::client::GrpcClient;
 use theway_transport::proto::theway_grpc::stream_frame;
 use theway_transport::proto::{theway_grpc, wire_status};
 use theway_transport::transport::SlashCompleter;
-use theway_transport::wire::{WireStatus};
-use theway_llm_provider::ImageContent;
+use theway_transport::wire::WireStatus;
 
-use render_utils::{enter_tui, leave_tui, new_textarea};
 use render_utils::{
     centered_rect, panel_line, panel_rule_preview, safe_control_prompt_label,
     safe_control_prompt_text,
 };
+use render_utils::{enter_tui, leave_tui, new_textarea};
 
 const SPINNER_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const MAX_INPUT_ROWS: usize = 6;
@@ -255,19 +255,22 @@ impl App {
         self.feed
             .push_plain_untimed("──────── theway ────────", Level::Header);
         self.feed.push_plain_untimed(
-            format!("model:   {} (daemon: {})", self.latest.model, self.client.addr()),
+            format!(
+                "model:   {} (daemon: {})",
+                self.latest.model,
+                self.client.addr()
+            ),
             Level::Output,
         );
-        self.feed.push_plain_untimed(
-            format!("session: {}", self.session_id),
-            Level::Output,
-        );
+        self.feed
+            .push_plain_untimed(format!("session: {}", self.session_id), Level::Output);
         let tools = if self.latest.sidebar.tools.names.is_empty() {
             "(none)".to_string()
         } else {
             self.latest.sidebar.tools.names.join(", ")
         };
-        self.feed.push_plain_untimed(format!("tools:   {tools}"), Level::Output);
+        self.feed
+            .push_plain_untimed(format!("tools:   {tools}"), Level::Output);
         self.feed.push_plain_untimed(
             "Enter send · Ctrl-V paste text/images · Ctrl-C abort/exit · /help",
             Level::System,
@@ -384,21 +387,18 @@ impl App {
                     }
                 }
                 _ = reconnect.tick(), if stream.is_none() => {
-                    if !self.quit {
-                        match self.client.stream_events().await {
-                            Ok(s) => {
-                                self.connected = true;
-                                self.system_line("reconnected to daemon");
-                                // Re-fetch the full state in case we missed
-                                // snapshots while down.
-                                match self.client.get_state().await {
-                                    Ok(state) => self.apply_snapshot(wire_status(&state)),
-                                    Err(e) => self.error_line(format!("get_state: {e}")),
-                                }
-                                stream = Some(s);
-                            }
-                            Err(_) => {}
+                    if !self.quit
+                        && let Ok(s) = self.client.stream_events().await
+                    {
+                        self.connected = true;
+                        self.system_line("reconnected to daemon");
+                        // Re-fetch the full state in case we missed
+                        // snapshots while down.
+                        match self.client.get_state().await {
+                            Ok(state) => self.apply_snapshot(wire_status(&state)),
+                            Err(e) => self.error_line(format!("get_state: {e}")),
                         }
+                        stream = Some(s);
                     }
                 }
                 _ = tick.tick() => {
@@ -734,7 +734,11 @@ impl App {
                     Color::DarkGray
                 };
                 lines.push(panel_line(
-                    format!("{id} [{state_flag}, {mode}]", id = rule.id, mode = rule.mode),
+                    format!(
+                        "{id} [{state_flag}, {mode}]",
+                        id = rule.id,
+                        mode = rule.mode
+                    ),
                     color,
                     width,
                 ));
@@ -850,7 +854,11 @@ impl App {
                     Color::DarkGray
                 };
                 lines.push(panel_line(
-                    format!("{id} [{state_flag}] {schedule}", id = job.id, schedule = job.schedule),
+                    format!(
+                        "{id} [{state_flag}] {schedule}",
+                        id = job.id,
+                        schedule = job.schedule
+                    ),
                     color,
                     width,
                 ));
@@ -1053,7 +1061,9 @@ impl App {
                         continue;
                     }
                     "/help" => {
-                        println!("theway client — send messages to the thewayd daemon; local commands: /login /quit /clear /session");
+                        println!(
+                            "theway client — send messages to the thewayd daemon; local commands: /login /quit /clear /session"
+                        );
                         continue;
                     }
                     _ if input.starts_with("/login") => {
@@ -1068,10 +1078,9 @@ impl App {
                                 println!("login cancelled (empty key)");
                             }
                             Ok(token) => match theway::commands::save_api_key(&provider, &token) {
-                                Ok(path) => println!(
-                                    "saved api key for `{provider}` to {}",
-                                    path.display()
-                                ),
+                                Ok(path) => {
+                                    println!("saved api key for `{provider}` to {}", path.display())
+                                }
                                 Err(e) => println!("error: {e}"),
                             },
                             Err(e) => println!("error: {e}"),
@@ -1110,11 +1119,7 @@ fn collect_slash_commands(
             names
         })
         .collect();
-    commands.extend(
-        DAEMON_COMMANDS
-            .iter()
-            .map(|name| format!("/{name}")),
-    );
+    commands.extend(DAEMON_COMMANDS.iter().map(|name| format!("/{name}")));
     for skill in skills {
         if let Some(shortcut) = skill.name.split('/').next() {
             commands.push(format!("/{shortcut}"));
@@ -1126,8 +1131,31 @@ fn collect_slash_commands(
 /// Daemon-side slash commands the client forwards (the daemon's registry is not
 /// exposed over RPC; keep this list in sync with `commands::Registry` builtins).
 const DAEMON_COMMANDS: &[&str] = &[
-    "goal", "goal-start", "diag", "template", "compact", "bug-report", "model", "thinking",
-    "cost", "save", "undo", "name", "sessions", "share", "logout", "skill", "skills",
-    "triggers", "new-trigger", "cron", "inbox", "web-connect", "web-disconnect", "find",
+    "goal",
+    "goal-start",
+    "diag",
+    "template",
+    "compact",
+    "bug-report",
+    "model",
+    "thinking",
+    "cost",
+    "save",
+    "undo",
+    "name",
+    "sessions",
+    "share",
+    "logout",
+    "skill",
+    "skills",
+    "triggers",
+    "new-trigger",
+    "cron",
+    "inbox",
+    "web-connect",
+    "web-disconnect",
+    "find",
 ];
 
+#[cfg(test)]
+mod tests;

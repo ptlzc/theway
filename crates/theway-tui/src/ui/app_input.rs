@@ -84,7 +84,9 @@ impl App {
             KeyCode::Down if self.input_is_single_line() => self.history_next(),
             KeyCode::Char('u') if ctrl => {
                 if self.input_text().is_empty() {
-                    self.system_line("the queue lives on the daemon; Ctrl-C aborts the current turn");
+                    self.system_line(
+                        "the queue lives on the daemon; Ctrl-C aborts the current turn",
+                    );
                 } else {
                     self.clear_input();
                 }

@@ -11,7 +11,7 @@ use std::io::IsTerminal as _;
 use anyhow::{Context as _, Result};
 use theway::SqliteSessionRepo;
 use theway::session;
-use theway_transport::client::{discover, spawn_daemon, wait_ready, GrpcClient};
+use theway_transport::client::{GrpcClient, discover, spawn_daemon, wait_ready};
 use theway_transport::proto::wire_status;
 use theway_transport::wire::WireStatus;
 
@@ -70,10 +70,7 @@ fn daemon_launch_args(cli: &Cli) -> Vec<String> {
 }
 
 /// Find a daemon or spawn one, then return a connected client + initial state.
-async fn connect_or_spawn(
-    cli: &Cli,
-    cwd: &std::path::Path,
-) -> Result<(GrpcClient, WireStatus)> {
+async fn connect_or_spawn(cli: &Cli, cwd: &std::path::Path) -> Result<(GrpcClient, WireStatus)> {
     // 1. Reuse a running daemon: port file first, default port second.
     if let Some(addr) = discover(std::time::Duration::from_millis(800)).await? {
         tracing::info!("reusing running daemon at {addr}");
@@ -89,8 +86,8 @@ async fn connect_or_spawn(
         // stdout/stderr inherit so diagnostics stay visible on the pipe).
     }
     let args = daemon_launch_args(cli);
-    let mut child = spawn_daemon(cwd, &args)
-        .with_context(|| format!("spawn thewayd in {}", cwd.display()))?;
+    let mut child =
+        spawn_daemon(cwd, &args).with_context(|| format!("spawn thewayd in {}", cwd.display()))?;
     let addr = match wait_ready(std::time::Duration::from_secs(20)).await {
         Ok(addr) => addr,
         Err(e) => {

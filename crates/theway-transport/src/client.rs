@@ -21,8 +21,8 @@ use tonic::transport::Channel;
 use crate::proto::theway_grpc;
 use crate::proto::theway_grpc::theway_grpc_client::ThewayGrpcClient;
 use crate::proto::theway_grpc::{
-    self as proto, ApproveRequest, CreateSessionRequest, DeleteSessionRequest,
-    Empty, GetNodeOutputRequest, GraphCancelRequest, GraphListRequest, GraphRetryRequest,
+    self as proto, ApproveRequest, CreateSessionRequest, DeleteSessionRequest, Empty,
+    GetNodeOutputRequest, GraphCancelRequest, GraphListRequest, GraphRetryRequest,
     GraphSkipRequest, RenameSessionRequest, SendMessageRequest, SessionState, SetModelRequest,
     StreamFrame, SwitchSessionRequest,
 };
@@ -54,14 +54,15 @@ pub fn port_file_path() -> PathBuf {
 pub fn read_port_file() -> Result<Option<u16>> {
     match std::fs::read_to_string(port_file_path()) {
         Ok(contents) => {
-            let port = contents
-                .trim()
-                .parse::<u16>()
-                .with_context(|| format!("parse daemon port file {}", port_file_path().display()))?;
+            let port = contents.trim().parse::<u16>().with_context(|| {
+                format!("parse daemon port file {}", port_file_path().display())
+            })?;
             Ok(Some(port))
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e).with_context(|| format!("read daemon port file {}", port_file_path().display())),
+        Err(e) => {
+            Err(e).with_context(|| format!("read daemon port file {}", port_file_path().display()))
+        }
     }
 }
 
@@ -71,7 +72,7 @@ pub fn read_port_file() -> Result<Option<u16>> {
 /// `&mut self` because tonic's generated unary methods do. `stream_events`
 /// returns the raw frame stream — the caller selects on it (snapshot frames
 /// replace the full state, event frames are increments).
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct GrpcClient {
     inner: ThewayGrpcClient<Channel>,
     addr: String,
@@ -283,7 +284,11 @@ impl GrpcClient {
         Ok(accepted.into_inner().accepted)
     }
 
-    pub async fn graph_retry(&mut self, run_id: &str, node_id: Option<&str>) -> Result<Vec<String>> {
+    pub async fn graph_retry(
+        &mut self,
+        run_id: &str,
+        node_id: Option<&str>,
+    ) -> Result<Vec<String>> {
         let response = self
             .inner
             .graph_retry(GraphRetryRequest {
@@ -345,7 +350,9 @@ pub async fn probe(addr: &str, timeout: Duration) -> Result<SessionState> {
     let mut client = GrpcClient::connect(addr).await?;
     let state = tokio::time::timeout(timeout, client.get_state())
         .await
-        .with_context(|| format!("daemon at {addr} did not answer get_state within {timeout:?}"))??;
+        .with_context(|| {
+            format!("daemon at {addr} did not answer get_state within {timeout:?}")
+        })??;
     Ok(state)
 }
 
@@ -392,14 +399,10 @@ pub fn daemon_binary() -> Option<PathBuf> {
 /// launch args (model/session selection, approval flags, …). Inherits cwd (overridden
 /// by `--cwd`) and the environment. The caller must [`wait_ready`] for it.
 pub fn spawn_daemon(cwd: &Path, extra_args: &[String]) -> Result<Child> {
-    let binary = daemon_binary()
-        .context("thewayd binary not found (sibling of theway or on PATH)")?;
+    let binary =
+        daemon_binary().context("thewayd binary not found (sibling of theway or on PATH)")?;
     let mut command = std::process::Command::new(&binary);
-    command
-        .arg("--port")
-        .arg("0")
-        .arg("--cwd")
-        .arg(cwd);
+    command.arg("--port").arg("0").arg("--cwd").arg(cwd);
     for arg in extra_args {
         command.arg(arg);
     }

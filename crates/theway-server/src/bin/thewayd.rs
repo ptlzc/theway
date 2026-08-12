@@ -111,8 +111,7 @@ async fn main() -> Result<()> {
         Mode::Grpc
     };
     if let Some(dir) = &cli.cwd {
-        std::env::set_current_dir(dir)
-            .with_context(|| format!("cd into {}", dir.display()))?;
+        std::env::set_current_dir(dir).with_context(|| format!("cd into {}", dir.display()))?;
     }
     let cwd = std::env::current_dir().context("getting cwd")?;
     let repo = Arc::new(session::open_repo(&cwd).await);

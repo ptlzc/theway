@@ -9,8 +9,8 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use futures::StreamExt as _;
-use theway_transport::client::{probe, wait_ready, GrpcClient};
-use theway_transport::proto::theway_grpc::{self, stream_frame};
+use theway_transport::client::{GrpcClient, probe, wait_ready};
+use theway_transport::proto::theway_grpc::stream_frame;
 
 /// THEWAY_DIR is process-global; all daemon-spawning tests serialize here.
 static DAEMON_E2E_LOCK: Mutex<()> = Mutex::new(());
@@ -32,7 +32,7 @@ impl Drop for DaemonGuard {
 /// ready client address (from `wait_ready`, exercising the port-file discovery).
 async fn spawn_daemon(dir: &std::path::Path) -> (DaemonGuard, String) {
     let binary = env!("CARGO_BIN_EXE_thewayd");
-    let mut child = Command::new(binary)
+    let child = Command::new(binary)
         .arg("--port")
         .arg("0")
         .arg("--cwd")
@@ -45,13 +45,10 @@ async fn spawn_daemon(dir: &std::path::Path) -> (DaemonGuard, String) {
         .spawn()
         .expect("spawn thewayd");
     // Give the daemon a moment to exec, then wait for the port file + readiness.
-    let addr = tokio::time::timeout(
-        Duration::from_secs(20),
-        wait_ready(Duration::from_secs(20)),
-    )
-    .await
-    .expect("daemon never became ready")
-    .expect("wait_ready failed");
+    let addr = tokio::time::timeout(Duration::from_secs(20), wait_ready(Duration::from_secs(20)))
+        .await
+        .expect("daemon never became ready")
+        .expect("wait_ready failed");
     (DaemonGuard { child }, addr)
 }
 
@@ -182,7 +179,10 @@ async fn dead_daemon_probe_fails_promptly() {
     drop(_daemon); // kills the child
     tokio::time::sleep(Duration::from_millis(200)).await;
     let err = probe(&addr, Duration::from_millis(500)).await;
-    assert!(err.is_err(), "probe against a dead daemon must fail: {err:?}");
+    assert!(
+        err.is_err(),
+        "probe against a dead daemon must fail: {err:?}"
+    );
 
     unsafe { std::env::remove_var("THEWAY_DIR") };
 }

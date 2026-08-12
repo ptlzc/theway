@@ -145,7 +145,6 @@ mod tests {
     use super::*;
     use theway_transport::wire::ModelEntry;
 
-
     fn two_groups() -> Vec<ProviderGroup> {
         vec![
             ProviderGroup {

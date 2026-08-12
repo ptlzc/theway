@@ -454,7 +454,6 @@ pub(crate) fn bind_addr(host: &str, port: u16) -> Result<SocketAddr> {
     Ok(SocketAddr::new(ip, port))
 }
 
-
 fn open_web_browser(url: &str) -> Result<()> {
     let mut command = open_browser_command(url);
     command

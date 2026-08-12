@@ -119,11 +119,25 @@ with `/cost`.
 
 ## Quick start
 
+`theway` is a **pure client**: it connects to the `thewayd` daemon, which owns the
+agent runtime (harness, session, tools, triggers). On startup the TUI reuses a
+running daemon (discovered via `~/.theway/daemon-port` or the default port
+`44777`), or spawns `thewayd` in the current directory and waits for readiness.
+The daemon stays running after the TUI exits (multi-client sharing); stop it
+with `Ctrl-C` / `SIGTERM`, or start it explicitly:
+
 ```bash
-# Start in the current project
+# Start the daemon yourself (same flags as the TUI: --provider/--model/--cwd/...)
+./target/release/thewayd --cwd /path/to/project
+./target/release/thewayd --port 0        # random port, published to ~/.theway/daemon-port
+./target/release/thewayd --http          # HTTP/WS surface (workmate) instead of gRPC
+```
+
+```bash
+# Start the TUI in the current project (spawns/reuses the daemon)
 ./target/release/theway
 
-# Choose a specific provider/model
+# Choose a specific provider/model (forwarded to the daemon on spawn)
 ./target/release/theway --provider anthropic --model claude-haiku-4-5
 
 # Enable extended thinking where supported
@@ -132,6 +146,13 @@ with `/cost`.
 # Resume the most recent session for this project
 ./target/release/theway --resume
 ```
+
+> **Tool working directory**: tools execute in the **daemon's** cwd (start the
+daemon in the project directory, or pass `--cwd`). The TUI no longer runs
+commands in its own process.
+
+> **Disconnects**: if the daemon dies, the TUI shows a `daemon offline` banner
+and reconnects automatically when it comes back.
 
 Once the REPL opens, type a request such as:
 
@@ -167,7 +188,12 @@ Inside `theway`, slash commands control the session:
 | `/cron enable <id>` / `/cron disable <id>` | Resume or pause a scheduled job |
 | `/cron remove <id>` | Delete a scheduled job |
 | `/inbox [all\|claim <n>\|dismiss <n>\|clear]` | Triage findings reported by stateful loops |
-| `/quit` | Exit |
+| `/quit` | Exit the TUI (the daemon keeps running) |
+
+Local-only commands (the TUI handles these itself; everything else forwards to
+the daemon): `/login` (writes `~/.theway/auth.json` — the daemon picks the key
+up on its next turn), `/session export|import` (local SQLite repo),
+`/session switch <id>` (daemon `SwitchSession` RPC).
 
 CLI helpers:
 
@@ -304,6 +330,7 @@ By default, `theway` stores local state under `~/.theway`:
 | `~/.theway/sessions/<cwd-hash>/<uuidv7>.cron.toml` | Session-scoped cron jobs |
 | `~/.theway/sessions/<cwd-hash>/<uuidv7>.loop-<job-id>.md` | Loop state kept by a stateful cron job |
 | `~/.theway/inbox.jsonl` | Global triage inbox written by stateful loops |
+| `~/.theway/daemon-port` | Port the running `thewayd` bound (written on bind; clients discover the daemon here) |
 | `~/.theway/config.toml` | Optional user config, including trigger poll interval |
 
 Set `THEWAY_DIR` to use a different base directory.

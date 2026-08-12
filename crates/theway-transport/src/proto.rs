@@ -190,12 +190,15 @@ pub fn wire_status(state: &wire::SessionState) -> WireStatus {
                 summary: status.summary.clone(),
             }
         }),
-        goal: state.goal.as_ref().map(|goal| crate::wire::WireGoalSnapshot {
-            condition: goal.condition.clone(),
-            status: goal.status.clone(),
-            iterations: goal.iterations,
-            last_reason: goal.last_reason.clone(),
-        }),
+        goal: state
+            .goal
+            .as_ref()
+            .map(|goal| crate::wire::WireGoalSnapshot {
+                condition: goal.condition.clone(),
+                status: goal.status.clone(),
+                iterations: goal.iterations,
+                last_reason: goal.last_reason.clone(),
+            }),
         control_plane_prompt: state.control_plane_prompt.as_ref().map(|prompt| {
             crate::wire::WireControlPlanePromptSnapshot {
                 tool_name: prompt.tool_name.clone(),
@@ -218,15 +221,31 @@ fn sidebar_wire(sidebar: Option<&wire::SidebarSnapshot>) -> crate::wire::WireSid
     crate::wire::WireSidebarSnapshot {
         inbox_new: sidebar.inbox_new as usize,
         skills: crate::wire::WireSkillsSnapshot {
-            total: sidebar.skills.as_ref().map(|s| s.total as usize).unwrap_or(0),
-            enabled: sidebar.skills.as_ref().map(|s| s.enabled as usize).unwrap_or(0),
+            total: sidebar
+                .skills
+                .as_ref()
+                .map(|s| s.total as usize)
+                .unwrap_or(0),
+            enabled: sidebar
+                .skills
+                .as_ref()
+                .map(|s| s.enabled as usize)
+                .unwrap_or(0),
             disabled: sidebar
                 .skills
                 .as_ref()
                 .map(|s| s.disabled as usize)
                 .unwrap_or(0),
-            builtin: sidebar.skills.as_ref().map(|s| s.builtin as usize).unwrap_or(0),
-            user: sidebar.skills.as_ref().map(|s| s.user as usize).unwrap_or(0),
+            builtin: sidebar
+                .skills
+                .as_ref()
+                .map(|s| s.builtin as usize)
+                .unwrap_or(0),
+            user: sidebar
+                .skills
+                .as_ref()
+                .map(|s| s.user as usize)
+                .unwrap_or(0),
             project: sidebar
                 .skills
                 .as_ref()
@@ -284,8 +303,16 @@ fn sidebar_wire(sidebar: Option<&wire::SidebarSnapshot>) -> crate::wire::WireSid
         },
         cron: crate::wire::WireCronSnapshot {
             total: sidebar.cron.as_ref().map(|c| c.total as usize).unwrap_or(0),
-            enabled: sidebar.cron.as_ref().map(|c| c.enabled as usize).unwrap_or(0),
-            disabled: sidebar.cron.as_ref().map(|c| c.disabled as usize).unwrap_or(0),
+            enabled: sidebar
+                .cron
+                .as_ref()
+                .map(|c| c.enabled as usize)
+                .unwrap_or(0),
+            disabled: sidebar
+                .cron
+                .as_ref()
+                .map(|c| c.disabled as usize)
+                .unwrap_or(0),
             jobs: sidebar
                 .cron
                 .as_ref()
@@ -305,7 +332,11 @@ fn sidebar_wire(sidebar: Option<&wire::SidebarSnapshot>) -> crate::wire::WireSid
                 .unwrap_or_default(),
         },
         mcp: crate::wire::WireMcpSnapshot {
-            servers: sidebar.mcp.as_ref().map(|m| m.servers as usize).unwrap_or(0),
+            servers: sidebar
+                .mcp
+                .as_ref()
+                .map(|m| m.servers as usize)
+                .unwrap_or(0),
             tools: sidebar.mcp.as_ref().map(|m| m.tools as usize).unwrap_or(0),
             notification_hooks: sidebar
                 .mcp
@@ -324,7 +355,11 @@ fn sidebar_wire(sidebar: Option<&wire::SidebarSnapshot>) -> crate::wire::WireSid
                 .unwrap_or_default(),
         },
         tools: crate::wire::WireToolsSnapshot {
-            total: sidebar.tools.as_ref().map(|t| t.total as usize).unwrap_or(0),
+            total: sidebar
+                .tools
+                .as_ref()
+                .map(|t| t.total as usize)
+                .unwrap_or(0),
             names: sidebar
                 .tools
                 .as_ref()
@@ -415,15 +450,16 @@ fn wire_dag_run(run: &wire::DagRunSnapshot) -> crate::wire::WireDagRunSnapshot {
                 error: node.error.clone(),
                 input_tokens: node.input_tokens,
                 output_tokens: node.output_tokens,
-                result: node.result.as_ref().map(|result| {
-                    crate::wire::WireNodeResultSnapshot {
+                result: node
+                    .result
+                    .as_ref()
+                    .map(|result| crate::wire::WireNodeResultSnapshot {
                         success: result.success,
                         error: result.error.clone(),
                         duration_ms: result.duration_ms,
                         attempt: result.attempt,
                         total_attempts: result.total_attempts,
-                    }
-                }),
+                    }),
                 output_tail: node.output_tail.clone(),
                 live_preview: node.live_preview.clone(),
             })
