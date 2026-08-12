@@ -25,7 +25,15 @@ theway-llm-provider = { path = "../theway-llm-provider", default-features = fals
 # Local-surface modules moved from theway-server (node 3-move-modules of
 # sdk-split-local-sandbox): config/session/auth/stream_auth/history/images/mentions
 # under `local/`, config + feed under `common/`. Versions mirror theway-server.
-tokio = { version = "1", features = ["macros", "rt", "fs"] }
+# fs/session modules + LocalExecutor (node 4-local-executor of sdk-split-local-sandbox):
+# `process` for run_command/git, `time` for the run_command timeout kill.
+tokio = { version = "1", features = ["macros", "rt", "fs", "process", "time"] }
+# LocalExecutor tool surface: `async_trait` to implement theway_core::executor::ToolExecutor,
+# `ignore` for .gitignore-aware grep/find walks, `regex` for grep patterns
+# (versions mirror theway-server).
+async-trait = "0.1"
+ignore = "0.4"
+regex = "1"
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
