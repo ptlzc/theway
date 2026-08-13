@@ -114,17 +114,6 @@ pub struct RpcRequest<P: Serialize> {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct RpcResponse<R> {
-    #[allow(dead_code)]
-    pub jsonrpc: Option<String>,
-    pub id: Option<u64>,
-    #[serde(default)]
-    pub result: Option<R>,
-    #[serde(default)]
-    pub error: Option<RpcError>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 pub struct RpcError {
     pub code: i64,
     pub message: String,

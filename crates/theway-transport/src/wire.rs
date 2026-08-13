@@ -377,17 +377,6 @@ pub struct WireToolsSnapshot {
     pub names: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct PromptRequest {
-    pub text: String,
-    #[serde(default)]
-    pub images: Vec<WirePromptImage>,
-    /// Target session (optional; must be the active session — see
-    /// `POST /prompt` validation in theway-server).
-    #[serde(default)]
-    pub session_id: Option<String>,
-}
-
 #[derive(Clone, Debug, Deserialize)]
 pub struct WirePromptImage {
     pub data: String,
@@ -395,31 +384,6 @@ pub struct WirePromptImage {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct CompleteRequest {
-    pub text: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct CompleteResponse {
-    pub completions: Vec<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct CommandAccepted {
-    pub accepted: bool,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ControlPlaneDecisionRequest {
-    pub approve: bool,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct SetModelRequest {
     pub model: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct TriggerRuleRequest {
-    pub id: String,
 }

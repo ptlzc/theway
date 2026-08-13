@@ -1,11 +1,9 @@
-//! Stdio transport. Spawns a subprocess, talks JSON-RPC over its stdin/stdout, captures
-//! stderr to a buffered log accessor for diagnostics.
+//! Stdio transport. Spawns a subprocess, talks JSON-RPC over its stdin/stdout, and drains
+//! stderr to keep the child's pipe buffer from filling up.
 
 use std::process::Stdio;
-use std::sync::Arc;
 
 use async_trait::async_trait;
-use parking_lot::Mutex;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::Mutex as AsyncMutex;
@@ -18,8 +16,6 @@ pub struct StdioTransport {
     stdin: AsyncMutex<ChildStdin>,
     rx: AsyncMutex<tokio::sync::mpsc::Receiver<Result<String, McpError>>>,
     child: AsyncMutex<Option<Child>>,
-    #[allow(dead_code)]
-    stderr_tail: Arc<Mutex<Vec<String>>>,
 }
 
 impl StdioTransport {
@@ -67,17 +63,14 @@ impl StdioTransport {
             }
         });
 
-        // stderr drain (keep tail for diagnostics).
-        let stderr_tail = Arc::new(Mutex::new(Vec::<String>::new()));
-        let st = stderr_tail.clone();
+        // stderr drain. The lines used to be buffered into an in-memory diagnostics
+        // tail buffer, but it had no readers and was removed (issue #15); lines are
+        // now discarded after read. The pump must keep running, otherwise the child's
+        // stderr pipe buffer fills up and the subprocess blocks.
         tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                let mut g = st.lock();
-                if g.len() >= 200 {
-                    g.remove(0);
-                }
-                g.push(line);
+                drop(line);
             }
         });
 
@@ -85,7 +78,6 @@ impl StdioTransport {
             stdin: AsyncMutex::new(stdin),
             rx: AsyncMutex::new(rx),
             child: AsyncMutex::new(Some(child)),
-            stderr_tail,
         })
     }
 }

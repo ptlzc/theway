@@ -154,10 +154,6 @@ impl HttpMcpTransport {
         })
     }
 
-    pub fn set_auth(&self, auth: HttpMcpAuth) {
-        *self.auth.lock() = auth;
-    }
-
     fn auth(&self) -> HttpMcpAuth {
         self.auth.lock().clone()
     }
