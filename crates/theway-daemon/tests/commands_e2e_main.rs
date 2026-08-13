@@ -21,11 +21,16 @@ mod auth {
     // suites; each test binary serializes its own env mutations with this copy.
     pub static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 }
+// Shared env lock + guard for the bridged `commands` unit tests (which mutate
+// `THEWAY_DIR` / provider keys); mirrors the `crate::test_env` bridge in
+// `src/lib.rs` for the lib test target. See tests/env_lock.rs.
 #[allow(dead_code)]
 #[path = "../src/bug_report.rs"]
 mod bug_report;
 #[path = "../src/commands/mod.rs"]
 mod commands;
+#[path = "common/env_lock.rs"]
+pub(crate) mod test_env;
 #[allow(dead_code)]
 #[path = "../src/trigger_engine/mod.rs"]
 mod trigger_engine;

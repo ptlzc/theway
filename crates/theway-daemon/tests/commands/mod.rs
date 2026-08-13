@@ -1,40 +1,8 @@
 //! Tests for `commands` — split out of src (see docs/RUST_TEST_FILES.md).
 
 use super::*;
+use crate::test_env::{EnvGuard, ENV_LOCK};
 use theway_core::SkillSource;
-
-/// Serializes env-var mutations within this test binary. The SDK keeps its own
-/// lock for its suites (tests run in separate processes, so no cross-binary
-/// coordination is needed).
-static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-struct EnvGuard {
-    key: &'static str,
-    original: Option<std::ffi::OsString>,
-}
-
-impl EnvGuard {
-    fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
-        let original = std::env::var_os(key);
-        unsafe { std::env::set_var(key, value) };
-        Self { key, original }
-    }
-
-    fn remove(key: &'static str) -> Self {
-        let original = std::env::var_os(key);
-        unsafe { std::env::remove_var(key) };
-        Self { key, original }
-    }
-}
-
-impl Drop for EnvGuard {
-    fn drop(&mut self) {
-        match self.original.take() {
-            Some(value) => unsafe { std::env::set_var(self.key, value) },
-            None => unsafe { std::env::remove_var(self.key) },
-        }
-    }
-}
 
 fn custom_test_model(provider: &str, id: &str) -> Model {
     Model {

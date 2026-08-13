@@ -52,3 +52,10 @@ pub mod ts_extensions;
 pub mod ui_mode_panel;
 // Server-first: transport is always on (the daemon IS an agent server).
 pub mod triggers;
+
+// Test-only env serialization lock shared by every bridged unit-test module
+// that mutates process env (commands, local_models, …) — see the file header
+// for the issue #16 race it fixes.
+#[cfg(test)]
+#[path = "../tests/common/env_lock.rs"]
+pub(crate) mod test_env;
