@@ -71,10 +71,10 @@ impl ApiProvider for OpenAICompletionsProvider {
             .map(|o| {
                 let mut base = o.base.clone();
                 if let Some(level) = o.reasoning {
-                    base.provider_extras.insert(
-                        "reasoning_effort".to_string(),
-                        json!(reasoning_effort(level)),
-                    );
+                    if let Some(effort) = map_reasoning_effort(model, level) {
+                        base.provider_extras
+                            .insert("reasoning_effort".to_string(), json!(effort));
+                    }
                 }
                 base
             })
@@ -83,13 +83,32 @@ impl ApiProvider for OpenAICompletionsProvider {
     }
 }
 
-fn reasoning_effort(level: ThinkingLevel) -> &'static str {
-    match level {
-        ThinkingLevel::Minimal => "minimal",
-        ThinkingLevel::Low => "low",
-        ThinkingLevel::Medium => "medium",
-        ThinkingLevel::High | ThinkingLevel::Xhigh => "high",
+/// Translate a thinking level into the `reasoning_effort` value for the request.
+///
+/// When the model declares a `thinkingLevelMap`, it wins: a mapped value is sent as-is and
+/// a `null` entry means the level is unsupported — no `reasoning_effort` is sent so the
+/// provider default applies. Without a map the legacy behavior is kept (xhigh collapses to
+/// "high", which every completions vendor accepts).
+fn map_reasoning_effort(model: &Model, level: ThinkingLevel) -> Option<String> {
+    if let Some(map) = &model.thinking_level_map {
+        let key = match level {
+            ThinkingLevel::Minimal => ModelThinkingLevel::Minimal,
+            ThinkingLevel::Low => ModelThinkingLevel::Low,
+            ThinkingLevel::Medium => ModelThinkingLevel::Medium,
+            ThinkingLevel::High => ModelThinkingLevel::High,
+            ThinkingLevel::Xhigh => ModelThinkingLevel::Xhigh,
+        };
+        return map.get(&key).cloned().flatten();
     }
+    Some(
+        match level {
+            ThinkingLevel::Minimal => "minimal",
+            ThinkingLevel::Low => "low",
+            ThinkingLevel::Medium => "medium",
+            ThinkingLevel::High | ThinkingLevel::Xhigh => "high",
+        }
+        .to_string(),
+    )
 }
 
 // ────────────────────────────────────────────────────────────────────────────────────────────
@@ -481,6 +500,51 @@ mod tests {
             headers: None,
             compat: None,
         }
+    }
+
+    #[test]
+    fn map_reasoning_effort_legacy_default_without_map() {
+        let m = mk_model(); // thinking_level_map: None
+        assert_eq!(
+            map_reasoning_effort(&m, ThinkingLevel::Minimal).as_deref(),
+            Some("minimal")
+        );
+        assert_eq!(
+            map_reasoning_effort(&m, ThinkingLevel::High).as_deref(),
+            Some("high")
+        );
+        // Legacy: xhigh collapses to high so map-less vendors never see "xhigh".
+        assert_eq!(
+            map_reasoning_effort(&m, ThinkingLevel::Xhigh).as_deref(),
+            Some("high")
+        );
+    }
+
+    #[test]
+    fn map_reasoning_effort_consults_model_map() {
+        let mut m = mk_model();
+        m.thinking_level_map = Some(
+            [
+                (ModelThinkingLevel::Off, None),
+                (ModelThinkingLevel::Minimal, None),
+                (ModelThinkingLevel::Low, None),
+                (ModelThinkingLevel::Medium, None),
+                (ModelThinkingLevel::High, Some("high".into())),
+                (ModelThinkingLevel::Xhigh, Some("max".into())),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        assert_eq!(
+            map_reasoning_effort(&m, ThinkingLevel::High).as_deref(),
+            Some("high")
+        );
+        assert_eq!(
+            map_reasoning_effort(&m, ThinkingLevel::Xhigh).as_deref(),
+            Some("max")
+        );
+        // Null entry = unsupported level: no reasoning_effort is sent.
+        assert_eq!(map_reasoning_effort(&m, ThinkingLevel::Medium), None);
     }
 
     #[test]

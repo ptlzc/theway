@@ -56,6 +56,36 @@ pub fn parse_trigger_poll_interval_secs(toml_text: &str) -> Result<Option<u64>, 
     Ok(Some(secs))
 }
 
+/// Default provider/model pair declared in `[model]` of `config.toml`. Applies when
+/// neither CLI flag is given; see `parse_model_default`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelDefault {
+    pub provider: String,
+    pub model: String,
+}
+
+/// Parse the `[model] provider = "..."` / `[model] model = "..."` default from `config.toml`.
+///
+/// Both keys must be present together — a half-default would silently change resolution
+/// semantics (explicit overrides require the pair), so a lone key is an error.
+pub fn parse_model_default(toml_text: &str) -> Result<Option<ModelDefault>, String> {
+    let parsed: ConfigFile =
+        toml::from_str(toml_text).map_err(|e| format!("parse config.toml: {e}"))?;
+    let Some(section) = parsed.model else {
+        return Ok(None);
+    };
+    match (section.provider, section.model) {
+        (None, None) => Ok(None),
+        (Some(provider), Some(model)) => {
+            if provider.trim().is_empty() || model.trim().is_empty() {
+                return Err("`[model]` provider/model must not be empty".into());
+            }
+            Ok(Some(ModelDefault { provider, model }))
+        }
+        _ => Err("`[model]` requires both `provider` and `model`".into()),
+    }
+}
+
 /// Default public relay endpoint for `/web-connect` (issue #22). Override with
 /// `[relay] base_url` in `~/.theway/config.toml` (e.g. a wrangler dev instance).
 pub const DEFAULT_RELAY_BASE_URL: &str = "https://pie.0xfefe.me";
@@ -91,6 +121,13 @@ pub async fn relay_base_url() -> Result<String, String> {
 struct ConfigFile {
     triggers: Option<TriggerConfigSection>,
     relay: Option<RelayConfigSection>,
+    model: Option<ModelConfigSection>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ModelConfigSection {
+    provider: Option<String>,
+    model: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -136,6 +173,40 @@ poll_interval_secs = 15
 poll_interval_secs = 0
 "#;
         assert!(parse_trigger_poll_interval_secs(text).is_err());
+    }
+
+    #[test]
+    fn parse_model_default_reads_pair() {
+        let text = r#"
+[model]
+provider = "theway-newapi"
+model = "deepseek-v4-pro-max"
+"#;
+        assert_eq!(
+            parse_model_default(text).unwrap(),
+            Some(ModelDefault {
+                provider: "theway-newapi".into(),
+                model: "deepseek-v4-pro-max".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_model_default_none_when_absent_or_empty_section() {
+        assert_eq!(parse_model_default("").unwrap(), None);
+        assert_eq!(parse_model_default("[model]\n").unwrap(), None);
+        // Unknown sections are ignored, so an unrelated config still yields None.
+        assert_eq!(
+            parse_model_default("[triggers]\npoll_interval_secs = 15\n").unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_model_default_requires_both_keys() {
+        assert!(parse_model_default("[model]\nprovider = \"x\"\n").is_err());
+        assert!(parse_model_default("[model]\nmodel = \"x\"\n").is_err());
+        assert!(parse_model_default("[model]\nprovider = \"\"\nmodel = \"x\"\n").is_err());
     }
 }
 

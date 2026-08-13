@@ -2,7 +2,10 @@
 //! poll interval) — daemon-kernel-layers: moved from the SDK; the TUI/CLI
 //! never calls these.
 
-use theway_transport::config::{parse_builtin_skills_config, parse_trigger_poll_interval_secs};
+use theway_transport::config::{
+    ModelDefault, parse_builtin_skills_config, parse_model_default,
+    parse_trigger_poll_interval_secs,
+};
 use theway_transport::triggers::DEFAULT_DYNAMIC_TRIGGER_POLL_INTERVAL_SECS;
 
 /// Read `<base_dir>/config.toml` and extract the `[builtin_skills] enabled = [...]` list.
@@ -43,6 +46,28 @@ pub async fn read_trigger_poll_interval_secs(
     }
 }
 
+/// Read the `[model]` default provider/model from `<base_dir>/config.toml`.
+/// Missing file or section → None. A malformed default reports a diagnostic but does
+/// not block startup (the caller falls back to env auto-detection).
+pub async fn read_model_default(
+    base_dir: &std::path::Path,
+) -> (Option<ModelDefault>, Option<String>) {
+    let path = base_dir.join("config.toml");
+    let Ok(text) = tokio::fs::read_to_string(&path).await else {
+        return (None, None);
+    };
+    match parse_model_default(&text) {
+        Ok(default) => (default, None),
+        Err(err) => (
+            None,
+            Some(format!(
+                "model: ignoring invalid default in {}: {err}",
+                path.display()
+            )),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -70,5 +95,45 @@ mod tests {
         let (cli_secs, diagnostic) = read_trigger_poll_interval_secs(base_dir, Some(15)).await;
         assert_eq!(cli_secs, 15);
         assert!(diagnostic.is_none());
+    }
+
+    #[tokio::test]
+    async fn model_default_reads_config_and_reports_malformed() {
+        let temp = tempfile::tempdir().unwrap();
+        let base_dir = temp.path();
+
+        let (default, diagnostic) = read_model_default(base_dir).await;
+        assert!(default.is_none());
+        assert!(diagnostic.is_none());
+
+        tokio::fs::write(
+            base_dir.join("config.toml"),
+            "[model]\nprovider = \"theway-newapi\"\nmodel = \"deepseek-v4-pro-max\"\n",
+        )
+        .await
+        .unwrap();
+        let (default, diagnostic) = read_model_default(base_dir).await;
+        assert_eq!(
+            default.as_ref().map(|d| d.provider.as_str()),
+            Some("theway-newapi")
+        );
+        assert_eq!(
+            default.as_ref().map(|d| d.model.as_str()),
+            Some("deepseek-v4-pro-max")
+        );
+        assert!(diagnostic.is_none());
+
+        // Half-configured default: diagnostic + None (env detection still applies).
+        tokio::fs::write(base_dir.join("config.toml"), "[model]\nprovider = \"x\"\n")
+            .await
+            .unwrap();
+        let (default, diagnostic) = read_model_default(base_dir).await;
+        assert!(default.is_none());
+        assert!(
+            diagnostic
+                .as_deref()
+                .unwrap_or_default()
+                .contains("requires both")
+        );
     }
 }

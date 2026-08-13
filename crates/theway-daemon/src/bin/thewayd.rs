@@ -130,12 +130,29 @@ async fn main() -> Result<()> {
                 .join(", ")
         );
     }
+    // Default provider/model from config.toml ([model]) — applies only when the CLI
+    // specifies neither flag; a lone CLI flag keeps the legacy env auto-detection path.
+    let (model_default, model_default_diag) =
+        theway_daemon::config_readers::read_model_default(&theway_transport::config::base_dir())
+            .await;
+    if let Some(diag) = model_default_diag {
+        tracing::warn!("{diag}");
+    }
+    let cli_overrides_model = cli.provider.is_some() || cli.model.is_some();
+    let (provider_override, model_override) = if cli_overrides_model {
+        (cli.provider.clone(), cli.model.clone())
+    } else {
+        match &model_default {
+            Some(default) => (Some(default.provider.clone()), Some(default.model.clone())),
+            None => (None, None),
+        }
+    };
     let mut model = match theway_daemon::model::auto_detect_model(
-        cli.provider.as_deref(),
-        cli.model.as_deref(),
+        provider_override.as_deref(),
+        model_override.as_deref(),
     ) {
         Ok(model) => model,
-        Err(e) if cli.provider.is_none() && cli.model.is_none() => {
+        Err(e) if provider_override.is_none() && model_override.is_none() => {
             tracing::warn!(
                 "no credential found: {e}; starting credential-less (turns will fail until a key is configured)"
             );
