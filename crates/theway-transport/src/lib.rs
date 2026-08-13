@@ -8,6 +8,7 @@
 
 pub mod client;
 pub mod commands;
+pub mod config;
 pub mod feed;
 pub mod grpc;
 pub mod host;
@@ -17,6 +18,7 @@ pub mod mcp;
 pub mod proto;
 pub mod testing;
 pub mod transport;
+pub mod triggers;
 pub mod wire;
 pub mod ws;
 

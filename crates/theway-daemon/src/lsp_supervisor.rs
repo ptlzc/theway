@@ -19,7 +19,7 @@ use tokio::sync::OnceCell;
 use tokio_util::sync::CancellationToken;
 
 use crate::lsp::{Diagnostic, LspClient};
-use theway::config::base_dir;
+use theway_transport::client::base_dir;
 
 const DIAG_WAIT_MS: u64 = 800;
 

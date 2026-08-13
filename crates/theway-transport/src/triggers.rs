@@ -1,9 +1,9 @@
-//! Session-scoped automation data models shared by the daemon's trigger engine
-//! and the SDK's session-archive surface.
+//! Session-scoped automation data models (daemon-kernel-layers: moved from the
+//! SDK into transport — trigger rules cross the wire, so they are contract).
 //!
-//! These are pure serde models (no trigger-engine logic) so both sides import the
-//! same type identity: the daemon's `triggers::{cron, dynamic}` modules re-export
-//! them, and `session_archive` serializes them into `.theway-session` sidecars.
+//! Pure serde models (no trigger-engine logic): the daemon's `triggers::{cron,
+//! dynamic}` modules re-export them, and `session_archive` serializes them into
+//! `.theway-session` sidecars.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

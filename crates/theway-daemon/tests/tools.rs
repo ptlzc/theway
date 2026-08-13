@@ -22,7 +22,7 @@ mod bug_report;
 #[allow(dead_code)]
 mod config {
     #[allow(unused_imports)]
-    pub use theway::config::*;
+    pub use theway_transport::config::*;
 }
 #[path = "../src/export.rs"]
 #[allow(dead_code)]

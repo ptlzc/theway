@@ -18,7 +18,7 @@ use theway_core::Session;
 // Re-exported: daemon modules reach the redactor through `crate::bug_report::redact`.
 pub use theway::bug_report::redact;
 
-use theway::config::base_dir;
+use theway_transport::client::base_dir;
 
 const MAX_LOG_LINES: usize = 200;
 

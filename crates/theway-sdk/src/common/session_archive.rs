@@ -20,8 +20,8 @@ use theway_core::{
 use theway_storage::sqlite_repo::SqliteSessionRepo;
 use theway_storage::sqlite_storage::SqliteSessionStorage;
 
-use crate::common::triggers::CronJob;
-use crate::common::triggers::DynamicTriggerRule;
+use theway_transport::triggers::CronJob;
+use theway_transport::triggers::DynamicTriggerRule;
 
 const SCHEMA: &str = "theway.session_export.v1";
 const MANIFEST_PATH: &str = "manifest.json";

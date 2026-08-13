@@ -7,7 +7,7 @@ use anyhow::{Context, Result, bail};
 use theway_core::Session;
 use theway_storage::sqlite_repo::SqliteSessionRepo;
 
-use crate::config::sessions_dir_for_cwd;
+use theway_transport::config::sessions_dir_for_cwd;
 
 pub struct SessionEntry {
     #[allow(dead_code)] // listed via the public API; not read by the CLI itself.

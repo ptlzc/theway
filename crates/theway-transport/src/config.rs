@@ -1,20 +1,19 @@
-//! Paths and identity. Mirrors `packages/coding-agent/src/config.ts` in spirit — one source of
-//! truth for `~/.theway/...` and the cwd-hash directory layout.
+//! Paths and identity (daemon-kernel-layers: moved from the SDK into transport —
+//! the config surface is shared client contract). One source of truth for
+//! `~/.theway/...` and the cwd-hash directory layout.
+//!
+//! `base_dir` is the transport client's single implementation (design decision 6:
+//! `client::base_dir` and the SDK's `config::base_dir` are merged — both the
+//! daemon and the TUI reference this one).
 
 use std::path::PathBuf;
 
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-/// Base directory: `${THEWAY_DIR:-$HOME/.theway}`.
-pub fn base_dir() -> PathBuf {
-    if let Ok(p) = std::env::var("THEWAY_DIR") {
-        return PathBuf::from(p);
-    }
-    directories::BaseDirs::new()
-        .map(|d| d.home_dir().join(".theway"))
-        .unwrap_or_else(|| PathBuf::from(".theway"))
-}
+/// Base directory: `${THEWAY_DIR:-$HOME/.theway}` — the single implementation is
+/// [`crate::client::base_dir`]; this re-export keeps the `config::base_dir` path.
+pub use crate::client::base_dir;
 
 /// Sessions live under `<base>/sessions/<cwd-hash>/<uuidv7>.jsonl`. Hashing the cwd lets us
 /// scope `--resume` to "last session opened from this directory".

@@ -20,7 +20,7 @@ pub mod sandbox;
 // (`theway::session`, `theway::config`, `theway::session_archive`, …) unchanged.
 pub use common::auth_helpers as commands;
 pub use theway_transport::cprintln;
-pub use common::config;
+pub use theway_transport::config;
 pub use common::{config_readers, session_archive};
 pub use local::{auth, bug_report, history, images, mentions, session, stream_auth};
 

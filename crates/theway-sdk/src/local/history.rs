@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::config::base_dir;
+use theway_transport::client::base_dir;
 
 const MAX_ENTRIES: usize = 1000;
 

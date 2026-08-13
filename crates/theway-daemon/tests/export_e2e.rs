@@ -17,7 +17,7 @@ use theway_llm_provider::{
 #[allow(dead_code)]
 mod config {
     #[allow(unused_imports)]
-    pub use theway::config::*;
+    pub use theway_transport::config::*;
 }
 #[allow(dead_code)]
 #[path = "../src/export.rs"]

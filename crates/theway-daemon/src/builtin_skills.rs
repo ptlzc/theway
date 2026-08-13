@@ -211,10 +211,10 @@ pub fn merge_with_user_project(mut builtins: Vec<Skill>, user_project: &[Skill])
 /// unknown names as a startup diagnostic, but a malformed config never prevents `theway` from
 /// running at all.
 ///
-/// The parser lives in the SDK (`theway::config::parse_builtin_skills_config`),
+/// The parser lives in transport (`theway_transport::config::parse_builtin_skills_config`),
 /// re-imported here so this module's unit tests keep the unqualified call sites.
 #[cfg(test)]
-use theway::config::parse_builtin_skills_config;
+use theway_transport::config::parse_builtin_skills_config;
 
 /// Error returned when the CLI enabled a built-in skill name that this binary does not
 /// recognise. The caller is expected to print the message and exit with a non-zero status

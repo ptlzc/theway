@@ -24,7 +24,7 @@ struct ModelsFile {
 
 pub async fn load_all(cwd: &Path, cli_base_url: Option<&str>) -> Result<LoadedLocalModels> {
     let paths = [
-        theway::config::base_dir().join("models.json"),
+        theway_transport::client::base_dir().join("models.json"),
         cwd.join(".theway").join("models.json"),
     ];
     load_all_from_paths_with_base_url(&paths, cli_base_url)

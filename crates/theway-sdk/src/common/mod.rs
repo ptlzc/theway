@@ -6,7 +6,5 @@
 //! this scaffold only declares the module tree.
 
 pub mod auth_helpers;
-pub mod config;
 pub mod config_readers;
 pub mod session_archive;
-pub mod triggers;

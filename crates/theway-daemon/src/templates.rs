@@ -21,7 +21,7 @@ use tokio_util::sync::CancellationToken;
 #[cfg(feature = "local")]
 use crate::env::native::NativeEnv;
 #[cfg(feature = "local")]
-use theway::config::base_dir;
+use theway_transport::client::base_dir;
 
 pub struct LoadedTemplates {
     pub templates: Vec<PromptTemplate>,

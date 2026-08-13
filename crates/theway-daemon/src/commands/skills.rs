@@ -254,7 +254,7 @@ async fn set_skill_enabled(
     }
 
     if let Err(e) =
-        crate::skill_overrides::set_and_save(&theway::config::base_dir(), &name, source, enabled)
+        crate::skill_overrides::set_and_save(&theway_transport::client::base_dir(), &name, source, enabled)
             .await
     {
         return CommandOutcome::Error(format!("persist skill state failed: {e}"));
