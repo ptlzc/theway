@@ -9,11 +9,11 @@ use std::io::IsTerminal as _;
 use crate::resume_picker;
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
-use theway_storage::sqlite_repo::SqliteSessionRepo;
 use theway_storage::session;
 use theway_storage::session_archive;
-use theway_transport::config;
+use theway_storage::sqlite_repo::SqliteSessionRepo;
 use theway_transport::commands;
+use theway_transport::config;
 
 #[derive(Parser, Debug)]
 #[command(

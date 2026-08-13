@@ -28,7 +28,6 @@ impl App {
         }
     }
 
-
     /// Resolve the pending daemon control-plane prompt through the `approve`
     /// RPC (the snapshot clears the card on the next frame).
     pub(super) fn resolve_control_plane_prompt(&mut self, approve: bool) {

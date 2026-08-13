@@ -141,7 +141,11 @@ impl App {
     /// run in the daemon (`/session export|import` is forwarded to it) — the
     /// session archive operates on the repo the daemon owns.
     async fn local_session_switch(&mut self, args: &str) {
-        let id = args.trim_start().strip_prefix("switch").unwrap_or(args).trim();
+        let id = args
+            .trim_start()
+            .strip_prefix("switch")
+            .unwrap_or(args)
+            .trim();
         if id.is_empty() {
             self.error_line("usage: /session switch <id>");
             return;

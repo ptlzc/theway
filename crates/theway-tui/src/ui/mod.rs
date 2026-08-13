@@ -52,13 +52,13 @@ use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap};
 use tui_textarea::TextArea;
 
-use theway_transport::feed::{Feed, Level, TriggerPollStatus};
-use theway_transport::commands;
-use theway_transport::commands::Registry;
-use theway_transport::history::HistoryStore;
-use theway_transport::mentions;
 use theway_llm_provider::ImageContent;
 use theway_transport::client::GrpcClient;
+use theway_transport::commands;
+use theway_transport::commands::Registry;
+use theway_transport::feed::{Feed, Level, TriggerPollStatus};
+use theway_transport::history::HistoryStore;
+use theway_transport::mentions;
 use theway_transport::proto::theway_grpc::stream_frame;
 use theway_transport::proto::{theway_grpc, wire_status};
 use theway_transport::transport::SlashCompleter;
@@ -126,7 +126,6 @@ pub struct AppConfig {
     pub cwd: PathBuf,
     /// cwd-scoped session repo backing the local-only surfaces (`/session`
     /// export/import, --list-sessions) — same machine, shared SQLite sessions.
-
     pub history: HistoryStore,
     /// Local slash-command registry (quit/clear/help/login + session
     /// export/import). Everything else forwards to the daemon.
@@ -157,8 +156,6 @@ pub struct App {
     pending_pasted_images: Vec<ImageContent>,
 
     /// cwd-scoped session repo backing the local-only `/session` export/import.
-
-
     feed: Feed,
     panel_status: PanelStatus,
     model_catalog: Vec<theway_transport::wire::ProviderGroup>,
@@ -1064,12 +1061,17 @@ impl App {
                             Ok(token) if token.trim().is_empty() => {
                                 println!("login cancelled (empty key)");
                             }
-                            Ok(token) => match theway_transport::auth::save_api_key(&provider, &token) {
-                                Ok(path) => {
-                                    println!("saved api key for `{provider}` to {}", path.display())
+                            Ok(token) => {
+                                match theway_transport::auth::save_api_key(&provider, &token) {
+                                    Ok(path) => {
+                                        println!(
+                                            "saved api key for `{provider}` to {}",
+                                            path.display()
+                                        )
+                                    }
+                                    Err(e) => println!("error: {e}"),
                                 }
-                                Err(e) => println!("error: {e}"),
-                            },
+                            }
                             Err(e) => println!("error: {e}"),
                         }
                         continue;

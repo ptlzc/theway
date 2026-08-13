@@ -17,11 +17,11 @@
 
 use std::sync::Arc;
 
-use theway_storage::sqlite_repo::SqliteSessionRepo;
-use theway_transport::commands::Registry;
 use theway_core::{AgentHarness, AgentHarnessOptions};
 use theway_daemon::agent_session::{AgentSession, RetrySettings};
 use theway_llm_provider::{Api, Model, ModelCost, Provider};
+use theway_storage::sqlite_repo::SqliteSessionRepo;
+use theway_transport::commands::Registry;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -29,7 +29,8 @@ async fn main() -> anyhow::Result<()> {
     let repo = Arc::new(SqliteSessionRepo::new(
         std::env::temp_dir().join("sdk-demo-sessions"),
     ));
-    let session = theway_storage::session::create(&repo, std::env::current_dir()?.as_path()).await?;
+    let session =
+        theway_storage::session::create(&repo, std::env::current_dir()?.as_path()).await?;
     let model = Model {
         id: "faux".into(),
         name: "Faux".into(),

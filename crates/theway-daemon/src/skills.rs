@@ -10,9 +10,9 @@ use theway_core::{Skill, SkillDiagnostic};
 
 #[cfg(feature = "local")]
 use crate::env::native::NativeEnv;
-use theway_transport::client::base_dir;
 #[cfg(feature = "local")]
 use theway_core::{SkillSource, load_skills};
+use theway_transport::client::base_dir;
 #[cfg(feature = "local")]
 use tokio_util::sync::CancellationToken;
 

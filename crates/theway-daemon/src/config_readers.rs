@@ -2,8 +2,8 @@
 //! poll interval) — daemon-kernel-layers: moved from the SDK; the TUI/CLI
 //! never calls these.
 
-use theway_transport::triggers::DEFAULT_DYNAMIC_TRIGGER_POLL_INTERVAL_SECS;
 use theway_transport::config::{parse_builtin_skills_config, parse_trigger_poll_interval_secs};
+use theway_transport::triggers::DEFAULT_DYNAMIC_TRIGGER_POLL_INTERVAL_SECS;
 
 /// Read `<base_dir>/config.toml` and extract the `[builtin_skills] enabled = [...]` list.
 /// Missing file → empty list. Parse error / missing section → empty list (the parser itself

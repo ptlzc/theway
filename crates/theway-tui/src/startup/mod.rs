@@ -9,8 +9,8 @@
 use std::io::IsTerminal as _;
 
 use anyhow::{Context as _, Result};
-use theway_storage::sqlite_repo::SqliteSessionRepo;
 use theway_storage::session;
+use theway_storage::sqlite_repo::SqliteSessionRepo;
 use theway_transport::client::{GrpcClient, discover, spawn_daemon, wait_ready};
 use theway_transport::proto::wire_status;
 use theway_transport::wire::WireStatus;

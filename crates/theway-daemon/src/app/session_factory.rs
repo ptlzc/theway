@@ -10,11 +10,11 @@ use std::sync::{Arc, OnceLock};
 use crate::SqliteSessionRepo;
 use crate::{agent_specs, tools, triggers};
 use anyhow::{Context, Result};
-use theway_transport::feed::FeedUpdate;
-use theway_storage::session;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::{AgentHarness, AgentHarnessOptions, ThinkingLevel};
 use theway_core::{agent::hooks, multiagent::goal};
+use theway_storage::session;
+use theway_transport::feed::FeedUpdate;
 use theway_transport::inbox;
 
 /// session-resource-model: rebuilds a fully-wired [`AgentHarness`] for any session id —

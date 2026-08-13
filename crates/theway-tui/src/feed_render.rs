@@ -8,9 +8,7 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
 
-use theway_transport::feed::{
-    Block, Level, display_prefix, should_separate, wrap_str,
-};
+use theway_transport::feed::{Block, Level, display_prefix, should_separate, wrap_str};
 
 const USER_STYLE: Style = Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD);
 const THINKING_STYLE: Style = Style::new()

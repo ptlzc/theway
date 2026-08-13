@@ -38,14 +38,14 @@ use tokio_util::sync::CancellationToken;
 // `commands::…` call sites (ui, main, readline, model_picker, tests) keep their paths.
 // The allow keeps the pre-split `commands::…` paths alive in the path-included e2e test
 // crate, where this module is private and some re-exports have no in-tree user.
+#[allow(unused_imports)]
+pub use theway_transport::auth::{model_credential_hint, save_api_key};
 /// The SDK's console sink is the single process-wide output sink: daemon commands route
 //  through it too (see the `cprintln!` macro below).
 pub use theway_transport::commands::console;
-#[allow(unused_imports)]
-pub use theway_transport::auth::{model_credential_hint, save_api_key};
 pub use theway_transport::commands::{
-    CommandOutcome, SlashCommand, WebRelayAction, attach_skill_prompt,
-    cli_model_help_text, parse, parse_model_spec,
+    CommandOutcome, SlashCommand, WebRelayAction, attach_skill_prompt, cli_model_help_text, parse,
+    parse_model_spec,
 };
 
 /// Drop-in replacement for `println!` inside this module: same call syntax, but the formatted

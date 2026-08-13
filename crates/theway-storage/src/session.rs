@@ -5,9 +5,9 @@
 
 use std::path::PathBuf;
 
+use crate::sqlite_repo::SqliteSessionRepo;
 use anyhow::{Context, Result, bail};
 use theway_core::Session;
-use crate::sqlite_repo::SqliteSessionRepo;
 
 use theway_transport::config::sessions_dir_for_cwd;
 

@@ -6,8 +6,8 @@
 //! `theway_llm_provider::ImageContent` ready to hand to
 //! `AgentHarness::prompt_with_images`.
 
-use std::path::Path;
 use anyhow::{Context, Result, bail};
+use std::path::Path;
 
 pub const MAX_PER_IMAGE_BYTES: usize = 10 * 1024 * 1024;
 pub const MAX_IMAGES_PER_MESSAGE: usize = 10;
@@ -37,7 +37,6 @@ pub fn load_bytes(label: &str, bytes: &[u8]) -> Result<theway_llm_provider::Imag
     })
 }
 
-
 /// Detect a supported image's mime type from its leading bytes. Supported: PNG, JPEG, WebP,
 /// GIF — matches the providers' general intersection.
 pub fn infer_mime(bytes: &[u8]) -> Option<&'static str> {
@@ -54,6 +53,32 @@ pub fn infer_mime(bytes: &[u8]) -> Option<&'static str> {
         return Some("image/gif");
     }
     None
+}
+
+pub async fn load_one(path: &Path) -> Result<theway_llm_provider::ImageContent> {
+    let bytes = tokio::fs::read(path)
+        .await
+        .with_context(|| format!("read image {}", path.display()))?;
+    load_bytes(&path.display().to_string(), &bytes)
+}
+
+/// Load every path. Errors on the first failure so the user gets a clear, surfaceable error
+/// instead of a partial attachment list.
+pub async fn load_all(
+    paths: &[std::path::PathBuf],
+) -> Result<Vec<theway_llm_provider::ImageContent>> {
+    if paths.len() > MAX_IMAGES_PER_MESSAGE {
+        bail!(
+            "{} images exceeds per-message cap of {}",
+            paths.len(),
+            MAX_IMAGES_PER_MESSAGE
+        );
+    }
+    let mut out = Vec::with_capacity(paths.len());
+    for p in paths {
+        out.push(load_one(p).await?);
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -113,31 +138,3 @@ mod tests {
         assert!(err.contains("unsupported image format"), "{err}");
     }
 }
-
-pub async fn load_one(path: &Path) -> Result<theway_llm_provider::ImageContent> {
-    let bytes = tokio::fs::read(path)
-        .await
-        .with_context(|| format!("read image {}", path.display()))?;
-    load_bytes(&path.display().to_string(), &bytes)
-}
-
-/// Load every path. Errors on the first failure so the user gets a clear, surfaceable error
-/// instead of a partial attachment list.
-pub async fn load_all(
-    paths: &[std::path::PathBuf],
-) -> Result<Vec<theway_llm_provider::ImageContent>> {
-    if paths.len() > MAX_IMAGES_PER_MESSAGE {
-        bail!(
-            "{} images exceeds per-message cap of {}",
-            paths.len(),
-            MAX_IMAGES_PER_MESSAGE
-        );
-    }
-    let mut out = Vec::with_capacity(paths.len());
-    for p in paths {
-        out.push(load_one(p).await?);
-    }
-    Ok(out)
-}
-
-

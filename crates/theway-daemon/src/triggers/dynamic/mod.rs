@@ -47,11 +47,11 @@ use crate::trigger_engine::types::Trigger;
 use hooks::extract_dynamic_rule_ids;
 #[cfg(test)]
 use parse::ZH_WHEN_PREFIX;
+#[cfg(test)]
+use theway_core::{AgentTool, PermissionClassification};
 pub use theway_transport::triggers::{
     DEFAULT_DYNAMIC_TRIGGER_POLL_INTERVAL_SECS, DynamicTriggerRule,
 };
-#[cfg(test)]
-use theway_core::{AgentTool, PermissionClassification};
 #[cfg(test)]
 use tokio::time::Duration;
 #[cfg(test)]
