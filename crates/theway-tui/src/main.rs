@@ -16,6 +16,7 @@
 
 mod cli;
 mod clipboard_image;
+mod feed_render;
 mod model_picker;
 mod resume_picker;
 mod startup;

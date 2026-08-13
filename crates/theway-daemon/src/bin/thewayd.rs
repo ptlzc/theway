@@ -176,7 +176,7 @@ async fn main() -> Result<()> {
 
     let _logging = theway_daemon::logging::init(&session_id);
     let (feed_tx, feed_rx) =
-        tokio::sync::mpsc::unbounded_channel::<theway::app::feed::FeedUpdate>();
+        tokio::sync::mpsc::unbounded_channel::<theway_transport::feed::FeedUpdate>();
 
     let stream_fn = stream_fn_with_auth_store();
     let dynamic_trigger_registry = triggers::global_registry().clone();
@@ -393,9 +393,9 @@ async fn main() -> Result<()> {
     {
         let tx = feed_tx.clone();
         theway_daemon::commands::console::set_sink(Box::new(move |line| {
-            let _ = tx.send(theway::app::feed::FeedUpdate::Plain {
+            let _ = tx.send(theway_transport::feed::FeedUpdate::Plain {
                 text: line,
-                level: theway::app::feed::Level::Output,
+                level: theway_transport::feed::Level::Output,
             });
         }));
     }

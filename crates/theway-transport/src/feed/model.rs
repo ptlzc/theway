@@ -1,4 +1,5 @@
-//! Conversation-feed model for the full-screen TUI.
+//! Conversation-feed model (daemon-kernel-layers: moved from the SDK into
+//! transport — the feed is part of the client contract).
 //!
 //! The feed is the scrolling region above the pinned input box. It is an ordered list of
 //! [`Block`]s — user prompts, assistant text, thinking, tool calls/results, and assorted
@@ -7,31 +8,114 @@
 //! machine the old line-stream renderer in `tui.rs` used, but producing a structured model we
 //! can re-wrap and scroll instead of raw stdout bytes.
 //!
-//! Rendering is width-aware: [`Feed::lines`] word-wraps every block to the available width and
-//! returns ready-to-draw `ratatui` lines, so scroll math operates on real display rows.
+//! This module is UI-agnostic: it exposes the block data ([`Feed::blocks`]) and
+//! width-wrapped plain-text rows ([`Feed::plain_lines`]); the ratatui-styled
+//! rendering lives in the `theway-tui` crate (`feed_render`).
 
 #[cfg(test)]
-use chrono::{Local, TimeZone, Utc};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::Line;
-#[cfg(test)]
-use unicode_width::UnicodeWidthStr;
+use chrono::{DateTime, Local, TimeZone, Utc};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-mod preview;
-mod render;
-mod types;
+use super::types::{Block, Open};
+pub use super::types::{FeedUpdate, Level, TriggerPollStatus, WireFeedBlock};
 
-pub use preview::{
+pub use super::preview::{
     compact_tool_content_blocks, compact_tool_output_lines, preview, truncate_chars,
 };
+
+/// Split `text` on newlines, word-wrap each paragraph to `width`, and push styled lines. An
+/// optional `prefix` is prepended to the very first paragraph (e.g. `you ▸ `).
+pub(crate) fn push_plain_paragraphs(
+    out: &mut Vec<String>,
+    text: &str,
+    prefix: Option<&str>,
+    width: usize,
+) {
+    for (i, para) in text.split('\n').enumerate() {
+        let owned;
+        let para = if i == 0 {
+            if let Some(p) = prefix {
+                owned = format!("{p}{para}");
+                owned.as_str()
+            } else {
+                para
+            }
+        } else {
+            para
+        };
+        for row in wrap_str(para, width) {
+            out.push(row);
+        }
+    }
+}
+
+/// Display-width-aware word wrap. Breaks at the last space that fits; hard-breaks a single
+/// word longer than `width`. Preserves leading whitespace (so indented tool output keeps its
+/// shape). Returns at least one row (possibly empty) so blank lines survive.
+pub fn wrap_str(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    if text.is_empty() {
+        return vec![String::new()];
+    }
+    let mut rows: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut cur_w = 0usize;
+    let mut last_space: Option<usize> = None;
+    for ch in text.chars() {
+        let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if cur_w + cw > width && !cur.is_empty() {
+            if let Some(bp) = last_space.take() {
+                let rest = cur.split_off(bp);
+                let rest = rest.trim_start_matches(' ').to_string();
+                let done = std::mem::replace(&mut cur, rest);
+                rows.push(done.trim_end().to_string());
+                cur_w = UnicodeWidthStr::width(cur.as_str());
+            } else {
+                rows.push(std::mem::take(&mut cur));
+                cur_w = 0;
+            }
+        }
+        cur.push(ch);
+        cur_w += cw;
+        if ch == ' ' {
+            last_space = Some(cur.len());
+        }
+    }
+    rows.push(cur);
+    rows
+}
+
+pub fn should_separate(previous: Option<&Block>, current: &Block, has_output: bool) -> bool {
+    if !has_output {
+        return false;
+    }
+    matches!(
+        (previous, current),
+        (_, Block::User { .. })
+            | (
+                Some(Block::User { .. }),
+                Block::Assistant { .. } | Block::Thinking { .. } | Block::Tool { .. }
+            )
+    )
+}
+
+pub fn display_prefix(timestamp: Option<&str>, label: &str) -> String {
+    match timestamp {
+        Some(ts) if label.is_empty() => format!("{ts} "),
+        Some(ts) => format!("{ts} {label}"),
+        None => label.to_string(),
+    }
+}
+
+pub(crate) fn current_time_label() -> Option<String> {
+    Some(chrono::Local::now().format("%Y-%m-%d %H:%M").to_string())
+}
+
 #[cfg(test)]
-use render::format_timestamp_label;
-use render::{
-    current_time_label, display_prefix, push_plain_paragraphs, should_separate, wrap_str,
-};
-use render::{push_paragraphs, style_for_level};
-use types::{Block, Open};
-pub use types::{FeedUpdate, Level, TriggerPollStatus, WireFeedBlock};
+fn format_timestamp_label(timestamp: DateTime<Utc>, _now: DateTime<Local>) -> String {
+    let local = timestamp.with_timezone(&Local);
+    local.format("%Y-%m-%d %H:%M").to_string()
+}
 
 pub struct Feed {
     blocks: Vec<Block>,
@@ -54,6 +138,12 @@ impl Feed {
         self.blocks.clear();
         self.open = Open::None;
         self.trim_text = true;
+    }
+
+    /// Read-only view of the ordered blocks (the tui crate renders from this;
+    /// see `theway_tui::feed_render::lines`).
+    pub fn blocks(&self) -> &[Block] {
+        &self.blocks
     }
 
     /// Replace the whole feed with finished wire blocks (client mode: the
@@ -291,8 +381,8 @@ impl Feed {
 
     /// Width-wrapped plain-text rendering of the whole feed (no terminal styles).
     ///
-    /// Headless counterpart of [`Self::lines`]: same separators/prefixes/wrap, but
-    /// returns `String` rows for transport consumers that don't need ratatui.
+    /// Returns `String` rows for transport consumers that don't need ratatui;
+    /// the styled counterpart lives in `theway_tui::feed_render::lines`.
     pub fn plain_lines(&self, width: usize) -> Vec<String> {
         let width = width.max(1);
         let mut out: Vec<String> = Vec::new();
@@ -356,81 +446,6 @@ impl Feed {
         out
     }
 
-    /// Render the whole feed to width-wrapped `ratatui` lines, ready to scroll/draw.
-    pub fn lines(&self, width: usize) -> Vec<Line<'static>> {
-        let width = width.max(1);
-        let mut out: Vec<Line<'static>> = Vec::new();
-        let mut previous: Option<&Block> = None;
-        for block in &self.blocks {
-            if should_separate(previous, block, !out.is_empty()) {
-                out.push(Line::raw(""));
-            }
-            match block {
-                Block::User { text, timestamp } => {
-                    let prefix = display_prefix(timestamp.as_deref(), "you ▸ ");
-                    push_paragraphs(&mut out, text, USER_STYLE, Some(&prefix), width);
-                }
-                Block::Assistant { text, timestamp } => {
-                    let prefix = display_prefix(timestamp.as_deref(), "ai ▸ ");
-                    push_paragraphs(&mut out, text, Style::default(), Some(&prefix), width);
-                }
-                Block::Thinking { text, timestamp } => {
-                    let prefix = display_prefix(timestamp.as_deref(), "[thinking] ");
-                    push_paragraphs(&mut out, text, THINKING_STYLE, Some(&prefix), width);
-                }
-                Block::Tool {
-                    name,
-                    args,
-                    timestamp,
-                } => {
-                    let text = format!("⚙ {name}{args}");
-                    let prefix = display_prefix(timestamp.as_deref(), "");
-                    push_paragraphs(&mut out, &text, TOOL_STYLE, Some(&prefix), width);
-                }
-                Block::ToolResult {
-                    lines,
-                    is_error,
-                    timestamp,
-                    ..
-                } => {
-                    let style = if *is_error {
-                        Style::default().fg(Color::Red)
-                    } else {
-                        Style::default().fg(Color::Green)
-                    };
-                    let mut first = true;
-                    for line in lines {
-                        let indented = if first {
-                            first = false;
-                            format!("{}    {line}", display_prefix(timestamp.as_deref(), ""))
-                        } else {
-                            format!("    {line}")
-                        };
-                        for row in wrap_str(&indented, width) {
-                            out.push(Line::styled(row, style));
-                        }
-                    }
-                }
-                Block::Plain {
-                    text,
-                    level,
-                    timestamp,
-                } => {
-                    let prefix = timestamp.as_deref().map(|ts| display_prefix(Some(ts), ""));
-                    push_paragraphs(
-                        &mut out,
-                        text,
-                        style_for_level(*level),
-                        prefix.as_deref(),
-                        width,
-                    );
-                }
-            }
-            previous = Some(block);
-        }
-        out
-    }
-
     pub fn wire_blocks(&self) -> Vec<WireFeedBlock> {
         self.blocks
             .iter()
@@ -486,11 +501,6 @@ impl Default for Feed {
     }
 }
 
-const USER_STYLE: Style = Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD);
-const THINKING_STYLE: Style = Style::new()
-    .fg(Color::DarkGray)
-    .add_modifier(Modifier::ITALIC);
-const TOOL_STYLE: Style = Style::new().fg(Color::Yellow);
 pub const TOOL_OUTPUT_HEAD_LINES: usize = 20;
 pub const TOOL_OUTPUT_TAIL_LINES: usize = 4;
 pub const TOOL_OUTPUT_ERROR_HEAD_LINES: usize = 40;

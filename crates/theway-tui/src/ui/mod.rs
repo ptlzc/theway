@@ -34,7 +34,7 @@ mod app_input;
 mod app_turns;
 mod render_utils;
 
-pub use theway::app::feed::FeedUpdate;
+pub use theway_transport::feed::FeedUpdate;
 
 use std::io::IsTerminal;
 use std::io::Write as _;
@@ -54,7 +54,7 @@ use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap};
 use tui_textarea::TextArea;
 
-use theway::app::feed::{Feed, Level, TriggerPollStatus};
+use theway_transport::feed::{Feed, Level, TriggerPollStatus};
 use theway::commands;
 use theway::commands::Registry;
 use theway::history::HistoryStore;
@@ -496,7 +496,7 @@ impl App {
         self.last_feed_area = Some(feed_area);
 
         // Feed (pre-wrapped to width so scroll math is exact).
-        let lines = self.feed.lines(feed_area.width as usize);
+        let lines = crate::feed_render::lines(&self.feed, feed_area.width as usize);
         let total = lines.len();
         let viewport = feed_area.height as usize;
         self.last_viewport_h = viewport;
@@ -559,7 +559,7 @@ impl App {
         };
         frame.render_widget(
             Paragraph::new(Line::styled(
-                theway::app::feed::truncate_chars(hint, hint_area.width as usize),
+                theway_transport::feed::truncate_chars(hint, hint_area.width as usize),
                 Style::default().fg(Color::DarkGray),
             )),
             hint_area,
@@ -640,7 +640,7 @@ impl App {
             )),
             Line::raw(format!(
                 "Preview: {}",
-                theway::app::feed::truncate_chars(&prompt.payload, CONTROL_PROMPT_TEXT_WIDTH)
+                theway_transport::feed::truncate_chars(&prompt.payload, CONTROL_PROMPT_TEXT_WIDTH)
             )),
             Line::raw(""),
             Line::styled(

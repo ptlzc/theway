@@ -17,7 +17,7 @@ use ratatui::text::Line;
 use regex::Regex;
 use tui_textarea::TextArea;
 
-use theway::app::feed;
+use theway_transport::feed;
 
 pub(super) fn panel_line(text: String, color: Color, width: usize) -> Line<'static> {
     Line::styled(

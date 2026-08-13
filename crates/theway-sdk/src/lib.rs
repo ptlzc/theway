@@ -27,9 +27,3 @@ pub use local::{auth, bug_report, history, images, mentions, session, stream_aut
 // minted as SQLite. Re-exported from the composition root so binaries don't need to
 // depend on theway-storage directly.
 pub use theway_storage::sqlite_repo::SqliteSessionRepo;
-
-/// Path-compat shim: the conversation feed keeps its pre-split path
-/// (`theway::app::feed`) even though it now lives in `common::feed`.
-pub mod app {
-    pub use crate::common::feed;
-}

@@ -93,7 +93,7 @@ async fn test_app() -> (App, mpsc::UnboundedReceiver<WireCommand>) {
     let client = GrpcClient::connect(&addr).await.unwrap();
     let initial = fixture_status(vec![WireFeedBlock::Plain {
         text: "banner".into(),
-        level: theway::app::feed::Level::Header,
+        level: theway_transport::feed::Level::Header,
         timestamp: None,
     }]);
     let app = App::new(AppConfig {
@@ -190,8 +190,7 @@ async fn status_line_shows_busy_spinner_from_snapshot() {
 async fn snapshot_rebuilds_feed_and_resyncs_busy_panel() {
     let (mut app, _rx) = test_app().await;
     assert!(
-        app.feed
-            .lines(100)
+        crate::feed_render::lines(&app.feed, 100)
             .iter()
             .any(|l| { l.spans.iter().any(|s| s.content.contains("banner")) })
     );
@@ -356,8 +355,7 @@ async fn session_switch_sends_switch_session_rpc() {
 }
 
 fn feed_text(app: &App) -> String {
-    app.feed
-        .lines(100)
+    crate::feed_render::lines(&app.feed, 100)
         .into_iter()
         .map(|line| {
             line.spans

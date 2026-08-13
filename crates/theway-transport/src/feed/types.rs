@@ -2,7 +2,7 @@
 //! web-facing mirrors serialized to transport consumers.
 
 /// Visual class for a plain status/output line. Maps to a concrete [`Style`] at render time.
-pub use theway_transport::feed::Level;
+pub use crate::feed::wire::Level;
 
 /// A message sent from the agent/harness listeners (or the console sink) into the UI loop,
 /// where it is applied to the [`Feed`]. Crosses thread boundaries, so every field is owned.
@@ -40,15 +40,15 @@ pub enum FeedUpdate {
     },
 }
 
-pub use theway_transport::feed::WireFeedBlock;
+pub use crate::feed::wire::WireFeedBlock;
 
 /// Bounded, display-only status for periodic trigger checks that should stay visible in the
 /// main UI without appending a line to the conversation feed.
-pub use theway_transport::feed::TriggerPollStatus;
+pub use crate::feed::wire::TriggerPollStatus;
 
 /// One renderable unit in the feed.
 #[derive(Clone, Debug)]
-pub(crate) enum Block {
+pub enum Block {
     User {
         text: String,
         timestamp: Option<String>,
@@ -81,7 +81,7 @@ pub(crate) enum Block {
 
 /// Which streaming block (if any) is currently open for appends.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Open {
+pub enum Open {
     None,
     Text,
     Thinking,
