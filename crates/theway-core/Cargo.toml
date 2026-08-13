@@ -19,13 +19,9 @@ default = ["harness"]
 # Harness layer (skills, prompt templates, sessions, compaction, system prompt). Opt-out for
 # embedders that only want the bare Agent (e.g. browser-side consumers).
 harness = []
-# Native filesystem adapter (std::fs). Default for native targets; turn off for wasm.
 
 [dependencies]
 theway-llm-provider = { path = "../theway-llm-provider" }
-# MCP client/adapter for the builtin tools (`runtime/tools/mcp_adapter.rs`). One-way
-# dependency: theway-mcp does NOT depend on theway-core (no cycle).
-theway-mcp = { path = "../theway-mcp" }
 
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "fs", "io-util", "process"] }
 tokio-util = { version = "0.7", features = ["io"] }
@@ -45,17 +41,15 @@ regex = "1"
 # Vendored mermaid parse stage (mmdr 0.3.1) — see crates/mermaid-parser.
 mermaid-rs-parser = { path = "../mermaid-parser" }
 
-# Builtin tools (`tools/`). install_skill needs the HTTP client. Local-execution tools
-# (bash/fs/git/grep/find/ls/outline) and web tools live in the server crate (app layer);
-# reqwest stays here for install_skill, directories for skills-state paths.
+# hooks (user-configured CLI hooks: TOML rules + shell/webhook side effects) and
+# goal (session goal stop-hook) live in the engine; reqwest powers hook webhooks,
+# toml parses hook rules, anyhow is the hook runner's error type, directories
+# resolves hook cwd paths (daemon-kernel-layers: tool bodies moved out; the
+# remaining deps all serve the agent runtime itself).
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "stream"] }
 once_cell = "1"
 tracing = "0.1"
 directories = "5"
-hex = "0.4"
-# hooks (user-configured CLI hooks: TOML rules + shell/webhook side effects) and
-# goal (session goal stop-hook) live in the engine; toml parses hook rules, anyhow
-# is the hook runner's error type (mirrors the former server-crate versions).
 toml = "0.8"
 anyhow = "1"
 # Stable content hash for trigger_promotion audit. Used only to fingerprint promotion

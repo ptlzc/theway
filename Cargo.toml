@@ -5,7 +5,6 @@ members = [
     "crates/mermaid-parser",
     "crates/theway-core",
     "crates/theway-storage",
-    "crates/theway-sdk",
     "crates/theway-daemon",
     "crates/theway-tui",
     "crates/theway-mcp",

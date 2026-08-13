@@ -60,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
     // that only run local commands use `()` (the daemon plugs in `DaemonCtx`).
     let _registry = Registry::<()>::new(); // TUI-local commands live in theway-tui; this embedder needs none
     let _repo = Arc::new(SqliteSessionRepo::new(
-        std::env::temp_dir().join("theway-sdk-demo-sessions"),
+        std::env::temp_dir().join("theway-demo-sessions"),
     ));
     println!("sdk: registry + session repo OK — SDK usable from external project");
     let _ = agent;
