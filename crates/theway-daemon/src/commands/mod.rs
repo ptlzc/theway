@@ -106,7 +106,7 @@ use triggers::{
 pub const THINKING_LEVEL_USAGE: &str = "[off|minimal|low|medium|high|xhigh]";
 
 /// Context handed to a command at runtime — daemon-shaped view kept for the assembly layer
-/// (`DaemonApp`) and the integration tests: it carries the `trigger_executor` reference.
+/// (`turn::TurnHost`) and the integration tests: it carries the `trigger_executor` reference.
 /// [`dispatch`] converts it into the transport framework's generic
 /// [`theway_transport::commands::CommandCtx`]
 /// with [`DaemonCtx`] extras; daemon commands (e.g. `/triggers`) reach the executor through

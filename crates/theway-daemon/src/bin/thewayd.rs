@@ -3,7 +3,7 @@
 //!
 //! Same startup assembly as the TUI binary minus the UI: harness, session,
 //! trigger engine, DAG engine, listeners — driven by the headless
-//! [`theway_daemon::app::daemon::DaemonApp`] through the `TransportHost` surface.
+//! [`theway_daemon::turn::daemon::TurnHost`] through the `TransportHost` surface.
 //!
 //! ```
 //! thewayd                    # gRPC on 127.0.0.1:<random port>
@@ -20,11 +20,11 @@ use theway_core::agent::hooks;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::persist::DagPersistSink;
 use theway_core::{AgentHarness, AgentHarnessOptions, PermissionPolicy, ThinkingLevel};
-use theway_daemon::app::daemon::{DaemonApp, DaemonConfig, PanelStatus};
-use theway_daemon::app::session_factory::SessionHarnessFactory;
 use theway_daemon::config_readers::{read_builtin_skills_config, read_trigger_poll_interval_secs};
 use theway_daemon::stream_auth::stream_fn_with_auth_store;
 use theway_daemon::system_prompt::compose_system_prompt;
+use theway_daemon::turn::daemon::{DaemonConfig, PanelStatus, TurnHost};
+use theway_daemon::turn::session_factory::SessionHarnessFactory;
 use theway_daemon::{agent_specs, session_ops, skills, templates, triggers, ui_mode_panel};
 use theway_storage::session;
 use theway_transport::config;
@@ -445,17 +445,17 @@ async fn main() -> Result<()> {
     };
 
     // Listeners: agent/harness events → feed; trigger executor → feed + main-run.
-    let _agent_broadcast = theway_daemon::app::listener::spawn_agent_broadcast_listener(
+    let _agent_broadcast = theway_daemon::turn::listener::spawn_agent_broadcast_listener(
         harness.agent().subscribe_broadcast(),
         feed_tx.clone(),
     );
-    let _harness_broadcast = theway_daemon::app::listener::spawn_harness_broadcast_listener(
+    let _harness_broadcast = theway_daemon::turn::listener::spawn_harness_broadcast_listener(
         harness.subscribe_session_broadcast(),
         feed_tx.clone(),
         cli.debug,
     );
     let _unsub_trigger = trigger_executor.subscribe(
-        theway_daemon::app::listener::trigger_listener(feed_tx.clone(), cli.debug),
+        theway_daemon::turn::listener::trigger_listener(feed_tx.clone(), cli.debug),
     );
     let _unsub_dynamic_fire_once = trigger_executor.subscribe(
         triggers::fire_once_trigger_listener(dynamic_trigger_registry.clone()),
@@ -491,7 +491,7 @@ async fn main() -> Result<()> {
         trigger_features: ui_mode_panel::active_trigger_features(),
     };
 
-    let app = DaemonApp::new(DaemonConfig {
+    let host = TurnHost::new(DaemonConfig {
         harness: harness.clone(),
         trigger_executor,
         retry: theway_daemon::agent_session::RetrySettings::default(),
@@ -547,7 +547,7 @@ async fn main() -> Result<()> {
         }
         Mode::Grpc => {
             theway_transport::grpc::run_grpc(
-                Box::new(app),
+                Box::new(host),
                 theway_transport::grpc::GrpcOptions {
                     host: cli.host.clone(),
                     port: cli.port,
@@ -558,7 +558,7 @@ async fn main() -> Result<()> {
         }
         Mode::Http => {
             theway_transport::http::run_web(
-                Box::new(app),
+                Box::new(host),
                 theway_transport::wire::WebOptions {
                     host: cli.host.clone(),
                     port: cli.port,

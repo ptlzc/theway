@@ -1,9 +1,9 @@
 //! `SessionHarnessFactory` — rebuilds a fully-wired harness for any session id
-//! (the in-process `--resume-id` path used by `App::switch_session`).
+//! (the in-process `--resume-id` path used by `TurnHost::switch_session`).
 //!
 //! Split out of `main.rs`. Mechanical module extraction — behavior is unchanged;
 //! the former `crate::agent_specs::launch_resolver` self-reference now resolves
-//! through this module's own `theway` import.
+//! through this module's own `agent_specs` import.
 
 use std::sync::{Arc, OnceLock};
 
@@ -19,9 +19,9 @@ use theway_transport::feed::FeedUpdate;
 use theway_transport::inbox;
 
 /// session-resource-model: rebuilds a fully-wired [`AgentHarness`] for any session id —
-/// the in-process version of the CLI `--resume-id` path. Constructed once in `run_repl`
-/// after the initial harness is up; wrapped into [`crate::session_ops::SessionFactory`]
-/// and consumed by `App::switch_session` on the serialized event loop.
+/// the in-process version of the CLI `--resume-id` path. Constructed once at thewayd
+/// startup (harness assembly); wrapped into [`crate::session_ops::SessionFactory`]
+/// and consumed by `TurnHost::switch_session` on the serialized event loop.
 ///
 /// Every field is either process-level state shared by Arc (DAG engine, subagent registry,
 /// feed/main-run channels, trigger registries, MCP tools + push hooks) or an immutable
@@ -181,16 +181,16 @@ impl SessionHarnessFactory {
         // the UI loop. This replaces the old `agent.subscribe()` /
         // `harness.subscribe_harness()` pattern. The JoinHandle is dropped without being
         // awaited — the task runs for the harness's lifetime.
-        let _agent_broadcast = crate::app::listener::spawn_agent_broadcast_listener(
+        let _agent_broadcast = crate::turn::listener::spawn_agent_broadcast_listener(
             harness.agent().subscribe_broadcast(),
             self.feed_tx.clone(),
         );
-        let _harness_broadcast = crate::app::listener::spawn_harness_broadcast_listener(
+        let _harness_broadcast = crate::turn::listener::spawn_harness_broadcast_listener(
             harness.subscribe_session_broadcast(),
             self.feed_tx.clone(),
             self.debug,
         );
-        let _ = trigger_executor.subscribe(crate::app::listener::trigger_listener(
+        let _ = trigger_executor.subscribe(crate::turn::listener::trigger_listener(
             self.feed_tx.clone(),
             self.debug,
         ));

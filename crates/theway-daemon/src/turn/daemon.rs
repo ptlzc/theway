@@ -1,4 +1,4 @@
-//! `DaemonApp` — the headless transport host behind the `thewayd` binary.
+//! `TurnHost` — the headless transport host behind the `thewayd` binary.
 //!
 //! Same turn semantics, snapshot surface and command handling as the TUI's `App`
 //! (the two share [`super::kernel`] and [`super::feed`]), but with no terminal:
@@ -105,7 +105,7 @@ pub struct DaemonConfig {
 }
 
 /// Headless transport host for `thewayd` (gRPC / HTTP / MCP).
-pub struct DaemonApp {
+pub struct TurnHost {
     kernel: ReplKernel,
     registry: Registry,
     completer: SlashCompleter,
@@ -172,7 +172,7 @@ fn slash_commands(registry: &Registry) -> Vec<String> {
         .collect()
 }
 
-impl DaemonApp {
+impl TurnHost {
     pub fn new(config: DaemonConfig) -> Self {
         let completer = SlashCompleter::from_commands(slash_commands(&config.registry));
         Self {
@@ -985,9 +985,9 @@ impl DaemonApp {
 }
 
 #[async_trait(?Send)]
-impl theway_transport::host::TransportHost for DaemonApp {
+impl theway_transport::host::TransportHost for TurnHost {
     fn transport_endpoints(&mut self) -> TransportEndpoints {
-        DaemonApp::transport_endpoints(self)
+        TurnHost::transport_endpoints(self)
     }
 
     async fn run_transport_loop(

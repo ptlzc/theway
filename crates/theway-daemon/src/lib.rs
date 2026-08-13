@@ -19,7 +19,6 @@ extern crate self as theway_daemon;
 
 pub mod agent_session;
 pub mod agent_specs;
-pub mod app;
 pub mod bug_report;
 pub mod builtin_skills;
 pub mod commands;
@@ -37,6 +36,7 @@ pub mod lsp_supervisor;
 pub mod mcp_loader;
 pub mod model;
 pub mod otlp;
+pub mod turn;
 // SDK surface re-exported for `crate::…` paths used inside this crate (bridged
 // unit tests reach `crate::auth` etc. through these; clients use the `theway`
 // SDK directly and don't need the forwarding).
