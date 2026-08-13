@@ -540,12 +540,34 @@ impl DaemonApp {
                 trigger_ids,
                 cron_ids,
             } => {
-                self.error_line(format!(
-                    "imported session {} has automation that needs enabling — re-import with --activate-triggers=on ({} triggers, {} cron)",
-                    session_path.display(),
-                    trigger_ids.len(),
-                    cron_ids.len()
+                self.system_line(format!(
+                    "imported session {} has automation that was left disabled (imports always \
+                     disable triggers/cron)",
+                    session_path.display()
                 ));
+                // Actionable guidance, not a reference to a nonexistent flag: the daemon
+                // has no `--activate-triggers` (that is a CLI subcommand flag), so list
+                // the ids the source had enabled with the enable commands that do exist.
+                const ID_PREVIEW: usize = 5;
+                let list_ids = |ids: &[String], what: &str, enable_cmd: &str| {
+                    let shown: Vec<&str> = ids.iter().take(ID_PREVIEW).map(String::as_str).collect();
+                    let mut line = format!(
+                        "{what} not enabled ({}): {}",
+                        ids.len(),
+                        shown.join(", ")
+                    );
+                    if ids.len() > ID_PREVIEW {
+                        line.push_str(&format!(" … (+{} more)", ids.len() - ID_PREVIEW));
+                    }
+                    line.push_str(&format!(" — enable with `{enable_cmd} <id>`"));
+                    line
+                };
+                if !trigger_ids.is_empty() {
+                    self.system_line(list_ids(&trigger_ids, "triggers", "/triggers enable"));
+                }
+                if !cron_ids.is_empty() {
+                    self.system_line(list_ids(&cron_ids, "cron jobs", "/cron enable"));
+                }
             }
             CommandOutcome::LoginSecret {
                 provider,
