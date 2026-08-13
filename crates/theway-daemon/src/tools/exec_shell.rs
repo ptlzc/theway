@@ -15,7 +15,7 @@
 //! 3. Exited shells stay queryable for [`EXITED_KEEP_ALIVE`] so the model can still read
 //!    their final output, then their registry entry is reaped.
 
-use crate::{AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate};
+use theway_core::{AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate};
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use serde_json::{Value, json};

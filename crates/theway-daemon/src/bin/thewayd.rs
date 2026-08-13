@@ -189,7 +189,7 @@ async fn main() -> Result<()> {
         tracing::warn!("cron: {err}");
     }
     let memory_dir = config::memory_dir();
-    let skill_harness_cell: theway_core::tools::skill::SkillHarnessCell =
+    let skill_harness_cell: theway_daemon::tools::skill::SkillHarnessCell =
         Arc::new(once_cell::sync::OnceCell::new());
     let dag_engine = Arc::new(DagEngine::new());
     let subagent_registry = theway_core::multiagent::registry::AgentJobRegistry::new();
@@ -250,7 +250,7 @@ async fn main() -> Result<()> {
         .iter()
         .map(|tool| tool.definition().name.clone())
         .collect::<Vec<_>>();
-    let memory_block = theway_core::tools::memory::load_memory_block(&memory_dir).await;
+    let memory_block = theway_daemon::tools::memory::load_memory_block(&memory_dir).await;
     let system_prompt = compose_system_prompt(&cwd, &memory_block, &tool_names);
 
     let loaded_skills = skills::load_all(&cwd).await;

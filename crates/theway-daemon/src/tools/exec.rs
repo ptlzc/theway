@@ -14,7 +14,7 @@ use tokio::io::AsyncReadExt;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
-use crate::AgentToolError;
+use theway_core::AgentToolError;
 
 /// Captured outcome of a foreground `sh -c` run. Only `Err` when the spawn itself
 /// failed; every other failure mode (kill from timeout / cancel / pipe error) folds

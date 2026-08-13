@@ -15,7 +15,7 @@ use theway_llm_provider::{
 };
 use tokio_util::sync::CancellationToken;
 
-use theway_core::tools::subagent;
+use theway_daemon::tools::subagent;
 
 fn faux_model() -> theway_llm_provider::Model {
     theway_llm_provider::Model {

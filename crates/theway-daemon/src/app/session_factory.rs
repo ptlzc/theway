@@ -99,7 +99,7 @@ impl SessionHarnessFactory {
 
         // Fresh per-session tool set (dag_* / task stamped with the target session; the
         // skill family gets a brand-new harness cell filled right after construction).
-        let skill_harness_cell: theway_core::tools::skill::SkillHarnessCell =
+        let skill_harness_cell: crate::tools::skill::SkillHarnessCell =
             std::sync::Arc::new(once_cell::sync::OnceCell::new());
         let mut tools = tools::session_tool_set(
             &self.memory_dir,

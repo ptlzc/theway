@@ -1,18 +1,20 @@
-//! Tool ASSEMBLY layer. The engine (`theway_core`) supplies the harness-runtime tools
-//! (graph/DAG, subagents, skills, memory, MCP — see `theway_core::tools`) AND assembles
-//! them via `theway_core::tools::assembly` (`engine_tools` for the main agent,
-//! `subagent_tools` for subagents); this module is the application-layer half:
+//! Tool ASSEMBLY layer — the application-layer half of the session tool set.
 //!
-//! - **Local-execution tool bodies** (bash / shell / fs / git / grep / find / ls /
-//!   outline / truncate) live HERE, not in the engine: they are environment-specific
-//!   agent capabilities — the local ones may become remote sandbox execution later —
-//!   so the engine must not depend on them.
+//! All tool BODIES (harness-runtime tools AND local-execution tools) live HERE, in
+//! the daemon (daemon-kernel-layers: the daemon is the single kernel; the engine
+//! crate `theway_core` keeps only the `AgentTool` / `ToolExecutor` / `ExecutionEnv`
+//! trait families and the agent runtime):
+//!
+//! - **Harness-runtime tools** (graph/DAG, subagents, skills, memory, MCP — formerly
+//!   `theway_core::tools`) sit next to the local bodies: `assembly` / `subagent` /
+//!   `dag_tools` / the skill family / `memory` / `mcp_adapter` / `exec_shell`.
+//! - **Local-execution tool bodies** (bash / fs / git / grep / find / ls / outline /
+//!   truncate) are environment-specific agent capabilities.
 //! - **Web tools** (`web_fetch` / `web_search`) are app-layer capabilities too (they
 //!   need external credentials/configuration).
 //! - **Assembly**: [`local_tools`] / the subagent tool-set resolver / `session_tool_set`
-//!   wire engine tools + local tools together. The engine-owned part is assembled
-//!   core-side ([`theway_core::tools::assembly`]); this module appends the
-//!   local-execution tools and the server-side trigger/cron family.
+//!   wire engine tools + local tools together, then append the server-side
+//!   trigger/cron family.
 //!
 //! Subagent tool sets are injected into the engine (specs carry no tool
 //! factory): [`subagent_tool_sets`] builds the ONE resolver both `subagent_tool` and the
@@ -28,16 +30,31 @@ use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::node_launcher;
 use theway_core::multiagent::registry::AgentJobRegistry;
 use theway_core::multiagent::types::ToolSetResolver;
-use theway_core::tools::skill::SkillHarnessCell;
-use theway_core::tools::subagent;
 
-// ── tool bodies (app-layer: local execution + web) ──────────────────────────
+use crate::tools::skill::SkillHarnessCell;
+
+// ── tool bodies (harness-runtime + app-layer) ───────────────────────────────
 //
 // Plain module declarations: `tests/tools.rs` pulls in only `triggers/tool_assembly.rs`
-// by `#[path]`, so nothing here needs `#[path]` re-routing — a plain `pub mod shell;`
-// resolves `src/tools/shell.rs` and lets `shell.rs`'s own `mod tests;` find
-// `src/tools/shell/tests/` (a `#[path]`-included module would break that resolution).
+// by `#[path]`, so nothing here needs `#[path]` re-routing — a plain `pub mod bash;`
+// resolves `src/tools/bash.rs` and lets `bash.rs`'s own `mod tests;` find
+// `src/tools/bash/tests/` (a `#[path]`-included module would break that resolution).
 
+// Harness-runtime tools (moved from theway-core, daemon-kernel-layers).
+pub mod assembly;
+pub mod dag_tools;
+pub mod exec;
+pub mod exec_shell;
+pub mod install_skill;
+pub mod mcp_adapter;
+pub mod memory;
+pub mod remove_skill;
+pub mod set_skill_state;
+pub mod skill;
+pub mod skill_builder;
+pub mod subagent;
+
+// App-layer local-execution + web tools.
 pub mod bash;
 pub mod edit;
 pub mod find;
@@ -60,16 +77,16 @@ pub use crate::triggers::tool_assembly::{
 
 /// Local-execution tool set (the app-layer half of the session tool set): shell / fs /
 /// git / grep / web — everything that depends on the execution environment. No engine
-/// tools here (DAG / subagent / skills / memory come from the engine's own assembly,
-/// [`theway_core::tools::assembly`]); no duplicate-memory risk.
+/// tools here (DAG / subagent / skills / memory come from the kernel's own assembly,
+/// [`crate::tools::assembly`]); no duplicate-memory risk.
 ///
 /// Executor binding (sdk-split-local-sandbox node 8): file-content and process tools
 /// (read / write / edit / outline / git) dispatch their effects through the injected
-/// [`ToolExecutor`] — the SDK's `LocalExecutor` for local editing mode; a sandbox
+/// [`ToolExecutor`] — the local executor for local editing mode; a sandbox
 /// executor swaps the execution environment without touching tool definitions. The
 /// remaining local tools are not yet wired through the executor: `bash` keeps its
 /// process-group-kill + cancel semantics (the executor's `run_command` kills only the
-/// direct child), and `ls` / `grep` / `find` / the engine `exec_shell` family use richer
+/// direct child), and `ls` / `grep` / `find` / the `exec_shell` family use richer
 /// directory/walk surfaces than the executor trait's first cut exposes.
 pub fn local_tools(executor: Arc<dyn ToolExecutor>) -> Vec<Arc<dyn AgentTool>> {
     vec![
@@ -77,10 +94,10 @@ pub fn local_tools(executor: Arc<dyn ToolExecutor>) -> Vec<Arc<dyn AgentTool>> {
         Arc::new(write::WriteTool::new(executor.clone())),
         Arc::new(edit::EditTool::new(executor.clone())),
         Arc::new(bash::BashTool),
-        Arc::new(theway_core::tools::exec_shell::ExecTool),
-        Arc::new(theway_core::tools::exec_shell::GetOutputTool),
-        Arc::new(theway_core::tools::exec_shell::KillShellTool),
-        Arc::new(theway_core::tools::exec_shell::WriteToProcessTool),
+        Arc::new(exec_shell::ExecTool),
+        Arc::new(exec_shell::GetOutputTool),
+        Arc::new(exec_shell::KillShellTool),
+        Arc::new(exec_shell::WriteToProcessTool),
         Arc::new(ls::LsTool),
         Arc::new(grep::GrepTool),
         Arc::new(find::FindTool),
@@ -124,18 +141,18 @@ pub fn subagent_tool(
 
 /// Build the app-layer tool-set resolver injected into the subagent tool and the DAG
 /// node launcher. ONE uniform set for every spec: engine tools minus the two
-/// orchestration tools (`subagent` / `dag_*`) plus local tools — assembled core-side,
-/// [`theway_core::tools::assembly::subagent_tools`]. Per-spec tool differences are gone;
+/// orchestration tools (`subagent` / `dag_*`) plus local tools — assembled kernel-side,
+/// [`crate::tools::assembly::subagent_tools`]. Per-spec tool differences are gone;
 /// behavior is defined by the spec's system prompt and the parent's task prompt.
 pub fn subagent_tool_sets(
     memory_dir: PathBuf,
     skill_harness_cell: SkillHarnessCell,
     executor: Arc<dyn ToolExecutor>,
 ) -> ToolSetResolver {
-    theway_core::tools::assembly::subagent_tools(
+    assembly::subagent_tools(
         &memory_dir,
         &skill_harness_cell,
-        // The engine-side local-tools factory closes over the daemon's executor, so every
+        // The kernel-side local-tools factory closes over the daemon's executor, so every
         // subagent / DAG-node tool set dispatches through the same execution environment.
         Arc::new(move || local_tools(executor.clone())),
     )
@@ -167,7 +184,7 @@ pub fn node_launcher(
 /// the CLI's initial harness build and the session factory ([`crate::session_ops::SessionFactory`]):
 /// everything here is either session-stamped (`dag_*` / `subagent`) or must be rebuilt per
 /// harness (the skill family wires a fresh harness cell per build). Local tools
-/// ([`local_tools`]) + engine tools ([`theway_core::tools::assembly::engine_tools`]) +
+/// ([`local_tools`]) + engine tools ([`crate::tools::assembly::engine_tools`]) +
 /// the server-side trigger/cron family. Process-level tool groups (MCP tools) are the
 /// caller's to add.
 pub fn session_tool_set(
@@ -181,9 +198,9 @@ pub fn session_tool_set(
     executor: Arc<dyn ToolExecutor>,
 ) -> Vec<Arc<dyn AgentTool>> {
     let mut tools = local_tools(executor.clone());
-    // Engine-owned tools (DAG / subagent / skills / memory), assembled core-side with the
+    // Engine-owned tools (DAG / subagent / skills / memory), assembled kernel-side with the
     // same subagent tool-set resolver the DAG node launcher uses.
-    tools.extend(theway_core::tools::assembly::engine_tools(
+    tools.extend(assembly::engine_tools(
         memory_dir,
         dag_engine,
         subagent_registry,

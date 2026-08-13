@@ -11,18 +11,11 @@ pub mod node;
 pub mod types;
 
 /// Runtime skill enable/disable overlay (`~/.theway/skill-overrides.json`), shared by the
-/// `SetSkillState` / `RemoveSkill` builtin tools and the `/skills enable|disable` slash
-/// command. Harness-layer concern (operates on [`Skill`] values), hence feature-gated.
+/// `SetSkillState` / `RemoveSkill` builtin tools (which live in the daemon kernel) and the
+/// `/skills enable|disable` slash command. Harness-layer concern (operates on [`Skill`]
+/// values), hence feature-gated.
 #[cfg(feature = "harness")]
 pub mod skill_overrides;
-
-/// Engine tools — capabilities that support the harness runtime itself: graph/DAG
-/// orchestration, subagent orchestration, skills, memory, MCP. One flat module (no
-/// runtime-tools / core-tools split). Local-execution tools (bash/fs/git/grep/find/ls/
-/// outline) and web tools are app-layer capabilities in the `theway` server crate.
-/// Harness feature-gated (these all operate on harness concepts); see the module docs.
-#[cfg(feature = "harness")]
-pub mod tools;
 
 // Public surface — mirrors `packages/agent/src/index.ts`.
 pub use agent::{

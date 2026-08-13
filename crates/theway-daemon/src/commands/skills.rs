@@ -115,7 +115,7 @@ async fn install_skill(argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> Comm
         "overwrite": parsed.overwrite,
     });
     let cell = skill_harness_cell(ctx);
-    let tool = theway_core::tools::install_skill::InstallSkillTool::new(cell);
+    let tool = theway_daemon::tools::install_skill::InstallSkillTool::new(cell);
     match tool
         .execute(
             "slash-skills-install",
@@ -293,7 +293,7 @@ async fn remove_skill(argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> Comma
         params["source"] = json!(source.label());
     }
     let cell = skill_harness_cell(ctx);
-    let tool = theway_core::tools::remove_skill::RemoveSkillTool::new(cell);
+    let tool = theway_daemon::tools::remove_skill::RemoveSkillTool::new(cell);
     match tool
         .execute(
             "slash-skills-remove",
@@ -368,7 +368,7 @@ fn print_remove_skill_result(result: &theway_core::AgentToolResult) {
 
 fn skill_harness_cell(
     ctx: &CommandCtx<'_, DaemonCtx>,
-) -> theway_core::tools::skill::SkillHarnessCell {
+) -> theway_daemon::tools::skill::SkillHarnessCell {
     let cell = std::sync::Arc::new(once_cell::sync::OnceCell::new());
     // This is a fresh cell scoped to a single slash command invocation, so set() can only fail
     // if this helper is called incorrectly inside the same invocation.

@@ -24,10 +24,10 @@ use std::sync::Arc;
 
 use theway_llm_provider::Model;
 
-use crate::multiagent::graph::engine::DagEngine;
-use crate::multiagent::registry::AgentJobRegistry;
-use crate::multiagent::types::ToolSetResolver;
-use crate::{AgentTool, StreamFn};
+use theway_core::multiagent::graph::engine::DagEngine;
+use theway_core::multiagent::registry::AgentJobRegistry;
+use theway_core::multiagent::types::ToolSetResolver;
+use theway_core::{AgentTool, StreamFn};
 
 use super::dag_tools;
 use super::install_skill;
@@ -37,7 +37,7 @@ use super::set_skill_state;
 use super::skill::{self, SkillHarnessCell};
 use super::skill_builder;
 use super::subagent::{SubagentTool, SubagentToolsFn};
-use crate::multiagent::types::AgentRunResolver;
+use theway_core::multiagent::types::AgentRunResolver;
 
 /// App-layer factory producing the LOCAL execution tools (bash / fs / git / web / …) —
 /// the part the engine cannot know about. Injected once at assembly; every harness

@@ -11,6 +11,12 @@
 //! The daemon depends on the SDK (`theway`) and adds the runtime-only modules on
 //! top; clients embed the SDK, not this crate.
 
+//! Self-alias so `#[path]`-included src modules (integration tests) and lib code
+//! share one absolute path shape: `theway_daemon::tools`, `theway_daemon::...`
+//! resolve identically inside the lib and inside test crates that pull src files
+//! in by path (same pattern as theway-core's `theway_core` alias).
+extern crate self as theway_daemon;
+
 pub mod agent_session;
 pub mod agent_specs;
 pub mod app;

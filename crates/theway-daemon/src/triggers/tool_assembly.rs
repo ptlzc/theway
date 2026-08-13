@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use theway_core::AgentTool;
-use theway_core::tools::skill::SkillHarnessCell;
+use theway_daemon::tools::skill::SkillHarnessCell;
 
 /// Build the session-scoped cron creation tool. This is the model-facing counterpart to
 /// `/cron add`: when the user asks in ordinary conversation for a scheduled / recurring

@@ -20,12 +20,11 @@
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use theway_core::{
-    AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate,
-    tools::exec::run_with_kill_on_timeout_or_cancel,
-};
+use theway_core::{AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate};
 use theway_llm_provider::{Tool, UserContentBlock};
 use tokio_util::sync::CancellationToken;
+
+use super::exec::run_with_kill_on_timeout_or_cancel;
 
 use super::truncate::{DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, truncate_tail};
 
@@ -79,7 +78,7 @@ impl AgentTool for BashTool {
         let cwd = params.get("cwd").and_then(|v| v.as_str()).map(String::from);
 
         if run_in_background {
-            let bg = theway_core::tools::exec_shell::run_in_background(command).await?;
+            let bg = crate::tools::exec_shell::run_in_background(command).await?;
             let text = format!("background shell started: {} (pid {})", bg.id, bg.pid);
             return Ok(AgentToolResult {
                 content: vec![UserContentBlock::text(text)],

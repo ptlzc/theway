@@ -1,6 +1,6 @@
 //! App-layer subagent spec table — the spec CONCEPT lives here, not in the engine.
 //!
-//! The engine (`theway_core::tools::subagent_launch`) provides only the launch data
+//! The engine (`theway_daemon::tools::subagent`) provides only the launch data
 //! channel ([`AgentRunParams`] + [`AgentRunResolver`]); it does not define what a spec is.
 //! This module owns the spec structure (name / description / system prompt / iteration
 //! budget), the built-in table (explorer / planner / executor-coder / checker /

@@ -32,9 +32,9 @@ use theway_core::{
 use theway_llm_provider::{Model, Tool, UserContentBlock};
 use tokio_util::sync::CancellationToken;
 
-use crate::multiagent::runner::{AgentRunOptions, run_agent};
-use crate::multiagent::types::AgentRunResolver;
-use crate::multiagent::types::ToolSetResolver;
+use theway_core::multiagent::runner::{AgentRunOptions, run_agent};
+use theway_core::multiagent::types::AgentRunResolver;
+use theway_core::multiagent::types::ToolSetResolver;
 
 /// Closure that resolves the tool set a subagent should have access to from its spec
 /// name. Same shape as the DAG node launcher's [`ToolSetResolver`](crate::multiagent::types::ToolSetResolver) — `task` and DAG
