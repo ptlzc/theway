@@ -50,6 +50,9 @@ base64 = "0.22"
 # TUI and daemon snapshots — see design.md decision on keeping Feed in the SDK).
 ratatui = { version = "0.29" }
 unicode-width = "0.2"
+# Cross-process file lock for the edit tool's read→modify→write cycle (issue #17).
+# Already in the dependency tree via tantivy, so this adds no new packages.
+fs4 = "0.13"
 
 [dev-dependencies]
 tests-bridge-macro = { path = "../tests-bridge-macro" }

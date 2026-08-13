@@ -5,6 +5,13 @@
 //! Optional `range: [startLine, endLine]` (1-indexed, inclusive) restricts the search to a
 //! line range; the entire match must lie within it. Duplicate matches produce a diagnostic
 //! with per-occurrence line numbers + context (mirrors enhanced-tools `edit.ts`).
+//!
+//! Concurrency (issue #17): the read→modify→write cycle holds a cross-process
+//! [`FileLock`](theway::local::file_lock::FileLock) keyed on the target path, so
+//! parallel agents (subagents) editing the same file serialize instead of silently
+//! losing each other's edits. The lock is taken only when the file already exists —
+//! an edit on a missing file fails at the read anyway, and locking must not create
+//! empty files as a side effect.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -84,6 +91,19 @@ impl AgentTool for EditTool {
                     "range must be an array of two integers: [startLine, endLine]",
                 ));
             }
+        };
+
+        // Serialize concurrent editors of this file across processes (subagents
+        // share one working tree). Held until the end of `execute`, i.e. across
+        // the read AND the write.
+        let _lock = if std::fs::metadata(Path::new(path)).is_ok() {
+            Some(
+                theway::local::file_lock::FileLock::acquire(Path::new(path))
+                    .await
+                    .map_err(|e| AgentToolError::from(format!("lock {path} for editing: {e}")))?,
+            )
+        } else {
+            None
         };
 
         let body = self
@@ -497,6 +517,54 @@ mod tests {
                 .await;
             let err = format!("{}", r.unwrap_err());
             assert!(err.contains("Invalid range"), "{err}");
+        }
+    }
+
+    /// Issue #17 regression: parallel editors on one file must serialize on
+    /// the file lock — every edit lands, none is silently clobbered by a
+    /// last-writer-wins race. Without the lock the tasks read the same body
+    /// and only the final write survives.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    async fn concurrent_edits_to_same_file_all_land() {
+        const N: usize = 8;
+        let dir = tempdir().unwrap();
+        let p = dir.path().join("slots.txt");
+        let mut body = String::new();
+        for i in 0..N {
+            body.push_str(&format!("<!-- SLOT{i} -->\n"));
+        }
+        std::fs::write(&p, &body).unwrap();
+
+        let tool = Arc::new(EditTool::new(local_exec()));
+        let mut handles = Vec::new();
+        for i in 0..N {
+            let tool = tool.clone();
+            let p = p.clone();
+            handles.push(tokio::spawn(async move {
+                tool.execute(
+                    "e",
+                    json!({
+                        "path": p.to_str().unwrap(),
+                        "old_string": format!("<!-- SLOT{i} -->"),
+                        "new_string": format!("<!-- SLOT{i} DONE -->"),
+                    }),
+                    CancellationToken::new(),
+                    None,
+                )
+                .await
+                .unwrap();
+            }));
+        }
+        for h in handles {
+            h.await.unwrap();
+        }
+
+        let final_body = std::fs::read_to_string(&p).unwrap();
+        for i in 0..N {
+            assert!(
+                final_body.contains(&format!("<!-- SLOT{i} DONE -->")),
+                "edit {i} was lost: {final_body}"
+            );
         }
     }
 }

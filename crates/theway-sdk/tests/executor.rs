@@ -265,3 +265,89 @@ async fn sandbox_all_operations_fail_fast_with_unsupported() {
     assert_unsupported("find", ex.find("*", path)).await;
     assert_unsupported("git", ex.git(&argv(&["status"]))).await;
 }
+
+/// Issue #17 regression: concurrent `write_file` calls to the same path must
+/// never expose partial content to readers — every observed state is either
+/// "file missing" or exactly one writer's full output. The direct
+/// truncate+write of the old implementation had a window (truncate → write)
+/// where readers saw empty/partial files; unique temp name + rename closes it.
+#[tokio::test]
+async fn write_file_is_atomic_under_concurrency() {
+    let dir = tempdir().unwrap();
+    let ex = LocalExecutor::with_cwd(dir.path());
+    let path = dir.path().join("contended.txt");
+
+    const WRITERS: usize = 8;
+    const ROUNDS: usize = 20;
+    let contents: Vec<String> = (0..WRITERS)
+        .map(|i| format!("writer {i}: {}\n", "y".repeat(256 * 1024)))
+        .collect();
+
+    // Writers hammer the same path from the blocking pool (tokio::fs writes
+    // go through spawn_blocking, so they run in parallel even on the
+    // current-thread runtime).
+    let mut writers = Vec::new();
+    for content in &contents {
+        let ex = ex.clone();
+        let path = path.clone();
+        let content = content.clone();
+        writers.push(tokio::spawn(async move {
+            for _ in 0..ROUNDS {
+                ex.write_file(&path, &content).await.unwrap();
+            }
+        }));
+    }
+
+    // Reader polls during the storm: every successful read must be one of the
+    // complete known contents (or the file simply not existing yet).
+    let path_read = path.clone();
+    let reader_known = contents.clone();
+    let reader = tokio::spawn(async move {
+        for _ in 0..200 {
+            if let Ok(body) = tokio::fs::read_to_string(&path_read).await {
+                assert!(
+                    reader_known.contains(&body),
+                    "partial/torn content observed: {} bytes",
+                    body.len()
+                );
+            } // Err = not created yet — fine
+            tokio::task::yield_now().await;
+        }
+    });
+
+    for w in writers {
+        w.await.unwrap();
+    }
+    reader.await.unwrap();
+
+    // Final content is one writer's exact output, and no temp litter remains.
+    let final_body = std::fs::read_to_string(&path).unwrap();
+    assert!(contents.contains(&final_body), "final content is torn");
+    let litter: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().contains("theway-tmp"))
+        .collect();
+    assert!(litter.is_empty(), "temp litter: {litter:?}");
+}
+
+/// Write-through-symlink semantics are preserved by the atomic writer: the
+/// rename must not replace the link itself.
+#[cfg(unix)]
+#[tokio::test]
+async fn write_file_through_symlink_updates_target() {
+    use std::os::unix::fs::symlink;
+
+    let dir = tempdir().unwrap();
+    let ex = LocalExecutor::with_cwd(dir.path());
+    let target = dir.path().join("real.txt");
+    let link = dir.path().join("link.txt");
+    std::fs::write(&target, "old").unwrap();
+    symlink(&target, &link).unwrap();
+
+    ex.write_file(&link, "new").await.unwrap();
+
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "new");
+    let meta = std::fs::symlink_metadata(&link).unwrap();
+    assert!(meta.file_type().is_symlink(), "link was replaced by a file");
+}

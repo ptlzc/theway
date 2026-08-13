@@ -26,6 +26,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -48,6 +49,53 @@ const MAX_GREP_FILES: usize = 5_000;
 /// Cap on paths returned by [`LocalExecutor::find`] (mirrors the `find` tool's
 /// `DEFAULT_LIMIT`).
 const MAX_FIND_PATHS: usize = 200;
+
+/// Unique suffix for atomic-write temp files. Process id disambiguates across
+/// parallel agent processes sharing one working tree (issue #17); the counter
+/// disambiguates within a process.
+static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Write `content` to `path` atomically: a uniquely-named temp file in the
+/// same directory, then `rename` over the target. Concurrent writers can no
+/// longer interleave (torn files) or collide on a shared temp name (the
+/// tmp+rename race seen with parallel agents). Readers see either the old or
+/// the new content, never a mix.
+///
+/// Symlinks: `rename` would replace the link itself, so a symlink target is
+/// resolved first (write-through semantics, matching the previous direct
+/// write). A broken symlink falls back to the direct write (which recreates
+/// the link target if its parent exists).
+async fn atomic_write(path: &Path, content: &[u8]) -> std::io::Result<()> {
+    let target = match tokio::fs::symlink_metadata(path).await {
+        Ok(meta) if meta.file_type().is_symlink() => match tokio::fs::canonicalize(path).await {
+            Ok(real) => real,
+            Err(_) => {
+                return tokio::fs::write(path, content).await;
+            }
+        },
+        _ => path.to_path_buf(),
+    };
+
+    let file_name = target.file_name().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("path has no file name: {}", target.display()),
+        )
+    })?;
+    let tmp_path = target.with_file_name(format!(
+        ".{}.theway-tmp-{}-{}",
+        file_name.to_string_lossy(),
+        std::process::id(),
+        TMP_COUNTER.fetch_add(1, Ordering::Relaxed),
+    ));
+
+    tokio::fs::write(&tmp_path, content).await?;
+    if let Err(e) = tokio::fs::rename(&tmp_path, &target).await {
+        let _ = tokio::fs::remove_file(&tmp_path).await;
+        return Err(e);
+    }
+    Ok(())
+}
 
 /// Reference [`ToolExecutor`] for local editing mode: local filesystem + process
 /// table. Cheap to construct, stateless apart from the repository context path,
@@ -161,7 +209,7 @@ impl ToolExecutor for LocalExecutor {
                 ExecutorError::Other(format!("create_dir_all {}: {e}", parent.display()))
             })?;
         }
-        tokio::fs::write(&path, content.as_bytes())
+        atomic_write(&path, content.as_bytes())
             .await
             .map_err(|e| ExecutorError::Other(format!("write {}: {e}", path.display())))
     }

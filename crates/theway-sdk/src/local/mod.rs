@@ -10,6 +10,7 @@ pub mod auth;
 pub mod bug_report;
 pub mod commands;
 pub mod executor;
+pub mod file_lock;
 pub mod history;
 pub mod images;
 pub mod mentions;
