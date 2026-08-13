@@ -11,6 +11,15 @@ authors = ["theway contributors"]
 name = "theway_daemon"
 path = "src/lib.rs"
 
+[features]
+# Kernel execution backends (daemon-kernel-layers): the daemon is the single
+# kernel; `local` drives tools straight against the local FS + process table
+# (LocalExecutor + NativeEnv), `sandbox` injects a sandbox executor stub. Both
+# features share the same tool bodies and assembly.
+default = ["local"]
+local = []
+sandbox = []
+
 [dependencies]
 # Enable every wire-protocol provider so model auto-detection isn't bottlenecked by feature
 # flags. The cost is compile time, not runtime — only the registered provider for the chosen
