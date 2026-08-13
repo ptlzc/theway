@@ -9,31 +9,3 @@
 pub fn sanitize_surrogates(text: &str) -> String {
     text.to_owned()
 }
-
-/// Variant that operates on `&[u16]` (decoded UTF-16 buffer). Drops any unpaired surrogate.
-pub fn sanitize_surrogates_u16(buf: &[u16]) -> String {
-    let mut out = Vec::with_capacity(buf.len());
-    let mut i = 0;
-    while i < buf.len() {
-        let c = buf[i];
-        if (0xD800..=0xDBFF).contains(&c) {
-            if i + 1 < buf.len() && (0xDC00..=0xDFFF).contains(&buf[i + 1]) {
-                out.push(c);
-                out.push(buf[i + 1]);
-                i += 2;
-                continue;
-            }
-            // unpaired high — drop
-            i += 1;
-            continue;
-        }
-        if (0xDC00..=0xDFFF).contains(&c) {
-            // unpaired low — drop
-            i += 1;
-            continue;
-        }
-        out.push(c);
-        i += 1;
-    }
-    String::from_utf16_lossy(&out)
-}

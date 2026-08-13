@@ -4,7 +4,7 @@
 //! and replays it as a normal event sequence (Start → per-block start/delta/end → Done). When
 //! the queue is empty the provider falls back to a single canned "[faux] hello" message.
 //!
-//! Builders (`faux_text`, `faux_thinking`, `faux_tool_call`, `faux_assistant_message`) mirror the
+//! Builders (`faux_text`, `faux_tool_call`, `faux_assistant_message`) mirror the
 //! TS helpers so tests read the same.
 
 use std::collections::VecDeque;
@@ -28,12 +28,6 @@ pub fn set_faux_responses(responses: Vec<AssistantMessage>) {
     *q = responses.into_iter().collect();
 }
 
-/// Append responses to the queue.
-pub fn append_faux_responses(responses: Vec<AssistantMessage>) {
-    let mut q = response_queue().lock().expect("faux queue poisoned");
-    q.extend(responses);
-}
-
 /// Clear the queue.
 pub fn clear_faux_responses() {
     response_queue()
@@ -46,14 +40,6 @@ pub fn clear_faux_responses() {
 
 pub fn faux_text(text: impl Into<String>) -> ContentBlock {
     ContentBlock::text(text)
-}
-
-pub fn faux_thinking(thinking: impl Into<String>) -> ContentBlock {
-    ContentBlock::Thinking(ThinkingContent {
-        thinking: thinking.into(),
-        thinking_signature: None,
-        redacted: false,
-    })
 }
 
 pub fn faux_tool_call(

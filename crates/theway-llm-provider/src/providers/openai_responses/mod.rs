@@ -4,7 +4,6 @@
 //!
 //! Implemented:
 //! - Provider trait + registration scaffold
-//! - `OpenAIResponsesOptions` typed knobs
 //! - HTTP request shape (POST /v1/responses, streaming JSON SSE)
 //! - SSE → AssistantMessageEvent mapping for the happy path
 //! - `prompt_cache_key` + `prompt_cache_retention` ("24h" when retention is long)
@@ -23,7 +22,6 @@
 //! and the shared SSE consumer reused by the Azure / Codex providers.
 
 use async_trait::async_trait;
-use serde::Serialize;
 use serde_json::json;
 // Test-only: pulled into `mod tests` via `use super::*`.
 #[cfg(test)]
@@ -77,16 +75,6 @@ pub(crate) fn resolve_compat(model: &Model) -> Compat {
         supports_long_cache_retention: read_bool("supportsLongCacheRetention", true),
         replay_reasoning_content: read_bool("requiresReasoningContentOnAssistantMessages", false),
     }
-}
-
-#[derive(Clone, Debug, Default, Serialize)]
-pub struct OpenAIResponsesOptions {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reasoning_effort: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reasoning_summary: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub service_tier: Option<String>,
 }
 
 #[derive(Default)]

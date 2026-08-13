@@ -82,7 +82,6 @@ regex = "1"
 tests-bridge-macro = { path = "../tests-bridge-macro" }
 anyhow = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }
-serde_yaml = "0.9"
 tempfile = "3"
 
 [[example]]

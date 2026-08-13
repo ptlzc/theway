@@ -2,7 +2,7 @@
 //! `packages/ai/src/providers/google-shared.ts`.
 //!
 //! Implemented: message conversion (contents/parts), tool conversion (functionDeclarations),
-//! stop-reason mapping, thought-signature retention.
+//! stop-reason mapping.
 //! TODO: multimodal functionResponse parts, tool-choice config mode, gemma/gemini3 thinking.
 
 use serde_json::{Value, json};
@@ -14,17 +14,6 @@ pub fn is_thinking_part(part: &Value) -> bool {
     part.get("thought")
         .and_then(|v| v.as_bool())
         .unwrap_or(false)
-}
-
-/// Keep a non-empty incoming signature, else retain the existing one. Never merges.
-pub fn retain_thought_signature(
-    existing: Option<String>,
-    incoming: Option<&str>,
-) -> Option<String> {
-    match incoming {
-        Some(s) if !s.is_empty() => Some(s.to_string()),
-        _ => existing,
-    }
 }
 
 pub fn map_stop_reason(reason: &str) -> StopReason {

@@ -5,7 +5,6 @@
 //!
 //! Implemented:
 //! - Provider trait + registration
-//! - `OpenAICompletionsOptions` (tool_choice, reasoning_effort)
 //! - HTTP request shape (POST /v1/chat/completions, streaming, `[DONE]` sentinel)
 //! - Streaming chunk handling: content deltas, reasoning_content/reasoning/reasoning_text,
 //!   index-keyed tool_calls (parallel tool streaming), finish_reason mapping
@@ -23,7 +22,6 @@
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
-use serde::Serialize;
 use serde_json::{Map, Value, json};
 
 use crate::api_registry::ApiProvider;
@@ -37,12 +35,6 @@ mod body;
 use body::*;
 
 const OPENAI_BASE_URL: &str = "https://api.openai.com";
-
-#[derive(Clone, Debug, Default, Serialize)]
-pub struct OpenAICompletionsOptions {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reasoning_effort: Option<String>,
-}
 
 #[derive(Default)]
 pub struct OpenAICompletionsProvider {}

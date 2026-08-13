@@ -9,7 +9,6 @@
 //! thoughtSignature replay correctness, tool-choice config.
 
 use async_trait::async_trait;
-use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::api_registry::ApiProvider;
@@ -22,14 +21,6 @@ use crate::utils::event_stream::{AssistantMessageEventSender, AssistantMessageEv
 use crate::utils::sse::SseStream;
 
 const GOOGLE_BASE_URL: &str = "https://generativelanguage.googleapis.com";
-
-#[derive(Clone, Debug, Default, Serialize)]
-pub struct GoogleOptions {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub thinking_enabled: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub thinking_budget_tokens: Option<i32>,
-}
 
 #[derive(Default)]
 pub struct GoogleProvider {}

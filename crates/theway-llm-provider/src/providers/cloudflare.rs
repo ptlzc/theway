@@ -7,25 +7,6 @@
 
 use crate::types::Model;
 
-/// Workers AI direct endpoint.
-pub const CLOUDFLARE_WORKERS_AI_BASE_URL: &str =
-    "https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/v1";
-
-/// AI Gateway Unified (compat) API.
-pub const CLOUDFLARE_AI_GATEWAY_COMPAT_BASE_URL: &str =
-    "https://gateway.ai.cloudflare.com/v1/{CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}/compat";
-
-/// AI Gateway → OpenAI passthrough.
-pub const CLOUDFLARE_AI_GATEWAY_OPENAI_BASE_URL: &str =
-    "https://gateway.ai.cloudflare.com/v1/{CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}/openai";
-
-/// AI Gateway → Anthropic passthrough.
-pub const CLOUDFLARE_AI_GATEWAY_ANTHROPIC_BASE_URL: &str = "https://gateway.ai.cloudflare.com/v1/{CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}/anthropic";
-
-pub fn is_cloudflare_provider(provider: &str) -> bool {
-    provider == "cloudflare-workers-ai" || provider == "cloudflare-ai-gateway"
-}
-
 /// Substitute `{VAR}` placeholders in a Cloudflare base URL from the environment.
 pub fn resolve_cloudflare_base_url(model: &Model) -> Result<String, String> {
     let url = &model.base_url;

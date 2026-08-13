@@ -5,7 +5,6 @@
 //! enabled providers with the global registry on first use.
 
 pub mod register_builtins;
-pub mod simple_options;
 pub mod transform_messages;
 
 #[cfg(feature = "anthropic")]
@@ -63,10 +62,5 @@ pub mod mistral;
 
 #[cfg(feature = "faux")]
 pub mod faux;
-
-// GitHub Copilot rides on top of openai-responses + anthropic-messages; its module just holds
-// header helpers, so it is feature-gated to anthropic OR openai-responses.
-#[cfg(any(feature = "anthropic", feature = "openai-responses"))]
-pub mod github_copilot_headers;
 
 pub mod images;

@@ -47,9 +47,6 @@ pub struct EventMessage {
 }
 
 impl EventMessage {
-    pub fn message_type(&self) -> Option<&str> {
-        self.header_str(":message-type")
-    }
     pub fn event_type(&self) -> Option<&str> {
         self.header_str(":event-type")
     }

@@ -1,27 +1,7 @@
 //! Registry for image-generation providers. 1:1 stub of
 //! `packages/ai/src/images-api-registry.ts`.
 
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
-
-use async_trait::async_trait;
-
 use crate::types::{AssistantImages, ImagesApi, ImagesContext, ImagesModel};
-
-#[async_trait]
-pub trait ImagesApiProvider: Send + Sync {
-    async fn generate(
-        &self,
-        model: &ImagesModel,
-        context: &ImagesContext,
-    ) -> Result<AssistantImages, String>;
-}
-
-#[allow(dead_code)]
-fn registry() -> &'static Mutex<HashMap<String, Box<dyn ImagesApiProvider>>> {
-    static CELL: OnceLock<Mutex<HashMap<String, Box<dyn ImagesApiProvider>>>> = OnceLock::new();
-    CELL.get_or_init(|| Mutex::new(HashMap::new()))
-}
 
 #[cfg(feature = "openrouter-images")]
 pub fn register_images_api_provider(

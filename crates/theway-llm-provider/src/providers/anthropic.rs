@@ -48,8 +48,6 @@ struct Compat {
     supports_long_cache_retention: bool,
     send_session_affinity_headers: bool,
     supports_cache_control_on_tools: bool,
-    #[allow(dead_code)]
-    supports_eager_tool_input_streaming: bool,
 }
 
 fn resolve_compat(model: &Model) -> Compat {
@@ -74,10 +72,6 @@ fn resolve_compat(model: &Model) -> Compat {
             is_fireworks || is_cf_anthropic,
         ),
         supports_cache_control_on_tools: read_bool("supportsCacheControlOnTools", !is_fireworks),
-        supports_eager_tool_input_streaming: read_bool(
-            "supportsEagerToolInputStreaming",
-            !is_fireworks,
-        ),
     }
 }
 

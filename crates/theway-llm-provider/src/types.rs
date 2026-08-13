@@ -142,12 +142,6 @@ pub enum Transport {
     Auto,
 }
 
-#[derive(Clone, Debug)]
-pub struct ProviderResponse {
-    pub status: u16,
-    pub headers: HashMap<String, String>,
-}
-
 // ──────────────────────────────────────────────────────────────────────────────────────────
 // Stream options
 // ──────────────────────────────────────────────────────────────────────────────────────────
@@ -187,21 +181,6 @@ pub struct SimpleStreamOptions {
 // ──────────────────────────────────────────────────────────────────────────────────────────
 // Content blocks
 // ──────────────────────────────────────────────────────────────────────────────────────────
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct TextSignatureV1 {
-    pub v: u8,
-    pub id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub phase: Option<TextSignaturePhase>,
-}
-
-#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TextSignaturePhase {
-    Commentary,
-    FinalAnswer,
-}
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct TextContent {
