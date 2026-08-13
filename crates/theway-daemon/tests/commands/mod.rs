@@ -99,10 +99,13 @@ fn model_credential_hint_accepts_env_or_auth_store_for_selected_provider() {
 
 #[test]
 fn registry_lookup_by_name_and_alias() {
+    // quit/clear/help are TUI-local commands now (daemon-kernel-layers); the
+    // daemon registry owns the runtime set (auth/session/triggers/…).
     let r = Registry::with_builtins();
-    assert!(r.find("quit").is_some());
-    assert!(r.find("q").is_some());
-    assert!(r.find("exit").is_some());
+    assert!(r.find("quit").is_none());
+    assert!(r.find("login").is_some());
+    assert!(r.find("logout").is_some());
+    assert!(r.find("sessions").is_some());
     assert!(r.find("session").is_some());
     assert!(r.find("triggers").is_some());
     assert!(r.find("nope").is_none());
@@ -150,9 +153,8 @@ fn help_topic_renders_command_usage_and_aliases() {
     assert!(model.contains("show or switch the active model"), "{model}");
     assert!(model.contains("more: /help model"), "{model}");
 
-    let quit = help_text(&registry, Some("/quit"));
-    assert!(quit.contains("/quit"), "{quit}");
-    assert!(quit.contains("aliases: /exit, /q"), "{quit}");
+    let login = help_text(&registry, Some("/login"));
+    assert!(login.contains("/login"), "{login}");
 
     let goal_start = help_text(&registry, Some("goal-start"));
     assert!(goal_start.contains("/goal-start <prompt>"), "{goal_start}");

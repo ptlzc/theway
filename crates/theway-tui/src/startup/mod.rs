@@ -9,8 +9,8 @@
 use std::io::IsTerminal as _;
 
 use anyhow::{Context as _, Result};
-use theway::SqliteSessionRepo;
-use theway::session;
+use theway_storage::sqlite_repo::SqliteSessionRepo;
+use theway_storage::session;
 use theway_transport::client::{GrpcClient, discover, spawn_daemon, wait_ready};
 use theway_transport::proto::wire_status;
 use theway_transport::wire::WireStatus;
@@ -20,7 +20,7 @@ use crate::ui;
 
 /// Re-exported for `crate::user_message` compatibility (see `main.rs`); the
 /// client path no longer uses it directly.
-pub use theway::stream_auth::user_message;
+pub use crate::local_commands::user_message;
 
 /// Map the client CLI to daemon launch arguments (design decision 3: session
 /// selection is a daemon launch concern when the TUI spawns it).
@@ -151,10 +151,8 @@ pub(crate) async fn run_repl(
         client,
         initial,
         cwd: cwd.clone(),
-        session_repo: repo,
-        history: theway::history::HistoryStore::load(),
-        registry: <theway_transport::commands::Registry<()> as
-            theway::local::commands::RegistryLocalExt<()>>::local(),
+        history: theway_transport::history::HistoryStore::load(),
+        registry: crate::local_commands::local_registry(),
         pending_images: cli.image.clone(),
     });
     app.banner();

@@ -17,8 +17,8 @@ use sha2::{Digest, Sha256};
 use theway_core::{
     JsonlSessionMetadata, Session, SessionImportOrigin, SessionStorage, SessionTreeEntry, uuidv7,
 };
-use theway_storage::sqlite_repo::SqliteSessionRepo;
-use theway_storage::sqlite_storage::SqliteSessionStorage;
+use crate::sqlite_repo::SqliteSessionRepo;
+use crate::sqlite_storage::SqliteSessionStorage;
 
 use theway_transport::triggers::CronJob;
 use theway_transport::triggers::DynamicTriggerRule;
@@ -147,8 +147,8 @@ pub async fn export_session(
     let session_hash = sha256_hex(session_jsonl.as_bytes());
     let active_leaf_id = session.leaf_id().await.context("read active leaf")?;
 
-    let trigger_path = crate::local::session::trigger_sidecar_path(&session_path);
-    let cron_path = crate::local::session::cron_sidecar_path(&session_path);
+    let trigger_path = crate::session::trigger_sidecar_path(&session_path);
+    let cron_path = crate::session::cron_sidecar_path(&session_path);
     let trigger_bytes = if !exclude_triggers {
         read_optional_sidecar(&trigger_path).await?
     } else {
@@ -345,7 +345,7 @@ pub async fn import_session(
     let triggers_imported = match &trigger_sidecar {
         Some(rules) => {
             sidecars.push((
-                crate::local::session::trigger_sidecar_path(&session_path),
+                crate::session::trigger_sidecar_path(&session_path),
                 serde_json::to_string_pretty(rules)?,
             ));
             rules.rules.len()
@@ -355,7 +355,7 @@ pub async fn import_session(
     let cron_imported = match &cron_sidecar {
         Some(jobs) => {
             sidecars.push((
-                crate::local::session::cron_sidecar_path(&session_path),
+                crate::session::cron_sidecar_path(&session_path),
                 toml::to_string_pretty(jobs)?,
             ));
             jobs.jobs.len()
@@ -394,7 +394,7 @@ pub fn activate_imported(
 ) -> Result<(usize, usize)> {
     let mut triggers_enabled = 0usize;
     if !trigger_ids.is_empty() {
-        let path = crate::local::session::trigger_sidecar_path(session_path);
+        let path = crate::session::trigger_sidecar_path(session_path);
         let text =
             std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
         let mut file: DynamicTriggerFile =
@@ -410,7 +410,7 @@ pub fn activate_imported(
     }
     let mut cron_enabled = 0usize;
     if !cron_ids.is_empty() {
-        let path = crate::local::session::cron_sidecar_path(session_path);
+        let path = crate::session::cron_sidecar_path(session_path);
         let text =
             std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
         let mut file: CronJobsFile = toml::from_str(&text).context("parse cron sidecar")?;

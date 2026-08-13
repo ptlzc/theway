@@ -33,7 +33,7 @@ pub fn auto_detect_model(
         bail!("{}", explicit_model_not_found_message(p, id, true));
     }
     // Detect by env, with the auth.json store as fallback (issue #13).
-    let store = theway::auth::AuthStore::load().unwrap_or_default();
+    let store = theway_transport::auth::AuthStore::load().unwrap_or_default();
     for (env, provider, model_id) in CANDIDATES {
         let env_set = std::env::var(env)
             .ok()

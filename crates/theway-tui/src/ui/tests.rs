@@ -5,9 +5,8 @@ use ratatui::backend::{CrosstermBackend, TestBackend};
 use ratatui::buffer::Buffer;
 use std::sync::Arc;
 use std::time::Duration;
-use theway::local::commands::RegistryLocalExt;
 use theway_transport::commands::Registry;
-use theway::history::HistoryStore;
+use theway_transport::history::HistoryStore;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::types::DagEvent;
 use theway_core::multiagent::registry::{AgentJobEvent, AgentJobRegistry};
@@ -101,11 +100,8 @@ async fn test_app() -> (App, mpsc::UnboundedReceiver<WireCommand>) {
         client,
         initial,
         cwd: std::path::PathBuf::from("/tmp/theway"),
-        session_repo: Arc::new(theway::SqliteSessionRepo::new(std::path::PathBuf::from(
-            "/nonexistent-theway-sessions",
-        ))),
         history: HistoryStore::load_from(std::path::Path::new("/nonexistent-theway-history")),
-        registry: Registry::local(),
+        registry: crate::local_commands::local_registry(),
         pending_images: vec![],
     });
     (app, command_rx)

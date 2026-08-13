@@ -42,8 +42,7 @@ use tokio_util::sync::CancellationToken;
 //  through it too (see the `cprintln!` macro below).
 pub use theway_transport::commands::console;
 #[allow(unused_imports)]
-pub use theway::commands::{model_credential_hint, save_api_key};
-use theway::local::commands::RegistryLocalExt;
+pub use theway_transport::auth::{model_credential_hint, save_api_key};
 pub use theway_transport::commands::{
     CommandOutcome, SlashCommand, WebRelayAction, attach_skill_prompt,
     cli_model_help_text, parse, parse_model_spec,
@@ -57,6 +56,7 @@ macro_rules! cprintln {
     ($($arg:tt)*) => { $crate::commands::console::emit_line(std::format!($($arg)*)) };
 }
 
+pub mod auth;
 pub mod goal;
 pub mod misc;
 pub mod model;
@@ -149,14 +149,16 @@ impl Registry {
         }
     }
 
-    /// Full builtin set for the daemon process: starts from the SDK local command set
-    /// (`Registry::<DaemonCtx>::local()` — the local commands are generic over the extras
-    /// type, so they register unchanged), then appends the daemon runtime commands
-    /// (skills/model/goal/session lifecycle/triggers/…).
+    /// Full builtin set for the daemon process: the runtime command set
+    /// (auth login/logout/sessions, skills/model/goal/session lifecycle/
+    /// triggers/…). The TUI keeps its own local set (quit/clear/help).
     pub fn with_daemon_commands() -> Self {
         let mut r = Self {
-            inner: theway_transport::commands::Registry::<DaemonCtx>::local(),
+            inner: theway_transport::commands::Registry::new(),
         };
+        r.register(Arc::new(auth::LoginCommand));
+        r.register(Arc::new(auth::LogoutCommand));
+        r.register(Arc::new(auth::SessionsCommand));
         r.register(Arc::new(SkillsCommand));
         r.register(Arc::new(SkillCommand));
         r.register(Arc::new(ModelCommand));

@@ -6,10 +6,15 @@
 //! server programs against this crate's channel surface
 //! ([`TransportEndpoints`]) instead of passing its app internals in.
 
+pub mod auth;
+pub mod bug_report;
 pub mod client;
 pub mod commands;
 pub mod config;
 pub mod feed;
+pub mod history;
+pub mod images;
+pub mod mentions;
 pub mod grpc;
 pub mod host;
 pub mod http;

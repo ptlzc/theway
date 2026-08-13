@@ -17,7 +17,7 @@
 
 use std::sync::Arc;
 
-use theway::SqliteSessionRepo;
+use theway_storage::sqlite_repo::SqliteSessionRepo;
 use theway_transport::commands::Registry;
 use theway_core::{AgentHarness, AgentHarnessOptions};
 use theway_daemon::agent_session::{AgentSession, RetrySettings};
@@ -29,7 +29,7 @@ async fn main() -> anyhow::Result<()> {
     let repo = Arc::new(SqliteSessionRepo::new(
         std::env::temp_dir().join("sdk-demo-sessions"),
     ));
-    let session = theway::session::create(&repo, std::env::current_dir()?.as_path()).await?;
+    let session = theway_storage::session::create(&repo, std::env::current_dir()?.as_path()).await?;
     let model = Model {
         id: "faux".into(),
         name: "Faux".into(),
@@ -58,7 +58,7 @@ async fn main() -> anyhow::Result<()> {
     //    without any UI (the interactive `App` lives in the `theway-tui` crate).
     // The SDK registry is generic over a command-context extras type; embedders
     // that only run local commands use `()` (the daemon plugs in `DaemonCtx`).
-    let _registry = <Registry<()> as theway::local::commands::RegistryLocalExt<()>>::local();
+    let _registry = Registry::<()>::new(); // TUI-local commands live in theway-tui; this embedder needs none
     let _repo = Arc::new(SqliteSessionRepo::new(
         std::env::temp_dir().join("theway-sdk-demo-sessions"),
     ));

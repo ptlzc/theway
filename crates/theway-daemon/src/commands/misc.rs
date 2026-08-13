@@ -221,7 +221,7 @@ impl SlashCommand<DaemonCtx> for FindCommand {
             return CommandOutcome::Error("usage: /find <query>".into());
         }
         let query = argv.join(" ").to_lowercase();
-        let repo = theway::session::open_repo(ctx.cwd).await;
+        let repo = theway_storage::session::open_repo(ctx.cwd).await;
         let files = match repo.list().await {
             Ok(f) => f,
             Err(e) => return CommandOutcome::Error(format!("list sessions: {e}")),
@@ -301,7 +301,7 @@ impl SlashCommand<DaemonCtx> for HistoryCommand {
     }
     async fn run(&self, argv: &[String], _ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
         let limit: usize = argv.first().and_then(|s| s.parse().ok()).unwrap_or(20);
-        let store = theway::history::HistoryStore::load();
+        let store = theway_transport::history::HistoryStore::load();
         let entries = store.entries();
         if entries.is_empty() {
             cprintln!("(no history yet)");

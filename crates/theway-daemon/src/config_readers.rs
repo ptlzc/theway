@@ -1,8 +1,6 @@
-//! `~/.theway/config.toml` readers used at startup (built-in skills, trigger poll interval).
-//!
-//! Thin daemon-startup readers over the SDK's `config` parsers. The TUI/CLI never calls
-//! these; they live here so the startup config surface stays in one crate next to
-//! [`crate::config`].
+//! `~/.theway/config.toml` readers used at startup (built-in skills, trigger
+//! poll interval) — daemon-kernel-layers: moved from the SDK; the TUI/CLI
+//! never calls these.
 
 use theway_transport::triggers::DEFAULT_DYNAMIC_TRIGGER_POLL_INTERVAL_SECS;
 use theway_transport::config::{parse_builtin_skills_config, parse_trigger_poll_interval_secs};

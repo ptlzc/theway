@@ -14,12 +14,11 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
 use theway_transport::commands;
-use theway::images;
-use theway::mentions;
+use theway_transport::images;
+use theway_transport::mentions;
 
 use super::App;
 use super::render_utils::{enter_tui, leave_tui};
-use theway::session_archive;
 
 impl App {
     // ── submit / dispatch ───────────────────────────────────────────────────────────────
@@ -116,10 +115,12 @@ impl App {
                 self.follow = true;
             }
             "/help" => self.system_line(
-                "theway client · send messages to the thewayd daemon · local: /login /quit /clear /session export|import · everything else forwards to the daemon (/model /goal /triggers /cron …)",
+                "theway client · send messages to the thewayd daemon · local: /login /quit /clear /session switch · everything else forwards to the daemon (/model /goal /triggers /cron /session …)",
             ),
             "/login" => self.login(args, terminal).await,
-            "/session" => self.local_session_command(args).await,
+            "/session" if args.trim_start().starts_with("switch") => {
+                self.local_session_switch(args).await;
+            }
             _ => {
                 // Forward to the daemon: it dispatches the full slash registry
                 // (model/goal/triggers/cron/skills/…) and publishes the result.
@@ -136,97 +137,18 @@ impl App {
         }
     }
 
-    /// Local-only `/session` surface: export/import operate on the local SQLite
-    /// repo (same machine, shared sessions) without touching the daemon.
-    async fn local_session_command(&mut self, args: &str) {
-        let mut parts = args.split_whitespace();
-        match parts.next() {
-            Some("export") => {
-                let output = parts.next();
-                let exclude_triggers = parts.any(|p| p == "--exclude-triggers");
-                let output_path = match output {
-                    Some(path) => std::path::PathBuf::from(path),
-                    None => session_archive::default_export_path(&self.cwd, &self.session_id),
-                };
-                let output_path = if output_path.is_absolute() {
-                    output_path
-                } else {
-                    self.cwd.join(output_path)
-                };
-                self.system_line(
-                    "warning: .theway-session archives include transcript and tool history. They do not include separate auth stores, provider credentials, OAuth tokens, or MCP config.",
-                );
-                let result = async {
-                    let Some(path) = theway::session::find_path_by_id(&self.session_repo, &self.session_id).await? else {
-                        anyhow::bail!("current session {} not found in repo", self.session_id);
-                    };
-                    let session = self.session_repo.open(&path).await?;
-                    session_archive::export_session(&session, &output_path, exclude_triggers).await
-                }
-                .await;
-                match result {
-                    Ok(summary) => self.system_line(format!(
-                        "exported session archive: {} (entries={})",
-                        summary.output_path.display(),
-                        summary.entry_count
-                    )),
-                    Err(e) => self.error_line(format!("session export failed: {e}")),
-                }
-            }
-            Some("import") => {
-                let Some(path) = parts.next() else {
-                    self.error_line("usage: /session import <path>");
-                    return;
-                };
-                let archive_path = if std::path::Path::new(path).is_absolute() {
-                    std::path::PathBuf::from(path)
-                } else {
-                    self.cwd.join(path)
-                };
-                self.system_line(
-                    "warning: .theway-session archives include transcript and tool history. They do not include separate auth stores, provider credentials, OAuth tokens, or MCP config.",
-                );
-                match session_archive::import_session(
-                    &self.session_repo,
-                    &archive_path,
-                    &self.cwd,
-                    session_archive::ActivateTriggers::Off,
-                )
-                .await
-                {
-                    Ok(summary) => {
-                        self.system_line(format!(
-                            "imported session: {} (entries={})",
-                            &summary.session_id[..16.min(summary.session_id.len())],
-                            summary.entry_count
-                        ));
-                        if !summary.originally_enabled_triggers.is_empty()
-                            || !summary.originally_enabled_cron.is_empty()
-                        {
-                            self.prompt_import_activation(
-                                summary.session_path,
-                                summary.originally_enabled_triggers,
-                                summary.originally_enabled_cron,
-                            );
-                        }
-                    }
-                    Err(e) => self.error_line(format!("session import failed: {e}")),
-                }
-            }
-            Some("switch") => {
-                let Some(id) = parts.next() else {
-                    self.error_line("usage: /session switch <id>");
-                    return;
-                };
-                let id = id.to_string();
-                match self.switch_session(id).await {
-                    Ok(()) => {}
-                    Err(e) => self.error_line(format!("switch session failed: {e}")),
-                }
-            }
-            _ => self.error_line(
-                "usage: /session export [path] [--exclude-triggers] | /session import <path> | /session switch <id>",
-            ),
+    /// Local `/session switch` surface (wire SwitchSession RPC). Export/import
+    /// run in the daemon (`/session export|import` is forwarded to it) — the
+    /// session archive operates on the repo the daemon owns.
+    async fn local_session_switch(&mut self, args: &str) {
+        let id = args.trim_start().strip_prefix("switch").unwrap_or(args).trim();
+        if id.is_empty() {
+            self.error_line("usage: /session switch <id>");
+            return;
+        }
+        match self.switch_session(id.to_string()).await {
+            Ok(()) => {}
+            Err(e) => self.error_line(format!("switch session failed: {e}")),
         }
     }
 
@@ -240,14 +162,14 @@ impl App {
         // UI for the prompt, then restore. The daemon picks the key up on its next turn via
         // the auth-store stream fn — no protocol change (design decision 6).
         leave_tui().ok();
-        let result = theway::auth::prompt_for_api_key(&provider).await;
+        let result = crate::local_commands::prompt_for_api_key(&provider).await;
         let _ = enter_tui();
         let _ = terminal.clear();
         match result {
             Ok(token) if token.trim().is_empty() => {
                 self.error_line("empty api key; login cancelled")
             }
-            Ok(token) => match theway::commands::save_api_key(&provider, &token) {
+            Ok(token) => match theway_transport::auth::save_api_key(&provider, &token) {
                 Ok(path) => self.system_line(format!(
                     "saved api key for `{provider}` to {} — the daemon picks it up on its next turn",
                     path.display()

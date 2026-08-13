@@ -16,9 +16,10 @@ use std::sync::{Arc, OnceLock};
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use theway::config_readers::{read_builtin_skills_config, read_trigger_poll_interval_secs};
-use theway::stream_auth::stream_fn_with_auth_store;
-use theway::{config, session};
+use theway_daemon::config_readers::{read_builtin_skills_config, read_trigger_poll_interval_secs};
+use theway_daemon::stream_auth::stream_fn_with_auth_store;
+use theway_transport::config;
+use theway_storage::session;
 use theway_core::agent::hooks;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::persist::DagPersistSink;

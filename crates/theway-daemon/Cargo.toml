@@ -26,10 +26,6 @@ sandbox = []
 # model's `api` actually gets exercised.
 theway-llm-provider = { path = "../theway-llm-provider", default-features = false, features = ["all-providers"] }
 theway-core = { path = "../theway-core" }
-# Client-facing SDK (sdk-split-local-sandbox): session/auth/config/feed/commands
-# framework etc. live in `theway` (crates/theway-sdk); the daemon adds the
-# runtime-only modules on top.
-theway = { path = "../theway-sdk" }
 theway-storage = { path = "../theway-storage" }
 theway-mcp = { path = "../theway-mcp" }
 theway-transport = { path = "../theway-transport" }

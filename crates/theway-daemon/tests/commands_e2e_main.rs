@@ -16,7 +16,7 @@
 #[allow(dead_code)]
 mod auth {
     #[allow(unused_imports)]
-    pub use theway::auth::*;
+    pub use theway_transport::auth::*;
     // Test-only env serialization lock. The SDK keeps a `pub(crate)` one for its own
     // suites; each test binary serializes its own env mutations with this copy.
     pub static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -46,7 +46,7 @@ mod export;
 #[allow(dead_code)]
 mod history {
     #[allow(unused_imports)]
-    pub use theway::history::*;
+    pub use theway_transport::history::*;
 }
 #[allow(dead_code)]
 #[path = "../src/mcp_loader.rs"]
@@ -54,12 +54,12 @@ mod mcp_loader;
 #[allow(dead_code)]
 mod session {
     #[allow(unused_imports)]
-    pub use theway::session::*;
+    pub use theway_storage::session::*;
 }
 #[allow(dead_code)]
 mod session_archive {
     #[allow(unused_imports)]
-    pub use theway::session_archive::*;
+    pub use theway_storage::session_archive::*;
 }
 #[allow(dead_code)]
 #[path = "../../theway-core/src/skill_overrides.rs"]

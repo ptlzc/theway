@@ -29,7 +29,6 @@
 //! skeleton, and rendering.
 
 mod app_goal;
-mod app_import;
 mod app_input;
 mod app_turns;
 mod render_utils;
@@ -39,7 +38,6 @@ pub use theway_transport::feed::FeedUpdate;
 use std::io::IsTerminal;
 use std::io::Write as _;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -57,8 +55,8 @@ use tui_textarea::TextArea;
 use theway_transport::feed::{Feed, Level, TriggerPollStatus};
 use theway_transport::commands;
 use theway_transport::commands::Registry;
-use theway::history::HistoryStore;
-use theway::mentions;
+use theway_transport::history::HistoryStore;
+use theway_transport::mentions;
 use theway_llm_provider::ImageContent;
 use theway_transport::client::GrpcClient;
 use theway_transport::proto::theway_grpc::stream_frame;
@@ -128,7 +126,7 @@ pub struct AppConfig {
     pub cwd: PathBuf,
     /// cwd-scoped session repo backing the local-only surfaces (`/session`
     /// export/import, --list-sessions) — same machine, shared SQLite sessions.
-    pub session_repo: Arc<theway::SqliteSessionRepo>,
+
     pub history: HistoryStore,
     /// Local slash-command registry (quit/clear/help/login + session
     /// export/import). Everything else forwards to the daemon.
@@ -159,7 +157,7 @@ pub struct App {
     pending_pasted_images: Vec<ImageContent>,
 
     /// cwd-scoped session repo backing the local-only `/session` export/import.
-    session_repo: Arc<theway::SqliteSessionRepo>,
+
 
     feed: Feed,
     panel_status: PanelStatus,
@@ -187,15 +185,6 @@ pub struct App {
 
     /// Stream connection state: `Some` while the frame stream is open.
     connected: bool,
-    /// Imported-but-disabled automation awaiting the user's "activate now?"
-    /// answer on the shared confirm surface (TUI keys).
-    pending_import_activation: Option<PendingImportActivation>,
-}
-
-struct PendingImportActivation {
-    session_path: PathBuf,
-    trigger_ids: Vec<String>,
-    cron_ids: Vec<String>,
 }
 
 impl App {
@@ -219,7 +208,6 @@ impl App {
             pending_skill: None,
             pending_images: config.pending_images,
             pending_pasted_images: Vec::new(),
-            session_repo: config.session_repo.clone(),
             feed,
             panel_status: PanelStatus::from_sidebar(&initial.sidebar),
             model_catalog: initial.model_catalog.clone(),
@@ -240,7 +228,6 @@ impl App {
             last_ctrlc: None,
             quit: false,
             connected: true,
-            pending_import_activation: None,
         }
     }
 
@@ -1072,12 +1059,12 @@ impl App {
                             .nth(1)
                             .unwrap_or("anthropic")
                             .to_string();
-                        let result = theway::auth::prompt_for_api_key(&provider).await;
+                        let result = crate::local_commands::prompt_for_api_key(&provider).await;
                         match result {
                             Ok(token) if token.trim().is_empty() => {
                                 println!("login cancelled (empty key)");
                             }
-                            Ok(token) => match theway::commands::save_api_key(&provider, &token) {
+                            Ok(token) => match theway_transport::auth::save_api_key(&provider, &token) {
                                 Ok(path) => {
                                     println!("saved api key for `{provider}` to {}", path.display())
                                 }

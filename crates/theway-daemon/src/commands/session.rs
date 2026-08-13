@@ -173,7 +173,7 @@ async fn session_export_command(
 
     let output_path = match path_arg {
         Some(path) => std::path::PathBuf::from(path),
-        None => crate::session_archive::default_export_path(ctx.cwd, ctx.session_id),
+        None => theway_storage::session_archive::default_export_path(ctx.cwd, ctx.session_id),
     };
     let output_path = if output_path.is_absolute() {
         output_path
@@ -182,7 +182,7 @@ async fn session_export_command(
     };
 
     emit_session_archive_warning();
-    match crate::session_archive::export_session(
+    match theway_storage::session_archive::export_session(
         ctx.harness.session(),
         &output_path,
         exclude_triggers,
@@ -220,14 +220,14 @@ async fn session_import_command(
     } else {
         ctx.cwd.join(archive_path)
     };
-    let repo = theway::session::open_repo(ctx.cwd).await;
+    let repo = theway_storage::session::open_repo(ctx.cwd).await;
 
     emit_session_archive_warning();
-    match crate::session_archive::import_session(
+    match theway_storage::session_archive::import_session(
         &repo,
         &archive_path,
         ctx.cwd,
-        crate::session_archive::ActivateTriggers::Off,
+        theway_storage::session_archive::ActivateTriggers::Off,
     )
     .await
     {

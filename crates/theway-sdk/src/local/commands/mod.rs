@@ -117,7 +117,7 @@ impl<X: Send + Sync> SlashCommand<X> for LogoutCommand {
             return CommandOutcome::Error("usage: /logout <provider>".into());
         }
         let provider = &argv[0];
-        let mut store = match crate::local::auth::AuthStore::load() {
+        let mut store = match theway_transport::auth::AuthStore::load() {
             Ok(s) => s,
             Err(e) => return CommandOutcome::Error(format!("load auth store: {e}")),
         };
@@ -148,8 +148,8 @@ impl<X: Send + Sync> SlashCommand<X> for SessionsCommand {
         "list sessions for this cwd"
     }
     async fn run(&self, _argv: &[String], ctx: &CommandCtx<'_, X>) -> CommandOutcome {
-        let repo = crate::local::session::open_repo(ctx.cwd).await;
-        let entries = match crate::local::session::list_entries(&repo).await {
+        let repo = theway_storage::session::open_repo(ctx.cwd).await;
+        let entries = match theway_storage::session::list_entries(&repo).await {
             Ok(e) => e,
             Err(e) => return CommandOutcome::Error(format!("list sessions: {e}")),
         };

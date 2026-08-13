@@ -12,7 +12,7 @@
 #[allow(dead_code)]
 pub mod auth {
     #[allow(unused_imports)]
-    pub use theway::auth::*;
+    pub use theway_transport::auth::*;
 }
 #[allow(dead_code)]
 #[path = "../../src/bug_report.rs"]

@@ -128,7 +128,9 @@ async fn dynamic_skill_slash_command_hides_disabled_and_builtin_conflicts() {
             .iter()
             .all(|shortcut| shortcut.command != "/disabled-skill")
     );
-    assert!(shortcuts.iter().all(|shortcut| shortcut.command != "/help"));
+    // /help is TUI-local now (daemon-kernel-layers); the daemon registry
+    // must not expose it, so no skill shortcut may collide with it either way.
+    assert!(registry.find("help").is_none());
 
     let cwd = std::env::current_dir().unwrap();
     let ctx = commands::CommandCtx {

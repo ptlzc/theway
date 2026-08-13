@@ -381,11 +381,13 @@ async fn dispatch_quit_returns_quit_outcome() {
         cwd: &cwd,
     };
 
+    // quit/clear/help are TUI-local commands (daemon-kernel-layers); the
+    // daemon no longer dispatches them.
     for input in ["/quit", "/exit", "/q"] {
         let outcome = commands::dispatch(input, &registry, &ctx).await;
         assert!(
-            matches!(outcome, commands::CommandOutcome::Quit),
-            "{input} should map to Quit"
+            matches!(outcome, commands::CommandOutcome::Error(_)),
+            "{input} should not be a daemon command"
         );
     }
 }

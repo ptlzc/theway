@@ -23,6 +23,7 @@ pub mod app;
 pub mod bug_report;
 pub mod builtin_skills;
 pub mod commands;
+pub mod config_readers;
 pub mod control_plane_prompt;
 pub mod dag_persist;
 pub mod env;
@@ -38,12 +39,13 @@ pub mod otlp;
 // SDK surface re-exported for `crate::…` paths used inside this crate (bridged
 // unit tests reach `crate::auth` etc. through these; clients use the `theway`
 // SDK directly and don't need the forwarding).
-pub use theway::{auth, config, history, images, mentions, session, stream_auth};
+pub use theway_transport::{auth, config, history, mentions};
 // Session archive export/import lives in the SDK; re-exported because daemon
 // modules reach it through `crate::session_archive` paths.
-pub use theway::session_archive;
+pub use theway_storage::session_archive;
 pub mod session_ops;
 pub mod skills;
+pub mod stream_auth;
 pub mod system_prompt;
 
 // Skill enable/disable overlay moved into the engine crate with the builtin tools

@@ -16,7 +16,7 @@ use chrono::Utc;
 use theway_core::Session;
 
 // Re-exported: daemon modules reach the redactor through `crate::bug_report::redact`.
-pub use theway::bug_report::redact;
+pub use theway_transport::bug_report::redact;
 
 use theway_transport::client::base_dir;
 
@@ -111,5 +111,5 @@ pub async fn build(diag: DiagInputs, session: &Session, dest: &Path) -> Result<P
 }
 
 // The secret redactor (`redact`) lives in the `theway` SDK
-// (`theway::bug_report::redact`) so both the daemon and client crates share one
+// (`theway_transport::bug_report::redact`) so both the daemon and client crates share one
 // conservative implementation; imported above.

@@ -9,8 +9,10 @@ use std::io::IsTerminal as _;
 use crate::resume_picker;
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
-use theway::SqliteSessionRepo;
-use theway::{config, session, session_archive};
+use theway_storage::sqlite_repo::SqliteSessionRepo;
+use theway_storage::session;
+use theway_storage::session_archive;
+use theway_transport::config;
 use theway_transport::commands;
 
 #[derive(Parser, Debug)]
@@ -257,7 +259,7 @@ pub(crate) async fn list_all_sessions_cmd() -> Result<()> {
 
     let mut all = Vec::new();
     for b in &buckets {
-        let repo = theway::SqliteSessionRepo::new(b);
+        let repo = SqliteSessionRepo::new(b);
         // list_entries may return Err if the bucket is empty/malformed; skip those gracefully.
         let entries = session::list_entries(&repo).await.unwrap_or_default();
         for e in entries {

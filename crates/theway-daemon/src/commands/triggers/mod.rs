@@ -341,8 +341,8 @@ async fn automation_elsewhere_hint_for_ctx(ctx: &CommandCtx<'_, DaemonCtx>) -> O
         .get("path")
         .and_then(|v| v.as_str())
         .map(std::path::PathBuf::from);
-    let repo = theway::session::open_repo(ctx.cwd).await;
-    theway::session::automation_elsewhere_hint(&repo, current.as_deref()).await
+    let repo = theway_storage::session::open_repo(ctx.cwd).await;
+    theway_storage::session::automation_elsewhere_hint(&repo, current.as_deref()).await
 }
 
 pub struct InboxCommand;

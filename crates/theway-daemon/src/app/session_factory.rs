@@ -11,7 +11,7 @@ use crate::SqliteSessionRepo;
 use crate::{agent_specs, tools, triggers};
 use anyhow::{Context, Result};
 use theway_transport::feed::FeedUpdate;
-use theway::session;
+use theway_storage::session;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::{AgentHarness, AgentHarnessOptions, ThinkingLevel};
 use theway_core::{agent::hooks, multiagent::goal};

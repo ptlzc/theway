@@ -9,6 +9,12 @@
 //! One-way dependency: theway-storage → theway-core (traits + types). The core
 //! never references this crate, so there is no cycle.
 
+//! Self-alias so bridged unit tests (tests_bridge) and lib code share one path
+//! shape (`theway_storage::…`), same pattern as theway-core / theway-daemon.
+extern crate self as theway_storage;
+
+pub mod session;
+pub mod session_archive;
 pub mod sqlite_dag;
 pub mod sqlite_repo;
 pub mod sqlite_storage;

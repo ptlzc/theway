@@ -28,30 +28,10 @@ impl App {
         }
     }
 
-    /// Resolve the pending control-plane prompt: import-activation cards resolve
-    /// locally, daemon cards go through the `approve` RPC (the snapshot clears
-    /// the card on the next frame).
+
+    /// Resolve the pending daemon control-plane prompt through the `approve`
+    /// RPC (the snapshot clears the card on the next frame).
     pub(super) fn resolve_control_plane_prompt(&mut self, approve: bool) {
-        if let Some(pending) = self.pending_import_activation.take() {
-            self.control_plane_prompt = None;
-            if approve {
-                match theway::session_archive::activate_imported(
-                    &pending.session_path,
-                    &pending.trigger_ids,
-                    &pending.cron_ids,
-                ) {
-                    Ok((triggers, cron)) => self.system_line(format!(
-                        "activated imported automation: {triggers} trigger(s), {cron} cron job(s) re-enabled"
-                    )),
-                    Err(e) => self.error_line(format!("activate imported automation: {e}")),
-                }
-            } else {
-                self.system_line(
-                    "imported automation stays disabled; enable later via /triggers enable and /cron enable",
-                );
-            }
-            return;
-        }
         let Some(prompt) = self.control_plane_prompt.take() else {
             return;
         };

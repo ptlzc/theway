@@ -54,14 +54,14 @@ fn redact_control_prompt_secrets(text: &str) -> String {
         )
         .expect("control prompt redaction regex must compile")
     });
-    let redacted = theway::bug_report::redact(text);
+    let redacted = theway_transport::bug_report::redact(text);
     TOKENISH_FIELD
         .replace_all(&redacted, "$1$2[REDACTED]")
         .into_owned()
 }
 
 pub(super) fn panel_rule_preview(text: &str, width: usize) -> String {
-    let redacted = theway::bug_report::redact(text).replace('\n', " ");
+    let redacted = theway_transport::bug_report::redact(text).replace('\n', " ");
     feed::truncate_chars(&redacted, width.max(1))
 }
 

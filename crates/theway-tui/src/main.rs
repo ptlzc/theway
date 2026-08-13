@@ -17,6 +17,7 @@
 mod cli;
 mod clipboard_image;
 mod feed_render;
+mod local_commands;
 mod model_picker;
 mod resume_picker;
 mod startup;
@@ -26,8 +27,9 @@ use std::io::IsTerminal as _;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use theway::SqliteSessionRepo;
-use theway::{session, session_archive};
+use theway_storage::session;
+use theway_storage::session_archive;
+use theway_storage::sqlite_repo::SqliteSessionRepo;
 
 use cli::{
     ActivateTriggersArg, Cli, CliCommand, SessionCliCommand, delete_session_cmd,

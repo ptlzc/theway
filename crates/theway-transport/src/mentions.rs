@@ -1,4 +1,6 @@
-//! `@file` mention injection.
+//! `@file` mention injection (daemon-kernel-layers: moved from the SDK into
+//! transport — both the TUI input path and the daemon prompt intake expand
+//! the same mention syntax).
 //!
 //! When the user types a prompt containing `@<path>` tokens, the REPL resolves each path
 //! against the current working directory, reads the file, and prepends a small attachment

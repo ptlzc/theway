@@ -1,6 +1,8 @@
-//! Persistent credential store for `theway`. Foundation for c4pt0r/theway#13: stores per-provider
-//! credentials at `~/.theway/auth.json` with mode 0600. /login + /logout populate it;
-//! resolve_for_provider plumbs into model auto-detection and the CLI stream wrapper.
+//! Persistent credential store (daemon-kernel-layers: moved from the SDK into
+//! transport — the auth store file format is shared contract: the TUI's /login
+//! flow writes it, the daemon reads it). Stores per-provider credentials at
+//! `~/.theway/auth.json` with mode 0600; `resolve_for_provider` plumbs into
+//! model auto-detection and the stream wrapper.
 //!
 //! Resolution precedence (in `resolve_for_provider`):
 //!   1. The provider's environment variable, if set and non-empty.
@@ -8,34 +10,18 @@
 //!   3. None.
 
 use std::collections::HashMap;
-use std::io::IsTerminal as _;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use theway_transport::client::base_dir;
+use crate::client::base_dir;
 
 #[cfg(test)]
 pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 pub fn auth_path() -> PathBuf {
     base_dir().join("auth.json")
-}
-
-/// Prompt the user for a provider API key on the terminal (no echo).
-/// Errors when stdin is not a TTY. Used by `/login` and the CLI login flow.
-pub async fn prompt_for_api_key(provider: &str) -> Result<String> {
-    let provider = provider.to_string();
-    tokio::task::spawn_blocking(move || {
-        if !std::io::stdin().is_terminal() {
-            anyhow::bail!(login_requires_tty_message(&provider, None));
-        }
-        rpassword::prompt_password(format!("api key for `{provider}`: "))
-            .context("read api key without echo")
-    })
-    .await
-    .context("login prompt task")?
 }
 
 /// Human-readable guidance for when `/login` cannot run (non-TTY stdin).
@@ -305,4 +291,53 @@ mod tests {
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600, "got {:o}", mode);
     }
+}
+
+/// Credential hint for a provider when neither the env vars nor the auth store hold one:
+/// tells the user which env var to set or to run `/login <provider>`. `None` when a
+/// credential is already available.
+pub fn model_credential_hint(provider: &str) -> Option<String> {
+    let vars = theway_llm_provider::env_api_keys::env_var_names(provider);
+    let has_env = vars.iter().any(|var| {
+        std::env::var(var)
+            .ok()
+            .map(|v| !v.trim().is_empty())
+            .unwrap_or(false)
+    });
+    if has_env {
+        return None;
+    }
+    let has_stored = AuthStore::load()
+        .ok()
+        .and_then(|store| store.get(provider).cloned())
+        .is_some();
+    if has_stored {
+        return None;
+    }
+
+    let env_hint = if vars.is_empty() {
+        "set the provider API key env var".to_string()
+    } else {
+        format!("set {}", vars.join(" or "))
+    };
+    Some(format!("{env_hint} or run /login {provider}"))
+}
+
+/// Store an API key for `provider` in the local auth store (`~/.theway/auth.json`).
+/// Returns the auth store path on success.
+pub fn save_api_key(provider: &str, token: &str) -> Result<PathBuf, String> {
+    let mut store = match AuthStore::load() {
+        Ok(s) => s,
+        Err(e) => return Err(format!("load auth store: {e}")),
+    };
+    store.set(
+        provider.to_string(),
+        ProviderCredential::ApiKey {
+            value: token.to_string(),
+        },
+    );
+    if let Err(e) = store.save() {
+        return Err(format!("save auth store: {e}"));
+    }
+    Ok(auth_path())
 }

@@ -1,11 +1,13 @@
-//! Session helpers — wraps `theway_storage::SqliteSessionRepo` with resume / list / delete
-//! semantics scoped to the current cwd hash.
+//! Session helpers (daemon-kernel-layers: moved from the SDK into storage —
+//! repo-adjacent resume / list / delete semantics scoped to the current cwd
+//! hash, shared by the daemon runtime and the CLI offline session commands).
+//! Wraps [`SqliteSessionRepo`] with cwd-scoped semantics.
 
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 use theway_core::Session;
-use theway_storage::sqlite_repo::SqliteSessionRepo;
+use crate::sqlite_repo::SqliteSessionRepo;
 
 use theway_transport::config::sessions_dir_for_cwd;
 

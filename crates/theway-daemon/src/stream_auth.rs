@@ -6,7 +6,7 @@ use theway_llm_provider::Message as PiMessage;
 pub fn stream_fn_with_auth_store() -> theway_core::StreamFn {
     std::sync::Arc::new(|model, context, options| {
         let merged = apply_auth_to_simple_options(model, options, |provider| {
-            crate::auth::AuthStore::load()
+            theway_transport::auth::AuthStore::load()
                 .ok()
                 .and_then(|store| store.resolve_for_provider(provider))
         });
