@@ -550,12 +550,10 @@ impl DaemonApp {
                 // the ids the source had enabled with the enable commands that do exist.
                 const ID_PREVIEW: usize = 5;
                 let list_ids = |ids: &[String], what: &str, enable_cmd: &str| {
-                    let shown: Vec<&str> = ids.iter().take(ID_PREVIEW).map(String::as_str).collect();
-                    let mut line = format!(
-                        "{what} not enabled ({}): {}",
-                        ids.len(),
-                        shown.join(", ")
-                    );
+                    let shown: Vec<&str> =
+                        ids.iter().take(ID_PREVIEW).map(String::as_str).collect();
+                    let mut line =
+                        format!("{what} not enabled ({}): {}", ids.len(), shown.join(", "));
                     if ids.len() > ID_PREVIEW {
                         line.push_str(&format!(" … (+{} more)", ids.len() - ID_PREVIEW));
                     }
