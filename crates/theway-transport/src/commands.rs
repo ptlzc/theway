@@ -1,18 +1,14 @@
 //! Slash-command framework: [`CommandOutcome`], [`CommandCtx`], the [`SlashCommand`]
 //! trait, [`Registry`], the shared output sink ([`console`]), slash parsing ([`parse`]),
 //! and the pure helpers shared by command implementations and the CLI layer
-//! (`parse_model_spec`, `save_api_key`, `attach_skill_prompt`, …).
+//! (`parse_model_spec`, `attach_skill_prompt`, …).
 //!
-//! Split out of the daemon crate (sdk-split-local-sandbox, node 5-commands-layer).
-//! The framework is generic over the context extras (`CommandCtx<'a, X>` /
-//! `SlashCommand<X>`): the SDK ships the environment-agnostic surface, and the
-//! daemon layers its runtime commands on top with its own extras type (node 6
-//! introduces `DaemonCtx`). Local commands implement `SlashCommand<X>` for every
-//! `X` so any registry can register them.
-//!
-//! Command families: this module keeps the shared framework + pure helpers;
-//! the local command implementations (quit/clear/help/login/logout/sessions)
-//! live in [`crate::local::commands`].
+//! Moved from the SDK into transport (daemon-kernel-layers): the command table is
+//! shared contract — the TUI (completion) and the daemon (execution) both program
+//! against it. The framework is generic over the context extras (`CommandCtx<'a, X>` /
+//! `SlashCommand<X>`): the daemon layers its runtime commands on top with its own
+//! extras type (`DaemonCtx`); the TUI registers its local UI commands. Command
+//! implementations themselves live with their owners (tui / daemon).
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -27,8 +23,8 @@ use theway_llm_provider::Model;
 /// a sink that forwards each line into the conversation feed; when none is installed (unit
 /// tests, non-interactive shells) output falls back to stdout.
 ///
-/// This is the single process-wide sink: daemon-side command implementations (still in the
-/// daemon crate) route here too, so local and daemon command output share one surface.
+/// This is the single process-wide sink: daemon-side command implementations route
+/// here too, so local and daemon command output share one surface.
 pub mod console {
     use parking_lot::Mutex;
 
@@ -65,8 +61,8 @@ pub mod console {
 /// command implementations can share it.
 #[macro_export]
 macro_rules! cprintln {
-    () => { $crate::common::commands::console::emit_line(String::new()) };
-    ($($arg:tt)*) => { $crate::common::commands::console::emit_line(std::format!($($arg)*)) };
+    () => { $crate::commands::console::emit_line(String::new()) };
+    ($($arg:tt)*) => { $crate::commands::console::emit_line(std::format!($($arg)*)) };
 }
 
 /// Thinking levels accepted by `/thinking` and the `--thinking` CLI flag.
@@ -305,56 +301,6 @@ pub fn parse_model_spec(spec: &str) -> Option<(&str, &str)> {
         return None;
     }
     Some((provider, id))
-}
-
-/// Credential hint for a provider when neither the env vars nor the auth store hold one:
-/// tells the user which env var to set or to run `/login <provider>`. `None` when a
-/// credential is already available.
-pub fn model_credential_hint(provider: &str) -> Option<String> {
-    let vars = theway_llm_provider::env_api_keys::env_var_names(provider);
-    let has_env = vars.iter().any(|var| {
-        std::env::var(var)
-            .ok()
-            .map(|v| !v.trim().is_empty())
-            .unwrap_or(false)
-    });
-    if has_env {
-        return None;
-    }
-    let has_stored = crate::local::auth::AuthStore::load()
-        .ok()
-        .and_then(|store| store.get(provider).cloned())
-        .is_some();
-    if has_stored {
-        return None;
-    }
-
-    let env_hint = if vars.is_empty() {
-        "set the provider API key env var".to_string()
-    } else {
-        format!("set {}", vars.join(" or "))
-    };
-    Some(format!("{env_hint} or run /login {provider}"))
-}
-
-/// Store an API key for `provider` in the local auth store (`~/.theway/auth.json`).
-/// Returns the auth store path on success.
-#[cfg_attr(test, allow(dead_code))]
-pub fn save_api_key(provider: &str, token: &str) -> Result<PathBuf, String> {
-    let mut store = match crate::local::auth::AuthStore::load() {
-        Ok(s) => s,
-        Err(e) => return Err(format!("load auth store: {e}")),
-    };
-    store.set(
-        provider.to_string(),
-        crate::local::auth::ProviderCredential::ApiKey {
-            value: token.to_string(),
-        },
-    );
-    if let Err(e) = store.save() {
-        return Err(format!("save auth store: {e}"));
-    }
-    Ok(crate::local::auth::auth_path())
 }
 
 /// Wrap a user prompt so the agent invokes the named skill first. Without a skill name the

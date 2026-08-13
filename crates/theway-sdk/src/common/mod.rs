@@ -5,7 +5,7 @@
 //! Module bodies are filled by later nodes of `sdk-split-local-sandbox`;
 //! this scaffold only declares the module tree.
 
-pub mod commands;
+pub mod auth_helpers;
 pub mod config;
 pub mod config_readers;
 pub mod session_archive;

@@ -6,7 +6,7 @@
 use super::*;
 
 use super::model::{emit_multiline, model_catalog_text, model_help_summary_lines};
-use theway::commands::CommandCtx;
+use theway_transport::commands::CommandCtx;
 
 pub struct DiagCommand;
 

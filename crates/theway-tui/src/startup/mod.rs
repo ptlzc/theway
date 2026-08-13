@@ -153,7 +153,8 @@ pub(crate) async fn run_repl(
         cwd: cwd.clone(),
         session_repo: repo,
         history: theway::history::HistoryStore::load(),
-        registry: theway::commands::Registry::local(),
+        registry: <theway_transport::commands::Registry<()> as
+            theway::local::commands::RegistryLocalExt<()>>::local(),
         pending_images: cli.image.clone(),
     });
     app.banner();

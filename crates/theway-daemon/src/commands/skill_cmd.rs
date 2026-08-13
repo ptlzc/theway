@@ -3,7 +3,7 @@
 
 use super::*;
 
-use theway::commands::CommandCtx;
+use theway_transport::commands::CommandCtx;
 
 pub struct SkillCommand;
 

@@ -10,7 +10,8 @@ use crate::resume_picker;
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use theway::SqliteSessionRepo;
-use theway::{commands, config, session, session_archive};
+use theway::{config, session, session_archive};
+use theway_transport::commands;
 
 #[derive(Parser, Debug)]
 #[command(

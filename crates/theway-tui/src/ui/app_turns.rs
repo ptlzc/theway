@@ -13,7 +13,7 @@ use anyhow::Result;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
-use theway::commands;
+use theway_transport::commands;
 use theway::images;
 use theway::mentions;
 
@@ -247,7 +247,7 @@ impl App {
             Ok(token) if token.trim().is_empty() => {
                 self.error_line("empty api key; login cancelled")
             }
-            Ok(token) => match commands::save_api_key(&provider, &token) {
+            Ok(token) => match theway::commands::save_api_key(&provider, &token) {
                 Ok(path) => self.system_line(format!(
                     "saved api key for `{provider}` to {} — the daemon picks it up on its next turn",
                     path.display()

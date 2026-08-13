@@ -5,9 +5,9 @@
 
 use super::*;
 
-use theway::commands::CommandCtx;
-use theway::commands::provider_summary;
-pub(super) use theway::commands::{model_groups, model_help_summary_lines};
+use theway_transport::commands::CommandCtx;
+use theway_transport::commands::provider_summary;
+pub(super) use theway_transport::commands::{model_groups, model_help_summary_lines};
 
 pub struct ModelCommand;
 

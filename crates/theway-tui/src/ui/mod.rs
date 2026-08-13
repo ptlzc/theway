@@ -55,8 +55,8 @@ use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Padding, Paragraph
 use tui_textarea::TextArea;
 
 use theway_transport::feed::{Feed, Level, TriggerPollStatus};
-use theway::commands;
-use theway::commands::Registry;
+use theway_transport::commands;
+use theway_transport::commands::Registry;
 use theway::history::HistoryStore;
 use theway::mentions;
 use theway_llm_provider::ImageContent;
@@ -1109,7 +1109,7 @@ impl App {
 /// client forwards slash text via `send_message`) + skill shortcuts from the
 /// snapshot sidebar.
 fn collect_slash_commands(
-    registry: &theway::commands::Registry,
+    registry: &theway_transport::commands::Registry,
     skills: &[theway_transport::wire::WireSkillSnapshot],
 ) -> Vec<String> {
     let mut commands: Vec<String> = registry

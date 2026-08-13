@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::common::commands::{CommandCtx, CommandOutcome, Registry, SlashCommand};
+use theway_transport::commands::{CommandCtx, CommandOutcome, Registry, SlashCommand};
 
 pub struct QuitCommand;
 
@@ -167,12 +167,24 @@ impl<X: Send + Sync> SlashCommand<X> for SessionsCommand {
     }
 }
 
-impl<X: Send + Sync> Registry<X> {
+/// Extension trait so the SDK can add constructors to the (transport-owned)
+/// [`Registry`] without violating the orphan rule (daemon-kernel-layers: the
+/// framework moved to transport; the local command set stays here until it
+/// splits into tui / daemon).
+pub trait RegistryLocalExt<X> {
     /// The local command set: everything that runs without a daemon runtime.
     /// Clients enumerate/dispatch these offline; the daemon appends its runtime
-    /// commands on top (node 6: `with_daemon_commands`).
-    pub fn local() -> Self {
-        let mut r = Self::new();
+    /// commands on top.
+    fn local() -> Registry<X>;
+
+    /// Compatibility alias for [`RegistryLocalExt::local`] kept while the TUI
+    /// still calls `Registry::with_builtins()`.
+    fn with_builtins() -> Registry<X>;
+}
+
+impl<X: Send + Sync> RegistryLocalExt<X> for Registry<X> {
+    fn local() -> Registry<X> {
+        let mut r = Registry::new();
         r.register(Arc::new(HelpCommand));
         r.register(Arc::new(ClearCommand));
         r.register(Arc::new(QuitCommand));
@@ -182,9 +194,7 @@ impl<X: Send + Sync> Registry<X> {
         r
     }
 
-    /// Compatibility alias for [`Registry::local`] kept while the TUI still calls
-    /// `Registry::with_builtins()` (it switches to `local()` in node 9-tui-boundary).
-    pub fn with_builtins() -> Self {
+    fn with_builtins() -> Registry<X> {
         Self::local()
     }
 }

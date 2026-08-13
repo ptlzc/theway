@@ -40,11 +40,13 @@ use tokio_util::sync::CancellationToken;
 // crate, where this module is private and some re-exports have no in-tree user.
 /// The SDK's console sink is the single process-wide output sink: daemon commands route
 //  through it too (see the `cprintln!` macro below).
-pub use theway::commands::console;
+pub use theway_transport::commands::console;
 #[allow(unused_imports)]
-pub use theway::commands::{
-    CommandOutcome, SlashCommand, THINKING_LEVEL_VALUES, WebRelayAction, attach_skill_prompt,
-    cli_model_help_text, model_credential_hint, parse, parse_model_spec, save_api_key,
+pub use theway::commands::{model_credential_hint, save_api_key};
+use theway::local::commands::RegistryLocalExt;
+pub use theway_transport::commands::{
+    CommandOutcome, SlashCommand, WebRelayAction, attach_skill_prompt,
+    cli_model_help_text, parse, parse_model_spec,
 };
 
 /// Drop-in replacement for `println!` inside this module: same call syntax, but the formatted
@@ -76,7 +78,7 @@ pub use misc::print_help;
 pub(crate) use triggers::{render_cron_jobs, render_dynamic_trigger_rules, render_triggers_status};
 
 // Daemon command implementations registered by `Registry::with_daemon_commands` (the local
-// set comes from `theway::commands::Registry::<DaemonCtx>::local()`).
+// set comes from `theway_transport::commands::Registry::<DaemonCtx>::local()`).
 use goal::{GoalCommand, GoalStartCommand};
 use misc::{
     BugReportCommand, CompactCommand, DiagCommand, FindCommand, HistoryCommand, TemplateCommand,
@@ -105,7 +107,8 @@ pub const THINKING_LEVEL_USAGE: &str = "[off|minimal|low|medium|high|xhigh]";
 
 /// Context handed to a command at runtime — daemon-shaped view kept for the assembly layer
 /// (`DaemonApp`) and the integration tests: it carries the `trigger_executor` reference.
-/// [`dispatch`] converts it into the SDK's generic [`theway::commands::CommandCtx`]
+/// [`dispatch`] converts it into the transport framework's generic
+/// [`theway_transport::commands::CommandCtx`]
 /// with [`DaemonCtx`] extras; daemon commands (e.g. `/triggers`) reach the executor through
 /// `ctx.extra.trigger_executor`.
 pub struct CommandCtx<'a> {
@@ -133,7 +136,7 @@ pub struct DaemonCtx {
 /// `Registry` type in the assembly layer while the SDK's constructors only know the local
 /// command set.
 pub struct Registry {
-    inner: theway::commands::Registry<DaemonCtx>,
+    inner: theway_transport::commands::Registry<DaemonCtx>,
 }
 
 impl Registry {
@@ -142,7 +145,7 @@ impl Registry {
     #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
-            inner: theway::commands::Registry::new(),
+            inner: theway_transport::commands::Registry::new(),
         }
     }
 
@@ -152,7 +155,7 @@ impl Registry {
     /// (skills/model/goal/session lifecycle/triggers/…).
     pub fn with_daemon_commands() -> Self {
         let mut r = Self {
-            inner: theway::commands::Registry::<DaemonCtx>::local(),
+            inner: theway_transport::commands::Registry::<DaemonCtx>::local(),
         };
         r.register(Arc::new(SkillsCommand));
         r.register(Arc::new(SkillCommand));
@@ -194,7 +197,7 @@ impl Registry {
 }
 
 impl std::ops::Deref for Registry {
-    type Target = theway::commands::Registry<DaemonCtx>;
+    type Target = theway_transport::commands::Registry<DaemonCtx>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -323,7 +326,7 @@ pub async fn dispatch(input: &str, registry: &Registry, ctx: &CommandCtx<'_>) ->
     let extra = DaemonCtx {
         trigger_executor: ctx.trigger_executor.clone(),
     };
-    let sdk_ctx = theway::commands::CommandCtx {
+    let sdk_ctx = theway_transport::commands::CommandCtx {
         harness: ctx.harness,
         session_id: ctx.session_id,
         log_path: ctx.log_path,

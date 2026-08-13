@@ -10,7 +10,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
-use theway::commands;
+use theway_transport::commands;
 use theway::images;
 use theway_transport::transport::SlashCompleter;
 
@@ -211,7 +211,7 @@ impl App {
         let id = id.to_string();
         match self.client.set_model(&format!("{provider}:{id}")).await {
             Ok(true) => {
-                if let Some(hint) = commands::model_credential_hint(&provider) {
+                if let Some(hint) = theway::commands::model_credential_hint(&provider) {
                     self.system_line(format!(
                         "selected {provider}:{id}, but login is required: {hint}"
                     ));
