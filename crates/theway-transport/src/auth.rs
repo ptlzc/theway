@@ -1,3 +1,4 @@
+//! shared client contract (not protocol) — zone per the crate-level "Module zones" doc.
 //! Persistent credential store (daemon-kernel-layers: moved from the SDK into
 //! transport — the auth store file format is shared contract: the TUI's /login
 //! flow writes it, the daemon reads it). Stores per-provider credentials at

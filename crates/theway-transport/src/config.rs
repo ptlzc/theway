@@ -1,3 +1,4 @@
+//! shared client contract (not protocol) — zone per the crate-level "Module zones" doc.
 //! Paths and identity (daemon-kernel-layers: moved from the SDK into transport —
 //! the config surface is shared client contract). One source of truth for
 //! `~/.theway/...` and the cwd-hash directory layout.

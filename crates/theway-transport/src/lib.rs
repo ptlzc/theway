@@ -5,26 +5,43 @@
 //! (`mcp`, via the rmcp SDK). Independent of the server business logic — the
 //! server programs against this crate's channel surface
 //! ([`TransportEndpoints`]) instead of passing its app internals in.
+//!
+//! # Module zones
+//!
+//! Modules fall into two zones, declared in the two groups below:
+//!
+//! - **protocol** — the wire model and the transport implementations around it:
+//!   `wire`, `grpc`, `http`, `ws`, `mcp`, `proto`, `client`, `host`,
+//!   `transport`, `inbox`, `testing`. These implement or directly serve the
+//!   protocol surfaces the server and its clients speak.
+//! - **shared** — client/daemon contract helpers absorbed from the former SDK
+//!   (not protocol): `auth`, `bug_report`, `commands`, `config`, `feed`,
+//!   `history`, `images`, `mentions`, `triggers`. Both zones' modules are
+//!   marked `shared client contract` in their headers; the public paths never
+//!   change.
 
-pub mod auth;
-pub mod bug_report;
+// ── protocol zone: wire model + transport implementations ──
 pub mod client;
-pub mod commands;
-pub mod config;
-pub mod feed;
 pub mod grpc;
-pub mod history;
 pub mod host;
 pub mod http;
-pub mod images;
 pub mod inbox;
 pub mod mcp;
-pub mod mentions;
 pub mod proto;
 pub mod testing;
 pub mod transport;
-pub mod triggers;
 pub mod wire;
 pub mod ws;
+
+// ── shared zone: client/daemon contract helpers (not protocol) ──
+pub mod auth;
+pub mod bug_report;
+pub mod commands;
+pub mod config;
+pub mod feed;
+pub mod history;
+pub mod images;
+pub mod mentions;
+pub mod triggers;
 
 pub use transport::{TransportEndpoints, TransportMode};

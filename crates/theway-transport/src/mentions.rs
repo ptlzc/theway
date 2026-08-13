@@ -1,3 +1,4 @@
+//! shared client contract (not protocol) — zone per the crate-level "Module zones" doc.
 //! `@file` mention injection (daemon-kernel-layers: moved from the SDK into
 //! transport — both the TUI input path and the daemon prompt intake expand
 //! the same mention syntax).

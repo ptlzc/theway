@@ -1,3 +1,4 @@
+//! shared client contract (not protocol) — zone per the crate-level "Module zones" doc.
 //! Persistent input history for the REPL. Each submitted prompt is appended to
 //! `~/.theway/history`, capped at 1000 entries. Subsequent sessions load it; the existing
 //! line-based REPL doesn't yet offer ↑/↓ recall (needs raw mode → c4pt0r/theway#2 main

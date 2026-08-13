@@ -1,3 +1,4 @@
+//! shared client contract (not protocol) — zone per the crate-level "Module zones" doc.
 //! Slash-command framework: [`CommandOutcome`], [`CommandCtx`], the [`SlashCommand`]
 //! trait, [`Registry`], the shared output sink ([`console`]), slash parsing ([`parse`]),
 //! and the pure helpers shared by command implementations and the CLI layer

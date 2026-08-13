@@ -1,3 +1,4 @@
+//! shared client contract (not protocol) — zone per the crate-level "Module zones" doc.
 //! Session-scoped automation data models (daemon-kernel-layers: moved from the
 //! SDK into transport — trigger rules cross the wire, so they are contract).
 //!

@@ -1,3 +1,4 @@
+//! shared client contract (not protocol) — zone per the crate-level "Module zones" doc.
 //! Image attachment payload helpers (daemon-kernel-layers: moved from the SDK
 //! into transport — image payloads cross the wire, so the encode/validation
 //! contract lives here; the fs-side loaders live in the daemon).

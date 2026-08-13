@@ -1,3 +1,4 @@
+//! shared client contract (not protocol) — zone per the crate-level "Module zones" doc.
 //! Conversation-feed contract: wire types + the structured [`Feed`] model +
 //! display-only helpers, shared by the daemon (producer) and the TUI/web
 //! clients (consumers). UI-agnostic by design — ratatui rendering lives in
