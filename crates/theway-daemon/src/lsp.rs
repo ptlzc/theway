@@ -56,7 +56,6 @@ pub struct LspClient {
     next_id: AtomicU64,
     inflight: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
     diagnostics: Arc<Mutex<HashMap<String, Vec<Diagnostic>>>>,
-    diag_tx: mpsc::UnboundedSender<(String, Vec<Diagnostic>)>,
     diag_rx: AsyncMutex<mpsc::UnboundedReceiver<(String, Vec<Diagnostic>)>>,
     child: AsyncMutex<Option<Child>>,
     request_timeout: Duration,
@@ -91,12 +90,11 @@ impl LspClient {
             Arc::new(Mutex::new(HashMap::new()));
         let diagnostics: Arc<Mutex<HashMap<String, Vec<Diagnostic>>>> =
             Arc::new(Mutex::new(HashMap::new()));
-        let (diag_tx, diag_rx) = mpsc::unbounded_channel::<(String, Vec<Diagnostic>)>();
+        let (diagnostics_tx, diag_rx) = mpsc::unbounded_channel::<(String, Vec<Diagnostic>)>();
 
         // Read pump.
         let pump_inflight = inflight.clone();
         let pump_diagnostics = diagnostics.clone();
-        let pump_diag_tx = diag_tx.clone();
         tokio::spawn(async move {
             let mut reader = tokio::io::BufReader::new(stdout);
             loop {
@@ -124,7 +122,7 @@ impl LspClient {
                                         pump_diagnostics
                                             .lock()
                                             .insert(p.uri.clone(), p.diagnostics.clone());
-                                        let _ = pump_diag_tx.send((p.uri, p.diagnostics));
+                                        let _ = diagnostics_tx.send((p.uri, p.diagnostics));
                                     }
                                 }
                             }
@@ -152,7 +150,6 @@ impl LspClient {
             next_id: AtomicU64::new(1),
             inflight,
             diagnostics,
-            diag_tx,
             diag_rx: AsyncMutex::new(diag_rx),
             child: AsyncMutex::new(Some(child)),
             request_timeout: Duration::from_secs(15),

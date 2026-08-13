@@ -20,17 +20,13 @@ pub mod commands;
 pub mod control_plane_prompt;
 pub mod dag_persist;
 pub mod export;
-pub mod extensions;
 pub mod local_models;
 pub mod logging;
 pub mod lsp;
 pub mod lsp_supervisor;
-pub mod markdown;
 pub mod mcp_loader;
 pub mod model;
-pub mod oauth;
 pub mod otlp;
-pub mod readline;
 // SDK surface re-exported for `crate::…` paths used inside this crate (bridged
 // unit tests reach `crate::auth` etc. through these; clients use the `theway`
 // SDK directly and don't need the forwarding).

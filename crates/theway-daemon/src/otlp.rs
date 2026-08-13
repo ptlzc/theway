@@ -75,16 +75,6 @@ impl OtlpLayer {
         Self { inner }
     }
 
-    pub fn with_service_name(self, name: impl Into<String>) -> Self {
-        // The Arc<Inner> is shared; create a new wrapper that points at a fresh inner if the
-        // caller wants a different service name. Cheaper to just allow this once at construction.
-        let mut inner = (*self.inner).clone_for_rename();
-        inner.service_name = name.into();
-        Self {
-            inner: Arc::new(inner),
-        }
-    }
-
     async fn flush_once(inner: &Arc<Inner>) {
         let drained: Vec<Value> = {
             let mut g = inner.pending.lock();
@@ -117,19 +107,6 @@ impl OtlpLayer {
             tokio::spawn(async move {
                 let _ = req.send().await;
             });
-        }
-    }
-}
-
-impl Inner {
-    /// Re-bind the service name without poisoning the existing inner's queue. Used only by
-    /// `with_service_name`.
-    fn clone_for_rename(&self) -> Inner {
-        Inner {
-            endpoint: self.endpoint.clone(),
-            service_name: self.service_name.clone(),
-            pending: Mutex::new(Vec::new()),
-            open: Mutex::new(HashMap::new()),
         }
     }
 }

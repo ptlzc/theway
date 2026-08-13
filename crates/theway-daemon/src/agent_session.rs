@@ -17,9 +17,7 @@ use std::sync::Arc;
 
 use once_cell::sync::Lazy;
 use regex::Regex;
-use theway_core::{
-    AgentHarness, AgentMessage, AgentRunError, LoopEvent, LoopListener, SessionTreeEntry,
-};
+use theway_core::{AgentHarness, AgentMessage, AgentRunError, LoopListener, SessionTreeEntry};
 use theway_llm_provider::{AssistantMessage as PiAssistantMessage, Message as PiMessage};
 
 #[derive(Clone, Debug)]
@@ -216,28 +214,6 @@ fn backoff_ms(attempt: u32, base: u64, max: u64) -> u64 {
     let n = (base as u128) << exponent;
     n.min(max as u128) as u64
 }
-
-// Lifecycle events the wrapper emits on its own (not via Agent). Consumers wanting visibility
-// into retries subscribe to these.
-#[allow(dead_code)] // declared for future embedder use; the binary doesn't emit these yet.
-#[derive(Clone, Debug)]
-pub enum AgentSessionEvent {
-    AutoRetryStart {
-        attempt: u32,
-        max_attempts: u32,
-        delay_ms: u64,
-        error_message: String,
-    },
-    AutoRetryEnd {
-        success: bool,
-        attempt: u32,
-        final_error: Option<String>,
-    },
-}
-
-/// Convert a base `LoopEvent` listener type into the kind we use here for symmetry.
-#[allow(dead_code)]
-pub fn forward_to_listener(_: LoopEvent) {}
 
 #[cfg(test)]
 mod tests {

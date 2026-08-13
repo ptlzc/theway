@@ -6,7 +6,6 @@
 //! inbound stream into [`Trigger`](super::types::Trigger) envelopes, and push them into a
 //! shared `TriggerSink`. The `TriggerExecutor` (host) consumes whatever the hooks produce.
 
-use std::pin::Pin;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
@@ -50,10 +49,6 @@ pub trait NotificationHook: Send + Sync {
 /// Hooks can also be stored / shared as boxed trait objects. Most callers will use this
 /// alias instead of writing the trait-object syntax everywhere.
 pub type DynNotificationHook = Arc<dyn NotificationHook>;
-
-/// Boxed long-running future, exposed for downstream test fixtures that want to spawn a
-/// hook manually without going through the supervisor.
-pub type HookFuture = Pin<Box<dyn std::future::Future<Output = Result<(), HookError>> + Send>>;
 
 /// Failure modes reported by a hook to the runtime supervisor. The supervisor decides
 /// whether to restart, escalate to `requires_attention`, or surface as a user error.

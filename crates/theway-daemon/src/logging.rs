@@ -85,11 +85,5 @@ fn short(session_id: &str) -> &str {
     &session_id[..cap]
 }
 
-/// Helper for the `/diag` command — returns the canonical logs dir for display.
-#[allow(dead_code)]
-pub fn logs_dir() -> PathBuf {
-    base_dir().join("logs")
-}
-
 #[allow(dead_code)]
 fn _path_check(_p: &Path) {}

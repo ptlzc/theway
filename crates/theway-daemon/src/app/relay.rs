@@ -87,17 +87,16 @@ struct RelayShared {
 pub struct RelayHandle {
     /// Public viewer URL (`https://…/session/<token>`).
     pub url: String,
+    /// Kept for the handle's lifetime even though it is never read directly: dropping the
+    /// last sender closes the relay task's snapshot channel, which the task interprets as an
+    /// app-initiated shutdown.
+    #[allow(dead_code)]
     snapshot_tx: mpsc::UnboundedSender<WireStatus>,
     cancel: CancellationToken,
     shared: Arc<Mutex<RelayShared>>,
 }
 
 impl RelayHandle {
-    /// Queue a snapshot for the relay. Cheap; the task debounces on the wire.
-    pub fn push_snapshot(&self, snapshot: WireStatus) {
-        let _ = self.snapshot_tx.send(snapshot);
-    }
-
     pub fn status_line(&self) -> String {
         let shared = self.shared.lock();
         let state = match shared.state {

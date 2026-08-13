@@ -10,7 +10,7 @@ use crate::trigger_engine::event::{TriggerEvent, TriggerListener};
 use crate::trigger_engine::types::{SourceKind, TriggerState};
 use chrono::Local;
 use parking_lot::Mutex;
-use theway_core::{LoopEvent, LoopListener, SessionEvent, SessionListener};
+use theway_core::{LoopEvent, SessionEvent, SessionListener};
 use theway_llm_provider::AssistantMessageEvent;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc::UnboundedSender;
@@ -20,22 +20,9 @@ use super::feed::{
     FeedUpdate, Level, TriggerPollStatus, compact_tool_content_blocks, preview, truncate_chars,
 };
 
-/// Build the per-turn agent listener. Maps streaming deltas, tool calls, and turn boundaries
-/// into feed updates.
-pub fn agent_listener(tx: UnboundedSender<FeedUpdate>) -> LoopListener {
-    Arc::new(move |event, _cancel| {
-        let tx = tx.clone();
-        Box::pin(async move {
-            for update in map_agent_event(&event) {
-                let _ = tx.send(update);
-            }
-        })
-    })
-}
-
 /// Spawn a tokio task that receives [`LoopEvent`]s from the core broadcast channel
 /// (segment 3) and forwards them as [`FeedUpdate`]s to the UI channel. Replaces the
-/// old synchronous `agent_listener` + `agent.subscribe()` pattern.
+/// old synchronous `agent.subscribe()` pattern.
 pub fn spawn_agent_broadcast_listener(
     mut rx: broadcast::Receiver<LoopEvent>,
     tx: UnboundedSender<FeedUpdate>,
