@@ -39,17 +39,32 @@
 
 ## 6. sdk 运行时数据 → daemon + 命令拆分
 
-- [ ] 6.1 迁 `local/auth`、`local/stream_auth` → daemon;daemon 内 `theway::auth` 引用适配;auth 测试迁移
-- [ ] 6.2 迁 `local/session` 包装 + `common/session_archive` → daemon;`theway::session` / `session_archive` 引用适配;测试迁移
-- [ ] 6.3 迁 `local/history`、`local/images`、`local/mentions`、`local/bug_report` → daemon;引用与测试迁移
-- [ ] 6.4 迁 `config_readers` 与仅 daemon 使用的 config 解析 → daemon
-- [ ] 6.5 命令拆分:quit/clear/help → tui 本地注册;login/logout/sessions → daemon 运行时命令(Registry::with_daemon_commands 调整);TUI 补全表机制适配
-- [ ] 6.6 tui 移除对 `theway`(sdk)的依赖,改 `theway_transport`;daemon 移除对 `theway` 的依赖
+- [x] 6.1 迁 `local/auth`、`local/stream_auth` → daemon;daemon 内 `theway::auth` 引用适配;auth 测试迁移
+- [x] 6.2 迁 `local/session` 包装 + `common/session_archive` → daemon;`theway::session` / `session_archive` 引用适配;测试迁移
+- [x] 6.3 迁 `local/history`、`local/images`、`local/mentions`、`local/bug_report` → daemon;引用与测试迁移
+- [x] 6.4 迁 `config_readers` 与仅 daemon 使用的 config 解析 → daemon
+- [x] 6.5 命令拆分:quit/clear/help → tui 本地注册;login/logout/sessions → daemon 运行时命令(Registry::with_daemon_commands 调整);TUI 补全表机制适配
+- [x] 6.6 tui 移除对 `theway`(sdk)的依赖,改 `theway_transport`;daemon 移除对 `theway` 的依赖
 
 ## 7. sdk 删除与终态验证
 
-- [ ] 7.1 删除 `crates/theway-sdk`,workspace member 移除;全仓 `theway::` 引用清零(保留 `theway_transport::` / `theway_core::` / `theway_daemon::`)
-- [ ] 7.2 依赖收敛:core 移除仅迁出工具使用的依赖(逐项验证 reqwest/tree-sitter/theway-mcp 等);`Cargo.lock` 无新增包
-- [ ] 7.3 特性矩阵:`cargo build -p theway-daemon`、`--no-default-features --features sandbox`、`--all-features`
-- [ ] 7.4 `cargo test --workspace --no-fail-fast` 全绿;`cargo clippy --workspace --all-targets -- -D warnings`;`cargo fmt --all --check`
+- [x] 7.1 删除 `crates/theway-sdk`,workspace member 移除;全仓 `theway::` 引用清零(保留 `theway_transport::` / `theway_core::` / `theway_daemon::`)
+- [x] 7.2 依赖收敛:core 移除仅迁出工具使用的依赖(逐项验证 reqwest/tree-sitter/theway-mcp 等);`Cargo.lock` 无新增包
+- [x] 7.3 特性矩阵:`cargo build -p theway-daemon`、`--no-default-features --features sandbox`、`--all-features`
+- [x] 7.4 `cargo test --workspace --no-fail-fast` 全绿;`cargo clippy --workspace --all-targets -- -D warnings`;`cargo fmt --all --check`
 - [ ] 7.5 归档变更(openspec archive)与 issue #18 收口
+
+## 执行笔记 (deviations from design decision 4)
+
+- **session 包装 + session_archive → theway-storage**(设计表原写 daemon):CLI 离线子命令
+  (`theway session export/import/list/delete`) 不在 daemon 内运行,且协议不变是硬约束
+  (无 export/import wire 命令),客户端亦不得依赖 daemon — storage 是两个消费方的中性归宿。
+  daemon 的 `/session export|import` 命令与 TUI 的离线 CLI 均消费同一实现。
+- **auth / history / mentions / bug_report(redact)/ images(编码+fs 加载)→ theway-transport**
+  (设计表原写 daemon):这些模块同时被 TUI 客户端与 daemon 使用(/login 客户端交互写共享
+  auth.json、输入历史、@file 展开、显示前脱敏、剪贴板/--image 编码);客户端契约层是唯一
+  两边都可依赖的层。stream_auth / config_readers 按表入 daemon。
+- **TUI 内 `/session export|import` 本地面移除**,改为转发 daemon 命令(daemon 实现早已存在);
+  `/session switch` 仍走本地 SwitchSession RPC。
+- **quit/clear/help → TUI 本地注册;login/logout/sessions → daemon with_daemon_commands 显式注册**;
+  daemon 侧 /login 维持 LoginSecret 指引行为不变。
