@@ -383,10 +383,6 @@ impl ArchDir {
             _ => None,
         }
     }
-
-    pub fn is_horizontal(self) -> bool {
-        matches!(self, ArchDir::Left | ArchDir::Right)
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

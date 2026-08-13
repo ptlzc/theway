@@ -2,7 +2,9 @@
 //! level styling, and display-width-aware word wrapping used by `Feed::lines` and
 //! `Feed::plain_lines`.
 
-use chrono::{DateTime, Local, TimeZone, Utc};
+use chrono::Local;
+#[cfg(test)]
+use chrono::{DateTime, Utc};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -49,14 +51,7 @@ pub(crate) fn current_time_label() -> Option<String> {
     Some(Local::now().format("%Y-%m-%d %H:%M").to_string())
 }
 
-pub(crate) fn message_timestamp_label(timestamp_ms: i64) -> Option<String> {
-    if timestamp_ms <= 0 {
-        return None;
-    }
-    let dt = Utc.timestamp_millis_opt(timestamp_ms).single()?;
-    Some(format_timestamp_label(dt, Local::now()))
-}
-
+#[cfg(test)]
 pub(crate) fn format_timestamp_label(timestamp: DateTime<Utc>, _now: DateTime<Local>) -> String {
     let local = timestamp.with_timezone(&Local);
     local.format("%Y-%m-%d %H:%M").to_string()

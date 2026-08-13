@@ -4534,7 +4534,7 @@ fn parse_xy_chart_diagram(input: &str) -> Result<ParseOutput> {
             }
             continue;
         }
-        if let Some((series_kind, label, values)) = parse_xy_series_line_v2(line) {
+        if let Some((series_kind, label, values)) = parse_xy_series(line) {
             graph.xychart.series.push(crate::ir::XYSeries {
                 kind: series_kind,
                 label,
@@ -4546,9 +4546,7 @@ fn parse_xy_chart_diagram(input: &str) -> Result<ParseOutput> {
     Ok(ParseOutput { graph, init_config })
 }
 
-fn parse_xy_series_line_v2(
-    line: &str,
-) -> Option<(crate::ir::XYSeriesKind, Option<String>, Vec<f32>)> {
+fn parse_xy_series(line: &str) -> Option<(crate::ir::XYSeriesKind, Option<String>, Vec<f32>)> {
     let lower = line.to_ascii_lowercase();
     let (kind, rest) = if lower.starts_with("bar") {
         (
@@ -4621,24 +4619,6 @@ fn parse_xy_axis_categories(rest: &str) -> Vec<String> {
         })
         .filter(|value| !value.is_empty())
         .collect()
-}
-
-#[allow(dead_code)]
-fn parse_xy_series_line(line: &str) -> Option<(String, Vec<String>)> {
-    let mut parts = line.splitn(2, ' ');
-    let series = parts.next()?.trim().to_string();
-    let rest = parts.next()?.trim();
-    let values = rest
-        .trim_matches(|ch| ch == '[' || ch == ']')
-        .split(',')
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>();
-    if series.is_empty() {
-        None
-    } else {
-        Some((series, values))
-    }
 }
 
 fn parse_state_diagram(input: &str) -> Result<ParseOutput> {

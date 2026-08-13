@@ -27,8 +27,7 @@ pub use preview::{
 #[cfg(test)]
 use render::format_timestamp_label;
 use render::{
-    current_time_label, display_prefix, message_timestamp_label, push_plain_paragraphs,
-    should_separate, wrap_str,
+    current_time_label, display_prefix, push_plain_paragraphs, should_separate, wrap_str,
 };
 use render::{push_paragraphs, style_for_level};
 use types::{Block, Open};
@@ -102,10 +101,6 @@ impl Feed {
         self.push_user_with_timestamp(text, current_time_label());
     }
 
-    pub fn push_user_at(&mut self, text: impl Into<String>, timestamp_ms: i64) {
-        self.push_user_with_timestamp(text, message_timestamp_label(timestamp_ms));
-    }
-
     fn push_user_with_timestamp(&mut self, text: impl Into<String>, timestamp: Option<String>) {
         self.open = Open::None;
         self.blocks.push(Block::User {
@@ -119,10 +114,6 @@ impl Feed {
         self.push_assistant_with_timestamp(text, current_time_label());
     }
 
-    pub fn push_assistant_at(&mut self, text: impl Into<String>, timestamp_ms: i64) {
-        self.push_assistant_with_timestamp(text, message_timestamp_label(timestamp_ms));
-    }
-
     fn push_assistant_with_timestamp(
         &mut self,
         text: impl Into<String>,
@@ -133,10 +124,6 @@ impl Feed {
             text: text.into(),
             timestamp,
         });
-    }
-
-    pub fn push_thinking_at(&mut self, text: impl Into<String>, timestamp_ms: i64) {
-        self.push_thinking_with_timestamp(text, message_timestamp_label(timestamp_ms));
     }
 
     fn push_thinking_with_timestamp(&mut self, text: impl Into<String>, timestamp: Option<String>) {
@@ -173,15 +160,6 @@ impl Feed {
         self.push_tool_with_timestamp(name, args, current_time_label());
     }
 
-    pub fn push_tool_at(
-        &mut self,
-        name: impl Into<String>,
-        args: impl Into<String>,
-        timestamp_ms: i64,
-    ) {
-        self.push_tool_with_timestamp(name, args, message_timestamp_label(timestamp_ms));
-    }
-
     fn push_tool_with_timestamp(
         &mut self,
         name: impl Into<String>,
@@ -203,21 +181,6 @@ impl Feed {
         is_error: bool,
     ) {
         self.push_tool_result_with_timestamp(tool_call_id, lines, is_error, current_time_label());
-    }
-
-    pub fn push_tool_result_at(
-        &mut self,
-        tool_call_id: impl Into<String>,
-        lines: Vec<String>,
-        is_error: bool,
-        timestamp_ms: i64,
-    ) {
-        self.push_tool_result_with_timestamp(
-            tool_call_id,
-            lines,
-            is_error,
-            message_timestamp_label(timestamp_ms),
-        );
     }
 
     fn push_tool_result_with_timestamp(
