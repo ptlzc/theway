@@ -67,8 +67,18 @@ pub async fn load_all(cwd: &Path) -> LoadedSkills {
 }
 
 /// Sandbox-only stub (see the `local` impl above).
+///
+/// Sandbox builds must never degrade silently: skill discovery is unavailable
+/// without the `local` feature, so the composition root logs an explicit warn
+/// instead of looking like an empty-but-healthy skill directory. The
+/// once-per-startup semantics are guaranteed by the callers (the composition
+/// root loads skills once), not by this stub.
 #[cfg(not(feature = "local"))]
 pub async fn load_all(_cwd: &Path) -> LoadedSkills {
+    tracing::warn!(
+        "skill discovery unavailable in sandbox build — loading no skills (the sandbox feature \
+         has no local filesystem access)"
+    );
     LoadedSkills {
         skills: Vec::new(),
         diagnostics: Vec::new(),

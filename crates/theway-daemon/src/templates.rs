@@ -63,8 +63,18 @@ pub async fn load_all(cwd: &Path) -> LoadedTemplates {
 }
 
 /// Sandbox-only stub (see the `local` impl above).
+///
+/// Sandbox builds must never degrade silently: template discovery is
+/// unavailable without the `local` feature, so the composition root logs an
+/// explicit warn instead of looking like an empty-but-healthy template set.
+/// The once-per-startup semantics are guaranteed by the callers (the
+/// composition root loads templates once), not by this stub.
 #[cfg(not(feature = "local"))]
 pub async fn load_all(_cwd: &Path) -> LoadedTemplates {
+    tracing::warn!(
+        "template discovery unavailable in sandbox build — loading no templates (the sandbox \
+         feature has no local filesystem access)"
+    );
     LoadedTemplates {
         templates: Vec::new(),
         diagnostics: Vec::new(),
