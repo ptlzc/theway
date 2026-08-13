@@ -194,11 +194,12 @@ async fn main() -> Result<()> {
     let dag_engine = Arc::new(DagEngine::new());
     let subagent_registry = theway_core::multiagent::registry::AgentJobRegistry::new();
     subagent_registry.set_messages_dir(Some(cwd.join(".pi").join("subagent-jobs")));
-    // Execution-environment seam (sdk-split-local-sandbox node 8): local tool bodies
-    // dispatch through a `ToolExecutor`; the daemon is assembled with the reference
-    // local executor (local filesystem + process table, rooted at the process cwd).
+    // Execution-environment seam (daemon-kernel-layers): local tool bodies
+    // dispatch through a `ToolExecutor`; the composition root picks the executor
+    // by feature — the local filesystem/process executor for `local` builds, the
+    // sandbox stub for `sandbox`-only builds.
     let executor: Arc<dyn theway_core::executor::ToolExecutor> =
-        Arc::new(theway::local::executor::LocalExecutor::default());
+        theway_daemon::executor::default_executor();
     dag_engine.set_launcher(Some(theway_daemon::tools::node_launcher(
         dag_engine.clone(),
         model.clone(),

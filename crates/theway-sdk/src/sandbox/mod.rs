@@ -1,5 +1,5 @@
-//! Sandboxed-execution surface of the SDK. Currently a stub: the sandbox
-//! executor returns unsupported errors (no e2b / remote sandbox in this
-//! change) but provides the real seam the daemon's tool assembly switches on.
-
-pub mod executor;
+//! Sandboxed-execution surface of the SDK (dissolving — daemon-kernel-layers).
+//!
+//! The `SandboxExecutor` stub moved to `theway-daemon/src/executor/sandbox.rs`
+//! (the daemon is the single kernel; executor impls live there behind the
+//! `sandbox` feature). This module is empty pending the SDK's full removal.

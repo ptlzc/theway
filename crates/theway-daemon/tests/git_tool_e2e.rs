@@ -36,10 +36,10 @@ fn init_repo(dir: &std::path::Path) {
     std::fs::write(dir.join("b.txt"), "draft\n").unwrap();
 }
 
-/// Build the git tool wired to a std-backed local executor (node 8 executor injection).
+/// Build the git tool wired to a std-backed local executor.
 fn git_tool() -> git::GitTool {
     git::GitTool::new(std::sync::Arc::new(
-        theway::local::executor::LocalExecutor::new(),
+        theway_daemon::executor::local::LocalExecutor::new(),
     ))
 }
 

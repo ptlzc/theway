@@ -42,9 +42,9 @@ use triggers::tool_assembly as tools_asm;
 static DYNAMIC_TRIGGER_LOCK: Mutex<()> = Mutex::new(());
 static CRON_LOCK: Mutex<()> = Mutex::new(());
 
-/// Std-backed local executor for tool tests (sdk-split-local-sandbox node 8 injection).
+/// Std-backed local executor for tool tests.
 fn local_exec() -> Arc<dyn theway_core::executor::ToolExecutor> {
-    Arc::new(theway::local::executor::LocalExecutor::new())
+    Arc::new(theway_daemon::executor::local::LocalExecutor::new())
 }
 
 #[tokio::test]

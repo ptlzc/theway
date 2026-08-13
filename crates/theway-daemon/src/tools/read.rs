@@ -148,7 +148,7 @@ mod tests {
     use tempfile::tempdir;
 
     fn local_executor() -> Arc<dyn ToolExecutor> {
-        Arc::new(theway::local::executor::LocalExecutor::new())
+        Arc::new(crate::executor::local::LocalExecutor::new())
     }
 
     async fn read_text(tool: &ReadTool, params: Value) -> String {

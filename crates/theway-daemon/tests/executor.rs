@@ -1,14 +1,18 @@
-//! Integration tests for the SDK executors — `LocalExecutor` (real filesystem +
-//! process table) and the `SandboxExecutor` stub — against the
-//! `theway_core::executor::ToolExecutor` trait (openspec change
-//! `sdk-split-local-sandbox`, node 4-local-executor).
+//! Integration tests for the daemon kernel executors — `LocalExecutor` (real
+//! filesystem + process table, `local` feature) and the `SandboxExecutor` stub
+//! (`sandbox` feature) — against the `theway_core::executor::ToolExecutor` trait
+//! (daemon-kernel-layers, executor impls moved sdk → daemon).
 
 use std::time::{Duration, Instant};
 
 use tempfile::tempdir;
-use theway::local::executor::LocalExecutor;
-use theway::sandbox::executor::SandboxExecutor;
-use theway_core::executor::{ExecutorError, ExecutorKind, ToolExecutor};
+#[cfg(feature = "local")]
+use theway_daemon::executor::local::LocalExecutor;
+#[cfg(feature = "sandbox")]
+use theway_daemon::executor::sandbox::SandboxExecutor;
+use theway_core::executor::{ExecutorError, ToolExecutor};
+#[cfg(feature = "sandbox")]
+use theway_core::executor::ExecutorKind;
 
 fn argv(parts: &[&str]) -> Vec<String> {
     parts.iter().map(|s| (*s).to_string()).collect()
@@ -228,6 +232,7 @@ async fn git_runs_in_repo_context() {
 }
 
 /// kind() reports Local / Sandbox respectively.
+#[cfg(all(feature = "local", feature = "sandbox"))]
 #[tokio::test]
 async fn kind_reports_local_and_sandbox() {
     assert_eq!(LocalExecutor::new().kind().await, ExecutorKind::Local);
@@ -236,6 +241,7 @@ async fn kind_reports_local_and_sandbox() {
 
 /// Every sandbox operation fails promptly with `UnsupportedKind(Sandbox)` — never
 /// hangs (each call is additionally guarded by a hard deadline).
+#[cfg(feature = "sandbox")]
 #[tokio::test]
 async fn sandbox_all_operations_fail_fast_with_unsupported() {
     let ex = SandboxExecutor::new();

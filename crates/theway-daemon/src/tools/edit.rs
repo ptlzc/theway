@@ -7,7 +7,7 @@
 //! with per-occurrence line numbers + context (mirrors enhanced-tools `edit.ts`).
 //!
 //! Concurrency (issue #17): the read→modify→write cycle holds a cross-process
-//! [`FileLock`](theway::local::file_lock::FileLock) keyed on the target path, so
+//! [`FileLock`](crate::executor::file_lock::FileLock) keyed on the target path, so
 //! parallel agents (subagents) editing the same file serialize instead of silently
 //! losing each other's edits. The lock is taken only when the file already exists —
 //! an edit on a missing file fails at the read anyway, and locking must not create
@@ -98,7 +98,7 @@ impl AgentTool for EditTool {
         // the read AND the write.
         let _lock = if std::fs::metadata(Path::new(path)).is_ok() {
             Some(
-                theway::local::file_lock::FileLock::acquire(Path::new(path))
+                crate::executor::file_lock::FileLock::acquire(Path::new(path))
                     .await
                     .map_err(|e| AgentToolError::from(format!("lock {path} for editing: {e}")))?,
             )
@@ -319,7 +319,7 @@ mod tests {
     use tempfile::tempdir;
 
     fn local_exec() -> Arc<dyn ToolExecutor> {
-        Arc::new(theway::local::executor::LocalExecutor::new())
+        Arc::new(crate::executor::local::LocalExecutor::new())
     }
 
     #[tokio::test]

@@ -4,16 +4,16 @@
 
 ## 1. daemon feature 骨架
 
-- [ ] 1.1 `theway-daemon/Cargo.toml` 增加 `local`(default)/ `sandbox` feature;`local` 暂为 no-op
-- [ ] 1.2 验证 `cargo build -p theway-daemon`、`cargo build -p theway-daemon --no-default-features --features sandbox` 均通过
+- [x] 1.1 `theway-daemon/Cargo.toml` 增加 `local`(default)/ `sandbox` feature;`local` 暂为 no-op
+- [x] 1.2 验证 `cargo build -p theway-daemon`、`cargo build -p theway-daemon --no-default-features --features sandbox` 均通过
 
 ## 2. executor 实现 sdk → daemon
 
-- [ ] 2.1 迁 `crates/theway-sdk/src/local/executor.rs`(LocalExecutor + atomic_write)→ `crates/theway-daemon/src/executor/local.rs`;daemon 引用适配
-- [ ] 2.2 迁 `crates/theway-sdk/src/sandbox/executor.rs`(SandboxExecutor)→ `crates/theway-daemon/src/executor/sandbox.rs`;挂 `sandbox` feature
-- [ ] 2.3 迁 `crates/theway-sdk/src/local/file_lock.rs` → `crates/theway-daemon/src/executor/file_lock.rs`;EditTool 引用适配
-- [ ] 2.4 迁 `crates/theway-sdk/tests/executor.rs` → `crates/theway-daemon/tests/executor.rs`(路径/包名适配)
-- [ ] 2.5 sdk 删除 executor/file_lock 模块声明;验证 sdk 生产代码零残留引用
+- [x] 2.1 迁 `crates/theway-sdk/src/local/executor.rs`(LocalExecutor + atomic_write)→ `crates/theway-daemon/src/executor/local.rs`;daemon 引用适配
+- [x] 2.2 迁 `crates/theway-sdk/src/sandbox/executor.rs`(SandboxExecutor)→ `crates/theway-daemon/src/executor/sandbox.rs`;挂 `sandbox` feature
+- [x] 2.3 迁 `crates/theway-sdk/src/local/file_lock.rs` → `crates/theway-daemon/src/executor/file_lock.rs`;EditTool 引用适配
+- [x] 2.4 迁 `crates/theway-sdk/tests/executor.rs` → `crates/theway-daemon/tests/executor.rs`(路径/包名适配)
+- [x] 2.5 sdk 删除 executor/file_lock 模块声明;验证 sdk 生产代码零残留引用
 
 ## 3. core 工具族 → daemon
 

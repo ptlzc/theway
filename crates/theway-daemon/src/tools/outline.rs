@@ -458,7 +458,7 @@ mod tests {
     }
 
     fn local_exec() -> Arc<dyn ToolExecutor> {
-        Arc::new(theway::local::executor::LocalExecutor::new())
+        Arc::new(crate::executor::local::LocalExecutor::new())
     }
 
     /// Test helper mirroring `execute`'s runtime path: read through the local executor,
