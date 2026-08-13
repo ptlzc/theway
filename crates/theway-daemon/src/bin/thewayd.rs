@@ -389,7 +389,14 @@ async fn main() -> Result<()> {
         let state = harness.agent().state();
         (state.model.clone(), state.thinking_level)
     };
-    let hooks = hooks::load(&cwd, session_id.clone(), hook_model.as_ref(), hook_thinking).await;
+    let hooks = hooks::load(
+        &cwd,
+        session_id.clone(),
+        hook_model.as_ref(),
+        hook_thinking,
+        theway_daemon::hook_executors::daemon_executors(),
+    )
+    .await;
 
     {
         let tx = feed_tx.clone();

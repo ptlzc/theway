@@ -1,12 +1,14 @@
 //! Process execution primitives — spawn `sh -c` with setsid + killpg teardown.
 //!
 //! Single implementation of the timeout/cancel → kill-the-whole-tree semantics shared
-//! by the server `bash` tool and the core async exec tool group (`exec_shell`):
-//! the child runs in its own process group (`setsid` on Unix), so killing the group
-//! reaches background jobs and detached descendants (`(sleep 60) & wait`, runaway
-//! `find /`, ...). A command without an explicit timeout still has the caller's
-//! default applied — never unbounded.
+//! by the server `bash` tool, the core async exec tool group (`exec_shell`) and the
+//! hook command executor (`crate::hook_executors`): the child runs in its own process
+//! group (`setsid` on Unix), so killing the group reaches background jobs and
+//! detached descendants (`(sleep 60) & wait`, runaway `find /`, ...). A command
+//! without an explicit timeout still has the caller's default applied — never unbounded.
 
+use std::collections::BTreeMap;
+use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -29,6 +31,18 @@ pub struct RunOutcome {
     pub exit_code: Option<i32>,
     /// Optional marker the renderer appends to `stderr` (e.g. `"[aborted]"`).
     pub stderr_suffix: Option<String>,
+    /// Why the child was killed, when it was killed (timeout / cancel). `None` when the
+    /// child finished on its own. Callers that need to distinguish the kill path (the
+    /// hook executor maps this to its own error contract) read this instead of
+    /// matching on `stderr_suffix` text.
+    pub kill_reason: Option<KillReason>,
+}
+
+/// The kill path taken when the child did not finish on its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KillReason {
+    TimedOut { secs: u64 },
+    Cancelled,
 }
 
 impl RunOutcome {
@@ -45,17 +59,22 @@ impl RunOutcome {
 /// command produced.
 pub async fn run_with_kill_on_timeout_or_cancel(
     command: &str,
-    timeout_secs: Option<u64>,
-    cwd: Option<&str>,
+    timeout: Option<Duration>,
+    cwd: Option<&Path>,
+    envs: Option<&BTreeMap<String, String>>,
     cancel: &CancellationToken,
 ) -> Result<RunOutcome, AgentToolError> {
     let mut cmd = tokio::process::Command::new("sh");
     cmd.arg("-c")
         .arg(command)
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if let Some(dir) = cwd {
         cmd.current_dir(dir);
+    }
+    if let Some(envs) = envs {
+        cmd.envs(envs);
     }
     cmd
         // Defense in depth: any early-return path between here and the explicit kill
@@ -121,7 +140,7 @@ pub async fn run_with_kill_on_timeout_or_cancel(
     // The `wait` future borrows `&mut child`, so we keep it inside an inner block so the
     // borrow is released before we call `child.start_kill()` / `child.wait()` again
     // outside.
-    let kill_reason: KillReason;
+    let select_outcome: SelectOutcome;
     let exit_code: Option<i32>;
     {
         let wait = child.wait();
@@ -129,28 +148,28 @@ pub async fn run_with_kill_on_timeout_or_cancel(
         // `None` timeout maps to a far-future sleep gated by `if has_timeout` — that arm
         // never resolves in that case, so the select reduces to cancel-vs-wait.
         let timeout_future =
-            tokio::time::sleep(Duration::from_secs(timeout_secs.unwrap_or(u64::MAX / 2)));
+            tokio::time::sleep(timeout.unwrap_or(Duration::from_secs(u64::MAX / 2)));
         tokio::pin!(timeout_future);
-        let has_timeout = timeout_secs.is_some();
+        let has_timeout = timeout.is_some();
 
         let (kr, code) = tokio::select! {
             biased;
 
             // Cancellation wins over both timeout and natural finish so the user's
             // Ctrl-C is honoured promptly.
-            _ = cancel.cancelled() => (KillReason::Cancelled, None),
+            _ = cancel.cancelled() => (SelectOutcome::Cancelled, None),
 
             _ = &mut timeout_future, if has_timeout => (
-                KillReason::TimedOut { secs: timeout_secs.unwrap() },
+                SelectOutcome::TimedOut { secs: timeout.expect("guarded by has_timeout").as_secs() },
                 None,
             ),
 
             status = &mut wait => {
                 let c = status.ok().and_then(|s| s.code());
-                (KillReason::Finished, c)
+                (SelectOutcome::Finished, c)
             }
         };
-        kill_reason = kr;
+        select_outcome = kr;
         exit_code = code;
     }
 
@@ -161,22 +180,22 @@ pub async fn run_with_kill_on_timeout_or_cancel(
     // non-Unix targets we fall back to `start_kill` (which only kills the direct child;
     // proper Windows job-object support is a separate port story). `kill_on_drop` and
     // the post-reap `wait` are the final fallbacks.
-    if !matches!(kill_reason, KillReason::Finished) {
+    if !matches!(select_outcome, SelectOutcome::Finished) {
         terminate_child_tree(&mut child, child_pid).await;
     }
 
     // The drain task should be done — pipes close when the child exits. Cap with a short
     // timeout in case the kernel hasn't surfaced the EOF yet on a wedged child.
-    let drain_result = timeout(Duration::from_secs(2), drain_handle).await;
+    let drain_result = tokio::time::timeout(Duration::from_secs(2), drain_handle).await;
     let (stdout, stderr) = match drain_result {
         Ok(Ok((o, e))) => (o, e),
         _ => (String::new(), String::new()),
     };
 
-    let stderr_suffix = match kill_reason {
-        KillReason::Finished => None,
-        KillReason::Cancelled => Some("[aborted]".into()),
-        KillReason::TimedOut { secs } => Some(format!("[timed out after {secs}s]")),
+    let stderr_suffix = match select_outcome {
+        SelectOutcome::Finished => None,
+        SelectOutcome::Cancelled => Some("[aborted]".into()),
+        SelectOutcome::TimedOut { secs } => Some(format!("[timed out after {secs}s]")),
     };
 
     Ok(RunOutcome {
@@ -184,10 +203,17 @@ pub async fn run_with_kill_on_timeout_or_cancel(
         stderr,
         exit_code,
         stderr_suffix,
+        kill_reason: match select_outcome {
+            SelectOutcome::Finished => None,
+            SelectOutcome::Cancelled => Some(KillReason::Cancelled),
+            SelectOutcome::TimedOut { secs } => Some(KillReason::TimedOut { secs }),
+        },
     })
 }
 
-enum KillReason {
+/// Internal select result: finished on its own vs. killed by timeout / cancel.
+#[derive(Clone, Copy)]
+enum SelectOutcome {
     Finished,
     TimedOut { secs: u64 },
     Cancelled,

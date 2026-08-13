@@ -23,7 +23,7 @@ harness = []
 [dependencies]
 theway-llm-provider = { path = "../theway-llm-provider" }
 
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "fs", "io-util", "process"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "fs", "io-util"] }
 tokio-util = { version = "0.7", features = ["io"] }
 futures = "0.3"
 async-trait = "0.1"
@@ -41,12 +41,11 @@ regex = "1"
 # Vendored mermaid parse stage (mmdr 0.3.1) — see crates/mermaid-parser.
 mermaid-rs-parser = { path = "../mermaid-parser" }
 
-# hooks (user-configured CLI hooks: TOML rules + shell/webhook side effects) and
-# goal (session goal stop-hook) live in the engine; reqwest powers hook webhooks,
-# toml parses hook rules, anyhow is the hook runner's error type, directories
-# resolves hook cwd paths (daemon-kernel-layers: tool bodies moved out; the
-# remaining deps all serve the agent runtime itself).
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "stream"] }
+# hooks (user-configured CLI hooks) and goal (session goal stop-hook) live in the
+# engine. Hook side effects (process spawn / kill, webhook HTTP) are injected seams
+# — the implementations live in theway-daemon, so core no longer needs reqwest or
+# libc here. The remaining deps serve the agent runtime itself: toml parses hook
+# rules, anyhow is the hook runner's error type, directories resolves hook cwd paths.
 once_cell = "1"
 tracing = "0.1"
 directories = "5"
@@ -57,8 +56,6 @@ anyhow = "1"
 # / authentication primitive. SHA-256 is overkill cryptographically for this purpose
 # but avoids the "two hashers disagree" footgun of non-deterministic stdlib hashers.
 sha2 = "0.10"
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
 
 [dev-dependencies]
 tests-bridge-macro = { path = "../tests-bridge-macro" }

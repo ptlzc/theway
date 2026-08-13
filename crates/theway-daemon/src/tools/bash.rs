@@ -20,6 +20,7 @@
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use std::time::Duration;
 use theway_core::{AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate};
 use theway_llm_provider::{Tool, UserContentBlock};
 use tokio_util::sync::CancellationToken;
@@ -87,9 +88,14 @@ impl AgentTool for BashTool {
             });
         }
 
-        let outcome =
-            run_with_kill_on_timeout_or_cancel(command, timeout_secs, cwd.as_deref(), &cancel)
-                .await?;
+        let outcome = run_with_kill_on_timeout_or_cancel(
+            command,
+            timeout_secs.map(Duration::from_secs),
+            cwd.as_deref().map(std::path::Path::new),
+            None,
+            &cancel,
+        )
+        .await?;
 
         let exit = outcome.rendered_exit();
         let (stdout_trim, st) =

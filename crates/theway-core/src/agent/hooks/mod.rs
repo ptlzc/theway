@@ -9,13 +9,25 @@
 //! mapping; [`utils`] holds the execution and summary helpers shared by that mapping and
 //! the runner. This module keeps rule loading (`load`/`read_file`/`push_rules`) and the
 //! [`HookRunner`] execution logic.
+//!
+//! # Side-effect seams (core is interface-only)
+//!
+//! Core holds the *mechanism* (rule parsing, event orchestration, payload assembly,
+//! diagnostics) but no OS-side-effect implementation: command execution and webhook
+//! delivery are injected at construction as [`HookCommandExecutor`] / [`HookWebhookSender`]
+//! closures ([`HookExecutors`]). The implementations live in theway-daemon, where the
+//! command executor reuses the single process-group-kill primitive shared by the bash
+//! tool, the exec_shell family and native env. Without injected executors, side-effect
+//! rules are skipped and reported in the load diagnostics — core on its own degrades
+//! hooks to pure diagnostics.
 
 pub mod event;
 pub mod utils;
 
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -23,11 +35,10 @@ use serde::{Deserialize, Serialize};
 #[cfg(test)] // Only used by the bridged unit tests (`tests/agent/hooks`) via `use super::*`.
 use theway_core::AgentMessage;
 use theway_core::{LoopEvent, LoopListener, SessionEvent, SessionListener, ThinkingLevel};
-use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
-use event::{EventData, HookEvent, HookOutcome};
-use utils::{env_for, shell_arg, shell_program, write_payload_file};
+use event::{EventData, HookEvent};
+use utils::{env_for, write_payload_file};
 
 const DEFAULT_TIMEOUT_MS: u64 = 5_000;
 
@@ -48,7 +59,77 @@ pub struct LoadedHooks {
     pub diagnostics: Vec<String>,
 }
 
-#[derive(Debug)]
+/// Command-execution seam for hook rules. Core defines only this injection point —
+/// the implementation (spawn `sh -c` with the given env, whole-process-tree kill on
+/// timeout/cancel) lives in theway-daemon, which routes it through the single
+/// `setsid`/`killpg` primitive shared by the bash tool, the exec_shell family and
+/// native env. Returns captured stdout/stderr on success.
+pub type HookCommandExecutor = Arc<
+    dyn Fn(
+            String,                   // command
+            PathBuf,                  // resolved cwd
+            BTreeMap<String, String>, // env for the child
+            Duration,                 // timeout
+            CancellationToken,        // cancel
+        ) -> Pin<Box<dyn Future<Output = anyhow::Result<HookCommandOutput>> + Send>>
+        + Send
+        + Sync,
+>;
+
+/// Captured output of a successful hook command run, returned to core for debug
+/// logging (mirrors the previous inline implementation's `tracing::debug!` of
+/// stdout/stderr on success).
+#[derive(Debug, Default)]
+pub struct HookCommandOutput {
+    pub stdout: String,
+    pub stderr: String,
+}
+
+/// Webhook-send seam for hook rules. Core assembles the payload and headers; the
+/// HTTP delivery implementation (POST + timeout + cancel race + status check) lives
+/// in theway-daemon.
+pub type HookWebhookSender = Arc<
+    dyn Fn(
+            String,                   // url
+            String,                   // payload JSON body
+            BTreeMap<String, String>, // extra headers
+            Duration,                 // timeout
+            CancellationToken,        // cancel
+        ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>
+        + Send
+        + Sync,
+>;
+
+/// Side-effect executors injected when constructing [`HookRunner`] (via [`load`]).
+/// `None` = not injected: rules of that kind are skipped at runtime and a diagnostic
+/// is recorded at load time — core on its own performs no OS side effects.
+#[derive(Default, Clone)]
+pub struct HookExecutors {
+    pub command: Option<HookCommandExecutor>,
+    pub webhook: Option<HookWebhookSender>,
+}
+
+impl std::fmt::Debug for HookRunner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HookRunner")
+            .field("rules", &self.rules)
+            .field("session_id", &self.session_id)
+            .field("cwd", &self.cwd)
+            .field("model_provider", &self.model_provider)
+            .field("model_id", &self.model_id)
+            .field("thinking_level", &self.thinking_level)
+            .field(
+                "command_executor",
+                &self.command_executor.as_ref().map(|_| "<closure>"),
+            )
+            .field(
+                "webhook_sender",
+                &self.webhook_sender.as_ref().map(|_| "<closure>"),
+            )
+            .finish()
+    }
+}
+
 pub struct HookRunner {
     rules: Vec<HookRule>,
     session_id: String,
@@ -56,7 +137,8 @@ pub struct HookRunner {
     model_provider: String,
     model_id: String,
     thinking_level: String,
-    client: reqwest::Client,
+    command_executor: Option<HookCommandExecutor>,
+    webhook_sender: Option<HookWebhookSender>,
 }
 
 #[derive(Clone, Debug)]
@@ -144,6 +226,7 @@ pub async fn load(
     session_id: impl Into<String>,
     model: Option<&theway_llm_provider::Model>,
     thinking_level: Option<ThinkingLevel>,
+    executors: HookExecutors,
 ) -> LoadedHooks {
     let session_id = session_id.into();
     let (model_provider, model_id) = model
@@ -185,10 +268,20 @@ pub async fn load(
         }
     }
 
-    let client = reqwest::Client::builder()
-        .user_agent(format!("theway/{}", env!("CARGO_PKG_VERSION")))
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
+    if executors.command.is_none() && rules.iter().any(|r| r.command.is_some()) {
+        diagnostics.push(
+            "hooks: command rules loaded but no command executor was injected — command side \
+             effects will be skipped (no side-effect executors injected)"
+                .into(),
+        );
+    }
+    if executors.webhook.is_none() && rules.iter().any(|r| r.webhook.is_some()) {
+        diagnostics.push(
+            "hooks: webhook rules loaded but no webhook sender was injected — webhook side \
+             effects will be skipped (no side-effect executors injected)"
+                .into(),
+        );
+    }
 
     LoadedHooks {
         runner: Arc::new(HookRunner {
@@ -198,7 +291,8 @@ pub async fn load(
             model_provider,
             model_id,
             thinking_level,
-            client,
+            command_executor: executors.command,
+            webhook_sender: executors.webhook,
         }),
         diagnostics,
     }
@@ -369,169 +463,58 @@ impl HookRunner {
         cancel: CancellationToken,
     ) -> anyhow::Result<()> {
         let payload_json = serde_json::to_string(payload)?;
-        let payload_path = write_payload_file(&payload_json).await?;
 
-        let result = async {
-            if let Some(command) = &rule.command {
-                self.run_command(rule, command, payload, &payload_path, cancel.clone())
-                    .await?;
-            }
-            if let Some(url) = &rule.webhook {
-                self.run_webhook(rule, url, &payload_json, cancel.clone())
-                    .await?;
-            }
-            anyhow::Ok(())
-        }
-        .await;
-
-        let _ = tokio::fs::remove_file(&payload_path).await;
-        result
-    }
-
-    async fn run_command(
-        &self,
-        rule: &HookRule,
-        command: &str,
-        payload: &HookPayload,
-        payload_path: &Path,
-        cancel: CancellationToken,
-    ) -> anyhow::Result<()> {
-        // Previously: `cmd.output()` raced against `tokio::time::timeout` + cancel via
-        // `select!`. Either non-completion branch left `sh -c` running in the background
-        // (along with anything it spawned), so a hook that ran `(slow_thing) & wait` would
-        // leak descendants past its declared `timeout_ms`. Mirrors the bash-tool fix in
-        // PR #41 and the `NativeEnv::exec` fix in PR #40: spawn explicitly, put the child
-        // in its own process group on Unix via `setsid`, and `killpg(pgid, SIGKILL)` the
-        // whole tree on timeout / cancel. `kill_on_drop(true)` is the cross-platform
-        // backstop.
-        let timeout = Duration::from_millis(rule.timeout_ms);
-        let mut cmd = Command::new(shell_program());
-        cmd.arg(shell_arg())
-            .arg(command)
-            .current_dir(self.cwd_for(rule))
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .envs(env_for(payload, payload_path))
-            .kill_on_drop(true);
-
-        #[cfg(unix)]
-        {
-            // SAFETY: `setsid` is async-signal-safe per POSIX and has no Rust state to
-            // invalidate. The child becomes session and process-group leader; SIGKILL to
-            // `-pgid` then targets the whole tree we just spawned. `tokio::process::Command`
-            // exposes `pre_exec` as an inherent method so no trait import is needed.
-            unsafe {
-                cmd.pre_exec(|| {
-                    if libc::setsid() == -1 {
-                        return Err(std::io::Error::last_os_error());
+        if let Some(command) = &rule.command {
+            if let Some(executor) = &self.command_executor {
+                let payload_path = write_payload_file(&payload_json).await?;
+                let run = executor(
+                    command.clone(),
+                    self.cwd_for(rule),
+                    env_for(payload, &payload_path),
+                    Duration::from_millis(rule.timeout_ms),
+                    cancel.clone(),
+                )
+                .await;
+                let _ = tokio::fs::remove_file(&payload_path).await;
+                match run {
+                    Ok(out) => {
+                        if !out.stdout.is_empty() {
+                            tracing::debug!("hook command stdout: {}", out.stdout.trim());
+                        }
+                        if !out.stderr.is_empty() {
+                            tracing::debug!("hook command stderr: {}", out.stderr.trim());
+                        }
                     }
-                    Ok(())
-                });
-            }
-        }
-
-        let child = cmd.spawn().map_err(|e| anyhow::anyhow!("spawn: {e}"))?;
-        let child_pid = child.id();
-
-        // Race the wait against the rule's timeout and the cancel token. `biased` puts
-        // cancel first so a user Ctrl-C wins same-tick ties over the timeout.
-        let outcome: HookOutcome = {
-            let wait = child.wait_with_output();
-            tokio::pin!(wait);
-            tokio::select! {
-                biased;
-                _ = cancel.cancelled() => HookOutcome::Cancelled,
-                res = tokio::time::timeout(timeout, &mut wait) => match res {
-                    Ok(out) => HookOutcome::Completed(out),
-                    Err(_) => HookOutcome::TimedOut,
-                },
-            }
-        };
-
-        match outcome {
-            HookOutcome::Completed(Ok(output)) => {
-                if !output.status.success() {
-                    anyhow::bail!(
-                        "command exited {}: {}",
-                        output.status.code().unwrap_or(-1),
-                        String::from_utf8_lossy(&output.stderr).trim()
-                    );
+                    Err(e) => return Err(e),
                 }
-                if !output.stdout.is_empty() {
-                    tracing::debug!(
-                        "hook command stdout: {}",
-                        String::from_utf8_lossy(&output.stdout).trim()
-                    );
-                }
-                if !output.stderr.is_empty() {
-                    tracing::debug!(
-                        "hook command stderr: {}",
-                        String::from_utf8_lossy(&output.stderr).trim()
-                    );
-                }
-                Ok(())
-            }
-            HookOutcome::Completed(Err(e)) => Err(anyhow::anyhow!(e)),
-            HookOutcome::TimedOut => {
-                terminate_hook_tree(child_pid).await;
-                anyhow::bail!("timed out after {}ms", rule.timeout_ms);
-            }
-            HookOutcome::Cancelled => {
-                terminate_hook_tree(child_pid).await;
-                anyhow::bail!("cancelled");
+            } else {
+                tracing::debug!(
+                    "hook {} {}: command side effect skipped (no command executor injected)",
+                    rule.source,
+                    rule.event.as_str()
+                );
             }
         }
-    }
-}
 
-/// Best-effort SIGKILL of the hook child's whole process group on Unix. On non-Unix targets
-/// this is a no-op (the `kill_on_drop(true)` set on the `Command` is the only kill path
-/// when the wait future is dropped). The pid was snapshotted with `child.id()` before the
-/// wait future consumed the handle.
-async fn terminate_hook_tree(pid: Option<u32>) {
-    #[cfg(unix)]
-    if let Some(pid) = pid {
-        // SAFETY: SIGKILL on a pid we just observed via `child.id()`. `killpg` returning
-        // `ESRCH` (group already gone) is benign and we don't act on the return.
-        unsafe {
-            libc::killpg(pid as libc::pid_t, libc::SIGKILL);
-        }
-    }
-    let _ = pid;
-}
-
-impl HookRunner {
-    async fn run_webhook(
-        &self,
-        rule: &HookRule,
-        url: &str,
-        payload_json: &str,
-        cancel: CancellationToken,
-    ) -> anyhow::Result<()> {
-        let mut req = self
-            .client
-            .post(url)
-            .timeout(Duration::from_millis(rule.timeout_ms))
-            .header("Content-Type", "application/json")
-            .body(payload_json.to_string());
-        for (k, v) in &rule.headers {
-            req = req.header(k, v);
-        }
-        let resp = tokio::select! {
-            r = req.send() => r?,
-            _ = cancel.cancelled() => {
-                anyhow::bail!("cancelled");
+        if let Some(url) = &rule.webhook {
+            if let Some(sender) = &self.webhook_sender {
+                sender(
+                    url.clone(),
+                    payload_json.clone(),
+                    rule.headers.clone(),
+                    Duration::from_millis(rule.timeout_ms),
+                    cancel.clone(),
+                )
+                .await?;
+            } else {
+                tracing::debug!(
+                    "hook {} {}: webhook side effect skipped (no webhook sender injected)",
+                    rule.source,
+                    rule.event.as_str()
+                );
             }
-        };
-        let status = resp.status();
-        if !status.is_success() {
-            let text = resp.text().await.unwrap_or_default();
-            anyhow::bail!(
-                "webhook status {status}: {}",
-                text.chars().take(500).collect::<String>()
-            );
         }
+
         Ok(())
     }
 

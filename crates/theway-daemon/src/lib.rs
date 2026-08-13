@@ -29,6 +29,7 @@ pub mod dag_persist;
 pub mod env;
 pub mod executor;
 pub mod export;
+pub mod hook_executors;
 pub mod local_models;
 pub mod logging;
 pub mod lsp;

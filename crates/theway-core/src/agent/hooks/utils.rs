@@ -159,23 +159,3 @@ pub(super) fn truncate(s: &str) -> String {
     out.push('…');
     out
 }
-
-#[cfg(unix)]
-pub(super) fn shell_program() -> &'static str {
-    "sh"
-}
-
-#[cfg(unix)]
-pub(super) fn shell_arg() -> &'static str {
-    "-c"
-}
-
-#[cfg(windows)]
-pub(super) fn shell_program() -> &'static str {
-    "cmd"
-}
-
-#[cfg(windows)]
-pub(super) fn shell_arg() -> &'static str {
-    "/C"
-}

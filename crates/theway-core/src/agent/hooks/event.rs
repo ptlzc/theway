@@ -191,12 +191,3 @@ impl EventData {
         }
     }
 }
-
-/// Outcome of one `run_command` race. Lifted out of `tokio::select!` so the match in
-/// `HookRunner::run_command` can spell the kill-tree path explicitly per branch rather
-/// than mixing it into the select arms.
-pub(super) enum HookOutcome {
-    Completed(std::io::Result<std::process::Output>),
-    TimedOut,
-    Cancelled,
-}

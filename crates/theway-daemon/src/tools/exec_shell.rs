@@ -568,9 +568,14 @@ impl AgentTool for ExecTool {
                 .and_then(|v| v.as_u64())
                 .unwrap_or(DEFAULT_FG_TIMEOUT_SECS),
         );
-        let outcome =
-            super::exec::run_with_kill_on_timeout_or_cancel(command, timeout_secs, None, &cancel)
-                .await?;
+        let outcome = super::exec::run_with_kill_on_timeout_or_cancel(
+            command,
+            timeout_secs.map(Duration::from_secs),
+            None,
+            None,
+            &cancel,
+        )
+        .await?;
         let exit = outcome.rendered_exit();
         let mut stderr_full = outcome.stderr;
         if let Some(suffix) = &outcome.stderr_suffix {

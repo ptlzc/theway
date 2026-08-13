@@ -19,6 +19,7 @@ use tokio::net::TcpListener;
 
 // hooks moved into the engine (theway_core::hooks); the e2e drives its pub API.
 use theway_core::agent::hooks;
+use theway_daemon::hook_executors::daemon_executors;
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -171,6 +172,7 @@ X-Theway-Harness-Test = "webhook-e2e"
         "session-webhook-e2e",
         Some(&model),
         Some(ThinkingLevel::Off),
+        daemon_executors(),
     )
     .await;
     assert_eq!(loaded.diagnostics, Vec::<String>::new());
@@ -240,6 +242,7 @@ timeout_ms = 3000
         "session-manual-compaction-e2e",
         Some(&model),
         Some(ThinkingLevel::Off),
+        daemon_executors(),
     )
     .await;
     assert_eq!(loaded.diagnostics, Vec::<String>::new());
@@ -299,6 +302,7 @@ timeout_ms = 3000
         "session-auto-compaction-e2e",
         Some(&model),
         Some(ThinkingLevel::Off),
+        daemon_executors(),
     )
     .await;
     assert_eq!(loaded.diagnostics, Vec::<String>::new());

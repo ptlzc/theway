@@ -1,8 +1,26 @@
 use super::*;
-use theway_core::{AgentToolResult, ToolExecutionMode};
+use std::sync::Mutex;
+use theway_core::{AgentToolResult, LoopEvent, SessionEvent};
 use theway_llm_provider::{ToolResultMessage, ToolResultRole, UserContentBlock};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
+
+/// Details of one command-executor invocation, captured by the fake seam.
+#[derive(Debug)]
+struct CommandCall {
+    command: String,
+    cwd: PathBuf,
+    env: BTreeMap<String, String>,
+    timeout: Duration,
+    payload: serde_json::Value,
+}
+
+/// Details of one webhook-sender invocation, captured by the fake seam.
+#[derive(Debug)]
+struct WebhookCall {
+    url: String,
+    body: String,
+    headers: BTreeMap<String, String>,
+    timeout: Duration,
+}
 
 fn runner(rules: Vec<HookRule>) -> HookRunner {
     HookRunner {
@@ -12,8 +30,54 @@ fn runner(rules: Vec<HookRule>) -> HookRunner {
         model_provider: "faux".into(),
         model_id: "model".into(),
         thinking_level: "off".into(),
-        client: reqwest::Client::new(),
+        command_executor: None,
+        webhook_sender: None,
     }
+}
+
+/// Fake command executor: reads the payload file the runner wrote (from the injected
+/// `THEWAY_HOOK_PAYLOAD` env var) and records the full call into `slot`. The payload
+/// file is still present at this point — the runner removes it after the executor
+/// returns.
+fn capture_command_executor(slot: Arc<Mutex<Option<CommandCall>>>) -> HookCommandExecutor {
+    Arc::new(move |command, cwd, env, timeout, _cancel| {
+        let slot = slot.clone();
+        Box::pin(async move {
+            let payload_path = env
+                .get("THEWAY_HOOK_PAYLOAD")
+                .map(PathBuf::from)
+                .expect("runner must inject THEWAY_HOOK_PAYLOAD");
+            let payload_text = tokio::fs::read_to_string(&payload_path)
+                .await
+                .expect("payload file must exist while the executor runs");
+            let payload: serde_json::Value =
+                serde_json::from_str(&payload_text).expect("payload file must be valid JSON");
+            *slot.lock().unwrap() = Some(CommandCall {
+                command,
+                cwd,
+                env,
+                timeout,
+                payload,
+            });
+            Ok(HookCommandOutput::default())
+        })
+    })
+}
+
+/// Fake webhook sender: records the full call into `slot`.
+fn capture_webhook_sender(slot: Arc<Mutex<Option<WebhookCall>>>) -> HookWebhookSender {
+    Arc::new(move |url, body, headers, timeout, _cancel| {
+        let slot = slot.clone();
+        Box::pin(async move {
+            *slot.lock().unwrap() = Some(WebhookCall {
+                url,
+                body,
+                headers,
+                timeout,
+            });
+            Ok(())
+        })
+    })
 }
 
 fn rule(event: HookEvent) -> HookRule {
@@ -27,52 +91,6 @@ fn rule(event: HookEvent) -> HookRule {
         on_failure: OnFailure::Warn,
         tool: None,
         source: "test".into(),
-    }
-}
-
-/// Hook command that writes `<event> <extra vars...> ` to `out` and runs a
-/// payload check. The runner spawns `sh -c` on Unix and `cmd /C` on Windows,
-/// so the command syntax is platform-specific (`$VAR`/`printf`/`;` vs
-/// `%VAR%`/`echo`/`&`); `echo` writes a trailing CRLF on Windows, hence the
-/// CRLF-tolerant assertions.
-fn hook_capture_command(out: &std::path::Path, var_names: &[&str], payload_check: &str) -> String {
-    #[cfg(unix)]
-    {
-        let mut vars = vec!["$THEWAY_HOOK_EVENT".to_string()];
-        vars.extend(var_names.iter().map(|v| format!("${v}")));
-        let fmt = "%s ".repeat(vars.len());
-        format!(
-            "printf '{fmt}' {} > '{}'; {payload_check}",
-            vars.join(" "),
-            out.display()
-        )
-    }
-    #[cfg(windows)]
-    {
-        let mut vars = vec!["%THEWAY_HOOK_EVENT%".to_string()];
-        vars.extend(var_names.iter().map(|v| format!("%{v}%")));
-        // `cmd /C` one-liners mis-parse QUOTED redirect targets and args
-        // ("filename, directory name, or volume label syntax is incorrect") —
-        // keep the paths unquoted. Temp dirs on CI/test hosts have no spaces.
-        format!("echo {}> {} & {payload_check}", vars.join(" "), out.display())
-    }
-}
-
-/// Platform-appropriate payload check: non-empty (None) or contains a needle.
-fn hook_payload_check(needle: Option<&str>) -> String {
-    #[cfg(unix)]
-    {
-        match needle {
-            Some(n) => format!("grep -q '{n}' \"$THEWAY_HOOK_PAYLOAD\""),
-            None => "test -s \"$THEWAY_HOOK_PAYLOAD\"".to_string(),
-        }
-    }
-    #[cfg(windows)]
-    {
-        match needle {
-            Some(n) => format!("findstr {n} %THEWAY_HOOK_PAYLOAD% >nul"),
-            None => "findstr /R . %THEWAY_HOOK_PAYLOAD% >nul".to_string(),
-        }
     }
 }
 
@@ -108,17 +126,12 @@ command = "echo nope"
 }
 
 #[tokio::test]
-async fn command_hook_receives_env_and_payload() {
-    let dir = tempfile::tempdir().unwrap();
-    let out = dir.path().join("hook.out");
+async fn command_hook_passes_env_and_payload_to_executor() {
+    let slot: Arc<Mutex<Option<CommandCall>>> = Arc::new(Mutex::new(None));
     let mut r = rule(HookEvent::ToolEnd);
-    r.command = Some(hook_capture_command(
-        &out,
-        &["THEWAY_TOOL_NAME"],
-        &hook_payload_check(None),
-    ));
-    r.cwd = HookCwd::Project;
-    let runner = runner(vec![r]);
+    r.command = Some("echo hi".into());
+    let mut runner = runner(vec![r]);
+    runner.command_executor = Some(capture_command_executor(slot.clone()));
     let ev = LoopEvent::ToolExecutionEnd {
         tool_call_id: "call-1".into(),
         tool_name: "bash".into(),
@@ -130,22 +143,33 @@ async fn command_hook_receives_env_and_payload() {
         is_error: false,
     };
     runner.handle_event(&ev, CancellationToken::new()).await;
-    let body = tokio::fs::read_to_string(out).await.unwrap();
-    // `cmd /C echo` appends CRLF on Windows; strip it before comparing.
-    assert_eq!(body.trim_end_matches(['\r', '\n']), "tool_end bash ");
+
+    let call = slot.lock().unwrap().take().expect("executor was not called");
+    assert_eq!(call.command, "echo hi");
+    assert_eq!(call.cwd, std::env::current_dir().unwrap());
+    assert_eq!(call.timeout, Duration::from_millis(1_000));
+    assert_eq!(call.env["THEWAY_HOOK_EVENT"], "tool_end");
+    assert_eq!(call.env["THEWAY_TOOL_NAME"], "bash");
+    assert_eq!(call.env["THEWAY_SESSION_ID"], "session-1");
+    assert_eq!(call.payload["event"], "tool_end");
+    assert_eq!(call.payload["tool_name"], "bash");
+
+    // The payload file must have been cleaned up after the executor returned.
+    let payload_path = PathBuf::from(&call.env["THEWAY_HOOK_PAYLOAD"]);
+    assert!(
+        !payload_path.exists(),
+        "payload file must be removed after the run: {}",
+        payload_path.display()
+    );
 }
 
 #[tokio::test]
-async fn compaction_command_hook_receives_env_and_payload() {
-    let dir = tempfile::tempdir().unwrap();
-    let out = dir.path().join("hook.out");
+async fn compaction_command_hook_passes_env_and_payload_to_executor() {
+    let slot: Arc<Mutex<Option<CommandCall>>> = Arc::new(Mutex::new(None));
     let mut r = rule(HookEvent::Compaction);
-    r.command = Some(hook_capture_command(
-        &out,
-        &["THEWAY_COMPACTION_TRIGGER", "THEWAY_COMPACTION_TOKENS_BEFORE"],
-        &hook_payload_check(Some("compaction_summary")),
-    ));
-    let runner = runner(vec![r]);
+    r.command = Some("echo compacted".into());
+    let mut runner = runner(vec![r]);
+    runner.command_executor = Some(capture_command_executor(slot.clone()));
     let ev = SessionEvent::Compaction {
         from_hook: true,
         summary: "summary text".into(),
@@ -154,33 +178,24 @@ async fn compaction_command_hook_receives_env_and_payload() {
     runner
         .handle_harness_event(&ev, CancellationToken::new())
         .await;
-    let body = tokio::fs::read_to_string(out).await.unwrap();
-    // `cmd /C echo` appends CRLF on Windows; strip it before comparing.
-    assert_eq!(
-        body.trim_end_matches(['\r', '\n']),
-        "compaction manual 42 "
-    );
+
+    let call = slot.lock().unwrap().take().expect("executor was not called");
+    assert_eq!(call.env["THEWAY_HOOK_EVENT"], "compaction");
+    assert_eq!(call.env["THEWAY_COMPACTION_TRIGGER"], "manual");
+    assert_eq!(call.env["THEWAY_COMPACTION_TOKENS_BEFORE"], "42");
+    assert_eq!(call.payload["compaction_summary"], "summary text");
+    assert_eq!(call.payload["compaction_trigger"], "manual");
+    assert_eq!(call.payload["compaction_tokens_before"].as_u64(), Some(42));
 }
 
 #[tokio::test]
-async fn webhook_hook_posts_json_payload() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let seen = Arc::new(tokio::sync::Mutex::new(String::new()));
-    let seen_task = seen.clone();
-    let server = tokio::spawn(async move {
-        if let Ok((mut sock, _)) = listener.accept().await {
-            let mut buf = vec![0u8; 4096];
-            let n = sock.read(&mut buf).await.unwrap();
-            *seen_task.lock().await = String::from_utf8_lossy(&buf[..n]).into_owned();
-            let resp = "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
-            let _ = sock.write_all(resp.as_bytes()).await;
-        }
-    });
-
+async fn webhook_hook_passes_payload_to_sender() {
+    let slot: Arc<Mutex<Option<WebhookCall>>> = Arc::new(Mutex::new(None));
     let mut r = rule(HookEvent::TurnEnd);
-    r.webhook = Some(format!("http://{addr}/hook"));
-    let runner = runner(vec![r]);
+    r.webhook = Some("http://127.0.0.1:9/hook".into());
+    r.headers.insert("X-Test".into(), "v".into());
+    let mut runner = runner(vec![r]);
+    runner.webhook_sender = Some(capture_webhook_sender(slot.clone()));
     let ev = LoopEvent::TurnCompleted {
         message: AgentMessage::Llm(theway_llm_provider::Message::ToolResult(
             ToolResultMessage {
@@ -196,20 +211,31 @@ async fn webhook_hook_posts_json_payload() {
         tool_results: Vec::new(),
     };
     runner.handle_event(&ev, CancellationToken::new()).await;
-    server.await.unwrap();
-    let req = seen.lock().await.clone();
-    assert!(req.starts_with("POST /hook "), "{req}");
-    assert!(req.contains("\"event\":\"turn_end\""), "{req}");
+
+    let call = slot.lock().unwrap().take().expect("sender was not called");
+    assert_eq!(call.url, "http://127.0.0.1:9/hook");
+    assert_eq!(call.headers.get("X-Test").map(String::as_str), Some("v"));
+    assert_eq!(call.timeout, Duration::from_millis(1_000));
+    let payload: serde_json::Value = serde_json::from_str(&call.body).unwrap();
+    assert_eq!(payload["event"], "turn_end");
+    assert_eq!(payload["session_id"], "session-1");
 }
 
 #[tokio::test]
 async fn tool_filter_skips_non_matching_tool() {
-    let dir = tempfile::tempdir().unwrap();
-    let out = dir.path().join("hook.out");
+    let calls: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
     let mut r = rule(HookEvent::ToolEnd);
     r.tool = Some("bash".into());
-    r.command = Some(format!("touch {}", out.display()));
-    let runner = runner(vec![r]);
+    r.command = Some("touch whatever".into());
+    let mut runner = runner(vec![r]);
+    let counter = calls.clone();
+    runner.command_executor = Some(Arc::new(move |_command, _cwd, _env, _timeout, _cancel| {
+        let counter = counter.clone();
+        Box::pin(async move {
+            *counter.lock().unwrap() += 1;
+            Ok(HookCommandOutput::default())
+        })
+    }));
     let ev = LoopEvent::ToolExecutionEnd {
         tool_call_id: "call-1".into(),
         tool_name: "read".into(),
@@ -217,115 +243,96 @@ async fn tool_filter_skips_non_matching_tool() {
         is_error: false,
     };
     runner.handle_event(&ev, CancellationToken::new()).await;
-    assert!(!out.exists());
+    assert_eq!(*calls.lock().unwrap(), 0);
 }
 
-#[allow(dead_code)]
-fn _keep_tool_execution_mode(_: ToolExecutionMode) {}
+static ENV_LOCK: Mutex<()> = Mutex::new(());
 
-/// Hook command that exceeds `timeout_ms` must be killed, including any descendant
-/// process the shell backgrounded. The previous implementation used `cmd.output()`
-/// inside a `select!` against `tokio::time::timeout`, so on timeout the underlying
-/// `sh -c` (and any `(child) & wait` subprocess) kept running.
-#[cfg(unix)]
-#[tokio::test]
-async fn command_hook_timeout_kills_descendant_process() {
-    use std::time::Instant;
+struct EnvGuard {
+    key: &'static str,
+    old: Option<String>,
+}
 
-    // Unique marker so `pgrep` only finds the descendant this test spawned.
-    let marker = "theway-hook-timeout-test-mkr-z2x7a1";
-    let mut r = rule(HookEvent::ToolEnd);
-    r.timeout_ms = 100;
-    r.command = Some(format!("(sleep 30 && echo {marker}) & wait"));
-    let runner = runner(vec![r]);
-
-    let started = Instant::now();
-    let ev = LoopEvent::ToolExecutionEnd {
-        tool_call_id: "call-1".into(),
-        tool_name: "bash".into(),
-        result: AgentToolResult::default(),
-        is_error: false,
-    };
-    runner.handle_event(&ev, CancellationToken::new()).await;
-    let elapsed = started.elapsed();
-    assert!(
-        elapsed.as_secs() < 5,
-        "hook timeout path took {elapsed:?}; descendant kill did not happen in time"
-    );
-
-    // Give the kernel a beat to reap the killed group.
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    let pgrep = tokio::process::Command::new("pgrep")
-        .arg("-f")
-        .arg(marker)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn();
-    if let Ok(mut child) = pgrep {
-        let mut buf = String::new();
-        if let Some(mut s) = child.stdout.take() {
-            let _ = tokio::io::AsyncReadExt::read_to_string(&mut s, &mut buf).await;
-        }
-        let _ = child.wait().await;
-        assert!(
-            buf.trim().is_empty(),
-            "found surviving descendant matching {marker:?} after hook timeout: pids={buf}"
-        );
+impl EnvGuard {
+    fn set(key: &'static str, value: &std::path::Path) -> Self {
+        let old = std::env::var(key).ok();
+        // Tests in Rust 2024 require acknowledging that process env is global.
+        unsafe { std::env::set_var(key, value) };
+        Self { key, old }
     }
 }
 
-/// Cancellation token tripped mid-hook must kill the whole shell tree, mirroring the
-/// timeout path. Mirrors `bash_tool::cancellation_kills_child_process` for hooks.
-#[cfg(unix)]
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        if let Some(old) = &self.old {
+            unsafe { std::env::set_var(self.key, old) };
+        } else {
+            unsafe { std::env::remove_var(self.key) };
+        }
+    }
+}
+
+/// Without injected executors the loader must report the degraded mode in
+/// diagnostics, and handling events with side-effect rules must skip the side
+/// effects (core is diagnostics-only without a host).
 #[tokio::test]
-async fn command_hook_cancellation_kills_descendant_process() {
-    use std::time::Instant;
+async fn load_without_executors_reports_skip_diagnostics() {
+    let _env_lock = ENV_LOCK.lock().unwrap();
+    let theway_dir = tempfile::tempdir().unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+    let _theway_dir_guard = EnvGuard::set("THEWAY_DIR", theway_dir.path());
 
-    let marker = "theway-hook-cancel-test-mkr-z2x7b2";
-    let mut r = rule(HookEvent::ToolEnd);
-    r.timeout_ms = 30_000;
-    r.command = Some(format!("(sleep 30 && echo {marker}) & wait"));
-    let runner = runner(vec![r]);
+    std::fs::write(
+        theway_dir.path().join("hooks.toml"),
+        r#"
+[[hook]]
+event = "turn_end"
+command = "echo hi"
+webhook = "http://127.0.0.1:9/hook"
+"#,
+    )
+    .unwrap();
 
-    let cancel = CancellationToken::new();
-    let cancel_clone = cancel.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        cancel_clone.cancel();
-    });
+    let loaded = load(
+        cwd.path(),
+        "session-no-executors",
+        None::<&theway_llm_provider::Model>,
+        None::<ThinkingLevel>,
+        HookExecutors::default(),
+    )
+    .await;
 
-    let started = Instant::now();
-    let ev = LoopEvent::ToolExecutionEnd {
-        tool_call_id: "call-1".into(),
-        tool_name: "bash".into(),
-        result: AgentToolResult::default(),
-        is_error: false,
-    };
-    runner.handle_event(&ev, cancel).await;
-    let elapsed = started.elapsed();
+    assert_eq!(loaded.runner.len(), 1);
+    assert_eq!(loaded.diagnostics.len(), 2);
     assert!(
-        elapsed.as_secs() < 5,
-        "hook cancel path took {elapsed:?}; descendant kill did not happen in time"
+        loaded.diagnostics[0].contains("no command executor"),
+        "unexpected diagnostics: {:?}",
+        loaded.diagnostics
+    );
+    assert!(
+        loaded.diagnostics[1].contains("no webhook sender"),
+        "unexpected diagnostics: {:?}",
+        loaded.diagnostics
     );
 
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    let pgrep = tokio::process::Command::new("pgrep")
-        .arg("-f")
-        .arg(marker)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn();
-    if let Ok(mut child) = pgrep {
-        let mut buf = String::new();
-        if let Some(mut s) = child.stdout.take() {
-            let _ = tokio::io::AsyncReadExt::read_to_string(&mut s, &mut buf).await;
-        }
-        let _ = child.wait().await;
-        assert!(
-            buf.trim().is_empty(),
-            "found surviving descendant matching {marker:?} after hook cancel: pids={buf}"
-        );
-    }
+    // Handling a matching event must not panic and must not perform side effects —
+    // the runner simply skips both sides.
+    let ev = LoopEvent::TurnCompleted {
+        message: AgentMessage::Llm(theway_llm_provider::Message::ToolResult(
+            ToolResultMessage {
+                role: ToolResultRole::ToolResult,
+                tool_call_id: "call-1".into(),
+                tool_name: "bash".into(),
+                content: vec![UserContentBlock::text("ok")],
+                details: None,
+                is_error: false,
+                timestamp: 0,
+            },
+        )),
+        tool_results: Vec::new(),
+    };
+    loaded
+        .runner
+        .handle_event(&ev, CancellationToken::new())
+        .await;
 }

@@ -8,6 +8,7 @@
 use std::sync::{Arc, OnceLock};
 
 use crate::SqliteSessionRepo;
+use crate::hook_executors::daemon_executors;
 use crate::{agent_specs, tools, triggers};
 use anyhow::{Context, Result};
 use theway_core::multiagent::graph::engine::DagEngine;
@@ -210,6 +211,7 @@ impl SessionHarnessFactory {
             session_id.clone(),
             hook_model.as_ref(),
             hook_thinking,
+            daemon_executors(),
         )
         .await;
         for diag in &loaded_hooks.diagnostics {
