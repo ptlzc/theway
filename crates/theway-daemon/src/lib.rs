@@ -26,6 +26,7 @@ pub mod commands;
 pub mod control_plane_prompt;
 pub mod dag_persist;
 pub mod executor;
+pub mod env;
 pub mod export;
 pub mod local_models;
 pub mod logging;

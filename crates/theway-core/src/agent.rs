@@ -23,8 +23,6 @@ pub mod assembly;
 pub mod compaction;
 #[cfg(feature = "harness")]
 pub mod cost;
-#[cfg(all(feature = "harness", feature = "native-env"))]
-pub mod env;
 #[cfg(feature = "harness")]
 pub mod hooks;
 #[cfg(feature = "harness")]

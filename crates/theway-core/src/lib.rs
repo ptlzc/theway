@@ -91,6 +91,3 @@ pub use agent::types::{
     FileError, FileErrorCode, FileInfo, FileKind, FsResult, PromptTemplate, SessionError,
     SessionErrorCode, Skill, SkillDiagnostic, SkillDiagnosticCode, SkillFrontmatter, SkillSource,
 };
-
-#[cfg(all(feature = "harness", feature = "native-env"))]
-pub use agent::env::native::NativeEnv;

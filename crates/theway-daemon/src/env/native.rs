@@ -17,7 +17,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio_util::sync::CancellationToken;
 
-use crate::agent::types::*;
+use theway_core::agent::types::*;
 
 pub struct NativeEnv {
     cwd: String,

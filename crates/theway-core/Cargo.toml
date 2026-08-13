@@ -13,14 +13,13 @@ name = "theway_core"
 path = "src/lib.rs"
 
 [features]
-default = ["harness", "native-env"]
+default = ["harness"]
 
 # Bare Agent + agent-loop. Always on.
 # Harness layer (skills, prompt templates, sessions, compaction, system prompt). Opt-out for
 # embedders that only want the bare Agent (e.g. browser-side consumers).
 harness = []
 # Native filesystem adapter (std::fs). Default for native targets; turn off for wasm.
-native-env = []
 
 [dependencies]
 theway-llm-provider = { path = "../theway-llm-provider" }

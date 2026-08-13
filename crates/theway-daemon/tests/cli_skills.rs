@@ -23,7 +23,8 @@ use theway_core::{
 /// the test fails the next time we touch it.
 mod skills_mirror {
     use std::path::{Path, PathBuf};
-    use theway_core::{NativeEnv, Skill, SkillDiagnostic, SkillSource, load_skills};
+    use theway_core::{Skill, SkillDiagnostic, SkillSource, load_skills};
+    use theway_daemon::env::native::NativeEnv;
     use tokio_util::sync::CancellationToken;
 
     pub struct LoadedSkills {

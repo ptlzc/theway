@@ -40,7 +40,7 @@ fn build_test_harness(
     let loader: ReloadSkillsFn = Arc::new(move || {
         let dir_for_fut = dir_clone.clone();
         Box::pin(async move {
-            let env = theway_core::NativeEnv::new(
+            let env = theway_daemon::env::native::NativeEnv::new(
                 std::env::current_dir()
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_default(),

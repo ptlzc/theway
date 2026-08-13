@@ -6,9 +6,14 @@
 
 use std::path::{Path, PathBuf};
 
-use theway_core::{NativeEnv, Skill, SkillDiagnostic, SkillSource, load_skills};
-use tokio_util::sync::CancellationToken;
+use theway_core::{Skill, SkillDiagnostic};
 
+#[cfg(feature = "local")]
+use theway_core::{SkillSource, load_skills};
+#[cfg(feature = "local")]
+use tokio_util::sync::CancellationToken;
+#[cfg(feature = "local")]
+use crate::env::native::NativeEnv;
 use theway::config::base_dir;
 
 /// Returns (project_root, user_root) in the order they should be consulted.
@@ -30,6 +35,10 @@ pub struct LoadedSkills {
 
 /// Load skills from both roots, with project-local overriding user-global on name collision.
 /// Missing directories are silently skipped — most users won't have either initially.
+///
+/// `sandbox`-only builds return empty: local skill discovery walks the OS filesystem
+/// via [`NativeEnv`], which is a `local`-feature capability (daemon-kernel-layers).
+#[cfg(feature = "local")]
 pub async fn load_all(cwd: &Path) -> LoadedSkills {
     let (project, user) = skills_dirs(cwd);
     let env = NativeEnv::new(cwd.to_string_lossy().to_string());
@@ -57,8 +66,18 @@ pub async fn load_all(cwd: &Path) -> LoadedSkills {
     }
 }
 
+/// Sandbox-only stub (see the `local` impl above).
+#[cfg(not(feature = "local"))]
+pub async fn load_all(_cwd: &Path) -> LoadedSkills {
+    LoadedSkills {
+        skills: Vec::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
 /// Insert `skill` into `combined`, replacing any existing entry with the same name. Since we
 /// load user first and project second, a later (project-side) skill displaces the earlier one.
+#[cfg(feature = "local")]
 fn dedupe_project_wins(combined: &mut Vec<Skill>, skill: Skill) {
     if let Some(i) = combined.iter().position(|s| s.name == skill.name) {
         combined[i] = skill;

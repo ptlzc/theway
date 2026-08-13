@@ -6,15 +6,24 @@
 //! only consumes already-loaded `PromptTemplate` values (interpolation happens on the
 //! type itself via `PromptTemplate::interpolate`).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(feature = "local")]
+use std::path::PathBuf;
 
+use theway_core::{PromptTemplate, SkillDiagnostic};
+#[cfg(feature = "local")]
 use serde::Deserialize;
+#[cfg(feature = "local")]
 use theway_core::{
-    ExecutionEnv, FileErrorCode, FileKind, NativeEnv, PromptTemplate, SkillDiagnostic,
-    SkillDiagnosticCode,
+    ExecutionEnv, FileErrorCode, FileKind, SkillDiagnosticCode,
 };
+#[cfg(feature = "local")]
 use tokio_util::sync::CancellationToken;
 
+#[cfg(feature = "local")]
+#[cfg(feature = "local")]
+use crate::env::native::NativeEnv;
+#[cfg(feature = "local")]
 use theway::config::base_dir;
 
 pub struct LoadedTemplates {
@@ -22,6 +31,10 @@ pub struct LoadedTemplates {
     pub diagnostics: Vec<SkillDiagnostic>,
 }
 
+/// `sandbox`-only builds return empty: local template discovery walks the OS
+/// filesystem via [`NativeEnv`], which is a `local`-feature capability
+/// (daemon-kernel-layers).
+#[cfg(feature = "local")]
 pub async fn load_all(cwd: &Path) -> LoadedTemplates {
     let project: PathBuf = cwd.join(".theway").join("templates");
     let user: PathBuf = base_dir().join("templates");
@@ -52,10 +65,20 @@ pub async fn load_all(cwd: &Path) -> LoadedTemplates {
     }
 }
 
+/// Sandbox-only stub (see the `local` impl above).
+#[cfg(not(feature = "local"))]
+pub async fn load_all(_cwd: &Path) -> LoadedTemplates {
+    LoadedTemplates {
+        templates: Vec::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
 // ──────────────────────────────────────────────────────────────────────────────────────────
 // File loader
 // ──────────────────────────────────────────────────────────────────────────────────────────
 
+#[cfg(feature = "local")]
 #[derive(Debug, Default, Deserialize)]
 struct TemplateFrontmatter {
     name: Option<String>,
@@ -73,6 +96,7 @@ pub struct LoadTemplatesOutput {
 /// (templates are flat to keep `/template <name>` unambiguous).
 ///
 /// Same diagnostic shape as the skills loader so the CLI can render both uniformly.
+#[cfg(feature = "local")]
 async fn load_templates(
     env: &dyn ExecutionEnv,
     dirs: &[&str],
@@ -153,6 +177,7 @@ async fn load_templates(
     out
 }
 
+#[cfg(feature = "local")]
 fn parse_frontmatter(content: &str) -> Result<(TemplateFrontmatter, String), String> {
     let normalized = content.replace("\r\n", "\n").replace('\r', "\n");
     if !normalized.starts_with("---") {
@@ -168,7 +193,7 @@ fn parse_frontmatter(content: &str) -> Result<(TemplateFrontmatter, String), Str
     Ok((fm, body))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "local"))]
 mod tests {
     use super::parse_frontmatter;
 
