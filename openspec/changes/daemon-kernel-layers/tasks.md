@@ -17,25 +17,25 @@
 
 ## 3. core 工具族 → daemon
 
-- [ ] 3.1 迁 `core/src/tools/assembly.rs` + `subagent.rs` + `dag_tools/` → `daemon/src/tools/`;daemon `tools.rs` 装配层 `theway_core::tools::*` → `crate::tools::*`
-- [ ] 3.2 迁 skill 族(`skill.rs`、`skill_builder.rs`、`install_skill/`、`remove_skill.rs`、`set_skill_state.rs`)+ `memory.rs` + `mcp_adapter.rs` → daemon;core `tests/tools/*` 镜像迁移
-- [ ] 3.3 迁 `exec.rs` + `exec_shell.rs` → daemon;bash 工具与装配引用适配
-- [ ] 3.4 core 清理:`src/tools/mod.rs`、lib.rs 中 tools 声明与 re-export 移除;验证 core 内 `crate::tools` 零引用
-- [ ] 3.5 迁移工具对应的 core 测试(install_skill/remove_skill/set_skill_state/skill_builder 等 tests_bridge 目录)
+- [x] 3.1 迁 `core/src/tools/assembly.rs` + `subagent.rs` + `dag_tools/` → `daemon/src/tools/`;daemon `tools.rs` 装配层 `theway_core::tools::*` → `crate::tools::*`
+- [x] 3.2 迁 skill 族(`skill.rs`、`skill_builder.rs`、`install_skill/`、`remove_skill.rs`、`set_skill_state.rs`)+ `memory.rs` + `mcp_adapter.rs` → daemon;core `tests/tools/*` 镜像迁移
+- [x] 3.3 迁 `exec.rs` + `exec_shell.rs` → daemon;bash 工具与装配引用适配
+- [x] 3.4 core 清理:`src/tools/mod.rs`、lib.rs 中 tools 声明与 re-export 移除;验证 core 内 `crate::tools` 零引用
+- [x] 3.5 迁移工具对应的 core 测试(install_skill/remove_skill/set_skill_state/skill_builder 等 tests_bridge 目录)
 
 ## 4. native env 实现 core → daemon
 
-- [ ] 4.1 迁 `core/src/agent/env/native.rs` → `daemon/src/env/native.rs`,挂 `local` feature;daemon `templates.rs`/`skills.rs` 注入点适配(`theway_core::NativeEnv` → `crate::env::native::NativeEnv`)
-- [ ] 4.2 core 移除 `native-env` feature 与 `NativeEnv` re-export;验证 `ExecutionEnv` trait 保留、core 内 native 零引用
+- [x] 4.1 迁 `core/src/agent/env/native.rs` → `daemon/src/env/native.rs`,挂 `local` feature;daemon `templates.rs`/`skills.rs` 注入点适配(`theway_core::NativeEnv` → `crate::env::native::NativeEnv`)
+- [x] 4.2 core 移除 `native-env` feature 与 `NativeEnv` re-export;验证 `ExecutionEnv` trait 保留、core 内 native 零引用
 
 ## 5. sdk common → transport(契约吸收)
 
-- [ ] 5.1 迁 feed 模型(mod.rs/types.rs/preview.rs,不含 ratatui 渲染)→ `transport/src/feed/`;daemon `theway::app::feed` → `theway_transport::feed`;tui 引用适配
-- [ ] 5.2 迁 `common/commands` 框架 → `transport/src/commands/`;daemon/tui 引用适配
-- [ ] 5.3 迁 `common/triggers` 类型 → `transport/src/triggers.rs`;引用适配
-- [ ] 5.4 迁 `common/config` 公共面 → transport;`base_dir()` 与 `client::base_dir` 合并唯一,daemon 9 处 `theway::config::base_dir` 改 `theway_transport::client::base_dir`
-- [ ] 5.5 迁 feed/render.rs(ratatui 渲染)→ tui;tui 内引用适配
-- [ ] 5.6 transport Cargo.toml 承接 toml/serde 等依赖;验证 transport 不引入 ratatui
+- [x] 5.1 迁 feed 模型(mod.rs/types.rs/preview.rs,不含 ratatui 渲染)→ `transport/src/feed/`;daemon `theway::app::feed` → `theway_transport::feed`;tui 引用适配
+- [x] 5.2 迁 `common/commands` 框架 → `transport/src/commands/`;daemon/tui 引用适配
+- [x] 5.3 迁 `common/triggers` 类型 → `transport/src/triggers.rs`;引用适配
+- [x] 5.4 迁 `common/config` 公共面 → transport;`base_dir()` 与 `client::base_dir` 合并唯一,daemon 9 处 `theway::config::base_dir` 改 `theway_transport::client::base_dir`
+- [x] 5.5 迁 feed/render.rs(ratatui 渲染)→ tui;tui 内引用适配
+- [x] 5.6 transport Cargo.toml 承接 toml/serde 等依赖;验证 transport 不引入 ratatui
 
 ## 6. sdk 运行时数据 → daemon + 命令拆分
 
