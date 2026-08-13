@@ -6,13 +6,13 @@
 use std::time::{Duration, Instant};
 
 use tempfile::tempdir;
+#[cfg(feature = "sandbox")]
+use theway_core::executor::ExecutorKind;
+use theway_core::executor::{ExecutorError, ToolExecutor};
 #[cfg(feature = "local")]
 use theway_daemon::executor::local::LocalExecutor;
 #[cfg(feature = "sandbox")]
 use theway_daemon::executor::sandbox::SandboxExecutor;
-use theway_core::executor::{ExecutorError, ToolExecutor};
-#[cfg(feature = "sandbox")]
-use theway_core::executor::ExecutorKind;
 
 fn argv(parts: &[&str]) -> Vec<String> {
     parts.iter().map(|s| (*s).to_string()).collect()

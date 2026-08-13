@@ -10,17 +10,14 @@ use std::path::Path;
 #[cfg(feature = "local")]
 use std::path::PathBuf;
 
-use theway_core::{PromptTemplate, SkillDiagnostic};
 #[cfg(feature = "local")]
 use serde::Deserialize;
 #[cfg(feature = "local")]
-use theway_core::{
-    ExecutionEnv, FileErrorCode, FileKind, SkillDiagnosticCode,
-};
+use theway_core::{ExecutionEnv, FileErrorCode, FileKind, SkillDiagnosticCode};
+use theway_core::{PromptTemplate, SkillDiagnostic};
 #[cfg(feature = "local")]
 use tokio_util::sync::CancellationToken;
 
-#[cfg(feature = "local")]
 #[cfg(feature = "local")]
 use crate::env::native::NativeEnv;
 #[cfg(feature = "local")]

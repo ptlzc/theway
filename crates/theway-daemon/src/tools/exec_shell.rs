@@ -15,7 +15,6 @@
 //! 3. Exited shells stay queryable for [`EXITED_KEEP_ALIVE`] so the model can still read
 //!    their final output, then their registry entry is reaped.
 
-use theway_core::{AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate};
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use serde_json::{Value, json};
@@ -24,6 +23,7 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
+use theway_core::{AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate};
 use theway_llm_provider::{Tool, UserContentBlock};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Notify;

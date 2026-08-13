@@ -4,10 +4,197 @@
 use std::sync::Arc;
 use tempfile::tempdir;
 use theway_core::{
-    AgentHarness, AgentHarnessOptions, MemorySessionStorage, NativeEnv, Session, SessionStorage,
-    SkillDiagnosticCode, format_skills_for_system_prompt, load_skills,
+    AgentHarness, AgentHarnessOptions, ExecOptions, ExecOutput, ExecResult, ExecutionEnv,
+    ExecutionError, ExecutionErrorCode, FileError, FileErrorCode, FileInfo, FileKind, FsResult,
+    MemorySessionStorage, Session, SessionStorage, SkillDiagnosticCode,
+    format_skills_for_system_prompt, load_skills,
 };
 use tokio_util::sync::CancellationToken;
+
+use async_trait::async_trait;
+
+/// Minimal fs-backed [`ExecutionEnv`] for the loader tests (the production `NativeEnv`
+/// moved to the daemon kernel — daemon-kernel-layers; core tests supply their own env).
+struct TestEnv {
+    root: String,
+}
+
+impl TestEnv {
+    fn new(root: &std::path::Path) -> Self {
+        Self {
+            root: root.to_string_lossy().to_string(),
+        }
+    }
+
+    fn full(&self, path: &str) -> String {
+        if path.starts_with('/') {
+            path.to_string()
+        } else {
+            format!("{}/{}", self.root.trim_end_matches('/'), path)
+        }
+    }
+
+    fn unsupported<T>(op: &str) -> FsResult<T> {
+        Err(FileError {
+            code: FileErrorCode::Unknown,
+            message: format!("TestEnv does not support {op}"),
+            path: None,
+        })
+    }
+
+    fn file_info_of(p: &std::path::Path) -> FsResult<FileInfo> {
+        let meta = std::fs::metadata(p).map_err(|e| FileError {
+            code: if e.kind() == std::io::ErrorKind::NotFound {
+                FileErrorCode::NotFound
+            } else {
+                FileErrorCode::Unknown
+            },
+            message: e.to_string(),
+            path: Some(p.to_string_lossy().to_string()),
+        })?;
+        let kind = if meta.is_dir() {
+            FileKind::Directory
+        } else {
+            FileKind::File
+        };
+        Ok(FileInfo {
+            name: p
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default(),
+            path: p.to_string_lossy().to_string(),
+            kind,
+            size: meta.len(),
+            mtime_ms: 0,
+        })
+    }
+}
+
+#[async_trait]
+impl ExecutionEnv for TestEnv {
+    fn cwd(&self) -> &str {
+        &self.root
+    }
+
+    async fn read_text_file(&self, path: &str, _cancel: CancellationToken) -> FsResult<String> {
+        std::fs::read_to_string(self.full(path)).map_err(|e| FileError {
+            code: FileErrorCode::Unknown,
+            message: e.to_string(),
+            path: Some(path.to_string()),
+        })
+    }
+
+    async fn file_info(&self, path: &str, _cancel: CancellationToken) -> FsResult<FileInfo> {
+        Self::file_info_of(std::path::Path::new(&self.full(path)))
+    }
+
+    async fn list_dir(&self, path: &str, _cancel: CancellationToken) -> FsResult<Vec<FileInfo>> {
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(self.full(path)).map_err(|e| FileError {
+            code: FileErrorCode::Unknown,
+            message: e.to_string(),
+            path: Some(path.to_string()),
+        })? {
+            let entry = entry.map_err(|e| FileError {
+                code: FileErrorCode::Unknown,
+                message: e.to_string(),
+                path: Some(path.to_string()),
+            })?;
+            out.push(Self::file_info_of(&entry.path())?);
+        }
+        Ok(out)
+    }
+
+    async fn exists(&self, path: &str, _cancel: CancellationToken) -> FsResult<bool> {
+        Ok(std::path::Path::new(&self.full(path)).exists())
+    }
+
+    async fn absolute_path(&self, path: &str, _cancel: CancellationToken) -> FsResult<String> {
+        Ok(self.full(path))
+    }
+
+    async fn join_path(&self, parts: &[&str], _cancel: CancellationToken) -> FsResult<String> {
+        Ok(parts.join("/"))
+    }
+
+    async fn read_text_lines(
+        &self,
+        _path: &str,
+        _max_lines: Option<usize>,
+        _cancel: CancellationToken,
+    ) -> FsResult<Vec<String>> {
+        Self::unsupported("read_text_lines")
+    }
+
+    async fn read_binary_file(&self, _path: &str, _cancel: CancellationToken) -> FsResult<Vec<u8>> {
+        Self::unsupported("read_binary_file")
+    }
+
+    async fn write_file(
+        &self,
+        _path: &str,
+        _content: &[u8],
+        _cancel: CancellationToken,
+    ) -> FsResult<()> {
+        Self::unsupported("write_file")
+    }
+
+    async fn append_file(
+        &self,
+        _path: &str,
+        _content: &[u8],
+        _cancel: CancellationToken,
+    ) -> FsResult<()> {
+        Self::unsupported("append_file")
+    }
+
+    async fn canonical_path(&self, path: &str, _cancel: CancellationToken) -> FsResult<String> {
+        Ok(self.full(path))
+    }
+
+    async fn create_dir(
+        &self,
+        _path: &str,
+        _recursive: bool,
+        _cancel: CancellationToken,
+    ) -> FsResult<()> {
+        Self::unsupported("create_dir")
+    }
+
+    async fn remove(
+        &self,
+        _path: &str,
+        _recursive: bool,
+        _force: bool,
+        _cancel: CancellationToken,
+    ) -> FsResult<()> {
+        Self::unsupported("remove")
+    }
+
+    async fn create_temp_dir(
+        &self,
+        _prefix: Option<&str>,
+        _cancel: CancellationToken,
+    ) -> FsResult<String> {
+        Self::unsupported("create_temp_dir")
+    }
+
+    async fn create_temp_file(
+        &self,
+        _prefix: Option<&str>,
+        _suffix: Option<&str>,
+        _cancel: CancellationToken,
+    ) -> FsResult<String> {
+        Self::unsupported("create_temp_file")
+    }
+
+    async fn exec(&self, _command: &str, _options: ExecOptions) -> ExecResult<ExecOutput> {
+        Err(ExecutionError::new(
+            ExecutionErrorCode::Unknown,
+            "TestEnv does not support exec",
+        ))
+    }
+}
 
 #[tokio::test]
 async fn discovers_skill_with_matching_parent_dir() {
@@ -21,7 +208,7 @@ async fn discovers_skill_with_matching_parent_dir() {
     )
     .unwrap();
 
-    let env = NativeEnv::new(root.to_string_lossy().to_string());
+    let env = TestEnv::new(root);
     let out = load_skills(&env, &[root.to_str().unwrap()], CancellationToken::new()).await;
 
     assert!(
@@ -44,7 +231,7 @@ async fn missing_description_emits_diagnostic_and_skips() {
     std::fs::create_dir_all(&skill_dir).unwrap();
     std::fs::write(skill_dir.join("SKILL.md"), "---\nname: nodesc\n---\nBody.").unwrap();
 
-    let env = NativeEnv::new(root.to_string_lossy().to_string());
+    let env = TestEnv::new(root);
     let out = load_skills(&env, &[root.to_str().unwrap()], CancellationToken::new()).await;
     assert!(
         out.skills.is_empty(),
@@ -72,7 +259,7 @@ async fn name_must_match_parent_dir() {
     )
     .unwrap();
 
-    let env = NativeEnv::new(root.to_string_lossy().to_string());
+    let env = TestEnv::new(root);
     let out = load_skills(&env, &[root.to_str().unwrap()], CancellationToken::new()).await;
     // skill still loads (TS keeps it; only emits a warning), but a diagnostic flags the mismatch.
     assert!(
@@ -97,7 +284,7 @@ async fn system_prompt_block_lists_each_skill() {
         )
         .unwrap();
     }
-    let env = NativeEnv::new(root.to_string_lossy().to_string());
+    let env = TestEnv::new(root);
     let out = load_skills(&env, &[root.to_str().unwrap()], CancellationToken::new()).await;
     assert_eq!(out.skills.len(), 2);
     let block = format_skills_for_system_prompt(&out.skills);
@@ -129,7 +316,7 @@ async fn disable_model_invocation_accepts_both_kebab_and_snake() {
             ),
         )
         .unwrap();
-        let env = NativeEnv::new(root.to_string_lossy().to_string());
+        let env = TestEnv::new(root);
         let out = load_skills(&env, &[root.to_str().unwrap()], CancellationToken::new()).await;
         assert!(
             out.diagnostics.is_empty(),
@@ -173,7 +360,7 @@ async fn resume_rebuilds_skill_block_byte_identical_from_same_directory() {
         .unwrap();
     }
 
-    let env = NativeEnv::new(root.to_string_lossy().to_string());
+    let env = TestEnv::new(root);
 
     // First load (initial session start).
     let first = load_skills(&env, &[root.to_str().unwrap()], CancellationToken::new()).await;
@@ -285,7 +472,7 @@ async fn resume_rebuilds_harness_system_prompt_byte_identical() {
         .unwrap();
     }
 
-    let env = NativeEnv::new(root.to_string_lossy().to_string());
+    let env = TestEnv::new(root);
 
     let base_system_prompt =
         "You are a careful coding assistant. Use the tools you have, never invent state.";
