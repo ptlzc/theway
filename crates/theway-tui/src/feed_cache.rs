@@ -17,12 +17,58 @@
 
 use ratatui::text::Line;
 
-use theway_transport::feed::{Feed, should_separate};
+use theway_transport::feed::{Block, Feed, block_fingerprint, should_separate};
 
-use crate::feed_render::{self, FeedRenderOptions};
+use crate::feed_render::{self, FeedRenderOptions, ThinkingMode};
 
 /// Growth margin above `cap` before the head trim actually drains.
 const TRIM_MARGIN: usize = 512;
+
+/// Streaming render state for the LAST feed block while it appends (issue
+/// #35): instead of re-rendering the growing block from scratch every frame
+/// (O(n²) over the stream), deltas feed an incremental renderer and only the
+/// unfrozen tail is re-processed per frame.
+enum StreamState {
+    /// Assistant markdown via `StreamingMarkdownRenderer`: frozen lines are
+    /// processed once, the tail once per frame.
+    Markdown {
+        renderer: theway_markdown::StreamingMarkdownRenderer,
+        /// Frozen RENDERER lines already processed into `cache.lines`.
+        frozen_lines: usize,
+        /// Cache rows those frozen lines occupy (wrapping expands 1→N).
+        frozen_cache_rows: usize,
+    },
+    /// Thinking text via the incremental wrapper: completed rows append to
+    /// `cache.lines` (Full) or rebuild a small Peek window each frame. Keeps
+    /// a ring of the last few completed rows for the Peek window.
+    Thinking {
+        wrap: feed_render::IncrementalWrap,
+        mode: ThinkingMode,
+        /// Completed rows already pushed into `cache.lines`.
+        completed_rows: usize,
+        /// Ring of the last THINKING_PEEK_LINES completed rows (for Peek).
+        last_rows: std::collections::VecDeque<String>,
+        /// Characters streamed so far (header counter).
+        char_count: usize,
+    },
+}
+
+struct StreamingEntry {
+    block_index: usize,
+    /// Block source text at the last update (append detection prefix).
+    source: String,
+    /// Source length at the last rebase; streaming growth beyond
+    /// `REBASE_BYTES` past this point falls back to a one-shot render so an
+    /// unbroken paragraph (nothing freezes) cannot drive O(n) per frame.
+    rebase_source_len: usize,
+    state: StreamState,
+}
+
+/// Maximum streamed delta before a one-shot rebase bounds the unfrozen tail
+/// (issue #35): an unbroken paragraph never freezes in the streaming
+/// renderer, so without this cap per-frame cost would grow linearly with the
+/// block and quadratically over the stream.
+const REBASE_BYTES: usize = 24 * 1024;
 
 #[derive(Default)]
 pub struct FeedRenderCache {
@@ -39,6 +85,8 @@ pub struct FeedRenderCache {
     /// Blocks re-rendered by the last `update` (0 = everything was cached).
     /// Exposed for tests and diagnostics.
     pub last_rebuilt: usize,
+    /// Streaming state for the last block while it appends (issue #35).
+    streaming: Option<StreamingEntry>,
 }
 
 impl FeedRenderCache {
@@ -58,7 +106,9 @@ impl FeedRenderCache {
 
     /// Reconcile the cache with `feed` at `width`/`opts`, capped at `cap`
     /// lines. Only blocks after the first fingerprint mismatch are
-    /// re-rendered; a pure prefix match costs one fingerprint scan.
+    /// re-rendered; a pure prefix match costs one fingerprint scan. When the
+    /// LAST block is assistant/thinking and grows by pure append, a streaming
+    /// renderer extends it in O(delta + tail) instead of re-rendering it.
     pub fn update(&mut self, feed: &Feed, width: usize, opts: &FeedRenderOptions, cap: usize) {
         let width = width.max(1);
         let cap = cap.max(1);
@@ -71,29 +121,64 @@ impl FeedRenderCache {
         let mut first_dirty = 0;
         while first_dirty < blocks.len()
             && first_dirty < self.fingerprints.len()
-            && self.fingerprints[first_dirty]
-                == feed_render::block_fingerprint(&blocks[first_dirty])
+            && self.fingerprints[first_dirty] == block_fingerprint(&blocks[first_dirty])
         {
             first_dirty += 1;
         }
         self.last_rebuilt = blocks.len().saturating_sub(first_dirty);
 
-        // Cut the rendered suffix at the first dirty block (its range start
-        // includes the preceding separator, so the splice is clean).
+        // A shrunken feed (e.g. `/clear`) has nothing to rebuild but must
+        // still truncate: only return early when the block count is stable.
+        if self.last_rebuilt == 0 && blocks.len() == self.fingerprints.len() {
+            return;
+        }
+
+        // The dirty suffix starts at `cut` (the dirty block's range start,
+        // which includes the preceding separator, so splices are clean).
+        let cut = self
+            .block_ranges
+            .get(first_dirty)
+            .map(|range| range.start)
+            .unwrap_or(self.lines.len());
+
+        // Streaming fast path: exactly one dirty block (the last) that
+        // appends. `stream_block` owns the splice (it truncates to
+        // `cut + frozen_rows` itself, keeping the frozen prefix intact).
+        if blocks.len() == first_dirty + 1
+            && let Some(block) = blocks.last()
+            && let Some((streamable, text)) = streamable_block_text(block, opts)
+        {
+            let mut entry = self.streaming.take();
+            let resume = entry.as_ref().is_some_and(|entry| {
+                entry.block_index == first_dirty
+                    && entry.state.kind_matches(block)
+                    && entry.source.len() <= text.len()
+                    && text[..entry.source.len()] == entry.source
+            });
+            if !resume {
+                entry = Some(StreamingEntry {
+                    block_index: first_dirty,
+                    source: String::new(),
+                    rebase_source_len: 0,
+                    state: StreamState::new(block, opts, width),
+                });
+            }
+            if streamable
+                && let Some(entry) = entry
+                && text.len().saturating_sub(entry.rebase_source_len) < REBASE_BYTES
+            {
+                self.stream_block(first_dirty, cut, entry, block, text, width);
+                return;
+            }
+        }
+
+        // One-shot fallback: render the dirty suffix block by block.
+        self.streaming = None;
         if first_dirty < self.fingerprints.len() || blocks.len() != self.fingerprints.len() {
-            let cut = self
-                .block_ranges
-                .get(first_dirty)
-                .map(|range| range.start)
-                .unwrap_or(self.lines.len());
             self.lines.truncate(cut);
             self.block_ranges.truncate(first_dirty);
             self.fingerprints.truncate(first_dirty);
         }
-        if self.last_rebuilt == 0 {
-            return;
-        }
-
         let mut previous = first_dirty.checked_sub(1).map(|index| &blocks[index]);
         for block in blocks.iter().skip(first_dirty) {
             let range_start = self.lines.len();
@@ -103,8 +188,7 @@ impl FeedRenderCache {
             self.lines
                 .extend(feed_render::render_block(block, width, opts));
             self.block_ranges.push(range_start..self.lines.len());
-            self.fingerprints
-                .push(feed_render::block_fingerprint(block));
+            self.fingerprints.push(block_fingerprint(block));
             previous = Some(block);
         }
 
@@ -122,14 +206,202 @@ impl FeedRenderCache {
         }
     }
 
+    /// Streaming append for the last block: splice only the unfrozen tail.
+    fn stream_block(
+        &mut self,
+        block_index: usize,
+        cut: usize,
+        mut entry: StreamingEntry,
+        block: &Block,
+        text: &str,
+        width: usize,
+    ) {
+        let delta = &text[entry.source.len()..];
+        entry.source.push_str(delta);
+        match &mut entry.state {
+            StreamState::Markdown {
+                renderer,
+                frozen_lines,
+                frozen_cache_rows,
+            } => {
+                self.lines.truncate(cut + *frozen_cache_rows);
+                renderer.push_and_render(delta, Some(theway_markdown::default_syntect()));
+                let view = renderer.view();
+                // Process newly frozen lines exactly once.
+                let frozen_total = view.lines.len().min(renderer.frozen_lines_count());
+                for i in *frozen_lines..frozen_total {
+                    feed_render::push_rendered_markdown_line(
+                        &mut self.lines,
+                        i,
+                        view.lines[i].clone(),
+                        feed_render::AI_PREFIX,
+                        feed_render::AI_PREFIX_STYLE,
+                        width,
+                        view.code_blocks,
+                        view.hyperlinks,
+                    );
+                }
+                *frozen_lines = frozen_total;
+                *frozen_cache_rows = self.lines.len().saturating_sub(cut);
+                // Unfrozen tail re-processes every frame.
+                for i in frozen_total..view.lines.len() {
+                    feed_render::push_rendered_markdown_line(
+                        &mut self.lines,
+                        i,
+                        view.lines[i].clone(),
+                        feed_render::AI_PREFIX,
+                        feed_render::AI_PREFIX_STYLE,
+                        width,
+                        view.code_blocks,
+                        view.hyperlinks,
+                    );
+                }
+            }
+            StreamState::Thinking {
+                wrap,
+                mode,
+                completed_rows,
+                last_rows,
+                char_count,
+            } => {
+                wrap.push_str(delta);
+                let new_rows = std::mem::take(&mut wrap.rows);
+                *char_count += delta.chars().count();
+                for row in &new_rows {
+                    if last_rows.len() >= feed_render::THINKING_PEEK_LINES {
+                        last_rows.pop_front();
+                    }
+                    last_rows.push_back(row.clone());
+                }
+                let old_completed = *completed_rows;
+                *completed_rows = old_completed + new_rows.len();
+                match mode {
+                    ThinkingMode::Full => {
+                        // Completed rows stay; the partial tail row re-renders
+                        // every frame.
+                        self.lines.truncate(cut + old_completed);
+                        for row in &new_rows {
+                            self.lines.push(ratatui::text::Line::styled(
+                                row.clone(),
+                                feed_render::THINKING_STYLE,
+                            ));
+                        }
+                        self.lines.push(ratatui::text::Line::styled(
+                            wrap.tail.clone(),
+                            feed_render::THINKING_STYLE,
+                        ));
+                    }
+                    ThinkingMode::Peek => {
+                        // Rebuild the small peek window: header + last 3 rows.
+                        self.lines.truncate(cut);
+                        self.lines.push(ratatui::text::Line::styled(
+                            format!(
+                                "{}thinking · {} chars",
+                                feed_render::TOOL_PREFIX,
+                                *char_count
+                            ),
+                            feed_render::RESULT_SUMMARY_STYLE,
+                        ));
+                        let total_rows = *completed_rows + 1;
+                        let mut shown: Vec<&str> = last_rows.iter().map(String::as_str).collect();
+                        shown.push(wrap.tail.as_str());
+                        let start = shown.len().saturating_sub(feed_render::THINKING_PEEK_LINES);
+                        for row in &shown[start..] {
+                            self.lines.push(ratatui::text::Line::styled(
+                                format!("  {row}"),
+                                feed_render::THINKING_STYLE,
+                            ));
+                        }
+                        if total_rows > feed_render::THINKING_PEEK_LINES {
+                            self.lines.push(ratatui::text::Line::styled(
+                                "  … Ctrl+O cycles: hidden/peek/full",
+                                feed_render::RESULT_SUMMARY_STYLE,
+                            ));
+                        }
+                    }
+                    ThinkingMode::Hidden => {
+                        self.lines.truncate(cut);
+                    }
+                }
+            }
+        }
+        let end = self.lines.len();
+        if self.block_ranges.len() == block_index {
+            self.block_ranges.push(cut..end);
+            self.fingerprints.push(block_fingerprint(block));
+        } else {
+            self.block_ranges[block_index] = cut..end;
+            self.fingerprints[block_index] = block_fingerprint(block);
+        }
+        self.streaming = Some(entry);
+    }
+
     fn reset(&mut self, width: usize, opts: FeedRenderOptions, cap: usize) {
         self.lines.clear();
         self.block_ranges.clear();
         self.fingerprints.clear();
+        self.streaming = None;
         self.trimmed = 0;
         self.width = width;
         self.opts = opts;
         self.cap = cap;
+    }
+}
+
+impl StreamState {
+    fn kind_matches(&self, block: &Block) -> bool {
+        matches!(
+            (self, block),
+            (StreamState::Markdown { .. }, Block::Assistant { .. })
+                | (StreamState::Thinking { .. }, Block::Thinking { .. })
+        )
+    }
+
+    fn new(block: &Block, opts: &FeedRenderOptions, width: usize) -> Self {
+        match block {
+            Block::Assistant { .. } => {
+                let mut renderer = theway_markdown::StreamingMarkdownRenderer::new(
+                    feed_render::markdown_style(),
+                    true,
+                );
+                renderer.set_max_table_width(Some(width));
+                StreamState::Markdown {
+                    renderer,
+                    frozen_lines: 0,
+                    frozen_cache_rows: 0,
+                }
+            }
+            Block::Thinking { .. } => {
+                let mut wrap = feed_render::IncrementalWrap::new(width);
+                // The `⏵ ` prefix is part of the first wrapped row (matching
+                // the one-shot paragraph render).
+                wrap.push_str(feed_render::TOOL_PREFIX);
+                StreamState::Thinking {
+                    wrap,
+                    mode: opts.thinking_mode,
+                    completed_rows: 0,
+                    last_rows: std::collections::VecDeque::new(),
+                    char_count: 0,
+                }
+            }
+            _ => unreachable!("streaming state is only built for assistant/thinking blocks"),
+        }
+    }
+}
+
+/// Whether `block` takes the streaming path under `opts`, plus its text.
+/// Thinking blocks stream in Full/Peek mode; Hidden renders nothing.
+fn streamable_block_text<'a>(
+    block: &'a Block,
+    opts: &FeedRenderOptions,
+) -> Option<(bool, &'a str)> {
+    match block {
+        Block::Assistant { text, .. } => Some((true, text)),
+        Block::Thinking { text, .. } => {
+            let streamable = opts.thinking_mode != ThinkingMode::Hidden;
+            Some((streamable, text))
+        }
+        _ => None,
     }
 }
 
@@ -292,25 +564,224 @@ mod tests {
             text: "same".into(),
             timestamp: None,
         };
-        assert_eq!(
-            feed_render::block_fingerprint(&same_a),
-            feed_render::block_fingerprint(&same_b)
-        );
+        assert_eq!(block_fingerprint(&same_a), block_fingerprint(&same_b));
         let different = Block::Assistant {
             text: "other".into(),
             timestamp: None,
         };
-        assert_ne!(
-            feed_render::block_fingerprint(&same_a),
-            feed_render::block_fingerprint(&different)
-        );
+        assert_ne!(block_fingerprint(&same_a), block_fingerprint(&different));
         let user_block = Block::User {
             text: "same".into(),
             timestamp: None,
         };
-        assert_ne!(
-            feed_render::block_fingerprint(&same_a),
-            feed_render::block_fingerprint(&user_block)
-        );
+        assert_ne!(block_fingerprint(&same_a), block_fingerprint(&user_block));
+    }
+}
+
+#[cfg(test)]
+mod streaming_tests {
+    use super::*;
+    use crate::feed_render::FeedRenderOptions;
+    use theway_transport::feed::{Block, Feed, WireFeedBlock};
+
+    fn feed_from_blocks(blocks: &[Block]) -> Feed {
+        let wire: Vec<WireFeedBlock> = blocks
+            .iter()
+            .map(|block| match block {
+                Block::User { text, timestamp } => WireFeedBlock::User {
+                    text: text.clone(),
+                    timestamp: timestamp.clone(),
+                },
+                Block::Assistant { text, timestamp } => WireFeedBlock::Assistant {
+                    text: text.clone(),
+                    timestamp: timestamp.clone(),
+                },
+                Block::Thinking { text, timestamp } => WireFeedBlock::Thinking {
+                    text: text.clone(),
+                    timestamp: timestamp.clone(),
+                },
+                Block::Tool {
+                    name,
+                    args,
+                    timestamp,
+                } => WireFeedBlock::Tool {
+                    name: name.clone(),
+                    args: args.clone(),
+                    timestamp: timestamp.clone(),
+                },
+                Block::ToolResult {
+                    lines,
+                    is_error,
+                    timestamp,
+                    ..
+                } => WireFeedBlock::ToolResult {
+                    lines: lines.clone(),
+                    is_error: *is_error,
+                    timestamp: timestamp.clone(),
+                },
+                Block::Plain {
+                    text,
+                    level,
+                    timestamp,
+                } => WireFeedBlock::Plain {
+                    text: text.clone(),
+                    level: *level,
+                    timestamp: timestamp.clone(),
+                },
+            })
+            .collect();
+        let mut feed = Feed::new();
+        feed.replace_blocks(&wire);
+        feed
+    }
+
+    fn flat(lines: &[Line<'static>]) -> String {
+        lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    const CHUNKS: [&str; 6] = [
+        "# Heading\n\nSome **bold** text and a [link](https://example.com/x).\n",
+        "More prose that will eventually wrap across the width because it is quite long.\n",
+        "```rust\nfn main() {\n    println!(\"hi\");\n}\n```\n",
+        "- list item one\n- list item two\n",
+        "A | B\n---|---\n1 | 2\n",
+        "Final paragraph.\n",
+    ];
+
+    #[test]
+    fn streamed_assistant_matches_one_shot_render() {
+        // Reference: one-shot render of the whole text.
+        let full_text: String = CHUNKS.concat();
+        let reference_feed = feed_from_blocks(&[Block::Assistant {
+            text: full_text.clone(),
+            timestamp: None,
+        }]);
+        let reference = flat(&crate::feed_render::lines(
+            &reference_feed,
+            40,
+            &FeedRenderOptions::default(),
+        ));
+
+        // Streaming: append the chunks one by one through the cache.
+        let mut cache = FeedRenderCache::new();
+        let mut text = String::new();
+        for (i, chunk) in CHUNKS.iter().enumerate() {
+            text.push_str(chunk);
+            let feed = feed_from_blocks(&[Block::Assistant {
+                text: text.clone(),
+                timestamp: None,
+            }]);
+            cache.update(&feed, 40, &FeedRenderOptions::default(), 1000);
+            assert_eq!(cache.last_rebuilt, 1, "chunk {i} must stream");
+        }
+        assert_eq!(flat(cache.lines()), reference, "streamed != one-shot");
+    }
+
+    #[test]
+    fn streamed_thinking_matches_one_shot_in_full_mode() {
+        let text: String = "pondering the design\ndeeply, considering edge cases and tradeoffs that wrap over the width"
+            .into();
+        let reference_feed = feed_from_blocks(&[Block::Thinking {
+            text: text.clone(),
+            timestamp: None,
+        }]);
+        let reference = flat(&crate::feed_render::lines(
+            &reference_feed,
+            24,
+            &FeedRenderOptions::default(),
+        ));
+
+        let mut cache = FeedRenderCache::new();
+        for end in (0..text.len()).step_by(7).chain([text.len()]) {
+            let feed = feed_from_blocks(&[Block::Thinking {
+                text: text[..end].to_string(),
+                timestamp: None,
+            }]);
+            cache.update(&feed, 24, &FeedRenderOptions::default(), 1000);
+        }
+        assert_eq!(flat(cache.lines()), reference, "streamed != one-shot");
+    }
+
+    #[test]
+    fn streamed_thinking_peek_window_is_bounded() {
+        let mut cache = FeedRenderCache::new();
+        let opts = FeedRenderOptions {
+            thinking_mode: ThinkingMode::Peek,
+            tools_expanded: false,
+        };
+        let mut text = String::new();
+        for i in 0..50 {
+            text.push_str(&format!("line {i}\n"));
+            let feed = feed_from_blocks(&[Block::Thinking {
+                text: text.clone(),
+                timestamp: None,
+            }]);
+            cache.update(&feed, 40, &opts, 1000);
+        }
+        let rendered = flat(cache.lines());
+        // Header + at most THINKING_PEEK_LINES rows + hint.
+        assert!(rendered.contains("⏵ thinking ·"), "{rendered}");
+        assert!(rendered.contains("line 49"), "{rendered}");
+        assert!(!rendered.contains("line 0\n"), "{rendered}");
+        assert!(rendered.contains("Ctrl+O cycles"), "{rendered}");
+        assert!(cache.lines().len() <= 1 + feed_render::THINKING_PEEK_LINES + 1);
+    }
+
+    #[test]
+    fn mid_edit_falls_back_to_one_shot() {
+        let mut cache = FeedRenderCache::new();
+        let feed = feed_from_blocks(&[Block::Assistant {
+            text: "streaming content".into(),
+            timestamp: None,
+        }]);
+        cache.update(&feed, 80, &FeedRenderOptions::default(), 1000);
+        // Backfill replaces the text (not an append): one-shot fallback.
+        let feed = feed_from_blocks(&[Block::Assistant {
+            text: "REPLACED summary".into(),
+            timestamp: None,
+        }]);
+        cache.update(&feed, 80, &FeedRenderOptions::default(), 1000);
+        assert_eq!(cache.last_rebuilt, 1);
+        let rendered = flat(cache.lines());
+        assert!(rendered.contains("REPLACED summary"), "{rendered}");
+        assert!(!rendered.contains("streaming content"), "{rendered}");
+    }
+
+    #[test]
+    fn new_block_after_streamed_block_finalizes() {
+        let mut cache = FeedRenderCache::new();
+        let blocks = vec![Block::Assistant {
+            text: "answer text".into(),
+            timestamp: None,
+        }];
+        let feed = feed_from_blocks(&blocks);
+        cache.update(&feed, 80, &FeedRenderOptions::default(), 1000);
+        // Append a tool block: the assistant block is now frozen history.
+        let blocks = vec![
+            Block::Assistant {
+                text: "answer text".into(),
+                timestamp: None,
+            },
+            Block::Tool {
+                name: "read".into(),
+                args: "(path=\"x\")".into(),
+                timestamp: None,
+            },
+        ];
+        let feed = feed_from_blocks(&blocks);
+        cache.update(&feed, 80, &FeedRenderOptions::default(), 1000);
+        assert_eq!(cache.last_rebuilt, 1);
+        let rendered = flat(cache.lines());
+        assert!(rendered.contains("answer text"), "{rendered}");
+        assert!(rendered.contains("⏵ read"), "{rendered}");
     }
 }

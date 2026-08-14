@@ -1214,12 +1214,16 @@ impl App {
             while let Some(frame) = stream.next().await {
                 let Ok(frame) = frame else { continue };
                 if let Some(stream_frame::Payload::Snapshot(state)) = frame.payload {
+                    // Issue #35: snapshots carry only rows appended since the
+                    // last publish; `feed_lines_base` anchors their absolute
+                    // index in the transcript.
+                    let base = state.feed_lines_base as usize;
                     let lines = state.feed_lines;
-                    if lines.len() > printed {
-                        for line in &lines[printed..] {
+                    if base + lines.len() > printed {
+                        for line in &lines[printed.saturating_sub(base)..] {
                             println!("{line}");
                         }
-                        printed = lines.len();
+                        printed = base + lines.len();
                         let _ = std::io::stdout().flush();
                     }
                 }

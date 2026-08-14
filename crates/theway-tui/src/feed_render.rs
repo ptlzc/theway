@@ -17,22 +17,22 @@ const ACCENT_TOOL: Color = Color::Rgb(115, 122, 162); // DARK5 — tool name
 const TEXT_PRIMARY: Color = Color::Rgb(192, 202, 245); // FG — body text
 const BG_HIGHLIGHT: Color = Color::Rgb(41, 46, 66); // BG_HIGHLIGHT — user band / selection
 
-const USER_PREFIX: &str = "\u{276F} "; // ❯ (2 cols, grok prompt_arrow)
-const AI_PREFIX: &str = "ai \u{25b8} "; // ai ▸
-const TOOL_PREFIX: &str = "\u{23f5} "; // ⏵
+pub(crate) const USER_PREFIX: &str = "\u{276F} "; // ❯ (2 cols, grok prompt_arrow)
+pub(crate) const AI_PREFIX: &str = "ai \u{25b8} "; // ai ▸
+pub(crate) const TOOL_PREFIX: &str = "\u{23f5} "; // ⏵
 const USER_BAND_INDENT: &str = "  ";
 
 const USER_STYLE: Style = Style::new().fg(ACCENT_USER).add_modifier(Modifier::BOLD);
-const THINKING_STYLE: Style = Style::new()
+pub(crate) const THINKING_STYLE: Style = Style::new()
     .fg(Color::DarkGray)
     .add_modifier(Modifier::ITALIC);
 const USER_BODY_STYLE: Style = Style::new().fg(TEXT_PRIMARY);
-const AI_PREFIX_STYLE: Style = Style::new()
+pub(crate) const AI_PREFIX_STYLE: Style = Style::new()
     .fg(ACCENT_ASSISTANT)
     .add_modifier(Modifier::BOLD);
 const TOOL_NAME_STYLE: Style = Style::new().fg(ACCENT_TOOL).add_modifier(Modifier::BOLD);
 const TOOL_ARGS_STYLE: Style = Style::new().fg(Color::DarkGray);
-const RESULT_SUMMARY_STYLE: Style = Style::new().fg(Color::DarkGray);
+pub(crate) const RESULT_SUMMARY_STYLE: Style = Style::new().fg(Color::DarkGray);
 const BAND_STYLE: Style = Style::new().bg(BG_HIGHLIGHT);
 
 /// How `Block::Thinking` renders in the feed (Ctrl+O cycles).
@@ -56,7 +56,7 @@ pub struct FeedRenderOptions {
 }
 
 /// Lines shown in the thinking peek window.
-const THINKING_PEEK_LINES: usize = 3;
+pub(crate) const THINKING_PEEK_LINES: usize = 3;
 
 pub fn style_for_level(level: Level) -> Style {
     match level {
@@ -108,7 +108,7 @@ pub fn push_paragraphs(
 /// are then adapted to the terminal's color capabilities via [`adapt`].
 ///
 /// [`adapt`]: theway_markdown::MarkdownStyle::adapt
-fn markdown_style() -> theway_markdown::MarkdownStyle {
+pub(crate) fn markdown_style() -> theway_markdown::MarkdownStyle {
     use anstyle::Style as AStyle;
     theway_markdown::MarkdownStyle {
         heading_inner: [AStyle::new().bold(); 6],
@@ -251,99 +251,120 @@ pub fn push_markdown(
         Some(width),
     );
     let width = width.max(1);
-    let prefix_width = unicode_width::UnicodeWidthStr::width(prefix);
-
-    let mut mapped: Vec<MappedLine> = Vec::with_capacity(rendered.lines.len());
     for (i, line) in rendered.lines.into_iter().enumerate() {
-        let first = i == 0;
-        let in_code = rendered
-            .code_blocks
-            .iter()
-            .any(|cb| cb.output_line_range.contains(&i));
-        let keep = in_code || is_table_line(&line);
-
-        let line_text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        let source = if first {
-            format!("{prefix}{line_text}")
-        } else {
-            line_text
-        };
-
-        if keep || unicode_width::UnicodeWidthStr::width(source.as_str()) <= width {
-            let mut line = line;
-            if first {
-                line.spans
-                    .insert(0, Span::styled(prefix.to_string(), prefix_style));
-            }
-            mapped.push(MappedLine {
-                start: out.len(),
-                source: None,
-                rows: Vec::new(),
-            });
-            out.push(line);
-        } else {
-            // Re-wrap the line with `wrap_str` semantics but re-apply each
-            // span's style through the row byte ranges, so inline styles
-            // (bold/italic/code/link) survive the wrap instead of degrading
-            // to a single base style.
-            let prefix_len = if first { prefix.len() } else { 0 };
-            let mut pieces: Vec<(std::ops::Range<usize>, Style)> =
-                Vec::with_capacity(line.spans.len() + 1);
-            if first {
-                pieces.push((0..prefix_len, prefix_style));
-            }
-            let mut offset = prefix_len;
-            for span in &line.spans {
-                let end = offset + span.content.len();
-                pieces.push((offset..end, span.style));
-                offset = end;
-            }
-            let rows = wrap_str_ranges(&source, width);
-            let start = out.len();
-            for row in &rows {
-                let mut spans: Vec<Span<'static>> = Vec::new();
-                for (range, style) in &pieces {
-                    let overlap = range.start.max(row.range.start)..range.end.min(row.range.end);
-                    if overlap.start < overlap.end {
-                        spans.push(Span::styled(source[overlap].to_string(), *style));
-                    }
-                }
-                out.push(Line::from(spans));
-            }
-            mapped.push(MappedLine {
-                start,
-                source: Some(source),
-                rows,
-            });
-        }
+        push_rendered_markdown_line(
+            out,
+            i,
+            line,
+            prefix,
+            prefix_style,
+            width,
+            &rendered.code_blocks,
+            &rendered.hyperlinks,
+        );
     }
+}
 
-    // Underline hyperlinks on the final rows: the renderer reports each link
-    // as (pre-wrap line index, display-column range), which maps directly
-    // onto verbatim rows and through the byte ranges onto wrapped rows.
-    for link in &rendered.hyperlinks {
-        let Some(mapped_line) = mapped.get(link.line_index) else {
-            continue;
-        };
-        let shift = if link.line_index == 0 {
-            prefix_width
-        } else {
-            0
-        };
+/// Process ONE rendered markdown line into width-wrapped, prefixed, underlined
+/// `ratatui` lines. Shared by the one-shot [`push_markdown`] path and the
+/// streaming tail renderer (`feed_cache`): frozen lines are processed exactly
+/// once, unfrozen tail lines once per frame.
+pub(crate) fn push_rendered_markdown_line(
+    out: &mut Vec<Line<'static>>,
+    line_index: usize,
+    line: Line<'static>,
+    prefix: &str,
+    prefix_style: Style,
+    width: usize,
+    code_blocks: &[theway_markdown::CodeBlockSpan],
+    hyperlinks: &[theway_markdown::HyperlinkTarget],
+) {
+    let width = width.max(1);
+    let first = line_index == 0;
+    let in_code = code_blocks
+        .iter()
+        .any(|cb| cb.output_line_range.contains(&line_index));
+    let keep = in_code || is_table_line(&line);
+
+    let line_text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+    let source = if first {
+        format!("{prefix}{line_text}")
+    } else {
+        line_text
+    };
+
+    let mapped = if keep || unicode_width::UnicodeWidthStr::width(source.as_str()) <= width {
+        let mut line = line;
+        if first {
+            line.spans
+                .insert(0, Span::styled(prefix.to_string(), prefix_style));
+        }
+        let start = out.len();
+        out.push(line);
+        MappedLine {
+            start,
+            source: None,
+            rows: Vec::new(),
+        }
+    } else {
+        // Re-wrap the line with `wrap_str` semantics but re-apply each
+        // span's style through the row byte ranges, so inline styles
+        // (bold/italic/code/link) survive the wrap instead of degrading
+        // to a single base style.
+        let prefix_len = if first { prefix.len() } else { 0 };
+        let mut pieces: Vec<(std::ops::Range<usize>, Style)> =
+            Vec::with_capacity(line.spans.len() + 1);
+        if first {
+            pieces.push((0..prefix_len, prefix_style));
+        }
+        let mut offset = prefix_len;
+        for span in &line.spans {
+            let end = offset + span.content.len();
+            pieces.push((offset..end, span.style));
+            offset = end;
+        }
+        let rows = wrap_str_ranges(&source, width);
+        let start = out.len();
+        for row in &rows {
+            let mut spans: Vec<Span<'static>> = Vec::new();
+            for (range, style) in &pieces {
+                let overlap = range.start.max(row.range.start)..range.end.min(row.range.end);
+                if overlap.start < overlap.end {
+                    spans.push(Span::styled(source[overlap].to_string(), *style));
+                }
+            }
+            out.push(Line::from(spans));
+        }
+        MappedLine {
+            start,
+            source: Some(source),
+            rows,
+        }
+    };
+
+    // Underline hyperlinks on this line: the renderer reports each link as
+    // (pre-wrap line index, display-column range), which maps directly onto
+    // verbatim rows and through the byte ranges onto wrapped rows.
+    let prefix_width = unicode_width::UnicodeWidthStr::width(prefix);
+    for link in hyperlinks
+        .iter()
+        .filter(|link| link.line_index == line_index)
+    {
+        let shift = if first { prefix_width } else { 0 };
         let start_col = link.column_range.start + shift;
         let end_col = link.column_range.end + shift;
-        match &mapped_line.source {
+        match &mapped.source {
             Some(source) => {
                 let byte_start =
                     theway_pager_render::line_utils::byte_offset_at_width(source, start_col);
                 let byte_end =
                     theway_pager_render::line_utils::byte_offset_at_width(source, end_col);
-                for (j, row) in mapped_line.rows.iter().enumerate() {
+                for (j, row) in mapped.rows.iter().enumerate() {
                     let overlap = byte_start.max(row.range.start)..byte_end.min(row.range.end);
                     if overlap.start >= overlap.end {
                         continue;
                     }
-                    let row_idx = mapped_line.start + j;
+                    let row_idx = mapped.start + j;
                     let row_start_width =
                         unicode_width::UnicodeWidthStr::width(&source[..row.range.start]);
                     let c0 = unicode_width::UnicodeWidthStr::width(&source[..overlap.start])
@@ -353,7 +374,7 @@ pub fn push_markdown(
                     underline_range(&mut out[row_idx], c0, c1);
                 }
             }
-            None => underline_range(&mut out[mapped_line.start], start_col, end_col),
+            None => underline_range(&mut out[mapped.start], start_col, end_col),
         }
     }
 }
@@ -473,71 +494,6 @@ pub(crate) fn render_block(
     }
     underline_links(&mut out, &assistant_rows);
     out
-}
-
-/// Content fingerprint of one feed block (fnv-1a over kind + fields). Two
-/// blocks with identical fingerprints render identically for the same
-/// width/options, so the render cache reuses their rendered lines.
-pub(crate) fn block_fingerprint(block: &Block) -> u64 {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    let mut mix = |bytes: &[u8]| {
-        for &byte in bytes {
-            hash ^= u64::from(byte);
-            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-        }
-    };
-    match block {
-        Block::User { text, timestamp } => {
-            mix(b"user\x00");
-            mix(text.as_bytes());
-            mix(timestamp.as_deref().unwrap_or("").as_bytes());
-        }
-        Block::Assistant { text, timestamp } => {
-            mix(b"assistant\x00");
-            mix(text.as_bytes());
-            mix(timestamp.as_deref().unwrap_or("").as_bytes());
-        }
-        Block::Thinking { text, timestamp } => {
-            mix(b"thinking\x00");
-            mix(text.as_bytes());
-            mix(timestamp.as_deref().unwrap_or("").as_bytes());
-        }
-        Block::Tool {
-            name,
-            args,
-            timestamp,
-        } => {
-            mix(b"tool\x00");
-            mix(name.as_bytes());
-            mix(args.as_bytes());
-            mix(timestamp.as_deref().unwrap_or("").as_bytes());
-        }
-        Block::ToolResult {
-            lines,
-            is_error,
-            timestamp,
-            ..
-        } => {
-            mix(b"toolresult\x00");
-            mix(if *is_error { b"1" } else { b"0" });
-            for line in lines {
-                mix(line.as_bytes());
-                mix(b"\x00");
-            }
-            mix(timestamp.as_deref().unwrap_or("").as_bytes());
-        }
-        Block::Plain {
-            text,
-            level,
-            timestamp,
-        } => {
-            mix(b"plain\x00");
-            mix(format!("{level:?}").as_bytes());
-            mix(text.as_bytes());
-            mix(timestamp.as_deref().unwrap_or("").as_bytes());
-        }
-    }
-    hash
 }
 
 /// Draw pre-wrapped lines into the visible window only (O(viewport)) — the
@@ -675,6 +631,54 @@ fn push_thinking_peek(out: &mut Vec<Line<'static>>, text: &str, width: usize) {
             "  … Ctrl+O cycles: hidden/peek/full",
             RESULT_SUMMARY_STYLE,
         ));
+    }
+}
+
+/// Stateful, width-aware incremental wrapper with the exact `wrap_str`
+/// semantics (break at last space, hard-break overlong words, preserve
+/// leading whitespace) applied across arbitrary chunk boundaries (issue #35).
+///
+/// `push_str` feeds appended text and moves COMPLETE rows into `rows`; the
+/// current partial row stays in `tail`. A `\n` always terminates the current
+/// row (empty paragraphs yield an empty row, matching `push_paragraphs`).
+pub(crate) struct IncrementalWrap {
+    width: usize,
+    /// Current partial row (the live tail line).
+    pub(crate) tail: String,
+    /// Complete rows flushed so far.
+    pub rows: Vec<String>,
+}
+
+impl IncrementalWrap {
+    pub fn new(width: usize) -> Self {
+        Self {
+            width: width.max(1),
+            tail: String::new(),
+            rows: Vec::new(),
+        }
+    }
+
+    /// Append text; flushes every row completed by the append.
+    pub fn push_str(&mut self, delta: &str) {
+        for ch in delta.chars() {
+            if ch == '\n' {
+                self.rows.push(std::mem::take(&mut self.tail));
+                continue;
+            }
+            let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+            let cur_w = unicode_width::UnicodeWidthStr::width(self.tail.as_str());
+            if cur_w + cw > self.width && !self.tail.is_empty() {
+                if let Some(bp) = self.tail.rfind(' ') {
+                    let rest = self.tail.split_off(bp);
+                    let rest = rest.trim_start_matches(' ').to_string();
+                    self.rows.push(self.tail.trim_end().to_string());
+                    self.tail = rest;
+                } else {
+                    self.rows.push(std::mem::take(&mut self.tail));
+                }
+            }
+            self.tail.push(ch);
+        }
     }
 }
 
@@ -995,6 +999,55 @@ mod tests {
                     .map(|row| text[row.range].to_string())
                     .collect();
                 assert_eq!(got, expected, "text={text:?} width={width}");
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod wrap_property_tests {
+    use super::IncrementalWrap;
+    use theway_transport::feed::wrap_str;
+
+    #[test]
+    fn incremental_wrap_matches_wrap_str_across_chunk_boundaries() {
+        let texts = [
+            "hello world",
+            "aa bb cc dd ee ff",
+            "  leading spaces preserved",
+            "mix of 中文 and ascii text",
+            "one\ntwo\n\nfour",
+            "",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ];
+        // Long repeating-word text constructed dynamically.
+        let long_words = "word ".repeat(30);
+        let texts = texts
+            .into_iter()
+            .chain(std::iter::once(long_words.as_str()))
+            .collect::<Vec<_>>();
+        for text in texts {
+            for width in [1usize, 3, 6, 12, 20] {
+                let expected: Vec<String> = text
+                    .split('\n')
+                    .flat_map(|para| wrap_str(para, width))
+                    .collect();
+                // Push in 1-, 2- and 3-char chunks; every boundary must agree.
+                for step in [1usize, 2, 3] {
+                    let mut wrap = IncrementalWrap::new(width);
+                    let mut offset = 0;
+                    while offset < text.len() {
+                        let mut end = (offset + step).min(text.len());
+                        while end < text.len() && !text.is_char_boundary(end) {
+                            end += 1;
+                        }
+                        wrap.push_str(&text[offset..end]);
+                        offset = end;
+                    }
+                    let mut got = wrap.rows;
+                    got.push(wrap.tail.clone());
+                    assert_eq!(got, expected, "text={text:?} width={width} step={step}");
+                }
             }
         }
     }
