@@ -281,3 +281,116 @@ async fn delete_removes_session_sidecars() {
     assert!(!trigger_path.exists());
     assert!(!cron_path.exists());
 }
+
+// ── fork + tree-shaped history (pi parity, issue #29) ──────────────────────────────────
+
+fn entry(id: &str, parent_id: Option<&str>, preview: &str) -> SessionEntry {
+    SessionEntry {
+        path: PathBuf::from(format!("/sessions/{id}.db")),
+        id: id.into(),
+        created_at: format!("2026-08-14T10:{id:0>2}:00Z"),
+        preview: Some(preview.into()),
+        automation: AutomationCounts::default(),
+        parent_id: parent_id.map(str::to_string),
+    }
+}
+
+#[test]
+fn flatten_session_tree_nests_forks_with_pi_prefixes() {
+    // a, b roots; c forked from a; d forked from a; e forked from c (fork of a fork).
+    let entries = vec![
+        entry("a", None, "root a"),
+        entry("b", None, "root b"),
+        entry("c", Some("a"), "fork of a"),
+        entry("d", Some("a"), "fork of a again"),
+        entry("e", Some("c"), "fork of c"),
+    ];
+    let rows = flatten_session_tree(&entries);
+    let prefixes: Vec<&str> = rows.iter().map(|r| r.prefix.as_str()).collect();
+    // pi /tree style: every ancestor level keeps its own continuation column
+    // ("│ " while more children follow, "  " after), then the row's connector.
+    assert_eq!(
+        prefixes,
+        vec!["", "", "│ ├─ ", "  └─ ", "    └─ "],
+        "c: a still has d below → │ + ├─; d: closes a → └─; e: a and c both closed → └─"
+    );
+    assert_eq!(rows[4].depth, 2);
+    assert_eq!(rows[0].depth, 0);
+
+    // Roots keep flat order and stay at depth 0.
+    assert_eq!(rows[1].id, "b");
+}
+
+#[test]
+fn flatten_session_tree_breaks_parent_cycles() {
+    let entries = vec![entry("a", Some("a"), "self-parent"), entry("b", None, "root")];
+    let rows = flatten_session_tree(&entries);
+    assert_eq!(rows[0].prefix, "", "cyclic parent must not recurse");
+    assert_eq!(rows[0].depth, 0);
+    assert_eq!(rows[1].depth, 0);
+}
+
+#[tokio::test]
+async fn fork_session_replays_entries_and_records_parent_lineage() {
+    let dir = tempdir().unwrap();
+    let repo = SqliteSessionRepo::new(dir.path());
+    let parent = repo.create("/cwd").await.unwrap();
+    let parent_meta = parent.storage().get_metadata_json().await.unwrap();
+    let parent_path = PathBuf::from(parent_meta["path"].as_str().unwrap());
+    let parent_id = parent_meta["id"].as_str().unwrap().to_string();
+
+    // Two-entry parent chain: u1 (root) -> c1.
+    let u1 = theway_core::SessionTreeEntry::Custom {
+        id: "u1".into(),
+        parent_id: None,
+        timestamp: "2026-08-14T10:00:00Z".into(),
+        custom_type: "test".into(),
+        data: None,
+    };
+    let c1 = theway_core::SessionTreeEntry::Custom {
+        id: "c1".into(),
+        parent_id: Some("u1".into()),
+        timestamp: "2026-08-14T10:01:00Z".into(),
+        custom_type: "test".into(),
+        data: None,
+    };
+    parent.storage().append_entry(u1.clone()).await.unwrap();
+    parent.storage().append_entry(c1.clone()).await.unwrap();
+
+    // Fork before c1: the new session must contain exactly [u1].
+    let fork = fork_session(&repo, std::path::Path::new("/cwd"), &parent, vec![u1.clone()])
+        .await
+        .unwrap();
+    let fork_meta = fork.storage().get_metadata_json().await.unwrap();
+    let fork_path = PathBuf::from(fork_meta["path"].as_str().unwrap());
+    assert_ne!(fork_path, parent_path, "fork must be a new file");
+    assert_eq!(
+        fork_meta["parentSessionPath"].as_str().unwrap(),
+        parent_path.to_str().unwrap()
+    );
+
+    let fork_entries = fork.storage().get_entries().await.unwrap();
+    assert_eq!(fork_entries.len(), 1);
+    assert_eq!(fork_entries[0].id(), "u1");
+    assert_eq!(fork_entries[0].parent_id(), None);
+
+    // Continue from the fork point: the next entry chains onto the replayed leaf (u1).
+    let new_msg = theway_core::SessionTreeEntry::Custom {
+        id: "c2".into(),
+        parent_id: Some("u1".into()),
+        timestamp: "2026-08-14T10:02:00Z".into(),
+        custom_type: "test".into(),
+        data: None,
+    };
+    fork.storage().append_entry(new_msg).await.unwrap();
+    let leaf = fork.storage().get_leaf_id().await.unwrap();
+    assert_eq!(leaf.as_deref(), Some("c2"));
+
+    // list_entries resolves the lineage for the tree display.
+    let listed = list_entries(&repo).await.unwrap();
+    assert_eq!(listed.len(), 2);
+    let fork_entry = listed.iter().find(|e| e.id != parent_id).unwrap();
+    assert_eq!(fork_entry.parent_id.as_deref(), Some(parent_id.as_str()));
+    let parent_entry = listed.iter().find(|e| e.id == parent_id).unwrap();
+    assert_eq!(parent_entry.parent_id, None);
+}

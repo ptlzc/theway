@@ -218,19 +218,22 @@ pub(crate) async fn list_sessions_cmd(repo: &SqliteSessionRepo) -> Result<()> {
         println!("(no sessions for this cwd)");
         return Ok(());
     }
-    println!("sessions in {}:", repo.root().display());
-    for e in entries {
-        let preview = e.preview.as_deref().unwrap_or("");
-        let badge = e
+    println!(
+        "sessions in {} (tree — forks nested under their parent):",
+        repo.root().display()
+    );
+    for row in session::flatten_session_tree(&entries) {
+        let preview = row.preview.as_deref().unwrap_or("(empty)");
+        let badge = row
             .automation
             .badge()
             .map(|b| format!("  [{b}]"))
             .unwrap_or_default();
         println!(
-            "  {}  {}{}  {}",
-            &e.id[..16.min(e.id.len())],
-            e.created_at,
-            badge,
+            "  {}{}  {}{badge}  {}",
+            row.prefix,
+            &row.id[..16.min(row.id.len())],
+            row.created_at,
             preview
         );
     }
@@ -300,7 +303,7 @@ pub(crate) async fn select_resume_session(
     repo: &SqliteSessionRepo,
     cwd: &std::path::Path,
 ) -> Result<(theway_core::Session, bool)> {
-    let mut entries = session::list_entries(repo).await?;
+    let entries = session::list_entries(repo).await?;
     if entries.is_empty() {
         anyhow::bail!("no sessions to resume in {}", repo.root().display());
     }
@@ -311,15 +314,17 @@ pub(crate) async fn select_resume_session(
         );
     }
 
-    entries.reverse(); // newest first — index 0 in the picker is the latest session
-    let rows: Vec<resume_picker::PickerRow> = entries
+    // Chronological tree order (oldest → newest, forks nested under parents).
+    let tree = session::flatten_session_tree(&entries);
+    let rows: Vec<resume_picker::PickerRow> = tree
         .iter()
-        .map(|entry| resume_picker::PickerRow {
-            id_short: entry.id.chars().take(16).collect(),
+        .map(|row| resume_picker::PickerRow {
+            id_short: row.id.chars().take(16).collect(),
             // RFC3339 with sub-second precision is noise in a menu; minutes are enough.
-            created_at: entry.created_at.chars().take(16).collect(),
-            badge: entry.automation.badge(),
-            preview: entry.preview.clone().unwrap_or_default(),
+            created_at: row.created_at.chars().take(16).collect(),
+            badge: row.automation.badge(),
+            preview: row.preview.clone().unwrap_or_default(),
+            prefix: row.prefix.clone(),
         })
         .collect();
     let choice = tokio::task::spawn_blocking(move || resume_picker::pick_blocking(&rows))
@@ -328,7 +333,7 @@ pub(crate) async fn select_resume_session(
     match choice {
         resume_picker::PickerChoice::Clean => Ok((session::create(repo, cwd).await?, false)),
         resume_picker::PickerChoice::Resume(selected) => {
-            Ok((repo.open(&entries[selected].path).await?, true))
+            Ok((repo.open(&tree[selected].path).await?, true))
         }
         resume_picker::PickerChoice::Cancelled => anyhow::bail!("resume selection cancelled"),
     }

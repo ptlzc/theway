@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use crate::sqlite_repo::SqliteSessionRepo;
 use anyhow::{Context, Result, bail};
-use theway_core::Session;
+use theway_core::{Session, SessionStorage};
 
 use theway_transport::config::sessions_dir_for_cwd;
 
@@ -18,6 +18,9 @@ pub struct SessionEntry {
     pub created_at: String,
     pub preview: Option<String>,
     pub automation: AutomationCounts,
+    /// Parent session id for forks (`parentSessionPath` metadata resolved to the
+    /// parent's id). `None` for root sessions.
+    pub parent_id: Option<String>,
 }
 
 pub async fn open_repo(cwd: &std::path::Path) -> SqliteSessionRepo {
@@ -99,11 +102,43 @@ pub async fn resume(repo: &SqliteSessionRepo, explicit_id: Option<&str>) -> Resu
 }
 
 /// List sessions for this cwd, oldest → newest, with a short preview from the first user
-/// message when available.
+/// message when available. `parent_id` is resolved from each session's `parentSessionPath`
+/// metadata (fork lineage).
 pub async fn list_entries(repo: &SqliteSessionRepo) -> Result<Vec<SessionEntry>> {
-    let mut out = Vec::new();
+    struct Raw {
+        path: PathBuf,
+        id: String,
+        created_at: String,
+        preview: Option<String>,
+        automation: AutomationCounts,
+        parent_path: Option<String>,
+    }
+    let mut raw: Vec<Raw> = Vec::new();
     for path in repo.list().await? {
-        let session = repo.open(&path).await?;
+        // The daemon holds an exclusive libsql lock on its live session db, so
+        // a cross-process listing (CLI `--list-sessions`, the resume picker
+        // while a daemon runs) cannot open it. Degrade that one row instead of
+        // failing the whole listing: file stem is the session id, the rest of
+        // the fields stay blank until the daemon releases the lock.
+        let session = match repo.open(&path).await {
+            Ok(s) => s,
+            Err(_) => {
+                let stem = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("?")
+                    .to_string();
+                raw.push(Raw {
+                    path: path.clone(),
+                    id: stem,
+                    created_at: "?".into(),
+                    preview: None,
+                    automation: automation_counts(&path).await,
+                    parent_path: None,
+                });
+                continue;
+            }
+        };
         let meta = session.storage().get_metadata_json().await?;
         let id = meta
             .get("id")
@@ -115,17 +150,215 @@ pub async fn list_entries(repo: &SqliteSessionRepo) -> Result<Vec<SessionEntry>>
             .and_then(|v| v.as_str())
             .unwrap_or("?")
             .to_string();
+        let parent_path = meta
+            .get("parentSessionPath")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
         let preview = first_user_text(&session).await;
         let automation = automation_counts(&path).await;
-        out.push(SessionEntry {
+        raw.push(Raw {
             path,
             id,
             created_at,
             preview,
             automation,
+            parent_path,
         });
     }
-    Ok(out)
+    // Resolve parent *paths* to parent *ids* (fork lineage for the tree display).
+    let path_to_id: std::collections::HashMap<String, String> = raw
+        .iter()
+        .map(|r| (r.path.to_string_lossy().into_owned(), r.id.clone()))
+        .collect();
+    Ok(raw
+        .into_iter()
+        .map(|r| SessionEntry {
+            parent_id: r
+                .parent_path
+                .as_deref()
+                .and_then(|p| path_to_id.get(p))
+                .cloned(),
+            path: r.path,
+            id: r.id,
+            created_at: r.created_at,
+            preview: r.preview,
+            automation: r.automation,
+        })
+        .collect())
+}
+
+/// Fork a session pi-style: create a brand-new session database whose transcript is the
+/// given `entries` (a path-to-root chain ending just before the fork point, as produced by
+/// `get_entries_to_fork`), and record the parent via `parentSessionPath`.
+///
+/// Entry ids and their `parentId` chain are preserved verbatim, so the fork replays the
+/// parent's history up to the fork point. `current_leaf` in the new database resolves to
+/// the last replayed entry, so the next appended message continues from the fork point.
+pub async fn fork_session(
+    repo: &SqliteSessionRepo,
+    cwd: &std::path::Path,
+    parent: &Session,
+    entries: Vec<theway_core::SessionTreeEntry>,
+) -> Result<Session> {
+    let parent_meta = parent.storage().get_metadata_json().await?;
+    let parent_path = parent_meta
+        .get("path")
+        .and_then(|v| v.as_str())
+        .map(std::path::PathBuf::from)
+        .with_context(|| "parent session has no recorded path")?;
+    let parent_id = parent_meta
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?")
+        .to_string();
+
+    tokio::fs::create_dir_all(repo.root())
+        .await
+        .with_context(|| format!("create {}", repo.root().display()))?;
+    let file = repo
+        .root()
+        .join(format!("{}.db", theway_core::create_session_id()));
+    let storage = crate::sqlite_storage::SqliteSessionStorage::create(
+        &file,
+        cwd.to_string_lossy().to_string(),
+    )
+    .await?;
+    for entry in &entries {
+        storage.append_entry(entry.clone()).await?;
+    }
+    storage.set_parent_session_path(&parent_path).await?;
+    storage
+        .checkpoint()
+        .await
+        .with_context(|| format!("checkpoint {}", file.display()))?;
+    let session = Session::new(
+        std::sync::Arc::new(storage) as std::sync::Arc<dyn theway_core::SessionStorage>
+    );
+    // Validate the replay the same way archive import does.
+    session
+        .build_context()
+        .await
+        .with_context(|| format!("validate forked session (forked from {parent_id})"))?;
+    Ok(session)
+}
+
+// ── tree-shaped history (pi parity) ────────────────────────────────────────────────────
+
+/// One row of the flattened session tree: display fields plus the pi-style prefix
+/// (`├─ `/`└─ `/`│ ` continuation) that nests forked children under their parents.
+pub struct SessionTreeRow {
+    pub path: PathBuf,
+    pub id: String,
+    pub created_at: String,
+    pub preview: Option<String>,
+    pub automation: AutomationCounts,
+    /// Depth in the fork tree; 0 = root session.
+    pub depth: u16,
+    /// Tree prefix (empty for roots): continuation bars + `├─ `/`└─ ` connector.
+    pub prefix: String,
+}
+
+/// Flatten `entries` (chronological, oldest → newest) into tree-display order with pi-style
+/// prefixes. Forks appear nested directly under their parent session, so the tree reads
+/// top-down as the fork history grows. Entries with a dangling or cyclic parent are kept
+/// at root level rather than dropped.
+pub fn flatten_session_tree(entries: &[SessionEntry]) -> Vec<SessionTreeRow> {
+    // Direct children of each session id, in list order (oldest → newest).
+    let mut children: std::collections::HashMap<String, Vec<usize>> =
+        std::collections::HashMap::new();
+    for (i, e) in entries.iter().enumerate() {
+        if let Some(parent) = &e.parent_id {
+            children.entry(parent.clone()).or_default().push(i);
+        }
+    }
+
+    // Ancestor chain (ids, deepest last) for a row, with cycle protection. A
+    // self-parent (or any chain that reaches the row itself) is treated as a root.
+    let ancestors = |i: usize| -> Vec<String> {
+        let mut chain = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut cur = entries[i].parent_id.clone();
+        while let Some(id) = cur {
+            if id == entries[i].id || !seen.insert(id.clone()) || chain.len() >= 32 {
+                break;
+            }
+            chain.push(id.clone());
+            cur = entries
+                .iter()
+                .find(|e| e.id == id)
+                .and_then(|e| e.parent_id.clone());
+        }
+        chain.reverse(); // root ancestor first
+        chain
+    };
+
+    entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let chain = ancestors(i);
+            let depth = chain.len() as u16;
+            let mut prefix = String::new();
+            // Continuation column per ancestor: "│ " while the ancestor still has
+            // children further down the list, "  " afterwards.
+            for anc in &chain {
+                let has_later = children
+                    .get(anc)
+                    .is_some_and(|kids| kids.iter().any(|&k| k > i));
+                prefix.push_str(if has_later { "│ " } else { "  " });
+            }
+            // The row's own connector (roots have none). Anchored to the
+            // cycle-safe chain, so a self-parent row can't get a connector.
+            if let Some(parent) = chain.last() {
+                let is_last = children
+                    .get(parent)
+                    .is_some_and(|kids| kids.last() == Some(&i));
+                prefix.push_str(if is_last { "└─ " } else { "├─ " });
+            }
+            SessionTreeRow {
+                path: e.path.clone(),
+                id: e.id.clone(),
+                created_at: e.created_at.clone(),
+                preview: e.preview.clone(),
+                automation: e.automation,
+                depth,
+                prefix,
+            }
+        })
+        .collect()
+}
+
+/// Text of a user message entry (text or text blocks joined), truncated and
+/// newline-flattened for listing use. Public so the daemon's `/fork` listing can
+/// reuse the same preview shape as `first_user_text`.
+pub fn user_message_text(entry: &theway_core::SessionTreeEntry) -> Option<String> {
+    let theway_core::SessionTreeEntry::Message {
+        message: theway_core::AgentMessage::Llm(theway_llm_provider::Message::User(u)),
+        ..
+    } = entry
+    else {
+        return None;
+    };
+    let text = match &u.content {
+        theway_llm_provider::UserContent::Text(s) => s.clone(),
+        theway_llm_provider::UserContent::Blocks(blocks) => blocks
+            .iter()
+            .filter_map(|b| match b {
+                theway_llm_provider::UserContentBlock::Text(t) => Some(t.text.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join(" "),
+    };
+    let text = text.replace('\n', " ");
+    let preview = if text.chars().count() > 80 {
+        let mut p: String = text.chars().take(80).collect();
+        p.push('…');
+        p
+    } else {
+        text
+    };
+    Some(preview)
 }
 
 /// First user message text, truncated to a short preview. Public so the daemon's
@@ -133,32 +366,7 @@ pub async fn list_entries(repo: &SqliteSessionRepo) -> Result<Vec<SessionEntry>>
 pub async fn first_user_text(session: &Session) -> Option<String> {
     let entries = session.entries().await.ok()?;
     for e in entries {
-        if let theway_core::SessionTreeEntry::Message {
-            message: theway_core::AgentMessage::Llm(theway_llm_provider::Message::User(u)),
-            ..
-        } = e
-        {
-            let text = match u.content {
-                theway_llm_provider::UserContent::Text(s) => s,
-                theway_llm_provider::UserContent::Blocks(blocks) => blocks
-                    .into_iter()
-                    .filter_map(|b| match b {
-                        theway_llm_provider::UserContentBlock::Text(t) => Some(t.text),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" "),
-            };
-            // Char-bounded truncation: `String::truncate` works in bytes and panics if
-            // the cutoff lands inside a multi-byte UTF-8 character (CJK / emoji).
-            let text = text.replace('\n', " ");
-            let preview = if text.chars().count() > 80 {
-                let mut p: String = text.chars().take(80).collect();
-                p.push('…');
-                p
-            } else {
-                text
-            };
+        if let Some(preview) = user_message_text(&e) {
             return Some(preview);
         }
     }
@@ -198,12 +406,20 @@ async fn find_session_path(
     files: &[PathBuf],
     id: &str,
 ) -> Result<Option<PathBuf>> {
+    // Fast path: the db file stem IS the session id for both created and
+    // imported sessions (uuidv7, see SqliteSessionStorage::create /
+    // create_with_id). Never opens a db, so a live daemon holding the WAL
+    // lock on the newest session can't block resolving an older one.
     for path in files {
         let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
         if stem == id || stem.starts_with(id) {
             return Ok(Some(path.clone()));
         }
-
+    }
+    // Slow path: files whose stem was renamed away from the metadata id. Each
+    // open may collide with a live daemon's lock; only reachable when no stem
+    // matched.
+    for path in files {
         let session = repo.open(path).await?;
         let metadata_id = session
             .storage()

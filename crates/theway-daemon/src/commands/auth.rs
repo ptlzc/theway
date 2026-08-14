@@ -97,11 +97,22 @@ impl SlashCommand<DaemonCtx> for SessionsCommand {
             cprintln!("(no sessions for this cwd)");
             return CommandOutcome::Handled;
         }
-        cprintln!("Sessions:");
-        for e in entries {
-            let preview = e.preview.as_deref().unwrap_or("");
-            let id_short: String = e.id.chars().take(16).collect();
-            cprintln!("  {}  {}  {}", id_short, e.created_at, preview);
+        cprintln!("Sessions (tree — forks nested under their parent):");
+        for row in theway_storage::session::flatten_session_tree(&entries) {
+            let preview = row.preview.as_deref().unwrap_or("(empty)");
+            let badge = row
+                .automation
+                .badge()
+                .map(|b| format!("  [{b}]"))
+                .unwrap_or_default();
+            let id_short: String = row.id.chars().take(16).collect();
+            cprintln!(
+                "  {}{}  {}{badge}  {}",
+                row.prefix,
+                id_short,
+                row.created_at,
+                preview
+            );
         }
         CommandOutcome::Handled
     }

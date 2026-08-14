@@ -218,6 +218,24 @@ impl SqliteSessionStorage {
         Ok(())
     }
 
+    /// Record the fork parent (`parentSessionPath`) — pi-style session lineage
+    /// for the tree-shaped history display. Persists to the `meta` table.
+    pub async fn set_parent_session_path(&self, path: &Path) -> Result<(), SessionError> {
+        let value = path.to_string_lossy().to_string();
+        {
+            let mut m = self.metadata.lock();
+            m.parent_session_path = Some(value.clone());
+        }
+        let conn = self.conn().await?;
+        conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('parentSessionPath', ?1)",
+            [serde_json::to_string(&value).map_err(json_err)?],
+        )
+        .await
+        .map_err(map_err)?;
+        Ok(())
+    }
+
     /// Record import provenance (`.theway-session` archive import), mirroring what
     /// `rewrite_session_jsonl` does for the JSONL backend: the header gains an
     /// `importedFrom` entry pointing at the source session. Persists to the `meta`

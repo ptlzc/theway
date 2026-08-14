@@ -13,13 +13,16 @@ use std::io::Write as _;
 use anyhow::{Context, Result};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 
-/// One selectable session row (already newest-first; the pinned "clean" row is added by
-/// the renderer, not the caller).
+/// One selectable session row in chronological (oldest → newest) tree order — fork
+/// children nested under their parents; the pinned "clean" row is added by the
+/// renderer, not the caller. `prefix` carries the pi-style tree prefix
+/// (`├─ `/`└─ `/`│ ` continuation) that nests forked sessions under their parents.
 pub struct PickerRow {
     pub id_short: String,
     pub created_at: String,
     pub badge: Option<String>,
     pub preview: String,
+    pub prefix: String,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -100,8 +103,8 @@ fn render_lines(rows: &[PickerRow], selected: usize, width: usize, height: usize
                 .map(|b| format!("  [{b}]"))
                 .unwrap_or_default();
             format!(
-                "{}  {}{}  {}",
-                row.id_short, row.created_at, badge, row.preview
+                "{}{}  {}{}  {}",
+                row.prefix, row.id_short, row.created_at, badge, row.preview
             )
         };
         let line = format!("{marker}{body}");
@@ -243,6 +246,7 @@ mod tests {
             created_at: "2026-06-11T03:43".into(),
             badge: None,
             preview: format!("preview for {id}"),
+            prefix: String::new(),
         }
     }
 
@@ -311,6 +315,19 @@ mod tests {
         assert!(
             lines.iter().all(|l| l.chars().count() <= 60),
             "every line must fit the terminal width"
+        );
+    }
+
+    #[test]
+    fn render_shows_tree_prefixes() {
+        let mut fork = row("session-01");
+        fork.prefix = "└─ ".into();
+        let rows = vec![row("session-00"), fork];
+        let lines = render_lines(&rows, 2, 100, 5);
+        let joined = lines.join("\n");
+        assert!(
+            joined.contains("└─ session-01"),
+            "forked sessions must show their tree prefix: {joined}"
         );
     }
 

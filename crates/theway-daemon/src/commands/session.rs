@@ -271,6 +271,123 @@ fn short_id(id: &str) -> String {
     id.chars().take(16).collect()
 }
 
+/// `/fork` — pi-style session forking: create a new session file that replays the
+/// transcript up to (not including) a chosen previous user message.
+///
+/// Without args it lists the session's user messages newest-first with index
+/// numbers; `/fork <n>` forks before the n-th one (1 = most recent). The new
+/// session records its parent via `parentSessionPath`, which the `/sessions` and
+/// `/resume` tree displays use to nest it under its parent.
+pub struct ForkCommand;
+
+#[async_trait]
+impl SlashCommand<DaemonCtx> for ForkCommand {
+    fn name(&self) -> &'static str {
+        "fork"
+    }
+    fn description(&self) -> &'static str {
+        "fork a new session from a previous user message (pi-style session tree)"
+    }
+    fn usage(&self) -> &'static str {
+        "[n]"
+    }
+    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
+        let session = ctx.harness.session();
+        let entries = match session.storage().get_entries().await {
+            Ok(e) => e,
+            Err(e) => return CommandOutcome::Error(format!("read session: {e}")),
+        };
+        // User messages, newest first.
+        let users: Vec<(String, String)> = entries
+            .iter()
+            .rev()
+            .filter_map(|e| {
+                let theway_core::SessionTreeEntry::Message { id, .. } = e else {
+                    return None;
+                };
+                theway_storage::session::user_message_text(e).map(|preview| (id.clone(), preview))
+            })
+            .collect();
+        if users.is_empty() {
+            return CommandOutcome::Error("no user messages to fork from".into());
+        }
+
+        let Some(arg) = argv.first() else {
+            cprintln!("user messages (newest first):");
+            for (i, (_, preview)) in users.iter().enumerate() {
+                let p = if preview.chars().count() > 60 {
+                    let mut p: String = preview.chars().take(60).collect();
+                    p.push('…');
+                    p
+                } else {
+                    preview.clone()
+                };
+                cprintln!("  {}) {p}", i + 1);
+            }
+            cprintln!(
+                "fork before message N with /fork <N> — the new session replays everything before it"
+            );
+            return CommandOutcome::Handled;
+        };
+
+        let n: usize = match arg.parse() {
+            Ok(n) if n >= 1 && n <= users.len() => n,
+            _ => {
+                return CommandOutcome::Error(format!(
+                    "fork index must be 1..={} (run /fork to list messages)",
+                    users.len()
+                ));
+            }
+        };
+        let (target_id, _) = &users[n - 1];
+        let options = theway_core::ForkOptions {
+            entry_id: Some(target_id.clone()),
+            position: theway_core::ForkPosition::Before,
+        };
+        let to_fork =
+            match theway_core::get_entries_to_fork(session.storage().as_ref(), options).await {
+                Ok(v) => v,
+                Err(e) => return CommandOutcome::Error(format!("fork failed: {e}")),
+            };
+
+        let repo = theway_storage::session::open_repo(ctx.cwd).await;
+        let count = to_fork.len();
+        match theway_storage::session::fork_session(&repo, ctx.cwd, session, to_fork).await {
+            Ok(new) => {
+                let meta = match new.storage().get_metadata_json().await {
+                    Ok(m) => m,
+                    Err(e) => {
+                        return CommandOutcome::Error(format!("fork created but unreadable: {e}"));
+                    }
+                };
+                let new_id = meta.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+                let parent_id = session
+                    .storage()
+                    .get_metadata_json()
+                    .await
+                    .ok()
+                    .and_then(|m| m.get("id").and_then(|v| v.as_str()).map(str::to_string))
+                    .unwrap_or_default();
+                if count == 0 {
+                    cprintln!(
+                        "forked empty session {} (nothing before message #{n})",
+                        short_id(new_id)
+                    );
+                } else {
+                    cprintln!(
+                        "forked session {} from {} ({count} entries replayed, before message #{n})",
+                        short_id(new_id),
+                        short_id(&parent_id),
+                    );
+                }
+                cprintln!("resume with: theway --resume-id {}", new_id);
+                CommandOutcome::Handled
+            }
+            Err(e) => CommandOutcome::Error(format!("fork failed: {e}")),
+        }
+    }
+}
+
 fn yes_no(value: bool) -> &'static str {
     if value { "yes" } else { "no" }
 }
