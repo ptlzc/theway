@@ -1,4 +1,4 @@
-//! Render primitives ported from Grok Build's `xai-grok-pager-render`
+//! Render primitives ported from Grok Build's pager render crate
 //! (Apache-2.0, source revision `5d08d7e`) — the self-contained subset the
 //! theway TUI consumes, under `theway-` names.
 //!

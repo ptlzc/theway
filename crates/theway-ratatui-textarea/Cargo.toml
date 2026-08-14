@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "Apache-2.0"
-description = "theway port of xai-ratatui-textarea: an advanced TextArea widget for ratatui with undo/redo, soft-wrap, mouse selection, scrollbar and atomic text elements"
+description = "theway port of the Grok Build textarea: an advanced TextArea widget for ratatui with undo/redo, soft-wrap, mouse selection, scrollbar and atomic text elements"
 authors = ["theway contributors"]
 repository = "https://github.com/ptlzc/theway"
 

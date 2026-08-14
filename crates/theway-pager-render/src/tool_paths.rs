@@ -243,7 +243,7 @@ mod tests {
 
     #[test]
     fn shorten_path_fish_style() {
-        let result = shorten_path("crates/codegen/xai-grok-pager/src/views/foo.rs", 25);
+        let result = shorten_path("crates/codegen/theway-pager/src/views/foo.rs", 25);
         assert!(result.width() <= 25, "got: {result}");
         assert!(result.ends_with("foo.rs"), "got: {result}");
     }
@@ -251,7 +251,7 @@ mod tests {
     #[test]
     fn shorten_path_front_truncate() {
         let result = shorten_path(
-            "crates/codegen/xai-grok-pager/src/views/very_long_filename.rs",
+            "crates/codegen/theway-pager/src/views/very_long_filename.rs",
             20,
         );
         assert!(result.width() <= 20, "got: {result}");
