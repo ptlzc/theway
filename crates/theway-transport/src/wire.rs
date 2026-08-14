@@ -326,6 +326,10 @@ pub struct WireSidebarSnapshot {
     pub tools: WireToolsSnapshot,
     pub hooks: Vec<String>,
     pub runtime: Vec<String>,
+    /// Slash-prefixed file-command names discovered from `.agents/commands`
+    /// and `.claude/commands` (claude-code format, issue #37).
+    #[serde(default)]
+    pub commands: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]

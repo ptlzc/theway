@@ -68,6 +68,7 @@ fn fixture_snapshot() -> WireStatus {
             },
             hooks: Vec::new(),
             runtime: vec!["ok".into()],
+            commands: vec!["/commit".into(), "/review".into()],
         },
         feed_blocks: vec![
             WireFeedBlock::User {

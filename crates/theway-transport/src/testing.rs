@@ -147,5 +147,6 @@ pub fn empty_sidebar_snapshot() -> WireSidebarSnapshot {
         },
         hooks: Vec::new(),
         runtime: Vec::new(),
+        commands: Vec::new(),
     }
 }
