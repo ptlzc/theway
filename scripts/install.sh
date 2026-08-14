@@ -9,6 +9,9 @@
 #
 # 行为:
 #   - cargo install --path crates/theway-tui --force 构建 release 并覆盖安装
+#   - cargo install --path crates/theway-daemon --force 同步安装 thewayd
+#     (TUI 按需 spawn daemon 时从 theway 同目录或 PATH 找 thewayd, 两者必须配套,
+#     否则 discovery 协议错配会表现为冷启动 20s 超时)
 #   - 同时生成 `tw` 简写 (与 theway 相同的二进制副本, Makefile 同款约定)
 #   - 安装后打印版本; 若目标 bin 目录不在 PATH 中会给出提示
 #
@@ -58,6 +61,9 @@ BIN_DIR="$INSTALL_ROOT/bin"
 echo "==> 构建并安装 theway (release) 到 $BIN_DIR"
 mkdir -p "$BIN_DIR"
 "$CARGO" install --path "$ROOT/crates/theway-tui" --force --root "$INSTALL_ROOT"
+
+echo "==> 构建并安装 thewayd (release) 到 $BIN_DIR"
+"$CARGO" install --path "$ROOT/crates/theway-daemon" --force --root "$INSTALL_ROOT"
 
 echo "==> 生成 tw 简写"
 cp "$BIN_DIR/theway$EXE" "$BIN_DIR/tw$EXE"
