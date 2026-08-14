@@ -223,6 +223,9 @@ pub struct App {
     /// Feed text selection (highlight only, no copy yet — issue #33): line
     /// range in UNCAPPED rendered-line coordinates.
     feed_selection: Option<FeedSelection>,
+    /// Block-level render cache for the feed (issue #34): re-renders only
+    /// dirty blocks across snapshot frames.
+    feed_cache: crate::feed_cache::FeedRenderCache,
     /// Per-frame feed geometry (uncapped line indices) for selection keys.
     selection_view: SelectionView,
     last_viewport_h: usize,
@@ -275,6 +278,7 @@ impl App {
             thinking_mode: crate::feed_render::ThinkingMode::Full,
             tools_expanded: false,
             feed_selection: None,
+            feed_cache: crate::feed_cache::FeedRenderCache::new(),
             selection_view: SelectionView::default(),
             last_viewport_h: 1,
             last_feed_area: None,
@@ -565,30 +569,30 @@ impl App {
         };
         self.last_feed_area = Some(feed_area);
 
-        // Feed (pre-wrapped to width so scroll math is exact).
-        let mut lines = crate::feed_render::lines(
-            &self.feed,
-            feed_area.width as usize,
-            &crate::feed_render::FeedRenderOptions {
-                thinking_mode: self.thinking_mode,
-                tools_expanded: self.tools_expanded,
-            },
-        );
-        let uncapped_total = lines.len();
-        // Scrollback cap (issue #27): keep only the newest N rendered lines,
-        // N = the daemon-pushed `[tui] max_feed_lines` config value, falling
-        // back to DEFAULT_MAX_FEED_LINES. `self.scroll` lives in *uncapped*
-        // coordinates (it only grows as the feed grows), so the per-frame
-        // head trim cannot drift a scrolled-up view; the display scroll is
-        // the uncapped offset shifted down by the trimmed count.
+        // Feed: block-render cache + visible-window draw (issue #34). The
+        // cache re-renders only dirty blocks; the window draw is O(viewport).
+        // Scrollback cap (issue #27): N = the daemon-pushed `[tui]
+        // max_feed_lines` config value, falling back to DEFAULT_MAX_FEED_LINES.
+        // `self.scroll` lives in *uncapped* coordinates (it only grows as the
+        // feed grows), so the cache's head trim cannot drift a scrolled-up
+        // view; the display scroll is the uncapped offset shifted down by the
+        // trimmed count.
         let max_feed_lines = self
             .latest
             .tui_max_feed_lines
             .map(|n| n as usize)
             .filter(|n| *n > 0)
             .unwrap_or(DEFAULT_MAX_FEED_LINES);
-        let trimmed = trim_feed_head(&mut lines, max_feed_lines);
+        let opts = crate::feed_render::FeedRenderOptions {
+            thinking_mode: self.thinking_mode,
+            tools_expanded: self.tools_expanded,
+        };
+        self.feed_cache
+            .update(&self.feed, feed_area.width as usize, &opts, max_feed_lines);
+        let lines = self.feed_cache.lines();
+        let trimmed = self.feed_cache.trimmed();
         let total = lines.len();
+        let uncapped_total = total + trimmed;
         let viewport = feed_area.height as usize;
         self.last_viewport_h = viewport;
         let max_scroll = total.saturating_sub(viewport);
@@ -614,18 +618,24 @@ impl App {
             bottom: (display_scroll + trimmed).saturating_add(viewport.saturating_sub(1)),
             total: uncapped_total,
         };
-        // Selection highlight (issue #33): restyle the selected range.
-        if let Some(sel) = self.feed_selection {
+        // Selection highlight (issue #33) is applied by the window draw; map
+        // the uncapped selection range into capped line indices.
+        let sel_range = self.feed_selection.and_then(|sel| {
             let range = sel.range(uncapped_total);
-            for idx in range {
-                let capped = idx.saturating_sub(trimmed);
-                if let Some(line) = lines.get_mut(capped) {
-                    crate::feed_render::highlight_line(line);
-                }
-            }
-        }
-        let feed = Paragraph::new(lines).scroll((display_scroll as u16, 0));
-        frame.render_widget(feed, feed_area);
+            let start = range.start().saturating_sub(trimmed);
+            let end = range
+                .end()
+                .saturating_sub(trimmed)
+                .min(total.saturating_sub(1));
+            (start <= end).then_some(start..=end)
+        });
+        crate::feed_render::render_lines_window(
+            frame.buffer_mut(),
+            feed_area,
+            lines,
+            display_scroll,
+            sel_range,
+        );
         // Feed scrollbar (theway-pager-render primitive): right edge of the
         // feed pane, subtle while following, brighter when scrolled up.
         if max_scroll > 0 {
@@ -1278,17 +1288,6 @@ impl App {
         printer.abort();
         Ok(())
     }
-}
-
-/// Trim a rendered feed line buffer to its newest `cap` lines (scrollback
-/// cap, issue #27). Returns how many lines were dropped from the head so the
-/// caller can shift its scroll offset by the same amount.
-fn trim_feed_head(lines: &mut Vec<Line<'static>>, cap: usize) -> usize {
-    let trimmed = lines.len().saturating_sub(cap);
-    if trimmed > 0 {
-        lines.drain(..trimmed);
-    }
-    trimmed
 }
 
 /// Assemble the slash-command completion list: the SDK local command set from

@@ -184,32 +184,36 @@ async fn status_line_shows_busy_spinner_from_snapshot() {
     );
 }
 
-/// Feed scrollback cap (issue #27): the render path keeps only the newest
-/// DEFAULT_MAX_FEED_LINES lines and shifts the scroll offset by the trimmed
-/// head count so a scrolled-up view does not jump.
+/// Feed scrollback cap (issue #27 + #34): the render cache drains the head
+/// lazily — only once the line count exceeds the cap by the internal margin —
+/// and shifts the scroll offset by the trimmed count so a scrolled-up view
+/// does not jump.
 #[test]
-fn trim_feed_head_drops_oldest_lines_and_reports_count() {
-    let mut lines: Vec<ratatui::text::Line<'static>> = (0..3_500)
-        .map(|i| ratatui::text::Line::raw(format!("row-{i}")))
-        .collect();
-    let trimmed = super::trim_feed_head(&mut lines, super::DEFAULT_MAX_FEED_LINES);
-    assert_eq!(trimmed, 500);
-    assert_eq!(lines.len(), super::DEFAULT_MAX_FEED_LINES);
-    assert_eq!(lines[0].spans[0].content, "row-500");
+fn feed_cache_trims_to_cap_and_tracks_trimmed() {
+    let mut feed = theway_transport::feed::Feed::new();
+    for i in 0..4_000 {
+        feed.push_plain_untimed(format!("row-{i}"), theway_transport::feed::Level::Output);
+    }
+    let mut cache = crate::feed_cache::FeedRenderCache::new();
+    let opts = crate::feed_render::FeedRenderOptions::default();
+    cache.update(&feed, 80, &opts, super::DEFAULT_MAX_FEED_LINES);
+    assert_eq!(cache.trimmed(), 1_000);
+    assert_eq!(cache.lines().len(), super::DEFAULT_MAX_FEED_LINES);
+    assert_eq!(cache.lines()[0].spans[0].content, "row-1000");
     assert_eq!(
-        lines[super::DEFAULT_MAX_FEED_LINES - 1].spans[0].content,
-        "row-3499"
+        cache.lines()[super::DEFAULT_MAX_FEED_LINES - 1].spans[0].content,
+        "row-3999"
     );
 
     // Under the cap: no-op, nothing trimmed.
-    let mut short: Vec<ratatui::text::Line<'static>> = (0..10)
-        .map(|i| ratatui::text::Line::raw(format!("row-{i}")))
-        .collect();
-    assert_eq!(
-        super::trim_feed_head(&mut short, super::DEFAULT_MAX_FEED_LINES),
-        0
-    );
-    assert_eq!(short.len(), 10);
+    let mut feed = theway_transport::feed::Feed::new();
+    for i in 0..10 {
+        feed.push_plain_untimed(format!("row-{i}"), theway_transport::feed::Level::Output);
+    }
+    let mut cache = crate::feed_cache::FeedRenderCache::new();
+    cache.update(&feed, 80, &opts, super::DEFAULT_MAX_FEED_LINES);
+    assert_eq!(cache.trimmed(), 0);
+    assert_eq!(cache.lines().len(), 10);
 }
 
 #[tokio::test]
@@ -316,7 +320,9 @@ async fn feed_render_uses_tui_max_feed_lines_from_snapshot() {
     );
 
     // Zero / absent from the snapshot falls back to the built-in 3000-line
-    // default: the top of the scrollback is original row 200 (not 2200).
+    // default. The head trim drains lazily (only past cap + margin, issue
+    // #34), so 3200 lines stay fully visible: the top of the scrollback is
+    // original row 0.
     let mut status = fixture_status(vec![block.clone()]);
     status.tui_max_feed_lines = Some(0);
     app.apply_snapshot(status);
@@ -325,8 +331,8 @@ async fn feed_render_uses_tui_max_feed_lines_from_snapshot() {
     terminal.draw(|f| app.render(f)).unwrap();
     let text = buffer_text(terminal.backend().buffer());
     assert!(
-        text.contains("row-0200"),
-        "zero cap must fall back to the 3000-line default:\n{text}"
+        text.contains("row-0000"),
+        "zero cap must fall back to the 3000-line default (lazy trim keeps the extra rows):\n{text}"
     );
 }
 

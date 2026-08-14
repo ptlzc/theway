@@ -8,7 +8,7 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use theway_transport::feed::{Block, Level, display_prefix, should_separate, wrap_str};
+use theway_transport::feed::{Block, Level, display_prefix, wrap_str};
 
 /// Grok tokyonight palette values (xai-grok-pager-render theme/tokyonight.rs).
 const ACCENT_USER: Color = Color::Rgb(122, 162, 247); // BLUE — user `❯` prefix
@@ -48,7 +48,7 @@ pub enum ThinkingMode {
 }
 
 /// Renderer switches owned by the TUI app state.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FeedRenderOptions {
     pub thinking_mode: ThinkingMode,
     /// Tool results: collapsed to a one-line summary unless expanded (Ctrl+T).
@@ -360,11 +360,16 @@ pub fn push_markdown(
 
 /// Render the whole feed to width-wrapped `ratatui` lines, ready to scroll/draw.
 ///
+/// The production render path uses the block cache (`feed_cache`) instead;
+/// this whole-feed renderer stays for tests (reference composition with
+/// separators) and diagnostics.
+///
 /// Grok-style block styling (issue #33): user rows carry a `❯` accent prefix on
 /// an elevated band, tool calls are `⏵ name` + dim args single-liners, tool
 /// results collapse to a one-line summary unless `tools_expanded`, and
 /// thinking blocks honor `thinking_mode`. Timestamps are dropped for
 /// conversational blocks (grok shows none); plain status lines keep theirs.
+#[cfg(test)]
 pub fn lines(
     feed: &theway_transport::feed::Feed,
     width: usize,
@@ -372,86 +377,210 @@ pub fn lines(
 ) -> Vec<Line<'static>> {
     let width = width.max(1);
     let mut out: Vec<Line<'static>> = Vec::new();
-    let mut assistant_rows: Vec<std::ops::Range<usize>> = Vec::new();
     let mut previous: Option<&Block> = None;
     for block in feed.blocks() {
-        if should_separate(previous, block, !out.is_empty()) {
+        if theway_transport::feed::should_separate(previous, block, !out.is_empty()) {
             out.push(Line::raw(""));
         }
-        match block {
-            Block::User { text, .. } => push_user_block(&mut out, text, width),
-            Block::Assistant { text, .. } => {
-                // Assistant blocks are markdown: one-shot pretty render via
-                // theway-markdown, link underlines from the renderer's
-                // hyperlinks, verbatim code/table/mermaid rows, wrapped prose.
-                let start = out.len();
-                push_markdown(&mut out, text, AI_PREFIX, AI_PREFIX_STYLE, width);
-                assistant_rows.push(start..out.len());
+        out.extend(render_block(block, width, opts));
+        previous = Some(block);
+    }
+    out
+}
+
+/// Render ONE feed block to width-wrapped lines (no inter-block separator).
+/// The feed render cache calls this per dirty block; [`lines`] composes it
+/// with separators. Assistant blocks skip the URL regex scan (their underlines
+/// come from the markdown renderer's hyperlinks); every other block scans its
+/// own lines once, so the per-block result is stable and cacheable.
+pub(crate) fn render_block(
+    block: &Block,
+    width: usize,
+    opts: &FeedRenderOptions,
+) -> Vec<Line<'static>> {
+    let width = width.max(1);
+    let mut out: Vec<Line<'static>> = Vec::new();
+    let mut assistant_rows: Vec<std::ops::Range<usize>> = Vec::new();
+    match block {
+        Block::User { text, .. } => push_user_block(&mut out, text, width),
+        Block::Assistant { text, .. } => {
+            // Assistant blocks are markdown: one-shot pretty render via
+            // theway-markdown, link underlines from the renderer's
+            // hyperlinks, verbatim code/table/mermaid rows, wrapped prose.
+            let start = out.len();
+            push_markdown(&mut out, text, AI_PREFIX, AI_PREFIX_STYLE, width);
+            assistant_rows.push(start..out.len());
+        }
+        Block::Thinking { text, .. } => match opts.thinking_mode {
+            ThinkingMode::Hidden => {}
+            ThinkingMode::Peek => push_thinking_peek(&mut out, text, width),
+            ThinkingMode::Full => {
+                push_paragraphs(&mut out, text, THINKING_STYLE, Some(TOOL_PREFIX), width)
             }
-            Block::Thinking { text, .. } => match opts.thinking_mode {
-                ThinkingMode::Hidden => {}
-                ThinkingMode::Peek => push_thinking_peek(&mut out, text, width),
-                ThinkingMode::Full => {
-                    push_paragraphs(&mut out, text, THINKING_STYLE, Some(TOOL_PREFIX), width)
-                }
-            },
-            Block::Tool { name, args, .. } => {
-                let mut spans = vec![Span::styled(
-                    format!("{TOOL_PREFIX}{name}"),
-                    TOOL_NAME_STYLE,
-                )];
-                if !args.is_empty() {
-                    spans.push(Span::styled(format!(" {args}"), TOOL_ARGS_STYLE));
-                }
-                let mut line = Line::from(spans);
-                truncate_line(&mut line, width);
-                out.push(line);
+        },
+        Block::Tool { name, args, .. } => {
+            let mut spans = vec![Span::styled(
+                format!("{TOOL_PREFIX}{name}"),
+                TOOL_NAME_STYLE,
+            )];
+            if !args.is_empty() {
+                spans.push(Span::styled(format!(" {args}"), TOOL_ARGS_STYLE));
             }
-            Block::ToolResult {
-                lines, is_error, ..
-            } => {
-                if !opts.tools_expanded {
-                    let bytes: usize = lines.iter().map(String::len).sum();
-                    out.push(Line::styled(
-                        format!(
-                            "    result · {} lines · {} B · Ctrl+T expand",
-                            lines.len(),
-                            bytes
-                        ),
-                        RESULT_SUMMARY_STYLE,
-                    ));
+            let mut line = Line::from(spans);
+            truncate_line(&mut line, width);
+            out.push(line);
+        }
+        Block::ToolResult {
+            lines, is_error, ..
+        } => {
+            if !opts.tools_expanded {
+                let bytes: usize = lines.iter().map(String::len).sum();
+                out.push(Line::styled(
+                    format!(
+                        "    result · {} lines · {} B · Ctrl+T expand",
+                        lines.len(),
+                        bytes
+                    ),
+                    RESULT_SUMMARY_STYLE,
+                ));
+            } else {
+                let style = if *is_error {
+                    Style::default().fg(Color::Red)
                 } else {
-                    let style = if *is_error {
-                        Style::default().fg(Color::Red)
-                    } else {
-                        Style::default().fg(Color::Green)
-                    };
-                    for line in lines {
-                        for row in wrap_str(&format!("    {line}"), width) {
-                            out.push(Line::styled(row, style));
-                        }
+                    Style::default().fg(Color::Green)
+                };
+                for line in lines {
+                    for row in wrap_str(&format!("    {line}"), width) {
+                        out.push(Line::styled(row, style));
                     }
                 }
             }
-            Block::Plain {
-                text,
-                level,
-                timestamp,
-            } => {
-                let prefix = timestamp.as_deref().map(|ts| display_prefix(Some(ts), ""));
-                push_paragraphs(
-                    &mut out,
-                    text,
-                    style_for_level(*level),
-                    prefix.as_deref(),
-                    width,
-                );
-            }
         }
-        previous = Some(block);
+        Block::Plain {
+            text,
+            level,
+            timestamp,
+        } => {
+            let prefix = timestamp.as_deref().map(|ts| display_prefix(Some(ts), ""));
+            push_paragraphs(
+                &mut out,
+                text,
+                style_for_level(*level),
+                prefix.as_deref(),
+                width,
+            );
+        }
     }
     underline_links(&mut out, &assistant_rows);
     out
+}
+
+/// Content fingerprint of one feed block (fnv-1a over kind + fields). Two
+/// blocks with identical fingerprints render identically for the same
+/// width/options, so the render cache reuses their rendered lines.
+pub(crate) fn block_fingerprint(block: &Block) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut mix = |bytes: &[u8]| {
+        for &byte in bytes {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    };
+    match block {
+        Block::User { text, timestamp } => {
+            mix(b"user\x00");
+            mix(text.as_bytes());
+            mix(timestamp.as_deref().unwrap_or("").as_bytes());
+        }
+        Block::Assistant { text, timestamp } => {
+            mix(b"assistant\x00");
+            mix(text.as_bytes());
+            mix(timestamp.as_deref().unwrap_or("").as_bytes());
+        }
+        Block::Thinking { text, timestamp } => {
+            mix(b"thinking\x00");
+            mix(text.as_bytes());
+            mix(timestamp.as_deref().unwrap_or("").as_bytes());
+        }
+        Block::Tool {
+            name,
+            args,
+            timestamp,
+        } => {
+            mix(b"tool\x00");
+            mix(name.as_bytes());
+            mix(args.as_bytes());
+            mix(timestamp.as_deref().unwrap_or("").as_bytes());
+        }
+        Block::ToolResult {
+            lines,
+            is_error,
+            timestamp,
+            ..
+        } => {
+            mix(b"toolresult\x00");
+            mix(if *is_error { b"1" } else { b"0" });
+            for line in lines {
+                mix(line.as_bytes());
+                mix(b"\x00");
+            }
+            mix(timestamp.as_deref().unwrap_or("").as_bytes());
+        }
+        Block::Plain {
+            text,
+            level,
+            timestamp,
+        } => {
+            mix(b"plain\x00");
+            mix(format!("{level:?}").as_bytes());
+            mix(text.as_bytes());
+            mix(timestamp.as_deref().unwrap_or("").as_bytes());
+        }
+    }
+    hash
+}
+
+/// Draw pre-wrapped lines into the visible window only (O(viewport)) — the
+/// cache-friendly replacement for `Paragraph::new(lines).scroll(...)` (issue
+/// #34). Rows outside the window are never touched, and the area is cleared
+/// first so a shrinking feed cannot leave stale cells behind. `selection` is
+/// an inclusive range of *capped* line indices rendered as highlighted rows.
+pub fn render_lines_window(
+    buf: &mut ratatui::buffer::Buffer,
+    area: ratatui::layout::Rect,
+    lines: &[Line<'static>],
+    offset: usize,
+    selection: Option<std::ops::RangeInclusive<usize>>,
+) {
+    for y in area.y..area.bottom() {
+        for x in area.x..area.right() {
+            if let Some(cell) = buf.cell_mut((x, y)) {
+                cell.reset();
+            }
+        }
+    }
+    for (i, line) in lines.iter().enumerate().skip(offset) {
+        let row = i - offset;
+        if row >= area.height as usize {
+            break;
+        }
+        let y = area.y + row as u16;
+        if selection.as_ref().is_some_and(|sel| sel.contains(&i)) {
+            let mut selected = line.clone();
+            highlight_line(&mut selected);
+            set_line_safe(buf, area.x, y, &selected, area.width);
+        } else {
+            set_line_safe(buf, area.x, y, line, area.width);
+        }
+    }
+}
+
+/// Bounds-checked `Buffer::set_line`: resize races can leave a momentarily
+/// out-of-bounds rect — skip the write instead of panicking.
+fn set_line_safe(buf: &mut ratatui::buffer::Buffer, x: u16, y: u16, line: &Line<'_>, width: u16) {
+    if y < buf.area.bottom() && x < buf.area.right() {
+        buf.set_line(x, y, line, width);
+    }
 }
 
 /// User rows, grok style: `❯ ` accent prefix + primary-colored body on a

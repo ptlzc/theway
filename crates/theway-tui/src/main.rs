@@ -16,6 +16,7 @@
 
 mod cli;
 mod clipboard_image;
+mod feed_cache;
 mod feed_render;
 mod local_commands;
 mod model_picker;
