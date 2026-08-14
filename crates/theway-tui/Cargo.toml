@@ -24,6 +24,7 @@ theway-markdown-core = { path = "../theway-markdown-core" }
 crossterm = { version = "0.28", features = ["event-stream"] }
 ratatui = { version = "0.29", features = ["unstable-widget-ref"] }
 theway-ratatui-textarea = { path = "../theway-ratatui-textarea" }
+theway-pager-render = { path = "../theway-pager-render" }
 unicode-width = "0.2"
 arboard = { version = "3" }
 image = { version = "0.25", default-features = false, features = ["png"] }

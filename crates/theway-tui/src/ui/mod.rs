@@ -524,6 +524,24 @@ impl App {
         }
         let feed = Paragraph::new(lines).scroll((self.scroll as u16, 0));
         frame.render_widget(feed, feed_area);
+        // Feed scrollbar (theway-pager-render primitive): right edge of the
+        // feed pane, subtle while following, brighter when scrolled up.
+        if max_scroll > 0 {
+            let sb_area = Rect {
+                x: feed_area.right().saturating_sub(1),
+                y: feed_area.y,
+                width: 1,
+                height: feed_area.height,
+            };
+            theway_pager_render::scrollbar::render_scrollbar(
+                frame.buffer_mut(),
+                Some(sb_area),
+                total as u16,
+                viewport as u16,
+                self.scroll as u16,
+                self.follow,
+            );
+        }
         if let Some(area) = trigger_area {
             self.render_trigger_panel(frame, area);
         }

@@ -465,3 +465,22 @@ fn markdown_fenced_code_renders_verbatim_no_wrap() {
     );
     assert!(rendered.iter().any(|l| l == "```rust"), "{rendered:#?}");
 }
+
+#[test]
+fn feed_urls_get_underline_style() {
+    use ratatui::style::Modifier;
+    // A user block with an http URL: the URL span must carry UNDERLINED.
+    let mut feed = theway_transport::feed::Feed::new();
+    feed.push_user("see https://example.com/path now");
+    let lines = crate::feed_render::lines(&feed, 100);
+    let underlined: String = lines
+        .iter()
+        .flat_map(|l| &l.spans)
+        .filter(|s| s.style.add_modifier.contains(Modifier::UNDERLINED))
+        .map(|s| s.content.as_ref())
+        .collect();
+    assert!(
+        underlined.contains("https://example.com/path"),
+        "{underlined}"
+    );
+}
