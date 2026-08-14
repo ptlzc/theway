@@ -27,8 +27,12 @@ mod auth {
 #[allow(dead_code)]
 #[path = "../src/bug_report.rs"]
 mod bug_report;
+#[allow(dead_code)]
 #[path = "../src/commands/mod.rs"]
 mod commands;
+#[allow(dead_code)]
+#[path = "../src/file_commands.rs"]
+mod file_commands;
 #[path = "common/env_lock.rs"]
 pub(crate) mod test_env;
 #[allow(dead_code)]

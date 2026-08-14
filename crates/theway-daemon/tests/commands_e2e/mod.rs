@@ -8,6 +8,7 @@
 //! reach them via `use crate::...` and share fixtures through `helpers`.
 
 pub mod control_plane;
+pub mod file_commands;
 pub mod goal;
 pub mod helpers;
 pub mod model_session;

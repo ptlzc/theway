@@ -22,7 +22,7 @@ use theway_core::{
 /// duplicated lets us test the loader without restructuring the crate; if the duplicate drifts,
 /// the test fails the next time we touch it.
 mod skills_mirror {
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
     use theway_core::{Skill, SkillDiagnostic, SkillSource, load_skills};
     use theway_daemon::env::native::NativeEnv;
     use tokio_util::sync::CancellationToken;
@@ -33,23 +33,31 @@ mod skills_mirror {
     }
 
     pub async fn load_all(cwd: &Path, base_dir: &Path) -> LoadedSkills {
-        let project: PathBuf = cwd.join(".theway").join("skills");
-        let user: PathBuf = base_dir.join("skills");
         let env = NativeEnv::new(cwd.to_string_lossy().to_string());
         let cancel = CancellationToken::new();
         let mut combined = Vec::<Skill>::new();
         let mut diagnostics = Vec::<SkillDiagnostic>::new();
-        // Mirror the real `skills::load_all`: load user first, project second (project wins),
-        // and tag each skill with the source of the root it came from.
-        for (dir, source) in [(user, SkillSource::User), (project, SkillSource::Project)] {
+        // Mirror the real `skills::load_all`: scan roots in priority order
+        // (project before user, `.agents` before the other project roots)
+        // and keep the first copy of each name — `.agents` has the highest
+        // weight (issue #37).
+        let roots = [
+            (cwd.join(".agents").join("skills"), SkillSource::Project),
+            (cwd.join(".theway").join("skills"), SkillSource::Project),
+            (cwd.join(".codex").join("skills"), SkillSource::Project),
+            (cwd.join(".claude").join("skills"), SkillSource::Project),
+            (base_dir.join(".agents").join("skills"), SkillSource::User),
+            (base_dir.join("skills"), SkillSource::User),
+            (base_dir.join(".codex").join("skills"), SkillSource::User),
+            (base_dir.join(".claude").join("skills"), SkillSource::User),
+        ];
+        for (dir, source) in roots {
             let s = dir.to_string_lossy().to_string();
             let out = load_skills(&env, &[s.as_str()], cancel.clone()).await;
             diagnostics.extend(out.diagnostics);
             for mut skill in out.skills {
                 skill.source = source;
-                if let Some(i) = combined.iter().position(|s| s.name == skill.name) {
-                    combined[i] = skill;
-                } else {
+                if !combined.iter().any(|s| s.name == skill.name) {
                     combined.push(skill);
                 }
             }
@@ -241,4 +249,49 @@ async fn loader_tags_project_source_when_project_shadows_user() {
         SkillSource::Project,
         "project-shadowed skill must report Project source"
     );
+}
+
+#[tokio::test]
+async fn agents_skills_have_highest_weight_first_wins() {
+    let home = TempDir::new().unwrap();
+    let cwd = TempDir::new().unwrap();
+
+    // Same name across .agents / .codex / .claude: the .agents copy is
+    // loaded first and wins; no duplicate is kept (issue #37).
+    write_skill(
+        &cwd.path().join(".agents"),
+        "shared",
+        "agents-version",
+        "AGENTS BODY",
+    );
+    write_skill(
+        &cwd.path().join(".codex"),
+        "shared",
+        "codex-version",
+        "CODEX BODY",
+    );
+    write_skill(
+        &cwd.path().join(".claude"),
+        "shared",
+        "claude-version",
+        "CLAUDE BODY",
+    );
+
+    let loaded = skills_mirror::load_all(cwd.path(), home.path()).await;
+    assert!(
+        loaded.diagnostics.is_empty(),
+        "unexpected diagnostics: {:#?}",
+        loaded.diagnostics
+    );
+    let shared: Vec<&theway_core::Skill> = loaded
+        .skills
+        .iter()
+        .filter(|s| s.name == "shared")
+        .collect();
+    assert_eq!(shared.len(), 1, "only the first copy may be kept");
+    assert_eq!(
+        shared[0].description, "agents-version",
+        ".agents has the highest weight and must win"
+    );
+    assert!(shared[0].content.contains("AGENTS BODY"));
 }

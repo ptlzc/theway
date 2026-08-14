@@ -119,7 +119,7 @@ async fn dispatch_session_export_writes_archive_with_bounded_output() {
 }
 
 #[tokio::test]
-async fn dispatch_unknown_command_returns_error_outcome() {
+async fn dispatch_unknown_command_runs_it_as_agent_prompt() {
     let storage = Arc::new(MemorySessionStorage::new());
     let session = Session::new(storage as Arc<dyn SessionStorage>);
     let opts = AgentHarnessOptions::new(faux_model(), session);
@@ -146,10 +146,14 @@ async fn dispatch_unknown_command_returns_error_outcome() {
         tool_count: 0,
         cwd: &cwd,
     };
+    // Issue #37: a leading `/` is not necessarily a command — a path like
+    // `/notarealcommand` is a plain user message, not an error.
     let outcome = commands::dispatch("/notarealcommand", &registry, &ctx).await;
     match outcome {
-        commands::CommandOutcome::Error(msg) => assert!(msg.contains("unknown command")),
-        other => panic!("expected Error outcome, got {other:?}"),
+        commands::CommandOutcome::RunAgentPrompt { prompt, .. } => {
+            assert_eq!(prompt, "/notarealcommand");
+        }
+        other => panic!("expected RunAgentPrompt outcome, got {other:?}"),
     }
 }
 
@@ -382,11 +386,12 @@ async fn dispatch_quit_returns_quit_outcome() {
     };
 
     // quit/clear/help are TUI-local commands (daemon-kernel-layers); the
-    // daemon no longer dispatches them.
+    // daemon no longer dispatches them. Issue #37: an unmatched `/…` is a
+    // plain user message, so these forward as agent prompts here.
     for input in ["/quit", "/exit", "/q"] {
         let outcome = commands::dispatch(input, &registry, &ctx).await;
         assert!(
-            matches!(outcome, commands::CommandOutcome::Error(_)),
+            matches!(outcome, commands::CommandOutcome::RunAgentPrompt { .. }),
             "{input} should not be a daemon command"
         );
     }

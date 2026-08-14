@@ -137,6 +137,9 @@ pub struct DaemonCtx {
 /// command set.
 pub struct Registry {
     inner: theway_transport::commands::Registry<DaemonCtx>,
+    /// Claude-code-format file commands scanned from disk (issue #37); the
+    /// `/reload` special case in [`dispatch`] rewrites this list.
+    file_commands: std::sync::RwLock<Vec<crate::file_commands::FileCommand>>,
 }
 
 impl Registry {
@@ -146,6 +149,7 @@ impl Registry {
     pub fn new() -> Self {
         Self {
             inner: theway_transport::commands::Registry::new(),
+            file_commands: std::sync::RwLock::new(Vec::new()),
         }
     }
 
@@ -155,6 +159,7 @@ impl Registry {
     pub fn with_daemon_commands() -> Self {
         let mut r = Self {
             inner: theway_transport::commands::Registry::new(),
+            file_commands: std::sync::RwLock::new(Vec::new()),
         };
         r.register(Arc::new(auth::LoginCommand));
         r.register(Arc::new(auth::LogoutCommand));
@@ -196,6 +201,32 @@ impl Registry {
 
     pub fn register(&mut self, command: Arc<dyn SlashCommand<DaemonCtx>>) {
         self.inner.register(command);
+    }
+
+    /// Replace the scanned claude-code-format file commands (issue #37).
+    /// Called at startup by `TurnHost` and on `/reload`.
+    pub fn set_file_commands(&self, commands: Vec<crate::file_commands::FileCommand>) {
+        *self
+            .file_commands
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = commands;
+    }
+
+    /// Snapshot of the scanned file commands.
+    pub fn file_commands(&self) -> Vec<crate::file_commands::FileCommand> {
+        self.file_commands
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Slash-prefixed names of the scanned file commands (completion + wire
+    /// sidebar surface, issue #37).
+    pub fn file_command_names(&self) -> Vec<String> {
+        self.file_commands()
+            .into_iter()
+            .map(|c| format!("/{}", c.name))
+            .collect()
     }
 }
 
@@ -321,9 +352,33 @@ pub async fn dispatch(input: &str, registry: &Registry, ctx: &CommandCtx<'_>) ->
         );
         return CommandOutcome::Handled;
     }
+    // Special-case `/reload`: rescan skills + file commands (issue #37).
+    if name == "reload" {
+        return reload_everything(registry, ctx).await;
+    }
     let Some(cmd) = registry.find(&name) else {
+        // Claude-code-format file commands take precedence over skill
+        // shortcuts of the same name: the file body is an explicit prompt
+        // the user wrote for `/name` (issue #37).
+        if let Some(file_cmd) = registry
+            .file_commands()
+            .into_iter()
+            .find(|fc| fc.name == name)
+        {
+            let args_tail = args_tail_of(input, &name);
+            return CommandOutcome::RunAgentPrompt {
+                prompt: crate::file_commands::expand_file_command(&file_cmd, &args_tail),
+                error_context: "",
+            };
+        }
         return run_skill_shortcut(&name, &argv, registry, ctx).unwrap_or_else(|| {
-            CommandOutcome::Error(format!("unknown command: /{name} (try /help)"))
+            // Issue #37: a leading `/` is not necessarily a command — a path
+            // like `/etc/hosts` is a plain user message. Send the raw input
+            // to the model instead of erroring.
+            CommandOutcome::RunAgentPrompt {
+                prompt: input.to_string(),
+                error_context: "",
+            }
         });
     };
     let extra = DaemonCtx {
@@ -338,6 +393,47 @@ pub async fn dispatch(input: &str, registry: &Registry, ctx: &CommandCtx<'_>) ->
         extra: &extra,
     };
     cmd.run(&argv, &sdk_ctx).await
+}
+
+/// The raw argument tail after `/name` in `input` (one leading space
+/// stripped, spacing otherwise preserved) — the claude-code `$ARGUMENTS`
+/// payload for file commands.
+fn args_tail_of(input: &str, name: &str) -> String {
+    let trimmed = input.trim();
+    let skip = 1 + name.len();
+    if trimmed.len() <= skip {
+        return String::new();
+    }
+    trimmed[skip..].trim_start().to_string()
+}
+
+/// `/reload` (issue #37): rescan the claude-code-format file commands and
+/// hot-reload the skill catalog from disk.
+async fn reload_everything(registry: &Registry, ctx: &CommandCtx<'_>) -> CommandOutcome {
+    let scanned = crate::file_commands::scan_file_commands(ctx.cwd);
+    let count = scanned.len();
+    registry.set_file_commands(scanned.clone());
+    cprintln!("reloaded commands: {count} file command(s)");
+    for fc in &scanned {
+        if fc.description.is_empty() {
+            cprintln!("  - /{}", fc.name);
+        } else {
+            cprintln!("  - /{} — {}", fc.name, fc.description);
+        }
+    }
+    match ctx.harness.reload_skills_from_disk().await {
+        Ok(out) => {
+            cprintln!(
+                "reloaded skills: {} loaded, {} diagnostics",
+                out.skills.len(),
+                out.diagnostics.len()
+            );
+        }
+        Err(e) => {
+            return CommandOutcome::Error(format!("reload skills failed: {e}"));
+        }
+    }
+    CommandOutcome::Handled
 }
 
 #[cfg(test)]

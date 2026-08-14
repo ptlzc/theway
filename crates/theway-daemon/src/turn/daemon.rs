@@ -194,7 +194,7 @@ fn user_facing_run_error(error: &str) -> String {
 }
 
 fn slash_commands(registry: &Registry) -> Vec<String> {
-    registry
+    let mut commands: Vec<String> = registry
         .commands()
         .iter()
         .flat_map(|c| {
@@ -202,11 +202,19 @@ fn slash_commands(registry: &Registry) -> Vec<String> {
             names.extend(c.aliases().iter().map(|a| format!("/{a}")));
             names
         })
-        .collect()
+        .collect();
+    // Claude-code-format file commands join the completion surface (issue #37).
+    commands.extend(registry.file_command_names());
+    commands
 }
 
 impl TurnHost {
     pub fn new(config: DaemonConfig) -> Self {
+        // Scan claude-code-format file commands once at startup; `/reload`
+        // rescans them (issue #37).
+        config
+            .registry
+            .set_file_commands(crate::file_commands::scan_file_commands(&config.cwd));
         let completer = SlashCompleter::from_commands(slash_commands(&config.registry));
         Self {
             kernel: ReplKernel::new(config.harness, config.trigger_executor, config.retry),
@@ -794,6 +802,9 @@ impl TurnHost {
             },
             hooks: self.panel_status.hook_points.clone(),
             runtime: self.panel_status.trigger_features.clone(),
+            // File commands join the snapshot so the TUI popup lists them
+            // and a `/reload` republish refreshes them (issue #37).
+            commands: self.registry.file_command_names(),
         }
     }
 
