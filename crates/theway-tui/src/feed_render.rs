@@ -10,11 +10,53 @@ use ratatui::text::{Line, Span};
 
 use theway_transport::feed::{Block, Level, display_prefix, should_separate, wrap_str};
 
-const USER_STYLE: Style = Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD);
+/// Grok tokyonight palette values (xai-grok-pager-render theme/tokyonight.rs).
+const ACCENT_USER: Color = Color::Rgb(122, 162, 247); // BLUE — user `❯` prefix
+const ACCENT_ASSISTANT: Color = Color::Rgb(187, 154, 247); // MAGENTA — `ai ▸` prefix
+const ACCENT_TOOL: Color = Color::Rgb(115, 122, 162); // DARK5 — tool name
+const TEXT_PRIMARY: Color = Color::Rgb(192, 202, 245); // FG — body text
+const BG_HIGHLIGHT: Color = Color::Rgb(41, 46, 66); // BG_HIGHLIGHT — user band / selection
+
+const USER_PREFIX: &str = "\u{276F} "; // ❯ (2 cols, grok prompt_arrow)
+const AI_PREFIX: &str = "ai \u{25b8} "; // ai ▸
+const TOOL_PREFIX: &str = "\u{23f5} "; // ⏵
+const USER_BAND_INDENT: &str = "  ";
+
+const USER_STYLE: Style = Style::new().fg(ACCENT_USER).add_modifier(Modifier::BOLD);
 const THINKING_STYLE: Style = Style::new()
     .fg(Color::DarkGray)
     .add_modifier(Modifier::ITALIC);
-const TOOL_STYLE: Style = Style::new().fg(Color::Yellow);
+const USER_BODY_STYLE: Style = Style::new().fg(TEXT_PRIMARY);
+const AI_PREFIX_STYLE: Style = Style::new()
+    .fg(ACCENT_ASSISTANT)
+    .add_modifier(Modifier::BOLD);
+const TOOL_NAME_STYLE: Style = Style::new().fg(ACCENT_TOOL).add_modifier(Modifier::BOLD);
+const TOOL_ARGS_STYLE: Style = Style::new().fg(Color::DarkGray);
+const RESULT_SUMMARY_STYLE: Style = Style::new().fg(Color::DarkGray);
+const BAND_STYLE: Style = Style::new().bg(BG_HIGHLIGHT);
+
+/// How `Block::Thinking` renders in the feed (Ctrl+O cycles).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum ThinkingMode {
+    /// Full thinking text (default).
+    #[default]
+    Full,
+    /// Peek window: header + the last few lines only.
+    Peek,
+    /// Skipped entirely.
+    Hidden,
+}
+
+/// Renderer switches owned by the TUI app state.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FeedRenderOptions {
+    pub thinking_mode: ThinkingMode,
+    /// Tool results: collapsed to a one-line summary unless expanded (Ctrl+T).
+    pub tools_expanded: bool,
+}
+
+/// Lines shown in the thinking peek window.
+const THINKING_PEEK_LINES: usize = 3;
 
 pub fn style_for_level(level: Level) -> Style {
     match level {
@@ -186,17 +228,27 @@ struct MappedLine {
 /// Render assistant markdown through `theway-markdown` (one-shot full render,
 /// pretty mode) and push width-wrapped `ratatui` lines.
 ///
-/// `prefix` (e.g. `ai ▸ `) is prepended to the first rendered line only.
-/// Fenced-code body lines (per the renderer's `code_blocks` output ranges)
-/// and table rows stay verbatim; every other line wraps with `wrap_str`.
-/// Link underlines come from the renderer's `hyperlinks` output — the
-/// assistant block does not go through the regex URL scan.
-pub fn push_markdown(out: &mut Vec<Line<'static>>, text: &str, prefix: &str, width: usize) {
-    let (rendered, _checkpoint) = theway_markdown::render_markdown_ratatui_full(
+/// `prefix` (e.g. `ai ▸ `) is prepended to the first rendered line only, in
+/// `prefix_style`. Fenced-code body lines (per the renderer's `code_blocks`
+/// output ranges) and table rows stay verbatim; every other line wraps with
+/// `wrap_str`. The width-aware render entry passes `max_table_width` so fenced
+/// `mermaid` diagrams come out sized to the feed (over-wide graphs fall back
+/// to a framed source box). Link underlines come from the renderer's
+/// `hyperlinks` output — the assistant block does not go through the regex
+/// URL scan.
+pub fn push_markdown(
+    out: &mut Vec<Line<'static>>,
+    text: &str,
+    prefix: &str,
+    prefix_style: Style,
+    width: usize,
+) {
+    let (rendered, _checkpoint) = theway_markdown::render_markdown_ratatui_full_width(
         text,
         markdown_style(),
         true,
         Some(theway_markdown::default_syntect()),
+        Some(width),
     );
     let width = width.max(1);
     let prefix_width = unicode_width::UnicodeWidthStr::width(prefix);
@@ -221,7 +273,7 @@ pub fn push_markdown(out: &mut Vec<Line<'static>>, text: &str, prefix: &str, wid
             let mut line = line;
             if first {
                 line.spans
-                    .insert(0, Span::styled(prefix.to_string(), Style::default()));
+                    .insert(0, Span::styled(prefix.to_string(), prefix_style));
             }
             mapped.push(MappedLine {
                 start: out.len(),
@@ -238,7 +290,7 @@ pub fn push_markdown(out: &mut Vec<Line<'static>>, text: &str, prefix: &str, wid
             let mut pieces: Vec<(std::ops::Range<usize>, Style)> =
                 Vec::with_capacity(line.spans.len() + 1);
             if first {
-                pieces.push((0..prefix_len, Style::default()));
+                pieces.push((0..prefix_len, prefix_style));
             }
             let mut offset = prefix_len;
             for span in &line.spans {
@@ -307,7 +359,17 @@ pub fn push_markdown(out: &mut Vec<Line<'static>>, text: &str, prefix: &str, wid
 }
 
 /// Render the whole feed to width-wrapped `ratatui` lines, ready to scroll/draw.
-pub fn lines(feed: &theway_transport::feed::Feed, width: usize) -> Vec<Line<'static>> {
+///
+/// Grok-style block styling (issue #33): user rows carry a `❯` accent prefix on
+/// an elevated band, tool calls are `⏵ name` + dim args single-liners, tool
+/// results collapse to a one-line summary unless `tools_expanded`, and
+/// thinking blocks honor `thinking_mode`. Timestamps are dropped for
+/// conversational blocks (grok shows none); plain status lines keep theirs.
+pub fn lines(
+    feed: &theway_transport::feed::Feed,
+    width: usize,
+    opts: &FeedRenderOptions,
+) -> Vec<Line<'static>> {
     let width = width.max(1);
     let mut out: Vec<Line<'static>> = Vec::new();
     let mut assistant_rows: Vec<std::ops::Range<usize>> = Vec::new();
@@ -317,53 +379,57 @@ pub fn lines(feed: &theway_transport::feed::Feed, width: usize) -> Vec<Line<'sta
             out.push(Line::raw(""));
         }
         match block {
-            Block::User { text, timestamp } => {
-                let prefix = display_prefix(timestamp.as_deref(), "you ▸ ");
-                push_paragraphs(&mut out, text, USER_STYLE, Some(&prefix), width);
-            }
-            Block::Assistant { text, timestamp } => {
-                let prefix = display_prefix(timestamp.as_deref(), "ai ▸ ");
+            Block::User { text, .. } => push_user_block(&mut out, text, width),
+            Block::Assistant { text, .. } => {
                 // Assistant blocks are markdown: one-shot pretty render via
                 // theway-markdown, link underlines from the renderer's
-                // hyperlinks, verbatim code/table rows, wrapped prose.
+                // hyperlinks, verbatim code/table/mermaid rows, wrapped prose.
                 let start = out.len();
-                push_markdown(&mut out, text, &prefix, width);
+                push_markdown(&mut out, text, AI_PREFIX, AI_PREFIX_STYLE, width);
                 assistant_rows.push(start..out.len());
             }
-            Block::Thinking { text, timestamp } => {
-                let prefix = display_prefix(timestamp.as_deref(), "[thinking] ");
-                push_paragraphs(&mut out, text, THINKING_STYLE, Some(&prefix), width);
-            }
-            Block::Tool {
-                name,
-                args,
-                timestamp,
-            } => {
-                let text = format!("⚙ {name}{args}");
-                let prefix = display_prefix(timestamp.as_deref(), "");
-                push_paragraphs(&mut out, &text, TOOL_STYLE, Some(&prefix), width);
+            Block::Thinking { text, .. } => match opts.thinking_mode {
+                ThinkingMode::Hidden => {}
+                ThinkingMode::Peek => push_thinking_peek(&mut out, text, width),
+                ThinkingMode::Full => {
+                    push_paragraphs(&mut out, text, THINKING_STYLE, Some(TOOL_PREFIX), width)
+                }
+            },
+            Block::Tool { name, args, .. } => {
+                let mut spans = vec![Span::styled(
+                    format!("{TOOL_PREFIX}{name}"),
+                    TOOL_NAME_STYLE,
+                )];
+                if !args.is_empty() {
+                    spans.push(Span::styled(format!(" {args}"), TOOL_ARGS_STYLE));
+                }
+                let mut line = Line::from(spans);
+                truncate_line(&mut line, width);
+                out.push(line);
             }
             Block::ToolResult {
-                lines,
-                is_error,
-                timestamp,
-                ..
+                lines, is_error, ..
             } => {
-                let style = if *is_error {
-                    Style::default().fg(Color::Red)
+                if !opts.tools_expanded {
+                    let bytes: usize = lines.iter().map(String::len).sum();
+                    out.push(Line::styled(
+                        format!(
+                            "    result · {} lines · {} B · Ctrl+T expand",
+                            lines.len(),
+                            bytes
+                        ),
+                        RESULT_SUMMARY_STYLE,
+                    ));
                 } else {
-                    Style::default().fg(Color::Green)
-                };
-                let mut first = true;
-                for line in lines {
-                    let indented = if first {
-                        first = false;
-                        format!("{}    {line}", display_prefix(timestamp.as_deref(), ""))
+                    let style = if *is_error {
+                        Style::default().fg(Color::Red)
                     } else {
-                        format!("    {line}")
+                        Style::default().fg(Color::Green)
                     };
-                    for row in wrap_str(&indented, width) {
-                        out.push(Line::styled(row, style));
+                    for line in lines {
+                        for row in wrap_str(&format!("    {line}"), width) {
+                            out.push(Line::styled(row, style));
+                        }
                     }
                 }
             }
@@ -386,6 +452,101 @@ pub fn lines(feed: &theway_transport::feed::Feed, width: usize) -> Vec<Line<'sta
     }
     underline_links(&mut out, &assistant_rows);
     out
+}
+
+/// User rows, grok style: `❯ ` accent prefix + primary-colored body on a
+/// full-width elevated band; continuation lines keep a 2-col indent.
+fn push_user_block(out: &mut Vec<Line<'static>>, text: &str, width: usize) {
+    for (i, para) in text.split('\n').enumerate() {
+        let owned;
+        let (prefix, body) = if i == 0 {
+            (Some(USER_PREFIX), para)
+        } else {
+            (None, {
+                owned = format!("{USER_BAND_INDENT}{para}");
+                owned.as_str()
+            })
+        };
+        let prefix_width = prefix
+            .map(unicode_width::UnicodeWidthStr::width)
+            .unwrap_or(0);
+        let mut first = true;
+        for row in wrap_str(body, width.saturating_sub(prefix_width).max(1)) {
+            let mut spans = Vec::with_capacity(3);
+            if first && let Some(prefix) = prefix {
+                spans.push(Span::styled(prefix.to_string(), USER_STYLE));
+            }
+            spans.push(Span::styled(row.clone(), USER_BODY_STYLE));
+            first = false;
+            let row_width = if prefix.is_some() && spans.len() > 1 {
+                prefix_width
+            } else {
+                0
+            } + unicode_width::UnicodeWidthStr::width(row.as_str());
+            let pad = width.saturating_sub(row_width);
+            if pad > 0 {
+                spans.push(Span::styled(" ".repeat(pad), BAND_STYLE));
+            }
+            out.push(Line::from(spans));
+        }
+    }
+}
+
+/// Restyle a rendered feed line as selected (issue #33): the line's spans are
+/// flattened and the whole row carries the selection background. Highlight
+/// only — no copy yet.
+pub fn highlight_line(line: &mut Line<'static>) {
+    let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+    line.spans = vec![Span::styled(text, BAND_STYLE)];
+}
+
+/// Truncate a styled line to `max` display columns, dropping trailing spans
+/// and slicing the final span (single-line tool rows never wrap).
+fn truncate_line(line: &mut Line<'static>, max: usize) {
+    let mut total = 0usize;
+    let mut keep: Vec<Span<'static>> = Vec::with_capacity(line.spans.len());
+    for span in std::mem::take(&mut line.spans) {
+        let w = unicode_width::UnicodeWidthStr::width(span.content.as_ref());
+        if total + w <= max {
+            total += w;
+            keep.push(span);
+        } else {
+            let budget = max.saturating_sub(total);
+            if budget == 0 {
+                break;
+            }
+            let cut = theway_pager_render::line_utils::byte_offset_at_width(&span.content, budget);
+            if let Some(s) = span.content.get(..cut).filter(|s| !s.is_empty()) {
+                keep.push(Span::styled(s.to_string(), span.style));
+            }
+            break;
+        }
+    }
+    line.spans = keep;
+}
+
+/// Thinking peek window: dim header with the char count, the last few
+/// wrapped lines, and a mode hint.
+fn push_thinking_peek(out: &mut Vec<Line<'static>>, text: &str, width: usize) {
+    let chars = text.chars().count();
+    out.push(Line::styled(
+        format!("{TOOL_PREFIX}thinking · {chars} chars"),
+        RESULT_SUMMARY_STYLE,
+    ));
+    let wrapped: Vec<String> = text
+        .split('\n')
+        .flat_map(|para| wrap_str(para, width))
+        .collect();
+    let shown = wrapped.iter().rev().take(THINKING_PEEK_LINES).rev();
+    for row in shown {
+        out.push(Line::styled(format!("  {row}"), THINKING_STYLE));
+    }
+    if wrapped.len() > THINKING_PEEK_LINES {
+        out.push(Line::styled(
+            "  … Ctrl+O cycles: hidden/peek/full",
+            RESULT_SUMMARY_STYLE,
+        ));
+    }
 }
 
 /// Underline URLs detected in the rendered lines (theway-pager-render osc8
@@ -477,7 +638,211 @@ fn underline_range(line: &mut Line<'static>, start_col: usize, end_col: usize) {
 
 #[cfg(test)]
 mod tests {
-    use super::wrap_str_ranges;
+    use super::*;
+    use theway_transport::feed::{Feed, WireFeedBlock};
+    use unicode_width::UnicodeWidthStr;
+
+    fn feed_with(blocks: &[WireFeedBlock]) -> Feed {
+        let mut feed = Feed::new();
+        feed.replace_blocks(blocks);
+        feed
+    }
+
+    fn flat(lines: &[Line<'static>]) -> String {
+        lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn user_block_has_accent_prefix_and_band() {
+        let feed = feed_with(&[WireFeedBlock::User {
+            text: "hello world".into(),
+            timestamp: Some("2026-01-01 12:00".into()),
+        }]);
+        let opts = FeedRenderOptions::default();
+        let lines = super::lines(&feed, 30, &opts);
+        assert_eq!(lines.len(), 1);
+        let spans = &lines[0].spans;
+        assert_eq!(spans[0].content, "\u{276f} ");
+        assert_eq!(spans[0].style.fg, Some(ACCENT_USER));
+        assert!(spans[0].style.add_modifier.contains(Modifier::BOLD));
+        assert_eq!(spans[1].content, "hello world");
+        // Trailing band span pads the row to full width.
+        let total: usize = spans.iter().map(|s| s.content.width()).sum();
+        assert_eq!(total, 30);
+        assert_eq!(spans[2].style.bg, Some(BG_HIGHLIGHT));
+        // Timestamps are dropped from conversational blocks.
+        assert!(!flat(&lines).contains("2026-01-01"));
+    }
+
+    #[test]
+    fn user_block_wraps_with_indent_and_band() {
+        let feed = feed_with(&[WireFeedBlock::User {
+            text: "one two three four five six seven".into(),
+            timestamp: None,
+        }]);
+        let opts = FeedRenderOptions::default();
+        let lines = super::lines(&feed, 12, &opts);
+        assert!(lines.len() >= 2, "expected wrap: {lines:?}");
+        // Continuation rows keep the band width.
+        for line in &lines {
+            let total: usize = line.spans.iter().map(|s| s.content.width()).sum();
+            assert_eq!(total, 12);
+        }
+    }
+
+    #[test]
+    fn thinking_modes_full_peek_hidden() {
+        let blocks = vec![
+            WireFeedBlock::User {
+                text: "go".into(),
+                timestamp: None,
+            },
+            WireFeedBlock::Thinking {
+                text: "deep thoughts about the plan".into(),
+                timestamp: None,
+            },
+        ];
+        let opts = |mode| FeedRenderOptions {
+            thinking_mode: mode,
+            tools_expanded: false,
+        };
+        let full = flat(&super::lines(
+            &feed_with(&blocks),
+            80,
+            &opts(ThinkingMode::Full),
+        ));
+        assert!(full.contains("deep thoughts"), "{full}");
+        let peek = flat(&super::lines(
+            &feed_with(&blocks),
+            80,
+            &opts(ThinkingMode::Peek),
+        ));
+        assert!(peek.contains("⏵ thinking · 28 chars"), "{peek}");
+        assert!(peek.contains("deep thoughts"), "{peek}");
+        let hidden = flat(&super::lines(
+            &feed_with(&blocks),
+            80,
+            &opts(ThinkingMode::Hidden),
+        ));
+        assert!(!hidden.contains("deep thoughts"), "{hidden}");
+        assert!(hidden.contains("❯ go"), "{hidden}");
+    }
+
+    #[test]
+    fn thinking_peek_windows_tail_lines() {
+        let text = (0..30)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let feed = feed_with(&[WireFeedBlock::Thinking {
+            text,
+            timestamp: None,
+        }]);
+        let opts = FeedRenderOptions {
+            thinking_mode: ThinkingMode::Peek,
+            tools_expanded: false,
+        };
+        let lines = super::lines(&feed, 80, &opts);
+        // Header + 3 peek rows + mode hint.
+        assert!(lines.len() <= 1 + THINKING_PEEK_LINES + 1, "{lines:?}");
+        let flat = flat(&lines);
+        assert!(flat.contains("line 27"), "{flat}");
+        assert!(flat.contains("line 29"), "{flat}");
+        assert!(!flat.contains("line 0"), "{flat}");
+    }
+
+    #[test]
+    fn tool_call_is_single_accent_line_without_timestamp() {
+        let feed = feed_with(&[WireFeedBlock::Tool {
+            name: "read".into(),
+            args: "(path=\"x\")".into(),
+            timestamp: Some("2026-01-01 12:00".into()),
+        }]);
+        let opts = FeedRenderOptions::default();
+        let lines = super::lines(&feed, 80, &opts);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].spans[0].content, "\u{23f5} read");
+        assert_eq!(lines[0].spans[0].style.fg, Some(ACCENT_TOOL));
+        assert!(
+            lines[0].spans[0]
+                .style
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
+        assert!(lines[0].spans[1].content.contains("(path=\"x\")"));
+        assert!(!flat(&lines).contains("2026-01-01"));
+    }
+
+    #[test]
+    fn tool_result_collapses_by_default_and_expands() {
+        let feed = feed_with(&[WireFeedBlock::ToolResult {
+            lines: vec!["line a".into(), "line b".into()],
+            is_error: false,
+            timestamp: None,
+        }]);
+        let collapsed = flat(&super::lines(&feed, 80, &FeedRenderOptions::default()));
+        assert!(collapsed.contains("result · 2 lines"), "{collapsed}");
+        assert!(!collapsed.contains("line a"), "{collapsed}");
+        let expanded = flat(&super::lines(
+            &feed,
+            80,
+            &FeedRenderOptions {
+                thinking_mode: ThinkingMode::Full,
+                tools_expanded: true,
+            },
+        ));
+        assert!(expanded.contains("    line a"), "{expanded}");
+        assert!(expanded.contains("    line b"), "{expanded}");
+    }
+
+    #[test]
+    fn mermaid_fence_renders_diagram_not_source() {
+        let feed = feed_with(&[WireFeedBlock::Assistant {
+            text: "```mermaid\ngraph TD\n  A[Start] --> B[End]\n```\n".into(),
+            timestamp: None,
+        }]);
+        let opts = FeedRenderOptions::default();
+        let lines = super::lines(&feed, 80, &opts);
+        let flat = flat(&lines);
+        assert!(
+            flat.chars().any(|c| "─│┌┐└┘├┤┬┴┼".contains(c)),
+            "expected diagram art: {flat}"
+        );
+        assert!(!flat.contains("graph TD"), "{flat}");
+    }
+
+    #[test]
+    fn highlight_line_flattens_spans_and_sets_band_bg() {
+        let mut line = Line::from(vec![
+            Span::styled("abc", Style::default().fg(Color::Red)),
+            Span::styled("def", Style::default().fg(Color::Green)),
+        ]);
+        highlight_line(&mut line);
+        assert_eq!(line.spans.len(), 1);
+        assert_eq!(line.spans[0].content, "abcdef");
+        assert_eq!(line.spans[0].style.bg, Some(BG_HIGHLIGHT));
+    }
+
+    #[test]
+    fn assistant_prefix_is_magenta() {
+        let feed = feed_with(&[WireFeedBlock::Assistant {
+            text: "plain answer".into(),
+            timestamp: None,
+        }]);
+        let opts = FeedRenderOptions::default();
+        let lines = super::lines(&feed, 80, &opts);
+        assert!(lines[0].spans[0].content.starts_with("ai ▸ "));
+        assert_eq!(lines[0].spans[0].style.fg, Some(ACCENT_ASSISTANT));
+    }
 
     /// `wrap_str_ranges` must produce rows identical to the transport
     /// `wrap_str` (byte ranges re-slice the source to the same rows).

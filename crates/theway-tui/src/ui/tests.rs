@@ -13,7 +13,7 @@ use theway_transport::feed::WireFeedBlock;
 use theway_transport::grpc::{GrpcState, serve_grpc};
 use theway_transport::history::HistoryStore;
 use theway_transport::testing::FakeSessionOps;
-use theway_transport::wire::{WireCommand, WireStatus};
+use theway_transport::wire::{WireCommand, WireContextUsage, WireStatus};
 use tokio::sync::{broadcast, mpsc};
 
 fn fixture_status(feed_blocks: Vec<WireFeedBlock>) -> WireStatus {
@@ -39,6 +39,7 @@ fn fixture_status(feed_blocks: Vec<WireFeedBlock>) -> WireStatus {
         feed_lines: Vec::new(),
         dags: Vec::new(),
         subagents: Vec::new(),
+        usage: WireContextUsage::default(),
         tui_max_feed_lines: None,
     }
 }
@@ -132,7 +133,7 @@ async fn renders_feed_above_pinned_input_box() {
     let text = buffer_text(terminal.backend().buffer());
 
     assert!(
-        text.contains("you ▸ hello world"),
+        text.contains("❯ hello world"),
         "feed user line missing:\n{text}"
     );
     assert!(
@@ -333,9 +334,13 @@ async fn feed_render_uses_tui_max_feed_lines_from_snapshot() {
 async fn snapshot_rebuilds_feed_and_resyncs_busy_panel() {
     let (mut app, _rx) = test_app().await;
     assert!(
-        crate::feed_render::lines(&app.feed, 100)
-            .iter()
-            .any(|l| { l.spans.iter().any(|s| s.content.contains("banner")) })
+        crate::feed_render::lines(
+            &app.feed,
+            100,
+            &crate::feed_render::FeedRenderOptions::default()
+        )
+        .iter()
+        .any(|l| { l.spans.iter().any(|s| s.content.contains("banner")) })
     );
 
     let mut status = fixture_status(vec![
@@ -350,16 +355,19 @@ async fn snapshot_rebuilds_feed_and_resyncs_busy_panel() {
     ]);
     status.busy = true;
     status.queued_count = 2;
+    // Scrolled-up view: a snapshot append must NOT yank the view back to the
+    // bottom (issue #33 — follow is user-controlled, not snapshot-forced).
+    app.follow = false;
     app.apply_snapshot(status);
 
     assert!(app.busy);
     assert_eq!(app.latest.queued_count, 2);
     let text = feed_text(&app);
-    assert!(text.contains("you ▸ snap question"), "{text}");
+    assert!(text.contains("❯ snap question"), "{text}");
     assert!(text.contains("ai ▸ snap answer"), "{text}");
     // The old banner block is gone (whole-replacement semantics).
     assert!(!text.contains("banner"), "{text}");
-    assert!(app.follow);
+    assert!(!app.follow, "snapshot append must not re-enable follow");
 }
 
 #[tokio::test]
@@ -551,16 +559,20 @@ async fn session_switch_sends_switch_session_rpc() {
 }
 
 fn feed_text(app: &App) -> String {
-    crate::feed_render::lines(&app.feed, 100)
-        .into_iter()
-        .map(|line| {
-            line.spans
-                .into_iter()
-                .map(|span| span.content.into_owned())
-                .collect::<String>()
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    crate::feed_render::lines(
+        &app.feed,
+        100,
+        &crate::feed_render::FeedRenderOptions::default(),
+    )
+    .into_iter()
+    .map(|line| {
+        line.spans
+            .into_iter()
+            .map(|span| span.content.into_owned())
+            .collect::<String>()
+    })
+    .collect::<Vec<_>>()
+    .join("\n")
 }
 
 /// Tests drive `App` methods that only borrow the terminal (never draw);
@@ -571,7 +583,13 @@ fn terminal_placeholder() -> Terminal<CrosstermBackend<std::io::Stdout>> {
 
 fn assistant_lines(text: &str, width: usize) -> Vec<ratatui::text::Line<'static>> {
     let mut out: Vec<ratatui::text::Line<'static>> = Vec::new();
-    crate::feed_render::push_markdown(&mut out, text, "ai ▸ ", width);
+    crate::feed_render::push_markdown(
+        &mut out,
+        text,
+        "ai ▸ ",
+        ratatui::style::Style::default(),
+        width,
+    );
     out
 }
 
@@ -848,7 +866,11 @@ fn feed_urls_get_underline_style() {
     // A user block with an http URL: the URL span must carry UNDERLINED.
     let mut feed = theway_transport::feed::Feed::new();
     feed.push_user("see https://example.com/path now");
-    let lines = crate::feed_render::lines(&feed, 100);
+    let lines = crate::feed_render::lines(
+        &feed,
+        100,
+        &crate::feed_render::FeedRenderOptions::default(),
+    );
     let underlined: String = lines
         .iter()
         .flat_map(|l| &l.spans)
@@ -869,7 +891,11 @@ fn assistant_url_uses_hyperlinks_not_regex_scan() {
     // underlined alongside the URL.
     let mut feed = theway_transport::feed::Feed::new();
     feed.push_assistant("[docs](https://example.com/x)");
-    let lines = crate::feed_render::lines(&feed, 100);
+    let lines = crate::feed_render::lines(
+        &feed,
+        100,
+        &crate::feed_render::FeedRenderOptions::default(),
+    );
     let underlined: String = lines
         .iter()
         .flat_map(|l| &l.spans)
@@ -878,4 +904,19 @@ fn assistant_url_uses_hyperlinks_not_regex_scan() {
         .collect();
     assert!(underlined.contains("docs"), "{underlined}");
     assert!(underlined.contains("https://example.com/x"), "{underlined}");
+}
+
+#[test]
+fn feed_selection_range_and_extend_clamp() {
+    let mut sel = super::FeedSelection { anchor: 10, end: 5 };
+    // Ordered inclusive range.
+    assert_eq!(sel.range(100), 5..=10);
+    // Clamped to the last valid line.
+    assert_eq!(sel.range(8), 5..=7);
+    // Extend up clamps at 0, down clamps at total-1.
+    sel.extend(-100, 100);
+    assert_eq!(sel.end, 0);
+    sel.end = 95;
+    sel.extend(100, 100);
+    assert_eq!(sel.end, 99);
 }

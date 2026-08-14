@@ -59,6 +59,9 @@ pub struct PromptChrome<'a> {
     pub flags: &'a [PromptFlag<'a>],
     /// Right-aligned "multiline" indicator (grok shows it when the draft has \n).
     pub multiline: bool,
+    /// Right-aligned context-usage label (e.g. `12% ctx`), shown before the
+    /// multiline indicator on the info line (grok's context bar, inlined).
+    pub usage: Option<&'a str>,
     /// Optional session title inlined into the top divider (agent view in grok).
     pub title: Option<&'a str>,
     /// Placeholder shown when the draft is empty. Grok hides it while focused;
@@ -75,6 +78,7 @@ impl Default for PromptChrome<'_> {
             model_name: "",
             flags: &[],
             multiline: false,
+            usage: None,
             title: None,
             placeholder: "Build anything",
             input_empty: true,
@@ -241,9 +245,15 @@ fn render_info_line(buf: &mut Buffer, area: Rect, c: &PromptChrome) {
     }
     left_spans.push(Span::styled(" ", Style::default().bg(bg)));
 
-    // Right side: "multiline" indicator.
+    // Right side: context-usage label + "multiline" indicator.
     let mut right_spans: Vec<Span<'static>> = Vec::new();
+    if let Some(usage) = c.usage {
+        right_spans.push(Span::styled(usage.to_owned(), flag_style));
+    }
     if c.multiline {
+        if !right_spans.is_empty() {
+            right_spans.push(Span::styled(" · ", sep_style));
+        }
         right_spans.push(Span::styled("multiline", flag_style));
     }
 
@@ -370,6 +380,46 @@ mod tests {
         assert_eq!(cell_str(&buf, 19, 3), "m");
         assert_eq!(cell_str(&buf, 27, 3), "e");
         assert_eq!(cell_str(&buf, 29, 3), "╯");
+    }
+
+    #[test]
+    fn info_line_usage_right_aligns_before_multiline() {
+        let area = Rect::new(0, 0, 40, 4);
+        let c = PromptChrome {
+            model_name: "grok-3",
+            usage: Some("12% ctx"),
+            multiline: true,
+            ..Default::default()
+        };
+        let buf = render(area, &c);
+        let row: String = (2..38)
+            .filter_map(|x| buf.cell((x, 3)).map(|c| c.symbol()))
+            .collect();
+        // Usage and multiline join on the right side, usage left of multiline.
+        assert!(row.contains("12% ctx"), "info row: {row}");
+        assert!(row.contains("multiline"), "info row: {row}");
+        let usage_pos = row.find("12% ctx").unwrap();
+        let multiline_pos = row.find("multiline").unwrap();
+        assert!(usage_pos < multiline_pos, "info row: {row}");
+        // Right-anchored: last content cell (before ╯ at x=39) is "e" of multiline.
+        assert_eq!(cell_str(&buf, 37, 3), "e");
+        assert_eq!(cell_str(&buf, 39, 3), "╯");
+    }
+
+    #[test]
+    fn info_line_usage_without_multiline() {
+        let area = Rect::new(0, 0, 30, 4);
+        let c = PromptChrome {
+            model_name: "grok-3",
+            usage: Some("50% ctx"),
+            ..Default::default()
+        };
+        let buf = render(area, &c);
+        let row: String = (2..28)
+            .filter_map(|x| buf.cell((x, 3)).map(|c| c.symbol()))
+            .collect();
+        assert!(row.contains("50% ctx"), "info row: {row}");
+        assert!(!row.contains("multiline"), "info row: {row}");
     }
 
     #[test]

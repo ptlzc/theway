@@ -56,7 +56,9 @@ impl App {
                 }
             }
             KeyCode::Esc => {
-                if !self.completions.is_empty() {
+                if self.feed_selection.is_some() {
+                    self.feed_selection = None;
+                } else if !self.completions.is_empty() {
                     self.completions.clear();
                 } else if self.busy {
                     self.request_abort();
@@ -76,6 +78,21 @@ impl App {
             }
             KeyCode::Char('m') if alt => {
                 self.open_model_picker();
+            }
+            KeyCode::Char('o') if ctrl => self.cycle_thinking_mode(),
+            KeyCode::Char('t') if ctrl => self.toggle_tool_outputs(),
+            KeyCode::Char(' ') if ctrl => self.toggle_feed_selection(),
+            KeyCode::Up if shift && self.feed_selection.is_some() => {
+                self.extend_feed_selection(-1);
+            }
+            KeyCode::Down if shift && self.feed_selection.is_some() => {
+                self.extend_feed_selection(1);
+            }
+            KeyCode::PageUp if shift && self.feed_selection.is_some() => {
+                self.extend_feed_selection(-(self.last_viewport_h.max(1) as isize));
+            }
+            KeyCode::PageDown if shift && self.feed_selection.is_some() => {
+                self.extend_feed_selection(self.last_viewport_h.max(1) as isize);
             }
             KeyCode::Tab => self.cycle_completion(),
             KeyCode::PageUp => self.scroll_up(self.last_viewport_h.max(1)),
@@ -274,6 +291,59 @@ impl App {
     }
 
     // ── input helpers ───────────────────────────────────────────────────────────────────
+
+    /// Ctrl+O: cycle the thinking rendering mode Full → Peek → Hidden → Full.
+    pub(super) fn cycle_thinking_mode(&mut self) {
+        use crate::feed_render::ThinkingMode;
+        self.thinking_mode = match self.thinking_mode {
+            ThinkingMode::Full => ThinkingMode::Peek,
+            ThinkingMode::Peek => ThinkingMode::Hidden,
+            ThinkingMode::Hidden => ThinkingMode::Full,
+        };
+        let label = match self.thinking_mode {
+            ThinkingMode::Full => "thinking: full (Ctrl+O cycles)",
+            ThinkingMode::Peek => "thinking: peek — last lines only (Ctrl+O cycles)",
+            ThinkingMode::Hidden => "thinking: hidden (Ctrl+O cycles)",
+        };
+        self.system_line(label);
+    }
+
+    /// Ctrl+T: expand/collapse tool results in the feed.
+    pub(super) fn toggle_tool_outputs(&mut self) {
+        self.tools_expanded = !self.tools_expanded;
+        self.system_line(if self.tools_expanded {
+            "tool results expanded (Ctrl+T collapses)"
+        } else {
+            "tool results collapsed (Ctrl+T expands)"
+        });
+    }
+
+    /// Ctrl+Space: start a feed selection on the visible page, or clear it.
+    pub(super) fn toggle_feed_selection(&mut self) {
+        if self.feed_selection.is_some() {
+            self.feed_selection = None;
+            self.system_line("selection off");
+            return;
+        }
+        let view = self.selection_view;
+        if view.total == 0 {
+            self.system_line("nothing to select");
+            return;
+        }
+        self.feed_selection = Some(super::FeedSelection {
+            anchor: view.top,
+            end: view.bottom.min(view.total.saturating_sub(1)),
+        });
+        self.system_line("selection on — Shift+↑↓ extend · Esc clear");
+    }
+
+    /// Shift+arrows: extend the selection's free end by `delta` lines.
+    pub(super) fn extend_feed_selection(&mut self, delta: isize) {
+        let Some(sel) = self.feed_selection.as_mut() else {
+            return;
+        };
+        sel.extend(delta, self.selection_view.total);
+    }
 
     pub(super) fn input_text(&self) -> String {
         self.input.text().to_string()

@@ -120,6 +120,41 @@ impl PanelStatus {
     }
 }
 
+/// Line range of the feed text selection, in uncapped rendered-line
+/// coordinates (stable across scrollback trimming and streaming appends).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FeedSelection {
+    pub anchor: usize,
+    pub end: usize,
+}
+
+impl FeedSelection {
+    /// Inclusive ordered range, clamped to `[0, total)`.
+    pub fn range(&self, total: usize) -> std::ops::RangeInclusive<usize> {
+        let total = total.saturating_sub(1);
+        self.anchor.min(self.end).min(total)..=self.anchor.max(self.end).min(total)
+    }
+
+    /// Extend the free end by `delta` lines, clamped to `[0, total)`.
+    pub fn extend(&mut self, delta: isize, total: usize) {
+        let total = total.saturating_sub(1);
+        if delta < 0 {
+            self.end = self.end.saturating_sub(delta.unsigned_abs());
+        } else {
+            self.end = self.end.saturating_add(delta as usize).min(total);
+        }
+    }
+}
+
+/// Per-frame feed geometry (uncapped line indices) cached in the app for the
+/// selection key bindings.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SelectionView {
+    pub top: usize,
+    pub bottom: usize,
+    pub total: usize,
+}
+
 /// Everything the client App needs, assembled by `main.rs` after the daemon
 /// is discovered/spawned and the initial snapshot is fetched.
 pub struct AppConfig {
@@ -180,6 +215,16 @@ pub struct App {
 
     scroll: usize,
     follow: bool,
+    /// Thinking rendering mode, cycled by Ctrl+O (Full → Peek → Hidden).
+    thinking_mode: crate::feed_render::ThinkingMode,
+    /// Tool-result expansion toggle (Ctrl+T); collapsed results show a
+    /// one-line summary.
+    tools_expanded: bool,
+    /// Feed text selection (highlight only, no copy yet — issue #33): line
+    /// range in UNCAPPED rendered-line coordinates.
+    feed_selection: Option<FeedSelection>,
+    /// Per-frame feed geometry (uncapped line indices) for selection keys.
+    selection_view: SelectionView,
     last_viewport_h: usize,
     last_feed_area: Option<Rect>,
 
@@ -227,6 +272,10 @@ impl App {
             completion_idx: 0,
             scroll: 0,
             follow: true,
+            thinking_mode: crate::feed_render::ThinkingMode::Full,
+            tools_expanded: false,
+            feed_selection: None,
+            selection_view: SelectionView::default(),
             last_viewport_h: 1,
             last_feed_area: None,
             busy: false,
@@ -312,7 +361,10 @@ impl App {
                 // Truncation/reordering: rebuild.
                 self.feed.replace_blocks(new_blocks);
             }
-            self.follow = true;
+            // NOTE: `follow` is deliberately NOT forced here. A scrolled-up
+            // view stays pinned while the stream appends (issue #33); follow
+            // is only re-enabled by an explicit user action (submit) or by
+            // scrolling back to the bottom (render() clamp).
         }
     }
 
@@ -514,7 +566,14 @@ impl App {
         self.last_feed_area = Some(feed_area);
 
         // Feed (pre-wrapped to width so scroll math is exact).
-        let mut lines = crate::feed_render::lines(&self.feed, feed_area.width as usize);
+        let mut lines = crate::feed_render::lines(
+            &self.feed,
+            feed_area.width as usize,
+            &crate::feed_render::FeedRenderOptions {
+                thinking_mode: self.thinking_mode,
+                tools_expanded: self.tools_expanded,
+            },
+        );
         let uncapped_total = lines.len();
         // Scrollback cap (issue #27): keep only the newest N rendered lines,
         // N = the daemon-pushed `[tui] max_feed_lines` config value, falling
@@ -549,6 +608,22 @@ impl App {
             }
             capped
         };
+        // Cache the frame geometry for the selection keys (uncapped coords).
+        self.selection_view = SelectionView {
+            top: display_scroll + trimmed,
+            bottom: (display_scroll + trimmed).saturating_add(viewport.saturating_sub(1)),
+            total: uncapped_total,
+        };
+        // Selection highlight (issue #33): restyle the selected range.
+        if let Some(sel) = self.feed_selection {
+            let range = sel.range(uncapped_total);
+            for idx in range {
+                let capped = idx.saturating_sub(trimmed);
+                if let Some(line) = lines.get_mut(capped) {
+                    crate::feed_render::highlight_line(line);
+                }
+            }
+        }
         let feed = Paragraph::new(lines).scroll((display_scroll as u16, 0));
         frame.render_widget(feed, feed_area);
         // Feed scrollbar (theway-pager-render primitive): right edge of the
@@ -606,27 +681,53 @@ impl App {
                 bold: false,
             });
         }
+        let usage_label = {
+            let usage = &self.latest.usage;
+            if usage.context_window > 0 && usage.total_tokens > 0 {
+                let pct = ((usage.total_tokens as f64 * 100.0 / usage.context_window as f64)
+                    .round())
+                .clamp(0.0, 100.0) as u64;
+                format!("{pct}% ctx")
+            } else if usage.total_tokens > 0 {
+                render_utils::human_tokens(usage.total_tokens)
+            } else {
+                String::new()
+            }
+        };
         let chrome = prompt_chrome::PromptChrome {
             focused,
             model_name: &model_name,
             flags: &flags,
             multiline: !self.input_is_single_line(),
+            usage: (!usage_label.is_empty()).then_some(usage_label.as_str()),
             input_empty: self.input_text().is_empty(),
             ..prompt_chrome::PromptChrome::default()
         };
         let text_area =
             prompt_chrome::render_prompt_chrome(frame.buffer_mut(), input_area, &chrome);
+        let mut cursor_pos = None;
         if text_area.width > 0 && text_area.height > 0 {
             let input = &self.input;
             let input_state = &mut self.input_state;
             frame.render_stateful_widget_ref(input, text_area, input_state);
+            // The textarea renders no cursor of its own: draw it at the
+            // computed position (state is fresh — the widget just synced the
+            // viewport scroll into `input_state`).
+            if focused {
+                cursor_pos = self
+                    .input
+                    .cursor_pos_with_state(text_area, self.input_state);
+            }
+        }
+        if let Some((x, y)) = cursor_pos {
+            frame.set_cursor_position(ratatui::layout::Position::new(x, y));
         }
 
         // Hint line.
         let hint = if self.busy {
-            "Enter queue next · Ctrl-V paste · Alt+Enter newline · Ctrl-C abort current · empty Ctrl-U removes queued"
+            "Enter queue next · Ctrl-O thinking · Ctrl-T tools · Ctrl-Space select · Ctrl-C abort"
         } else {
-            "Enter send · Ctrl-V paste · Alt+Enter newline · ↑↓ history · Wheel/PgUp scroll · Ctrl-C abort"
+            "Enter send · Ctrl-O thinking · Ctrl-T tools · Ctrl-Space select · ↑↓ history · Wheel/PgUp scroll · Ctrl-C abort"
         };
         frame.render_widget(
             Paragraph::new(Line::styled(

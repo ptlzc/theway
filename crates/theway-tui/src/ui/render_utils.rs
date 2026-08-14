@@ -77,6 +77,18 @@ pub(super) fn human_bytes(bytes: usize) -> String {
     }
 }
 
+/// Compact token-count label for the prompt chrome info line (e.g. `1.5k tok`,
+/// `2.4M tok`). Bare counts under 10k stay exact.
+pub(super) fn human_tokens(tokens: u64) -> String {
+    if tokens >= 1_000_000 {
+        format!("{:.1}M tok", tokens as f64 / 1_000_000.0)
+    } else if tokens >= 10_000 {
+        format!("{:.1}k tok", tokens as f64 / 1_000.0)
+    } else {
+        format!("{tokens} tok")
+    }
+}
+
 pub(super) fn new_textarea() -> TextArea {
     // The ported textarea has no placeholder or cursor-line-style knobs;
     // defaults match the previous look (plain cursor, no placeholder).
