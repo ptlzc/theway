@@ -325,6 +325,34 @@ impl Feed {
         self.push_tool_result(tool_call_id, lines, is_error);
     }
 
+    /// Index (position in the block list) + text of the LAST thinking block,
+    /// for the daemon's thinking-summarization backfill.
+    pub fn last_thinking_block(&self) -> Option<(usize, String)> {
+        self.blocks
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, block)| matches!(block, Block::Thinking { .. }))
+            .map(|(index, block)| {
+                let Block::Thinking { text, .. } = block else {
+                    unreachable!("matched block must be Thinking");
+                };
+                (index, text.clone())
+            })
+    }
+
+    /// Replace the text of the thinking block at `index`, keeping its
+    /// timestamp. Returns false when `index` is out of range or the block is
+    /// not a thinking block (blocks are append-only, so a stale index from a
+    /// completed summary is simply dropped).
+    pub fn set_thinking_block(&mut self, index: usize, text: String) -> bool {
+        let Some(Block::Thinking { text: existing, .. }) = self.blocks.get_mut(index) else {
+            return false;
+        };
+        *existing = text;
+        true
+    }
+
     pub fn apply(&mut self, update: FeedUpdate) {
         match update {
             FeedUpdate::TurnStart | FeedUpdate::TurnEnd => {
@@ -345,6 +373,12 @@ impl Feed {
                 is_error,
             } => self.upsert_tool_result(tool_call_id, lines, is_error),
             FeedUpdate::Plain { text, level } => self.push_plain(text, level),
+            FeedUpdate::ThinkingSummary {
+                block_index,
+                summary,
+            } => {
+                self.set_thinking_block(block_index, summary);
+            }
             FeedUpdate::TriggerPollStatus(_) => {}
             FeedUpdate::SkillsReloaded { .. } => {}
         }
@@ -732,6 +766,51 @@ mod tests {
 
         assert!(compacted[0].ends_with('…'));
         assert!(compacted.iter().any(|line| line.contains("truncated")));
+    }
+
+    #[test]
+    fn last_thinking_block_finds_trailing_thinking() {
+        let mut feed = Feed::new();
+        feed.push_user("go");
+        feed.apply(FeedUpdate::ThinkingDelta("pondering".into()));
+        feed.apply(FeedUpdate::ThinkingDelta(" more".into()));
+        feed.apply(FeedUpdate::ToolStart {
+            name: "read".into(),
+            args: "(path=\"x\")".into(),
+        });
+        let (index, text) = feed.last_thinking_block().unwrap();
+        assert_eq!(index, 1);
+        assert_eq!(text, "pondering more");
+        // Tool block after thinking does not shadow it.
+        assert_eq!(feed.last_thinking_block().map(|(i, _)| i), Some(1));
+    }
+
+    #[test]
+    fn set_thinking_block_replaces_only_thinking() {
+        let mut feed = Feed::new();
+        feed.push_user("go");
+        feed.apply(FeedUpdate::ThinkingDelta("raw thoughts".into()));
+        assert!(feed.set_thinking_block(1, "structured summary".into()));
+        let rendered = plain_text(&feed.plain_lines(80));
+        assert!(rendered.contains("structured summary"));
+        assert!(!rendered.contains("raw thoughts"));
+        // Non-thinking block and out-of-range indices are rejected.
+        assert!(!feed.set_thinking_block(0, "nope".into()));
+        assert!(!feed.set_thinking_block(99, "nope".into()));
+    }
+
+    #[test]
+    fn thinking_summary_update_backfills_block() {
+        let mut feed = Feed::new();
+        feed.push_user("go");
+        feed.apply(FeedUpdate::ThinkingDelta("verbose".into()));
+        feed.apply(FeedUpdate::ThinkingSummary {
+            block_index: 1,
+            summary: "## Goal\n- do it".into(),
+        });
+        let rendered = plain_text(&feed.plain_lines(80));
+        assert!(rendered.contains("## Goal"));
+        assert!(!rendered.contains("verbose"));
     }
 
     #[test]

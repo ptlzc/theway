@@ -139,11 +139,50 @@ struct ConfigFile {
     relay: Option<RelayConfigSection>,
     model: Option<ModelConfigSection>,
     tui: Option<TuiConfigSection>,
+    orchestrator: Option<OrchestratorConfigSection>,
 }
 
 #[derive(Debug, Deserialize)]
 struct TuiConfigSection {
     max_feed_lines: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OrchestratorConfigSection {
+    thinking_summary: Option<bool>,
+    thinking_summary_min_chars: Option<usize>,
+}
+
+/// `[orchestrator] thinking_summary` settings: when enabled, each finished
+/// thinking burst is handed to a summarizer subagent whose structured output
+/// replaces the raw thinking block in the conversation feed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThinkingSummarySettings {
+    /// Minimum thinking text length (chars) that triggers summarization.
+    pub min_chars: usize,
+}
+
+/// Parse the `[orchestrator] thinking_summary` settings from `config.toml`.
+///
+/// Missing section/key or `thinking_summary = false` → `None`. When enabled,
+/// `thinking_summary_min_chars` defaults to 2000; `0` is rejected (an empty
+/// threshold would summarize every token of thinking).
+pub fn parse_orchestrator_thinking_summary(
+    toml_text: &str,
+) -> Result<Option<ThinkingSummarySettings>, String> {
+    let parsed: ConfigFile =
+        toml::from_str(toml_text).map_err(|e| format!("parse config.toml: {e}"))?;
+    let Some(section) = parsed.orchestrator else {
+        return Ok(None);
+    };
+    if section.thinking_summary != Some(true) {
+        return Ok(None);
+    }
+    let min_chars = section.thinking_summary_min_chars.unwrap_or(2000);
+    if min_chars == 0 {
+        return Err("`[orchestrator] thinking_summary_min_chars` must be at least 1".into());
+    }
+    Ok(Some(ThinkingSummarySettings { min_chars }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -195,6 +234,46 @@ poll_interval_secs = 15
 poll_interval_secs = 0
 "#;
         assert!(parse_trigger_poll_interval_secs(text).is_err());
+    }
+
+    #[test]
+    fn parse_orchestrator_thinking_summary_defaults_min_chars() {
+        assert_eq!(
+            parse_orchestrator_thinking_summary("[orchestrator]\nthinking_summary = true\n")
+                .unwrap(),
+            Some(ThinkingSummarySettings { min_chars: 2000 })
+        );
+        assert_eq!(
+            parse_orchestrator_thinking_summary(
+                "[orchestrator]\nthinking_summary = true\nthinking_summary_min_chars = 800\n"
+            )
+            .unwrap(),
+            Some(ThinkingSummarySettings { min_chars: 800 })
+        );
+    }
+
+    #[test]
+    fn parse_orchestrator_thinking_summary_disabled_or_missing() {
+        assert_eq!(
+            parse_orchestrator_thinking_summary("[orchestrator]\nthinking_summary = false\n")
+                .unwrap(),
+            None
+        );
+        assert_eq!(parse_orchestrator_thinking_summary("").unwrap(), None);
+        assert_eq!(
+            parse_orchestrator_thinking_summary("[tui]\nmax_feed_lines = 8000\n").unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_orchestrator_thinking_summary_rejects_zero_min_chars() {
+        assert!(
+            parse_orchestrator_thinking_summary(
+                "[orchestrator]\nthinking_summary = true\nthinking_summary_min_chars = 0\n"
+            )
+            .is_err()
+        );
     }
 
     #[test]

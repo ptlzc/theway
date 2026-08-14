@@ -1,6 +1,7 @@
 //! Tests for `client` — split out of src (see docs/RUST_TEST_FILES.md).
 
 use super::*;
+use crate::wire::WireContextUsage;
 use crate::grpc::{serve_grpc, GrpcState};
 use crate::proto::{session_state, wire_status};
 use crate::testing::{FakeSessionOps, empty_sidebar_snapshot};
@@ -40,6 +41,7 @@ fn fixture_status(feed_line: &str) -> WireStatus {
         feed_lines: vec![feed_line.into()],
         dags: Vec::new(),
         subagents: Vec::new(),
+        usage: WireContextUsage::default(),
         tui_max_feed_lines: None,
     }
 }

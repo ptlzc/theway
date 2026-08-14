@@ -1,7 +1,7 @@
 //! Tests for `proto` — split out of src (see docs/RUST_TEST_FILES.md).
 
 use super::*;
-use crate::wire::{ModelEntry, ProviderGroup};
+use crate::wire::{ModelEntry, ProviderGroup, WireContextUsage};
 use crate::feed::{Level, TriggerPollStatus};
 use crate::wire::{
     WireCronSnapshot, WireMcpSnapshot, WireSidebarSnapshot, WireSkillsSnapshot, WireToolsSnapshot,
@@ -83,6 +83,7 @@ fn fixture_snapshot() -> WireStatus {
         feed_lines: vec!["line".into()],
         dags: Vec::new(),
         subagents: Vec::new(),
+        usage: WireContextUsage::default(),
         tui_max_feed_lines: None,
     }
 }

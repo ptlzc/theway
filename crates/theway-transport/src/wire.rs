@@ -152,6 +152,16 @@ pub struct WireAgentJobSnapshot {
     pub turn: Option<u32>,
 }
 
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct WireContextUsage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
+    pub total_tokens: u64,
+    pub context_window: u64,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct WireStatus {
     pub session_id: String,
@@ -168,6 +178,10 @@ pub struct WireStatus {
     pub feed_lines: Vec<String>,
     pub dags: Vec<WireDagRunSnapshot>,
     pub subagents: Vec<WireAgentJobSnapshot>,
+    /// Running token usage + the active model's context window, published by
+    /// the daemon for the TUI prompt chrome (context-usage indicator).
+    #[serde(default)]
+    pub usage: WireContextUsage,
     /// TUI display settings resolved by the daemon from `config.toml`
     /// (`[tui] max_feed_lines`); `None` → the TUI built-in default applies.
     pub tui_max_feed_lines: Option<u64>,

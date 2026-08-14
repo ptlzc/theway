@@ -78,6 +78,29 @@ pub fn render_markdown_ratatui_full(
     render_markdown_ratatui_with_buffers(text, ms, pretty, &mut buffers, syntect)
 }
 
+/// Width-aware variant of [`render_markdown_ratatui_full`]: `max_table_width`
+/// is forwarded to the mermaid diagram renderer so fenced `mermaid` blocks
+/// produce art that fits the target width (over-wide graphs fall back to a
+/// framed source box), and caps table layout the same way the streaming
+/// renderer does.
+pub fn render_markdown_ratatui_full_width(
+    text: &str,
+    ms: MarkdownStyle,
+    pretty: bool,
+    syntect: Option<&Syntect>,
+    max_table_width: Option<usize>,
+) -> (MarkdownRenderOutput, Option<Checkpoint>) {
+    let mut buffers = MarkdownBuffers::new();
+    render_markdown_ratatui_with_buffers_width(
+        text,
+        ms,
+        pretty,
+        &mut buffers,
+        syntect,
+        max_table_width,
+    )
+}
+
 /// Render markdown to ratatui Lines, reusing the provided buffers.
 pub fn render_markdown_ratatui_with_buffers(
     text: &str,

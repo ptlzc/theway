@@ -151,6 +151,14 @@ pub fn session_state(snapshot: &WireStatus) -> wire::SessionState {
         feed_lines: snapshot.feed_lines.clone(),
         dags: snapshot.dags.iter().map(dag_run_wire).collect(),
         subagents: snapshot.subagents.iter().map(subagent_wire).collect(),
+        context_usage: Some(wire::ContextUsage {
+            input_tokens: snapshot.usage.input_tokens,
+            output_tokens: snapshot.usage.output_tokens,
+            cache_read_tokens: snapshot.usage.cache_read_tokens,
+            cache_write_tokens: snapshot.usage.cache_write_tokens,
+            total_tokens: snapshot.usage.total_tokens,
+            context_window: snapshot.usage.context_window.min(u32::MAX as u64) as u32,
+        }),
         tui_max_feed_lines: snapshot.tui_max_feed_lines.map(|n| n as u32),
     }
 }
@@ -214,6 +222,18 @@ pub fn wire_status(state: &wire::SessionState) -> WireStatus {
         feed_lines: state.feed_lines.clone(),
         dags: state.dags.iter().map(wire_dag_run).collect(),
         subagents: state.subagents.iter().map(wire_subagent_job).collect(),
+        usage: state
+            .context_usage
+            .as_ref()
+            .map(|usage| crate::wire::WireContextUsage {
+                input_tokens: usage.input_tokens,
+                output_tokens: usage.output_tokens,
+                cache_read_tokens: usage.cache_read_tokens,
+                cache_write_tokens: usage.cache_write_tokens,
+                total_tokens: usage.total_tokens,
+                context_window: u64::from(usage.context_window),
+            })
+            .unwrap_or_default(),
         tui_max_feed_lines: state.tui_max_feed_lines.map(u64::from),
     }
 }

@@ -32,6 +32,19 @@ message SessionState {
   repeated SubagentJobSnapshot subagents = 14;
   // TUI display settings pushed from the daemon (read from config.toml).
   optional uint32 tui_max_feed_lines = 15;
+  // Token usage + context window for the live session (orchestrator thinking
+  // summary + markdown width need these; node 2 fills real values).
+  optional ContextUsage context_usage = 16;
+}
+
+// Token usage for the current/last turn, plus the model's context window size.
+message ContextUsage {
+  uint64 input_tokens = 1;
+  uint64 output_tokens = 2;
+  uint64 cache_read_tokens = 3;
+  uint64 cache_write_tokens = 4;
+  uint64 total_tokens = 5;
+  uint32 context_window = 6;
 }
 
 message ProviderGroup {

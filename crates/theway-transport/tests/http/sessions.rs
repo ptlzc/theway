@@ -3,6 +3,7 @@
 //! HTTP against a router wired with the in-memory [`FakeSessionOps`].
 
 use super::super::*;
+use crate::wire::WireContextUsage;
 use super::helpers::{rpc_call, rpc_error};
 use crate::testing::{FakeSessionOps, empty_sidebar_snapshot};
 use serde_json::json;
@@ -23,6 +24,7 @@ fn wire_status(session_id: &str) -> WireStatus {
         feed_lines: Vec::new(),
         dags: Vec::new(),
         subagents: Vec::new(),
+        usage: WireContextUsage::default(),
         tui_max_feed_lines: None,
     }
 }

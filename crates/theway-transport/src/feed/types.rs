@@ -31,6 +31,13 @@ pub enum FeedUpdate {
         text: String,
         level: Level,
     },
+    /// A finished thinking burst was summarized by a background subagent;
+    /// `block_index` is the feed block to backfill with `summary` (thinking
+    /// summarization, `[orchestrator] thinking_summary`).
+    ThinkingSummary {
+        block_index: usize,
+        summary: String,
+    },
     TriggerPollStatus(TriggerPollStatus),
     /// The skill catalog was hot-reloaded. Display-only: appends no feed block, but the
     /// update itself drives a TUI repaint / web snapshot republish so sidebars showing the

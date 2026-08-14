@@ -1,6 +1,7 @@
 //! Tests for `grpc` — split out of src (see docs/RUST_TEST_FILES.md).
 
 use super::*;
+use crate::wire::WireContextUsage;
 use crate::testing::{FakeSessionOps, empty_sidebar_snapshot};
 use std::time::Duration;
 
@@ -20,6 +21,7 @@ fn fixture_snapshot(feed_line: &str) -> WireStatus {
         feed_lines: vec![feed_line.into()],
         dags: Vec::new(),
         subagents: Vec::new(),
+        usage: WireContextUsage::default(),
         tui_max_feed_lines: None,
     }
 }
