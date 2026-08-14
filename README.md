@@ -124,8 +124,9 @@ agent runtime (harness, session, tools, triggers). The client/daemon split mirro
 the crate layout — the TUI depends on the `theway` SDK crate only, never on the
 daemon runtime; see [Workspace layout](#workspace-layout) and
 [docs/architecture.md](docs/architecture.md). On startup the TUI reuses a
-running daemon (discovered via `~/.theway/daemon-port` or the default port
-`44777`), or spawns `thewayd` in the current directory and waits for readiness.
+running daemon (discovered via `~/.theway/daemon-port-<cwd-hash>` or the default
+port `44777`), or spawns `thewayd` in the current directory and waits for
+readiness.
 The daemon stays running after the TUI exits (multi-client sharing); stop it
 with `Ctrl-C` / `SIGTERM`, or start it explicitly:
 
@@ -342,7 +343,7 @@ By default, `theway` stores local state under `~/.theway`:
 | `~/.theway/sessions/<cwd-hash>/<uuidv7>.cron.toml` | Session-scoped cron jobs |
 | `~/.theway/sessions/<cwd-hash>/<uuidv7>.loop-<job-id>.md` | Loop state kept by a stateful cron job |
 | `~/.theway/inbox.jsonl` | Global triage inbox written by stateful loops |
-| `~/.theway/daemon-port` | Port the running `thewayd` bound (written on bind; clients discover the daemon here) |
+| `~/.theway/daemon-port-<cwd-hash>` | Port + pid the running `thewayd` bound for that cwd (written on bind; clients discover the daemon here) |
 | `~/.theway/config.toml` | Optional user config, including trigger poll interval and TUI scrollback (`[tui] max_feed_lines`) |
 
 Set `THEWAY_DIR` to use a different base directory.
