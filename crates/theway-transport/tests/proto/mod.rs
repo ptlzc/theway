@@ -148,6 +148,8 @@ fn dag_run_converts_to_wire_shape() {
             cwd: None,
             model: None,
             thinking: None,
+            max_iterations: None,
+            tools: None,
             status: NodeStatus::Running,
             job_id: Some("job-7".into()),
             attempt: 1,
