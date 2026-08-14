@@ -50,7 +50,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap};
-use tui_textarea::TextArea;
+use theway_ratatui_textarea::{TextArea, TextAreaState};
 
 use theway_llm_provider::ImageContent;
 use theway_transport::client::GrpcClient;
@@ -166,7 +166,10 @@ pub struct App {
     latest_goal: Option<theway_transport::wire::WireGoalSnapshot>,
     latest_trigger_poll: Option<TriggerPollStatus>,
 
-    input: TextArea<'static>,
+    input: TextArea,
+    /// Render state for the ported textarea (viewport scroll + cursor
+    /// position live here, not in the widget — stateful render API).
+    input_state: TextAreaState,
     completions: Vec<String>,
     completion_idx: usize,
 
@@ -214,6 +217,7 @@ impl App {
             latest_trigger_poll: initial.latest_trigger_poll.clone(),
             latest: initial,
             input: new_textarea(),
+            input_state: TextAreaState::default(),
             completions: Vec::new(),
             completion_idx: 0,
             scroll: 0,
@@ -475,7 +479,12 @@ impl App {
 
     fn render(&mut self, frame: &mut ratatui::Frame) {
         let area = frame.area();
-        let input_rows = self.input.lines().len().clamp(1, MAX_INPUT_ROWS) as u16;
+        let input_rows = self
+            .input
+            .text()
+            .split('\n')
+            .count()
+            .clamp(1, MAX_INPUT_ROWS) as u16;
         let chunks = Layout::vertical([
             Constraint::Min(1),
             Constraint::Length(1),              // status separator
@@ -551,7 +560,9 @@ impl App {
                 height: inner.height,
             };
             if text_area.width > 0 {
-                frame.render_widget(&self.input, text_area);
+                let input = &self.input;
+                let input_state = &mut self.input_state;
+                frame.render_stateful_widget_ref(input, text_area, input_state);
             }
         }
 

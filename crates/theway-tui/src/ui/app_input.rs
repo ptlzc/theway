@@ -65,7 +65,7 @@ impl App {
                 }
             }
             KeyCode::Enter if alt || shift => {
-                self.input.insert_newline();
+                self.input.insert_str("\n");
                 self.refresh_completions();
             }
             KeyCode::Enter => {
@@ -276,11 +276,11 @@ impl App {
     // ── input helpers ───────────────────────────────────────────────────────────────────
 
     pub(super) fn input_text(&self) -> String {
-        self.input.lines().join("\n")
+        self.input.text().to_string()
     }
 
     pub(super) fn input_is_single_line(&self) -> bool {
-        self.input.lines().len() <= 1
+        !self.input.text().contains('\n')
     }
 
     pub(super) fn clear_input(&mut self) {

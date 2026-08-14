@@ -22,8 +22,8 @@ theway-markdown-core = { path = "../theway-markdown-core" }
 # Terminal UI surface (moved out of the daemon crate; the ratatui full-screen REPL,
 # web/grpc transport event loop, feed, listener and relay all live in this crate).
 crossterm = { version = "0.28", features = ["event-stream"] }
-ratatui = { version = "0.29" }
-tui-textarea = { version = "0.7" }
+ratatui = { version = "0.29", features = ["unstable-widget-ref"] }
+theway-ratatui-textarea = { path = "../theway-ratatui-textarea" }
 unicode-width = "0.2"
 arboard = { version = "3" }
 image = { version = "0.25", default-features = false, features = ["png"] }

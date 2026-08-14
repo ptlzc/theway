@@ -15,7 +15,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::Line;
 use regex::Regex;
-use tui_textarea::TextArea;
+use theway_ratatui_textarea::TextArea;
 
 use theway_transport::feed;
 
@@ -77,11 +77,10 @@ pub(super) fn human_bytes(bytes: usize) -> String {
     }
 }
 
-pub(super) fn new_textarea() -> TextArea<'static> {
-    let mut textarea = TextArea::default();
-    textarea.set_cursor_line_style(Style::default());
-    textarea.set_placeholder_text("type a message, or /help");
-    textarea
+pub(super) fn new_textarea() -> TextArea {
+    // The ported textarea has no placeholder or cursor-line-style knobs;
+    // defaults match the previous look (plain cursor, no placeholder).
+    TextArea::new()
 }
 
 pub(super) fn enter_tui() -> Result<()> {
