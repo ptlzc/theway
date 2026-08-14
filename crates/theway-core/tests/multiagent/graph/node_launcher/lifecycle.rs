@@ -1,0 +1,133 @@
+//! Node launch lifecycle: resolution, completion, overrides, timeout, cancel.
+
+use super::*;
+
+#[tokio::test]
+async fn unknown_agent_fails_node_synchronously() {
+    let engine = engine_with_launcher(faux_model(), faux_stream("nope"));
+    // plan → tick → launch all happen synchronously; the unknown-agent path never
+    // spawns a task, so the run is already Failed when plan returns.
+    let run_id = plan_single_node(&engine, "no-such-agent", "hello", None);
+    let run = engine.get_run(&run_id).unwrap();
+    assert_eq!(run.status, DagStatus::Failed);
+    let node = run.node("a").unwrap();
+    assert_eq!(node.status, NodeStatus::Failed);
+    assert_eq!(
+        node.error.as_deref(),
+        Some("unknown agent \"no-such-agent\"")
+    );
+    assert_eq!(node.input_tokens, Some(0));
+}
+
+#[tokio::test]
+async fn known_agent_completes_with_output_and_tokens() {
+    let engine = engine_with_launcher(faux_model(), faux_stream("dag done"));
+    let run_id = plan_single_node(&engine, "general", "do the thing", None);
+    let results = engine
+        .wait_for_runs(std::slice::from_ref(&run_id), Duration::from_secs(10), None)
+        .await;
+    assert_eq!(results, vec![(run_id.clone(), false)], "run must finish");
+    let run = engine.get_run(&run_id).unwrap();
+    assert_eq!(run.status, DagStatus::Completed);
+    let node = run.node("a").unwrap();
+    assert_eq!(node.status, NodeStatus::Succeeded);
+    assert_eq!(node.error, None);
+    assert_eq!(node.output.as_deref(), Some("dag done"));
+    assert_eq!(node.input_tokens, Some(0));
+    assert_eq!(node.output_tokens, Some(0));
+    assert!(node.result.as_ref().unwrap().total_attempts >= 1);
+}
+
+#[tokio::test]
+async fn model_override_rewrites_id_and_still_completes() {
+    let engine = engine_with_launcher(faux_model(), faux_stream("ok"));
+    let def = DagRunDef {
+        name: "override".into(),
+        nodes: vec![DagNodeDef {
+            id: "a".into(),
+            agent: "general".into(),
+            task: "t".into(),
+            depends_on: None,
+            timeout: None,
+            cwd: None,
+            model: Some("other-model".into()),
+            thinking: None,
+            max_iterations: None,
+            tools: None,
+        }],
+        max_concurrency: None,
+        fail_fast: None,
+        direction: None,
+    };
+    let run_id = engine.plan(def, None, None).unwrap().id;
+    let results = engine
+        .wait_for_runs(std::slice::from_ref(&run_id), Duration::from_secs(10), None)
+        .await;
+    assert_eq!(results, vec![(run_id.clone(), false)]);
+    let run = engine.get_run(&run_id).unwrap();
+    assert_eq!(run.status, DagStatus::Completed);
+    assert_eq!(run.node("a").unwrap().status, NodeStatus::Succeeded);
+}
+
+#[tokio::test]
+async fn node_timeout_fails_the_node() {
+    let engine = engine_with_launcher(faux_model(), stalled_stream());
+    let run_id = plan_single_node(&engine, "general", "hang", Some(1));
+    let results = engine
+        .wait_for_runs(std::slice::from_ref(&run_id), Duration::from_secs(10), None)
+        .await;
+    assert_eq!(results, vec![(run_id.clone(), false)], "run must finish");
+    let run = engine.get_run(&run_id).unwrap();
+    assert_eq!(run.status, DagStatus::Failed);
+    let node = run.node("a").unwrap();
+    assert_eq!(node.status, NodeStatus::Failed);
+    let err = node.error.as_deref().unwrap();
+    assert!(err.contains("no output for 1s (idle timeout)"), "{err}");
+}
+
+/// Idle timeout must NOT be a wall-clock cap: a node that keeps emitting
+/// activity (token deltas) past the idle window survives to completion.
+#[tokio::test]
+async fn idle_timeout_reschedules_on_activity() {
+    let engine = engine_with_launcher(faux_model(), slow_stream());
+    let run_id = plan_single_node(&engine, "general", "stream", Some(1));
+    let results = engine
+        .wait_for_runs(std::slice::from_ref(&run_id), Duration::from_secs(10), None)
+        .await;
+    assert_eq!(
+        results,
+        vec![(run_id.clone(), false)],
+        "activity must keep the run alive"
+    );
+    let run = engine.get_run(&run_id).unwrap();
+    assert_eq!(run.status, DagStatus::Completed);
+    let node = run.node("a").unwrap();
+    assert_eq!(node.status, NodeStatus::Succeeded);
+    assert_eq!(node.output.as_deref(), Some("slow done"));
+}
+
+#[tokio::test]
+async fn run_cancel_aborts_the_node_job() {
+    let engine = engine_with_launcher(faux_model(), stalled_stream());
+    let run_id = plan_single_node(&engine, "general", "hang", None);
+    // Let the node reach Running (launch is a spawned task) before cancelling.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    engine.cancel_run(&run_id, Some("test cancel"));
+    let run = engine.get_run(&run_id).unwrap();
+    assert_eq!(run.status, DagStatus::Cancelled);
+    assert_eq!(run.node("a").unwrap().status, NodeStatus::Cancelled);
+    // Give the aborted job time to unwind; a stale completion report must not flip
+    // the cancelled state.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let run = engine.get_run(&run_id).unwrap();
+    assert_eq!(run.status, DagStatus::Cancelled);
+    assert_eq!(run.node("a").unwrap().status, NodeStatus::Cancelled);
+    assert_eq!(run.error.as_deref(), Some("test cancel"));
+}
+
+#[test]
+fn cap_chars_truncates_on_char_boundary() {
+    assert_eq!(cap_chars("short", 10), "short");
+    let long = "x".repeat(100);
+    assert_eq!(cap_chars(&long, 16).chars().count(), 16);
+}

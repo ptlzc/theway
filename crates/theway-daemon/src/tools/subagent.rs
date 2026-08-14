@@ -7,8 +7,10 @@
 //!   checker / general — same table the DAG node launcher resolves against), same model
 //!   as parent. ONE uniform tool set for every spec, injected from the app layer at
 //!   construction (engine tools minus subagent/dag_* plus local tools — the spec's
-//!   system prompt and the parent's task prompt define behavior), max 16 iterations,
-//!   MemorySessionStorage so nothing leaks to disk.
+//!   system prompt and the parent's task prompt define behavior); the iteration budget
+//!   comes from the spec table. Per-call `max_iterations` and `tools` (allowlist)
+//!   override the spec budget / narrow the tool set at launch; an unknown allowlist
+//!   name fails the call. MemorySessionStorage so nothing leaks to disk.
 //! - Concurrent execution mode (Parallel) so the parent can fire multiple subagent calls in one
 //!   turn and they run together.
 //! - Parent abort cascades: the tool listens on the parent's cancellation token and aborts
@@ -32,7 +34,7 @@ use theway_core::{
 use theway_llm_provider::{Model, Tool, UserContentBlock};
 use tokio_util::sync::CancellationToken;
 
-use theway_core::multiagent::runner::{AgentRunOptions, run_agent};
+use theway_core::multiagent::runner::{AgentRunOptions, filter_tool_set, run_agent};
 use theway_core::multiagent::types::AgentRunResolver;
 use theway_core::multiagent::types::ToolSetResolver;
 
@@ -142,17 +144,39 @@ impl AgentTool for SubagentTool {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
+        let max_iterations = params
+            .get("max_iterations")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32);
+        let tools_allow: Option<Vec<String>> =
+            params.get("tools").and_then(|v| v.as_array()).map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(String::from))
+                    .collect()
+            });
 
         // All specs in the app's table are valid subagents; the shared runner drives
         // the harness from the resolved spec (system prompt); the tool set comes from
         // the app-layer resolver injected at construction (same one the DAG launcher
         // uses).
-        let launch = (self.launch_resolver)(subagent_type).ok_or_else(|| {
+        let mut launch = (self.launch_resolver)(subagent_type).ok_or_else(|| {
             AgentToolError::Message(format!("unknown subagent_type: {subagent_type}"))
         })?;
+        // Budget override: the call parameter wins over the spec default.
+        if let Some(n) = max_iterations {
+            launch.max_iterations = n;
+        }
+        // Tool allowlist: narrow the resolved tool set; an unknown name fails the
+        // call visibly to the orchestrator (retryable — same semantics as the DAG
+        // node launcher's synchronous node failure).
+        let tools = (self.subagent_tools)(subagent_type);
+        let tools = match tools_allow.as_deref() {
+            None => tools,
+            Some(allow) => filter_tool_set(tools, allow).map_err(AgentToolError::Message)?,
+        };
         let result = run_agent(AgentRunOptions {
             launch,
-            tools: (self.subagent_tools)(subagent_type),
+            tools,
             prompt,
             model: self.model.clone(),
             stream_fn: self.stream_fn.clone(),
@@ -203,7 +227,9 @@ fn build_definition(spec_names: &[String]) -> Tool {
     Tool {
         name: "subagent".into(),
         description:
-            "Delegate a self-contained task to a fresh sub-agent. The subagent gets its own context window and the uniform subagent tool set (engine tools minus subagent/dag_* plus local tools); this tool returns a single text result from the subagent. Use this when you need to inspect a large surface area (search, file reads) or run a contained change without polluting the main conversation.".into(),
+            "Delegate a self-contained task to a fresh sub-agent. The subagent gets its own context window and the uniform subagent tool set (engine tools minus subagent/dag_* plus local tools); this tool returns a single text result from the subagent. Use this when you need to inspect a large surface area (search, file reads) or run a contained change without polluting the main conversation.\n\
+             Budget: the subagent defaults to 300 LLM-turn attempts — the code-harness budget (compile → fix loops need it). For short, fast tasks (a quick read, a single check) lower max_iterations to a reasonable range like 4-32.\n\
+             Tools: by default the subagent gets every orchestrator tool except dag_* and subagent; pass tools: [\"read\", \"bash\"] to restrict it to specific tools (unknown names fail the call).".into(),
         parameters: json!({
             "type": "object",
             "properties": {
@@ -221,9 +247,21 @@ fn build_definition(spec_names: &[String]) -> Tool {
                     "type": "string",
                     "description": "Full prompt the subagent will receive as its user message.",
                 },
+                "max_iterations": {
+                    "type": "number",
+                    "description": "Iteration-budget override (LLM-turn attempts); when set it wins over the spec default.",
+                },
+                "tools": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Tool allowlist (tool names): restricts the subagent to exactly these tools; unknown names fail the call. Omit for the full subagent tool set.",
+                },
             },
             "required": ["prompt"],
             "additionalProperties": false,
         }),
     }
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("tools/subagent");
