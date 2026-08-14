@@ -88,10 +88,24 @@ impl AgentTool for DagWaitTool {
             Duration::from_secs(timeout_secs),
             Some(Duration::from_secs(DAG_WAIT_IDLE_SECS)),
         );
-        // Parent abort cascades: the wait must not outlive the agent turn.
+        // Parent abort cascades: the wait must not outlive the agent turn. When the
+        // parent turn is interrupted, return an informative result instead of a bare
+        // error — the DAGs are still running in the background and the agent needs to
+        // know that (and how to re-harvest or stop them).
         let results = tokio::select! {
             r = wait => r,
-            _ = cancel.cancelled() => return Err(AgentToolError::Message("cancelled".into())),
+            _ = cancel.cancelled() => {
+                let mut lines: Vec<String> = Vec::new();
+                for id in &run_ids {
+                    if let Some(run) = self.engine.get_run(id) {
+                        lines.push(format!("{} ({})", run.id, run_summary_line(&run)));
+                    }
+                }
+                return Ok(ok_text(format!(
+                    "dag_wait 被父回合打断 (用户中断/新消息), 提前退出。所等 DAG 仍在后台运行:\n{}\n\n仍可继续: 再调 dag_wait 收割结果; 要终止则 dag_cancel。",
+                    lines.join("\n")
+                )));
+            }
         };
         let mut runs: Vec<(DagRun, bool)> = Vec::new();
         for (id, timed_out) in results {

@@ -73,7 +73,7 @@ async fn wait_times_out_on_stuck_run() {
 }
 
 #[tokio::test]
-async fn wait_respects_parent_cancel() {
+async fn wait_parent_cancel_returns_informative_state() {
     let (engine, _) = engine_with(FakeLauncher::stuck());
     let tools = tools(engine, None);
     exec(
@@ -98,11 +98,24 @@ async fn wait_respects_parent_cancel() {
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
     cancel.cancel();
-    let err = handle.await.unwrap().expect_err("cancel 必须中止 wait");
-    match err {
-        AgentToolError::Message(m) => assert_eq!(m, "cancelled"),
-        AgentToolError::Other(e) => panic!("expected Message(\"cancelled\"), got Other({e})"),
-    }
+    let result = handle.await.unwrap().unwrap();
+    let text = result
+        .content
+        .iter()
+        .filter_map(|b| match b {
+            UserContentBlock::Text(t) => Some(t.text.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    // The interrupted wait must still report which DAGs it was waiting on and
+    // their live state (still running in the background), plus recovery guidance —
+    // never a bare "cancelled" that hides the context.
+    assert!(text.contains("dag_wait 被父回合打断"), "{text}");
+    assert!(text.contains("dag-1"), "{text}");
+    assert!(text.contains("仍在后台运行"), "{text}");
+    assert!(text.contains("dag_wait 收割结果"), "{text}");
+    assert!(text.contains("dag_cancel"), "{text}");
 }
 
 #[tokio::test]

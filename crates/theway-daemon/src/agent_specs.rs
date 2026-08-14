@@ -12,7 +12,8 @@ use std::sync::Arc;
 
 use theway_core::multiagent::types::{AgentRunParams, AgentRunResolver};
 
-/// Iteration budget default, mirroring the `subagent` tool's "max 16 iterations" doc.
+/// Iteration budget default, enforced by the sub-harness agent loop as a hard
+/// cap on LLM turn attempts (see `AgentOptions::max_iterations`).
 pub const DEFAULT_MAX_ITERATIONS: u32 = 16;
 
 /// App-layer spec definition. Structure and content are server decisions; the engine
