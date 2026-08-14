@@ -1096,3 +1096,136 @@ fn feed_selection_range_and_extend_clamp() {
     sel.extend(100, 100);
     assert_eq!(sel.end, 99);
 }
+
+fn dag_run(kind: &str) -> theway_transport::wire::WireDagRunSnapshot {
+    theway_transport::wire::WireDagRunSnapshot {
+        id: "dag-1".into(),
+        name: "demo".into(),
+        kind: kind.into(),
+        status: "running".into(),
+        fail_fast: false,
+        max_concurrency: 4,
+        direction: "TD".into(),
+        created_at: 0,
+        completed_at: None,
+        error: None,
+        nodes: Vec::new(),
+    }
+}
+
+#[test]
+fn feature_labels_empty_without_sources() {
+    assert!(super::feature_labels(&[], &[], false).is_empty());
+}
+
+#[test]
+fn feature_labels_passes_runtime_features_through() {
+    let runtime = vec!["suppress".to_string(), "cycle".to_string()];
+    assert_eq!(super::feature_labels(&runtime, &[], false), runtime);
+}
+
+#[test]
+fn feature_labels_derives_graph_engine_from_dag_run() {
+    let labels = super::feature_labels(&[], &[dag_run("dag")], false);
+    assert_eq!(labels, vec!["graph engine".to_string()]);
+}
+
+#[test]
+fn feature_labels_goal_from_run_or_active_goal_once() {
+    let from_run = super::feature_labels(&[], &[dag_run("goal")], false);
+    assert_eq!(from_run, vec!["goal".to_string()]);
+    let from_goal = super::feature_labels(&[], &[], true);
+    assert_eq!(from_goal, vec!["goal".to_string()]);
+    // Both sources active still emit a single label.
+    let both = super::feature_labels(&[], &[dag_run("goal")], true);
+    assert_eq!(both, vec!["goal".to_string()]);
+}
+
+#[test]
+fn feature_labels_combined_order() {
+    let runtime = vec!["inject-and-run".to_string()];
+    let dags = vec![dag_run("dag"), dag_run("goal")];
+    let labels = super::feature_labels(&runtime, &dags, true);
+    assert_eq!(
+        labels,
+        vec![
+            "inject-and-run".to_string(),
+            "graph engine".to_string(),
+            "goal".to_string(),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn chrome_info_line_drops_working_and_multiline() {
+    let (mut app, _rx) = test_app().await;
+    // Busy (the old "working" flag case) with a multiline draft (the old
+    // "multiline" indicator case): neither may appear on the info line.
+    let mut status = fixture_status(Vec::new());
+    status.busy = true;
+    app.apply_snapshot(status);
+    app.set_input("line one\nline two");
+    let backend = TestBackend::new(60, 14);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    let text = buffer_text(terminal.backend().buffer());
+    let lines: Vec<&str> = text.lines().collect();
+    let info_row = lines
+        .iter()
+        .find(|l| l.contains('╰'))
+        .unwrap_or_else(|| panic!("composer info line missing:\n{text}"));
+    assert!(info_row.contains("provider:model"), "info row: {info_row}");
+    assert!(!info_row.contains("working"), "info row: {info_row}");
+    assert!(!info_row.contains("multiline"), "info row: {info_row}");
+    // The busy band above still carries the working label.
+    assert!(
+        text.contains("working"),
+        "busy band lost its label:\n{text}"
+    );
+}
+
+#[tokio::test]
+async fn chrome_top_divider_shows_feature_labels() {
+    let (mut app, _rx) = test_app().await;
+    let mut status = fixture_status(Vec::new());
+    status.sidebar.runtime = vec!["inject-and-run".to_string()];
+    status.dags = vec![dag_run("dag")];
+    status.goal = Some(theway_transport::wire::WireGoalSnapshot {
+        condition: "done".into(),
+        status: "running".into(),
+        iterations: 1,
+        last_reason: None,
+    });
+    app.apply_snapshot(status);
+    let backend = TestBackend::new(60, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    let text = buffer_text(terminal.backend().buffer());
+    let lines: Vec<&str> = text.lines().collect();
+    let divider = lines
+        .iter()
+        .find(|l| l.contains('╭'))
+        .unwrap_or_else(|| panic!("composer top divider missing:\n{text}"));
+    assert!(
+        divider.contains("inject-and-run · graph engine · goal"),
+        "divider row: {divider}"
+    );
+}
+
+#[tokio::test]
+async fn chrome_top_divider_blank_without_features() {
+    let (mut app, _rx) = test_app().await;
+    let backend = TestBackend::new(60, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    let text = buffer_text(terminal.backend().buffer());
+    let lines: Vec<&str> = text.lines().collect();
+    let divider = lines
+        .iter()
+        .find(|l| l.contains('╭'))
+        .unwrap_or_else(|| panic!("composer top divider missing:\n{text}"));
+    assert!(
+        divider.chars().all(|c| c == '╭' || c == '─' || c == '╮'),
+        "divider row must stay bare without features: {divider}"
+    );
+}

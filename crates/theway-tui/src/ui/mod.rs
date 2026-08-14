@@ -865,6 +865,10 @@ impl App {
                 bold: false,
             });
         }
+        // Context-usage label: the wire usage carries the recent turn's token
+        // counts (daemon `wire_snapshot`, issue #38), so total ÷ window
+        // tracks the live context fill instead of pegging at 100% on
+        // session-cumulative totals.
         let usage_label = {
             let usage = &self.latest.usage;
             if usage.context_window > 0 && usage.total_tokens > 0 {
@@ -878,11 +882,16 @@ impl App {
                 String::new()
             }
         };
+        let features = feature_labels(
+            &self.latest.sidebar.runtime,
+            &self.latest.dags,
+            self.latest.goal.is_some(),
+        );
         let chrome = prompt_chrome::PromptChrome {
             focused,
             model_name: &model_name,
             flags: &flags,
-            multiline: !self.input_is_single_line(),
+            features: &features,
             usage: (!usage_label.is_empty()).then_some(usage_label.as_str()),
             input_empty: self.input_text().is_empty(),
             ..prompt_chrome::PromptChrome::default()
@@ -1562,6 +1571,26 @@ fn feed_text_bytes(blocks: &[theway_transport::feed::WireFeedBlock]) -> usize {
             Block::ToolResult { lines, .. } => lines.iter().map(String::len).sum(),
         })
         .sum()
+}
+
+/// Composer feature labels (issue #38): the trigger-runtime features from
+/// the sidebar snapshot (daemon `active_trigger_features()`), plus graph
+/// features derived from the DAG runs — any `dag`-kind run activates
+/// `graph engine`; any `goal`-kind run or an active goal activates `goal`.
+/// Empty inputs yield an empty list (the chrome renders nothing).
+fn feature_labels(
+    runtime: &[String],
+    dags: &[theway_transport::wire::WireDagRunSnapshot],
+    has_goal: bool,
+) -> Vec<String> {
+    let mut labels = runtime.to_vec();
+    if dags.iter().any(|run| run.kind == "dag") {
+        labels.push("graph engine".to_string());
+    }
+    if has_goal || dags.iter().any(|run| run.kind == "goal") {
+        labels.push("goal".to_string());
+    }
+    labels
 }
 
 /// Shimmer style for the busy label (issue #37): brightness sweeps a sine

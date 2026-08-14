@@ -57,13 +57,19 @@ pub struct PromptChrome<'a> {
     pub model_name: &'a str,
     /// Flags appended after the model name, joined by " · ".
     pub flags: &'a [PromptFlag<'a>],
-    /// Right-aligned "multiline" indicator (grok shows it when the draft has \n).
+    /// Right-aligned "multiline" indicator — kept for struct compatibility;
+    /// no longer rendered (issue #38): the textarea's own wrapping already
+    /// shows a multiline draft.
+    #[allow(dead_code)]
     pub multiline: bool,
-    /// Right-aligned context-usage label (e.g. `12% ctx`), shown before the
-    /// multiline indicator on the info line (grok's context bar, inlined).
+    /// Right-aligned context-usage label (e.g. `12% ctx`) on the info line
+    /// (grok's context bar, inlined).
     pub usage: Option<&'a str>,
     /// Optional session title inlined into the top divider (agent view in grok).
     pub title: Option<&'a str>,
+    /// Active feature labels (issue #38) inlined at the right end of the top
+    /// divider: dim `·`-joined string, nothing rendered when empty.
+    pub features: &'a [String],
     /// Placeholder shown when the draft is empty. Grok hides it while focused;
     /// theway's box is almost always focused, so it only shows when unfocused.
     pub placeholder: &'a str,
@@ -80,6 +86,7 @@ impl Default for PromptChrome<'_> {
             multiline: false,
             usage: None,
             title: None,
+            features: &[],
             placeholder: "Build anything",
             input_empty: true,
         }
@@ -92,9 +99,9 @@ impl Default for PromptChrome<'_> {
 /// Layout (mirrors grok's `draw()` with `chrome: true`, `show_accent_line:
 /// false`, `vpad_top: 1`):
 /// ```text
-/// ╭──────────────────────╮   <- top divider (title right-aligned)
+/// ╭──────────────────────╮   <- top divider (title + features right-aligned)
 /// │ ❯ draft text         │   <- text rows, │ side borders
-/// ╰─ model · flags ──────╯   <- info line (multiline right-aligned)
+/// ╰─ model · flags ──────╯   <- info line (usage right-aligned)
 /// ```
 /// Degrades to a plain fill when `area` is too small for the chrome.
 pub fn render_prompt_chrome(buf: &mut Buffer, area: Rect, c: &PromptChrome) -> Rect {
@@ -145,6 +152,21 @@ pub fn render_prompt_chrome(buf: &mut Buffer, area: Rect, c: &PromptChrome) -> R
             let label_w = UnicodeWidthStr::width(truncated.as_str()) as u16;
             let x = area.x + area.width.saturating_sub(3 + label_w);
             buf.set_string(x, top_y, &truncated, caption_style(bg, c.focused));
+        }
+    }
+
+    // Active feature labels (issue #38): dim `·`-joined string at the right
+    // end of the divider, same anchoring as the title; an empty list renders
+    // nothing (no cells occupied).
+    if !c.features.is_empty() {
+        let max_w = area.width.saturating_sub(6);
+        if max_w >= 6 {
+            let label = format!(" {} ", c.features.join(" · "));
+            let truncated = truncate_str(&label, max_w as usize);
+            let label_w = UnicodeWidthStr::width(truncated.as_str()) as u16;
+            let x = area.x + area.width.saturating_sub(3 + label_w);
+            let style = Style::default().fg(GRAY).bg(bg).add_modifier(Modifier::DIM);
+            buf.set_string(x, top_y, &truncated, style);
         }
     }
 
@@ -220,8 +242,9 @@ fn caption_style(bg: Color, focused: bool) -> Style {
 }
 
 /// Render the info line on the bottom divider: left-aligned
-/// ` model · flag1 · flag2`, right-aligned `multiline`. Mirrors grok's
-/// `render_info_line` (right-edge anchored, 1-cell padding from the corners).
+/// ` model · flag1 · flag2`, right-aligned context-usage label. Mirrors
+/// grok's `render_info_line` (right-edge anchored, 1-cell padding from the
+/// corners).
 fn render_info_line(buf: &mut Buffer, area: Rect, c: &PromptChrome) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -245,16 +268,11 @@ fn render_info_line(buf: &mut Buffer, area: Rect, c: &PromptChrome) {
     }
     left_spans.push(Span::styled(" ", Style::default().bg(bg)));
 
-    // Right side: context-usage label + "multiline" indicator.
+    // Right side: context-usage label. The "multiline" indicator is no
+    // longer rendered (issue #38) even though the field is still accepted.
     let mut right_spans: Vec<Span<'static>> = Vec::new();
     if let Some(usage) = c.usage {
         right_spans.push(Span::styled(usage.to_owned(), flag_style));
-    }
-    if c.multiline {
-        if !right_spans.is_empty() {
-            right_spans.push(Span::styled(" · ", sep_style));
-        }
-        right_spans.push(Span::styled("multiline", flag_style));
     }
 
     let left_line = Line::from(left_spans);
@@ -352,7 +370,7 @@ mod tests {
         let c = PromptChrome {
             model_name: "grok-3",
             flags: &[PromptFlag {
-                text: "working",
+                text: "2 queued",
                 color: Color::Rgb(255, 0, 0),
                 bold: true,
             }],
@@ -363,11 +381,11 @@ mod tests {
             .filter_map(|x| buf.cell((x, 3)).map(|c| c.symbol()))
             .collect();
         assert!(row.contains("grok-3"), "info row: {row}");
-        assert!(row.contains("working"), "info row: {row}");
+        assert!(row.contains("2 queued"), "info row: {row}");
     }
 
     #[test]
-    fn info_line_right_aligns_multiline() {
+    fn info_line_multiline_field_not_rendered() {
         let area = Rect::new(0, 0, 30, 4);
         let c = PromptChrome {
             model_name: "grok-3",
@@ -375,34 +393,31 @@ mod tests {
             ..Default::default()
         };
         let buf = render(area, &c);
-        // "multiline" right-aligned inside the info rect (x=2, w=27):
-        // "multiline " (10 cols) ends at x=29, so text spans x=19..=27.
-        assert_eq!(cell_str(&buf, 19, 3), "m");
-        assert_eq!(cell_str(&buf, 27, 3), "e");
+        // Issue #38: the field is kept for compatibility but renders nothing.
+        let row: String = (2..28)
+            .filter_map(|x| buf.cell((x, 3)).map(|c| c.symbol()))
+            .collect();
+        assert!(!row.contains("multiline"), "info row: {row}");
         assert_eq!(cell_str(&buf, 29, 3), "╯");
     }
 
     #[test]
-    fn info_line_usage_right_aligns_before_multiline() {
+    fn info_line_usage_right_aligns() {
         let area = Rect::new(0, 0, 40, 4);
         let c = PromptChrome {
             model_name: "grok-3",
             usage: Some("12% ctx"),
-            multiline: true,
             ..Default::default()
         };
         let buf = render(area, &c);
         let row: String = (2..38)
             .filter_map(|x| buf.cell((x, 3)).map(|c| c.symbol()))
             .collect();
-        // Usage and multiline join on the right side, usage left of multiline.
         assert!(row.contains("12% ctx"), "info row: {row}");
-        assert!(row.contains("multiline"), "info row: {row}");
-        let usage_pos = row.find("12% ctx").unwrap();
-        let multiline_pos = row.find("multiline").unwrap();
-        assert!(usage_pos < multiline_pos, "info row: {row}");
-        // Right-anchored: last content cell (before ╯ at x=39) is "e" of multiline.
-        assert_eq!(cell_str(&buf, 37, 3), "e");
+        assert!(!row.contains("multiline"), "info row: {row}");
+        // Right-anchored: "12% ctx " (8 cols) ends at x=38, before ╯ at x=39.
+        assert_eq!(cell_str(&buf, 31, 3), "1");
+        assert_eq!(cell_str(&buf, 37, 3), "x");
         assert_eq!(cell_str(&buf, 39, 3), "╯");
     }
 
@@ -420,6 +435,38 @@ mod tests {
             .collect();
         assert!(row.contains("50% ctx"), "info row: {row}");
         assert!(!row.contains("multiline"), "info row: {row}");
+    }
+
+    #[test]
+    fn top_divider_renders_feature_labels() {
+        let area = Rect::new(0, 0, 40, 4);
+        let c = PromptChrome {
+            features: &["graph engine".to_string(), "goal".to_string()],
+            ..Default::default()
+        };
+        let buf = render(area, &c);
+        let row: String = (1..39)
+            .filter_map(|x| buf.cell((x, 0)).map(|c| c.symbol()))
+            .collect();
+        assert!(row.contains("graph engine · goal"), "divider row: {row}");
+        // Right-anchored inside the divider: the label's trailing space ends
+        // 2 cells before ╮ (x=39), so "goal" ends at x=35.
+        assert_eq!(cell_str(&buf, 35, 0), "l");
+        assert_eq!(cell_str(&buf, 39, 0), "╮");
+        // Dim caption style on the prompt background.
+        let cell = buf.cell((35, 0)).unwrap();
+        assert_eq!(cell.fg, GRAY);
+        assert!(cell.modifier.contains(Modifier::DIM));
+    }
+
+    #[test]
+    fn top_divider_empty_features_render_nothing() {
+        let area = Rect::new(0, 0, 40, 4);
+        let buf = render(area, &PromptChrome::default());
+        let row: String = (1..39)
+            .filter_map(|x| buf.cell((x, 0)).map(|c| c.symbol()))
+            .collect();
+        assert!(row.chars().all(|c| c == '─'), "divider row: {row}");
     }
 
     #[test]
