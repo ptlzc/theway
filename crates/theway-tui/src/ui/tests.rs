@@ -1348,3 +1348,97 @@ async fn chrome_top_divider_blank_without_features() {
         "divider row must stay bare without features: {divider}"
     );
 }
+
+fn dag_node(id: &str, status: &str) -> theway_transport::wire::WireDagNodeSnapshot {
+    theway_transport::wire::WireDagNodeSnapshot {
+        id: id.into(),
+        agent: "executor-coder".into(),
+        status: status.into(),
+        depends_on: Vec::new(),
+        job_id: None,
+        attempt: 1,
+        started_at: None,
+        completed_at: None,
+        error: None,
+        input_tokens: None,
+        output_tokens: None,
+        result: None,
+        output_tail: None,
+        live_preview: None,
+    }
+}
+
+#[tokio::test]
+async fn dag_band_renders_between_feed_and_busy() {
+    let (mut app, _rx) = test_app().await;
+    let mut status = fixture_status(Vec::new());
+    status.busy = true;
+    let mut run = dag_run("dag");
+    let mut failed = dag_node("2-impl", "failed");
+    failed.error = Some("compile error".into());
+    run.nodes = vec![
+        dag_node("1-explore", "succeeded"),
+        failed,
+        dag_node("3-verify", "running"),
+        dag_node("4-ship", "pending"),
+    ];
+    status.dags = vec![run];
+    app.apply_snapshot(status);
+    let backend = TestBackend::new(80, 18);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    let text = buffer_text(terminal.backend().buffer());
+    let lines: Vec<&str> = text.lines().collect();
+    let header = lines
+        .iter()
+        .position(|l| l.contains("dag-1 · demo"))
+        .unwrap_or_else(|| panic!("dag band header missing:\n{text}"));
+    assert!(lines[header].contains("1/4"), "header: {}", lines[header]);
+    assert!(lines[header].contains("c/s"), "header: {}", lines[header]);
+    // A running node renders the braille mini spinner on the header.
+    assert!(
+        lines[header]
+            .chars()
+            .any(|c| ('\u{2800}'..='\u{28FF}').contains(&c)),
+        "header: {}",
+        lines[header]
+    );
+    // The node row with state glyphs and the error summary follows.
+    let node_row = lines[header + 1];
+    for needle in [
+        "✓ 1-explore",
+        "✗ 2-impl compile error",
+        "▶ 3-verify",
+        "· 4-ship",
+    ] {
+        assert!(node_row.contains(needle), "node row: {node_row}");
+    }
+    // The band sits between the feed and the busy band (above "working").
+    let working = lines
+        .iter()
+        .position(|l| l.contains("working"))
+        .unwrap_or_else(|| panic!("busy band missing:\n{text}"));
+    assert!(header < working, "band must sit above the busy band");
+}
+
+#[tokio::test]
+async fn dag_band_caps_at_two_runs_with_more_line() {
+    let (mut app, _rx) = test_app().await;
+    let mut status = fixture_status(Vec::new());
+    let mut runs = Vec::new();
+    for n in 1..=3 {
+        let mut run = dag_run("dag");
+        run.id = format!("dag-{n}");
+        runs.push(run);
+    }
+    status.dags = runs;
+    app.apply_snapshot(status);
+    let backend = TestBackend::new(60, 14);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    let text = buffer_text(terminal.backend().buffer());
+    assert!(text.contains("dag-1 · demo"), "{text}");
+    assert!(text.contains("dag-2 · demo"), "{text}");
+    assert!(text.contains("… 1 more"), "{text}");
+    assert!(!text.contains("dag-3"), "{text}");
+}

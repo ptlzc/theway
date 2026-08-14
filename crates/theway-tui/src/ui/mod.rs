@@ -31,6 +31,7 @@
 mod app_goal;
 mod app_input;
 mod app_turns;
+pub mod dag_band;
 mod pixel_loader;
 mod prompt_chrome;
 mod render_utils;
@@ -265,6 +266,11 @@ pub struct App {
     cps_meter: stats::CpsMeter,
     /// Shared rainbow spinner driving the busy-band loader (issue #38).
     spinner: pixel_loader::RainbowSpinner,
+    /// Per-run throughput meters behind the DAG band's `c/s` figures
+    /// (issue #38): cumulative output-token sums sampled each tick.
+    dag_meters: std::collections::HashMap<String, stats::CpsMeter>,
+    /// DAG band animation tick (one per event-loop frame interval).
+    dag_tick: u64,
     /// Mouse-dragged composer height override (issue #37); `None` follows
     /// the content-driven auto-grow. Reset on submit.
     manual_composer_rows: Option<u16>,
@@ -334,6 +340,8 @@ impl App {
             busy_started: None,
             cps_meter: stats::CpsMeter::new(),
             spinner: pixel_loader::RainbowSpinner::new(),
+            dag_meters: std::collections::HashMap::new(),
+            dag_tick: 0,
             manual_composer_rows: None,
             resize_drag: None,
             mouse_selecting: false,
@@ -542,6 +550,8 @@ impl App {
                         self.spinner.advance(cps);
                         self.spinner.tick(SPINNER_TICK_MS);
                     }
+                    self.dag_tick = self.dag_tick.wrapping_add(1);
+                    dag_band::record_meters(&mut self.dag_meters, &self.latest.dags);
                 }
             }
         }
@@ -789,6 +799,22 @@ impl App {
         let hint_area = chunks[3];
         self.last_status_area = Some(status_area);
         self.last_input_area = Some(input_area);
+        // DAG status band (issue #38): while DAG runs are live the band
+        // squeezes the feed's bottom rows, between the feed and the busy
+        // band.
+        let (content_area, dag_band_area) = if self.latest.dags.is_empty() {
+            (content_area, None)
+        } else {
+            let rows = dag_band::band_rows(&self.latest.dags, content_area.width)
+                .min(content_area.height.saturating_sub(1));
+            if rows == 0 {
+                (content_area, None)
+            } else {
+                let split = Layout::vertical([Constraint::Min(1), Constraint::Length(rows)])
+                    .split(content_area);
+                (split[0], Some(split[1]))
+            }
+        };
         let (feed_area, trigger_area) = if content_area.width >= TRIGGER_PANEL_MIN_TOTAL_WIDTH
             && self.should_show_side_panel()
         {
@@ -889,6 +915,15 @@ impl App {
         }
         if let Some(area) = trigger_area {
             self.render_trigger_panel(frame, area);
+        }
+        if let Some(band_area) = dag_band_area {
+            dag_band::render_dag_band(
+                frame.buffer_mut(),
+                band_area,
+                &self.latest.dags,
+                &self.dag_meters,
+                self.dag_tick,
+            );
         }
 
         // Status separator: plain rule when idle; pixel-grid loader band
