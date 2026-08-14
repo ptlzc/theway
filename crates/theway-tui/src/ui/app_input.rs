@@ -9,6 +9,8 @@ use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
 
 use theway_transport::commands;
 use theway_transport::images;
@@ -16,7 +18,16 @@ use theway_transport::transport::SlashCompleter;
 
 use super::App;
 use super::collect_slash_commands;
+use super::prompt_chrome;
 use super::render_utils::{human_bytes, new_textarea};
+
+/// Element-kind tag for paste objects (issue #37): pastes over
+/// [`PASTE_OBJECT_MIN_CHARS`] chars are inserted as atomic elements whose
+/// display chip reads `[ paste N chars ]`.
+const PASTE_ELEMENT_KIND: theway_ratatui_textarea::ElementKind =
+    theway_ratatui_textarea::ElementKind(1);
+/// Pastes longer than this many chars become paste objects.
+const PASTE_OBJECT_MIN_CHARS: usize = 20;
 
 impl App {
     // ── event handling ──────────────────────────────────────────────────────────────────
@@ -71,7 +82,13 @@ impl App {
                 self.refresh_completions();
             }
             KeyCode::Enter => {
-                self.submit(terminal).await?;
+                // The command popup is open: Enter accepts the highlighted
+                // entry into the input (a second Enter submits it).
+                if !self.completions.is_empty() {
+                    self.accept_completion();
+                } else {
+                    self.submit(terminal).await?;
+                }
             }
             KeyCode::Char('v') if ctrl => {
                 self.paste_clipboard().await;
@@ -95,6 +112,8 @@ impl App {
                 self.extend_feed_selection(self.last_viewport_h.max(1) as isize);
             }
             KeyCode::Tab => self.cycle_completion(),
+            KeyCode::Up if !self.completions.is_empty() => self.completion_prev(),
+            KeyCode::Down if !self.completions.is_empty() => self.completion_next(),
             KeyCode::PageUp => self.scroll_up(self.last_viewport_h.max(1)),
             KeyCode::PageDown => self.scroll_down(self.last_viewport_h.max(1)),
             KeyCode::Up if self.input_is_single_line() => self.history_prev(),
@@ -251,8 +270,7 @@ impl App {
                 self.attach_clipboard_image(image);
             }
             Ok(crate::clipboard_image::ClipboardPaste::Text(text)) => {
-                self.input.insert_str(&text);
-                self.refresh_completions();
+                self.insert_paste_text(text);
             }
             Ok(crate::clipboard_image::ClipboardPaste::Empty) => {
                 self.system_line("clipboard is empty");
@@ -261,6 +279,25 @@ impl App {
                 self.error_line(format!("clipboard paste failed: {e}"));
             }
         }
+    }
+
+    /// Insert pasted text (issue #37): pastes longer than
+    /// [`PASTE_OBJECT_MIN_CHARS`] chars become an atomic paste *object* whose
+    /// chip renders `[ paste N chars ]` — backspace / navigation treat the
+    /// whole object as one unit, and submit expands it to the full text.
+    pub(super) fn insert_paste_text(&mut self, text: String) {
+        let chars = text.chars().count();
+        if chars > PASTE_OBJECT_MIN_CHARS {
+            let display = Line::from(Span::styled(
+                format!("[ paste {chars} chars ]"),
+                Style::default().fg(prompt_chrome::ACCENT_USER),
+            ));
+            self.input
+                .insert_element(&text, PASTE_ELEMENT_KIND, Some(display));
+        } else {
+            self.input.insert_str(&text);
+        }
+        self.refresh_completions();
     }
 
     pub(super) fn attach_clipboard_image(&mut self, image: crate::clipboard_image::ClipboardImage) {
@@ -350,7 +387,7 @@ impl App {
     }
 
     pub(super) fn input_is_single_line(&self) -> bool {
-        !self.input.text().contains('\n')
+        self.input_display_lines() <= 1
     }
 
     pub(super) fn clear_input(&mut self) {
@@ -397,6 +434,34 @@ impl App {
             self.completions.clear();
             self.completion_idx = 0;
         }
+    }
+
+    /// ↑ with the command popup open: move the highlight up (issue #37).
+    pub(super) fn completion_prev(&mut self) {
+        if self.completions.is_empty() {
+            return;
+        }
+        self.completion_idx =
+            (self.completion_idx + self.completions.len() - 1) % self.completions.len();
+    }
+
+    /// ↓ with the command popup open: move the highlight down (issue #37).
+    pub(super) fn completion_next(&mut self) {
+        if self.completions.is_empty() {
+            return;
+        }
+        self.completion_idx = (self.completion_idx + 1) % self.completions.len();
+    }
+
+    /// Enter with the command popup open: accept the highlighted entry into
+    /// the input. The popup closes (the accepted text matches exactly); a
+    /// second Enter submits it (issue #37).
+    pub(super) fn accept_completion(&mut self) {
+        if self.completions.is_empty() {
+            return;
+        }
+        let pick = self.completions[self.completion_idx % self.completions.len()].clone();
+        self.set_input(&pick);
     }
 
     pub(super) fn history_prev(&mut self) {

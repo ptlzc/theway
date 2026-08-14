@@ -31,6 +31,7 @@
 mod app_goal;
 mod app_input;
 mod app_turns;
+mod pixel_loader;
 mod prompt_chrome;
 mod render_utils;
 
@@ -43,13 +44,13 @@ use std::time::Duration;
 use std::time::Instant;
 
 use anyhow::Result;
-use crossterm::event::{Event, EventStream, KeyEventKind, MouseEventKind};
+use crossterm::event::{Event, EventStream, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
 use futures::StreamExt as _;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Style};
-use ratatui::text::Line;
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap};
 use theway_ratatui_textarea::{TextArea, TextAreaState};
 
@@ -71,8 +72,13 @@ use render_utils::{
 };
 use render_utils::{enter_tui, leave_tui, new_textarea};
 
-const SPINNER_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const MAX_INPUT_ROWS: usize = 6;
+/// Upper bound for mouse-dragged composer height (issue #37): dragging the
+/// status rule can grow the input box beyond the content-driven cap.
+const DRAG_MAX_INPUT_ROWS: u16 = 12;
+/// Height of the busy status band: 3 rows for the pixel-grid loader
+/// (issue #37), 1 row for the plain ready/offline rule.
+const BUSY_STATUS_ROWS: u16 = 3;
 const SCROLL_STEP: usize = 3;
 /// Default scrollback cap for the conversation feed: only the newest
 /// `DEFAULT_MAX_FEED_LINES` rendered lines are kept; older lines are trimmed
@@ -155,6 +161,14 @@ pub struct SelectionView {
     pub total: usize,
 }
 
+/// Composer drag-resize state (issue #37): anchored on mouse-down at the
+/// status rule / input-box top border, rows grow as the pointer moves up.
+#[derive(Clone, Copy, Debug)]
+struct ComposerDrag {
+    start_row: u16,
+    start_rows: u16,
+}
+
 /// Everything the client App needs, assembled by `main.rs` after the daemon
 /// is discovered/spawned and the initial snapshot is fetched.
 pub struct AppConfig {
@@ -233,6 +247,21 @@ pub struct App {
 
     busy: bool,
     spinner_frame: usize,
+    /// Wall-clock start of the current busy window (pixel-loader elapsed
+    /// timer, issue #37); `None` while idle.
+    busy_started: Option<Instant>,
+    /// Mouse-dragged composer height override (issue #37); `None` follows
+    /// the content-driven auto-grow. Reset on submit.
+    manual_composer_rows: Option<u16>,
+    /// Live drag state while resizing the composer via its top rule.
+    resize_drag: Option<ComposerDrag>,
+    /// Feed drag-selection in progress (mouse button still held).
+    mouse_selecting: bool,
+    /// Composer text-area rect (mouse click forwarding to the textarea).
+    last_text_area: Option<Rect>,
+    /// Status-rule and input-box rects (drag-resize hit testing).
+    last_status_area: Option<Rect>,
+    last_input_area: Option<Rect>,
     last_ctrlc: Option<Instant>,
     quit: bool,
 
@@ -284,6 +313,13 @@ impl App {
             last_feed_area: None,
             busy: false,
             spinner_frame: 0,
+            busy_started: None,
+            manual_composer_rows: None,
+            resize_drag: None,
+            mouse_selecting: false,
+            last_text_area: None,
+            last_status_area: None,
+            last_input_area: None,
             last_ctrlc: None,
             quit: false,
             connected: true,
@@ -344,7 +380,14 @@ impl App {
         let old_blocks = self.latest.feed_blocks.clone();
         self.latest = status;
         self.session_id = self.latest.session_id.clone();
+        let was_busy = self.busy;
         self.busy = self.latest.busy;
+        if self.busy && !was_busy {
+            // Fresh busy window: restart the pixel-loader elapsed timer.
+            self.busy_started = Some(Instant::now());
+        } else if !self.busy {
+            self.busy_started = None;
+        }
         self.panel_status = PanelStatus::from_sidebar(&self.latest.sidebar);
         self.model_catalog = self.latest.model_catalog.clone();
         self.control_plane_prompt = self.latest.control_plane_prompt.clone();
@@ -491,14 +534,9 @@ impl App {
             Event::Key(key) if key.kind != KeyEventKind::Release => {
                 self.handle_key(key, terminal).await?;
             }
-            Event::Mouse(m) => match m.kind {
-                MouseEventKind::ScrollUp => self.handle_mouse_scroll(m.column, m.row, true),
-                MouseEventKind::ScrollDown => self.handle_mouse_scroll(m.column, m.row, false),
-                _ => {}
-            },
+            Event::Mouse(m) => self.handle_mouse_event(m),
             Event::Paste(text) => {
-                self.input.insert_str(&text);
-                self.refresh_completions();
+                self.insert_paste_text(text);
             }
             _ => {}
         }
@@ -513,6 +551,87 @@ impl App {
     fn scroll_down(&mut self, n: usize) {
         self.scroll = self.scroll.saturating_add(n);
         // render() clamps and re-enables follow when we reach the bottom.
+    }
+
+    // ── mouse (issue #37: drag-select feed, drag-resize composer) ──────────────────────────
+
+    fn handle_mouse_event(&mut self, m: MouseEvent) {
+        match m.kind {
+            MouseEventKind::ScrollUp => self.handle_mouse_scroll(m.column, m.row, true),
+            MouseEventKind::ScrollDown => self.handle_mouse_scroll(m.column, m.row, false),
+            MouseEventKind::Down(MouseButton::Left) => self.handle_mouse_down(m),
+            MouseEventKind::Drag(MouseButton::Left) => self.handle_mouse_drag(m.column, m.row),
+            MouseEventKind::Up(MouseButton::Left) => self.handle_mouse_up(),
+            _ => {}
+        }
+    }
+
+    fn overlays_open(&self) -> bool {
+        self.model_picker.is_some() || self.control_plane_prompt.is_some()
+    }
+
+    fn handle_mouse_down(&mut self, m: MouseEvent) {
+        if self.overlays_open() {
+            return;
+        }
+        // Composer resize handle: the status rule right above the input box,
+        // or the box's own top border row.
+        let on_rule = self
+            .last_status_area
+            .is_some_and(|a| m.row == a.y && m.column >= a.x && m.column < a.right());
+        let on_top_border = self
+            .last_input_area
+            .is_some_and(|a| m.row == a.y && m.column >= a.x && m.column < a.right());
+        if on_rule || on_top_border {
+            self.resize_drag = Some(ComposerDrag {
+                start_row: m.row,
+                start_rows: self.composer_rows(),
+            });
+            return;
+        }
+        // Composer text area: forward to the textarea (cursor placement,
+        // chip clicks, its own drag selection).
+        if self
+            .last_text_area
+            .is_some_and(|a| self.rect_contains(a, m.column, m.row))
+        {
+            self.input
+                .handle_mouse(m, self.last_text_area.unwrap(), self.input_state);
+            return;
+        }
+        // Feed: begin a drag selection anchored at the clicked line.
+        if self.mouse_in_feed(m.column, m.row) {
+            let line = self.feed_line_at(m.row);
+            self.feed_selection = Some(FeedSelection {
+                anchor: line,
+                end: line,
+            });
+            self.mouse_selecting = true;
+        }
+    }
+
+    fn handle_mouse_drag(&mut self, column: u16, row: u16) {
+        if let Some(drag) = self.resize_drag {
+            let grown = drag.start_row.saturating_sub(row);
+            let rows = drag
+                .start_rows
+                .saturating_add(grown)
+                .clamp(1, DRAG_MAX_INPUT_ROWS);
+            self.manual_composer_rows = Some(rows);
+            return;
+        }
+        if self.mouse_selecting {
+            let line = self.feed_line_at(row);
+            if let Some(sel) = self.feed_selection.as_mut() {
+                sel.end = line;
+            }
+            let _ = column;
+        }
+    }
+
+    fn handle_mouse_up(&mut self) {
+        self.resize_drag = None;
+        self.mouse_selecting = false;
     }
 
     fn handle_mouse_scroll(&mut self, column: u16, row: u16, up: bool) {
@@ -530,33 +649,75 @@ impl App {
         let Some(area) = self.last_feed_area else {
             return false;
         };
+        self.rect_contains(area, column, row)
+    }
+
+    fn rect_contains(&self, area: Rect, column: u16, row: u16) -> bool {
         column >= area.x
             && column < area.x.saturating_add(area.width)
             && row >= area.y
             && row < area.y.saturating_add(area.height)
     }
 
+    /// Uncapped rendered-line index under terminal `row` (feed coordinates).
+    fn feed_line_at(&self, row: u16) -> usize {
+        let rel = self
+            .last_feed_area
+            .map(|a| row.saturating_sub(a.y) as usize)
+            .unwrap_or(0);
+        let line = self.selection_view.top.saturating_add(rel);
+        line.min(self.selection_view.total.saturating_sub(1))
+    }
+
+    /// Effective composer row count: the mouse-dragged override, or the
+    /// content-driven auto-grow capped at [`MAX_INPUT_ROWS`] (issue #37).
+    fn composer_rows(&self) -> u16 {
+        if let Some(rows) = self.manual_composer_rows {
+            return rows;
+        }
+        self.input_display_lines().clamp(1, MAX_INPUT_ROWS) as u16
+    }
+
+    /// Number of visual lines the draft occupies, counting element chips as
+    /// single lines (paste objects can hold newlines invisibly, issue #37).
+    fn input_display_lines(&self) -> usize {
+        let text = self.input.text();
+        let mut lines = 0;
+        let mut pos = 0;
+        for chip in self.input.elements().iter().filter(|e| e.display.is_some()) {
+            let plain = &text[pos..chip.range.start];
+            if !plain.is_empty() {
+                lines += plain.matches('\n').count() + 1;
+            }
+            lines += 1; // the chip itself renders as one visual line
+            pos = chip.range.end;
+        }
+        let tail = &text[pos..];
+        if !tail.is_empty() {
+            lines += tail.matches('\n').count() + 1;
+        }
+        lines
+    }
+
     // ── rendering ───────────────────────────────────────────────────────────────────────
 
     fn render(&mut self, frame: &mut ratatui::Frame) {
         let area = frame.area();
-        let input_rows = self
-            .input
-            .text()
-            .split('\n')
-            .count()
-            .clamp(1, MAX_INPUT_ROWS) as u16;
+        let input_rows = self.composer_rows();
+        let status_rows = if self.busy { BUSY_STATUS_ROWS } else { 1 };
         let chunks = Layout::vertical([
             Constraint::Min(1),
-            Constraint::Length(1),              // status separator
+            Constraint::Length(status_rows), // status separator (loader band while busy)
             Constraint::Length(input_rows + 2), // input box with border
-            Constraint::Length(1),              // hint line
+            Constraint::Length(1),           // hint line
         ])
         .split(area);
         let content_area = chunks[0];
         let status_area = chunks[1];
         let input_area = chunks[2];
         let hint_area = chunks[3];
+        self.last_status_area = Some(status_area);
+        self.last_input_area = Some(input_area);
         let (feed_area, trigger_area) = if content_area.width >= TRIGGER_PANEL_MIN_TOTAL_WIDTH
             && self.should_show_side_panel()
         {
@@ -658,30 +819,25 @@ impl App {
             self.render_trigger_panel(frame, area);
         }
 
-        // Status separator: rule + model + run state.
-        frame.render_widget(
-            self.status_line(status_area.width as usize, max_scroll),
-            status_area,
-        );
+        // Status separator: plain rule when idle; pixel-grid loader band
+        // while busy (issue #37).
+        if self.busy {
+            self.render_busy_status(frame, status_area);
+        } else {
+            frame.render_widget(
+                self.status_line(status_area.width as usize, max_scroll),
+                status_area,
+            );
+        }
 
         // Input box: grok-style chrome (rounded border, ❯ prefix, info line),
         // ported from xai-grok-pager's prompt widget (issue #28).
         let focused = self.model_picker.is_none() && self.control_plane_prompt.is_none();
-        let model_name = self
-            .latest
-            .model
-            .rsplit_once(':')
-            .map(|(_, id)| id)
-            .unwrap_or(self.latest.model.as_str())
-            .to_owned();
+        // The info line shows the full `provider:model-id` label (issue #37).
+        let model_name = self.latest.model.clone();
         let mut flags: Vec<prompt_chrome::PromptFlag<'_>> = Vec::new();
-        if self.busy {
-            flags.push(prompt_chrome::PromptFlag {
-                text: "working",
-                color: Color::Rgb(187, 154, 247), // accent_running (magenta)
-                bold: true,
-            });
-        }
+        // Busy state renders in the pixel-loader status band above the box
+        // (issue #37), not as an info-line flag.
         let queued_flag: Option<String> =
             (self.latest.queued_count > 0).then(|| format!("{} queued", self.latest.queued_count));
         if let Some(ref q) = queued_flag {
@@ -715,6 +871,7 @@ impl App {
         };
         let text_area =
             prompt_chrome::render_prompt_chrome(frame.buffer_mut(), input_area, &chrome);
+        self.last_text_area = Some(text_area);
         let mut cursor_pos = None;
         if text_area.width > 0 && text_area.height > 0 {
             let input = &self.input;
@@ -1120,36 +1277,88 @@ impl App {
         lines
     }
 
-    fn status_line(&self, width: usize, max_scroll: usize) -> Paragraph<'static> {
-        let model = if self.latest.model.is_empty() {
-            "no-model".to_string()
-        } else {
-            self.latest.model.clone()
-        };
+    fn status_line(&self, width: usize, _max_scroll: usize) -> Paragraph<'static> {
         let queue = if self.latest.queued_count == 0 {
             String::new()
         } else {
             format!(" · {} queued", self.latest.queued_count)
         };
-        let status = if self.busy {
-            format!(
-                "{} working (Ctrl-C aborts){queue}",
-                SPINNER_FRAMES[self.spinner_frame % SPINNER_FRAMES.len()],
-            )
-        } else if !self.connected {
+        let status = if !self.connected {
             format!("daemon offline{queue}")
         } else {
             format!("ready{queue}")
         };
         let scrolled = if self.follow { "" } else { " ↑scrolled" };
-        let label = format!(" theway · {model} · {status}{scrolled} ");
+        let label = format!(" {status}{scrolled} ");
         let mut text = label.clone();
         let used = unicode_width::UnicodeWidthStr::width(label.as_str());
         if width > used {
             text.push_str(&"─".repeat(width - used));
         }
-        let _ = max_scroll;
         Paragraph::new(Line::styled(text, Style::default().fg(Color::DarkGray)))
+    }
+
+    /// Busy band (issue #37): the 3×3 pixel-grid loader on the left; the
+    /// middle row carries a shimmering `working` label, a live elapsed
+    /// timer, the queue depth and the scrolled-up marker.
+    fn render_busy_status(&self, frame: &mut ratatui::Frame, area: Rect) {
+        let tick = self.spinner_frame as u64;
+        let loader = pixel_loader::PixelFrame::render(tick);
+        let grid_x = area.x.saturating_add(1);
+        for r in 0..3u16 {
+            for c in 0..3u16 {
+                let cell = &loader.cells[(r * 3 + c) as usize];
+                let x = grid_x.saturating_add(c * 2);
+                let y = area.y.saturating_add(r);
+                if x < area.right() && y < area.bottom() {
+                    let mut style = Style::default().fg(cell.fg);
+                    if cell.lit > 0.5 {
+                        style = style.add_modifier(Modifier::BOLD);
+                    }
+                    frame
+                        .buffer_mut()
+                        .set_string(x, y, cell.glyph.to_string(), style);
+                }
+            }
+        }
+        let label_x = area.x.saturating_add(8);
+        if label_x < area.right() && area.height > 1 {
+            let mut spans = vec![
+                Span::styled("working", shimmer_style(tick)),
+                Span::styled(
+                    format!(" {}", self.elapsed_label()),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ];
+            if self.latest.queued_count > 0 {
+                spans.push(Span::styled(
+                    format!(" · {} queued", self.latest.queued_count),
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
+            if !self.follow {
+                spans.push(Span::styled(
+                    " · ↑scrolled",
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
+            let line = Line::from(spans);
+            let w = area.right().saturating_sub(label_x);
+            frame.buffer_mut().set_line(label_x, area.y + 1, &line, w);
+        }
+    }
+
+    /// Elapsed time since the busy window began (`m s` after a minute).
+    fn elapsed_label(&self) -> String {
+        let Some(start) = self.busy_started else {
+            return String::new();
+        };
+        let secs = start.elapsed().as_secs_f32();
+        if secs < 60.0 {
+            format!("{secs:.1}s")
+        } else {
+            format!("{}m {:.1}s", secs as u32 / 60, secs % 60.0)
+        }
     }
 
     fn render_completions(&self, frame: &mut ratatui::Frame, status_area: Rect) {
@@ -1292,6 +1501,25 @@ impl App {
         printer.abort();
         Ok(())
     }
+}
+
+/// Shimmer style for the busy label (issue #37): brightness sweeps a sine
+/// wave with a ~1.4 s period, fading between the chrome gray and a
+/// near-white highlight.
+fn shimmer_style(tick: u64) -> Style {
+    const PERIOD: u64 = 14; // 1.4 s at 10 ticks/s
+    let phase = (tick % PERIOD) as f32 / PERIOD as f32;
+    let b = 0.5 + 0.5 * (phase * std::f32::consts::TAU).sin();
+    let dim = (86.0, 95.0, 137.0);
+    let bright = (203.0, 209.0, 255.0);
+    let mix = |d: f32, l: f32| (d + (l - d) * b).round() as u8;
+    Style::default()
+        .fg(Color::Rgb(
+            mix(dim.0, bright.0),
+            mix(dim.1, bright.1),
+            mix(dim.2, bright.2),
+        ))
+        .add_modifier(Modifier::BOLD)
 }
 
 /// Assemble the slash-command completion list: the SDK local command set from

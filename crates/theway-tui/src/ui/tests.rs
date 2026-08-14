@@ -1,5 +1,5 @@
 use super::{App, AppConfig};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::Terminal;
 use ratatui::backend::{CrosstermBackend, TestBackend};
 use ratatui::buffer::Buffer;
@@ -122,6 +122,15 @@ fn buffer_text(buf: &Buffer) -> String {
     rows.join("\n")
 }
 
+fn mouse_event(column: u16, row: u16, kind: MouseEventKind) -> MouseEvent {
+    MouseEvent {
+        kind,
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    }
+}
+
 #[tokio::test]
 async fn renders_feed_above_pinned_input_box() {
     let (mut app, _rx) = test_app().await;
@@ -141,13 +150,17 @@ async fn renders_feed_above_pinned_input_box() {
         text.contains("ai ▸ hi there, the box is pinned"),
         "assistant line missing:\n{text}"
     );
-    assert!(text.contains("theway ·"), "status rule missing:\n{text}");
     assert!(
         text.contains("ready"),
         "status should read ready when idle:\n{text}"
     );
+    // Issue #37: the status rule carries no brand or model label anymore.
+    assert!(
+        !text.contains("theway ·"),
+        "brand label must be gone from the status rule:\n{text}"
+    );
     let lines: Vec<&str> = text.lines().collect();
-    let status_row = lines.iter().position(|l| l.contains("theway ·")).unwrap();
+    let status_row = lines.iter().position(|l| l.contains("ready")).unwrap();
     assert!(
         status_row >= lines.len() - 5,
         "status rule should be pinned near the bottom (row {status_row} of {}):\n{text}",
@@ -170,19 +183,175 @@ async fn status_line_shows_daemon_offline_when_disconnected() {
 }
 
 #[tokio::test]
-async fn status_line_shows_busy_spinner_from_snapshot() {
+async fn chrome_info_line_shows_model_with_provider() {
     let (mut app, _rx) = test_app().await;
-    let mut status = fixture_status(Vec::new());
-    status.busy = true;
-    app.apply_snapshot(status);
-    let backend = TestBackend::new(50, 12);
+    let backend = TestBackend::new(60, 12);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|f| app.render(f)).unwrap();
     let text = buffer_text(terminal.backend().buffer());
+    // Issue #37: the composer info line carries the full provider:model-id
+    // label (fixture model is `provider:model`).
     assert!(
-        text.contains("working (Ctrl-C"),
-        "busy status missing:\n{text}"
+        text.contains("provider:model"),
+        "info line must show the model with provider:\n{text}"
     );
+}
+
+#[tokio::test]
+async fn busy_status_shows_pixel_loader_with_elapsed() {
+    let (mut app, _rx) = test_app().await;
+    let mut status = fixture_status(Vec::new());
+    status.busy = true;
+    status.queued_count = 2;
+    app.apply_snapshot(status);
+    let backend = TestBackend::new(60, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    let text = buffer_text(terminal.backend().buffer());
+    assert!(text.contains("working"), "busy label missing:\n{text}");
+    assert!(
+        text.contains("working 0."),
+        "elapsed timer should follow the label (sub-second in test):\n{text}"
+    );
+    assert!(
+        text.contains("2 queued"),
+        "queue depth missing from the busy band:\n{text}"
+    );
+    assert!(
+        text.contains('■'),
+        "pixel-grid glyphs missing from the busy band:\n{text}"
+    );
+    // The busy band is 3 rows: composer top border sits 2 rows below the
+    // middle (label) row.
+    let lines: Vec<&str> = text.lines().collect();
+    let label_row = lines.iter().position(|l| l.contains("working")).unwrap();
+    let border_row = lines
+        .iter()
+        .rposition(|l| l.contains('╭'))
+        .expect("composer top border missing");
+    assert_eq!(
+        border_row,
+        label_row + 2,
+        "composer should sit below the 3-row loader band:\n{text}"
+    );
+    // The busy window timer arms on the false→true edge and clears on idle.
+    assert!(app.busy_started.is_some());
+    let mut idle = fixture_status(Vec::new());
+    idle.busy = false;
+    app.apply_snapshot(idle);
+    assert!(app.busy_started.is_none());
+}
+
+#[tokio::test]
+async fn slash_popup_navigates_with_arrows_and_accepts_with_enter() {
+    let (mut app, _rx) = test_app().await;
+    app.set_input("/");
+    assert!(app.completions.len() > 1, "bare slash lists commands");
+    assert_eq!(app.completion_idx, 0);
+    app.completion_next();
+    assert_eq!(app.completion_idx, 1);
+    app.completion_prev();
+    assert_eq!(app.completion_idx, 0);
+    let expected = app.completions[1].clone();
+    app.completion_next();
+    app.accept_completion();
+    assert_eq!(
+        app.input_text(),
+        expected,
+        "Enter accepts the highlighted entry"
+    );
+    assert!(
+        app.completions.is_empty(),
+        "popup closes once the accepted command matches exactly"
+    );
+    // History keys are untouched when the popup is closed: arrows still
+    // navigate history on a single-line draft.
+    app.set_input("");
+    assert!(app.completions.is_empty());
+    app.completion_next();
+    assert_eq!(app.completion_idx, 0);
+}
+
+#[tokio::test]
+async fn paste_object_is_atomic_and_keeps_full_text_for_send() {
+    let (mut app, _rx) = test_app().await;
+    let long = "x".repeat(25);
+    app.insert_paste_text(long.clone());
+    assert_eq!(app.input.text(), long, "buffer keeps the full pasted text");
+    assert_eq!(app.input.elements().len(), 1);
+    let display = app.input.elements()[0].display.clone().unwrap();
+    let chip: String = display.spans.iter().map(|s| s.content.as_ref()).collect();
+    assert_eq!(chip, "[ paste 25 chars ]");
+    // The chip renders as one visual line even though the buffer is long.
+    assert_eq!(app.input_display_lines(), 1);
+    // Backspace at the object's end deletes the whole object.
+    app.input.delete_backward(1);
+    assert_eq!(app.input.text(), "");
+    assert!(app.input.elements().is_empty());
+    // Short pastes stay plain text.
+    app.insert_paste_text("short".into());
+    assert_eq!(app.input.text(), "short");
+    assert!(app.input.elements().is_empty());
+}
+
+#[tokio::test]
+async fn drag_on_status_rule_resizes_composer_and_send_resets() {
+    let (mut app, _rx) = test_app().await;
+    let backend = TestBackend::new(60, 20);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    let rule_row = app.last_status_area.unwrap().y;
+    assert_eq!(app.composer_rows(), 1);
+    app.handle_mouse_down(mouse_event(
+        5,
+        rule_row,
+        MouseEventKind::Down(MouseButton::Left),
+    ));
+    assert!(app.resize_drag.is_some());
+    app.handle_mouse_drag(5, rule_row.saturating_sub(4));
+    assert_eq!(app.manual_composer_rows, Some(5));
+    assert_eq!(app.composer_rows(), 5);
+    app.handle_mouse_up();
+    assert!(app.resize_drag.is_none());
+    // Sending resets the dragged height (issue #37).
+    app.set_input("/quit");
+    app.submit(&mut terminal_placeholder()).await.unwrap();
+    assert!(app.manual_composer_rows.is_none());
+    assert_eq!(app.composer_rows(), 1);
+    assert!(app.quit);
+}
+
+#[tokio::test]
+async fn mouse_drag_selects_feed_lines() {
+    let (mut app, _rx) = test_app().await;
+    for i in 0..20 {
+        app.feed
+            .push_plain_untimed(format!("row-{i}"), theway_transport::feed::Level::Output);
+    }
+    let backend = TestBackend::new(60, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    let feed = app.last_feed_area.unwrap();
+    let anchor_row = feed.y + 2;
+    app.handle_mouse_down(mouse_event(
+        2,
+        anchor_row,
+        MouseEventKind::Down(MouseButton::Left),
+    ));
+    assert!(app.feed_selection.is_some(), "down must start a selection");
+    app.handle_mouse_drag(2, anchor_row + 3);
+    let sel = app.feed_selection.unwrap();
+    assert_eq!(
+        sel.range(app.selection_view.total).count(),
+        4,
+        "drag must extend the selection over the rows crossed"
+    );
+    app.handle_mouse_up();
+    assert!(
+        app.feed_selection.is_some(),
+        "selection persists after the button is released"
+    );
+    assert!(!app.mouse_selecting);
 }
 
 /// Feed scrollback cap (issue #27 + #34): the render cache drains the head
