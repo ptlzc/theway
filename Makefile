@@ -78,9 +78,8 @@ run: ## build + run theway in dev mode (interactive)
 	$(CARGO) run --workspace -p theway-tui --bin theway
 
 .PHONY: install
-install: ## install theway binary into ~/.cargo/bin
-	$(CARGO) install --path crates/theway-tui --force
-	cp ~/.cargo/bin/theway$(EXE) ~/.cargo/bin/tw$(EXE)
+install: ## install theway + tw into $(CARGO_HOME)/bin (via scripts/install.sh)
+	scripts/install.sh
 
 # --- docs / housekeeping ----------------------------------------------------
 
