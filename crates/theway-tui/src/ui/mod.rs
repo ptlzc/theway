@@ -31,6 +31,7 @@
 mod app_goal;
 mod app_input;
 mod app_turns;
+mod prompt_chrome;
 mod render_utils;
 
 pub use theway_transport::feed::FeedUpdate;
@@ -578,36 +579,47 @@ impl App {
             status_area,
         );
 
-        // Input box. Keep the cursor away from the terminal edge and reserve a visible prompt
-        // column so the typing surface feels intentional instead of cramped.
-        let input_block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan));
-        let inner = input_block.inner(input_area);
-        frame.render_widget(input_block, input_area);
-        if inner.width > 0 && inner.height > 0 {
-            let prompt_width = inner.width.min(2);
-            let prompt_area = Rect {
-                x: inner.x,
-                y: inner.y,
-                width: prompt_width,
-                height: inner.height,
-            };
-            frame.render_widget(
-                Paragraph::new(Line::styled("> ", Style::default().fg(Color::Cyan))),
-                prompt_area,
-            );
-            let text_area = Rect {
-                x: inner.x + prompt_width,
-                y: inner.y,
-                width: inner.width.saturating_sub(prompt_width),
-                height: inner.height,
-            };
-            if text_area.width > 0 {
-                let input = &self.input;
-                let input_state = &mut self.input_state;
-                frame.render_stateful_widget_ref(input, text_area, input_state);
-            }
+        // Input box: grok-style chrome (rounded border, ❯ prefix, info line),
+        // ported from xai-grok-pager's prompt widget (issue #28).
+        let focused = self.model_picker.is_none() && self.control_plane_prompt.is_none();
+        let model_name = self
+            .latest
+            .model
+            .rsplit_once(':')
+            .map(|(_, id)| id)
+            .unwrap_or(self.latest.model.as_str())
+            .to_owned();
+        let mut flags: Vec<prompt_chrome::PromptFlag<'_>> = Vec::new();
+        if self.busy {
+            flags.push(prompt_chrome::PromptFlag {
+                text: "working",
+                color: Color::Rgb(187, 154, 247), // accent_running (magenta)
+                bold: true,
+            });
+        }
+        let queued_flag: Option<String> =
+            (self.latest.queued_count > 0).then(|| format!("{} queued", self.latest.queued_count));
+        if let Some(ref q) = queued_flag {
+            flags.push(prompt_chrome::PromptFlag {
+                text: q,
+                color: prompt_chrome::GRAY,
+                bold: false,
+            });
+        }
+        let chrome = prompt_chrome::PromptChrome {
+            focused,
+            model_name: &model_name,
+            flags: &flags,
+            multiline: !self.input_is_single_line(),
+            input_empty: self.input_text().is_empty(),
+            ..prompt_chrome::PromptChrome::default()
+        };
+        let text_area =
+            prompt_chrome::render_prompt_chrome(frame.buffer_mut(), input_area, &chrome);
+        if text_area.width > 0 && text_area.height > 0 {
+            let input = &self.input;
+            let input_state = &mut self.input_state;
+            frame.render_stateful_widget_ref(input, text_area, input_state);
         }
 
         // Hint line.
