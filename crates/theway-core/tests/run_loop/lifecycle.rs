@@ -458,3 +458,66 @@ async fn prepare_arguments_normalizes_args_for_hook_and_execute() {
         "execute() must see prepared args, got {exec_seen:?}"
     );
 }
+
+#[tokio::test]
+async fn max_iterations_caps_tool_loop() {
+    // Three queued tool-use responses; with a cap of 2 the run must stop after
+    // two turn attempts (the cap fires before the third LLM call).
+    let responses = Arc::new(Mutex::new(
+        (0..3)
+            .map(|i| {
+                let mut args = serde_json::Map::new();
+                args.insert("x".into(), serde_json::json!(i));
+                assistant_with(
+                    vec![ContentBlock::ToolCall(ToolCall {
+                        id: format!("call_{i}"),
+                        name: "no-such-tool".into(),
+                        arguments: args,
+                        thought_signature: None,
+                    })],
+                    StopReason::ToolUse,
+                )
+            })
+            .collect(),
+    ));
+
+    let mut state = AgentState::default();
+    state.model = Some(faux_model());
+    state.system_prompt = "loop forever".into();
+
+    let agent = Agent::new(AgentOptions {
+        initial_state: Some(state),
+        stream_fn: Some(faux_stream_fn_with(responses)),
+        max_iterations: Some(2),
+        ..Default::default()
+    });
+
+    let user = AgentMessage::Llm(theway_llm_provider::Message::User(
+        theway_llm_provider::UserMessage {
+            role: theway_llm_provider::UserRole::User,
+            content: theway_llm_provider::UserContent::Text("go".into()),
+            timestamp: 0,
+        },
+    ));
+    let err = agent
+        .prompt(user)
+        .await
+        .expect_err("the iteration cap must stop the loop");
+    assert!(
+        err.to_string().contains("max iterations (2) exceeded"),
+        "{err}"
+    );
+    // Exactly two tool executions happened; the third turn was never attempted.
+    let g = agent.state();
+    let tool_results = g
+        .messages
+        .iter()
+        .filter(|m| {
+            matches!(
+                m,
+                AgentMessage::Llm(theway_llm_provider::Message::ToolResult(_))
+            )
+        })
+        .count();
+    assert_eq!(tool_results, 2);
+}

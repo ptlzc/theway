@@ -90,6 +90,12 @@ pub struct AgentOptions {
     pub follow_up_mode: QueueMode,
     pub session_id: Option<String>,
     pub tool_execution: ToolExecutionMode,
+    /// Hard cap on loop iterations (one LLM turn attempt each) for this agent.
+    /// `None` = unbounded (the interactive main agent). Sub-harnesses
+    /// (`subagent` tool, DAG nodes, goal evaluator) set it from their spec's
+    /// `max_iterations`; the cap raises `AgentRunError::Other("max iterations
+    /// (N) exceeded")` before the call that would exceed it.
+    pub max_iterations: Option<u32>,
 }
 
 /// Stateful wrapper around the low-level agent loop.
@@ -113,6 +119,8 @@ pub(crate) struct AgentInner {
     /// the run survives if a steering message is queued, otherwise it ends.
     pub turn_cancel: Mutex<Option<CancellationToken>>,
     pub idle: Notify,
+    /// Hard cap on loop iterations (see [`AgentOptions::max_iterations`]).
+    pub max_iterations: Option<u32>,
 }
 
 pub(crate) struct PendingMessageQueue {
@@ -152,6 +160,7 @@ impl Agent {
         if options.convert_to_llm.is_none() {
             options.convert_to_llm = Some(default_convert_to_llm());
         }
+        let max_iterations = options.max_iterations;
         let (broadcast_tx, _) = broadcast::channel(LOOP_EVENT_BROADCAST_CAPACITY);
         let inner = AgentInner {
             state: Mutex::new(state),
@@ -164,6 +173,7 @@ impl Agent {
             active_cancel: Mutex::new(None),
             turn_cancel: Mutex::new(None),
             idle: Notify::new(),
+            max_iterations,
         };
         Self {
             inner: Arc::new(inner),

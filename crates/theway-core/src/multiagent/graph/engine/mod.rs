@@ -195,6 +195,7 @@ impl DagEngine {
             status: NodeStatus::Running,
             job_id: None,
             attempt: 0,
+            launch_gen: 0,
             started_at: Some(now),
             completed_at: None,
             error: None,

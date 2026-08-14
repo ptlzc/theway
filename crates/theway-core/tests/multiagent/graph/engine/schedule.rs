@@ -128,8 +128,9 @@ fn on_node_update_syncs_tokens_preview_activity() {
         )
         .unwrap();
     let id = run.id.clone();
+    let launch_gen = engine.get_run(&id).unwrap().node("a").unwrap().launch_gen;
     let long_preview = "x".repeat(5000);
-    engine.on_node_update(&id, "a", Some(100), Some(200), Some(long_preview));
+    engine.on_node_update(&id, "a", launch_gen, Some(100), Some(200), Some(long_preview));
     let run = engine.get_run(&id).unwrap();
     assert_eq!(run.node("a").unwrap().input_tokens, Some(100));
     assert_eq!(run.node("a").unwrap().output_tokens, Some(200));
@@ -144,6 +145,40 @@ fn on_node_update_syncs_tokens_preview_activity() {
         2048
     );
     assert!(run.last_activity_at > 0);
+}
+
+#[test]
+fn stale_launch_generation_update_is_dropped() {
+    let (engine, _launcher) = engine_with_launcher();
+    let run = engine
+        .plan(
+            run_def("t", None, None, &[("a", "x", "t", &[])]),
+            None,
+            None,
+        )
+        .unwrap();
+    let id = run.id.clone();
+    let first_gen = engine.get_run(&id).unwrap().node("a").unwrap().launch_gen;
+    assert!(first_gen >= 1);
+    // Fail the node so retry has a blocked node to reset and re-dispatch
+    // (a fully-succeeded run is a retry no-op — TS parity).
+    engine.on_node_completed(&id, "a", fail_outcome("boom"));
+    assert_eq!(engine.get_run(&id).unwrap().status, DagStatus::Failed);
+    assert_eq!(engine.retry(&id, None), vec!["a".to_string()]);
+    let second_gen = engine.get_run(&id).unwrap().node("a").unwrap().launch_gen;
+    assert!(second_gen > first_gen);
+    // A stale job's update (pre-retry generation) must be dropped entirely —
+    // tokens, preview, and the run's idle clock must not be touched.
+    engine.on_node_update(&id, "a", first_gen, Some(999), Some(999), Some("stale".into()));
+    let run = engine.get_run(&id).unwrap();
+    assert_eq!(run.node("a").unwrap().input_tokens, None);
+    assert_eq!(run.node("a").unwrap().output_tokens, None);
+    assert_eq!(run.node("a").unwrap().live_preview, None);
+    // The current generation's update applies.
+    engine.on_node_update(&id, "a", second_gen, Some(100), Some(200), Some("fresh".into()));
+    let run = engine.get_run(&id).unwrap();
+    assert_eq!(run.node("a").unwrap().input_tokens, Some(100));
+    assert_eq!(run.node("a").unwrap().live_preview.as_deref(), Some("fresh"));
 }
 
 #[test]

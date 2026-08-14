@@ -177,6 +177,7 @@ pub fn hydrate(p: PersistedRun) -> DagRun {
                 },
                 job_id: None,
                 attempt: n.attempt,
+                launch_gen: 0, // jobs died with the process; a fresh start re-dispatches from gen 0
                 started_at: if was_running { None } else { n.started_at },
                 completed_at: n.completed_at,
                 error: n.error,

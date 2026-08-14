@@ -26,6 +26,7 @@ fn sample_run(id: &str, status: DagStatus) -> DagRun {
         status: status.clone(),
         job_id: Some("job-x".to_string()),
         attempt: 2,
+        launch_gen: 5,
         started_at: if started { Some(1000) } else { None },
         completed_at: None,
         error: None,

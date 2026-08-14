@@ -120,6 +120,13 @@ pub struct DagNode {
     pub job_id: Option<String>,
     /// Completed attempts so far (from the subagent result's total_attempts).
     pub attempt: u32,
+    /// Launch generation: incremented every time the node is dispatched by the
+    /// scheduler (`start_node`). Callbacks from stale jobs (pre-cancel/pre-retry)
+    /// carry their captured generation and are dropped when it no longer matches —
+    /// `on_node_update` from an old attempt must never pollute a re-launched one.
+    /// Monotonic across retries; not persisted (starts at 0 after a restore).
+    #[serde(default)]
+    pub launch_gen: u64,
     pub started_at: Option<i64>,
     pub completed_at: Option<i64>,
     /// Failure / skip / cancel reason.

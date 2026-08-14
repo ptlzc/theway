@@ -118,6 +118,10 @@ pub struct AgentHarnessOptions {
     /// `0` to disable continuation entirely (the hook still fires once for audit /
     /// observability, but `Continue` decisions are treated as `budget_limited`).
     pub turn_continuation_cap: Option<u32>,
+    /// Hard cap on loop iterations for this harness's agent (one LLM turn
+    /// attempt each). `None` = unbounded. The subagent runner sets it from the
+    /// spec's `max_iterations`; the interactive main harness leaves it unset.
+    pub max_iterations: Option<u32>,
 }
 
 impl AgentHarnessOptions {
@@ -140,6 +144,7 @@ impl AgentHarnessOptions {
             reload_skills_fn: None,
             on_turn_end: None,
             turn_continuation_cap: None,
+            max_iterations: None,
         }
     }
 }
@@ -218,6 +223,7 @@ impl AgentHarness {
             before_tool_call: options.before_tool_call.clone(),
             after_tool_call: options.after_tool_call.clone(),
             on_control_plane_prompt: options.on_control_plane_prompt.clone(),
+            max_iterations: options.max_iterations,
             ..Default::default()
         });
 

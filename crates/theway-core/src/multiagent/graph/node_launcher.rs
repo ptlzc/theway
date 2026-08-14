@@ -6,19 +6,24 @@
 //! resolved through the injected [`AgentRunResolver`](crate::multiagent::types). The outcome (success, error, duration, tokens,
 //! final text) is reported back to the engine via [`DagEngine::on_node_completed`]; live
 //! token/preview sync runs through [`DagEngine::on_node_update`] via the runner's
-//! per-turn callback. 1:1 port of the dag-orchestrator extension's `defaultLauncher`
+//! per-event callback. 1:1 port of the dag-orchestrator extension's `defaultLauncher`
 //! (engine.ts), minus the BgJob registry and circuit-breaker layers.
 //!
-//! v1 limitations (deliberate, mirroring the TS runner's simpler shape):
+//! `node.timeout` is an **idle timeout** (TS `runPiOnce` semantics, ported): the runner
+//! kills the subagent after `timeout` seconds of NO output activity — any harness event
+//! (token stream chunk, tool execution update) reschedules the watchdog, so a node that
+//! keeps producing never times out; only a true stall trips it. Kill escalation mirrors
+//! TS: abort, 5s grace, force-kill. The node fails with
+//! `Timed out: no output for {N}s (idle timeout)`; default 120s when unset
+//! (TS `ctx.defaults.timeout ?? 120`).
+//!
+//! Known deviations from the TS original — open gaps, NOT deliberately scoped out:
 //! - `node.model` override only rewrites the model *id* on the parent's [`Model`] (same
-//!   provider/base_url). A full provider lookup from the loaded models catalog is a
-//!   follow-up; this covers the common "same provider, different model" case.
+//!   provider/base_url). A full provider lookup from the loaded models catalog is TODO.
 //! - `node.thinking` maps onto the harness `ThinkingLevel`; providers without a
 //!   `thinking_level_map` ignore the reasoning option at stream time.
-//! - `node.timeout` wraps the whole run with `tokio::time::timeout` (in the runner) — a
-//!   simplified idle timeout (the TS runner's per-turn idle watchdog is not ported).
-//! - The spec's `max_iterations` is logged only: the agent loop has no hard iteration
-//!   cap yet, same as the `subagent` tool.
+//! - The spec's `max_iterations` is enforced by the shared runner (agent-loop cap:
+//!   one LLM turn attempt per iteration; see [`runner`](super::runner)).
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -49,6 +54,10 @@ struct NodeJob {
     /// Attempt ordinal for this job (previous completions + 1; the engine resets the
     /// counter on retry, so this is 1 for a fresh launch).
     attempt: u32,
+    /// Launch generation captured at dispatch (`node.launch_gen` after `start_node`
+    /// bumped it). Every engine sync from this job carries it so stale jobs
+    /// (cancelled/skipped/retried meanwhile) are dropped by the engine.
+    launch_gen: u64,
     /// Subagent job registry (graph mode metrics/output).
     registry: AgentJobRegistry,
 }
@@ -136,6 +145,7 @@ impl NodeLauncher for NodeLauncherImpl {
             thinking: node.thinking.clone(),
             timeout: node.timeout,
             attempt: node.attempt.saturating_add(1),
+            launch_gen: node.launch_gen,
             registry: self.registry.clone(),
         };
         tokio::spawn(run_node(job, cancel));
@@ -172,6 +182,7 @@ async fn run_node(job: NodeJob, cancel: CancellationToken) {
     let run_id = job.run_id.clone();
     let node_id = job.node_id.clone();
     let attempt = job.attempt;
+    let launch_gen = job.launch_gen;
     // DAG node jobs inherit the owning session from the run.
     let session_id = engine.get_run(&run_id).and_then(|r| r.session_id);
     // Clones for the per-turn callback: the closure owns them, `run_node` keeps using
@@ -196,9 +207,11 @@ async fn run_node(job: NodeJob, cancel: CancellationToken) {
         system_prompt_extra: None,
         on_turn_end: Some(Arc::new(move |text, input, output| {
             // Live token/preview sync per turn — refreshes the idle-watchdog clock.
+            // Carries `gen` so a stale job's events can't pollute a re-launched node.
             engine_cb.on_node_update(
                 &run_id_cb,
                 &node_id_cb,
+                launch_gen,
                 Some(input),
                 Some(output),
                 Some(text.to_string()),
@@ -224,6 +237,7 @@ async fn run_node(job: NodeJob, cancel: CancellationToken) {
     engine.on_node_update(
         &run_id,
         &node_id,
+        launch_gen,
         Some(result.input_tokens),
         Some(result.output_tokens),
         output.clone(),
@@ -323,6 +337,47 @@ mod tests {
             tokio::spawn(async move {
                 let _sender = sender;
                 tokio::time::sleep(Duration::from_secs(30)).await;
+            });
+            stream
+        })
+    }
+
+    /// Stream that drips token deltas for ~1.6s before completing: with a 1s
+    /// IDLE timeout the node must survive (activity reschedules the watchdog),
+    /// while a wall-clock cap would have killed it.
+    fn slow_stream() -> StreamFn {
+        Arc::new(|_, _, _| {
+            let (stream, mut sender) = AssistantMessageEventStream::new();
+            tokio::spawn(async move {
+                let base = AssistantMessage {
+                    role: AssistantRole::Assistant,
+                    content: vec![ContentBlock::text("slow done")],
+                    api: theway_llm_provider::Api::from("faux"),
+                    provider: theway_llm_provider::Provider::from("faux"),
+                    model: "faux".into(),
+                    response_model: None,
+                    response_id: None,
+                    diagnostics: None,
+                    usage: Usage::default(),
+                    stop_reason: StopReason::Stop,
+                    error_message: None,
+                    timestamp: 0,
+                };
+                sender.push(AssistantMessageEvent::Start {
+                    partial: base.clone(),
+                });
+                for _ in 0..8 {
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    sender.push(AssistantMessageEvent::TextDelta {
+                        content_index: 0,
+                        delta: "x".into(),
+                        partial: base.clone(),
+                    });
+                }
+                sender.push(AssistantMessageEvent::Done {
+                    reason: DoneReason::Stop,
+                    message: base,
+                });
             });
             stream
         })
@@ -459,7 +514,28 @@ mod tests {
         let node = run.node("a").unwrap();
         assert_eq!(node.status, NodeStatus::Failed);
         let err = node.error.as_deref().unwrap();
-        assert!(err.contains("timed out after 1s"), "{err}");
+        assert!(err.contains("no output for 1s (idle timeout)"), "{err}");
+    }
+
+    /// Idle timeout must NOT be a wall-clock cap: a node that keeps emitting
+    /// activity (token deltas) past the idle window survives to completion.
+    #[tokio::test]
+    async fn idle_timeout_reschedules_on_activity() {
+        let engine = engine_with_launcher(faux_model(), slow_stream());
+        let run_id = plan_single_node(&engine, "general", "stream", Some(1));
+        let results = engine
+            .wait_for_runs(std::slice::from_ref(&run_id), Duration::from_secs(10), None)
+            .await;
+        assert_eq!(
+            results,
+            vec![(run_id.clone(), false)],
+            "activity must keep the run alive"
+        );
+        let run = engine.get_run(&run_id).unwrap();
+        assert_eq!(run.status, DagStatus::Completed);
+        let node = run.node("a").unwrap();
+        assert_eq!(node.status, NodeStatus::Succeeded);
+        assert_eq!(node.output.as_deref(), Some("slow done"));
     }
 
     #[tokio::test]

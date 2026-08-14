@@ -115,9 +115,21 @@ async fn drive_loop(
     inner: &Arc<AgentInner>,
     cancel: CancellationToken,
 ) -> Result<(), AgentRunError> {
+    let mut iterations: u32 = 0;
     loop {
         if cancel.is_cancelled() {
             return Ok(());
+        }
+        // Iteration budget: each loop pass is one LLM turn attempt (the
+        // TurnInterrupted retry path included — it makes another LLM call).
+        // Unbounded when the harness carries no cap (the interactive main agent).
+        if let Some(max) = inner.max_iterations {
+            if iterations >= max {
+                let msg = format!("max iterations ({max}) exceeded");
+                inner.state.lock().error_message = Some(msg.clone());
+                return Err(AgentRunError::Other(msg));
+            }
+            iterations += 1;
         }
         emit(inner, LoopEvent::TurnStart, &cancel).await;
 

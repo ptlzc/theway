@@ -3,7 +3,7 @@
 //!
 //! Both callers used to duplicate the same pipeline: a fresh [`AgentHarness`] on an
 //! in-memory session, a [`metrics_listener`] registry subscription, final-text
-//! collection, a cancel watcher, an optional timeout wrapper, and the registry
+//! collection, a cancel watcher, an idle watchdog, and the registry
 //! `finish`. This module is that pipeline, parameterized by [`AgentRunParams`], so
 //! `subagent` and `node_launcher` behave identically (same harness shape, same registry
 //! semantics: `source` is "subagent" or "dag", run/node ids carried through).
@@ -35,8 +35,11 @@ pub struct AgentRunOptions {
     pub prompt: String,
     pub model: Model,
     pub stream_fn: Option<StreamFn>,
-    /// Optional whole-run timeout; on expiry the harness is aborted. DAG nodes use it;
-    /// the `subagent` tool passes `None`.
+    /// Idle (no-output) timeout in seconds — TS `runPiOnce` parity. The run is
+    /// killed only after this many seconds with NO activity; any harness event
+    /// (token stream chunk, tool execution update) reschedules the watchdog, so
+    /// a busy subagent never trips it. `None` → default 120s
+    /// (TS `ctx.defaults.timeout ?? 120`); `Some(0)` disables the watchdog.
     pub timeout: Option<u64>,
     pub thinking: Option<String>,
     /// Subagent job registry (graph mode metrics/output).
@@ -77,9 +80,16 @@ pub struct AgentRunResult {
     pub job_id: String,
 }
 
+/// Default idle timeout for subagent runs (TS `ctx.defaults.timeout ?? 120`).
+const DEFAULT_IDLE_TIMEOUT_SECS: u64 = 120;
+
+/// Force-kill grace after the idle watchdog aborts the harness
+/// (TS SIGTERM → 5s → SIGKILL escalation).
+const IDLE_KILL_GRACE_SECS: u64 = 5;
+
 /// Run one subagent to completion: fresh in-memory session (nothing touches disk), the
 /// spec's tool set, registry registration + metrics, final-text collection, cancel
-/// watcher, and optional timeout wrapper.
+/// watcher, and the idle watchdog (no-output timeout with abort → grace → force-kill).
 pub async fn run_agent(opts: AgentRunOptions) -> AgentRunResult {
     let started = Instant::now();
 
@@ -101,6 +111,10 @@ pub async fn run_agent(opts: AgentRunOptions) -> AgentRunResult {
     };
     harness_opts.tools = opts.tools;
     harness_opts.stream_fn = opts.stream_fn;
+    // Spec iteration budget, enforced by the agent loop (one LLM turn attempt
+    // per iteration). Covers the `subagent` tool, DAG nodes, and the goal
+    // evaluator (whose spec sets 1).
+    harness_opts.max_iterations = Some(opts.launch.max_iterations);
     if let Some(level) = opts
         .thinking
         .as_deref()
@@ -142,12 +156,17 @@ pub async fn run_agent(opts: AgentRunOptions) -> AgentRunResult {
 
     // Collect the final assistant text (MessageEnd fires per assistant turn; keep the
     // latest non-empty text) and, for DAG nodes, sync live tokens/preview to the engine
-    // (refreshes the engine's idle-watchdog clock). Sync callback — memory-only ops.
+    // (refreshes the engine's idle-watchdog clock). Also the idle-watchdog heartbeat:
+    // ANY harness event counts as output activity (TS: any stdout/stderr chunk) and
+    // reschedules the kill timer. Sync callback — memory-only ops.
+    let last_activity: Arc<Mutex<Instant>> = Arc::new(Mutex::new(Instant::now()));
+    let activity = last_activity.clone();
     let final_text: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
     let collector = final_text.clone();
     let on_turn_end = opts.on_turn_end.clone();
     let sub_for_events = sub.clone();
     let _unsub = sub.agent().subscribe_sync(Arc::new(move |event| {
+        *activity.lock() = Instant::now();
         if let LoopEvent::MessageEnd {
             message: AgentMessage::Llm(PiMessage::Assistant(a)),
         } = event
@@ -180,19 +199,96 @@ pub async fn run_agent(opts: AgentRunOptions) -> AgentRunResult {
         sub_for_cancel.abort();
     });
 
-    let run = match opts.timeout {
-        Some(secs) => {
-            match tokio::time::timeout(Duration::from_secs(secs), sub.prompt(opts.prompt)).await {
-                Ok(result) => result,
-                Err(_) => {
-                    sub.abort();
-                    Err(AgentRunError::Other(format!(
-                        "node timed out after {secs}s"
-                    )))
+    // ── prompt execution with the idle watchdog ─────────────────────────────
+    // TS `runPiOnce` parity: `timeout` is an idle (no-output) timeout, NOT a
+    // wall-clock cap. The watchdog fires only after `idle_secs` with zero
+    // activity (any harness event reschedules it). Escalation mirrors TS:
+    // abort the harness (SIGTERM analog), give it a grace period to unwind,
+    // then force-drop the task (SIGKILL analog) so a hung socket can't hold
+    // the node job open forever.
+    let idle_secs = opts.timeout.unwrap_or(DEFAULT_IDLE_TIMEOUT_SECS);
+    let run = if idle_secs == 0 {
+        sub.prompt(opts.prompt).await
+    } else {
+        let sub_for_prompt = sub.clone();
+        let mut handle = tokio::spawn(async move { sub_for_prompt.prompt(opts.prompt).await });
+        let wd_activity = last_activity.clone();
+        let wd_sub = sub.clone();
+        let wd_fired = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let wd_fired_inner = wd_fired.clone();
+        let wd_stop = CancellationToken::new();
+        let wd_stop_inner = wd_stop.clone();
+        // oneshot "fired" signal instead of polling the wd JoinHandle inside the
+        // select: a JoinHandle may only be polled to completion once, and select
+        // drops ready outputs of losing branches.
+        let (wd_fire_tx, mut wd_fire_rx) = tokio::sync::oneshot::channel::<()>();
+        let wd = tokio::spawn(async move {
+            let idle = Duration::from_secs(idle_secs);
+            loop {
+                let deadline = tokio::time::Instant::from_std(*wd_activity.lock()) + idle;
+                tokio::select! {
+                    _ = tokio::time::sleep_until(deadline) => {}
+                    _ = wd_stop_inner.cancelled() => return,
+                }
+                if wd_activity.lock().elapsed() >= idle {
+                    // No output for `idle_secs`: SIGTERM analog, then the caller
+                    // escalates to a force-kill after the grace period.
+                    wd_sub.abort();
+                    wd_fired_inner.store(true, std::sync::atomic::Ordering::SeqCst);
+                    let _ = wd_fire_tx.send(());
+                    return;
                 }
             }
+        });
+        enum Run {
+            Done(Result<Result<(), AgentRunError>, tokio::task::JoinError>),
+            TimedOut,
         }
-        None => sub.prompt(opts.prompt).await,
+        let outcome = tokio::select! {
+            r = &mut handle => {
+                wd_stop.cancel();
+                Run::Done(r)
+            }
+            fired = &mut wd_fire_rx => match fired {
+                Ok(()) => {
+                    // Grace period for the aborted harness to unwind; then SIGKILL analog.
+                    // The handle may have completed while the select was polling it —
+                    // never poll a finished JoinHandle again.
+                    if !handle.is_finished()
+                        && tokio::time::timeout(
+                            Duration::from_secs(IDLE_KILL_GRACE_SECS),
+                            &mut handle,
+                        )
+                        .await
+                        .is_err()
+                    {
+                        handle.abort();
+                    }
+                    Run::TimedOut
+                }
+                // Watchdog exited without firing (stop raced) or panicked —
+                // pathological; take the prompt result if we can still poll it.
+                Err(_) if !handle.is_finished() => Run::Done(handle.await),
+                Err(_) => Run::TimedOut,
+            },
+        };
+        wd_stop.cancel();
+        let _ = wd.await;
+        // The watchdog firing is decisive: the harness abort it triggered races with
+        // the select's Done arm (abort makes `prompt` return quickly), so a Done arm
+        // that lands after the watchdog fired must still report the idle timeout.
+        let timeout_err = || {
+            AgentRunError::Other(format!(
+                "Timed out: no output for {idle_secs}s (idle timeout)"
+            ))
+        };
+        match outcome {
+            Run::Done(r) if !wd_fired.load(std::sync::atomic::Ordering::SeqCst) => match r {
+                Ok(inner) => inner,
+                Err(e) => Err(AgentRunError::Other(format!("subagent task failed: {e}"))),
+            },
+            Run::Done(_) | Run::TimedOut => Err(timeout_err()),
+        }
     };
     watcher.abort();
 

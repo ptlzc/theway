@@ -64,6 +64,7 @@ impl DagEngine {
                 return;
             }
             node.status = NodeStatus::Running;
+            node.launch_gen += 1;
             node.started_at = Some(now_ms());
             node.job_id = Some(format!("job-{}-{}", run_id, node_id));
             let token = CancellationToken::new();
@@ -180,11 +181,16 @@ impl DagEngine {
     }
 
     /// Live token/preview sync while a node is running (mirrors the TS job
-    /// update handler; refreshes the idle watchdog clock).
+    /// update handler; refreshes the idle watchdog clock). `launch_gen` is the
+    /// launch generation the reporting job captured at dispatch time: updates
+    /// from a stale job (its launch was cancelled/skipped/retried meanwhile)
+    /// are dropped so they can't pollute a re-launched attempt's tokens/preview
+    /// or refresh the run's idle clock.
     pub fn on_node_update(
         &self,
         run_id: &str,
         node_id: &str,
+        launch_gen: u64,
         input_tokens: Option<u64>,
         output_tokens: Option<u64>,
         preview: Option<String>,
@@ -193,10 +199,13 @@ impl DagEngine {
         let Some(run) = inner.runs.get_mut(run_id) else {
             return;
         };
-        run.last_activity_at = now_ms();
         let Some(node) = run.node_mut(node_id) else {
             return;
         };
+        if node.launch_gen != launch_gen {
+            return;
+        }
+        let now = now_ms();
         if let Some(t) = input_tokens {
             node.input_tokens = Some(t);
         }
@@ -206,7 +215,9 @@ impl DagEngine {
         if let Some(p) = preview {
             node.live_preview = Some(cap_chars(&p, 2048));
         }
-        node.last_active_at = Some(now_ms());
+        node.last_active_at = Some(now);
+        // After the `node` borrow ends (NLL): refresh the run idle clock.
+        run.last_activity_at = now;
         drop(inner);
         self.notify_persist();
     }

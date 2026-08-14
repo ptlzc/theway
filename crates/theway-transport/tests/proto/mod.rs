@@ -147,6 +147,7 @@ fn dag_run_converts_to_wire_shape() {
             status: NodeStatus::Running,
             job_id: Some("job-7".into()),
             attempt: 1,
+            launch_gen: 3,
             started_at: Some(1000),
             completed_at: None,
             error: None,

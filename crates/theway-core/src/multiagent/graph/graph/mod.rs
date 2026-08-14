@@ -195,6 +195,7 @@ pub fn build_run(def: &DagRunDef) -> DagRun {
             status: NodeStatus::Pending,
             job_id: None,
             attempt: 0,
+            launch_gen: 0,
             started_at: None,
             completed_at: None,
             error: None,
