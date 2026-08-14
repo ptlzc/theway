@@ -2,7 +2,10 @@
 
 ## 范围整合
 
-本 change 合并三批需求为一份 openspec（一个 issue、一个 DAG 实施链）：
+本 change 把多批输入需求收拢为一份 openspec（一个 issue、一个 DAG 实施链）——
+已落地的进台账，未落地的进计划。本轮输入 14 行：第 5 行为无意义粘贴片段
+（不纳入），其余 13 条——7 条已随 #37 落地（台账见下），6 条 TUI 待办入计划
+（= 完整清单 1–6）：
 
 **近期 TUI 清单（#37 之后，6 条）**：工具调用块化、thinking 统计行、working 吞吐
 统计、彩虹 callback 转轮、ctx 100% 修复 + 去 working/multiline、右上角 features。
@@ -24,6 +27,20 @@ Ctrl+O thinking 三状态（隐藏/查探/全显）、orchestrator thinking 结�
 滚动 pinning（非底部时流式输出不打扰滚动位置）、文字选区高亮（鼠标拖拽 +
 Ctrl+Space + Shift+方向键；用户明确只做选区，不做复制）。
 
+**本轮输入 · #37 批次已完成项（不在本计划，9-verify 逐条回归）**：
+
+| # | 输入需求 | 落点 |
+|---|---------|------|
+| 1 | 按 `/` 弹 command 列表，支持上下选择 | e4f1388 `SlashCompleter`：Up/Down 高亮、Enter 接受 |
+| 2 | 首字符 `/` 不一定是指令（可能是路径）；无对应指令不报错，直接当 user message 输入 | 90e1e01 `commands::dispatch` 未匹配回落 `RunAgentPrompt`（原样送模型） |
+| 3 | composer 左上角删除 `theway`、模型也删除；右下角模型加 provider | e4f1388 状态行去品牌/模型；info 行显示完整 `provider:model-id` |
+| 4 | `/reload` 重扫配置、skills、commands（兼容 claude code 格式）；多根目录（`.agents/skills` / `.codex/skills` / `.claude/skills`）同名 skill 不重复加载——保留先加载者，`.agents` 权重最高 | 90e1e01 + 696c5d2 `reload_everything` + `skills` 优先级扫描 `dedupe_first_wins` |
+| 6 | 超 20 字符的粘贴显示 `[ paste xxx chars ]`；粘贴后是 object 不是字符，backspace 删除整个 object | e4f1388 `PASTE_OBJECT_MIN_CHARS` + paste object chip（提交时展开全文） |
+| 7 | 拖动 composer 顶部横线拉高，发送时重置还原 | e4f1388 `ComposerDrag`（上限 12 行），发送复位 |
+| 8 | 鼠标左键在 TUI 上选择内容 | e4f1388 左键拖拽 feed 选区；用户复核仍反馈「无法选择」→ 9-verify 重点回归，失效即修 |
+
+（输入第 5 条为无意义粘贴片段，不纳入。）
+
 ## Why
 
 **TUI 侧**：#37 落地了 slash popup、粘贴对象、composer 拖拽和鼠标选区，但 feed 的
@@ -36,7 +53,7 @@ token，#33 遗留）；dag 运行中没有任何可见状态带。
 未写）；subagent / DAG 节点只能拿固定全量工具集，orchestrator 无法收窄工具面
 （如只让某节点用 read+bash）。
 
-## 完整清单（11 条）
+## 完整清单（11 条，计划内）
 
 **TUI（9 条）：**
 
@@ -61,8 +78,8 @@ token，#33 遗留）；dag 运行中没有任何可见状态带。
     节点 `tools` 字段；默认全量（orchestrator - dag_* - subagent）；非空时只注入
     列出的工具；未知工具名 fail-fast（报错列出可用名）
 
-（选区只保留现有高亮，不做复制——用户确认。composer 顶部拖拽调高在 #37 已实现
-[e4f1388]，不在本计划，但 verify 阶段回归验证。）
+（#37 已落地的 7 条见「范围整合」台账，不在本计划，9-verify 逐条回归；选区
+只保留现有高亮，不做复制——用户确认。）
 
 ## What changes
 

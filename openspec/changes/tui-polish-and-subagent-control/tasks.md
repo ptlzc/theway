@@ -25,8 +25,10 @@ graph TD
   (a))` 的 `a.usage`），替换会话累计 `cost.tokens`；daemon 单测。
 - `3-spinner` — `ui/stats.rs` CpsMeter（1s 滑动窗）+ `pixel_loader.rs` rainbow
   callback 化（`RainbowSpinner` + `step_delay_ms(cps)` 速度映射 + 20ms 封顶 +
-  回落基准）；busy 带接入 char/s + input/output 统计；thinking 统计行接数值；
-  单测（cps 滑窗、速度映射单调封顶）。dag band 转轮复用本组件（5-dagband 接）。
+  回落基准）；9 点点亮顺序按用户给定的旋转阵列落表（三张顺序表单测钉死，
+  design §4.3；第三轮 ASCII 有错位，无法对齐时 ask_user）；busy 带接入
+  char/s + input/output 统计；thinking 统计行接数值；单测（cps 滑窗、速度
+  映射单调封顶、顺序表）。dag band 转轮复用本组件（5-dagband 接）。
 - `4-status` — `ui/mod.rs` + `prompt_chrome.rs`：ctx% 用最近一轮 usage；移除
   working/multiline 标志；右上角 features 标签（sidebar.runtime + dags kind 推导
   graph engine/goal，纯函数 `feature_labels`）；ui/tests.rs 增补。
@@ -71,5 +73,9 @@ graph TD
   `make fmt-check`；tmux e2e（块折叠视觉、流式 c/s 与转轮加速、工具等待回落、
   ctx% 变化、长按加速滚动、composer 滚轮、拖拽调高回归、dag 状态带渲染）；
   编排 e2e（可选：`tools: ["bash"]` 节点工具面收窄、`maxIterations: 8` 短任务
-  正常完成）；选区保持现有高亮不动；按 crate 提交推送（feat(#38): …）；
-  close issue #38。
+  正常完成）；#37 台账回归（proposal 台账 7 条，tmux）：slash 弹层 Up/Down
+  选择 + Enter 接受、未匹配 slash（路径）回落 user message 无报错、chrome 无
+  theway 品牌 + info 行 `provider:model-id`、`/reload` 重扫 + 多根 skills 去重
+  （`.agents` 优先、先到者胜）、paste object backspace 整体删除、拖拽调高 +
+  发送复位、鼠标左键拖拽选区（用户反馈仍失效——回归失败即修，改动限
+  ui/mod.rs 选区路径）；按 crate 提交推送（feat(#38): …）；close issue #38。
