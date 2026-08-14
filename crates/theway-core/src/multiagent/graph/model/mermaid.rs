@@ -361,6 +361,10 @@ pub fn parse_mermaid(text: &str) -> MermaidParseResult {
                 cwd: None,
                 model: None,
                 thinking: None,
+                // Mermaid labels only carry "agent: task"; budget/tools come
+                // from the nodes[] JSON form.
+                max_iterations: None,
+                tools: None,
             });
         }
 

@@ -87,6 +87,36 @@ const DEFAULT_IDLE_TIMEOUT_SECS: u64 = 120;
 /// (TS SIGTERM → 5s → SIGKILL escalation).
 const IDLE_KILL_GRACE_SECS: u64 = 5;
 
+/// Apply a tool allowlist to a resolved tool set (shared by the `subagent`
+/// tool and the DAG node launcher).
+///
+/// - Empty `allow` → the set is returned unchanged (full-set default).
+/// - Every `allow` name must match a tool's `definition().name`; the first
+///   unknown name fails with the available names listed.
+/// - The filtered result keeps the original set's order (definition order),
+///   not the allowlist's order.
+pub fn filter_tool_set(
+    tools: Vec<Arc<dyn AgentTool>>,
+    allow: &[String],
+) -> Result<Vec<Arc<dyn AgentTool>>, String> {
+    if allow.is_empty() {
+        return Ok(tools);
+    }
+    let available: Vec<&str> = tools.iter().map(|t| t.definition().name.as_str()).collect();
+    for name in allow {
+        if !available.contains(&name.as_str()) {
+            return Err(format!(
+                "unknown tool in allowlist: {name} (available: {})",
+                available.join(", ")
+            ));
+        }
+    }
+    Ok(tools
+        .into_iter()
+        .filter(|t| allow.iter().any(|a| a == &t.definition().name))
+        .collect())
+}
+
 /// Run one subagent to completion: fresh in-memory session (nothing touches disk), the
 /// spec's tool set, registry registration + metrics, final-text collection, cancel
 /// watcher, and the idle watchdog (no-output timeout with abort → grace → force-kill).
@@ -335,3 +365,6 @@ pub async fn run_agent(opts: AgentRunOptions) -> AgentRunResult {
         job_id,
     }
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("multiagent/runner");

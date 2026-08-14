@@ -1,5 +1,6 @@
 use super::*;
 
+mod build;
 mod helpers;
 mod mermaid;
 mod reconcile;
@@ -20,6 +21,8 @@ fn node_def(id: &str, agent: &str, task: &str, deps: &[&str]) -> DagNodeDef {
         cwd: None,
         model: None,
         thinking: None,
+        max_iterations: None,
+        tools: None,
     }
 }
 

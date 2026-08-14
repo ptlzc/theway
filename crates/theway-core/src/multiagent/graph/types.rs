@@ -77,6 +77,13 @@ pub struct DagNodeDef {
     pub model: Option<String>,
     /// Primary-target thinking override.
     pub thinking: Option<String>,
+    /// Iteration-budget override (LLM-turn attempts); the launcher applies it
+    /// over the spec default when set.
+    #[serde(default)]
+    pub max_iterations: Option<u32>,
+    /// Tool allowlist (tool names); `None` means the full resolved tool set.
+    #[serde(default)]
+    pub tools: Option<Vec<String>>,
 }
 
 /// User-declared run definition.
@@ -115,6 +122,13 @@ pub struct DagNode {
     pub cwd: Option<String>,
     pub model: Option<String>,
     pub thinking: Option<String>,
+    /// Iteration-budget override carried from the definition; persisted so a
+    /// restored node still launches with it.
+    #[serde(default)]
+    pub max_iterations: Option<u32>,
+    /// Tool allowlist carried from the definition; persisted like the budget.
+    #[serde(default)]
+    pub tools: Option<Vec<String>>,
     pub status: NodeStatus,
     /// Subagent BgJob id while running / after completion.
     pub job_id: Option<String>,

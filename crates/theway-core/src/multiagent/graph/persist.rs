@@ -52,6 +52,12 @@ pub struct PersistedNode {
     pub cwd: Option<String>,
     pub model: Option<String>,
     pub thinking: Option<String>,
+    /// Defaults to None for state written before the budget field existed.
+    #[serde(default)]
+    pub max_iterations: Option<u32>,
+    /// Defaults to None for state written before the allowlist field existed.
+    #[serde(default)]
+    pub tools: Option<Vec<String>>,
     pub status: NodeStatus,
     pub attempt: u32,
     pub started_at: Option<i64>,
@@ -137,6 +143,8 @@ pub fn to_persisted(run: &DagRun) -> PersistedRun {
                 cwd: n.cwd.clone(),
                 model: n.model.clone(),
                 thinking: n.thinking.clone(),
+                max_iterations: n.max_iterations,
+                tools: n.tools.clone(),
                 status: n.status.clone(),
                 attempt: n.attempt,
                 started_at: n.started_at,
@@ -170,6 +178,8 @@ pub fn hydrate(p: PersistedRun) -> DagRun {
                 timeout: n.timeout,
                 model: n.model,
                 thinking: n.thinking,
+                max_iterations: n.max_iterations,
+                tools: n.tools,
                 status: if was_running {
                     NodeStatus::Ready
                 } else {
@@ -218,3 +228,6 @@ pub fn max_run_counter(runs: &[DagRun]) -> u64 {
         .max()
         .unwrap_or(0)
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("multiagent/graph/persist");

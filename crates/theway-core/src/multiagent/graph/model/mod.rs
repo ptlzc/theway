@@ -192,6 +192,8 @@ pub fn build_run(def: &DagRunDef) -> DagRun {
             cwd: n.cwd.clone(),
             model: n.model.clone(),
             thinking: n.thinking.clone(),
+            max_iterations: n.max_iterations,
+            tools: n.tools.clone(),
             status: NodeStatus::Pending,
             job_id: None,
             attempt: 0,

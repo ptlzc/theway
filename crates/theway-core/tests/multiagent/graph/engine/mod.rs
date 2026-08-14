@@ -79,6 +79,8 @@ fn run_def(
                 cwd: None,
                 model: None,
                 thinking: None,
+                max_iterations: None,
+                tools: None,
             })
             .collect(),
         max_concurrency: max_conc,
@@ -123,6 +125,8 @@ fn persisted_node(id: &str, status: NodeStatus, deps: &[&str]) -> PersistedNode 
         cwd: None,
         model: None,
         thinking: None,
+        max_iterations: None,
+        tools: None,
         status,
         attempt: 0,
         started_at: None,

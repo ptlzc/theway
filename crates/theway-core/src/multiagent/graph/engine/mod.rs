@@ -192,6 +192,8 @@ impl DagEngine {
             cwd: None,
             model: None,
             thinking: None,
+            max_iterations: None,
+            tools: None,
             status: NodeStatus::Running,
             job_id: None,
             attempt: 0,
