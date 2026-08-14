@@ -120,6 +120,7 @@ async fn dag_plan_wait_status_completes_2_node_dag_with_real_launcher() {
             "checker".into(),
             "general".into(),
         ],
+        theway_core::multiagent::registry::AgentJobRegistry::new(),
     );
 
     // dag_plan: 2-node mermaid DAG (A → B), both nodes are `explorer` subagents.

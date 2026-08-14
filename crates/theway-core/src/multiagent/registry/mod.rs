@@ -302,6 +302,23 @@ impl AgentJobRegistry {
         inner.jobs.iter().find(|j| j.id == id).cloned()
     }
 
+    /// Find the most recent job registered for a DAG node. Retries register a
+    /// fresh job per attempt, so the newest one is the live/relevant record.
+    /// `dag_inspect kind=transcript` resolves the engine node to its registry
+    /// job through this (engine-dispatched nodes keep only a placeholder job
+    /// id, so the lookup key is the (run_id, node_id) pair stamped at launch).
+    pub fn job_for_node(&self, run_id: &str, node_id: &str) -> Option<AgentJob> {
+        let inner = self.inner.lock();
+        inner
+            .jobs
+            .iter()
+            .filter(|j| {
+                j.run_id.as_deref() == Some(run_id) && j.node_id.as_deref() == Some(node_id)
+            })
+            .max_by_key(|j| j.started_at)
+            .cloned()
+    }
+
     /// Terminal state: status + error + completion time. Detaches the live
     /// control handle so a finished job can no longer steer anything.
     pub fn finish(&self, id: &str, status: JobStatus, error: Option<String>) {

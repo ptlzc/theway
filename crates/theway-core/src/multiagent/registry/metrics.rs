@@ -2,7 +2,9 @@
 
 use std::sync::Arc;
 
+use serde_json::json;
 use theway_llm_provider::Message as PiMessage;
+use theway_llm_provider::UserContentBlock;
 
 use crate::{AgentMessage, LoopEvent};
 
@@ -67,9 +69,46 @@ pub fn metrics_listener(
                 });
             }
         }
-        LoopEvent::ToolExecutionStart { .. } => {
+        LoopEvent::ToolExecutionStart {
+            tool_name, args, ..
+        } => {
             registry.update(&job_id, |job| {
                 job.tools_called = job.tools_called.saturating_add(1);
+                // Typed transcript entry (dag_inspect kind=transcript): the call
+                // site with its arguments, in emission order with tool results.
+                append_message(
+                    job,
+                    &json!({"role": "toolCall", "name": tool_name.clone(), "args": args.clone()}),
+                );
+            });
+        }
+        LoopEvent::ToolExecutionEnd {
+            tool_name,
+            result,
+            is_error,
+            ..
+        } => {
+            let text: String = result
+                .content
+                .iter()
+                .filter_map(|b| match b {
+                    UserContentBlock::Text(t) => Some(t.text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            registry.update(&job_id, |job| {
+                // Bounded to keep one tool result from dominating the transcript
+                // buffer (MAX_MESSAGES_BYTES keeps the whole list bounded too).
+                append_message(
+                    job,
+                    &json!({
+                        "role": "toolResult",
+                        "name": tool_name.clone(),
+                        "isError": is_error,
+                        "content": cap_tool_result(&text),
+                    }),
+                );
             });
         }
         LoopEvent::TurnStart => {
@@ -79,4 +118,14 @@ pub fn metrics_listener(
         }
         _ => {}
     })
+}
+
+/// Cap a tool-result body for the transcript buffer: keep the head, tag the cut.
+fn cap_tool_result(text: &str) -> String {
+    const CAP: usize = 4096;
+    if text.chars().count() <= CAP {
+        return text.to_string();
+    }
+    let head: String = text.chars().take(CAP).collect();
+    format!("{head}…(截断)")
 }

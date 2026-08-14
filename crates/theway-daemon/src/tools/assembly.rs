@@ -66,6 +66,7 @@ pub fn engine_tools(
         dag_engine.clone(),
         Some(session_id.to_string()),
         spec_names.clone(),
+        subagent_registry.clone(),
     ));
     // Subagent delegation tool: shares the parent's model + stream backend; jobs are
     // stamped with this session.

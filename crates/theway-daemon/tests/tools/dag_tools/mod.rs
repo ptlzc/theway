@@ -6,6 +6,7 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use theway_core::multiagent::graph::engine::{NodeLauncher, NodeOutcome};
 use theway_core::multiagent::graph::graph::node_summary_line;
+use theway_core::multiagent::registry::AgentJobRegistry;
 
 use super::*;
 
@@ -112,6 +113,14 @@ fn engine_with(launcher: FakeLauncher) -> (Arc<DagEngine>, Arc<FakeLauncher>) {
 }
 
 fn tools(engine: Arc<DagEngine>, session_id: Option<&str>) -> Vec<Arc<dyn AgentTool>> {
+    tools_with_registry(engine, session_id, AgentJobRegistry::new())
+}
+
+fn tools_with_registry(
+    engine: Arc<DagEngine>,
+    session_id: Option<&str>,
+    registry: AgentJobRegistry,
+) -> Vec<Arc<dyn AgentTool>> {
     DagTools::new(
         engine,
         session_id.map(String::from),
@@ -122,6 +131,7 @@ fn tools(engine: Arc<DagEngine>, session_id: Option<&str>) -> Vec<Arc<dyn AgentT
             "checker".into(),
             "general".into(),
         ],
+        registry,
     )
 }
 
