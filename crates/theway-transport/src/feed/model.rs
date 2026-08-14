@@ -151,38 +151,50 @@ impl Feed {
     /// rebuilds its feed from `WireStatus.feed_blocks` on every snapshot).
     pub fn replace_blocks(&mut self, blocks: &[WireFeedBlock]) {
         self.clear();
+        self.append_blocks(blocks);
+    }
+
+    /// Append finished wire blocks without clearing. The snapshot feed is
+    /// append-only while a turn streams; callers that detect a pure tail
+    /// append (shared prefix with the previous snapshot) push only the new
+    /// blocks instead of rebuilding the whole feed.
+    pub fn append_blocks(&mut self, blocks: &[WireFeedBlock]) {
         for block in blocks {
-            match block {
-                WireFeedBlock::User { text, timestamp } => {
-                    self.push_user_with_timestamp(text.clone(), timestamp.clone())
-                }
-                WireFeedBlock::Assistant { text, timestamp } => {
-                    self.push_assistant_with_timestamp(text.clone(), timestamp.clone())
-                }
-                WireFeedBlock::Thinking { text, timestamp } => {
-                    self.push_thinking_with_timestamp(text.clone(), timestamp.clone())
-                }
-                WireFeedBlock::Tool {
-                    name,
-                    args,
-                    timestamp,
-                } => self.push_tool_with_timestamp(name.clone(), args.clone(), timestamp.clone()),
-                WireFeedBlock::ToolResult {
-                    lines,
-                    is_error,
-                    timestamp,
-                } => self.push_tool_result_with_timestamp(
-                    String::new(),
-                    lines.clone(),
-                    *is_error,
-                    timestamp.clone(),
-                ),
-                WireFeedBlock::Plain {
-                    text,
-                    level,
-                    timestamp,
-                } => self.push_plain_with_timestamp(text.clone(), *level, timestamp.clone()),
+            self.push_wire_block(block);
+        }
+    }
+
+    fn push_wire_block(&mut self, block: &WireFeedBlock) {
+        match block {
+            WireFeedBlock::User { text, timestamp } => {
+                self.push_user_with_timestamp(text.clone(), timestamp.clone())
             }
+            WireFeedBlock::Assistant { text, timestamp } => {
+                self.push_assistant_with_timestamp(text.clone(), timestamp.clone())
+            }
+            WireFeedBlock::Thinking { text, timestamp } => {
+                self.push_thinking_with_timestamp(text.clone(), timestamp.clone())
+            }
+            WireFeedBlock::Tool {
+                name,
+                args,
+                timestamp,
+            } => self.push_tool_with_timestamp(name.clone(), args.clone(), timestamp.clone()),
+            WireFeedBlock::ToolResult {
+                lines,
+                is_error,
+                timestamp,
+            } => self.push_tool_result_with_timestamp(
+                String::new(),
+                lines.clone(),
+                *is_error,
+                timestamp.clone(),
+            ),
+            WireFeedBlock::Plain {
+                text,
+                level,
+                timestamp,
+            } => self.push_plain_with_timestamp(text.clone(), *level, timestamp.clone()),
         }
     }
 

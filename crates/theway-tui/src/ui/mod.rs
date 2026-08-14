@@ -272,10 +272,14 @@ impl App {
 
     // ── snapshot application (the daemon owns the transcript) ──────────────────────────
 
-    /// Apply a full snapshot: refresh the cache, rebuild the feed when the
-    /// transcript changed, and resync every renderable status field.
+    /// Apply a full snapshot: refresh the cache, sync the feed, and resync
+    /// every renderable status field. The daemon transcript is append-only
+    /// while a turn streams, so a snapshot whose blocks share a prefix with
+    /// the previous one pushes only the new tail instead of rebuilding the
+    /// whole feed (the longer the feed, the bigger the win).
     pub(super) fn apply_snapshot(&mut self, status: WireStatus) {
         let feed_changed = self.latest.feed_blocks != status.feed_blocks;
+        let old_blocks = self.latest.feed_blocks.clone();
         self.latest = status;
         self.session_id = self.latest.session_id.clone();
         self.busy = self.latest.busy;
@@ -286,13 +290,29 @@ impl App {
         self.latest_trigger_poll = self.latest.latest_trigger_poll.clone();
         self.connected = true;
         if feed_changed {
-            self.feed.replace_blocks(&self.latest.feed_blocks);
+            let new_blocks = &self.latest.feed_blocks;
+            let prefix = old_blocks
+                .iter()
+                .zip(new_blocks)
+                .take_while(|(a, b)| a == b)
+                .count();
+            if prefix == old_blocks.len() {
+                // Pure tail append: push only the new blocks.
+                self.feed.append_blocks(&new_blocks[prefix..]);
+            } else {
+                // Truncation/reordering: rebuild.
+                self.feed.replace_blocks(new_blocks);
+            }
             self.follow = true;
         }
     }
 
-    /// Apply one stream frame (snapshot → full replace; event increments are
-    /// ignored — the next snapshot carries the whole state).
+    /// Apply one stream frame. Snapshots carry the full state (feed diffed in
+    /// `apply_snapshot`). `StreamEvent` carries graph-plane increments
+    /// (subagent_*/node_status/run_status); the TUI has no graph panel yet —
+    /// `latest.dags`/`latest.subagents` refresh via snapshots only. There is
+    /// no feed event kind, so feed blocks travel in snapshots; events are
+    /// ignored deliberately rather than mapped onto unrelated UI state.
     pub(super) fn apply_frame(&mut self, frame: theway_grpc::StreamFrame) {
         match frame.payload {
             Some(stream_frame::Payload::Snapshot(state)) => {

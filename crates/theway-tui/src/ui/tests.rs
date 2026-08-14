@@ -227,6 +227,59 @@ async fn snapshot_with_unchanged_feed_keeps_local_annotations() {
 }
 
 #[tokio::test]
+async fn snapshot_tail_append_pushes_only_new_blocks() {
+    let (mut app, _rx) = test_app().await;
+    let first = fixture_status(vec![WireFeedBlock::Plain {
+        text: "banner".into(),
+        level: theway_transport::feed::Level::System,
+        timestamp: None,
+    }]);
+    app.apply_snapshot(first);
+    // Local annotations survive a pure tail append (no full rebuild).
+    app.system_line("local note");
+    let mut second = fixture_status(app.latest.feed_blocks.clone());
+    second.feed_blocks.push(WireFeedBlock::Assistant {
+        text: "appended answer".into(),
+        timestamp: None,
+    });
+    app.apply_snapshot(second);
+    let text = feed_text(&app);
+    assert!(text.contains("banner"), "{text}");
+    assert!(text.contains("appended answer"), "{text}");
+    assert!(text.contains("local note"), "{text}");
+}
+
+#[tokio::test]
+async fn snapshot_truncation_rebuilds_feed() {
+    let (mut app, _rx) = test_app().await;
+    let first = fixture_status(vec![
+        WireFeedBlock::Plain {
+            text: "one".into(),
+            level: theway_transport::feed::Level::System,
+            timestamp: None,
+        },
+        WireFeedBlock::Plain {
+            text: "two".into(),
+            level: theway_transport::feed::Level::System,
+            timestamp: None,
+        },
+    ]);
+    app.apply_snapshot(first);
+    // A shorter snapshot means the daemon truncated/reset the transcript —
+    // prefix diff fails, the feed rebuilds from the new block list.
+    let second = fixture_status(vec![WireFeedBlock::Plain {
+        text: "fresh".into(),
+        level: theway_transport::feed::Level::System,
+        timestamp: None,
+    }]);
+    app.apply_snapshot(second);
+    let text = feed_text(&app);
+    assert!(text.contains("fresh"), "{text}");
+    assert!(!text.contains("one"), "{text}");
+    assert!(!text.contains("two"), "{text}");
+}
+
+#[tokio::test]
 async fn submit_sends_message_to_daemon() {
     let (mut app, mut rx) = test_app().await;
     app.set_input("hello daemon");
