@@ -1,5 +1,7 @@
 use super::{App, AppConfig};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{
+    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::Terminal;
 use ratatui::backend::{CrosstermBackend, TestBackend};
 use ratatui::buffer::Buffer;
@@ -352,6 +354,123 @@ async fn mouse_drag_selects_feed_lines() {
         "selection persists after the button is released"
     );
     assert!(!app.mouse_selecting);
+}
+
+/// Keyboard scroll acceleration (issue #38): consecutive same-direction
+/// Press/Repeat events ramp the multiplier 1.0 → 1.1 → … capped at 1.5x;
+/// a direction change or a key Release resets the chain to 1.0x.
+#[tokio::test]
+async fn keyboard_scroll_acceleration_mult_sequence_caps_and_resets() {
+    let (mut app, _rx) = test_app().await;
+
+    // Multiplier ramp: +0.1 per same-direction repeat, capped at 1.5x.
+    let expected = [1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.5, 1.5];
+    for (repeat, want) in expected.into_iter().enumerate() {
+        let got = App::scroll_key_mult(repeat as u32);
+        assert!(
+            (got - want).abs() < 1e-9,
+            "repeat {repeat}: mult {got}, want {want}"
+        );
+    }
+
+    // Step = base × mult: same-direction presses ramp, the sixth event
+    // reaches the cap and further repeats stay capped.
+    let base = 20;
+    let steps: Vec<usize> = (0..8).map(|_| app.scroll_key_step(false, base)).collect();
+    assert_eq!(steps, vec![20, 22, 24, 26, 28, 30, 30, 30]);
+    assert_eq!(app.scroll_repeat, 7);
+    assert_eq!(app.scroll_repeat_up, Some(false));
+
+    // Direction change resets the chain: the new direction starts at 1.0x.
+    assert_eq!(app.scroll_key_step(true, base), 20);
+    assert_eq!(app.scroll_repeat, 0);
+    assert_eq!(app.scroll_repeat_up, Some(true));
+
+    // A key Release resets the chain end-to-end through the event loop.
+    let mut term = terminal_placeholder();
+    let release = Event::Key(KeyEvent {
+        kind: KeyEventKind::Release,
+        ..KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE)
+    });
+    app.handle_event(release, &mut term).await.unwrap();
+    assert_eq!(app.scroll_repeat, 0);
+    assert_eq!(app.scroll_repeat_up, None);
+    // Next press after the release is a fresh 1.0x first press.
+    assert_eq!(app.scroll_key_step(true, base), 20);
+}
+
+/// Composer wheel browsing (issue #38): the wheel over the textarea rect is
+/// forwarded to the textarea (multi-line draft browsing) and never scrolls
+/// the feed; the wheel over the feed region scrolls the feed at the plain
+/// SCROLL_STEP and never touches the textarea.
+#[tokio::test]
+async fn mouse_wheel_routes_between_composer_textarea_and_feed() {
+    let (mut app, _rx) = test_app().await;
+    for i in 0..40 {
+        app.feed
+            .push_plain_untimed(format!("row-{i}"), theway_transport::feed::Level::Output);
+    }
+    // A draft taller than the MAX_INPUT_ROWS cap gives the textarea
+    // overflow it can scroll through.
+    app.set_input(
+        &(0..10)
+            .map(|i| format!("draft line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    let text_area = app.last_text_area.unwrap();
+    let feed = app.last_feed_area.unwrap();
+
+    // Unpin from the bottom anchor so feed scroll deltas are observable.
+    app.scroll_up(10);
+    terminal.draw(|f| app.render(f)).unwrap();
+    let feed_scroll = app.scroll;
+    // Cursor sits at the draft end, so the textarea viewport starts
+    // bottom-anchored (scroll > 0).
+    let ta_scroll = app.input_state.scroll;
+    assert!(
+        ta_scroll > 0,
+        "a 10-line draft in a capped composer must start scrolled down"
+    );
+
+    // Wheel over the composer text area: the textarea scrolls, the feed
+    // does not move.
+    app.handle_mouse_event(mouse_event(
+        text_area.x + 1,
+        text_area.y + 1,
+        MouseEventKind::ScrollUp,
+    ));
+    assert_eq!(
+        app.scroll, feed_scroll,
+        "wheel over the composer must not scroll the feed"
+    );
+    terminal.draw(|f| app.render(f)).unwrap();
+    assert!(
+        app.input_state.scroll < ta_scroll,
+        "wheel over the composer must scroll the draft view"
+    );
+
+    // Wheel over the feed region: the feed scrolls by one plain SCROLL_STEP
+    // and the textarea view is untouched.
+    let ta_scroll = app.input_state.scroll;
+    app.handle_mouse_event(mouse_event(
+        feed.x + 2,
+        feed.y + 2,
+        MouseEventKind::ScrollDown,
+    ));
+    assert_eq!(
+        app.scroll,
+        feed_scroll + super::SCROLL_STEP,
+        "feed wheel keeps the plain SCROLL_STEP (no acceleration)"
+    );
+    terminal.draw(|f| app.render(f)).unwrap();
+    assert_eq!(
+        app.input_state.scroll, ta_scroll,
+        "wheel over the feed must not touch the textarea view"
+    );
 }
 
 /// Feed scrollback cap (issue #27 + #34): the render cache drains the head

@@ -233,6 +233,12 @@ pub struct App {
 
     scroll: usize,
     follow: bool,
+    /// Consecutive same-direction keyboard scroll key events (issue #38):
+    /// drives the acceleration multiplier; direction change or key Release
+    /// resets it.
+    scroll_repeat: u32,
+    /// Direction of the active keyboard scroll chain (`None` = idle).
+    scroll_repeat_up: Option<bool>,
     /// Thinking rendering mode, cycled by Ctrl+O (Full → Peek → Hidden).
     thinking_mode: crate::feed_render::ThinkingMode,
     /// Tool-result expansion toggle (Ctrl+T); collapsed results show a
@@ -314,6 +320,8 @@ impl App {
             completion_idx: 0,
             scroll: 0,
             follow: true,
+            scroll_repeat: 0,
+            scroll_repeat_up: None,
             thinking_mode: crate::feed_render::ThinkingMode::Full,
             tools_expanded: false,
             feed_selection: None,
@@ -551,6 +559,11 @@ impl App {
             Event::Key(key) if key.kind != KeyEventKind::Release => {
                 self.handle_key(key, terminal).await?;
             }
+            Event::Key(key) if key.kind == KeyEventKind::Release => {
+                // Releasing a key ends the keyboard scroll acceleration
+                // chain (issue #38).
+                self.reset_scroll_repeat();
+            }
             Event::Mouse(m) => self.handle_mouse_event(m),
             Event::Paste(text) => {
                 self.insert_paste_text(text);
@@ -570,12 +583,42 @@ impl App {
         // render() clamps and re-enables follow when we reach the bottom.
     }
 
+    /// Keyboard scroll acceleration multiplier (issue #38): +0.1x per
+    /// consecutive same-direction key event, capped at 1.5x. The first
+    /// press is always 1.0x.
+    fn scroll_key_mult(repeat: u32) -> f64 {
+        (1.0 + f64::from(repeat) * 0.1).min(1.5)
+    }
+
+    /// Record a keyboard scroll key event (Press/Repeat) and return the
+    /// accelerated step: `base * mult`. Same-direction consecutive events
+    /// increment [`Self::scroll_repeat`]; a direction change restarts the
+    /// chain at 1.0x. Mouse-wheel scrolling never calls this — it keeps the
+    /// fixed [`SCROLL_STEP`].
+    fn scroll_key_step(&mut self, up: bool, base: usize) -> usize {
+        if self.scroll_repeat_up == Some(up) {
+            self.scroll_repeat = self.scroll_repeat.saturating_add(1);
+        } else {
+            self.scroll_repeat = 0;
+            self.scroll_repeat_up = Some(up);
+        }
+        let mult = Self::scroll_key_mult(self.scroll_repeat);
+        usize::max(1, ((base as f64) * mult).round() as usize)
+    }
+
+    /// Reset the keyboard scroll acceleration chain (any key Release).
+    fn reset_scroll_repeat(&mut self) {
+        self.scroll_repeat = 0;
+        self.scroll_repeat_up = None;
+    }
+
     // ── mouse (issue #37: drag-select feed, drag-resize composer) ──────────────────────────
 
     fn handle_mouse_event(&mut self, m: MouseEvent) {
         match m.kind {
-            MouseEventKind::ScrollUp => self.handle_mouse_scroll(m.column, m.row, true),
-            MouseEventKind::ScrollDown => self.handle_mouse_scroll(m.column, m.row, false),
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                self.handle_mouse_scroll(m);
+            }
             MouseEventKind::Down(MouseButton::Left) => self.handle_mouse_down(m),
             MouseEventKind::Drag(MouseButton::Left) => self.handle_mouse_drag(m.column, m.row),
             MouseEventKind::Up(MouseButton::Left) => self.handle_mouse_up(),
@@ -651,14 +694,25 @@ impl App {
         self.mouse_selecting = false;
     }
 
-    fn handle_mouse_scroll(&mut self, column: u16, row: u16, up: bool) {
-        if !self.mouse_in_feed(column, row) {
+    fn handle_mouse_scroll(&mut self, m: MouseEvent) {
+        // Composer text area: forward the wheel event to the textarea so
+        // multi-line / wrapped drafts can be browsed (issue #38); content
+        // that fits the view is a no-op there.
+        if self
+            .last_text_area
+            .is_some_and(|a| self.rect_contains(a, m.column, m.row))
+        {
+            self.input
+                .handle_mouse(m, self.last_text_area.unwrap(), self.input_state);
             return;
         }
-        if up {
-            self.scroll_up(SCROLL_STEP);
-        } else {
-            self.scroll_down(SCROLL_STEP);
+        if !self.mouse_in_feed(m.column, m.row) {
+            return;
+        }
+        match m.kind {
+            MouseEventKind::ScrollUp => self.scroll_up(SCROLL_STEP),
+            MouseEventKind::ScrollDown => self.scroll_down(SCROLL_STEP),
+            _ => {}
         }
     }
 

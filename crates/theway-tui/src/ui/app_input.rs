@@ -114,8 +114,14 @@ impl App {
             KeyCode::Tab => self.cycle_completion(),
             KeyCode::Up if !self.completions.is_empty() => self.completion_prev(),
             KeyCode::Down if !self.completions.is_empty() => self.completion_next(),
-            KeyCode::PageUp => self.scroll_up(self.last_viewport_h.max(1)),
-            KeyCode::PageDown => self.scroll_down(self.last_viewport_h.max(1)),
+            KeyCode::PageUp => {
+                let step = self.scroll_key_step(true, self.last_viewport_h.max(1));
+                self.scroll_up(step);
+            }
+            KeyCode::PageDown => {
+                let step = self.scroll_key_step(false, self.last_viewport_h.max(1));
+                self.scroll_down(step);
+            }
             KeyCode::Up if self.input_is_single_line() => self.history_prev(),
             KeyCode::Down if self.input_is_single_line() => self.history_next(),
             KeyCode::Char('u') if ctrl => {
