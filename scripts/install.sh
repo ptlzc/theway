@@ -60,10 +60,13 @@ BIN_DIR="$INSTALL_ROOT/bin"
 
 echo "==> 构建并安装 theway (release) 到 $BIN_DIR"
 mkdir -p "$BIN_DIR"
-"$CARGO" install --path "$ROOT/crates/theway-tui" --force --root "$INSTALL_ROOT"
+# --locked: cargo install 默认忽略 workspace Cargo.lock 重新解析依赖, 曾解析出
+# oxc_transformer 0.75.1 + oxc-browserslist 2.3.1 的破坏性组合 (Version 第三字段
+# u32→u16 不兼容); 锁定后与 workspace 构建同一依赖集.
+"$CARGO" install --path "$ROOT/crates/theway-tui" --force --locked --root "$INSTALL_ROOT"
 
 echo "==> 构建并安装 thewayd (release) 到 $BIN_DIR"
-"$CARGO" install --path "$ROOT/crates/theway-daemon" --force --root "$INSTALL_ROOT"
+"$CARGO" install --path "$ROOT/crates/theway-daemon" --force --locked --root "$INSTALL_ROOT"
 
 echo "==> 生成 tw 简写"
 cp "$BIN_DIR/theway$EXE" "$BIN_DIR/tw$EXE"
