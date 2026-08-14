@@ -1,0 +1,23 @@
+theway-pager-render
+
+This crate ports a self-contained subset of Grok Build's
+`xai-grok-pager-render`, contributed by SpaceXAI under the Apache License,
+Version 2.0.
+
+Source: xai-org/grok-build, crates/codegen/xai-grok-pager-render/src/render/,
+source revision 5d08d7e.
+
+Ported modules: color.rs, line_utils.rs, scrollbar.rs, osc8.rs,
+tool_paths.rs (each keeps its donor copyright header where present).
+
+Localized changes (Apache-2.0 §4(b) change notice):
+- osc8.rs: link-opening policy reduced to an http/https allowlist
+  (`is_safe_url`); terminal-context and VS Code remote branches removed;
+  upstream tests dropped with the removed machinery.
+- line_utils.rs: `byte_offset_at_width` vendored from the donor's `util`
+  module so this crate stays self-contained.
+- Module paths flattened (`crate::render::tool_paths` -> `crate::tool_paths`).
+
+Not ported (Grok pager-specific or heavy): syntax (syntect), theme,
+wrapping/highlight (theme-coupled), glyphs/host/terminal (environment
+detection), preview/image/video overlays, gboom effects.
