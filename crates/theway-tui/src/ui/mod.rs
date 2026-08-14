@@ -748,6 +748,7 @@ impl App {
         let opts = crate::feed_render::FeedRenderOptions {
             thinking_mode: self.thinking_mode,
             tools_expanded: self.tools_expanded,
+            ..Default::default()
         };
         self.feed_cache
             .update(&self.feed, feed_area.width as usize, &opts, max_feed_lines);

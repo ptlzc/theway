@@ -277,9 +277,17 @@ impl FeedRenderCache {
                 *completed_rows = old_completed + new_rows.len();
                 match mode {
                     ThinkingMode::Full => {
-                        // Completed rows stay; the partial tail row re-renders
-                        // every frame.
-                        self.lines.truncate(cut + old_completed);
+                        // The stats line at `cut` re-renders every frame (the
+                        // char count grows); completed body rows stay frozen
+                        // after it, and the partial tail row re-renders.
+                        let stats =
+                            feed_render::thinking_stats_line(*char_count, &self.opts, width);
+                        if self.lines.len() > cut {
+                            self.lines.truncate(cut + 1 + old_completed);
+                            self.lines[cut] = stats;
+                        } else {
+                            self.lines.push(stats);
+                        }
                         for row in &new_rows {
                             self.lines.push(ratatui::text::Line::styled(
                                 row.clone(),
@@ -292,15 +300,12 @@ impl FeedRenderCache {
                         ));
                     }
                     ThinkingMode::Peek => {
-                        // Rebuild the small peek window: header + last 3 rows.
+                        // Rebuild the small peek window: stats line + last rows.
                         self.lines.truncate(cut);
-                        self.lines.push(ratatui::text::Line::styled(
-                            format!(
-                                "{}thinking · {} chars",
-                                feed_render::TOOL_PREFIX,
-                                *char_count
-                            ),
-                            feed_render::RESULT_SUMMARY_STYLE,
+                        self.lines.push(feed_render::thinking_stats_line(
+                            *char_count,
+                            &self.opts,
+                            width,
                         ));
                         let total_rows = *completed_rows + 1;
                         let mut shown: Vec<&str> = last_rows.iter().map(String::as_str).collect();
@@ -524,6 +529,7 @@ mod tests {
         let peek = FeedRenderOptions {
             thinking_mode: crate::feed_render::ThinkingMode::Peek,
             tools_expanded: false,
+            ..Default::default()
         };
         cache.update(&feed, 40, &peek, 1000);
         assert_eq!(cache.last_rebuilt, 2);
@@ -717,6 +723,7 @@ mod streaming_tests {
         let opts = FeedRenderOptions {
             thinking_mode: ThinkingMode::Peek,
             tools_expanded: false,
+            ..Default::default()
         };
         let mut text = String::new();
         for i in 0..50 {

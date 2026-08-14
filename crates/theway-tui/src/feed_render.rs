@@ -48,15 +48,30 @@ pub enum ThinkingMode {
 }
 
 /// Renderer switches owned by the TUI app state.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+///
+/// `PartialEq` only (not `Eq`): `thinking_cps` is an `f64`.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FeedRenderOptions {
     pub thinking_mode: ThinkingMode,
-    /// Tool results: collapsed to a one-line summary unless expanded (Ctrl+T).
+    /// Tool results: collapsed to a bordered preview unless expanded (Ctrl+T).
     pub tools_expanded: bool,
+    /// Thinking-block throughput (chars/sec over the last 1s window) shown on
+    /// the stats line; sourced by the CpsMeter (node 3-spinner).
+    pub thinking_cps: f64,
+    /// Last-turn output token count shown on the thinking stats line.
+    pub thinking_output_tokens: u64,
+    /// Rainbow spinner animation phase (node 3-spinner); passthrough, not
+    /// consumed by block rendering.
+    pub spinner_phase: u32,
 }
 
 /// Lines shown in the thinking peek window.
 pub(crate) const THINKING_PEEK_LINES: usize = 3;
+
+/// Left border + indent prefixed to each tool result preview line.
+const TOOL_RESULT_BORDER: &str = "   \u{2502} ";
+/// Tool result preview height before the `…(N more lines)` elision row.
+const TOOL_RESULT_PREVIEW_LINES: usize = 5;
 
 pub fn style_for_level(level: Level) -> Style {
     match level {
@@ -434,8 +449,9 @@ pub(crate) fn render_block(
         }
         Block::Thinking { text, .. } => match opts.thinking_mode {
             ThinkingMode::Hidden => {}
-            ThinkingMode::Peek => push_thinking_peek(&mut out, text, width),
+            ThinkingMode::Peek => push_thinking_peek(&mut out, text, opts, width),
             ThinkingMode::Full => {
+                push_thinking_stats_line(&mut out, text, opts, width);
                 push_paragraphs(&mut out, text, THINKING_STYLE, Some(TOOL_PREFIX), width)
             }
         },
@@ -454,17 +470,7 @@ pub(crate) fn render_block(
         Block::ToolResult {
             lines, is_error, ..
         } => {
-            if !opts.tools_expanded {
-                let bytes: usize = lines.iter().map(String::len).sum();
-                out.push(Line::styled(
-                    format!(
-                        "    result · {} lines · {} B · Ctrl+T expand",
-                        lines.len(),
-                        bytes
-                    ),
-                    RESULT_SUMMARY_STYLE,
-                ));
-            } else {
+            if opts.tools_expanded {
                 let style = if *is_error {
                     Style::default().fg(Color::Red)
                 } else {
@@ -475,6 +481,8 @@ pub(crate) fn render_block(
                         out.push(Line::styled(row, style));
                     }
                 }
+            } else {
+                push_tool_result_preview(&mut out, lines, *is_error, width);
             }
         }
         Block::Plain {
@@ -610,14 +618,63 @@ fn truncate_line(line: &mut Line<'static>, max: usize) {
     line.spans = keep;
 }
 
-/// Thinking peek window: dim header with the char count, the last few
-/// wrapped lines, and a mode hint.
-fn push_thinking_peek(out: &mut Vec<Line<'static>>, text: &str, width: usize) {
-    let chars = text.chars().count();
-    out.push(Line::styled(
-        format!("{TOOL_PREFIX}thinking · {chars} chars"),
-        RESULT_SUMMARY_STYLE,
-    ));
+/// Human-format a count for stats lines: raw below 1000, otherwise `k` with
+/// one decimal (`1.2k`, `100.2k`).
+fn human_count(n: u64) -> String {
+    if n < 1000 {
+        n.to_string()
+    } else {
+        format!("{:.1}k", n as f64 / 1000.0)
+    }
+}
+
+/// Build the thinking stats line for `chars` characters of thinking text:
+/// char count (human format) on the left, `c/s` throughput + last-turn output
+/// tokens on the right, right aligned to the content width. Shared by the
+/// one-shot renderer and the streaming cache so both stay byte-identical.
+pub(crate) fn thinking_stats_line(
+    chars: usize,
+    opts: &FeedRenderOptions,
+    width: usize,
+) -> Line<'static> {
+    let left = format!("{TOOL_PREFIX}thinking · {} char", human_count(chars as u64));
+    let cps = opts.thinking_cps.round() as u64;
+    let right = format!(
+        "c/s: {} · output: {}",
+        cps,
+        human_count(opts.thinking_output_tokens)
+    );
+    let left_w = unicode_width::UnicodeWidthStr::width(left.as_str());
+    let right_w = unicode_width::UnicodeWidthStr::width(right.as_str());
+    let pad = width.saturating_sub(left_w + right_w).max(1);
+    let mut line = Line::from(vec![
+        Span::styled(left, RESULT_SUMMARY_STYLE),
+        Span::styled(" ".repeat(pad), RESULT_SUMMARY_STYLE),
+        Span::styled(right, RESULT_SUMMARY_STYLE),
+    ]);
+    truncate_line(&mut line, width);
+    line
+}
+
+/// Push the thinking stats line for `text`. Hidden mode never renders it.
+fn push_thinking_stats_line(
+    out: &mut Vec<Line<'static>>,
+    text: &str,
+    opts: &FeedRenderOptions,
+    width: usize,
+) {
+    out.push(thinking_stats_line(text.chars().count(), opts, width));
+}
+
+/// Thinking peek window: stats-line header, the last few wrapped lines, and a
+/// mode hint.
+fn push_thinking_peek(
+    out: &mut Vec<Line<'static>>,
+    text: &str,
+    opts: &FeedRenderOptions,
+    width: usize,
+) {
+    push_thinking_stats_line(out, text, opts, width);
     let wrapped: Vec<String> = text
         .split('\n')
         .flat_map(|para| wrap_str(para, width))
@@ -629,6 +686,37 @@ fn push_thinking_peek(out: &mut Vec<Line<'static>>, text: &str, width: usize) {
     if wrapped.len() > THINKING_PEEK_LINES {
         out.push(Line::styled(
             "  … Ctrl+O cycles: hidden/peek/full",
+            RESULT_SUMMARY_STYLE,
+        ));
+    }
+}
+
+/// Collapsed tool result: a bordered preview of the first
+/// [`TOOL_RESULT_PREVIEW_LINES`] lines plus an `…(N more lines)` elision row
+/// when the result is taller. Full expansion (Ctrl+T) keeps the whole body.
+fn push_tool_result_preview(
+    out: &mut Vec<Line<'static>>,
+    lines: &[String],
+    is_error: bool,
+    width: usize,
+) {
+    let style = if is_error {
+        Style::default().fg(Color::Red)
+    } else {
+        Style::default().fg(Color::Green)
+    };
+    let border_w = unicode_width::UnicodeWidthStr::width(TOOL_RESULT_BORDER);
+    let content_w = width.saturating_sub(border_w).max(1);
+    let preview_n = lines.len().min(TOOL_RESULT_PREVIEW_LINES);
+    for line in &lines[..preview_n] {
+        for row in wrap_str(line, content_w) {
+            out.push(Line::styled(format!("{TOOL_RESULT_BORDER}{row}"), style));
+        }
+    }
+    if lines.len() > TOOL_RESULT_PREVIEW_LINES {
+        let more = lines.len() - TOOL_RESULT_PREVIEW_LINES;
+        out.push(Line::styled(
+            format!("{TOOL_RESULT_BORDER}…({more} more lines)"),
             RESULT_SUMMARY_STYLE,
         ));
     }
@@ -847,6 +935,7 @@ mod tests {
         let opts = |mode| FeedRenderOptions {
             thinking_mode: mode,
             tools_expanded: false,
+            ..Default::default()
         };
         let full = flat(&super::lines(
             &feed_with(&blocks),
@@ -859,7 +948,8 @@ mod tests {
             80,
             &opts(ThinkingMode::Peek),
         ));
-        assert!(peek.contains("⏵ thinking · 28 chars"), "{peek}");
+        assert!(peek.contains("⏵ thinking · 28 char"), "{peek}");
+        assert!(peek.contains("c/s: 0 · output: 0"), "{peek}");
         assert!(peek.contains("deep thoughts"), "{peek}");
         let hidden = flat(&super::lines(
             &feed_with(&blocks),
@@ -883,6 +973,7 @@ mod tests {
         let opts = FeedRenderOptions {
             thinking_mode: ThinkingMode::Peek,
             tools_expanded: false,
+            ..Default::default()
         };
         let lines = super::lines(&feed, 80, &opts);
         // Header + 3 peek rows + mode hint.
@@ -916,25 +1007,121 @@ mod tests {
     }
 
     #[test]
-    fn tool_result_collapses_by_default_and_expands() {
+    fn tool_result_collapses_to_preview_and_expands() {
         let feed = feed_with(&[WireFeedBlock::ToolResult {
             lines: vec!["line a".into(), "line b".into()],
             is_error: false,
             timestamp: None,
         }]);
         let collapsed = flat(&super::lines(&feed, 80, &FeedRenderOptions::default()));
-        assert!(collapsed.contains("result · 2 lines"), "{collapsed}");
-        assert!(!collapsed.contains("line a"), "{collapsed}");
+        assert!(collapsed.contains("│ line a"), "{collapsed}");
+        assert!(collapsed.contains("│ line b"), "{collapsed}");
+        assert!(!collapsed.contains("more lines"), "{collapsed}");
         let expanded = flat(&super::lines(
             &feed,
             80,
             &FeedRenderOptions {
                 thinking_mode: ThinkingMode::Full,
                 tools_expanded: true,
+                ..Default::default()
             },
         ));
         assert!(expanded.contains("    line a"), "{expanded}");
         assert!(expanded.contains("    line b"), "{expanded}");
+    }
+
+    #[test]
+    fn tool_result_preview_folds_to_five_lines_with_elision() {
+        let lines: Vec<String> = (0..8).map(|i| format!("row {i}")).collect();
+        let feed = feed_with(&[WireFeedBlock::ToolResult {
+            lines,
+            is_error: false,
+            timestamp: None,
+        }]);
+        let collapsed = flat(&super::lines(&feed, 80, &FeedRenderOptions::default()));
+        // The first 5 source lines render, each behind the left border.
+        for i in 0..5 {
+            assert!(collapsed.contains(&format!("│ row {i}")), "{collapsed}");
+        }
+        // Lines beyond the preview window are folded away.
+        assert!(!collapsed.contains("row 5"), "{collapsed}");
+        assert!(!collapsed.contains("row 7"), "{collapsed}");
+        // The elision row carries the remaining line count.
+        assert!(collapsed.contains("…(3 more lines)"), "{collapsed}");
+    }
+
+    #[test]
+    fn tool_result_expanded_keeps_all_lines() {
+        let lines: Vec<String> = (0..8).map(|i| format!("row {i}")).collect();
+        let feed = feed_with(&[WireFeedBlock::ToolResult {
+            lines,
+            is_error: false,
+            timestamp: None,
+        }]);
+        let opts = FeedRenderOptions {
+            tools_expanded: true,
+            ..Default::default()
+        };
+        let expanded = flat(&super::lines(&feed, 80, &opts));
+        for i in 0..8 {
+            assert!(expanded.contains(&format!("row {i}")), "{expanded}");
+        }
+        assert!(!expanded.contains("more lines"), "{expanded}");
+    }
+
+    #[test]
+    fn human_count_formats_raw_and_kilo() {
+        assert_eq!(human_count(0), "0");
+        assert_eq!(human_count(999), "999");
+        assert_eq!(human_count(1000), "1.0k");
+        assert_eq!(human_count(1200), "1.2k");
+        assert_eq!(human_count(1234), "1.2k");
+        assert_eq!(human_count(100_200), "100.2k");
+    }
+
+    #[test]
+    fn thinking_hidden_renders_no_stats() {
+        let feed = feed_with(&[WireFeedBlock::Thinking {
+            text: "some thinking text".into(),
+            timestamp: None,
+        }]);
+        let opts = FeedRenderOptions {
+            thinking_mode: ThinkingMode::Hidden,
+            thinking_cps: 84.0,
+            thinking_output_tokens: 1200,
+            ..Default::default()
+        };
+        let flat = flat(&super::lines(&feed, 80, &opts));
+        assert!(!flat.contains("c/s"), "{flat}");
+        assert!(!flat.contains("thinking"), "{flat}");
+        assert!(!flat.contains("some thinking text"), "{flat}");
+    }
+
+    #[test]
+    fn thinking_stats_line_formats_cps_and_output() {
+        let feed = feed_with(&[WireFeedBlock::Thinking {
+            text: "x".repeat(1200),
+            timestamp: None,
+        }]);
+        let opts = FeedRenderOptions {
+            thinking_mode: ThinkingMode::Full,
+            thinking_cps: 84.0,
+            thinking_output_tokens: 1200,
+            ..Default::default()
+        };
+        let flat = flat(&super::lines(&feed, 80, &opts));
+        assert!(flat.contains("⏵ thinking · 1.2k char"), "{flat}");
+        assert!(flat.contains("c/s: 84 · output: 1.2k"), "{flat}");
+    }
+
+    #[test]
+    fn feed_render_options_defaults() {
+        let opts = FeedRenderOptions::default();
+        assert_eq!(opts.thinking_mode, ThinkingMode::default());
+        assert!(!opts.tools_expanded);
+        assert_eq!(opts.thinking_cps, 0.0);
+        assert_eq!(opts.thinking_output_tokens, 0);
+        assert_eq!(opts.spinner_phase, 0);
     }
 
     #[test]
