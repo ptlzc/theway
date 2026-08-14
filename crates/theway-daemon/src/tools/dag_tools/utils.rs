@@ -256,5 +256,14 @@ pub(super) fn node_def_from_json(n: &Value) -> DagNodeDef {
         cwd: n.get("cwd").and_then(|v| v.as_str()).map(String::from),
         model: n.get("model").and_then(|v| v.as_str()).map(String::from),
         thinking: n.get("thinking").and_then(|v| v.as_str()).map(String::from),
+        max_iterations: n
+            .get("maxIterations")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32),
+        tools: n.get("tools").and_then(|v| v.as_array()).map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(String::from))
+                .collect()
+        }),
     }
 }

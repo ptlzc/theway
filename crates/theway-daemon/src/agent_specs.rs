@@ -14,7 +14,12 @@ use theway_core::multiagent::types::{AgentRunParams, AgentRunResolver};
 
 /// Iteration budget default, enforced by the sub-harness agent loop as a hard
 /// cap on LLM turn attempts (see `AgentOptions::max_iterations`).
-pub const DEFAULT_MAX_ITERATIONS: u32 = 16;
+///
+/// 300 is the code-harness budget — compile → fix loops need it. For short,
+/// fast tasks (a quick read, a single check) the orchestrator lowers it to a
+/// range like 4-32 per its prompt guidance. The goal-evaluator spec keeps its
+/// own explicit budget of 1 (single-turn judge), not this default.
+pub const DEFAULT_MAX_ITERATIONS: u32 = 300;
 
 /// App-layer spec definition. Structure and content are server decisions; the engine
 /// only ever sees the mapped [`AgentRunParams`].

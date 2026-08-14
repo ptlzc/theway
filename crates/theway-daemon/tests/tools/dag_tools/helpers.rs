@@ -1,3 +1,4 @@
+use super::super::utils::node_def_from_json;
 use super::super::*;
 use super::*;
 
@@ -88,5 +89,58 @@ fn node_def(id: &str) -> DagNodeDef {
         cwd: None,
         model: None,
         thinking: None,
+        max_iterations: None,
+        tools: None,
     }
+}
+
+// ── node_def_from_json: maxIterations / tools ───────────────────────────
+
+#[test]
+fn node_def_from_json_parses_max_iterations_and_tools() {
+    let def = node_def_from_json(&json!({
+        "id": "a",
+        "agent": "explorer",
+        "task": "read",
+        "maxIterations": 8,
+        "tools": ["read", "bash"],
+    }));
+    assert_eq!(def.id, "a");
+    assert_eq!(def.max_iterations, Some(8));
+    assert_eq!(
+        def.tools,
+        Some(vec!["read".to_string(), "bash".to_string()])
+    );
+}
+
+#[test]
+fn node_def_from_json_missing_max_iterations_and_tools_stay_none() {
+    let def = node_def_from_json(&json!({
+        "id": "a",
+        "agent": "explorer",
+        "task": "read",
+    }));
+    assert_eq!(def.max_iterations, None);
+    assert_eq!(def.tools, None);
+}
+
+#[test]
+fn node_def_from_json_wrong_types_fall_back_to_none() {
+    let def = node_def_from_json(&json!({
+        "id": "a",
+        "agent": "explorer",
+        "task": "read",
+        "maxIterations": "eight",
+        "tools": "read",
+    }));
+    assert_eq!(def.max_iterations, None);
+    assert_eq!(def.tools, None);
+    // Non-string entries inside the tools array are dropped, not an error.
+    let def = node_def_from_json(&json!({
+        "id": "a",
+        "agent": "explorer",
+        "task": "read",
+        "tools": ["read", 7, null],
+    }));
+    assert_eq!(def.tools, Some(vec!["read".to_string()]));
 }
