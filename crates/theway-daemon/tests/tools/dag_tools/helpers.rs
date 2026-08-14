@@ -35,7 +35,7 @@ fn status_counts_segments() {
         fail_fast: None,
         direction: None,
     };
-    let mut run = theway_core::multiagent::graph::graph::build_run(&def);
+    let mut run = theway_core::multiagent::graph::model::build_run(&def);
     run.id = "dag-1".into();
     run.node_mut("a").unwrap().status = NodeStatus::Succeeded;
     run.node_mut("b").unwrap().status = NodeStatus::Running;
@@ -55,7 +55,7 @@ fn node_result_text_pieces() {
         fail_fast: None,
         direction: None,
     };
-    let mut run = theway_core::multiagent::graph::graph::build_run(&def);
+    let mut run = theway_core::multiagent::graph::model::build_run(&def);
     let node = run.node_mut("a").unwrap();
     node.status = NodeStatus::Succeeded;
     node.started_at = Some(0);

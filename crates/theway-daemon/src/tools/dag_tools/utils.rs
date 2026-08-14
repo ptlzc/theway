@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use serde_json::{Value, json};
 use theway_core::AgentToolResult;
 use theway_core::multiagent::graph::engine::DagEngine;
-use theway_core::multiagent::graph::graph::{dag_status_label, fmt_dur, node_status_label};
+use theway_core::multiagent::graph::model::{dag_status_label, fmt_dur, node_status_label};
 use theway_core::multiagent::graph::types::{DagNode, DagNodeDef, DagRun, DagStatus, NodeStatus};
 use theway_llm_provider::UserContentBlock;
 

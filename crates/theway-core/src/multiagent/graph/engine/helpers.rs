@@ -1,6 +1,6 @@
 //! Small state-machine helpers shared by the engine modules.
 
-use super::super::graph::now_ms;
+use super::super::model::now_ms;
 use super::super::types::{DagNode, DagRun, NodeStatus};
 
 /// TS `emitState` equivalent: stamp last activity (drives the idle watchdog).

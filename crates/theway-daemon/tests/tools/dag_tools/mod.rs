@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use parking_lot::Mutex;
 use theway_core::multiagent::graph::engine::{NodeLauncher, NodeOutcome};
-use theway_core::multiagent::graph::graph::node_summary_line;
+use theway_core::multiagent::graph::model::node_summary_line;
 use theway_core::multiagent::registry::AgentJobRegistry;
 
 use super::*;

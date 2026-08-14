@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use serde_json::{Value, json};
 use theway_core::multiagent::graph::engine::DagEngine;
-use theway_core::multiagent::graph::graph::{dag_status_label, run_summary_line};
+use theway_core::multiagent::graph::model::{dag_status_label, run_summary_line};
 use theway_core::multiagent::graph::types::{DagRun, DagStatus};
 use theway_core::{AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate, ToolExecutionMode};
 use theway_llm_provider::Tool;

@@ -9,7 +9,7 @@ use std::time::Duration;
 use futures::future::join_all;
 use tokio_util::sync::CancellationToken;
 
-use super::super::graph::{is_terminal, now_ms};
+use super::super::model::{is_terminal, now_ms};
 use super::super::persist::{PersistedRun, hydrate, max_run_counter};
 use super::super::types::{DagEvent, DagStatus, NodeResult, NodeStatus};
 use super::helpers::{cap_chars, emit_state, panic_message};
@@ -228,7 +228,7 @@ impl DagEngine {
         let Some(run) = inner.runs.get_mut(run_id) else {
             return;
         };
-        super::super::graph::reconcile(run);
+        super::super::model::reconcile(run);
         emit_state(run);
     }
 

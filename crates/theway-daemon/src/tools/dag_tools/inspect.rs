@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use serde_json::{Value, json};
 use theway_core::multiagent::graph::engine::DagEngine;
-use theway_core::multiagent::graph::graph::node_status_label;
+use theway_core::multiagent::graph::model::node_status_label;
 use theway_core::multiagent::graph::types::DagNode;
 use theway_core::multiagent::registry::{AgentJob, AgentJobRegistry, JobStatus};
 use theway_core::{AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate, ToolExecutionMode};

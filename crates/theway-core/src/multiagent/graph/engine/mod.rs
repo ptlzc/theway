@@ -19,7 +19,7 @@ use parking_lot::Mutex;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
-use super::graph::{build_run, downstream_closure, is_blocked, now_ms, validate_graph};
+use super::model::{build_run, downstream_closure, is_blocked, now_ms, validate_graph};
 use super::persist::DagPersistSink;
 // Glob-imported by the bridged tests (`tests/multiagent/graph/engine/`).
 #[cfg(test)]

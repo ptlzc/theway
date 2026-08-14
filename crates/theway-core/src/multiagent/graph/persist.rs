@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use super::graph::now_ms;
+use super::model::now_ms;
 use super::types::{DagNode, DagRun, DagStatus, Direction, NodeResult, NodeStatus, RunKind};
 
 /// Sink contract the engine uses to signal "something changed, persist me".

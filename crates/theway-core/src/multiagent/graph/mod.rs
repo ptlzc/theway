@@ -8,7 +8,7 @@
 //! rest of `multiagent`; the reverse is not allowed.
 
 pub mod engine;
-pub mod graph;
+pub mod model;
 pub mod node_launcher;
 pub mod persist;
 pub mod types;

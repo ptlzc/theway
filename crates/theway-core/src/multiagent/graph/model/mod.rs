@@ -306,4 +306,4 @@ pub fn reconcile(run: &mut DagRun) {
 }
 
 #[cfg(test)]
-tests_bridge_macro::tests_bridge!("multiagent/graph/graph");
+tests_bridge_macro::tests_bridge!("multiagent/graph/model");
