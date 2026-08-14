@@ -17,6 +17,7 @@ theway-core = { path = "../theway-core" }
 theway-storage = { path = "../theway-storage" }
 theway-transport = { path = "../theway-transport" }
 theway-llm-provider = { path = "../theway-llm-provider" }
+theway-markdown-core = { path = "../theway-markdown-core" }
 
 # Terminal UI surface (moved out of the daemon crate; the ratatui full-screen REPL,
 # web/grpc transport event loop, feed, listener and relay all live in this crate).

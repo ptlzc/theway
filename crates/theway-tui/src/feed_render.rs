@@ -15,6 +15,7 @@ const THINKING_STYLE: Style = Style::new()
     .fg(Color::DarkGray)
     .add_modifier(Modifier::ITALIC);
 const TOOL_STYLE: Style = Style::new().fg(Color::Yellow);
+const CODE_STYLE: Style = Style::new().fg(Color::DarkGray);
 
 pub fn style_for_level(level: Level) -> Style {
     match level {
@@ -56,6 +57,49 @@ pub fn push_paragraphs(
     }
 }
 
+/// Markdown-aware paragraph split (Grok Build parsing parity via
+/// `theway-markdown-core`): fenced code blocks are rendered verbatim —
+/// line-per-line without word-wrapping — in the code style; everything else
+/// goes through the plain paragraph path. Single-tilde pairs stay literal
+/// (the parser options demote them, so nothing is struck here).
+pub fn push_markdown_paragraphs(
+    out: &mut Vec<Line<'static>>,
+    text: &str,
+    style: Style,
+    prefix: Option<&str>,
+    width: usize,
+) {
+    use theway_markdown_core::{CodeBlockKind, Event as MdEvent, Tag as MdTag, offset_events};
+
+    let fenced: Vec<std::ops::Range<usize>> = offset_events(text)
+        .filter_map(|(event, range)| match event {
+            MdEvent::Start(MdTag::CodeBlock(CodeBlockKind::Fenced(_))) => Some(range),
+            _ => None,
+        })
+        .collect();
+    if fenced.is_empty() {
+        push_paragraphs(out, text, style, prefix, width);
+        return;
+    }
+
+    let mut cursor = 0usize;
+    let mut first_prefix = prefix;
+    for range in fenced {
+        // Prose before this fence: normal paragraph flow (may be empty).
+        push_paragraphs(out, &text[cursor..range.start], style, first_prefix, width);
+        first_prefix = None;
+        // Fenced block: verbatim lines, no wrapping, code style. The fence
+        // lines themselves (```lang / ```) render like the surrounding code.
+        let block = &text[range.clone()];
+        for line in block.split('\n') {
+            out.push(Line::styled(line.to_string(), CODE_STYLE));
+        }
+        cursor = range.end;
+    }
+    // Prose after the last fence.
+    push_paragraphs(out, &text[cursor..], style, None, width);
+}
+
 /// Render the whole feed to width-wrapped `ratatui` lines, ready to scroll/draw.
 pub fn lines(feed: &theway_transport::feed::Feed, width: usize) -> Vec<Line<'static>> {
     let width = width.max(1);
@@ -72,7 +116,10 @@ pub fn lines(feed: &theway_transport::feed::Feed, width: usize) -> Vec<Line<'sta
             }
             Block::Assistant { text, timestamp } => {
                 let prefix = display_prefix(timestamp.as_deref(), "ai ▸ ");
-                push_paragraphs(&mut out, text, Style::default(), Some(&prefix), width);
+                // Assistant blocks are markdown: fenced code renders verbatim,
+                // everything else follows the plain paragraph flow (single-tilde
+                // pairs stay literal per the markdown-core parsing policy).
+                push_markdown_paragraphs(&mut out, text, Style::default(), Some(&prefix), width);
             }
             Block::Thinking { text, timestamp } => {
                 let prefix = display_prefix(timestamp.as_deref(), "[thinking] ");

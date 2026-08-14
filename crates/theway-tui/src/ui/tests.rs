@@ -421,3 +421,47 @@ fn feed_text(app: &App) -> String {
 fn terminal_placeholder() -> Terminal<CrosstermBackend<std::io::Stdout>> {
     Terminal::new(CrosstermBackend::new(std::io::stdout())).unwrap()
 }
+
+#[test]
+fn markdown_single_tilde_pair_stays_literal() {
+    use crate::feed_render::push_markdown_paragraphs;
+    use ratatui::style::Style;
+    let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
+    push_markdown_paragraphs(
+        &mut lines,
+        "~**10%** is not struck",
+        Style::default(),
+        None,
+        80,
+    );
+    let text: String = lines
+        .iter()
+        .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+        .collect();
+    // Single-tilde pairs are demoted to literal `~` by the shared parser
+    // options — the renderer must not strike them.
+    assert!(text.contains("~**10%**"), "{text}");
+}
+
+#[test]
+fn markdown_fenced_code_renders_verbatim_no_wrap() {
+    use crate::feed_render::push_markdown_paragraphs;
+    use ratatui::style::Style;
+    // A code line longer than the width must stay on one unwrapped line.
+    let long_code = "let x = 1; // ".to_string() + &"a".repeat(120);
+    let input = format!("before\n```rust\n{long_code}\n```\nafter");
+    let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
+    push_markdown_paragraphs(&mut lines, &input, Style::default(), None, 40);
+    let rendered: Vec<String> = lines
+        .iter()
+        .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+        .map(String::from)
+        .collect();
+    assert!(
+        rendered
+            .iter()
+            .any(|l| l.contains("let x = 1;") && l.len() >= long_code.len()),
+        "{rendered:#?}"
+    );
+    assert!(rendered.iter().any(|l| l == "```rust"), "{rendered:#?}");
+}

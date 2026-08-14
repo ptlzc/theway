@@ -10,8 +10,13 @@
 //! Single-tilde pairs (`~text~`) are demoted to literal `~` text so LLM output
 //! like `~**10%**` is not struck (pulldown treats those pairs as strike; we do not).
 
-use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{HeadingLevel, Options, Parser, TagEnd};
 use std::ops::Range;
+
+/// Re-exported parser types so `offset_events` consumers can match on the
+/// event stream without depending on pulldown-cmark directly (this crate owns
+/// the parser configuration — one dependency point for the markdown pipeline).
+pub use pulldown_cmark::{CodeBlockKind, Event, Tag};
 
 /// The exact `pulldown-cmark` option set Grok Build uses to render markdown.
 ///
