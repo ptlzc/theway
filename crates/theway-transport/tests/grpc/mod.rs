@@ -19,6 +19,7 @@ fn fixture_snapshot(feed_line: &str) -> WireStatus {
         sidebar: empty_sidebar_snapshot(),
         feed_blocks: Vec::new(),
         feed_lines: vec![feed_line.into()],
+        feed_lines_base: 0,
         dags: Vec::new(),
         subagents: Vec::new(),
         usage: WireContextUsage::default(),

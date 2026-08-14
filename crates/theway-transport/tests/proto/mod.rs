@@ -81,6 +81,7 @@ fn fixture_snapshot() -> WireStatus {
             },
         ],
         feed_lines: vec!["line".into()],
+        feed_lines_base: 0,
         dags: Vec::new(),
         subagents: Vec::new(),
         usage: WireContextUsage::default(),

@@ -176,6 +176,10 @@ pub struct WireStatus {
     pub sidebar: WireSidebarSnapshot,
     pub feed_blocks: Vec<crate::feed::WireFeedBlock>,
     pub feed_lines: Vec<String>,
+    /// Absolute index of `feed_lines[0]` in the full transcript (issue #35):
+    /// stream snapshots carry only appended rows.
+    #[serde(default)]
+    pub feed_lines_base: u64,
     pub dags: Vec<WireDagRunSnapshot>,
     pub subagents: Vec<WireAgentJobSnapshot>,
     /// Running token usage + the active model's context window, published by

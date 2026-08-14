@@ -149,6 +149,7 @@ pub fn session_state(snapshot: &WireStatus) -> wire::SessionState {
         }),
         feed_blocks: snapshot.feed_blocks.iter().map(feed_block).collect(),
         feed_lines: snapshot.feed_lines.clone(),
+        feed_lines_base: snapshot.feed_lines_base,
         dags: snapshot.dags.iter().map(dag_run_wire).collect(),
         subagents: snapshot.subagents.iter().map(subagent_wire).collect(),
         context_usage: Some(wire::ContextUsage {
@@ -220,6 +221,7 @@ pub fn wire_status(state: &wire::SessionState) -> WireStatus {
         sidebar: sidebar_wire(state.sidebar.as_ref()),
         feed_blocks: state.feed_blocks.iter().map(wire_feed_block).collect(),
         feed_lines: state.feed_lines.clone(),
+        feed_lines_base: state.feed_lines_base,
         dags: state.dags.iter().map(wire_dag_run).collect(),
         subagents: state.subagents.iter().map(wire_subagent_job).collect(),
         usage: state

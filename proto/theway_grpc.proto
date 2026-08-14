@@ -32,9 +32,12 @@ message SessionState {
   repeated SubagentJobSnapshot subagents = 14;
   // TUI display settings pushed from the daemon (read from config.toml).
   optional uint32 tui_max_feed_lines = 15;
-  // Token usage + context window for the live session (orchestrator thinking
-  // summary + markdown width need these; node 2 fills real values).
+  // Token usage + context window for the live session.
   optional ContextUsage context_usage = 16;
+  // Absolute index of feed_lines[0] in the full transcript (issue #35):
+  // stream snapshots carry only rows appended since the last publish; the
+  // initial get_state snapshot carries everything (base 0).
+  uint64 feed_lines_base = 17;
 }
 
 // Token usage for the current/last turn, plus the model's context window size.

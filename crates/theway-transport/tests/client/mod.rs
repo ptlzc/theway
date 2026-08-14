@@ -39,6 +39,7 @@ fn fixture_status(feed_line: &str) -> WireStatus {
             timestamp: None,
         }],
         feed_lines: vec![feed_line.into()],
+        feed_lines_base: 0,
         dags: Vec::new(),
         subagents: Vec::new(),
         usage: WireContextUsage::default(),
