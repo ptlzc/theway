@@ -56,7 +56,7 @@ pub use parse::{MarkdownParser, ParsedMarkdown};
 pub use source_map::SourceMap;
 pub use streaming::StreamingMarkdownRenderer;
 pub use style::{MarkdownStyle, TableBorders};
-pub use syntax::Syntect;
+pub use syntax::{Syntect, default_syntect};
 
 // Re-export test helpers when fuzzing
 #[cfg(fuzzing)]

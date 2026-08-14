@@ -171,6 +171,17 @@ pub fn test_syntect() -> &'static Syntect {
     TEST_SYNTECT.get_or_init(|| Syntect::new(include_bytes!("../assets/tokyo-night.tmTheme")))
 }
 
+/// Get the shared default [`Syntect`] instance for production renders.
+///
+/// This lazily loads the grok-night theme bundled with the crate into a
+/// process-wide static, so consumers (e.g. the TUI feed renderer) share one
+/// syntax set + theme instead of shipping or embedding their own copy.
+pub fn default_syntect() -> &'static Syntect {
+    use std::sync::OnceLock;
+    static DEFAULT_SYNTECT: OnceLock<Syntect> = OnceLock::new();
+    DEFAULT_SYNTECT.get_or_init(|| Syntect::new(include_bytes!("../assets/grok-night.tmTheme")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::parse_line_citation_fence_info;

@@ -422,48 +422,277 @@ fn terminal_placeholder() -> Terminal<CrosstermBackend<std::io::Stdout>> {
     Terminal::new(CrosstermBackend::new(std::io::stdout())).unwrap()
 }
 
+fn assistant_lines(text: &str, width: usize) -> Vec<ratatui::text::Line<'static>> {
+    let mut out: Vec<ratatui::text::Line<'static>> = Vec::new();
+    crate::feed_render::push_markdown(&mut out, text, "ai ▸ ", width);
+    out
+}
+
+fn line_text(line: &ratatui::text::Line<'static>) -> String {
+    line.spans
+        .iter()
+        .map(|s| s.content.as_ref())
+        .collect::<String>()
+}
+
+fn all_text(lines: &[ratatui::text::Line<'static>]) -> String {
+    lines.iter().map(line_text).collect::<String>()
+}
+
 #[test]
 fn markdown_single_tilde_pair_stays_literal() {
-    use crate::feed_render::push_markdown_paragraphs;
-    use ratatui::style::Style;
-    let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
-    push_markdown_paragraphs(
-        &mut lines,
-        "~**10%** is not struck",
-        Style::default(),
-        None,
-        80,
-    );
-    let text: String = lines
-        .iter()
-        .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
-        .collect();
+    use ratatui::style::Modifier;
     // Single-tilde pairs are demoted to literal `~` by the shared parser
-    // options — the renderer must not strike them.
-    assert!(text.contains("~**10%**"), "{text}");
+    // options — the renderer must not strike them. `**10%**` inside still
+    // renders as a bold span (pretty mode hides the `**` markers).
+    let lines = assistant_lines("~**10%** is not struck", 80);
+    let text = all_text(&lines);
+    assert!(text.contains("~10%"), "{text}");
+    let bold: Vec<&str> = lines
+        .iter()
+        .flat_map(|l| &l.spans)
+        .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
+        .map(|s| s.content.as_ref())
+        .collect();
+    assert_eq!(bold, vec!["10%"], "{lines:#?}");
 }
 
 #[test]
 fn markdown_fenced_code_renders_verbatim_no_wrap() {
-    use crate::feed_render::push_markdown_paragraphs;
-    use ratatui::style::Style;
     // A code line longer than the width must stay on one unwrapped line.
     let long_code = "let x = 1; // ".to_string() + &"a".repeat(120);
     let input = format!("before\n```rust\n{long_code}\n```\nafter");
-    let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
-    push_markdown_paragraphs(&mut lines, &input, Style::default(), None, 40);
-    let rendered: Vec<String> = lines
-        .iter()
-        .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
-        .map(String::from)
-        .collect();
+    let lines = assistant_lines(&input, 40);
+    let rendered: Vec<String> = lines.iter().map(line_text).collect();
     assert!(
         rendered
             .iter()
-            .any(|l| l.contains("let x = 1;") && l.len() >= long_code.len()),
+            .any(|l| l.starts_with("let x = 1;") && l.len() >= long_code.len()),
         "{rendered:#?}"
     );
-    assert!(rendered.iter().any(|l| l == "```rust"), "{rendered:#?}");
+    // Pretty mode hides the fence delimiters entirely.
+    assert!(!rendered.iter().any(|l| l == "```rust"), "{rendered:#?}");
+    // The rust body carries syntax-highlighted (colored) spans.
+    let colored = lines.iter().any(|l| {
+        line_text(l).starts_with("let x = 1;") && l.spans.iter().any(|s| s.style.fg.is_some())
+    });
+    assert!(colored, "{lines:#?}");
+    // Surrounding prose still renders and wraps normally.
+    assert!(
+        rendered.iter().any(|l| l.contains("before")),
+        "{rendered:#?}"
+    );
+    assert!(
+        rendered.iter().any(|l| l.contains("after")),
+        "{rendered:#?}"
+    );
+}
+
+#[test]
+fn markdown_parity_bold_italic_inline_code_spans() {
+    use ratatui::style::Modifier;
+    let lines = assistant_lines("**bold** *em* `code`", 80);
+    assert_eq!(line_text(&lines[0]), "ai ▸ bold em code");
+    let span = |content: &str| {
+        lines[0]
+            .spans
+            .iter()
+            .find(|s| s.content == content)
+            .unwrap_or_else(|| panic!("span {content:?} missing: {:?}", lines[0].spans))
+    };
+    assert!(
+        span("bold").style.add_modifier.contains(Modifier::BOLD),
+        "{:?}",
+        lines[0].spans
+    );
+    assert!(
+        span("em").style.add_modifier.contains(Modifier::ITALIC),
+        "{:?}",
+        lines[0].spans
+    );
+    // Inline code is styled distinctly (feed style: bold) with hidden backticks.
+    assert!(
+        span("code").style.add_modifier.contains(Modifier::BOLD),
+        "{:?}",
+        lines[0].spans
+    );
+}
+
+#[test]
+fn markdown_parity_heading_is_styled() {
+    use ratatui::style::Modifier;
+    let lines = assistant_lines("# h", 80);
+    // Pretty mode hides the `# ` marker; the heading text is styled.
+    assert_eq!(line_text(&lines[0]), "ai ▸ h");
+    let heading = lines[0]
+        .spans
+        .iter()
+        .find(|s| s.content == "h")
+        .expect("heading span missing");
+    assert!(
+        heading.style.add_modifier.contains(Modifier::BOLD),
+        "{:?}",
+        lines[0].spans
+    );
+}
+
+#[test]
+fn markdown_parity_table_renders_border_rows() {
+    let lines = assistant_lines("| A | B |\n|---|---|\n| 1 | 2 |", 80);
+    let text: Vec<String> = lines.iter().map(line_text).collect();
+    assert!(
+        text.iter().any(|l| l.contains('┌') && l.contains('┐')),
+        "{text:#?}"
+    );
+    assert!(text.iter().any(|l| l.contains("│ A │")), "{text:#?}");
+    assert!(text.iter().any(|l| l.contains("│ 1 │")), "{text:#?}");
+}
+
+#[test]
+fn markdown_parity_link_gets_underline_from_hyperlinks() {
+    use ratatui::style::Modifier;
+    let lines = assistant_lines("[text](https://example.com) end", 80);
+    let underlined: String = lines
+        .iter()
+        .flat_map(|l| &l.spans)
+        .filter(|s| s.style.add_modifier.contains(Modifier::UNDERLINED))
+        .map(|s| s.content.as_ref())
+        .collect();
+    assert!(underlined.contains("text"), "{underlined}");
+    assert!(underlined.contains("https://example.com"), "{underlined}");
+}
+
+#[test]
+fn markdown_parity_fenced_rust_has_colored_spans() {
+    let lines = assistant_lines("```rust\nlet x = 1;\n```", 80);
+    let code = lines
+        .iter()
+        .find(|l| line_text(l).contains("let x"))
+        .expect("rust code line missing");
+    assert!(
+        code.spans.iter().any(|s| s.style.fg.is_some()),
+        "syntax highlighting missing: {:?}",
+        code.spans
+    );
+    assert!(!all_text(&lines).contains("```"), "{}", all_text(&lines));
+}
+
+#[test]
+fn markdown_parity_mermaid_renders_diagram_art() {
+    let lines = assistant_lines("```mermaid\nflowchart TD\nA --> B\n```", 80);
+    let text: Vec<String> = lines.iter().map(line_text).collect();
+    assert!(
+        text.iter().any(|l| l.contains('┌') && l.contains('┐')),
+        "mermaid diagram boxes missing: {text:#?}"
+    );
+    assert!(
+        text.iter().any(|l| l.contains("│ A │")),
+        "mermaid node A missing: {text:#?}"
+    );
+}
+
+#[test]
+fn markdown_parity_latex_math_transforms() {
+    use ratatui::style::Modifier;
+    let lines = assistant_lines("$x^2$", 80);
+    assert_eq!(line_text(&lines[0]), "ai ▸ x²");
+    let math = lines[0]
+        .spans
+        .iter()
+        .find(|s| s.content == "x²")
+        .expect("math span missing");
+    assert!(
+        math.style.add_modifier.contains(Modifier::ITALIC),
+        "{:?}",
+        lines[0].spans
+    );
+}
+
+#[test]
+fn markdown_long_prose_wraps_to_feed_width() {
+    use unicode_width::UnicodeWidthStr;
+    let input = "word ".repeat(30);
+    let lines = assistant_lines(&input, 20);
+    assert!(lines.len() > 1, "{lines:#?}");
+    for line in &lines {
+        let width = line_text(line).width();
+        assert!(width <= 20, "line too wide ({width}): {line:?}");
+    }
+    // All words survive the re-wrap (nothing dropped).
+    assert_eq!(
+        all_text(&lines).matches("word").count(),
+        30,
+        "{}",
+        all_text(&lines)
+    );
+}
+
+#[test]
+fn markdown_inline_styles_survive_wrapping() {
+    use ratatui::style::Modifier;
+    // A bold/italic run inside prose that must wrap: span styles are
+    // re-applied through the wrap byte ranges instead of degrading to the
+    // line's base style.
+    let input = format!(
+        "{} **bold** *em* {}",
+        "word ".repeat(10),
+        "word ".repeat(10)
+    );
+    let lines = assistant_lines(&input, 20);
+    assert!(lines.len() > 1, "{lines:#?}");
+    let bold: String = lines
+        .iter()
+        .flat_map(|l| &l.spans)
+        .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
+        .map(|s| s.content.as_ref())
+        .collect();
+    assert_eq!(bold, "bold", "{lines:#?}");
+    let italic: String = lines
+        .iter()
+        .flat_map(|l| &l.spans)
+        .filter(|s| s.style.add_modifier.contains(Modifier::ITALIC))
+        .map(|s| s.content.as_ref())
+        .collect();
+    assert_eq!(italic, "em", "{lines:#?}");
+}
+
+#[test]
+fn markdown_link_underline_survives_wrapping() {
+    use ratatui::style::Modifier;
+    use unicode_width::UnicodeWidthStr;
+    // A link inside prose that must wrap: the underline comes from the
+    // renderer's hyperlinks, projected through the wrap byte ranges.
+    let input = format!(
+        "{} [link](https://example.com) {}",
+        "before ".repeat(4),
+        "after ".repeat(4)
+    );
+    let lines = assistant_lines(&input, 20);
+    for line in &lines {
+        let width = line_text(line).width();
+        assert!(width <= 20, "line too wide ({width}): {line:?}");
+    }
+    let underlined: String = lines
+        .iter()
+        .flat_map(|l| &l.spans)
+        .filter(|s| s.style.add_modifier.contains(Modifier::UNDERLINED))
+        .map(|s| s.content.as_ref())
+        .collect();
+    assert!(underlined.contains("link"), "{underlined}");
+    assert!(underlined.contains("https://"), "{underlined}");
+    assert!(underlined.contains("example.com"), "{underlined}");
+}
+
+#[test]
+fn markdown_prefix_only_on_first_rendered_line() {
+    let lines = assistant_lines("hello\n\nworld", 80);
+    let text: Vec<String> = lines.iter().map(line_text).collect();
+    assert_eq!(text[0], "ai ▸ hello", "{text:#?}");
+    assert!(
+        text.iter().skip(1).all(|l| !l.contains("ai ▸")),
+        "{text:#?}"
+    );
+    assert!(text.iter().any(|l| l == "world"), "{text:#?}");
 }
 
 #[test]
@@ -483,4 +712,23 @@ fn feed_urls_get_underline_style() {
         underlined.contains("https://example.com/path"),
         "{underlined}"
     );
+}
+
+#[test]
+fn assistant_url_uses_hyperlinks_not_regex_scan() {
+    use ratatui::style::Modifier;
+    // Assistant blocks skip the regex URL scan: the underline comes from the
+    // renderer's hyperlink output, so the pretty-mode link text itself is
+    // underlined alongside the URL.
+    let mut feed = theway_transport::feed::Feed::new();
+    feed.push_assistant("[docs](https://example.com/x)");
+    let lines = crate::feed_render::lines(&feed, 100);
+    let underlined: String = lines
+        .iter()
+        .flat_map(|l| &l.spans)
+        .filter(|s| s.style.add_modifier.contains(Modifier::UNDERLINED))
+        .map(|s| s.content.as_ref())
+        .collect();
+    assert!(underlined.contains("docs"), "{underlined}");
+    assert!(underlined.contains("https://example.com/x"), "{underlined}");
 }
