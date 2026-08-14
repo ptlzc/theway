@@ -11,6 +11,7 @@ members = [
     "crates/theway-transport",
     "crates/theway-probe",
     "crates/tests-bridge-macro",
+    "crates/theway-markdown-core",
 ]
 
 [workspace.package]

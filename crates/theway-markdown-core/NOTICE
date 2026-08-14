@@ -1,0 +1,24 @@
+theway-markdown-core
+===================
+
+This crate is a mechanical port of `xai-grok-markdown-core` from the
+Grok Build codebase.
+
+Donor
+-----
+- SpaceXAI (xAI), Grok Build
+- Source revision: 5d08d7e
+- License: Apache-2.0 (retained; see source file headers and Cargo.toml)
+
+Purpose
+-------
+Port of Grok Build's exact `pulldown-cmark` configuration: parser options
+(GFM / strikethrough / math / tasklists / tables), the single-tilde
+strikethrough demotion (`offset_events`), and the markdown analysis
+(`analyze`, `MarkdownStats`, `StructuralIssue`). Used by theway's TUI feed
+renderer so analysis matches what is actually rendered.
+
+Only mechanical changes were made: package name / prefix
+`xai-grok-markdown-core` -> `theway-markdown-core`, and the crate shell
+(Cargo.toml) rewritten for theway's workspace. Original copyright headers
+in the source files are preserved.

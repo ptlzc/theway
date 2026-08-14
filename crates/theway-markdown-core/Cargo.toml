@@ -1,0 +1,10 @@
+[package]
+name = "theway-markdown-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+description = "Headless markdown analysis sharing Grok Build's exact pulldown-cmark config."
+
+[dependencies]
+pulldown-cmark = "0.13"
