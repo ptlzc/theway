@@ -4,7 +4,7 @@
 
 use theway_transport::config::{
     ModelDefault, parse_builtin_skills_config, parse_model_default,
-    parse_trigger_poll_interval_secs,
+    parse_trigger_poll_interval_secs, parse_tui_max_feed_lines,
 };
 use theway_transport::triggers::DEFAULT_DYNAMIC_TRIGGER_POLL_INTERVAL_SECS;
 
@@ -62,6 +62,26 @@ pub async fn read_model_default(
             None,
             Some(format!(
                 "model: ignoring invalid default in {}: {err}",
+                path.display()
+            )),
+        ),
+    }
+}
+
+/// Read the `[tui] max_feed_lines` scrollback cap from `<base_dir>/config.toml`.
+/// Missing file/section/key → None (the TUI built-in default applies). A malformed
+/// value reports a diagnostic but does not block startup.
+pub async fn read_tui_max_feed_lines(base_dir: &std::path::Path) -> (Option<u64>, Option<String>) {
+    let path = base_dir.join("config.toml");
+    let Ok(text) = tokio::fs::read_to_string(&path).await else {
+        return (None, None);
+    };
+    match parse_tui_max_feed_lines(&text) {
+        Ok(lines) => (lines, None),
+        Err(err) => (
+            None,
+            Some(format!(
+                "tui: ignoring invalid max_feed_lines in {}: {err}",
                 path.display()
             )),
         ),
@@ -134,6 +154,39 @@ mod tests {
                 .as_deref()
                 .unwrap_or_default()
                 .contains("requires both")
+        );
+    }
+
+    #[tokio::test]
+    async fn tui_max_feed_lines_reads_config_and_reports_malformed() {
+        let temp = tempfile::tempdir().unwrap();
+        let base_dir = temp.path();
+
+        let (lines, diagnostic) = read_tui_max_feed_lines(base_dir).await;
+        assert!(lines.is_none());
+        assert!(diagnostic.is_none());
+
+        tokio::fs::write(
+            base_dir.join("config.toml"),
+            "[tui]\nmax_feed_lines = 8000\n",
+        )
+        .await
+        .unwrap();
+        let (lines, diagnostic) = read_tui_max_feed_lines(base_dir).await;
+        assert_eq!(lines, Some(8000));
+        assert!(diagnostic.is_none());
+
+        // Malformed value: diagnostic + None (built-in default still applies).
+        tokio::fs::write(base_dir.join("config.toml"), "[tui]\nmax_feed_lines = 0\n")
+            .await
+            .unwrap();
+        let (lines, diagnostic) = read_tui_max_feed_lines(base_dir).await;
+        assert!(lines.is_none());
+        assert!(
+            diagnostic
+                .as_deref()
+                .unwrap_or_default()
+                .contains("max_feed_lines")
         );
     }
 }

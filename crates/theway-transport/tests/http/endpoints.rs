@@ -28,6 +28,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
         feed_lines: vec!["ready".into()],
         dags: Vec::new(),
         subagents: Vec::new(),
+        tui_max_feed_lines: None,
     }));
     let router = web_router(HttpState {
         commands: command_tx,
@@ -190,6 +191,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
             feed_lines: vec!["streamed".into()],
             dags: Vec::new(),
             subagents: Vec::new(),
+            tui_max_feed_lines: None,
         })
         .unwrap();
     let chunk = tokio::time::timeout(Duration::from_secs(2), stream.next())
@@ -223,6 +225,7 @@ async fn websocket_serves_snapshot_and_accepts_commands() {
         feed_lines: vec!["ready".into()],
         dags: Vec::new(),
         subagents: Vec::new(),
+        tui_max_feed_lines: None,
     }));
     let router = web_router(HttpState {
         commands: command_tx,
@@ -326,6 +329,7 @@ async fn healthz_answers_ok_without_snapshot_and_root_404s() {
         feed_lines: vec!["secret-feed-line".into()],
         dags: Vec::new(),
         subagents: Vec::new(),
+        tui_max_feed_lines: None,
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

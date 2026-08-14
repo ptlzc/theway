@@ -515,12 +515,19 @@ impl App {
         // Feed (pre-wrapped to width so scroll math is exact).
         let mut lines = crate::feed_render::lines(&self.feed, feed_area.width as usize);
         let uncapped_total = lines.len();
-        // Scrollback cap (issue #27): keep only the newest
-        // DEFAULT_MAX_FEED_LINES rendered lines. `self.scroll` lives in
-        // *uncapped* coordinates (it only grows as the feed grows), so the
-        // per-frame head trim cannot drift a scrolled-up view; the display
-        // scroll is the uncapped offset shifted down by the trimmed count.
-        let trimmed = trim_feed_head(&mut lines, DEFAULT_MAX_FEED_LINES);
+        // Scrollback cap (issue #27): keep only the newest N rendered lines,
+        // N = the daemon-pushed `[tui] max_feed_lines` config value, falling
+        // back to DEFAULT_MAX_FEED_LINES. `self.scroll` lives in *uncapped*
+        // coordinates (it only grows as the feed grows), so the per-frame
+        // head trim cannot drift a scrolled-up view; the display scroll is
+        // the uncapped offset shifted down by the trimmed count.
+        let max_feed_lines = self
+            .latest
+            .tui_max_feed_lines
+            .map(|n| n as usize)
+            .filter(|n| *n > 0)
+            .unwrap_or(DEFAULT_MAX_FEED_LINES);
+        let trimmed = trim_feed_head(&mut lines, max_feed_lines);
         let total = lines.len();
         let viewport = feed_area.height as usize;
         self.last_viewport_h = viewport;

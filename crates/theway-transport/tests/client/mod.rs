@@ -40,6 +40,7 @@ fn fixture_status(feed_line: &str) -> WireStatus {
         feed_lines: vec![feed_line.into()],
         dags: Vec::new(),
         subagents: Vec::new(),
+        tui_max_feed_lines: None,
     }
 }
 

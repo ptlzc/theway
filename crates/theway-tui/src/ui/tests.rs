@@ -39,6 +39,7 @@ fn fixture_status(feed_blocks: Vec<WireFeedBlock>) -> WireStatus {
         feed_lines: Vec::new(),
         dags: Vec::new(),
         subagents: Vec::new(),
+        tui_max_feed_lines: None,
     }
 }
 
@@ -257,6 +258,74 @@ async fn feed_render_caps_scrollback_at_default_max_lines() {
     assert!(
         text.contains("row-2000"),
         "second draw must not drift the scrolled-up view:\n{text}"
+    );
+}
+
+/// The daemon-pushed `tui_max_feed_lines` config value overrides the
+/// built-in 3000-line scrollback cap (issue #27 follow-up).
+#[tokio::test]
+async fn feed_render_uses_tui_max_feed_lines_from_snapshot() {
+    let (mut app, _rx) = test_app().await;
+    app.feed.clear();
+    let rows: Vec<String> = (0..3_200).map(|i| format!("row-{i:04}")).collect();
+    let block = theway_transport::feed::WireFeedBlock::Plain {
+        text: rows.join("\n"),
+        level: theway_transport::feed::Level::Note,
+        timestamp: None,
+    };
+    app.feed
+        .push_plain_untimed(rows.join("\n"), theway_transport::feed::Level::Note);
+    let backend = TestBackend::new(50, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    // Cap above the feed size: nothing trimmed — the top of the scrollback
+    // still shows original row 0.
+    let mut status = fixture_status(vec![block.clone()]);
+    status.tui_max_feed_lines = Some(4_000);
+    app.apply_snapshot(status);
+    app.follow = false;
+    app.scroll = 0;
+    terminal.draw(|f| app.render(f)).unwrap();
+    let text = buffer_text(terminal.backend().buffer());
+    assert!(
+        text.contains("row-0000"),
+        "cap 4000 must keep row 0:\n{text}"
+    );
+
+    // Cap below the feed size: head-trimmed to 1000. Scrolling to the very
+    // top reveals the oldest kept row (original row 2200), and following
+    // still shows the newest.
+    let mut status = fixture_status(vec![block.clone()]);
+    status.tui_max_feed_lines = Some(1_000);
+    app.apply_snapshot(status);
+    app.follow = false;
+    app.scroll = 0;
+    terminal.draw(|f| app.render(f)).unwrap();
+    let text = buffer_text(terminal.backend().buffer());
+    assert!(
+        text.contains("row-2200"),
+        "cap 1000: the top of the scrollback must be original row 2200:\n{text}"
+    );
+    app.follow = true;
+    terminal.draw(|f| app.render(f)).unwrap();
+    let text = buffer_text(terminal.backend().buffer());
+    assert!(
+        text.contains("row-3199"),
+        "cap 1000 must keep the newest row:\n{text}"
+    );
+
+    // Zero / absent from the snapshot falls back to the built-in 3000-line
+    // default: the top of the scrollback is original row 200 (not 2200).
+    let mut status = fixture_status(vec![block.clone()]);
+    status.tui_max_feed_lines = Some(0);
+    app.apply_snapshot(status);
+    app.follow = false;
+    app.scroll = 0;
+    terminal.draw(|f| app.render(f)).unwrap();
+    let text = buffer_text(terminal.backend().buffer());
+    assert!(
+        text.contains("row-0200"),
+        "zero cap must fall back to the 3000-line default:\n{text}"
     );
 }
 

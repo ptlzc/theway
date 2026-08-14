@@ -151,6 +151,7 @@ pub fn session_state(snapshot: &WireStatus) -> wire::SessionState {
         feed_lines: snapshot.feed_lines.clone(),
         dags: snapshot.dags.iter().map(dag_run_wire).collect(),
         subagents: snapshot.subagents.iter().map(subagent_wire).collect(),
+        tui_max_feed_lines: snapshot.tui_max_feed_lines.map(|n| n as u32),
     }
 }
 
@@ -213,6 +214,7 @@ pub fn wire_status(state: &wire::SessionState) -> WireStatus {
         feed_lines: state.feed_lines.clone(),
         dags: state.dags.iter().map(wire_dag_run).collect(),
         subagents: state.subagents.iter().map(wire_subagent_job).collect(),
+        tui_max_feed_lines: state.tui_max_feed_lines.map(u64::from),
     }
 }
 

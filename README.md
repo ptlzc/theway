@@ -262,6 +262,14 @@ For one run, override it with:
 ./target/release/theway --trigger-poll-secs 60
 ```
 
+The TUI conversation feed keeps a 3000-line scrollback by default. Raise (or lower)
+the cap in `~/.theway/config.toml`:
+
+```toml
+[tui]
+max_feed_lines = 10000
+```
+
 Notifications are trigger sources too. Each configured MCP server may expose a server-push
 stream; `theway` consumes those frames through a `NotificationHook`, converts them into bounded
 trigger envelopes, and runs them through the same deduping, audit, prompt, and action queue as
@@ -335,7 +343,7 @@ By default, `theway` stores local state under `~/.theway`:
 | `~/.theway/sessions/<cwd-hash>/<uuidv7>.loop-<job-id>.md` | Loop state kept by a stateful cron job |
 | `~/.theway/inbox.jsonl` | Global triage inbox written by stateful loops |
 | `~/.theway/daemon-port` | Port the running `thewayd` bound (written on bind; clients discover the daemon here) |
-| `~/.theway/config.toml` | Optional user config, including trigger poll interval |
+| `~/.theway/config.toml` | Optional user config, including trigger poll interval and TUI scrollback (`[tui] max_feed_lines`) |
 
 Set `THEWAY_DIR` to use a different base directory.
 

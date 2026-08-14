@@ -24,4 +24,13 @@ feed 滚动回放默认最多保留 **3000 行**：渲染出的行超过上限�
 ## 非目标
 
 - daemon 侧 transcript / SQLite 历史裁剪不动；
-- 不做 CLI / 配置可调（后续需要再加）。
+- 不做 CLI 可调（后续需要再加）。
+
+## 可配置（#27 后续）
+
+`[tui] max_feed_lines = N` in `~/.theway/config.toml`：
+- daemon 启动时经 `config_readers::read_tui_max_feed_lines` 读取（transport
+  `parse_tui_max_feed_lines` 解析；`0`/解析错误 → 诊断日志 + 回退内置默认 3000）；
+- 经 gRPC `SessionState.tui_max_feed_lines`（proto 字段 15）+ `WireStatus`
+  快照推给 TUI；TUI 渲染时用它覆盖 `DEFAULT_MAX_FEED_LINES`（0/缺失回退）。
+- 上游改动生效需重启 thewayd。

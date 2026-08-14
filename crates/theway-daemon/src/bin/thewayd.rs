@@ -20,7 +20,9 @@ use theway_core::agent::hooks;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::persist::DagPersistSink;
 use theway_core::{AgentHarness, AgentHarnessOptions, PermissionPolicy, ThinkingLevel};
-use theway_daemon::config_readers::{read_builtin_skills_config, read_trigger_poll_interval_secs};
+use theway_daemon::config_readers::{
+    read_builtin_skills_config, read_trigger_poll_interval_secs, read_tui_max_feed_lines,
+};
 use theway_daemon::stream_auth::stream_fn_with_auth_store;
 use theway_daemon::system_prompt::compose_system_prompt;
 use theway_daemon::turn::daemon::{DaemonConfig, PanelStatus, TurnHost};
@@ -284,6 +286,11 @@ async fn main() -> Result<()> {
     let (trigger_poll_secs, _trigger_config_diagnostic) =
         read_trigger_poll_interval_secs(&config::base_dir(), cli.trigger_poll_secs).await;
     triggers::dynamic::set_dynamic_trigger_poll_interval_secs(trigger_poll_secs);
+    let (tui_max_feed_lines, tui_config_diagnostic) =
+        read_tui_max_feed_lines(&config::base_dir()).await;
+    if let Some(diag) = tui_config_diagnostic {
+        tracing::warn!("{diag}");
+    }
     let resolved_builtins = theway_daemon::builtin_skills::resolve_builtins(
         &cli.builtin_skill,
         &config_enabled_builtins,
@@ -528,6 +535,7 @@ async fn main() -> Result<()> {
             session_ops::CurrentSessionState::default(),
         )),
         panel_status,
+        tui_max_feed_lines,
     });
 
     let mode_label = match mode {

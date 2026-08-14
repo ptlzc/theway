@@ -30,6 +30,8 @@ message SessionState {
   // graph mode (P1/P2 fill these):
   repeated DagRunSnapshot dags = 13;
   repeated SubagentJobSnapshot subagents = 14;
+  // TUI display settings pushed from the daemon (read from config.toml).
+  optional uint32 tui_max_feed_lines = 15;
 }
 
 message ProviderGroup {

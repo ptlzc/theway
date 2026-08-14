@@ -83,6 +83,7 @@ fn fixture_snapshot() -> WireStatus {
         feed_lines: vec!["line".into()],
         dags: Vec::new(),
         subagents: Vec::new(),
+        tui_max_feed_lines: None,
     }
 }
 

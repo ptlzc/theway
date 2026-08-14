@@ -64,6 +64,22 @@ pub struct ModelDefault {
     pub model: String,
 }
 
+/// Parse the `[tui] max_feed_lines = N` scrollback setting from `config.toml`.
+///
+/// Missing section/key → `None` (the TUI falls back to its built-in default).
+/// `0` is rejected: an empty scrollback is never useful.
+pub fn parse_tui_max_feed_lines(toml_text: &str) -> Result<Option<u64>, String> {
+    let parsed: ConfigFile =
+        toml::from_str(toml_text).map_err(|e| format!("parse config.toml: {e}"))?;
+    let Some(lines) = parsed.tui.and_then(|section| section.max_feed_lines) else {
+        return Ok(None);
+    };
+    if lines == 0 {
+        return Err("`[tui] max_feed_lines` must be at least 1".into());
+    }
+    Ok(Some(lines))
+}
+
 /// Parse the `[model] provider = "..."` / `[model] model = "..."` default from `config.toml`.
 ///
 /// Both keys must be present together — a half-default would silently change resolution
@@ -122,6 +138,12 @@ struct ConfigFile {
     triggers: Option<TriggerConfigSection>,
     relay: Option<RelayConfigSection>,
     model: Option<ModelConfigSection>,
+    tui: Option<TuiConfigSection>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TuiConfigSection {
+    max_feed_lines: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -173,6 +195,18 @@ poll_interval_secs = 15
 poll_interval_secs = 0
 "#;
         assert!(parse_trigger_poll_interval_secs(text).is_err());
+    }
+
+    #[test]
+    fn parse_tui_max_feed_lines_reads_value_and_defaults() {
+        assert_eq!(parse_tui_max_feed_lines("").unwrap(), None);
+        assert_eq!(
+            parse_tui_max_feed_lines("[triggers]\npoll_interval_secs = 15\n").unwrap(),
+            None
+        );
+        let text = "[tui]\nmax_feed_lines = 8000\n";
+        assert_eq!(parse_tui_max_feed_lines(text).unwrap(), Some(8000));
+        assert!(parse_tui_max_feed_lines("[tui]\nmax_feed_lines = 0\n").is_err());
     }
 
     #[test]

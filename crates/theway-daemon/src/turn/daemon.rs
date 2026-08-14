@@ -102,6 +102,8 @@ pub struct DaemonConfig {
     pub session_repo: Arc<SqliteSessionRepo>,
     pub current_session_state: Arc<Mutex<CurrentSessionState>>,
     pub panel_status: PanelStatus,
+    /// `[tui] max_feed_lines` from config.toml, pushed to the TUI in snapshots.
+    pub tui_max_feed_lines: Option<u64>,
 }
 
 /// Headless transport host for `thewayd` (gRPC / HTTP / MCP).
@@ -123,6 +125,8 @@ pub struct TurnHost {
     control_plane_prompt: Option<UiControlPlanePrompt>,
     model_catalog: Vec<ProviderGroup>,
     panel_status: PanelStatus,
+    /// `[tui] max_feed_lines` from config.toml (None → TUI built-in default).
+    tui_max_feed_lines: Option<u64>,
 
     dag_engine: Arc<theway_core::multiagent::graph::engine::DagEngine>,
     subagent_registry: theway_core::multiagent::registry::AgentJobRegistry,
@@ -192,6 +196,7 @@ impl TurnHost {
             control_plane_prompt: None,
             model_catalog: model_catalog(),
             panel_status: config.panel_status,
+            tui_max_feed_lines: config.tui_max_feed_lines,
             dag_engine: config.dag_engine,
             subagent_registry: config.subagent_registry,
             session_factory: config.session_factory,
@@ -628,6 +633,7 @@ impl TurnHost {
                 .filter(|job| job.session_id.as_deref() == Some(self.session_id.as_str()))
                 .map(subagent_job_snapshot)
                 .collect(),
+            tui_max_feed_lines: self.tui_max_feed_lines,
         }
     }
 

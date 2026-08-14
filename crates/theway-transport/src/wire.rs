@@ -168,6 +168,9 @@ pub struct WireStatus {
     pub feed_lines: Vec<String>,
     pub dags: Vec<WireDagRunSnapshot>,
     pub subagents: Vec<WireAgentJobSnapshot>,
+    /// TUI display settings resolved by the daemon from `config.toml`
+    /// (`[tui] max_feed_lines`); `None` → the TUI built-in default applies.
+    pub tui_max_feed_lines: Option<u64>,
 }
 
 impl WireStatus {

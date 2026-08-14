@@ -23,6 +23,7 @@ fn wire_status(session_id: &str) -> WireStatus {
         feed_lines: Vec::new(),
         dags: Vec::new(),
         subagents: Vec::new(),
+        tui_max_feed_lines: None,
     }
 }
 
