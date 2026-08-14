@@ -34,6 +34,7 @@ mod app_turns;
 mod pixel_loader;
 mod prompt_chrome;
 mod render_utils;
+pub mod stats;
 
 pub use theway_transport::feed::FeedUpdate;
 
@@ -79,6 +80,9 @@ const DRAG_MAX_INPUT_ROWS: u16 = 12;
 /// Height of the busy status band: 3 rows for the pixel-grid loader
 /// (issue #37), 1 row for the plain ready/offline rule.
 const BUSY_STATUS_ROWS: u16 = 3;
+/// Busy-band frame period: spinner cadence + char/s meter sampling
+/// (issue #38).
+const SPINNER_TICK_MS: u64 = 100;
 const SCROLL_STEP: usize = 3;
 /// Default scrollback cap for the conversation feed: only the newest
 /// `DEFAULT_MAX_FEED_LINES` rendered lines are kept; older lines are trimmed
@@ -250,6 +254,11 @@ pub struct App {
     /// Wall-clock start of the current busy window (pixel-loader elapsed
     /// timer, issue #37); `None` while idle.
     busy_started: Option<Instant>,
+    /// Streaming throughput meter behind the busy-band stats line
+    /// (issue #38).
+    cps_meter: stats::CpsMeter,
+    /// Shared rainbow spinner driving the busy-band loader (issue #38).
+    spinner: pixel_loader::RainbowSpinner,
     /// Mouse-dragged composer height override (issue #37); `None` follows
     /// the content-driven auto-grow. Reset on submit.
     manual_composer_rows: Option<u16>,
@@ -315,6 +324,8 @@ impl App {
             busy: false,
             spinner_frame: 0,
             busy_started: None,
+            cps_meter: stats::CpsMeter::new(),
+            spinner: pixel_loader::RainbowSpinner::new(),
             manual_composer_rows: None,
             resize_drag: None,
             mouse_selecting: false,
@@ -454,7 +465,7 @@ impl App {
         terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     ) -> Result<()> {
         let mut reader = EventStream::new();
-        let mut tick = tokio::time::interval(Duration::from_millis(100));
+        let mut tick = tokio::time::interval(Duration::from_millis(SPINNER_TICK_MS));
         let mut reconnect = tokio::time::interval(Duration::from_secs(1));
         let mut stream = match self.client.stream_events().await {
             Ok(stream) => Some(stream),
@@ -517,6 +528,11 @@ impl App {
                 _ = tick.tick() => {
                     if self.busy {
                         self.spinner_frame = self.spinner_frame.wrapping_add(1);
+                        self.cps_meter
+                            .record(feed_text_bytes(&self.latest.feed_blocks));
+                        let cps = self.cps_meter.cps();
+                        self.spinner.advance(cps);
+                        self.spinner.tick(SPINNER_TICK_MS);
                     }
                 }
             }
@@ -1302,10 +1318,12 @@ impl App {
 
     /// Busy band (issue #37): the 3×3 pixel-grid loader on the left; the
     /// middle row carries a shimmering `working` label, a live elapsed
-    /// timer, the queue depth and the scrolled-up marker.
+    /// timer, the queue depth and the scrolled-up marker; the right side of
+    /// the middle row carries the throughput stats line (issue #38).
     fn render_busy_status(&self, frame: &mut ratatui::Frame, area: Rect) {
         let tick = self.spinner_frame as u64;
-        let loader = pixel_loader::PixelFrame::render(tick);
+        let cps = self.cps_meter.cps();
+        let loader = pixel_loader::rainbow_frame(self.spinner.step(), cps);
         let grid_x = area.x.saturating_add(1);
         for r in 0..3u16 {
             for c in 0..3u16 {
@@ -1348,6 +1366,30 @@ impl App {
             let w = area.right().saturating_sub(label_x);
             frame.buffer_mut().set_line(label_x, area.y + 1, &line, w);
         }
+        self.render_busy_stats(frame, area);
+    }
+
+    /// Throughput stats on the right side of the busy band's middle row:
+    /// `84 char/s · input: 57.1k · output: 1.2k` (char/s from the meter;
+    /// input/output from the recent context usage; no usage data → char/s
+    /// only).
+    fn render_busy_stats(&self, frame: &mut ratatui::Frame, area: Rect) {
+        if area.height < 2 {
+            return;
+        }
+        let usage = &self.latest.usage;
+        let input = (usage.input_tokens > 0).then_some(usage.input_tokens);
+        let output = (usage.output_tokens > 0).then_some(usage.output_tokens);
+        let text = stats::busy_stats_text(self.cps_meter.cps(), input, output);
+        let width = unicode_width::UnicodeWidthStr::width(text.as_str()) as u16;
+        let right = area.right();
+        if width == 0 || width >= right {
+            return;
+        }
+        let x = right.saturating_sub(width).saturating_sub(1);
+        frame
+            .buffer_mut()
+            .set_string(x, area.y + 1, text, Style::default().fg(Color::DarkGray));
     }
 
     /// Elapsed time since the busy window began (`m s` after a minute).
@@ -1503,6 +1545,23 @@ impl App {
         printer.abort();
         Ok(())
     }
+}
+
+/// Cumulative text bytes across the feed blocks — the monotonic counter the
+/// busy-band char/s meter samples each spinner tick (issue #38).
+fn feed_text_bytes(blocks: &[theway_transport::feed::WireFeedBlock]) -> usize {
+    use theway_transport::feed::WireFeedBlock as Block;
+    blocks
+        .iter()
+        .map(|block| match block {
+            Block::User { text, .. }
+            | Block::Assistant { text, .. }
+            | Block::Thinking { text, .. }
+            | Block::Plain { text, .. } => text.len(),
+            Block::Tool { name, args, .. } => name.len() + args.len(),
+            Block::ToolResult { lines, .. } => lines.iter().map(String::len).sum(),
+        })
+        .sum()
 }
 
 /// Shimmer style for the busy label (issue #37): brightness sweeps a sine
