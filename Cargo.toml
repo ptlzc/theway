@@ -12,6 +12,7 @@ members = [
     "crates/theway-probe",
     "crates/tests-bridge-macro",
     "crates/theway-markdown-core",
+    "crates/theway-ratatui-textarea",
 ]
 
 [workspace.package]

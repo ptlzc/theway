@@ -1,0 +1,38 @@
+[package]
+name = "theway-ratatui-textarea"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+description = "theway port of xai-ratatui-textarea: an advanced TextArea widget for ratatui with undo/redo, soft-wrap, mouse selection, scrollbar and atomic text elements"
+authors = ["theway contributors"]
+repository = "https://github.com/ptlzc/theway"
+
+[dependencies]
+crossterm = { version = "0.28", features = ["event-stream", "bracketed-paste"] }
+ratatui = { version = "0.29", features = ["crossterm", "unstable-widget-ref"] }
+ratatui-core = "0.1"
+textwrap = "0.16"
+tui-scrollbar = "0.2"
+unicode-segmentation = "1.12"
+unicode-width = "0.2"
+
+[dev-dependencies]
+# Used by unit tests (fuzzing / seeded assertions):
+#   rand, chrono, itertools, pretty_assertions
+# Used by examples/textarea_demo.rs (kept so the example compiles):
+#   arboard, fuzzy-matcher, ignore
+arboard = "3"
+chrono = "0.4"
+fuzzy-matcher = "0.3"
+ignore = "0.4"
+itertools = "0.14"
+pretty_assertions = "1"
+rand = "0.9"
+
+[[example]]
+name = "textarea_demo"
+path = "examples/textarea_demo.rs"
+
+[lints]
+workspace = true

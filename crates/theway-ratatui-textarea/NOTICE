@@ -1,0 +1,20 @@
+theway-ratatui-textarea
+
+This crate is a port of xai-ratatui-textarea into the theway repository,
+contributed by SpaceXAI under the Apache License, Version 2.0.
+
+Source: xai-org/grok-build, crates/codegen/xai-ratatui-textarea/,
+source revision 5d08d7e.
+
+xai-ratatui-textarea is first-party code maintained by xAI for the Grok TUI.
+
+Copyright 2023-2026 xAI
+Licensed under the Apache License, Version 2.0 (see the grok-build
+repository root LICENSE).
+
+Upstream lineage: xai-ratatui-textarea is a fork of the tui-textarea
+crate family (https://github.com/rhysd/tui-textarea), originally by rhysd.
+
+This crate is not a wholesale redistribution of third-party source. Dependencies
+such as ratatui are declared in Cargo.toml; their licenses appear in the
+repository root THIRD-PARTY-NOTICES file.
