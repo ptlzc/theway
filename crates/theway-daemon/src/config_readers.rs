@@ -88,6 +88,31 @@ pub async fn read_tui_max_feed_lines(base_dir: &std::path::Path) -> (Option<u64>
     }
 }
 
+/// Read the `[orchestrator] thinking_summary` settings from `<base_dir>/config.toml`.
+/// Missing file/section/key or `thinking_summary = false` → None. A malformed
+/// value reports a diagnostic but does not block startup.
+pub async fn read_orchestrator_thinking_summary(
+    base_dir: &std::path::Path,
+) -> (
+    Option<theway_transport::config::ThinkingSummarySettings>,
+    Option<String>,
+) {
+    let path = base_dir.join("config.toml");
+    let Ok(text) = tokio::fs::read_to_string(&path).await else {
+        return (None, None);
+    };
+    match theway_transport::config::parse_orchestrator_thinking_summary(&text) {
+        Ok(settings) => (settings, None),
+        Err(err) => (
+            None,
+            Some(format!(
+                "orchestrator: ignoring invalid thinking_summary in {}: {err}",
+                path.display()
+            )),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -117,6 +142,35 @@ mod tests {
         assert!(diagnostic.is_none());
     }
 
+    #[tokio::test]
+    async fn orchestrator_thinking_summary_reads_config_and_reports_malformed() {
+        let temp = tempfile::tempdir().unwrap();
+        let base_dir = temp.path();
+
+        let (settings, diagnostic) = read_orchestrator_thinking_summary(base_dir).await;
+        assert!(settings.is_none());
+        assert!(diagnostic.is_none());
+
+        tokio::fs::write(
+            base_dir.join("config.toml"),
+            "[orchestrator]\nthinking_summary = true\nthinking_summary_min_chars = 500\n",
+        )
+        .await
+        .unwrap();
+        let (settings, diagnostic) = read_orchestrator_thinking_summary(base_dir).await;
+        assert_eq!(settings.map(|s| s.min_chars), Some(500));
+        assert!(diagnostic.is_none());
+
+        tokio::fs::write(
+            base_dir.join("config.toml"),
+            "[orchestrator]\nthinking_summary = true\nthinking_summary_min_chars = 0\n",
+        )
+        .await
+        .unwrap();
+        let (settings, diagnostic) = read_orchestrator_thinking_summary(base_dir).await;
+        assert!(settings.is_none());
+        assert!(diagnostic.is_some());
+    }
     #[tokio::test]
     async fn model_default_reads_config_and_reports_malformed() {
         let temp = tempfile::tempdir().unwrap();

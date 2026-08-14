@@ -23,3 +23,4 @@ pub mod kernel;
 pub mod listener;
 pub mod relay;
 pub mod session_factory;
+pub mod thinking_summary;

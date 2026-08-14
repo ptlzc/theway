@@ -94,6 +94,9 @@ pub struct DaemonConfig {
     pub log_path: Option<PathBuf>,
     pub tool_count: usize,
     pub feed_rx: mpsc::UnboundedReceiver<FeedUpdate>,
+    /// Loopback sender for feed updates produced inside the host (thinking
+    /// summarizer backfill); pairs with `feed_rx`.
+    pub feed_tx: mpsc::UnboundedSender<FeedUpdate>,
     pub main_run_rx: mpsc::UnboundedReceiver<String>,
     pub control_plane_prompt_rx: Option<mpsc::UnboundedReceiver<UiControlPlanePrompt>>,
     pub dag_engine: Arc<theway_core::multiagent::graph::engine::DagEngine>,
@@ -102,6 +105,8 @@ pub struct DaemonConfig {
     pub session_repo: Arc<SqliteSessionRepo>,
     pub current_session_state: Arc<Mutex<CurrentSessionState>>,
     pub panel_status: PanelStatus,
+    /// `[orchestrator] thinking_summary` settings; `None` → thinking stays raw.
+    pub thinking_summary: Option<super::thinking_summary::ThinkingSummarySettings>,
     /// `[tui] max_feed_lines` from config.toml, pushed to the TUI in snapshots.
     pub tui_max_feed_lines: Option<u64>,
 }
@@ -120,6 +125,11 @@ pub struct TurnHost {
     latest_trigger_poll: Option<TriggerPollStatus>,
     latest_goal: Option<theway_core::multiagent::goal::GoalState>,
     feed_rx: Option<mpsc::UnboundedReceiver<FeedUpdate>>,
+    /// Loopback sender for feed updates produced inside the host (thinking
+    /// summarizer backfill); pairs with `feed_rx`.
+    feed_tx: mpsc::UnboundedSender<FeedUpdate>,
+    thinking_summary: Option<super::thinking_summary::ThinkingSummarySettings>,
+    thinking_burst: super::thinking_summary::ThinkingBurst,
     main_run_rx: Option<mpsc::UnboundedReceiver<String>>,
     control_plane_prompt_rx: Option<mpsc::UnboundedReceiver<UiControlPlanePrompt>>,
     control_plane_prompt: Option<UiControlPlanePrompt>,
@@ -145,6 +155,19 @@ fn current_model_label(harness: &Arc<theway_core::AgentHarness>) -> String {
         .as_ref()
         .map(|m| format!("{}:{}", m.provider.0, m.id))
         .unwrap_or_else(|| "no-model".to_string())
+}
+
+/// Resolve the active model's context window (tokens) from the provider
+/// catalog. `0` when unknown — the TUI then hides the percentage indicator.
+pub(crate) fn context_window_for(label: &str) -> u64 {
+    let Some((provider, id)) = label.split_once(':') else {
+        return 0;
+    };
+    theway_llm_provider::list_models()
+        .iter()
+        .find(|m| m.provider.0 == provider && m.id == id)
+        .map(|m| u64::from(m.context_window))
+        .unwrap_or(0)
 }
 
 fn user_facing_run_error(error: &str) -> String {
@@ -191,6 +214,9 @@ impl TurnHost {
             latest_trigger_poll: None,
             latest_goal: None,
             feed_rx: Some(config.feed_rx),
+            feed_tx: config.feed_tx,
+            thinking_summary: config.thinking_summary,
+            thinking_burst: super::thinking_summary::ThinkingBurst::default(),
             main_run_rx: Some(config.main_run_rx),
             control_plane_prompt_rx: config.control_plane_prompt_rx,
             control_plane_prompt: None,
@@ -598,6 +624,8 @@ impl TurnHost {
 
     fn wire_snapshot(&self) -> WireStatus {
         let model = current_model_label(self.kernel.harness());
+        let context_window = context_window_for(&model);
+        let cost = self.kernel.harness().cost();
         WireStatus {
             session_id: self.session_id.clone(),
             model,
@@ -633,6 +661,16 @@ impl TurnHost {
                 .filter(|job| job.session_id.as_deref() == Some(self.session_id.as_str()))
                 .map(subagent_job_snapshot)
                 .collect(),
+            usage: {
+                WireContextUsage {
+                    input_tokens: cost.tokens.input,
+                    output_tokens: cost.tokens.output,
+                    cache_read_tokens: cost.tokens.cache_read,
+                    cache_write_tokens: cost.tokens.cache_write,
+                    total_tokens: cost.tokens.total_tokens,
+                    context_window,
+                }
+            },
             tui_max_feed_lines: self.tui_max_feed_lines,
         }
     }
@@ -899,7 +937,13 @@ impl TurnHost {
             FeedUpdate::TriggerPollStatus(status) => {
                 self.latest_trigger_poll = Some(status);
             }
-            other => self.feed.apply(other),
+            update => super::thinking_summary::apply(
+                &mut self.feed,
+                &mut self.thinking_burst,
+                self.thinking_summary.as_ref(),
+                &self.feed_tx,
+                update,
+            ),
         }
     }
 

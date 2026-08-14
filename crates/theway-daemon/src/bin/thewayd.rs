@@ -21,7 +21,8 @@ use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::persist::DagPersistSink;
 use theway_core::{AgentHarness, AgentHarnessOptions, PermissionPolicy, ThinkingLevel};
 use theway_daemon::config_readers::{
-    read_builtin_skills_config, read_trigger_poll_interval_secs, read_tui_max_feed_lines,
+    read_builtin_skills_config, read_orchestrator_thinking_summary,
+    read_trigger_poll_interval_secs, read_tui_max_feed_lines,
 };
 use theway_daemon::stream_auth::stream_fn_with_auth_store;
 use theway_daemon::system_prompt::compose_system_prompt;
@@ -291,6 +292,11 @@ async fn main() -> Result<()> {
     if let Some(diag) = tui_config_diagnostic {
         tracing::warn!("{diag}");
     }
+    let (thinking_summary_cfg, thinking_summary_diagnostic) =
+        read_orchestrator_thinking_summary(&config::base_dir()).await;
+    if let Some(diag) = thinking_summary_diagnostic {
+        tracing::warn!("{diag}");
+    }
     let resolved_builtins = theway_daemon::builtin_skills::resolve_builtins(
         &cli.builtin_skill,
         &config_enabled_builtins,
@@ -515,6 +521,67 @@ async fn main() -> Result<()> {
         trigger_features: ui_mode_panel::active_trigger_features(),
     };
 
+    let thinking_summary = thinking_summary_cfg.map(|cfg| {
+        use theway_daemon::turn::thinking_summary::{
+            ThinkingSummarizerFn, ThinkingSummarySettings,
+        };
+        let summarizer_model = model.clone();
+        let summarizer_stream = stream_fn.clone();
+        let summarizer_registry = subagent_registry.clone();
+        let summarizer_session = session_id.clone();
+        let summarizer_launch = agent_specs::launch_resolver();
+        let summarizer: ThinkingSummarizerFn = Arc::new(move |text: String| {
+            let summarizer_launch = summarizer_launch.clone();
+            let summarizer_model = summarizer_model.clone();
+            let summarizer_stream = summarizer_stream.clone();
+            let summarizer_registry = summarizer_registry.clone();
+            let summarizer_session = summarizer_session.clone();
+            Box::pin(async move {
+                let Some(launch) = summarizer_launch("general") else {
+                    return Err("general subagent spec unavailable".to_string());
+                };
+                let prompt = format!(
+                    "Summarize the following reasoning transcript into a STRUCTURED markdown summary. Output ONLY the summary:\n## Goal\n- ...\n## Key steps\n- ...\n## Findings\n- ...\n## Decision\n- ...\n\nThinking transcript:\n\n{}",
+                    theway_transport::feed::truncate_chars(&text, 24_000)
+                );
+                let result = theway_core::multiagent::runner::run_agent(
+                    theway_core::multiagent::runner::AgentRunOptions {
+                        launch,
+                        // The summarizer is pure text: no tools, no delegation.
+                        tools: Vec::new(),
+                        prompt,
+                        model: summarizer_model,
+                        stream_fn: Some(summarizer_stream),
+                        timeout: None,
+                        thinking: None,
+                        registry: summarizer_registry,
+                        source: "thinking-summary".into(),
+                        run_id: None,
+                        node_id: None,
+                        session_id: Some(summarizer_session),
+                        cancel: tokio_util::sync::CancellationToken::new(),
+                        system_prompt_extra: Some(
+                            "You are a thinking summarizer: compress verbose step-by-step \
+                             reasoning into a concise structured summary. Never run tools. \
+                             Never add commentary beyond the summary."
+                                .to_string(),
+                        ),
+                        on_turn_end: None,
+                    },
+                )
+                .await;
+                match result.error {
+                    Some(error) => Err(error),
+                    None => Ok(result.text),
+                }
+            })
+        });
+        ThinkingSummarySettings {
+            min_chars: cfg.min_chars,
+            summarizer,
+        }
+    });
+
     let host = TurnHost::new(DaemonConfig {
         harness: harness.clone(),
         trigger_executor,
@@ -525,6 +592,7 @@ async fn main() -> Result<()> {
         log_path: _logging.as_ref().map(|l| l.log_path.clone()),
         tool_count: tool_names.len(),
         feed_rx,
+        feed_tx: feed_tx.clone(),
         main_run_rx,
         control_plane_prompt_rx,
         dag_engine: dag_engine.clone(),
@@ -535,6 +603,7 @@ async fn main() -> Result<()> {
             session_ops::CurrentSessionState::default(),
         )),
         panel_status,
+        thinking_summary,
         tui_max_feed_lines,
     });
 
