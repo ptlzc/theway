@@ -226,6 +226,7 @@ The agent has tools for common coding workflows:
   triage inbox; see [docs/loops.md](docs/loops.md)
 - receive server-pushed MCP notifications and normalize them into the same trigger runtime
 - run local command hooks or HTTP webhooks on agent lifecycle events; see [docs/hooks.md](docs/hooks.md)
+- render assistant output through crates/theway-markdown (ported from Grok Build: bold, italic, headings, inline code, lists, tables, blockquotes, strikethrough, link underlines, fenced syntax highlighting, mermaid, LaTeX pretty mode)
 
 ## Triggers and notifications
 
