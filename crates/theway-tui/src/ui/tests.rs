@@ -182,6 +182,84 @@ async fn status_line_shows_busy_spinner_from_snapshot() {
     );
 }
 
+/// Feed scrollback cap (issue #27): the render path keeps only the newest
+/// DEFAULT_MAX_FEED_LINES lines and shifts the scroll offset by the trimmed
+/// head count so a scrolled-up view does not jump.
+#[test]
+fn trim_feed_head_drops_oldest_lines_and_reports_count() {
+    let mut lines: Vec<ratatui::text::Line<'static>> = (0..3_500)
+        .map(|i| ratatui::text::Line::raw(format!("row-{i}")))
+        .collect();
+    let trimmed = super::trim_feed_head(&mut lines, super::DEFAULT_MAX_FEED_LINES);
+    assert_eq!(trimmed, 500);
+    assert_eq!(lines.len(), super::DEFAULT_MAX_FEED_LINES);
+    assert_eq!(lines[0].spans[0].content, "row-500");
+    assert_eq!(
+        lines[super::DEFAULT_MAX_FEED_LINES - 1].spans[0].content,
+        "row-3499"
+    );
+
+    // Under the cap: no-op, nothing trimmed.
+    let mut short: Vec<ratatui::text::Line<'static>> = (0..10)
+        .map(|i| ratatui::text::Line::raw(format!("row-{i}")))
+        .collect();
+    assert_eq!(
+        super::trim_feed_head(&mut short, super::DEFAULT_MAX_FEED_LINES),
+        0
+    );
+    assert_eq!(short.len(), 10);
+}
+
+#[tokio::test]
+async fn feed_render_caps_scrollback_at_default_max_lines() {
+    let (mut app, _rx) = test_app().await;
+    // ~3.2k rendered rows: one Plain block with one short row per line (no
+    // wrapping at width 50).
+    app.feed.clear();
+    let rows: Vec<String> = (0..3_200).map(|i| format!("row-{i:04}")).collect();
+    app.feed
+        .push_plain_untimed(rows.join("\n"), theway_transport::feed::Level::Note);
+
+    let backend = TestBackend::new(50, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    // Following: the capped tail is visible (newest row on screen) and the
+    // uncapped scroll anchor sits at the bottom of the full feed.
+    app.follow = true;
+    terminal.draw(|f| app.render(f)).unwrap();
+    let text = buffer_text(terminal.backend().buffer());
+    assert!(
+        text.contains("row-3199"),
+        "follow must show the newest feed row:\n{text}"
+    );
+    assert_eq!(
+        app.scroll,
+        3_200 - app.last_viewport_h,
+        "follow anchors scroll one viewport above the uncapped end"
+    );
+
+    // Scrolled up: the view must keep showing the same content (uncapped
+    // offset 2000 → display offset 1800 after the 200-line head trim), and a
+    // second draw must not drift the view.
+    app.follow = false;
+    app.scroll = 2_000;
+    terminal.draw(|f| app.render(f)).unwrap();
+    let text = buffer_text(terminal.backend().buffer());
+    assert!(
+        text.contains("row-2000"),
+        "scrolled-up view must keep showing the same feed content:\n{text}"
+    );
+    assert_eq!(app.scroll, 2_000, "uncapped scroll anchor must not change");
+    assert!(!app.follow, "scrolled up must disable follow");
+
+    terminal.draw(|f| app.render(f)).unwrap();
+    let text = buffer_text(terminal.backend().buffer());
+    assert!(
+        text.contains("row-2000"),
+        "second draw must not drift the scrolled-up view:\n{text}"
+    );
+}
+
 #[tokio::test]
 async fn snapshot_rebuilds_feed_and_resyncs_busy_panel() {
     let (mut app, _rx) = test_app().await;

@@ -73,6 +73,10 @@ use render_utils::{enter_tui, leave_tui, new_textarea};
 const SPINNER_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const MAX_INPUT_ROWS: usize = 6;
 const SCROLL_STEP: usize = 3;
+/// Default scrollback cap for the conversation feed: only the newest
+/// `DEFAULT_MAX_FEED_LINES` rendered lines are kept; older lines are trimmed
+/// from the head (issue #27).
+pub(crate) const DEFAULT_MAX_FEED_LINES: usize = 3_000;
 const COMPLETION_POPUP_MAX: usize = 8;
 const TRIGGER_PANEL_MIN_TOTAL_WIDTH: u16 = 100;
 const TRIGGER_PANEL_WIDTH: u16 = 36;
@@ -509,20 +513,35 @@ impl App {
         self.last_feed_area = Some(feed_area);
 
         // Feed (pre-wrapped to width so scroll math is exact).
-        let lines = crate::feed_render::lines(&self.feed, feed_area.width as usize);
+        let mut lines = crate::feed_render::lines(&self.feed, feed_area.width as usize);
+        let uncapped_total = lines.len();
+        // Scrollback cap (issue #27): keep only the newest
+        // DEFAULT_MAX_FEED_LINES rendered lines. `self.scroll` lives in
+        // *uncapped* coordinates (it only grows as the feed grows), so the
+        // per-frame head trim cannot drift a scrolled-up view; the display
+        // scroll is the uncapped offset shifted down by the trimmed count.
+        let trimmed = trim_feed_head(&mut lines, DEFAULT_MAX_FEED_LINES);
         let total = lines.len();
         let viewport = feed_area.height as usize;
         self.last_viewport_h = viewport;
         let max_scroll = total.saturating_sub(viewport);
-        if self.follow {
-            self.scroll = max_scroll;
+        let display_scroll = if self.follow {
+            // Bottom anchor in uncapped coordinates: display bottom is
+            // max_scroll (= capped_total - viewport), which maps back to
+            // (capped_total - viewport) + trimmed = uncapped_total - viewport.
+            // Anchoring one viewport above the end keeps a single PageUp a
+            // real step (it must not land back on the follow threshold).
+            self.scroll = uncapped_total.saturating_sub(viewport);
+            max_scroll
         } else {
-            self.scroll = self.scroll.min(max_scroll);
-            if self.scroll >= max_scroll {
+            let capped = self.scroll.saturating_sub(trimmed).min(max_scroll);
+            if capped >= max_scroll {
                 self.follow = true;
+                self.scroll = uncapped_total.saturating_sub(viewport);
             }
-        }
-        let feed = Paragraph::new(lines).scroll((self.scroll as u16, 0));
+            capped
+        };
+        let feed = Paragraph::new(lines).scroll((display_scroll as u16, 0));
         frame.render_widget(feed, feed_area);
         // Feed scrollbar (theway-pager-render primitive): right edge of the
         // feed pane, subtle while following, brighter when scrolled up.
@@ -538,7 +557,7 @@ impl App {
                 Some(sb_area),
                 total as u16,
                 viewport as u16,
-                self.scroll as u16,
+                display_scroll as u16,
                 self.follow,
             );
         }
@@ -1139,6 +1158,17 @@ impl App {
         printer.abort();
         Ok(())
     }
+}
+
+/// Trim a rendered feed line buffer to its newest `cap` lines (scrollback
+/// cap, issue #27). Returns how many lines were dropped from the head so the
+/// caller can shift its scroll offset by the same amount.
+fn trim_feed_head(lines: &mut Vec<Line<'static>>, cap: usize) -> usize {
+    let trimmed = lines.len().saturating_sub(cap);
+    if trimmed > 0 {
+        lines.drain(..trimmed);
+    }
+    trimmed
 }
 
 /// Assemble the slash-command completion list: the SDK local command set from
