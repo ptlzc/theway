@@ -407,6 +407,7 @@ impl App {
         self.completer = SlashCompleter::from_commands(collect_slash_commands(
             &self.registry,
             &self.latest.sidebar.skills.items,
+            &self.latest.sidebar.commands,
         ));
         self.completions = if self.input_is_single_line() {
             self.completer.matches(&self.input_text())

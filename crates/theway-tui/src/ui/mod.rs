@@ -277,6 +277,7 @@ impl App {
         let completer = SlashCompleter::from_commands(collect_slash_commands(
             &config.registry,
             &initial.sidebar.skills.items,
+            &initial.sidebar.commands,
         ));
         Self {
             client: config.client,
@@ -1526,10 +1527,12 @@ fn shimmer_style(tick: u64) -> Style {
 /// `registry` (`Registry::local()` — quit/clear/help/login/logout/sessions) +
 /// the daemon-side command surface (the daemon owns the full registry; the
 /// client forwards slash text via `send_message`) + skill shortcuts from the
-/// snapshot sidebar.
+/// snapshot sidebar + the daemon-scanned claude-code-format file commands
+/// (issue #37).
 fn collect_slash_commands(
     registry: &theway_transport::commands::Registry,
     skills: &[theway_transport::wire::WireSkillSnapshot],
+    file_commands: &[String],
 ) -> Vec<String> {
     let mut commands: Vec<String> = registry
         .commands()
@@ -1541,6 +1544,7 @@ fn collect_slash_commands(
         })
         .collect();
     commands.extend(DAEMON_COMMANDS.iter().map(|name| format!("/{name}")));
+    commands.extend(file_commands.iter().cloned());
     for skill in skills {
         if let Some(shortcut) = skill.name.split('/').next() {
             commands.push(format!("/{shortcut}"));
@@ -1560,6 +1564,7 @@ fn collect_slash_commands(
 const DAEMON_COMMANDS: &[&str] = &[
     "skills",
     "skill",
+    "reload",
     "model",
     "thinking",
     "cost",
