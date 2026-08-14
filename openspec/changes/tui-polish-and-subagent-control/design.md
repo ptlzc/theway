@@ -178,15 +178,158 @@ prompt_chrome 渲染时不再输出 working 标志（busy 已由工作带表达�
 - `ui/mod.rs` 只加调用点：render() 里 feed 段与 busy 段之间，`latest.dags`
   非空时先压缩 feed 面积再画 band；CpsMeter 集合放在 App 状态。
 
-## 9. 验证
+## 9. 迭代预算与工具 allowlist（编排层）
+
+### 9.1 数据流（现状 + 改动点）
+
+```
+dag_plan 节点 JSON {maxIterations?, tools?}
+        │  node_def_from_json()  [daemon/src/tools/dag_tools/utils.rs]
+        ▼
+DagNodeDef { max_iterations: Option<u32>, tools: Option<Vec<String>> }   ← 新增字段
+        │  build_run()           [core/multiagent/graph/model/mod.rs]
+        ▼
+DagNode   { max_iterations, tools }                                     ← 新增字段
+        │  NodeLauncherImpl::launch()  [core/multiagent/graph/node_launcher.rs]
+        ├── launch.max_iterations = node.max_iterations.unwrap_or(spec 默认 300)
+        └── tools = filter_tool_set(resolver(agent), node.tools)        ← 新增
+        ▼
+runner::run_agent(AgentRunOptions { launch, tools, … })                 ← 消费现有字段
+```
+
+subagent 工具路径对称：
+
+```
+subagent({subagent_type, max_iterations?, tools?, …})  [daemon/src/tools/subagent.rs]
+        ├── launch.max_iterations = params.max_iterations.unwrap_or(spec 默认 300)
+        └── tools = filter_tool_set(resolver(spec), params.tools)
+        ▼
+runner::run_agent(AgentRunOptions { … })
+```
+
+### 9.2 预算默认 300
+
+`crates/theway-daemon/src/agent_specs.rs`：
+
+```rust
+pub const DEFAULT_MAX_ITERATIONS: u32 = 300;
+```
+
+- 全部 5 个普通 spec（explorer/planner/executor-coder/checker/general）用它；
+  goal-evaluator 保持 `max_iterations: 1`。
+- 注释写明预算策略：300 是 code-harness 预算（编译/修复循环需要）；短平快任务
+  由 orchestrator 按提示词指引降到 4–32。
+- 引擎（`theway-core`）不改：它只执行 `AgentRunParams.max_iterations`，默认值
+  归属 app 层 spec 表。
+
+### 9.3 覆盖语义
+
+覆盖发生在「解析 launch 之后、run_agent 之前」，两个入口同一模式：
+
+```rust
+let mut launch = launch;                       // spec 默认 300
+if let Some(n) = override { launch.max_iterations = n; }
+```
+
+- 覆盖值 0 的语义：`max_iterations: 0` 在 agent loop 里是「立即超限」——文档注明
+  不要传 0（提示词写 4–32 范围）。
+- DAG 节点路径在 `node_launcher.rs` 读取 `node.max_iterations`（`DagNode` 运行时
+  状态随 `DagNodeDef` 持久化，restore 后覆盖仍生效）。
+
+### 9.4 工具 allowlist
+
+#### filter_tool_set（core，共享）
+
+`crates/theway-core/src/multiagent/runner.rs`：
+
+```rust
+pub fn filter_tool_set(
+    tools: Vec<Arc<dyn AgentTool>>,
+    allow: &[String],
+) -> Result<Vec<Arc<dyn AgentTool>>, String>
+```
+
+- `allow` 空 → 原样返回（默认全量语义）。
+- 每个 allow 名字必须存在于 `tools`（按 `definition().name` 匹配）；任一未知 →
+  `Err("unknown tool in allowlist: {name} (available: …)")`。
+- 命中过滤后返回；顺序保持原集顺序（按定义序过滤）。
+
+#### 默认工具集（不变）
+
+`daemon/src/tools/assembly.rs::subagent_tools()` 现在就是「orchestrator 工具 -
+subagent - dag_*」+ local tools（`subagent_engine_tools` = skill 家族 + memory，
+再加 local）。本 change 不重构该集合，只在其结果上应用 allowlist。
+
+#### 两个入口
+
+- `subagent` 工具：执行时 `filter_tool_set(resolver(subagent_type), allow)`，
+  Err → `AgentToolError::Message` 直接作为工具结果返回给 orchestrator
+  （可见、可重试）。
+- `dag_plan` 节点：`DagNodeDef.tools` + `DagNode.tools`；node_launcher 在 filter
+  失败时 `on_node_completed(…, success: false, error: 消息)`（节点同步失败，
+  orchestrator 通过 dag_inspect 看到原因；不 panic）。
+
+### 9.5 提示词更新
+
+- `subagent` 工具 description 加两段：
+  > Budget: the subagent defaults to 300 LLM-turn attempts — the code-harness
+  > budget (compile → fix loops need it). For short, fast tasks (a quick read, a
+  > single check) lower max_iterations to a reasonable range like 4-32.
+  > Tools: by default the subagent gets every orchestrator tool except dag_* and
+  > subagent; pass tools: ["read", "bash"] to restrict it to specific tools
+  > (unknown names fail the call).
+  schema 加 `max_iterations`（number）与 `tools`（array of string）。
+- `dag_plan` 工具 description 节点字段列表改为 `{id, agent, task, dependsOn?,
+  timeout?, cwd?, model?, thinking?, maxIterations?, tools?}`，加两段：
+  > Node budgets: every node's subagent defaults to 300 LLM-turn attempts
+  > (code-harness budget — compile/fix loops need it); for short, fast tasks
+  > (a quick read, a single check) set maxIterations to a smaller range like 4-32.
+  > Node tools: by default a node's subagent gets the orchestrator tool set minus
+  > dag_* and subagent; to restrict a node to specific tools set
+  > tools: ["read", "bash"] (unknown tool names fail the node).
+  schema 加 `maxIterations`（number）与 `tools`（array of string）。
+
+### 9.6 持久化
+
+- `DagNode` 新增两字段均 `#[serde(default)]`（旧持久化数据兼容）。
+- `PersistedNode` 镜像两字段；`hydrate` 还原时写入 `DagNode`；
+  `snapshot`（to_persisted）同步拷贝。Running 节点跨进程恢复后覆盖仍生效。
+
+### 9.7 解析（dag_plan）
+
+`node_def_from_json`（daemon/tools/dag_tools/utils.rs）：
+
+```rust
+max_iterations: n.get("maxIterations").and_then(|v| v.as_u64()).map(|v| v as u32),
+tools: n.get("tools").and_then(|v| v.as_array()).map(|a| {
+    a.iter().filter_map(|x| x.as_str().map(String::from)).collect()
+}),
+```
+
+mermaid 形式不支持这两字段（标签只有 `agent: task`），构造处补 `None`。
+
+### 9.8 边界与决策
+
+- **不引入 per-spec 工具差异**：spec 表保持「同一默认集」，差异只在启动时由
+  orchestrator 显式指定（保持 spec 概念简单）。
+- **不把 300 写进引擎**：引擎没有默认；所有默认都在 app 层 spec 表，与现有
+  「引擎只消费 launch 数据」分层一致。
+- **goal-evaluator 不变**：单轮评估器保持 1。
+- **不新增 wire/proto**：编排层内部变更，状态面无需暴露预算/工具面。
+
+## 10. 验证
 
 - 单测：块渲染（5 行折叠/展开）、统计行格式（human 数字 1 位小数）、CPS 滑窗、
   转轮速度映射（cps→delay 单调封顶）、usage 最近一轮、滚动加速度序列
   （1.0→1.5 封顶 + 复位）、滚轮命中区域路由、dag band（各状态符号/颜色/截断、
-  c/s 计量）。
+  c/s 计量）、filter_tool_set（空 allow 全量 / 命中过滤 / 未知名 Err / 顺序保持）、
+  build_run 传递新字段、persist roundtrip 带新字段、node_launcher override 生效、
+  node_def_from_json 解析 maxIterations/tools。
 - e2e（tmux capture-pane）：长工具调用块折叠视觉、流式时 char/s 与转轮加速、
   工具等待期转轮回落、ctx% 随最近一轮变化、长按滚动键加速滚动、composer 滚轮
   浏览、composer 拖拽调高回归（#37 已有功能）、dag 运行中状态带渲染（节点状态
   着色 + c/s 跳动）。
+- e2e（编排，可选）：真跑一个 `tools: ["bash"]` 的节点，断言工具面收窄
+  （读文件失败、bash 可用）；一个 `maxIterations: 8` 的短任务正常完成。
 - 门禁：`make check` / `make test` / `make lint` / `make fmt-check`。
 - 选区：仅保留现有高亮（鼠标拖拽 + Ctrl+Space + Shift+方向键），不新增复制。

@@ -1,16 +1,23 @@
-# TUI 打磨：工具块渲染、吞吐统计、彩虹转轮、状态修复
+# TUI 打磨 + subagent/DAG 编排控制
 
 ## 范围整合
 
-本 change 合并两批任务的欠账为一份 openspec：
+本 change 合并三批需求为一份 openspec（一个 issue、一个 DAG 实施链）：
 
-**近期清单（#37 之后，6 条）**：工具调用块化、thinking 统计行、working 吞吐统计、
-彩虹 callback 转轮、ctx 100% 修复 + 去 working/multiline、右上角 features。
+**近期 TUI 清单（#37 之后，6 条）**：工具调用块化、thinking 统计行、working 吞吐
+统计、彩虹 callback 转轮、ctx 100% 修复 + 去 working/multiline、右上角 features。
 
-**本轮新增（2 条）**：滚动加速度（最多 1.5x）、composer 输入框滚轮浏览。
+**本轮 TUI 新增（3 条）**：滚动加速度（最多 1.5x）、composer 输入框滚轮浏览、
+DAG 状态带（节点状态着色 + c/s 统计）。
 
 **#33 批次欠账（用户复核确认还欠的 2 条）**：工具调用平铺（= 近期 1）、ctx 用量
 显示 bug（= 近期 6）。
+
+**编排层新增（2 条，code harness 场景暴露）**：
+- subagent / DAG 节点迭代预算默认 300（launch 参数层），短平快任务按启动降预算
+  （4–32），提示词写明策略。
+- subagent / DAG 节点支持工具 allowlist：默认全量（orchestrator 工具 - dag_* -
+  subagent），orchestrator 可在特定场景收窄到指定工具，未知工具名 fail-fast。
 
 **#33 批次已完成项（不在本计划）**：输入框光标、用户输入块渲染、mermaid 图、
 Ctrl+O thinking 三状态（隐藏/查探/全显）、orchestrator thinking 结构化总结回填、
@@ -19,12 +26,19 @@ Ctrl+Space + Shift+方向键；用户明确只做选区，不做复制）。
 
 ## Why
 
-#37 落地了 slash popup、粘贴对象、composer 拖拽和鼠标选区，但 feed 的工具调用仍然是
-平铺单行，缺少块化结构（#33 遗留）；busy 转轮是固定 tick 驱动，与流式节奏脱节；
+**TUI 侧**：#37 落地了 slash popup、粘贴对象、composer 拖拽和鼠标选区，但 feed 的
+工具调用仍然是平铺单行（#33 遗留）；busy 转轮是固定 tick 驱动，与流式节奏脱节；
 thinking 块没有字数/吞吐统计；右下角 ctx 百分比恒定 100%（daemon 发的是会话累计
-token，除以 context window 后一旦超窗就永远 100%，#33 遗留）。
+token，#33 遗留）；dag 运行中没有任何可见状态带。
 
-整合后的完整清单（9 条）：
+**编排侧**：code harness 场景暴露两个缺陷——`DEFAULT_MAX_ITERATIONS = 16` 对
+编译→修复循环太低（executor-coder 一轮探索+编译+修错就烧光预算，死前一行代码
+未写）；subagent / DAG 节点只能拿固定全量工具集，orchestrator 无法收窄工具面
+（如只让某节点用 read+bash）。
+
+## 完整清单（11 条）
+
+**TUI（9 条）：**
 
 1. tools 调用分块渲染：首行是指令，下面是 5 行输出，超过 5 行省略
 2. thinking 块：一块内容 + 字数统计，右侧有 `c(har)/s`、`output: 1.2k`（最多 1 位小数）
@@ -37,6 +51,15 @@ token，除以 context window 后一旦超窗就永远 100%，#33 遗留）。
 8. composer 输入框支持鼠标滚轮浏览（多行/折行内容滚轮查看）
 9. dag 模式：在 composer 状态栏之上渲染 DAG 状态带——每个节点按运行/取消/成功/失败
    等状态着色，run 头显示 c/s 输出统计（与转轮统一 cps 驱动）
+
+**编排（2 条）：**
+
+10. subagent / DAG 节点迭代预算默认 300（launch 参数层）；`subagent` 工具
+    `max_iterations` 参数、`dag_plan` 节点 `maxIterations` 字段按启动覆盖；
+    短平快任务（快速读文件/单次检查）提示词指引降为 4–32
+11. subagent / DAG 节点工具 allowlist：`subagent` 工具 `tools` 参数、`dag_plan`
+    节点 `tools` 字段；默认全量（orchestrator - dag_* - subagent）；非空时只注入
+    列出的工具；未知工具名 fail-fast（报错列出可用名）
 
 （选区只保留现有高亮，不做复制——用户确认。composer 顶部拖拽调高在 #37 已实现
 [e4f1388]，不在本计划，但 verify 阶段回归验证。）
@@ -92,10 +115,25 @@ output_tokens 之和在快照间的 delta / 1s 滑动窗（复用 C 的 CpsMeter
 `…`。数据源 `WireStatus.dags`（wire 已带 per-node status/tokens/preview），无 proto
 变更。
 
+**J. 迭代预算默认 300（agent_specs）**：`DEFAULT_MAX_ITERATIONS` 16 → 300，作为
+每个 spec 的 launch 默认（goal-evaluator 保持 1）。这是「启动参数默认」，引擎不
+硬编码——引擎只消费 `AgentRunParams.max_iterations`。
+
+**K. 按启动降预算 + 工具 allowlist（两入口共用 filter）**：
+- `subagent` 工具新增参数 `max_iterations`（number）与 `tools`（string[]）。
+- `dag_plan` 节点新增字段 `maxIterations` 与 `tools`，经
+  `DagNodeDef → DagNode → node_launcher` 传入 runner。
+- 共享 filter：`theway-core` runner 新增
+  `filter_tool_set(tools, allow) -> Result<Vec<Arc<dyn AgentTool>>, String>`——
+  空 allow 全量；未知名 Err（列出可用名）；按原顺序过滤。
+- 提示词策略：code harness 任务（编译/修复循环）用默认 300；短平快任务设 4–32。
+
 ## Impact
 
-- 纯 TUI + daemon usage 语义微调，无 proto 变更（ContextUsage 已够用）。
-- 工具块默认折叠 5 行输出 → 长工具调用不再刷屏；Ctrl+T 展开行为不变。
-- 转轮 callback 化后，无流式输出时转轮回落基准速度，不增加帧成本（仍是单帧渲染）。
-- ctx 百分比修复后反映真实最近一轮占用。
-- 选区保持现状（仅高亮），本 change 不引入复制路径。
+- TUI 侧：无 proto 变更（ContextUsage / WireStatus.dags 已够用）；工具块默认折叠
+  5 行输出 → 长工具调用不再刷屏；转轮 callback 化后无流式输出时回落基准速度，
+  不增加帧成本；ctx 百分比修复后反映真实最近一轮占用；选区保持现状（仅高亮）。
+- 编排侧：纯 core + daemon（`DagNodeDef`/`DagNode`/持久化加两个可选字段，
+  `#[serde(default)]` 向后兼容）；默认 300 后 runaway 子代理最长运行时间变长，
+  但有硬上限兜底且 orchestrator 可按任务降预算；不动 proto / wire / TUI 状态面。
+- 两个主题互相独立（文件不重叠），可并行实施；verify 统一收尾。
