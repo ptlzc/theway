@@ -12,6 +12,9 @@
 #   - cargo install --path crates/theway-daemon --force 同步安装 thewayd
 #     (TUI 按需 spawn daemon 时从 theway 同目录或 PATH 找 thewayd, 两者必须配套,
 #     否则 discovery 协议错配会表现为冷启动 20s 超时)
+#   - 安装后停掉正在运行的旧版 thewayd (先 SIGTERM 优雅退出, 再 SIGKILL 兜底)
+#     并移除残留端口文件 — 协议随版本演进, 旧 daemon 留着会变成不可发现的僵尸
+#     (注意: 其他终端正在运行的 theway 会话会被断开)
 #   - 同时生成 `tw` 简写 (与 theway 相同的二进制副本, Makefile 同款约定)
 #   - 安装后打印版本; 若目标 bin 目录不在 PATH 中会给出提示
 #
@@ -67,6 +70,21 @@ mkdir -p "$BIN_DIR"
 
 echo "==> 构建并安装 thewayd (release) 到 $BIN_DIR"
 "$CARGO" install --path "$ROOT/crates/theway-daemon" --force --locked --root "$INSTALL_ROOT"
+
+# ── 清理旧 daemon ───────────────────────────────────────────────────────────
+# 安装即替换协议: 正在运行的旧版 thewayd 与新客户端不兼容, 留着只会变成
+# 不可发现的僵尸 (占内存/端口直到被手动 pkill). 先 SIGTERM (优雅退出, 新版
+# 会自清端口文件), 最多等 5s, 再 SIGKILL 兜底.
+echo "==> 停掉旧版 thewayd 进程 (其他终端的 theway 会话会断开)"
+pkill -TERM -x thewayd 2>/dev/null || true
+for _ in 1 2 3 4 5; do
+    pgrep -x thewayd >/dev/null 2>&1 || break
+    sleep 1
+done
+pkill -KILL -x thewayd 2>/dev/null || true
+# 移除旧全局端口文件 + 残留 per-cwd 条目 (新 daemon 启动时会写自己的).
+THEWAY_BASE="${THEWAY_DIR:-$HOME/.theway}"
+rm -f "$THEWAY_BASE"/daemon-port "$THEWAY_BASE"/daemon-port-*
 
 echo "==> 生成 tw 简写"
 cp "$BIN_DIR/theway$EXE" "$BIN_DIR/tw$EXE"
