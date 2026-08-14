@@ -20,6 +20,7 @@ use base64::Engine as _;
 use parking_lot::Mutex;
 use tokio::sync::{broadcast, mpsc};
 
+use theway_core::AgentMessage;
 use theway_core::SkillSource;
 use theway_core::multiagent::graph::types::DagEvent;
 use theway_core::multiagent::registry::AgentJobEvent;
@@ -32,7 +33,7 @@ use crate::control_plane_prompt::UiControlPlanePrompt;
 use crate::session_ops::{CurrentSessionState, SessionFactory};
 use crate::triggers;
 use crate::{SqliteSessionRepo, bug_report};
-use theway_llm_provider::ImageContent;
+use theway_llm_provider::{ImageContent, Message, Usage};
 use theway_transport::mentions;
 use theway_transport::transport::SlashCompleter;
 use theway_transport::wire::*;
@@ -654,7 +655,11 @@ impl TurnHost {
     fn wire_snapshot(&mut self) -> WireStatus {
         let model = current_model_label(self.kernel.harness());
         let context_window = context_window_for(&model);
-        let cost = self.kernel.harness().cost();
+        // Last-turn usage (not session-cumulative): the last assistant message's
+        // usage, so the TUI's ctx% divides one turn's token count by the context
+        // window instead of growing past it forever (issue #38).
+        let usage =
+            last_turn_usage(&self.kernel.harness().agent().state().messages).unwrap_or_default();
         // Incremental plain rows (issue #35): only the tail appended since the
         // last publish goes on the wire; `feed_lines_base` anchors it.
         let (feed_lines, feed_lines_base) = {
@@ -701,15 +706,15 @@ impl TurnHost {
                 .filter(|job| job.session_id.as_deref() == Some(self.session_id.as_str()))
                 .map(subagent_job_snapshot)
                 .collect(),
-            usage: {
-                WireContextUsage {
-                    input_tokens: cost.tokens.input,
-                    output_tokens: cost.tokens.output,
-                    cache_read_tokens: cost.tokens.cache_read,
-                    cache_write_tokens: cost.tokens.cache_write,
-                    total_tokens: cost.tokens.total_tokens,
-                    context_window,
-                }
+            // Last-turn token usage (input/output/cache/total from the last
+            // assistant message) + the active model's context window.
+            usage: WireContextUsage {
+                input_tokens: usage.input,
+                output_tokens: usage.output,
+                cache_read_tokens: usage.cache_read,
+                cache_write_tokens: usage.cache_write,
+                total_tokens: usage.total_tokens,
+                context_window,
             },
             tui_max_feed_lines: self.tui_max_feed_lines,
         }
@@ -1095,6 +1100,16 @@ impl theway_transport::host::TransportHost for TurnHost {
     }
 }
 
+/// Token usage of the most recent completed LLM turn: the last assistant
+/// message's `usage` (input/output/cache/total) in the transcript. `None`
+/// before the first assistant reply; the snapshot then reports zeroed usage.
+fn last_turn_usage(messages: &[AgentMessage]) -> Option<Usage> {
+    messages.iter().rev().find_map(|m| match m {
+        AgentMessage::Llm(Message::Assistant(a)) => Some(a.usage.clone()),
+        _ => None,
+    })
+}
+
 fn wire_preview(text: &str) -> String {
     feed::truncate_chars(&bug_report::redact(text), 120)
 }
@@ -1157,3 +1172,8 @@ fn load_web_prompt_images(images: &[WirePromptImage]) -> Result<Vec<ImageContent
     }
     Ok(out)
 }
+
+#[cfg(test)]
+// Test files live in `tests/turn/daemon/` (mirror of src), pulled in by
+// path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
+tests_bridge_macro::tests_bridge!("turn/daemon");
