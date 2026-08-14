@@ -4,8 +4,9 @@
 //! needs (state, frames, commands, session + graph control) and the daemon
 //! discovery helpers ([`read_port_file`], [`probe`], [`spawn_daemon`],
 //! [`wait_ready`]) that implement the `daemon-client` capability: find the
-//! daemon via `<THEWAY_DIR>/daemon-port` (or the default port 44777), verify it
-//! is alive with a `get_state` health probe, and spawn one on demand.
+//! daemon via a per-cwd discovery file (`<THEWAY_DIR>/daemon-port-<cwd-hash>`,
+//! carrying `<port> <pid>`) or the default port 44777, verify it is alive with
+//! a `get_state` health probe, and spawn one on demand.
 //!
 //! Loopback-only, same trust model as the daemon itself: no auth is performed
 //! beyond the loopback bind the daemon uses.
@@ -44,25 +45,96 @@ pub fn base_dir() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from(".theway"))
 }
 
-/// Well-known daemon discovery file: `<base>/daemon-port`, written by `thewayd`
-/// on bind (actual bound port — meaningful when `--port 0` asked for random).
-pub fn port_file_path() -> PathBuf {
-    base_dir().join("daemon-port")
+/// Published daemon endpoint read from the discovery file: `<port> <pid>`.
+///
+/// `pid` is the daemon that wrote the file; clients compare it against a
+/// spawned child's pid ([`wait_ready`]) or check liveness ([`pid_alive`]) so a
+/// leftover entry from a dead daemon can never shadow a fresh spawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PortEntry {
+    pub port: u16,
+    pub pid: Option<u32>,
 }
 
-/// Read the published daemon port, if any. `Ok(None)` = no port file (or empty).
-pub fn read_port_file() -> Result<Option<u16>> {
-    match std::fs::read_to_string(port_file_path()) {
+/// FNV-1a 64-bit over path bytes. Deterministic and dependency-free; used only
+/// to turn a cwd path into a short, filesystem-safe discovery-file suffix.
+fn fnv64(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for &b in bytes {
+        hash ^= u64::from(b);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// Canonical (symlink-resolved) cwd used as the discovery-file key; falls back
+/// to the input path when canonicalization fails (dir may not exist yet).
+fn canonical_cwd(cwd: &Path) -> PathBuf {
+    std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf())
+}
+
+/// Per-cwd daemon discovery file: `<base>/daemon-port-<fnv64(canonical cwd)>`,
+/// written by `thewayd` on bind (actual bound port — meaningful when `--port 0`
+/// asked for random).
+///
+/// One file per cwd: concurrent daemons in different worktrees no longer
+/// clobber each other, and a stale entry can only ever shadow its own cwd.
+/// Both sides (daemon + client) derive the name from their cwd, so they agree
+/// by construction; the legacy global `<base>/daemon-port` is no longer read.
+pub fn port_file_path(cwd: &Path) -> PathBuf {
+    let canonical = canonical_cwd(cwd);
+    base_dir().join(format!(
+        "daemon-port-{:016x}",
+        fnv64(canonical.as_os_str().as_encoded_bytes())
+    ))
+}
+
+/// Read the published daemon entry, if any. `Ok(None)` = no port file (or empty).
+/// A single-token file (pre-pid format) parses with `pid: None`.
+pub fn read_port_file(cwd: &Path) -> Result<Option<PortEntry>> {
+    let path = port_file_path(cwd);
+    match std::fs::read_to_string(&path) {
         Ok(contents) => {
-            let port = contents.trim().parse::<u16>().with_context(|| {
-                format!("parse daemon port file {}", port_file_path().display())
-            })?;
-            Ok(Some(port))
+            let mut parts = contents.split_whitespace();
+            let port = parts
+                .next()
+                .with_context(|| format!("parse daemon port file {}: empty", path.display()))?
+                .parse::<u16>()
+                .with_context(|| format!("parse daemon port file {}", path.display()))?;
+            let pid = match parts.next() {
+                Some(raw) => Some(
+                    raw.parse::<u32>()
+                        .with_context(|| format!("parse daemon pid in {}", path.display()))?,
+                ),
+                None => None,
+            };
+            Ok(Some(PortEntry { port, pid }))
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => {
-            Err(e).with_context(|| format!("read daemon port file {}", port_file_path().display()))
-        }
+        Err(e) => Err(e).with_context(|| format!("read daemon port file {}", path.display())),
+    }
+}
+
+/// Liveness check for a recorded daemon pid: `/proc/<pid>` on Linux. Outside
+/// Linux we cannot verify process existence without a libc dep, so treat the
+/// entry as live (best effort — the `get_state` probe remains the final arbiter).
+pub fn pid_alive(pid: u32) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        std::path::Path::new(&format!("/proc/{pid}")).exists()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pid;
+        true
+    }
+}
+
+/// Remove the discovery file for `cwd` only if the entry still names `pid` —
+/// never delete a successor daemon's entry (the file may have been overwritten).
+pub fn remove_port_file_if_owner(cwd: &Path, pid: u32) {
+    if matches!(read_port_file(cwd), Ok(Some(entry)) if entry.pid == Some(pid)) {
+        let _ = std::fs::remove_file(port_file_path(cwd));
     }
 }
 
@@ -356,21 +428,24 @@ pub async fn probe(addr: &str, timeout: Duration) -> Result<SessionState> {
     Ok(state)
 }
 
-/// Candidate address list for discovery: the port-file port first (when
-/// present), then the default port.
-pub fn candidate_addrs() -> Vec<String> {
+/// Candidate address list for discovery: the per-cwd port-file port first
+/// (when present and its pid is alive), then the default port.
+pub fn candidate_addrs(cwd: &Path) -> Vec<String> {
     let mut addrs = Vec::new();
-    if let Ok(Some(port)) = read_port_file() {
-        addrs.push(format!("127.0.0.1:{port}"));
+    if let Ok(Some(entry)) = read_port_file(cwd) {
+        if entry.pid.map(pid_alive).unwrap_or(true) {
+            addrs.push(format!("127.0.0.1:{}", entry.port));
+        }
     }
     addrs.push(format!("127.0.0.1:{DEFAULT_PORT}"));
     addrs
 }
 
-/// Discover a running daemon: probe the port-file address, then the default
-/// port. Returns the first address that answers `get_state`, or `None`.
-pub async fn discover(timeout: Duration) -> Result<Option<String>> {
-    for addr in candidate_addrs() {
+/// Discover a running daemon for `cwd`: probe the per-cwd port-file address,
+/// then the default port. Returns the first address that answers `get_state`,
+/// or `None`.
+pub async fn discover(timeout: Duration, cwd: &Path) -> Result<Option<String>> {
+    for addr in candidate_addrs(cwd) {
         if probe(&addr, timeout).await.is_ok() {
             return Ok(Some(addr));
         }
@@ -413,19 +488,25 @@ pub fn spawn_daemon(cwd: &Path, extra_args: &[String]) -> Result<Child> {
     Ok(child)
 }
 
-/// Wait for a spawned daemon to become ready: poll the port file until it
-/// appears, then `get_state` until it answers (or the timeout expires).
-pub async fn wait_ready(timeout: Duration) -> Result<String> {
+/// Wait for a spawned daemon (`pid`) to become ready: poll the per-cwd port
+/// file until it carries an entry whose pid matches the child, then
+/// `get_state` until it answers (or the timeout expires). A leftover entry
+/// from a dead daemon (different pid) is ignored — the pre-existing-file race
+/// that broke cold starts is gone.
+pub async fn wait_ready(timeout: Duration, cwd: &Path, pid: u32) -> Result<String> {
     let deadline = tokio::time::Instant::now() + timeout;
-    // The port file is written by the daemon on bind — poll for it first.
+    // The port file is written by the daemon on bind — poll for it first. Only
+    // the entry naming our child counts; anything else is stale/foreign.
     let port = loop {
-        if let Ok(Some(port)) = read_port_file() {
-            break port;
+        if let Ok(Some(entry)) = read_port_file(cwd) {
+            if entry.pid == Some(pid) {
+                break entry.port;
+            }
         }
         if tokio::time::Instant::now() >= deadline {
             anyhow::bail!(
-                "daemon did not publish {} within {timeout:?}",
-                port_file_path().display()
+                "daemon (pid {pid}) did not publish {} within {timeout:?}",
+                port_file_path(cwd).display()
             );
         }
         tokio::time::sleep(Duration::from_millis(100)).await;

@@ -71,8 +71,8 @@ fn daemon_launch_args(cli: &Cli) -> Vec<String> {
 
 /// Find a daemon or spawn one, then return a connected client + initial state.
 async fn connect_or_spawn(cli: &Cli, cwd: &std::path::Path) -> Result<(GrpcClient, WireStatus)> {
-    // 1. Reuse a running daemon: port file first, default port second.
-    if let Some(addr) = discover(std::time::Duration::from_millis(800)).await? {
+    // 1. Reuse a running daemon: per-cwd port file first, default port second.
+    if let Some(addr) = discover(std::time::Duration::from_millis(800), cwd).await? {
         tracing::info!("reusing running daemon at {addr}");
         let mut client = GrpcClient::connect(&addr).await?;
         let state = client.get_state().await?;
@@ -88,7 +88,7 @@ async fn connect_or_spawn(cli: &Cli, cwd: &std::path::Path) -> Result<(GrpcClien
     let args = daemon_launch_args(cli);
     let mut child =
         spawn_daemon(cwd, &args).with_context(|| format!("spawn thewayd in {}", cwd.display()))?;
-    let addr = match wait_ready(std::time::Duration::from_secs(20)).await {
+    let addr = match wait_ready(std::time::Duration::from_secs(20), cwd, child.id()).await {
         Ok(addr) => addr,
         Err(e) => {
             let _ = child.kill();

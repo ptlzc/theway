@@ -265,12 +265,25 @@ fn port_file_round_trips_the_bound_port() {
     let _guard = THEWAY_DIR_LOCK.lock().unwrap();
     let dir = tempfile::tempdir().unwrap();
     with_theway_dir(dir.path());
+    let cwd = std::env::temp_dir();
 
-    assert_eq!(read_port_file().unwrap(), None, "no port file yet");
-    std::fs::write(port_file_path(), "44777").unwrap();
-    assert_eq!(read_port_file().unwrap(), Some(44777));
-    std::fs::write(port_file_path(), "0").unwrap();
-    assert_eq!(read_port_file().unwrap(), Some(0));
+    assert_eq!(read_port_file(&cwd).unwrap(), None, "no port file yet");
+    std::fs::write(port_file_path(&cwd), "44777 1234").unwrap();
+    assert_eq!(
+        read_port_file(&cwd).unwrap(),
+        Some(PortEntry { port: 44777, pid: Some(1234) })
+    );
+    std::fs::write(port_file_path(&cwd), "0 1").unwrap();
+    assert_eq!(
+        read_port_file(&cwd).unwrap(),
+        Some(PortEntry { port: 0, pid: Some(1) })
+    );
+    // Pre-pid format (single token) still parses, pid unknown.
+    std::fs::write(port_file_path(&cwd), "44777").unwrap();
+    assert_eq!(
+        read_port_file(&cwd).unwrap(),
+        Some(PortEntry { port: 44777, pid: None })
+    );
     drop(dir);
     clear_theway_dir();
 }
@@ -280,29 +293,67 @@ fn port_file_with_garbage_is_an_error() {
     let _guard = THEWAY_DIR_LOCK.lock().unwrap();
     let dir = tempfile::tempdir().unwrap();
     with_theway_dir(dir.path());
-    std::fs::write(port_file_path(), "not-a-port").unwrap();
-    assert!(read_port_file().is_err());
+    let cwd = std::env::temp_dir();
+    std::fs::write(port_file_path(&cwd), "not-a-port").unwrap();
+    assert!(read_port_file(&cwd).is_err());
+    std::fs::write(port_file_path(&cwd), "44777 not-a-pid").unwrap();
+    assert!(read_port_file(&cwd).is_err());
     drop(dir);
     clear_theway_dir();
 }
 
 #[test]
-fn candidate_addrs_prefers_port_file_then_default() {
+fn candidate_addrs_prefers_live_port_file_then_default() {
     let _guard = THEWAY_DIR_LOCK.lock().unwrap();
     let dir = tempfile::tempdir().unwrap();
     with_theway_dir(dir.path());
+    let cwd = std::env::temp_dir();
 
     // No port file → default only.
     assert_eq!(
-        candidate_addrs(),
+        candidate_addrs(&cwd),
         vec![format!("127.0.0.1:{DEFAULT_PORT}")]
     );
 
-    // Port file present → port-file address first, default second.
-    std::fs::write(port_file_path(), "43001").unwrap();
+    // Entry whose pid is dead → skipped, default only (the stale-entry case
+    // that used to break cold starts). Linux-only: outside Linux pid_alive
+    // cannot verify, so the entry is probed as a best effort.
+    std::fs::write(port_file_path(&cwd), format!("43001 {}", u32::MAX)).unwrap();
+    if cfg!(target_os = "linux") {
+        assert_eq!(
+            candidate_addrs(&cwd),
+            vec![format!("127.0.0.1:{DEFAULT_PORT}")]
+        );
+    }
+
+    // Entry whose pid is alive (ours) → port-file address first, default second.
+    std::fs::write(port_file_path(&cwd), format!("43001 {}", std::process::id())).unwrap();
     assert_eq!(
-        candidate_addrs(),
+        candidate_addrs(&cwd),
         vec!["127.0.0.1:43001".to_string(), format!("127.0.0.1:{DEFAULT_PORT}")]
+    );
+    drop(dir);
+    clear_theway_dir();
+}
+
+#[test]
+fn remove_port_file_removes_only_the_owners_entry() {
+    let _guard = THEWAY_DIR_LOCK.lock().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    with_theway_dir(dir.path());
+    let cwd = std::env::temp_dir();
+
+    // Own entry → removed.
+    std::fs::write(port_file_path(&cwd), format!("43001 {}", std::process::id())).unwrap();
+    remove_port_file_if_owner(&cwd, std::process::id());
+    assert_eq!(read_port_file(&cwd).unwrap(), None);
+
+    // Foreign entry (a successor daemon) → untouched.
+    std::fs::write(port_file_path(&cwd), "43001 424242").unwrap();
+    remove_port_file_if_owner(&cwd, std::process::id());
+    assert_eq!(
+        read_port_file(&cwd).unwrap(),
+        Some(PortEntry { port: 43001, pid: Some(424242) })
     );
     drop(dir);
     clear_theway_dir();

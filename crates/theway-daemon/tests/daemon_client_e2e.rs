@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use futures::StreamExt as _;
-use theway_transport::client::{GrpcClient, probe, wait_ready};
+use theway_transport::client::{GrpcClient, port_file_path, probe, wait_ready};
 use theway_transport::proto::theway_grpc::stream_frame;
 
 /// THEWAY_DIR is process-global; all daemon-spawning tests serialize here.
@@ -44,12 +44,40 @@ async fn spawn_daemon(dir: &std::path::Path) -> (DaemonGuard, String) {
         .stderr(std::process::Stdio::null())
         .spawn()
         .expect("spawn thewayd");
+    let child_pid = child.id();
     // Give the daemon a moment to exec, then wait for the port file + readiness.
-    let addr = tokio::time::timeout(Duration::from_secs(20), wait_ready(Duration::from_secs(20)))
-        .await
-        .expect("daemon never became ready")
-        .expect("wait_ready failed");
+    let addr = tokio::time::timeout(
+        Duration::from_secs(20),
+        wait_ready(Duration::from_secs(20), dir, child_pid),
+    )
+    .await
+    .expect("daemon never became ready")
+    .expect("wait_ready failed");
     (DaemonGuard { child }, addr)
+}
+
+#[tokio::test]
+async fn wait_ready_ignores_stale_entry_from_a_dead_daemon() {
+    let _guard = DAEMON_E2E_LOCK.lock().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    // SAFETY: serialized on DAEMON_E2E_LOCK; no other test touches THEWAY_DIR.
+    unsafe { std::env::set_var("THEWAY_DIR", dir.path()) };
+
+    // A leftover entry from a dead daemon (the cold-start failure mode: the
+    // file exists, so wait_ready must NOT accept it and must wait for the
+    // freshly spawned child's own entry).
+    std::fs::write(port_file_path(dir.path()), format!("1 {}", u32::MAX)).unwrap();
+
+    let (_daemon, addr) = spawn_daemon(dir.path()).await;
+    assert_ne!(
+        addr, "127.0.0.1:1",
+        "wait_ready accepted the stale port instead of the spawned daemon's"
+    );
+    let mut client = GrpcClient::connect(&addr).await.unwrap();
+    let state = client.get_state().await.unwrap();
+    assert_eq!(state.cwd, dir.path().display().to_string());
+
+    unsafe { std::env::remove_var("THEWAY_DIR") };
 }
 
 #[tokio::test]

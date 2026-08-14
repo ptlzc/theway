@@ -520,7 +520,7 @@ async fn main() -> Result<()> {
         trigger_executor,
         retry: theway_daemon::agent_session::RetrySettings::default(),
         registry: theway_daemon::commands::Registry::with_daemon_commands(),
-        cwd,
+        cwd: cwd.clone(),
         session_id,
         log_path: _logging.as_ref().map(|l| l.log_path.clone()),
         tool_count: tool_names.len(),
@@ -549,13 +549,16 @@ async fn main() -> Result<()> {
         cli.port
     );
 
-    // Publish the actual bound port to a well-known file so clients (theway TUI,
-    // scripts) can discover the daemon without a fixed port. Written on bind.
-    let port_file = config::base_dir().join("daemon-port");
+    // Publish the actual bound port + our pid to a per-cwd discovery file so
+    // clients (theway TUI, scripts) can find this daemon without a fixed port.
+    // Written on bind; removed on shutdown only when the entry still names us.
+    let port_file = theway_transport::client::port_file_path(&cwd);
+    let daemon_pid = std::process::id();
     let on_listen: std::sync::Arc<dyn Fn(std::net::SocketAddr) + Send + Sync> = {
         let port_file = port_file.clone();
         std::sync::Arc::new(move |addr| {
-            if let Err(e) = std::fs::write(&port_file, addr.port().to_string()) {
+            let entry = format!("{} {}", addr.port(), daemon_pid);
+            if let Err(e) = std::fs::write(&port_file, entry) {
                 tracing::warn!("write daemon port file {}: {e}", port_file.display());
             }
         })
@@ -563,7 +566,17 @@ async fn main() -> Result<()> {
 
     let result = match mode {
         Mode::Mcp => {
-            let _ = std::fs::remove_file(&port_file);
+            // Clear a leftover discovery entry only when its daemon is gone;
+            // a live daemon keeps its entry (MCP mode serves no gRPC surface).
+            if let Ok(Some(entry)) = theway_transport::client::read_port_file(&cwd) {
+                if entry
+                    .pid
+                    .map(|p| !theway_transport::client::pid_alive(p))
+                    .unwrap_or(true)
+                {
+                    let _ = std::fs::remove_file(&port_file);
+                }
+            }
             theway_transport::mcp::run_mcp_server(theway_daemon::tools::local_tools(
                 executor.clone(),
             ))
@@ -595,5 +608,8 @@ async fn main() -> Result<()> {
     };
     _dag_persist.flush().await;
     dag_engine.abort_all_runs("daemon shutdown");
+    // Remove our discovery entry — but only when it still names us (a
+    // successor daemon in the same cwd may have overwritten it).
+    theway_transport::client::remove_port_file_if_owner(&cwd, daemon_pid);
     result
 }
