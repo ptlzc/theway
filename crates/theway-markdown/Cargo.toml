@@ -1,0 +1,44 @@
+[package]
+name = "theway-markdown"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+description = "theway port of Grok Build streaming markdown renderer"
+repository = "https://github.com/ptlzc/theway"
+
+[dependencies]
+anstyle = "1.0"
+anstyle-lossy = "1.1.4"
+anstyle-syntect = "1.0.4"
+html-escape = "0.2"
+linkify = "0.10"
+pulldown-cmark = "0.13"
+ratatui = { version = "0.29", features = ["unstable-widget-ref"] }
+supports-color = "3.0"
+syntect = "5.3"
+two-face = { version = "0.4", default-features = false, features = ["syntect-fancy"] }
+textwrap = "0.16"
+unicode-segmentation = "1.12.0"
+unicode-width = "0.2"
+url = "2"
+theway-markdown-core = { path = "../theway-markdown-core" }
+
+# NOTE: cargo 1.91 rejects combining `[lints] workspace = true` with additional
+# lint tables (such as the `unexpected_cfgs` check-cfg declaration below), so the
+# workspace clippy policy is replicated here instead of inherited. Keep this
+# table in sync with `[workspace.lints.clippy]` in the root Cargo.toml.
+[lints.clippy]
+large_enum_variant = "allow"
+module_inception = "allow"
+type_complexity = "allow"
+manual_div_ceil = "allow"
+too_many_arguments = "allow"
+new_without_default = "allow"
+await_holding_lock = "allow"
+field_reassign_with_default = "allow"
+redundant_guards = "allow"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
+

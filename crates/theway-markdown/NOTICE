@@ -1,0 +1,47 @@
+theway-markdown
+===============
+
+This crate is a mechanical port of `xai-grok-markdown` from the Grok Build
+codebase.
+
+Donor
+-----
+- SpaceXAI (xAI), Grok Build
+- Source: xai-org/grok-build, crates/codegen/xai-grok-markdown/
+- Source revision: be713136d2a69080743a3f6b3c72077057e5948f
+- License: Apache-2.0 (retained; see source file headers and Cargo.toml)
+
+Purpose
+-------
+Streaming markdown renderer for terminal UIs: incremental/streaming
+rendering with checkpoint-based freezing, syntect syntax highlighting,
+terminal color adaptation, LaTeX-to-Unicode math approximation, hyperlink
+(OSC 8) extraction, and mermaid/table rendering.
+
+Only mechanical changes were made: package name / prefix
+`xai-grok-markdown` -> `theway-markdown`, the dependency on
+`xai-grok-markdown-core` -> `theway-markdown-core` (local path), and the
+crate shell (Cargo.toml) rewritten for theway's workspace. The
+`playground` feature, `[[bin]]` targets, `[[bench]]` target, crossterm,
+textarea, and criterion dev-dependencies were not ported; the
+`pretty_assertions` dev-dependency was dropped and test imports switched
+to std `assert_eq!`. Original copyright headers in the source files are
+preserved.
+
+Assets
+------
+`assets/tokyo-night.tmTheme` is copied from
+xai-org/grok-build, crates/codegen/xai-grok-markdown/assets/
+(same source revision). `assets/grok-night.tmTheme` is copied from
+xai-org/grok-build, crates/codegen/xai-grok-pager-render/assets/
+(same source revision).
+
+Upstream lineage
+----------------
+- ratatui: widget/style/render conventions.
+- syntect + two-face: syntax highlighting machinery.
+- pulldown-cmark: markdown parsing (shared config in theway-markdown-core).
+
+This crate is not a wholesale redistribution of third-party source.
+Dependencies are declared in Cargo.toml; their licenses appear in the
+repository root THIRD-PARTY-NOTICES file.
