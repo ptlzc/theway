@@ -224,16 +224,6 @@ fn file_path_to_url(path: &Path) -> Option<Arc<str>> {
         .map(|u| Arc::from(u.as_str()))
 }
 
-#[cfg(test)]
-fn tool_path_file_target_with_home(
-    path: &str,
-    cwd: Option<&Path>,
-    home: Option<&Path>,
-) -> Option<LinkTarget> {
-    let target = crate::tool_paths::resolve_tool_path_target_with_home(Path::new(path), cwd, home)?;
-    Some(LinkTarget::File(Arc::from(target)))
-}
-
 /// Semantic target for a Read/Edit path, joining ordinary relative paths to `cwd`.
 pub fn tool_path_file_target(path: &str, cwd: Option<&Path>) -> Option<LinkTarget> {
     crate::tool_paths::resolve_tool_path_target(path, cwd)
@@ -274,18 +264,6 @@ pub fn file_link_presentation(
     cwd: Option<&Path>,
 ) -> LinkPresentation {
     let resolved = crate::tool_paths::resolve_tool_path_target(painted, cwd);
-    file_link_presentation_for_resolved(painted, target, cwd, resolved.as_deref())
-}
-
-#[cfg(test)]
-fn file_link_presentation_with_home(
-    painted: &str,
-    target: &LinkTarget,
-    cwd: Option<&Path>,
-    home: Option<&Path>,
-) -> LinkPresentation {
-    let resolved =
-        crate::tool_paths::resolve_tool_path_target_with_home(Path::new(painted), cwd, home);
     file_link_presentation_for_resolved(painted, target, cwd, resolved.as_deref())
 }
 
