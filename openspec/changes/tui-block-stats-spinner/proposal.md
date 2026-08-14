@@ -24,7 +24,7 @@ Ctrl+Space + Shift+方向键；用户明确只做选区，不做复制）。
 thinking 块没有字数/吞吐统计；右下角 ctx 百分比恒定 100%（daemon 发的是会话累计
 token，除以 context window 后一旦超窗就永远 100%，#33 遗留）。
 
-整合后的完整清单（8 条）：
+整合后的完整清单（9 条）：
 
 1. tools 调用分块渲染：首行是指令，下面是 5 行输出，超过 5 行省略
 2. thinking 块：一块内容 + 字数统计，右侧有 `c(har)/s`、`output: 1.2k`（最多 1 位小数）
@@ -35,6 +35,8 @@ token，除以 context window 后一旦超窗就永远 100%，#33 遗留）。
 6. composer 右上角显示 feature（如 `graph engine | goal`）
 7. 滚动支持加速度：按住滚动键逐渐加速，但不要加得太快，最多 1.5x 封顶
 8. composer 输入框支持鼠标滚轮浏览（多行/折行内容滚轮查看）
+9. dag 模式：在 composer 状态栏之上渲染 DAG 状态带——每个节点按运行/取消/成功/失败
+   等状态着色，run 头显示 c/s 输出统计（与转轮统一 cps 驱动）
 
 （选区只保留现有高亮，不做复制——用户确认。composer 顶部拖拽调高在 #37 已实现
 [e4f1388]，不在本计划，但 verify 阶段回归验证。）
@@ -59,13 +61,16 @@ dag subagents 指示器（sidebar/dag 渲染处）统一走同一组件。
 multiline 标志删除）；`xx% ctx` 改用最近一轮 token（daemon 需发 per-turn usage 或
 TUI 用最后一条消息 usage 计算），修复恒定 100%。
 
-**E. daemon 侧 usage 语义**：ContextUsage 已含 input/output/cache；确认其语义为
-「当前/最近一轮」，若为会话累计则在 daemon 侧补 per-turn 累计点（只在 wire_snapshot
-的 usage 处改成最近消息 usage），不动 proto。
+**E. daemon 侧 usage 语义**：ContextUsage 已含 input/output/cache；现状取会话累计
+cost（wire_snapshot 的 `cost.tokens`），改为「最近一轮」——取 agent state 最后一条
+assistant 消息的 usage（`AgentMessage::Llm(Message::Assistant(a))` 的 `a.usage`），
+不动 proto。
 
-**F. composer 右上角 features**：状态行右侧（或 composer 顶栏右上）显示激活特性，
-来源 sidebar runtime/trigger 特性（graph engine、goal 等），daemon 已有
-trigger_features 通道，补齐映射与渲染。
+**F. composer 右上角 features**：状态行右侧（或 composer 顶栏右上）显示激活特性。
+数据源已齐备无需新通道：`latest.sidebar.runtime`（wire 已有，daemon 填
+ui_mode_panel 的 trigger 特性）+ 从 `latest.dags`（kind "dag" → "graph engine"、
+kind "goal" → "goal"）与 `latest.goal`（Some → "goal"）推导的标签。渲染为 dim
+`·` 分隔串置于 chrome 顶行右端。
 
 **G. 加速度滚动（TUI）**：键盘滚动（Up/Down/PageUp/PageDown）连续按住时步长
 逐渐加速——以按键 repeat 计数驱动，倍率从 1.0 渐增、1.5x 封顶（"不要加得太快"），
@@ -75,6 +80,17 @@ trigger_features 通道，补齐映射与渲染。
 ratatui-textarea（`input()` 处理滚轮滚动），多行/折行内容可滚轮浏览；滚轮事件不再
 落到 feed 滚动。Shift+滚轮横向滚动（textarea 原生支持则透传）。拖拽调高已存在
 （#37 e4f1388），仅回归验证。
+
+**I. DAG 状态带（TUI，新文件 ui/dag_band.rs）**：`latest.dags` 非空时，在 feed 与
+busy 带之间（composer 状态栏之上）渲染 DAG 状态带——每 run 一个头行
+（`dag-2 · issue-38-tui-polish · 2/6 · c/s 84`，运行中带统一迷你转轮）+ 节点行
+（状态符号 + id，按 wire 顺序、` · ` 分隔可折行）。节点状态样式：
+pending `·` 暗灰 / ready `▸` 黄 / running `▶` 青（带转轮）/ succeeded `✓` 绿 /
+failed `✗` 红 / cancelled `×` 暗灰删除线 / skipped `↷` 灰。run 级 c/s：各节点
+output_tokens 之和在快照间的 delta / 1s 滑动窗（复用 C 的 CpsMeter，每 run 一个
+实例），转轮速度同样由 cps 回调驱动。高度上限 4 行（1 头 + 3 节点行），多 run 截断
+`…`。数据源 `WireStatus.dags`（wire 已带 per-node status/tokens/preview），无 proto
+变更。
 
 ## Impact
 

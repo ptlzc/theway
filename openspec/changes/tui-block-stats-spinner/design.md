@@ -102,12 +102,14 @@ prompt_chrome 渲染时不再输出 working 标志（busy 已由工作带表达�
 
 ## 6. composer 右上角 features
 
-状态行/输入框顶栏右上角渲染激活特性标签，来源 daemon sidebar runtime 特性：
+状态行/输入框顶栏右上角渲染激活特性标签。数据源已齐备，无新 wire 通道：
 
-- daemon 已发布 `trigger_features`（sidebar.runtime）；补一个明确的
-  `features: Vec<String>`（如 `graph engine`、`goal`）或直接映射现有
-  runtime 特性。为最小改动：TUI 从 sidebar.runtime + 会话配置推导
-  `["graph engine", "goal"]` 等标签，渲染为 dim `·` 分隔串，置于 chrome 顶行右端。
+- `latest.sidebar.runtime`（wire 已有 `runtime: Vec<String>`，daemon 在
+  wire_sidebar_snapshot 填 `panel_status.trigger_features`，即 ui_mode_panel.rs
+  `active_trigger_features()` 的 dedup/cycle suppress/fire-once rules/inject-and-run）。
+- 图形特性推导：`latest.dags` 中任一 run `kind == "dag"` → `graph engine`；
+  `kind == "goal"` 或 `latest.goal.is_some()` → `goal`。
+- 渲染：dim `·` 分隔串置于 chrome 顶行右端，无特性时不占位。
 
 ## 7. 加速度滚动 + composer 滚轮
 
@@ -130,13 +132,61 @@ prompt_chrome 渲染时不再输出 working 标志（busy 已由工作带表达�
   `last_text_area` 实时值为准。
 - 单测：滚轮命中 text_area → textarea 滚动、feed 不动；命中 feed → feed 滚动。
 
-## 8. 验证
+## 8. DAG 状态带（dag band）
+
+### 8.1 位置与布局
+
+- 仅当 `latest.dags` 非空渲染；位于 feed 与 busy 带之间（composer 状态栏之上）。
+  多 run 时最多显示 2 组，超出 `… N more`。
+- 每 run：1 个头行 + 节点行（可折行），总高上限 4 行（1 头 + 3 节点行）。
+
+```
+⠿ dag-2 · issue-38-tui-polish · 2/6 · c/s 84
+  ✓ 1-blocks · ✗ 2-daemon-usage · ▶ 3-spinner · · 4-status · × 4-scroll
+```
+
+- 头行：`dag-{n}` 前缀取 run.id（引擎已编号），name 截断，进度 done/total
+  （Succeeded+Skipped 数 / 节点数），右侧 run 级 `c/s`。
+- 任一节点 running → 头行左侧渲染统一迷你转轮（pixel_loader 小尺寸变体，
+  3-spinner 节点提供）。
+
+### 8.2 节点状态样式
+
+| 状态 | 符号 | 颜色 |
+|---|---|---|
+| pending | `·` | dark gray |
+| ready | `▸` | yellow |
+| running | `▶`（带转轮） | cyan |
+| succeeded | `✓` | green |
+| failed | `✗` | red |
+| cancelled | `×` | dark gray + strikethrough |
+| skipped | `↷` | gray |
+
+节点按 wire 顺序（引擎定义序）渲染，` · ` 分隔；failed/cancelled 节点 error 摘要
+截断至 20 字符附在节点后（dim）。
+
+### 8.3 run 级 c/s 统计
+
+- 复用 3-spinner 的 CpsMeter：每 run 一个实例（HashMap<run_id, CpsMeter>），
+  每帧记录 `sum(node.output_tokens)`（快照 delta），1s 滑动窗 → `c/s`。
+- 转轮速度映射与 busy 带同一套（cps 快转得快、封顶、回落）。
+
+### 8.4 实现
+
+- 新文件 `ui/dag_band.rs`：纯渲染函数 `render_dag_band(area, dags, meters, tick)`
+  + 状态样式表 + 单测（构造 WireDagRunSnapshot 各状态断言符号/颜色/截断）。
+- `ui/mod.rs` 只加调用点：render() 里 feed 段与 busy 段之间，`latest.dags`
+  非空时先压缩 feed 面积再画 band；CpsMeter 集合放在 App 状态。
+
+## 9. 验证
 
 - 单测：块渲染（5 行折叠/展开）、统计行格式（human 数字 1 位小数）、CPS 滑窗、
   转轮速度映射（cps→delay 单调封顶）、usage 最近一轮、滚动加速度序列
-  （1.0→1.5 封顶 + 复位）、滚轮命中区域路由。
+  （1.0→1.5 封顶 + 复位）、滚轮命中区域路由、dag band（各状态符号/颜色/截断、
+  c/s 计量）。
 - e2e（tmux capture-pane）：长工具调用块折叠视觉、流式时 char/s 与转轮加速、
   工具等待期转轮回落、ctx% 随最近一轮变化、长按滚动键加速滚动、composer 滚轮
-  浏览、composer 拖拽调高回归（#37 已有功能）。
+  浏览、composer 拖拽调高回归（#37 已有功能）、dag 运行中状态带渲染（节点状态
+  着色 + c/s 跳动）。
 - 门禁：`make check` / `make test` / `make lint` / `make fmt-check`。
 - 选区：仅保留现有高亮（鼠标拖拽 + Ctrl+Space + Shift+方向键），不新增复制。
