@@ -1,17 +1,17 @@
 # tui-batch-polish
 
-Issue: #45（umbrella；子 issue #39-#44、#46-#54）
+Issue: #45（umbrella；子 issue #39-#44、#46-#55）
 
 ## 范围整合
 
-本轮 15 条输入收拢为一个 change、一个 DAG 实施链（同 #38 先例）——
+本轮 16 条输入收拢为一个 change、一个 DAG 实施链（同 #38 先例）——
 之前为每条单独建的 change（tui-composer-features-only-graph-engine /
 tui-composer-single-line-wrap / dag-node-graph-render /
 tui-busy-snake-loader / tui-theme-interface）已并入本 change 并删除，
 理由：涉及文件高度重叠（ui/mod.rs ×7、feed_render.rs ×3），按仓库规则
 共享文件节点必须串行，拆开反而制造合并摩擦。
 
-## 完整清单（15 条）
+## 完整清单（16 条）
 
 **1. composer 右上角 features 只保留 graph engine（#39）**
 
@@ -227,6 +227,24 @@ tui-busy-snake-loader / tui-theme-interface）已并入本 change 并删除，
 - 非目标：面板状态持久化、daemon/web 侧 resize、面板内容折叠。
 - 涉及 ui/mod.rs、ui/app_turns.rs、ui/app_input.rs、ui/tests.rs。
 
+**15. TUI fork 补齐（#55）**
+
+- 现状：/fork 已在 daemon（#29，pi 语义），但 TUI 补全
+  `DAEMON_COMMANDS` 漏了 fork；fork 成功提示 `theway --resume-id` 对
+  TUI 不可用；无交互选择。
+- 补全对齐：DAEMON_COMMANDS 加 "fork"，并核对 daemon
+  `Registry::with_daemon_commands()` 全量命令名与 TUI 列表一致（diff
+  补齐）。
+- 交互 fork（按用户输入选择）：`/fork` 无参数 → TUI 弹层列出当前会话
+  feed 的 User 块（新→旧编号 + ≤60 字符预览；编号序与 daemon 一致），
+  Up/Down/Enter 选择 → 转发 `/fork <n>`；Esc 取消；`/fork <n>` 带参数
+  直接转发（现状路径）。
+- fork 后提示：daemon ForkCommand 成功输出 `forked session {完整id} —
+  /session switch {short} to continue there`（保留 CLI resume 提示）；
+  不自动切换（pi 语义）。
+- 涉及 ui/mod.rs、ui/app_turns.rs、ui/app_input.rs、ui/tests.rs、
+  daemon commands/session.rs。
+
 ## Out of scope
 
 - #39-#44 为 theway-tui / theway-markdown 纯展示（除 #50/#51 的 wire
@@ -237,6 +255,6 @@ tui-busy-snake-loader / tui-theme-interface）已并入本 change 并删除，
 
 ## Acceptance
 
-- 15 条各自单测 + 编译 + 视觉断言（tmux e2e 截图）通过；
+- 16 条各自单测 + 编译 + 视觉断言（tmux e2e 截图）通过；
   make check / test / lint / fmt-check 全绿。
-- 逐条 close #39-#44、#46-#54，证据贴 #45 后 close #45。
+- 逐条 close #39-#44、#46-#55，证据贴 #45 后 close #45。
