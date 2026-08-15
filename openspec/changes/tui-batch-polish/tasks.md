@@ -7,12 +7,13 @@ graph TD
   C --> D["4-thinking-stats: c/s + in/out 接线 (#44)"]
   D --> E["5-theme: theme.toml + 块背景色 (#43)"]
   E --> F["6-dag-graph: DAG 框图渲染 (#41)"]
-  F --> G["7-verify: make ci + tmux e2e + close #39-#45"]
+  F --> G["7-completion-scroll: 补全弹层自动翻页 (#46)"]
+  G --> H["8-verify: make ci + tmux e2e + close #39-#46"]
 ```
 
-全串行：ui/mod.rs 被 1/2/3/4/5 修改，feed_render.rs 被 4/5/6 修改，
+全串行：ui/mod.rs 被 1/2/3/4/5/7 修改，feed_render.rs 被 4/5/6 修改，
 按仓库规则共享文件节点串行。每节点小步 commit（feat(#子issue)），
-7-verify 基于最新 HEAD 复核并逐条 close。
+8-verify 基于最新 HEAD 复核并逐条 close。
 
 - [ ] 1-features — `crates/theway-tui/src/ui/mod.rs` + `ui/tests.rs`：
   - `feature_labels(runtime, dags, has_goal)` → `feature_labels(dags)`：
@@ -88,12 +89,24 @@ graph TD
     mermaid 围栏 → `┌─┐` 盒子断言。
   - 验收：`cargo check --workspace`；`cargo test -p theway-markdown -p
     theway-tui` 全绿。
-- [ ] 7-verify — `make check` + `make test`（workspace 全量）+ `make lint` +
+- [ ] 7-completion-scroll — `ui/mod.rs` + `ui/app_input.rs` + `ui/tests.rs`：
+  - `App` 加 `completion_scroll: usize`；`completion_prev` / `completion_next`
+    / `cycle_completion` 移动后调整窗口：idx < scroll → scroll = idx；
+    idx ≥ scroll + COMPLETION_POPUP_MAX → scroll = idx - MAX + 1。
+  - `render_completions`：渲染 `completions[scroll..scroll+MAX]`，高亮按
+    绝对下标匹配（`i == scroll 偏移`）。
+  - `refresh_completions` / `clear_input` / `accept_completion` 重置
+    scroll = 0；Up/Down/Tab 环绕不变。
+  - 测试：20+ 项列表 Down 连按越过 8 项后高亮仍在窗口内（buffer 断言
+    高亮行可见）；Up 回翻跟随；刷新重置到顶部。
+  - 验收：`cargo check -p theway-tui`；`cargo test -p theway-tui` 全绿。
+- [ ] 8-verify — `make check` + `make test`（workspace 全量）+ `make lint` +
   `make fmt-check`；tmux e2e 逐条：①composer 右上角仅 graph engine（无
   dag run 无标签，trigger 面板 Runtime 仍在）②长文本折行显示行首 + Up/Down
   历史/拖拽调高回归 ③busy 时彩虹蛇在 9 点轨道左右跑 + 折返 + 与 working
   同行（带 1 行、idle 无跳动）④流式 thinking 统计行 c/s 非零 + in/out
   随流更新 ⑤theme.toml 定制 tool/thinking 背景铺满块宽 + 无主题视觉回归
   ⑥dag 状态带盒子+箭头图 + dag_status mermaid 围栏在 feed 成图 + 超宽
-  回退；`gh issue close 39 40 41 42 43 44`，证据贴 #45 后 `gh issue
+  回退 ⑦补全弹层 Down/Up 越界自动翻页、高亮始终可见；
+  `gh issue close 39 40 41 42 43 44 46`，证据贴 #45 后 `gh issue
   close 45`。

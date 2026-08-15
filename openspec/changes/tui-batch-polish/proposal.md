@@ -1,17 +1,17 @@
 # tui-batch-polish
 
-Issue: #45（umbrella；子 issue #39-#44）
+Issue: #45（umbrella；子 issue #39-#44、#46）
 
 ## 范围整合
 
-本轮 6 条 TUI 输入收拢为一个 change、一个 DAG 实施链（同 #38 先例）——
+本轮 7 条 TUI 输入收拢为一个 change、一个 DAG 实施链（同 #38 先例）——
 之前为每条单独建的 change（tui-composer-features-only-graph-engine /
 tui-composer-single-line-wrap / dag-node-graph-render /
 tui-busy-snake-loader / tui-theme-interface）已并入本 change 并删除，
-理由：涉及文件高度重叠（ui/mod.rs ×4、feed_render.rs ×3），按仓库规则
+理由：涉及文件高度重叠（ui/mod.rs ×5、feed_render.rs ×3），按仓库规则
 共享文件节点必须串行，拆开反而制造合并摩擦。
 
-## 完整清单（6 条）
+## 完整清单（7 条）
 
 **1. composer 右上角 features 只保留 graph engine（#39）**
 
@@ -94,6 +94,19 @@ tui-busy-snake-loader / tui-theme-interface）已并入本 change 并删除，
 - 非目标：PNG/SVG、mmdc CLI、高级图形、节点状态分色边框（v1 状态符号进
   标签）。
 
+**7. slash command 补全弹层自动翻页（#46）**
+
+- 现状：弹层渲染固定窗口 `completions[0..COMPLETION_POPUP_MAX(8)]`，
+  高亮下标循环任意项——Down 越过第 8 项后高亮跑出窗口（不可见）。
+- 新增 `completion_scroll`（窗口首项下标）：selection 移动时保持
+  `idx ∈ [scroll, scroll+MAX-1]`——越过上边界 `scroll = idx`，越过
+  下边界 `scroll = idx - MAX + 1`；render_completions 渲染
+  `completions[scroll..scroll+MAX]` 并按绝对下标匹配高亮。
+- refresh_completions / clear_input / accept_completion 重置 scroll = 0；
+  Up/Down/Tab 环绕语义不变。
+- 涉及 ui/mod.rs（render_completions + App 字段）、ui/app_input.rs、
+  ui/tests.rs。
+
 ## Out of scope
 
 - 协议/wire/daemon 不改（#39-#44 全为 theway-tui / theway-markdown 纯展示）。
@@ -101,6 +114,6 @@ tui-busy-snake-loader / tui-theme-interface）已并入本 change 并删除，
 
 ## Acceptance
 
-- 6 条各自单测 + 编译 + 视觉断言（tmux e2e 截图）通过；
+- 7 条各自单测 + 编译 + 视觉断言（tmux e2e 截图）通过；
   make check / test / lint / fmt-check 全绿。
-- 逐条 close #39-#44，证据贴 #45 后 close #45。
+- 逐条 close #39-#44、#46，证据贴 #45 后 close #45。
