@@ -1,9 +1,10 @@
-// Event plane: unified snapshot/event stream envelope and the
-// high-frequency subagent / graph-engine event increments.
+// Event plane: unified snapshot/event stream envelope, the high-frequency
+// subagent / graph-engine event increments, and the EventService RPC surface.
 
 syntax = "proto3";
 package theway.grpc.v1;
 
+import "commands.proto";
 import "session.proto";
 
 // Unified envelope for StreamEvents / WebSocket frames.
@@ -71,4 +72,9 @@ message RunStatus {
   string run_id = 1;
   string status = 2;
   optional string error = 3;
+}
+
+service EventService {
+  // Snapshot/event stream (P0: snapshot frames; P2+: event increments).
+  rpc StreamEvents(Empty) returns (stream StreamFrame);
 }

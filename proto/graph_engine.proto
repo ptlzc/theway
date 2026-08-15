@@ -1,9 +1,12 @@
 // Graph engine domain: DAG/goal run state, subagent jobs, node output,
-// control, checkpoint/restore, and run enumeration. Planning is agent-side;
-// this surface observes and steers runs created by the dag_plan / goal tools.
+// control, checkpoint/restore, run enumeration, and the GraphEngineService
+// RPC surface. Planning is agent-side; this surface observes and steers runs
+// created by the dag_plan / goal tools.
 
 syntax = "proto3";
 package theway.grpc.v1;
+
+import "commands.proto";
 
 message DagRunSnapshot {
   string id = 1;
@@ -169,4 +172,22 @@ message GraphListRequest {
 
 message GraphListResponse {
   repeated DagRunSnapshot runs = 1;
+}
+
+service GraphEngineService {
+  // Fetch a DAG node's full output from an offset (P3).
+  rpc GetNodeOutput(GetNodeOutputRequest) returns (GetNodeOutputResponse);
+  // Graph orchestration control (DAG + goal runs; planning is agent-side).
+  rpc GraphCancel(GraphCancelRequest) returns (CommandResult);
+  rpc GraphRetry(GraphRetryRequest) returns (GraphRetryResponse);
+  rpc GraphSkip(GraphSkipRequest) returns (GraphSkipResponse);
+  // Stop the node's in-flight turn (run ends unless steering was queued).
+  rpc GraphNodeInterrupt(GraphNodeInterruptRequest) returns (CommandResult);
+  // Queue a steering message injected at the node's next natural turn boundary.
+  rpc GraphNodeSteer(GraphNodeSteerRequest) returns (CommandResult);
+  // Checkpoint / restore (portable run snapshots for external persistence).
+  rpc GraphCheckpoint(GraphCheckpointRequest) returns (GraphCheckpointResponse);
+  rpc GraphRestore(GraphRestoreRequest) returns (GraphRestoreResponse);
+  // Enumerate one session's graph runs (DagRunSnapshot shape).
+  rpc GraphList(GraphListRequest) returns (GraphListResponse);
 }

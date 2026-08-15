@@ -6,6 +6,19 @@
 
 /* eslint-disable */
 import { BinaryReader, BinaryWriter } from "@bufbuild/protobuf/wire";
+import {
+  type CallOptions,
+  type ChannelCredentials,
+  Client,
+  type ClientOptions,
+  type ClientUnaryCall,
+  type handleUnaryCall,
+  makeGenericClientConstructor,
+  type Metadata,
+  type ServiceError,
+  type UntypedServiceImplementation,
+} from "@grpc/grpc-js";
+import { CommandResult } from "./commands.js";
 
 export const protobufPackage = "theway.grpc.v1";
 
@@ -2742,6 +2755,274 @@ export const GraphListResponse: MessageFns<GraphListResponse> = {
     message.runs = object.runs?.map((e) => DagRunSnapshot.fromPartial(e)) || [];
     return message;
   },
+};
+
+export type GraphEngineServiceService = typeof GraphEngineServiceService;
+export const GraphEngineServiceService = {
+  /** Fetch a DAG node's full output from an offset (P3). */
+  getNodeOutput: {
+    path: "/theway.grpc.v1.GraphEngineService/GetNodeOutput" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: GetNodeOutputRequest): Buffer => Buffer.from(GetNodeOutputRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): GetNodeOutputRequest => GetNodeOutputRequest.decode(value),
+    responseSerialize: (value: GetNodeOutputResponse): Buffer =>
+      Buffer.from(GetNodeOutputResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): GetNodeOutputResponse => GetNodeOutputResponse.decode(value),
+  },
+  /** Graph orchestration control (DAG + goal runs; planning is agent-side). */
+  graphCancel: {
+    path: "/theway.grpc.v1.GraphEngineService/GraphCancel" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: GraphCancelRequest): Buffer => Buffer.from(GraphCancelRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): GraphCancelRequest => GraphCancelRequest.decode(value),
+    responseSerialize: (value: CommandResult): Buffer => Buffer.from(CommandResult.encode(value).finish()),
+    responseDeserialize: (value: Buffer): CommandResult => CommandResult.decode(value),
+  },
+  graphRetry: {
+    path: "/theway.grpc.v1.GraphEngineService/GraphRetry" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: GraphRetryRequest): Buffer => Buffer.from(GraphRetryRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): GraphRetryRequest => GraphRetryRequest.decode(value),
+    responseSerialize: (value: GraphRetryResponse): Buffer => Buffer.from(GraphRetryResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): GraphRetryResponse => GraphRetryResponse.decode(value),
+  },
+  graphSkip: {
+    path: "/theway.grpc.v1.GraphEngineService/GraphSkip" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: GraphSkipRequest): Buffer => Buffer.from(GraphSkipRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): GraphSkipRequest => GraphSkipRequest.decode(value),
+    responseSerialize: (value: GraphSkipResponse): Buffer => Buffer.from(GraphSkipResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): GraphSkipResponse => GraphSkipResponse.decode(value),
+  },
+  /** Stop the node's in-flight turn (run ends unless steering was queued). */
+  graphNodeInterrupt: {
+    path: "/theway.grpc.v1.GraphEngineService/GraphNodeInterrupt" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: GraphNodeInterruptRequest): Buffer =>
+      Buffer.from(GraphNodeInterruptRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): GraphNodeInterruptRequest => GraphNodeInterruptRequest.decode(value),
+    responseSerialize: (value: CommandResult): Buffer => Buffer.from(CommandResult.encode(value).finish()),
+    responseDeserialize: (value: Buffer): CommandResult => CommandResult.decode(value),
+  },
+  /** Queue a steering message injected at the node's next natural turn boundary. */
+  graphNodeSteer: {
+    path: "/theway.grpc.v1.GraphEngineService/GraphNodeSteer" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: GraphNodeSteerRequest): Buffer =>
+      Buffer.from(GraphNodeSteerRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): GraphNodeSteerRequest => GraphNodeSteerRequest.decode(value),
+    responseSerialize: (value: CommandResult): Buffer => Buffer.from(CommandResult.encode(value).finish()),
+    responseDeserialize: (value: Buffer): CommandResult => CommandResult.decode(value),
+  },
+  /** Checkpoint / restore (portable run snapshots for external persistence). */
+  graphCheckpoint: {
+    path: "/theway.grpc.v1.GraphEngineService/GraphCheckpoint" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: GraphCheckpointRequest): Buffer =>
+      Buffer.from(GraphCheckpointRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): GraphCheckpointRequest => GraphCheckpointRequest.decode(value),
+    responseSerialize: (value: GraphCheckpointResponse): Buffer =>
+      Buffer.from(GraphCheckpointResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): GraphCheckpointResponse => GraphCheckpointResponse.decode(value),
+  },
+  graphRestore: {
+    path: "/theway.grpc.v1.GraphEngineService/GraphRestore" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: GraphRestoreRequest): Buffer => Buffer.from(GraphRestoreRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): GraphRestoreRequest => GraphRestoreRequest.decode(value),
+    responseSerialize: (value: GraphRestoreResponse): Buffer =>
+      Buffer.from(GraphRestoreResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): GraphRestoreResponse => GraphRestoreResponse.decode(value),
+  },
+  /** Enumerate one session's graph runs (DagRunSnapshot shape). */
+  graphList: {
+    path: "/theway.grpc.v1.GraphEngineService/GraphList" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: GraphListRequest): Buffer => Buffer.from(GraphListRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): GraphListRequest => GraphListRequest.decode(value),
+    responseSerialize: (value: GraphListResponse): Buffer => Buffer.from(GraphListResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): GraphListResponse => GraphListResponse.decode(value),
+  },
+} as const;
+
+export interface GraphEngineServiceServer extends UntypedServiceImplementation {
+  /** Fetch a DAG node's full output from an offset (P3). */
+  getNodeOutput: handleUnaryCall<GetNodeOutputRequest, GetNodeOutputResponse>;
+  /** Graph orchestration control (DAG + goal runs; planning is agent-side). */
+  graphCancel: handleUnaryCall<GraphCancelRequest, CommandResult>;
+  graphRetry: handleUnaryCall<GraphRetryRequest, GraphRetryResponse>;
+  graphSkip: handleUnaryCall<GraphSkipRequest, GraphSkipResponse>;
+  /** Stop the node's in-flight turn (run ends unless steering was queued). */
+  graphNodeInterrupt: handleUnaryCall<GraphNodeInterruptRequest, CommandResult>;
+  /** Queue a steering message injected at the node's next natural turn boundary. */
+  graphNodeSteer: handleUnaryCall<GraphNodeSteerRequest, CommandResult>;
+  /** Checkpoint / restore (portable run snapshots for external persistence). */
+  graphCheckpoint: handleUnaryCall<GraphCheckpointRequest, GraphCheckpointResponse>;
+  graphRestore: handleUnaryCall<GraphRestoreRequest, GraphRestoreResponse>;
+  /** Enumerate one session's graph runs (DagRunSnapshot shape). */
+  graphList: handleUnaryCall<GraphListRequest, GraphListResponse>;
+}
+
+export interface GraphEngineServiceClient extends Client {
+  /** Fetch a DAG node's full output from an offset (P3). */
+  getNodeOutput(
+    request: GetNodeOutputRequest,
+    callback: (error: ServiceError | null, response: GetNodeOutputResponse) => void,
+  ): ClientUnaryCall;
+  getNodeOutput(
+    request: GetNodeOutputRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: GetNodeOutputResponse) => void,
+  ): ClientUnaryCall;
+  getNodeOutput(
+    request: GetNodeOutputRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: GetNodeOutputResponse) => void,
+  ): ClientUnaryCall;
+  /** Graph orchestration control (DAG + goal runs; planning is agent-side). */
+  graphCancel(
+    request: GraphCancelRequest,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  graphCancel(
+    request: GraphCancelRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  graphCancel(
+    request: GraphCancelRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  graphRetry(
+    request: GraphRetryRequest,
+    callback: (error: ServiceError | null, response: GraphRetryResponse) => void,
+  ): ClientUnaryCall;
+  graphRetry(
+    request: GraphRetryRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: GraphRetryResponse) => void,
+  ): ClientUnaryCall;
+  graphRetry(
+    request: GraphRetryRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: GraphRetryResponse) => void,
+  ): ClientUnaryCall;
+  graphSkip(
+    request: GraphSkipRequest,
+    callback: (error: ServiceError | null, response: GraphSkipResponse) => void,
+  ): ClientUnaryCall;
+  graphSkip(
+    request: GraphSkipRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: GraphSkipResponse) => void,
+  ): ClientUnaryCall;
+  graphSkip(
+    request: GraphSkipRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: GraphSkipResponse) => void,
+  ): ClientUnaryCall;
+  /** Stop the node's in-flight turn (run ends unless steering was queued). */
+  graphNodeInterrupt(
+    request: GraphNodeInterruptRequest,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  graphNodeInterrupt(
+    request: GraphNodeInterruptRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  graphNodeInterrupt(
+    request: GraphNodeInterruptRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  /** Queue a steering message injected at the node's next natural turn boundary. */
+  graphNodeSteer(
+    request: GraphNodeSteerRequest,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  graphNodeSteer(
+    request: GraphNodeSteerRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  graphNodeSteer(
+    request: GraphNodeSteerRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  /** Checkpoint / restore (portable run snapshots for external persistence). */
+  graphCheckpoint(
+    request: GraphCheckpointRequest,
+    callback: (error: ServiceError | null, response: GraphCheckpointResponse) => void,
+  ): ClientUnaryCall;
+  graphCheckpoint(
+    request: GraphCheckpointRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: GraphCheckpointResponse) => void,
+  ): ClientUnaryCall;
+  graphCheckpoint(
+    request: GraphCheckpointRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: GraphCheckpointResponse) => void,
+  ): ClientUnaryCall;
+  graphRestore(
+    request: GraphRestoreRequest,
+    callback: (error: ServiceError | null, response: GraphRestoreResponse) => void,
+  ): ClientUnaryCall;
+  graphRestore(
+    request: GraphRestoreRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: GraphRestoreResponse) => void,
+  ): ClientUnaryCall;
+  graphRestore(
+    request: GraphRestoreRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: GraphRestoreResponse) => void,
+  ): ClientUnaryCall;
+  /** Enumerate one session's graph runs (DagRunSnapshot shape). */
+  graphList(
+    request: GraphListRequest,
+    callback: (error: ServiceError | null, response: GraphListResponse) => void,
+  ): ClientUnaryCall;
+  graphList(
+    request: GraphListRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: GraphListResponse) => void,
+  ): ClientUnaryCall;
+  graphList(
+    request: GraphListRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: GraphListResponse) => void,
+  ): ClientUnaryCall;
+}
+
+export const GraphEngineServiceClient = makeGenericClientConstructor(
+  GraphEngineServiceService,
+  "theway.grpc.v1.GraphEngineService",
+) as unknown as {
+  new (address: string, credentials: ChannelCredentials, options?: Partial<ClientOptions>): GraphEngineServiceClient;
+  service: typeof GraphEngineServiceService;
+  serviceName: string;
 };
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;

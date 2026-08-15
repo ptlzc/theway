@@ -6,6 +6,18 @@
 
 /* eslint-disable */
 import { BinaryReader, BinaryWriter } from "@bufbuild/protobuf/wire";
+import {
+  type CallOptions,
+  type ChannelCredentials,
+  Client,
+  type ClientOptions,
+  type ClientReadableStream,
+  type handleServerStreamingCall,
+  makeGenericClientConstructor,
+  type Metadata,
+  type UntypedServiceImplementation,
+} from "@grpc/grpc-js";
+import { Empty } from "./commands.js";
 import { SessionState } from "./session.js";
 
 export const protobufPackage = "theway.grpc.v1";
@@ -1176,6 +1188,40 @@ export const RunStatus: MessageFns<RunStatus> = {
     message.error = object.error ?? undefined;
     return message;
   },
+};
+
+export type EventServiceService = typeof EventServiceService;
+export const EventServiceService = {
+  /** Snapshot/event stream (P0: snapshot frames; P2+: event increments). */
+  streamEvents: {
+    path: "/theway.grpc.v1.EventService/StreamEvents" as const,
+    requestStream: false as const,
+    responseStream: true as const,
+    requestSerialize: (value: Empty): Buffer => Buffer.from(Empty.encode(value).finish()),
+    requestDeserialize: (value: Buffer): Empty => Empty.decode(value),
+    responseSerialize: (value: StreamFrame): Buffer => Buffer.from(StreamFrame.encode(value).finish()),
+    responseDeserialize: (value: Buffer): StreamFrame => StreamFrame.decode(value),
+  },
+} as const;
+
+export interface EventServiceServer extends UntypedServiceImplementation {
+  /** Snapshot/event stream (P0: snapshot frames; P2+: event increments). */
+  streamEvents: handleServerStreamingCall<Empty, StreamFrame>;
+}
+
+export interface EventServiceClient extends Client {
+  /** Snapshot/event stream (P0: snapshot frames; P2+: event increments). */
+  streamEvents(request: Empty, options?: Partial<CallOptions>): ClientReadableStream<StreamFrame>;
+  streamEvents(request: Empty, metadata?: Metadata, options?: Partial<CallOptions>): ClientReadableStream<StreamFrame>;
+}
+
+export const EventServiceClient = makeGenericClientConstructor(
+  EventServiceService,
+  "theway.grpc.v1.EventService",
+) as unknown as {
+  new (address: string, credentials: ChannelCredentials, options?: Partial<ClientOptions>): EventServiceClient;
+  service: typeof EventServiceService;
+  serviceName: string;
 };
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;

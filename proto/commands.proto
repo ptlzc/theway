@@ -1,6 +1,7 @@
 // Command domain: shared command markers, prompt submission, approval, and
-// model-switch request messages. The service definition lives in
-// theway_grpc.proto.
+// model-switch request messages. `Empty` and `CommandResult` are cross-domain
+// shared primitives used by the other domain services; `CommandService` is
+// the command-side RPC surface.
 
 syntax = "proto3";
 package theway.grpc.v1;
@@ -42,4 +43,15 @@ message SetModelRequest {
 
 message ApproveRequest {
   bool approve = 1;
+}
+
+service CommandService {
+  // Submit a message. mode=GUIDE queues after the current turn (default);
+  // mode=INTERRUPT stops the current turn and runs the message immediately.
+  rpc SendMessage(SendMessageRequest) returns (CommandResult);
+  rpc SetModel(SetModelRequest) returns (CommandResult);
+  // Stop the in-flight turn (same as local Ctrl-C). Does not cancel DAG runs.
+  rpc Cancel(Empty) returns (CommandResult);
+  // Resolve a pending control-plane approval request (approve / reject).
+  rpc Approve(ApproveRequest) returns (CommandResult);
 }

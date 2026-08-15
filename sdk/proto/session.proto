@@ -1,10 +1,11 @@
 // Session domain: the full session state plane (snapshot, sidebar, feed,
-// model catalog, status) plus session resource messages
-// (list/create/switch/rename/delete).
+// model catalog, status), session resource messages
+// (list/create/switch/rename/delete), and the SessionService RPC surface.
 
 syntax = "proto3";
 package theway.grpc.v1;
 
+import "commands.proto";
 import "graph_engine.proto";
 
 // Full session state (the structured form of the former WireSnapshot JSON).
@@ -246,4 +247,17 @@ message DeleteSessionRequest {
 message DeleteSessionResponse {
   // Non-empty = deletion refused, these graphs are still running.
   repeated string running_run_ids = 1;
+}
+
+service SessionService {
+  // Full structured state (binary protobuf).
+  rpc GetState(Empty) returns (SessionState);
+  // Session resources: list (with current marker) / create / switch / rename /
+  // delete. DeleteSession reports the offending run ids when refused because
+  // the session still has running graphs.
+  rpc ListSessions(Empty) returns (ListSessionsResponse);
+  rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
+  rpc SwitchSession(SwitchSessionRequest) returns (CommandResult);
+  rpc RenameSession(RenameSessionRequest) returns (CommandResult);
+  rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse);
 }

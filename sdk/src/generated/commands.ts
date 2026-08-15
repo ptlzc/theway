@@ -6,6 +6,18 @@
 
 /* eslint-disable */
 import { BinaryReader, BinaryWriter } from "@bufbuild/protobuf/wire";
+import {
+  type CallOptions,
+  type ChannelCredentials,
+  Client,
+  type ClientOptions,
+  type ClientUnaryCall,
+  type handleUnaryCall,
+  makeGenericClientConstructor,
+  type Metadata,
+  type ServiceError,
+  type UntypedServiceImplementation,
+} from "@grpc/grpc-js";
 
 export const protobufPackage = "theway.grpc.v1";
 
@@ -487,6 +499,140 @@ export const ApproveRequest: MessageFns<ApproveRequest> = {
     message.approve = object.approve ?? false;
     return message;
   },
+};
+
+export type CommandServiceService = typeof CommandServiceService;
+export const CommandServiceService = {
+  /**
+   * Submit a message. mode=GUIDE queues after the current turn (default);
+   * mode=INTERRUPT stops the current turn and runs the message immediately.
+   */
+  sendMessage: {
+    path: "/theway.grpc.v1.CommandService/SendMessage" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: SendMessageRequest): Buffer => Buffer.from(SendMessageRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): SendMessageRequest => SendMessageRequest.decode(value),
+    responseSerialize: (value: CommandResult): Buffer => Buffer.from(CommandResult.encode(value).finish()),
+    responseDeserialize: (value: Buffer): CommandResult => CommandResult.decode(value),
+  },
+  setModel: {
+    path: "/theway.grpc.v1.CommandService/SetModel" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: SetModelRequest): Buffer => Buffer.from(SetModelRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): SetModelRequest => SetModelRequest.decode(value),
+    responseSerialize: (value: CommandResult): Buffer => Buffer.from(CommandResult.encode(value).finish()),
+    responseDeserialize: (value: Buffer): CommandResult => CommandResult.decode(value),
+  },
+  /** Stop the in-flight turn (same as local Ctrl-C). Does not cancel DAG runs. */
+  cancel: {
+    path: "/theway.grpc.v1.CommandService/Cancel" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: Empty): Buffer => Buffer.from(Empty.encode(value).finish()),
+    requestDeserialize: (value: Buffer): Empty => Empty.decode(value),
+    responseSerialize: (value: CommandResult): Buffer => Buffer.from(CommandResult.encode(value).finish()),
+    responseDeserialize: (value: Buffer): CommandResult => CommandResult.decode(value),
+  },
+  /** Resolve a pending control-plane approval request (approve / reject). */
+  approve: {
+    path: "/theway.grpc.v1.CommandService/Approve" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: ApproveRequest): Buffer => Buffer.from(ApproveRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): ApproveRequest => ApproveRequest.decode(value),
+    responseSerialize: (value: CommandResult): Buffer => Buffer.from(CommandResult.encode(value).finish()),
+    responseDeserialize: (value: Buffer): CommandResult => CommandResult.decode(value),
+  },
+} as const;
+
+export interface CommandServiceServer extends UntypedServiceImplementation {
+  /**
+   * Submit a message. mode=GUIDE queues after the current turn (default);
+   * mode=INTERRUPT stops the current turn and runs the message immediately.
+   */
+  sendMessage: handleUnaryCall<SendMessageRequest, CommandResult>;
+  setModel: handleUnaryCall<SetModelRequest, CommandResult>;
+  /** Stop the in-flight turn (same as local Ctrl-C). Does not cancel DAG runs. */
+  cancel: handleUnaryCall<Empty, CommandResult>;
+  /** Resolve a pending control-plane approval request (approve / reject). */
+  approve: handleUnaryCall<ApproveRequest, CommandResult>;
+}
+
+export interface CommandServiceClient extends Client {
+  /**
+   * Submit a message. mode=GUIDE queues after the current turn (default);
+   * mode=INTERRUPT stops the current turn and runs the message immediately.
+   */
+  sendMessage(
+    request: SendMessageRequest,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  sendMessage(
+    request: SendMessageRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  sendMessage(
+    request: SendMessageRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  setModel(
+    request: SetModelRequest,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  setModel(
+    request: SetModelRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  setModel(
+    request: SetModelRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  /** Stop the in-flight turn (same as local Ctrl-C). Does not cancel DAG runs. */
+  cancel(request: Empty, callback: (error: ServiceError | null, response: CommandResult) => void): ClientUnaryCall;
+  cancel(
+    request: Empty,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  cancel(
+    request: Empty,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  /** Resolve a pending control-plane approval request (approve / reject). */
+  approve(
+    request: ApproveRequest,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  approve(
+    request: ApproveRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  approve(
+    request: ApproveRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+}
+
+export const CommandServiceClient = makeGenericClientConstructor(
+  CommandServiceService,
+  "theway.grpc.v1.CommandService",
+) as unknown as {
+  new (address: string, credentials: ChannelCredentials, options?: Partial<ClientOptions>): CommandServiceClient;
+  service: typeof CommandServiceService;
+  serviceName: string;
 };
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;

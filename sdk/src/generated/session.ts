@@ -6,6 +6,19 @@
 
 /* eslint-disable */
 import { BinaryReader, BinaryWriter } from "@bufbuild/protobuf/wire";
+import {
+  type CallOptions,
+  type ChannelCredentials,
+  Client,
+  type ClientOptions,
+  type ClientUnaryCall,
+  type handleUnaryCall,
+  makeGenericClientConstructor,
+  type Metadata,
+  type ServiceError,
+  type UntypedServiceImplementation,
+} from "@grpc/grpc-js";
+import { CommandResult, Empty } from "./commands.js";
 import { DagRunSnapshot, SubagentJobSnapshot } from "./graph_engine.js";
 
 export const protobufPackage = "theway.grpc.v1";
@@ -3993,6 +4006,193 @@ export const DeleteSessionResponse: MessageFns<DeleteSessionResponse> = {
     message.runningRunIds = object.runningRunIds?.map((e) => e) || [];
     return message;
   },
+};
+
+export type SessionServiceService = typeof SessionServiceService;
+export const SessionServiceService = {
+  /** Full structured state (binary protobuf). */
+  getState: {
+    path: "/theway.grpc.v1.SessionService/GetState" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: Empty): Buffer => Buffer.from(Empty.encode(value).finish()),
+    requestDeserialize: (value: Buffer): Empty => Empty.decode(value),
+    responseSerialize: (value: SessionState): Buffer => Buffer.from(SessionState.encode(value).finish()),
+    responseDeserialize: (value: Buffer): SessionState => SessionState.decode(value),
+  },
+  /**
+   * Session resources: list (with current marker) / create / switch / rename /
+   * delete. DeleteSession reports the offending run ids when refused because
+   * the session still has running graphs.
+   */
+  listSessions: {
+    path: "/theway.grpc.v1.SessionService/ListSessions" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: Empty): Buffer => Buffer.from(Empty.encode(value).finish()),
+    requestDeserialize: (value: Buffer): Empty => Empty.decode(value),
+    responseSerialize: (value: ListSessionsResponse): Buffer =>
+      Buffer.from(ListSessionsResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): ListSessionsResponse => ListSessionsResponse.decode(value),
+  },
+  createSession: {
+    path: "/theway.grpc.v1.SessionService/CreateSession" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: CreateSessionRequest): Buffer => Buffer.from(CreateSessionRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): CreateSessionRequest => CreateSessionRequest.decode(value),
+    responseSerialize: (value: CreateSessionResponse): Buffer =>
+      Buffer.from(CreateSessionResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): CreateSessionResponse => CreateSessionResponse.decode(value),
+  },
+  switchSession: {
+    path: "/theway.grpc.v1.SessionService/SwitchSession" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: SwitchSessionRequest): Buffer => Buffer.from(SwitchSessionRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): SwitchSessionRequest => SwitchSessionRequest.decode(value),
+    responseSerialize: (value: CommandResult): Buffer => Buffer.from(CommandResult.encode(value).finish()),
+    responseDeserialize: (value: Buffer): CommandResult => CommandResult.decode(value),
+  },
+  renameSession: {
+    path: "/theway.grpc.v1.SessionService/RenameSession" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: RenameSessionRequest): Buffer => Buffer.from(RenameSessionRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): RenameSessionRequest => RenameSessionRequest.decode(value),
+    responseSerialize: (value: CommandResult): Buffer => Buffer.from(CommandResult.encode(value).finish()),
+    responseDeserialize: (value: Buffer): CommandResult => CommandResult.decode(value),
+  },
+  deleteSession: {
+    path: "/theway.grpc.v1.SessionService/DeleteSession" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: DeleteSessionRequest): Buffer => Buffer.from(DeleteSessionRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): DeleteSessionRequest => DeleteSessionRequest.decode(value),
+    responseSerialize: (value: DeleteSessionResponse): Buffer =>
+      Buffer.from(DeleteSessionResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): DeleteSessionResponse => DeleteSessionResponse.decode(value),
+  },
+} as const;
+
+export interface SessionServiceServer extends UntypedServiceImplementation {
+  /** Full structured state (binary protobuf). */
+  getState: handleUnaryCall<Empty, SessionState>;
+  /**
+   * Session resources: list (with current marker) / create / switch / rename /
+   * delete. DeleteSession reports the offending run ids when refused because
+   * the session still has running graphs.
+   */
+  listSessions: handleUnaryCall<Empty, ListSessionsResponse>;
+  createSession: handleUnaryCall<CreateSessionRequest, CreateSessionResponse>;
+  switchSession: handleUnaryCall<SwitchSessionRequest, CommandResult>;
+  renameSession: handleUnaryCall<RenameSessionRequest, CommandResult>;
+  deleteSession: handleUnaryCall<DeleteSessionRequest, DeleteSessionResponse>;
+}
+
+export interface SessionServiceClient extends Client {
+  /** Full structured state (binary protobuf). */
+  getState(request: Empty, callback: (error: ServiceError | null, response: SessionState) => void): ClientUnaryCall;
+  getState(
+    request: Empty,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: SessionState) => void,
+  ): ClientUnaryCall;
+  getState(
+    request: Empty,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: SessionState) => void,
+  ): ClientUnaryCall;
+  /**
+   * Session resources: list (with current marker) / create / switch / rename /
+   * delete. DeleteSession reports the offending run ids when refused because
+   * the session still has running graphs.
+   */
+  listSessions(
+    request: Empty,
+    callback: (error: ServiceError | null, response: ListSessionsResponse) => void,
+  ): ClientUnaryCall;
+  listSessions(
+    request: Empty,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: ListSessionsResponse) => void,
+  ): ClientUnaryCall;
+  listSessions(
+    request: Empty,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: ListSessionsResponse) => void,
+  ): ClientUnaryCall;
+  createSession(
+    request: CreateSessionRequest,
+    callback: (error: ServiceError | null, response: CreateSessionResponse) => void,
+  ): ClientUnaryCall;
+  createSession(
+    request: CreateSessionRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: CreateSessionResponse) => void,
+  ): ClientUnaryCall;
+  createSession(
+    request: CreateSessionRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: CreateSessionResponse) => void,
+  ): ClientUnaryCall;
+  switchSession(
+    request: SwitchSessionRequest,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  switchSession(
+    request: SwitchSessionRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  switchSession(
+    request: SwitchSessionRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  renameSession(
+    request: RenameSessionRequest,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  renameSession(
+    request: RenameSessionRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  renameSession(
+    request: RenameSessionRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  deleteSession(
+    request: DeleteSessionRequest,
+    callback: (error: ServiceError | null, response: DeleteSessionResponse) => void,
+  ): ClientUnaryCall;
+  deleteSession(
+    request: DeleteSessionRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: DeleteSessionResponse) => void,
+  ): ClientUnaryCall;
+  deleteSession(
+    request: DeleteSessionRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: DeleteSessionResponse) => void,
+  ): ClientUnaryCall;
+}
+
+export const SessionServiceClient = makeGenericClientConstructor(
+  SessionServiceService,
+  "theway.grpc.v1.SessionService",
+) as unknown as {
+  new (address: string, credentials: ChannelCredentials, options?: Partial<ClientOptions>): SessionServiceClient;
+  service: typeof SessionServiceService;
+  serviceName: string;
 };
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;
