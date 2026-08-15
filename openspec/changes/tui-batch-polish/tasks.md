@@ -177,7 +177,7 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
   - 测试：mode 渲染解析（Auto 有/无内容、Hidden、Shown clamp）、拖拽
     宽度计算与拖到最右关闭、菜单导航/应用/取消、/status-panel 打开菜单。
   - 验收：`cargo check -p theway-tui`；`cargo test -p theway-tui` 全绿。
-- [ ] 12-fork-picker — `ui/mod.rs` + `ui/app_turns.rs` + `ui/app_input.rs`
+- [x] 12-fork-picker — `ui/mod.rs` + `ui/app_turns.rs` + `ui/app_input.rs`
   + `ui/tests.rs` + daemon `commands/session.rs`（#55）：
   - DAEMON_COMMANDS 加 "fork"；核对 daemon `Registry::with_daemon_commands()`
     全量命令名与 TUI 列表一致（diff 补齐其它缺失项）。
