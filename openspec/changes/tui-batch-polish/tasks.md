@@ -158,7 +158,7 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
   - 测试：列钳制、文本提取（首尾列截断 + 多行）、列区间涂色（buffer
     bg 断言）、mouse 列映射、键盘扩展、复制调用（mock）。
   - 验收：`cargo check -p theway-tui`；`cargo test -p theway-tui` 全绿。
-- [ ] 11-status-panel — `ui/mod.rs` + `ui/app_turns.rs` + `ui/app_input.rs`
+- [x] 11-status-panel — `ui/mod.rs` + `ui/app_turns.rs` + `ui/app_input.rs`
   + `ui/tests.rs`（#54）：
   - `enum SidePanelMode { Auto, Shown(u16), Hidden }`（App 字段，默认
     Auto）；渲染 split：mode → Option<width>（Auto = should_show_side_panel()
