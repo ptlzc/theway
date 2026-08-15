@@ -194,7 +194,7 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
     Enter 转发文本为 `/fork <n>`；Esc 取消；daemon 提示文本断言。
   - 验收：`cargo check --workspace`；`cargo test -p theway-tui -p
     theway-daemon` 全绿。
-- [ ] 13-fresh-attach — `startup/mod.rs` + `ui/mod.rs` + `ui/app_turns.rs`
+- [x] 13-fresh-attach — `startup/mod.rs` + `ui/mod.rs` + `ui/app_turns.rs`
   + `ui/app_input.rs` + `ui/tests.rs`（#56）：
   - startup `connect_or_spawn`：discover 复用路径返回标记 `reused:
     bool`；reused 且无 `--resume/--resume-id/--continue` 时 attach 后
