@@ -138,7 +138,7 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
   - 测试：slash_new 触发 create_session + SwitchSession{id} 命令；补全
     列表含 /new；失败路径 error_line。
   - 验收：`cargo check -p theway-tui`；`cargo test -p theway-tui` 全绿。
-- [ ] 10-text-selection — 新 `ui/selection.rs` + `feed_render.rs` +
+- [x] 10-text-selection — 新 `ui/selection.rs` + `feed_render.rs` +
   `ui/mod.rs` + `ui/app_input.rs` + `ui/tests.rs`（#53）：
   - `FeedSelection { anchor: (usize, usize), head: (usize, usize) }`
     （uncapped 行 + 显示列）；`ordered()` 归一方向；列钳制按行文本
