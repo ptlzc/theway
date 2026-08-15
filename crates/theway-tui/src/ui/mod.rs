@@ -35,6 +35,7 @@ pub mod dag_band;
 mod pixel_loader;
 mod prompt_chrome;
 mod render_utils;
+mod snake_loader;
 pub mod stats;
 
 pub use theway_transport::feed::FeedUpdate;
@@ -78,9 +79,6 @@ const MAX_INPUT_ROWS: usize = 6;
 /// Upper bound for mouse-dragged composer height (issue #37): dragging the
 /// status rule can grow the input box beyond the content-driven cap.
 const DRAG_MAX_INPUT_ROWS: u16 = 12;
-/// Height of the busy status band: 3 rows for the pixel-grid loader
-/// (issue #37), 1 row for the plain ready/offline rule.
-const BUSY_STATUS_ROWS: u16 = 3;
 /// Busy-band frame period: spinner cadence + char/s meter sampling
 /// (issue #38).
 const SPINNER_TICK_MS: u64 = 100;
@@ -264,7 +262,8 @@ pub struct App {
     /// Streaming throughput meter behind the busy-band stats line
     /// (issue #38).
     cps_meter: stats::CpsMeter,
-    /// Shared rainbow spinner driving the busy-band loader (issue #38).
+    /// Shared step counter driving the busy-band snake loader cadence
+    /// (issue #42).
     spinner: pixel_loader::RainbowSpinner,
     /// Per-run throughput meters behind the DAG band's `c/s` figures
     /// (issue #38): cumulative output-token sums sampled each tick.
@@ -798,12 +797,11 @@ impl App {
     fn render(&mut self, frame: &mut ratatui::Frame) {
         let area = frame.area();
         let input_rows = self.composer_rows(area.width);
-        let status_rows = if self.busy { BUSY_STATUS_ROWS } else { 1 };
         let chunks = Layout::vertical([
             Constraint::Min(1),
-            Constraint::Length(status_rows), // status separator (loader band while busy)
+            Constraint::Length(1), // status rule (snake loader row while busy)
             Constraint::Length(input_rows + 2), // input box with border
-            Constraint::Length(1),           // hint line
+            Constraint::Length(1), // hint line
         ])
         .split(area);
         let content_area = chunks[0];
@@ -939,8 +937,8 @@ impl App {
             );
         }
 
-        // Status separator: plain rule when idle; pixel-grid loader band
-        // while busy (issue #37).
+        // Status rule: plain ready/offline rule when idle; single-row
+        // rainbow snake loader while busy (issue #42).
         if self.busy {
             self.render_busy_status(frame, status_area);
         } else {
@@ -1423,33 +1421,35 @@ impl App {
         Paragraph::new(Line::styled(text, Style::default().fg(Color::DarkGray)))
     }
 
-    /// Busy band (issue #37): the 3×3 pixel-grid loader on the left; the
-    /// middle row carries a shimmering `working` label, a live elapsed
-    /// timer, the queue depth and the scrolled-up marker; the right side of
-    /// the middle row carries the throughput stats line (issue #38).
+    /// Busy rule (issue #42): a single row with the 9-cell rainbow snake
+    /// track at `x+1` (head bounces 0→8→0, tail decays along the trail),
+    /// the shimmering `working` label with the live elapsed timer, queue
+    /// depth and scrolled-up marker at `x+12`, and the throughput stats
+    /// right-aligned on the same row (issue #38). One row for both busy
+    /// and idle keeps the layout from jumping.
     fn render_busy_status(&self, frame: &mut ratatui::Frame, area: Rect) {
+        if area.height == 0 {
+            return;
+        }
         let tick = self.spinner_frame as u64;
         let cps = self.cps_meter.cps();
-        let loader = pixel_loader::rainbow_frame(self.spinner.step(), cps);
-        let grid_x = area.x.saturating_add(1);
-        for r in 0..3u16 {
-            for c in 0..3u16 {
-                let cell = &loader.cells[(r * 3 + c) as usize];
-                let x = grid_x.saturating_add(c * 2);
-                let y = area.y.saturating_add(r);
-                if x < area.right() && y < area.bottom() {
-                    let mut style = Style::default().fg(cell.fg);
-                    if cell.lit > 0.5 {
-                        style = style.add_modifier(Modifier::BOLD);
-                    }
-                    frame
-                        .buffer_mut()
-                        .set_string(x, y, cell.glyph.to_string(), style);
-                }
+        let snake = snake_loader::snake_frame(self.spinner.step(), cps);
+        let track_x = area.x.saturating_add(1);
+        for (idx, cell) in snake.cells.iter().enumerate() {
+            let x = track_x.saturating_add(idx as u16);
+            if x >= area.right() {
+                break;
             }
+            let mut style = Style::default().fg(cell.fg).bg(cell.bg);
+            if cell.lit > 0.5 {
+                style = style.add_modifier(Modifier::BOLD);
+            }
+            frame
+                .buffer_mut()
+                .set_string(x, area.y, cell.glyph.to_string(), style);
         }
-        let label_x = area.x.saturating_add(8);
-        if label_x < area.right() && area.height > 1 {
+        let label_x = area.x.saturating_add(12);
+        if label_x < area.right() {
             let mut spans = vec![
                 Span::styled("working", shimmer_style(tick)),
                 Span::styled(
@@ -1471,17 +1471,17 @@ impl App {
             }
             let line = Line::from(spans);
             let w = area.right().saturating_sub(label_x);
-            frame.buffer_mut().set_line(label_x, area.y + 1, &line, w);
+            frame.buffer_mut().set_line(label_x, area.y, &line, w);
         }
         self.render_busy_stats(frame, area);
     }
 
-    /// Throughput stats on the right side of the busy band's middle row:
+    /// Throughput stats on the right side of the busy rule:
     /// `84 char/s · input: 57.1k · output: 1.2k` (char/s from the meter;
     /// input/output from the recent context usage; no usage data → char/s
     /// only).
     fn render_busy_stats(&self, frame: &mut ratatui::Frame, area: Rect) {
-        if area.height < 2 {
+        if area.height == 0 {
             return;
         }
         let usage = &self.latest.usage;
@@ -1496,7 +1496,7 @@ impl App {
         let x = right.saturating_sub(width).saturating_sub(1);
         frame
             .buffer_mut()
-            .set_string(x, area.y + 1, text, Style::default().fg(Color::DarkGray));
+            .set_string(x, area.y, text, Style::default().fg(Color::DarkGray));
     }
 
     /// Elapsed time since the busy window began (`m s` after a minute).

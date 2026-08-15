@@ -213,8 +213,9 @@ fn rainbow_color(order_pos: usize, step: u64, lit: f32) -> Color {
     Color::Rgb(r, g, b)
 }
 
-/// Standard HSV→RGB (h in degrees, s/v in 0..=1).
-fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
+/// Standard HSV→RGB (h in degrees, s/v in 0..=1). Shared with the busy
+/// band's snake loader (issue #42).
+pub(crate) fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
     let c = v * s;
     let hp = (h % 360.0) / 60.0;
     let x = c * (1.0 - (hp % 2.0 - 1.0).abs());

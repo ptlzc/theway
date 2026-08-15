@@ -1,10 +1,11 @@
-use super::{App, AppConfig};
+use super::{App, AppConfig, snake_loader};
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ratatui::Terminal;
 use ratatui::backend::{CrosstermBackend, TestBackend};
 use ratatui::buffer::Buffer;
+use ratatui::style::Color;
 use std::sync::Arc;
 use std::time::Duration;
 use theway_core::multiagent::graph::engine::DagEngine;
@@ -200,7 +201,7 @@ async fn chrome_info_line_shows_model_with_provider() {
 }
 
 #[tokio::test]
-async fn busy_status_shows_pixel_loader_with_elapsed() {
+async fn busy_status_shows_snake_loader_with_elapsed() {
     let (mut app, _rx) = test_app().await;
     let mut status = fixture_status(Vec::new());
     status.busy = true;
@@ -209,7 +210,8 @@ async fn busy_status_shows_pixel_loader_with_elapsed() {
     let backend = TestBackend::new(60, 12);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|f| app.render(f)).unwrap();
-    let text = buffer_text(terminal.backend().buffer());
+    let buf = terminal.backend().buffer();
+    let text = buffer_text(buf);
     assert!(text.contains("working"), "busy label missing:\n{text}");
     assert!(
         text.contains("working 0."),
@@ -219,12 +221,25 @@ async fn busy_status_shows_pixel_loader_with_elapsed() {
         text.contains("2 queued"),
         "queue depth missing from the busy band:\n{text}"
     );
-    assert!(
-        text.contains('■'),
-        "pixel-grid glyphs missing from the busy band:\n{text}"
+    // Single-row layout (issue #42): the 9-cell snake track starts at
+    // x+1, the working label at x+12, and the stats share the same row.
+    let status_area = app.last_status_area.unwrap();
+    for c in 0..9u16 {
+        assert_eq!(
+            buf[(status_area.x + 1 + c, status_area.y)].symbol(),
+            "●",
+            "track cell {c} must render the snake glyph:\n{text}"
+        );
+    }
+    assert_eq!(
+        buf[(status_area.x + 12, status_area.y)].symbol(),
+        "w",
+        "working label must start at x+12:\n{text}"
     );
-    // The busy band is 3 rows: composer top border sits 2 rows below the
-    // middle (label) row.
+    assert!(
+        text.contains("char/s"),
+        "throughput stats must share the busy row:\n{text}"
+    );
     let lines: Vec<&str> = text.lines().collect();
     let label_row = lines.iter().position(|l| l.contains("working")).unwrap();
     let border_row = lines
@@ -233,8 +248,8 @@ async fn busy_status_shows_pixel_loader_with_elapsed() {
         .expect("composer top border missing");
     assert_eq!(
         border_row,
-        label_row + 2,
-        "composer should sit below the 3-row loader band:\n{text}"
+        label_row + 1,
+        "composer should sit directly below the single-row busy band:\n{text}"
     );
     // The busy window timer arms on the false→true edge and clears on idle.
     assert!(app.busy_started.is_some());
@@ -242,6 +257,129 @@ async fn busy_status_shows_pixel_loader_with_elapsed() {
     idle.busy = false;
     app.apply_snapshot(idle);
     assert!(app.busy_started.is_none());
+}
+
+// ── busy snake loader (issue #42) ─────────────────────────────────────────
+
+/// Head trajectory: the triangular wave walks 0→8→0 and bounces at both
+/// ends of the fixed 9-cell track.
+#[test]
+fn snake_head_bounces_along_the_nine_cell_track() {
+    let expected = [0usize, 1, 2, 3, 4, 5, 6, 7, 8, 7, 6, 5, 4, 3, 2, 1];
+    for (step, &want) in expected.iter().enumerate() {
+        assert_eq!(snake_loader::head_pos(step as u64), want, "step {step}");
+    }
+    // The wave repeats every 16 steps and never leaves the track.
+    for step in 0..=64u64 {
+        let pos = snake_loader::head_pos(step);
+        assert!(pos < 9, "step {step}: head left the track ({pos})");
+        assert_eq!(
+            snake_loader::head_pos(step + 16),
+            pos,
+            "step {step}: wave must repeat every 16 steps"
+        );
+    }
+}
+
+/// Tail follow: segment `i` sits where the head was `i` steps ago, and
+/// at a reversal the tail flips to the far side of the motion direction.
+#[test]
+fn snake_tail_follows_head_history_and_flips_at_reversal() {
+    // Moving right: head at 8, the tail trails to its left.
+    assert_eq!(snake_loader::segment_pos(8, 0), Some(8));
+    assert_eq!(snake_loader::segment_pos(8, 1), Some(7));
+    assert_eq!(snake_loader::segment_pos(8, 2), Some(6));
+    // Step 9 reverses: head at 7, the tail now trails on the right.
+    assert_eq!(snake_loader::segment_pos(9, 0), Some(7));
+    assert_eq!(snake_loader::segment_pos(9, 1), Some(8));
+    // History predating the wave start is out of range: the segment has
+    // no track cell and renders dim.
+    assert_eq!(snake_loader::segment_pos(0, 0), Some(0));
+    assert_eq!(snake_loader::segment_pos(0, 1), None);
+    assert_eq!(snake_loader::segment_pos(2, 3), None);
+}
+
+/// Rainbow gradient: every step rotates the hue wheel by 15° and each
+/// trail segment adds a 40° offset, all through the shared HSV→RGB
+/// conversion.
+#[test]
+fn snake_rainbow_hues_advance_per_step_and_segment() {
+    // The head is fully lit (value 1.0), so its color follows the
+    // step*15° hue exactly.
+    for step in [0u64, 1, 3, 7] {
+        let frame = snake_loader::snake_frame(step, 0.0);
+        let pos = snake_loader::head_pos(step);
+        let (r, g, b) = super::pixel_loader::hsv_to_rgb((step as f32 * 15.0) % 360.0, 0.85, 1.0);
+        assert_eq!(frame.cells[pos].fg, Color::Rgb(r, g, b), "step {step}");
+    }
+    // Within one frame the trail steps 40° per segment: adjacent
+    // segments carry different colors.
+    let frame = snake_loader::snake_frame(16, 0.0);
+    let colors: Vec<Color> = frame
+        .cells
+        .iter()
+        .filter(|c| c.lit > 0.0)
+        .map(|c| c.fg)
+        .collect();
+    assert_eq!(colors.len(), 2, "idle trail lights head + one segment");
+    assert_ne!(colors[0], colors[1], "trail hues must differ by segment");
+    // Hue rotates with step even when the head revisits the same cell
+    // (bounce positions repeat every 16 steps, colors every 24).
+    let a = snake_loader::snake_frame(0, 0.0).cells[0].fg;
+    let b = snake_loader::snake_frame(16, 0.0).cells[0].fg;
+    assert_ne!(a, b);
+}
+
+/// Trail length: 2 segments at rest growing with throughput, capped at
+/// 8; segments whose history predates the wave start stay dim.
+#[test]
+fn snake_trail_grows_from_two_to_eight_segments() {
+    assert_eq!(snake_loader::trail_len(0.0), 2.0);
+    assert_eq!(snake_loader::trail_len(1e9), 8.0);
+    // Mid-wave step 16 (head at 0 moving right): the history is a
+    // straight run, so the lit count equals the trail length.
+    let idle = snake_loader::snake_frame(16, 0.0);
+    assert_eq!(
+        idle.cells.iter().filter(|c| c.lit > 0.0).count(),
+        2,
+        "idle trail must light 2 cells"
+    );
+    let fast = snake_loader::snake_frame(16, 1e9);
+    assert_eq!(
+        fast.cells.iter().filter(|c| c.lit > 0.0).count(),
+        8,
+        "speed-cap trail must light 8 cells"
+    );
+    // History predating the wave start renders dim: only the head lit.
+    let early = snake_loader::snake_frame(0, 1e9);
+    assert_eq!(early.cells.iter().filter(|c| c.lit > 0.0).count(), 1);
+    assert_eq!(early.cells[0].lit, 1.0);
+}
+
+/// Track stability: all nine cells render every frame — lit cells carry
+/// the rainbow body, unlit ones stay as dim dots on a dim background so
+/// the single-row band never changes shape.
+#[test]
+fn snake_track_always_shows_all_nine_cells_with_dim_background() {
+    for step in [0u64, 4, 8, 9, 15, 23, 100] {
+        for cps in [0.0, 500.0, 1e9] {
+            let frame = snake_loader::snake_frame(step, cps);
+            assert_eq!(frame.cells.len(), 9, "step {step}");
+            for (i, cell) in frame.cells.iter().enumerate() {
+                assert_eq!(cell.glyph, '●', "step {step} cell {i}");
+                if cell.lit > 0.0 {
+                    assert_eq!(cell.bg, Color::Reset, "step {step} cell {i}");
+                } else {
+                    assert_eq!(cell.lit, 0.0, "step {step} cell {i}");
+                    assert_ne!(
+                        cell.bg,
+                        Color::Reset,
+                        "step {step} cell {i}: unlit track dots need a dim background"
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[tokio::test]
