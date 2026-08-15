@@ -17,6 +17,12 @@ Rust 2024 Cargo workspace. The root [`Cargo.toml`](Cargo.toml) is the authoritat
 
 Layering: daemon/tui depend on core/storage/transport; everything sits on `theway-llm-provider`. Provider-specific code lives under `crates/theway-llm-provider/src/providers/`; daemon tool implementations under `crates/theway-daemon/src/tools/`.
 
+### Daemon positioning
+
+The daemon ([`crates/theway-daemon`](crates/theway-daemon)) is the runtime service for sessions, tools, triggers, and orchestration, facing the protocol layer ([`crates/theway-transport`](crates/theway-transport): gRPC + HTTP/SSE/WS). It has no concept of client form — it does not distinguish TUI, web, headless scripts, or other programs — and carries no UI concepts (colors, layout, keys).
+
+Boundary rules: client-specific appearance and interaction belong to [`crates/theway-tui`](crates/theway-tui); cross-client features define the wire contract first, and the daemon implements only the protocol-side semantics; behavior requiring client coordination is expressed via snapshot fields or events (for example, `runtime_revision` notifies clients to re-read local resources).
+
 ## File size governance (>800 lines)
 
 Source and test files stay under ~800 lines; larger files split into a directory (`foo.rs` → `foo/mod.rs` + domain submodules; `tests/<name>/mod.rs` + domain submodule files), splitting by domain, never mechanically. Exceptions:
