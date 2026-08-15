@@ -11,8 +11,11 @@ use ratatui::text::{Line, Span};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// Theme-derived styles used when painting a diagram.
-#[derive(Clone, Copy)]
-pub(crate) struct MermaidStyles {
+///
+/// [`Default`] renders an unstyled (terminal-default) diagram; consumers can
+/// override individual roles (e.g. the TUI DAG band colors its borders).
+#[derive(Clone, Copy, Default)]
+pub struct MermaidStyles {
     pub border: Style,
     pub node_text: Style,
     pub edge: Style,
@@ -21,9 +24,16 @@ pub(crate) struct MermaidStyles {
 }
 
 /// Rendered diagram: styled lines for the TUI and plain lines for ANSI output.
-pub(crate) struct MermaidArt {
+///
+/// `fallback` is `true` when the source could not be laid out as a diagram
+/// (unsupported type, unparseable, or over-wide) and the framed source box
+/// was emitted instead — callers that require a real diagram (e.g. the DAG
+/// band) can use it to pick a different presentation.
+pub struct MermaidArt {
     pub styled_lines: Vec<Line<'static>>,
     pub plain_lines: Vec<String>,
+    /// Framed-source fallback rather than a laid-out diagram.
+    pub fallback: bool,
 }
 
 const MAX_LABEL: usize = 28;
@@ -58,7 +68,7 @@ enum Oversize {
 }
 
 /// Render a mermaid source block, or `None` for blank input.
-pub(crate) fn render(
+pub fn render_mermaid_art(
     src: &str,
     styles: &MermaidStyles,
     max_width: Option<usize>,
@@ -90,6 +100,16 @@ pub(crate) fn render(
         Some(Err(Oversize::Cells)) | None => false,
     };
     Some(fallback(src, styles, max_width, too_wide))
+}
+
+/// Internal alias kept for the markdown parse path in `parse.rs` (same
+/// behavior as [`render_mermaid_art`]).
+pub(crate) fn render(
+    src: &str,
+    styles: &MermaidStyles,
+    max_width: Option<usize>,
+) -> Option<MermaidArt> {
+    render_mermaid_art(src, styles, max_width)
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -1377,6 +1397,7 @@ fn render_class(
     Ok(MermaidArt {
         styled_lines,
         plain_lines,
+        fallback: false,
     })
 }
 
@@ -1751,6 +1772,7 @@ fn layout_flowchart(
     Ok(MermaidArt {
         styled_lines,
         plain_lines,
+        fallback: false,
     })
 }
 
@@ -2022,6 +2044,7 @@ fn render_grouped(
     Ok(MermaidArt {
         styled_lines,
         plain_lines,
+        fallback: false,
     })
 }
 
@@ -3482,6 +3505,7 @@ fn layout_sequence(
     Ok(MermaidArt {
         styled_lines,
         plain_lines,
+        fallback: false,
     })
 }
 
@@ -3570,6 +3594,7 @@ fn fallback(
     MermaidArt {
         styled_lines: styled,
         plain_lines: plain,
+        fallback: true,
     }
 }
 

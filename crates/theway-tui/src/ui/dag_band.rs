@@ -18,6 +18,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use theway_markdown::{MermaidStyles, render_mermaid_art};
 use theway_transport::wire::{WireDagNodeSnapshot, WireDagRunSnapshot};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -228,16 +229,130 @@ fn node_rows(run: &WireDagRunSnapshot, width: usize) -> Vec<Vec<Span<'static>>> 
     rows
 }
 
+// ── mermaid box diagram (issue #41) ───────────────────────────────────────
+
+/// Flatten a node id into a mermaid identifier: alphanumerics and `_`
+/// survive, everything else becomes `_` (mermaid ids are bare words).
+fn mermaid_id(id: &str) -> String {
+    id.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// Flatten a node id for use inside a `["…"]` label: quotes and newlines
+/// break the source, so they become `'` and spaces.
+fn mermaid_label(id: &str) -> String {
+    id.chars()
+        .map(|c| match c {
+            '"' => '\'',
+            '\n' | '\r' => ' ',
+            other => other,
+        })
+        .collect()
+}
+
+/// Synthesize a `graph {direction}` mermaid source for one run: one
+/// `id["{glyph} {id}"]` node per wire node plus a `dep --> id` edge for each
+/// `depends_on` entry. Node ids are sanitized via [`mermaid_id`]; the
+/// direction comes from the run (`TD` when unknown/absent).
+#[must_use]
+pub fn synthesize_mermaid(run: &WireDagRunSnapshot) -> String {
+    let direction = run.direction.to_ascii_uppercase();
+    let direction = match direction.as_str() {
+        "TD" | "TB" | "BT" | "LR" | "RL" => direction,
+        _ => "TD".to_string(),
+    };
+    let mut src = format!("graph {direction}\n");
+    for node in &run.nodes {
+        let glyph = node_style(&node.status).0;
+        src.push_str(&format!(
+            "  {}[\"{glyph} {}\"]\n",
+            mermaid_id(&node.id),
+            mermaid_label(&node.id)
+        ));
+    }
+    for node in &run.nodes {
+        for dep in &node.depends_on {
+            src.push_str(&format!(
+                "  {} --> {}\n",
+                mermaid_id(dep),
+                mermaid_id(&node.id)
+            ));
+        }
+    }
+    src
+}
+
+/// Border/edge styles for the per-run diagram, in the band palette.
+fn diagram_styles() -> MermaidStyles {
+    MermaidStyles {
+        border: separator_style(),
+        edge: separator_style(),
+        edge_label: Style::default().fg(Color::DarkGray),
+        title: Style::default().fg(Color::Gray),
+        ..MermaidStyles::default()
+    }
+}
+
+fn line_width(line: &Line<'_>) -> usize {
+    line.spans
+        .iter()
+        .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+        .sum()
+}
+
+/// Try to render `run` as a mermaid box diagram that fits `width` columns
+/// and `height_budget` rows (excluding the header row). `None` when the run
+/// carries no dependency edges (a flat glyph list reads better as text), or
+/// the render falls back to the framed source box / is too wide / too tall —
+/// callers then fall back to the wrapped text rows.
+fn run_diagram(
+    run: &WireDagRunSnapshot,
+    width: u16,
+    height_budget: u16,
+) -> Option<Vec<Line<'static>>> {
+    if !run.nodes.iter().any(|node| !node.depends_on.is_empty()) {
+        return None;
+    }
+    let src = synthesize_mermaid(run);
+    let art = render_mermaid_art(&src, &diagram_styles(), Some(usize::from(width)))?;
+    if art.fallback {
+        return None;
+    }
+    if art.styled_lines.len() > usize::from(height_budget)
+        || art
+            .styled_lines
+            .iter()
+            .any(|line| line_width(line) > usize::from(width))
+    {
+        return None;
+    }
+    Some(art.styled_lines)
+}
+
 /// Band height (rows) for `dags` at `width`: each shown run contributes one
-/// header row plus its wrapped node rows (capped at [`MAX_NODE_ROWS`]), and
+/// header row plus its mermaid box diagram (when one renders within the
+/// band width) or its wrapped node rows (capped at [`MAX_NODE_ROWS`]), and
 /// runs beyond [`MAX_RUNS`] add one `… N more` row. Zero with no runs.
 #[must_use]
 pub fn band_rows(dags: &[WireDagRunSnapshot], width: u16) -> u16 {
     let shown = dags.len().min(MAX_RUNS);
-    let text_width = usize::from(width).saturating_sub(usize::from(NODE_INDENT));
+    let text_width = width.saturating_sub(NODE_INDENT);
     let mut rows: u16 = 0;
     for run in &dags[..shown] {
-        rows += 1 + node_rows(run, text_width).len() as u16;
+        rows += 1;
+        match run_diagram(run, text_width, u16::MAX) {
+            Some(diagram) => rows += diagram.len() as u16,
+            None => {
+                rows += node_rows(run, usize::from(text_width)).len() as u16;
+            }
+        }
     }
     if dags.len() > MAX_RUNS {
         rows += 1;
@@ -273,6 +388,7 @@ pub fn record_meters_at(
 }
 
 /// Render the DAG band into `buf` at `area`: per run one header row then
+/// its mermaid box diagram (when one renders within the remaining rows) or
 /// the wrapped node rows; a `… N more` row closes runs beyond [`MAX_RUNS`].
 /// Pure: reads only `dags`, `meters`, and `tick`.
 pub fn render_dag_band(
@@ -295,19 +411,32 @@ pub fn render_dag_band(
         let header = run_header_line(run, cps, tick, width);
         buf.set_line(area.x + HEADER_INDENT, y, &header, width);
         y += 1;
-        let text_width = usize::from(area.width).saturating_sub(usize::from(NODE_INDENT));
-        for row in node_rows(run, text_width) {
-            if y >= area.bottom() {
-                break;
+        let text_width = area.width.saturating_sub(NODE_INDENT);
+        match run_diagram(run, text_width, area.bottom().saturating_sub(y)) {
+            Some(diagram) => {
+                for line in diagram {
+                    if y >= area.bottom() {
+                        break;
+                    }
+                    buf.set_line(area.x + NODE_INDENT, y, &line, text_width);
+                    y += 1;
+                }
             }
-            let line = Line::from(row);
-            buf.set_line(
-                area.x + NODE_INDENT,
-                y,
-                &line,
-                area.width.saturating_sub(NODE_INDENT),
-            );
-            y += 1;
+            None => {
+                for row in node_rows(run, usize::from(text_width)) {
+                    if y >= area.bottom() {
+                        break;
+                    }
+                    let line = Line::from(row);
+                    buf.set_line(
+                        area.x + NODE_INDENT,
+                        y,
+                        &line,
+                        area.width.saturating_sub(NODE_INDENT),
+                    );
+                    y += 1;
+                }
+            }
         }
     }
     if dags.len() > MAX_RUNS && y < area.bottom() {
@@ -526,6 +655,137 @@ mod tests {
         let nodes: Vec<_> = ids.iter().map(|id| node(id, "pending")).collect();
         let big = vec![run("dag-1", nodes)];
         assert_eq!(band_rows(&big, 20), 1 + MAX_NODE_ROWS as u16);
+    }
+
+    // ── mermaid box diagram (issue #41) ─────────────────────────────────
+
+    /// Three-node dependency chain: `1-explore → 2-impl → 3-verify`.
+    fn chained_run() -> WireDagRunSnapshot {
+        let explore = node("1-explore", "succeeded");
+        let mut imp = node("2-impl", "running");
+        imp.depends_on = vec!["1-explore".into()];
+        let mut verify = node("3-verify", "pending");
+        verify.depends_on = vec!["2-impl".into()];
+        run("dag-1", vec![explore, imp, verify])
+    }
+
+    #[test]
+    fn synthesize_mermaid_source_snapshot() {
+        let src = synthesize_mermaid(&chained_run());
+        let expected = "graph TD\n  \
+            1_explore[\"✓ 1-explore\"]\n  \
+            2_impl[\"▶ 2-impl\"]\n  \
+            3_verify[\"· 3-verify\"]\n  \
+            1_explore --> 2_impl\n  \
+            2_impl --> 3_verify\n";
+        assert_eq!(src, expected);
+    }
+
+    #[test]
+    fn synthesize_mermaid_sanitizes_ids_and_direction() {
+        let mut wide = run("dag-1", vec![node("1-a", "succeeded")]);
+        wide.direction = "lr".into();
+        let src = synthesize_mermaid(&wide);
+        assert!(src.starts_with("graph LR\n"), "{src}");
+        assert!(src.contains("1_a[\"✓ 1-a\"]"), "{src}");
+    }
+
+    #[test]
+    fn run_diagram_renders_box_and_arrow_art() {
+        let diagram = run_diagram(&chained_run(), 60, 20).expect("diagram must render");
+        let text: String = diagram
+            .iter()
+            .flat_map(|line| line.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+        assert!(text.contains('┌') && text.contains('┐'), "{text}");
+        assert!(text.contains('▼'), "TD arrow glyph missing: {text}");
+        assert!(text.contains("✓ 1-explore"), "{text}");
+        assert!(text.contains("3-verify"), "{text}");
+        // Every diagram row fits the band width.
+        for line in &diagram {
+            assert!(line_width(line) <= 60, "{line:?}");
+        }
+    }
+
+    #[test]
+    fn run_diagram_returns_none_without_dependency_edges() {
+        let flat = run("dag-1", vec![node("a", "pending"), node("b", "pending")]);
+        assert!(run_diagram(&flat, 60, 20).is_none());
+        assert!(run_diagram(&run("dag-1", Vec::new()), 60, 20).is_none());
+    }
+
+    #[test]
+    fn run_diagram_falls_back_when_too_tall() {
+        let chained = chained_run();
+        let full = run_diagram(&chained, 60, 100).expect("diagram renders");
+        assert!(full.len() > MAX_NODE_ROWS);
+        assert!(run_diagram(&chained, 60, full.len() as u16 - 1).is_none());
+    }
+
+    #[test]
+    fn run_diagram_falls_back_when_too_wide() {
+        let mut prev: Option<String> = None;
+        let mut nodes = Vec::new();
+        for i in 0..6 {
+            let mut n = node(&format!("node-{i}"), "succeeded");
+            if let Some(p) = &prev {
+                n.depends_on = vec![p.clone()];
+            }
+            prev = Some(n.id.clone());
+            nodes.push(n);
+        }
+        let mut wide = run("dag-1", nodes);
+        wide.direction = "LR".into();
+        // The horizontal chain exceeds a 20-column band.
+        assert!(
+            run_diagram(&wide, 20, 50).is_none(),
+            "over-wide diagram must fall back"
+        );
+        // The same source lays out fine at a generous width.
+        assert!(run_diagram(&wide, 200, 50).is_some());
+    }
+
+    #[test]
+    fn band_rows_counts_diagram_height() {
+        let chained = chained_run();
+        let diagram = run_diagram(&chained, 80 - NODE_INDENT, u16::MAX).unwrap();
+        assert_eq!(band_rows(&[chained], 80), 1 + diagram.len() as u16);
+        // Flat runs (no edges) keep the text-row accounting.
+        let flat = run("dag-1", vec![node("a", "pending"), node("b", "pending")]);
+        assert_eq!(band_rows(&[flat], 80), 2);
+    }
+
+    #[test]
+    fn render_dag_band_draws_box_diagram_that_fits() {
+        let chained = chained_run();
+        let rows = band_rows(std::slice::from_ref(&chained), 80);
+        let area = Rect::new(0, 0, 80, rows);
+        let mut buf = Buffer::empty(area);
+        render_dag_band(&mut buf, area, &[chained], &HashMap::new(), 0);
+        let text = buffer_text(&buf);
+        assert!(
+            text.lines().next().unwrap().contains("dag-1 · demo"),
+            "{text}"
+        );
+        assert!(text.contains('┌') && text.contains('┐'), "{text}");
+        assert!(text.contains('▼'), "TD arrow glyph missing: {text}");
+        assert!(text.contains("✓ 1-explore"), "{text}");
+        // The diagram replaces the wrapped text rows.
+        assert!(!text.contains("✓ 1-explore · "), "{text}");
+    }
+
+    #[test]
+    fn render_dag_band_falls_back_to_text_rows_when_too_tall() {
+        let chained = chained_run();
+        // Header + 3 text rows fit; the chained diagram does not.
+        let area = Rect::new(0, 0, 80, 4);
+        let mut buf = Buffer::empty(area);
+        render_dag_band(&mut buf, area, &[chained], &HashMap::new(), 0);
+        let text = buffer_text(&buf);
+        assert!(text.contains("dag-1 · demo"), "{text}");
+        assert!(text.contains("✓ 1-explore"), "{text}");
+        assert!(text.contains("▶ 2-impl"), "{text}");
+        assert!(!text.contains('┌'), "{text}");
     }
 
     // ── c/s meter accounting ────────────────────────────────────────────

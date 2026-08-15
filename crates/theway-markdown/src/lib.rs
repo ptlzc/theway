@@ -51,6 +51,7 @@ pub use colors::{
     polarity_safe_syntax, polarity_safe_syntax_ansi, set_color_level_cap, set_polarity_safe_syntax,
 };
 pub use latex_delimiters::{LatexDelimiterNormalizer, normalize_latex_delimiters};
+pub use mermaid::{MermaidArt, MermaidStyles, render_mermaid_art};
 pub use output::{CodeBlockSpan, HyperlinkTarget, MarkdownRenderOutput, MarkdownRenderView};
 pub use parse::{MarkdownParser, ParsedMarkdown};
 pub use source_map::SourceMap;

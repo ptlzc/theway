@@ -596,11 +596,7 @@ pub(crate) fn render_block(
             };
             let mut rows: Vec<Line<'static>> = Vec::new();
             if opts.tools_expanded {
-                for line in lines {
-                    for row in wrap_str(&format!("    {line}"), content_w) {
-                        rows.push(Line::styled(row, style));
-                    }
-                }
+                push_tool_result_expanded(&mut rows, lines, content_w, style);
             } else {
                 push_tool_result_preview(&mut rows, lines, *is_error, content_w, theme);
             }
@@ -905,6 +901,66 @@ fn push_tool_result_preview(
             RESULT_SUMMARY_STYLE,
         ));
     }
+}
+
+/// Expanded tool result (issue #41): non-fence lines render exactly as
+/// before (`    `-indented, width-wrapped, result-colored); a ```mermaid
+/// fence routes its body through the markdown mermaid render path into a
+/// box-and-arrow diagram. The fence lines themselves are consumed by the
+/// diagram, matching pretty-mode markdown.
+fn push_tool_result_expanded(
+    out: &mut Vec<Line<'static>>,
+    lines: &[String],
+    width: usize,
+    style: Style,
+) {
+    let mut i = 0;
+    while i < lines.len() {
+        if lines[i].trim().starts_with("```mermaid") {
+            let mut body: Vec<&str> = Vec::new();
+            let mut j = i + 1;
+            while j < lines.len() && !lines[j].trim().starts_with("```") {
+                body.push(lines[j].as_str());
+                j += 1;
+            }
+            // `j` is the closing fence index, or `lines.len()` when unclosed
+            // (the rest of the block is the body, like a truncated fence).
+            push_mermaid_diagram(out, &body.join("\n"), style, width);
+            i = j + 1;
+            continue;
+        }
+        for row in wrap_str(&format!("    {}", lines[i]), width) {
+            out.push(Line::styled(row, style));
+        }
+        i += 1;
+    }
+}
+
+/// Render a mermaid body through [`theway_markdown::render_mermaid_art`] and
+/// push the diagram lines, recolored to the tool result `style`; blank
+/// bodies fall back to the ordinary text rows. Over-wide or unsupported
+/// sources render as the renderer's framed source box (markdown parity).
+fn push_mermaid_diagram(out: &mut Vec<Line<'static>>, src: &str, style: Style, width: usize) {
+    let Some(mut art) = theway_markdown::render_mermaid_art(
+        src,
+        &theway_markdown::MermaidStyles::default(),
+        Some(width),
+    ) else {
+        for row in wrap_str(src, width) {
+            out.push(Line::styled(row, style));
+        }
+        return;
+    };
+    if let Some(fg) = style.fg {
+        for line in &mut art.styled_lines {
+            for span in &mut line.spans {
+                if span.style.fg.is_none() {
+                    span.style = span.style.fg(fg);
+                }
+            }
+        }
+    }
+    out.extend(art.styled_lines);
 }
 
 /// Stateful, width-aware incremental wrapper with the exact `wrap_str`
@@ -1252,6 +1308,74 @@ mod tests {
             assert!(expanded.contains(&format!("row {i}")), "{expanded}");
         }
         assert!(!expanded.contains("more lines"), "{expanded}");
+    }
+
+    /// Issue #41: an expanded tool result containing a ```mermaid fence
+    /// renders the fenced body as box-drawing diagram art; non-fence lines
+    /// keep the existing indented text rows.
+    #[test]
+    fn tool_result_mermaid_fence_renders_box_diagram() {
+        let feed = feed_with(&[WireFeedBlock::ToolResult {
+            lines: vec![
+                "before".into(),
+                "```mermaid".into(),
+                "graph TD".into(),
+                "  A[Start] --> B[End]".into(),
+                "```".into(),
+                "after".into(),
+            ],
+            is_error: false,
+            timestamp: None,
+        }]);
+        let opts = FeedRenderOptions {
+            tools_expanded: true,
+            ..Default::default()
+        };
+        let expanded = flat(&super::lines(&feed, 80, &opts));
+        assert!(
+            expanded.chars().any(|c| "┌┐─".contains(c)),
+            "expected mermaid box art: {expanded}"
+        );
+        // Non-fence lines stay as today (indented text rows).
+        assert!(expanded.contains("    before"), "{expanded}");
+        assert!(expanded.contains("    after"), "{expanded}");
+        // The fence delimiters are consumed by the diagram.
+        assert!(!expanded.contains("```"), "{expanded}");
+    }
+
+    /// Only the expanded branch detects fences: the collapsed preview keeps
+    /// the classic text rendering (the fence stays visible behind the
+    /// preview border).
+    #[test]
+    fn tool_result_collapsed_preview_keeps_fence_text() {
+        let lines = vec![
+            "```mermaid".into(),
+            "graph TD".into(),
+            "  A --> B".into(),
+            "```".into(),
+        ];
+        let feed = feed_with(&[WireFeedBlock::ToolResult {
+            lines,
+            is_error: false,
+            timestamp: None,
+        }]);
+        let collapsed = flat(&super::lines(&feed, 80, &FeedRenderOptions::default()));
+        assert!(
+            !collapsed.chars().any(|c| "┌┐─".contains(c)),
+            "collapsed preview must not render the diagram: {collapsed}"
+        );
+        let expanded = flat(&super::lines(
+            &feed,
+            80,
+            &FeedRenderOptions {
+                tools_expanded: true,
+                ..Default::default()
+            },
+        ));
+        assert!(
+            expanded.chars().any(|c| "┌┐─".contains(c)),
+            "expanded fence must render the diagram: {expanded}"
+        );
     }
 
     #[test]
