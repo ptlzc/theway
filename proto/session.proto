@@ -1,8 +1,208 @@
-// Session resource domain: session summaries and the list/create/switch/
-// rename/delete request and response messages.
+// Session domain: the full session state plane (snapshot, sidebar, feed,
+// model catalog, status) plus session resource messages
+// (list/create/switch/rename/delete).
 
 syntax = "proto3";
 package theway.grpc.v1;
+
+import "graph_engine.proto";
+
+// Full session state (the structured form of the former WireSnapshot JSON).
+// Low-frequency, whole-replacement: GetState / stream snapshot frames.
+message SessionState {
+  string session_id = 1;
+  string model = 2;
+  repeated ProviderGroup model_catalog = 3;
+  string cwd = 4;
+  bool busy = 5;
+  uint32 queued_count = 6;
+  optional TriggerPollStatus latest_trigger_poll = 7;
+  optional GoalSnapshot goal = 8;
+  optional ControlPlanePromptSnapshot control_plane_prompt = 9;
+  SidebarSnapshot sidebar = 10;
+  repeated FeedBlock feed_blocks = 11;
+  repeated string feed_lines = 12;
+  // graph mode (P1/P2 fill these):
+  repeated DagRunSnapshot dags = 13;
+  repeated SubagentJobSnapshot subagents = 14;
+  // TUI display settings pushed from the daemon (read from config.toml).
+  optional uint32 tui_max_feed_lines = 15;
+  // Token usage + context window for the live session.
+  optional ContextUsage context_usage = 16;
+  // Absolute index of feed_lines[0] in the full transcript (issue #35):
+  // stream snapshots carry only rows appended since the last publish; the
+  // initial get_state snapshot carries everything (base 0).
+  uint64 feed_lines_base = 17;
+}
+
+// Token usage for the current/last turn, plus the model's context window size.
+message ContextUsage {
+  uint64 input_tokens = 1;
+  uint64 output_tokens = 2;
+  uint64 cache_read_tokens = 3;
+  uint64 cache_write_tokens = 4;
+  uint64 total_tokens = 5;
+  uint32 context_window = 6;
+}
+
+message ProviderGroup {
+  string provider = 1;
+  bool has_credential = 2;
+  repeated ModelEntry models = 3;
+}
+
+message ModelEntry {
+  string id = 1;
+  string name = 2;
+}
+
+message TriggerPollStatus {
+  string checked_at = 1;
+  string trace_id = 2;
+  string source_label = 3;
+  string event_label = 4;
+  string summary = 5;
+}
+
+message GoalSnapshot {
+  string condition = 1;
+  string status = 2;
+  uint32 iterations = 3;
+  optional string last_reason = 4;
+}
+
+message ControlPlanePromptSnapshot {
+  string tool_name = 1;
+  string label = 2;
+  string reason = 3;
+  string args_hash = 4;
+  string payload = 5;
+}
+
+message SidebarSnapshot {
+  uint32 inbox_new = 1;
+  SkillsSnapshot skills = 2;
+  TriggersSnapshot triggers = 3;
+  CronSnapshot cron = 4;
+  McpSnapshot mcp = 5;
+  ToolsSnapshot tools = 6;
+  repeated string hooks = 7;
+  repeated string runtime = 8;
+  // Slash-prefixed file-command names (claude-code format, issue #37):
+  // discovered from .agents/commands + .claude/commands.
+  repeated string commands = 9;
+  // Daemon runtime revision, bumped by the `reload` agent tool; clients
+  // watch it to re-read local resources (e.g. ~/.theway/theme.toml).
+  uint64 runtime_revision = 10;
+}
+
+message SkillsSnapshot {
+  uint32 total = 1;
+  uint32 enabled = 2;
+  uint32 disabled = 3;
+  uint32 builtin = 4;
+  uint32 user = 5;
+  uint32 project = 6;
+  repeated SkillSnapshot items = 7;
+}
+
+message SkillSnapshot {
+  string name = 1;
+  string source = 2;
+  string file_path = 3;
+  bool enabled = 4;
+}
+
+message TriggersSnapshot {
+  uint32 total = 1;
+  uint32 enabled = 2;
+  uint32 disabled = 3;
+  repeated TriggerRuleSnapshot rules = 4;
+}
+
+message TriggerRuleSnapshot {
+  string id = 1;
+  string full_id = 2;
+  bool enabled = 3;
+  string mode = 4;
+  string condition = 5;
+  string action = 6;
+}
+
+message CronSnapshot {
+  uint32 total = 1;
+  uint32 enabled = 2;
+  uint32 disabled = 3;
+  repeated CronJobSnapshot jobs = 4;
+}
+
+message CronJobSnapshot {
+  string id = 1;
+  bool enabled = 2;
+  string schedule = 3;
+  string action = 4;
+  uint64 skipped_overlap_count = 5;
+  optional string last_error = 6;
+}
+
+message McpSnapshot {
+  uint32 servers = 1;
+  uint32 tools = 2;
+  uint32 notification_hooks = 3;
+  repeated string server_names = 4;
+  repeated string tool_names = 5;
+}
+
+message ToolsSnapshot {
+  uint32 total = 1;
+  repeated string names = 2;
+}
+
+// One renderable feed entry. oneof mirrors the serde tagged enum WireFeedBlock;
+// JSON channels keep serde shape until the protojson migration.
+message FeedBlock {
+  oneof kind {
+    UserBlock user = 1;
+    AssistantBlock assistant = 2;
+    ThinkingBlock thinking = 3;
+    ToolBlock tool = 4;
+    ToolResultBlock tool_result = 5;
+    PlainBlock plain = 6;
+  }
+}
+
+message UserBlock {
+  string text = 1;
+  optional string timestamp = 2;
+}
+
+message AssistantBlock {
+  string text = 1;
+  optional string timestamp = 2;
+}
+
+message ThinkingBlock {
+  string text = 1;
+  optional string timestamp = 2;
+}
+
+message ToolBlock {
+  string name = 1;
+  string args = 2;
+  optional string timestamp = 3;
+}
+
+message ToolResultBlock {
+  repeated string lines = 1;
+  bool is_error = 2;
+  optional string timestamp = 3;
+}
+
+message PlainBlock {
+  string text = 1;
+  string level = 2; // "output" | "system" | "error" | "note" (serde snake_case variant names)
+  optional string timestamp = 3;
+}
 
 message SessionSummary {
   string session_id = 1;

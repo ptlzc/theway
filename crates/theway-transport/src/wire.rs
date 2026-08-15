@@ -79,7 +79,7 @@ pub struct SessionSummary {
     pub preview: Option<String>,
 }
 
-/// graph mode: one DAG run (mirrors `proto/graph.proto` DagRunSnapshot; task text is
+/// graph mode: one DAG run (mirrors `proto/graph_engine.proto` DagRunSnapshot; task text is
 /// deliberately excluded from the wire model — full text goes through GetNodeOutput).
 #[derive(Clone, Debug, Serialize)]
 pub struct WireDagRunSnapshot {
@@ -124,7 +124,7 @@ pub struct WireNodeResultSnapshot {
     pub total_attempts: u32,
 }
 
-/// graph mode: one subagent job (mirrors `proto/subagent.proto` SubagentJobSnapshot).
+/// graph mode: one subagent job (mirrors `proto/graph_engine.proto` SubagentJobSnapshot).
 /// Populated from the AgentJobRegistry in P2; the type ships now so the wire
 /// shape is stable.
 #[derive(Clone, Debug, Serialize)]

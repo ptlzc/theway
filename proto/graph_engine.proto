@@ -1,0 +1,172 @@
+// Graph engine domain: DAG/goal run state, subagent jobs, node output,
+// control, checkpoint/restore, and run enumeration. Planning is agent-side;
+// this surface observes and steers runs created by the dag_plan / goal tools.
+
+syntax = "proto3";
+package theway.grpc.v1;
+
+message DagRunSnapshot {
+  string id = 1;
+  string name = 2;
+  string status = 3; // running/completed/failed/cancelled
+  bool fail_fast = 4;
+  uint32 max_concurrency = 5;
+  string direction = 6; // TD/LR
+  int64 created_at = 7;
+  optional int64 completed_at = 8;
+  optional string error = 9;
+  repeated DagNodeSnapshot nodes = 10;
+  string kind = 11; // "dag" | "goal" — goal runs are single-node self-loops (condition-terminated)
+}
+
+message DagNodeSnapshot {
+  string id = 1;
+  string agent = 2;
+  string status = 3; // pending/ready/running/succeeded/failed/skipped/cancelled
+  repeated string depends_on = 4;
+  optional string job_id = 5; // ↔ SubagentJobSnapshot.id
+  uint32 attempt = 6;
+  optional int64 started_at = 7;
+  optional int64 completed_at = 8;
+  optional string error = 9;
+  optional uint64 input_tokens = 10;
+  optional uint64 output_tokens = 11;
+  optional NodeResultSnapshot result = 12;
+  optional string output_tail = 13; // terminal output tail; full text via events/GetNodeOutput
+  optional string live_preview = 14; // live output while running
+}
+
+message NodeResultSnapshot {
+  bool success = 1;
+  optional string error = 2;
+  optional uint64 duration_ms = 3;
+  uint32 attempt = 4;
+  uint32 total_attempts = 5;
+}
+
+message SubagentJobSnapshot {
+  string id = 1;
+  string agent = 2; // general / explorer / executor-coder / ...
+  string source = 3; // task | dag
+  optional string run_id = 4;
+  optional string node_id = 5;
+  string status = 6; // running/succeeded/failed/cancelled
+  optional int64 started_at = 7;
+  optional int64 completed_at = 8;
+  optional uint64 duration_ms = 9;
+  uint32 attempt = 10;
+  uint32 total_attempts = 11;
+  optional uint64 input_tokens = 12;
+  optional uint64 output_tokens = 13;
+  optional string error = 14;
+  optional string output_tail = 15;
+  optional string live_preview = 16;
+  // graph mode metrics:
+  optional double tps = 17; // output tokens/sec (sliding window)
+  optional double cps = 18; // output chars/sec
+  optional uint64 chars = 19; // cumulative output chars
+  optional uint64 tools_called = 20; // cumulative tool calls
+  optional uint32 turn = 21; // completed turns
+}
+
+// Full output of a DAG node, fetched on demand with an offset (P3).
+message GetNodeOutputRequest {
+  string run_id = 1;
+  string node_id = 2;
+  uint64 offset = 3;
+}
+
+message GetNodeOutputResponse {
+  string text = 1; // fragment from offset
+  uint64 offset = 2; // start offset of this fragment
+  uint64 total = 3; // full length
+  bool truncated = 4; // server buffer capped
+  // Full conversation transcript (user prompts + assistant turns with tool
+  // calls + tool results) as a JSON array of serde_json::Value — the same
+  // shape the registry keeps in memory and on disk. "" when unavailable
+  // (e.g. unknown node). Optional so older clients keep working.
+  optional string messages_json = 5;
+  bool messages_truncated = 6; // transcript buffer was capped (oldest dropped)
+}
+
+enum GraphKind {
+  GRAPH_DAG = 0;
+  GRAPH_GOAL = 1;
+}
+
+message GraphCancelRequest {
+  string run_id = 1;
+}
+
+message GraphRetryRequest {
+  string run_id = 1;
+  optional string node_id = 2; // omitted = all failed/cancelled nodes
+}
+
+message GraphRetryResponse {
+  repeated string reset_node_ids = 1;
+}
+
+message GraphSkipRequest {
+  string run_id = 1;
+  string node_id = 2;
+}
+
+// Turn-level control for a running DAG node's subagent.
+message GraphNodeInterruptRequest {
+  string run_id = 1;
+  string node_id = 2;
+}
+
+message GraphNodeSteerRequest {
+  string run_id = 1;
+  string node_id = 2;
+  string text = 3;
+}
+
+message GraphSkipResponse {
+  bool skipped = 1;
+}
+
+// Checkpoints are organized by session: a session owns its runs
+// (DagRun.session_id), and `SessionState.dags` mounts the live graph status
+// under that session. Checkpoint exports one run or the session's whole graph
+// set as portable JSON snapshots; restore revives them back under the session.
+message GraphCheckpointRequest {
+  // Owning session. Omitted = the session this connection belongs to.
+  optional string session_id = 1;
+  // Omitted = every running run of the session; set to export a single run.
+  optional string run_id = 2;
+}
+
+message GraphCheckpointResponse {
+  string session_id = 1;
+  repeated GraphSnapshotEntry checkpoints = 2;
+  optional string error = 3;
+}
+
+message GraphSnapshotEntry {
+  GraphKind kind = 1;
+  string run_id = 2;
+  string snapshot = 3; // JSON (PersistedRun shape: definition, node states, progress)
+}
+
+// Restore: resume run(s) from GraphCheckpoint snapshots. Running runs are
+// revived with their ready nodes re-scheduled, and re-attached to the session.
+message GraphRestoreRequest {
+  string session_id = 1;
+  string snapshot = 2; // single GraphSnapshotEntry.snapshot (PersistedRun JSON)
+}
+
+message GraphRestoreResponse {
+  string run_id = 1;
+  optional string error = 2;
+}
+
+message GraphListRequest {
+  string session_id = 1;
+}
+
+message GraphListResponse {
+  repeated DagRunSnapshot runs = 1;
+}
