@@ -128,7 +128,7 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
   - 测试：collect_slash_commands 断言 skill:: / mcp: 条目存在；
     弹层过滤（/skill:: 只剩 skill 条目）。
   - 验收：`cargo check -p theway-tui`；`cargo test -p theway-tui` 全绿。
-- [ ] 9-new-session — `ui/app_turns.rs` + `ui/mod.rs` + `ui/tests.rs`（#52）：
+- [x] 9-new-session — `ui/app_turns.rs` + `ui/mod.rs` + `ui/tests.rs`（#52）：
   - dispatch_slash 加 `"/new"` 分支：`self.client.create_session(None).await`
     → 取 summary.session_id → `self.switch_session(id).await`（已有，
     app_goal.rs）；失败 error_line；成功 system_line 提示新 id。
