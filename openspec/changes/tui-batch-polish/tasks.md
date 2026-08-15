@@ -9,17 +9,18 @@ graph TD
   E --> F["6-dag-graph: DAG 框图渲染 (#41)"]
   F --> G["7-completion-scroll: 补全弹层自动翻页 (#46)"]
   G --> H["8-slash-catalog: 弹层 skill:: 与 mcp: 条目 (#47)"]
-  H --> I["9-reload: reload tool + revision + TUI 热重载 (#50)"]
-  J["10-tool-rename: 工具名统一 snake_case (#48)"] --> L["12-verify"]
-  K["11-agents-doc: daemon 定位写入 AGENTS.md (#51)"] --> L["12-verify"]
-  I --> L["12-verify: make ci + tmux e2e + close #39-#51"]
+  H --> I["9-new-session: /new 命令 create+switch (#52)"]
+  I --> J["10-reload: reload tool + revision + TUI 热重载 (#50)"]
+  K["11-tool-rename: 工具名统一 snake_case (#48)"] --> M["13-verify"]
+  L["12-agents-doc: daemon 定位写入 AGENTS.md (#51)"] --> M["13-verify"]
+  J --> M["13-verify: make ci + tmux e2e + close #39-#52"]
 ```
 
-主链全串行：ui/mod.rs 被 1/2/3/4/5/7/8/9 修改，feed_render.rs 被 4/5/6
-修改，按仓库规则共享文件节点串行。10-tool-rename 只碰 daemon 文件
-（tool 定义 + 测试 + listener + system_prompt）、11-agents-doc 只碰
+主链全串行：ui/mod.rs 被 1/2/3/4/5/7/8/9/10 修改，feed_render.rs 被 4/5/6
+修改，按仓库规则共享文件节点串行。11-tool-rename 只碰 daemon 文件
+（tool 定义 + 测试 + listener + system_prompt）、12-agents-doc 只碰
 AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
-（feat(#子issue)），12-verify 基于最新 HEAD 复核并逐条 close。
+（feat(#子issue)），13-verify 基于最新 HEAD 复核并逐条 close。
 
 - [ ] 1-features — `crates/theway-tui/src/ui/mod.rs` + `ui/tests.rs`：
   - `feature_labels(runtime, dags, has_goal)` → `feature_labels(dags)`：
@@ -123,7 +124,17 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
   - 测试：collect_slash_commands 断言 skill:: / mcp: 条目存在；
     弹层过滤（/skill:: 只剩 skill 条目）。
   - 验收：`cargo check -p theway-tui`；`cargo test -p theway-tui` 全绿。
-- [ ] 9-reload — daemon + transport + tui（#50）：
+- [ ] 9-new-session — `ui/app_turns.rs` + `ui/mod.rs` + `ui/tests.rs`（#52）：
+  - dispatch_slash 加 `"/new"` 分支：`self.client.create_session(None).await`
+    → 取 summary.session_id → `self.switch_session(id).await`（已有，
+    app_goal.rs）；失败 error_line；成功 system_line 提示新 id。
+  - busy 不加额外防护（与 /session switch 一致：切换中止当前 turn）。
+  - collect_slash_commands 加 `LOCAL_COMMANDS: &["new"]`（TUI 本地命令，
+    不进 DAEMON_COMMANDS）；/help 文案本地清单加 /new。
+  - 测试：slash_new 触发 create_session + SwitchSession{id} 命令；补全
+    列表含 /new；失败路径 error_line。
+  - 验收：`cargo check -p theway-tui`；`cargo test -p theway-tui` 全绿。
+- [ ] 10-reload — daemon + transport + tui（#50）：
   - daemon 新 `tools/reload.rs`：AgentTool `reload`（snake_case），
     包装现有 `reload_everything`（skills/config/commands/triggers 重扫，
     与 /reload 命令共用逻辑不复制），执行成功 → 递增 runtime_revision；
@@ -139,7 +150,7 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
     变化触发 theme 重载断言（ui/tests.rs）。
   - 验收：`cargo check --workspace`；`cargo test -p theway-daemon -p
     theway-tui` 全绿。
-- [ ] 10-tool-rename — daemon-only（与主链文件不相交，并行）：
+- [ ] 11-tool-rename — daemon-only（与主链文件不相交，并行）：
   - `tools/skill.rs`、`tools/skill_builder.rs`、`tools/install_skill/
     mod.rs`、`tools/remove_skill.rs`、`tools/set_skill_state.rs`、
     `triggers/cron/tools.rs`、`triggers/dynamic/tools.rs`：Tool.name +
@@ -160,7 +171,7 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
     dynamic_trigger_e2e、e2e_llm.rs）更新。
   - 验收：`cargo check -p theway-daemon`；`cargo test -p theway-daemon`
     全绿；grep 确认 `name: "[A-Z]` 在 Tool 定义中无残留（除 test Faux）。
-- [ ] 11-agents-doc — `AGENTS.md`（#51，只碰文档，并行）：
+- [ ] 12-agents-doc — `AGENTS.md`（#51，只碰文档，并行）：
   - Workspace layout / Layering 附近加"daemon 定位"小节：daemon =
     会话/工具/触发/编排的运行时服务，面向协议层（transport 的 gRPC +
     HTTP/SSE/WS）；对客户端形态无概念（不区分 TUI/web/headless 脚本/
@@ -169,7 +180,7 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
     契约，daemon 只做协议侧语义；需要客户端配合的行为用 snapshot 字段/
     事件表达（例：runtime_revision 通知客户端重读本地资源）。
   - 验收：`git diff AGENTS.md` 内容符合上述语义；无其它文件改动。
-- [ ] 12-verify — `make check` + `make test`（workspace 全量）+ `make lint` +
+- [ ] 13-verify — `make check` + `make test`（workspace 全量）+ `make lint` +
   `make fmt-check`；tmux e2e 逐条：①composer 右上角仅 graph engine（无
   dag run 无标签，trigger 面板 Runtime 仍在）②长文本折行显示行首 + Up/Down
   历史/拖拽调高回归 ③busy 时彩虹蛇在 9 点轨道左右跑 + 折返 + 与 working
@@ -180,6 +191,7 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
   高亮始终可见 ⑧弹层含 skill:: 与 mcp: 条目、前缀过滤生效 ⑨工具调用块
   显示 snake_case 名（skill/trigger/cron 工具调用正常）⑩装 skill / 改
   theme.toml 后 LLM 调 reload → 新 skill 可 invoke + TUI 主题即时生效
-  ⑪AGENTS.md 定位小节在库；
-  `gh issue close 39 40 41 42 43 44 46 47 48 49 50 51`，证据贴 #45 后
+  ⑪AGENTS.md 定位小节在库 ⑫/new 新 session：feed 清空、系统行提示、
+  下一条消息进新 session、/sessions 可见新旧两个；
+  `gh issue close 39 40 41 42 43 44 46 47 48 49 50 51 52`，证据贴 #45 后
   `gh issue close 45`。

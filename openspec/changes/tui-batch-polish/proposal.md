@@ -1,17 +1,17 @@
 # tui-batch-polish
 
-Issue: #45（umbrella；子 issue #39-#44、#46-#51）
+Issue: #45（umbrella；子 issue #39-#44、#46-#52）
 
 ## 范围整合
 
-本轮 12 条输入收拢为一个 change、一个 DAG 实施链（同 #38 先例）——
+本轮 13 条输入收拢为一个 change、一个 DAG 实施链（同 #38 先例）——
 之前为每条单独建的 change（tui-composer-features-only-graph-engine /
 tui-composer-single-line-wrap / dag-node-graph-render /
 tui-busy-snake-loader / tui-theme-interface）已并入本 change 并删除，
 理由：涉及文件高度重叠（ui/mod.rs ×7、feed_render.rs ×3），按仓库规则
 共享文件节点必须串行，拆开反而制造合并摩擦。
 
-## 完整清单（12 条）
+## 完整清单（13 条）
 
 **1. composer 右上角 features 只保留 graph engine（#39）**
 
@@ -172,6 +172,20 @@ tui-busy-snake-loader / tui-theme-interface）已并入本 change 并删除，
   客户端类型。
 - 涉及 AGENTS.md（Workspace layout / Layering 附近）。
 
+**12. /new 命令：新开 session（#52，TUI 本地命令）**
+
+- 基础设施已齐（session-resource-model）：`client.create_session(None)`
+  （gRPC CreateSession → SessionOps::create，cwd 继承）+ `client.
+  switch_session(id)`（WireCommand::SwitchSession → 事件循环
+  TurnHost::switch_session：换 harness、清 feed、清队列）。
+- dispatch_slash 加 `"/new"` 分支：create → switch，失败 error_line，
+  成功 system line 提示新 session id；busy 不加额外防护（与 /session
+  switch 一致：切换即中止当前 turn）。
+- 补全：collect_slash_commands 加 LOCAL_COMMANDS const（"new"）——/new
+  是 TUI 本地命令，不进 DAEMON_COMMANDS（那是 daemon 侧命令表）；
+  /help 文案本地清单加 /new。
+- 非目标：headless/web（已有 RPC）、name 参数、确认框。
+
 ## Out of scope
 
 - #39-#44 为 theway-tui / theway-markdown 纯展示（除 #50/#51 的 wire
@@ -182,6 +196,6 @@ tui-busy-snake-loader / tui-theme-interface）已并入本 change 并删除，
 
 ## Acceptance
 
-- 12 条各自单测 + 编译 + 视觉断言（tmux e2e 截图）通过；
+- 13 条各自单测 + 编译 + 视觉断言（tmux e2e 截图）通过；
   make check / test / lint / fmt-check 全绿。
-- 逐条 close #39-#44、#46-#51，证据贴 #45 后 close #45。
+- 逐条 close #39-#44、#46-#52，证据贴 #45 后 close #45。
