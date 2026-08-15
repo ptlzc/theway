@@ -137,6 +137,11 @@ with `Ctrl-C` / `SIGTERM`, or start it explicitly:
 ./target/release/thewayd --http          # HTTP/WS surface (workmate) instead of gRPC
 ```
 
+The daemon's gRPC surface is split into four domain services —
+`theway.grpc.v1.CommandService`, `theway.grpc.v1.SessionService`,
+`theway.grpc.v1.GraphEngineService`, and `theway.grpc.v1.EventService` — plus
+the standard `grpc.health.v1.Health` service.
+
 ```bash
 # Start the TUI in the current project (spawns/reuses the daemon)
 ./target/release/theway
