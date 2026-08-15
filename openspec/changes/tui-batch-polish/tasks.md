@@ -13,17 +13,18 @@ graph TD
   I --> J["10-text-selection: 字符级文本选中 + 复制 (#53)"]
   J --> K["11-status-panel: 面板拖拽调宽 + /status-panel 菜单 (#54)"]
   K --> L["12-fork-picker: TUI fork 补全/交互选择/可切换 (#55)"]
-  L --> M["13-reload: reload tool + revision + TUI 热重载 (#50)"]
-  N["14-tool-rename: 工具名统一 snake_case (#48)"] --> P["16-verify"]
-  O["15-agents-doc: daemon 定位写入 AGENTS.md (#51)"] --> P["16-verify"]
-  M --> P["16-verify: make ci + tmux e2e + close #39-#55"]
+  L --> M["13-fresh-attach: 重进默认 new session + /resume (#56)"]
+  M --> N["14-reload: reload tool + revision + TUI 热重载 (#50)"]
+  O["15-tool-rename: 工具名统一 snake_case (#48)"] --> Q["17-verify"]
+  P["16-agents-doc: daemon 定位写入 AGENTS.md (#51)"] --> Q["17-verify"]
+  N --> Q["17-verify: make ci + tmux e2e + close #39-#56"]
 ```
 
-主链全串行：ui/mod.rs 被 1/2/3/4/5/7/8/9/10/11/12/13 修改，feed_render.rs 被
-4/5/6/10 修改，按仓库规则共享文件节点串行。14-tool-rename 只碰 daemon
-文件（tool 定义 + 测试 + listener + system_prompt）、15-agents-doc 只碰
+主链全串行：ui/mod.rs 被 1/2/3/4/5/7/8/9/10/11/12/13/14 修改，feed_render.rs 被
+4/5/6/10 修改，按仓库规则共享文件节点串行。15-tool-rename 只碰 daemon
+文件（tool 定义 + 测试 + listener + system_prompt）、16-agents-doc 只碰
 AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
-（feat(#子issue)），16-verify 基于最新 HEAD 复核并逐条 close。
+（feat(#子issue)），17-verify 基于最新 HEAD 复核并逐条 close。
 
 - [ ] 1-features — `crates/theway-tui/src/ui/mod.rs` + `ui/tests.rs`：
   - `feature_labels(runtime, dags, has_goal)` → `feature_labels(dags)`：
@@ -193,7 +194,26 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
     Enter 转发文本为 `/fork <n>`；Esc 取消；daemon 提示文本断言。
   - 验收：`cargo check --workspace`；`cargo test -p theway-tui -p
     theway-daemon` 全绿。
-- [ ] 13-reload — daemon + transport + tui（#50）：
+- [ ] 13-fresh-attach — `startup/mod.rs` + `ui/mod.rs` + `ui/app_turns.rs`
+  + `ui/app_input.rs` + `ui/tests.rs`（#56）：
+  - startup `connect_or_spawn`：discover 复用路径返回标记 `reused:
+    bool`；reused 且无 `--resume/--resume-id/--continue` 时 attach 后
+    `client.create_session(None)` + `client.switch_session(id)`（/new
+    同路径）；自己 spawn 的 daemon 不重复建（返回前标记 spawn）。
+  - `/resume`（TUI 本地）：dispatch_slash 拦截 → `resume_picker:
+    Option<ResumePickerState>`（client.list_sessions() 的
+    (sessions, current_id)）；弹层行 = 短 id + name + busy/graph 标记
+    （current 行标注）；Up/Down/Enter → switch_session 并关闭、Esc 取消；
+    空列表 system line "no sessions to resume"。
+  - ui/mod.rs：resume_picker 状态 + 渲染（复用 completion 弹层样式）；
+    LOCAL_COMMANDS 加 `resume`；/help 文案同步。
+  - busy 时 switch 排队：快照到达后自动呈现新会话（apply_snapshot 已有
+    session_id 更新路径，验证即可）。
+  - 测试：reused 路径触发 create+switch（mock client 断言命令序列）、
+    spawn 路径不触发；/resume 弹层列表、Enter 发 SwitchSession{id}、
+    Esc 取消、空列表提示；--resume-id 启动无回归。
+  - 验收：`cargo check -p theway-tui`；`cargo test -p theway-tui` 全绿。
+- [ ] 14-reload — daemon + transport + tui（#50）：
   - daemon 新 `tools/reload.rs`：AgentTool `reload`（snake_case），
     包装现有 `reload_everything`（skills/config/commands/triggers 重扫，
     与 /reload 命令共用逻辑不复制），执行成功 → 递增 runtime_revision；
@@ -209,7 +229,7 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
     变化触发 theme 重载断言（ui/tests.rs）。
   - 验收：`cargo check --workspace`；`cargo test -p theway-daemon -p
     theway-tui` 全绿。
-- [ ] 14-tool-rename — daemon-only（与主链文件不相交，并行）：
+- [ ] 15-tool-rename — daemon-only（与主链文件不相交，并行）：
   - `tools/skill.rs`、`tools/skill_builder.rs`、`tools/install_skill/
     mod.rs`、`tools/remove_skill.rs`、`tools/set_skill_state.rs`、
     `triggers/cron/tools.rs`、`triggers/dynamic/tools.rs`：Tool.name +
@@ -230,7 +250,7 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
     dynamic_trigger_e2e、e2e_llm.rs）更新。
   - 验收：`cargo check -p theway-daemon`；`cargo test -p theway-daemon`
     全绿；grep 确认 `name: "[A-Z]` 在 Tool 定义中无残留（除 test Faux）。
-- [ ] 15-agents-doc — `AGENTS.md`（#51，只碰文档，并行）：
+- [ ] 16-agents-doc — `AGENTS.md`（#51，只碰文档，并行）：
   - Workspace layout / Layering 附近加"daemon 定位"小节：daemon =
     会话/工具/触发/编排的运行时服务，面向协议层（transport 的 gRPC +
     HTTP/SSE/WS）；对客户端形态无概念（不区分 TUI/web/headless 脚本/
@@ -239,7 +259,7 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
     契约，daemon 只做协议侧语义；需要客户端配合的行为用 snapshot 字段/
     事件表达（例：runtime_revision 通知客户端重读本地资源）。
   - 验收：`git diff AGENTS.md` 内容符合上述语义；无其它文件改动。
-- [ ] 16-verify — `make check` + `make test`（workspace 全量）+ `make lint` +
+- [ ] 17-verify — `make check` + `make test`（workspace 全量）+ `make lint` +
   `make fmt-check`；tmux e2e 逐条：①composer 右上角仅 graph engine（无
   dag run 无标签，trigger 面板 Runtime 仍在）②长文本折行显示行首 + Up/Down
   历史/拖拽调高回归 ③busy 时彩虹蛇在 9 点轨道左右跑 + 折返 + 与 working
@@ -256,6 +276,8 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
   扩展、Ctrl+Shift+C 复制、Esc 清除 ⑭面板左边界拖动调宽（24-60 clamp）、
   拖到最右关闭、/status-panel 菜单 show/hide/auto 生效 ⑮/fork 补全可见、
   无参数弹层列出 user messages、选 #k 转发 /fork k → 新 session 完整 id +
-  /session switch 提示、切换成功、Esc 取消弹层；
-  `gh issue close 39 40 41 42 43 44 46 47 48 49 50 51 52 53 54 55`，证据贴
-  #45 后 `gh issue close 45`。
+  /session switch 提示、切换成功、Esc 取消弹层 ⑯daemon 存活时退出再进 →
+  新 session（system line 新 id、feed 空）、/resume 弹层选旧会话 → feed
+  恢复、--resume-id 启动无回归、spawn 新 daemon 无多余空 session；
+  `gh issue close 39 40 41 42 43 44 46 47 48 49 50 51 52 53 54 55 56`，
+  证据贴 #45 后 `gh issue close 45`。

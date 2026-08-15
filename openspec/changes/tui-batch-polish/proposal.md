@@ -1,17 +1,17 @@
 # tui-batch-polish
 
-Issue: #45（umbrella；子 issue #39-#44、#46-#55）
+Issue: #45（umbrella；子 issue #39-#44、#46-#56）
 
 ## 范围整合
 
-本轮 16 条输入收拢为一个 change、一个 DAG 实施链（同 #38 先例）——
+本轮 17 条输入收拢为一个 change、一个 DAG 实施链（同 #38 先例）——
 之前为每条单独建的 change（tui-composer-features-only-graph-engine /
 tui-composer-single-line-wrap / dag-node-graph-render /
 tui-busy-snake-loader / tui-theme-interface）已并入本 change 并删除，
 理由：涉及文件高度重叠（ui/mod.rs ×7、feed_render.rs ×3），按仓库规则
 共享文件节点必须串行，拆开反而制造合并摩擦。
 
-## 完整清单（16 条）
+## 完整清单（17 条）
 
 **1. composer 右上角 features 只保留 graph engine（#39）**
 
@@ -245,6 +245,23 @@ tui-busy-snake-loader / tui-theme-interface）已并入本 change 并删除，
 - 涉及 ui/mod.rs、ui/app_turns.rs、ui/app_input.rs、ui/tests.rs、
   daemon commands/session.rs。
 
+**16. TUI 重进默认 new session + /resume 恢复对话（#56）**
+
+- 现状：daemon 存活时退出再进 → discover 复用 daemon → 回到旧会话；
+  用户要求默认 new session。
+- attach 默认 new（TUI 客户端语义，daemon 不动）：仅 discover **复用**
+  运行中 daemon 且无 `--resume/--resume-id/--continue` 时，attach 后
+  `create_session(None)` + `switch_session(id)`（/new 同路径）；自己
+  spawn 的 daemon 已是新 session 不重复建；busy 时 switch 排队
+  （首个快照可能旧会话，随后自动切）。
+- `/resume`（TUI 本地）：`client.list_sessions()` → 弹层（sessions 树
+  顺序，行 = 短 id + name + busy 标记），Up/Down/Enter 切换、Esc 取消；
+  空列表 system line 提示；LOCAL_COMMANDS 加 `resume`；`/session
+  switch <id>` 保留；`--resume-id`/`--continue` 启动路径不变。
+- 多端注意：默认 new 是 TUI 客户端语义（#51 原则），web/headless 自定。
+- 涉及 startup/mod.rs、ui/mod.rs、ui/app_turns.rs、ui/app_input.rs、
+  ui/tests.rs。
+
 ## Out of scope
 
 - #39-#44 为 theway-tui / theway-markdown 纯展示（除 #50/#51 的 wire
@@ -255,6 +272,6 @@ tui-busy-snake-loader / tui-theme-interface）已并入本 change 并删除，
 
 ## Acceptance
 
-- 16 条各自单测 + 编译 + 视觉断言（tmux e2e 截图）通过；
+- 17 条各自单测 + 编译 + 视觉断言（tmux e2e 截图）通过；
   make check / test / lint / fmt-check 全绿。
-- 逐条 close #39-#44、#46-#55，证据贴 #45 后 close #45。
+- 逐条 close #39-#44、#46-#56，证据贴 #45 后 close #45。
