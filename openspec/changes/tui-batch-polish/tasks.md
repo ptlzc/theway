@@ -213,7 +213,7 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
     spawn 路径不触发；/resume 弹层列表、Enter 发 SwitchSession{id}、
     Esc 取消、空列表提示；--resume-id 启动无回归。
   - 验收：`cargo check -p theway-tui`；`cargo test -p theway-tui` 全绿。
-- [ ] 14-reload — daemon + transport + tui（#50）：
+- [x] 14-reload — daemon + transport + tui（#50）：
   - daemon 新 `tools/reload.rs`：AgentTool `reload`（snake_case），
     包装现有 `reload_everything`（skills/config/commands/triggers 重扫，
     与 /reload 命令共用逻辑不复制），执行成功 → 递增 runtime_revision；
