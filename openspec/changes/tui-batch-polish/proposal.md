@@ -1,17 +1,17 @@
 # tui-batch-polish
 
-Issue: #45（umbrella；子 issue #39-#44、#46）
+Issue: #45（umbrella；子 issue #39-#44、#46-#48）
 
 ## 范围整合
 
-本轮 7 条 TUI 输入收拢为一个 change、一个 DAG 实施链（同 #38 先例）——
+本轮 9 条 TUI 输入收拢为一个 change、一个 DAG 实施链（同 #38 先例）——
 之前为每条单独建的 change（tui-composer-features-only-graph-engine /
 tui-composer-single-line-wrap / dag-node-graph-render /
 tui-busy-snake-loader / tui-theme-interface）已并入本 change 并删除，
-理由：涉及文件高度重叠（ui/mod.rs ×5、feed_render.rs ×3），按仓库规则
+理由：涉及文件高度重叠（ui/mod.rs ×6、feed_render.rs ×3），按仓库规则
 共享文件节点必须串行，拆开反而制造合并摩擦。
 
-## 完整清单（7 条）
+## 完整清单（9 条）
 
 **1. composer 右上角 features 只保留 graph engine（#39）**
 
@@ -107,6 +107,34 @@ tui-busy-snake-loader / tui-theme-interface）已并入本 change 并删除，
 - 涉及 ui/mod.rs（render_completions + App 字段）、ui/app_input.rs、
   ui/tests.rs。
 
+**8. slash 弹层显示 skill:: 与 mcp: 条目（#47）**
+
+- `collect_slash_commands` 追加两类条目（沿用 `/` 前缀存储与既有过滤
+  机制）：每个已启用 skill → `skill::<name>`（WireSkillSnapshot.name
+  原样）；每个 MCP 工具 → `mcp:<tool_name>`（sidebar.mcp.tool_names
+  原样，server 定义名不改写）。
+- 现有 `/skillname` 快捷与其它条目保留；提交后未知 slash 命令按 #37
+  语义回落 user message（不报错）——这些是引用信息形态。
+- 列表超长自动翻页由 #46 的 completion_scroll 承接（本节点在其后）。
+- 涉及 ui/mod.rs（collect_slash_commands + 调用点）、ui/tests.rs。
+
+**9. 工具名统一小写+下划线（#48，daemon-only，与主链并行）**
+
+- 14 处改名（Tool.name + label()）：Skill → skill、SkillBuilder →
+  skill_builder、InstallSkill → install_skill、RemoveSkill →
+  remove_skill、SetSkillState → set_skill_state、NewCronJob →
+  new_cron_job、ListCronJobs → list_cron_jobs、RemoveCronJob →
+  remove_cron_job、SetCronJobState → set_cron_job_state、NewTrigger →
+  new_trigger、ListTriggers → list_triggers、RemoveTrigger →
+  remove_trigger、SetTriggerState → set_trigger_state、Exec → exec
+  （exec_shell 仅 label，name 已是 exec）。
+- 连带：turn/listener.rs 的 `tool_name == "Skill"` 匹配与 `Skill(...)`
+  显示串、system_prompt.rs 自然语言提及、skill_builder description 内
+  InstallSkill 自引用、daemon 测试（tests/tools/*、commands_e2e、
+  dynamic_trigger_e2e、e2e_llm）名字断言、代码注释。
+- 非目标：MCP 工具名（server 定义不改写）、Rust struct 名、历史会话
+  transcript 旧名。
+
 ## Out of scope
 
 - 协议/wire/daemon 不改（#39-#44 全为 theway-tui / theway-markdown 纯展示）。
@@ -114,6 +142,6 @@ tui-busy-snake-loader / tui-theme-interface）已并入本 change 并删除，
 
 ## Acceptance
 
-- 7 条各自单测 + 编译 + 视觉断言（tmux e2e 截图）通过；
+- 9 条各自单测 + 编译 + 视觉断言（tmux e2e 截图）通过；
   make check / test / lint / fmt-check 全绿。
-- 逐条 close #39-#44、#46，证据贴 #45 后 close #45。
+- 逐条 close #39-#44、#46-#48，证据贴 #45 后 close #45。

@@ -8,12 +8,16 @@ graph TD
   D --> E["5-theme: theme.toml + 块背景色 (#43)"]
   E --> F["6-dag-graph: DAG 框图渲染 (#41)"]
   F --> G["7-completion-scroll: 补全弹层自动翻页 (#46)"]
-  G --> H["8-verify: make ci + tmux e2e + close #39-#46"]
+  G --> H["8-slash-catalog: 弹层 skill:: 与 mcp: 条目 (#47)"]
+  I["9-tool-rename: 工具名统一 snake_case (#48)"] --> J["10-verify"]
+  H --> J["10-verify: make ci + tmux e2e + close #39-#48"]
 ```
 
-全串行：ui/mod.rs 被 1/2/3/4/5/7 修改，feed_render.rs 被 4/5/6 修改，
-按仓库规则共享文件节点串行。每节点小步 commit（feat(#子issue)），
-8-verify 基于最新 HEAD 复核并逐条 close。
+主链全串行：ui/mod.rs 被 1/2/3/4/5/7/8 修改，feed_render.rs 被 4/5/6
+修改，按仓库规则共享文件节点串行。9-tool-rename 只碰 daemon 文件
+（tool 定义 + 测试 + listener + system_prompt），与主链文件不相交，
+并行跑。每节点小步 commit（feat(#子issue)），10-verify 基于最新 HEAD
+复核并逐条 close。
 
 - [ ] 1-features — `crates/theway-tui/src/ui/mod.rs` + `ui/tests.rs`：
   - `feature_labels(runtime, dags, has_goal)` → `feature_labels(dags)`：
@@ -100,13 +104,45 @@ graph TD
   - 测试：20+ 项列表 Down 连按越过 8 项后高亮仍在窗口内（buffer 断言
     高亮行可见）；Up 回翻跟随；刷新重置到顶部。
   - 验收：`cargo check -p theway-tui`；`cargo test -p theway-tui` 全绿。
-- [ ] 8-verify — `make check` + `make test`（workspace 全量）+ `make lint` +
+- [ ] 8-slash-catalog — `ui/mod.rs` + `ui/tests.rs`：
+  - `collect_slash_commands` 增 `mcp_tool_names: &[String]` 参数（调用点
+    传 `latest.sidebar.mcp.tool_names`）；追加条目：每个已启用 skill →
+    `skill::{name}`（name 原样）；每个 mcp 工具 → `mcp:{tool}`。
+  - 现有 `/skillname` 快捷与全部既有条目保留；SlashCompleter 去重排序
+    不变（from_commands 已处理）。
+  - 测试：collect_slash_commands 断言 skill:: / mcp: 条目存在；
+    弹层过滤（/skill:: 只剩 skill 条目）。
+  - 验收：`cargo check -p theway-tui`；`cargo test -p theway-tui` 全绿。
+- [ ] 9-tool-rename — daemon-only（与主链文件不相交，并行）：
+  - `tools/skill.rs`、`tools/skill_builder.rs`、`tools/install_skill/
+    mod.rs`、`tools/remove_skill.rs`、`tools/set_skill_state.rs`、
+    `triggers/cron/tools.rs`、`triggers/dynamic/tools.rs`：Tool.name +
+    label() 按映射改 snake_case（Skill→skill、SkillBuilder→skill_builder、
+    InstallSkill→install_skill、RemoveSkill→remove_skill、SetSkillState→
+    set_skill_state、NewCronJob→new_cron_job、ListCronJobs→list_cron_jobs、
+    RemoveCronJob→remove_cron_job、SetCronJobState→set_cron_job_state、
+    NewTrigger→new_trigger、ListTriggers→list_triggers、RemoveTrigger→
+    remove_trigger、SetTriggerState→set_trigger_state）；
+    `tools/exec_shell.rs` label "Exec" → "exec"（name 已是 exec）。
+  - `turn/listener.rs`：`tool_name == "Skill"` → `"skill"`；
+    `Skill(...)` 显示串 → `skill(...)`。
+  - `system_prompt.rs`：自然语言提及（call ListCronJobs、SkillBuilder、
+    InstallSkill…）改新名。
+  - description 自引用（skill_builder 描述里 InstallSkill 等）+ 代码
+    注释提及同步。
+  - daemon 测试名字断言（tests/tools/*、commands_e2e、
+    dynamic_trigger_e2e、e2e_llm.rs）更新。
+  - 验收：`cargo check -p theway-daemon`；`cargo test -p theway-daemon`
+    全绿；grep 确认 `name: "[A-Z]` 在 Tool 定义中无残留（除 test Faux）。
+- [ ] 10-verify — `make check` + `make test`（workspace 全量）+ `make lint` +
   `make fmt-check`；tmux e2e 逐条：①composer 右上角仅 graph engine（无
   dag run 无标签，trigger 面板 Runtime 仍在）②长文本折行显示行首 + Up/Down
   历史/拖拽调高回归 ③busy 时彩虹蛇在 9 点轨道左右跑 + 折返 + 与 working
   同行（带 1 行、idle 无跳动）④流式 thinking 统计行 c/s 非零 + in/out
   随流更新 ⑤theme.toml 定制 tool/thinking 背景铺满块宽 + 无主题视觉回归
   ⑥dag 状态带盒子+箭头图 + dag_status mermaid 围栏在 feed 成图 + 超宽
-  回退 ⑦补全弹层 Down/Up 越界自动翻页、高亮始终可见；
-  `gh issue close 39 40 41 42 43 44 46`，证据贴 #45 后 `gh issue
-  close 45`。
+  回退 ⑦补全弹层 Down/Up 越界自动翻页、高亮始终可见 ⑧弹层含 skill:: 与
+  mcp: 条目、前缀过滤生效 ⑨工具调用块显示 snake_case 名（skill/trigger/
+  cron 工具调用正常）；
+  `gh issue close 39 40 41 42 43 44 46 47 48`，证据贴 #45 后
+  `gh issue close 45`。
