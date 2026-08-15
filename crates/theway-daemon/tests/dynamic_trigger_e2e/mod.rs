@@ -1,7 +1,7 @@
 //! End-to-end coverage for dynamic trigger creation from ordinary conversation.
 //!
 //! The model is simulated with a deterministic stream: the first user prompt creates a
-//! dynamic rule via the model-facing `NewTrigger` tool, and a later runtime `Trigger`
+//! dynamic rule via the model-facing `new_trigger` tool, and a later runtime `Trigger`
 //! causes the trigger sub-agent to call `bash` for the matching rule action.
 //!
 //! Layout: shared fixtures live in `helpers.rs`; the tests are split by domain into

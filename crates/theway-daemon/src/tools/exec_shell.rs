@@ -529,7 +529,7 @@ impl AgentTool for ExecTool {
     }
 
     fn label(&self) -> &str {
-        "Exec"
+        "exec"
     }
 
     async fn execute(

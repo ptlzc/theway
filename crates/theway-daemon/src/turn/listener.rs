@@ -123,10 +123,10 @@ fn map_agent_event(event: &LoopEvent) -> Vec<FeedUpdate> {
 }
 
 fn tool_start_display(tool_name: &str, args: &serde_json::Value) -> (String, String) {
-    if tool_name == "Skill" {
+    if tool_name == "skill" {
         if let Some(name) = args.get("name").and_then(|v| v.as_str()) {
             return (
-                format!("Skill({})", truncate_chars(name, 48)),
+                format!("skill({})", truncate_chars(name, 48)),
                 String::new(),
             );
         }

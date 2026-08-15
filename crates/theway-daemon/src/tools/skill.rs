@@ -1,7 +1,7 @@
-//! `Skill` builtin tool. Closes the gap flagged in issue #25: the system prompt registry
-//! already tells the model "Use the Skill tool to invoke a skill by name when applicable",
-//! but the tool itself was never registered, so model-issued `Skill` calls failed with
-//! `no tool named 'Skill'`.
+//! `skill` builtin tool. The system prompt registry tells the model "Use the skill tool to
+//! invoke a skill by name when applicable"; this is the registered tool backing those
+//! `skill` calls (model-issued calls to a name other than `skill` fail with
+//! `no tool named '...'`).
 //!
 //! Behavior (per issue #25 acceptance):
 //! - Looks the requested name up in the live `AgentHarness::skills()` snapshot.
@@ -51,7 +51,7 @@ impl AgentTool for SkillTool {
     }
 
     fn label(&self) -> &str {
-        "Skill"
+        "skill"
     }
 
     fn execution_mode(&self) -> Option<ToolExecutionMode> {
@@ -76,7 +76,7 @@ impl AgentTool for SkillTool {
         let harness = match self.harness.get() {
             Some(h) => h,
             None => {
-                return Err(AgentToolError::from("Skill tool not yet initialized"));
+                return Err(AgentToolError::from("skill tool not yet initialized"));
             }
         };
 
@@ -106,7 +106,7 @@ impl AgentTool for SkillTool {
 }
 
 static DEFINITION: Lazy<Tool> = Lazy::new(|| Tool {
-    name: "Skill".into(),
+    name: "skill".into(),
     description:
         "Invoke a skill by name. Returns the skill body wrapped in a `<skill>` block for the \
          model to follow. Use this when the skill registry in the system prompt indicates the \
@@ -242,7 +242,7 @@ mod tests {
     #[tokio::test]
     async fn disabled_skill_refuses_body_via_steering_path() {
         // `/skill <name>` enqueues a steering message; the next turn the model invokes the
-        // `Skill` tool with the same name, which ends up here. Assert the enforcement is
+        // `skill` tool with the same name, which ends up here. Assert the enforcement is
         // identical — the disable flag is not bypassable by any caller path.
         let cell: SkillHarnessCell = Arc::new(SyncOnceCell::new());
         let harness = build_harness_with_skills(vec![make_skill("locked", true)]);
@@ -271,7 +271,7 @@ mod tests {
         let AgentToolError::Message(msg) = err else {
             panic!("expected Message error, not a panic");
         };
-        assert!(msg.contains("Skill tool not yet initialized"));
+        assert!(msg.contains("skill tool not yet initialized"));
     }
 
     #[tokio::test]

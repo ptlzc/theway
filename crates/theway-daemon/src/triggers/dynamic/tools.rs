@@ -1,5 +1,5 @@
-//! Model-facing tools for managing dynamic trigger rules: create (`NewTrigger`), list
-//! (`ListTriggers`), remove (`RemoveTrigger`), and enable/disable (`SetTriggerState`).
+//! Model-facing tools for managing dynamic trigger rules: create (`new_trigger`), list
+//! (`list_triggers`), remove (`remove_trigger`), and enable/disable (`set_trigger_state`).
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
@@ -27,7 +27,7 @@ impl AgentTool for NewTriggerTool {
     }
 
     fn label(&self) -> &str {
-        "NewTrigger"
+        "new_trigger"
     }
 
     fn execution_mode(&self) -> Option<ToolExecutionMode> {
@@ -90,7 +90,7 @@ impl AgentTool for NewTriggerTool {
         .any(looks_like_fixed_schedule_request);
         if fixed_schedule_text {
             return Err(AgentToolError::Message(
-                "fixed scheduled jobs must use NewCronJob, not NewTrigger".into(),
+                "fixed scheduled jobs must use new_cron_job, not new_trigger".into(),
             ));
         }
         let rule = match (condition, action) {
@@ -131,7 +131,7 @@ impl AgentTool for ListTriggersTool {
     }
 
     fn label(&self) -> &str {
-        "ListTriggers"
+        "list_triggers"
     }
 
     fn execution_mode(&self) -> Option<ToolExecutionMode> {
@@ -170,7 +170,7 @@ impl AgentTool for RemoveTriggerTool {
     }
 
     fn label(&self) -> &str {
-        "RemoveTrigger"
+        "remove_trigger"
     }
 
     fn execution_mode(&self) -> Option<ToolExecutionMode> {
@@ -251,7 +251,7 @@ impl AgentTool for SetTriggerStateTool {
     }
 
     fn label(&self) -> &str {
-        "SetTriggerState"
+        "set_trigger_state"
     }
 
     fn execution_mode(&self) -> Option<ToolExecutionMode> {
@@ -376,8 +376,8 @@ fn looks_like_fixed_schedule_request(text: &str) -> bool {
 
 static NEW_TRIGGER_TOOL: once_cell::sync::Lazy<Tool> = once_cell::sync::Lazy::new(|| {
     Tool {
-        name: "NewTrigger".into(),
-        description: "Create an event/condition-based dynamic trigger rule. Use this for future events such as a browser tab, file, MCP notification, webhook, or other condition becoming true. Do not use this for fixed time, recurring, scheduled, hourly, daily, weekly, cron, crontab, 定时任务, 每小时, or similar time-based jobs; use NewCronJob instead.".into(),
+        name: "new_trigger".into(),
+        description: "Create an event/condition-based dynamic trigger rule. Use this for future events such as a browser tab, file, MCP notification, webhook, or other condition becoming true. Do not use this for fixed time, recurring, scheduled, hourly, daily, weekly, cron, crontab, 定时任务, 每小时, or similar time-based jobs; use new_cron_job instead.".into(),
         parameters: json!({
             "type": "object",
             "properties": {
@@ -410,7 +410,7 @@ static NEW_TRIGGER_TOOL: once_cell::sync::Lazy<Tool> = once_cell::sync::Lazy::ne
 
 static LIST_TRIGGERS_TOOL: once_cell::sync::Lazy<Tool> = once_cell::sync::Lazy::new(|| {
     Tool {
-    name: "ListTriggers".into(),
+    name: "list_triggers".into(),
     description: "List dynamic trigger rules currently registered in theway. Use this when the user asks to view, list, show, inspect, or find trigger ids.".into(),
     parameters: json!({
         "type": "object",
@@ -422,7 +422,7 @@ static LIST_TRIGGERS_TOOL: once_cell::sync::Lazy<Tool> = once_cell::sync::Lazy::
 
 static REMOVE_TRIGGER_TOOL: once_cell::sync::Lazy<Tool> = once_cell::sync::Lazy::new(|| {
     Tool {
-        name: "RemoveTrigger".into(),
+        name: "remove_trigger".into(),
         description: "Delete dynamic trigger rules. Use this when the user asks theway to delete, remove, or clear an existing dynamic trigger.".into(),
         parameters: json!({
             "type": "object",
@@ -443,7 +443,7 @@ static REMOVE_TRIGGER_TOOL: once_cell::sync::Lazy<Tool> = once_cell::sync::Lazy:
 
 static SET_TRIGGER_STATE_TOOL: once_cell::sync::Lazy<Tool> = once_cell::sync::Lazy::new(|| {
     Tool {
-        name: "SetTriggerState".into(),
+        name: "set_trigger_state".into(),
         description: "Enable or disable an existing dynamic trigger rule without deleting it. Use this when the user asks to pause, disable, enable, or resume a trigger.".into(),
         parameters: json!({
             "type": "object",

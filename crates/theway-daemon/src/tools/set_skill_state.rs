@@ -1,10 +1,10 @@
-//! `SetSkillState` builtin tool (skill-lifecycle task #23, S-A2): enable or disable a loaded
+//! `set_skill_state` builtin tool (skill-lifecycle task #23, S-A2): enable or disable a loaded
 //! skill at runtime without editing its `SKILL.md`.
 //!
 //! Persistence is the `~/.theway/skill-overrides.json` overlay (see [`crate::skill_overrides`]) keyed
 //! by `{source, name}` — the user's SKILL.md stays pristine and the choice survives restarts
 //! and reloads. Works for ANY source: a builtin or project skill that can't be deleted can
-//! still be disabled. (Removal of user-installed skills is the separate `RemoveSkill` tool.)
+//! still be disabled. (Removal of user-installed skills is the separate `remove_skill` tool.)
 //!
 //! **Authorization model (issue #110 sub-PR 3, post-PR-#108 lift)**: the model-facing tool is
 //! no longer disable-only. The narrowing/escalating split moved from `execute` into
@@ -90,7 +90,7 @@ impl AgentTool for SetSkillStateTool {
     }
 
     fn label(&self) -> &str {
-        "SetSkillState"
+        "set_skill_state"
     }
 
     fn execution_mode(&self) -> Option<ToolExecutionMode> {
@@ -142,7 +142,7 @@ impl AgentTool for SetSkillStateTool {
         let harness = self
             .harness
             .get()
-            .ok_or_else(|| AgentToolError::from("SetSkillState not yet initialized"))?;
+            .ok_or_else(|| AgentToolError::from("set_skill_state not yet initialized"))?;
 
         // Resolve the active skill by name (catalog is deduped by name).
         let skills = harness.skills();
@@ -293,13 +293,13 @@ fn enabled_word(enabled: bool) -> &'static str {
 }
 
 static DEFINITION: Lazy<Tool> = Lazy::new(|| Tool {
-    name: "SetSkillState".into(),
+    name: "set_skill_state".into(),
     description: "Enable or disable a loaded skill at runtime without editing its SKILL.md. \
          The choice is recorded in a local overlay (~/.theway/skill-overrides.json) keyed by \
          source+name and survives restarts. Works for any source — a builtin or project skill \
          that can't be removed can still be disabled. Two-phase: first call previews (current \
          vs target state); call again with `confirm: true` to apply. Disabling prevents the \
-         model from auto-invoking the skill via the Skill tool; the skill still appears in \
+         model from auto-invoking the skill via the skill tool; the skill still appears in \
          the catalog. Re-enabling a previously-disabled skill is a privileged control-plane \
          write and requires explicit user confirmation through the runtime prompt card before \
          it takes effect (issue #110); disabling does not prompt."

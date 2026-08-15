@@ -229,7 +229,7 @@ pub fn dynamic_trigger_response(context: &Context) -> AssistantMessage {
     } else if !last_text.contains("Dynamic trigger rules") && last_text.contains("helloworld") {
         assistant_tool_call(
             "call-new-trigger-home",
-            "NewTrigger",
+            "new_trigger",
             serde_json::json!({
                 "condition": "$HOME contains a file named helloworld",
                 "action": "print the contents of $HOME/helloworld",
@@ -239,7 +239,7 @@ pub fn dynamic_trigger_response(context: &Context) -> AssistantMessage {
     } else if last_text.contains("visible to future turns") {
         assistant_tool_call(
             "call-new-trigger-promote",
-            "NewTrigger",
+            "new_trigger",
             serde_json::json!({
                 "condition": "the event says build finished",
                 "action": "echo dynamic-fired",
@@ -250,7 +250,7 @@ pub fn dynamic_trigger_response(context: &Context) -> AssistantMessage {
     {
         assistant_tool_call(
             "call-new-cron-job",
-            "NewCronJob",
+            "new_cron_job",
             serde_json::json!({
                 "schedule": "hourly",
                 "action": "Check the Hacker News front page for notable stories"
@@ -259,7 +259,7 @@ pub fn dynamic_trigger_response(context: &Context) -> AssistantMessage {
     } else if last_text.contains("Create a trigger") {
         assistant_tool_call(
             "call-new-trigger",
-            "NewTrigger",
+            "new_trigger",
             serde_json::json!({
                 "condition": "the event says build finished",
                 "action": "echo dynamic-fired"

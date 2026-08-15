@@ -1,4 +1,4 @@
-//! `InstallSkill` builtin tool (issue #87 sub-PR B).
+//! `install_skill` builtin tool (issue #87 sub-PR B).
 //!
 //! Lets the agent install a new skill into the user-global skills directory
 //! (`~/.theway/skills/<name>/SKILL.md`) from one of three sources: an `https://` URL, a local
@@ -15,7 +15,7 @@
 //!    skill already exists) for the install to actually run. This means even if the
 //!    permission layer runs `Allow`, the model can't silently install on a single
 //!    tool-call sequence.
-//! 2. **Permission category** — `InstallSkill` should opt into
+//! 2. **Permission category** — `install_skill` should opt into
 //!    [`theway_core::PermissionCategory::ControlPlaneWrite`] so the harness hook can
 //!    prompt the user. As of this PR the harness `before_tool_call` plumbing doesn't yet
 //!    route tools through a non-default category (see PermissionCategory docs:
@@ -133,13 +133,13 @@ impl AgentTool for InstallSkillTool {
     }
 
     fn label(&self) -> &str {
-        "InstallSkill"
+        "install_skill"
     }
 
     fn execution_mode(&self) -> Option<ToolExecutionMode> {
         // Install path writes to the global skills directory and triggers a harness
         // reload — request sequential execution so it doesn't race other tool calls in
-        // the same turn (e.g. a second InstallSkill, or reads of the skill catalog).
+        // the same turn (e.g. a second install_skill, or reads of the skill catalog).
         Some(ToolExecutionMode::Sequential)
     }
 
@@ -232,7 +232,7 @@ impl AgentTool for InstallSkillTool {
         let harness = self
             .harness
             .get()
-            .ok_or_else(|| AgentToolError::from("InstallSkill not yet initialized"))?;
+            .ok_or_else(|| AgentToolError::from("install_skill not yet initialized"))?;
         let reload = harness
             .reload_skills_from_disk()
             .await
@@ -431,7 +431,7 @@ pub(crate) async fn atomic_write_skill(target: &Path, content: &str) -> Result<(
 // ──────────────────────────────────────────────────────────────────────────────────────────
 
 static DEFINITION: Lazy<Tool> = Lazy::new(|| Tool {
-    name: "InstallSkill".into(),
+    name: "install_skill".into(),
     description:
         "Install a new skill into the user-global skills directory (~/.theway/skills/<name>/) \
          and hot-reload the catalog so the next turn can use it. Two-phase: first call \

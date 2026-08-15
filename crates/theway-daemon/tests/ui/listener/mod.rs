@@ -82,7 +82,7 @@ fn short_tool_output_display_stays_unchanged() {
 fn skill_tool_start_uses_bounded_label_without_body() {
     let event = LoopEvent::ToolExecutionStart {
         tool_call_id: "call-skill".into(),
-        tool_name: "Skill".into(),
+        tool_name: "skill".into(),
         args: serde_json::json!({
             "name": "review-pr",
             "content": "SECRET SKILL BODY"
@@ -93,10 +93,10 @@ fn skill_tool_start_uses_bounded_label_without_body() {
     let [FeedUpdate::ToolStart { name, args }] = updates.as_slice() else {
         panic!("expected one tool start update");
     };
-    assert_eq!(name, "Skill(review-pr)");
+    assert_eq!(name, "skill(review-pr)");
     assert!(
         args.is_empty(),
-        "Skill tool args should not be rendered: {args}"
+        "skill tool args should not be rendered: {args}"
     );
 }
 

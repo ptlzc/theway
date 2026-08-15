@@ -150,7 +150,7 @@ async fn project_skill_overrides_user_skill_with_same_name() {
         prompt.contains("name: only-user"),
         "system prompt should list 'only-user' skill: {prompt}"
     );
-    // Description identifies which version landed. Skill bodies are invoked via the `Skill`
+    // Description identifies which version landed. Skill bodies are invoked via the `skill`
     // tool, not inlined into the prompt — so we don't assert on `PROJECT BODY` here.
     assert!(
         prompt.contains("description: project-version"),
@@ -162,7 +162,7 @@ async fn project_skill_overrides_user_skill_with_same_name() {
     );
 
     // Sanity-check: the project body actually lives on the in-memory skill record (so when the
-    // model later invokes `Skill('shared')`, it gets the project copy).
+    // model later invokes `skill('shared')`, it gets the project copy).
     let kept = harness
         .skills()
         .into_iter()

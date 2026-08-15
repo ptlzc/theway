@@ -1,18 +1,18 @@
-//! `SkillBuilder` builtin tool (issue #21).
+//! `skill_builder` builtin tool (issue #21).
 //!
-//! Authors a new user-global skill from structured fields. Where `InstallSkill` ingests a
-//! complete, externally sourced `SKILL.md`, `SkillBuilder` owns the format: the model
+//! Authors a new user-global skill from structured fields. Where `install_skill` ingests a
+//! complete, externally sourced `SKILL.md`, `skill_builder` owns the format: the model
 //! supplies `name` / `description` / `instructions` (+ optional `examples`) and the tool
 //! renders the canonical template, so every produced skill is loadable by construction and
 //! the model never hand-assembles frontmatter.
 //!
-//! Safety model is inherited from `InstallSkill` and shares its code paths:
+//! Safety model is inherited from `install_skill` and shares its code paths:
 //!
 //! - Two-phase `confirm` flow — the first call only validates and previews; nothing is
 //!   written until an explicit `confirm: true` call (+ `overwrite: true` when a same-name
 //!   skill exists with different content).
 //! - Rendered content runs through the same `parse_and_validate_skill_md` used by
-//!   `InstallSkill`, then the same atomic tempfile+rename write and catalog hot-reload.
+//!   `install_skill`, then the same atomic tempfile+rename write and catalog hot-reload.
 //! - `PermissionClassification::Prompt` (control-plane write) with a bounded reason; the
 //!   skill name enters the reason only after passing the kebab-case charset check.
 //! - The audit entry (`skill_install`, `source_kind: "builder"`) carries metadata + hashes
@@ -128,7 +128,7 @@ impl AgentTool for SkillBuilderTool {
     }
 
     fn label(&self) -> &str {
-        "SkillBuilder"
+        "skill_builder"
     }
 
     fn execution_mode(&self) -> Option<ToolExecutionMode> {
@@ -141,8 +141,8 @@ impl AgentTool for SkillBuilderTool {
     /// exactly one approval, on the `confirm: true` write. That write is a persistent
     /// control-plane change growing the model's skill surface, so it always prompts. The
     /// name is model-supplied and only enters the bounded reason after passing the same
-    /// charset shape the validator enforces. (Unlike InstallSkill — which prompts on
-    /// preview too because it fetches untrusted external content — SkillBuilder's preview
+    /// charset shape the validator enforces. (Unlike install_skill — which prompts on
+    /// preview too because it fetches untrusted external content — skill_builder's preview
     /// input is model-authored from the visible conversation.)
     fn permission_classification(&self, prepared_args: &Value) -> PermissionClassification {
         let confirm = prepared_args
@@ -178,7 +178,7 @@ impl AgentTool for SkillBuilderTool {
             .map_err(|e| AgentToolError::Message(format!("invalid arguments: {e}")))?;
 
         // Phase 1: render + validate. The rendered content goes through the exact
-        // validation InstallSkill applies, so authored skills can never diverge from what
+        // validation install_skill applies, so authored skills can never diverge from what
         // the loader accepts. Pure read; no fs writes happen here.
         let rendered = render_skill_md(
             &input.name,
@@ -259,7 +259,7 @@ impl AgentTool for SkillBuilderTool {
         let harness = self
             .harness
             .get()
-            .ok_or_else(|| AgentToolError::from("SkillBuilder not yet initialized"))?;
+            .ok_or_else(|| AgentToolError::from("skill_builder not yet initialized"))?;
         let reload = harness
             .reload_skills_from_disk()
             .await
@@ -276,7 +276,7 @@ impl AgentTool for SkillBuilderTool {
                 .map(|d| format!("{:?}: {}", d.code, d.message)),
         );
 
-        // Persistent audit: same `skill_install` channel as InstallSkill so resume and
+        // Persistent audit: same `skill_install` channel as install_skill so resume and
         // forensics see one uniform record of model-driven skill writes. `source_kind:
         // "builder"` distinguishes authored skills; the body is never included.
         let audit_payload = json!({
@@ -337,14 +337,14 @@ impl AgentTool for SkillBuilderTool {
 }
 
 static DEFINITION: Lazy<Tool> = Lazy::new(|| Tool {
-    name: "SkillBuilder".into(),
+    name: "skill_builder".into(),
     description:
         "Create a NEW user skill from structured fields and hot-reload the catalog. Use this \
          when the user asks to create, save, or codify a reusable skill, workflow, checklist, \
          or convention — including \"summarize the recent work / this conversation into a \
          skill\": distill the generalizable workflow from the conversation (steps actually \
          performed, commands used, pitfalls hit) and write instructions for the general case, \
-         not a transcript of this one instance. Use InstallSkill instead when installing an \
+         not a transcript of this one instance. Use install_skill instead when installing an \
          existing SKILL.md from a URL, file, or pasted content. The tool renders canonical \
          SKILL.md (frontmatter + sections) from name/description/instructions — do not \
          hand-write frontmatter. Two-phase: first call without `confirm` validates and \

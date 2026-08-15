@@ -180,7 +180,7 @@ async fn new_trigger_tool_rejects_fixed_schedule_jobs() {
         .expect_err("fixed schedules should be routed to cron");
 
     assert!(
-        format!("{err}").contains("NewCronJob"),
+        format!("{err}").contains("new_cron_job"),
         "error should point model to cron tool: {err}"
     );
     assert!(triggers::global_registry().list().is_empty());
@@ -207,7 +207,7 @@ async fn new_trigger_tool_rejects_fixed_schedule_in_action_or_spec() {
         .expect_err("fixed schedule in action/spec should be routed to cron");
 
     assert!(
-        format!("{err}").contains("NewCronJob"),
+        format!("{err}").contains("new_cron_job"),
         "error should point model to cron tool: {err}"
     );
     assert!(triggers::global_registry().list().is_empty());
@@ -262,10 +262,10 @@ fn cron_management_tool_builders_expose_expected_catalog_names() {
     assert_eq!(
         names,
         [
-            "NewCronJob",
-            "ListCronJobs",
-            "RemoveCronJob",
-            "SetCronJobState"
+            "new_cron_job",
+            "list_cron_jobs",
+            "remove_cron_job",
+            "set_cron_job_state"
         ]
     );
 }

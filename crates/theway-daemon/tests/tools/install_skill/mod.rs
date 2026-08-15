@@ -568,7 +568,7 @@ fn install_permission_reason_uses_whitelisted_source_kind_only() {
             "source": { "type": input_type, "url": "ignored-by-reason" },
         }));
         let PermissionClassification::Prompt { reason } = cls else {
-            panic!("InstallSkill must always Prompt; got {cls:?}");
+            panic!("install_skill must always Prompt; got {cls:?}");
         };
         assert!(
             reason.contains(expected),

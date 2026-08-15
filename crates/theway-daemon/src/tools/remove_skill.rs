@@ -1,10 +1,10 @@
-//! `RemoveSkill` builtin tool (skill-lifecycle task #23, S-A2b): delete a **user-installed**
+//! `remove_skill` builtin tool (skill-lifecycle task #23, S-A2b): delete a **user-installed**
 //! skill from `~/.theway/skills/` and hot-reload the catalog.
 //!
 //! Scope guard (locked with Provider/Auth + QA on the #ux skill-lifecycle thread): only
 //! `SkillSource::User` skills can be removed. A `Builtin` skill is compiled into the binary;
 //! a `Project` skill belongs to the repo, not this user. Removing those isn't meaningful here
-//! — the tool returns a bounded error pointing at `SetSkillState` / `/skills disable` instead.
+//! — the tool returns a bounded error pointing at `set_skill_state` / `/skills disable` instead.
 //! This keeps "remove" strictly a deletion of something the user installed.
 //!
 //! Safety:
@@ -73,7 +73,7 @@ impl AgentTool for RemoveSkillTool {
     }
 
     fn label(&self) -> &str {
-        "RemoveSkill"
+        "remove_skill"
     }
 
     fn execution_mode(&self) -> Option<ToolExecutionMode> {
@@ -109,7 +109,7 @@ impl AgentTool for RemoveSkillTool {
         let harness = self
             .harness
             .get()
-            .ok_or_else(|| AgentToolError::from("RemoveSkill not yet initialized"))?;
+            .ok_or_else(|| AgentToolError::from("remove_skill not yet initialized"))?;
 
         // Resolve the active skill by name (catalog deduped by name).
         let skills = harness.skills();
@@ -137,7 +137,7 @@ impl AgentTool for RemoveSkillTool {
         if source != SkillSource::User {
             return Err(AgentToolError::Message(format!(
                 "'{}' is a {} skill and cannot be removed (builtin skills are compiled in; \
-                 project skills belong to the repo). Disable it instead with SetSkillState \
+                 project skills belong to the repo). Disable it instead with set_skill_state \
                  or `/skills disable {}`.",
                 input.name,
                 source.label(),
@@ -305,11 +305,11 @@ fn parse_source(s: &str) -> Result<SkillSource, AgentToolError> {
 }
 
 static DEFINITION: Lazy<Tool> = Lazy::new(|| Tool {
-    name: "RemoveSkill".into(),
+    name: "remove_skill".into(),
     description:
         "Delete a user-installed skill (from ~/.theway/skills/) and hot-reload the catalog. Only \
          user-installed skills can be removed — builtin skills are compiled into theway and \
-         project skills belong to the repo; for those, disable instead via SetSkillState. \
+         project skills belong to the repo; for those, disable instead via set_skill_state. \
          Two-phase: first call previews the target path; call again with `confirm: true` to \
          delete. Removing also clears any disabled-state overlay entry for the skill."
             .into(),

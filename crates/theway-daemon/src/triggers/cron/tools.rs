@@ -51,7 +51,7 @@ impl AgentTool for NewCronJobTool {
     }
 
     fn label(&self) -> &str {
-        "NewCronJob"
+        "new_cron_job"
     }
 
     fn execution_mode(&self) -> Option<ToolExecutionMode> {
@@ -113,7 +113,7 @@ impl AgentTool for ListCronJobsTool {
     }
 
     fn label(&self) -> &str {
-        "ListCronJobs"
+        "list_cron_jobs"
     }
 
     fn execution_mode(&self) -> Option<ToolExecutionMode> {
@@ -151,7 +151,7 @@ impl AgentTool for RemoveCronJobTool {
     }
 
     fn label(&self) -> &str {
-        "RemoveCronJob"
+        "remove_cron_job"
     }
 
     fn execution_mode(&self) -> Option<ToolExecutionMode> {
@@ -185,7 +185,7 @@ impl AgentTool for RemoveCronJobTool {
         if !confirm {
             return Ok(AgentToolResult {
                 content: vec![UserContentBlock::text(format!(
-                    "remove cron job {} requires confirmation\nschedule: {}\naction: {}\ncall RemoveCronJob again with confirm=true only after the user confirms",
+                    "remove cron job {} requires confirmation\nschedule: {}\naction: {}\ncall remove_cron_job again with confirm=true only after the user confirms",
                     job.id,
                     job.schedule,
                     preview_redacted(&job.action, MAX_ACTION_PREVIEW_CHARS)
@@ -237,7 +237,7 @@ impl AgentTool for SetCronJobStateTool {
     }
 
     fn label(&self) -> &str {
-        "SetCronJobState"
+        "set_cron_job_state"
     }
 
     fn execution_mode(&self) -> Option<ToolExecutionMode> {
@@ -304,10 +304,10 @@ impl AgentTool for SetCronJobStateTool {
 }
 
 static NEW_CRON_JOB_TOOL: once_cell::sync::Lazy<Tool> = once_cell::sync::Lazy::new(|| Tool {
-    name: "NewCronJob".into(),
+    name: "new_cron_job".into(),
     description: "Create a session-scoped cron scheduled job. Use this when the user asks for a \
          fixed time, recurring, scheduled, hourly, daily, weekly, crontab, 定时任务, 每小时, \
-         每天, or similar time-based job. Do not use NewTrigger for these scheduled jobs. \
+         每天, or similar time-based job. Do not use new_trigger for these scheduled jobs. \
          Cron jobs are scoped to the current chat session by default."
         .into(),
     parameters: json!({
@@ -333,7 +333,7 @@ static NEW_CRON_JOB_TOOL: once_cell::sync::Lazy<Tool> = once_cell::sync::Lazy::n
 });
 
 static LIST_CRON_JOBS_TOOL: once_cell::sync::Lazy<Tool> = once_cell::sync::Lazy::new(|| Tool {
-    name: "ListCronJobs".into(),
+    name: "list_cron_jobs".into(),
     description: "List the session-scoped cron scheduled jobs. Use this when the user asks to \
          view, list, inspect, or find scheduled jobs, cron jobs, crontab entries, 定时任务, \
          or recurring jobs."
@@ -346,7 +346,7 @@ static LIST_CRON_JOBS_TOOL: once_cell::sync::Lazy<Tool> = once_cell::sync::Lazy:
 });
 
 static REMOVE_CRON_JOB_TOOL: once_cell::sync::Lazy<Tool> = once_cell::sync::Lazy::new(|| Tool {
-    name: "RemoveCronJob".into(),
+    name: "remove_cron_job".into(),
     description: "Preview or confirm removal of a session-scoped cron scheduled job by exact id. \
          Use confirm=false first when the user asks to delete, remove, or clear a scheduled job, \
          cron job, crontab entry, or 定时任务. Call confirm=true only after the user explicitly \
@@ -370,7 +370,7 @@ static REMOVE_CRON_JOB_TOOL: once_cell::sync::Lazy<Tool> = once_cell::sync::Lazy
 });
 
 static SET_CRON_JOB_STATE_TOOL: once_cell::sync::Lazy<Tool> = once_cell::sync::Lazy::new(|| Tool {
-    name: "SetCronJobState".into(),
+    name: "set_cron_job_state".into(),
     description: "Disable a session-scoped cron scheduled job by exact id. Model-facing \
              enable/resume is refused until control-plane confirmation is wired; use \
              /cron enable <id> for enabling."

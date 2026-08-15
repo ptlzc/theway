@@ -69,7 +69,7 @@ pub fn new_trigger_extraction_stream() -> theway_core::StreamFn {
         } else {
             assistant_tool_call(
                 "call-new-trigger",
-                "NewTrigger",
+                "new_trigger",
                 serde_json::json!({
                     "condition": "\u{73b0}\u{5728}\u{662f} 11pm",
                     "action": "\u{5199}\u{4e00}\u{4e2a} tmp \u{6587}\u{4ef6}",
