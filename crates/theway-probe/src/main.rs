@@ -20,7 +20,8 @@ use tonic::Request;
 pub mod health {
     tonic::include_proto!("grpc.health.v1");
 }
-/// Generated from proto/theway_grpc.proto and its domain imports (theway.grpc.v1).
+/// Generated from the four domain proto files
+/// (commands.proto / session.proto / graph_engine.proto / events.proto).
 pub mod theway_grpc {
     tonic::include_proto!("theway.grpc.v1");
 }

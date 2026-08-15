@@ -2,15 +2,16 @@
 //!
 //! `WireStatus` (serde, `crate::wire`) is the internal model shared by the
 //! `--http` JSON surface and the UI event loop; `SessionState` (prost, generated
-//! from the split `proto/theway_grpc.proto` service entrypoint and its domain
-//! imports by this crate's build.rs) is the structured wire model for gRPC. The
-//! gRPC server serializes `SessionState` as binary protobuf; JSON channels keep
-//! using `WireStatus` until the protojson migration (see docs/PROTOCOL.md).
+//! from the four domain proto files — `commands.proto`, `session.proto`,
+//! `graph_engine.proto`, `events.proto` — plus `health.proto` by this crate's
+//! build.rs) is the structured wire model for gRPC. The gRPC server serializes
+//! `SessionState` as binary protobuf; JSON channels keep using `WireStatus`
+//! until the protojson migration (see docs/PROTOCOL.md).
 
 /// Generated protobuf code for package `theway.grpc.v1`, produced by this
-/// crate's `build.rs` into its own OUT_DIR. `proto/theway_grpc.proto` is the
-/// service entrypoint; messages and enums are split by domain across sibling
-/// proto files in the same package.
+/// crate's `build.rs` into its own OUT_DIR. Each domain proto file carries its
+/// messages, enums, and service in the same package:
+/// `commands.proto` / `session.proto` / `graph_engine.proto` / `events.proto`.
 pub mod theway_grpc {
     tonic::include_proto!("theway.grpc.v1");
 }

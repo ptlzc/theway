@@ -16,8 +16,9 @@ fi
 mkdir -p "$OUT"
 rm -f "$OUT"/*.ts
 
-# proto/theway_grpc.proto is the service entrypoint; protoc resolves its
-# domain imports and ts-proto writes one generated file per proto file.
+# Each domain proto file carries its own service (plus health.proto);
+# protoc resolves the domain imports and ts-proto writes one generated file
+# per proto file.
 #
 # ts-proto options:
 #   outputClientImpl=grpc-js  — client stubs only (no server side)
@@ -31,7 +32,7 @@ rm -f "$OUT"/*.ts
   --ts_proto_out="$OUT" \
   --proto_path=proto \
   --ts_proto_opt=outputServices=grpc-js,outputClientImpl=grpc-js,esModuleInterop=true,useOptionals=messages,forceLong=string,oneof=unions,importSuffix=.js \
-  proto/theway_grpc.proto proto/health.proto
+  proto/commands.proto proto/session.proto proto/graph_engine.proto proto/events.proto proto/health.proto
 
 echo "generated:"
 ls "$OUT"

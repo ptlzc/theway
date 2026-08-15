@@ -33,7 +33,10 @@ use crate::proto::{
 use theway_core::multiagent::graph::types::DagEvent;
 use theway_core::multiagent::registry::{AgentJobEvent, AgentJobRegistry};
 
-use theway_grpc::theway_grpc_server::{ThewayGrpc, ThewayGrpcServer};
+use theway_grpc::command_service_server::{CommandService, CommandServiceServer};
+use theway_grpc::event_service_server::{EventService, EventServiceServer};
+use theway_grpc::graph_engine_service_server::{GraphEngineService, GraphEngineServiceServer};
+use theway_grpc::session_service_server::{SessionService, SessionServiceServer};
 use theway_grpc::{
     ApproveRequest, CommandResult, CreateSessionRequest, CreateSessionResponse,
     DeleteSessionRequest, DeleteSessionResponse, Empty, GetNodeOutputRequest,
@@ -80,8 +83,8 @@ pub struct GrpcState {
 }
 
 #[tonic::async_trait]
-impl theway_grpc::command_service_server::CommandService for GrpcState {
-        async fn send_message(
+impl CommandService for GrpcState {
+    async fn send_message(
         &self,
         request: Request<SendMessageRequest>,
     ) -> Result<Response<CommandResult>, Status> {
@@ -116,7 +119,7 @@ impl theway_grpc::command_service_server::CommandService for GrpcState {
         Ok(Response::new(CommandResult { accepted }))
     }
 
-        async fn set_model(
+    async fn set_model(
         &self,
         request: Request<SetModelRequest>,
     ) -> Result<Response<CommandResult>, Status> {
@@ -129,12 +132,12 @@ impl theway_grpc::command_service_server::CommandService for GrpcState {
         Ok(Response::new(CommandResult { accepted }))
     }
 
-        async fn cancel(&self, _request: Request<Empty>) -> Result<Response<CommandResult>, Status> {
+    async fn cancel(&self, _request: Request<Empty>) -> Result<Response<CommandResult>, Status> {
         let accepted = self.commands.send(WireCommand::Abort).is_ok();
         Ok(Response::new(CommandResult { accepted }))
     }
 
-        async fn approve(
+    async fn approve(
         &self,
         request: Request<ApproveRequest>,
     ) -> Result<Response<CommandResult>, Status> {
@@ -146,18 +149,18 @@ impl theway_grpc::command_service_server::CommandService for GrpcState {
             .is_ok();
         Ok(Response::new(CommandResult { accepted }))
     }
-
-    // ── graph orchestration (DAG + goal runs) ────────────────────────────
 }
 
 #[tonic::async_trait]
-impl theway_grpc::session_service_server::SessionService for GrpcState {
-        async fn get_state(&self, _request: Request<Empty>) -> Result<Response<SessionState>, Status> {
+impl SessionService for GrpcState {
+    async fn get_state(&self, _request: Request<Empty>) -> Result<Response<SessionState>, Status> {
         let latest = self.latest.lock();
         Ok(Response::new(session_state(&latest)))
     }
 
-        async fn list_sessions(
+    // ── session resources (session-resource-model; backed by SessionOps) ──
+
+    async fn list_sessions(
         &self,
         _request: Request<Empty>,
     ) -> Result<Response<ListSessionsResponse>, Status> {
@@ -173,7 +176,7 @@ impl theway_grpc::session_service_server::SessionService for GrpcState {
         }))
     }
 
-        async fn create_session(
+    async fn create_session(
         &self,
         request: Request<CreateSessionRequest>,
     ) -> Result<Response<CreateSessionResponse>, Status> {
@@ -212,7 +215,7 @@ impl theway_grpc::session_service_server::SessionService for GrpcState {
         Ok(Response::new(CreateSessionResponse { session }))
     }
 
-        async fn switch_session(
+    async fn switch_session(
         &self,
         request: Request<SwitchSessionRequest>,
     ) -> Result<Response<CommandResult>, Status> {
@@ -237,7 +240,7 @@ impl theway_grpc::session_service_server::SessionService for GrpcState {
         Ok(Response::new(CommandResult { accepted }))
     }
 
-        async fn rename_session(
+    async fn rename_session(
         &self,
         request: Request<RenameSessionRequest>,
     ) -> Result<Response<CommandResult>, Status> {
@@ -255,7 +258,7 @@ impl theway_grpc::session_service_server::SessionService for GrpcState {
         Ok(Response::new(CommandResult { accepted: true }))
     }
 
-        async fn delete_session(
+    async fn delete_session(
         &self,
         request: Request<DeleteSessionRequest>,
     ) -> Result<Response<DeleteSessionResponse>, Status> {
@@ -307,8 +310,8 @@ impl theway_grpc::session_service_server::SessionService for GrpcState {
 }
 
 #[tonic::async_trait]
-impl theway_grpc::graph_engine_service_server::GraphEngineService for GrpcState {
-        async fn get_node_output(
+impl GraphEngineService for GrpcState {
+    async fn get_node_output(
         &self,
         request: Request<GetNodeOutputRequest>,
     ) -> Result<Response<GetNodeOutputResponse>, Status> {
@@ -362,7 +365,9 @@ impl theway_grpc::graph_engine_service_server::GraphEngineService for GrpcState 
         }))
     }
 
-        async fn graph_cancel(
+    // ── graph orchestration (DAG + goal runs) ────────────────────────────
+
+    async fn graph_cancel(
         &self,
         request: Request<GraphCancelRequest>,
     ) -> Result<Response<CommandResult>, Status> {
@@ -372,7 +377,7 @@ impl theway_grpc::graph_engine_service_server::GraphEngineService for GrpcState 
         Ok(Response::new(CommandResult { accepted: true }))
     }
 
-        async fn graph_retry(
+    async fn graph_retry(
         &self,
         request: Request<GraphRetryRequest>,
     ) -> Result<Response<GraphRetryResponse>, Status> {
@@ -384,7 +389,7 @@ impl theway_grpc::graph_engine_service_server::GraphEngineService for GrpcState 
         }))
     }
 
-        async fn graph_skip(
+    async fn graph_skip(
         &self,
         request: Request<GraphSkipRequest>,
     ) -> Result<Response<GraphSkipResponse>, Status> {
@@ -393,7 +398,7 @@ impl theway_grpc::graph_engine_service_server::GraphEngineService for GrpcState 
         Ok(Response::new(GraphSkipResponse { skipped }))
     }
 
-        async fn graph_node_interrupt(
+    async fn graph_node_interrupt(
         &self,
         request: Request<GraphNodeInterruptRequest>,
     ) -> Result<Response<CommandResult>, Status> {
@@ -404,7 +409,7 @@ impl theway_grpc::graph_engine_service_server::GraphEngineService for GrpcState 
         Ok(Response::new(CommandResult { accepted }))
     }
 
-        async fn graph_node_steer(
+    async fn graph_node_steer(
         &self,
         request: Request<GraphNodeSteerRequest>,
     ) -> Result<Response<CommandResult>, Status> {
@@ -415,7 +420,7 @@ impl theway_grpc::graph_engine_service_server::GraphEngineService for GrpcState 
         Ok(Response::new(CommandResult { accepted }))
     }
 
-        async fn graph_checkpoint(
+    async fn graph_checkpoint(
         &self,
         request: Request<GraphCheckpointRequest>,
     ) -> Result<Response<GraphCheckpointResponse>, Status> {
@@ -469,7 +474,7 @@ impl theway_grpc::graph_engine_service_server::GraphEngineService for GrpcState 
         }))
     }
 
-        async fn graph_restore(
+    async fn graph_restore(
         &self,
         request: Request<GraphRestoreRequest>,
     ) -> Result<Response<GraphRestoreResponse>, Status> {
@@ -492,9 +497,7 @@ impl theway_grpc::graph_engine_service_server::GraphEngineService for GrpcState 
         }))
     }
 
-    // ── session resources (session-resource-model; backed by SessionOps) ──
-
-        async fn graph_list(
+    async fn graph_list(
         &self,
         request: Request<GraphListRequest>,
     ) -> Result<Response<GraphListResponse>, Status> {
@@ -511,9 +514,9 @@ impl theway_grpc::graph_engine_service_server::GraphEngineService for GrpcState 
 }
 
 #[tonic::async_trait]
-impl theway_grpc::event_service_server::EventService for GrpcState {
-        type StreamEventsStream = Pin<Box<dyn Stream<Item = Result<StreamFrame, Status>> + Send>>;
-        async fn stream_events(
+impl EventService for GrpcState {
+    type StreamEventsStream = Pin<Box<dyn Stream<Item = Result<StreamFrame, Status>> + Send>>;
+    async fn stream_events(
         &self,
         _request: Request<Empty>,
     ) -> Result<Response<Self::StreamEventsStream>, Status> {
@@ -562,191 +565,6 @@ impl theway_grpc::event_service_server::EventService for GrpcState {
         Ok(Response::new(Box::pin(stream)))
     }
 }
-
-// Legacy aggregate service, kept as a migration bridge while clients cut over
-// to the four domain services. Each method is a thin UFCS delegate so the
-// bridge cannot drift from the new implementation; delete together with
-// `proto/theway_grpc.proto` in the cutover step.
-#[tonic::async_trait]
-impl ThewayGrpc for GrpcState {
-    type StreamEventsStream = Pin<Box<dyn Stream<Item = Result<StreamFrame, Status>> + Send>>;
-
-    async fn get_state(&self, request: Request<Empty>) -> Result<Response<SessionState>, Status> {
-        <Self as theway_grpc::session_service_server::SessionService>::get_state(self, request)
-            .await
-    }
-
-    async fn stream_events(
-        &self,
-        request: Request<Empty>,
-    ) -> Result<Response<Self::StreamEventsStream>, Status> {
-        <Self as theway_grpc::event_service_server::EventService>::stream_events(self, request)
-            .await
-    }
-
-    async fn get_node_output(
-        &self,
-        request: Request<GetNodeOutputRequest>,
-    ) -> Result<Response<GetNodeOutputResponse>, Status> {
-        <Self as theway_grpc::graph_engine_service_server::GraphEngineService>::get_node_output(
-            self,
-            request,
-        )
-        .await
-    }
-
-    async fn send_message(
-        &self,
-        request: Request<SendMessageRequest>,
-    ) -> Result<Response<CommandResult>, Status> {
-        <Self as theway_grpc::command_service_server::CommandService>::send_message(self, request)
-            .await
-    }
-
-    async fn set_model(
-        &self,
-        request: Request<SetModelRequest>,
-    ) -> Result<Response<CommandResult>, Status> {
-        <Self as theway_grpc::command_service_server::CommandService>::set_model(self, request).await
-    }
-
-    async fn cancel(&self, request: Request<Empty>) -> Result<Response<CommandResult>, Status> {
-        <Self as theway_grpc::command_service_server::CommandService>::cancel(self, request).await
-    }
-
-    async fn approve(
-        &self,
-        request: Request<ApproveRequest>,
-    ) -> Result<Response<CommandResult>, Status> {
-        <Self as theway_grpc::command_service_server::CommandService>::approve(self, request).await
-    }
-
-    async fn graph_cancel(
-        &self,
-        request: Request<GraphCancelRequest>,
-    ) -> Result<Response<CommandResult>, Status> {
-        <Self as theway_grpc::graph_engine_service_server::GraphEngineService>::graph_cancel(
-            self,
-            request,
-        )
-        .await
-    }
-
-    async fn graph_retry(
-        &self,
-        request: Request<GraphRetryRequest>,
-    ) -> Result<Response<GraphRetryResponse>, Status> {
-        <Self as theway_grpc::graph_engine_service_server::GraphEngineService>::graph_retry(
-            self,
-            request,
-        )
-        .await
-    }
-
-    async fn graph_skip(
-        &self,
-        request: Request<GraphSkipRequest>,
-    ) -> Result<Response<GraphSkipResponse>, Status> {
-        <Self as theway_grpc::graph_engine_service_server::GraphEngineService>::graph_skip(
-            self,
-            request,
-        )
-        .await
-    }
-
-    async fn graph_node_interrupt(
-        &self,
-        request: Request<GraphNodeInterruptRequest>,
-    ) -> Result<Response<CommandResult>, Status> {
-        <Self as theway_grpc::graph_engine_service_server::GraphEngineService>::graph_node_interrupt(self, request)
-            .await
-    }
-
-    async fn graph_node_steer(
-        &self,
-        request: Request<GraphNodeSteerRequest>,
-    ) -> Result<Response<CommandResult>, Status> {
-        <Self as theway_grpc::graph_engine_service_server::GraphEngineService>::graph_node_steer(
-            self,
-            request,
-        )
-        .await
-    }
-
-    async fn graph_checkpoint(
-        &self,
-        request: Request<GraphCheckpointRequest>,
-    ) -> Result<Response<GraphCheckpointResponse>, Status> {
-        <Self as theway_grpc::graph_engine_service_server::GraphEngineService>::graph_checkpoint(
-            self,
-            request,
-        )
-        .await
-    }
-
-    async fn graph_restore(
-        &self,
-        request: Request<GraphRestoreRequest>,
-    ) -> Result<Response<GraphRestoreResponse>, Status> {
-        <Self as theway_grpc::graph_engine_service_server::GraphEngineService>::graph_restore(
-            self,
-            request,
-        )
-        .await
-    }
-
-    async fn list_sessions(
-        &self,
-        request: Request<Empty>,
-    ) -> Result<Response<ListSessionsResponse>, Status> {
-        <Self as theway_grpc::session_service_server::SessionService>::list_sessions(self, request)
-            .await
-    }
-
-    async fn create_session(
-        &self,
-        request: Request<CreateSessionRequest>,
-    ) -> Result<Response<CreateSessionResponse>, Status> {
-        <Self as theway_grpc::session_service_server::SessionService>::create_session(self, request)
-            .await
-    }
-
-    async fn switch_session(
-        &self,
-        request: Request<SwitchSessionRequest>,
-    ) -> Result<Response<CommandResult>, Status> {
-        <Self as theway_grpc::session_service_server::SessionService>::switch_session(self, request)
-            .await
-    }
-
-    async fn rename_session(
-        &self,
-        request: Request<RenameSessionRequest>,
-    ) -> Result<Response<CommandResult>, Status> {
-        <Self as theway_grpc::session_service_server::SessionService>::rename_session(self, request)
-            .await
-    }
-
-    async fn delete_session(
-        &self,
-        request: Request<DeleteSessionRequest>,
-    ) -> Result<Response<DeleteSessionResponse>, Status> {
-        <Self as theway_grpc::session_service_server::SessionService>::delete_session(self, request)
-            .await
-    }
-
-    async fn graph_list(
-        &self,
-        request: Request<GraphListRequest>,
-    ) -> Result<Response<GraphListResponse>, Status> {
-        <Self as theway_grpc::graph_engine_service_server::GraphEngineService>::graph_list(
-            self,
-            request,
-        )
-        .await
-    }
-}
-
 
 /// Standard `grpc.health.v1` service: the server is live as long as the
 /// event loop owns it, so every probe answers SERVING regardless of the
@@ -815,7 +633,9 @@ pub async fn run_grpc(mut app: Box<dyn TransportHost>, options: GrpcOptions) -> 
     let server_task = serve_grpc(listener, grpc_state);
 
     println!("theway grpc listening on {actual}");
-    println!("  service: theway.grpc.v1.ThewayGrpc + grpc.health.v1.Health · UI: workmate (独立)");
+    println!(
+        "  services: theway.grpc.v1.CommandService / theway.grpc.v1.SessionService / theway.grpc.v1.GraphEngineService / theway.grpc.v1.EventService + grpc.health.v1.Health · UI: workmate (独立)"
+    );
 
     app.run_transport_loop(TransportMode::Grpc, endpoints, server_task)
         .await
@@ -825,21 +645,10 @@ pub async fn run_grpc(mut app: Box<dyn TransportHost>, options: GrpcOptions) -> 
 /// server exits (the event loop selects on it).
 pub fn serve_grpc(listener: TcpListener, state: GrpcState) -> tokio::task::JoinHandle<Result<()>> {
     let server = tonic::transport::Server::builder()
-        .add_service(ThewayGrpcServer::new(state.clone()))
-        .add_service(theway_grpc::command_service_server::CommandServiceServer::new(
-            state.clone(),
-        ))
-        .add_service(theway_grpc::session_service_server::SessionServiceServer::new(
-            state.clone(),
-        ))
-        .add_service(
-            theway_grpc::graph_engine_service_server::GraphEngineServiceServer::new(
-                state.clone(),
-            ),
-        )
-        .add_service(theway_grpc::event_service_server::EventServiceServer::new(
-            state,
-        ))
+        .add_service(CommandServiceServer::new(state.clone()))
+        .add_service(SessionServiceServer::new(state.clone()))
+        .add_service(GraphEngineServiceServer::new(state.clone()))
+        .add_service(EventServiceServer::new(state))
         .add_service(HealthServer::new(HealthService))
         .serve_with_incoming(TcpListenerStream::new(listener));
     tokio::spawn(async move {

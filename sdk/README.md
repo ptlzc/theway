@@ -1,9 +1,12 @@
 # @theway-ai/sdk
 
 Typed TypeScript SDK for the **theway** gRPC daemon (`theway --grpc` loopback server).
-Generated from [`proto/theway_grpc.proto`](proto/theway_grpc.proto) (service entrypoint
-plus its domain imports) + [`proto/health.proto`](proto/health.proto) via ts-proto +
-`@grpc/grpc-js` — **no runtime proto loading**, no path magic.
+Generated from the four domain protos
+([`proto/commands.proto`](proto/commands.proto),
+[`proto/session.proto`](proto/session.proto),
+[`proto/graph_engine.proto`](proto/graph_engine.proto),
+[`proto/events.proto`](proto/events.proto)) + [`proto/health.proto`](proto/health.proto)
+via ts-proto + `@grpc/grpc-js` — **no runtime proto loading**, no path magic.
 
 Published to the internal Nexus npm-private registry (`https://registry.npmjs.org/repository/npm-private/`).
 
