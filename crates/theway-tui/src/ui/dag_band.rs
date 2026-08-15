@@ -454,6 +454,5 @@ pub fn render_dag_band(
 }
 
 #[cfg(test)]
-#[cfg(test)]
 #[path = "dag_band_tests.rs"]
 mod tests;
