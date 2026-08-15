@@ -26,7 +26,7 @@ graph TD
 AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
 （feat(#子issue)），17-verify 基于最新 HEAD 复核并逐条 close。
 
-- [ ] 1-features — `crates/theway-tui/src/ui/mod.rs` + `ui/tests.rs`：
+- [x] 1-features — `crates/theway-tui/src/ui/mod.rs` + `ui/tests.rs`：
   - `feature_labels(runtime, dags, has_goal)` → `feature_labels(dags)`：
     删 runtime 透传与 goal 推导；dag-kind run 存在 → `["graph engine"]`，
     否则空。调用点只传 `&self.latest.dags`。
@@ -250,7 +250,7 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
     dynamic_trigger_e2e、e2e_llm.rs）更新。
   - 验收：`cargo check -p theway-daemon`；`cargo test -p theway-daemon`
     全绿；grep 确认 `name: "[A-Z]` 在 Tool 定义中无残留（除 test Faux）。
-- [ ] 16-agents-doc — `AGENTS.md`（#51，只碰文档，并行）：
+- [x] 16-agents-doc — `AGENTS.md`（#51，只碰文档，并行）：
   - Workspace layout / Layering 附近加"daemon 定位"小节：daemon =
     会话/工具/触发/编排的运行时服务，面向协议层（transport 的 gRPC +
     HTTP/SSE/WS）；对客户端形态无概念（不区分 TUI/web/headless 脚本/
