@@ -259,7 +259,7 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
     契约，daemon 只做协议侧语义；需要客户端配合的行为用 snapshot 字段/
     事件表达（例：runtime_revision 通知客户端重读本地资源）。
   - 验收：`git diff AGENTS.md` 内容符合上述语义；无其它文件改动。
-- [ ] 17-verify — `make check` + `make test`（workspace 全量）+ `make lint` +
+- [x] 17-verify — `make check` + `make test`（workspace 全量）+ `make lint` +
   `make fmt-check`；tmux e2e 逐条：①composer 右上角仅 graph engine（无
   dag run 无标签，trigger 面板 Runtime 仍在）②长文本折行显示行首 + Up/Down
   历史/拖拽调高回归 ③busy 时彩虹蛇在 9 点轨道左右跑 + 折返 + 与 working
