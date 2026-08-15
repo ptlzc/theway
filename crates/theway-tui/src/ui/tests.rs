@@ -1234,45 +1234,15 @@ fn dag_run(kind: &str) -> theway_transport::wire::WireDagRunSnapshot {
 
 #[test]
 fn feature_labels_empty_without_sources() {
-    assert!(super::feature_labels(&[], &[], false).is_empty());
-}
-
-#[test]
-fn feature_labels_passes_runtime_features_through() {
-    let runtime = vec!["suppress".to_string(), "cycle".to_string()];
-    assert_eq!(super::feature_labels(&runtime, &[], false), runtime);
+    assert!(super::feature_labels(&[]).is_empty());
+    // Non-dag-kind runs (e.g. goal) do not activate a composer label.
+    assert!(super::feature_labels(&[dag_run("goal")]).is_empty());
 }
 
 #[test]
 fn feature_labels_derives_graph_engine_from_dag_run() {
-    let labels = super::feature_labels(&[], &[dag_run("dag")], false);
+    let labels = super::feature_labels(&[dag_run("dag")]);
     assert_eq!(labels, vec!["graph engine".to_string()]);
-}
-
-#[test]
-fn feature_labels_goal_from_run_or_active_goal_once() {
-    let from_run = super::feature_labels(&[], &[dag_run("goal")], false);
-    assert_eq!(from_run, vec!["goal".to_string()]);
-    let from_goal = super::feature_labels(&[], &[], true);
-    assert_eq!(from_goal, vec!["goal".to_string()]);
-    // Both sources active still emit a single label.
-    let both = super::feature_labels(&[], &[dag_run("goal")], true);
-    assert_eq!(both, vec!["goal".to_string()]);
-}
-
-#[test]
-fn feature_labels_combined_order() {
-    let runtime = vec!["inject-and-run".to_string()];
-    let dags = vec![dag_run("dag"), dag_run("goal")];
-    let labels = super::feature_labels(&runtime, &dags, true);
-    assert_eq!(
-        labels,
-        vec![
-            "inject-and-run".to_string(),
-            "graph engine".to_string(),
-            "goal".to_string(),
-        ]
-    );
 }
 
 #[tokio::test]
@@ -1307,14 +1277,7 @@ async fn chrome_info_line_drops_working_and_multiline() {
 async fn chrome_top_divider_shows_feature_labels() {
     let (mut app, _rx) = test_app().await;
     let mut status = fixture_status(Vec::new());
-    status.sidebar.runtime = vec!["inject-and-run".to_string()];
     status.dags = vec![dag_run("dag")];
-    status.goal = Some(theway_transport::wire::WireGoalSnapshot {
-        condition: "done".into(),
-        status: "running".into(),
-        iterations: 1,
-        last_reason: None,
-    });
     app.apply_snapshot(status);
     let backend = TestBackend::new(60, 12);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -1326,7 +1289,7 @@ async fn chrome_top_divider_shows_feature_labels() {
         .find(|l| l.contains('╭'))
         .unwrap_or_else(|| panic!("composer top divider missing:\n{text}"));
     assert!(
-        divider.contains("inject-and-run · graph engine · goal"),
+        divider.contains("graph engine") && !divider.contains("goal"),
         "divider row: {divider}"
     );
 }

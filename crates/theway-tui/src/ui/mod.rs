@@ -971,11 +971,7 @@ impl App {
                 String::new()
             }
         };
-        let features = feature_labels(
-            &self.latest.sidebar.runtime,
-            &self.latest.dags,
-            self.latest.goal.is_some(),
-        );
+        let features = feature_labels(&self.latest.dags);
         let chrome = prompt_chrome::PromptChrome {
             focused,
             model_name: &model_name,
@@ -1662,24 +1658,17 @@ fn feed_text_bytes(blocks: &[theway_transport::feed::WireFeedBlock]) -> usize {
         .sum()
 }
 
-/// Composer feature labels (issue #38): the trigger-runtime features from
-/// the sidebar snapshot (daemon `active_trigger_features()`), plus graph
-/// features derived from the DAG runs — any `dag`-kind run activates
-/// `graph engine`; any `goal`-kind run or an active goal activates `goal`.
-/// Empty inputs yield an empty list (the chrome renders nothing).
-fn feature_labels(
-    runtime: &[String],
-    dags: &[theway_transport::wire::WireDagRunSnapshot],
-    has_goal: bool,
-) -> Vec<String> {
-    let mut labels = runtime.to_vec();
+/// Composer feature labels (issue #39): the composer's top-right corner
+/// shows only the graph-engine feature — any `dag`-kind run activates
+/// `graph engine`; otherwise the list is empty and the chrome renders
+/// nothing. Trigger-runtime features stay in the trigger panel's Runtime
+/// section.
+fn feature_labels(dags: &[theway_transport::wire::WireDagRunSnapshot]) -> Vec<String> {
     if dags.iter().any(|run| run.kind == "dag") {
-        labels.push("graph engine".to_string());
+        vec!["graph engine".to_string()]
+    } else {
+        Vec::new()
     }
-    if has_goal || dags.iter().any(|run| run.kind == "goal") {
-        labels.push("goal".to_string());
-    }
-    labels
 }
 
 /// Shimmer style for the busy label (issue #37): brightness sweeps a sine
