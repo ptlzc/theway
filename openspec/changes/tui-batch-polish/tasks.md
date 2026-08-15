@@ -45,7 +45,7 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
   - 测试：超宽单行（200 字符）`composer_rows` ≥ 2 且 ≤ 6；超长封顶 6；
     `input_is_single_line()` 仍 true；拖拽覆盖优先。
   - 验收：`cargo check -p theway-tui`；`cargo test -p theway-tui` 全绿。
-- [ ] 3-snake — 新 `crates/theway-tui/src/ui/snake_loader.rs` +
+- [x] 3-snake — 新 `crates/theway-tui/src/ui/snake_loader.rs` +
   `ui/mod.rs` + `ui/tests.rs`：
   - `snake_frame(step, cps) -> SnakeFrame`（轨道固定 9 格；蛇头三角波
     0→8→0 折返；蛇尾节 i 跟随头历史位置、越界暗色；lit 随 trail 衰减，
