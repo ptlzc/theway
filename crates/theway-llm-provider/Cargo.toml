@@ -60,6 +60,8 @@ bytes = "1"
 # Serialization. Tool-call args + provider payloads are JSON-shaped.
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+# Enum ↔ string mapping derives (KnownApi::as_str).
+strum = { version = "0.28", features = ["derive"] }
 
 # Misc utilities.
 thiserror = "2"

@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+use strum::IntoStaticStr;
 
 use crate::utils::event_stream::AssistantMessageEventStream;
 
@@ -31,12 +32,19 @@ impl<S: Into<String>> From<S> for Api {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, IntoStaticStr)]
+// heck's kebab-case splits the `OpenAI` acronym run (`open-ai-…`), so pin the
+// four variants whose wire spelling keeps it fused.
+#[strum(serialize_all = "kebab-case")]
 pub enum KnownApi {
+    #[strum(serialize = "openai-completions")]
     OpenAICompletions,
     MistralConversations,
+    #[strum(serialize = "openai-responses")]
     OpenAIResponses,
+    #[strum(serialize = "azure-openai-responses")]
     AzureOpenAIResponses,
+    #[strum(serialize = "openai-codex-responses")]
     OpenAICodexResponses,
     AnthropicMessages,
     BedrockConverseStream,
@@ -46,17 +54,7 @@ pub enum KnownApi {
 
 impl KnownApi {
     pub fn as_str(self) -> &'static str {
-        match self {
-            Self::OpenAICompletions => "openai-completions",
-            Self::MistralConversations => "mistral-conversations",
-            Self::OpenAIResponses => "openai-responses",
-            Self::AzureOpenAIResponses => "azure-openai-responses",
-            Self::OpenAICodexResponses => "openai-codex-responses",
-            Self::AnthropicMessages => "anthropic-messages",
-            Self::BedrockConverseStream => "bedrock-converse-stream",
-            Self::GoogleGenerativeAi => "google-generative-ai",
-            Self::GoogleVertex => "google-vertex",
-        }
+        self.into()
     }
 }
 
