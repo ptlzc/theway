@@ -62,9 +62,8 @@ pub async fn write_clipboard(text: &str) -> Result<()> {
 fn write_clipboard_sync(text: &str) -> Result<()> {
     match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set_text(text.to_string())) {
         Ok(()) => Ok(()),
-        Err(e) => write_osc52(text).with_context(|| {
-            format!("system clipboard unavailable ({e}); OSC 52 fallback failed")
-        }),
+        Err(e) => write_osc52(text)
+            .with_context(|| format!("system clipboard unavailable ({e}); OSC 52 fallback failed")),
     }
 }
 

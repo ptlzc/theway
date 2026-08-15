@@ -57,7 +57,9 @@ pub enum QueueMode {
 
 /// Thinking/reasoning level for the agent runtime. Wider than `theway_llm_provider::ThinkingLevel` because the
 /// agent layer exposes an explicit "off".
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, EnumString, IntoStaticStr)]
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, EnumString, IntoStaticStr,
+)]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 pub enum ThinkingLevel {

@@ -384,23 +384,6 @@ fn fork_success_line(new_id: &str) -> String {
     )
 }
 
-#[cfg(test)]
-mod tests {
-    use super::fork_success_line;
-
-    #[test]
-    fn fork_success_line_uses_full_id_and_short_switch_hint() {
-        // Act
-        let line = fork_success_line("0123456789abcdef-0123456789abcdef");
-
-        // Assert: full id first, short id (16 chars) in the switch hint.
-        assert_eq!(
-            line,
-            "forked session 0123456789abcdef-0123456789abcdef — /session switch 0123456789abcdef to continue there"
-        );
-    }
-}
-
 fn yes_no(value: bool) -> &'static str {
     if value { "yes" } else { "no" }
 }
@@ -464,5 +447,22 @@ impl SlashCommand<DaemonCtx> for ShareCommand {
         let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
         cprintln!("shared: {url}");
         CommandOutcome::Handled
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fork_success_line;
+
+    #[test]
+    fn fork_success_line_uses_full_id_and_short_switch_hint() {
+        // Act
+        let line = fork_success_line("0123456789abcdef-0123456789abcdef");
+
+        // Assert: full id first, short id (16 chars) in the switch hint.
+        assert_eq!(
+            line,
+            "forked session 0123456789abcdef-0123456789abcdef — /session switch 0123456789abcdef to continue there"
+        );
     }
 }

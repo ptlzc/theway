@@ -559,7 +559,10 @@ mod tests {
         opts.thinking_output_tokens = 1_200;
         opts.spinner_phase = 9;
         cache.update(&feed, 80, &opts, 1000);
-        assert_eq!(cache.last_rebuilt, 0, "per-frame counters must not invalidate the cache");
+        assert_eq!(
+            cache.last_rebuilt, 0,
+            "per-frame counters must not invalidate the cache"
+        );
     }
 
     #[test]

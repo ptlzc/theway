@@ -511,7 +511,7 @@ fn assert_highlight_on_popup(app: &App, buf: &Buffer, expected: &str) {
     let shown = app.completions.len().min(super::COMPLETION_POPUP_MAX);
     let height = shown as u16 + 2;
     assert!(
-        y >= status_y.saturating_sub(height) + 1 && y <= status_y.saturating_sub(2),
+        y > status_y.saturating_sub(height) && y <= status_y.saturating_sub(2),
         "highlight row {y} must stay inside the popup window above status row {status_y}"
     );
 }

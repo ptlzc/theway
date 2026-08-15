@@ -147,6 +147,7 @@ pub fn session_state(snapshot: &WireStatus) -> wire::SessionState {
             hooks: snapshot.sidebar.hooks.clone(),
             runtime: snapshot.sidebar.runtime.clone(),
             commands: snapshot.sidebar.commands.clone(),
+            runtime_revision: snapshot.sidebar.runtime_revision,
         }),
         feed_blocks: snapshot.feed_blocks.iter().map(feed_block).collect(),
         feed_lines: snapshot.feed_lines.clone(),
@@ -394,9 +395,7 @@ fn sidebar_wire(sidebar: Option<&wire::SidebarSnapshot>) -> crate::wire::WireSid
         hooks: sidebar.hooks.clone(),
         runtime: sidebar.runtime.clone(),
         commands: sidebar.commands.clone(),
-        // The proto `SidebarSnapshot` has no runtime_revision field yet; the
-        // gRPC surface reports 0 (the JSON/SSE surface carries the value).
-        runtime_revision: 0,
+        runtime_revision: sidebar.runtime_revision,
     }
 }
 

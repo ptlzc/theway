@@ -96,6 +96,9 @@ message SidebarSnapshot {
   // Slash-prefixed file-command names (claude-code format, issue #37):
   // discovered from .agents/commands + .claude/commands.
   repeated string commands = 9;
+  // Daemon runtime revision, bumped by the `reload` agent tool; clients
+  // watch it to re-read local resources (e.g. ~/.theway/theme.toml).
+  uint64 runtime_revision = 10;
 }
 
 message SkillsSnapshot {

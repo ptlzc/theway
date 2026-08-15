@@ -765,6 +765,10 @@ impl App {
         let pick = self.completions[self.completion_idx % self.completions.len()].clone();
         self.completion_scroll = 0;
         self.set_input(&pick);
+        // Close the popup: `set_input` refreshes completions, so without this
+        // a second Enter would re-accept the same entry instead of submitting.
+        self.completions.clear();
+        self.completion_idx = 0;
     }
 
     pub(super) fn history_prev(&mut self) {
