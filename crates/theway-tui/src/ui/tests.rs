@@ -1,5 +1,5 @@
 use super::theme::{BlockAlign, Theme};
-use super::{App, AppConfig, snake_loader};
+use super::{App, AppConfig, collect_slash_commands, snake_loader};
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
@@ -18,7 +18,7 @@ use theway_transport::feed::WireFeedBlock;
 use theway_transport::grpc::{GrpcState, serve_grpc};
 use theway_transport::history::HistoryStore;
 use theway_transport::testing::FakeSessionOps;
-use theway_transport::wire::{WireCommand, WireContextUsage, WireStatus};
+use theway_transport::wire::{WireCommand, WireContextUsage, WireSkillSnapshot, WireStatus};
 use tokio::sync::{broadcast, mpsc};
 
 fn fixture_status(feed_blocks: Vec<WireFeedBlock>) -> WireStatus {
@@ -574,6 +574,108 @@ async fn completion_popup_pages_past_window_and_scrolls_back_up() {
     assert_eq!(app.completion_scroll, 0, "refresh must reset the window");
     assert_eq!(app.completion_idx, 0);
     assert_window_contains_idx(&app);
+}
+
+/// Catalog entries (issue #47): every ENABLED skill appears as
+/// `skill::<name>` and every MCP tool as `mcp:<tool>` with verbatim names,
+/// stored with the `/` prefix like every other completion. Existing
+/// `/shortcut` entries and all other commands stay in the list.
+#[test]
+fn collect_slash_commands_appends_skill_and_mcp_catalog_entries() {
+    // Arrange
+    let registry = crate::local_commands::local_registry();
+    let skills = vec![
+        WireSkillSnapshot {
+            name: "code-review".into(),
+            source: "user".into(),
+            file_path: "/skills/code-review".into(),
+            enabled: true,
+        },
+        WireSkillSnapshot {
+            name: "secrets-check".into(),
+            source: "builtin".into(),
+            file_path: "/skills/secrets".into(),
+            enabled: false,
+        },
+    ];
+    let mcp_tools = vec!["fetch_url".to_string(), "Server_Uppercase_Tool".to_string()];
+
+    // Act
+    let commands = collect_slash_commands(&registry, &skills, &[], &mcp_tools);
+
+    // Assert
+    assert!(
+        commands.contains(&"/skill::code-review".to_string()),
+        "enabled skills must appear behind the skill:: prefix"
+    );
+    assert!(
+        !commands.contains(&"/skill::secrets-check".to_string()),
+        "disabled skills must not appear in the catalog"
+    );
+    assert!(commands.contains(&"/mcp:fetch_url".to_string()));
+    assert!(
+        commands.contains(&"/mcp:Server_Uppercase_Tool".to_string()),
+        "MCP tool names must stay verbatim, never rewritten"
+    );
+    // Existing entries are preserved alongside the new catalog entries.
+    assert!(commands.contains(&"/help".to_string()));
+    assert!(commands.contains(&"/code-review".to_string()));
+}
+
+/// Popup prefix filtering with catalog entries (issue #47): typing
+/// `/skill::` narrows the popup to skill catalog entries only and `/mcp:`
+/// to MCP tools — plain commands and `/shortcut` entries disappear.
+#[tokio::test]
+async fn slash_popup_filters_skill_and_mcp_catalogs_by_prefix() {
+    let (mut app, _rx) = test_app().await;
+    // Arrange: seed the snapshot sidebar the popup completer reads from.
+    app.latest.sidebar.skills.items = vec![
+        WireSkillSnapshot {
+            name: "code-review".into(),
+            source: "user".into(),
+            file_path: "/skills/code-review".into(),
+            enabled: true,
+        },
+        WireSkillSnapshot {
+            name: "secrets-check".into(),
+            source: "builtin".into(),
+            file_path: "/skills/secrets".into(),
+            enabled: false,
+        },
+    ];
+    app.latest.sidebar.mcp.tool_names = vec!["fetch_url".into()];
+
+    // Act: a bare slash lists the catalog entries among the commands.
+    app.set_input("/");
+    assert!(
+        app.completions.contains(&"/skill::code-review".to_string()),
+        "bare slash must list enabled skill catalog entries"
+    );
+    assert!(
+        app.completions.contains(&"/mcp:fetch_url".to_string()),
+        "bare slash must list MCP catalog entries"
+    );
+
+    // Act: the skill catalog prefix filters everything else out.
+    app.set_input("/skill::");
+    assert!(!app.completions.is_empty());
+    assert!(
+        app.completions.iter().all(|c| c.starts_with("/skill::")),
+        "skill prefix must leave only skill entries, got {:?}",
+        app.completions
+    );
+    assert!(app.completions.contains(&"/skill::code-review".to_string()));
+    assert!(!app.completions.contains(&"/skill::secrets-check".to_string()));
+
+    // Act: the mcp catalog prefix filters to MCP tools only.
+    app.set_input("/mcp:");
+    assert!(!app.completions.is_empty());
+    assert!(
+        app.completions.iter().all(|c| c.starts_with("/mcp:")),
+        "mcp prefix must leave only mcp entries, got {:?}",
+        app.completions
+    );
+    assert!(app.completions.contains(&"/mcp:fetch_url".to_string()));
 }
 
 #[tokio::test]

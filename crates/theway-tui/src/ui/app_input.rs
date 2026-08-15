@@ -415,6 +415,7 @@ impl App {
             &self.registry,
             &self.latest.sidebar.skills.items,
             &self.latest.sidebar.commands,
+            &self.latest.sidebar.mcp.tool_names,
         ));
         self.completions = if self.input_is_single_line() {
             self.completer.matches(&self.input_text())

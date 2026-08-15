@@ -313,6 +313,7 @@ impl App {
             &config.registry,
             &initial.sidebar.skills.items,
             &initial.sidebar.commands,
+            &initial.sidebar.mcp.tool_names,
         ));
         Self {
             client: config.client,
@@ -1745,11 +1746,15 @@ fn shimmer_style(tick: u64) -> Style {
 /// the daemon-side command surface (the daemon owns the full registry; the
 /// client forwards slash text via `send_message`) + skill shortcuts from the
 /// snapshot sidebar + the daemon-scanned claude-code-format file commands
-/// (issue #37).
+/// (issue #37) + reference catalog entries (issue #47): every enabled skill
+/// as `skill::<name>` and every MCP tool as `mcp:<tool>` with verbatim
+/// names. Unknown slash commands submitted by the user fall back to a plain
+/// user message (#37 semantics), so the catalog entries are reference info.
 fn collect_slash_commands(
     registry: &theway_transport::commands::Registry,
     skills: &[theway_transport::wire::WireSkillSnapshot],
     file_commands: &[String],
+    mcp_tool_names: &[String],
 ) -> Vec<String> {
     let mut commands: Vec<String> = registry
         .commands()
@@ -1766,6 +1771,16 @@ fn collect_slash_commands(
         if let Some(shortcut) = skill.name.split('/').next() {
             commands.push(format!("/{shortcut}"));
         }
+    }
+    // Skill catalog: one entry per enabled skill, `WireSkillSnapshot.name`
+    // verbatim behind the `skill::` prefix (issue #47).
+    for skill in skills.iter().filter(|skill| skill.enabled) {
+        commands.push(format!("/skill::{}", skill.name));
+    }
+    // MCP catalog: one entry per connected MCP tool, names verbatim —
+    // server-defined names are never rewritten (issue #47).
+    for tool in mcp_tool_names {
+        commands.push(format!("/mcp:{tool}"));
     }
     commands
 }
