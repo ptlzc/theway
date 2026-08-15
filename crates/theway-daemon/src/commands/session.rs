@@ -351,7 +351,6 @@ impl SlashCommand<DaemonCtx> for ForkCommand {
             };
 
         let repo = theway_storage::session::open_repo(ctx.cwd).await;
-        let count = to_fork.len();
         match theway_storage::session::fork_session(&repo, ctx.cwd, session, to_fork).await {
             Ok(new) => {
                 let meta = match new.storage().get_metadata_json().await {
@@ -361,30 +360,44 @@ impl SlashCommand<DaemonCtx> for ForkCommand {
                     }
                 };
                 let new_id = meta.get("id").and_then(|v| v.as_str()).unwrap_or("?");
-                let parent_id = session
-                    .storage()
-                    .get_metadata_json()
-                    .await
-                    .ok()
-                    .and_then(|m| m.get("id").and_then(|v| v.as_str()).map(str::to_string))
-                    .unwrap_or_default();
-                if count == 0 {
-                    cprintln!(
-                        "forked empty session {} (nothing before message #{n})",
-                        short_id(new_id)
-                    );
-                } else {
-                    cprintln!(
-                        "forked session {} from {} ({count} entries replayed, before message #{n})",
-                        short_id(new_id),
-                        short_id(&parent_id),
-                    );
-                }
+                // Issue #55: the success line is TUI-first — the full new id
+                // plus a `/session switch <short>` hint to continue there; the
+                // CLI resume hint stays on its own line. Forking never
+                // auto-switches (pi semantics).
+                cprintln!("{}", fork_success_line(new_id));
                 cprintln!("resume with: theway --resume-id {}", new_id);
                 CommandOutcome::Handled
             }
             Err(e) => CommandOutcome::Error(format!("fork failed: {e}")),
         }
+    }
+}
+
+/// Success line for `/fork <n>` (issue #55): `forked session {full id} —
+/// /session switch {short} to continue there`. The full id is what the TUI's
+/// feed shows; the short prefix is enough for `/session switch`. The CLI
+/// resume hint prints separately.
+fn fork_success_line(new_id: &str) -> String {
+    format!(
+        "forked session {new_id} — /session switch {} to continue there",
+        short_id(new_id)
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fork_success_line;
+
+    #[test]
+    fn fork_success_line_uses_full_id_and_short_switch_hint() {
+        // Act
+        let line = fork_success_line("0123456789abcdef-0123456789abcdef");
+
+        // Assert: full id first, short id (16 chars) in the switch hint.
+        assert_eq!(
+            line,
+            "forked session 0123456789abcdef-0123456789abcdef — /session switch 0123456789abcdef to continue there"
+        );
     }
 }
 

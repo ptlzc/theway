@@ -101,6 +101,10 @@ const SCROLL_STEP: usize = 3;
 /// from the head (issue #27).
 pub(crate) const DEFAULT_MAX_FEED_LINES: usize = 3_000;
 const COMPLETION_POPUP_MAX: usize = 8;
+/// Fork-picker popup window size (issue #55): at most this many user-message
+/// rows render at once, mirroring the completion popup's fixed window; the
+/// window slides with the selection.
+const FORK_POPUP_MAX: usize = 8;
 const TRIGGER_PANEL_MIN_TOTAL_WIDTH: u16 = 100;
 /// Auto-mode width and the `show` menu option's width for the side panel
 /// (the Automation/trigger panel, issue #54).
@@ -186,6 +190,27 @@ pub(crate) enum SidePanelMode {
 struct PanelDrag {
     start_col: u16,
     start_width: u16,
+}
+
+/// One interactive fork-picker row (issue #55): the 1-based number matches
+/// the daemon's `/fork <n>` numbering (1 = most recent user message) and the
+/// preview mirrors the daemon's ≤60-char listing (newlines flattened for
+/// single-row rendering).
+#[derive(Clone, Debug)]
+pub(crate) struct ForkPickerEntry {
+    pub(crate) number: usize,
+    pub(crate) preview: String,
+}
+
+/// Interactive fork picker state (issue #55): `Some` = the `/fork` popup is
+/// open over the current session's User feed blocks (newest-first), with the
+/// highlighted row + the popup's first visible row. Keys are handled in
+/// `app_input::handle_fork_picker_key`; rendering in `render_fork_picker`.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ForkPickerState {
+    pub(crate) entries: Vec<ForkPickerEntry>,
+    pub(crate) selected: usize,
+    pub(crate) scroll: usize,
 }
 
 /// Clipboard write sink for tests (`true` = copied): `None` routes to the
@@ -315,6 +340,9 @@ pub struct App {
     status_panel_menu: Option<usize>,
     /// Live drag state while resizing the side panel via its left edge.
     panel_drag: Option<PanelDrag>,
+    /// Interactive `/fork` picker (issue #55): `Some` = popup open over the
+    /// current session's User feed blocks; `None` when closed/cancelled.
+    fork_picker: Option<ForkPickerState>,
     /// Feed drag-selection in progress (mouse button still held).
     mouse_selecting: bool,
     /// Composer text-area rect (mouse click forwarding to the textarea).
@@ -393,6 +421,7 @@ impl App {
             side_panel_mode: SidePanelMode::Auto,
             status_panel_menu: None,
             panel_drag: None,
+            fork_picker: None,
             mouse_selecting: false,
             last_text_area: None,
             last_status_area: None,
@@ -1159,6 +1188,7 @@ impl App {
         self.render_model_picker(frame);
         self.render_control_plane_prompt(frame);
         self.render_status_panel_menu(frame);
+        self.render_fork_picker(frame);
     }
 
     fn render_model_picker(&self, frame: &mut ratatui::Frame) {
@@ -1277,6 +1307,49 @@ impl App {
         let block = Block::default()
             .borders(Borders::ALL)
             .title(" status panel ")
+            .border_style(Style::default().fg(Color::Cyan));
+        frame.render_widget(Clear, rect);
+        frame.render_widget(Paragraph::new(text).block(block), rect);
+    }
+
+    /// Interactive `/fork` picker (issue #55): a centered popup listing the
+    /// current session's User messages newest-first (numbers match the
+    /// daemon's `/fork <n>` numbering), reusing the completion popup style —
+    /// cyan rows, black-on-cyan highlight, a fixed [`FORK_POPUP_MAX`]-row
+    /// window that slides with the selection. Enter in
+    /// `app_input::handle_fork_picker_key` forwards `/fork <number>`.
+    fn render_fork_picker(&self, frame: &mut ratatui::Frame) {
+        let Some(picker) = self.fork_picker.as_ref() else {
+            return;
+        };
+        if picker.entries.is_empty() {
+            return;
+        }
+        let area = frame.area();
+        let width = area.width.clamp(24, 80);
+        let scroll = picker.scroll.min(picker.entries.len().saturating_sub(1));
+        let shown = (picker.entries.len() - scroll).min(FORK_POPUP_MAX);
+        let height = shown as u16 + 3; // item rows + hint + borders
+        let rect = centered_rect(area, width, height);
+        let mut text = Vec::with_capacity(shown + 1);
+        for (i, entry) in picker.entries.iter().skip(scroll).take(shown).enumerate() {
+            let style = if scroll + i == picker.selected {
+                Style::default().fg(Color::Black).bg(Color::Cyan)
+            } else {
+                Style::default().fg(Color::Cyan)
+            };
+            text.push(Line::styled(
+                format!(" {}) {}", entry.number, entry.preview),
+                style,
+            ));
+        }
+        text.push(Line::styled(
+            "↑↓ move · Enter fork · Esc cancel",
+            Style::default().fg(Color::DarkGray),
+        ));
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(" fork ")
             .border_style(Style::default().fg(Color::Cyan));
         frame.render_widget(Clear, rect);
         frame.render_widget(Paragraph::new(text).block(block), rect);
@@ -1912,8 +1985,40 @@ fn shimmer_style(tick: u64) -> Style {
         .add_modifier(Modifier::BOLD)
 }
 
-/// Assemble the slash-command completion list: the SDK local command set from
-/// `registry` (`Registry::local()` — quit/clear/help/login/logout/sessions) +
+/// Fork-picker rows from the current session's feed blocks (issue #55):
+/// User blocks newest-first with 1-based numbers matching the daemon's
+/// `/fork <n>` numbering (1 = most recent user message), each with a
+/// ≤60-char preview (`…` appended when truncated, newlines flattened for
+/// single-row rendering — the same shape the daemon's `/fork` listing
+/// prints).
+fn fork_picker_entries(blocks: &[theway_transport::feed::WireFeedBlock]) -> Vec<ForkPickerEntry> {
+    blocks
+        .iter()
+        .rev()
+        .filter_map(|block| match block {
+            theway_transport::feed::WireFeedBlock::User { text, .. } => {
+                let flat: String = text
+                    .chars()
+                    .map(|c| if c == '\n' { ' ' } else { c })
+                    .collect();
+                let mut preview = flat.chars().take(60).collect::<String>();
+                if flat.chars().count() > 60 {
+                    preview.push('…');
+                }
+                Some(preview)
+            }
+            _ => None,
+        })
+        .enumerate()
+        .map(|(i, preview)| ForkPickerEntry {
+            number: i + 1,
+            preview,
+        })
+        .collect()
+}
+
+/// Assemble the slash-command completion list: the TUI-local command set from
+/// `registry` (`local_commands::local_registry` — quit/clear/help + aliases) +
 /// the TUI-local command set (`LOCAL_COMMANDS` — commands the client
 /// intercepts and never forwards) + the daemon-side command surface (the
 /// daemon owns the full registry; the client forwards slash text via
@@ -1962,12 +2067,15 @@ fn collect_slash_commands(
 /// Daemon-side slash commands the client forwards (the daemon's registry is not
 /// exposed over RPC). Hint list only — completion, no dispatch. Keep in sync
 /// with the commands `theway_daemon::Registry::with_daemon_commands()` adds on
-/// top of the SDK's `Registry::local()` (crates/theway-daemon/src/commands/mod.rs).
-/// The SDK-local commands (help/clear/quit/login/logout/sessions) are NOT
-/// listed here: they come from the `registry` argument above (node 9
-/// switched the TUI to `Registry::local()`, so listing them would duplicate).
+/// top of the SDK's `Registry::local()` (crates/theway-daemon/src/commands/mod.rs),
+/// including the auth surface (`/login` `/logout` `/sessions`) and `/fork`
+/// (issue #55). The TUI-local commands (help/clear/quit/…) are NOT listed
+/// here: they come from the `registry` argument above.
 /// `crontab` is the daemon's alias for `/cron`.
 const DAEMON_COMMANDS: &[&str] = &[
+    "login",
+    "logout",
+    "sessions",
     "skills",
     "skill",
     "reload",
@@ -1981,6 +2089,7 @@ const DAEMON_COMMANDS: &[&str] = &[
     "undo",
     "bug-report",
     "name",
+    "fork",
     "session",
     "web-connect",
     "web-disconnect",

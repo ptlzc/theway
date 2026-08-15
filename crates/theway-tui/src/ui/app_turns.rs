@@ -130,6 +130,13 @@ impl App {
             "/status-panel" => {
                 self.status_panel_menu = Some(0);
             }
+            // Issue #55: bare `/fork` opens the interactive picker over the
+            // current session's User messages. `/fork <n>` (non-empty args)
+            // misses this guard and falls through to the daemon-forwarding
+            // arm below — the daemon's numbering (1 = most recent) is the
+            // picker's numbering, so the forwarded text is what the daemon
+            // expects.
+            "/fork" if args.is_empty() => self.open_fork_picker(),
             "/new" => match self.client.create_session(None).await {
                 Ok(summary) => {
                     let id = summary.session_id;
@@ -157,6 +164,25 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Issue #55: bare `/fork` opens the interactive picker over the current
+    /// session's User feed blocks (newest-first, numbers matching the
+    /// daemon's `/fork <n>` numbering). The picker snapshots the list at
+    /// open time; Enter forwards `/fork <n>` through the normal dispatch
+    /// path. An empty feed never opens the popup — the same error the daemon
+    /// reports for a session with no user messages.
+    pub(super) fn open_fork_picker(&mut self) {
+        let entries = super::fork_picker_entries(&self.latest.feed_blocks);
+        if entries.is_empty() {
+            self.error_line("no user messages to fork from");
+            return;
+        }
+        self.fork_picker = Some(super::ForkPickerState {
+            entries,
+            selected: 0,
+            scroll: 0,
+        });
     }
 
     /// Local `/session switch` surface (wire SwitchSession RPC). Export/import

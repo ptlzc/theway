@@ -44,6 +44,11 @@ impl App {
         if self.handle_status_panel_menu_key(&key) {
             return Ok(());
         }
+        // Interactive `/fork` picker (issue #55): modal — every key goes to
+        // the picker until Enter forwards `/fork <n>` or Esc cancels.
+        if self.handle_fork_picker_key(&key, terminal).await {
+            return Ok(());
+        }
         if self.handle_control_plane_prompt_key(&key) {
             return Ok(());
         }
@@ -201,6 +206,67 @@ impl App {
             _ => {}
         }
         true
+    }
+
+    /// `/fork` picker keys (issue #55): Up/Down move the highlight over the
+    /// newest-first user-message list, Enter forwards `/fork <n>` (n = the
+    /// highlighted row's number, matching the daemon's numbering) through
+    /// the normal dispatch path and closes the popup, Esc cancels. Returns
+    /// `true` (and consumes the key) whenever the picker is open — the
+    /// picker is modal.
+    pub(super) async fn handle_fork_picker_key(
+        &mut self,
+        key: &KeyEvent,
+        terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    ) -> bool {
+        if self.fork_picker.is_none() {
+            return false;
+        }
+        match key.code {
+            KeyCode::Up => {
+                if let Some(picker) = self.fork_picker.as_mut() {
+                    picker.selected = picker.selected.saturating_sub(1);
+                }
+                self.sync_fork_picker_window();
+            }
+            KeyCode::Down => {
+                if let Some(picker) = self.fork_picker.as_mut() {
+                    picker.selected = picker
+                        .selected
+                        .saturating_add(1)
+                        .min(picker.entries.len().saturating_sub(1));
+                }
+                self.sync_fork_picker_window();
+            }
+            KeyCode::Enter => {
+                let picker = self.fork_picker.take();
+                if let Some(picker) = picker
+                    && let Some(entry) = picker.entries.get(picker.selected)
+                {
+                    self.dispatch_slash(&format!("/fork {}", entry.number), terminal)
+                        .await;
+                }
+            }
+            KeyCode::Esc => {
+                self.fork_picker = None;
+            }
+            _ => {}
+        }
+        true
+    }
+
+    /// Slide the fork-picker window so the highlight stays inside
+    /// `[scroll, scroll + FORK_POPUP_MAX)` (issue #55) — the same windowing
+    /// the completion popup uses (issue #46).
+    fn sync_fork_picker_window(&mut self) {
+        let Some(picker) = self.fork_picker.as_mut() else {
+            return;
+        };
+        if picker.selected < picker.scroll {
+            picker.scroll = picker.selected;
+        } else if picker.selected >= picker.scroll + super::FORK_POPUP_MAX {
+            picker.scroll = picker.selected - super::FORK_POPUP_MAX + 1;
+        }
     }
 
     pub(super) fn handle_control_plane_prompt_key(&mut self, key: &KeyEvent) -> bool {
