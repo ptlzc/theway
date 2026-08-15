@@ -49,6 +49,11 @@ impl App {
         if self.handle_fork_picker_key(&key, terminal).await {
             return Ok(());
         }
+        // Interactive `/resume` picker (issue #56): modal — every key goes
+        // to the picker until Enter switches session or Esc cancels.
+        if self.handle_resume_picker_key(&key).await {
+            return Ok(());
+        }
         if self.handle_control_plane_prompt_key(&key) {
             return Ok(());
         }
@@ -266,6 +271,70 @@ impl App {
             picker.scroll = picker.selected;
         } else if picker.selected >= picker.scroll + super::FORK_POPUP_MAX {
             picker.scroll = picker.selected - super::FORK_POPUP_MAX + 1;
+        }
+    }
+
+    /// `/resume` picker keys (issue #56): Up/Down move the highlight over
+    /// the daemon's session list (tree order, oldest → newest), Enter
+    /// switches to the highlighted session via `switch_session` (the switch
+    /// queues daemon-side; a busy turn is aborted and the new session
+    /// appears on the next snapshot) and closes the popup, Esc cancels.
+    /// Returns `true` (and consumes the key) whenever the picker is open —
+    /// the picker is modal.
+    pub(super) async fn handle_resume_picker_key(&mut self, key: &KeyEvent) -> bool {
+        if self.resume_picker.is_none() {
+            return false;
+        }
+        match key.code {
+            KeyCode::Up => {
+                if let Some(picker) = self.resume_picker.as_mut() {
+                    picker.selected = picker.selected.saturating_sub(1);
+                }
+                self.sync_resume_picker_window();
+            }
+            KeyCode::Down => {
+                if let Some(picker) = self.resume_picker.as_mut() {
+                    picker.selected = picker
+                        .selected
+                        .saturating_add(1)
+                        .min(picker.entries.len().saturating_sub(1));
+                }
+                self.sync_resume_picker_window();
+            }
+            KeyCode::Enter => {
+                let picker = self.resume_picker.take();
+                if let Some(picker) = picker
+                    && let Some(entry) = picker.entries.get(picker.selected)
+                {
+                    let id = entry.id.clone();
+                    // `switch_session` prints its own rejected/error line and
+                    // never returns Err (the same contract /new relies on).
+                    if let Err(e) = self.switch_session(id.clone()).await {
+                        self.error_line(format!("switch session failed: {e}"));
+                    } else {
+                        self.system_line(format!("resuming session {id}"));
+                    }
+                }
+            }
+            KeyCode::Esc => {
+                self.resume_picker = None;
+            }
+            _ => {}
+        }
+        true
+    }
+
+    /// Slide the resume-picker window so the highlight stays inside
+    /// `[scroll, scroll + RESUME_POPUP_MAX)` (issue #56) — the same
+    /// windowing the fork picker uses.
+    pub(super) fn sync_resume_picker_window(&mut self) {
+        let Some(picker) = self.resume_picker.as_mut() else {
+            return;
+        };
+        if picker.selected < picker.scroll {
+            picker.scroll = picker.selected;
+        } else if picker.selected >= picker.scroll + super::RESUME_POPUP_MAX {
+            picker.scroll = picker.selected - super::RESUME_POPUP_MAX + 1;
         }
     }
 

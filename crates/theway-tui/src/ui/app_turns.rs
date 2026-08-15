@@ -118,7 +118,7 @@ impl App {
                 self.follow = true;
             }
             "/help" => self.system_line(
-                "theway client · send messages to the thewayd daemon · local: /login /quit /clear /new /session switch /status-panel · everything else forwards to the daemon (/model /goal /triggers /cron /session …)",
+                "theway client · send messages to the thewayd daemon · local: /login /quit /clear /new /resume /session switch /status-panel · everything else forwards to the daemon (/model /goal /triggers /cron /session …)",
             ),
             "/login" => self.login(args, terminal).await,
             "/session" if args.trim_start().starts_with("switch") => {
@@ -137,6 +137,11 @@ impl App {
             // picker's numbering, so the forwarded text is what the daemon
             // expects.
             "/fork" if args.is_empty() => self.open_fork_picker(),
+            // Issue #56: `/resume` opens the TUI-local session picker over
+            // `list_sessions` (the daemon's tree order + current id). The
+            // startup `--resume` terminal picker (`resume_picker.rs`) is a
+            // different mechanism and stays untouched.
+            "/resume" => self.open_resume_picker().await,
             "/new" => match self.client.create_session(None).await {
                 Ok(summary) => {
                     let id = summary.session_id;
@@ -183,6 +188,46 @@ impl App {
             selected: 0,
             scroll: 0,
         });
+    }
+
+    /// Issue #56: `/resume` opens the TUI-local session picker over
+    /// `client.list_sessions()` — rows keep the daemon's tree order
+    /// (oldest → newest), carry short id + name + busy/graph marks, and the
+    /// current session row is annotated and pre-selected. An empty daemon
+    /// list prints a system hint instead of opening an empty popup; a list
+    /// RPC failure reports an error line. Selecting a row (Enter in
+    /// `handle_resume_picker_key`) switches via `switch_session`.
+    pub(super) async fn open_resume_picker(&mut self) {
+        let (sessions, current_id) = match self.client.list_sessions().await {
+            Ok(pair) => pair,
+            Err(e) => {
+                self.error_line(format!("list sessions failed: {e}"));
+                return;
+            }
+        };
+        if sessions.is_empty() {
+            self.system_line("no sessions to resume");
+            return;
+        }
+        let entries: Vec<super::ResumePickerEntry> = sessions
+            .iter()
+            .map(|s| super::ResumePickerEntry {
+                id: s.session_id.clone(),
+                id_short: crate::cli::short_id(&s.session_id),
+                name: s.name.clone(),
+                busy: s.busy,
+                graph_count: s.graph_count,
+                active_graph_count: s.active_graph_count,
+                current: s.session_id == current_id,
+            })
+            .collect();
+        let selected = entries.iter().position(|e| e.current).unwrap_or(0);
+        self.resume_picker = Some(super::ResumePickerState {
+            entries,
+            selected,
+            scroll: 0,
+        });
+        self.sync_resume_picker_window();
     }
 
     /// Local `/session switch` surface (wire SwitchSession RPC). Export/import

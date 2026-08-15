@@ -69,14 +69,21 @@ fn daemon_launch_args(cli: &Cli) -> Vec<String> {
     args
 }
 
-/// Find a daemon or spawn one, then return a connected client + initial state.
-async fn connect_or_spawn(cli: &Cli, cwd: &std::path::Path) -> Result<(GrpcClient, WireStatus)> {
+/// Find a daemon or spawn one, then return a connected client + initial
+/// state + a `reused` marker (issue #56): `true` only when the client
+/// attached to an already-running daemon via `discover`. The marker drives
+/// the fresh-attach step in `run_repl` — a freshly spawned daemon
+/// (`reused = false`) already starts on its own new session.
+async fn connect_or_spawn(
+    cli: &Cli,
+    cwd: &std::path::Path,
+) -> Result<(GrpcClient, WireStatus, bool)> {
     // 1. Reuse a running daemon: per-cwd port file first, default port second.
     if let Some(addr) = discover(std::time::Duration::from_millis(800), cwd).await? {
         tracing::info!("reusing running daemon at {addr}");
         let mut client = GrpcClient::connect(&addr).await?;
         let state = client.get_state().await?;
-        return Ok((client, wire_status(&state)));
+        return Ok((client, wire_status(&state), true));
     }
 
     // 2. Spawn `thewayd` on demand (inherits cwd/env; `--port 0` publishes the
@@ -99,7 +106,30 @@ async fn connect_or_spawn(cli: &Cli, cwd: &std::path::Path) -> Result<(GrpcClien
     tracing::info!("spawned daemon at {addr}");
     let mut client = GrpcClient::connect(&addr).await?;
     let state = client.get_state().await?;
-    Ok((client, wire_status(&state)))
+    Ok((client, wire_status(&state), false))
+}
+
+/// Fresh-attach gate (issue #56): the TUI defaults to a new session only
+/// when it REUSED a running daemon (`reused`) and the user passed no
+/// explicit session selection — `--resume` (bare picker or id),
+/// `--resume-id`, or `--continue`. A self-spawned daemon already has a
+/// fresh session, so `reused = false` never attaches fresh; the daemon is
+/// untouched either way (fresh attach is TUI client semantics).
+fn fresh_attach_wanted(reused: bool, cli: &Cli) -> bool {
+    reused && cli.resume.is_none() && cli.resume_id.is_none() && !cli.continue_
+}
+
+/// Create + switch to a new session after attaching to a reused daemon —
+/// the same path `/new` drives (issue #56). Returns the new session id.
+/// The switch queues on the daemon's serialized event loop, so the current
+/// snapshot may still describe the old session until the republish lands.
+async fn attach_fresh_session(client: &mut GrpcClient) -> Result<String> {
+    let summary = client.create_session(None).await?;
+    let id = summary.session_id.clone();
+    if !client.switch_session(&id).await? {
+        anyhow::bail!("daemon rejected the session switch");
+    }
+    Ok(id)
 }
 
 pub(crate) async fn run_repl(
@@ -138,8 +168,31 @@ pub(crate) async fn run_repl(
         _ => String::new(),
     };
 
-    // Connect (reuse or spawn), fetch the initial snapshot.
-    let (client, initial) = connect_or_spawn(&cli, &cwd).await?;
+    // Connect (reuse or spawn), fetch the initial snapshot. `reused` marks a
+    // discover hit (issue #56): an already-running daemon would resume its
+    // OLD session, so the fresh-attach step below applies. A freshly
+    // spawned daemon (`reused = false`) already starts on its own new
+    // session — creating another would leave an extra empty session behind.
+    let (mut client, mut initial, reused) = connect_or_spawn(&cli, &cwd).await?;
+
+    // Issue #56: re-entering the TUI with a live daemon defaults to a NEW
+    // session (daemon untouched — fresh attach is TUI client semantics).
+    // Explicit `--resume`/`--resume-id`/`--continue` selections skip this.
+    // Mirrors the /new path: create + switch. The switch queues on the
+    // daemon's event loop, so the first snapshots may still show the old
+    // session; the new one appears on the next snapshot (apply_snapshot's
+    // session-id path).
+    let fresh_session_id = if fresh_attach_wanted(reused, &cli) {
+        let id = attach_fresh_session(&mut client).await?;
+        // Patch the cached snapshot's session id so the banner names the
+        // new session before the first republish lands (the feed still
+        // holds the old session's blocks until then).
+        initial.session_id = id.clone();
+        Some(id)
+    } else {
+        None
+    };
+
     let session_id = if session_id.is_empty() {
         initial.session_id.clone()
     } else {
@@ -161,6 +214,9 @@ pub(crate) async fn run_repl(
         app.client_addr(),
         cwd.display()
     ));
+    if let Some(id) = fresh_session_id {
+        app.system_line(format!("new session {id}"));
+    }
     app.run().await
 }
 
@@ -172,4 +228,160 @@ async fn session_id_of(session: &theway_core::Session) -> String {
         .ok()
         .and_then(|m| m.get("id").and_then(|v| v.as_str()).map(str::to_string))
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser as _;
+    use std::sync::Arc;
+    use theway_core::multiagent::graph::engine::DagEngine;
+    use theway_core::multiagent::graph::types::DagEvent;
+    use theway_core::multiagent::registry::{AgentJobEvent, AgentJobRegistry};
+    use theway_transport::grpc::{GrpcState, serve_grpc};
+    use theway_transport::testing::FakeSessionOps;
+    use theway_transport::wire::{WireCommand, WireStatus};
+    use tokio::sync::{broadcast, mpsc};
+
+    fn test_status() -> WireStatus {
+        WireStatus {
+            session_id: "sess-1".into(),
+            model: "provider:model".into(),
+            model_catalog: Vec::new(),
+            cwd: "/tmp/theway".into(),
+            busy: false,
+            queued_count: 0,
+            latest_trigger_poll: None,
+            goal: None,
+            control_plane_prompt: None,
+            sidebar: theway_transport::testing::empty_sidebar_snapshot(),
+            feed_blocks: Vec::new(),
+            feed_lines: Vec::new(),
+            feed_lines_base: 0,
+            dags: Vec::new(),
+            subagents: Vec::new(),
+            usage: theway_transport::wire::WireContextUsage::default(),
+            tui_max_feed_lines: None,
+        }
+    }
+
+    /// In-process gRPC fixture (the same `GrpcState` shape the UI tests
+    /// use): the client round-trips through real tonic frames and the mock
+    /// command channel records every daemon-side `WireCommand`, so tests can
+    /// assert the create+switch command sequence.
+    async fn test_daemon_client() -> (GrpcClient, mpsc::UnboundedReceiver<WireCommand>) {
+        let (command_tx, command_rx) = mpsc::unbounded_channel::<WireCommand>();
+        let (snapshot_tx, _) = broadcast::channel::<WireStatus>(16);
+        let latest = Arc::new(parking_lot::Mutex::new(test_status()));
+        let (event_tx, _) = broadcast::channel::<AgentJobEvent>(16);
+        let (dag_event_tx, _) = broadcast::channel::<DagEvent>(16);
+        let registry = AgentJobRegistry::new();
+        let agent_fwd = {
+            let mut rx = registry.subscribe();
+            let fwd_tx = event_tx.clone();
+            tokio::spawn(async move {
+                loop {
+                    match rx.recv().await {
+                        Ok(event) => {
+                            let _ = fwd_tx.send(event);
+                        }
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            eprintln!("AgentJobEvent broadcast lagged by {n}, skipping");
+                            continue;
+                        }
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+            })
+        }
+        .abort_handle();
+        let session_ops = Arc::new(FakeSessionOps::new());
+        session_ops.add_session("sess-1");
+        let state = GrpcState {
+            commands: command_tx,
+            snapshots: snapshot_tx,
+            latest,
+            events: event_tx,
+            dag_events: dag_event_tx,
+            registry,
+            dag_engine: Arc::new(DagEngine::new()),
+            session_ops,
+            session_id: Arc::new(std::sync::RwLock::new("sess-1".into())),
+            agent_fwd,
+        };
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let server = serve_grpc(listener, state);
+        let _server = server;
+        let client = GrpcClient::connect(&addr).await.unwrap();
+        (client, command_rx)
+    }
+
+    /// Issue #56 gate: only a REUSED daemon with no explicit session
+    /// selection (`--resume` bare or with an id, `--resume-id`,
+    /// `--continue`) triggers the fresh-attach step. The spawn path
+    /// (`reused = false`) never does — the spawned daemon already starts on
+    /// its own new session — and neither does any resume/continue flag.
+    #[test]
+    fn fresh_attach_gate_reused_without_resume_flags_only() {
+        let plain = Cli::parse_from(["theway"]);
+        assert!(fresh_attach_wanted(true, &plain));
+        assert!(
+            !fresh_attach_wanted(false, &plain),
+            "a spawned daemon already has a fresh session"
+        );
+
+        for args in [
+            vec!["theway", "--resume"],
+            vec!["theway", "--resume", "sess-abc"],
+            vec!["theway", "--resume-id", "sess-abc"],
+            vec!["theway", "--continue"],
+        ] {
+            let cli = Cli::parse_from(args.clone());
+            assert!(
+                !fresh_attach_wanted(true, &cli),
+                "explicit selection must suppress fresh attach: {args:?}"
+            );
+        }
+    }
+
+    /// Issue #56 reused path: `attach_fresh_session` runs the `/new` path —
+    /// `create_session(None)` then `switch_session(id)` — and the mock
+    /// command channel sees both, in order, carrying the new session id.
+    /// (The gRPC create handler itself enqueues the first switch — becoming
+    /// current is serialized through the event loop — and the client-side
+    /// call enqueues the second.)
+    #[tokio::test]
+    async fn attach_fresh_session_creates_then_switches_in_order() {
+        let (mut client, mut rx) = test_daemon_client().await;
+
+        // Act
+        let id = attach_fresh_session(&mut client).await.unwrap();
+
+        // Assert: FakeSessionOps ids come from a counter — the first create
+        // yields `sess-new-1`; both switches carry it, in command order.
+        assert_eq!(id, "sess-new-1");
+        for (i, origin) in ["create-time switch", "client-side switch"]
+            .iter()
+            .enumerate()
+        {
+            let cmd = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+                .await
+                .expect("no switch_session command")
+                .unwrap();
+            match cmd {
+                WireCommand::SwitchSession { id: got } => {
+                    assert_eq!(got, "sess-new-1", "wrong id after {origin} (index {i})")
+                }
+                other => panic!("unexpected command after {origin} (index {i}): {other:?}"),
+            }
+        }
+
+        // Assert: the new session is registered and current daemon-side.
+        let (sessions, current) = client.list_sessions().await.unwrap();
+        assert_eq!(sessions.len(), 2);
+        assert_eq!(sessions[0].session_id, "sess-1");
+        assert_eq!(sessions[1].session_id, "sess-new-1");
+        assert_eq!(current, "sess-new-1");
+    }
 }

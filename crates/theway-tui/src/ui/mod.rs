@@ -105,6 +105,10 @@ const COMPLETION_POPUP_MAX: usize = 8;
 /// rows render at once, mirroring the completion popup's fixed window; the
 /// window slides with the selection.
 const FORK_POPUP_MAX: usize = 8;
+/// Resume-picker popup window size (issue #56): at most this many session
+/// rows render at once; the window slides with the selection like the fork
+/// picker's.
+const RESUME_POPUP_MAX: usize = 8;
 const TRIGGER_PANEL_MIN_TOTAL_WIDTH: u16 = 100;
 /// Auto-mode width and the `show` menu option's width for the side panel
 /// (the Automation/trigger panel, issue #54).
@@ -209,6 +213,35 @@ pub(crate) struct ForkPickerEntry {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ForkPickerState {
     pub(crate) entries: Vec<ForkPickerEntry>,
+    pub(crate) selected: usize,
+    pub(crate) scroll: usize,
+}
+
+/// One `/resume` popup row (issue #56): a daemon session in tree order
+/// (oldest → newest, as `list_sessions` returns it). The row label renders
+/// short id + name + busy/graph marks, with `current` annotating the
+/// daemon's active session — see [`resume_picker_label`].
+#[derive(Clone, Debug)]
+pub(crate) struct ResumePickerEntry {
+    /// Full session id — what `SwitchSession` needs (also accepts unique
+    /// prefixes, but the picker always sends the full id).
+    pub(crate) id: String,
+    pub(crate) id_short: String,
+    pub(crate) name: String,
+    pub(crate) busy: bool,
+    pub(crate) graph_count: u32,
+    pub(crate) active_graph_count: u32,
+    pub(crate) current: bool,
+}
+
+/// Interactive `/resume` picker state (issue #56): `Some` = the popup is
+/// open over the daemon's session list, pre-selected on the current
+/// session. Keys are handled in `app_input::handle_resume_picker_key`;
+/// rendering in `render_resume_picker`. TUI-local — the startup `--resume`
+/// terminal picker in `resume_picker.rs` is a separate mechanism.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ResumePickerState {
+    pub(crate) entries: Vec<ResumePickerEntry>,
     pub(crate) selected: usize,
     pub(crate) scroll: usize,
 }
@@ -343,6 +376,10 @@ pub struct App {
     /// Interactive `/fork` picker (issue #55): `Some` = popup open over the
     /// current session's User feed blocks; `None` when closed/cancelled.
     fork_picker: Option<ForkPickerState>,
+    /// Interactive `/resume` picker (issue #56): `Some` = popup open over
+    /// the daemon's session list; `None` when closed/cancelled. The startup
+    /// `--resume` terminal picker (`resume_picker.rs`) is separate.
+    resume_picker: Option<ResumePickerState>,
     /// Feed drag-selection in progress (mouse button still held).
     mouse_selecting: bool,
     /// Composer text-area rect (mouse click forwarding to the textarea).
@@ -422,6 +459,7 @@ impl App {
             status_panel_menu: None,
             panel_drag: None,
             fork_picker: None,
+            resume_picker: None,
             mouse_selecting: false,
             last_text_area: None,
             last_status_area: None,
@@ -1189,6 +1227,7 @@ impl App {
         self.render_control_plane_prompt(frame);
         self.render_status_panel_menu(frame);
         self.render_fork_picker(frame);
+        self.render_resume_picker(frame);
     }
 
     fn render_model_picker(&self, frame: &mut ratatui::Frame) {
@@ -1350,6 +1389,50 @@ impl App {
         let block = Block::default()
             .borders(Borders::ALL)
             .title(" fork ")
+            .border_style(Style::default().fg(Color::Cyan));
+        frame.render_widget(Clear, rect);
+        frame.render_widget(Paragraph::new(text).block(block), rect);
+    }
+
+    /// Interactive `/resume` picker (issue #56): a centered popup listing
+    /// the daemon's sessions in tree order (oldest → newest), reusing the
+    /// completion popup style — cyan rows, black-on-cyan highlight, a fixed
+    /// [`RESUME_POPUP_MAX`]-row window that slides with the selection.
+    /// Rows render short id + name + busy/graph marks via
+    /// [`resume_picker_label`]; the daemon's current session is annotated.
+    /// Enter in `app_input::handle_resume_picker_key` switches session.
+    fn render_resume_picker(&self, frame: &mut ratatui::Frame) {
+        let Some(picker) = self.resume_picker.as_ref() else {
+            return;
+        };
+        if picker.entries.is_empty() {
+            return;
+        }
+        let area = frame.area();
+        let width = area.width.clamp(24, 90);
+        let scroll = picker.scroll.min(picker.entries.len().saturating_sub(1));
+        let shown = (picker.entries.len() - scroll).min(RESUME_POPUP_MAX);
+        let height = shown as u16 + 3; // item rows + hint + borders
+        let rect = centered_rect(area, width, height);
+        let mut text = Vec::with_capacity(shown + 1);
+        for (i, entry) in picker.entries.iter().skip(scroll).take(shown).enumerate() {
+            let style = if scroll + i == picker.selected {
+                Style::default().fg(Color::Black).bg(Color::Cyan)
+            } else {
+                Style::default().fg(Color::Cyan)
+            };
+            text.push(Line::styled(
+                format!(" {}", resume_picker_label(entry)),
+                style,
+            ));
+        }
+        text.push(Line::styled(
+            "↑↓ move · Enter resume · Esc cancel",
+            Style::default().fg(Color::DarkGray),
+        ));
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(" resume ")
             .border_style(Style::default().fg(Color::Cyan));
         frame.render_widget(Clear, rect);
         frame.render_widget(Paragraph::new(text).block(block), rect);
@@ -1859,7 +1942,7 @@ impl App {
                     }
                     "/help" => {
                         println!(
-                            "theway client — send messages to the thewayd daemon; local commands: /login /quit /clear /new /status-panel /session"
+                            "theway client — send messages to the thewayd daemon; local commands: /login /quit /clear /new /resume /status-panel /session"
                         );
                         continue;
                     }
@@ -2017,6 +2100,39 @@ fn fork_picker_entries(blocks: &[theway_transport::feed::WireFeedBlock]) -> Vec<
         .collect()
 }
 
+/// `/resume` popup row label (issue #56): `{short id} {name}` plus marks —
+/// `busy` when the session is mid-turn, `graphs N (M active)` when it has
+/// DAG runs, `current` on the daemon's active session. Marks join with `·`;
+/// a bare session renders just the short id.
+fn resume_picker_label(entry: &ResumePickerEntry) -> String {
+    let mut head = vec![entry.id_short.clone()];
+    if !entry.name.is_empty() {
+        head.push(entry.name.clone());
+    }
+    let mut marks = Vec::new();
+    if entry.busy {
+        marks.push("busy".to_string());
+    }
+    if entry.graph_count > 0 {
+        marks.push(if entry.active_graph_count > 0 {
+            format!(
+                "graphs {} ({} active)",
+                entry.graph_count, entry.active_graph_count
+            )
+        } else {
+            format!("graphs {}", entry.graph_count)
+        });
+    }
+    if entry.current {
+        marks.push("current".to_string());
+    }
+    if marks.is_empty() {
+        head.join(" ")
+    } else {
+        format!("{} · {}", head.join(" "), marks.join(" · "))
+    }
+}
+
 /// Assemble the slash-command completion list: the TUI-local command set from
 /// `registry` (`local_commands::local_registry` — quit/clear/help + aliases) +
 /// the TUI-local command set (`LOCAL_COMMANDS` — commands the client
@@ -2105,12 +2221,13 @@ const DAEMON_COMMANDS: &[&str] = &[
     "inbox",
 ];
 
-/// TUI-local slash commands (issues #52 + #54): dispatched in the client,
-/// never forwarded to the daemon. NOT listed in `DAEMON_COMMANDS` — the
-/// daemon has no `/new` or `/status-panel` command; the client intercepts
-/// them (`/new` drives the session-resource RPCs, `/status-panel` opens the
-/// local panel-mode menu).
-const LOCAL_COMMANDS: &[&str] = &["new", "status-panel"];
+/// TUI-local slash commands (issues #52 + #54 + #56): dispatched in the
+/// client, never forwarded to the daemon. NOT listed in `DAEMON_COMMANDS` —
+/// the daemon has no `/new`, `/status-panel` or `/resume` command; the
+/// client intercepts them (`/new` drives the session-resource RPCs,
+/// `/status-panel` opens the local panel-mode menu, `/resume` opens the
+/// session-list popup over `list_sessions`).
+const LOCAL_COMMANDS: &[&str] = &["new", "status-panel", "resume"];
 
 #[cfg(test)]
 mod tests;

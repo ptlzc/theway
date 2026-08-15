@@ -56,6 +56,20 @@ fn fixture_status(feed_blocks: Vec<WireFeedBlock>) -> WireStatus {
 /// same GrpcState shape the transport tests use), so submit/cancel/approve
 /// round-trip through actual tonic frames.
 async fn test_app() -> (App, mpsc::UnboundedReceiver<WireCommand>) {
+    let (app, rx, _ops) = test_app_with_sessions(&["sess-1"]).await;
+    (app, rx)
+}
+
+/// [`test_app`] with an explicit seed session list (empty = a daemon with
+/// no sessions) plus the `FakeSessionOps` handle for tests that inspect or
+/// mutate the session table (issue #56).
+async fn test_app_with_sessions(
+    seeds: &[&str],
+) -> (
+    App,
+    mpsc::UnboundedReceiver<WireCommand>,
+    Arc<FakeSessionOps>,
+) {
     let (command_tx, command_rx) = mpsc::unbounded_channel::<WireCommand>();
     let (snapshot_tx, _) = broadcast::channel::<WireStatus>(16);
     let latest = Arc::new(parking_lot::Mutex::new(fixture_status(Vec::new())));
@@ -82,7 +96,10 @@ async fn test_app() -> (App, mpsc::UnboundedReceiver<WireCommand>) {
         .abort_handle()
     };
     let session_ops = Arc::new(FakeSessionOps::new());
-    session_ops.add_session("sess-1");
+    for id in seeds {
+        session_ops.add_session(id);
+    }
+    let current: String = seeds.first().copied().unwrap_or("").to_string();
     let state = GrpcState {
         commands: command_tx,
         snapshots: snapshot_tx,
@@ -91,8 +108,8 @@ async fn test_app() -> (App, mpsc::UnboundedReceiver<WireCommand>) {
         dag_events: dag_event_tx,
         registry,
         dag_engine: Arc::new(DagEngine::new()),
-        session_ops,
-        session_id: Arc::new(std::sync::RwLock::new("sess-1".into())),
+        session_ops: session_ops.clone(),
+        session_id: Arc::new(std::sync::RwLock::new(current)),
         agent_fwd,
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -121,7 +138,7 @@ async fn test_app() -> (App, mpsc::UnboundedReceiver<WireCommand>) {
     // Copy sink default: a no-op success handler so mouse tests never touch
     // the real clipboard (copy-specific tests override it with a recorder).
     app.copy_handler = Some(Arc::new(|_: String| true));
-    (app, command_rx)
+    (app, command_rx, session_ops)
 }
 
 fn buffer_text(buf: &Buffer) -> String {
@@ -2122,6 +2139,222 @@ async fn fork_picker_renders_centered_popup_with_fork_title() {
         row.contains("1) newest prompt"),
         "highlight must sit on the first row, row: {row:?}"
     );
+}
+
+/// Issue #56: `/resume` completes as a TUI-local command (`LOCAL_COMMANDS`)
+/// and stays out of the daemon-side command table the client forwards.
+#[test]
+fn collect_slash_commands_includes_local_resume_command() {
+    // Arrange
+    let registry = crate::local_commands::local_registry();
+
+    // Act
+    let commands = collect_slash_commands(&registry, &[], &[], &[]);
+
+    // Assert
+    assert!(
+        commands.contains(&"/resume".to_string()),
+        "completion list must contain /resume, got: {commands:?}"
+    );
+    assert!(
+        !super::DAEMON_COMMANDS.contains(&"resume"),
+        "/resume is TUI-local and must not live in the daemon command table"
+    );
+}
+
+/// Issue #56: `/help` lists `/resume` in the local command surface.
+#[tokio::test]
+async fn help_line_lists_resume_command() {
+    let (mut app, _rx) = test_app().await;
+
+    // Act
+    app.dispatch_slash("/help", &mut terminal_placeholder())
+        .await;
+
+    // Assert
+    let text = feed_text(&app);
+    assert!(
+        text.contains("/resume"),
+        "help text must list /resume, got: {text}"
+    );
+}
+
+/// Issue #56: `/resume` opens a popup over `list_sessions` in the daemon's
+/// tree order (oldest → newest) with short id + name + busy/graph marks,
+/// the current session annotated and pre-selected.
+#[tokio::test]
+async fn resume_picker_lists_sessions_and_annotates_current() {
+    let (mut app, mut rx, _ops) = test_app_with_sessions(&["sess-1", "sess-2"]).await;
+    // Arrange: make sess-2 the daemon's current session (drain the command).
+    assert!(app.client.switch_session("sess-2").await.unwrap());
+    rx.recv().await.expect("switch command");
+
+    // Act
+    app.dispatch_slash("/resume", &mut terminal_placeholder())
+        .await;
+
+    // Assert: tree order, current annotated + selected, short ids present.
+    let picker = app
+        .resume_picker
+        .as_ref()
+        .expect("/resume must open the picker");
+    assert_eq!(picker.entries.len(), 2);
+    assert_eq!(picker.entries[0].id, "sess-1");
+    assert!(!picker.entries[0].current);
+    assert_eq!(picker.entries[1].id, "sess-2");
+    assert!(picker.entries[1].current);
+    assert_eq!(picker.selected, 1, "the current session is pre-selected");
+    assert_eq!(picker.entries[1].id_short, "sess-2");
+
+    // Render: popup lists both sessions and the current annotation.
+    let backend = TestBackend::new(80, 20);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    let text = buffer_text(terminal.backend().buffer());
+    assert!(text.contains("resume"), "popup title missing:\n{text}");
+    assert!(text.contains("sess-1"), "session row missing:\n{text}");
+    assert!(
+        text.contains("sess-2 · current"),
+        "current row must be annotated, got:\n{text}"
+    );
+}
+
+/// Issue #56: Enter switches to the highlighted session over the
+/// SwitchSession RPC (queued daemon-side — the next snapshot presents the
+/// new session) and closes the popup; Esc cancels without sending anything.
+#[tokio::test]
+async fn resume_picker_enter_switches_session_and_esc_cancels() {
+    let (mut app, mut rx, _ops) = test_app_with_sessions(&["sess-1", "sess-2"]).await;
+    let mut term = terminal_placeholder();
+    app.dispatch_slash("/resume", &mut term).await;
+    assert!(app.resume_picker.is_some());
+
+    // Act: Down highlights sess-2, Enter switches to it.
+    app.handle_event(
+        Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::empty())),
+        &mut term,
+    )
+    .await
+    .unwrap();
+    app.handle_event(
+        Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty())),
+        &mut term,
+    )
+    .await
+    .unwrap();
+
+    // Assert: the daemon receives SwitchSession{id}; popup closed.
+    let cmd = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+        .await
+        .expect("no switch_session command")
+        .unwrap();
+    match cmd {
+        WireCommand::SwitchSession { id } => assert_eq!(id, "sess-2"),
+        other => panic!("unexpected command: {other:?}"),
+    }
+    assert!(app.resume_picker.is_none(), "Enter must close the picker");
+
+    // Act: reopen and cancel with Esc.
+    app.dispatch_slash("/resume", &mut term).await;
+    assert!(app.resume_picker.is_some());
+    app.handle_event(
+        Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty())),
+        &mut term,
+    )
+    .await
+    .unwrap();
+
+    // Assert: closed, nothing forwarded.
+    assert!(app.resume_picker.is_none(), "Esc must cancel the picker");
+    assert!(
+        rx.try_recv().is_err(),
+        "Esc must not forward any command to the daemon"
+    );
+}
+
+/// Issue #56: an empty session list prints the system hint instead of
+/// opening an empty popup.
+#[tokio::test]
+async fn resume_picker_empty_list_prints_no_sessions_hint() {
+    let (mut app, _rx, _ops) = test_app_with_sessions(&[]).await;
+
+    // Act
+    app.dispatch_slash("/resume", &mut terminal_placeholder())
+        .await;
+
+    // Assert
+    assert!(
+        app.resume_picker.is_none(),
+        "an empty list must not open the popup"
+    );
+    let text = feed_text(&app);
+    assert!(
+        text.contains("no sessions to resume"),
+        "feed must print the empty-list hint, got: {text}"
+    );
+}
+
+/// Issue #56: the popup row label joins short id + name + marks (`busy`,
+/// `graphs N (M active)`, `current`) — a bare session renders just the
+/// short id.
+#[test]
+fn resume_picker_label_formats_name_busy_graph_and_current_marks() {
+    // Arrange
+    let full = super::ResumePickerEntry {
+        id: "abc1234567890".into(),
+        id_short: "abc1234567890".into(),
+        name: "plan".into(),
+        busy: true,
+        graph_count: 3,
+        active_graph_count: 2,
+        current: true,
+    };
+
+    // Act + Assert
+    assert_eq!(
+        super::resume_picker_label(&full),
+        "abc1234567890 plan · busy · graphs 3 (2 active) · current"
+    );
+    let inactive_graphs = super::ResumePickerEntry {
+        busy: false,
+        active_graph_count: 0,
+        current: false,
+        ..full.clone()
+    };
+    assert_eq!(
+        super::resume_picker_label(&inactive_graphs),
+        "abc1234567890 plan · graphs 3"
+    );
+    let bare = super::ResumePickerEntry {
+        name: String::new(),
+        busy: false,
+        graph_count: 0,
+        active_graph_count: 0,
+        current: false,
+        ..full.clone()
+    };
+    assert_eq!(super::resume_picker_label(&bare), "abc1234567890");
+}
+
+/// Issue #56 busy-switch path: switching queues on the daemon's event loop
+/// (a busy turn aborts and the new session lands on the next snapshot) —
+/// `apply_snapshot`'s session-id path presents the new session
+/// automatically.
+#[tokio::test]
+async fn apply_snapshot_updates_session_id_when_switch_lands() {
+    let (mut app, _rx) = test_app().await;
+    assert_eq!(app.session_id, "sess-1");
+
+    // Arrange: the daemon republishes after a queued SwitchSession.
+    let mut status = fixture_status(Vec::new());
+    status.session_id = "sess-9".into();
+
+    // Act
+    app.apply_snapshot(status);
+
+    // Assert: the app follows the snapshot's session id.
+    assert_eq!(app.session_id, "sess-9");
+    assert_eq!(app.latest.session_id, "sess-9");
 }
 
 fn feed_text(app: &App) -> String {
