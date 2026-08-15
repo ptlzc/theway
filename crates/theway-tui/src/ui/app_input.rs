@@ -39,6 +39,11 @@ impl App {
         key: KeyEvent,
         terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     ) -> Result<()> {
+        // Second-level `/status-panel` menu (issue #54): modal — it consumes
+        // every key until Enter applies the highlighted mode or Esc cancels.
+        if self.handle_status_panel_menu_key(&key) {
+            return Ok(());
+        }
         if self.handle_control_plane_prompt_key(&key) {
             return Ok(());
         }
@@ -156,6 +161,46 @@ impl App {
             }
         }
         Ok(())
+    }
+
+    /// `/status-panel` menu keys (issue #54): Up/Down move the highlight
+    /// over `show` / `hide` / `auto`, Enter applies the highlighted mode
+    /// (show → `Shown(36)`, hide → `Hidden`, auto → `Auto`) and closes the
+    /// menu, Esc cancels. Returns `true` (and consumes the key) whenever the
+    /// menu is open — the menu is modal.
+    pub(super) fn handle_status_panel_menu_key(&mut self, key: &KeyEvent) -> bool {
+        let Some(idx) = self.status_panel_menu else {
+            return false;
+        };
+        match key.code {
+            KeyCode::Up => {
+                self.status_panel_menu = Some(idx.saturating_sub(1));
+            }
+            KeyCode::Down => {
+                self.status_panel_menu = Some(
+                    idx.saturating_add(1)
+                        .min(super::SIDE_PANEL_MENU_ITEMS.len() - 1),
+                );
+            }
+            KeyCode::Enter => {
+                self.status_panel_menu = None;
+                let (mode, label) = match idx {
+                    0 => (
+                        super::SidePanelMode::Shown(super::TRIGGER_PANEL_WIDTH),
+                        "shown",
+                    ),
+                    1 => (super::SidePanelMode::Hidden, "hidden"),
+                    _ => (super::SidePanelMode::Auto, "auto"),
+                };
+                self.side_panel_mode = mode;
+                self.system_line(format!("status panel: {label}"));
+            }
+            KeyCode::Esc => {
+                self.status_panel_menu = None;
+            }
+            _ => {}
+        }
+        true
     }
 
     pub(super) fn handle_control_plane_prompt_key(&mut self, key: &KeyEvent) -> bool {

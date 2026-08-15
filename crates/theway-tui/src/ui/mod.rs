@@ -102,8 +102,17 @@ const SCROLL_STEP: usize = 3;
 pub(crate) const DEFAULT_MAX_FEED_LINES: usize = 3_000;
 const COMPLETION_POPUP_MAX: usize = 8;
 const TRIGGER_PANEL_MIN_TOTAL_WIDTH: u16 = 100;
+/// Auto-mode width and the `show` menu option's width for the side panel
+/// (the Automation/trigger panel, issue #54).
 const TRIGGER_PANEL_WIDTH: u16 = 36;
 const TRIGGER_PANEL_RULE_LIMIT: usize = 5;
+/// Side-panel drag-resize bounds (issue #54): dragging the panel's left
+/// edge grows/shrinks the panel inside `[min, max]`.
+const SIDE_PANEL_MIN_WIDTH: u16 = 24;
+const SIDE_PANEL_MAX_WIDTH: u16 = 60;
+/// Second-level `/status-panel` menu options (issue #54), in order:
+/// index 0 = show, 1 = hide, 2 = auto.
+const SIDE_PANEL_MENU_ITEMS: [&str; 3] = ["show", "hide", "auto"];
 const CONTROL_PROMPT_TEXT_WIDTH: usize = 68;
 
 #[derive(Clone, Debug, Default)]
@@ -157,6 +166,26 @@ pub struct SelectionView {
 struct ComposerDrag {
     start_row: u16,
     start_rows: u16,
+}
+
+/// Side-panel visibility mode (issue #54): `Auto` keeps the pre-existing
+/// content-driven rule (panel content + ≥100 columns → 36 wide); `Shown(w)`
+/// forces the panel at an explicit width; `Hidden` closes it. TUI-local
+/// in-memory state — never persisted, never sent to the daemon.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SidePanelMode {
+    Auto,
+    Shown(u16),
+    Hidden,
+}
+
+/// Live side-panel drag state (issue #54): anchored on mouse-down at the
+/// panel's left border (1-column strip), the width tracks
+/// `start_width + (start_col - col)` while the button is held.
+#[derive(Clone, Copy, Debug)]
+struct PanelDrag {
+    start_col: u16,
+    start_width: u16,
 }
 
 /// Clipboard write sink for tests (`true` = copied): `None` routes to the
@@ -277,6 +306,15 @@ pub struct App {
     manual_composer_rows: Option<u16>,
     /// Live drag state while resizing the composer via its top rule.
     resize_drag: Option<ComposerDrag>,
+    /// Side-panel visibility mode (issue #54): `Auto` by default; the
+    /// `/status-panel` menu and the left-edge drag change it. Never
+    /// persisted — panel visibility is client-side state.
+    side_panel_mode: SidePanelMode,
+    /// Second-level `/status-panel` menu highlight (issue #54): `Some(i)` =
+    /// open, highlighting option `SIDE_PANEL_MENU_ITEMS[i]`.
+    status_panel_menu: Option<usize>,
+    /// Live drag state while resizing the side panel via its left edge.
+    panel_drag: Option<PanelDrag>,
     /// Feed drag-selection in progress (mouse button still held).
     mouse_selecting: bool,
     /// Composer text-area rect (mouse click forwarding to the textarea).
@@ -284,6 +322,9 @@ pub struct App {
     /// Status-rule and input-box rects (drag-resize hit testing).
     last_status_area: Option<Rect>,
     last_input_area: Option<Rect>,
+    /// Rendered side-panel rect (left-edge drag hit testing); `None` when
+    /// the panel is not rendered (issue #54).
+    last_panel_area: Option<Rect>,
     last_ctrlc: Option<Instant>,
     quit: bool,
 
@@ -349,10 +390,14 @@ impl App {
             dag_tick: 0,
             manual_composer_rows: None,
             resize_drag: None,
+            side_panel_mode: SidePanelMode::Auto,
+            status_panel_menu: None,
+            panel_drag: None,
             mouse_selecting: false,
             last_text_area: None,
             last_status_area: None,
             last_input_area: None,
+            last_panel_area: None,
             last_ctrlc: None,
             quit: false,
             connected: true,
@@ -675,6 +720,21 @@ impl App {
                 .handle_mouse(m, self.last_text_area.unwrap(), self.input_state);
             return;
         }
+        // Side-panel left-edge resize handle (issue #54): the border column
+        // over the panel's full height starts a width drag. Checked BEFORE
+        // the feed drag-select branch so the grab strip never starts a text
+        // selection. Grabbing exits Auto: the panel becomes user-controlled
+        // at its current width.
+        if let Some(area) = self.last_panel_area {
+            if m.column == area.x && m.row >= area.y && m.row < area.y.saturating_add(area.height) {
+                self.panel_drag = Some(PanelDrag {
+                    start_col: m.column,
+                    start_width: area.width,
+                });
+                self.side_panel_mode = SidePanelMode::Shown(area.width);
+                return;
+            }
+        }
         // Feed: begin a drag selection anchored at the clicked cell (row,
         // display column; past the row end clamps to the row end).
         if self.mouse_in_feed(m.column, m.row) {
@@ -698,6 +758,29 @@ impl App {
             self.manual_composer_rows = Some(rows);
             return;
         }
+        if let Some(drag) = self.panel_drag {
+            // The panel's right edge stays anchored while the left edge
+            // follows the pointer: width = start_width + (start_col - col)
+            // (signed — dragging right of the grab column shrinks the
+            // panel), clamped to [SIDE_PANEL_MIN_WIDTH, SIDE_PANEL_MAX_WIDTH].
+            // Dragging to or past the panel's right edge (its last column),
+            // or squeezing the width below the floor, hides the panel
+            // (issue #54).
+            let right = drag
+                .start_col
+                .saturating_add(drag.start_width)
+                .saturating_sub(1);
+            let width = i64::from(drag.start_width) + i64::from(drag.start_col) - i64::from(column);
+            self.side_panel_mode = if column >= right || width < i64::from(SIDE_PANEL_MIN_WIDTH) {
+                SidePanelMode::Hidden
+            } else {
+                SidePanelMode::Shown(width.clamp(
+                    i64::from(SIDE_PANEL_MIN_WIDTH),
+                    i64::from(SIDE_PANEL_MAX_WIDTH),
+                ) as u16)
+            };
+            return;
+        }
         if self.mouse_selecting {
             let line = self.feed_line_at(row);
             let col = self.feed_column_at(column, line);
@@ -711,6 +794,7 @@ impl App {
     /// (primary-selection semantics, issue #53).
     async fn handle_mouse_up(&mut self) {
         self.resize_drag = None;
+        self.panel_drag = None;
         let was_selecting = self.mouse_selecting;
         self.mouse_selecting = false;
         if was_selecting && self.feed_selection.is_some() {
@@ -859,17 +943,19 @@ impl App {
                 (split[0], Some(split[1]))
             }
         };
-        let (feed_area, trigger_area) = if content_area.width >= TRIGGER_PANEL_MIN_TOTAL_WIDTH
-            && self.should_show_side_panel()
-        {
-            let cols =
-                Layout::horizontal([Constraint::Min(40), Constraint::Length(TRIGGER_PANEL_WIDTH)])
+        let (feed_area, trigger_area) = match self.side_panel_width(content_area.width) {
+            Some(width) => {
+                let cols = Layout::horizontal([Constraint::Min(40), Constraint::Length(width)])
                     .split(content_area);
-            (cols[0], Some(cols[1]))
-        } else {
-            (content_area, None)
+                (cols[0], Some(cols[1]))
+            }
+            None => (content_area, None),
         };
         self.last_feed_area = Some(feed_area);
+        // Issue #54: record the rendered panel rect for left-edge drag
+        // hit-testing; cleared whenever the panel is not rendered so a stale
+        // rect never matches a grab.
+        self.last_panel_area = trigger_area;
 
         // Feed: block-render cache + visible-window draw (issue #34). The
         // cache re-renders only dirty blocks; the window draw is O(viewport).
@@ -1072,6 +1158,7 @@ impl App {
         self.render_completions(frame, status_area);
         self.render_model_picker(frame);
         self.render_control_plane_prompt(frame);
+        self.render_status_panel_menu(frame);
     }
 
     fn render_model_picker(&self, frame: &mut ratatui::Frame) {
@@ -1162,6 +1249,39 @@ impl App {
         );
     }
 
+    /// Second-level `/status-panel` menu (issue #54): a centered popup with
+    /// the three mode options (`show` / `hide` / `auto`); the highlighted
+    /// option renders with the popup's cyan background. Keys are handled in
+    /// `app_input::handle_status_panel_menu_key`.
+    fn render_status_panel_menu(&self, frame: &mut ratatui::Frame) {
+        let Some(selected) = self.status_panel_menu else {
+            return;
+        };
+        let area = frame.area();
+        let width = area.width.clamp(20, 34);
+        let height = SIDE_PANEL_MENU_ITEMS.len() as u16 + 3; // items + hint + borders
+        let rect = centered_rect(area, width, height);
+        let mut text = Vec::with_capacity(SIDE_PANEL_MENU_ITEMS.len() + 1);
+        for (i, label) in SIDE_PANEL_MENU_ITEMS.iter().enumerate() {
+            let style = if i == selected {
+                Style::default().fg(Color::Black).bg(Color::Cyan)
+            } else {
+                Style::default().fg(Color::Cyan)
+            };
+            text.push(Line::styled(format!(" {label} "), style));
+        }
+        text.push(Line::styled(
+            "↑↓ move · Enter apply · Esc cancel",
+            Style::default().fg(Color::DarkGray),
+        ));
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(" status panel ")
+            .border_style(Style::default().fg(Color::Cyan));
+        frame.render_widget(Clear, rect);
+        frame.render_widget(Paragraph::new(text).block(block), rect);
+    }
+
     fn render_trigger_panel(&self, frame: &mut ratatui::Frame, area: Rect) {
         let lines =
             self.trigger_panel_lines(area.width.saturating_sub(2) as usize, area.height as usize);
@@ -1174,6 +1294,16 @@ impl App {
                 .title_style(Style::default().fg(Color::Magenta)),
         );
         frame.render_widget(panel, area);
+    }
+
+    /// Resolve the side panel's rendered width from the visibility mode
+    /// (issue #54): `None` hides the panel.
+    fn side_panel_width(&self, content_width: u16) -> Option<u16> {
+        resolve_side_panel_width(
+            self.side_panel_mode,
+            self.should_show_side_panel(),
+            content_width,
+        )
     }
 
     fn should_show_side_panel(&self) -> bool {
@@ -1656,7 +1786,7 @@ impl App {
                     }
                     "/help" => {
                         println!(
-                            "theway client — send messages to the thewayd daemon; local commands: /login /quit /clear /new /session"
+                            "theway client — send messages to the thewayd daemon; local commands: /login /quit /clear /new /status-panel /session"
                         );
                         continue;
                     }
@@ -1699,6 +1829,37 @@ impl App {
         }
         printer.abort();
         Ok(())
+    }
+}
+
+/// Pure side-panel width resolution (issue #54), split from
+/// [`App::side_panel_width`] for direct testing: `None` hides the panel.
+/// Every mode shares the ≥100-column gate
+/// ([`TRIGGER_PANEL_MIN_TOTAL_WIDTH`]). `Auto` keeps the pre-existing
+/// content-driven rule (content + wide enough → [`TRIGGER_PANEL_WIDTH`]);
+/// `Hidden` is always closed; `Shown(w)` forces the panel regardless of
+/// content, clamping the width to
+/// `[SIDE_PANEL_MIN_WIDTH, content_width - 40]` (40 columns stay reserved
+/// for the feed).
+fn resolve_side_panel_width(
+    mode: SidePanelMode,
+    has_content: bool,
+    content_width: u16,
+) -> Option<u16> {
+    if content_width < TRIGGER_PANEL_MIN_TOTAL_WIDTH {
+        return None;
+    }
+    match mode {
+        SidePanelMode::Hidden => None,
+        SidePanelMode::Auto => has_content.then_some(TRIGGER_PANEL_WIDTH),
+        SidePanelMode::Shown(w) => {
+            let max = content_width.saturating_sub(40);
+            if max < SIDE_PANEL_MIN_WIDTH {
+                None
+            } else {
+                Some(w.clamp(SIDE_PANEL_MIN_WIDTH, max))
+            }
+        }
     }
 }
 
@@ -1835,11 +1996,12 @@ const DAEMON_COMMANDS: &[&str] = &[
     "inbox",
 ];
 
-/// TUI-local slash commands (issue #52): dispatched in the client, never
-/// forwarded to the daemon. NOT listed in `DAEMON_COMMANDS` — the daemon has
-/// no `/new` command; the client intercepts it and drives the session-resource
-/// RPCs (`create_session` + `switch_session`) itself.
-const LOCAL_COMMANDS: &[&str] = &["new"];
+/// TUI-local slash commands (issues #52 + #54): dispatched in the client,
+/// never forwarded to the daemon. NOT listed in `DAEMON_COMMANDS` — the
+/// daemon has no `/new` or `/status-panel` command; the client intercepts
+/// them (`/new` drives the session-resource RPCs, `/status-panel` opens the
+/// local panel-mode menu).
+const LOCAL_COMMANDS: &[&str] = &["new", "status-panel"];
 
 #[cfg(test)]
 mod tests;

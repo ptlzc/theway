@@ -794,6 +794,164 @@ async fn composer_rows_drag_override_wins_over_wrapped_height() {
     app.handle_mouse_up().await;
 }
 
+/// Side-panel mode render resolution (issue #54): every mode shares the
+/// ≥100-column gate; Auto keeps the content-driven rule, Hidden closes,
+/// Shown(w) forces the panel (content or not) and clamps the width to
+/// [SIDE_PANEL_MIN_WIDTH, content - 40].
+#[test]
+fn resolve_side_panel_width_applies_mode_gate_and_clamps() {
+    use super::SidePanelMode as Mode;
+
+    // The ≥100-column gate hides the panel in every mode.
+    for mode in [Mode::Auto, Mode::Shown(36), Mode::Hidden] {
+        assert_eq!(
+            super::resolve_side_panel_width(mode, true, 99),
+            None,
+            "below 100 columns the panel must stay hidden ({mode:?})"
+        );
+    }
+
+    // Auto: the panel content decides.
+    assert_eq!(
+        super::resolve_side_panel_width(Mode::Auto, true, 140),
+        Some(super::TRIGGER_PANEL_WIDTH)
+    );
+    assert_eq!(
+        super::resolve_side_panel_width(Mode::Auto, false, 140),
+        None,
+        "Auto without panel content hides the panel"
+    );
+
+    // Hidden: always closed.
+    assert_eq!(
+        super::resolve_side_panel_width(Mode::Hidden, true, 140),
+        None
+    );
+
+    // Shown: forced even without content; width clamps to [24, content-40].
+    assert_eq!(
+        super::resolve_side_panel_width(Mode::Shown(36), false, 140),
+        Some(36)
+    );
+    assert_eq!(
+        super::resolve_side_panel_width(Mode::Shown(10), true, 140),
+        Some(super::SIDE_PANEL_MIN_WIDTH),
+        "widths below the floor clamp up to 24"
+    );
+    assert_eq!(
+        super::resolve_side_panel_width(Mode::Shown(200), true, 140),
+        Some(100),
+        "upper clamp = content width - 40"
+    );
+    // At exactly 100 columns the clamp ceiling is 60.
+    assert_eq!(
+        super::resolve_side_panel_width(Mode::Shown(80), true, 100),
+        Some(60)
+    );
+}
+
+/// Panel render per mode (issue #54): Auto renders the default 36-wide
+/// panel when it has content; Hidden drops it and clears the recorded rect;
+/// Shown forces it even without content at the clamped width.
+#[tokio::test]
+async fn side_panel_render_follows_mode_auto_hidden_shown() {
+    let (mut app, _rx) = test_app().await;
+    let backend = TestBackend::new(120, 20);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    // Auto + content: the 36-wide panel renders and shrinks the feed area.
+    app.latest.sidebar.skills.items = vec![WireSkillSnapshot {
+        name: "code-review".into(),
+        source: "user".into(),
+        file_path: "/skills/code-review".into(),
+        enabled: true,
+    }];
+    terminal.draw(|f| app.render(f)).unwrap();
+    let panel = app
+        .last_panel_area
+        .expect("auto mode with content renders the panel");
+    assert_eq!(panel.width, super::TRIGGER_PANEL_WIDTH);
+    assert_eq!(app.last_feed_area.unwrap().width, 120 - 36);
+    assert!(
+        buffer_text(terminal.backend().buffer()).contains("Skills"),
+        "panel content missing"
+    );
+
+    // Hidden: no panel, the feed reclaims the full width, the recorded
+    // rect is cleared so a stale area never matches a grab.
+    app.side_panel_mode = super::SidePanelMode::Hidden;
+    terminal.draw(|f| app.render(f)).unwrap();
+    assert!(app.last_panel_area.is_none());
+    assert_eq!(app.last_feed_area.unwrap().width, 120);
+
+    // Shown forces the panel even without content; widths clamp up to 24.
+    app.latest.sidebar.skills.items.clear();
+    app.side_panel_mode = super::SidePanelMode::Shown(10);
+    terminal.draw(|f| app.render(f)).unwrap();
+    let panel = app
+        .last_panel_area
+        .expect("shown mode renders the panel regardless of content");
+    assert_eq!(panel.width, super::SIDE_PANEL_MIN_WIDTH);
+    assert_eq!(app.last_feed_area.unwrap().width, 120 - 24);
+}
+
+/// Panel left-edge drag (issue #54): grabbing the border column starts a
+/// width drag that exits Auto; the width tracks start + (start_col - col),
+/// clamps to [24, 60], and hides when the pointer reaches the panel's right
+/// edge or squeezes below 24; release ends the drag.
+#[tokio::test]
+async fn panel_edge_drag_resizes_clamps_and_drag_past_right_hides() {
+    let (mut app, _rx) = test_app().await;
+    app.latest.sidebar.skills.items = vec![WireSkillSnapshot {
+        name: "code-review".into(),
+        source: "user".into(),
+        file_path: "/skills/code-review".into(),
+        enabled: true,
+    }];
+    let backend = TestBackend::new(140, 20);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    let area = app.last_panel_area.unwrap();
+    assert_eq!(area.width, 36);
+
+    // Grab the 1-column left-edge strip: the drag anchors at the rendered
+    // width and the mode switches from Auto to Shown.
+    app.handle_mouse_down(mouse_event(
+        area.x,
+        area.y + 1,
+        MouseEventKind::Down(MouseButton::Left),
+    ));
+    let drag = app.panel_drag.expect("edge grab starts a panel drag");
+    assert_eq!((drag.start_col, drag.start_width), (area.x, 36));
+    assert_eq!(app.side_panel_mode, super::SidePanelMode::Shown(36));
+
+    // Dragging left grows the panel (right edge anchored).
+    app.handle_mouse_drag(area.x - 6, area.y + 1);
+    assert_eq!(app.side_panel_mode, super::SidePanelMode::Shown(42));
+
+    // Dragging far left clamps at the 60-column ceiling.
+    app.handle_mouse_drag(area.x - 40, area.y + 1);
+    assert_eq!(app.side_panel_mode, super::SidePanelMode::Shown(60));
+
+    // Squeezing below 24 hides the panel…
+    app.handle_mouse_drag(area.x + 20, area.y + 1);
+    assert_eq!(app.side_panel_mode, super::SidePanelMode::Hidden);
+
+    // …but dragging back left within the same drag reopens it.
+    app.handle_mouse_drag(area.x - 4, area.y + 1);
+    assert_eq!(app.side_panel_mode, super::SidePanelMode::Shown(40));
+
+    // Reaching the panel's right edge (its last column) hides it.
+    let right = area.x + area.width - 1;
+    app.handle_mouse_drag(right, area.y + 1);
+    assert_eq!(app.side_panel_mode, super::SidePanelMode::Hidden);
+
+    // Release ends the drag; the grab never started a feed selection.
+    app.handle_mouse_up().await;
+    assert!(app.panel_drag.is_none());
+    assert!(app.feed_selection.is_none());
+}
+
 #[tokio::test]
 async fn mouse_drag_selects_feed_lines() {
     let (mut app, _rx) = test_app().await;
@@ -1611,6 +1769,127 @@ fn collect_slash_commands_includes_local_new_command() {
     assert!(
         !super::DAEMON_COMMANDS.contains(&"new"),
         "/new is TUI-local and must not live in the daemon command table"
+    );
+}
+
+/// Issue #54: `/status-panel` completes as a TUI-local command
+/// (`LOCAL_COMMANDS`) and stays out of the daemon-side command table the
+/// client forwards.
+#[test]
+fn collect_slash_commands_includes_local_status_panel_command() {
+    // Arrange
+    let registry = crate::local_commands::local_registry();
+
+    // Act
+    let commands = collect_slash_commands(&registry, &[], &[], &[]);
+
+    // Assert
+    assert!(
+        commands.contains(&"/status-panel".to_string()),
+        "completion list must contain /status-panel, got: {commands:?}"
+    );
+    assert!(
+        !super::DAEMON_COMMANDS.contains(&"status-panel"),
+        "/status-panel is TUI-local and must not live in the daemon command table"
+    );
+}
+
+/// `/status-panel` opens the second-level menu (issue #54): Up/Down move
+/// the highlight, Enter applies show/hide/auto and closes the menu, Esc
+/// cancels without touching the mode.
+#[tokio::test]
+async fn status_panel_slash_opens_menu_and_keys_apply_or_cancel() {
+    let (mut app, _rx) = test_app().await;
+    let mut term = terminal_placeholder();
+    let key = |code| Event::Key(KeyEvent::new(code, KeyModifiers::empty()));
+
+    // /status-panel opens the menu at option 0 (show).
+    app.dispatch_slash("/status-panel", &mut term).await;
+    assert_eq!(app.status_panel_menu, Some(0));
+
+    // Down/Down highlight hide then auto; Up moves back.
+    app.handle_event(key(KeyCode::Down), &mut term).await.unwrap();
+    assert_eq!(app.status_panel_menu, Some(1));
+    app.handle_event(key(KeyCode::Down), &mut term).await.unwrap();
+    assert_eq!(app.status_panel_menu, Some(2));
+    app.handle_event(key(KeyCode::Up), &mut term).await.unwrap();
+    assert_eq!(app.status_panel_menu, Some(1));
+
+    // Enter applies the highlighted mode (hide) and closes the menu.
+    app.handle_event(key(KeyCode::Enter), &mut term).await.unwrap();
+    assert_eq!(app.status_panel_menu, None);
+    assert_eq!(app.side_panel_mode, super::SidePanelMode::Hidden);
+
+    // show → Shown(36).
+    app.dispatch_slash("/status-panel", &mut term).await;
+    app.handle_event(key(KeyCode::Enter), &mut term).await.unwrap();
+    assert_eq!(
+        app.side_panel_mode,
+        super::SidePanelMode::Shown(super::TRIGGER_PANEL_WIDTH)
+    );
+
+    // auto → Auto (Down Down Enter).
+    app.dispatch_slash("/status-panel", &mut term).await;
+    app.handle_event(key(KeyCode::Down), &mut term).await.unwrap();
+    app.handle_event(key(KeyCode::Down), &mut term).await.unwrap();
+    app.handle_event(key(KeyCode::Enter), &mut term).await.unwrap();
+    assert_eq!(app.side_panel_mode, super::SidePanelMode::Auto);
+
+    // Esc cancels without touching the mode; the menu consumes unrelated
+    // keys while open (typing never reaches the input).
+    app.side_panel_mode = super::SidePanelMode::Shown(40);
+    app.dispatch_slash("/status-panel", &mut term).await;
+    app.handle_event(key(KeyCode::Down), &mut term).await.unwrap();
+    app.handle_event(key(KeyCode::Char('x')), &mut term)
+        .await
+        .unwrap();
+    assert_eq!(app.input_text(), "", "menu must swallow typing");
+    app.handle_event(key(KeyCode::Esc), &mut term).await.unwrap();
+    assert_eq!(app.status_panel_menu, None);
+    assert_eq!(app.side_panel_mode, super::SidePanelMode::Shown(40));
+}
+
+/// The `/status-panel` menu renders as a centered popup (issue #54): title
+/// "status panel", the three options, and the popup highlight on the
+/// selected option.
+#[tokio::test]
+async fn status_panel_menu_renders_centered_popup_with_highlight() {
+    let (mut app, _rx) = test_app().await;
+    app.status_panel_menu = Some(1); // "hide" highlighted
+    let backend = TestBackend::new(80, 20);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    let buf = terminal.backend().buffer();
+    let text = buffer_text(buf);
+
+    assert!(
+        text.contains("status panel"),
+        "menu title missing:\n{text}"
+    );
+    assert!(text.contains("show"), "menu options missing:\n{text}");
+    assert!(text.contains("hide"), "menu options missing:\n{text}");
+    assert!(text.contains("auto"), "menu options missing:\n{text}");
+
+    // The highlighted option carries the popup's cyan background.
+    let mut highlighted = Vec::new();
+    for y in 0..buf.area().height {
+        if (0..buf.area().width).any(|x| buf[(x, y)].bg == Color::Cyan) {
+            highlighted.push(y);
+        }
+    }
+    assert_eq!(
+        highlighted.len(),
+        1,
+        "expected exactly one highlighted menu row, got rows {highlighted:?}"
+    );
+    let row: String = (0..buf.area().width)
+        .map(|x| buf[(x, highlighted[0])].symbol())
+        .collect::<String>()
+        .trim_end()
+        .to_string();
+    assert!(
+        row.contains("hide"),
+        "highlight must sit on hide, row: {row:?}"
     );
 }
 
