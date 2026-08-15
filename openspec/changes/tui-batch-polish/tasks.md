@@ -93,7 +93,7 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
     thinking 块 buffer bg + padding + 右对齐断言；composer 换色断言；
     默认主题 feed_render / prompt_chrome 现有测试全绿。
   - 验收：`cargo check -p theway-tui`；`cargo test -p theway-tui` 全绿。
-- [ ] 6-dag-graph — `crates/theway-markdown` + `ui/dag_band.rs` +
+- [x] 6-dag-graph — `crates/theway-markdown` + `ui/dag_band.rs` +
   `ui/feed_render.rs`：
   - markdown：`mermaid.rs` 的 `MermaidStyles`/`MermaidArt` 转 `pub`、
     `MermaidStyles` 加 Default、`render()` 转 `pub render_mermaid_art`；
