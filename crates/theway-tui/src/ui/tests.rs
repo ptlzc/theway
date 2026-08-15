@@ -1,5 +1,6 @@
+use super::selection;
 use super::theme::{BlockAlign, Theme};
-use super::{App, AppConfig, collect_slash_commands, snake_loader};
+use super::{App, AppConfig, FeedSelection, collect_slash_commands, snake_loader};
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
@@ -7,8 +8,9 @@ use ratatui::Terminal;
 use ratatui::backend::{CrosstermBackend, TestBackend};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::Color;
-use std::sync::Arc;
+use ratatui::style::{Color, Style};
+use ratatui::text::{Line, Span};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::types::DagEvent;
@@ -116,6 +118,9 @@ async fn test_app() -> (App, mpsc::UnboundedReceiver<WireCommand>) {
     // tests never depend on the machine's theme file (theme-specific tests
     // set `app.theme` explicitly).
     app.theme = super::theme::Theme::default();
+    // Copy sink default: a no-op success handler so mouse tests never touch
+    // the real clipboard (copy-specific tests override it with a recorder).
+    app.copy_handler = Some(Arc::new(|_: String| true));
     (app, command_rx)
 }
 
@@ -717,7 +722,7 @@ async fn drag_on_status_rule_resizes_composer_and_send_resets() {
     app.handle_mouse_drag(5, rule_row.saturating_sub(4));
     assert_eq!(app.manual_composer_rows, Some(5));
     assert_eq!(app.composer_rows(60), 5);
-    app.handle_mouse_up();
+    app.handle_mouse_up().await;
     assert!(app.resize_drag.is_none());
     // Sending resets the dragged height (issue #37).
     app.set_input("/quit");
@@ -786,7 +791,7 @@ async fn composer_rows_drag_override_wins_over_wrapped_height() {
         7,
         "drag override must win over the computed 4 rows and the 6-row cap"
     );
-    app.handle_mouse_up();
+    app.handle_mouse_up().await;
 }
 
 #[tokio::test]
@@ -801,25 +806,239 @@ async fn mouse_drag_selects_feed_lines() {
     terminal.draw(|f| app.render(f)).unwrap();
     let feed = app.last_feed_area.unwrap();
     let anchor_row = feed.y + 2;
+    let top = app.selection_view.top;
     app.handle_mouse_down(mouse_event(
-        2,
+        feed.x + 2,
         anchor_row,
         MouseEventKind::Down(MouseButton::Left),
     ));
-    assert!(app.feed_selection.is_some(), "down must start a selection");
-    app.handle_mouse_drag(2, anchor_row + 3);
     let sel = app.feed_selection.unwrap();
     assert_eq!(
-        sel.range(app.selection_view.total).count(),
-        4,
-        "drag must extend the selection over the rows crossed"
+        sel.anchor, (top + 2, 2),
+        "down must anchor the clicked cell (row, display column)"
     );
-    app.handle_mouse_up();
+    app.handle_mouse_drag(feed.x + 2, anchor_row + 3);
+    let sel = app.feed_selection.unwrap();
+    assert_eq!(
+        sel.head, (top + 5, 2),
+        "drag must extend the head over the rows crossed"
+    );
+    app.handle_mouse_up().await;
     assert!(
         app.feed_selection.is_some(),
         "selection persists after the button is released"
     );
     assert!(!app.mouse_selecting);
+}
+
+/// Mouse column mapping (issue #53): the anchor takes the display column
+/// within the row; a click past the row end clamps to the row's text width
+/// (terminal semantics); the drag updates the head's row and column.
+#[tokio::test]
+async fn mouse_down_maps_display_column_and_clamps_to_row_width() {
+    let (mut app, _rx) = test_app().await;
+    app.feed
+        .push_plain_untimed("abcdef", theway_transport::feed::Level::Output);
+    let backend = TestBackend::new(60, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    let feed = app.last_feed_area.unwrap();
+    let row = feed.y + 1; // "banner" is row 0, "abcdef" is row 1
+
+    app.handle_mouse_down(mouse_event(
+        feed.x + 2,
+        row,
+        MouseEventKind::Down(MouseButton::Left),
+    ));
+    assert_eq!(
+        app.feed_selection.unwrap().anchor,
+        (app.selection_view.top + 1, 2),
+        "click inside the text maps to the display column"
+    );
+    app.handle_mouse_drag(feed.x + 4, row);
+    assert_eq!(
+        app.feed_selection.unwrap().head,
+        (app.selection_view.top + 1, 4),
+        "drag updates the head's row and column"
+    );
+
+    // Release after a real drag copies and keeps the selection.
+    app.handle_mouse_up().await;
+    assert!(app.feed_selection.is_some());
+
+    // A plain click past the row end clamps to the text width...
+    app.handle_mouse_down(mouse_event(
+        feed.x + 30,
+        row,
+        MouseEventKind::Down(MouseButton::Left),
+    ));
+    assert_eq!(
+        app.feed_selection.unwrap().anchor.1,
+        6,
+        "click past the row end clamps to the text width"
+    );
+
+    // ...and releasing without a drag clears the zero-width selection.
+    app.handle_mouse_up().await;
+    assert!(app.feed_selection.is_none());
+}
+
+/// Ctrl+Space selects the visible page; Shift+arrows extend per char / row /
+/// page; Esc clears (issue #53).
+#[tokio::test]
+async fn ctrl_space_selects_page_and_shift_keys_extend_by_char_row_page() {
+    let (mut app, _rx) = test_app().await;
+    for i in 0..30 {
+        app.feed
+            .push_plain_untimed(format!("line-{i:02}"), theway_transport::feed::Level::Output);
+    }
+    let backend = TestBackend::new(60, 14);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    let mut term = terminal_placeholder();
+    let press = |key: KeyEvent| Event::Key(key);
+
+    // Ctrl+Space: (view.top, 0) → (view.bottom, last-row text width).
+    app.handle_event(
+        press(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::CONTROL)),
+        &mut term,
+    )
+    .await
+    .unwrap();
+    let view = app.selection_view;
+    let sel = app.feed_selection.unwrap();
+    assert_eq!(sel.anchor, (view.top, 0), "anchor = first visible row, column 0");
+    assert_eq!(
+        sel.head, (view.bottom, 7),
+        "head = last visible row, its text width"
+    );
+    assert!(
+        view.bottom >= view.top,
+        "the visible page spans at least one row"
+    );
+
+    // Shift+←/→ move one column, clamped to the row width.
+    for _ in 0..2 {
+        app.handle_event(
+            press(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT)),
+            &mut term,
+        )
+        .await
+        .unwrap();
+    }
+    assert_eq!(app.feed_selection.unwrap().head, (view.bottom, 5));
+    app.handle_event(
+        press(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT)),
+        &mut term,
+    )
+    .await
+    .unwrap();
+    assert_eq!(app.feed_selection.unwrap().head, (view.bottom, 6));
+
+    // Shift+↑/↓ move one row, keeping the column.
+    app.handle_event(
+        press(KeyEvent::new(KeyCode::Up, KeyModifiers::SHIFT)),
+        &mut term,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        app.feed_selection.unwrap().head,
+        (view.bottom.saturating_sub(1), 6)
+    );
+    app.handle_event(
+        press(KeyEvent::new(KeyCode::Down, KeyModifiers::SHIFT)),
+        &mut term,
+    )
+    .await
+    .unwrap();
+    assert_eq!(app.feed_selection.unwrap().head, (view.bottom, 6));
+
+    // Shift+PgUp/PgDn move one page.
+    let page = app.last_viewport_h.max(1);
+    app.handle_event(
+        press(KeyEvent::new(KeyCode::PageUp, KeyModifiers::SHIFT)),
+        &mut term,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        app.feed_selection.unwrap().head,
+        (view.bottom.saturating_sub(page), 6)
+    );
+    app.handle_event(
+        press(KeyEvent::new(KeyCode::PageDown, KeyModifiers::SHIFT)),
+        &mut term,
+    )
+    .await
+    .unwrap();
+    assert_eq!(app.feed_selection.unwrap().head, (view.bottom, 6));
+
+    // Esc clears.
+    app.handle_event(
+        press(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        &mut term,
+    )
+    .await
+    .unwrap();
+    assert!(app.feed_selection.is_none());
+}
+
+/// Copy invocation (issue #53): mouse release and Ctrl+Shift+C both push
+/// the extracted text through the clipboard sink and report
+/// `copied N chars · M lines`.
+#[tokio::test]
+async fn copy_selection_reports_chars_and_lines_through_mock_handler() {
+    let (mut app, _rx) = test_app().await;
+    let captured: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+    let sink = captured.clone();
+    app.copy_handler = Some(Arc::new(move |text| {
+        *sink.lock().unwrap() = text;
+        true
+    }));
+    app.feed
+        .push_plain_untimed("alpha", theway_transport::feed::Level::Output);
+    app.feed
+        .push_plain_untimed("beta", theway_transport::feed::Level::Output);
+    app.feed
+        .push_plain_untimed("gamma", theway_transport::feed::Level::Output);
+    let backend = TestBackend::new(60, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    let feed = app.last_feed_area.unwrap();
+
+    // Mouse release after a drag copies the selected cells.
+    app.handle_mouse_down(mouse_event(
+        feed.x,
+        feed.y + 1,
+        MouseEventKind::Down(MouseButton::Left),
+    ));
+    app.handle_mouse_drag(feed.x + 5, feed.y + 3);
+    app.handle_mouse_up().await;
+    assert_eq!(*captured.lock().unwrap(), "alpha\nbeta\ngamma");
+    terminal.draw(|f| app.render(f)).unwrap();
+    let text = buffer_text(terminal.backend().buffer());
+    assert!(
+        text.contains("copied 16 chars · 3 lines"),
+        "system line must report the copy:\n{text}"
+    );
+
+    // Ctrl+Shift+C copies explicitly and keeps the selection.
+    let mut term = terminal_placeholder();
+    app.handle_event(
+        Event::Key(KeyEvent::new(
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        )),
+        &mut term,
+    )
+    .await
+    .unwrap();
+    assert_eq!(*captured.lock().unwrap(), "alpha\nbeta\ngamma");
+    assert!(
+        app.feed_selection.is_some(),
+        "explicit copy must keep the selection (Esc clears)"
+    );
 }
 
 /// Keyboard scroll acceleration (issue #38): consecutive same-direction
@@ -908,7 +1127,8 @@ async fn mouse_wheel_routes_between_composer_textarea_and_feed() {
         text_area.x + 1,
         text_area.y + 1,
         MouseEventKind::ScrollUp,
-    ));
+    ))
+    .await;
     assert_eq!(
         app.scroll, feed_scroll,
         "wheel over the composer must not scroll the feed"
@@ -926,7 +1146,8 @@ async fn mouse_wheel_routes_between_composer_textarea_and_feed() {
         feed.x + 2,
         feed.y + 2,
         MouseEventKind::ScrollDown,
-    ));
+    ))
+    .await;
     assert_eq!(
         app.scroll,
         feed_scroll + super::SCROLL_STEP,
@@ -1742,18 +1963,134 @@ fn assistant_url_uses_hyperlinks_not_regex_scan() {
 }
 
 #[test]
-fn feed_selection_range_and_extend_clamp() {
-    let mut sel = super::FeedSelection { anchor: 10, end: 5 };
-    // Ordered inclusive range.
-    assert_eq!(sel.range(100), 5..=10);
-    // Clamped to the last valid line.
-    assert_eq!(sel.range(8), 5..=7);
-    // Extend up clamps at 0, down clamps at total-1.
-    sel.extend(-100, 100);
-    assert_eq!(sel.end, 0);
-    sel.end = 95;
-    sel.extend(100, 100);
-    assert_eq!(sel.end, 99);
+fn selection_orders_direction_and_paint_cols_clamp_to_row_width() {
+    // Reversed direction normalizes (rows first, then columns).
+    let sel = FeedSelection {
+        anchor: (5, 3),
+        head: (2, 9),
+    };
+    assert_eq!(sel.ordered(), ((2, 9), (5, 3)));
+
+    // A backward drag within one row normalizes by column.
+    let row_sel = FeedSelection {
+        anchor: (2, 3),
+        head: (2, 1),
+    };
+    assert_eq!(row_sel.paint_cols(2, &Line::from("hello")), (1, 3));
+
+    // Columns clamp to the row's text width — wide CJK chars count 2 each,
+    // so a stored column 7 clamps to the 4-column text width.
+    let wide = FeedSelection {
+        anchor: (0, 7),
+        head: (0, 7),
+    };
+    assert_eq!(wide.paint_cols(0, &Line::from("中中")), (4, 4));
+
+    // Boundary rows paint their column slice; interior rows paint full
+    // width; rows outside the selection paint nothing.
+    let lines = [
+        Line::from("hello world"),
+        Line::from("mid"),
+        Line::from("tail"),
+    ];
+    let sel = FeedSelection {
+        anchor: (0, 6),
+        head: (2, 2),
+    };
+    assert_eq!(sel.paint_cols(0, &lines[0]), (6, 11));
+    assert_eq!(sel.paint_cols(1, &lines[1]), (0, 3));
+    assert_eq!(sel.paint_cols(2, &lines[2]), (0, 2));
+    assert_eq!(sel.paint_cols(3, &lines[0]), (0, 0));
+}
+
+#[test]
+fn selection_to_capped_maps_uncapped_rows_and_drops_trimmed() {
+    let sel = FeedSelection {
+        anchor: (10, 2),
+        head: (14, 3),
+    };
+    let capped = sel.to_capped(8, 100).unwrap();
+    assert_eq!(capped.anchor, (2, 2));
+    assert_eq!(capped.head, (6, 3));
+
+    // Entirely above the trimmed head → gone; empty slice → gone.
+    assert!(
+        FeedSelection {
+            anchor: (1, 0),
+            head: (3, 0)
+        }
+        .to_capped(8, 100)
+        .is_none()
+    );
+    assert!(sel.to_capped(0, 0).is_none());
+}
+
+#[test]
+fn extract_text_truncates_boundary_rows_and_joins_with_newlines() {
+    let lines = vec![
+        Line::from("hello world"),
+        Line::from("middle row"),
+        Line::from("tail"),
+    ];
+    let sel = FeedSelection {
+        anchor: (0, 6),
+        head: (2, 2),
+    };
+    assert_eq!(
+        selection::extract_text(&lines, &sel),
+        "world\nmiddle row\nta"
+    );
+
+    // Reversed direction extracts the same normalized text.
+    let rev = FeedSelection {
+        anchor: (2, 2),
+        head: (0, 6),
+    };
+    assert_eq!(selection::extract_text(&lines, &rev), "world\nmiddle row\nta");
+
+    // Wide chars cut on display columns, not bytes: "中文文本" is 8 columns.
+    let wide = vec![Line::from("中文文本")];
+    let sel = FeedSelection {
+        anchor: (0, 2),
+        head: (0, 6),
+    };
+    assert_eq!(selection::extract_text(&wide, &sel), "文文");
+
+    // Trailing filler spans (band padding) never leak into the copy.
+    let padded = Line::from(vec![
+        Span::styled("abc", Style::default()),
+        Span::styled("     ", Style::default()),
+    ]);
+    let sel = FeedSelection {
+        anchor: (0, 0),
+        head: (0, 50),
+    };
+    assert_eq!(selection::extract_text(&[padded], &sel), "abc");
+}
+
+#[test]
+fn highlight_cols_paints_only_the_selected_column_range() {
+    let line = Line::from(vec![
+        Span::styled("abcd", Style::default().fg(Color::Red)),
+        Span::styled("efgh", Style::default().fg(Color::Green)),
+    ]);
+    let mut buf = Buffer::empty(Rect::new(0, 0, 20, 2));
+    selection::highlight_cols(&mut buf, 0, 0, &line, 2, 6);
+
+    let bg = selection::BAND_STYLE.bg.unwrap();
+    for x in 0..20u16 {
+        let cell = &buf[(x, 0)];
+        if (2..6).contains(&x) {
+            assert_eq!(cell.bg, bg, "column {x} must carry the selection bg");
+        } else {
+            assert_ne!(cell.bg, bg, "column {x} must keep its own style");
+        }
+    }
+    // Original colors survive under the selection bg.
+    assert_eq!(buf[(3, 0)].fg, Color::Red);
+    assert_eq!(buf[(5, 0)].fg, Color::Green);
+    // The second row is untouched.
+    assert_ne!(buf[(3, 1)].bg, bg);
 }
 
 fn dag_run(kind: &str) -> theway_transport::wire::WireDagRunSnapshot {

@@ -10,6 +10,7 @@ use ratatui::text::{Line, Span};
 
 use theway_transport::feed::{Block, Level, display_prefix, wrap_str};
 
+use crate::ui::selection::{self, FeedSelection};
 use crate::ui::theme::{BlockAlign, BlockTheme, Theme};
 
 /// Grok tokyonight palette values (xai-grok-pager-render theme/tokyonight.rs).
@@ -55,8 +56,6 @@ pub(crate) const AI_PREFIX_STYLE: Style = Style::new()
     .fg(ACCENT_ASSISTANT)
     .add_modifier(Modifier::BOLD);
 pub(crate) const RESULT_SUMMARY_STYLE: Style = Style::new().fg(Color::DarkGray);
-/// Selection highlight (not a theme role).
-const BAND_STYLE: Style = Style::new().bg(BG_HIGHLIGHT);
 
 fn user_body_style(theme: &Theme) -> Style {
     Style::new().fg(theme.user_text)
@@ -682,13 +681,16 @@ fn apply_block_layout(
 /// cache-friendly replacement for `Paragraph::new(lines).scroll(...)` (issue
 /// #34). Rows outside the window are never touched, and the area is cleared
 /// first so a shrinking feed cannot leave stale cells behind. `selection` is
-/// an inclusive range of *capped* line indices rendered as highlighted rows.
+/// a 2D feed selection in *capped* line coordinates (`(line, display
+/// column)` pairs, issue #53): only the `[c1, c2)` column slice of each
+/// selected row is painted with the selection background — never the whole
+/// line, never the screen width.
 pub fn render_lines_window(
     buf: &mut ratatui::buffer::Buffer,
     area: ratatui::layout::Rect,
     lines: &[Line<'static>],
     offset: usize,
-    selection: Option<std::ops::RangeInclusive<usize>>,
+    selection: Option<FeedSelection>,
 ) {
     for y in area.y..area.bottom() {
         for x in area.x..area.right() {
@@ -703,10 +705,12 @@ pub fn render_lines_window(
             break;
         }
         let y = area.y + row as u16;
-        if selection.as_ref().is_some_and(|sel| sel.contains(&i)) {
-            let mut selected = line.clone();
-            highlight_line(&mut selected);
-            set_line_safe(buf, area.x, y, &selected, area.width);
+        let (c1, c2) = selection
+            .as_ref()
+            .map(|sel| sel.paint_cols(i, line))
+            .unwrap_or((0, 0));
+        if c1 < c2 {
+            selection::highlight_cols(buf, area.x, y, line, c1, c2);
         } else {
             set_line_safe(buf, area.x, y, line, area.width);
         }
@@ -758,14 +762,6 @@ fn push_user_block(out: &mut Vec<Line<'static>>, text: &str, width: usize, theme
             out.push(Line::from(spans));
         }
     }
-}
-
-/// Restyle a rendered feed line as selected (issue #33): the line's spans are
-/// flattened and the whole row carries the selection background. Highlight
-/// only — no copy yet.
-pub fn highlight_line(line: &mut Line<'static>) {
-    let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-    line.spans = vec![Span::styled(text, BAND_STYLE)];
 }
 
 /// Truncate a styled line to `max` display columns, dropping trailing spans
@@ -1651,18 +1647,6 @@ mod tests {
             "expected diagram art: {flat}"
         );
         assert!(!flat.contains("graph TD"), "{flat}");
-    }
-
-    #[test]
-    fn highlight_line_flattens_spans_and_sets_band_bg() {
-        let mut line = Line::from(vec![
-            Span::styled("abc", Style::default().fg(Color::Red)),
-            Span::styled("def", Style::default().fg(Color::Green)),
-        ]);
-        highlight_line(&mut line);
-        assert_eq!(line.spans.len(), 1);
-        assert_eq!(line.spans[0].content, "abcdef");
-        assert_eq!(line.spans[0].style.bg, Some(BG_HIGHLIGHT));
     }
 
     #[test]

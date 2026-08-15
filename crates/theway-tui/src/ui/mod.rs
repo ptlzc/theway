@@ -35,6 +35,10 @@ pub mod dag_band;
 mod pixel_loader;
 pub(crate) mod prompt_chrome;
 mod render_utils;
+/// Character-level feed text selection (issue #53): 2D model + column
+/// clamping + plain-text extraction + column-range painting, shared by the
+/// feed renderer and the input surface.
+pub(crate) mod selection;
 mod snake_loader;
 pub mod stats;
 /// Theme model + `~/.theway/theme.toml` parser (issues #43 + #49). Lives at
@@ -44,6 +48,8 @@ pub mod stats;
 pub(crate) mod theme;
 
 use theme::Theme;
+
+pub(crate) use selection::FeedSelection;
 
 pub use theway_transport::feed::FeedUpdate;
 
@@ -136,32 +142,6 @@ impl PanelStatus {
     }
 }
 
-/// Line range of the feed text selection, in uncapped rendered-line
-/// coordinates (stable across scrollback trimming and streaming appends).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct FeedSelection {
-    pub anchor: usize,
-    pub end: usize,
-}
-
-impl FeedSelection {
-    /// Inclusive ordered range, clamped to `[0, total)`.
-    pub fn range(&self, total: usize) -> std::ops::RangeInclusive<usize> {
-        let total = total.saturating_sub(1);
-        self.anchor.min(self.end).min(total)..=self.anchor.max(self.end).min(total)
-    }
-
-    /// Extend the free end by `delta` lines, clamped to `[0, total)`.
-    pub fn extend(&mut self, delta: isize, total: usize) {
-        let total = total.saturating_sub(1);
-        if delta < 0 {
-            self.end = self.end.saturating_sub(delta.unsigned_abs());
-        } else {
-            self.end = self.end.saturating_add(delta as usize).min(total);
-        }
-    }
-}
-
 /// Per-frame feed geometry (uncapped line indices) cached in the app for the
 /// selection key bindings.
 #[derive(Clone, Copy, Debug, Default)]
@@ -178,6 +158,10 @@ struct ComposerDrag {
     start_row: u16,
     start_rows: u16,
 }
+
+/// Clipboard write sink for tests (`true` = copied): `None` routes to the
+/// real arboard/OSC 52 path in `clipboard_image`; tests inject a recorder.
+type CopyHandler = std::sync::Arc<dyn Fn(String) -> bool + Send + Sync>;
 
 /// Everything the client App needs, assembled by `main.rs` after the daemon
 /// is discovered/spawned and the initial snapshot is fetched.
@@ -258,9 +242,12 @@ pub struct App {
     /// and #49): color roles, block layout and composer style threaded into
     /// every render; reloaded on daemon runtime-revision changes (#50).
     theme: Theme,
-    /// Feed text selection (highlight only, no copy yet — issue #33): line
-    /// range in UNCAPPED rendered-line coordinates.
+    /// Feed text selection (issue #53): `(line, display column)` anchor and
+    /// head in UNCAPPED rendered-line coordinates; columns clamp to each
+    /// row's text width at paint/extract time.
     feed_selection: Option<FeedSelection>,
+    /// Clipboard sink override (`None` = the real arboard/OSC 52 path).
+    copy_handler: Option<CopyHandler>,
     /// Block-level render cache for the feed (issue #34): re-renders only
     /// dirty blocks across snapshot frames.
     feed_cache: crate::feed_cache::FeedRenderCache,
@@ -348,6 +335,7 @@ impl App {
             tools_expanded: false,
             theme: Theme::load(),
             feed_selection: None,
+            copy_handler: None,
             feed_cache: crate::feed_cache::FeedRenderCache::new(),
             selection_view: SelectionView::default(),
             last_viewport_h: 1,
@@ -591,7 +579,7 @@ impl App {
                 // chain (issue #38).
                 self.reset_scroll_repeat();
             }
-            Event::Mouse(m) => self.handle_mouse_event(m),
+            Event::Mouse(m) => self.handle_mouse_event(m).await,
             Event::Paste(text) => {
                 self.insert_paste_text(text);
             }
@@ -641,14 +629,14 @@ impl App {
 
     // ── mouse (issue #37: drag-select feed, drag-resize composer) ──────────────────────────
 
-    fn handle_mouse_event(&mut self, m: MouseEvent) {
+    async fn handle_mouse_event(&mut self, m: MouseEvent) {
         match m.kind {
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
                 self.handle_mouse_scroll(m);
             }
             MouseEventKind::Down(MouseButton::Left) => self.handle_mouse_down(m),
             MouseEventKind::Drag(MouseButton::Left) => self.handle_mouse_drag(m.column, m.row),
-            MouseEventKind::Up(MouseButton::Left) => self.handle_mouse_up(),
+            MouseEventKind::Up(MouseButton::Left) => self.handle_mouse_up().await,
             _ => {}
         }
     }
@@ -687,12 +675,14 @@ impl App {
                 .handle_mouse(m, self.last_text_area.unwrap(), self.input_state);
             return;
         }
-        // Feed: begin a drag selection anchored at the clicked line.
+        // Feed: begin a drag selection anchored at the clicked cell (row,
+        // display column; past the row end clamps to the row end).
         if self.mouse_in_feed(m.column, m.row) {
             let line = self.feed_line_at(m.row);
+            let col = self.feed_column_at(m.column, line);
             self.feed_selection = Some(FeedSelection {
-                anchor: line,
-                end: line,
+                anchor: (line, col),
+                head: (line, col),
             });
             self.mouse_selecting = true;
         }
@@ -710,16 +700,22 @@ impl App {
         }
         if self.mouse_selecting {
             let line = self.feed_line_at(row);
+            let col = self.feed_column_at(column, line);
             if let Some(sel) = self.feed_selection.as_mut() {
-                sel.end = line;
+                sel.head = (line, col);
             }
-            let _ = column;
         }
     }
 
-    fn handle_mouse_up(&mut self) {
+    /// Mouse release ends any drag; a feed drag copies the selection
+    /// (primary-selection semantics, issue #53).
+    async fn handle_mouse_up(&mut self) {
         self.resize_drag = None;
+        let was_selecting = self.mouse_selecting;
         self.mouse_selecting = false;
+        if was_selecting && self.feed_selection.is_some() {
+            self.copy_selection().await;
+        }
     }
 
     fn handle_mouse_scroll(&mut self, m: MouseEvent) {
@@ -766,6 +762,25 @@ impl App {
             .unwrap_or(0);
         let line = self.selection_view.top.saturating_add(rel);
         line.min(self.selection_view.total.saturating_sub(1))
+    }
+
+    /// Display column under terminal `column` in the feed row `line_idx`
+    /// (uncapped): relative to the feed area, clamped to the row's text
+    /// width — terminal semantics, past the row end lands on the row end
+    /// (issue #53).
+    fn feed_column_at(&self, column: u16, line_idx: usize) -> usize {
+        let rel = self
+            .last_feed_area
+            .map(|a| column.saturating_sub(a.x) as usize)
+            .unwrap_or(0);
+        let trimmed = self.feed_cache.trimmed();
+        let width = self
+            .feed_cache
+            .lines()
+            .get(line_idx.saturating_sub(trimmed))
+            .map(|l| selection::line_text_width(l))
+            .unwrap_or(0);
+        rel.min(width)
     }
 
     /// Effective composer row count (issue #40): the mouse-dragged override
@@ -915,23 +930,18 @@ impl App {
             bottom: (display_scroll + trimmed).saturating_add(viewport.saturating_sub(1)),
             total: uncapped_total,
         };
-        // Selection highlight (issue #33) is applied by the window draw; map
-        // the uncapped selection range into capped line indices.
-        let sel_range = self.feed_selection.and_then(|sel| {
-            let range = sel.range(uncapped_total);
-            let start = range.start().saturating_sub(trimmed);
-            let end = range
-                .end()
-                .saturating_sub(trimmed)
-                .min(total.saturating_sub(1));
-            (start <= end).then_some(start..=end)
-        });
+        // Selection highlight (issue #53) is applied by the window draw: map
+        // the uncapped 2D selection onto the capped lines retained by the
+        // cache (head-trimmed rows drop out).
+        let sel_capped = self
+            .feed_selection
+            .and_then(|sel| sel.to_capped(trimmed, total));
         crate::feed_render::render_lines_window(
             frame.buffer_mut(),
             feed_area,
             lines,
             display_scroll,
-            sel_range,
+            sel_capped,
         );
         // Feed scrollbar (theway-pager-render primitive): right edge of the
         // feed pane, subtle while following, brighter when scrolled up.
