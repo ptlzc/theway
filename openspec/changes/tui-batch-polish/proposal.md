@@ -1,17 +1,17 @@
 # tui-batch-polish
 
-Issue: #45（umbrella；子 issue #39-#44、#46-#53）
+Issue: #45（umbrella；子 issue #39-#44、#46-#54）
 
 ## 范围整合
 
-本轮 14 条输入收拢为一个 change、一个 DAG 实施链（同 #38 先例）——
+本轮 15 条输入收拢为一个 change、一个 DAG 实施链（同 #38 先例）——
 之前为每条单独建的 change（tui-composer-features-only-graph-engine /
 tui-composer-single-line-wrap / dag-node-graph-render /
 tui-busy-snake-loader / tui-theme-interface）已并入本 change 并删除，
 理由：涉及文件高度重叠（ui/mod.rs ×7、feed_render.rs ×3），按仓库规则
 共享文件节点必须串行，拆开反而制造合并摩擦。
 
-## 完整清单（14 条）
+## 完整清单（15 条）
 
 **1. composer 右上角 features 只保留 graph engine（#39）**
 
@@ -206,6 +206,27 @@ tui-busy-snake-loader / tui-theme-interface）已并入本 change 并删除，
   供 feed_render/ui 复用）；涉及 feed_render.rs、ui/mod.rs、
   ui/app_input.rs、ui/tests.rs。
 
+**14. 侧边面板拖动调宽 + /status-panel 二级菜单（#54）**
+
+- 现状：面板（Automation）纯自动——`should_show_side_panel()` 有内容
+  且总宽 ≥100 才显示，固定宽 36，用户无法控制。
+- 面板状态（TUI 本地内存态，不持久化）：
+  `enum SidePanelMode { Auto, Shown(u16), Hidden }`，默认 Auto（现状
+  语义，宽 36）。
+- `/status-panel` 二级菜单：居中弹层菜单（Up/Down 移动、Enter 应用、
+  Esc 取消），选项 `show`（Shown(36)）/`hide`（Hidden）/`auto`（Auto）；
+  TUI 本地命令（面板是客户端状态），dispatch_slash 本地分支打开菜单；
+  LOCAL_COMMANDS 加 `status-panel`，/help 同步。
+- 拖动调宽：抓住面板左边界（1 列命中区、整面板高）水平拖动——
+  `width = start_width + (start_col - col)` clamp [24,60]；**拖到面板
+  右缘之外（最右边）或宽度 < 24 → Hidden**；拖动开始即脱离 Auto 进入
+  Shown(width)。
+- 渲染：mode → Option<width>（Auto 用现状门槛；Hidden=None；Shown(w)
+  再 clamp 内容区可用宽），记录 `last_panel_area` 供命中测试；面板边界
+  命中测试先于 feed 拖选（本节点在 10-text-selection 之后，串行无冲突）。
+- 非目标：面板状态持久化、daemon/web 侧 resize、面板内容折叠。
+- 涉及 ui/mod.rs、ui/app_turns.rs、ui/app_input.rs、ui/tests.rs。
+
 ## Out of scope
 
 - #39-#44 为 theway-tui / theway-markdown 纯展示（除 #50/#51 的 wire
@@ -216,6 +237,6 @@ tui-busy-snake-loader / tui-theme-interface）已并入本 change 并删除，
 
 ## Acceptance
 
-- 14 条各自单测 + 编译 + 视觉断言（tmux e2e 截图）通过；
+- 15 条各自单测 + 编译 + 视觉断言（tmux e2e 截图）通过；
   make check / test / lint / fmt-check 全绿。
-- 逐条 close #39-#44、#46-#53，证据贴 #45 后 close #45。
+- 逐条 close #39-#44、#46-#54，证据贴 #45 后 close #45。
