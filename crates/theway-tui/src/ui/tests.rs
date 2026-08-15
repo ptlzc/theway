@@ -2357,6 +2357,54 @@ async fn apply_snapshot_updates_session_id_when_switch_lands() {
     assert_eq!(app.latest.session_id, "sess-9");
 }
 
+/// Issue #50 TUI-side reload: a daemon `reload` bumps the runtime revision,
+/// so `apply_snapshot` re-reads `~/.theway/theme.toml` into `App.theme`.
+#[tokio::test]
+async fn apply_snapshot_reloads_theme_when_runtime_revision_changes() {
+    let (mut app, _rx) = test_app().await;
+    assert_eq!(app.last_runtime_revision, 0);
+
+    // Arrange: pin a sentinel theme so a reload is observable, then publish
+    // a snapshot whose sidebar revision moved.
+    let sentinel = {
+        let mut theme = Theme::default();
+        theme.user_text = Color::Red;
+        theme
+    };
+    app.theme = sentinel;
+    let mut status = fixture_status(Vec::new());
+    status.sidebar.runtime_revision = 7;
+
+    // Act
+    app.apply_snapshot(status);
+
+    // Assert: the theme was reloaded from disk and the revision cached.
+    assert_ne!(app.theme, sentinel);
+    assert_eq!(app.theme, Theme::load());
+    assert_eq!(app.last_runtime_revision, 7);
+}
+
+/// Same revision → no theme re-read (every snapshot would otherwise reload).
+#[tokio::test]
+async fn apply_snapshot_keeps_theme_when_revision_unchanged() {
+    let (mut app, _rx) = test_app().await;
+
+    // Arrange: pin a sentinel theme; the snapshot carries the cached revision.
+    let sentinel = {
+        let mut theme = Theme::default();
+        theme.user_text = Color::Red;
+        theme
+    };
+    app.theme = sentinel;
+
+    // Act
+    app.apply_snapshot(fixture_status(Vec::new()));
+
+    // Assert: no reload happened.
+    assert_eq!(app.theme, sentinel);
+    assert_eq!(app.last_runtime_revision, 0);
+}
+
 fn feed_text(app: &App) -> String {
     crate::feed_render::lines(
         &app.feed,

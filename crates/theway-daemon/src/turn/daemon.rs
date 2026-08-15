@@ -12,6 +12,7 @@
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
@@ -31,6 +32,7 @@ use crate::agent_session::RetrySettings;
 use crate::commands::{self, CommandCtx, CommandOutcome, Registry};
 use crate::control_plane_prompt::UiControlPlanePrompt;
 use crate::session_ops::{CurrentSessionState, SessionFactory};
+use crate::tools::assembly::reload::{self, ReloadRuntime};
 use crate::triggers;
 use crate::{SqliteSessionRepo, bug_report};
 use theway_llm_provider::{ImageContent, Message, Usage};
@@ -116,12 +118,16 @@ pub struct DaemonConfig {
 /// Headless transport host for `thewayd` (gRPC / HTTP / MCP).
 pub struct TurnHost {
     kernel: ReplKernel,
-    registry: Registry,
+    registry: Arc<Registry>,
     completer: SlashCompleter,
     cwd: PathBuf,
     session_id: String,
     log_path: Option<PathBuf>,
     tool_count: usize,
+    /// Process-level reload state (issue #50): registry / cwd / trigger
+    /// executor for the `reload` tool and the revision counter published in
+    /// sidebar snapshots.
+    reload_runtime: Arc<ReloadRuntime>,
 
     feed: Feed,
     /// Incremental plain-text row cache behind `feed_lines` snapshots
@@ -213,13 +219,22 @@ impl TurnHost {
     pub fn new(config: DaemonConfig) -> Self {
         // Scan claude-code-format file commands once at startup; `/reload`
         // rescans them (issue #37).
-        config
-            .registry
-            .set_file_commands(crate::file_commands::scan_file_commands(&config.cwd));
-        let completer = SlashCompleter::from_commands(slash_commands(&config.registry));
+        let registry = Arc::new(config.registry);
+        registry.set_file_commands(crate::file_commands::scan_file_commands(&config.cwd));
+        let completer = SlashCompleter::from_commands(slash_commands(&registry));
+        // Install the process-level reload runtime (issue #50): the `reload`
+        // tool reaches the registry / cwd / trigger executor at execute time
+        // and bumps the revision this host publishes in sidebar snapshots.
+        let reload_runtime = reload::install_runtime(ReloadRuntime {
+            registry: registry.clone(),
+            cwd: config.cwd.clone(),
+            trigger_executor: config.trigger_executor.clone(),
+            revision: Arc::new(AtomicU64::new(0)),
+        });
         Self {
             kernel: ReplKernel::new(config.harness, config.trigger_executor, config.retry),
-            registry: config.registry,
+            registry,
+            reload_runtime,
             completer,
             cwd: config.cwd,
             session_id: config.session_id,
@@ -810,6 +825,9 @@ impl TurnHost {
             // File commands join the snapshot so the TUI popup lists them
             // and a `/reload` republish refreshes them (issue #37).
             commands: self.registry.file_command_names(),
+            // Reload epoch (issue #50): clients cache this and re-read local
+            // resources (theme.toml) when the `reload` tool bumps it.
+            runtime_revision: self.reload_runtime.revision.load(Ordering::SeqCst),
         }
     }
 

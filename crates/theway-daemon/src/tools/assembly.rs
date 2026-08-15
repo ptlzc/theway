@@ -39,6 +39,11 @@ use super::skill_builder;
 use super::subagent::{SubagentTool, SubagentToolsFn};
 use theway_core::multiagent::types::AgentRunResolver;
 
+// The reload tool body lives flat in `src/tools/reload.rs` next to the other
+// tool bodies; the `#[path]` anchor keeps that file layout.
+#[path = "reload.rs"]
+pub mod reload;
+
 /// App-layer factory producing the LOCAL execution tools (bash / fs / git / web / …) —
 /// the part the engine cannot know about. Injected once at assembly; every harness
 /// (main agent and subagents) gets a fresh instance per build.
@@ -83,6 +88,13 @@ pub fn engine_tools(
     ));
     // Skill family — each wires a fresh harness cell per harness build.
     tools.extend(skill_family(skill_harness_cell));
+    // Reload (issue #50): the LLM's single entry point for `/reload`
+    // semantics — rescan file commands + skill catalog and bump the runtime
+    // revision so clients re-read local resources. Resolves the process-level
+    // runtime installed by `TurnHost::new` at execute time.
+    tools.push(Arc::new(reload::ReloadTool::new(
+        skill_harness_cell.clone(),
+    )));
     // Memory: same dir as the parent's store.
     tools.push(Arc::new(MemoryTool::new(memory_dir.to_path_buf())));
     tools

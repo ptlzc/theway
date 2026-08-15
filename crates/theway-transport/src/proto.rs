@@ -394,6 +394,9 @@ fn sidebar_wire(sidebar: Option<&wire::SidebarSnapshot>) -> crate::wire::WireSid
         hooks: sidebar.hooks.clone(),
         runtime: sidebar.runtime.clone(),
         commands: sidebar.commands.clone(),
+        // The proto `SidebarSnapshot` has no runtime_revision field yet; the
+        // gRPC surface reports 0 (the JSON/SSE surface carries the value).
+        runtime_revision: 0,
     }
 }
 

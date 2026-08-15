@@ -330,6 +330,12 @@ pub struct WireSidebarSnapshot {
     /// and `.claude/commands` (claude-code format, issue #37).
     #[serde(default)]
     pub commands: Vec<String>,
+    /// Runtime-reload epoch (issue #50): the daemon bumps this after a
+    /// successful `reload` tool call; clients cache it and re-read local
+    /// resources (e.g. `~/.theway/theme.toml`) when it changes. Serde
+    /// default keeps older snapshots decodable.
+    #[serde(default)]
+    pub runtime_revision: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]

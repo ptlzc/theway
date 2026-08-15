@@ -329,6 +329,10 @@ pub struct App {
     /// and #49): color roles, block layout and composer style threaded into
     /// every render; reloaded on daemon runtime-revision changes (#50).
     theme: Theme,
+    /// Last `sidebar.runtime_revision` seen from the daemon (issue #50): a
+    /// change means the daemon-side `reload` ran, so `apply_snapshot`
+    /// re-reads `~/.theway/theme.toml` into [`App::theme`].
+    last_runtime_revision: u64,
     /// Feed text selection (issue #53): `(line, display column)` anchor and
     /// head in UNCAPPED rendered-line coordinates; columns clamp to each
     /// row's text width at paint/extract time.
@@ -400,6 +404,7 @@ pub struct App {
 impl App {
     pub fn new(config: AppConfig) -> Self {
         let initial = config.initial;
+        let initial_runtime_revision = initial.sidebar.runtime_revision;
         let mut feed = Feed::new();
         feed.replace_blocks(&initial.feed_blocks);
         let completer = SlashCompleter::from_commands(collect_slash_commands(
@@ -440,6 +445,7 @@ impl App {
             thinking_mode: crate::feed_render::ThinkingMode::Full,
             tools_expanded: false,
             theme: Theme::load(),
+            last_runtime_revision: initial_runtime_revision,
             feed_selection: None,
             copy_handler: None,
             feed_cache: crate::feed_cache::FeedRenderCache::new(),
@@ -525,6 +531,14 @@ impl App {
         let old_blocks = self.latest.feed_blocks.clone();
         self.latest = status;
         self.session_id = self.latest.session_id.clone();
+        // Daemon-side reload (issue #50): the `reload` tool bumped the
+        // runtime revision, so re-read the local theme file — theme.toml
+        // edits land without a restart.
+        let runtime_revision = self.latest.sidebar.runtime_revision;
+        if runtime_revision != self.last_runtime_revision {
+            self.last_runtime_revision = runtime_revision;
+            self.theme = Theme::load();
+        }
         let was_busy = self.busy;
         self.busy = self.latest.busy;
         if self.busy && !was_busy {
