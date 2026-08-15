@@ -9,7 +9,7 @@
 
 ## Phase 1 — proto 桥：领域 service 与旧 service 并存
 
- - [ ] **`1-proto-dual`** · agent: executor · [depends: -]
+ - [x] **`1-proto-dual`** · agent: executor · [depends: -]
       `proto/commands.proto` 末尾新增 `service CommandService`（SendMessage / SetModel /
       Cancel / Approve）。`proto/session.proto` 新增 `import "commands.proto";` 与
       `service SessionService`（GetState / ListSessions / CreateSession / SwitchSession /
@@ -30,7 +30,7 @@
 
 ## Phase 2 — 并行迁移：server ∥ transport client ∥ probe ∥ SDK
 
- - [ ] **`2-server-dual`** · agent: executor · [depends: 1-proto-dual]
+ - [x] **`2-server-dual`** · agent: executor · [depends: 1-proto-dual]
       `crates/theway-transport/src/grpc.rs` 用全路径为 `GrpcState` 实现四个新 tonic trait：
       `theway_grpc::command_service_server::CommandService`、
       `theway_grpc::session_service_server::SessionService`、
@@ -46,7 +46,7 @@
       验收: `cargo check -p theway-transport --all-targets`；
       `cargo test -p theway-transport grpc` 通过（旧 trait 测试路径仍工作）。
 
- - [ ] **`3-client-four-stubs`** · agent: executor · [depends: 1-proto-dual]
+ - [x] **`3-client-four-stubs`** · agent: executor · [depends: 1-proto-dual]
       `crates/theway-transport/src/client.rs`：`GrpcClient` 改为持有四个生成客户端
       `SessionServiceClient` / `CommandServiceClient` / `GraphEngineServiceClient` /
       `EventServiceClient`。`connect` 先 `Channel::from_shared(format!("http://{addr}"))`
@@ -56,7 +56,7 @@
       验收: `cargo check -p theway-transport --all-targets`（server/client 桥接期并行，
       行为测试由 `6-tests-dual` 与终态验收覆盖）。
 
- - [ ] **`4-probe-four-stubs`** · agent: executor · [depends: 1-proto-dual]
+ - [x] **`4-probe-four-stubs`** · agent: executor · [depends: 1-proto-dual]
       `crates/theway-probe/src/main.rs`：直接生成客户端改接新服务——
       `run_multi_session` 使用 `SessionServiceClient`（list/create/switch）与
       `CommandServiceClient`（send_message）；`run_get_state` 使用
@@ -65,7 +65,7 @@
       只改: `crates/theway-probe/src/main.rs`。
       验收: `cargo check -p theway-probe`；`cargo build -p theway-probe` 通过。
 
- - [ ] **`5-sdk-four-stubs`** · agent: executor · [depends: 1-proto-dual]
+ - [x] **`5-sdk-four-stubs`** · agent: executor · [depends: 1-proto-dual]
       `sdk/src/client.ts`：`ThewayGrpcClient` 改为持有四个生成 stub
       （`SessionServiceClient` / `CommandServiceClient` / `GraphEngineServiceClient` /
       `EventServiceClient`），构造器逐一创建，方法按领域委托，`close()` 关闭四个。
@@ -79,7 +79,7 @@
 
 ## Phase 3 — transport 生成客户端测试切换
 
- - [ ] **`6-tests-dual`** · agent: executor · [depends: 2-server-dual, 3-client-four-stubs]
+ - [x] **`6-tests-dual`** · agent: executor · [depends: 2-server-dual, 3-client-four-stubs]
       `crates/theway-transport/tests/grpc/mod.rs`：
       `grpc_server_over_transport_serves_client` 改为分别连接
       `SessionServiceClient`（GetState）与 `CommandServiceClient`（SendMessage），并新增断言
@@ -91,7 +91,7 @@
 
 ## Phase 4 — cutover：删除旧 service
 
- - [ ] **`7-cutover`** · agent: executor · [depends: 2-server-dual, 3-client-four-stubs, 4-probe-four-stubs, 5-sdk-four-stubs, 6-tests-dual]
+ - [x] **`7-cutover`** · agent: executor · [depends: 2-server-dual, 3-client-four-stubs, 4-probe-four-stubs, 5-sdk-four-stubs, 6-tests-dual]
       删除 `proto/theway_grpc.proto` 与 `sdk/proto/theway_grpc.proto`。
       `crates/theway-transport/build.rs` / `crates/theway-probe/build.rs` 改为编译
       `commands.proto` / `session.proto` / `graph_engine.proto` / `events.proto` +
@@ -118,7 +118,7 @@
 
 ## Phase 5 — 终态验收
 
- - [ ] **`8-verify`** · agent: verify · [depends: 7-cutover]
+ - [x] **`8-verify`** · agent: verify · [depends: 7-cutover]
       基于最新 HEAD 全量复核：`cargo test --workspace`、
       `cargo clippy --workspace --all-targets -- -D warnings`、
       `cargo fmt --all --check`；`cd sdk && npm run gen && npm run build`；
@@ -129,7 +129,7 @@
 
 ## Phase 6 — 收尾
 
- - [ ] **`9-docs-closeout`** · agent: writer · [depends: 8-verify]
+ - [x] **`9-docs-closeout`** · agent: writer · [depends: 8-verify]
       README / SDK README / docs 中 gRPC service 描述同步为四 service 结构；确认
       `openspec` 本 change 与实现一致；close issue #60。
       只改: `README.md`, `sdk/README.md`, `docs/*`（如需）。
