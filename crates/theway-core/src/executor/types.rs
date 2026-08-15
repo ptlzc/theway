@@ -1,29 +1,20 @@
 //! Supporting types for the [`super::ToolExecutor`] abstraction.
 
-use std::fmt;
-
 use serde::{Deserialize, Serialize};
+use strum::Display;
 
 /// Which execution environment a [`super::ToolExecutor`] dispatches tool calls to.
 ///
 /// Callers (daemons, tests) branch on this to distinguish local editing mode from
 /// remote-sandbox execution; tool *definitions* never depend on it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum ExecutorKind {
     /// Local filesystem and process table (the default editing mode).
     Local,
     /// Remote sandbox environment (stub until a real backend such as e2b lands).
     Sandbox,
-}
-
-impl fmt::Display for ExecutorKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            ExecutorKind::Local => "local",
-            ExecutorKind::Sandbox => "sandbox",
-        })
-    }
 }
 
 /// Captured result of a command executed through [`super::ToolExecutor::run_command`]

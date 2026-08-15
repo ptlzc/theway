@@ -1,5 +1,7 @@
 //! High-frequency event plane types for the job registry (graph mode).
 
+use strum::IntoStaticStr;
+
 /// Capacity of the built-in broadcast channel for [`AgentJobEvent`]s.
 /// Same sizing rationale as `LOOP_EVENT_BROADCAST_CAPACITY`: enough for
 /// bursty output without backpressure on the subagent runner.
@@ -43,7 +45,8 @@ pub enum AgentJobEvent {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, IntoStaticStr)]
+#[strum(serialize_all = "lowercase")]
 pub enum JobStatus {
     Running,
     Succeeded,
@@ -56,12 +59,6 @@ pub enum JobStatus {
 
 impl JobStatus {
     pub fn as_str(&self) -> &'static str {
-        match self {
-            JobStatus::Running => "running",
-            JobStatus::Succeeded => "succeeded",
-            JobStatus::Failed => "failed",
-            JobStatus::Cancelled => "cancelled",
-            JobStatus::Interrupted => "interrupted",
-        }
+        (*self).into()
     }
 }

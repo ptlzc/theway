@@ -2,6 +2,7 @@
 //! `types.ts` (pi-src/extensions/dag-orchestrator).
 
 use serde::{Deserialize, Serialize};
+use strum::IntoStaticStr;
 
 /// Lifecycle of a single DAG node.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -35,8 +36,9 @@ pub enum DagStatus {
 
 /// Run flavour. Goal runs are single-node self-loops driven by the goal.rs
 /// hook (no DAG edges; termination is condition-based, not dependency-based).
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Default, Serialize, Deserialize, IntoStaticStr)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum RunKind {
     #[default]
     Dag,
@@ -45,10 +47,7 @@ pub enum RunKind {
 
 impl RunKind {
     pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Dag => "dag",
-            Self::Goal => "goal",
-        }
+        self.into()
     }
 }
 

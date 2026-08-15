@@ -10,6 +10,7 @@ use std::sync::{Arc, OnceLock};
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use strum::IntoStaticStr;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::types::{DagStatus, RunKind};
 use theway_core::multiagent::registry::AgentJobRegistry;
@@ -25,8 +26,9 @@ pub const CUSTOM_TYPE: &str = "goal_state";
 const TRANSCRIPT_CHAR_LIMIT: usize = 40_000;
 pub const MAX_CONTINUATIONS: u32 = 8;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, IntoStaticStr)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum GoalStatus {
     Pursuing,
     Paused,
@@ -37,13 +39,7 @@ pub enum GoalStatus {
 
 impl GoalStatus {
     pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Pursuing => "pursuing",
-            Self::Paused => "paused",
-            Self::Achieved => "achieved",
-            Self::BudgetLimited => "budget_limited",
-            Self::Cleared => "cleared",
-        }
+        self.into()
     }
 }
 

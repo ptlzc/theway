@@ -20,6 +20,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use strum::{EnumString, IntoStaticStr};
 use tokio_util::sync::CancellationToken;
 
 use theway_llm_provider::{
@@ -56,8 +57,9 @@ pub enum QueueMode {
 
 /// Thinking/reasoning level for the agent runtime. Wider than `theway_llm_provider::ThinkingLevel` because the
 /// agent layer exposes an explicit "off".
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, EnumString, IntoStaticStr)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum ThinkingLevel {
     Off,
     Minimal,
@@ -69,14 +71,7 @@ pub enum ThinkingLevel {
 
 impl ThinkingLevel {
     pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Off => "off",
-            Self::Minimal => "minimal",
-            Self::Low => "low",
-            Self::Medium => "medium",
-            Self::High => "high",
-            Self::Xhigh => "xhigh",
-        }
+        self.into()
     }
 
     /// Translate to the theway-llm-provider `ThinkingLevel`. Returns `None` for `Off` since `theway-llm-provider` has no
@@ -89,22 +84,6 @@ impl ThinkingLevel {
             Self::Medium => Some(theway_llm_provider::ThinkingLevel::Medium),
             Self::High => Some(theway_llm_provider::ThinkingLevel::High),
             Self::Xhigh => Some(theway_llm_provider::ThinkingLevel::Xhigh),
-        }
-    }
-}
-
-impl std::str::FromStr for ThinkingLevel {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "off" => Ok(Self::Off),
-            "minimal" => Ok(Self::Minimal),
-            "low" => Ok(Self::Low),
-            "medium" => Ok(Self::Medium),
-            "high" => Ok(Self::High),
-            "xhigh" => Ok(Self::Xhigh),
-            other => Err(format!("invalid thinking level: {other}")),
         }
     }
 }

@@ -32,6 +32,8 @@ parking_lot = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 serde_yaml = "0.9"
+# Enum ↔ string mapping derives (parse/as_str/Display). Also pulled in by ratatui-core.
+strum = { version = "0.28", features = ["derive"] }
 
 thiserror = "2"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }

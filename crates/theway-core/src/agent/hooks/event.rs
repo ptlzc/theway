@@ -5,12 +5,15 @@
 
 use theway_core::{LoopEvent, SessionEvent};
 
+use strum::{EnumString, IntoStaticStr};
+
 use super::utils::{
     assistant_event_name, compaction_trigger, message_kind, message_summary, result_summary,
     truncate,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumString, IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub(super) enum HookEvent {
     AgentStart,
     AgentEnd,
@@ -27,36 +30,11 @@ pub(super) enum HookEvent {
 
 impl HookEvent {
     pub(super) fn parse(s: &str) -> Option<Self> {
-        match s {
-            "agent_start" => Some(Self::AgentStart),
-            "agent_end" => Some(Self::AgentEnd),
-            "turn_start" => Some(Self::TurnStart),
-            "turn_end" => Some(Self::TurnEnd),
-            "message_start" => Some(Self::MessageStart),
-            "message_update" => Some(Self::MessageUpdate),
-            "message_end" => Some(Self::MessageEnd),
-            "tool_start" => Some(Self::ToolStart),
-            "tool_update" => Some(Self::ToolUpdate),
-            "tool_end" => Some(Self::ToolEnd),
-            "compaction" => Some(Self::Compaction),
-            _ => None,
-        }
+        s.parse().ok()
     }
 
     pub(super) fn as_str(self) -> &'static str {
-        match self {
-            Self::AgentStart => "agent_start",
-            Self::AgentEnd => "agent_end",
-            Self::TurnStart => "turn_start",
-            Self::TurnEnd => "turn_end",
-            Self::MessageStart => "message_start",
-            Self::MessageUpdate => "message_update",
-            Self::MessageEnd => "message_end",
-            Self::ToolStart => "tool_start",
-            Self::ToolUpdate => "tool_update",
-            Self::ToolEnd => "tool_end",
-            Self::Compaction => "compaction",
-        }
+        self.into()
     }
 }
 
