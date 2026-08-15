@@ -118,12 +118,25 @@ impl App {
                 self.follow = true;
             }
             "/help" => self.system_line(
-                "theway client · send messages to the thewayd daemon · local: /login /quit /clear /session switch · everything else forwards to the daemon (/model /goal /triggers /cron /session …)",
+                "theway client · send messages to the thewayd daemon · local: /login /quit /clear /new /session switch · everything else forwards to the daemon (/model /goal /triggers /cron /session …)",
             ),
             "/login" => self.login(args, terminal).await,
             "/session" if args.trim_start().starts_with("switch") => {
                 self.local_session_switch(args).await;
             }
+            "/new" => match self.client.create_session(None).await {
+                Ok(summary) => {
+                    let id = summary.session_id;
+                    // `switch_session` prints its own rejected/error line and
+                    // never returns Err; /new adds the success line on top.
+                    if let Err(e) = self.switch_session(id.clone()).await {
+                        self.error_line(format!("switch session failed: {e}"));
+                    } else {
+                        self.system_line(format!("new session {id}"));
+                    }
+                }
+                Err(e) => self.error_line(format!("create session failed: {e}")),
+            },
             _ => {
                 // Forward to the daemon: it dispatches the full slash registry
                 // (model/goal/triggers/cron/skills/…) and publishes the result.

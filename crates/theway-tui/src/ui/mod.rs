@@ -1646,7 +1646,7 @@ impl App {
                     }
                     "/help" => {
                         println!(
-                            "theway client — send messages to the thewayd daemon; local commands: /login /quit /clear /session"
+                            "theway client — send messages to the thewayd daemon; local commands: /login /quit /clear /new /session"
                         );
                         continue;
                     }
@@ -1743,13 +1743,15 @@ fn shimmer_style(tick: u64) -> Style {
 
 /// Assemble the slash-command completion list: the SDK local command set from
 /// `registry` (`Registry::local()` — quit/clear/help/login/logout/sessions) +
-/// the daemon-side command surface (the daemon owns the full registry; the
-/// client forwards slash text via `send_message`) + skill shortcuts from the
-/// snapshot sidebar + the daemon-scanned claude-code-format file commands
-/// (issue #37) + reference catalog entries (issue #47): every enabled skill
-/// as `skill::<name>` and every MCP tool as `mcp:<tool>` with verbatim
-/// names. Unknown slash commands submitted by the user fall back to a plain
-/// user message (#37 semantics), so the catalog entries are reference info.
+/// the TUI-local command set (`LOCAL_COMMANDS` — commands the client
+/// intercepts and never forwards) + the daemon-side command surface (the
+/// daemon owns the full registry; the client forwards slash text via
+/// `send_message`) + skill shortcuts from the snapshot sidebar + the
+/// daemon-scanned claude-code-format file commands (issue #37) + reference
+/// catalog entries (issue #47): every enabled skill as `skill::<name>` and
+/// every MCP tool as `mcp:<tool>` with verbatim names. Unknown slash commands
+/// submitted by the user fall back to a plain user message (#37 semantics),
+/// so the catalog entries are reference info.
 fn collect_slash_commands(
     registry: &theway_transport::commands::Registry,
     skills: &[theway_transport::wire::WireSkillSnapshot],
@@ -1766,6 +1768,7 @@ fn collect_slash_commands(
         })
         .collect();
     commands.extend(DAEMON_COMMANDS.iter().map(|name| format!("/{name}")));
+    commands.extend(LOCAL_COMMANDS.iter().map(|name| format!("/{name}")));
     commands.extend(file_commands.iter().cloned());
     for skill in skills {
         if let Some(shortcut) = skill.name.split('/').next() {
@@ -1821,6 +1824,12 @@ const DAEMON_COMMANDS: &[&str] = &[
     "crontab",
     "inbox",
 ];
+
+/// TUI-local slash commands (issue #52): dispatched in the client, never
+/// forwarded to the daemon. NOT listed in `DAEMON_COMMANDS` — the daemon has
+/// no `/new` command; the client intercepts it and drives the session-resource
+/// RPCs (`create_session` + `switch_session`) itself.
+const LOCAL_COMMANDS: &[&str] = &["new"];
 
 #[cfg(test)]
 mod tests;

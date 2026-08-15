@@ -1319,6 +1319,80 @@ async fn session_switch_sends_switch_session_rpc() {
     }
 }
 
+/// Issue #52: `/new` creates a fresh session over the session-resource RPC
+/// (`FakeSessionOps` ids come from a counter — the first create yields
+/// `sess-new-1`) and switches to it. The gRPC create handler itself queues a
+/// `SwitchSession` for the new id (becoming current is serialized through the
+/// event loop), and the client-side switch queues a second one — both carry
+/// the new id. The success line notes the new session id.
+#[tokio::test]
+async fn slash_new_creates_and_switches_session() {
+    let (mut app, mut rx) = test_app().await;
+
+    app.dispatch_slash("/new", &mut terminal_placeholder())
+        .await;
+
+    // Assert: both the create-time switch and the client-side switch arrive.
+    for (i, origin) in ["create", "client-side switch"].iter().enumerate() {
+        let cmd = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .expect("no switch_session command")
+            .unwrap();
+        match cmd {
+            WireCommand::SwitchSession { id } => assert_eq!(id, "sess-new-1"),
+            other => panic!("unexpected command after {origin} (index {i}): {other:?}"),
+        }
+    }
+    // Assert: the feed notes the new session id.
+    let text = feed_text(&app);
+    assert!(
+        text.contains("new session sess-new-1"),
+        "feed must note the new session id, got: {text}"
+    );
+}
+
+/// Issue #52 failure path: when `create_session` errors, `/new` reports it as
+/// an error line (the daemon never sees a forward).
+#[tokio::test]
+async fn slash_new_create_failure_shows_error_line() {
+    let (mut app, rx) = test_app().await;
+    // Dropping the command receiver closes the event-loop channel: the gRPC
+    // create handler fails its SwitchSession enqueue with `unavailable`, so
+    // `create_session` errors before any switch happens.
+    drop(rx);
+
+    app.dispatch_slash("/new", &mut terminal_placeholder())
+        .await;
+
+    // Assert: the create failure surfaces on the error line.
+    let text = feed_text(&app);
+    assert!(
+        text.contains("error: create session failed"),
+        "feed must show the create failure, got: {text}"
+    );
+}
+
+/// Issue #52: `/new` completes as a TUI-local command (`LOCAL_COMMANDS`) and
+/// stays out of the daemon-side command table the client forwards.
+#[test]
+fn collect_slash_commands_includes_local_new_command() {
+    // Arrange
+    let registry = crate::local_commands::local_registry();
+
+    // Act
+    let commands = collect_slash_commands(&registry, &[], &[], &[]);
+
+    // Assert
+    assert!(
+        commands.contains(&"/new".to_string()),
+        "completion list must contain /new, got: {commands:?}"
+    );
+    assert!(
+        !super::DAEMON_COMMANDS.contains(&"new"),
+        "/new is TUI-local and must not live in the daemon command table"
+    );
+}
+
 fn feed_text(app: &App) -> String {
     crate::feed_render::lines(
         &app.feed,
