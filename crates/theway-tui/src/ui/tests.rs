@@ -687,7 +687,10 @@ async fn slash_popup_filters_skill_and_mcp_catalogs_by_prefix() {
         app.completions
     );
     assert!(app.completions.contains(&"/skill::code-review".to_string()));
-    assert!(!app.completions.contains(&"/skill::secrets-check".to_string()));
+    assert!(
+        !app.completions
+            .contains(&"/skill::secrets-check".to_string())
+    );
 
     // Act: the mcp catalog prefix filters to MCP tools only.
     app.set_input("/mcp:");
@@ -989,13 +992,15 @@ async fn mouse_drag_selects_feed_lines() {
     ));
     let sel = app.feed_selection.unwrap();
     assert_eq!(
-        sel.anchor, (top + 2, 2),
+        sel.anchor,
+        (top + 2, 2),
         "down must anchor the clicked cell (row, display column)"
     );
     app.handle_mouse_drag(feed.x + 2, anchor_row + 3);
     let sel = app.feed_selection.unwrap();
     assert_eq!(
-        sel.head, (top + 5, 2),
+        sel.head,
+        (top + 5, 2),
         "drag must extend the head over the rows crossed"
     );
     app.handle_mouse_up().await;
@@ -1064,8 +1069,10 @@ async fn mouse_down_maps_display_column_and_clamps_to_row_width() {
 async fn ctrl_space_selects_page_and_shift_keys_extend_by_char_row_page() {
     let (mut app, _rx) = test_app().await;
     for i in 0..30 {
-        app.feed
-            .push_plain_untimed(format!("line-{i:02}"), theway_transport::feed::Level::Output);
+        app.feed.push_plain_untimed(
+            format!("line-{i:02}"),
+            theway_transport::feed::Level::Output,
+        );
     }
     let backend = TestBackend::new(60, 14);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -1082,9 +1089,14 @@ async fn ctrl_space_selects_page_and_shift_keys_extend_by_char_row_page() {
     .unwrap();
     let view = app.selection_view;
     let sel = app.feed_selection.unwrap();
-    assert_eq!(sel.anchor, (view.top, 0), "anchor = first visible row, column 0");
     assert_eq!(
-        sel.head, (view.bottom, 7),
+        sel.anchor,
+        (view.top, 0),
+        "anchor = first visible row, column 0"
+    );
+    assert_eq!(
+        sel.head,
+        (view.bottom, 7),
         "head = last visible row, its text width"
     );
     assert!(
@@ -1825,21 +1837,29 @@ async fn status_panel_slash_opens_menu_and_keys_apply_or_cancel() {
     assert_eq!(app.status_panel_menu, Some(0));
 
     // Down/Down highlight hide then auto; Up moves back.
-    app.handle_event(key(KeyCode::Down), &mut term).await.unwrap();
+    app.handle_event(key(KeyCode::Down), &mut term)
+        .await
+        .unwrap();
     assert_eq!(app.status_panel_menu, Some(1));
-    app.handle_event(key(KeyCode::Down), &mut term).await.unwrap();
+    app.handle_event(key(KeyCode::Down), &mut term)
+        .await
+        .unwrap();
     assert_eq!(app.status_panel_menu, Some(2));
     app.handle_event(key(KeyCode::Up), &mut term).await.unwrap();
     assert_eq!(app.status_panel_menu, Some(1));
 
     // Enter applies the highlighted mode (hide) and closes the menu.
-    app.handle_event(key(KeyCode::Enter), &mut term).await.unwrap();
+    app.handle_event(key(KeyCode::Enter), &mut term)
+        .await
+        .unwrap();
     assert_eq!(app.status_panel_menu, None);
     assert_eq!(app.side_panel_mode, super::SidePanelMode::Hidden);
 
     // show → Shown(36).
     app.dispatch_slash("/status-panel", &mut term).await;
-    app.handle_event(key(KeyCode::Enter), &mut term).await.unwrap();
+    app.handle_event(key(KeyCode::Enter), &mut term)
+        .await
+        .unwrap();
     assert_eq!(
         app.side_panel_mode,
         super::SidePanelMode::Shown(super::TRIGGER_PANEL_WIDTH)
@@ -1847,21 +1867,31 @@ async fn status_panel_slash_opens_menu_and_keys_apply_or_cancel() {
 
     // auto → Auto (Down Down Enter).
     app.dispatch_slash("/status-panel", &mut term).await;
-    app.handle_event(key(KeyCode::Down), &mut term).await.unwrap();
-    app.handle_event(key(KeyCode::Down), &mut term).await.unwrap();
-    app.handle_event(key(KeyCode::Enter), &mut term).await.unwrap();
+    app.handle_event(key(KeyCode::Down), &mut term)
+        .await
+        .unwrap();
+    app.handle_event(key(KeyCode::Down), &mut term)
+        .await
+        .unwrap();
+    app.handle_event(key(KeyCode::Enter), &mut term)
+        .await
+        .unwrap();
     assert_eq!(app.side_panel_mode, super::SidePanelMode::Auto);
 
     // Esc cancels without touching the mode; the menu consumes unrelated
     // keys while open (typing never reaches the input).
     app.side_panel_mode = super::SidePanelMode::Shown(40);
     app.dispatch_slash("/status-panel", &mut term).await;
-    app.handle_event(key(KeyCode::Down), &mut term).await.unwrap();
+    app.handle_event(key(KeyCode::Down), &mut term)
+        .await
+        .unwrap();
     app.handle_event(key(KeyCode::Char('x')), &mut term)
         .await
         .unwrap();
     assert_eq!(app.input_text(), "", "menu must swallow typing");
-    app.handle_event(key(KeyCode::Esc), &mut term).await.unwrap();
+    app.handle_event(key(KeyCode::Esc), &mut term)
+        .await
+        .unwrap();
     assert_eq!(app.status_panel_menu, None);
     assert_eq!(app.side_panel_mode, super::SidePanelMode::Shown(40));
 }
@@ -1879,10 +1909,7 @@ async fn status_panel_menu_renders_centered_popup_with_highlight() {
     let buf = terminal.backend().buffer();
     let text = buffer_text(buf);
 
-    assert!(
-        text.contains("status panel"),
-        "menu title missing:\n{text}"
-    );
+    assert!(text.contains("status panel"), "menu title missing:\n{text}");
     assert!(text.contains("show"), "menu options missing:\n{text}");
     assert!(text.contains("hide"), "menu options missing:\n{text}");
     assert!(text.contains("auto"), "menu options missing:\n{text}");
@@ -2837,7 +2864,10 @@ fn extract_text_truncates_boundary_rows_and_joins_with_newlines() {
         anchor: (2, 2),
         head: (0, 6),
     };
-    assert_eq!(selection::extract_text(&lines, &rev), "world\nmiddle row\nta");
+    assert_eq!(
+        selection::extract_text(&lines, &rev),
+        "world\nmiddle row\nta"
+    );
 
     // Wide chars cut on display columns, not bytes: "中文文本" is 8 columns.
     let wide = vec![Line::from("中文文本")];

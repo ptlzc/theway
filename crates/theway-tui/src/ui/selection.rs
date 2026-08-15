@@ -69,8 +69,16 @@ impl FeedSelection {
             return (0, 0);
         }
         let width = line_text_width(line);
-        let c1 = if row == start.0 { start.1.min(width) } else { 0 };
-        let c2 = if row == end.0 { end.1.min(width) } else { width };
+        let c1 = if row == start.0 {
+            start.1.min(width)
+        } else {
+            0
+        };
+        let c2 = if row == end.0 {
+            end.1.min(width)
+        } else {
+            width
+        };
         (c1.min(c2), c1.max(c2))
     }
 }
@@ -143,10 +151,14 @@ fn line_slice(line: &Line<'_>, c1: usize, c2: usize) -> String {
         if pos >= c2 {
             break;
         }
-        let cut_start =
-            theway_pager_render::line_utils::byte_offset_at_width(&span.content, c1.saturating_sub(pos));
-        let cut_end =
-            theway_pager_render::line_utils::byte_offset_at_width(&span.content, c2.saturating_sub(pos));
+        let cut_start = theway_pager_render::line_utils::byte_offset_at_width(
+            &span.content,
+            c1.saturating_sub(pos),
+        );
+        let cut_end = theway_pager_render::line_utils::byte_offset_at_width(
+            &span.content,
+            c2.saturating_sub(pos),
+        );
         out.push_str(&span.content[cut_start..cut_end]);
         pos = span_end;
     }
@@ -191,10 +203,14 @@ fn paint_slice(line: &Line<'static>, c1: usize, c2: usize) -> Line<'static> {
         if span_end <= c1 || pos >= c2 {
             spans.push(span.clone());
         } else {
-            let cut_start =
-                theway_pager_render::line_utils::byte_offset_at_width(&span.content, c1.saturating_sub(pos));
-            let cut_end =
-                theway_pager_render::line_utils::byte_offset_at_width(&span.content, c2.saturating_sub(pos));
+            let cut_start = theway_pager_render::line_utils::byte_offset_at_width(
+                &span.content,
+                c1.saturating_sub(pos),
+            );
+            let cut_end = theway_pager_render::line_utils::byte_offset_at_width(
+                &span.content,
+                c2.saturating_sub(pos),
+            );
             if cut_start > 0 {
                 spans.push(Span::styled(
                     span.content[..cut_start].to_string(),
