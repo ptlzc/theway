@@ -72,7 +72,7 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
   - 测试：thinking_stats_line 格式断言（in/out 出现）；opts 相等语义
     测试（cps 变化仍相等、mode 变化不等）。
   - 验收：`cargo check -p theway-tui`；`cargo test -p theway-tui` 全绿。
-- [ ] 5-theme — 新 `crates/theway-tui/src/theme.rs` + `feed_render.rs` +
+- [x] 5-theme — 新 `crates/theway-tui/src/theme.rs` + `feed_render.rs` +
   `prompt_chrome.rs` + `ui/mod.rs` + `ui/tests.rs`（#43 + #49）：
   - `Theme`（颜色角色 + 块布局 + composer 样式，Default = 现状 const 色）
     + `Theme::load`（`[colors]` 表 + `[blocks.*]` 段 + `[composer]` 表
