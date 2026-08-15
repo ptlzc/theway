@@ -1,0 +1,49 @@
+// Session resource domain: session summaries and the list/create/switch/
+// rename/delete request and response messages.
+
+syntax = "proto3";
+package theway.grpc.v1;
+
+message SessionSummary {
+  string session_id = 1;
+  string name = 2;
+  string cwd = 3;
+  string model = 4;
+  string created_at = 5;
+  int64 last_activity_at = 6;
+  uint32 graph_count = 7;
+  uint32 active_graph_count = 8;
+  bool busy = 9;
+  optional string preview = 10;
+}
+
+message ListSessionsResponse {
+  repeated SessionSummary sessions = 1;
+  string current_session_id = 2;
+}
+
+message CreateSessionRequest {
+  optional string name = 1;
+}
+
+message CreateSessionResponse {
+  SessionSummary session = 1;
+}
+
+message SwitchSessionRequest {
+  string session_id = 1;
+}
+
+message RenameSessionRequest {
+  string session_id = 1;
+  string name = 2;
+}
+
+message DeleteSessionRequest {
+  string session_id = 1;
+}
+
+message DeleteSessionResponse {
+  // Non-empty = deletion refused, these graphs are still running.
+  repeated string running_run_ids = 1;
+}

@@ -15,17 +15,21 @@ fi
 
 mkdir -p "$OUT"
 
+# proto/theway_grpc.proto is the service entrypoint; protoc resolves its
+# domain imports and ts-proto writes one generated file per proto file.
+#
 # ts-proto options:
 #   outputClientImpl=grpc-js  — client stubs only (no server side)
 #   esModuleInterop=true      — ES module imports
 #   useOptionals=true         — proto3 fields optional (no fake ""/0 defaults)
 #   forceLong=string          — int64/uint64 as string (matches proto-loader longs: String)
 #   oneof=unions              — oneof as discriminated $case unions
+#   importSuffix=.js          — NodeNext-compatible relative imports between split files
 "$PROTOC" \
   --plugin="protoc-gen-ts_proto=$PLUGIN" \
   --ts_proto_out="$OUT" \
   --proto_path=proto \
-  --ts_proto_opt=outputServices=grpc-js,outputClientImpl=grpc-js,esModuleInterop=true,useOptionals=messages,forceLong=string,oneof=unions \
+  --ts_proto_opt=outputServices=grpc-js,outputClientImpl=grpc-js,esModuleInterop=true,useOptionals=messages,forceLong=string,oneof=unions,importSuffix=.js \
   proto/theway_grpc.proto proto/health.proto
 
 echo "generated:"

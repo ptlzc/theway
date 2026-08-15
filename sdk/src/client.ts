@@ -1,40 +1,48 @@
 import * as grpc from '@grpc/grpc-js';
 import {
   ThewayGrpcClient as ThewayGrpcClientCtor,
-  MessageMode,
+  type ThewayGrpcClient as ThewayGrpcClientApi,
 } from './generated/theway_grpc.js';
+import {
+  MessageMode,
+  type ApproveRequest,
+  type CommandResult,
+  type Empty,
+  type SendMessageRequest,
+  type SetModelRequest,
+} from './generated/common.js';
+import type { SessionState } from './generated/state.js';
+import type { StreamFrame } from './generated/events.js';
 import type {
-  ApproveRequest,
-  CommandResult,
-  CreateSessionRequest,
-  CreateSessionResponse,
-  DeleteSessionRequest,
-  DeleteSessionResponse,
-  Empty,
-  GetNodeOutputRequest,
-  GetNodeOutputResponse,
   GraphCancelRequest,
-  GraphCheckpointRequest,
-  GraphCheckpointResponse,
-  GraphListRequest,
-  GraphListResponse,
   GraphNodeInterruptRequest,
   GraphNodeSteerRequest,
-  GraphRestoreRequest,
-  GraphRestoreResponse,
   GraphRetryRequest,
   GraphRetryResponse,
   GraphSkipRequest,
   GraphSkipResponse,
+} from './generated/graph_control.js';
+import type {
+  GraphCheckpointRequest,
+  GraphCheckpointResponse,
+  GraphRestoreRequest,
+  GraphRestoreResponse,
+} from './generated/graph_checkpoint.js';
+import type {
+  GetNodeOutputRequest,
+  GetNodeOutputResponse,
+  GraphListRequest,
+  GraphListResponse,
+} from './generated/graph_output.js';
+import type {
+  CreateSessionRequest,
+  CreateSessionResponse,
+  DeleteSessionRequest,
+  DeleteSessionResponse,
   ListSessionsResponse,
   RenameSessionRequest,
-  SendMessageRequest,
-  SessionState,
-  SetModelRequest,
-  StreamFrame,
   SwitchSessionRequest,
-  ThewayGrpcClient as ThewayGrpcClientApi,
-} from './generated/theway_grpc.js';
+} from './generated/session.js';
 
 // ── authority cleaning ──
 
@@ -43,8 +51,8 @@ const TRAILING_SLASHES = /\/+$/;
 
 /**
  * Typed gRPC client for the `theway --grpc` loopback server
- * (theway.grpc.v1.ThewayGrpc). Generated from proto/theway_grpc.proto
- * (ts-proto + @grpc/grpc-js) — no runtime proto loading.
+ * (theway.grpc.v1.ThewayGrpc). Generated from proto/theway_grpc.proto and its
+ * domain imports (ts-proto + @grpc/grpc-js) — no runtime proto loading.
  *
  * Command RPCs (SendMessage / SetModel / …) resolve the raw CommandResult;
  * the convenience wrappers (`prompt`, `setModelSpec`, `abort`, …) throw when

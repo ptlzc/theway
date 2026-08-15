@@ -1,7 +1,7 @@
 {
   "name": "@theway-ai/sdk",
   "version": "1.0.1",
-  "description": "TypeScript SDK for the theway gRPC daemon (theway.grpc.v1 + grpc.health.v1). Typed client for all RPCs, generated from proto/theway_grpc.proto via ts-proto.",
+  "description": "TypeScript SDK for the theway gRPC daemon (theway.grpc.v1 + grpc.health.v1). Typed client for all RPCs, generated from the split proto/theway_grpc.proto domain files via ts-proto.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",

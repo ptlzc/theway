@@ -1,0 +1,27 @@
+// Sidebar domain: the daemon-pushed sidebar snapshot. Component snapshot
+// groups live in their own files in this package.
+
+syntax = "proto3";
+package theway.grpc.v1;
+
+import "cron.proto";
+import "sidebar_tools.proto";
+import "skills.proto";
+import "triggers.proto";
+
+message SidebarSnapshot {
+  uint32 inbox_new = 1;
+  SkillsSnapshot skills = 2;
+  TriggersSnapshot triggers = 3;
+  CronSnapshot cron = 4;
+  McpSnapshot mcp = 5;
+  ToolsSnapshot tools = 6;
+  repeated string hooks = 7;
+  repeated string runtime = 8;
+  // Slash-prefixed file-command names (claude-code format, issue #37):
+  // discovered from .agents/commands + .claude/commands.
+  repeated string commands = 9;
+  // Daemon runtime revision, bumped by the `reload` agent tool; clients
+  // watch it to re-read local resources (e.g. ~/.theway/theme.toml).
+  uint64 runtime_revision = 10;
+}

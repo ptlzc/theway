@@ -1,0 +1,45 @@
+// Graph checkpoint domain: run kind plus portable checkpoint export/restore
+// snapshots. Planning is agent-side; this surface only restores run state.
+
+syntax = "proto3";
+package theway.grpc.v1;
+
+enum GraphKind {
+  GRAPH_DAG = 0;
+  GRAPH_GOAL = 1;
+}
+
+// Checkpoints are organized by session: a session owns its runs
+// (DagRun.session_id), and `SessionState.dags` mounts the live graph status
+// under that session. Checkpoint exports one run or the session's whole graph
+// set as portable JSON snapshots; restore revives them back under the session.
+message GraphCheckpointRequest {
+  // Owning session. Omitted = the session this connection belongs to.
+  optional string session_id = 1;
+  // Omitted = every running run of the session; set to export a single run.
+  optional string run_id = 2;
+}
+
+message GraphCheckpointResponse {
+  string session_id = 1;
+  repeated GraphSnapshotEntry checkpoints = 2;
+  optional string error = 3;
+}
+
+message GraphSnapshotEntry {
+  GraphKind kind = 1;
+  string run_id = 2;
+  string snapshot = 3; // JSON (PersistedRun shape: definition, node states, progress)
+}
+
+// Restore: resume run(s) from GraphCheckpoint snapshots. Running runs are
+// revived with their ready nodes re-scheduled, and re-attached to the session.
+message GraphRestoreRequest {
+  string session_id = 1;
+  string snapshot = 2; // single GraphSnapshotEntry.snapshot (PersistedRun JSON)
+}
+
+message GraphRestoreResponse {
+  string run_id = 1;
+  optional string error = 2;
+}

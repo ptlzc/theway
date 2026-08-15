@@ -1,0 +1,39 @@
+// Graph control domain: cancel/retry/skip plus turn-level interrupt/steer for
+// DAG and goal runs. Checkpoint/restore lives in graph_checkpoint.proto.
+
+syntax = "proto3";
+package theway.grpc.v1;
+
+message GraphCancelRequest {
+  string run_id = 1;
+}
+
+message GraphRetryRequest {
+  string run_id = 1;
+  optional string node_id = 2; // omitted = all failed/cancelled nodes
+}
+
+message GraphRetryResponse {
+  repeated string reset_node_ids = 1;
+}
+
+message GraphSkipRequest {
+  string run_id = 1;
+  string node_id = 2;
+}
+
+// Turn-level control for a running DAG node's subagent.
+message GraphNodeInterruptRequest {
+  string run_id = 1;
+  string node_id = 2;
+}
+
+message GraphNodeSteerRequest {
+  string run_id = 1;
+  string node_id = 2;
+  string text = 3;
+}
+
+message GraphSkipResponse {
+  bool skipped = 1;
+}
