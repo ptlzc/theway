@@ -19,24 +19,25 @@ import {
   type ServiceError,
   type UntypedServiceImplementation,
 } from "@grpc/grpc-js";
-import { ApproveRequest, CommandResult, Empty, SendMessageRequest, SetModelRequest } from "./common.js";
+import { ApproveRequest, CommandResult, Empty, SendMessageRequest, SetModelRequest } from "./commands.js";
 import { StreamFrame } from "./events.js";
 import {
+  GetNodeOutputRequest,
+  GetNodeOutputResponse,
+  GraphCancelRequest,
   GraphCheckpointRequest,
   GraphCheckpointResponse,
-  GraphRestoreRequest,
-  GraphRestoreResponse,
-} from "./graph_checkpoint.js";
-import {
-  GraphCancelRequest,
+  GraphListRequest,
+  GraphListResponse,
   GraphNodeInterruptRequest,
   GraphNodeSteerRequest,
+  GraphRestoreRequest,
+  GraphRestoreResponse,
   GraphRetryRequest,
   GraphRetryResponse,
   GraphSkipRequest,
   GraphSkipResponse,
-} from "./graph_control.js";
-import { GetNodeOutputRequest, GetNodeOutputResponse, GraphListRequest, GraphListResponse } from "./graph_output.js";
+} from "./graph_engine.js";
 import {
   CreateSessionRequest,
   CreateSessionResponse,
@@ -44,9 +45,9 @@ import {
   DeleteSessionResponse,
   ListSessionsResponse,
   RenameSessionRequest,
+  SessionState,
   SwitchSessionRequest,
 } from "./session.js";
-import { SessionState } from "./state.js";
 
 export const protobufPackage = "theway.grpc.v1";
 

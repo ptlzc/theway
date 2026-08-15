@@ -10,30 +10,25 @@ import {
   type Empty,
   type SendMessageRequest,
   type SetModelRequest,
-} from './generated/common.js';
-import type { SessionState } from './generated/state.js';
+} from './generated/commands.js';
 import type { StreamFrame } from './generated/events.js';
 import type {
+  GetNodeOutputRequest,
+  GetNodeOutputResponse,
   GraphCancelRequest,
+  GraphCheckpointRequest,
+  GraphCheckpointResponse,
+  GraphListRequest,
+  GraphListResponse,
   GraphNodeInterruptRequest,
   GraphNodeSteerRequest,
+  GraphRestoreRequest,
+  GraphRestoreResponse,
   GraphRetryRequest,
   GraphRetryResponse,
   GraphSkipRequest,
   GraphSkipResponse,
-} from './generated/graph_control.js';
-import type {
-  GraphCheckpointRequest,
-  GraphCheckpointResponse,
-  GraphRestoreRequest,
-  GraphRestoreResponse,
-} from './generated/graph_checkpoint.js';
-import type {
-  GetNodeOutputRequest,
-  GetNodeOutputResponse,
-  GraphListRequest,
-  GraphListResponse,
-} from './generated/graph_output.js';
+} from './generated/graph_engine.js';
 import type {
   CreateSessionRequest,
   CreateSessionResponse,
@@ -41,6 +36,7 @@ import type {
   DeleteSessionResponse,
   ListSessionsResponse,
   RenameSessionRequest,
+  SessionState,
   SwitchSessionRequest,
 } from './generated/session.js';
 

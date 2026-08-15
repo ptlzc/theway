@@ -6,8 +6,221 @@
 
 /* eslint-disable */
 import { BinaryReader, BinaryWriter } from "@bufbuild/protobuf/wire";
+import { DagRunSnapshot, SubagentJobSnapshot } from "./graph_engine.js";
 
 export const protobufPackage = "theway.grpc.v1";
+
+/**
+ * Full session state (the structured form of the former WireSnapshot JSON).
+ * Low-frequency, whole-replacement: GetState / stream snapshot frames.
+ */
+export interface SessionState {
+  sessionId: string;
+  model: string;
+  modelCatalog: ProviderGroup[];
+  cwd: string;
+  busy: boolean;
+  queuedCount: number;
+  latestTriggerPoll?: TriggerPollStatus | undefined;
+  goal?: GoalSnapshot | undefined;
+  controlPlanePrompt?: ControlPlanePromptSnapshot | undefined;
+  sidebar?: SidebarSnapshot | undefined;
+  feedBlocks: FeedBlock[];
+  feedLines: string[];
+  /** graph mode (P1/P2 fill these): */
+  dags: DagRunSnapshot[];
+  subagents: SubagentJobSnapshot[];
+  /** TUI display settings pushed from the daemon (read from config.toml). */
+  tuiMaxFeedLines?:
+    | number
+    | undefined;
+  /** Token usage + context window for the live session. */
+  contextUsage?:
+    | ContextUsage
+    | undefined;
+  /**
+   * Absolute index of feed_lines[0] in the full transcript (issue #35):
+   * stream snapshots carry only rows appended since the last publish; the
+   * initial get_state snapshot carries everything (base 0).
+   */
+  feedLinesBase: string;
+}
+
+/** Token usage for the current/last turn, plus the model's context window size. */
+export interface ContextUsage {
+  inputTokens: string;
+  outputTokens: string;
+  cacheReadTokens: string;
+  cacheWriteTokens: string;
+  totalTokens: string;
+  contextWindow: number;
+}
+
+export interface ProviderGroup {
+  provider: string;
+  hasCredential: boolean;
+  models: ModelEntry[];
+}
+
+export interface ModelEntry {
+  id: string;
+  name: string;
+}
+
+export interface TriggerPollStatus {
+  checkedAt: string;
+  traceId: string;
+  sourceLabel: string;
+  eventLabel: string;
+  summary: string;
+}
+
+export interface GoalSnapshot {
+  condition: string;
+  status: string;
+  iterations: number;
+  lastReason?: string | undefined;
+}
+
+export interface ControlPlanePromptSnapshot {
+  toolName: string;
+  label: string;
+  reason: string;
+  argsHash: string;
+  payload: string;
+}
+
+export interface SidebarSnapshot {
+  inboxNew: number;
+  skills?: SkillsSnapshot | undefined;
+  triggers?: TriggersSnapshot | undefined;
+  cron?: CronSnapshot | undefined;
+  mcp?: McpSnapshot | undefined;
+  tools?: ToolsSnapshot | undefined;
+  hooks: string[];
+  runtime: string[];
+  /**
+   * Slash-prefixed file-command names (claude-code format, issue #37):
+   * discovered from .agents/commands + .claude/commands.
+   */
+  commands: string[];
+  /**
+   * Daemon runtime revision, bumped by the `reload` agent tool; clients
+   * watch it to re-read local resources (e.g. ~/.theway/theme.toml).
+   */
+  runtimeRevision: string;
+}
+
+export interface SkillsSnapshot {
+  total: number;
+  enabled: number;
+  disabled: number;
+  builtin: number;
+  user: number;
+  project: number;
+  items: SkillSnapshot[];
+}
+
+export interface SkillSnapshot {
+  name: string;
+  source: string;
+  filePath: string;
+  enabled: boolean;
+}
+
+export interface TriggersSnapshot {
+  total: number;
+  enabled: number;
+  disabled: number;
+  rules: TriggerRuleSnapshot[];
+}
+
+export interface TriggerRuleSnapshot {
+  id: string;
+  fullId: string;
+  enabled: boolean;
+  mode: string;
+  condition: string;
+  action: string;
+}
+
+export interface CronSnapshot {
+  total: number;
+  enabled: number;
+  disabled: number;
+  jobs: CronJobSnapshot[];
+}
+
+export interface CronJobSnapshot {
+  id: string;
+  enabled: boolean;
+  schedule: string;
+  action: string;
+  skippedOverlapCount: string;
+  lastError?: string | undefined;
+}
+
+export interface McpSnapshot {
+  servers: number;
+  tools: number;
+  notificationHooks: number;
+  serverNames: string[];
+  toolNames: string[];
+}
+
+export interface ToolsSnapshot {
+  total: number;
+  names: string[];
+}
+
+/**
+ * One renderable feed entry. oneof mirrors the serde tagged enum WireFeedBlock;
+ * JSON channels keep serde shape until the protojson migration.
+ */
+export interface FeedBlock {
+  kind?:
+    | { $case: "user"; user: UserBlock }
+    | { $case: "assistant"; assistant: AssistantBlock }
+    | { $case: "thinking"; thinking: ThinkingBlock }
+    | { $case: "tool"; tool: ToolBlock }
+    | { $case: "toolResult"; toolResult: ToolResultBlock }
+    | { $case: "plain"; plain: PlainBlock }
+    | undefined;
+}
+
+export interface UserBlock {
+  text: string;
+  timestamp?: string | undefined;
+}
+
+export interface AssistantBlock {
+  text: string;
+  timestamp?: string | undefined;
+}
+
+export interface ThinkingBlock {
+  text: string;
+  timestamp?: string | undefined;
+}
+
+export interface ToolBlock {
+  name: string;
+  args: string;
+  timestamp?: string | undefined;
+}
+
+export interface ToolResultBlock {
+  lines: string[];
+  isError: boolean;
+  timestamp?: string | undefined;
+}
+
+export interface PlainBlock {
+  text: string;
+  /** "output" | "system" | "error" | "note" (serde snake_case variant names) */
+  level: string;
+  timestamp?: string | undefined;
+}
 
 export interface SessionSummary {
   sessionId: string;
@@ -52,6 +265,3028 @@ export interface DeleteSessionResponse {
   /** Non-empty = deletion refused, these graphs are still running. */
   runningRunIds: string[];
 }
+
+function createBaseSessionState(): SessionState {
+  return {
+    sessionId: "",
+    model: "",
+    modelCatalog: [],
+    cwd: "",
+    busy: false,
+    queuedCount: 0,
+    latestTriggerPoll: undefined,
+    goal: undefined,
+    controlPlanePrompt: undefined,
+    sidebar: undefined,
+    feedBlocks: [],
+    feedLines: [],
+    dags: [],
+    subagents: [],
+    tuiMaxFeedLines: undefined,
+    contextUsage: undefined,
+    feedLinesBase: "0",
+  };
+}
+
+export const SessionState: MessageFns<SessionState> = {
+  encode(message: SessionState, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sessionId !== "") {
+      writer.uint32(10).string(message.sessionId);
+    }
+    if (message.model !== "") {
+      writer.uint32(18).string(message.model);
+    }
+    for (const v of message.modelCatalog) {
+      ProviderGroup.encode(v!, writer.uint32(26).fork()).join();
+    }
+    if (message.cwd !== "") {
+      writer.uint32(34).string(message.cwd);
+    }
+    if (message.busy !== false) {
+      writer.uint32(40).bool(message.busy);
+    }
+    if (message.queuedCount !== 0) {
+      writer.uint32(48).uint32(message.queuedCount);
+    }
+    if (message.latestTriggerPoll !== undefined) {
+      TriggerPollStatus.encode(message.latestTriggerPoll, writer.uint32(58).fork()).join();
+    }
+    if (message.goal !== undefined) {
+      GoalSnapshot.encode(message.goal, writer.uint32(66).fork()).join();
+    }
+    if (message.controlPlanePrompt !== undefined) {
+      ControlPlanePromptSnapshot.encode(message.controlPlanePrompt, writer.uint32(74).fork()).join();
+    }
+    if (message.sidebar !== undefined) {
+      SidebarSnapshot.encode(message.sidebar, writer.uint32(82).fork()).join();
+    }
+    for (const v of message.feedBlocks) {
+      FeedBlock.encode(v!, writer.uint32(90).fork()).join();
+    }
+    for (const v of message.feedLines) {
+      writer.uint32(98).string(v!);
+    }
+    for (const v of message.dags) {
+      DagRunSnapshot.encode(v!, writer.uint32(106).fork()).join();
+    }
+    for (const v of message.subagents) {
+      SubagentJobSnapshot.encode(v!, writer.uint32(114).fork()).join();
+    }
+    if (message.tuiMaxFeedLines !== undefined) {
+      writer.uint32(120).uint32(message.tuiMaxFeedLines);
+    }
+    if (message.contextUsage !== undefined) {
+      ContextUsage.encode(message.contextUsage, writer.uint32(130).fork()).join();
+    }
+    if (message.feedLinesBase !== "0") {
+      writer.uint32(136).uint64(message.feedLinesBase);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SessionState {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSessionState();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.model = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.modelCatalog.push(ProviderGroup.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.cwd = reader.string();
+          continue;
+        }
+        case 5: {
+          if (tag !== 40) {
+            break;
+          }
+
+          message.busy = reader.bool();
+          continue;
+        }
+        case 6: {
+          if (tag !== 48) {
+            break;
+          }
+
+          message.queuedCount = reader.uint32();
+          continue;
+        }
+        case 7: {
+          if (tag !== 58) {
+            break;
+          }
+
+          message.latestTriggerPoll = TriggerPollStatus.decode(reader, reader.uint32());
+          continue;
+        }
+        case 8: {
+          if (tag !== 66) {
+            break;
+          }
+
+          message.goal = GoalSnapshot.decode(reader, reader.uint32());
+          continue;
+        }
+        case 9: {
+          if (tag !== 74) {
+            break;
+          }
+
+          message.controlPlanePrompt = ControlPlanePromptSnapshot.decode(reader, reader.uint32());
+          continue;
+        }
+        case 10: {
+          if (tag !== 82) {
+            break;
+          }
+
+          message.sidebar = SidebarSnapshot.decode(reader, reader.uint32());
+          continue;
+        }
+        case 11: {
+          if (tag !== 90) {
+            break;
+          }
+
+          message.feedBlocks.push(FeedBlock.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 12: {
+          if (tag !== 98) {
+            break;
+          }
+
+          message.feedLines.push(reader.string());
+          continue;
+        }
+        case 13: {
+          if (tag !== 106) {
+            break;
+          }
+
+          message.dags.push(DagRunSnapshot.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 14: {
+          if (tag !== 114) {
+            break;
+          }
+
+          message.subagents.push(SubagentJobSnapshot.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 15: {
+          if (tag !== 120) {
+            break;
+          }
+
+          message.tuiMaxFeedLines = reader.uint32();
+          continue;
+        }
+        case 16: {
+          if (tag !== 130) {
+            break;
+          }
+
+          message.contextUsage = ContextUsage.decode(reader, reader.uint32());
+          continue;
+        }
+        case 17: {
+          if (tag !== 136) {
+            break;
+          }
+
+          message.feedLinesBase = reader.uint64().toString();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SessionState {
+    return {
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : "",
+      model: isSet(object.model) ? globalThis.String(object.model) : "",
+      modelCatalog: globalThis.Array.isArray(object?.modelCatalog)
+        ? object.modelCatalog.map((e: any) => ProviderGroup.fromJSON(e))
+        : globalThis.Array.isArray(object?.model_catalog)
+        ? object.model_catalog.map((e: any) => ProviderGroup.fromJSON(e))
+        : [],
+      cwd: isSet(object.cwd) ? globalThis.String(object.cwd) : "",
+      busy: isSet(object.busy) ? globalThis.Boolean(object.busy) : false,
+      queuedCount: isSet(object.queuedCount)
+        ? globalThis.Number(object.queuedCount)
+        : isSet(object.queued_count)
+        ? globalThis.Number(object.queued_count)
+        : 0,
+      latestTriggerPoll: isSet(object.latestTriggerPoll)
+        ? TriggerPollStatus.fromJSON(object.latestTriggerPoll)
+        : isSet(object.latest_trigger_poll)
+        ? TriggerPollStatus.fromJSON(object.latest_trigger_poll)
+        : undefined,
+      goal: isSet(object.goal) ? GoalSnapshot.fromJSON(object.goal) : undefined,
+      controlPlanePrompt: isSet(object.controlPlanePrompt)
+        ? ControlPlanePromptSnapshot.fromJSON(object.controlPlanePrompt)
+        : isSet(object.control_plane_prompt)
+        ? ControlPlanePromptSnapshot.fromJSON(object.control_plane_prompt)
+        : undefined,
+      sidebar: isSet(object.sidebar) ? SidebarSnapshot.fromJSON(object.sidebar) : undefined,
+      feedBlocks: globalThis.Array.isArray(object?.feedBlocks)
+        ? object.feedBlocks.map((e: any) => FeedBlock.fromJSON(e))
+        : globalThis.Array.isArray(object?.feed_blocks)
+        ? object.feed_blocks.map((e: any) => FeedBlock.fromJSON(e))
+        : [],
+      feedLines: globalThis.Array.isArray(object?.feedLines)
+        ? object.feedLines.map((e: any) => globalThis.String(e))
+        : globalThis.Array.isArray(object?.feed_lines)
+        ? object.feed_lines.map((e: any) => globalThis.String(e))
+        : [],
+      dags: globalThis.Array.isArray(object?.dags)
+        ? object.dags.map((e: any) => DagRunSnapshot.fromJSON(e))
+        : [],
+      subagents: globalThis.Array.isArray(object?.subagents)
+        ? object.subagents.map((e: any) => SubagentJobSnapshot.fromJSON(e))
+        : [],
+      tuiMaxFeedLines: isSet(object.tuiMaxFeedLines)
+        ? globalThis.Number(object.tuiMaxFeedLines)
+        : isSet(object.tui_max_feed_lines)
+        ? globalThis.Number(object.tui_max_feed_lines)
+        : undefined,
+      contextUsage: isSet(object.contextUsage)
+        ? ContextUsage.fromJSON(object.contextUsage)
+        : isSet(object.context_usage)
+        ? ContextUsage.fromJSON(object.context_usage)
+        : undefined,
+      feedLinesBase: isSet(object.feedLinesBase)
+        ? globalThis.String(object.feedLinesBase)
+        : isSet(object.feed_lines_base)
+        ? globalThis.String(object.feed_lines_base)
+        : "0",
+    };
+  },
+
+  toJSON(message: SessionState): unknown {
+    const obj: any = {};
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
+    }
+    if (message.model !== "") {
+      obj.model = message.model;
+    }
+    if (message.modelCatalog?.length) {
+      obj.modelCatalog = message.modelCatalog.map((e) => ProviderGroup.toJSON(e));
+    }
+    if (message.cwd !== "") {
+      obj.cwd = message.cwd;
+    }
+    if (message.busy !== false) {
+      obj.busy = message.busy;
+    }
+    if (message.queuedCount !== 0) {
+      obj.queuedCount = Math.round(message.queuedCount);
+    }
+    if (message.latestTriggerPoll !== undefined) {
+      obj.latestTriggerPoll = TriggerPollStatus.toJSON(message.latestTriggerPoll);
+    }
+    if (message.goal !== undefined) {
+      obj.goal = GoalSnapshot.toJSON(message.goal);
+    }
+    if (message.controlPlanePrompt !== undefined) {
+      obj.controlPlanePrompt = ControlPlanePromptSnapshot.toJSON(message.controlPlanePrompt);
+    }
+    if (message.sidebar !== undefined) {
+      obj.sidebar = SidebarSnapshot.toJSON(message.sidebar);
+    }
+    if (message.feedBlocks?.length) {
+      obj.feedBlocks = message.feedBlocks.map((e) => FeedBlock.toJSON(e));
+    }
+    if (message.feedLines?.length) {
+      obj.feedLines = message.feedLines;
+    }
+    if (message.dags?.length) {
+      obj.dags = message.dags.map((e) => DagRunSnapshot.toJSON(e));
+    }
+    if (message.subagents?.length) {
+      obj.subagents = message.subagents.map((e) => SubagentJobSnapshot.toJSON(e));
+    }
+    if (message.tuiMaxFeedLines !== undefined) {
+      obj.tuiMaxFeedLines = Math.round(message.tuiMaxFeedLines);
+    }
+    if (message.contextUsage !== undefined) {
+      obj.contextUsage = ContextUsage.toJSON(message.contextUsage);
+    }
+    if (message.feedLinesBase !== "0") {
+      obj.feedLinesBase = message.feedLinesBase;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SessionState>, I>>(base?: I): SessionState {
+    return SessionState.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<SessionState>, I>>(object: I): SessionState {
+    const message = createBaseSessionState();
+    message.sessionId = object.sessionId ?? "";
+    message.model = object.model ?? "";
+    message.modelCatalog = object.modelCatalog?.map((e) => ProviderGroup.fromPartial(e)) || [];
+    message.cwd = object.cwd ?? "";
+    message.busy = object.busy ?? false;
+    message.queuedCount = object.queuedCount ?? 0;
+    message.latestTriggerPoll = (object.latestTriggerPoll !== undefined && object.latestTriggerPoll !== null)
+      ? TriggerPollStatus.fromPartial(object.latestTriggerPoll)
+      : undefined;
+    message.goal = (object.goal !== undefined && object.goal !== null)
+      ? GoalSnapshot.fromPartial(object.goal)
+      : undefined;
+    message.controlPlanePrompt = (object.controlPlanePrompt !== undefined && object.controlPlanePrompt !== null)
+      ? ControlPlanePromptSnapshot.fromPartial(object.controlPlanePrompt)
+      : undefined;
+    message.sidebar = (object.sidebar !== undefined && object.sidebar !== null)
+      ? SidebarSnapshot.fromPartial(object.sidebar)
+      : undefined;
+    message.feedBlocks = object.feedBlocks?.map((e) => FeedBlock.fromPartial(e)) || [];
+    message.feedLines = object.feedLines?.map((e) => e) || [];
+    message.dags = object.dags?.map((e) => DagRunSnapshot.fromPartial(e)) || [];
+    message.subagents = object.subagents?.map((e) => SubagentJobSnapshot.fromPartial(e)) || [];
+    message.tuiMaxFeedLines = object.tuiMaxFeedLines ?? undefined;
+    message.contextUsage = (object.contextUsage !== undefined && object.contextUsage !== null)
+      ? ContextUsage.fromPartial(object.contextUsage)
+      : undefined;
+    message.feedLinesBase = object.feedLinesBase ?? "0";
+    return message;
+  },
+};
+
+function createBaseContextUsage(): ContextUsage {
+  return {
+    inputTokens: "0",
+    outputTokens: "0",
+    cacheReadTokens: "0",
+    cacheWriteTokens: "0",
+    totalTokens: "0",
+    contextWindow: 0,
+  };
+}
+
+export const ContextUsage: MessageFns<ContextUsage> = {
+  encode(message: ContextUsage, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.inputTokens !== "0") {
+      writer.uint32(8).uint64(message.inputTokens);
+    }
+    if (message.outputTokens !== "0") {
+      writer.uint32(16).uint64(message.outputTokens);
+    }
+    if (message.cacheReadTokens !== "0") {
+      writer.uint32(24).uint64(message.cacheReadTokens);
+    }
+    if (message.cacheWriteTokens !== "0") {
+      writer.uint32(32).uint64(message.cacheWriteTokens);
+    }
+    if (message.totalTokens !== "0") {
+      writer.uint32(40).uint64(message.totalTokens);
+    }
+    if (message.contextWindow !== 0) {
+      writer.uint32(48).uint32(message.contextWindow);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ContextUsage {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseContextUsage();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.inputTokens = reader.uint64().toString();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.outputTokens = reader.uint64().toString();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.cacheReadTokens = reader.uint64().toString();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.cacheWriteTokens = reader.uint64().toString();
+          continue;
+        }
+        case 5: {
+          if (tag !== 40) {
+            break;
+          }
+
+          message.totalTokens = reader.uint64().toString();
+          continue;
+        }
+        case 6: {
+          if (tag !== 48) {
+            break;
+          }
+
+          message.contextWindow = reader.uint32();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ContextUsage {
+    return {
+      inputTokens: isSet(object.inputTokens)
+        ? globalThis.String(object.inputTokens)
+        : isSet(object.input_tokens)
+        ? globalThis.String(object.input_tokens)
+        : "0",
+      outputTokens: isSet(object.outputTokens)
+        ? globalThis.String(object.outputTokens)
+        : isSet(object.output_tokens)
+        ? globalThis.String(object.output_tokens)
+        : "0",
+      cacheReadTokens: isSet(object.cacheReadTokens)
+        ? globalThis.String(object.cacheReadTokens)
+        : isSet(object.cache_read_tokens)
+        ? globalThis.String(object.cache_read_tokens)
+        : "0",
+      cacheWriteTokens: isSet(object.cacheWriteTokens)
+        ? globalThis.String(object.cacheWriteTokens)
+        : isSet(object.cache_write_tokens)
+        ? globalThis.String(object.cache_write_tokens)
+        : "0",
+      totalTokens: isSet(object.totalTokens)
+        ? globalThis.String(object.totalTokens)
+        : isSet(object.total_tokens)
+        ? globalThis.String(object.total_tokens)
+        : "0",
+      contextWindow: isSet(object.contextWindow)
+        ? globalThis.Number(object.contextWindow)
+        : isSet(object.context_window)
+        ? globalThis.Number(object.context_window)
+        : 0,
+    };
+  },
+
+  toJSON(message: ContextUsage): unknown {
+    const obj: any = {};
+    if (message.inputTokens !== "0") {
+      obj.inputTokens = message.inputTokens;
+    }
+    if (message.outputTokens !== "0") {
+      obj.outputTokens = message.outputTokens;
+    }
+    if (message.cacheReadTokens !== "0") {
+      obj.cacheReadTokens = message.cacheReadTokens;
+    }
+    if (message.cacheWriteTokens !== "0") {
+      obj.cacheWriteTokens = message.cacheWriteTokens;
+    }
+    if (message.totalTokens !== "0") {
+      obj.totalTokens = message.totalTokens;
+    }
+    if (message.contextWindow !== 0) {
+      obj.contextWindow = Math.round(message.contextWindow);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ContextUsage>, I>>(base?: I): ContextUsage {
+    return ContextUsage.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ContextUsage>, I>>(object: I): ContextUsage {
+    const message = createBaseContextUsage();
+    message.inputTokens = object.inputTokens ?? "0";
+    message.outputTokens = object.outputTokens ?? "0";
+    message.cacheReadTokens = object.cacheReadTokens ?? "0";
+    message.cacheWriteTokens = object.cacheWriteTokens ?? "0";
+    message.totalTokens = object.totalTokens ?? "0";
+    message.contextWindow = object.contextWindow ?? 0;
+    return message;
+  },
+};
+
+function createBaseProviderGroup(): ProviderGroup {
+  return { provider: "", hasCredential: false, models: [] };
+}
+
+export const ProviderGroup: MessageFns<ProviderGroup> = {
+  encode(message: ProviderGroup, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.provider !== "") {
+      writer.uint32(10).string(message.provider);
+    }
+    if (message.hasCredential !== false) {
+      writer.uint32(16).bool(message.hasCredential);
+    }
+    for (const v of message.models) {
+      ModelEntry.encode(v!, writer.uint32(26).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ProviderGroup {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseProviderGroup();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.provider = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.hasCredential = reader.bool();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.models.push(ModelEntry.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ProviderGroup {
+    return {
+      provider: isSet(object.provider) ? globalThis.String(object.provider) : "",
+      hasCredential: isSet(object.hasCredential)
+        ? globalThis.Boolean(object.hasCredential)
+        : isSet(object.has_credential)
+        ? globalThis.Boolean(object.has_credential)
+        : false,
+      models: globalThis.Array.isArray(object?.models) ? object.models.map((e: any) => ModelEntry.fromJSON(e)) : [],
+    };
+  },
+
+  toJSON(message: ProviderGroup): unknown {
+    const obj: any = {};
+    if (message.provider !== "") {
+      obj.provider = message.provider;
+    }
+    if (message.hasCredential !== false) {
+      obj.hasCredential = message.hasCredential;
+    }
+    if (message.models?.length) {
+      obj.models = message.models.map((e) => ModelEntry.toJSON(e));
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ProviderGroup>, I>>(base?: I): ProviderGroup {
+    return ProviderGroup.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ProviderGroup>, I>>(object: I): ProviderGroup {
+    const message = createBaseProviderGroup();
+    message.provider = object.provider ?? "";
+    message.hasCredential = object.hasCredential ?? false;
+    message.models = object.models?.map((e) => ModelEntry.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseModelEntry(): ModelEntry {
+  return { id: "", name: "" };
+}
+
+export const ModelEntry: MessageFns<ModelEntry> = {
+  encode(message: ModelEntry, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.id !== "") {
+      writer.uint32(10).string(message.id);
+    }
+    if (message.name !== "") {
+      writer.uint32(18).string(message.name);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ModelEntry {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseModelEntry();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.id = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ModelEntry {
+    return {
+      id: isSet(object.id) ? globalThis.String(object.id) : "",
+      name: isSet(object.name) ? globalThis.String(object.name) : "",
+    };
+  },
+
+  toJSON(message: ModelEntry): unknown {
+    const obj: any = {};
+    if (message.id !== "") {
+      obj.id = message.id;
+    }
+    if (message.name !== "") {
+      obj.name = message.name;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ModelEntry>, I>>(base?: I): ModelEntry {
+    return ModelEntry.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ModelEntry>, I>>(object: I): ModelEntry {
+    const message = createBaseModelEntry();
+    message.id = object.id ?? "";
+    message.name = object.name ?? "";
+    return message;
+  },
+};
+
+function createBaseTriggerPollStatus(): TriggerPollStatus {
+  return { checkedAt: "", traceId: "", sourceLabel: "", eventLabel: "", summary: "" };
+}
+
+export const TriggerPollStatus: MessageFns<TriggerPollStatus> = {
+  encode(message: TriggerPollStatus, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.checkedAt !== "") {
+      writer.uint32(10).string(message.checkedAt);
+    }
+    if (message.traceId !== "") {
+      writer.uint32(18).string(message.traceId);
+    }
+    if (message.sourceLabel !== "") {
+      writer.uint32(26).string(message.sourceLabel);
+    }
+    if (message.eventLabel !== "") {
+      writer.uint32(34).string(message.eventLabel);
+    }
+    if (message.summary !== "") {
+      writer.uint32(42).string(message.summary);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): TriggerPollStatus {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseTriggerPollStatus();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.checkedAt = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.traceId = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.sourceLabel = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.eventLabel = reader.string();
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.summary = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): TriggerPollStatus {
+    return {
+      checkedAt: isSet(object.checkedAt)
+        ? globalThis.String(object.checkedAt)
+        : isSet(object.checked_at)
+        ? globalThis.String(object.checked_at)
+        : "",
+      traceId: isSet(object.traceId)
+        ? globalThis.String(object.traceId)
+        : isSet(object.trace_id)
+        ? globalThis.String(object.trace_id)
+        : "",
+      sourceLabel: isSet(object.sourceLabel)
+        ? globalThis.String(object.sourceLabel)
+        : isSet(object.source_label)
+        ? globalThis.String(object.source_label)
+        : "",
+      eventLabel: isSet(object.eventLabel)
+        ? globalThis.String(object.eventLabel)
+        : isSet(object.event_label)
+        ? globalThis.String(object.event_label)
+        : "",
+      summary: isSet(object.summary) ? globalThis.String(object.summary) : "",
+    };
+  },
+
+  toJSON(message: TriggerPollStatus): unknown {
+    const obj: any = {};
+    if (message.checkedAt !== "") {
+      obj.checkedAt = message.checkedAt;
+    }
+    if (message.traceId !== "") {
+      obj.traceId = message.traceId;
+    }
+    if (message.sourceLabel !== "") {
+      obj.sourceLabel = message.sourceLabel;
+    }
+    if (message.eventLabel !== "") {
+      obj.eventLabel = message.eventLabel;
+    }
+    if (message.summary !== "") {
+      obj.summary = message.summary;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<TriggerPollStatus>, I>>(base?: I): TriggerPollStatus {
+    return TriggerPollStatus.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<TriggerPollStatus>, I>>(object: I): TriggerPollStatus {
+    const message = createBaseTriggerPollStatus();
+    message.checkedAt = object.checkedAt ?? "";
+    message.traceId = object.traceId ?? "";
+    message.sourceLabel = object.sourceLabel ?? "";
+    message.eventLabel = object.eventLabel ?? "";
+    message.summary = object.summary ?? "";
+    return message;
+  },
+};
+
+function createBaseGoalSnapshot(): GoalSnapshot {
+  return { condition: "", status: "", iterations: 0, lastReason: undefined };
+}
+
+export const GoalSnapshot: MessageFns<GoalSnapshot> = {
+  encode(message: GoalSnapshot, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.condition !== "") {
+      writer.uint32(10).string(message.condition);
+    }
+    if (message.status !== "") {
+      writer.uint32(18).string(message.status);
+    }
+    if (message.iterations !== 0) {
+      writer.uint32(24).uint32(message.iterations);
+    }
+    if (message.lastReason !== undefined) {
+      writer.uint32(34).string(message.lastReason);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): GoalSnapshot {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGoalSnapshot();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.condition = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.status = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.iterations = reader.uint32();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.lastReason = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GoalSnapshot {
+    return {
+      condition: isSet(object.condition) ? globalThis.String(object.condition) : "",
+      status: isSet(object.status) ? globalThis.String(object.status) : "",
+      iterations: isSet(object.iterations) ? globalThis.Number(object.iterations) : 0,
+      lastReason: isSet(object.lastReason)
+        ? globalThis.String(object.lastReason)
+        : isSet(object.last_reason)
+        ? globalThis.String(object.last_reason)
+        : undefined,
+    };
+  },
+
+  toJSON(message: GoalSnapshot): unknown {
+    const obj: any = {};
+    if (message.condition !== "") {
+      obj.condition = message.condition;
+    }
+    if (message.status !== "") {
+      obj.status = message.status;
+    }
+    if (message.iterations !== 0) {
+      obj.iterations = Math.round(message.iterations);
+    }
+    if (message.lastReason !== undefined) {
+      obj.lastReason = message.lastReason;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GoalSnapshot>, I>>(base?: I): GoalSnapshot {
+    return GoalSnapshot.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<GoalSnapshot>, I>>(object: I): GoalSnapshot {
+    const message = createBaseGoalSnapshot();
+    message.condition = object.condition ?? "";
+    message.status = object.status ?? "";
+    message.iterations = object.iterations ?? 0;
+    message.lastReason = object.lastReason ?? undefined;
+    return message;
+  },
+};
+
+function createBaseControlPlanePromptSnapshot(): ControlPlanePromptSnapshot {
+  return { toolName: "", label: "", reason: "", argsHash: "", payload: "" };
+}
+
+export const ControlPlanePromptSnapshot: MessageFns<ControlPlanePromptSnapshot> = {
+  encode(message: ControlPlanePromptSnapshot, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.toolName !== "") {
+      writer.uint32(10).string(message.toolName);
+    }
+    if (message.label !== "") {
+      writer.uint32(18).string(message.label);
+    }
+    if (message.reason !== "") {
+      writer.uint32(26).string(message.reason);
+    }
+    if (message.argsHash !== "") {
+      writer.uint32(34).string(message.argsHash);
+    }
+    if (message.payload !== "") {
+      writer.uint32(42).string(message.payload);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ControlPlanePromptSnapshot {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseControlPlanePromptSnapshot();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.toolName = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.label = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.reason = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.argsHash = reader.string();
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.payload = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ControlPlanePromptSnapshot {
+    return {
+      toolName: isSet(object.toolName)
+        ? globalThis.String(object.toolName)
+        : isSet(object.tool_name)
+        ? globalThis.String(object.tool_name)
+        : "",
+      label: isSet(object.label) ? globalThis.String(object.label) : "",
+      reason: isSet(object.reason) ? globalThis.String(object.reason) : "",
+      argsHash: isSet(object.argsHash)
+        ? globalThis.String(object.argsHash)
+        : isSet(object.args_hash)
+        ? globalThis.String(object.args_hash)
+        : "",
+      payload: isSet(object.payload) ? globalThis.String(object.payload) : "",
+    };
+  },
+
+  toJSON(message: ControlPlanePromptSnapshot): unknown {
+    const obj: any = {};
+    if (message.toolName !== "") {
+      obj.toolName = message.toolName;
+    }
+    if (message.label !== "") {
+      obj.label = message.label;
+    }
+    if (message.reason !== "") {
+      obj.reason = message.reason;
+    }
+    if (message.argsHash !== "") {
+      obj.argsHash = message.argsHash;
+    }
+    if (message.payload !== "") {
+      obj.payload = message.payload;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ControlPlanePromptSnapshot>, I>>(base?: I): ControlPlanePromptSnapshot {
+    return ControlPlanePromptSnapshot.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ControlPlanePromptSnapshot>, I>>(object: I): ControlPlanePromptSnapshot {
+    const message = createBaseControlPlanePromptSnapshot();
+    message.toolName = object.toolName ?? "";
+    message.label = object.label ?? "";
+    message.reason = object.reason ?? "";
+    message.argsHash = object.argsHash ?? "";
+    message.payload = object.payload ?? "";
+    return message;
+  },
+};
+
+function createBaseSidebarSnapshot(): SidebarSnapshot {
+  return {
+    inboxNew: 0,
+    skills: undefined,
+    triggers: undefined,
+    cron: undefined,
+    mcp: undefined,
+    tools: undefined,
+    hooks: [],
+    runtime: [],
+    commands: [],
+    runtimeRevision: "0",
+  };
+}
+
+export const SidebarSnapshot: MessageFns<SidebarSnapshot> = {
+  encode(message: SidebarSnapshot, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.inboxNew !== 0) {
+      writer.uint32(8).uint32(message.inboxNew);
+    }
+    if (message.skills !== undefined) {
+      SkillsSnapshot.encode(message.skills, writer.uint32(18).fork()).join();
+    }
+    if (message.triggers !== undefined) {
+      TriggersSnapshot.encode(message.triggers, writer.uint32(26).fork()).join();
+    }
+    if (message.cron !== undefined) {
+      CronSnapshot.encode(message.cron, writer.uint32(34).fork()).join();
+    }
+    if (message.mcp !== undefined) {
+      McpSnapshot.encode(message.mcp, writer.uint32(42).fork()).join();
+    }
+    if (message.tools !== undefined) {
+      ToolsSnapshot.encode(message.tools, writer.uint32(50).fork()).join();
+    }
+    for (const v of message.hooks) {
+      writer.uint32(58).string(v!);
+    }
+    for (const v of message.runtime) {
+      writer.uint32(66).string(v!);
+    }
+    for (const v of message.commands) {
+      writer.uint32(74).string(v!);
+    }
+    if (message.runtimeRevision !== "0") {
+      writer.uint32(80).uint64(message.runtimeRevision);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SidebarSnapshot {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSidebarSnapshot();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.inboxNew = reader.uint32();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.skills = SkillsSnapshot.decode(reader, reader.uint32());
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.triggers = TriggersSnapshot.decode(reader, reader.uint32());
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.cron = CronSnapshot.decode(reader, reader.uint32());
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.mcp = McpSnapshot.decode(reader, reader.uint32());
+          continue;
+        }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.tools = ToolsSnapshot.decode(reader, reader.uint32());
+          continue;
+        }
+        case 7: {
+          if (tag !== 58) {
+            break;
+          }
+
+          message.hooks.push(reader.string());
+          continue;
+        }
+        case 8: {
+          if (tag !== 66) {
+            break;
+          }
+
+          message.runtime.push(reader.string());
+          continue;
+        }
+        case 9: {
+          if (tag !== 74) {
+            break;
+          }
+
+          message.commands.push(reader.string());
+          continue;
+        }
+        case 10: {
+          if (tag !== 80) {
+            break;
+          }
+
+          message.runtimeRevision = reader.uint64().toString();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SidebarSnapshot {
+    return {
+      inboxNew: isSet(object.inboxNew)
+        ? globalThis.Number(object.inboxNew)
+        : isSet(object.inbox_new)
+        ? globalThis.Number(object.inbox_new)
+        : 0,
+      skills: isSet(object.skills) ? SkillsSnapshot.fromJSON(object.skills) : undefined,
+      triggers: isSet(object.triggers) ? TriggersSnapshot.fromJSON(object.triggers) : undefined,
+      cron: isSet(object.cron) ? CronSnapshot.fromJSON(object.cron) : undefined,
+      mcp: isSet(object.mcp) ? McpSnapshot.fromJSON(object.mcp) : undefined,
+      tools: isSet(object.tools) ? ToolsSnapshot.fromJSON(object.tools) : undefined,
+      hooks: globalThis.Array.isArray(object?.hooks) ? object.hooks.map((e: any) => globalThis.String(e)) : [],
+      runtime: globalThis.Array.isArray(object?.runtime) ? object.runtime.map((e: any) => globalThis.String(e)) : [],
+      commands: globalThis.Array.isArray(object?.commands) ? object.commands.map((e: any) => globalThis.String(e)) : [],
+      runtimeRevision: isSet(object.runtimeRevision)
+        ? globalThis.String(object.runtimeRevision)
+        : isSet(object.runtime_revision)
+        ? globalThis.String(object.runtime_revision)
+        : "0",
+    };
+  },
+
+  toJSON(message: SidebarSnapshot): unknown {
+    const obj: any = {};
+    if (message.inboxNew !== 0) {
+      obj.inboxNew = Math.round(message.inboxNew);
+    }
+    if (message.skills !== undefined) {
+      obj.skills = SkillsSnapshot.toJSON(message.skills);
+    }
+    if (message.triggers !== undefined) {
+      obj.triggers = TriggersSnapshot.toJSON(message.triggers);
+    }
+    if (message.cron !== undefined) {
+      obj.cron = CronSnapshot.toJSON(message.cron);
+    }
+    if (message.mcp !== undefined) {
+      obj.mcp = McpSnapshot.toJSON(message.mcp);
+    }
+    if (message.tools !== undefined) {
+      obj.tools = ToolsSnapshot.toJSON(message.tools);
+    }
+    if (message.hooks?.length) {
+      obj.hooks = message.hooks;
+    }
+    if (message.runtime?.length) {
+      obj.runtime = message.runtime;
+    }
+    if (message.commands?.length) {
+      obj.commands = message.commands;
+    }
+    if (message.runtimeRevision !== "0") {
+      obj.runtimeRevision = message.runtimeRevision;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SidebarSnapshot>, I>>(base?: I): SidebarSnapshot {
+    return SidebarSnapshot.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<SidebarSnapshot>, I>>(object: I): SidebarSnapshot {
+    const message = createBaseSidebarSnapshot();
+    message.inboxNew = object.inboxNew ?? 0;
+    message.skills = (object.skills !== undefined && object.skills !== null)
+      ? SkillsSnapshot.fromPartial(object.skills)
+      : undefined;
+    message.triggers = (object.triggers !== undefined && object.triggers !== null)
+      ? TriggersSnapshot.fromPartial(object.triggers)
+      : undefined;
+    message.cron = (object.cron !== undefined && object.cron !== null)
+      ? CronSnapshot.fromPartial(object.cron)
+      : undefined;
+    message.mcp = (object.mcp !== undefined && object.mcp !== null) ? McpSnapshot.fromPartial(object.mcp) : undefined;
+    message.tools = (object.tools !== undefined && object.tools !== null)
+      ? ToolsSnapshot.fromPartial(object.tools)
+      : undefined;
+    message.hooks = object.hooks?.map((e) => e) || [];
+    message.runtime = object.runtime?.map((e) => e) || [];
+    message.commands = object.commands?.map((e) => e) || [];
+    message.runtimeRevision = object.runtimeRevision ?? "0";
+    return message;
+  },
+};
+
+function createBaseSkillsSnapshot(): SkillsSnapshot {
+  return { total: 0, enabled: 0, disabled: 0, builtin: 0, user: 0, project: 0, items: [] };
+}
+
+export const SkillsSnapshot: MessageFns<SkillsSnapshot> = {
+  encode(message: SkillsSnapshot, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.total !== 0) {
+      writer.uint32(8).uint32(message.total);
+    }
+    if (message.enabled !== 0) {
+      writer.uint32(16).uint32(message.enabled);
+    }
+    if (message.disabled !== 0) {
+      writer.uint32(24).uint32(message.disabled);
+    }
+    if (message.builtin !== 0) {
+      writer.uint32(32).uint32(message.builtin);
+    }
+    if (message.user !== 0) {
+      writer.uint32(40).uint32(message.user);
+    }
+    if (message.project !== 0) {
+      writer.uint32(48).uint32(message.project);
+    }
+    for (const v of message.items) {
+      SkillSnapshot.encode(v!, writer.uint32(58).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SkillsSnapshot {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSkillsSnapshot();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.total = reader.uint32();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.enabled = reader.uint32();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.disabled = reader.uint32();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.builtin = reader.uint32();
+          continue;
+        }
+        case 5: {
+          if (tag !== 40) {
+            break;
+          }
+
+          message.user = reader.uint32();
+          continue;
+        }
+        case 6: {
+          if (tag !== 48) {
+            break;
+          }
+
+          message.project = reader.uint32();
+          continue;
+        }
+        case 7: {
+          if (tag !== 58) {
+            break;
+          }
+
+          message.items.push(SkillSnapshot.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SkillsSnapshot {
+    return {
+      total: isSet(object.total) ? globalThis.Number(object.total) : 0,
+      enabled: isSet(object.enabled) ? globalThis.Number(object.enabled) : 0,
+      disabled: isSet(object.disabled) ? globalThis.Number(object.disabled) : 0,
+      builtin: isSet(object.builtin) ? globalThis.Number(object.builtin) : 0,
+      user: isSet(object.user) ? globalThis.Number(object.user) : 0,
+      project: isSet(object.project) ? globalThis.Number(object.project) : 0,
+      items: globalThis.Array.isArray(object?.items) ? object.items.map((e: any) => SkillSnapshot.fromJSON(e)) : [],
+    };
+  },
+
+  toJSON(message: SkillsSnapshot): unknown {
+    const obj: any = {};
+    if (message.total !== 0) {
+      obj.total = Math.round(message.total);
+    }
+    if (message.enabled !== 0) {
+      obj.enabled = Math.round(message.enabled);
+    }
+    if (message.disabled !== 0) {
+      obj.disabled = Math.round(message.disabled);
+    }
+    if (message.builtin !== 0) {
+      obj.builtin = Math.round(message.builtin);
+    }
+    if (message.user !== 0) {
+      obj.user = Math.round(message.user);
+    }
+    if (message.project !== 0) {
+      obj.project = Math.round(message.project);
+    }
+    if (message.items?.length) {
+      obj.items = message.items.map((e) => SkillSnapshot.toJSON(e));
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SkillsSnapshot>, I>>(base?: I): SkillsSnapshot {
+    return SkillsSnapshot.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<SkillsSnapshot>, I>>(object: I): SkillsSnapshot {
+    const message = createBaseSkillsSnapshot();
+    message.total = object.total ?? 0;
+    message.enabled = object.enabled ?? 0;
+    message.disabled = object.disabled ?? 0;
+    message.builtin = object.builtin ?? 0;
+    message.user = object.user ?? 0;
+    message.project = object.project ?? 0;
+    message.items = object.items?.map((e) => SkillSnapshot.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseSkillSnapshot(): SkillSnapshot {
+  return { name: "", source: "", filePath: "", enabled: false };
+}
+
+export const SkillSnapshot: MessageFns<SkillSnapshot> = {
+  encode(message: SkillSnapshot, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.name !== "") {
+      writer.uint32(10).string(message.name);
+    }
+    if (message.source !== "") {
+      writer.uint32(18).string(message.source);
+    }
+    if (message.filePath !== "") {
+      writer.uint32(26).string(message.filePath);
+    }
+    if (message.enabled !== false) {
+      writer.uint32(32).bool(message.enabled);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SkillSnapshot {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSkillSnapshot();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.source = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.filePath = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.enabled = reader.bool();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SkillSnapshot {
+    return {
+      name: isSet(object.name) ? globalThis.String(object.name) : "",
+      source: isSet(object.source) ? globalThis.String(object.source) : "",
+      filePath: isSet(object.filePath)
+        ? globalThis.String(object.filePath)
+        : isSet(object.file_path)
+        ? globalThis.String(object.file_path)
+        : "",
+      enabled: isSet(object.enabled) ? globalThis.Boolean(object.enabled) : false,
+    };
+  },
+
+  toJSON(message: SkillSnapshot): unknown {
+    const obj: any = {};
+    if (message.name !== "") {
+      obj.name = message.name;
+    }
+    if (message.source !== "") {
+      obj.source = message.source;
+    }
+    if (message.filePath !== "") {
+      obj.filePath = message.filePath;
+    }
+    if (message.enabled !== false) {
+      obj.enabled = message.enabled;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SkillSnapshot>, I>>(base?: I): SkillSnapshot {
+    return SkillSnapshot.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<SkillSnapshot>, I>>(object: I): SkillSnapshot {
+    const message = createBaseSkillSnapshot();
+    message.name = object.name ?? "";
+    message.source = object.source ?? "";
+    message.filePath = object.filePath ?? "";
+    message.enabled = object.enabled ?? false;
+    return message;
+  },
+};
+
+function createBaseTriggersSnapshot(): TriggersSnapshot {
+  return { total: 0, enabled: 0, disabled: 0, rules: [] };
+}
+
+export const TriggersSnapshot: MessageFns<TriggersSnapshot> = {
+  encode(message: TriggersSnapshot, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.total !== 0) {
+      writer.uint32(8).uint32(message.total);
+    }
+    if (message.enabled !== 0) {
+      writer.uint32(16).uint32(message.enabled);
+    }
+    if (message.disabled !== 0) {
+      writer.uint32(24).uint32(message.disabled);
+    }
+    for (const v of message.rules) {
+      TriggerRuleSnapshot.encode(v!, writer.uint32(34).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): TriggersSnapshot {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseTriggersSnapshot();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.total = reader.uint32();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.enabled = reader.uint32();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.disabled = reader.uint32();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.rules.push(TriggerRuleSnapshot.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): TriggersSnapshot {
+    return {
+      total: isSet(object.total) ? globalThis.Number(object.total) : 0,
+      enabled: isSet(object.enabled) ? globalThis.Number(object.enabled) : 0,
+      disabled: isSet(object.disabled) ? globalThis.Number(object.disabled) : 0,
+      rules: globalThis.Array.isArray(object?.rules)
+        ? object.rules.map((e: any) => TriggerRuleSnapshot.fromJSON(e))
+        : [],
+    };
+  },
+
+  toJSON(message: TriggersSnapshot): unknown {
+    const obj: any = {};
+    if (message.total !== 0) {
+      obj.total = Math.round(message.total);
+    }
+    if (message.enabled !== 0) {
+      obj.enabled = Math.round(message.enabled);
+    }
+    if (message.disabled !== 0) {
+      obj.disabled = Math.round(message.disabled);
+    }
+    if (message.rules?.length) {
+      obj.rules = message.rules.map((e) => TriggerRuleSnapshot.toJSON(e));
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<TriggersSnapshot>, I>>(base?: I): TriggersSnapshot {
+    return TriggersSnapshot.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<TriggersSnapshot>, I>>(object: I): TriggersSnapshot {
+    const message = createBaseTriggersSnapshot();
+    message.total = object.total ?? 0;
+    message.enabled = object.enabled ?? 0;
+    message.disabled = object.disabled ?? 0;
+    message.rules = object.rules?.map((e) => TriggerRuleSnapshot.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseTriggerRuleSnapshot(): TriggerRuleSnapshot {
+  return { id: "", fullId: "", enabled: false, mode: "", condition: "", action: "" };
+}
+
+export const TriggerRuleSnapshot: MessageFns<TriggerRuleSnapshot> = {
+  encode(message: TriggerRuleSnapshot, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.id !== "") {
+      writer.uint32(10).string(message.id);
+    }
+    if (message.fullId !== "") {
+      writer.uint32(18).string(message.fullId);
+    }
+    if (message.enabled !== false) {
+      writer.uint32(24).bool(message.enabled);
+    }
+    if (message.mode !== "") {
+      writer.uint32(34).string(message.mode);
+    }
+    if (message.condition !== "") {
+      writer.uint32(42).string(message.condition);
+    }
+    if (message.action !== "") {
+      writer.uint32(50).string(message.action);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): TriggerRuleSnapshot {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseTriggerRuleSnapshot();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.id = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.fullId = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.enabled = reader.bool();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.mode = reader.string();
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.condition = reader.string();
+          continue;
+        }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.action = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): TriggerRuleSnapshot {
+    return {
+      id: isSet(object.id) ? globalThis.String(object.id) : "",
+      fullId: isSet(object.fullId)
+        ? globalThis.String(object.fullId)
+        : isSet(object.full_id)
+        ? globalThis.String(object.full_id)
+        : "",
+      enabled: isSet(object.enabled) ? globalThis.Boolean(object.enabled) : false,
+      mode: isSet(object.mode) ? globalThis.String(object.mode) : "",
+      condition: isSet(object.condition) ? globalThis.String(object.condition) : "",
+      action: isSet(object.action) ? globalThis.String(object.action) : "",
+    };
+  },
+
+  toJSON(message: TriggerRuleSnapshot): unknown {
+    const obj: any = {};
+    if (message.id !== "") {
+      obj.id = message.id;
+    }
+    if (message.fullId !== "") {
+      obj.fullId = message.fullId;
+    }
+    if (message.enabled !== false) {
+      obj.enabled = message.enabled;
+    }
+    if (message.mode !== "") {
+      obj.mode = message.mode;
+    }
+    if (message.condition !== "") {
+      obj.condition = message.condition;
+    }
+    if (message.action !== "") {
+      obj.action = message.action;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<TriggerRuleSnapshot>, I>>(base?: I): TriggerRuleSnapshot {
+    return TriggerRuleSnapshot.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<TriggerRuleSnapshot>, I>>(object: I): TriggerRuleSnapshot {
+    const message = createBaseTriggerRuleSnapshot();
+    message.id = object.id ?? "";
+    message.fullId = object.fullId ?? "";
+    message.enabled = object.enabled ?? false;
+    message.mode = object.mode ?? "";
+    message.condition = object.condition ?? "";
+    message.action = object.action ?? "";
+    return message;
+  },
+};
+
+function createBaseCronSnapshot(): CronSnapshot {
+  return { total: 0, enabled: 0, disabled: 0, jobs: [] };
+}
+
+export const CronSnapshot: MessageFns<CronSnapshot> = {
+  encode(message: CronSnapshot, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.total !== 0) {
+      writer.uint32(8).uint32(message.total);
+    }
+    if (message.enabled !== 0) {
+      writer.uint32(16).uint32(message.enabled);
+    }
+    if (message.disabled !== 0) {
+      writer.uint32(24).uint32(message.disabled);
+    }
+    for (const v of message.jobs) {
+      CronJobSnapshot.encode(v!, writer.uint32(34).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CronSnapshot {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCronSnapshot();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.total = reader.uint32();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.enabled = reader.uint32();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.disabled = reader.uint32();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.jobs.push(CronJobSnapshot.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CronSnapshot {
+    return {
+      total: isSet(object.total) ? globalThis.Number(object.total) : 0,
+      enabled: isSet(object.enabled) ? globalThis.Number(object.enabled) : 0,
+      disabled: isSet(object.disabled) ? globalThis.Number(object.disabled) : 0,
+      jobs: globalThis.Array.isArray(object?.jobs) ? object.jobs.map((e: any) => CronJobSnapshot.fromJSON(e)) : [],
+    };
+  },
+
+  toJSON(message: CronSnapshot): unknown {
+    const obj: any = {};
+    if (message.total !== 0) {
+      obj.total = Math.round(message.total);
+    }
+    if (message.enabled !== 0) {
+      obj.enabled = Math.round(message.enabled);
+    }
+    if (message.disabled !== 0) {
+      obj.disabled = Math.round(message.disabled);
+    }
+    if (message.jobs?.length) {
+      obj.jobs = message.jobs.map((e) => CronJobSnapshot.toJSON(e));
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<CronSnapshot>, I>>(base?: I): CronSnapshot {
+    return CronSnapshot.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<CronSnapshot>, I>>(object: I): CronSnapshot {
+    const message = createBaseCronSnapshot();
+    message.total = object.total ?? 0;
+    message.enabled = object.enabled ?? 0;
+    message.disabled = object.disabled ?? 0;
+    message.jobs = object.jobs?.map((e) => CronJobSnapshot.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseCronJobSnapshot(): CronJobSnapshot {
+  return { id: "", enabled: false, schedule: "", action: "", skippedOverlapCount: "0", lastError: undefined };
+}
+
+export const CronJobSnapshot: MessageFns<CronJobSnapshot> = {
+  encode(message: CronJobSnapshot, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.id !== "") {
+      writer.uint32(10).string(message.id);
+    }
+    if (message.enabled !== false) {
+      writer.uint32(16).bool(message.enabled);
+    }
+    if (message.schedule !== "") {
+      writer.uint32(26).string(message.schedule);
+    }
+    if (message.action !== "") {
+      writer.uint32(34).string(message.action);
+    }
+    if (message.skippedOverlapCount !== "0") {
+      writer.uint32(40).uint64(message.skippedOverlapCount);
+    }
+    if (message.lastError !== undefined) {
+      writer.uint32(50).string(message.lastError);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CronJobSnapshot {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCronJobSnapshot();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.id = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.enabled = reader.bool();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.schedule = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.action = reader.string();
+          continue;
+        }
+        case 5: {
+          if (tag !== 40) {
+            break;
+          }
+
+          message.skippedOverlapCount = reader.uint64().toString();
+          continue;
+        }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.lastError = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CronJobSnapshot {
+    return {
+      id: isSet(object.id) ? globalThis.String(object.id) : "",
+      enabled: isSet(object.enabled) ? globalThis.Boolean(object.enabled) : false,
+      schedule: isSet(object.schedule) ? globalThis.String(object.schedule) : "",
+      action: isSet(object.action) ? globalThis.String(object.action) : "",
+      skippedOverlapCount: isSet(object.skippedOverlapCount)
+        ? globalThis.String(object.skippedOverlapCount)
+        : isSet(object.skipped_overlap_count)
+        ? globalThis.String(object.skipped_overlap_count)
+        : "0",
+      lastError: isSet(object.lastError)
+        ? globalThis.String(object.lastError)
+        : isSet(object.last_error)
+        ? globalThis.String(object.last_error)
+        : undefined,
+    };
+  },
+
+  toJSON(message: CronJobSnapshot): unknown {
+    const obj: any = {};
+    if (message.id !== "") {
+      obj.id = message.id;
+    }
+    if (message.enabled !== false) {
+      obj.enabled = message.enabled;
+    }
+    if (message.schedule !== "") {
+      obj.schedule = message.schedule;
+    }
+    if (message.action !== "") {
+      obj.action = message.action;
+    }
+    if (message.skippedOverlapCount !== "0") {
+      obj.skippedOverlapCount = message.skippedOverlapCount;
+    }
+    if (message.lastError !== undefined) {
+      obj.lastError = message.lastError;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<CronJobSnapshot>, I>>(base?: I): CronJobSnapshot {
+    return CronJobSnapshot.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<CronJobSnapshot>, I>>(object: I): CronJobSnapshot {
+    const message = createBaseCronJobSnapshot();
+    message.id = object.id ?? "";
+    message.enabled = object.enabled ?? false;
+    message.schedule = object.schedule ?? "";
+    message.action = object.action ?? "";
+    message.skippedOverlapCount = object.skippedOverlapCount ?? "0";
+    message.lastError = object.lastError ?? undefined;
+    return message;
+  },
+};
+
+function createBaseMcpSnapshot(): McpSnapshot {
+  return { servers: 0, tools: 0, notificationHooks: 0, serverNames: [], toolNames: [] };
+}
+
+export const McpSnapshot: MessageFns<McpSnapshot> = {
+  encode(message: McpSnapshot, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.servers !== 0) {
+      writer.uint32(8).uint32(message.servers);
+    }
+    if (message.tools !== 0) {
+      writer.uint32(16).uint32(message.tools);
+    }
+    if (message.notificationHooks !== 0) {
+      writer.uint32(24).uint32(message.notificationHooks);
+    }
+    for (const v of message.serverNames) {
+      writer.uint32(34).string(v!);
+    }
+    for (const v of message.toolNames) {
+      writer.uint32(42).string(v!);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): McpSnapshot {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseMcpSnapshot();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.servers = reader.uint32();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.tools = reader.uint32();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.notificationHooks = reader.uint32();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.serverNames.push(reader.string());
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.toolNames.push(reader.string());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): McpSnapshot {
+    return {
+      servers: isSet(object.servers) ? globalThis.Number(object.servers) : 0,
+      tools: isSet(object.tools) ? globalThis.Number(object.tools) : 0,
+      notificationHooks: isSet(object.notificationHooks)
+        ? globalThis.Number(object.notificationHooks)
+        : isSet(object.notification_hooks)
+        ? globalThis.Number(object.notification_hooks)
+        : 0,
+      serverNames: globalThis.Array.isArray(object?.serverNames)
+        ? object.serverNames.map((e: any) => globalThis.String(e))
+        : globalThis.Array.isArray(object?.server_names)
+        ? object.server_names.map((e: any) => globalThis.String(e))
+        : [],
+      toolNames: globalThis.Array.isArray(object?.toolNames)
+        ? object.toolNames.map((e: any) => globalThis.String(e))
+        : globalThis.Array.isArray(object?.tool_names)
+        ? object.tool_names.map((e: any) => globalThis.String(e))
+        : [],
+    };
+  },
+
+  toJSON(message: McpSnapshot): unknown {
+    const obj: any = {};
+    if (message.servers !== 0) {
+      obj.servers = Math.round(message.servers);
+    }
+    if (message.tools !== 0) {
+      obj.tools = Math.round(message.tools);
+    }
+    if (message.notificationHooks !== 0) {
+      obj.notificationHooks = Math.round(message.notificationHooks);
+    }
+    if (message.serverNames?.length) {
+      obj.serverNames = message.serverNames;
+    }
+    if (message.toolNames?.length) {
+      obj.toolNames = message.toolNames;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<McpSnapshot>, I>>(base?: I): McpSnapshot {
+    return McpSnapshot.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<McpSnapshot>, I>>(object: I): McpSnapshot {
+    const message = createBaseMcpSnapshot();
+    message.servers = object.servers ?? 0;
+    message.tools = object.tools ?? 0;
+    message.notificationHooks = object.notificationHooks ?? 0;
+    message.serverNames = object.serverNames?.map((e) => e) || [];
+    message.toolNames = object.toolNames?.map((e) => e) || [];
+    return message;
+  },
+};
+
+function createBaseToolsSnapshot(): ToolsSnapshot {
+  return { total: 0, names: [] };
+}
+
+export const ToolsSnapshot: MessageFns<ToolsSnapshot> = {
+  encode(message: ToolsSnapshot, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.total !== 0) {
+      writer.uint32(8).uint32(message.total);
+    }
+    for (const v of message.names) {
+      writer.uint32(18).string(v!);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ToolsSnapshot {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseToolsSnapshot();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.total = reader.uint32();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.names.push(reader.string());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ToolsSnapshot {
+    return {
+      total: isSet(object.total) ? globalThis.Number(object.total) : 0,
+      names: globalThis.Array.isArray(object?.names) ? object.names.map((e: any) => globalThis.String(e)) : [],
+    };
+  },
+
+  toJSON(message: ToolsSnapshot): unknown {
+    const obj: any = {};
+    if (message.total !== 0) {
+      obj.total = Math.round(message.total);
+    }
+    if (message.names?.length) {
+      obj.names = message.names;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ToolsSnapshot>, I>>(base?: I): ToolsSnapshot {
+    return ToolsSnapshot.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ToolsSnapshot>, I>>(object: I): ToolsSnapshot {
+    const message = createBaseToolsSnapshot();
+    message.total = object.total ?? 0;
+    message.names = object.names?.map((e) => e) || [];
+    return message;
+  },
+};
+
+function createBaseFeedBlock(): FeedBlock {
+  return { kind: undefined };
+}
+
+export const FeedBlock: MessageFns<FeedBlock> = {
+  encode(message: FeedBlock, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    switch (message.kind?.$case) {
+      case "user":
+        UserBlock.encode(message.kind.user, writer.uint32(10).fork()).join();
+        break;
+      case "assistant":
+        AssistantBlock.encode(message.kind.assistant, writer.uint32(18).fork()).join();
+        break;
+      case "thinking":
+        ThinkingBlock.encode(message.kind.thinking, writer.uint32(26).fork()).join();
+        break;
+      case "tool":
+        ToolBlock.encode(message.kind.tool, writer.uint32(34).fork()).join();
+        break;
+      case "toolResult":
+        ToolResultBlock.encode(message.kind.toolResult, writer.uint32(42).fork()).join();
+        break;
+      case "plain":
+        PlainBlock.encode(message.kind.plain, writer.uint32(50).fork()).join();
+        break;
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): FeedBlock {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseFeedBlock();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.kind = { $case: "user", user: UserBlock.decode(reader, reader.uint32()) };
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.kind = { $case: "assistant", assistant: AssistantBlock.decode(reader, reader.uint32()) };
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.kind = { $case: "thinking", thinking: ThinkingBlock.decode(reader, reader.uint32()) };
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.kind = { $case: "tool", tool: ToolBlock.decode(reader, reader.uint32()) };
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.kind = { $case: "toolResult", toolResult: ToolResultBlock.decode(reader, reader.uint32()) };
+          continue;
+        }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.kind = { $case: "plain", plain: PlainBlock.decode(reader, reader.uint32()) };
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): FeedBlock {
+    return {
+      kind: isSet(object.user)
+        ? { $case: "user", user: UserBlock.fromJSON(object.user) }
+        : isSet(object.assistant)
+        ? { $case: "assistant", assistant: AssistantBlock.fromJSON(object.assistant) }
+        : isSet(object.thinking)
+        ? { $case: "thinking", thinking: ThinkingBlock.fromJSON(object.thinking) }
+        : isSet(object.tool)
+        ? { $case: "tool", tool: ToolBlock.fromJSON(object.tool) }
+        : isSet(object.toolResult)
+        ? { $case: "toolResult", toolResult: ToolResultBlock.fromJSON(object.toolResult) }
+        : isSet(object.tool_result)
+        ? { $case: "toolResult", toolResult: ToolResultBlock.fromJSON(object.tool_result) }
+        : isSet(object.plain)
+        ? { $case: "plain", plain: PlainBlock.fromJSON(object.plain) }
+        : undefined,
+    };
+  },
+
+  toJSON(message: FeedBlock): unknown {
+    const obj: any = {};
+    if (message.kind?.$case === "user") {
+      obj.user = UserBlock.toJSON(message.kind.user);
+    } else if (message.kind?.$case === "assistant") {
+      obj.assistant = AssistantBlock.toJSON(message.kind.assistant);
+    } else if (message.kind?.$case === "thinking") {
+      obj.thinking = ThinkingBlock.toJSON(message.kind.thinking);
+    } else if (message.kind?.$case === "tool") {
+      obj.tool = ToolBlock.toJSON(message.kind.tool);
+    } else if (message.kind?.$case === "toolResult") {
+      obj.toolResult = ToolResultBlock.toJSON(message.kind.toolResult);
+    } else if (message.kind?.$case === "plain") {
+      obj.plain = PlainBlock.toJSON(message.kind.plain);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<FeedBlock>, I>>(base?: I): FeedBlock {
+    return FeedBlock.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<FeedBlock>, I>>(object: I): FeedBlock {
+    const message = createBaseFeedBlock();
+    switch (object.kind?.$case) {
+      case "user": {
+        if (object.kind?.user !== undefined && object.kind?.user !== null) {
+          message.kind = { $case: "user", user: UserBlock.fromPartial(object.kind.user) };
+        }
+        break;
+      }
+      case "assistant": {
+        if (object.kind?.assistant !== undefined && object.kind?.assistant !== null) {
+          message.kind = { $case: "assistant", assistant: AssistantBlock.fromPartial(object.kind.assistant) };
+        }
+        break;
+      }
+      case "thinking": {
+        if (object.kind?.thinking !== undefined && object.kind?.thinking !== null) {
+          message.kind = { $case: "thinking", thinking: ThinkingBlock.fromPartial(object.kind.thinking) };
+        }
+        break;
+      }
+      case "tool": {
+        if (object.kind?.tool !== undefined && object.kind?.tool !== null) {
+          message.kind = { $case: "tool", tool: ToolBlock.fromPartial(object.kind.tool) };
+        }
+        break;
+      }
+      case "toolResult": {
+        if (object.kind?.toolResult !== undefined && object.kind?.toolResult !== null) {
+          message.kind = { $case: "toolResult", toolResult: ToolResultBlock.fromPartial(object.kind.toolResult) };
+        }
+        break;
+      }
+      case "plain": {
+        if (object.kind?.plain !== undefined && object.kind?.plain !== null) {
+          message.kind = { $case: "plain", plain: PlainBlock.fromPartial(object.kind.plain) };
+        }
+        break;
+      }
+    }
+    return message;
+  },
+};
+
+function createBaseUserBlock(): UserBlock {
+  return { text: "", timestamp: undefined };
+}
+
+export const UserBlock: MessageFns<UserBlock> = {
+  encode(message: UserBlock, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.text !== "") {
+      writer.uint32(10).string(message.text);
+    }
+    if (message.timestamp !== undefined) {
+      writer.uint32(18).string(message.timestamp);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): UserBlock {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseUserBlock();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.text = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.timestamp = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): UserBlock {
+    return {
+      text: isSet(object.text) ? globalThis.String(object.text) : "",
+      timestamp: isSet(object.timestamp) ? globalThis.String(object.timestamp) : undefined,
+    };
+  },
+
+  toJSON(message: UserBlock): unknown {
+    const obj: any = {};
+    if (message.text !== "") {
+      obj.text = message.text;
+    }
+    if (message.timestamp !== undefined) {
+      obj.timestamp = message.timestamp;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<UserBlock>, I>>(base?: I): UserBlock {
+    return UserBlock.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<UserBlock>, I>>(object: I): UserBlock {
+    const message = createBaseUserBlock();
+    message.text = object.text ?? "";
+    message.timestamp = object.timestamp ?? undefined;
+    return message;
+  },
+};
+
+function createBaseAssistantBlock(): AssistantBlock {
+  return { text: "", timestamp: undefined };
+}
+
+export const AssistantBlock: MessageFns<AssistantBlock> = {
+  encode(message: AssistantBlock, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.text !== "") {
+      writer.uint32(10).string(message.text);
+    }
+    if (message.timestamp !== undefined) {
+      writer.uint32(18).string(message.timestamp);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): AssistantBlock {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseAssistantBlock();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.text = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.timestamp = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): AssistantBlock {
+    return {
+      text: isSet(object.text) ? globalThis.String(object.text) : "",
+      timestamp: isSet(object.timestamp) ? globalThis.String(object.timestamp) : undefined,
+    };
+  },
+
+  toJSON(message: AssistantBlock): unknown {
+    const obj: any = {};
+    if (message.text !== "") {
+      obj.text = message.text;
+    }
+    if (message.timestamp !== undefined) {
+      obj.timestamp = message.timestamp;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<AssistantBlock>, I>>(base?: I): AssistantBlock {
+    return AssistantBlock.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<AssistantBlock>, I>>(object: I): AssistantBlock {
+    const message = createBaseAssistantBlock();
+    message.text = object.text ?? "";
+    message.timestamp = object.timestamp ?? undefined;
+    return message;
+  },
+};
+
+function createBaseThinkingBlock(): ThinkingBlock {
+  return { text: "", timestamp: undefined };
+}
+
+export const ThinkingBlock: MessageFns<ThinkingBlock> = {
+  encode(message: ThinkingBlock, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.text !== "") {
+      writer.uint32(10).string(message.text);
+    }
+    if (message.timestamp !== undefined) {
+      writer.uint32(18).string(message.timestamp);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ThinkingBlock {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseThinkingBlock();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.text = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.timestamp = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ThinkingBlock {
+    return {
+      text: isSet(object.text) ? globalThis.String(object.text) : "",
+      timestamp: isSet(object.timestamp) ? globalThis.String(object.timestamp) : undefined,
+    };
+  },
+
+  toJSON(message: ThinkingBlock): unknown {
+    const obj: any = {};
+    if (message.text !== "") {
+      obj.text = message.text;
+    }
+    if (message.timestamp !== undefined) {
+      obj.timestamp = message.timestamp;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ThinkingBlock>, I>>(base?: I): ThinkingBlock {
+    return ThinkingBlock.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ThinkingBlock>, I>>(object: I): ThinkingBlock {
+    const message = createBaseThinkingBlock();
+    message.text = object.text ?? "";
+    message.timestamp = object.timestamp ?? undefined;
+    return message;
+  },
+};
+
+function createBaseToolBlock(): ToolBlock {
+  return { name: "", args: "", timestamp: undefined };
+}
+
+export const ToolBlock: MessageFns<ToolBlock> = {
+  encode(message: ToolBlock, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.name !== "") {
+      writer.uint32(10).string(message.name);
+    }
+    if (message.args !== "") {
+      writer.uint32(18).string(message.args);
+    }
+    if (message.timestamp !== undefined) {
+      writer.uint32(26).string(message.timestamp);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ToolBlock {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseToolBlock();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.args = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.timestamp = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ToolBlock {
+    return {
+      name: isSet(object.name) ? globalThis.String(object.name) : "",
+      args: isSet(object.args) ? globalThis.String(object.args) : "",
+      timestamp: isSet(object.timestamp) ? globalThis.String(object.timestamp) : undefined,
+    };
+  },
+
+  toJSON(message: ToolBlock): unknown {
+    const obj: any = {};
+    if (message.name !== "") {
+      obj.name = message.name;
+    }
+    if (message.args !== "") {
+      obj.args = message.args;
+    }
+    if (message.timestamp !== undefined) {
+      obj.timestamp = message.timestamp;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ToolBlock>, I>>(base?: I): ToolBlock {
+    return ToolBlock.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ToolBlock>, I>>(object: I): ToolBlock {
+    const message = createBaseToolBlock();
+    message.name = object.name ?? "";
+    message.args = object.args ?? "";
+    message.timestamp = object.timestamp ?? undefined;
+    return message;
+  },
+};
+
+function createBaseToolResultBlock(): ToolResultBlock {
+  return { lines: [], isError: false, timestamp: undefined };
+}
+
+export const ToolResultBlock: MessageFns<ToolResultBlock> = {
+  encode(message: ToolResultBlock, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.lines) {
+      writer.uint32(10).string(v!);
+    }
+    if (message.isError !== false) {
+      writer.uint32(16).bool(message.isError);
+    }
+    if (message.timestamp !== undefined) {
+      writer.uint32(26).string(message.timestamp);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ToolResultBlock {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseToolResultBlock();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.lines.push(reader.string());
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.isError = reader.bool();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.timestamp = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ToolResultBlock {
+    return {
+      lines: globalThis.Array.isArray(object?.lines) ? object.lines.map((e: any) => globalThis.String(e)) : [],
+      isError: isSet(object.isError)
+        ? globalThis.Boolean(object.isError)
+        : isSet(object.is_error)
+        ? globalThis.Boolean(object.is_error)
+        : false,
+      timestamp: isSet(object.timestamp) ? globalThis.String(object.timestamp) : undefined,
+    };
+  },
+
+  toJSON(message: ToolResultBlock): unknown {
+    const obj: any = {};
+    if (message.lines?.length) {
+      obj.lines = message.lines;
+    }
+    if (message.isError !== false) {
+      obj.isError = message.isError;
+    }
+    if (message.timestamp !== undefined) {
+      obj.timestamp = message.timestamp;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ToolResultBlock>, I>>(base?: I): ToolResultBlock {
+    return ToolResultBlock.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ToolResultBlock>, I>>(object: I): ToolResultBlock {
+    const message = createBaseToolResultBlock();
+    message.lines = object.lines?.map((e) => e) || [];
+    message.isError = object.isError ?? false;
+    message.timestamp = object.timestamp ?? undefined;
+    return message;
+  },
+};
+
+function createBasePlainBlock(): PlainBlock {
+  return { text: "", level: "", timestamp: undefined };
+}
+
+export const PlainBlock: MessageFns<PlainBlock> = {
+  encode(message: PlainBlock, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.text !== "") {
+      writer.uint32(10).string(message.text);
+    }
+    if (message.level !== "") {
+      writer.uint32(18).string(message.level);
+    }
+    if (message.timestamp !== undefined) {
+      writer.uint32(26).string(message.timestamp);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): PlainBlock {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBasePlainBlock();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.text = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.level = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.timestamp = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): PlainBlock {
+    return {
+      text: isSet(object.text) ? globalThis.String(object.text) : "",
+      level: isSet(object.level) ? globalThis.String(object.level) : "",
+      timestamp: isSet(object.timestamp) ? globalThis.String(object.timestamp) : undefined,
+    };
+  },
+
+  toJSON(message: PlainBlock): unknown {
+    const obj: any = {};
+    if (message.text !== "") {
+      obj.text = message.text;
+    }
+    if (message.level !== "") {
+      obj.level = message.level;
+    }
+    if (message.timestamp !== undefined) {
+      obj.timestamp = message.timestamp;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<PlainBlock>, I>>(base?: I): PlainBlock {
+    return PlainBlock.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<PlainBlock>, I>>(object: I): PlainBlock {
+    const message = createBasePlainBlock();
+    message.text = object.text ?? "";
+    message.level = object.level ?? "";
+    message.timestamp = object.timestamp ?? undefined;
+    return message;
+  },
+};
 
 function createBaseSessionSummary(): SessionSummary {
   return {

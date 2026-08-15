@@ -1,12 +1,10 @@
-// Event plane: unified stream envelope. Snapshot frames carry the full state
-// plane; event frames carry high-frequency graph/subagent increments.
+// Event plane: unified snapshot/event stream envelope and the
+// high-frequency subagent / graph-engine event increments.
 
 syntax = "proto3";
 package theway.grpc.v1;
 
-import "graph_events.proto";
-import "state.proto";
-import "subagent_events.proto";
+import "session.proto";
 
 // Unified envelope for StreamEvents / WebSocket frames.
 message StreamFrame {
@@ -25,4 +23,52 @@ message StreamEvent {
     NodeStatus node_status = 5;
     RunStatus run_status = 6;
   }
+}
+
+message SubagentStarted {
+  string id = 1;
+  string agent = 2;
+  string source = 3;
+  optional string run_id = 4;
+  optional string node_id = 5;
+}
+
+message SubagentOutput {
+  string id = 1;
+  string chunk = 2; // high-frequency, untruncated
+}
+
+message SubagentMetrics {
+  string id = 1;
+  double tps = 2;
+  double cps = 3;
+  uint64 chars = 4;
+  uint64 tokens_in = 5;
+  uint64 tokens_out = 6;
+  uint64 tools_called = 7;
+  uint32 turn = 8;
+}
+
+message SubagentCompleted {
+  string id = 1;
+  string status = 2;
+  optional string error = 3;
+  optional uint64 duration_ms = 4;
+  uint64 chars = 5;
+  uint64 tokens_in = 6;
+  uint64 tokens_out = 7;
+  uint64 tools_called = 8;
+}
+
+message NodeStatus {
+  string run_id = 1;
+  string node_id = 2;
+  string status = 3;
+  optional string error = 4;
+}
+
+message RunStatus {
+  string run_id = 1;
+  string status = 2;
+  optional string error = 3;
 }

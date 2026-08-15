@@ -13,13 +13,10 @@
 syntax = "proto3";
 package theway.grpc.v1;
 
-import "common.proto";
+import "commands.proto";
 import "events.proto";
-import "graph_checkpoint.proto";
-import "graph_control.proto";
-import "graph_output.proto";
+import "graph_engine.proto";
 import "session.proto";
-import "state.proto";
 
 service ThewayGrpc {
   // Full structured state (binary protobuf).

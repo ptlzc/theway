@@ -14,6 +14,7 @@ if [ ! -x "$PROTOC" ] || [ ! -x "$PLUGIN" ]; then
 fi
 
 mkdir -p "$OUT"
+rm -f "$OUT"/*.ts
 
 # proto/theway_grpc.proto is the service entrypoint; protoc resolves its
 # domain imports and ts-proto writes one generated file per proto file.

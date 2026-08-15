@@ -1,6 +1,6 @@
 // Command domain: shared command markers, prompt submission, approval, and
-// model-switch request messages for theway.grpc.v1. The service definition
-// lives in theway_grpc.proto.
+// model-switch request messages. The service definition lives in
+// theway_grpc.proto.
 
 syntax = "proto3";
 package theway.grpc.v1;
