@@ -27,7 +27,8 @@ pub mod theway_grpc {
 
 use health::HealthCheckRequest;
 use health::health_client::HealthClient;
-use theway_grpc::theway_grpc_client::ThewayGrpcClient;
+use theway_grpc::command_service_client::CommandServiceClient;
+use theway_grpc::session_service_client::SessionServiceClient;
 use theway_grpc::{CreateSessionRequest, Empty, ListSessionsResponse, SendMessageRequest};
 
 #[derive(Parser, Debug)]
@@ -237,10 +238,11 @@ async fn test_multi_session(addr: &str) -> TestResult {
 }
 
 async fn run_multi_session(addr: &str) -> Result<(usize, usize)> {
-    let mut client = ThewayGrpcClient::connect(addr.to_string()).await?;
+    let mut session_client = SessionServiceClient::connect(addr.to_string()).await?;
+    let mut command_client = CommandServiceClient::connect(addr.to_string()).await?;
 
     // Get initial session count
-    let list_resp: ListSessionsResponse = client
+    let list_resp: ListSessionsResponse = session_client
         .list_sessions(Request::new(Empty {}))
         .await?
         .into_inner();
@@ -248,7 +250,7 @@ async fn run_multi_session(addr: &str) -> Result<(usize, usize)> {
     let initial_session_id = list_resp.current_session_id.clone();
 
     // Create session A
-    let create_a = client
+    let create_a = session_client
         .create_session(Request::new(CreateSessionRequest {
             name: Some("probe-session-a".to_string()),
         }))
@@ -261,7 +263,7 @@ async fn run_multi_session(addr: &str) -> Result<(usize, usize)> {
         .unwrap_or_default();
 
     // Create session B
-    let create_b = client
+    let create_b = session_client
         .create_session(Request::new(CreateSessionRequest {
             name: Some("probe-session-b".to_string()),
         }))
@@ -274,7 +276,7 @@ async fn run_multi_session(addr: &str) -> Result<(usize, usize)> {
         .unwrap_or_default();
 
     // ListSessions should now have initial + 2
-    let list_resp2: ListSessionsResponse = client
+    let list_resp2: ListSessionsResponse = session_client
         .list_sessions(Request::new(Empty {}))
         .await?
         .into_inner();
@@ -307,7 +309,7 @@ async fn run_multi_session(addr: &str) -> Result<(usize, usize)> {
     // Verify each session is independently addressable: send a message to each.
     // A new session that's NOT the current one should return FAILED_PRECONDITION.
     // The current session (last created = B) should accept messages.
-    let send_to_current = client
+    let send_to_current = command_client
         .send_message(Request::new(SendMessageRequest {
             text: "probe: test message".to_string(),
             images: vec![],
@@ -327,7 +329,7 @@ async fn run_multi_session(addr: &str) -> Result<(usize, usize)> {
     }
 
     // SendMessage to a non-current session should fail with FAILED_PRECONDITION
-    let send_to_other = client
+    let send_to_other = command_client
         .send_message(Request::new(SendMessageRequest {
             text: "probe: should fail".to_string(),
             images: vec![],
@@ -356,7 +358,7 @@ async fn run_multi_session(addr: &str) -> Result<(usize, usize)> {
 
     // Clean up: switch back to initial session, delete probe sessions
     // (best-effort, don't fail if cleanup fails)
-    let _ = client
+    let _ = session_client
         .switch_session(Request::new(theway_grpc::SwitchSessionRequest {
             session_id: initial_session_id,
         }))
@@ -364,7 +366,7 @@ async fn run_multi_session(addr: &str) -> Result<(usize, usize)> {
 
     // Use DeleteSession (even if it fails with graphs running, we tried)
     for sid in [&session_a_id, &session_b_id] {
-        let _ = client
+        let _ = session_client
             .delete_session(Request::new(theway_grpc::DeleteSessionRequest {
                 session_id: sid.clone(),
             }))
@@ -391,14 +393,14 @@ async fn test_get_state(addr: &str) -> TestResult {
         Err(e) => TestResult::fail(
             "get-state",
             &format!("GetState RPC failed: {e}"),
-            "ThewayGrpc::GetState not functional",
+            "SessionService::GetState not functional",
             Some(format!("{e:#}")),
         ),
     }
 }
 
 async fn run_get_state(addr: &str) -> Result<theway_grpc::SessionState> {
-    let mut client = ThewayGrpcClient::connect(addr.to_string()).await?;
+    let mut client = SessionServiceClient::connect(addr.to_string()).await?;
     let resp = client.get_state(Request::new(Empty {})).await?;
     Ok(resp.into_inner())
 }
