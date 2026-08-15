@@ -1,9 +1,7 @@
 import * as grpc from '@grpc/grpc-js';
 import {
-  ThewayGrpcClient as ThewayGrpcClientCtor,
-  type ThewayGrpcClient as ThewayGrpcClientApi,
-} from './generated/theway_grpc.js';
-import {
+  CommandServiceClient as CommandServiceClientCtor,
+  type CommandServiceClient as CommandServiceClientApi,
   MessageMode,
   type ApproveRequest,
   type CommandResult,
@@ -11,33 +9,41 @@ import {
   type SendMessageRequest,
   type SetModelRequest,
 } from './generated/commands.js';
-import type { StreamFrame } from './generated/events.js';
-import type {
-  GetNodeOutputRequest,
-  GetNodeOutputResponse,
-  GraphCancelRequest,
-  GraphCheckpointRequest,
-  GraphCheckpointResponse,
-  GraphListRequest,
-  GraphListResponse,
-  GraphNodeInterruptRequest,
-  GraphNodeSteerRequest,
-  GraphRestoreRequest,
-  GraphRestoreResponse,
-  GraphRetryRequest,
-  GraphRetryResponse,
-  GraphSkipRequest,
-  GraphSkipResponse,
+import {
+  EventServiceClient as EventServiceClientCtor,
+  type EventServiceClient as EventServiceClientApi,
+  type StreamFrame,
+} from './generated/events.js';
+import {
+  GraphEngineServiceClient as GraphEngineServiceClientCtor,
+  type GraphEngineServiceClient as GraphEngineServiceClientApi,
+  type GetNodeOutputRequest,
+  type GetNodeOutputResponse,
+  type GraphCancelRequest,
+  type GraphCheckpointRequest,
+  type GraphCheckpointResponse,
+  type GraphListRequest,
+  type GraphListResponse,
+  type GraphNodeInterruptRequest,
+  type GraphNodeSteerRequest,
+  type GraphRestoreRequest,
+  type GraphRestoreResponse,
+  type GraphRetryRequest,
+  type GraphRetryResponse,
+  type GraphSkipRequest,
+  type GraphSkipResponse,
 } from './generated/graph_engine.js';
-import type {
-  CreateSessionRequest,
-  CreateSessionResponse,
-  DeleteSessionRequest,
-  DeleteSessionResponse,
-  ListSessionsResponse,
-  RenameSessionRequest,
-  SessionState,
-  SwitchSessionRequest,
+import {
+  SessionServiceClient as SessionServiceClientCtor,
+  type SessionServiceClient as SessionServiceClientApi,
+  type CreateSessionRequest,
+  type CreateSessionResponse,
+  type DeleteSessionRequest,
+  type DeleteSessionResponse,
+  type ListSessionsResponse,
+  type RenameSessionRequest,
+  type SessionState,
+  type SwitchSessionRequest,
 } from './generated/session.js';
 
 // ── authority cleaning ──
@@ -47,8 +53,9 @@ const TRAILING_SLASHES = /\/+$/;
 
 /**
  * Typed gRPC client for the `theway --grpc` loopback server
- * (theway.grpc.v1.ThewayGrpc). Generated from proto/theway_grpc.proto and its
- * domain imports (ts-proto + @grpc/grpc-js) — no runtime proto loading.
+ * (theway.grpc.v1.CommandService / SessionService / GraphEngineService /
+ * EventService). Generated from the domain proto files and health.proto
+ * (ts-proto + @grpc/grpc-js) — no runtime proto loading.
  *
  * Command RPCs (SendMessage / SetModel / …) resolve the raw CommandResult;
  * the convenience wrappers (`prompt`, `setModelSpec`, `abort`, …) throw when
@@ -56,26 +63,32 @@ const TRAILING_SLASHES = /\/+$/;
  * the JSON channels.
  */
 export class ThewayGrpcClient {
-  readonly #client: ThewayGrpcClientApi;
+  readonly #session: SessionServiceClientApi;
+  readonly #command: CommandServiceClientApi;
+  readonly #graph: GraphEngineServiceClientApi;
+  readonly #events: EventServiceClientApi;
 
   constructor(
     baseUrl: string,
     credentials: grpc.ChannelCredentials = grpc.credentials.createInsecure(),
   ) {
     const authority = baseUrl.replace(SCHEME_PREFIX, '').replace(TRAILING_SLASHES, '');
-    this.#client = new ThewayGrpcClientCtor(authority, credentials);
+    this.#session = new SessionServiceClientCtor(authority, credentials);
+    this.#command = new CommandServiceClientCtor(authority, credentials);
+    this.#graph = new GraphEngineServiceClientCtor(authority, credentials);
+    this.#events = new EventServiceClientCtor(authority, credentials);
   }
 
   // ── session state ──
 
   /** `GetState` — the latest full session state. */
   getState(): Promise<SessionState> {
-    return this.#call<Empty, SessionState>(this.#client.getState, 'GetState', {});
+    return this.#call<Empty, SessionState>(this.#session.getState.bind(this.#session), 'GetState', {});
   }
 
   /** `GetNodeOutput` — a DAG node's output fragment from an offset. */
   getNodeOutput(request: GetNodeOutputRequest): Promise<GetNodeOutputResponse> {
-    return this.#call<GetNodeOutputRequest, GetNodeOutputResponse>(this.#client.getNodeOutput, 'GetNodeOutput', request);
+    return this.#call<GetNodeOutputRequest, GetNodeOutputResponse>(this.#graph.getNodeOutput.bind(this.#graph), 'GetNodeOutput', request);
   }
 
   // ── commands ──
@@ -91,14 +104,14 @@ export class ThewayGrpcClient {
 
   /** `SendMessage` — raw request (mode=INTERRUPT supported). */
   sendMessage(request: SendMessageRequest): Promise<CommandResult> {
-    return this.#call<SendMessageRequest, CommandResult>(this.#client.sendMessage, 'SendMessage', request);
+    return this.#call<SendMessageRequest, CommandResult>(this.#command.sendMessage.bind(this.#command), 'SendMessage', request);
   }
 
   /** `SetModel` — switch model with a composed `provider:model` spec. */
   async setModelSpec(spec: string): Promise<void> {
     const request: SetModelRequest = { spec };
     const result = await this.#call<SetModelRequest, CommandResult>(
-      this.#client.setModel,
+      this.#command.setModel.bind(this.#command),
       'SetModel',
       request,
     );
@@ -114,7 +127,7 @@ export class ThewayGrpcClient {
 
   /** `Cancel` — stop the in-flight turn (same as local Ctrl-C). */
   async abort(): Promise<void> {
-    const result = await this.#call<Empty, CommandResult>(this.#client.cancel, 'Cancel', {});
+    const result = await this.#call<Empty, CommandResult>(this.#command.cancel.bind(this.#command), 'Cancel', {});
     if (!result.accepted) {
       throw new Error('theway grpc: Cancel was not accepted by the server');
     }
@@ -124,7 +137,7 @@ export class ThewayGrpcClient {
   async resolveControlPlane(approve: boolean): Promise<void> {
     const request: ApproveRequest = { approve };
     const result = await this.#call<ApproveRequest, CommandResult>(
-      this.#client.approve,
+      this.#command.approve.bind(this.#command),
       'Approve',
       request,
     );
@@ -139,7 +152,7 @@ export class ThewayGrpcClient {
   async graphCancel(runId: string): Promise<void> {
     const request: GraphCancelRequest = { runId };
     const result = await this.#call<GraphCancelRequest, CommandResult>(
-      this.#client.graphCancel,
+      this.#graph.graphCancel.bind(this.#graph),
       'GraphCancel',
       request,
     );
@@ -151,20 +164,20 @@ export class ThewayGrpcClient {
   /** `GraphRetry` — re-run failed/cancelled nodes (omitted nodeId = all). */
   graphRetry(runId: string, nodeId?: string): Promise<GraphRetryResponse> {
     const request: GraphRetryRequest = { runId, nodeId };
-    return this.#call<GraphRetryRequest, GraphRetryResponse>(this.#client.graphRetry, 'GraphRetry', request);
+    return this.#call<GraphRetryRequest, GraphRetryResponse>(this.#graph.graphRetry.bind(this.#graph), 'GraphRetry', request);
   }
 
   /** `GraphSkip` — skip a node (counts as success for downstream). */
   graphSkip(runId: string, nodeId: string): Promise<GraphSkipResponse> {
     const request: GraphSkipRequest = { runId, nodeId };
-    return this.#call<GraphSkipRequest, GraphSkipResponse>(this.#client.graphSkip, 'GraphSkip', request);
+    return this.#call<GraphSkipRequest, GraphSkipResponse>(this.#graph.graphSkip.bind(this.#graph), 'GraphSkip', request);
   }
 
   /** `GraphNodeInterrupt` — stop the node's in-flight turn. */
   async graphNodeInterrupt(runId: string, nodeId: string): Promise<void> {
     const request: GraphNodeInterruptRequest = { runId, nodeId };
     const result = await this.#call<GraphNodeInterruptRequest, CommandResult>(
-      this.#client.graphNodeInterrupt,
+      this.#graph.graphNodeInterrupt.bind(this.#graph),
       'GraphNodeInterrupt',
       request,
     );
@@ -177,7 +190,7 @@ export class ThewayGrpcClient {
   async graphNodeSteer(runId: string, nodeId: string, text: string): Promise<void> {
     const request: GraphNodeSteerRequest = { runId, nodeId, text };
     const result = await this.#call<GraphNodeSteerRequest, CommandResult>(
-      this.#client.graphNodeSteer,
+      this.#graph.graphNodeSteer.bind(this.#graph),
       'GraphNodeSteer',
       request,
     );
@@ -188,39 +201,39 @@ export class ThewayGrpcClient {
 
   /** `GraphCheckpoint` — export run snapshots as portable JSON. */
   graphCheckpoint(request: GraphCheckpointRequest = {}): Promise<GraphCheckpointResponse> {
-    return this.#call<GraphCheckpointRequest, GraphCheckpointResponse>(this.#client.graphCheckpoint, 'GraphCheckpoint', request);
+    return this.#call<GraphCheckpointRequest, GraphCheckpointResponse>(this.#graph.graphCheckpoint.bind(this.#graph), 'GraphCheckpoint', request);
   }
 
   /** `GraphRestore` — revive a run from a GraphCheckpoint snapshot. */
   graphRestore(sessionId: string, snapshot: string): Promise<GraphRestoreResponse> {
     const request: GraphRestoreRequest = { sessionId, snapshot };
-    return this.#call<GraphRestoreRequest, GraphRestoreResponse>(this.#client.graphRestore, 'GraphRestore', request);
+    return this.#call<GraphRestoreRequest, GraphRestoreResponse>(this.#graph.graphRestore.bind(this.#graph), 'GraphRestore', request);
   }
 
   /** `GraphList` — enumerate one session's graph runs. */
   graphList(sessionId: string): Promise<GraphListResponse> {
     const request: GraphListRequest = { sessionId };
-    return this.#call<GraphListRequest, GraphListResponse>(this.#client.graphList, 'GraphList', request);
+    return this.#call<GraphListRequest, GraphListResponse>(this.#graph.graphList.bind(this.#graph), 'GraphList', request);
   }
 
   // ── session resources ──
 
   /** `ListSessions` — all sessions (live + archived) with the current one marked. */
   listSessions(): Promise<ListSessionsResponse> {
-    return this.#call<Empty, ListSessionsResponse>(this.#client.listSessions, 'ListSessions', {});
+    return this.#call<Empty, ListSessionsResponse>(this.#session.listSessions.bind(this.#session), 'ListSessions', {});
   }
 
   /** `CreateSession` — create a session. */
   createSession(name?: string): Promise<CreateSessionResponse> {
     const request: CreateSessionRequest = { name };
-    return this.#call<CreateSessionRequest, CreateSessionResponse>(this.#client.createSession, 'CreateSession', request);
+    return this.#call<CreateSessionRequest, CreateSessionResponse>(this.#session.createSession.bind(this.#session), 'CreateSession', request);
   }
 
   /** `SwitchSession` — switch the live session. */
   async switchSession(sessionId: string): Promise<void> {
     const request: SwitchSessionRequest = { sessionId };
     const result = await this.#call<SwitchSessionRequest, CommandResult>(
-      this.#client.switchSession,
+      this.#session.switchSession.bind(this.#session),
       'SwitchSession',
       request,
     );
@@ -233,7 +246,7 @@ export class ThewayGrpcClient {
   async renameSession(sessionId: string, name: string): Promise<void> {
     const request: RenameSessionRequest = { sessionId, name };
     const result = await this.#call<RenameSessionRequest, CommandResult>(
-      this.#client.renameSession,
+      this.#session.renameSession.bind(this.#session),
       'RenameSession',
       request,
     );
@@ -245,7 +258,7 @@ export class ThewayGrpcClient {
   /** `DeleteSession` — delete a session (refused while graphs are running). */
   deleteSession(sessionId: string): Promise<DeleteSessionResponse> {
     const request: DeleteSessionRequest = { sessionId };
-    return this.#call<DeleteSessionRequest, DeleteSessionResponse>(this.#client.deleteSession, 'DeleteSession', request);
+    return this.#call<DeleteSessionRequest, DeleteSessionResponse>(this.#session.deleteSession.bind(this.#session), 'DeleteSession', request);
   }
 
   // ── event stream ──
@@ -263,7 +276,7 @@ export class ThewayGrpcClient {
       };
       signal?.addEventListener('abort', forwardAbort, { once: true });
 
-      const stream = this.#client.streamEvents({});
+      const stream = this.#events.streamEvents.bind(this.#events)({});
 
       stream.on('data', (frame: StreamFrame) => {
         try {
@@ -299,7 +312,10 @@ export class ThewayGrpcClient {
   /** Close the underlying channel; in-flight streams fail fast. */
   close(): void {
     this.#closed = true;
-    this.#client.close();
+    this.#session.close();
+    this.#command.close();
+    this.#graph.close();
+    this.#events.close();
   }
 
   // ── private helpers ──
@@ -315,7 +331,7 @@ export class ThewayGrpcClient {
     request: TReq,
   ): Promise<TResp> {
     return new Promise<TResp>((resolve, reject) => {
-      invoke.call(this.#client, request, (err, response) => {
+      invoke(request, (err, response) => {
         if (err) {
           reject(this.#mapError(method, err));
           return;
