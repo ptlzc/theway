@@ -400,6 +400,7 @@ impl App {
         self.input = new_textarea();
         self.completions.clear();
         self.completion_idx = 0;
+        self.completion_scroll = 0;
     }
 
     pub(super) fn set_input(&mut self, text: &str) {
@@ -421,6 +422,20 @@ impl App {
             Vec::new()
         };
         self.completion_idx = 0;
+        self.completion_scroll = 0;
+    }
+
+    /// Slide the popup window so the highlight stays inside
+    /// `[completion_scroll, completion_scroll + COMPLETION_POPUP_MAX)`
+    /// (issue #46): the highlight cycles over every match while the popup
+    /// renders a fixed window, so moving above the top edge snaps the window
+    /// up and moving past the bottom edge slides it down.
+    fn sync_completion_scroll(&mut self) {
+        if self.completion_idx < self.completion_scroll {
+            self.completion_scroll = self.completion_idx;
+        } else if self.completion_idx >= self.completion_scroll + super::COMPLETION_POPUP_MAX {
+            self.completion_scroll = self.completion_idx - super::COMPLETION_POPUP_MAX + 1;
+        }
     }
 
     pub(super) fn cycle_completion(&mut self) {
@@ -430,6 +445,7 @@ impl App {
         let options = self.completions.clone();
         let pick = self.completions[self.completion_idx % self.completions.len()].clone();
         self.completion_idx = (self.completion_idx + 1) % self.completions.len();
+        self.sync_completion_scroll();
         // Replace just the slash token (the whole single-line input here).
         let mut input = new_textarea();
         input.insert_str(&pick);
@@ -450,6 +466,7 @@ impl App {
         }
         self.completion_idx =
             (self.completion_idx + self.completions.len() - 1) % self.completions.len();
+        self.sync_completion_scroll();
     }
 
     /// ↓ with the command popup open: move the highlight down (issue #37).
@@ -458,6 +475,7 @@ impl App {
             return;
         }
         self.completion_idx = (self.completion_idx + 1) % self.completions.len();
+        self.sync_completion_scroll();
     }
 
     /// Enter with the command popup open: accept the highlighted entry into
@@ -468,6 +486,7 @@ impl App {
             return;
         }
         let pick = self.completions[self.completion_idx % self.completions.len()].clone();
+        self.completion_scroll = 0;
         self.set_input(&pick);
     }
 

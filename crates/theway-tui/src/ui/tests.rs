@@ -452,6 +452,130 @@ async fn slash_popup_navigates_with_arrows_and_accepts_with_enter() {
     assert_eq!(app.completion_idx, 0);
 }
 
+/// Locate the single highlighted popup row (cyan background) in a rendered
+/// buffer: its text and row. The popup is the only cyan-background surface,
+/// so a stray second highlighted row fails the scan.
+fn highlighted_popup_cell(buf: &Buffer) -> (String, u16) {
+    let mut rows = Vec::new();
+    for y in 0..buf.area().height {
+        if (0..buf.area().width).any(|x| buf[(x, y)].bg == Color::Cyan) {
+            rows.push(y);
+        }
+    }
+    assert_eq!(
+        rows.len(),
+        1,
+        "expected exactly one highlighted completion row, got rows {rows:?}"
+    );
+    let y = rows[0];
+    let text: String = (0..buf.area().width)
+        .map(|x| buf[(x, y)].symbol())
+        .collect::<String>()
+        .trim_end()
+        .to_string();
+    (text, y)
+}
+
+/// Assert the highlight sits on `expected` AND its row is inside the popup's
+/// item rows (between the title border and the bottom border), i.e. the
+/// selection is actually visible in the rendered window.
+fn assert_highlight_on_popup(app: &App, buf: &Buffer, expected: &str) {
+    let (symbol, y) = highlighted_popup_cell(buf);
+    assert!(
+        symbol.contains(expected),
+        "highlight must sit on the selected match {expected:?}, row text: {symbol:?}"
+    );
+    let status_y = app.last_status_area.unwrap().y;
+    let shown = app.completions.len().min(super::COMPLETION_POPUP_MAX);
+    let height = shown as u16 + 2;
+    assert!(
+        y >= status_y.saturating_sub(height) + 1 && y <= status_y.saturating_sub(2),
+        "highlight row {y} must stay inside the popup window above status row {status_y}"
+    );
+}
+
+/// The highlight index must always sit inside the popup window slice.
+fn assert_window_contains_idx(app: &App) {
+    let max = super::COMPLETION_POPUP_MAX;
+    assert!(
+        app.completion_idx >= app.completion_scroll
+            && app.completion_idx < app.completion_scroll + max,
+        "idx {} must stay inside [{}, {})",
+        app.completion_idx,
+        app.completion_scroll,
+        app.completion_scroll + max
+    );
+}
+
+/// Popup auto-paging (issue #46): with more matches than
+/// `COMPLETION_POPUP_MAX` rows, Down past the window bottom slides the
+/// window down so the highlight stays rendered inside the popup; Up slides
+/// it back; refreshing the matches resets the window to the top.
+#[tokio::test]
+async fn completion_popup_pages_past_window_and_scrolls_back_up() {
+    let (mut app, _rx) = test_app().await;
+    let max = super::COMPLETION_POPUP_MAX;
+    // 25 fake matches — far more than the 8-row popup window.
+    let n = 25;
+    app.completions = (0..n).map(|i| format!("/cmd{i:02}")).collect();
+    app.completion_idx = 0;
+    app.completion_scroll = 0;
+
+    let backend = TestBackend::new(60, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    assert_highlight_on_popup(&app, terminal.backend().buffer(), "/cmd00");
+
+    // Down past the 8th row: the highlight reaches item 8 (the 9th match)
+    // and the window slides down one item to keep it visible.
+    for _ in 0..8 {
+        app.completion_next();
+        assert_window_contains_idx(&app);
+    }
+    assert_eq!(app.completion_idx, 8);
+    assert_eq!(app.completion_scroll, 1);
+    terminal.draw(|f| app.render(f)).unwrap();
+    assert_highlight_on_popup(&app, terminal.backend().buffer(), "/cmd08");
+
+    // Down to the last match: the window tracks the highlight, so item 24
+    // renders on the window's bottom row.
+    while app.completion_idx < n - 1 {
+        app.completion_next();
+        assert_window_contains_idx(&app);
+    }
+    assert_eq!(app.completion_idx, n - 1);
+    assert_eq!(app.completion_scroll, n - max);
+    terminal.draw(|f| app.render(f)).unwrap();
+    assert_highlight_on_popup(&app, terminal.backend().buffer(), "/cmd24");
+
+    // Down wraps to the top: window back to item 0.
+    app.completion_next();
+    assert_eq!(app.completion_idx, 0);
+    assert_eq!(app.completion_scroll, 0);
+    terminal.draw(|f| app.render(f)).unwrap();
+    assert_highlight_on_popup(&app, terminal.backend().buffer(), "/cmd00");
+
+    // Up wraps to the tail: the window jumps to the last page, then Up
+    // across the top edge slides it back down as the highlight rises.
+    app.completion_prev();
+    assert_eq!(app.completion_idx, n - 1);
+    assert_eq!(app.completion_scroll, n - max);
+    for _ in 0..8 {
+        app.completion_prev();
+        assert_window_contains_idx(&app);
+    }
+    assert_eq!(app.completion_idx, 16);
+    assert_eq!(app.completion_scroll, 16);
+    terminal.draw(|f| app.render(f)).unwrap();
+    assert_highlight_on_popup(&app, terminal.backend().buffer(), "/cmd16");
+
+    // Refreshing the matches (any input edit) resets the window to the top.
+    app.set_input("/");
+    assert_eq!(app.completion_scroll, 0, "refresh must reset the window");
+    assert_eq!(app.completion_idx, 0);
+    assert_window_contains_idx(&app);
+}
+
 #[tokio::test]
 async fn paste_object_is_atomic_and_keeps_full_text_for_send() {
     let (mut app, _rx) = test_app().await;

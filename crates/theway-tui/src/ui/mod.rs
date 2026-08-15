@@ -236,6 +236,10 @@ pub struct App {
     input_state: TextAreaState,
     completions: Vec<String>,
     completion_idx: usize,
+    /// Popup window first-item index (issue #46): the popup renders at most
+    /// [`COMPLETION_POPUP_MAX`] rows while the highlight cycles over ALL
+    /// matches, so the window slides to keep the selection visible.
+    completion_scroll: usize,
 
     scroll: usize,
     follow: bool,
@@ -334,6 +338,7 @@ impl App {
             input_state: TextAreaState::default(),
             completions: Vec::new(),
             completion_idx: 0,
+            completion_scroll: 0,
             scroll: 0,
             follow: true,
             scroll_repeat: 0,
@@ -1541,7 +1546,13 @@ impl App {
         if self.completions.is_empty() {
             return;
         }
-        let shown = self.completions.len().min(COMPLETION_POPUP_MAX);
+        // Issue #46: the highlight may sit anywhere in the full match list,
+        // so the popup renders a fixed window starting at
+        // `completion_scroll` and matches the highlight by absolute index.
+        let scroll = self
+            .completion_scroll
+            .min(self.completions.len().saturating_sub(1));
+        let shown = (self.completions.len() - scroll).min(COMPLETION_POPUP_MAX);
         let height = shown as u16 + 2; // borders
         let area = frame.area();
         let y = status_area.y.saturating_sub(height).max(area.y);
@@ -1555,10 +1566,11 @@ impl App {
         let items: Vec<ListItem> = self
             .completions
             .iter()
+            .skip(scroll)
             .take(shown)
             .enumerate()
             .map(|(i, c)| {
-                let selected = i == self.completion_idx % self.completions.len();
+                let selected = scroll + i == self.completion_idx % self.completions.len();
                 let style = if selected {
                     Style::default().fg(Color::Black).bg(Color::Cyan)
                 } else {
