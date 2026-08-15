@@ -6,9 +6,12 @@
 //! the model name + flags. The textarea widget itself renders into the
 //! content rect this module returns; all key handling stays theway's.
 //!
-//! Colors are the TokyoNight values from `xai-grok-pager-render`'s theme
-//! (`theme/tokyonight.rs`) — prompt_border(_active), accent_user, gray_dim,
-//! gray, text_secondary, bg_base.
+//! Colors come from the theme's composer style (`[composer]` in
+//! `~/.theway/theme.toml`, issue #49) passed into [`render_prompt_chrome`];
+//! the consts below are the TokyoNight defaults from `xai-grok-pager-render`'s
+//! theme (`theme/tokyonight.rs`) — `prompt_border(_active)`, `accent_user`,
+//! `gray_dim`, `gray`, `text_secondary`, `bg_base` — that
+//! [`super::theme::ComposerStyle::default`] builds from.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -16,7 +19,9 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
-/// `prompt_border_active` — brighter chrome when focused.
+use super::theme::ComposerStyle;
+
+/// `prompt_border_active` — brighter chrome when focused (composer default).
 pub const BORDER_FOCUSED: Color = Color::Rgb(75, 92, 140);
 /// `prompt_border` — dimmer chrome when unfocused (picker / control prompt open).
 pub const BORDER_UNFOCUSED: Color = Color::Rgb(60, 75, 120);
@@ -94,7 +99,8 @@ impl Default for PromptChrome<'_> {
 }
 
 /// Draw the grok-style chrome into `area` and return the rect the textarea
-/// renders into (inside the border, past the `❯` prefix).
+/// renders into (inside the border, past the `❯` prefix). Colors come from
+/// the theme's composer style (issue #49).
 ///
 /// Layout (mirrors grok's `draw()` with `chrome: true`, `show_accent_line:
 /// false`, `vpad_top: 1`):
@@ -104,22 +110,27 @@ impl Default for PromptChrome<'_> {
 /// ╰─ model · flags ──────╯   <- info line (usage right-aligned)
 /// ```
 /// Degrades to a plain fill when `area` is too small for the chrome.
-pub fn render_prompt_chrome(buf: &mut Buffer, area: Rect, c: &PromptChrome) -> Rect {
+pub fn render_prompt_chrome(
+    buf: &mut Buffer,
+    area: Rect,
+    c: &PromptChrome,
+    style: &ComposerStyle,
+) -> Rect {
     if area.width < 4 || area.height < 2 {
-        buf.set_style(area, Style::default().fg(TEXT_PRIMARY).bg(BG_BASE));
+        buf.set_style(area, Style::default().fg(style.text).bg(style.bg));
         return area;
     }
-    let bg = BG_BASE;
+    let bg = style.bg;
     let border_color = if c.focused {
-        BORDER_FOCUSED
+        style.border_focused
     } else {
-        BORDER_UNFOCUSED
+        style.border_unfocused
     };
     let div_style = Style::default().fg(border_color).bg(bg);
 
     // Fill the whole area so every cell has RGB colors (grok does the same
     // for later blending); the textarea overpaints the content cells.
-    buf.set_style(area, Style::default().fg(TEXT_PRIMARY).bg(bg));
+    buf.set_style(area, Style::default().fg(style.text).bg(bg));
 
     let content_x = area.x + PAD_LEFT;
     let content_w = area.width.saturating_sub(PAD_LEFT + PAD_RIGHT);
@@ -151,7 +162,7 @@ pub fn render_prompt_chrome(buf: &mut Buffer, area: Rect, c: &PromptChrome) -> R
             let truncated = truncate_str(&label, max_w as usize);
             let label_w = UnicodeWidthStr::width(truncated.as_str()) as u16;
             let x = area.x + area.width.saturating_sub(3 + label_w);
-            buf.set_string(x, top_y, &truncated, caption_style(bg, c.focused));
+            buf.set_string(x, top_y, &truncated, caption_style(style, c.focused));
         }
     }
 
@@ -171,7 +182,7 @@ pub fn render_prompt_chrome(buf: &mut Buffer, area: Rect, c: &PromptChrome) -> R
     }
 
     // ── ❯ prefix on the first text row ───────────────────────────────────────
-    let prefix_color = if c.focused { ACCENT_USER } else { GRAY_DIM };
+    let prefix_color = if c.focused { style.prefix } else { GRAY_DIM };
     if text_h > 0 && content_w > PREFIX_WIDTH {
         buf.set_string(
             content_x,
@@ -222,7 +233,7 @@ pub fn render_prompt_chrome(buf: &mut Buffer, area: Rect, c: &PromptChrome) -> R
         width: content_w,
         height: 1,
     };
-    render_info_line(buf, info_rect, c);
+    render_info_line(buf, info_rect, c, style);
 
     Rect {
         x: ta_x,
@@ -233,26 +244,27 @@ pub fn render_prompt_chrome(buf: &mut Buffer, area: Rect, c: &PromptChrome) -> R
 }
 
 /// Caption style for text embedded in the border chrome (info-line model
-/// name, divider title): secondary text over the prompt bg, fading further
-/// when unfocused — grok's `chrome_caption_style`.
-fn caption_style(bg: Color, focused: bool) -> Style {
+/// name, divider title): the theme `info_text` color over the prompt bg,
+/// fading further when unfocused — grok's `chrome_caption_style`.
+fn caption_style(style: &ComposerStyle, focused: bool) -> Style {
     let opacity = if focused { 0.6 } else { 0.4 };
-    let fg = theway_pager_render::color::blend_color(bg, TEXT_SECONDARY, opacity).unwrap_or(GRAY);
-    Style::default().fg(fg).bg(bg)
+    let fg =
+        theway_pager_render::color::blend_color(style.bg, style.info_text, opacity).unwrap_or(GRAY);
+    Style::default().fg(fg).bg(style.bg)
 }
 
 /// Render the info line on the bottom divider: left-aligned
 /// ` model · flag1 · flag2`, right-aligned context-usage label. Mirrors
 /// grok's `render_info_line` (right-edge anchored, 1-cell padding from the
 /// corners).
-fn render_info_line(buf: &mut Buffer, area: Rect, c: &PromptChrome) {
+fn render_info_line(buf: &mut Buffer, area: Rect, c: &PromptChrome, style: &ComposerStyle) {
     if area.width == 0 || area.height == 0 {
         return;
     }
-    let bg = BG_BASE;
+    let bg = style.bg;
     let sep_style = Style::default().fg(GRAY_DIM).bg(bg);
     let flag_style = Style::default().fg(GRAY).bg(bg);
-    let model_style = caption_style(bg, c.focused);
+    let model_style = caption_style(style, c.focused);
 
     // Left side: model name + flags, wrapped in padding spaces so the cells
     // next to ╰ / ╯ are blanked out instead of showing `─`.
@@ -315,7 +327,7 @@ mod tests {
 
     fn render(area: Rect, c: &PromptChrome) -> Buffer {
         let mut buf = Buffer::empty(area);
-        render_prompt_chrome(&mut buf, area, c);
+        render_prompt_chrome(&mut buf, area, c, &ComposerStyle::default());
         buf
     }
 
@@ -472,7 +484,12 @@ mod tests {
     #[test]
     fn content_rect_is_inside_chrome() {
         let area = Rect::new(0, 0, 20, 5);
-        let inner = render_prompt_chrome(&mut Buffer::empty(area), area, &PromptChrome::default());
+        let inner = render_prompt_chrome(
+            &mut Buffer::empty(area),
+            area,
+            &PromptChrome::default(),
+            &ComposerStyle::default(),
+        );
         // x = area.x + PAD_LEFT + PREFIX_WIDTH, y = area.y + 1.
         assert_eq!(inner.x, 4);
         assert_eq!(inner.y, 1);
@@ -483,7 +500,12 @@ mod tests {
     #[test]
     fn tiny_area_degrades_gracefully() {
         let area = Rect::new(0, 0, 3, 2);
-        let inner = render_prompt_chrome(&mut Buffer::empty(area), area, &PromptChrome::default());
+        let inner = render_prompt_chrome(
+            &mut Buffer::empty(area),
+            area,
+            &PromptChrome::default(),
+            &ComposerStyle::default(),
+        );
         assert_eq!(inner, area);
     }
 }

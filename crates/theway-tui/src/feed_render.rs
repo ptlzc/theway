@@ -10,6 +10,8 @@ use ratatui::text::{Line, Span};
 
 use theway_transport::feed::{Block, Level, display_prefix, wrap_str};
 
+use crate::ui::theme::{BlockAlign, BlockTheme, Theme};
+
 /// Grok tokyonight palette values (xai-grok-pager-render theme/tokyonight.rs).
 const ACCENT_USER: Color = Color::Rgb(122, 162, 247); // BLUE — user `❯` prefix
 const ACCENT_ASSISTANT: Color = Color::Rgb(187, 154, 247); // MAGENTA — `ai ▸` prefix
@@ -17,23 +19,69 @@ const ACCENT_TOOL: Color = Color::Rgb(115, 122, 162); // DARK5 — tool name
 const TEXT_PRIMARY: Color = Color::Rgb(192, 202, 245); // FG — body text
 const BG_HIGHLIGHT: Color = Color::Rgb(41, 46, 66); // BG_HIGHLIGHT — user band / selection
 
+// ── Theme-role defaults (issue #43) ─────────────────────────────────────────
+// The pre-theme hardcoded colors, kept as the single source of truth for
+// `Theme::default()`: a build without `~/.theway/theme.toml` renders exactly
+// as before.
+pub(crate) const USER_TEXT_DEFAULT: Color = TEXT_PRIMARY;
+pub(crate) const USER_BG_DEFAULT: Color = BG_HIGHLIGHT;
+pub(crate) const ASSISTANT_TEXT_DEFAULT: Option<Color> = None;
+pub(crate) const ASSISTANT_PREFIX_DEFAULT: Color = ACCENT_ASSISTANT;
+pub(crate) const TOOL_TITLE_DEFAULT: Color = ACCENT_TOOL;
+pub(crate) const TOOL_ARGS_DEFAULT: Color = Color::DarkGray;
+pub(crate) const TOOL_RESULT_DEFAULT: Color = Color::Green;
+pub(crate) const TOOL_ERROR_DEFAULT: Color = Color::Red;
+pub(crate) const TOOL_RUNNING_BG_DEFAULT: Option<Color> = None;
+pub(crate) const TOOL_SUCCESS_BG_DEFAULT: Option<Color> = None;
+pub(crate) const TOOL_ERROR_BG_DEFAULT: Option<Color> = None;
+pub(crate) const THINKING_TEXT_DEFAULT: Color = Color::DarkGray;
+pub(crate) const THINKING_BG_DEFAULT: Option<Color> = None;
+
 pub(crate) const USER_PREFIX: &str = "\u{276F} "; // ❯ (2 cols, grok prompt_arrow)
 pub(crate) const AI_PREFIX: &str = "ai \u{25b8} "; // ai ▸
 pub(crate) const TOOL_PREFIX: &str = "\u{23f5} "; // ⏵
 const USER_BAND_INDENT: &str = "  ";
 
 const USER_STYLE: Style = Style::new().fg(ACCENT_USER).add_modifier(Modifier::BOLD);
+/// Default thinking style; the streaming thinking path in `feed_cache`
+/// reuses this const (theme-aware colors apply to one-shot renders).
 pub(crate) const THINKING_STYLE: Style = Style::new()
     .fg(Color::DarkGray)
     .add_modifier(Modifier::ITALIC);
-const USER_BODY_STYLE: Style = Style::new().fg(TEXT_PRIMARY);
+/// Default assistant prefix style; the streaming markdown path in
+/// `feed_cache` reuses this const (theme-aware colors apply to one-shot
+/// renders).
 pub(crate) const AI_PREFIX_STYLE: Style = Style::new()
     .fg(ACCENT_ASSISTANT)
     .add_modifier(Modifier::BOLD);
-const TOOL_NAME_STYLE: Style = Style::new().fg(ACCENT_TOOL).add_modifier(Modifier::BOLD);
-const TOOL_ARGS_STYLE: Style = Style::new().fg(Color::DarkGray);
 pub(crate) const RESULT_SUMMARY_STYLE: Style = Style::new().fg(Color::DarkGray);
+/// Selection highlight (not a theme role).
 const BAND_STYLE: Style = Style::new().bg(BG_HIGHLIGHT);
+
+fn user_body_style(theme: &Theme) -> Style {
+    Style::new().fg(theme.user_text)
+}
+fn band_style(theme: &Theme) -> Style {
+    Style::new().bg(theme.user_bg)
+}
+fn ai_prefix_style(theme: &Theme) -> Style {
+    Style::new()
+        .fg(theme.assistant_prefix)
+        .add_modifier(Modifier::BOLD)
+}
+fn tool_name_style(theme: &Theme) -> Style {
+    Style::new()
+        .fg(theme.tool_title)
+        .add_modifier(Modifier::BOLD)
+}
+fn tool_args_style(theme: &Theme) -> Style {
+    Style::new().fg(theme.tool_args)
+}
+fn thinking_style(theme: &Theme) -> Style {
+    Style::new()
+        .fg(theme.thinking_text)
+        .add_modifier(Modifier::ITALIC)
+}
 
 /// How `Block::Thinking` renders in the feed (Ctrl+O cycles).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -50,14 +98,15 @@ pub enum ThinkingMode {
 /// Renderer switches owned by the TUI app state.
 ///
 /// `PartialEq` is hand-implemented over the structural switches only
-/// (`thinking_mode` / `tools_expanded`): the per-frame counters
+/// (`thinking_mode` / `tools_expanded` / `theme`): the per-frame counters
 /// (`thinking_cps` / `thinking_input_tokens` / `thinking_output_tokens` /
 /// `spinner_phase`) change every frame while a turn streams and must NOT
 /// participate in equality — otherwise the feed cache sees a new option set
 /// every frame and the #34/#35 incremental rendering degrades to full
 /// re-renders. Streaming tails re-render their stats line with fresh
 /// counters each frame; frozen historical blocks keep the values they were
-/// rendered with.
+/// rendered with. The theme is structural: it changes only at startup (or
+/// on reload), so any theme change invalidates the whole cache.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FeedRenderOptions {
     pub thinking_mode: ThinkingMode,
@@ -77,14 +126,21 @@ pub struct FeedRenderOptions {
     /// counters).
     #[allow(dead_code)]
     pub spinner_phase: u32,
+    /// Theme color roles + block layout + composer style (issues #43 + #49),
+    /// loaded once at startup into `App.theme` and threaded into every
+    /// render so the feed cache fingerprints theme changes.
+    pub theme: Theme,
 }
 
-/// Structural equality only (issue #44): per-frame counters (cps / in / out /
-/// spinner_phase) are excluded so the feed cache keeps its incremental
-/// rendering across frames.
+/// Structural equality only (issue #44 + #49): per-frame counters
+/// (cps / in / out / spinner_phase) are excluded so the feed cache keeps its
+/// incremental rendering across frames; the theme participates because it
+/// changes colors and layout.
 impl PartialEq for FeedRenderOptions {
     fn eq(&self, other: &Self) -> bool {
-        self.thinking_mode == other.thinking_mode && self.tools_expanded == other.tools_expanded
+        self.thinking_mode == other.thinking_mode
+            && self.tools_expanded == other.tools_expanded
+            && self.theme == other.theme
     }
 }
 
@@ -452,61 +508,104 @@ pub fn lines(
 /// with separators. Assistant blocks skip the URL regex scan (their underlines
 /// come from the markdown renderer's hyperlinks); every other block scans its
 /// own lines once, so the per-block result is stable and cacheable.
+///
+/// Tool / ToolResult / Thinking blocks carry the theme block layout (issue
+/// #49): background, padding columns and left/right alignment, with the
+/// background spanning every block row at full width. Colors come from the
+/// theme roles in `opts.theme` (issue #43).
 pub(crate) fn render_block(
     block: &Block,
     width: usize,
     opts: &FeedRenderOptions,
 ) -> Vec<Line<'static>> {
     let width = width.max(1);
+    let theme = &opts.theme;
     let mut out: Vec<Line<'static>> = Vec::new();
     let mut assistant_rows: Vec<std::ops::Range<usize>> = Vec::new();
     match block {
-        Block::User { text, .. } => push_user_block(&mut out, text, width),
+        Block::User { text, .. } => push_user_block(&mut out, text, width, theme),
         Block::Assistant { text, .. } => {
             // Assistant blocks are markdown: one-shot pretty render via
             // theway-markdown, link underlines from the renderer's
             // hyperlinks, verbatim code/table/mermaid rows, wrapped prose.
             let start = out.len();
-            push_markdown(&mut out, text, AI_PREFIX, AI_PREFIX_STYLE, width);
+            push_markdown(&mut out, text, AI_PREFIX, ai_prefix_style(theme), width);
+            // `assistant_text` role: fallback foreground for spans the
+            // markdown renderer left uncolored (syntax colors win).
+            if let Some(fg) = theme.assistant_text {
+                for line in &mut out[start..] {
+                    for span in &mut line.spans {
+                        if span.style.fg.is_none() {
+                            span.style = span.style.fg(fg);
+                        }
+                    }
+                }
+            }
             assistant_rows.push(start..out.len());
         }
-        Block::Thinking { text, .. } => match opts.thinking_mode {
-            ThinkingMode::Hidden => {}
-            ThinkingMode::Peek => push_thinking_peek(&mut out, text, opts, width),
-            ThinkingMode::Full => {
-                push_thinking_stats_line(&mut out, text, opts, width);
-                push_paragraphs(&mut out, text, THINKING_STYLE, Some(TOOL_PREFIX), width)
+        Block::Thinking { text, .. } => {
+            let bg = theme.thinking.bg.or(theme.thinking_bg);
+            let content_w = block_content_width(width, bg, theme.thinking.padding);
+            let mut rows: Vec<Line<'static>> = Vec::new();
+            match opts.thinking_mode {
+                ThinkingMode::Hidden => {}
+                ThinkingMode::Peek => push_thinking_peek(&mut rows, text, opts, content_w),
+                ThinkingMode::Full => {
+                    push_thinking_stats_line(&mut rows, text, opts, content_w);
+                    push_paragraphs(
+                        &mut rows,
+                        text,
+                        thinking_style(theme),
+                        Some(TOOL_PREFIX),
+                        content_w,
+                    )
+                }
             }
-        },
+            apply_block_layout(&mut rows, width, bg, &theme.thinking);
+            out.extend(rows);
+        }
         Block::Tool { name, args, .. } => {
+            let bg = theme.tool.bg.or(theme.tool_running_bg);
+            let content_w = block_content_width(width, bg, theme.tool.padding);
             let mut spans = vec![Span::styled(
                 format!("{TOOL_PREFIX}{name}"),
-                TOOL_NAME_STYLE,
+                tool_name_style(theme),
             )];
             if !args.is_empty() {
-                spans.push(Span::styled(format!(" {args}"), TOOL_ARGS_STYLE));
+                spans.push(Span::styled(format!(" {args}"), tool_args_style(theme)));
             }
             let mut line = Line::from(spans);
-            truncate_line(&mut line, width);
-            out.push(line);
+            truncate_line(&mut line, content_w);
+            let mut rows = vec![line];
+            apply_block_layout(&mut rows, width, bg, &theme.tool);
+            out.extend(rows);
         }
         Block::ToolResult {
             lines, is_error, ..
         } => {
+            let bg = theme.tool.bg.or(if *is_error {
+                theme.tool_error_bg
+            } else {
+                theme.tool_success_bg
+            });
+            let content_w = block_content_width(width, bg, theme.tool.padding);
+            let style = if *is_error {
+                Style::default().fg(theme.tool_error)
+            } else {
+                Style::default().fg(theme.tool_result)
+            };
+            let mut rows: Vec<Line<'static>> = Vec::new();
             if opts.tools_expanded {
-                let style = if *is_error {
-                    Style::default().fg(Color::Red)
-                } else {
-                    Style::default().fg(Color::Green)
-                };
                 for line in lines {
-                    for row in wrap_str(&format!("    {line}"), width) {
-                        out.push(Line::styled(row, style));
+                    for row in wrap_str(&format!("    {line}"), content_w) {
+                        rows.push(Line::styled(row, style));
                     }
                 }
             } else {
-                push_tool_result_preview(&mut out, lines, *is_error, width);
+                push_tool_result_preview(&mut rows, lines, *is_error, content_w, theme);
             }
+            apply_block_layout(&mut rows, width, bg, &theme.tool);
+            out.extend(rows);
         }
         Block::Plain {
             text,
@@ -525,6 +624,62 @@ pub(crate) fn render_block(
     }
     underline_links(&mut out, &assistant_rows);
     out
+}
+
+/// Content width for a tool/thinking block row: with a background active the
+/// padding columns are reserved on both sides; without one the block keeps
+/// the classic full-width layout (theme padding is part of the background
+/// fill and renders nothing on its own).
+fn block_content_width(width: usize, bg: Option<Color>, padding: u16) -> usize {
+    if bg.is_some() {
+        width
+            .saturating_sub(usize::from(padding).saturating_mul(2))
+            .max(1)
+    } else {
+        width
+    }
+}
+
+/// Paint the block layout over already-wrapped rows (issue #49): every row
+/// becomes exactly `width` columns — `padding` background columns on each
+/// side, content between them (hugging the right padding under
+/// [`BlockAlign::Right`]) — and every span carries the background, so the
+/// block reads as one solid bar. Content rows shorter than the block width
+/// are filled with pure background spans; empty content rows render as pure
+/// background. No background → no-op (classic flush layout).
+fn apply_block_layout(
+    rows: &mut [Line<'static>],
+    width: usize,
+    bg: Option<Color>,
+    layout: &BlockTheme,
+) {
+    let Some(bg) = bg else { return };
+    let width = width.max(1);
+    let pad = usize::from(layout.padding).min(width / 2);
+    let inner = width - pad * 2;
+    for line in rows {
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        let content_w = unicode_width::UnicodeWidthStr::width(text.as_str());
+        if content_w > inner {
+            truncate_line(line, inner);
+        }
+        let gap = inner.saturating_sub(content_w.min(inner));
+        let (lead, trail) = match layout.align {
+            BlockAlign::Left => (pad, pad + gap),
+            BlockAlign::Right => (pad + gap, pad),
+        };
+        let mut spans: Vec<Span<'static>> = Vec::with_capacity(line.spans.len() + 2);
+        if lead > 0 {
+            spans.push(Span::styled(" ".repeat(lead), Style::new().bg(bg)));
+        }
+        for span in std::mem::take(&mut line.spans) {
+            spans.push(Span::styled(span.content, span.style.bg(bg)));
+        }
+        if trail > 0 {
+            spans.push(Span::styled(" ".repeat(trail), Style::new().bg(bg)));
+        }
+        line.spans = spans;
+    }
 }
 
 /// Draw pre-wrapped lines into the visible window only (O(viewport)) — the
@@ -571,8 +726,9 @@ fn set_line_safe(buf: &mut ratatui::buffer::Buffer, x: u16, y: u16, line: &Line<
 }
 
 /// User rows, grok style: `❯ ` accent prefix + primary-colored body on a
-/// full-width elevated band; continuation lines keep a 2-col indent.
-fn push_user_block(out: &mut Vec<Line<'static>>, text: &str, width: usize) {
+/// full-width elevated band (the band color is the `user_bg` theme role);
+/// continuation lines keep a 2-col indent.
+fn push_user_block(out: &mut Vec<Line<'static>>, text: &str, width: usize, theme: &Theme) {
     for (i, para) in text.split('\n').enumerate() {
         let owned;
         let (prefix, body) = if i == 0 {
@@ -592,7 +748,7 @@ fn push_user_block(out: &mut Vec<Line<'static>>, text: &str, width: usize) {
             if first && let Some(prefix) = prefix {
                 spans.push(Span::styled(prefix.to_string(), USER_STYLE));
             }
-            spans.push(Span::styled(row.clone(), USER_BODY_STYLE));
+            spans.push(Span::styled(row.clone(), user_body_style(theme)));
             first = false;
             let row_width = if prefix.is_some() && spans.len() > 1 {
                 prefix_width
@@ -601,7 +757,7 @@ fn push_user_block(out: &mut Vec<Line<'static>>, text: &str, width: usize) {
             } + unicode_width::UnicodeWidthStr::width(row.as_str());
             let pad = width.saturating_sub(row_width);
             if pad > 0 {
-                spans.push(Span::styled(" ".repeat(pad), BAND_STYLE));
+                spans.push(Span::styled(" ".repeat(pad), band_style(theme)));
             }
             out.push(Line::from(spans));
         }
@@ -706,7 +862,10 @@ fn push_thinking_peek(
         .collect();
     let shown = wrapped.iter().rev().take(THINKING_PEEK_LINES).rev();
     for row in shown {
-        out.push(Line::styled(format!("  {row}"), THINKING_STYLE));
+        out.push(Line::styled(
+            format!("  {row}"),
+            thinking_style(&opts.theme),
+        ));
     }
     if wrapped.len() > THINKING_PEEK_LINES {
         out.push(Line::styled(
@@ -724,11 +883,12 @@ fn push_tool_result_preview(
     lines: &[String],
     is_error: bool,
     width: usize,
+    theme: &Theme,
 ) {
     let style = if is_error {
-        Style::default().fg(Color::Red)
+        Style::default().fg(theme.tool_error)
     } else {
-        Style::default().fg(Color::Green)
+        Style::default().fg(theme.tool_result)
     };
     let border_w = unicode_width::UnicodeWidthStr::width(TOOL_RESULT_BORDER);
     let content_w = width.saturating_sub(border_w).max(1);
@@ -1154,7 +1314,7 @@ mod tests {
     /// `PartialEq` is hand-implemented (issue #44): the per-frame counters
     /// (cps / in / out / spinner_phase) must NOT participate, otherwise the
     /// feed cache invalidates and fully re-renders every frame; structural
-    /// switches (thinking_mode / tools_expanded) must.
+    /// switches (thinking_mode / tools_expanded / theme) must.
     #[test]
     fn feed_render_options_equality_ignores_per_frame_counters() {
         let structural = FeedRenderOptions::default();
@@ -1178,6 +1338,179 @@ mod tests {
             structural, per_frame,
             "tools_expanded change must change equality"
         );
+        per_frame = FeedRenderOptions::default();
+        per_frame.theme.tool_title = Color::Rgb(1, 2, 3);
+        assert_ne!(
+            structural, per_frame,
+            "theme change must change equality (issue #49: the cache fingerprints colors/layout)"
+        );
+    }
+
+    /// Custom theme block layout (issue #49): the tool row carries the
+    /// `tool_running_bg` background across the FULL block width with the
+    /// configured padding columns, right-aligned.
+    #[test]
+    fn custom_theme_paints_tool_row_bg_padding_and_right_align() {
+        let mut theme = crate::ui::theme::Theme::default();
+        theme.tool_running_bg = Some(Color::Rgb(1, 2, 3));
+        theme.tool.padding = 2;
+        theme.tool.align = crate::ui::theme::BlockAlign::Right;
+        let opts = FeedRenderOptions {
+            theme,
+            ..Default::default()
+        };
+        let feed = feed_with(&[WireFeedBlock::Tool {
+            name: "read".into(),
+            args: String::new(),
+            timestamp: None,
+        }]);
+        let lines = super::lines(&feed, 20, &opts);
+        assert_eq!(lines.len(), 1);
+        let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(text.trim(), "⏵ read", "{text}");
+        // Right padding columns: content ends 2 columns before the edge.
+        assert!(text.ends_with("  "), "{text}");
+        // Every span (content + padding) carries the background.
+        for span in &lines[0].spans {
+            assert_eq!(span.style.bg, Some(Color::Rgb(1, 2, 3)));
+        }
+        // The row fills the whole block width.
+        let total: usize = lines[0]
+            .spans
+            .iter()
+            .map(|s| unicode_width::UnicodeWidthStr::width(s.content.as_ref()))
+            .sum();
+        assert_eq!(total, 20);
+    }
+
+    /// Custom theme thinking layout (issue #49): stats line AND body rows get
+    /// the `thinking_bg` background at full width; an empty result row renders
+    /// as pure background.
+    #[test]
+    fn custom_theme_paints_thinking_and_empty_result_rows() {
+        let mut theme = crate::ui::theme::Theme::default();
+        theme.thinking_bg = Some(Color::Rgb(4, 5, 6));
+        theme.thinking.padding = 1;
+        theme.thinking.align = crate::ui::theme::BlockAlign::Left;
+        theme.tool_success_bg = Some(Color::Rgb(7, 8, 9));
+        let opts = FeedRenderOptions {
+            theme,
+            tools_expanded: true,
+            ..Default::default()
+        };
+        let feed = feed_with(&[
+            WireFeedBlock::Thinking {
+                text: "ponder".into(),
+                timestamp: None,
+            },
+            WireFeedBlock::ToolResult {
+                lines: vec!["row".into(), String::new()],
+                is_error: false,
+                timestamp: None,
+            },
+        ]);
+        let lines = super::lines(&feed, 20, &opts);
+        let flat = flat(&lines);
+        // Thinking stats row + body row both painted at full width.
+        let stats = &lines[0];
+        assert!(flat.contains("⏵ thinking"), "{flat}");
+        for span in &stats.spans {
+            assert_eq!(span.style.bg, Some(Color::Rgb(4, 5, 6)));
+        }
+        let total: usize = stats
+            .spans
+            .iter()
+            .map(|s| unicode_width::UnicodeWidthStr::width(s.content.as_ref()))
+            .sum();
+        assert_eq!(total, 20, "stats row must span the full block width");
+        let body = &lines[1];
+        for span in &body.spans {
+            assert_eq!(span.style.bg, Some(Color::Rgb(4, 5, 6)));
+        }
+        // The expanded empty result line renders as a pure-background row.
+        // Layout: [separator? no — blocks 0..1 thinking, then result rows]
+        // Find the empty result row: after the thinking rows + separator.
+        let empty = lines
+            .iter()
+            .find(|line| {
+                line.spans
+                    .iter()
+                    .all(|s| s.content.chars().all(|c| c == ' '))
+                    && !line.spans.is_empty()
+            })
+            .expect("empty result row missing");
+        for span in &empty.spans {
+            assert_eq!(span.style.bg, Some(Color::Rgb(7, 8, 9)));
+        }
+        let total: usize = empty
+            .spans
+            .iter()
+            .map(|s| unicode_width::UnicodeWidthStr::width(s.content.as_ref()))
+            .sum();
+        assert_eq!(total, 20, "empty row must be pure background at full width");
+    }
+
+    /// Theme role colors (issue #43): tool result / error colors flow from
+    /// the theme; the default theme equals the pre-theme consts.
+    #[test]
+    fn custom_theme_recolors_tool_result_and_error() {
+        let mut theme = crate::ui::theme::Theme::default();
+        theme.tool_result = Color::Rgb(1, 2, 3);
+        theme.tool_error = Color::Rgb(4, 5, 6);
+        let opts = FeedRenderOptions {
+            theme,
+            tools_expanded: true,
+            ..Default::default()
+        };
+        let feed = feed_with(&[
+            WireFeedBlock::ToolResult {
+                lines: vec!["ok".into()],
+                is_error: false,
+                timestamp: None,
+            },
+            WireFeedBlock::ToolResult {
+                lines: vec!["bad".into()],
+                is_error: true,
+                timestamp: None,
+            },
+        ]);
+        let lines = super::lines(&feed, 80, &opts);
+        let ok = lines
+            .iter()
+            .find(|l| l.spans.iter().any(|s| s.content.contains("ok")))
+            .unwrap();
+        let bad = lines
+            .iter()
+            .find(|l| l.spans.iter().any(|s| s.content.contains("bad")))
+            .unwrap();
+        // `Line::styled` puts the fg on the line itself (span styles stay
+        // default) — assert the effective line style.
+        assert_eq!(ok.style.fg, Some(Color::Rgb(1, 2, 3)), "{ok:?}");
+        assert_eq!(bad.style.fg, Some(Color::Rgb(4, 5, 6)), "{bad:?}");
+    }
+
+    /// Default theme renders byte-identical rows to the pre-theme consts:
+    /// no background, no padding columns, flush left (issue #49).
+    #[test]
+    fn default_theme_keeps_classic_tool_and_thinking_rows() {
+        let feed = feed_with(&[
+            WireFeedBlock::Tool {
+                name: "read".into(),
+                args: "(path=\"x\")".into(),
+                timestamp: None,
+            },
+            WireFeedBlock::Thinking {
+                text: "ponder".into(),
+                timestamp: None,
+            },
+        ]);
+        let lines = super::lines(&feed, 20, &FeedRenderOptions::default());
+        let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(text, "⏵ read (path=\"x\")", "tool row must stay flush");
+        assert!(lines[0].spans.iter().all(|s| s.style.bg.is_none()));
+        let stats: String = lines[1].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(stats.contains("⏵ thinking"), "{stats}");
+        assert!(lines[1].spans.iter().all(|s| s.style.bg.is_none()));
     }
 
     #[test]

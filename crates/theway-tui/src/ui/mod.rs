@@ -33,10 +33,17 @@ mod app_input;
 mod app_turns;
 pub mod dag_band;
 mod pixel_loader;
-mod prompt_chrome;
+pub(crate) mod prompt_chrome;
 mod render_utils;
 mod snake_loader;
 pub mod stats;
+/// Theme model + `~/.theway/theme.toml` parser (issues #43 + #49). Lives at
+/// the crate root (`src/theme.rs`) next to `feed_render`, which consumes it
+/// too; the `#[path]` anchor keeps the crate-root file layout.
+#[path = "../theme.rs"]
+pub(crate) mod theme;
+
+use theme::Theme;
 
 pub use theway_transport::feed::FeedUpdate;
 
@@ -243,6 +250,10 @@ pub struct App {
     /// Tool-result expansion toggle (Ctrl+T); collapsed results show a
     /// one-line summary.
     tools_expanded: bool,
+    /// Theme loaded once at startup from `~/.theway/theme.toml` (issues #43
+    /// and #49): color roles, block layout and composer style threaded into
+    /// every render; reloaded on daemon runtime-revision changes (#50).
+    theme: Theme,
     /// Feed text selection (highlight only, no copy yet — issue #33): line
     /// range in UNCAPPED rendered-line coordinates.
     feed_selection: Option<FeedSelection>,
@@ -329,6 +340,7 @@ impl App {
             scroll_repeat_up: None,
             thinking_mode: crate::feed_render::ThinkingMode::Full,
             tools_expanded: false,
+            theme: Theme::load(),
             feed_selection: None,
             feed_cache: crate::feed_cache::FeedRenderCache::new(),
             selection_view: SelectionView::default(),
@@ -861,6 +873,9 @@ impl App {
             thinking_cps: self.cps_meter.cps(),
             thinking_input_tokens: self.latest.usage.input_tokens,
             thinking_output_tokens: self.latest.usage.output_tokens,
+            // Theme colors + block layout (issues #43 + #49): structural —
+            // a change invalidates the feed cache via `PartialEq`.
+            theme: self.theme,
             ..Default::default()
         };
         self.feed_cache
@@ -998,8 +1013,12 @@ impl App {
             input_empty: self.input_text().is_empty(),
             ..prompt_chrome::PromptChrome::default()
         };
-        let text_area =
-            prompt_chrome::render_prompt_chrome(frame.buffer_mut(), input_area, &chrome);
+        let text_area = prompt_chrome::render_prompt_chrome(
+            frame.buffer_mut(),
+            input_area,
+            &chrome,
+            &self.theme.composer,
+        );
         self.last_text_area = Some(text_area);
         let mut cursor_pos = None;
         if text_area.width > 0 && text_area.height > 0 {
