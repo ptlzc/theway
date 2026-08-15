@@ -653,9 +653,10 @@ impl App {
             .last_input_area
             .is_some_and(|a| m.row == a.y && m.column >= a.x && m.column < a.right());
         if on_rule || on_top_border {
+            let input_width = self.last_input_area.map(|a| a.width).unwrap_or(0);
             self.resize_drag = Some(ComposerDrag {
                 start_row: m.row,
-                start_rows: self.composer_rows(),
+                start_rows: self.composer_rows(input_width),
             });
             return;
         }
@@ -750,13 +751,25 @@ impl App {
         line.min(self.selection_view.total.saturating_sub(1))
     }
 
-    /// Effective composer row count: the mouse-dragged override, or the
-    /// content-driven auto-grow capped at [`MAX_INPUT_ROWS`] (issue #37).
-    fn composer_rows(&self) -> u16 {
+    /// Effective composer row count (issue #40): the mouse-dragged override
+    /// wins; otherwise the textarea's own soft-wrap decides — a single
+    /// logical line that overflows the input box's content width wraps into
+    /// more rows instead of clipping. `content_width = input_area_width - 5`
+    /// (chrome pad 2+1 columns + the 2-column `❯` prefix); a draft taller
+    /// than [`MAX_INPUT_ROWS`] re-measures one column narrower to reserve
+    /// the scrollbar track, then clamps to `1..=MAX_INPUT_ROWS`.
+    fn composer_rows(&self, input_area_width: u16) -> u16 {
         if let Some(rows) = self.manual_composer_rows {
             return rows;
         }
-        self.input_display_lines().clamp(1, MAX_INPUT_ROWS) as u16
+        let content_width = input_area_width.saturating_sub(5);
+        let rows = self.input.desired_height(content_width);
+        let rows = if rows > MAX_INPUT_ROWS as u16 {
+            self.input.desired_height(content_width.saturating_sub(1))
+        } else {
+            rows
+        };
+        rows.clamp(1, MAX_INPUT_ROWS as u16)
     }
 
     /// Number of visual lines the draft occupies, counting element chips as
@@ -784,7 +797,7 @@ impl App {
 
     fn render(&mut self, frame: &mut ratatui::Frame) {
         let area = frame.area();
-        let input_rows = self.composer_rows();
+        let input_rows = self.composer_rows(area.width);
         let status_rows = if self.busy { BUSY_STATUS_ROWS } else { 1 };
         let chunks = Layout::vertical([
             Constraint::Min(1),
