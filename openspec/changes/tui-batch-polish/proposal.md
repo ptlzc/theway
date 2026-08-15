@@ -1,17 +1,17 @@
 # tui-batch-polish
 
-Issue: #45（umbrella；子 issue #39-#44、#46-#48）
+Issue: #45（umbrella；子 issue #39-#44、#46-#51）
 
 ## 范围整合
 
-本轮 9 条 TUI 输入收拢为一个 change、一个 DAG 实施链（同 #38 先例）——
+本轮 12 条输入收拢为一个 change、一个 DAG 实施链（同 #38 先例）——
 之前为每条单独建的 change（tui-composer-features-only-graph-engine /
 tui-composer-single-line-wrap / dag-node-graph-render /
 tui-busy-snake-loader / tui-theme-interface）已并入本 change 并删除，
-理由：涉及文件高度重叠（ui/mod.rs ×6、feed_render.rs ×3），按仓库规则
+理由：涉及文件高度重叠（ui/mod.rs ×7、feed_render.rs ×3），按仓库规则
 共享文件节点必须串行，拆开反而制造合并摩擦。
 
-## 完整清单（9 条）
+## 完整清单（12 条）
 
 **1. composer 右上角 features 只保留 graph engine（#39）**
 
@@ -63,23 +63,36 @@ tui-busy-snake-loader / tui-theme-interface）已并入本 change 并删除，
   增量渲染退化为全量。流式尾块每帧重渲染路径（IncrementalWrap / stats
   rebuild）新值自然生效；冻结历史块显示冻结时值。
 
-**5. TUI theme 接口：tools/thinking 方块背景色（#43）**
+**5. TUI theme 接口：块背景/padding/对齐 + composer 样式（#43 + #49）**
 
 - pi 参考（~/pi-src/config/themes/dark-theway.json）：`vars` + `colors`
   角色映射（toolPendingBg/toolSuccessBg/toolErrorBg/toolTitle/toolOutput、
   thinking 五级、markdown、syntax）+ settings.json 主题选择。
-- v1：新 `ui/theme.rs`——`Theme` 结构（命名角色 + Default = 现状硬编码
-  色，无 theme.toml 时视觉完全不变）；`Theme::load` 解析
-  `~/.theway/theme.toml` 的 `[colors]` 表 `role = "#rrggbb"`（未知角色
-  忽略、非法 hex warn 回落）。
-- 角色：user_text/user_bg/assistant_text/assistant_prefix/tool_title/
-  tool_args/tool_result/tool_error/tool_running_bg/tool_success_bg/
-  tool_error_bg/thinking_text/thinking_bg。
+- v1：新 `ui/theme.rs`——`Theme` 结构（默认 = 现状硬编码色，无
+  theme.toml 时视觉完全不变）；`Theme::load` 解析 `~/.theway/theme.toml`
+  （未知角色/非法值 warn 回落，缺段/缺键 = 默认）。
+- 角色（#43）：user_text/user_bg/assistant_text/assistant_prefix/
+  tool_title/tool_args/tool_result/tool_error/tool_running_bg/
+  tool_success_bg/tool_error_bg/thinking_text/thinking_bg。
+- 块布局（#49）：
+  ```toml
+  [blocks.user]          # 每块类型一段；缺省 = 默认
+  bg = "#343541"         # 背景色（可选）
+  padding = 2            # 块内水平 padding 列数（可选，默认 1，0 允许）
+  align = "right"        # left | right（可选，默认 left = 现状视觉）
+
+  [blocks.assistant] [blocks.tool] [blocks.thinking]  # 同构
+  ```
+  背景 + 左右 padding 列均铺背景、铺满块宽（真"方块"）；align=right
+  块内容右缘对齐（背景仍满宽）；非法值 warn + 回落。
+- composer 样式（#49）：`[composer]` 表
+  `border_focused/border_unfocused/prefix/text/bg/info_text`（默认 =
+  prompt_chrome 现有 const）——prompt_chrome.rs 颜色改走 theme。
 - feed_render.rs：const 迁移为 theme 角色默认值；Tool 块（标题 + args +
   result 展开/预览）与 Thinking 块（Full/Peek）设背景且**铺满块行宽**；
   颜色经 FeedRenderOptions 透传（feed_cache 指纹覆盖；启动一次性加载）。
-- 非目标：prompt chrome / dag band 配色、多主题目录 + settings 选择、
-  热切换。
+- 热重载：#50 的 reload 联动（runtime_revision 变化 → 重读 theme.toml）。
+- 非目标：dag band 配色、多主题目录 + settings 选择。
 
 **6. DAG 节点渲染成框图（#41）**
 
@@ -135,13 +148,40 @@ tui-busy-snake-loader / tui-theme-interface）已并入本 change 并删除，
 - 非目标：MCP 工具名（server 定义不改写）、Rust struct 名、历史会话
   transcript 旧名。
 
+**10. reload 工具：LLM 一个 reload 入口 + TUI 联动（#50）**
+
+- daemon 新 AgentTool `reload`（snake_case）：包装现有
+  `reload_everything`（skills/config/commands/triggers 重扫），执行后
+  递增 `runtime_revision`；description 写明"安装 skill / 修改配置后
+  调用以生效"。与 /reload 命令共用逻辑（不复制）。
+- transport：wire snapshot 加 `runtime_revision: u64`（serde default 0）。
+- TUI 联动：App 缓存 revision，检测变化 → 重读 `~/.theway/theme.toml`
+  + TUI 侧配置 → 更新 App.theme（TUI 自身 reload；runtime 侧 daemon 已
+  完成）。LLM 只看到一个 reload。
+- 涉及：daemon tools/reload.rs（新）+ assembly.rs 注册 + turn/daemon.rs、
+  transport wire.rs、ui/mod.rs、ui/tests.rs。
+
+**11. AGENTS.md 明确 daemon 定位（#51，文档，并行小节点）**
+
+- daemon = 会话/工具/触发/编排的运行时服务，面向**协议层**（transport
+  的 gRPC + HTTP/SSE/WS）；对客户端形态无概念，不区分 TUI/web/headless
+  脚本/其他程序，不携带 UI 概念（颜色/布局/按键）。
+- 边界规则：客户端专属外观与交互归 theway-tui；跨端新功能先定 wire
+  契约，daemon 只做协议侧；需要客户端配合的行为用 snapshot 字段/事件
+  表达（例：runtime_revision 通知客户端重读本地资源），不得假设单一
+  客户端类型。
+- 涉及 AGENTS.md（Workspace layout / Layering 附近）。
+
 ## Out of scope
 
-- 协议/wire/daemon 不改（#39-#44 全为 theway-tui / theway-markdown 纯展示）。
-- dag band mini spinner、速率映射、textarea 内核、prompt chrome 配色。
+- #39-#44 为 theway-tui / theway-markdown 纯展示（除 #50/#51 的 wire
+  增量外，其余不碰协议/daemon）。
+- dag band mini spinner、速率映射、textarea 内核。
+- prompt chrome 配色 v1 由 #49 覆盖；多主题目录 + settings 选择 + 热
+  切换不做（reload 后重读单文件即 v1 热重载语义）。
 
 ## Acceptance
 
-- 9 条各自单测 + 编译 + 视觉断言（tmux e2e 截图）通过；
+- 12 条各自单测 + 编译 + 视觉断言（tmux e2e 截图）通过；
   make check / test / lint / fmt-check 全绿。
-- 逐条 close #39-#44、#46-#48，证据贴 #45 后 close #45。
+- 逐条 close #39-#44、#46-#51，证据贴 #45 后 close #45。

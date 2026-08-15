@@ -5,19 +5,21 @@ graph TD
   A["1-features: composer 右上角只留 graph engine (#39)"] --> B["2-wrap: composer 单行超宽折行 (#40)"]
   B --> C["3-snake: 单行彩虹贪食蛇 busy 带 (#42)"]
   C --> D["4-thinking-stats: c/s + in/out 接线 (#44)"]
-  D --> E["5-theme: theme.toml + 块背景色 (#43)"]
+  D --> E["5-theme: theme.toml 块背景/padding/对齐 + composer (#43,#49)"]
   E --> F["6-dag-graph: DAG 框图渲染 (#41)"]
   F --> G["7-completion-scroll: 补全弹层自动翻页 (#46)"]
   G --> H["8-slash-catalog: 弹层 skill:: 与 mcp: 条目 (#47)"]
-  I["9-tool-rename: 工具名统一 snake_case (#48)"] --> J["10-verify"]
-  H --> J["10-verify: make ci + tmux e2e + close #39-#48"]
+  H --> I["9-reload: reload tool + revision + TUI 热重载 (#50)"]
+  J["10-tool-rename: 工具名统一 snake_case (#48)"] --> L["12-verify"]
+  K["11-agents-doc: daemon 定位写入 AGENTS.md (#51)"] --> L["12-verify"]
+  I --> L["12-verify: make ci + tmux e2e + close #39-#51"]
 ```
 
-主链全串行：ui/mod.rs 被 1/2/3/4/5/7/8 修改，feed_render.rs 被 4/5/6
-修改，按仓库规则共享文件节点串行。9-tool-rename 只碰 daemon 文件
-（tool 定义 + 测试 + listener + system_prompt），与主链文件不相交，
-并行跑。每节点小步 commit（feat(#子issue)），10-verify 基于最新 HEAD
-复核并逐条 close。
+主链全串行：ui/mod.rs 被 1/2/3/4/5/7/8/9 修改，feed_render.rs 被 4/5/6
+修改，按仓库规则共享文件节点串行。10-tool-rename 只碰 daemon 文件
+（tool 定义 + 测试 + listener + system_prompt）、11-agents-doc 只碰
+AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
+（feat(#子issue)），12-verify 基于最新 HEAD 复核并逐条 close。
 
 - [ ] 1-features — `crates/theway-tui/src/ui/mod.rs` + `ui/tests.rs`：
   - `feature_labels(runtime, dags, has_goal)` → `feature_labels(dags)`：
@@ -66,17 +68,25 @@ graph TD
     测试（cps 变化仍相等、mode 变化不等）。
   - 验收：`cargo check -p theway-tui`；`cargo test -p theway-tui` 全绿。
 - [ ] 5-theme — 新 `crates/theway-tui/src/theme.rs` + `feed_render.rs` +
-  `ui/mod.rs` + `ui/tests.rs`：
-  - `Theme`（角色字段 + Default = 现状 const 色）+ `Theme::load`
-    （`[colors]` 表解析；未知角色忽略、非法 hex warn 回落、无文件默认）。
-  - feed_render.rs：const 迁为默认值来源；FeedRenderOptions 加主题色
-    字段（结构，参与 PartialEq）；Tool 块（标题+args）、ToolResult
-    （展开/预览）、Thinking（Full/Peek + stats 行）设背景且**铺满块行宽**
-    （文本宽度归一后补 bg span 至 width，空行纯 bg）。
+  `prompt_chrome.rs` + `ui/mod.rs` + `ui/tests.rs`（#43 + #49）：
+  - `Theme`（颜色角色 + 块布局 + composer 样式，Default = 现状 const 色）
+    + `Theme::load`（`[colors]` 表 + `[blocks.*]` 段 + `[composer]` 表
+    解析；未知键/非法 hex/未知 align warn 回落、无文件默认）。
+  - 块布局：`[blocks.{user,assistant,tool,thinking}]` 段
+    `bg`（色）/`padding`（列数，默认 1，0 允许）/`align`（left|right，
+    默认 left）；背景 + 左右 padding 列铺满块宽，align=right 内容右缘
+    对齐。
+  - composer：`[composer]` 表 `border_focused/border_unfocused/prefix/
+    text/bg/info_text`；prompt_chrome.rs 颜色 const 改走 theme。
+  - feed_render.rs：const 迁为默认值来源；FeedRenderOptions 加主题色/
+    布局字段（结构，参与 PartialEq）；Tool 块（标题+args）、ToolResult
+    （展开/预览）、Thinking（Full/Peek + stats 行）设背景 + padding +
+    对齐（背景铺满块行宽，文本宽度归一后补 bg span，空行纯 bg）。
   - ui/mod.rs：启动 `Theme::load(~/.theway/theme.toml)` 一次存
     `App.theme`，组装 opts 填入。
   - 测试：Theme 解析（默认/覆盖/未知/非法/缺失）；自定义主题下 tool /
-    thinking 块 buffer bg 断言；默认主题 feed_render 现有测试全绿。
+    thinking 块 buffer bg + padding + 右对齐断言；composer 换色断言；
+    默认主题 feed_render / prompt_chrome 现有测试全绿。
   - 验收：`cargo check -p theway-tui`；`cargo test -p theway-tui` 全绿。
 - [ ] 6-dag-graph — `crates/theway-markdown` + `ui/dag_band.rs` +
   `ui/feed_render.rs`：
@@ -113,7 +123,23 @@ graph TD
   - 测试：collect_slash_commands 断言 skill:: / mcp: 条目存在；
     弹层过滤（/skill:: 只剩 skill 条目）。
   - 验收：`cargo check -p theway-tui`；`cargo test -p theway-tui` 全绿。
-- [ ] 9-tool-rename — daemon-only（与主链文件不相交，并行）：
+- [ ] 9-reload — daemon + transport + tui（#50）：
+  - daemon 新 `tools/reload.rs`：AgentTool `reload`（snake_case），
+    包装现有 `reload_everything`（skills/config/commands/triggers 重扫，
+    与 /reload 命令共用逻辑不复制），执行成功 → 递增 runtime_revision；
+    description 写明"安装 skill / 修改配置后调用以生效"。
+  - `tools/assembly.rs` 注册；`turn/daemon.rs`：revision 计数器 +
+    wire snapshot 携带。
+  - transport `wire.rs`：WireSidebarSnapshot 加 `runtime_revision: u64`
+    （serde default 0，向后兼容）。
+  - tui `ui/mod.rs`：App 缓存 `last_runtime_revision`，apply_snapshot
+    检测变化 → `Theme::load(~/.theway/theme.toml)` 重读 → 更新
+    `App.theme`（TUI 自身 reload；runtime 侧 daemon 已完成）。
+  - 测试：reload tool 调用 + revision 递增（daemon）；TUI revision
+    变化触发 theme 重载断言（ui/tests.rs）。
+  - 验收：`cargo check --workspace`；`cargo test -p theway-daemon -p
+    theway-tui` 全绿。
+- [ ] 10-tool-rename — daemon-only（与主链文件不相交，并行）：
   - `tools/skill.rs`、`tools/skill_builder.rs`、`tools/install_skill/
     mod.rs`、`tools/remove_skill.rs`、`tools/set_skill_state.rs`、
     `triggers/cron/tools.rs`、`triggers/dynamic/tools.rs`：Tool.name +
@@ -134,15 +160,26 @@ graph TD
     dynamic_trigger_e2e、e2e_llm.rs）更新。
   - 验收：`cargo check -p theway-daemon`；`cargo test -p theway-daemon`
     全绿；grep 确认 `name: "[A-Z]` 在 Tool 定义中无残留（除 test Faux）。
-- [ ] 10-verify — `make check` + `make test`（workspace 全量）+ `make lint` +
+- [ ] 11-agents-doc — `AGENTS.md`（#51，只碰文档，并行）：
+  - Workspace layout / Layering 附近加"daemon 定位"小节：daemon =
+    会话/工具/触发/编排的运行时服务，面向协议层（transport 的 gRPC +
+    HTTP/SSE/WS）；对客户端形态无概念（不区分 TUI/web/headless 脚本/
+    其他程序），不携带 UI 概念（颜色/布局/按键）。
+  - 边界规则：客户端专属外观与交互归 theway-tui；跨端新功能先定 wire
+    契约，daemon 只做协议侧语义；需要客户端配合的行为用 snapshot 字段/
+    事件表达（例：runtime_revision 通知客户端重读本地资源）。
+  - 验收：`git diff AGENTS.md` 内容符合上述语义；无其它文件改动。
+- [ ] 12-verify — `make check` + `make test`（workspace 全量）+ `make lint` +
   `make fmt-check`；tmux e2e 逐条：①composer 右上角仅 graph engine（无
   dag run 无标签，trigger 面板 Runtime 仍在）②长文本折行显示行首 + Up/Down
   历史/拖拽调高回归 ③busy 时彩虹蛇在 9 点轨道左右跑 + 折返 + 与 working
   同行（带 1 行、idle 无跳动）④流式 thinking 统计行 c/s 非零 + in/out
-  随流更新 ⑤theme.toml 定制 tool/thinking 背景铺满块宽 + 无主题视觉回归
-  ⑥dag 状态带盒子+箭头图 + dag_status mermaid 围栏在 feed 成图 + 超宽
-  回退 ⑦补全弹层 Down/Up 越界自动翻页、高亮始终可见 ⑧弹层含 skill:: 与
-  mcp: 条目、前缀过滤生效 ⑨工具调用块显示 snake_case 名（skill/trigger/
-  cron 工具调用正常）；
-  `gh issue close 39 40 41 42 43 44 46 47 48`，证据贴 #45 后
+  随流更新 ⑤theme.toml 定制 tool/thinking 背景/padding/对齐铺满块宽 +
+  composer 换色 + 无主题视觉回归 ⑥dag 状态带盒子+箭头图 + dag_status
+  mermaid 围栏在 feed 成图 + 超宽回退 ⑦补全弹层 Down/Up 越界自动翻页、
+  高亮始终可见 ⑧弹层含 skill:: 与 mcp: 条目、前缀过滤生效 ⑨工具调用块
+  显示 snake_case 名（skill/trigger/cron 工具调用正常）⑩装 skill / 改
+  theme.toml 后 LLM 调 reload → 新 skill 可 invoke + TUI 主题即时生效
+  ⑪AGENTS.md 定位小节在库；
+  `gh issue close 39 40 41 42 43 44 46 47 48 49 50 51`，证据贴 #45 后
   `gh issue close 45`。
