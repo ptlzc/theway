@@ -58,7 +58,7 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
     断言（composer 顶边框 = 标签行 + 1）。
   - 验收：`cargo check -p theway-tui`；`cargo test -p theway-tui` 全绿；
     dag band mini spinner 测试不回归。
-- [ ] 4-thinking-stats — `ui/mod.rs` + `feed_render.rs` + `feed_cache.rs` +
+- [x] 4-thinking-stats — `ui/mod.rs` + `feed_render.rs` + `feed_cache.rs` +
   `ui/tests.rs`：
   - ui/mod.rs 组装 opts：`thinking_cps = self.cps_meter.cps()`；
     `thinking_input_tokens` / `thinking_output_tokens` =
