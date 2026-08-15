@@ -119,7 +119,7 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
   - 测试：20+ 项列表 Down 连按越过 8 项后高亮仍在窗口内（buffer 断言
     高亮行可见）；Up 回翻跟随；刷新重置到顶部。
   - 验收：`cargo check -p theway-tui`；`cargo test -p theway-tui` 全绿。
-- [ ] 8-slash-catalog — `ui/mod.rs` + `ui/tests.rs`：
+- [x] 8-slash-catalog — `ui/mod.rs` + `ui/tests.rs`：
   - `collect_slash_commands` 增 `mcp_tool_names: &[String]` 参数（调用点
     传 `latest.sidebar.mcp.tool_names`）；追加条目：每个已启用 skill →
     `skill::{name}`（name 原样）；每个 mcp 工具 → `mcp:{tool}`。
