@@ -1,8 +1,8 @@
 //! Tests for `grpc` — split out of src (see docs/RUST_TEST_FILES.md).
 
 use super::*;
-use crate::wire::WireContextUsage;
 use crate::testing::{FakeSessionOps, empty_sidebar_snapshot};
+use crate::wire::WireContextUsage;
 use std::time::Duration;
 
 fn fixture_snapshot(feed_line: &str) -> WireStatus {
@@ -356,7 +356,9 @@ async fn get_node_output_recovers_messages_from_disk_after_restart() {
 
     // Restart: fresh GrpcState with a fresh registry, same messages dir.
     let (state, _command_rx) = grpc_state();
-    state.registry.set_messages_dir(Some(dir.path().join("subagent-jobs")));
+    state
+        .registry
+        .set_messages_dir(Some(dir.path().join("subagent-jobs")));
     let response = state
         .get_node_output(Request::new(GetNodeOutputRequest {
             run_id: "run-1".into(),
@@ -371,7 +373,10 @@ async fn get_node_output_recovers_messages_from_disk_after_restart() {
     let messages: Vec<serde_json::Value> =
         serde_json::from_str(response.messages_json.as_deref().unwrap()).unwrap();
     assert_eq!(messages.len(), 1);
-    assert_eq!(messages[0]["content"][0]["text"], serde_json::json!("survives"));
+    assert_eq!(
+        messages[0]["content"][0]["text"],
+        serde_json::json!("survives")
+    );
 
     // Unknown node still 404s even with a messages dir configured.
     let err = state
@@ -420,7 +425,10 @@ async fn two_simultaneous_subscribers_both_receive_frames() {
     }
 
     // A lagging subscriber catches up on the next publish instead of hanging.
-    state.snapshots.send(fixture_snapshot("second-wave")).unwrap();
+    state
+        .snapshots
+        .send(fixture_snapshot("second-wave"))
+        .unwrap();
     let item = tokio::time::timeout(Duration::from_secs(2), first.next())
         .await
         .expect("timed out")
@@ -536,15 +544,25 @@ async fn grpc_server_over_transport_serves_client() {
     let addr = listener.local_addr().unwrap();
     let server = serve_grpc(listener, state);
 
-    let mut client =
-        theway_grpc::theway_grpc_client::ThewayGrpcClient::connect(format!("http://{addr}"))
-            .await
-            .unwrap();
+    let mut session_client = theway_grpc::session_service_client::SessionServiceClient::connect(
+        format!("http://{addr}"),
+    )
+    .await
+    .unwrap();
+    let mut command_client = theway_grpc::command_service_client::CommandServiceClient::connect(
+        format!("http://{addr}"),
+    )
+    .await
+    .unwrap();
 
-    let state = client.get_state(Empty {}).await.unwrap().into_inner();
+    let state = session_client
+        .get_state(Empty {})
+        .await
+        .unwrap()
+        .into_inner();
     assert_eq!(state.session_id, "sess-1");
 
-    let result = client
+    let result = command_client
         .send_message(SendMessageRequest {
             text: "via transport".into(),
             images: Vec::new(),
@@ -560,6 +578,37 @@ async fn grpc_server_over_transport_serves_client() {
         other => panic!("unexpected command: {other:?}"),
     }
 
+    // EventService is registered: a stream can be opened against the domain
+    // path (dropping it cancels the call before any frame arrives).
+    let mut event_client =
+        theway_grpc::event_service_client::EventServiceClient::connect(format!("http://{addr}"))
+            .await
+            .unwrap();
+    let event_stream = event_client
+        .stream_events(Empty {})
+        .await
+        .unwrap()
+        .into_inner();
+    drop(event_stream);
+
+    // GraphEngineService is registered and answers GraphList on the domain
+    // path (empty fixture registry → empty run list for the current session).
+    let mut graph_client =
+        theway_grpc::graph_engine_service_client::GraphEngineServiceClient::connect(format!(
+            "http://{addr}"
+        ))
+        .await
+        .unwrap();
+    let runs = graph_client
+        .graph_list(GraphListRequest {
+            session_id: "sess-1".into(),
+        })
+        .await
+        .unwrap()
+        .into_inner()
+        .runs;
+    assert!(runs.is_empty());
+
     server.abort();
 }
 
@@ -570,11 +619,10 @@ async fn health_service_serves_serving_over_transport() {
     let addr = listener.local_addr().unwrap();
     let server = serve_grpc(listener, state);
 
-    let mut client = crate::proto::health::health_client::HealthClient::connect(
-        format!("http://{addr}"),
-    )
-    .await
-    .unwrap();
+    let mut client =
+        crate::proto::health::health_client::HealthClient::connect(format!("http://{addr}"))
+            .await
+            .unwrap();
 
     // Check answers SERVING.
     let response = client
