@@ -36,7 +36,7 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
     fixture 去 runtime/goal 只留 dags。
   - 验收：`cargo check -p theway-tui`；`cargo test -p theway-tui` 全绿；
     trigger 面板 Runtime 区块不受影响（测试未删）。
-- [ ] 2-wrap — `crates/theway-tui/src/ui/mod.rs` + `ui/tests.rs`：
+- [x] 2-wrap — `crates/theway-tui/src/ui/mod.rs` + `ui/tests.rs`：
   - `composer_rows(input_area_width: u16)`：拖拽覆盖优先；否则
     `content_width = input_area_width.saturating_sub(5)`，
     `rows = self.input.desired_height(content_width)`；`rows > 6` 时用
@@ -229,7 +229,7 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
     变化触发 theme 重载断言（ui/tests.rs）。
   - 验收：`cargo check --workspace`；`cargo test -p theway-daemon -p
     theway-tui` 全绿。
-- [ ] 15-tool-rename — daemon-only（与主链文件不相交，并行）：
+- [x] 15-tool-rename — daemon-only（与主链文件不相交，并行）：
   - `tools/skill.rs`、`tools/skill_builder.rs`、`tools/install_skill/
     mod.rs`、`tools/remove_skill.rs`、`tools/set_skill_state.rs`、
     `triggers/cron/tools.rs`、`triggers/dynamic/tools.rs`：Tool.name +
