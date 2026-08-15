@@ -80,64 +80,235 @@ pub struct GrpcState {
 }
 
 #[tonic::async_trait]
-impl ThewayGrpc for GrpcState {
-    type StreamEventsStream = Pin<Box<dyn Stream<Item = Result<StreamFrame, Status>> + Send>>;
+impl theway_grpc::command_service_server::CommandService for GrpcState {
+        async fn send_message(
+        &self,
+        request: Request<SendMessageRequest>,
+    ) -> Result<Response<CommandResult>, Status> {
+        let request = request.into_inner();
+        // Explicit session targeting: only the current (live) session can receive
+        // messages — the process runs a single agent loop. Other sessions must be
+        // switched to first (connection-level binding is client-side state).
+        if let Some(target) = request.session_id.as_deref() {
+            let current = self.session_id.read().unwrap().clone();
+            if target != current {
+                return Err(Status::failed_precondition(format!(
+                    "session {target} is not the active session ({current}); SwitchSession first"
+                )));
+            }
+        }
+        let interrupt = request.mode() == MessageMode::Interrupt;
+        let accepted = self
+            .commands
+            .send(WireCommand::Submit {
+                text: request.text,
+                images: request
+                    .images
+                    .into_iter()
+                    .map(|image| WirePromptImage {
+                        data: image.data,
+                        name: image.name,
+                    })
+                    .collect(),
+                interrupt,
+            })
+            .is_ok();
+        Ok(Response::new(CommandResult { accepted }))
+    }
 
-    async fn get_state(&self, _request: Request<Empty>) -> Result<Response<SessionState>, Status> {
+        async fn set_model(
+        &self,
+        request: Request<SetModelRequest>,
+    ) -> Result<Response<CommandResult>, Status> {
+        let accepted = self
+            .commands
+            .send(WireCommand::SetModel {
+                spec: request.into_inner().spec,
+            })
+            .is_ok();
+        Ok(Response::new(CommandResult { accepted }))
+    }
+
+        async fn cancel(&self, _request: Request<Empty>) -> Result<Response<CommandResult>, Status> {
+        let accepted = self.commands.send(WireCommand::Abort).is_ok();
+        Ok(Response::new(CommandResult { accepted }))
+    }
+
+        async fn approve(
+        &self,
+        request: Request<ApproveRequest>,
+    ) -> Result<Response<CommandResult>, Status> {
+        let accepted = self
+            .commands
+            .send(WireCommand::ResolveControlPlane {
+                approve: request.into_inner().approve,
+            })
+            .is_ok();
+        Ok(Response::new(CommandResult { accepted }))
+    }
+
+    // ── graph orchestration (DAG + goal runs) ────────────────────────────
+}
+
+#[tonic::async_trait]
+impl theway_grpc::session_service_server::SessionService for GrpcState {
+        async fn get_state(&self, _request: Request<Empty>) -> Result<Response<SessionState>, Status> {
         let latest = self.latest.lock();
         Ok(Response::new(session_state(&latest)))
     }
 
-    async fn stream_events(
+        async fn list_sessions(
         &self,
         _request: Request<Empty>,
-    ) -> Result<Response<Self::StreamEventsStream>, Status> {
-        // Merge the snapshot broadcast (low-frequency full state) with the event plane
-        // (high-frequency increments) into one typed frame stream.
-        let snapshots = BroadcastStream::new(self.snapshots.subscribe()).filter_map(|item| {
-            async move {
-                match item {
-                    Ok(snapshot) => Some(Ok(StreamFrame {
-                        payload: Some(theway_grpc::stream_frame::Payload::Snapshot(session_state(
-                            &snapshot,
-                        ))),
-                    })),
-                    // Lagged subscribers drop stale frames and catch up on the next
-                    // publish; a closed channel ends the stream (broadcast is dropped
-                    // when the event loop exits).
-                    Err(BroadcastStreamRecvError::Lagged(_)) => None,
-                }
-            }
-        });
-        let events = BroadcastStream::new(self.events.subscribe()).filter_map(|item| async move {
-            match item {
-                Ok(event) => Some(Ok(StreamFrame {
-                    payload: Some(theway_grpc::stream_frame::Payload::Event(
-                        stream_event_wire(&event),
-                    )),
-                })),
-                Err(BroadcastStreamRecvError::Lagged(_)) => None,
-            }
-        });
-        let dag_events =
-            BroadcastStream::new(self.dag_events.subscribe()).filter_map(|item| async move {
-                match item {
-                    Ok(event) => Some(Ok(StreamFrame {
-                        payload: Some(theway_grpc::stream_frame::Payload::Event(dag_event_wire(
-                            &event,
-                        ))),
-                    })),
-                    Err(BroadcastStreamRecvError::Lagged(_)) => None,
-                }
-            });
-        // Three sources: snapshot broadcast (low-frequency full state) + subagent
-        // events + DAG engine events (both high-frequency increments).
-        let stream =
-            futures::stream::select(snapshots, futures::stream::select(events, dag_events));
-        Ok(Response::new(Box::pin(stream)))
+    ) -> Result<Response<ListSessionsResponse>, Status> {
+        let sessions = self
+            .session_ops
+            .list()
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let current_session_id = self.session_id.read().unwrap().clone();
+        Ok(Response::new(ListSessionsResponse {
+            sessions: sessions.iter().map(session_summary_wire).collect(),
+            current_session_id,
+        }))
     }
 
-    async fn get_node_output(
+        async fn create_session(
+        &self,
+        request: Request<CreateSessionRequest>,
+    ) -> Result<Response<CreateSessionResponse>, Status> {
+        let request = request.into_inner();
+        let new_id = self
+            .session_ops
+            .create()
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+        if let Some(name) = request.name.as_deref()
+            && !name.trim().is_empty()
+        {
+            self.session_ops
+                .rename(&new_id, name)
+                .await
+                .map_err(|e| Status::invalid_argument(e.to_string()))?;
+        }
+        // Becoming current goes through the serialized event loop; the current
+        // marker in ListSessions follows on the next snapshot.
+        let accepted = self
+            .commands
+            .send(WireCommand::SwitchSession { id: new_id.clone() })
+            .is_ok();
+        if !accepted {
+            return Err(Status::unavailable("event loop command channel closed"));
+        }
+        let sessions = self
+            .session_ops
+            .list()
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let session = sessions
+            .iter()
+            .find(|s| s.session_id == new_id)
+            .map(session_summary_wire);
+        Ok(Response::new(CreateSessionResponse { session }))
+    }
+
+        async fn switch_session(
+        &self,
+        request: Request<SwitchSessionRequest>,
+    ) -> Result<Response<CommandResult>, Status> {
+        let requested = request.into_inner().session_id;
+        let sessions = self
+            .session_ops
+            .list()
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let target = resolve_session_id(&sessions, &requested)
+            .ok_or_else(|| Status::not_found(format!("no session matches id {requested}")))?;
+        let accepted = self
+            .commands
+            .send(WireCommand::SwitchSession { id: target.clone() })
+            .is_ok();
+        if accepted {
+            // Rebind the connection-level current session; the event loop applies
+            // the same change on the serialized loop and re-publishes snapshots.
+            *self.session_id.write().unwrap() = target.clone();
+            self.latest.lock().session_id = target;
+        }
+        Ok(Response::new(CommandResult { accepted }))
+    }
+
+        async fn rename_session(
+        &self,
+        request: Request<RenameSessionRequest>,
+    ) -> Result<Response<CommandResult>, Status> {
+        let request = request.into_inner();
+        self.session_ops
+            .rename(&request.session_id, &request.name)
+            .await
+            .map_err(|e| {
+                if e.to_string().contains("no session matches") {
+                    Status::not_found(e.to_string())
+                } else {
+                    Status::invalid_argument(e.to_string())
+                }
+            })?;
+        Ok(Response::new(CommandResult { accepted: true }))
+    }
+
+        async fn delete_session(
+        &self,
+        request: Request<DeleteSessionRequest>,
+    ) -> Result<Response<DeleteSessionResponse>, Status> {
+        let requested = request.into_inner().session_id;
+        // Resolve to the full id first: delete protection and the current-session
+        // fallback compare against the metadata id.
+        let sessions = self
+            .session_ops
+            .list()
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let full_id = resolve_session_id(&sessions, &requested)
+            .ok_or_else(|| Status::not_found(format!("no session matches id {requested}")))?;
+        let running = self
+            .session_ops
+            .delete(&full_id)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+        if !running.is_empty() {
+            return Err(Status::failed_precondition(format!(
+                "session {full_id} still has running graphs: {}; cancel them (GraphCancel) before deleting",
+                running.join(", ")
+            )));
+        }
+        // Deleted the current session → fall back to the most recent remaining
+        // session (or empty) and tell the event loop to switch to it.
+        if self.session_id.read().unwrap().clone() == full_id {
+            let remaining = self
+                .session_ops
+                .list()
+                .await
+                .map_err(|e| Status::internal(e.to_string()))?;
+            let fallback = remaining
+                .last()
+                .map(|s| s.session_id.clone())
+                .unwrap_or_default();
+            *self.session_id.write().unwrap() = fallback.clone();
+            self.latest.lock().session_id = fallback.clone();
+            if !fallback.is_empty() {
+                let _ = self
+                    .commands
+                    .send(WireCommand::SwitchSession { id: fallback });
+            }
+        }
+        Ok(Response::new(DeleteSessionResponse {
+            running_run_ids: Vec::new(),
+        }))
+    }
+}
+
+#[tonic::async_trait]
+impl theway_grpc::graph_engine_service_server::GraphEngineService for GrpcState {
+        async fn get_node_output(
         &self,
         request: Request<GetNodeOutputRequest>,
     ) -> Result<Response<GetNodeOutputResponse>, Status> {
@@ -191,75 +362,7 @@ impl ThewayGrpc for GrpcState {
         }))
     }
 
-    async fn send_message(
-        &self,
-        request: Request<SendMessageRequest>,
-    ) -> Result<Response<CommandResult>, Status> {
-        let request = request.into_inner();
-        // Explicit session targeting: only the current (live) session can receive
-        // messages — the process runs a single agent loop. Other sessions must be
-        // switched to first (connection-level binding is client-side state).
-        if let Some(target) = request.session_id.as_deref() {
-            let current = self.session_id.read().unwrap().clone();
-            if target != current {
-                return Err(Status::failed_precondition(format!(
-                    "session {target} is not the active session ({current}); SwitchSession first"
-                )));
-            }
-        }
-        let interrupt = request.mode() == MessageMode::Interrupt;
-        let accepted = self
-            .commands
-            .send(WireCommand::Submit {
-                text: request.text,
-                images: request
-                    .images
-                    .into_iter()
-                    .map(|image| WirePromptImage {
-                        data: image.data,
-                        name: image.name,
-                    })
-                    .collect(),
-                interrupt,
-            })
-            .is_ok();
-        Ok(Response::new(CommandResult { accepted }))
-    }
-
-    async fn set_model(
-        &self,
-        request: Request<SetModelRequest>,
-    ) -> Result<Response<CommandResult>, Status> {
-        let accepted = self
-            .commands
-            .send(WireCommand::SetModel {
-                spec: request.into_inner().spec,
-            })
-            .is_ok();
-        Ok(Response::new(CommandResult { accepted }))
-    }
-
-    async fn cancel(&self, _request: Request<Empty>) -> Result<Response<CommandResult>, Status> {
-        let accepted = self.commands.send(WireCommand::Abort).is_ok();
-        Ok(Response::new(CommandResult { accepted }))
-    }
-
-    async fn approve(
-        &self,
-        request: Request<ApproveRequest>,
-    ) -> Result<Response<CommandResult>, Status> {
-        let accepted = self
-            .commands
-            .send(WireCommand::ResolveControlPlane {
-                approve: request.into_inner().approve,
-            })
-            .is_ok();
-        Ok(Response::new(CommandResult { accepted }))
-    }
-
-    // ── graph orchestration (DAG + goal runs) ────────────────────────────
-
-    async fn graph_cancel(
+        async fn graph_cancel(
         &self,
         request: Request<GraphCancelRequest>,
     ) -> Result<Response<CommandResult>, Status> {
@@ -269,7 +372,7 @@ impl ThewayGrpc for GrpcState {
         Ok(Response::new(CommandResult { accepted: true }))
     }
 
-    async fn graph_retry(
+        async fn graph_retry(
         &self,
         request: Request<GraphRetryRequest>,
     ) -> Result<Response<GraphRetryResponse>, Status> {
@@ -281,7 +384,7 @@ impl ThewayGrpc for GrpcState {
         }))
     }
 
-    async fn graph_skip(
+        async fn graph_skip(
         &self,
         request: Request<GraphSkipRequest>,
     ) -> Result<Response<GraphSkipResponse>, Status> {
@@ -290,7 +393,7 @@ impl ThewayGrpc for GrpcState {
         Ok(Response::new(GraphSkipResponse { skipped }))
     }
 
-    async fn graph_node_interrupt(
+        async fn graph_node_interrupt(
         &self,
         request: Request<GraphNodeInterruptRequest>,
     ) -> Result<Response<CommandResult>, Status> {
@@ -301,7 +404,7 @@ impl ThewayGrpc for GrpcState {
         Ok(Response::new(CommandResult { accepted }))
     }
 
-    async fn graph_node_steer(
+        async fn graph_node_steer(
         &self,
         request: Request<GraphNodeSteerRequest>,
     ) -> Result<Response<CommandResult>, Status> {
@@ -312,7 +415,7 @@ impl ThewayGrpc for GrpcState {
         Ok(Response::new(CommandResult { accepted }))
     }
 
-    async fn graph_checkpoint(
+        async fn graph_checkpoint(
         &self,
         request: Request<GraphCheckpointRequest>,
     ) -> Result<Response<GraphCheckpointResponse>, Status> {
@@ -366,7 +469,7 @@ impl ThewayGrpc for GrpcState {
         }))
     }
 
-    async fn graph_restore(
+        async fn graph_restore(
         &self,
         request: Request<GraphRestoreRequest>,
     ) -> Result<Response<GraphRestoreResponse>, Status> {
@@ -391,155 +494,7 @@ impl ThewayGrpc for GrpcState {
 
     // ── session resources (session-resource-model; backed by SessionOps) ──
 
-    async fn list_sessions(
-        &self,
-        _request: Request<Empty>,
-    ) -> Result<Response<ListSessionsResponse>, Status> {
-        let sessions = self
-            .session_ops
-            .list()
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
-        let current_session_id = self.session_id.read().unwrap().clone();
-        Ok(Response::new(ListSessionsResponse {
-            sessions: sessions.iter().map(session_summary_wire).collect(),
-            current_session_id,
-        }))
-    }
-
-    async fn create_session(
-        &self,
-        request: Request<CreateSessionRequest>,
-    ) -> Result<Response<CreateSessionResponse>, Status> {
-        let request = request.into_inner();
-        let new_id = self
-            .session_ops
-            .create()
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
-        if let Some(name) = request.name.as_deref()
-            && !name.trim().is_empty()
-        {
-            self.session_ops
-                .rename(&new_id, name)
-                .await
-                .map_err(|e| Status::invalid_argument(e.to_string()))?;
-        }
-        // Becoming current goes through the serialized event loop; the current
-        // marker in ListSessions follows on the next snapshot.
-        let accepted = self
-            .commands
-            .send(WireCommand::SwitchSession { id: new_id.clone() })
-            .is_ok();
-        if !accepted {
-            return Err(Status::unavailable("event loop command channel closed"));
-        }
-        let sessions = self
-            .session_ops
-            .list()
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
-        let session = sessions
-            .iter()
-            .find(|s| s.session_id == new_id)
-            .map(session_summary_wire);
-        Ok(Response::new(CreateSessionResponse { session }))
-    }
-
-    async fn switch_session(
-        &self,
-        request: Request<SwitchSessionRequest>,
-    ) -> Result<Response<CommandResult>, Status> {
-        let requested = request.into_inner().session_id;
-        let sessions = self
-            .session_ops
-            .list()
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
-        let target = resolve_session_id(&sessions, &requested)
-            .ok_or_else(|| Status::not_found(format!("no session matches id {requested}")))?;
-        let accepted = self
-            .commands
-            .send(WireCommand::SwitchSession { id: target.clone() })
-            .is_ok();
-        if accepted {
-            // Rebind the connection-level current session; the event loop applies
-            // the same change on the serialized loop and re-publishes snapshots.
-            *self.session_id.write().unwrap() = target.clone();
-            self.latest.lock().session_id = target;
-        }
-        Ok(Response::new(CommandResult { accepted }))
-    }
-
-    async fn rename_session(
-        &self,
-        request: Request<RenameSessionRequest>,
-    ) -> Result<Response<CommandResult>, Status> {
-        let request = request.into_inner();
-        self.session_ops
-            .rename(&request.session_id, &request.name)
-            .await
-            .map_err(|e| {
-                if e.to_string().contains("no session matches") {
-                    Status::not_found(e.to_string())
-                } else {
-                    Status::invalid_argument(e.to_string())
-                }
-            })?;
-        Ok(Response::new(CommandResult { accepted: true }))
-    }
-
-    async fn delete_session(
-        &self,
-        request: Request<DeleteSessionRequest>,
-    ) -> Result<Response<DeleteSessionResponse>, Status> {
-        let requested = request.into_inner().session_id;
-        // Resolve to the full id first: delete protection and the current-session
-        // fallback compare against the metadata id.
-        let sessions = self
-            .session_ops
-            .list()
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
-        let full_id = resolve_session_id(&sessions, &requested)
-            .ok_or_else(|| Status::not_found(format!("no session matches id {requested}")))?;
-        let running = self
-            .session_ops
-            .delete(&full_id)
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
-        if !running.is_empty() {
-            return Err(Status::failed_precondition(format!(
-                "session {full_id} still has running graphs: {}; cancel them (GraphCancel) before deleting",
-                running.join(", ")
-            )));
-        }
-        // Deleted the current session → fall back to the most recent remaining
-        // session (or empty) and tell the event loop to switch to it.
-        if self.session_id.read().unwrap().clone() == full_id {
-            let remaining = self
-                .session_ops
-                .list()
-                .await
-                .map_err(|e| Status::internal(e.to_string()))?;
-            let fallback = remaining
-                .last()
-                .map(|s| s.session_id.clone())
-                .unwrap_or_default();
-            *self.session_id.write().unwrap() = fallback.clone();
-            self.latest.lock().session_id = fallback.clone();
-            if !fallback.is_empty() {
-                let _ = self
-                    .commands
-                    .send(WireCommand::SwitchSession { id: fallback });
-            }
-        }
-        Ok(Response::new(DeleteSessionResponse {
-            running_run_ids: Vec::new(),
-        }))
-    }
-
-    async fn graph_list(
+        async fn graph_list(
         &self,
         request: Request<GraphListRequest>,
     ) -> Result<Response<GraphListResponse>, Status> {
@@ -554,6 +509,244 @@ impl ThewayGrpc for GrpcState {
         Ok(Response::new(GraphListResponse { runs }))
     }
 }
+
+#[tonic::async_trait]
+impl theway_grpc::event_service_server::EventService for GrpcState {
+        type StreamEventsStream = Pin<Box<dyn Stream<Item = Result<StreamFrame, Status>> + Send>>;
+        async fn stream_events(
+        &self,
+        _request: Request<Empty>,
+    ) -> Result<Response<Self::StreamEventsStream>, Status> {
+        // Merge the snapshot broadcast (low-frequency full state) with the event plane
+        // (high-frequency increments) into one typed frame stream.
+        let snapshots = BroadcastStream::new(self.snapshots.subscribe()).filter_map(|item| {
+            async move {
+                match item {
+                    Ok(snapshot) => Some(Ok(StreamFrame {
+                        payload: Some(theway_grpc::stream_frame::Payload::Snapshot(session_state(
+                            &snapshot,
+                        ))),
+                    })),
+                    // Lagged subscribers drop stale frames and catch up on the next
+                    // publish; a closed channel ends the stream (broadcast is dropped
+                    // when the event loop exits).
+                    Err(BroadcastStreamRecvError::Lagged(_)) => None,
+                }
+            }
+        });
+        let events = BroadcastStream::new(self.events.subscribe()).filter_map(|item| async move {
+            match item {
+                Ok(event) => Some(Ok(StreamFrame {
+                    payload: Some(theway_grpc::stream_frame::Payload::Event(
+                        stream_event_wire(&event),
+                    )),
+                })),
+                Err(BroadcastStreamRecvError::Lagged(_)) => None,
+            }
+        });
+        let dag_events =
+            BroadcastStream::new(self.dag_events.subscribe()).filter_map(|item| async move {
+                match item {
+                    Ok(event) => Some(Ok(StreamFrame {
+                        payload: Some(theway_grpc::stream_frame::Payload::Event(dag_event_wire(
+                            &event,
+                        ))),
+                    })),
+                    Err(BroadcastStreamRecvError::Lagged(_)) => None,
+                }
+            });
+        // Three sources: snapshot broadcast (low-frequency full state) + subagent
+        // events + DAG engine events (both high-frequency increments).
+        let stream =
+            futures::stream::select(snapshots, futures::stream::select(events, dag_events));
+        Ok(Response::new(Box::pin(stream)))
+    }
+}
+
+// Legacy aggregate service, kept as a migration bridge while clients cut over
+// to the four domain services. Each method is a thin UFCS delegate so the
+// bridge cannot drift from the new implementation; delete together with
+// `proto/theway_grpc.proto` in the cutover step.
+#[tonic::async_trait]
+impl ThewayGrpc for GrpcState {
+    type StreamEventsStream = Pin<Box<dyn Stream<Item = Result<StreamFrame, Status>> + Send>>;
+
+    async fn get_state(&self, request: Request<Empty>) -> Result<Response<SessionState>, Status> {
+        <Self as theway_grpc::session_service_server::SessionService>::get_state(self, request)
+            .await
+    }
+
+    async fn stream_events(
+        &self,
+        request: Request<Empty>,
+    ) -> Result<Response<Self::StreamEventsStream>, Status> {
+        <Self as theway_grpc::event_service_server::EventService>::stream_events(self, request)
+            .await
+    }
+
+    async fn get_node_output(
+        &self,
+        request: Request<GetNodeOutputRequest>,
+    ) -> Result<Response<GetNodeOutputResponse>, Status> {
+        <Self as theway_grpc::graph_engine_service_server::GraphEngineService>::get_node_output(
+            self,
+            request,
+        )
+        .await
+    }
+
+    async fn send_message(
+        &self,
+        request: Request<SendMessageRequest>,
+    ) -> Result<Response<CommandResult>, Status> {
+        <Self as theway_grpc::command_service_server::CommandService>::send_message(self, request)
+            .await
+    }
+
+    async fn set_model(
+        &self,
+        request: Request<SetModelRequest>,
+    ) -> Result<Response<CommandResult>, Status> {
+        <Self as theway_grpc::command_service_server::CommandService>::set_model(self, request).await
+    }
+
+    async fn cancel(&self, request: Request<Empty>) -> Result<Response<CommandResult>, Status> {
+        <Self as theway_grpc::command_service_server::CommandService>::cancel(self, request).await
+    }
+
+    async fn approve(
+        &self,
+        request: Request<ApproveRequest>,
+    ) -> Result<Response<CommandResult>, Status> {
+        <Self as theway_grpc::command_service_server::CommandService>::approve(self, request).await
+    }
+
+    async fn graph_cancel(
+        &self,
+        request: Request<GraphCancelRequest>,
+    ) -> Result<Response<CommandResult>, Status> {
+        <Self as theway_grpc::graph_engine_service_server::GraphEngineService>::graph_cancel(
+            self,
+            request,
+        )
+        .await
+    }
+
+    async fn graph_retry(
+        &self,
+        request: Request<GraphRetryRequest>,
+    ) -> Result<Response<GraphRetryResponse>, Status> {
+        <Self as theway_grpc::graph_engine_service_server::GraphEngineService>::graph_retry(
+            self,
+            request,
+        )
+        .await
+    }
+
+    async fn graph_skip(
+        &self,
+        request: Request<GraphSkipRequest>,
+    ) -> Result<Response<GraphSkipResponse>, Status> {
+        <Self as theway_grpc::graph_engine_service_server::GraphEngineService>::graph_skip(
+            self,
+            request,
+        )
+        .await
+    }
+
+    async fn graph_node_interrupt(
+        &self,
+        request: Request<GraphNodeInterruptRequest>,
+    ) -> Result<Response<CommandResult>, Status> {
+        <Self as theway_grpc::graph_engine_service_server::GraphEngineService>::graph_node_interrupt(self, request)
+            .await
+    }
+
+    async fn graph_node_steer(
+        &self,
+        request: Request<GraphNodeSteerRequest>,
+    ) -> Result<Response<CommandResult>, Status> {
+        <Self as theway_grpc::graph_engine_service_server::GraphEngineService>::graph_node_steer(
+            self,
+            request,
+        )
+        .await
+    }
+
+    async fn graph_checkpoint(
+        &self,
+        request: Request<GraphCheckpointRequest>,
+    ) -> Result<Response<GraphCheckpointResponse>, Status> {
+        <Self as theway_grpc::graph_engine_service_server::GraphEngineService>::graph_checkpoint(
+            self,
+            request,
+        )
+        .await
+    }
+
+    async fn graph_restore(
+        &self,
+        request: Request<GraphRestoreRequest>,
+    ) -> Result<Response<GraphRestoreResponse>, Status> {
+        <Self as theway_grpc::graph_engine_service_server::GraphEngineService>::graph_restore(
+            self,
+            request,
+        )
+        .await
+    }
+
+    async fn list_sessions(
+        &self,
+        request: Request<Empty>,
+    ) -> Result<Response<ListSessionsResponse>, Status> {
+        <Self as theway_grpc::session_service_server::SessionService>::list_sessions(self, request)
+            .await
+    }
+
+    async fn create_session(
+        &self,
+        request: Request<CreateSessionRequest>,
+    ) -> Result<Response<CreateSessionResponse>, Status> {
+        <Self as theway_grpc::session_service_server::SessionService>::create_session(self, request)
+            .await
+    }
+
+    async fn switch_session(
+        &self,
+        request: Request<SwitchSessionRequest>,
+    ) -> Result<Response<CommandResult>, Status> {
+        <Self as theway_grpc::session_service_server::SessionService>::switch_session(self, request)
+            .await
+    }
+
+    async fn rename_session(
+        &self,
+        request: Request<RenameSessionRequest>,
+    ) -> Result<Response<CommandResult>, Status> {
+        <Self as theway_grpc::session_service_server::SessionService>::rename_session(self, request)
+            .await
+    }
+
+    async fn delete_session(
+        &self,
+        request: Request<DeleteSessionRequest>,
+    ) -> Result<Response<DeleteSessionResponse>, Status> {
+        <Self as theway_grpc::session_service_server::SessionService>::delete_session(self, request)
+            .await
+    }
+
+    async fn graph_list(
+        &self,
+        request: Request<GraphListRequest>,
+    ) -> Result<Response<GraphListResponse>, Status> {
+        <Self as theway_grpc::graph_engine_service_server::GraphEngineService>::graph_list(
+            self,
+            request,
+        )
+        .await
+    }
+}
+
 
 /// Standard `grpc.health.v1` service: the server is live as long as the
 /// event loop owns it, so every probe answers SERVING regardless of the
@@ -632,7 +825,21 @@ pub async fn run_grpc(mut app: Box<dyn TransportHost>, options: GrpcOptions) -> 
 /// server exits (the event loop selects on it).
 pub fn serve_grpc(listener: TcpListener, state: GrpcState) -> tokio::task::JoinHandle<Result<()>> {
     let server = tonic::transport::Server::builder()
-        .add_service(ThewayGrpcServer::new(state))
+        .add_service(ThewayGrpcServer::new(state.clone()))
+        .add_service(theway_grpc::command_service_server::CommandServiceServer::new(
+            state.clone(),
+        ))
+        .add_service(theway_grpc::session_service_server::SessionServiceServer::new(
+            state.clone(),
+        ))
+        .add_service(
+            theway_grpc::graph_engine_service_server::GraphEngineServiceServer::new(
+                state.clone(),
+            ),
+        )
+        .add_service(theway_grpc::event_service_server::EventServiceServer::new(
+            state,
+        ))
         .add_service(HealthServer::new(HealthService))
         .serve_with_incoming(TcpListenerStream::new(listener));
     tokio::spawn(async move {
