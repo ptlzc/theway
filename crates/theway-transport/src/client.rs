@@ -20,7 +20,10 @@ use tonic::codec::Streaming;
 use tonic::transport::Channel;
 
 use crate::proto::theway_grpc;
-use crate::proto::theway_grpc::theway_grpc_client::ThewayGrpcClient;
+use crate::proto::theway_grpc::command_service_client::CommandServiceClient;
+use crate::proto::theway_grpc::event_service_client::EventServiceClient;
+use crate::proto::theway_grpc::graph_engine_service_client::GraphEngineServiceClient;
+use crate::proto::theway_grpc::session_service_client::SessionServiceClient;
 use crate::proto::theway_grpc::{
     self as proto, ApproveRequest, CreateSessionRequest, DeleteSessionRequest, Empty,
     GetNodeOutputRequest, GraphCancelRequest, GraphListRequest, GraphRetryRequest,
@@ -138,7 +141,7 @@ pub fn remove_port_file_if_owner(cwd: &Path, pid: u32) {
     }
 }
 
-/// Typed client for the `theway.grpc.v1.ThewayGrpc` service.
+/// Typed client for the four `theway.grpc.v1` domain services.
 ///
 /// Cheap to clone (the underlying channel is `Arc`-shared); command calls take
 /// `&mut self` because tonic's generated unary methods do. `stream_events`
@@ -146,18 +149,26 @@ pub fn remove_port_file_if_owner(cwd: &Path, pid: u32) {
 /// replace the full state, event frames are increments).
 #[derive(Clone, Debug)]
 pub struct GrpcClient {
-    inner: ThewayGrpcClient<Channel>,
+    session: SessionServiceClient<Channel>,
+    command: CommandServiceClient<Channel>,
+    graph: GraphEngineServiceClient<Channel>,
+    events: EventServiceClient<Channel>,
     addr: String,
 }
 
 impl GrpcClient {
     /// Connect to `host:port` (no scheme). Fails fast when nothing listens.
     pub async fn connect(addr: &str) -> Result<Self> {
-        let inner = ThewayGrpcClient::connect(format!("http://{addr}"))
+        let channel = Channel::from_shared(format!("http://{addr}"))
+            .with_context(|| format!("connect to daemon at {addr}"))?
+            .connect()
             .await
             .with_context(|| format!("connect to daemon at {addr}"))?;
         Ok(Self {
-            inner,
+            session: SessionServiceClient::new(channel.clone()),
+            command: CommandServiceClient::new(channel.clone()),
+            graph: GraphEngineServiceClient::new(channel.clone()),
+            events: EventServiceClient::new(channel),
             addr: addr.to_string(),
         })
     }
@@ -170,7 +181,7 @@ impl GrpcClient {
     /// Full structured state (health probe: a live daemon answers this).
     pub async fn get_state(&mut self) -> Result<SessionState> {
         let state = self
-            .inner
+            .session
             .get_state(Empty {})
             .await
             .map_err(|e| anyhow::anyhow!("get_state: {e}"))?
@@ -182,7 +193,7 @@ impl GrpcClient {
     /// dies or the event loop exits; the caller is responsible for reconnect.
     pub async fn stream_events(&mut self) -> Result<Streaming<StreamFrame>> {
         let response = self
-            .inner
+            .events
             .stream_events(Empty {})
             .await
             .map_err(|e| anyhow::anyhow!("stream_events: {e}"))?;
@@ -198,7 +209,7 @@ impl GrpcClient {
         interrupt: bool,
     ) -> Result<bool> {
         let accepted = self
-            .inner
+            .command
             .send_message(SendMessageRequest {
                 text,
                 images: images
@@ -224,7 +235,7 @@ impl GrpcClient {
     /// Switch the daemon's active model.
     pub async fn set_model(&mut self, spec: &str) -> Result<bool> {
         let accepted = self
-            .inner
+            .command
             .set_model(SetModelRequest {
                 spec: spec.to_string(),
             })
@@ -236,7 +247,7 @@ impl GrpcClient {
     /// Stop the in-flight turn (same as a local Ctrl-C). Does not cancel DAG runs.
     pub async fn cancel(&mut self) -> Result<bool> {
         let accepted = self
-            .inner
+            .command
             .cancel(Empty {})
             .await
             .map_err(|e| anyhow::anyhow!("cancel: {e}"))?;
@@ -246,7 +257,7 @@ impl GrpcClient {
     /// Resolve a pending control-plane prompt (approve / deny).
     pub async fn approve(&mut self, approve: bool) -> Result<bool> {
         let accepted = self
-            .inner
+            .command
             .approve(ApproveRequest { approve })
             .await
             .map_err(|e| anyhow::anyhow!("approve: {e}"))?;
@@ -256,7 +267,7 @@ impl GrpcClient {
     /// Switch the daemon to another session (aborts an in-flight turn).
     pub async fn switch_session(&mut self, id: &str) -> Result<bool> {
         let accepted = self
-            .inner
+            .session
             .switch_session(SwitchSessionRequest {
                 session_id: id.to_string(),
             })
@@ -268,7 +279,7 @@ impl GrpcClient {
     /// List sessions (oldest → newest) plus the daemon's current session id.
     pub async fn list_sessions(&mut self) -> Result<(Vec<SessionSummary>, String)> {
         let response = self
-            .inner
+            .session
             .list_sessions(Empty {})
             .await
             .map_err(|e| anyhow::anyhow!("list_sessions: {e}"))?
@@ -295,7 +306,7 @@ impl GrpcClient {
     /// Create a session (becoming current flows through the daemon's event loop).
     pub async fn create_session(&mut self, name: Option<String>) -> Result<SessionSummary> {
         let response = self
-            .inner
+            .session
             .create_session(CreateSessionRequest { name })
             .await
             .map_err(|e| anyhow::anyhow!("create_session: {e}"))?
@@ -320,7 +331,7 @@ impl GrpcClient {
     /// Rename a session (full id or unique prefix).
     pub async fn rename_session(&mut self, id: &str, name: &str) -> Result<bool> {
         let accepted = self
-            .inner
+            .session
             .rename_session(RenameSessionRequest {
                 session_id: id.to_string(),
                 name: name.to_string(),
@@ -334,7 +345,7 @@ impl GrpcClient {
     /// `Ok(empty)` = deleted.
     pub async fn delete_session(&mut self, id: &str) -> Result<Vec<String>> {
         let response = self
-            .inner
+            .session
             .delete_session(DeleteSessionRequest {
                 session_id: id.to_string(),
             })
@@ -347,7 +358,7 @@ impl GrpcClient {
 
     pub async fn graph_cancel(&mut self, run_id: &str) -> Result<bool> {
         let accepted = self
-            .inner
+            .graph
             .graph_cancel(GraphCancelRequest {
                 run_id: run_id.to_string(),
             })
@@ -362,7 +373,7 @@ impl GrpcClient {
         node_id: Option<&str>,
     ) -> Result<Vec<String>> {
         let response = self
-            .inner
+            .graph
             .graph_retry(GraphRetryRequest {
                 run_id: run_id.to_string(),
                 node_id: node_id.map(str::to_string),
@@ -374,7 +385,7 @@ impl GrpcClient {
 
     pub async fn graph_skip(&mut self, run_id: &str, node_id: &str) -> Result<bool> {
         let skipped = self
-            .inner
+            .graph
             .graph_skip(GraphSkipRequest {
                 run_id: run_id.to_string(),
                 node_id: node_id.to_string(),
@@ -387,7 +398,7 @@ impl GrpcClient {
     /// One session's graph runs (DagRunSnapshot shape).
     pub async fn graph_list(&mut self, session_id: &str) -> Result<Vec<proto::DagRunSnapshot>> {
         let response = self
-            .inner
+            .graph
             .graph_list(GraphListRequest {
                 session_id: session_id.to_string(),
             })
@@ -404,7 +415,7 @@ impl GrpcClient {
         offset: u64,
     ) -> Result<proto::GetNodeOutputResponse> {
         let response = self
-            .inner
+            .graph
             .get_node_output(GetNodeOutputRequest {
                 run_id: run_id.to_string(),
                 node_id: node_id.to_string(),
