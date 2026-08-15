@@ -115,6 +115,12 @@ impl FeedRenderCache {
         if width != self.width || *opts != self.opts || cap != self.cap {
             self.reset(width, *opts, cap);
         }
+        // Refresh the per-frame counters WITHOUT invalidating: option equality
+        // deliberately ignores cps/in/out/spinner_phase (they change every
+        // frame), but the streaming tail re-renders its stats line each frame
+        // and must read the current values (issue #44). Frozen historical
+        // blocks keep the values they were rendered with.
+        self.opts = *opts;
         let blocks = feed.blocks();
 
         // Prefix scan: the first block whose fingerprint differs (or is new).
@@ -538,6 +544,25 @@ mod tests {
     }
 
     #[test]
+    fn per_frame_counter_change_reuses_cached_blocks() {
+        // Hand-written PartialEq (issue #44): cps/in/out/spinner_phase change
+        // every frame and must NOT invalidate the cache; a full rebuild per
+        // frame would degrade the #34/#35 incremental rendering.
+        let feed = feed_with(&[user("one"), assistant("two")]);
+        let mut cache = FeedRenderCache::new();
+        cache.update(&feed, 80, &FeedRenderOptions::default(), 1000);
+        assert_eq!(cache.last_rebuilt, 2);
+
+        let mut opts = FeedRenderOptions::default();
+        opts.thinking_cps = 1234.5;
+        opts.thinking_input_tokens = 57_100;
+        opts.thinking_output_tokens = 1_200;
+        opts.spinner_phase = 9;
+        cache.update(&feed, 80, &opts, 1000);
+        assert_eq!(cache.last_rebuilt, 0, "per-frame counters must not invalidate the cache");
+    }
+
+    #[test]
     fn cap_trims_head_and_tracks_trimmed() {
         // 700 plain lines at width 80 → 700 rendered lines.
         let mut feed = Feed::new();
@@ -741,6 +766,42 @@ mod streaming_tests {
         assert!(!rendered.contains("line 0\n"), "{rendered}");
         assert!(rendered.contains("Ctrl+O cycles"), "{rendered}");
         assert!(cache.lines().len() <= 1 + feed_render::THINKING_PEEK_LINES + 1);
+    }
+
+    #[test]
+    fn streamed_thinking_stats_tracks_per_frame_counters() {
+        // The streaming tail re-renders the stats line each frame with the
+        // CURRENT counters (issue #44): cps/in/out refresh without a cache
+        // invalidation, so a live stream shows live numbers.
+        let mut cache = FeedRenderCache::new();
+        let feed = feed_from_blocks(&[Block::Thinking {
+            text: "pondering".into(),
+            timestamp: None,
+        }]);
+        let opts = FeedRenderOptions {
+            thinking_cps: 100.0,
+            thinking_input_tokens: 500,
+            thinking_output_tokens: 90,
+            ..Default::default()
+        };
+        cache.update(&feed, 80, &opts, 1000);
+
+        let feed = feed_from_blocks(&[Block::Thinking {
+            text: "pondering the design".into(),
+            timestamp: None,
+        }]);
+        let opts = FeedRenderOptions {
+            thinking_cps: 1000.0,
+            thinking_input_tokens: 57_100,
+            thinking_output_tokens: 1_200,
+            ..Default::default()
+        };
+        cache.update(&feed, 80, &opts, 1000);
+        let rendered = flat(cache.lines());
+        assert!(
+            rendered.contains("c/s: 1000 · in: 57.1k · out: 1.2k"),
+            "streamed stats line must show the updated counters:\n{rendered}"
+        );
     }
 
     #[test]

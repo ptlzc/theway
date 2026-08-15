@@ -49,8 +49,16 @@ pub enum ThinkingMode {
 
 /// Renderer switches owned by the TUI app state.
 ///
-/// `PartialEq` only (not `Eq`): `thinking_cps` is an `f64`.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+/// `PartialEq` is hand-implemented over the structural switches only
+/// (`thinking_mode` / `tools_expanded`): the per-frame counters
+/// (`thinking_cps` / `thinking_input_tokens` / `thinking_output_tokens` /
+/// `spinner_phase`) change every frame while a turn streams and must NOT
+/// participate in equality — otherwise the feed cache sees a new option set
+/// every frame and the #34/#35 incremental rendering degrades to full
+/// re-renders. Streaming tails re-render their stats line with fresh
+/// counters each frame; frozen historical blocks keep the values they were
+/// rendered with.
+#[derive(Clone, Copy, Debug, Default)]
 pub struct FeedRenderOptions {
     pub thinking_mode: ThinkingMode,
     /// Tool results: collapsed to a bordered preview unless expanded (Ctrl+T).
@@ -58,11 +66,26 @@ pub struct FeedRenderOptions {
     /// Thinking-block throughput (chars/sec over the last 1s window) shown on
     /// the stats line; sourced by the CpsMeter (node 3-spinner).
     pub thinking_cps: f64,
+    /// Last-turn input token count shown on the thinking stats line.
+    pub thinking_input_tokens: u64,
     /// Last-turn output token count shown on the thinking stats line.
     pub thinking_output_tokens: u64,
     /// Rainbow spinner animation phase (node 3-spinner); passthrough, not
-    /// consumed by block rendering.
+    /// consumed by block rendering. Dead until a consumer wires it — kept in
+    /// the option set so per-frame animation state travels with the render
+    /// switches (and excluded from `PartialEq` like the other per-frame
+    /// counters).
+    #[allow(dead_code)]
     pub spinner_phase: u32,
+}
+
+/// Structural equality only (issue #44): per-frame counters (cps / in / out /
+/// spinner_phase) are excluded so the feed cache keeps its incremental
+/// rendering across frames.
+impl PartialEq for FeedRenderOptions {
+    fn eq(&self, other: &Self) -> bool {
+        self.thinking_mode == other.thinking_mode && self.tools_expanded == other.tools_expanded
+    }
 }
 
 /// Lines shown in the thinking peek window.
@@ -629,9 +652,10 @@ fn human_count(n: u64) -> String {
 }
 
 /// Build the thinking stats line for `chars` characters of thinking text:
-/// char count (human format) on the left, `c/s` throughput + last-turn output
-/// tokens on the right, right aligned to the content width. Shared by the
-/// one-shot renderer and the streaming cache so both stay byte-identical.
+/// char count (human format) on the left, `c/s` throughput + last-turn
+/// input/output tokens on the right, right aligned to the content width.
+/// Shared by the one-shot renderer and the streaming cache so both stay
+/// byte-identical.
 pub(crate) fn thinking_stats_line(
     chars: usize,
     opts: &FeedRenderOptions,
@@ -640,8 +664,9 @@ pub(crate) fn thinking_stats_line(
     let left = format!("{TOOL_PREFIX}thinking · {} char", human_count(chars as u64));
     let cps = opts.thinking_cps.round() as u64;
     let right = format!(
-        "c/s: {} · output: {}",
+        "c/s: {} · in: {} · out: {}",
         cps,
+        human_count(opts.thinking_input_tokens),
         human_count(opts.thinking_output_tokens)
     );
     let left_w = unicode_width::UnicodeWidthStr::width(left.as_str());
@@ -949,7 +974,7 @@ mod tests {
             &opts(ThinkingMode::Peek),
         ));
         assert!(peek.contains("⏵ thinking · 28 char"), "{peek}");
-        assert!(peek.contains("c/s: 0 · output: 0"), "{peek}");
+        assert!(peek.contains("c/s: 0 · in: 0 · out: 0"), "{peek}");
         assert!(peek.contains("deep thoughts"), "{peek}");
         let hidden = flat(&super::lines(
             &feed_with(&blocks),
@@ -1098,7 +1123,7 @@ mod tests {
     }
 
     #[test]
-    fn thinking_stats_line_formats_cps_and_output() {
+    fn thinking_stats_line_formats_cps_and_in_out_tokens() {
         let feed = feed_with(&[WireFeedBlock::Thinking {
             text: "x".repeat(1200),
             timestamp: None,
@@ -1106,12 +1131,13 @@ mod tests {
         let opts = FeedRenderOptions {
             thinking_mode: ThinkingMode::Full,
             thinking_cps: 84.0,
-            thinking_output_tokens: 1200,
+            thinking_input_tokens: 57_100,
+            thinking_output_tokens: 1_200,
             ..Default::default()
         };
         let flat = flat(&super::lines(&feed, 80, &opts));
         assert!(flat.contains("⏵ thinking · 1.2k char"), "{flat}");
-        assert!(flat.contains("c/s: 84 · output: 1.2k"), "{flat}");
+        assert!(flat.contains("c/s: 84 · in: 57.1k · out: 1.2k"), "{flat}");
     }
 
     #[test]
@@ -1120,8 +1146,38 @@ mod tests {
         assert_eq!(opts.thinking_mode, ThinkingMode::default());
         assert!(!opts.tools_expanded);
         assert_eq!(opts.thinking_cps, 0.0);
+        assert_eq!(opts.thinking_input_tokens, 0);
         assert_eq!(opts.thinking_output_tokens, 0);
         assert_eq!(opts.spinner_phase, 0);
+    }
+
+    /// `PartialEq` is hand-implemented (issue #44): the per-frame counters
+    /// (cps / in / out / spinner_phase) must NOT participate, otherwise the
+    /// feed cache invalidates and fully re-renders every frame; structural
+    /// switches (thinking_mode / tools_expanded) must.
+    #[test]
+    fn feed_render_options_equality_ignores_per_frame_counters() {
+        let structural = FeedRenderOptions::default();
+        let mut per_frame = FeedRenderOptions::default();
+        per_frame.thinking_cps = 999.5;
+        per_frame.thinking_input_tokens = 57_100;
+        per_frame.thinking_output_tokens = 1_200;
+        per_frame.spinner_phase = 42;
+        assert_eq!(
+            structural, per_frame,
+            "cps/in/out/spinner_phase changes must keep options equal"
+        );
+        per_frame.thinking_mode = ThinkingMode::Peek;
+        assert_ne!(
+            structural, per_frame,
+            "thinking_mode change must change equality"
+        );
+        per_frame = FeedRenderOptions::default();
+        per_frame.tools_expanded = true;
+        assert_ne!(
+            structural, per_frame,
+            "tools_expanded change must change equality"
+        );
     }
 
     #[test]

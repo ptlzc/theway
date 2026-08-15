@@ -259,6 +259,39 @@ async fn busy_status_shows_snake_loader_with_elapsed() {
     assert!(app.busy_started.is_none());
 }
 
+// ── thinking stats wiring (issue #44) ─────────────────────────────────────
+
+/// The thinking stats line's right side renders the live c/s meter plus the
+/// recent turn's in/out token counts from the snapshot usage — previously
+/// `thinking_cps` / `thinking_output_tokens` were never assigned and the line
+/// was stuck at `c/s: 0 · output: 0` with no input.
+#[tokio::test]
+async fn thinking_stats_line_shows_cps_and_in_out_tokens() {
+    let (mut app, _rx) = test_app().await;
+    let mut status = fixture_status(vec![WireFeedBlock::Thinking {
+        text: "pondering the design".into(),
+        timestamp: None,
+    }]);
+    status.usage = WireContextUsage {
+        input_tokens: 57_100,
+        output_tokens: 1_200,
+        ..Default::default()
+    };
+    app.apply_snapshot(status);
+    // Seed the char/s meter: 500 bytes over 0.5 s → 1000 char/s.
+    let now = std::time::Instant::now();
+    app.cps_meter.record_at(now - Duration::from_millis(500), 0);
+    app.cps_meter.record_at(now, 500);
+    let backend = TestBackend::new(80, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    let text = buffer_text(terminal.backend().buffer());
+    assert!(
+        text.contains("c/s: 1000 · in: 57.1k · out: 1.2k"),
+        "thinking stats line missing live counters:\n{text}"
+    );
+}
+
 // ── busy snake loader (issue #42) ─────────────────────────────────────────
 
 /// Head trajectory: the triangular wave walks 0→8→0 and bounces at both
