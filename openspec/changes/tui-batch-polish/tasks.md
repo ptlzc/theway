@@ -10,17 +10,18 @@ graph TD
   F --> G["7-completion-scroll: 补全弹层自动翻页 (#46)"]
   G --> H["8-slash-catalog: 弹层 skill:: 与 mcp: 条目 (#47)"]
   H --> I["9-new-session: /new 命令 create+switch (#52)"]
-  I --> J["10-reload: reload tool + revision + TUI 热重载 (#50)"]
-  K["11-tool-rename: 工具名统一 snake_case (#48)"] --> M["13-verify"]
-  L["12-agents-doc: daemon 定位写入 AGENTS.md (#51)"] --> M["13-verify"]
-  J --> M["13-verify: make ci + tmux e2e + close #39-#52"]
+  I --> J["10-text-selection: 字符级文本选中 + 复制 (#53)"]
+  J --> K["11-reload: reload tool + revision + TUI 热重载 (#50)"]
+  L["12-tool-rename: 工具名统一 snake_case (#48)"] --> N["14-verify"]
+  M["13-agents-doc: daemon 定位写入 AGENTS.md (#51)"] --> N["14-verify"]
+  K --> N["14-verify: make ci + tmux e2e + close #39-#53"]
 ```
 
-主链全串行：ui/mod.rs 被 1/2/3/4/5/7/8/9/10 修改，feed_render.rs 被 4/5/6
-修改，按仓库规则共享文件节点串行。11-tool-rename 只碰 daemon 文件
-（tool 定义 + 测试 + listener + system_prompt）、12-agents-doc 只碰
+主链全串行：ui/mod.rs 被 1/2/3/4/5/7/8/9/10/11 修改，feed_render.rs 被
+4/5/6/10 修改，按仓库规则共享文件节点串行。12-tool-rename 只碰 daemon
+文件（tool 定义 + 测试 + listener + system_prompt）、13-agents-doc 只碰
 AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
-（feat(#子issue)），13-verify 基于最新 HEAD 复核并逐条 close。
+（feat(#子issue)），14-verify 基于最新 HEAD 复核并逐条 close。
 
 - [ ] 1-features — `crates/theway-tui/src/ui/mod.rs` + `ui/tests.rs`：
   - `feature_labels(runtime, dags, has_goal)` → `feature_labels(dags)`：
@@ -134,7 +135,27 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
   - 测试：slash_new 触发 create_session + SwitchSession{id} 命令；补全
     列表含 /new；失败路径 error_line。
   - 验收：`cargo check -p theway-tui`；`cargo test -p theway-tui` 全绿。
-- [ ] 10-reload — daemon + transport + tui（#50）：
+- [ ] 10-text-selection — 新 `ui/selection.rs` + `feed_render.rs` +
+  `ui/mod.rs` + `ui/app_input.rs` + `ui/tests.rs`（#53）：
+  - `FeedSelection { anchor: (usize, usize), head: (usize, usize) }`
+    （uncapped 行 + 显示列）；`ordered()` 归一方向；列钳制按行文本
+    宽度（unicode-width）；`extract_text(lines)` 从渲染行 span 拼纯文本
+    （首/尾行按列截断，行间 \n）；`highlight_cols(buf, line, c1, c2)` 按
+    显示列切分 span 只涂 [c1,c2) 背景（BAND_STYLE）。
+  - feed_render.rs：render_lines_window 选区参数 2D 化（整行涂色路径
+    替换为列区间涂色；删除 highlight_line 整行压平逻辑或转 selection
+    内部）。
+  - ui/mod.rs：FeedSelection 2D；mouse down/drag 传列（col = 行内显示
+    列，超行宽钳行尾）；Ctrl+Space 选可视页 (view.top,0)→(view.bottom,
+    末行宽)；mouse-up 触发复制（system line `copied N chars · M lines`）。
+  - ui/app_input.rs：Shift+Left/Right 按字符（钳行宽）、Shift+Up/Down
+    保持列、Shift+PgUp/PgDn 按页；Ctrl+Shift+C 显式复制；Esc 清除不变。
+  - 复制：`clipboard_image` 模块（或 selection 内）加 write 路径——
+    arboard set_text（spawn_blocking）优先，失败回 OSC52。
+  - 测试：列钳制、文本提取（首尾列截断 + 多行）、列区间涂色（buffer
+    bg 断言）、mouse 列映射、键盘扩展、复制调用（mock）。
+  - 验收：`cargo check -p theway-tui`；`cargo test -p theway-tui` 全绿。
+- [ ] 11-reload — daemon + transport + tui（#50）：
   - daemon 新 `tools/reload.rs`：AgentTool `reload`（snake_case），
     包装现有 `reload_everything`（skills/config/commands/triggers 重扫，
     与 /reload 命令共用逻辑不复制），执行成功 → 递增 runtime_revision；
@@ -150,7 +171,7 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
     变化触发 theme 重载断言（ui/tests.rs）。
   - 验收：`cargo check --workspace`；`cargo test -p theway-daemon -p
     theway-tui` 全绿。
-- [ ] 11-tool-rename — daemon-only（与主链文件不相交，并行）：
+- [ ] 12-tool-rename — daemon-only（与主链文件不相交，并行）：
   - `tools/skill.rs`、`tools/skill_builder.rs`、`tools/install_skill/
     mod.rs`、`tools/remove_skill.rs`、`tools/set_skill_state.rs`、
     `triggers/cron/tools.rs`、`triggers/dynamic/tools.rs`：Tool.name +
@@ -171,7 +192,7 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
     dynamic_trigger_e2e、e2e_llm.rs）更新。
   - 验收：`cargo check -p theway-daemon`；`cargo test -p theway-daemon`
     全绿；grep 确认 `name: "[A-Z]` 在 Tool 定义中无残留（除 test Faux）。
-- [ ] 12-agents-doc — `AGENTS.md`（#51，只碰文档，并行）：
+- [ ] 13-agents-doc — `AGENTS.md`（#51，只碰文档，并行）：
   - Workspace layout / Layering 附近加"daemon 定位"小节：daemon =
     会话/工具/触发/编排的运行时服务，面向协议层（transport 的 gRPC +
     HTTP/SSE/WS）；对客户端形态无概念（不区分 TUI/web/headless 脚本/
@@ -180,7 +201,7 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
     契约，daemon 只做协议侧语义；需要客户端配合的行为用 snapshot 字段/
     事件表达（例：runtime_revision 通知客户端重读本地资源）。
   - 验收：`git diff AGENTS.md` 内容符合上述语义；无其它文件改动。
-- [ ] 13-verify — `make check` + `make test`（workspace 全量）+ `make lint` +
+- [ ] 14-verify — `make check` + `make test`（workspace 全量）+ `make lint` +
   `make fmt-check`；tmux e2e 逐条：①composer 右上角仅 graph engine（无
   dag run 无标签，trigger 面板 Runtime 仍在）②长文本折行显示行首 + Up/Down
   历史/拖拽调高回归 ③busy 时彩虹蛇在 9 点轨道左右跑 + 折返 + 与 working
@@ -192,6 +213,8 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
   显示 snake_case 名（skill/trigger/cron 工具调用正常）⑩装 skill / 改
   theme.toml 后 LLM 调 reload → 新 skill 可 invoke + TUI 主题即时生效
   ⑪AGENTS.md 定位小节在库 ⑫/new 新 session：feed 清空、系统行提示、
-  下一条消息进新 session、/sessions 可见新旧两个；
-  `gh issue close 39 40 41 42 43 44 46 47 48 49 50 51 52`，证据贴 #45 后
-  `gh issue close 45`。
+  下一条消息进新 session、/sessions 可见新旧两个 ⑬鼠标拖选只高亮字符
+  （跨行首尾按列截断）、释放后剪贴板含选区文本、Shift+方向键字符/行/页
+  扩展、Ctrl+Shift+C 复制、Esc 清除；
+  `gh issue close 39 40 41 42 43 44 46 47 48 49 50 51 52 53`，证据贴 #45
+  后 `gh issue close 45`。

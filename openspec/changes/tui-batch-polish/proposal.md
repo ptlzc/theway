@@ -1,17 +1,17 @@
 # tui-batch-polish
 
-Issue: #45（umbrella；子 issue #39-#44、#46-#52）
+Issue: #45（umbrella；子 issue #39-#44、#46-#53）
 
 ## 范围整合
 
-本轮 13 条输入收拢为一个 change、一个 DAG 实施链（同 #38 先例）——
+本轮 14 条输入收拢为一个 change、一个 DAG 实施链（同 #38 先例）——
 之前为每条单独建的 change（tui-composer-features-only-graph-engine /
 tui-composer-single-line-wrap / dag-node-graph-render /
 tui-busy-snake-loader / tui-theme-interface）已并入本 change 并删除，
 理由：涉及文件高度重叠（ui/mod.rs ×7、feed_render.rs ×3），按仓库规则
 共享文件节点必须串行，拆开反而制造合并摩擦。
 
-## 完整清单（13 条）
+## 完整清单（14 条）
 
 **1. composer 右上角 features 只保留 graph engine（#39）**
 
@@ -186,6 +186,26 @@ tui-busy-snake-loader / tui-theme-interface）已并入本 change 并删除，
   /help 文案本地清单加 /new。
 - 非目标：headless/web（已有 RPC）、name 参数、确认框。
 
+**13. feed 选区改字符级文本选中（#53）**
+
+- 现状（#33/#37/#38）：`FeedSelection { anchor, end }` 只存渲染行号；
+  高亮整行压平涂背景（highlight_line）；鼠标拖拽丢弃列；无复制。
+- 选区模型 2D：`FeedSelection { anchor: (line, col), head: (line, col) }`
+  ——uncapped 行号 + 显示列号（非字节；列按行文本宽度钳制）。
+- 鼠标：按下锚定 (row,col)（col = 行内显示列，超行宽钳行尾——terminal
+  语义）；拖动更新 head；释放复制（primary selection 语义）。
+- 键盘：Ctrl+Space 选可视页（(view.top,0)→(view.bottom,末行文本宽)）；
+  Shift+Left/Right 按字符（钳行宽）、Shift+Up/Down 按行（保持列）、
+  Shift+PgUp/PgDn 按页；Esc 清除；Ctrl+Shift+C 复制。
+- 高亮只涂选中字符：render_lines_window 选区参数 2D 化，每行只涂
+  [c1,c2) 列区间 span 背景（按显示列切分 span、BAND_STYLE），整行
+  不再压平、不再涂满屏宽。
+- 复制：渲染行 span 拼纯文本提取选区（首/尾行按列截断，行间 \n）；
+  arboard（已有依赖）优先、失败回落 OSC52；成功 system line 提示。
+- 新 `ui/selection.rs`（选区模型 + 列钳制 + 文本提取 + 列区间涂色，
+  供 feed_render/ui 复用）；涉及 feed_render.rs、ui/mod.rs、
+  ui/app_input.rs、ui/tests.rs。
+
 ## Out of scope
 
 - #39-#44 为 theway-tui / theway-markdown 纯展示（除 #50/#51 的 wire
@@ -196,6 +216,6 @@ tui-busy-snake-loader / tui-theme-interface）已并入本 change 并删除，
 
 ## Acceptance
 
-- 13 条各自单测 + 编译 + 视觉断言（tmux e2e 截图）通过；
+- 14 条各自单测 + 编译 + 视觉断言（tmux e2e 截图）通过；
   make check / test / lint / fmt-check 全绿。
-- 逐条 close #39-#44、#46-#52，证据贴 #45 后 close #45。
+- 逐条 close #39-#44、#46-#53，证据贴 #45 后 close #45。
