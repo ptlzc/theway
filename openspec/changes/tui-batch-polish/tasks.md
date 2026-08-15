@@ -108,7 +108,7 @@ AGENTS.md，两者与主链文件不相交，并行跑。每节点小步 commit
     mermaid 围栏 → `┌─┐` 盒子断言。
   - 验收：`cargo check --workspace`；`cargo test -p theway-markdown -p
     theway-tui` 全绿。
-- [ ] 7-completion-scroll — `ui/mod.rs` + `ui/app_input.rs` + `ui/tests.rs`：
+- [x] 7-completion-scroll — `ui/mod.rs` + `ui/app_input.rs` + `ui/tests.rs`：
   - `App` 加 `completion_scroll: usize`；`completion_prev` / `completion_next`
     / `cycle_completion` 移动后调整窗口：idx < scroll → scroll = idx；
     idx ≥ scroll + COMPLETION_POPUP_MAX → scroll = idx - MAX + 1。
