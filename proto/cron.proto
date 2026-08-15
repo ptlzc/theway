@@ -1,0 +1,20 @@
+// Sidebar cron domain: cron job counts and per-job summary.
+
+syntax = "proto3";
+package theway.grpc.v1;
+
+message CronSnapshot {
+  uint32 total = 1;
+  uint32 enabled = 2;
+  uint32 disabled = 3;
+  repeated CronJobSnapshot jobs = 4;
+}
+
+message CronJobSnapshot {
+  string id = 1;
+  bool enabled = 2;
+  string schedule = 3;
+  string action = 4;
+  uint64 skipped_overlap_count = 5;
+  optional string last_error = 6;
+}

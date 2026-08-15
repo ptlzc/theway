@@ -1,0 +1,45 @@
+// Command domain: shared command markers, prompt submission, approval, and
+// model-switch request messages for theway.grpc.v1. The service definition
+// lives in theway_grpc.proto.
+
+syntax = "proto3";
+package theway.grpc.v1;
+
+// Command result: `accepted` carries the same semantics as the existing
+// `GET /prompt`-style endpoints (true = the command was queued into the event loop).
+message CommandResult {
+  bool accepted = 1;
+}
+
+// Empty request marker. Kept as a local message (instead of
+// google/protobuf/empty.proto) so the build has no well-known-type include
+// dependency and works with the pure-Rust proto compiler.
+message Empty {}
+
+message SendMessageRequest {
+  string text = 1;
+  repeated Image images = 2;
+  MessageMode mode = 3; // GUIDE (default): queue after the current turn; INTERRUPT: stop the current turn and run now
+  // Target session. Omitted = the process-current session. Only the current
+  // session can receive messages (single live agent loop); targeting another
+  // session fails with FAILED_PRECONDITION — SwitchSession first.
+  optional string session_id = 4;
+}
+
+enum MessageMode {
+  GUIDE = 0;
+  INTERRUPT = 1;
+}
+
+message Image {
+  string data = 1;
+  optional string name = 2;
+}
+
+message SetModelRequest {
+  string spec = 1;
+}
+
+message ApproveRequest {
+  bool approve = 1;
+}

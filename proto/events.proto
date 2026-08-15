@@ -1,0 +1,28 @@
+// Event plane: unified stream envelope. Snapshot frames carry the full state
+// plane; event frames carry high-frequency graph/subagent increments.
+
+syntax = "proto3";
+package theway.grpc.v1;
+
+import "graph_events.proto";
+import "state.proto";
+import "subagent_events.proto";
+
+// Unified envelope for StreamEvents / WebSocket frames.
+message StreamFrame {
+  oneof payload {
+    SessionState snapshot = 1; // connection start + periodic full state
+    StreamEvent event = 2; // high-frequency increment
+  }
+}
+
+message StreamEvent {
+  oneof kind {
+    SubagentStarted subagent_started = 1;
+    SubagentOutput subagent_output = 2;
+    SubagentMetrics subagent_metrics = 3;
+    SubagentCompleted subagent_completed = 4;
+    NodeStatus node_status = 5;
+    RunStatus run_status = 6;
+  }
+}

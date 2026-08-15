@@ -1,0 +1,44 @@
+// Graph state domain: DAG/goal run, node, and node-result snapshots mounted on
+// `SessionState.dags`. Subagent job snapshots live in subagent.proto.
+
+syntax = "proto3";
+package theway.grpc.v1;
+
+message DagRunSnapshot {
+  string id = 1;
+  string name = 2;
+  string status = 3; // running/completed/failed/cancelled
+  bool fail_fast = 4;
+  uint32 max_concurrency = 5;
+  string direction = 6; // TD/LR
+  int64 created_at = 7;
+  optional int64 completed_at = 8;
+  optional string error = 9;
+  repeated DagNodeSnapshot nodes = 10;
+  string kind = 11; // "dag" | "goal" — goal runs are single-node self-loops (condition-terminated)
+}
+
+message DagNodeSnapshot {
+  string id = 1;
+  string agent = 2;
+  string status = 3; // pending/ready/running/succeeded/failed/skipped/cancelled
+  repeated string depends_on = 4;
+  optional string job_id = 5; // ↔ SubagentJobSnapshot.id
+  uint32 attempt = 6;
+  optional int64 started_at = 7;
+  optional int64 completed_at = 8;
+  optional string error = 9;
+  optional uint64 input_tokens = 10;
+  optional uint64 output_tokens = 11;
+  optional NodeResultSnapshot result = 12;
+  optional string output_tail = 13; // terminal output tail; full text via events/GetNodeOutput
+  optional string live_preview = 14; // live output while running
+}
+
+message NodeResultSnapshot {
+  bool success = 1;
+  optional string error = 2;
+  optional uint64 duration_ms = 3;
+  uint32 attempt = 4;
+  uint32 total_attempts = 5;
+}
