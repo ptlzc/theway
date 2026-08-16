@@ -11,7 +11,6 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use ratatui::Terminal;
-use ratatui::backend::CrosstermBackend;
 
 use theway_transport::commands;
 use theway_transport::images;
@@ -23,9 +22,9 @@ use super::render_utils::{enter_tui, leave_tui};
 impl App {
     // ── submit / dispatch ───────────────────────────────────────────────────────────────
 
-    pub(super) async fn submit(
+    pub(super) async fn submit<B: ratatui::backend::Backend>(
         &mut self,
-        terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+        terminal: &mut Terminal<B>,
     ) -> Result<()> {
         let text = self.input_text();
         let trimmed = text.trim().to_string();
@@ -102,10 +101,10 @@ impl App {
         Ok(())
     }
 
-    pub(super) async fn dispatch_slash(
+    pub(super) async fn dispatch_slash<B: ratatui::backend::Backend>(
         &mut self,
         input: &str,
-        terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+        terminal: &mut Terminal<B>,
     ) {
         let trimmed = input.trim();
         let (command, args) = trimmed
@@ -249,10 +248,10 @@ impl App {
         }
     }
 
-    pub(super) async fn login(
+    pub(super) async fn login<B: ratatui::backend::Backend>(
         &mut self,
         provider: &str,
-        terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+        terminal: &mut Terminal<B>,
     ) {
         let provider = provider.trim().to_string();
         // rpassword needs a cooked terminal with echo control, so drop out of the full-screen

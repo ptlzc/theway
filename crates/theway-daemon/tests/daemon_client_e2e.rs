@@ -75,7 +75,9 @@ async fn wait_ready_ignores_stale_entry_from_a_dead_daemon() {
     );
     let mut client = GrpcClient::connect(&addr).await.unwrap();
     let state = client.get_state().await.unwrap();
-    assert_eq!(state.cwd, dir.path().display().to_string());
+    let expected_cwd =
+        std::fs::canonicalize(dir.path()).unwrap_or_else(|_| dir.path().to_path_buf());
+    assert_eq!(state.cwd, expected_cwd.display().to_string());
 
     unsafe { std::env::remove_var("THEWAY_DIR") };
 }
@@ -98,7 +100,9 @@ async fn spawned_daemon_serves_get_state_immediately() {
         .expect("get_state hung after readiness")
         .unwrap();
     assert!(!state.session_id.is_empty(), "daemon created a session");
-    assert_eq!(state.cwd, dir.path().display().to_string());
+    let expected_cwd =
+        std::fs::canonicalize(dir.path()).unwrap_or_else(|_| dir.path().to_path_buf());
+    assert_eq!(state.cwd, expected_cwd.display().to_string());
 
     unsafe { std::env::remove_var("THEWAY_DIR") };
 }

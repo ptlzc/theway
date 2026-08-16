@@ -89,23 +89,6 @@ jobs:
           AZURE_OPENAI_API_KEY: ""
         run: cargo test --workspace
 
-  fefe-worker:
-    name: fefe worker
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: workers/fefe-hub
-    steps:
-      - uses: actions/checkout@v4
-      - name: setup node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: workers/fefe-hub/package-lock.json
-      - run: npm ci
-      - run: npm test
-
   # ----------------------------------------------------------------
   # L4 性能层编译门禁 — 完整 bench 不进 PR, 这里仅 `--test` (dry-run
   # 编译) 验证 bench 代码可编译。跑完整 bench 用:

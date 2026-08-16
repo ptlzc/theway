@@ -5,7 +5,7 @@ use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ratatui::Terminal;
-use ratatui::backend::{CrosstermBackend, TestBackend};
+use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
@@ -2449,10 +2449,10 @@ fn feed_text(app: &App) -> String {
     .join("\n")
 }
 
-/// Tests drive `App` methods that only borrow the terminal (never draw);
-/// a stdout-backed terminal is fine without entering raw mode.
-fn terminal_placeholder() -> Terminal<CrosstermBackend<std::io::Stdout>> {
-    Terminal::new(CrosstermBackend::new(std::io::stdout())).unwrap()
+/// Tests drive `App` methods that only borrow a terminal (never draw);
+/// `TestBackend` avoids requiring a controlling TTY in CI.
+fn terminal_placeholder() -> Terminal<ratatui::backend::TestBackend> {
+    Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap()
 }
 
 fn assistant_lines(text: &str, width: usize) -> Vec<ratatui::text::Line<'static>> {

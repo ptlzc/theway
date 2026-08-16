@@ -691,10 +691,10 @@ impl App {
 
     // ── event handling ──────────────────────────────────────────────────────────────────
 
-    async fn handle_event(
+    async fn handle_event<B: ratatui::backend::Backend>(
         &mut self,
         event: Event,
-        terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+        terminal: &mut Terminal<B>,
     ) -> Result<()> {
         match event {
             Event::Key(key) if key.kind != KeyEventKind::Release => {
