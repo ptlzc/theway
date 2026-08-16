@@ -214,7 +214,11 @@ async fn main() -> Result<()> {
         Arc::new(once_cell::sync::OnceCell::new());
     let dag_engine = Arc::new(DagEngine::new());
     let subagent_registry = theway_core::multiagent::registry::AgentJobRegistry::new();
-    subagent_registry.set_messages_dir(Some(cwd.join(".pi").join("subagent-jobs")));
+    subagent_registry.set_transcript_store(Some(
+        theway_daemon::job_transcripts::DiskTranscriptStore::new(
+            cwd.join(".pi").join("subagent-jobs"),
+        ),
+    ));
     // Execution-environment seam (daemon-kernel-layers): local tool bodies
     // dispatch through a `ToolExecutor`; the composition root picks the executor
     // by feature — the local filesystem/process executor for `local` builds, the
