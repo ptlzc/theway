@@ -23,12 +23,13 @@ use theway_llm_provider::Message as PiMessage;
 mod events;
 mod metrics;
 mod persist;
+mod transcript;
 
 pub use events::{AGENT_JOB_EVENT_BROADCAST_CAPACITY, AgentJobEvent, JobStatus};
 pub use metrics::metrics_listener;
-pub use persist::{
-    agent_message_to_json, append_message, append_output, load_messages, messages_path_for_node,
-    messages_path_for_task,
+pub use persist::{load_messages, messages_path_for_node, messages_path_for_task};
+pub use transcript::{
+    JobTranscript, JobTranscriptStore, agent_message_to_json, append_message, append_output,
 };
 
 /// Jobs beyond this are evicted oldest-first (terminal states only).
@@ -163,8 +164,10 @@ impl AgentJob {
 #[derive(Default)]
 struct Inner {
     jobs: Vec<AgentJob>,
-    /// Where finished jobs' full transcripts are written (set by the host,
-    /// e.g. `<cwd>/.pi/subagent-jobs`). `None` = no disk persistence.
+    /// Host-provided transcript persistence. `None` = transcripts stay in
+    /// memory only (the default).
+    transcript_store: Option<Arc<dyn JobTranscriptStore>>,
+    /// Legacy disk directory used when no host store is installed.
     messages_dir: Option<PathBuf>,
 }
 
@@ -202,9 +205,13 @@ impl AgentJobRegistry {
         self.events.subscribe()
     }
 
-    /// Set the directory where finished jobs' full transcripts are persisted
-    /// (`<dir>/<run_id>/<node_id>.json` for DAG nodes, `<dir>/task/<job_id>.json`
-    /// for task-tool jobs). `None` disables disk persistence (default).
+    /// Install the host-provided transcript store. `None` removes the store
+    /// (transcripts stay in memory only, the default).
+    pub fn set_transcript_store(&self, store: Option<Arc<dyn JobTranscriptStore>>) {
+        self.inner.lock().transcript_store = store;
+    }
+
+    /// Set the legacy disk directory used when no host store is installed.
     pub fn set_messages_dir(&self, dir: Option<PathBuf>) {
         self.inner.lock().messages_dir = dir;
     }
@@ -330,8 +337,9 @@ impl AgentJobRegistry {
         });
         if let Some(job) = self.job(id) {
             // Persist the transcript for terminal jobs (crash-safe recovery:
-            // the in-memory registry dies with the process, the disk copy
-            // survives a restart and is served by `node_messages` / `job_messages`).
+            // the in-memory registry dies with the process, a durable host
+            // store survives a restart and is served by `node_messages` /
+            // `job_messages`).
             self.persist_messages(&job);
             self.emit(AgentJobEvent::Completed {
                 id: job.id.clone(),
@@ -345,45 +353,71 @@ impl AgentJobRegistry {
         }
     }
 
-    /// Look up a DAG node's transcript: in-memory job first, then the disk copy
-    /// (a finished node's messages survive a process restart via the per-node
-    /// file written by [`Self::finish`]). Returns `None` when neither exists.
+    /// Look up a DAG node's transcript: in-memory job first, then the host
+    /// store, then the legacy disk directory. Returns `None` when none exist.
     pub fn node_messages(&self, run_id: &str, node_id: &str) -> Option<Vec<serde_json::Value>> {
         if let Some(job) = self.find_node(run_id, node_id) {
             if !job.messages.is_empty() {
                 return Some(job.messages);
             }
         }
-        let dir = self.inner.lock().messages_dir.clone()?;
+        let (store, dir) = {
+            let inner = self.inner.lock();
+            (inner.transcript_store.clone(), inner.messages_dir.clone())
+        };
+        if let Some(store) = store {
+            return store.load_node(run_id, node_id);
+        }
+        let dir = dir?;
         load_messages(&messages_path_for_node(&dir, run_id, node_id))
     }
 
-    /// Look up a task-tool job's transcript (in-memory, then disk).
+    /// Look up a task-tool job's transcript (in-memory, host store, legacy disk).
     pub fn job_messages(&self, job_id: &str) -> Option<Vec<serde_json::Value>> {
         if let Some(job) = self.job(job_id) {
             if !job.messages.is_empty() {
                 return Some(job.messages);
             }
         }
-        let dir = self.inner.lock().messages_dir.clone()?;
+        let (store, dir) = {
+            let inner = self.inner.lock();
+            (inner.transcript_store.clone(), inner.messages_dir.clone())
+        };
+        if let Some(store) = store {
+            return store.load_job(job_id);
+        }
+        let dir = dir?;
         load_messages(&messages_path_for_task(&dir, job_id))
     }
 
-    /// Write the job's transcript to disk (best-effort, failures are silent).
+    /// Hand the finished job's transcript to the host store, falling back to
+    /// the legacy disk directory when no store is installed (best-effort).
     fn persist_messages(&self, job: &AgentJob) {
         if job.messages.is_empty() {
             return;
         }
-        let Some(dir) = self.inner.lock().messages_dir.clone() else {
+        let (store, dir) = {
+            let inner = self.inner.lock();
+            (inner.transcript_store.clone(), inner.messages_dir.clone())
+        };
+        if let Some(store) = store {
+            store.save(&JobTranscript {
+                job_id: &job.id,
+                run_id: job.run_id.as_deref(),
+                node_id: job.node_id.as_deref(),
+                messages: &job.messages,
+            });
+            return;
+        }
+        let Some(dir) = dir else {
             return;
         };
         let path = match (&job.run_id, &job.node_id) {
             (Some(run), Some(node)) => messages_path_for_node(&dir, run, node),
             _ => messages_path_for_task(&dir, &job.id),
         };
-        let json = match serde_json::to_string_pretty(&job.messages) {
-            Ok(j) => j,
-            Err(_) => return,
+        let Ok(json) = serde_json::to_string_pretty(&job.messages) else {
+            return;
         };
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -442,6 +476,44 @@ fn now_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Shared in-memory `JobTranscriptStore` test double (stands in for the
+    /// daemon's disk-backed store without touching the filesystem).
+    #[derive(Default)]
+    struct MemoryTranscriptStore {
+        nodes:
+            parking_lot::Mutex<std::collections::HashMap<(String, String), Vec<serde_json::Value>>>,
+        jobs: parking_lot::Mutex<std::collections::HashMap<String, Vec<serde_json::Value>>>,
+    }
+
+    impl JobTranscriptStore for MemoryTranscriptStore {
+        fn save(&self, transcript: &JobTranscript) {
+            let messages = transcript.messages.to_vec();
+            match (transcript.run_id, transcript.node_id) {
+                (Some(run), Some(node)) => {
+                    self.nodes
+                        .lock()
+                        .insert((run.to_string(), node.to_string()), messages);
+                }
+                _ => {
+                    self.jobs
+                        .lock()
+                        .insert(transcript.job_id.to_string(), messages);
+                }
+            }
+        }
+
+        fn load_node(&self, run_id: &str, node_id: &str) -> Option<Vec<serde_json::Value>> {
+            self.nodes
+                .lock()
+                .get(&(run_id.to_string(), node_id.to_string()))
+                .cloned()
+        }
+
+        fn load_job(&self, job_id: &str) -> Option<Vec<serde_json::Value>> {
+            self.jobs.lock().get(job_id).cloned()
+        }
+    }
 
     #[test]
     fn control_handle_routes_interrupt_and_steer_by_job_id() {
@@ -735,10 +807,10 @@ mod tests {
     }
 
     #[test]
-    fn finish_persists_messages_recoverable_after_restart() {
-        let dir = tempfile::tempdir().unwrap();
+    fn finish_saves_transcript_to_host_store() {
+        let store = Arc::new(MemoryTranscriptStore::default());
         let registry = AgentJobRegistry::new();
-        registry.set_messages_dir(Some(dir.path().join("subagent-jobs")));
+        registry.set_transcript_store(Some(store.clone()));
         let id = registry.register(JobInit {
             agent: "explorer".into(),
             source: "dag".into(),
@@ -752,17 +824,16 @@ mod tests {
                 &serde_json::json!({"role": "note", "text": "recover me"}),
             );
         });
-        registry.finish(&id, JobStatus::Succeeded, None);
-        // Disk copy exists.
-        let path = messages_path_for_node(&dir.path().join("subagent-jobs"), "run-1", "node-1");
-        assert!(path.exists());
 
-        // Simulated restart: a fresh registry (same messages dir, empty memory).
+        registry.finish(&id, JobStatus::Succeeded, None);
+
+        // Simulated restart: a fresh registry (empty memory) with the same
+        // host store resolves the finished transcript through the seam.
         let restarted = AgentJobRegistry::new();
-        restarted.set_messages_dir(Some(dir.path().join("subagent-jobs")));
+        restarted.set_transcript_store(Some(store.clone()));
         let messages = restarted
             .node_messages("run-1", "node-1")
-            .expect("transcript recovered from disk after restart");
+            .expect("transcript recovered from host store after restart");
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0]["text"], serde_json::json!("recover me"));
         // In-memory lookup still serves the live job first.
@@ -773,10 +844,10 @@ mod tests {
     }
 
     #[test]
-    fn task_job_messages_persist_under_task_dir() {
-        let dir = tempfile::tempdir().unwrap();
+    fn job_messages_fall_back_to_host_store_after_restart() {
+        let store = Arc::new(MemoryTranscriptStore::default());
         let registry = AgentJobRegistry::new();
-        registry.set_messages_dir(Some(dir.path().join("subagent-jobs")));
+        registry.set_transcript_store(Some(store.clone()));
         let id = registry.register(JobInit {
             agent: "general".into(),
             source: "subagent".into(),
@@ -791,11 +862,11 @@ mod tests {
             );
         });
         registry.finish(&id, JobStatus::Succeeded, None);
-        assert!(messages_path_for_task(&dir.path().join("subagent-jobs"), &id).exists());
 
         let restarted = AgentJobRegistry::new();
-        restarted.set_messages_dir(Some(dir.path().join("subagent-jobs")));
+        restarted.set_transcript_store(Some(store.clone()));
         let messages = restarted.job_messages(&id).unwrap();
         assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["text"], serde_json::json!("task transcript"));
     }
 }
