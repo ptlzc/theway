@@ -20,7 +20,7 @@ message Empty {}
 message SendMessageRequest {
   string text = 1;
   repeated Image images = 2;
-  MessageMode mode = 3; // GUIDE (default): queue after the current turn; INTERRUPT: stop the current turn and run now
+  MessageMode mode = 3; // QUEUE (default): queue after the current turn; INTERRUPT: stop the current turn and run now
   // Target session. Omitted = the process-current session. Only the current
   // session can receive messages (single live agent loop); targeting another
   // session fails with FAILED_PRECONDITION — SwitchSession first.
@@ -28,7 +28,7 @@ message SendMessageRequest {
 }
 
 enum MessageMode {
-  GUIDE = 0;
+  QUEUE = 0;
   INTERRUPT = 1;
 }
 
@@ -46,7 +46,7 @@ message ApproveRequest {
 }
 
 service CommandService {
-  // Submit a message. mode=GUIDE queues after the current turn (default);
+  // Submit a message. mode=QUEUE queues after the current turn (default);
   // mode=INTERRUPT stops the current turn and runs the message immediately.
   rpc SendMessage(SendMessageRequest) returns (CommandResult);
   rpc SetModel(SetModelRequest) returns (CommandResult);

@@ -93,9 +93,9 @@ export class ThewayGrpcClient {
 
   // ── commands ──
 
-  /** `SendMessage` — submit a user prompt (mode=GUIDE). */
+  /** `SendMessage` — submit a user prompt (mode=QUEUE). */
   async prompt(text: string, images: SendMessageRequest['images'] = []): Promise<void> {
-    const request: SendMessageRequest = { text, images, mode: MessageMode.GUIDE };
+    const request: SendMessageRequest = { text, images, mode: MessageMode.QUEUE };
     const result = await this.sendMessage(request);
     if (!result.accepted) {
       throw new Error('theway grpc: SendMessage was not accepted by the server');

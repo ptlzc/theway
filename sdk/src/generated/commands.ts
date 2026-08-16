@@ -22,7 +22,7 @@ import {
 export const protobufPackage = "theway.grpc.v1";
 
 export enum MessageMode {
-  GUIDE = 0,
+  QUEUE = 0,
   INTERRUPT = 1,
   UNRECOGNIZED = -1,
 }
@@ -30,8 +30,8 @@ export enum MessageMode {
 export function messageModeFromJSON(object: any): MessageMode {
   switch (object) {
     case 0:
-    case "GUIDE":
-      return MessageMode.GUIDE;
+    case "QUEUE":
+      return MessageMode.QUEUE;
     case 1:
     case "INTERRUPT":
       return MessageMode.INTERRUPT;
@@ -44,8 +44,8 @@ export function messageModeFromJSON(object: any): MessageMode {
 
 export function messageModeToJSON(object: MessageMode): string {
   switch (object) {
-    case MessageMode.GUIDE:
-      return "GUIDE";
+    case MessageMode.QUEUE:
+      return "QUEUE";
     case MessageMode.INTERRUPT:
       return "INTERRUPT";
     case MessageMode.UNRECOGNIZED:
@@ -73,7 +73,7 @@ export interface Empty {
 export interface SendMessageRequest {
   text: string;
   images: Image[];
-  /** GUIDE (default): queue after the current turn; INTERRUPT: stop the current turn and run now */
+  /** QUEUE (default): queue after the current turn; INTERRUPT: stop the current turn and run now */
   mode: MessageMode;
   /**
    * Target session. Omitted = the process-current session. Only the current
@@ -504,7 +504,7 @@ export const ApproveRequest: MessageFns<ApproveRequest> = {
 export type CommandServiceService = typeof CommandServiceService;
 export const CommandServiceService = {
   /**
-   * Submit a message. mode=GUIDE queues after the current turn (default);
+   * Submit a message. mode=QUEUE queues after the current turn (default);
    * mode=INTERRUPT stops the current turn and runs the message immediately.
    */
   sendMessage: {
@@ -549,7 +549,7 @@ export const CommandServiceService = {
 
 export interface CommandServiceServer extends UntypedServiceImplementation {
   /**
-   * Submit a message. mode=GUIDE queues after the current turn (default);
+   * Submit a message. mode=QUEUE queues after the current turn (default);
    * mode=INTERRUPT stops the current turn and runs the message immediately.
    */
   sendMessage: handleUnaryCall<SendMessageRequest, CommandResult>;
@@ -562,7 +562,7 @@ export interface CommandServiceServer extends UntypedServiceImplementation {
 
 export interface CommandServiceClient extends Client {
   /**
-   * Submit a message. mode=GUIDE queues after the current turn (default);
+   * Submit a message. mode=QUEUE queues after the current turn (default);
    * mode=INTERRUPT stops the current turn and runs the message immediately.
    */
   sendMessage(
