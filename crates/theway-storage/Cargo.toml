@@ -20,9 +20,10 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 parking_lot = "0.12"
 tracing = "0.1"
 # Session helpers + archive (daemon-kernel-layers: moved from the SDK): tar/toml/sha2
-# for `.theway-session` archives, serde for sidecar models, transport for the shared
-# trigger/config models.
-theway-transport = { path = "../theway-transport" }
+# for `.theway-session` archives, serde for sidecar models, theway-contract for the
+# shared trigger models + base-dir/path contract (issue #64: storage depends on the
+# pure leaf contract crate, never on the transport stack).
+theway-contract = { path = "../theway-contract" }
 theway-llm-provider = { path = "../theway-llm-provider" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

@@ -25,6 +25,7 @@ sandbox = []
 # flags. The cost is compile time, not runtime — only the registered provider for the chosen
 # model's `api` actually gets exercised.
 theway-llm-provider = { path = "../theway-llm-provider", default-features = false, features = ["all-providers"] }
+theway-contract = { path = "../theway-contract" }
 theway-core = { path = "../theway-core" }
 theway-storage = { path = "../theway-storage" }
 theway-mcp = { path = "../theway-mcp" }

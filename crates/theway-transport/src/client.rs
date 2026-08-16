@@ -36,17 +36,10 @@ use crate::wire::{SessionSummary, WirePromptImage};
 /// started without `--port`).
 pub const DEFAULT_PORT: u16 = 44777;
 
-/// Base directory: `${THEWAY_DIR:-$HOME/.theway}`. Mirror of the server's
-/// `config::base_dir()` — kept local so the client half has no server
-/// dependency (they must agree on the same file, which they do by contract).
-pub fn base_dir() -> PathBuf {
-    if let Ok(p) = std::env::var("THEWAY_DIR") {
-        return PathBuf::from(p);
-    }
-    std::env::var("HOME")
-        .map(|home| PathBuf::from(home).join(".theway"))
-        .unwrap_or_else(|_| PathBuf::from(".theway"))
-}
+/// Base directory: `${THEWAY_DIR:-$HOME/.theway}` — re-export of the single
+/// implementation in `theway_contract::config` (issue #64), kept here so the
+/// `client::base_dir` path stays stable for daemon/client discovery.
+pub use theway_contract::config::base_dir;
 
 /// Published daemon endpoint read from the discovery file: `<port> <pid>`.
 ///

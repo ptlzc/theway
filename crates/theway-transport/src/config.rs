@@ -1,41 +1,16 @@
 //! shared client contract (not protocol) — zone per the crate-level "Module zones" doc.
 //! Paths and identity (daemon-kernel-layers: moved from the SDK into transport —
-//! the config surface is shared client contract). One source of truth for
-//! `~/.theway/...` and the cwd-hash directory layout.
+//! the config surface is shared client contract).
 //!
-//! `base_dir` is the transport client's single implementation (design decision 6:
-//! `client::base_dir` and the SDK's `config::base_dir` are merged — both the
-//! daemon and the TUI reference this one).
-
-use std::path::PathBuf;
+//! Issue #64: the base-dir / cwd-hash path contract itself lives in the pure
+//! leaf crate `theway-contract` (`theway_contract::config`); the re-exports
+//! below keep the `config::{base_dir, sessions_dir_for_cwd, memory_dir,
+//! cwd_hash}` public paths unchanged. This module retains the `config.toml`
+//! parsing helpers, which are transport-client surface.
 
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 
-/// Base directory: `${THEWAY_DIR:-$HOME/.theway}` — the single implementation is
-/// [`crate::client::base_dir`]; this re-export keeps the `config::base_dir` path.
-pub use crate::client::base_dir;
-
-/// Sessions live under `<base>/sessions/<cwd-hash>/<uuidv7>.jsonl`. Hashing the cwd lets us
-/// scope `--resume` to "last session opened from this directory".
-pub fn sessions_dir_for_cwd(cwd: &std::path::Path) -> PathBuf {
-    let hash = cwd_hash(cwd);
-    base_dir().join("sessions").join(hash)
-}
-
-/// Memory dir is global (not per-cwd) — that's the whole point of cross-session memory.
-pub fn memory_dir() -> PathBuf {
-    base_dir().join("memory")
-}
-
-/// Deterministic short hash of an absolute cwd path. Same input → same dir, so reopening from
-/// the same project always finds prior sessions.
-pub fn cwd_hash(cwd: &std::path::Path) -> String {
-    let mut h = Sha256::new();
-    h.update(cwd.to_string_lossy().as_bytes());
-    let digest = h.finalize();
-    hex::encode(&digest[..6]) // 12 chars; plenty for low-collision per-cwd buckets
-}
+pub use theway_contract::config::{base_dir, cwd_hash, memory_dir, sessions_dir_for_cwd};
 
 /// Parse the `[triggers] poll_interval_secs = N` setting from `config.toml`.
 ///

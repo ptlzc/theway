@@ -35,10 +35,12 @@ use uuid::Uuid;
 
 use errors::CronExpression;
 
-// The `CronJob` data model lives in transport (`theway_transport::triggers`) so
-// the session-archive surface shares one type identity; this module re-exports it
-// for `crate::triggers::cron::CronJob` paths and adds the daemon-side schedule helpers.
-pub use theway_transport::triggers::CronJob;
+// The `CronJob` data model lives in the pure leaf contract crate
+// (`theway_contract::triggers`, re-exported by `theway_transport::triggers`)
+// so the session-archive surface shares one type identity; this module
+// re-exports it for `crate::triggers::cron::CronJob` paths and adds the
+// daemon-side schedule helpers.
+pub use theway_contract::triggers::CronJob;
 
 /// Daemon-side schedule helpers on the SDK `CronJob` data model.
 pub trait CronJobExt {

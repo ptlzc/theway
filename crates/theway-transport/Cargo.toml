@@ -9,6 +9,7 @@ repository = "https://github.com/ptlzc/theway"
 authors = ["theway contributors"]
 
 [dependencies]
+theway-contract = { path = "../theway-contract" }
 theway-core = { path = "../theway-core" }
 theway-llm-provider = { path = "../theway-llm-provider" }
 rmcp = { version = "3", features = ["server", "transport-io"] }
@@ -29,8 +30,6 @@ thiserror = "2"
 tracing = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 toml = "0.8"
-sha2 = "0.10"
-hex = "0.4"
 regex = "1"
 unicode-width = "0.2"
 uuid = { version = "1", features = ["v7", "serde"] }

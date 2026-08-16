@@ -37,20 +37,10 @@ use theway_core::{LoopEvent, LoopListener, SessionEvent, SessionListener, Thinki
 use tokio_util::sync::CancellationToken;
 
 use event::{EventData, HookEvent};
+use theway_contract::config::base_dir;
 use utils::{env_for, write_payload_file};
 
 const DEFAULT_TIMEOUT_MS: u64 = 5_000;
-
-/// The theway base dir: `${THEWAY_DIR}` or `~/.theway`. Inlined (not via the server's
-/// `config` module, which lives one layer up) so hooks stay engine-self-contained.
-fn base_dir() -> std::path::PathBuf {
-    if let Ok(p) = std::env::var("THEWAY_DIR") {
-        return std::path::PathBuf::from(p);
-    }
-    directories::BaseDirs::new()
-        .map(|d| d.home_dir().join(".theway"))
-        .unwrap_or_else(|| std::path::PathBuf::from(".theway"))
-}
 
 #[derive(Debug)]
 pub struct LoadedHooks {

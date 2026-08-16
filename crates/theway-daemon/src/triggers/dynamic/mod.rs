@@ -49,7 +49,9 @@ use hooks::extract_dynamic_rule_ids;
 use parse::ZH_WHEN_PREFIX;
 #[cfg(test)]
 use theway_core::{AgentTool, PermissionClassification};
-pub use theway_transport::triggers::{
+// Data model + poll-interval default live in the pure leaf contract crate
+// (issue #64); `theway_transport::triggers` re-exports the same items.
+pub use theway_contract::triggers::{
     DEFAULT_DYNAMIC_TRIGGER_POLL_INTERVAL_SECS, DynamicTriggerRule,
 };
 #[cfg(test)]

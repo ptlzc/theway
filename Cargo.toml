@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/theway-llm-provider",
     "crates/mermaid-parser",
+    "crates/theway-contract",
     "crates/theway-core",
     "crates/theway-storage",
     "crates/theway-daemon",

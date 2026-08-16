@@ -20,8 +20,8 @@ use theway_core::{
     JsonlSessionMetadata, Session, SessionImportOrigin, SessionStorage, SessionTreeEntry, uuidv7,
 };
 
-use theway_transport::triggers::CronJob;
-use theway_transport::triggers::DynamicTriggerRule;
+use theway_contract::triggers::CronJob;
+use theway_contract::triggers::DynamicTriggerRule;
 
 const SCHEMA: &str = "theway.session_export.v1";
 const MANIFEST_PATH: &str = "manifest.json";

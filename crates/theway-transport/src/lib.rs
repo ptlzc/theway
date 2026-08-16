@@ -18,7 +18,10 @@
 //!   (not protocol): `auth`, `bug_report`, `commands`, `config`, `feed`,
 //!   `history`, `images`, `mentions`, `triggers`. Both zones' modules are
 //!   marked `shared client contract` in their headers; the public paths never
-//!   change.
+//!   change. Issue #64: the purest pieces — the trigger sidecar data models
+//!   and the base-dir/path contract — live in the leaf crate `theway-contract`
+//!   (`triggers`/`config` here re-export them) so storage and daemon can share
+//!   them without depending on the transport stack.
 
 // ── protocol zone: wire model + transport implementations ──
 pub mod client;
