@@ -99,6 +99,20 @@ clean: ## cargo clean
 outdated: ## list outdated workspace deps (requires `cargo-outdated`)
 	$(CARGO) outdated --workspace --root-deps-only
 
+# --- sdk --------------------------------------------------------------------
+
+.PHONY: hooks
+hooks: ## enable the repo git hooks (proto change -> auto sdk regen)
+	git config core.hooksPath .githooks
+
+.PHONY: sdk-sync
+sdk-sync: ## sync proto/ -> sdk/proto + regenerate the TS client (scripts/sdk-sync.sh)
+	bash scripts/sdk-sync.sh
+
+.PHONY: sdk-publish
+sdk-publish: ## publish the TS SDK to the Nexus registry (BUMP=patch|minor|major, ISSUE="#n")
+	bash scripts/sdk-publish.sh $(BUMP) $(ISSUE)
+
 # --- release helpers --------------------------------------------------------
 
 .PHONY: changelog

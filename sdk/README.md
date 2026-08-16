@@ -56,10 +56,39 @@ client.close();
 
 ## Regenerating
 
+`proto/` at the repo root is the single source of truth; `proto/*.proto` in this package is a mirror and
+`src/generated/` is regenerated from it. Sync and regenerate with:
+
+```sh
+cd ..                      # repo root
+make hooks                 # once per clone: enable the pre-commit hook
+make sdk-sync              # or: bash scripts/sdk-sync.sh
+```
+
+The enabled pre-commit hook ([`.githooks/pre-commit`](../.githooks/pre-commit)) runs the sync automatically
+whenever `proto/` changes and stages the regenerated files into the same commit, so the checked-in proto and
+generated client never drift.
+
+Manual generation without the Makefile:
+
 ```sh
 npm install
 npm run gen      # protoc (grpc-tools) + ts-proto → src/generated/
 ```
+
+## Publishing
+
+Publishing to the Nexus registry is manual ([`scripts/sdk-publish.sh`](../scripts/sdk-publish.sh)):
+
+```sh
+cd ..
+make sdk-publish BUMP=minor ISSUE="#62"
+# 或: bash scripts/sdk-publish.sh minor "#62"
+```
+
+The script verifies the tree is clean and in sync, bumps the version, runs `npm publish` against the
+registry in `publishConfig`, and commits the version bump. The publishing machine's `~/.npmrc` must hold a
+`_authToken` for `//registry.npmjs.org/repository/npm-private/`.
 
 ## Versioning
 

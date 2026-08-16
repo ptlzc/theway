@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# =============================================================================
+# pre-commit — proto/ 变更时自动同步 SDK (镜像拷贝 + 重新生成), 并一起 stage。
+#
+# 保证 proto 与 sdk/src/generated 永不漂移: 任何 proto 修改都会让生成产物
+# 随同一个 commit 落库。发布仍由 scripts/sdk-publish.sh 手动执行。
+#
+# 启用 (每个 clone 一次): make hooks   (等价 git config core.hooksPath .githooks)
+# =============================================================================
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+# proto/ 与 sdk/proto 均无变更 (staged/unstaged/untracked) 则直接放行
+if [ -z "$(git status --porcelain -- proto/ sdk/proto)" ]; then
+  exit 0
+fi
+
+echo "[pre-commit] proto/ changed — syncing sdk (mirror + regenerate)"
+bash scripts/sdk-sync.sh
+
+# 生成产物随本次 commit 一起落库 (含新增的未跟踪文件)
+git add sdk/proto sdk/src/generated
+echo "[pre-commit] staged sdk/proto + sdk/src/generated"
