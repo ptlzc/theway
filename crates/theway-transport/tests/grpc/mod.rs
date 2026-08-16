@@ -109,7 +109,7 @@ async fn commands_queue_with_accepted_semantics() {
                 data: "data".into(),
                 name: Some("clip.png".into()),
             }],
-            mode: MessageMode::Guide.into(),
+            mode: MessageMode::Queue.into(),
             session_id: None,
         }))
         .await
@@ -175,7 +175,7 @@ async fn send_message_rejects_non_current_session() {
         .send_message(Request::new(SendMessageRequest {
             text: "hi".into(),
             images: vec![],
-            mode: MessageMode::Guide.into(),
+            mode: MessageMode::Queue.into(),
             session_id: Some("test-session".into()),
         }))
         .await
@@ -188,7 +188,7 @@ async fn send_message_rejects_non_current_session() {
         .send_message(Request::new(SendMessageRequest {
             text: "hi".into(),
             images: vec![],
-            mode: MessageMode::Guide.into(),
+            mode: MessageMode::Queue.into(),
             session_id: Some("other-session".into()),
         }))
         .await
@@ -566,7 +566,7 @@ async fn grpc_server_over_transport_serves_client() {
         .send_message(SendMessageRequest {
             text: "via transport".into(),
             images: Vec::new(),
-            mode: MessageMode::Guide.into(),
+            mode: MessageMode::Queue.into(),
             session_id: None,
         })
         .await

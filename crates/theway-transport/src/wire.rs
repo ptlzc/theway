@@ -39,7 +39,7 @@ pub enum WireCommand {
         text: String,
         images: Vec<WirePromptImage>,
         /// true = stop the current turn and run this message now (INTERRUPT);
-        /// false = queue after the current turn (GUIDE, default).
+        /// false = queue after the current turn (QUEUE, default).
         interrupt: bool,
     },
     TriggerRuleNow {

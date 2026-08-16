@@ -201,7 +201,7 @@ impl GrpcClient {
     }
 
     /// Submit a message. `interrupt` = stop the current turn and run now
-    /// (INTERRUPT), otherwise queue after the current turn (GUIDE).
+    /// (INTERRUPT), otherwise queue after the current turn (QUEUE).
     pub async fn send_message(
         &mut self,
         text: String,
@@ -222,7 +222,7 @@ impl GrpcClient {
                 mode: if interrupt {
                     theway_grpc::MessageMode::Interrupt
                 } else {
-                    theway_grpc::MessageMode::Guide
+                    theway_grpc::MessageMode::Queue
                 }
                 .into(),
                 session_id: None,
