@@ -48,22 +48,31 @@ async fn main() -> Result<()> {
     print_dynamic_help_and_exit_if_requested()?;
     let cli = Cli::parse();
     let cwd = std::env::current_dir().context("getting cwd")?;
-    let repo = session::open_repo(&cwd).await;
 
+    // Session export/import keep their existing offline, repo-direct path.
     if let Some(command) = &cli.command {
+        let repo = session::open_repo(&cwd).await;
         return run_cli_command(command, &repo, &cwd).await;
     }
 
+    // Standalone session queries (issue #64): try the running daemon's RPC
+    // first and only open the local repo as an offline fallback inside the
+    // command — opening the repo here would race the daemon's libsql lock
+    // before we even know whether a daemon is up.
     if cli.list_sessions {
-        return list_sessions_cmd(&repo).await;
+        return list_sessions_cmd(&cwd).await;
     }
     if cli.list_all_sessions {
         return list_all_sessions_cmd().await;
     }
     if let Some(id) = &cli.delete_session {
-        return delete_session_cmd(&repo, id).await;
+        return delete_session_cmd(&cwd, id).await;
     }
 
+    // Interactive REPL + resume picker: the local repo is still needed (the
+    // daemon resolves its own session from the launch args; the TUI needs the
+    // repo for the picker and its local surfaces).
+    let repo = session::open_repo(&cwd).await;
     run_repl(cli, cwd, repo).await
 }
 
