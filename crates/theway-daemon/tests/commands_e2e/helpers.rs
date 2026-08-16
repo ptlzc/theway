@@ -147,6 +147,8 @@ pub fn skill(name: &str, content: &str, disabled: bool) -> Skill {
     }
 }
 
+/// Local-only: only the disk-backed `/skills` command tests use it (issue #64).
+#[cfg(feature = "local")]
 pub fn user_skill_at(base_dir: &Path, name: &str, disabled: bool) -> Skill {
     Skill {
         name: name.into(),
@@ -188,6 +190,9 @@ pub fn harness_with_reloadable_skills(base_dir: &Path, seed: Vec<Skill>) -> Arc<
     Arc::new(AgentHarness::new(opts))
 }
 
+/// Local-only: loads skills from disk through `NativeEnv`, which is compiled out of
+/// sandbox-only builds (issue #64).
+#[cfg(feature = "local")]
 pub fn harness_with_disk_skill_reload(base_dir: &Path, seed: Vec<Skill>) -> Arc<AgentHarness> {
     let storage = Arc::new(MemorySessionStorage::new());
     let session = Session::new(storage as Arc<dyn SessionStorage>);

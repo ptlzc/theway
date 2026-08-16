@@ -517,6 +517,8 @@ async fn dispatch_skills_reload_uses_harness_reload_and_prints_summary() {
     );
 }
 
+// `/skills install` writes through the local FS (NativeEnv-backed loader mirror); local-only (issue #64).
+#[cfg(feature = "local")]
 #[tokio::test]
 async fn dispatch_skills_install_previews_then_confirms_without_body_echo() {
     let _auth_guard = auth::ENV_LOCK.lock().unwrap();
@@ -589,6 +591,8 @@ async fn dispatch_skills_install_previews_then_confirms_without_body_echo() {
     assert!(!text.contains("SECRET SKILL BODY"), "{text}");
 }
 
+// `/skills remove` deletes through the local FS; local-only (issue #64).
+#[cfg(feature = "local")]
 #[tokio::test]
 async fn dispatch_skills_remove_previews_then_confirms_user_skill() {
     let _auth_guard = auth::ENV_LOCK.lock().unwrap();

@@ -9,6 +9,10 @@
 //!
 //! This exercises the public surface only — no direct calls into the harness-internal walker.
 //! If the CLI ever changes how it picks the roots, this test catches it.
+//!
+//! Local-only suite: the loader mirror walks the FS through `NativeEnv`, which is
+//! compiled out of sandbox-only builds (issue #64).
+#![cfg(feature = "local")]
 
 use std::path::Path;
 

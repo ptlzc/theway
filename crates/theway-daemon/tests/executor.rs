@@ -3,8 +3,11 @@
 //! (`sandbox` feature) — against the `theway_core::executor::ToolExecutor` trait
 //! (daemon-kernel-layers, executor impls moved sdk → daemon).
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(feature = "local")]
+use std::time::Instant;
 
+#[cfg(feature = "local")]
 use tempfile::tempdir;
 #[cfg(feature = "sandbox")]
 use theway_core::executor::ExecutorKind;
@@ -19,6 +22,7 @@ fn argv(parts: &[&str]) -> Vec<String> {
 }
 
 /// Write → read → list round-trip against a temp dir.
+#[cfg(feature = "local")]
 #[tokio::test]
 async fn write_read_list_round_trip() {
     let dir = tempdir().unwrap();
@@ -65,6 +69,7 @@ async fn write_read_list_round_trip() {
 }
 
 /// run_command captures stdout/stderr and the real exit code.
+#[cfg(feature = "local")]
 #[tokio::test]
 async fn run_command_captures_output_and_exit_code() {
     let dir = tempdir().unwrap();
@@ -95,6 +100,7 @@ async fn run_command_captures_output_and_exit_code() {
 }
 
 /// run_command honors the `cwd` argument regardless of the executor's root.
+#[cfg(feature = "local")]
 #[tokio::test]
 async fn run_command_respects_cwd() {
     let dir = tempdir().unwrap();
@@ -114,6 +120,7 @@ async fn run_command_respects_cwd() {
 }
 
 /// Timeout kills the child and reports `exit_code == -1` without hanging.
+#[cfg(feature = "local")]
 #[tokio::test]
 async fn run_command_timeout_kills_and_reports_minus_one() {
     let dir = tempdir().unwrap();
@@ -138,6 +145,7 @@ async fn run_command_timeout_kills_and_reports_minus_one() {
 }
 
 /// Empty argv is rejected cleanly.
+#[cfg(feature = "local")]
 #[tokio::test]
 async fn run_command_empty_argv_is_an_error() {
     let dir = tempdir().unwrap();
@@ -150,6 +158,7 @@ async fn run_command_empty_argv_is_an_error() {
 }
 
 /// grep walks the tree honoring filters and returns `path:line:text` matches.
+#[cfg(feature = "local")]
 #[tokio::test]
 async fn grep_returns_matching_lines() {
     let dir = tempdir().unwrap();
@@ -172,6 +181,7 @@ async fn grep_returns_matching_lines() {
 }
 
 /// find matches by filename glob across the tree.
+#[cfg(feature = "local")]
 #[tokio::test]
 async fn find_matches_glob_files() {
     let dir = tempdir().unwrap();
@@ -192,6 +202,7 @@ async fn find_matches_glob_files() {
 }
 
 /// git runs the system git binary in the executor's repository context.
+#[cfg(feature = "local")]
 #[tokio::test]
 async fn git_runs_in_repo_context() {
     let dir = tempdir().unwrap();
@@ -277,6 +288,7 @@ async fn sandbox_all_operations_fail_fast_with_unsupported() {
 /// "file missing" or exactly one writer's full output. The direct
 /// truncate+write of the old implementation had a window (truncate → write)
 /// where readers saw empty/partial files; unique temp name + rename closes it.
+#[cfg(feature = "local")]
 #[tokio::test]
 async fn write_file_is_atomic_under_concurrency() {
     let dir = tempdir().unwrap();
@@ -339,7 +351,7 @@ async fn write_file_is_atomic_under_concurrency() {
 
 /// Write-through-symlink semantics are preserved by the atomic writer: the
 /// rename must not replace the link itself.
-#[cfg(unix)]
+#[cfg(all(unix, feature = "local"))]
 #[tokio::test]
 async fn write_file_through_symlink_updates_target() {
     use std::os::unix::fs::symlink;

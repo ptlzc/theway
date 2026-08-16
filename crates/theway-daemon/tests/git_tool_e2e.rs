@@ -1,6 +1,10 @@
 //! End-to-end test for the structured git tool. Init a tempdir repo, make changes, then run
 //! the tool against it. We rely on the system `git` binary being available; this is a
 //! reasonable test-time dependency for a coding agent.
+//!
+//! Local-only suite: the tool under test dispatches through `LocalExecutor`, which is
+//! compiled out of sandbox-only builds (issue #64).
+#![cfg(feature = "local")]
 
 use std::process::Command;
 

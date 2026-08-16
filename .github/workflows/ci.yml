@@ -134,6 +134,12 @@ jobs:
   # ----------------------------------------------------------------
   # L0 feature 门控 — 验证 harness 特性关闭时 core 仍可编译
   # (assembly gated, run_loop ungated)。
+  #
+  # daemon 执行后端矩阵 (issue #64, sandbox fail-closed):
+  # - default (`local`): 全量工具集仍编译;
+  # - sandbox-only: 直接触碰本机 FS/进程的工具不再注册,所有 targets
+  #   (含测试) 必须编译,且 sandbox 门控集成测试必须通过;
+  # - all-features: local + sandbox 共存时 local 后端优先,编译不受影响。
   # ----------------------------------------------------------------
   feature-gate-check:
     name: feature-gate-check
@@ -154,3 +160,11 @@ jobs:
           restore-keys: |
             gate-${{ runner.os }}-
       - run: cargo check -p theway-core --no-default-features
+      - name: daemon default features
+        run: cargo check -p theway-daemon --all-targets
+      - name: daemon sandbox-only
+        run: cargo check -p theway-daemon --no-default-features --features sandbox --all-targets
+      - name: daemon all features
+        run: cargo check -p theway-daemon --all-features --all-targets
+      - name: daemon sandbox-only tool-gate tests
+        run: cargo test -p theway-daemon --no-default-features --features sandbox --test sandbox_tool_gate

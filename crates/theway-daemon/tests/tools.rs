@@ -42,11 +42,15 @@ use triggers::tool_assembly as tools_asm;
 static DYNAMIC_TRIGGER_LOCK: Mutex<()> = Mutex::new(());
 static CRON_LOCK: Mutex<()> = Mutex::new(());
 
-/// Std-backed local executor for tool tests.
+/// Std-backed local executor for tool tests. The `local` executor module is compiled
+/// out of sandbox-only builds (issue #64), so the helper and the tests dispatching
+/// through it are `local`-gated.
+#[cfg(feature = "local")]
 fn local_exec() -> Arc<dyn theway_core::executor::ToolExecutor> {
     Arc::new(theway_daemon::executor::local::LocalExecutor::new())
 }
 
+#[cfg(feature = "local")]
 #[tokio::test]
 async fn read_writes_then_reads() {
     let dir = tempdir().unwrap();
