@@ -14,11 +14,14 @@
 //!   `wire`, `grpc`, `http`, `ws`, `mcp`, `proto`, `client`, `host`,
 //!   `transport`, `inbox`, `testing`. These implement or directly serve the
 //!   protocol surfaces the server and its clients speak.
-//! - **shared** — client/daemon contract helpers absorbed from the former SDK
-//!   (not protocol): `auth`, `bug_report`, `commands`, `config`, `feed`,
-//!   `history`, `images`, `mentions`, `triggers`. Both zones' modules are
-//!   marked `shared client contract` in their headers; the public paths never
-//!   change.
+//! - **shared** — client/daemon contract helpers (not protocol): `auth`,
+//!   `bug_report`, `commands`, `config`, `feed`, `history`, `images`,
+//!   `mentions`, `triggers`. Both zones' modules are marked `shared client
+//!   contract` in their headers; the public paths never change. The purest
+//!   pieces — the trigger sidecar data models and the base-dir/path contract —
+//!   live in the leaf crate `theway-contract` (`triggers`/`config` here
+//!   re-export them) so storage and daemon can share them without depending on
+//!   the transport stack.
 
 // ── protocol zone: wire model + transport implementations ──
 pub mod client;

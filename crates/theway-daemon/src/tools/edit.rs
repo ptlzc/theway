@@ -313,7 +313,9 @@ static DEFINITION: Lazy<Tool> = Lazy::new(|| Tool {
         "required": ["path", "old_string", "new_string"],
     }),
 });
-#[cfg(test)]
+// The test bodies dispatch through the real local executor; sandbox-only builds gate
+// the `local` executor module out, so the suite compiles only with `local` (issue #64).
+#[cfg(all(test, feature = "local"))]
 mod tests {
     use super::*;
     use tempfile::tempdir;

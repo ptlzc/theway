@@ -1,5 +1,5 @@
 //! `/skill` — attach a loaded skill to the next prompt.
-//! (`attach_skill_prompt` moved to the SDK — sdk-split-local-sandbox, node 5-commands-layer.)
+//! (`attach_skill_prompt` lives in `theway_transport::commands`.)
 
 use super::*;
 

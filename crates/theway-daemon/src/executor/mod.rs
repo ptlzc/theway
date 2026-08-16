@@ -1,5 +1,5 @@
-//! Execution-environment seam (daemon-kernel-layers): the kernel-side executor
-//! implementations and process primitives that used to live in the client SDK.
+//! Execution-environment seam: the kernel-side executor implementations and
+//! process primitives.
 //!
 //! - [`local::LocalExecutor`] — reference [`ToolExecutor`] backed by the local
 //!   filesystem (`tokio::fs`) and process table (`tokio::process`), built with

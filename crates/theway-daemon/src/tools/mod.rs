@@ -75,6 +75,25 @@ pub use crate::triggers::tool_assembly::{
     remove_cron_job_tool, remove_trigger_tool, set_cron_job_state_tool, set_trigger_state_tool,
 };
 
+/// Tool names that bypass the [`ToolExecutor`] seam and touch the host OS directly:
+/// `bash` spawns `sh -c` process groups (setsid/killpg), the `exec_shell` family owns
+/// `tokio::process` children, and `ls` / `grep` / `find` walk the local filesystem
+/// with `tokio::fs` / `ignore`. They are registered ONLY in `local` builds. In
+/// sandbox-only builds they are omitted from the tool set (fail closed, issue #64) —
+/// the [`crate::executor::sandbox::SandboxExecutor`] seam covers only the
+/// executor-backed tools, so these bodies would otherwise keep acting straight on the
+/// host even in sandbox mode.
+pub const LOCAL_ONLY_TOOL_NAMES: &[&str] = &[
+    "bash",
+    "exec",
+    "get_output",
+    "kill_shell",
+    "write_to_process",
+    "ls",
+    "grep",
+    "find",
+];
+
 /// Local-execution tool set (the app-layer half of the session tool set): shell / fs /
 /// git / grep / web — everything that depends on the execution environment. No engine
 /// tools here (DAG / subagent / skills / memory come from the kernel's own assembly,
@@ -88,6 +107,15 @@ pub use crate::triggers::tool_assembly::{
 /// process-group-kill + cancel semantics (the executor's `run_command` kills only the
 /// direct child), and `ls` / `grep` / `find` / the `exec_shell` family use richer
 /// directory/walk surfaces than the executor trait's first cut exposes.
+///
+/// **Feature gating (issue #64, fail closed)**: in sandbox-only builds
+/// (`not(local) + sandbox`) the direct-OS tools ([`LOCAL_ONLY_TOOL_NAMES`]) are NOT
+/// registered and a `tracing::warn` names every omitted tool — never a silent drop.
+/// The executor-backed tools (read / write / edit / outline / git) stay registered:
+/// their effects go through the [`ToolExecutor`] seam, where the sandbox executor
+/// answers with an explicit `UnsupportedKind` error. `web_fetch` / `web_search` stay
+/// too: they are pure network requests with no host FS/process side effects.
+#[cfg(feature = "local")]
 pub fn local_tools(executor: Arc<dyn ToolExecutor>) -> Vec<Arc<dyn AgentTool>> {
     vec![
         Arc::new(read::ReadTool::new(executor.clone())),
@@ -106,6 +134,40 @@ pub fn local_tools(executor: Arc<dyn ToolExecutor>) -> Vec<Arc<dyn AgentTool>> {
         Arc::new(web_fetch::WebFetchTool),
         Arc::new(web_search::WebSearchTool::new()),
     ]
+}
+
+/// Sandbox-only variant: only the executor-backed tools and the network-only web tools
+/// are registered (see the `local` variant's doc for the policy). The omitted
+/// direct-OS tools are named explicitly in a `tracing::warn` so the degraded tool set
+/// is never silent.
+#[cfg(all(not(feature = "local"), feature = "sandbox"))]
+pub fn local_tools(executor: Arc<dyn ToolExecutor>) -> Vec<Arc<dyn AgentTool>> {
+    tracing::warn!(
+        omitted = ?LOCAL_ONLY_TOOL_NAMES,
+        "sandbox-only build: local-only tools bypass the ToolExecutor seam and touch \
+         the host FS/process table directly, so they are NOT registered (fail closed); \
+         executor-backed tools (read/write/edit/outline/git) and network-only tools \
+         (web_fetch/web_search) remain"
+    );
+    vec![
+        Arc::new(read::ReadTool::new(executor.clone())),
+        Arc::new(write::WriteTool::new(executor.clone())),
+        Arc::new(edit::EditTool::new(executor.clone())),
+        Arc::new(outline::OutlineTool::new(executor.clone())),
+        Arc::new(git::GitTool::new(executor)),
+        Arc::new(web_fetch::WebFetchTool),
+        Arc::new(web_search::WebSearchTool::new()),
+    ]
+}
+
+/// Fails the build when neither execution backend is selected. Mirrors
+/// [`crate::executor::default_executor`]: a daemon without any executor backend has no
+/// valid tool execution story at all.
+#[cfg(not(any(feature = "local", feature = "sandbox")))]
+pub fn local_tools(_executor: Arc<dyn ToolExecutor>) -> Vec<Arc<dyn AgentTool>> {
+    compile_error!("theway-daemon requires at least one of the `local` or `sandbox` features");
+    #[allow(unreachable_code)]
+    unreachable!()
 }
 
 /// Build the `Subagent` tool. Separate from `local_tools` because the tool needs the model handle to

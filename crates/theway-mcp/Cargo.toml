@@ -1,11 +1,13 @@
 [package]
 name = "theway-mcp"
-version = "0.75.0"
-edition = "2024"
-rust-version = "1.85"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description = "Minimal MCP (Model Context Protocol) stdio client for the theway agent runtime."
-license = "MIT"
-authors = ["theway contributors"]
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
 
 [dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "io-util", "io-std", "process"] }

@@ -224,11 +224,7 @@ impl Theme {
 /// `${THEWAY_DIR:-$HOME/.theway}/theme.toml`, matching the runtime-state
 /// layout documented in AGENTS.md.
 fn theme_toml_path() -> PathBuf {
-    let base = std::env::var("THEWAY_DIR")
-        .map(PathBuf::from)
-        .or_else(|_| std::env::var("HOME").map(|home| PathBuf::from(home).join(".theway")))
-        .unwrap_or_else(|_| PathBuf::from(".theway"));
-    base.join("theme.toml")
+    theway_transport::config::base_dir().join("theme.toml")
 }
 
 /// Strip a `#` comment, honoring quotes so `key = "#010203"` survives.

@@ -19,6 +19,11 @@ use tokio_util::sync::CancellationToken;
 
 use theway_core::agent::types::*;
 
+// The daemon's single process-group kill primitive (openspec `layering`): setsid-before-
+// spawn configuration + killpg-by-pid teardown live in one place (`tools::exec`) and are
+// shared with the bash tool, the exec_shell family and the hook command executor.
+use crate::tools::exec::process_group;
+
 pub struct NativeEnv {
     cwd: String,
 }
@@ -325,22 +330,9 @@ impl ExecutionEnv for NativeEnv {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
 
-        #[cfg(unix)]
-        {
-            // SAFETY: this closure runs in the child between fork and exec on Unix. `setsid`
-            // is async-signal-safe (POSIX) and has no Rust state to invalidate. The child
-            // becomes session and process-group leader; SIGKILL to `-pgid` then targets the
-            // whole tree we just spawned. `pre_exec` is exposed on tokio::process::Command
-            // via std::os::unix::process::CommandExt without needing a trait import.
-            unsafe {
-                cmd.pre_exec(|| {
-                    if libc::setsid() == -1 {
-                        return Err(std::io::Error::last_os_error());
-                    }
-                    Ok(())
-                });
-            }
-        }
+        // Shared daemon primitive (openspec `layering`): the child leads its own session /
+        // process group on Unix so the timeout/abort kill below reaches the whole tree.
+        process_group::prepare_command(&mut cmd);
 
         let mut child = cmd
             .spawn()
@@ -398,7 +390,7 @@ impl ExecutionEnv for NativeEnv {
                 ))
             }
             ExecOutcome::TimedOut => {
-                terminate_child_tree(&mut child, child_pid).await;
+                process_group::terminate_child_tree(&mut child, child_pid).await;
                 let _ = stdout_handle.await;
                 let _ = stderr_handle.await;
                 Err(ExecutionError::new(
@@ -410,7 +402,7 @@ impl ExecutionEnv for NativeEnv {
                 ))
             }
             ExecOutcome::Aborted => {
-                terminate_child_tree(&mut child, child_pid).await;
+                process_group::terminate_child_tree(&mut child, child_pid).await;
                 let _ = stdout_handle.await;
                 let _ = stderr_handle.await;
                 Err(ExecutionError::new(
@@ -436,43 +428,6 @@ async fn wait_with_optional_timeout(child: &mut Child, timeout_secs: Option<u64>
         },
         None => ExecOutcome::Completed(child.wait().await),
     }
-}
-
-/// Best-effort teardown of the child *and any descendants it spawned*. On Unix the child was
-/// placed in its own session/process group via `setsid()`, so a single `killpg(-pid, SIGKILL)`
-/// reaches background jobs and detached children. On Windows the direct child (`sh` from Git
-/// Bash, or `cmd`) forks real child processes that survive the parent's death and keep the
-/// piped stdout/stderr write ends open — without killing them the drain tasks below hang until
-/// the orphan exits on its own (the pre-existing `exec_timeout` Windows failure). `taskkill /T`
-/// walks the whole process tree, matching what the server's shell tool does.
-async fn terminate_child_tree(child: &mut Child, pid: Option<u32>) {
-    #[cfg(unix)]
-    if let Some(pid) = pid {
-        // SAFETY: `killpg` with SIGKILL on a known pgid is sound; the pid was just observed
-        // from `child.id()`. A zero/-ESRCH return (child already gone) is benign and we don't
-        // assert on it.
-        unsafe {
-            libc::killpg(pid as libc::pid_t, libc::SIGKILL);
-        }
-    }
-    #[cfg(windows)]
-    if let Some(pid) = pid {
-        use std::os::windows::process::CommandExt;
-        // `taskkill /PID <pid> /T /F` kills the whole tree rooted at the direct child, not
-        // just the child itself. CREATE_NO_WINDOW (0x08000000) avoids a console flash.
-        let _ = std::process::Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .creation_flags(0x08000000)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .output();
-    }
-    // Always also issue `Child::start_kill` so tokio considers the handle terminated. On
-    // Unix the SIGKILL above already did the work; this is the cross-platform reaper. The
-    // subsequent `wait` reaps the zombie.
-    let _ = child.start_kill();
-    let _ = child.wait().await;
-    let _ = pid;
 }
 
 /// Drain a child pipe into a UTF-8 string while also feeding each line into an optional

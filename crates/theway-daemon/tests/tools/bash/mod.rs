@@ -173,6 +173,56 @@ async fn cancellation_kills_child_process() {
     assert!(text.contains("[exit -1]"));
 }
 
+/// Cancel must tear down the whole tree exactly like timeout does — a backgrounded
+/// descendant (`(sleep ...) & wait`) must not survive the agent's Ctrl-C. Mirrors
+/// `timeout_kills_descendant_processes` through the cancellation-token path instead.
+#[cfg(unix)]
+#[tokio::test]
+async fn cancellation_kills_descendant_processes() {
+    let tool = BashTool;
+    // Unique marker so the `pgrep` check can't false-positive against sibling tests.
+    let marker = "bash-tool-cancel-desc-kill-marker-b21e4d";
+    let cmd = format!("(sleep 60 && echo {marker}) & wait");
+    let cancel = CancellationToken::new();
+    let cancel_clone = cancel.clone();
+    // Trip the token once the backgrounded subshell is up.
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        cancel_clone.cancel();
+    });
+    let started = Instant::now();
+    let _result = tool
+        .execute("cdesc", json!({ "command": cmd }), cancel, None)
+        .await
+        .expect("bash tool execute should not error on cancellation");
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed.as_secs() < 5,
+        "cancellation path took {elapsed:?}; descendant kill did not happen in time"
+    );
+
+    // Give the OS a beat to actually reap the descendant tree.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let pgrep = tokio::process::Command::new("pgrep")
+        .arg("-f")
+        .arg(marker)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn();
+    if let Ok(mut child) = pgrep {
+        let mut buf = String::new();
+        if let Some(mut s) = child.stdout.take() {
+            let _ = s.read_to_string(&mut buf).await;
+        }
+        let _ = child.wait().await;
+        assert!(
+            buf.trim().is_empty(),
+            "found surviving descendant process(es) matching {marker:?} after cancel: pids={buf}"
+        );
+    }
+}
+
 /// A command that writes a lot to stderr while stdout is also active must not deadlock
 /// the tool. The previous sequential drain (`read stdout → read stderr`) would block
 /// on stdout while the child blocked writing to a full stderr pipe.

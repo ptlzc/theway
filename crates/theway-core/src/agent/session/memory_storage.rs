@@ -1,6 +1,7 @@
 //! In-memory `SessionStorage`. 1:1 port of
 //! `packages/agent/src/harness/session/memory-storage.ts` (~131 lines). Used by tests and the
-//! browser harness. Mirrors `jsonl-storage` behaviour without touching disk.
+//! browser harness. Same append-only tree semantics as the durable backends, without
+//! touching disk.
 
 use std::sync::Mutex;
 

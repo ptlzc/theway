@@ -4993,7 +4993,7 @@ dependencies = [
 
 [[package]]
 name = "tests-bridge-macro"
-version = "0.1.0"
+version = "0.75.0"
 
 [[package]]
 name = "textwrap"
@@ -5004,6 +5004,17 @@ dependencies = [
  "smawk",
  "unicode-linebreak",
  "unicode-width 0.2.0",
+]
+
+[[package]]
+name = "theway-contract"
+version = "0.75.0"
+dependencies = [
+ "chrono",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -5071,6 +5082,7 @@ dependencies = [
  "strum 0.28.0",
  "tempfile",
  "tests-bridge-macro",
+ "theway-contract",
  "theway-core",
  "theway-llm-provider",
  "theway-mcp",
@@ -5189,7 +5201,7 @@ dependencies = [
 
 [[package]]
 name = "theway-probe"
-version = "0.1.0"
+version = "0.75.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -5238,9 +5250,9 @@ dependencies = [
  "tar",
  "tempfile",
  "tests-bridge-macro",
+ "theway-contract",
  "theway-core",
  "theway-llm-provider",
- "theway-transport",
  "tokio",
  "toml",
  "tracing",
@@ -5257,7 +5269,6 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "futures",
- "hex",
  "parking_lot",
  "prost",
  "protox",
@@ -5266,9 +5277,9 @@ dependencies = [
  "rmcp",
  "serde",
  "serde_json",
- "sha2",
  "tempfile",
  "tests-bridge-macro",
+ "theway-contract",
  "theway-core",
  "theway-llm-provider",
  "thiserror 2.0.20",

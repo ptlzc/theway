@@ -22,9 +22,9 @@ use super::truncate::{DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, truncate_head};
 /// Files larger than this many lines get the outline hint when read without `offset`.
 const OUTLINE_HINT_THRESHOLD: usize = 200;
 
-/// File reads dispatch through the injected [`ToolExecutor`] (sdk-split-local-sandbox
-/// node 8) — local editing mode uses the SDK's `LocalExecutor`; a sandbox executor
-/// swaps the execution environment without touching the tool definition.
+/// File reads dispatch through the injected [`ToolExecutor`] — local editing mode uses
+/// the kernel's `LocalExecutor`; a sandbox executor swaps the execution environment
+/// without touching the tool definition.
 pub struct ReadTool {
     executor: Arc<dyn ToolExecutor>,
 }
@@ -142,7 +142,9 @@ static DEFINITION: Lazy<Tool> = Lazy::new(|| Tool {
     }),
 });
 
-#[cfg(test)]
+// The test bodies dispatch through the real local executor; sandbox-only builds gate
+// the `local` executor module out, so the suite compiles only with `local` (issue #64).
+#[cfg(all(test, feature = "local"))]
 mod tests {
     use super::*;
     use tempfile::tempdir;

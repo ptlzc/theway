@@ -1,6 +1,6 @@
-//! TUI-local slash commands and helpers (daemon-kernel-layers: the client-local
-//! command surface — `/quit`, `/clear`, `/help` plus the interactive login
-//! prompt — moved out of the dissolving SDK; runtime commands run daemon-side).
+//! TUI-local slash commands and helpers — the client-local command surface:
+//! `/quit`, `/clear`, `/help` plus the interactive login prompt. Runtime
+//! commands run daemon-side.
 
 use std::sync::Arc;
 

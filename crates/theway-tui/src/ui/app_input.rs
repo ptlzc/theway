@@ -8,7 +8,6 @@
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::Terminal;
-use ratatui::backend::CrosstermBackend;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
@@ -34,10 +33,10 @@ const PASTE_OBJECT_MIN_CHARS: usize = 20;
 impl App {
     // ── event handling ──────────────────────────────────────────────────────────────────
 
-    pub(super) async fn handle_key(
+    pub(super) async fn handle_key<B: ratatui::backend::Backend>(
         &mut self,
         key: KeyEvent,
-        terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+        terminal: &mut Terminal<B>,
     ) -> Result<()> {
         // Second-level `/status-panel` menu (issue #54): modal — it consumes
         // every key until Enter applies the highlighted mode or Esc cancels.
@@ -219,10 +218,10 @@ impl App {
     /// the normal dispatch path and closes the popup, Esc cancels. Returns
     /// `true` (and consumes the key) whenever the picker is open — the
     /// picker is modal.
-    pub(super) async fn handle_fork_picker_key(
+    pub(super) async fn handle_fork_picker_key<B: ratatui::backend::Backend>(
         &mut self,
         key: &KeyEvent,
-        terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+        terminal: &mut Terminal<B>,
     ) -> bool {
         if self.fork_picker.is_none() {
             return false;

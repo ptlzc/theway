@@ -10,6 +10,7 @@ use std::sync::{Arc, OnceLock};
 use crate::SqliteSessionRepo;
 use crate::hook_executors::daemon_executors;
 use crate::hooks;
+use crate::trigger_engine::notification_hook::DynNotificationHook;
 use crate::{agent_specs, tools, triggers};
 use anyhow::{Context, Result};
 use theway_core::multiagent::goal;
@@ -152,30 +153,18 @@ impl SessionHarnessFactory {
                 self.before_tool_call.clone(),
                 self.after_tool_call.clone(),
             ));
-        for hook in self.mcp_notification_hooks.clone() {
-            trigger_executor.register_notification_hook(hook);
-        }
-        trigger_executor.register_notification_hook(std::sync::Arc::new(
-            triggers::CronNotificationHook::new(self.cron_registry.clone()),
-        ));
-        trigger_executor.register_notification_hook(std::sync::Arc::new(
-            triggers::DynamicTriggerCheckHook::new(self.dynamic_trigger_registry.clone()),
-        ));
+        // Notification hooks: MCP push sources are Arc'd clones of the process-level
+        // set; cron / dynamic-trigger hooks are constructed fresh per executor.
+        // Registered exactly once per executor — see `register_notification_hooks`.
+        register_notification_hooks(
+            &trigger_executor,
+            &self.mcp_notification_hooks,
+            &self.cron_registry,
+            &self.dynamic_trigger_registry,
+        );
         // Each build owns its cells, so `set` cannot fail; ignore the Result anyway.
         let _ = skill_harness_cell.set(harness.clone());
         let _ = goal_harness_cell.set(harness.clone());
-
-        // Notification hooks: MCP push sources are Arc'd, so clones re-register on the
-        // rebuilt executor; cron / dynamic-trigger hooks are constructed fresh per executor.
-        for hook in &self.mcp_notification_hooks {
-            trigger_executor.register_notification_hook(hook.clone());
-        }
-        trigger_executor.register_notification_hook(std::sync::Arc::new(
-            triggers::CronNotificationHook::new(self.cron_registry.clone()),
-        ));
-        trigger_executor.register_notification_hook(std::sync::Arc::new(
-            triggers::DynamicTriggerCheckHook::new(self.dynamic_trigger_registry.clone()),
-        ));
 
         // Feed listeners via the core broadcast channel (segment 3). Each spawned task
         // receives from the broadcast Receiver and forwards structured FeedUpdates to
@@ -240,3 +229,44 @@ impl SessionHarnessFactory {
         Ok(harness)
     }
 }
+
+/// Assembly target for notification hooks. The only production impl is the
+/// per-session [`TriggerExecutor`](crate::trigger_engine::execution::TriggerExecutor);
+/// the one-shot-registration unit tests inject a recording fake.
+trait NotificationHookSink {
+    fn register(&self, hook: DynNotificationHook);
+}
+
+impl NotificationHookSink for std::sync::Arc<crate::trigger_engine::execution::TriggerExecutor> {
+    fn register(&self, hook: DynNotificationHook) {
+        self.register_notification_hook(hook);
+    }
+}
+
+/// One-shot registration contract: wires every notification hook onto `sink` exactly
+/// once — the process-level MCP push sources, then a fresh cron watcher, then a fresh
+/// dynamic-trigger check. Registering any of these twice on the same executor breaks
+/// the session (a second MCP `run` fails on the already-consumed receiver; cron /
+/// dynamic hooks would pump and fire twice), so `build` calls this exactly once per
+/// executor.
+fn register_notification_hooks(
+    sink: &(impl NotificationHookSink + ?Sized),
+    mcp_notification_hooks: &[Arc<triggers::McpNotificationHook>],
+    cron_registry: &triggers::cron::CronRegistry,
+    dynamic_trigger_registry: &triggers::dynamic::DynamicTriggerRegistry,
+) {
+    for hook in mcp_notification_hooks {
+        sink.register(hook.clone());
+    }
+    sink.register(Arc::new(triggers::CronNotificationHook::new(
+        cron_registry.clone(),
+    )));
+    sink.register(Arc::new(triggers::DynamicTriggerCheckHook::new(
+        dynamic_trigger_registry.clone(),
+    )));
+}
+
+#[cfg(test)]
+// Test files live in `tests/turn/session_factory/` (mirror of src), pulled in by
+// path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
+tests_bridge_macro::tests_bridge!("turn/session_factory");

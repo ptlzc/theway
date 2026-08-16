@@ -136,14 +136,10 @@ impl ExtensionRegistry {
         }
     }
 
-    /// The theway base dir: `${THEWAY_DIR}` or `~/.theway`.
+    /// The theway base dir: `${THEWAY_DIR}` or `~/.theway` — the single
+    /// `theway_contract::config` implementation (issue #64).
     fn base_dir() -> PathBuf {
-        if let Ok(p) = std::env::var("THEWAY_DIR") {
-            return PathBuf::from(p);
-        }
-        directories::BaseDirs::new()
-            .map(|d| d.home_dir().join(".theway"))
-            .unwrap_or_else(|| PathBuf::from(".theway"))
+        theway_contract::config::base_dir()
     }
 
     /// Extension dirs in precedence order (first wins on name collision).

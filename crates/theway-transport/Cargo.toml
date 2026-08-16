@@ -1,14 +1,16 @@
 [package]
 name = "theway-transport"
-version = "0.75.0"
-edition = "2024"
-rust-version = "1.85"
-description = "theway protocol layer — wire model + HTTP/WS/gRPC/MCP transports, independent of the server business logic."
-license = "MIT"
-repository = "https://github.com/ptlzc/theway"
-authors = ["theway contributors"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "theway protocol layer — wire model + HTTP/WS/gRPC/MCP transports, independent of the server business logic, plus the shared client-contract modules (auth/config/feed/history/images/mentions/commands/triggers)."
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
 
 [dependencies]
+theway-contract = { path = "../theway-contract" }
 theway-core = { path = "../theway-core" }
 theway-llm-provider = { path = "../theway-llm-provider" }
 rmcp = { version = "3", features = ["server", "transport-io"] }
@@ -29,8 +31,6 @@ thiserror = "2"
 tracing = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 toml = "0.8"
-sha2 = "0.10"
-hex = "0.4"
 regex = "1"
 unicode-width = "0.2"
 uuid = { version = "1", features = ["v7", "serde"] }

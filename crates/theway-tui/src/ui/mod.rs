@@ -691,10 +691,10 @@ impl App {
 
     // ── event handling ──────────────────────────────────────────────────────────────────
 
-    async fn handle_event(
+    async fn handle_event<B: ratatui::backend::Backend>(
         &mut self,
         event: Event,
-        terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+        terminal: &mut Terminal<B>,
     ) -> Result<()> {
         match event {
             Event::Key(key) if key.kind != KeyEventKind::Release => {
@@ -2196,11 +2196,11 @@ fn collect_slash_commands(
 
 /// Daemon-side slash commands the client forwards (the daemon's registry is not
 /// exposed over RPC). Hint list only — completion, no dispatch. Keep in sync
-/// with the commands `theway_daemon::Registry::with_daemon_commands()` adds on
-/// top of the SDK's `Registry::local()` (crates/theway-daemon/src/commands/mod.rs),
-/// including the auth surface (`/login` `/logout` `/sessions`) and `/fork`
-/// (issue #55). The TUI-local commands (help/clear/quit/…) are NOT listed
-/// here: they come from the `registry` argument above.
+/// with the commands `theway_daemon::Registry::with_daemon_commands()` registers
+/// (crates/theway-daemon/src/commands/mod.rs), including the auth surface
+/// (`/login` `/logout` `/sessions`) and `/fork` (issue #55). The TUI-local
+/// commands (help/clear/quit/…) are NOT listed here: they come from the `registry`
+/// argument above.
 /// `crontab` is the daemon's alias for `/cron`.
 const DAEMON_COMMANDS: &[&str] = &[
     "login",

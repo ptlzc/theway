@@ -1,18 +1,21 @@
-//! theway — coding agent CLI binary (`[[bin]]` of the `theway` crate). Thin assembly layer
-//! on top of the `theway` SDK library; all runtime logic lives in the library so external
-//! projects can embed it in-process. `--http` / `--grpc` dispatch into the `transport::http`
-//! / `transport::grpc` drivers (crate `server` feature). The bin target requires features
-//! `tui` + `server`, so both are compile-time constants here.
+//! theway — coding agent TUI client binary (bin `theway` of the `theway-tui` crate).
 //!
-//! Modeled on `packages/coding-agent/` (the TS implementation) in spirit: same tools
-//! (`read`/`write`/`edit`/`bash`/`ls`/`grep`/`find` + `memory`), same `--resume` semantics
-//! scoped by cwd hash, same "interactive TUI" mode, dual-root skills loader (project ↻ user).
-//! Trimmed scope: no extensions, no themes, no print/rpc/json modes.
+//! Pure client of the `thewayd` daemon kernel: on startup it reuses a running daemon
+//! (per-cwd discovery file or default port) or spawns `thewayd` in the current
+//! directory and waits for readiness, then runs the ratatui REPL against the transport
+//! client. The agent runtime (harness, session, tools, triggers) lives in the daemon;
+//! this crate links `theway-transport` / `theway-core` / `theway-storage` and never the
+//! daemon kernel.
+//!
+//! Offline session maintenance is the exception: `session export|import` and the
+//! standalone session queries (`--list-sessions`, `--list-all-sessions`,
+//! `--delete-session`) open the local SQLite session repo directly, without the daemon.
 //!
 //! The bin entry is split into submodule directories: [`cli`] (CLI argument types +
 //! standalone session commands), [`startup`] (`run_repl`: daemon discovery/spawn +
-//! connect), and [`ui_mode`] (UI mode resolution + small CLI-level helpers). This file
-//! keeps `fn main` and the CLI command dispatch.
+//! connect), and [`ui`] (the ratatui REPL); feed rendering, local commands, model/resume
+//! pickers, and clipboard image support live in the sibling modules. This file keeps
+//! `fn main` and the CLI command dispatch.
 
 mod cli;
 mod clipboard_image;
@@ -48,22 +51,31 @@ async fn main() -> Result<()> {
     print_dynamic_help_and_exit_if_requested()?;
     let cli = Cli::parse();
     let cwd = std::env::current_dir().context("getting cwd")?;
-    let repo = session::open_repo(&cwd).await;
 
+    // Session export/import keep their existing offline, repo-direct path.
     if let Some(command) = &cli.command {
+        let repo = session::open_repo(&cwd).await;
         return run_cli_command(command, &repo, &cwd).await;
     }
 
+    // Standalone session queries (issue #64): try the running daemon's RPC
+    // first and only open the local repo as an offline fallback inside the
+    // command — opening the repo here would race the daemon's libsql lock
+    // before we even know whether a daemon is up.
     if cli.list_sessions {
-        return list_sessions_cmd(&repo).await;
+        return list_sessions_cmd(&cwd).await;
     }
     if cli.list_all_sessions {
         return list_all_sessions_cmd().await;
     }
     if let Some(id) = &cli.delete_session {
-        return delete_session_cmd(&repo, id).await;
+        return delete_session_cmd(&cwd, id).await;
     }
 
+    // Interactive REPL + resume picker: the local repo is still needed (the
+    // daemon resolves its own session from the launch args; the TUI needs the
+    // repo for the picker and its local surfaces).
+    let repo = session::open_repo(&cwd).await;
     run_repl(cli, cwd, repo).await
 }
 

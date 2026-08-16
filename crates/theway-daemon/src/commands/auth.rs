@@ -1,5 +1,5 @@
-//! Auth-store slash commands (daemon-kernel-layers: `/login`, `/logout`,
-//! `/sessions` moved from the SDK into the daemon's runtime command set).
+//! Auth-store slash commands: `/login`, `/logout`, `/sessions` — part of the
+//! daemon's runtime command set.
 //!
 //! `/login` returns [`CommandOutcome::LoginSecret`] so the client prompts for
 //! the secret without echoing it and writes the shared auth store; the daemon

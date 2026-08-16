@@ -62,15 +62,9 @@ impl SetSkillStateTool {
     }
 }
 
-/// Production theway base dir: `${THEWAY_DIR:-$HOME/.theway}`. Inlined (not via `crate::config`) so the
-/// module can be pulled into integration tests through `#[path]` includes.
+/// Production theway base dir from the shared contract.
 pub(crate) fn default_base_dir() -> PathBuf {
-    if let Ok(p) = std::env::var("THEWAY_DIR") {
-        return PathBuf::from(p);
-    }
-    directories::BaseDirs::new()
-        .map(|d| d.home_dir().join(".theway"))
-        .unwrap_or_else(|| PathBuf::from(".theway"))
+    theway_contract::config::base_dir()
 }
 
 #[derive(Debug, Deserialize)]

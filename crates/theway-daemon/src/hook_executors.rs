@@ -3,10 +3,11 @@
 //! The hook runtime ([`crate::hooks`]) defines injection points
 //! ([`HookCommandExecutor`], [`HookWebhookSender`]) for side effects; this
 //! module implements them. The command executor reuses
-//! [`crate::tools::exec::run_with_kill_on_timeout_or_cancel`] — the same
-//! `setsid` + `killpg` whole-tree-kill primitive shared by the `bash` tool and
-//! the `exec_shell` foreground family — so hook commands inherit the identical
-//! timeout/cancel semantics instead of carrying a private copy. The webhook
+//! [`crate::tools::exec::run_with_kill_on_timeout_or_cancel`] — built on the
+//! daemon's single `setsid` + `killpg` process-group primitive
+//! ([`crate::tools::exec::process_group`]) shared by the `bash` tool, the
+//! `exec_shell` family and `NativeEnv::exec` — so hook commands inherit the
+//! identical timeout/cancel semantics instead of carrying a private copy. The webhook
 //! sender mirrors the previous inline core implementation (reqwest POST +
 //! timeout + cancel race + status check), keeping the daemon's reqwest as the
 //! only HTTP client in the kernel.

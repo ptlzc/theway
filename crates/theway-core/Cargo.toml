@@ -1,12 +1,13 @@
 [package]
 name = "theway-core"
-version = "0.75.0"
-edition = "2024"
-rust-version = "1.85"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description = "theway core — stateful agent runtime + harness (Agent loop, skills, prompt templates, sessions, compaction) on top of theway-llm-provider."
-license = "MIT"
-repository = "https://github.com/earendil-works/theway"
-authors = ["theway contributors"]
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
 
 [lib]
 name = "theway_core"

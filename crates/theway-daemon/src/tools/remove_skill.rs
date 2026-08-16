@@ -336,7 +336,9 @@ static DEFINITION: Lazy<Tool> = Lazy::new(|| Tool {
     }),
 });
 
-#[cfg(test)]
+// The suite removes skills through `NativeEnv` (direct host FS), which is compiled
+// out of sandbox-only builds (issue #64), so the bridge compiles only with `local`.
+#[cfg(all(test, feature = "local"))]
 // Test files live in `tests/tools/remove_skill/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
 tests_bridge_macro::tests_bridge!("tools/remove_skill");

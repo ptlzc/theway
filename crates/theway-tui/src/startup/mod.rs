@@ -230,20 +230,24 @@ async fn session_id_of(session: &theway_core::Session) -> String {
         .unwrap_or_default()
 }
 
+/// Shared in-process gRPC daemon fixture for the TUI unit tests (issue #64):
+/// a real tonic server over [`FakeSessionOps`] on a random loopback port, so
+/// client-side code round-trips through real frames without touching a live
+/// daemon or the local session repo. The mock command channel records every
+/// daemon-side [`WireCommand`] for sequence assertions.
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use clap::Parser as _;
+pub(crate) mod test_daemon {
     use std::sync::Arc;
     use theway_core::multiagent::graph::engine::DagEngine;
     use theway_core::multiagent::graph::types::DagEvent;
     use theway_core::multiagent::registry::{AgentJobEvent, AgentJobRegistry};
+    use theway_transport::client::GrpcClient;
     use theway_transport::grpc::{GrpcState, serve_grpc};
     use theway_transport::testing::FakeSessionOps;
     use theway_transport::wire::{WireCommand, WireStatus};
     use tokio::sync::{broadcast, mpsc};
 
-    fn test_status() -> WireStatus {
+    pub(crate) fn test_status() -> WireStatus {
         WireStatus {
             session_id: "sess-1".into(),
             model: "provider:model".into(),
@@ -266,10 +270,16 @@ mod tests {
     }
 
     /// In-process gRPC fixture (the same `GrpcState` shape the UI tests
-    /// use): the client round-trips through real tonic frames and the mock
-    /// command channel records every daemon-side `WireCommand`, so tests can
-    /// assert the create+switch command sequence.
-    async fn test_daemon_client() -> (GrpcClient, mpsc::UnboundedReceiver<WireCommand>) {
+    /// use) with an explicit seed session list; the first seed becomes the
+    /// daemon's current session. Returns the connected client, the command
+    /// recorder, and the `FakeSessionOps` handle (delete-protection setup).
+    pub(crate) async fn test_daemon_client_with_sessions(
+        seeds: &[&str],
+    ) -> (
+        GrpcClient,
+        mpsc::UnboundedReceiver<WireCommand>,
+        Arc<FakeSessionOps>,
+    ) {
         let (command_tx, command_rx) = mpsc::unbounded_channel::<WireCommand>();
         let (snapshot_tx, _) = broadcast::channel::<WireStatus>(16);
         let latest = Arc::new(parking_lot::Mutex::new(test_status()));
@@ -296,7 +306,10 @@ mod tests {
         }
         .abort_handle();
         let session_ops = Arc::new(FakeSessionOps::new());
-        session_ops.add_session("sess-1");
+        for id in seeds {
+            session_ops.add_session(id);
+        }
+        let current: String = seeds.first().copied().unwrap_or("").to_string();
         let state = GrpcState {
             commands: command_tx,
             snapshots: snapshot_tx,
@@ -305,8 +318,8 @@ mod tests {
             dag_events: dag_event_tx,
             registry,
             dag_engine: Arc::new(DagEngine::new()),
-            session_ops,
-            session_id: Arc::new(std::sync::RwLock::new("sess-1".into())),
+            session_ops: session_ops.clone(),
+            session_id: Arc::new(std::sync::RwLock::new(current)),
             agent_fwd,
         };
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -314,8 +327,26 @@ mod tests {
         let server = serve_grpc(listener, state);
         let _server = server;
         let client = GrpcClient::connect(&addr).await.unwrap();
-        (client, command_rx)
+        (client, command_rx, session_ops)
     }
+
+    /// [`test_daemon_client_with_sessions`] seeded with one session
+    /// (`sess-1`, current) — the common single-session shape.
+    pub(crate) async fn test_daemon_client() -> (
+        GrpcClient,
+        mpsc::UnboundedReceiver<WireCommand>,
+        Arc<FakeSessionOps>,
+    ) {
+        test_daemon_client_with_sessions(&["sess-1"]).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_daemon::test_daemon_client;
+    use super::*;
+    use clap::Parser as _;
+    use theway_transport::wire::WireCommand;
 
     /// Issue #56 gate: only a REUSED daemon with no explicit session
     /// selection (`--resume` bare or with an id, `--resume-id`,
@@ -353,7 +384,7 @@ mod tests {
     /// call enqueues the second.)
     #[tokio::test]
     async fn attach_fresh_session_creates_then_switches_in_order() {
-        let (mut client, mut rx) = test_daemon_client().await;
+        let (mut client, mut rx, _session_ops) = test_daemon_client().await;
 
         // Act
         let id = attach_fresh_session(&mut client).await.unwrap();

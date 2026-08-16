@@ -114,16 +114,9 @@ impl InstallSkillTool {
     }
 }
 
-/// Production skills root: `${THEWAY_DIR:-$HOME/.theway}/skills`. Inlined so this module can be
-/// included by integration tests that pull `tools/mod.rs` via `#[path = ...]` and don't have
-/// access to `crate::config`.
+/// Production skills root from the shared base-dir contract.
 pub(crate) fn default_skills_root() -> PathBuf {
-    if let Ok(p) = std::env::var("THEWAY_DIR") {
-        return PathBuf::from(p).join("skills");
-    }
-    directories::BaseDirs::new()
-        .map(|d| d.home_dir().join(".theway").join("skills"))
-        .unwrap_or_else(|| PathBuf::from(".theway").join("skills"))
+    theway_contract::config::base_dir().join("skills")
 }
 
 #[async_trait]
@@ -506,7 +499,9 @@ static DEFINITION: Lazy<Tool> = Lazy::new(|| Tool {
 // Tests
 // ──────────────────────────────────────────────────────────────────────────────────────────
 
-#[cfg(test)]
+// The suite installs skills through `NativeEnv` (direct host FS), which is compiled
+// out of sandbox-only builds (issue #64), so the bridge compiles only with `local`.
+#[cfg(all(test, feature = "local"))]
 // Test files live in `tests/tools/install_skill/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
 tests_bridge_macro::tests_bridge!("tools/install_skill");

@@ -1,12 +1,13 @@
 [package]
 name = "theway-storage"
-version = "0.75.0"
-edition = "2024"
-rust-version = "1.85"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description = "theway storage backends — concrete SessionStorage / DAG-persist implementations (SQLite via Turso) for theway-core contracts."
-license = "MIT"
-repository = "https://github.com/ptlzc/theway"
-authors = ["theway contributors"]
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
 
 [dependencies]
 # Engine contracts + types come from theway-core; this crate only implements
@@ -20,9 +21,10 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 parking_lot = "0.12"
 tracing = "0.1"
 # Session helpers + archive (daemon-kernel-layers: moved from the SDK): tar/toml/sha2
-# for `.theway-session` archives, serde for sidecar models, transport for the shared
-# trigger/config models.
-theway-transport = { path = "../theway-transport" }
+# for `.theway-session` archives, serde for sidecar models, theway-contract for the
+# shared trigger models + base-dir/path contract (issue #64: storage depends on the
+# pure leaf contract crate, never on the transport stack).
+theway-contract = { path = "../theway-contract" }
 theway-llm-provider = { path = "../theway-llm-provider" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

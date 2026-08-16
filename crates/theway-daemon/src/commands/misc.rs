@@ -1,7 +1,6 @@
 //! Assorted REPL builtins: `/diag`, `/template`, `/compact`, `/bug-report`,
 //! `/web-connect`, `/web-disconnect`, `/find`, `/history`, and the `/help` text builders.
-//! (`/help`, `/clear`, `/quit` moved to the SDK local command set — sdk-split-local-sandbox,
-//! node 5-commands-layer.)
+//! (`/help`, `/clear`, `/quit` belong to the TUI-local command set in `theway-tui`.)
 
 use super::*;
 

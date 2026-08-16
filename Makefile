@@ -20,7 +20,7 @@ help: ## show this help
 # --- build ------------------------------------------------------------------
 
 .PHONY: build
-build: ## cargo build --workspace (full CLI; SDK-only consumers use -p theway)
+build: ## cargo build --workspace (full CLI; daemon-only consumers use -p theway-daemon)
 	$(CARGO) build --workspace --target-dir $(OUTPUT_DIR)
 	cp $(THEWAY_BINARY) $(dir $(THEWAY_BINARY))tw$(EXE)
 
@@ -68,8 +68,16 @@ fmt-check: ## rustfmt --check (CI uses this)
 lint: ## clippy with -D warnings (matches CI)
 	$(CARGO) clippy --workspace --all-targets -- -D warnings
 
+.PHONY: feature-gate
+feature-gate: ## feature-gate checks: core no-default + daemon default/sandbox-only/all-features (CI job feature-gate-check, issue #64)
+	$(CARGO) check -p theway-core --no-default-features
+	$(CARGO) check -p theway-daemon --all-targets
+	$(CARGO) check -p theway-daemon --no-default-features --features sandbox --all-targets
+	$(CARGO) check -p theway-daemon --all-features --all-targets
+	$(CARGO) test -p theway-daemon --no-default-features --features sandbox --test sandbox_tool_gate
+
 .PHONY: ci
-ci: fmt-check lint test ## run the full CI pipeline locally
+ci: fmt-check lint feature-gate test ## run the full CI pipeline locally
 
 # --- run / install ----------------------------------------------------------
 

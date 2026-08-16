@@ -1,18 +1,17 @@
-//! Transport servers (feature `server`).
+//! Transport servers.
 //!
-//! Protocol layer for the theway agent runtime: the `--web` (axum HTTP/SSE +
-//! WebSocket) and `--grpc` (tonic) servers plus the proto wire codecs,
-//! consolidated into the `theway` crate behind the `server` feature.
-//! The servers program against the public channel/state surface of
-//! [`crate::ui::web_loop::TransportEndpoints`] and never touch App internals.
-//! The kernel-polling event loop stays in this crate
-//! (`App::run_transport_loop`).
+//! Protocol layer for the theway agent runtime: the HTTP/SSE + WebSocket
+//! (axum) and gRPC (tonic) servers plus the proto wire codecs. The servers
+//! program against the public channel/state surface of [`TransportEndpoints`]
+//! and the [`crate::host::TransportHost`] trait, and never touch kernel
+//! internals — the kernel (`theway-daemon`'s `TurnHost`) implements
+//! `TransportHost` and drives the serialized transport event loop.
 //!
-//! Entry points (assembled by the CLI binary):
-//! - [`http::run_web`] / [`grpc::run_grpc`] — full drivers (bind, channels,
-//!   spawn server, run the event loop).
-//! - [`http::serve_web`] / [`grpc::serve_grpc`] — spawn just the protocol
-//!   server on a bound listener.
+//! Entry points (assembled by the daemon binary):
+//! - [`crate::http::run_web`] / [`crate::grpc::run_grpc`] — full drivers (bind,
+//!   channels, spawn server, run the event loop).
+//! - [`crate::http::serve_web`] / [`crate::grpc::serve_grpc`] — spawn just the
+//!   protocol server on a bound listener.
 
 // ──────────────────────────────────────────────────────────────────────────
 // Transport endpoints + shared host surface
@@ -116,12 +115,13 @@ impl TransportMode {
     }
 }
 
-/// Public channel/state surface shared with the `theway-server` crate.
+/// Public channel/state surface shared with the daemon kernel.
 ///
-/// Built by [`App::transport_endpoints`]: the server side takes the senders /
-/// shared state it needs to build its `HttpState` / `GrpcState`, while the
-/// receiver half (`command_rx`) plus `snapshot_tx`/`latest` feed the event
-/// loop ([`App::run_transport_loop`]).
+/// Built by [`TransportHost::transport_endpoints`](crate::host::TransportHost::transport_endpoints):
+/// the server side takes the senders / shared state it needs to build its
+/// `HttpState` / `GrpcState`, while the receiver half (`command_rx`) plus
+/// `snapshot_tx`/`latest` feed the event loop
+/// ([`TransportHost::run_transport_loop`](crate::host::TransportHost::run_transport_loop)).
 pub struct TransportEndpoints {
     /// Browser/client commands into the serialized event loop.
     pub command_tx: mpsc::UnboundedSender<WireCommand>,
@@ -148,8 +148,9 @@ pub struct TransportEndpoints {
     /// Owning session id (checkpoint scope / mount key).
     pub session_id: String,
     /// Abort handle for the registry→events forwarder task spawned in
-    /// [`transport_endpoints`](App::transport_endpoints). Clone it before moving
-    /// `TransportEndpoints` into [`run_transport_loop`](App::run_transport_loop).
+    /// [`transport_endpoints`](crate::host::TransportHost::transport_endpoints). Clone it
+    /// before moving `TransportEndpoints` into
+    /// [`run_transport_loop`](crate::host::TransportHost::run_transport_loop).
     pub agent_fwd: tokio::task::AbortHandle,
 }
 

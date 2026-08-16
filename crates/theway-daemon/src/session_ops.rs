@@ -4,17 +4,17 @@
 //! Two pieces live here:
 //!
 //! * [`SessionFactory`] — builds a fresh, fully-wired `AgentHarness` for any session id
-//!   (resume semantics, the in-process version of CLI `--resume-id`). Provided by the CLI
-//!   crate (`theway-tui`) through `ui::AppConfig`; consumed by `ui::App::switch_session`
-//!   inside the serialized event loop.
+//!   (resume semantics, the in-process version of CLI `--resume-id`). Built by the daemon
+//!   binary (`turn::session_factory::SessionHarnessFactory`) and carried by the transport
+//!   host (`turn::daemon::TurnHost`), which invokes it on `SwitchSession`.
 //! * [`SessionOps`] — sync query/mutation ops that do NOT need the event loop
 //!   (list / create / rename / delete). Switching the *current* session is deliberately
-//!   NOT here: it mutates App runtime state (kernel harness, feed, busy flag) and must go
+//!   NOT here: it mutates kernel runtime state (harness, feed, busy flag) and must go
 //!   through `WireCommand::SwitchSession` on the serialized loop.
 //!
-//! The server crate holds an `Arc<dyn SessionOps>` (via
+//! The daemon's transport host holds an `Arc<dyn SessionOps>` (via
 //! [`theway_transport::TransportEndpoints`]) and never touches the session repo
-//! directly, keeping the "server programs only against the app's public surface" boundary.
+//! directly, keeping the "transport programs only against the kernel's public surface" boundary.
 
 use std::sync::Arc;
 
@@ -45,11 +45,11 @@ pub type SessionFactory = Arc<
         + Sync,
 >;
 
-/// Live "current session" state shared between the App event loop and [`AppSessionOps`].
+/// Live "current session" state shared between the transport event loop and [`AppSessionOps`].
 ///
 /// The transport loop syncs it on every published snapshot (and on session switch), so
 /// `SessionOps::list` can report `busy` / `model` for the current session without reaching
-/// into `App` internals.
+/// into kernel internals.
 #[derive(Clone, Debug, Default)]
 pub struct CurrentSessionState {
     pub session_id: String,

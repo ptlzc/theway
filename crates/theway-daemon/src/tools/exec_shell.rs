@@ -27,8 +27,6 @@ use theway_core::{AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate};
 use theway_llm_provider::{Tool, UserContentBlock};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Notify;
-#[cfg(windows)]
-use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
 /// Default foreground-command timeout (exec without explicit `timeout` param).
@@ -230,49 +228,19 @@ impl ShellHandle {
         self.stdout.lock().unwrap().version + self.stderr.lock().unwrap().version
     }
 
-    /// Kill the whole process tree. Unix: the child leads its own session/process group
-    /// (via `setsid` at spawn), so one `killpg` reaches background jobs and detached
-    /// descendants — same pattern as `bash` and `NativeEnv::exec`. Windows: `taskkill /T`.
-    /// Pid-based on purpose: the `Child` handle belongs to the exit-watcher task, so killing
-    /// never contends with its `wait()` borrow.
+    /// Kill the whole process tree through the daemon's shared process-group primitive
+    /// (`super::exec::process_group`): Unix `killpg(SIGKILL)` of the session group the
+    /// child leads (via `setsid` at spawn), Windows `taskkill /T` fallback — the single
+    /// implementation also used by `bash`, the hook executor and `NativeEnv::exec`.
+    /// Pid-based on purpose: the `Child` handle belongs to the exit-watcher task, so
+    /// killing never contends with its `wait()` borrow.
     async fn kill(&self) -> Result<(), AgentToolError> {
         if self.killed.swap(true, Ordering::SeqCst) || self.exited.load(Ordering::SeqCst) {
             return Ok(());
         }
-        #[cfg(unix)]
-        {
-            // SAFETY: `killpg` on the observed pid is sound; `ESRCH` (already gone) is
-            // benign and not asserted on.
-            unsafe {
-                libc::killpg(self.pid as libc::pid_t, libc::SIGKILL);
-            }
-        }
-        #[cfg(windows)]
-        {
-            let mut cmd = tokio::process::Command::new("taskkill");
-            cmd.arg("/PID")
-                .arg(self.pid.to_string())
-                .arg("/T")
-                .arg("/F")
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .creation_flags(CREATE_NO_WINDOW);
-            let status = timeout(Duration::from_secs(5), cmd.status())
-                .await
-                .map_err(|_| AgentToolError::from("taskkill timed out"))?
-                .map_err(|e| AgentToolError::from(format!("taskkill spawn: {e}")))?;
-            if !status.success() {
-                return Err(AgentToolError::from(format!(
-                    "taskkill failed with {status}"
-                )));
-            }
-        }
-        Ok(())
+        super::exec::process_group::kill(self.pid).await
     }
 }
-
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 // ──────────────────────────────────────────────────────────────────────────────────────────
 // Spawn
@@ -295,20 +263,9 @@ pub async fn run_in_background(command: &str) -> Result<BackgroundShell, AgentTo
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
-    #[cfg(unix)]
-    {
-        // SAFETY: runs between fork and exec; `setsid` is async-signal-safe per POSIX and
-        // touches no Rust state. The child becomes session/process-group leader so
-        // `kill_shell`'s `killpg` reaches the whole tree.
-        unsafe {
-            cmd.pre_exec(|| {
-                if libc::setsid() == -1 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
-    }
+    // Shared daemon primitive (openspec `layering`): the child becomes session /
+    // process-group leader on Unix so `kill_shell`'s group kill reaches the whole tree.
+    super::exec::process_group::prepare_command(&mut cmd);
 
     let mut child = cmd
         .spawn()

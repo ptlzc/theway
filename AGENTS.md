@@ -6,7 +6,8 @@ Rust 2024 Cargo workspace. The root [`Cargo.toml`](Cargo.toml) is the authoritat
 
 - `crates/theway-llm-provider` — unified streaming LLM client: providers, model/image catalogs, SSE and OAuth helpers.
 - `crates/theway-core` — agent runtime: harness, session storage, skills loading, compaction, lifecycle hooks, and the multiagent DAG engine.
-- `crates/theway-storage` — SQLite persistence (session repos, DAG run snapshots).
+- `crates/theway-contract` — pure leaf contract crate: session-scoped trigger/cron sidecar models and the `~/.theway` base-dir/path layout; no workspace dependencies.
+- `crates/theway-storage` — SQLite persistence (one `<uuidv7>.db` per session, session archives, DAG run snapshots); depends on core + contract, never transport.
 - `crates/theway-daemon` — headless `thewayd` daemon (bin `src/bin/thewayd.rs`): harness assembly, tools, triggers, MCP/LSP wiring.
 - `crates/theway-tui` — the `theway` CLI binary: ratatui REPL plus local session commands.
 - `crates/theway-mcp` — MCP client: stdio transport, JSON-RPC framing, tools list/call.
@@ -15,7 +16,7 @@ Rust 2024 Cargo workspace. The root [`Cargo.toml`](Cargo.toml) is the authoritat
 - `crates/theway-probe` — gRPC serviceability probe binary (`theway --grpc`).
 - `crates/tests-bridge-macro` — proc macro anchoring mirrored `#[path]` test modules to the crate root.
 
-Layering: daemon/tui depend on core/storage/transport; everything sits on `theway-llm-provider`. Provider-specific code lives under `crates/theway-llm-provider/src/providers/`; daemon tool implementations under `crates/theway-daemon/src/tools/`.
+Layering: daemon/tui depend on core/storage/transport; `theway-storage` depends on `theway-core` + `theway-contract` and never on the transport stack; everything sits on `theway-llm-provider`. Provider-specific code lives under `crates/theway-llm-provider/src/providers/`; daemon tool implementations under `crates/theway-daemon/src/tools/`.
 
 ### Daemon positioning
 

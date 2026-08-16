@@ -1,6 +1,5 @@
 //! Session lifecycle commands: `/save`, `/undo`, `/name`, `/session`, `/share`.
-//! (`/sessions`, `/login`, `/logout` moved to the SDK local command set —
-//! sdk-split-local-sandbox, node 5-commands-layer.)
+//! (`/sessions`, `/login`, `/logout` are daemon runtime commands in [`super::auth`].)
 
 use super::*;
 

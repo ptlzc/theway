@@ -273,8 +273,8 @@ impl TurnHost {
         self.feed.push_plain_untimed(text.as_ref(), Level::Error);
     }
 
-    /// Build the public transport channels and wire the event planes (mirror of the TUI's
-    /// `App::transport_endpoints`).
+    /// Build the public transport channels and wire the event planes
+    /// ([`theway_transport::host::TransportHost::transport_endpoints`] implementation).
     pub fn transport_endpoints(&mut self) -> TransportEndpoints {
         let (command_tx, command_rx) = mpsc::unbounded_channel::<WireCommand>();
         let (snapshot_tx, _) = broadcast::channel::<WireStatus>(128);
@@ -322,8 +322,8 @@ impl TurnHost {
         }
     }
 
-    /// Serialized transport event loop (mirror of the TUI's `App::run_transport_loop`,
-    /// minus the relay and QR surfaces).
+    /// Serialized transport event loop: drains the endpoint channels into the host
+    /// and drives the selected transport server until shutdown.
     pub async fn run_transport_loop(
         mut self,
         mode: TransportMode,
