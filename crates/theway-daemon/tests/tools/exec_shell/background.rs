@@ -79,6 +79,52 @@ async fn kill_shell_terminates_background_process() {
     );
 }
 
+/// `kill_shell` must kill not just the direct shell but any descendants it
+/// backgrounded — same leak shape the bash / native-env regression tests cover for
+/// timeout/cancel: `(sleep N; touch marker) & wait` backgrounds the subshell, so a
+/// direct-child-only kill would leave the descendant alive to write the marker.
+/// `run_in_background` spawns through the shared process-group primitive (setsid at
+/// spawn) and `kill_shell` kills the whole group by pid. Unix-only because
+/// `setsid` / `killpg` are Unix primitives.
+#[cfg(unix)]
+#[tokio::test]
+async fn kill_shell_kills_backgrounded_descendant_processes() {
+    use tempfile::tempdir;
+    let dir = tempdir().expect("tempdir");
+    let marker = dir.path().join("exec-shell-leak-marker");
+    let marker_str = marker.to_string_lossy().to_string();
+
+    let bg = run_in_background(&format!("(sleep 4; touch {marker_str}) & wait"))
+        .await
+        .expect("spawn");
+
+    // Give the backgrounded subshell a beat to actually fork before we kill.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let result = KillShellTool
+        .execute(
+            "kd1",
+            json!({ "shell_id": bg.id }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect("kill_shell");
+    assert!(
+        text_of(&result).contains("Killed"),
+        "got: {}",
+        text_of(&result)
+    );
+
+    // Wider window than the descendant's 4s sleep: if the killpg missed the
+    // backgrounded subshell, the marker file appears unambiguously.
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    assert!(
+        !marker.exists(),
+        "descendant process was not killed by kill_shell — leak marker at {marker_str} exists"
+    );
+}
+
 #[tokio::test]
 async fn write_to_process_writes_stdin() {
     let bg = run_in_background(stdin_echo_cmd()).await.expect("spawn");
