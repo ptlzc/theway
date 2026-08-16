@@ -1,21 +1,13 @@
 //! theway-core — Rust port of `@earendil-works/theway-core`. Layered on top of `theway-llm-provider`.
 //! 1:1 file mapping with the TypeScript source at `packages/agent/src/`.
 
-//! Self-alias so modules ported from the server crate (builtin tools, skill-overrides
-//! overlay) keep their `use theway_core::...` import paths unchanged inside this crate.
+//! Self-alias so ported modules keep their `use theway_core::...` import paths unchanged.
 extern crate self as theway_core;
 
 pub mod agent;
 pub mod executor;
 pub mod node;
 pub mod types;
-
-/// Runtime skill enable/disable overlay (`~/.theway/skill-overrides.json`), shared by the
-/// `SetSkillState` / `RemoveSkill` builtin tools (which live in the daemon kernel) and the
-/// `/skills enable|disable` slash command. Harness-layer concern (operates on [`Skill`]
-/// values), hence feature-gated.
-#[cfg(feature = "harness")]
-pub mod skill_overrides;
 
 // Public surface — mirrors `packages/agent/src/index.ts`.
 pub use agent::{

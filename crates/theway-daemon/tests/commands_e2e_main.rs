@@ -66,7 +66,7 @@ mod session_archive {
     pub use theway_storage::session_archive::*;
 }
 #[allow(dead_code)]
-#[path = "../../theway-core/src/skill_overrides.rs"]
+#[path = "../src/skill_overrides.rs"]
 mod skill_overrides;
 #[allow(dead_code)]
 #[path = "../src/triggers/mod.rs"]

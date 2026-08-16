@@ -24,8 +24,6 @@ pub mod compaction;
 #[cfg(feature = "harness")]
 pub mod cost;
 #[cfg(feature = "harness")]
-pub mod hooks;
-#[cfg(feature = "harness")]
 pub mod messages;
 #[cfg(feature = "harness")]
 pub mod permission;

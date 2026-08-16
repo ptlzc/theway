@@ -30,6 +30,7 @@ pub mod executor;
 pub mod export;
 pub mod file_commands;
 pub mod hook_executors;
+pub mod hooks;
 pub mod local_models;
 pub mod logging;
 pub mod lsp;
@@ -50,9 +51,9 @@ pub mod skills;
 pub mod stream_auth;
 pub mod system_prompt;
 
-// Skill enable/disable overlay moved into the engine crate with the builtin tools
-// (openspec tools-into-core); re-exported so `crate::skill_overrides` paths keep working.
-pub use theway_core::skill_overrides;
+// Skill enable/disable overlay lives in the daemon kernel next to the builtin
+// tools that consume it (`SetSkillState` / `RemoveSkill`, `/skills enable|disable`).
+pub mod skill_overrides;
 // Session repo used by the assembly layer: hybrid JSONL+SQLite, new sessions
 // minted as SQLite. Re-exported from the composition root so binaries don't need to
 // depend on theway-storage directly.

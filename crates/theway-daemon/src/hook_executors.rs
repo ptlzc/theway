@@ -1,8 +1,8 @@
-//! Daemon-side implementations of the core hook side-effect seams.
+//! Daemon-side implementations of the hook side-effect seams.
 //!
-//! `theway-core` defines only injection points ([`HookCommandExecutor`],
-//! [`HookWebhookSender`]) for hook side effects; the daemon is the single kernel
-//! that implements them. The command executor reuses
+//! The hook runtime ([`crate::hooks`]) defines injection points
+//! ([`HookCommandExecutor`], [`HookWebhookSender`]) for side effects; this
+//! module implements them. The command executor reuses
 //! [`crate::tools::exec::run_with_kill_on_timeout_or_cancel`] — the same
 //! `setsid` + `killpg` whole-tree-kill primitive shared by the `bash` tool and
 //! the `exec_shell` foreground family — so hook commands inherit the identical
@@ -16,9 +16,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use theway_core::agent::hooks::{
-    HookCommandExecutor, HookCommandOutput, HookExecutors, HookWebhookSender,
-};
+use crate::hooks::{HookCommandExecutor, HookCommandOutput, HookExecutors, HookWebhookSender};
 use tokio_util::sync::CancellationToken;
 
 use crate::tools::exec::{KillReason, run_with_kill_on_timeout_or_cancel};

@@ -16,7 +16,6 @@ use std::sync::{Arc, OnceLock};
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use theway_core::agent::hooks;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::persist::DagPersistSink;
 use theway_core::{AgentHarness, AgentHarnessOptions, PermissionPolicy, ThinkingLevel};
@@ -24,6 +23,7 @@ use theway_daemon::config_readers::{
     read_builtin_skills_config, read_orchestrator_thinking_summary,
     read_trigger_poll_interval_secs, read_tui_max_feed_lines,
 };
+use theway_daemon::hooks;
 use theway_daemon::stream_auth::stream_fn_with_auth_store;
 use theway_daemon::system_prompt::compose_system_prompt;
 use theway_daemon::turn::daemon::{DaemonConfig, PanelStatus, TurnHost};

@@ -10,16 +10,15 @@
 //! the runner. This module keeps rule loading (`load`/`read_file`/`push_rules`) and the
 //! [`HookRunner`] execution logic.
 //!
-//! # Side-effect seams (core is interface-only)
+//! # Side-effect seams
 //!
-//! Core holds the *mechanism* (rule parsing, event orchestration, payload assembly,
-//! diagnostics) but no OS-side-effect implementation: command execution and webhook
-//! delivery are injected at construction as [`HookCommandExecutor`] / [`HookWebhookSender`]
-//! closures ([`HookExecutors`]). The implementations live in theway-daemon, where the
-//! command executor reuses the single process-group-kill primitive shared by the bash
-//! tool, the exec_shell family and native env. Without injected executors, side-effect
-//! rules are skipped and reported in the load diagnostics — core on its own degrades
-//! hooks to pure diagnostics.
+//! The daemon owns the hook runtime. Command execution and webhook delivery
+//! are injected at construction as [`HookCommandExecutor`] /
+//! [`HookWebhookSender`] closures ([`HookExecutors`]); the implementations
+//! live in [`crate::hook_executors`], where the command executor reuses the
+//! single process-group-kill primitive shared by the bash tool, the
+//! exec_shell family and native env. Without injected executors, side-effect
+//! rules are skipped and reported in the load diagnostics.
 
 pub mod event;
 pub mod utils;
@@ -544,6 +543,6 @@ impl HookRule {
 }
 
 #[cfg(test)]
-// Test files live in `tests/runtime/hooks/` (mirror of `src/runtime/`), pulled in by
-// path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
-tests_bridge_macro::tests_bridge!("agent/hooks");
+// Test files live in `tests/hooks/` (mirror of src), pulled in by path so
+// they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
+tests_bridge_macro::tests_bridge!("hooks");
