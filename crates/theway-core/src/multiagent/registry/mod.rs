@@ -6,7 +6,6 @@
 //! the graph mode output panel (`GetNodeOutput`) and the streamed `subagent_output`
 //! events. Snapshot accessors are cheap clones — the registry is a small Vec.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use chrono::Utc;
@@ -22,12 +21,10 @@ use theway_llm_provider::Message as PiMessage;
 
 mod events;
 mod metrics;
-mod persist;
 mod transcript;
 
 pub use events::{AGENT_JOB_EVENT_BROADCAST_CAPACITY, AgentJobEvent, JobStatus};
 pub use metrics::metrics_listener;
-pub use persist::{load_messages, messages_path_for_node, messages_path_for_task};
 pub use transcript::{
     JobTranscript, JobTranscriptStore, agent_message_to_json, append_message, append_output,
 };
@@ -167,8 +164,6 @@ struct Inner {
     /// Host-provided transcript persistence. `None` = transcripts stay in
     /// memory only (the default).
     transcript_store: Option<Arc<dyn JobTranscriptStore>>,
-    /// Legacy disk directory used when no host store is installed.
-    messages_dir: Option<PathBuf>,
 }
 
 /// Thread-safe registry (cheap clone via `Arc`).
@@ -209,11 +204,6 @@ impl AgentJobRegistry {
     /// (transcripts stay in memory only, the default).
     pub fn set_transcript_store(&self, store: Option<Arc<dyn JobTranscriptStore>>) {
         self.inner.lock().transcript_store = store;
-    }
-
-    /// Set the legacy disk directory used when no host store is installed.
-    pub fn set_messages_dir(&self, dir: Option<PathBuf>) {
-        self.inner.lock().messages_dir = dir;
     }
 
     /// Register a running job and return its stable id.
@@ -354,75 +344,43 @@ impl AgentJobRegistry {
     }
 
     /// Look up a DAG node's transcript: in-memory job first, then the host
-    /// store, then the legacy disk directory. Returns `None` when none exist.
+    /// store (a finished node's messages survive a process restart when the
+    /// host store is durable). Returns `None` when neither exists.
     pub fn node_messages(&self, run_id: &str, node_id: &str) -> Option<Vec<serde_json::Value>> {
         if let Some(job) = self.find_node(run_id, node_id) {
             if !job.messages.is_empty() {
                 return Some(job.messages);
             }
         }
-        let (store, dir) = {
-            let inner = self.inner.lock();
-            (inner.transcript_store.clone(), inner.messages_dir.clone())
-        };
-        if let Some(store) = store {
-            return store.load_node(run_id, node_id);
-        }
-        let dir = dir?;
-        load_messages(&messages_path_for_node(&dir, run_id, node_id))
+        let store = self.inner.lock().transcript_store.clone()?;
+        store.load_node(run_id, node_id)
     }
 
-    /// Look up a task-tool job's transcript (in-memory, host store, legacy disk).
+    /// Look up a task-tool job's transcript (in-memory, then host store).
     pub fn job_messages(&self, job_id: &str) -> Option<Vec<serde_json::Value>> {
         if let Some(job) = self.job(job_id) {
             if !job.messages.is_empty() {
                 return Some(job.messages);
             }
         }
-        let (store, dir) = {
-            let inner = self.inner.lock();
-            (inner.transcript_store.clone(), inner.messages_dir.clone())
-        };
-        if let Some(store) = store {
-            return store.load_job(job_id);
-        }
-        let dir = dir?;
-        load_messages(&messages_path_for_task(&dir, job_id))
+        let store = self.inner.lock().transcript_store.clone()?;
+        store.load_job(job_id)
     }
 
-    /// Hand the finished job's transcript to the host store, falling back to
-    /// the legacy disk directory when no store is installed (best-effort).
+    /// Hand the finished job's transcript to the host store (best-effort).
     fn persist_messages(&self, job: &AgentJob) {
         if job.messages.is_empty() {
             return;
         }
-        let (store, dir) = {
-            let inner = self.inner.lock();
-            (inner.transcript_store.clone(), inner.messages_dir.clone())
-        };
-        if let Some(store) = store {
-            store.save(&JobTranscript {
-                job_id: &job.id,
-                run_id: job.run_id.as_deref(),
-                node_id: job.node_id.as_deref(),
-                messages: &job.messages,
-            });
-            return;
-        }
-        let Some(dir) = dir else {
+        let Some(store) = self.inner.lock().transcript_store.clone() else {
             return;
         };
-        let path = match (&job.run_id, &job.node_id) {
-            (Some(run), Some(node)) => messages_path_for_node(&dir, run, node),
-            _ => messages_path_for_task(&dir, &job.id),
-        };
-        let Ok(json) = serde_json::to_string_pretty(&job.messages) else {
-            return;
-        };
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let _ = std::fs::write(path, json);
+        store.save(&JobTranscript {
+            job_id: &job.id,
+            run_id: job.run_id.as_deref(),
+            node_id: job.node_id.as_deref(),
+            messages: &job.messages,
+        });
     }
 
     /// Broadcast an event-plane message (no receiver → silently dropped, same
