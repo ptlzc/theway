@@ -1,7 +1,6 @@
-//! Session helpers (daemon-kernel-layers: moved from the SDK into storage —
-//! repo-adjacent resume / list / delete semantics scoped to the current cwd
-//! hash, shared by the daemon runtime and the CLI offline session commands).
-//! Wraps [`SqliteSessionRepo`] with cwd-scoped semantics.
+//! Session helpers — repo-adjacent resume / list / delete semantics scoped to the
+//! current cwd hash, shared by the daemon runtime and the CLI offline session
+//! commands. Wraps [`SqliteSessionRepo`] with cwd-scoped semantics.
 
 use std::path::PathBuf;
 
@@ -27,7 +26,7 @@ pub async fn open_repo(cwd: &std::path::Path) -> SqliteSessionRepo {
     SqliteSessionRepo::new(sessions_dir_for_cwd(cwd))
 }
 
-/// Dynamic trigger rules are session-scoped sidecars next to the jsonl transcript.
+/// Dynamic trigger rules are session-scoped sidecars next to the session database.
 pub fn trigger_sidecar_path(session_path: &std::path::Path) -> PathBuf {
     session_path.with_extension("triggers.json")
 }
@@ -39,7 +38,7 @@ pub fn cron_sidecar_path(session_path: &std::path::Path) -> PathBuf {
 
 /// Return the dynamic-trigger sidecar for a live session.
 ///
-/// Jsonl sessions record their absolute transcript path in metadata. Older or synthetic
+/// Sessions record their absolute database path in metadata. Older or synthetic
 /// sessions may not have that field, so keep a deterministic fallback under the repo root.
 pub async fn trigger_sidecar_path_for_session(
     session: &Session,

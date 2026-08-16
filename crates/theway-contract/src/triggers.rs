@@ -1,7 +1,6 @@
-//! Session-scoped automation data models (daemon-kernel-layers: moved from
-//! the SDK into transport, then into this pure leaf crate in issue #64 —
-//! trigger rules cross the wire and into session archives, so they are
-//! contract).
+//! Session-scoped automation data models — trigger rules cross the wire and into
+//! session archives, so they are contract. Kept in this pure leaf crate so the
+//! daemon, transport and storage can share them without layering on each other.
 //!
 //! Pure serde models (no trigger-engine logic): the daemon's
 //! `triggers::{cron, dynamic}` modules re-export them, `session_archive`

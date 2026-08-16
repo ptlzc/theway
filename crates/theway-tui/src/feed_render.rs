@@ -1,6 +1,5 @@
-//! Ratatui rendering for the conversation feed (daemon-kernel-layers: the
-//! terminal rendering moved from the SDK into the TUI; the UI-agnostic model
-//! lives in `theway_transport::feed`).
+//! Ratatui rendering for the conversation feed — the terminal rendering lives
+//! here in the TUI; the UI-agnostic model lives in `theway_transport::feed`.
 //!
 //! [`lines`] renders a [`Feed`] to width-wrapped, styled `ratatui` lines,
 //! ready to scroll/draw — the terminal counterpart of `Feed::plain_lines`.

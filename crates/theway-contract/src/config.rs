@@ -21,8 +21,9 @@ pub fn base_dir() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from(".theway"))
 }
 
-/// Sessions live under `<base>/sessions/<cwd-hash>/<uuidv7>.jsonl`. Hashing the cwd lets us
-/// scope `--resume` to "last session opened from this directory".
+/// Sessions live under `<base>/sessions/<cwd-hash>/<uuidv7>.db` (one SQLite database per
+/// session). Hashing the cwd lets us scope `--resume` to "last session opened from this
+/// directory".
 pub fn sessions_dir_for_cwd(cwd: &Path) -> PathBuf {
     let hash = cwd_hash(cwd);
     base_dir().join("sessions").join(hash)

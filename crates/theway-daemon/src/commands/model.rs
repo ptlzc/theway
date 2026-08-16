@@ -1,7 +1,6 @@
 //! `/model`, `/thinking`, `/cost` and the model-catalog help text they render.
 //! (The pure helpers `parse_model_spec`, `model_credential_hint`, `cli_model_help_text`
-//! and the catalog grouping helpers moved to the SDK — sdk-split-local-sandbox,
-//! node 5-commands-layer.)
+//! and the catalog grouping helpers live in `theway_transport::commands`.)
 
 use super::*;
 

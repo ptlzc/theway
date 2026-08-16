@@ -4,9 +4,9 @@
 //! and the pure helpers shared by command implementations and the CLI layer
 //! (`parse_model_spec`, `attach_skill_prompt`, …).
 //!
-//! Moved from the SDK into transport (daemon-kernel-layers): the command table is
-//! shared contract — the TUI (completion) and the daemon (execution) both program
-//! against it. The framework is generic over the context extras (`CommandCtx<'a, X>` /
+//! The command table is shared contract — the TUI (completion) and the daemon
+//! (execution) both program against it. The framework is generic over the context
+//! extras (`CommandCtx<'a, X>` /
 //! `SlashCommand<X>`): the daemon layers its runtime commands on top with its own
 //! extras type (`DaemonCtx`); the TUI registers its local UI commands. Command
 //! implementations themselves live with their owners (tui / daemon).
@@ -41,7 +41,7 @@ pub mod console {
 
     /// Clear the active line sink. Used by tests to avoid leaking capture sinks across cases.
     /// Not `cfg(test)`-gated: integration tests that path-include the command modules compile
-    /// the SDK as a dependency (where `cfg(test)` is inactive) and still need this.
+    /// this crate as a dependency (where `cfg(test)` is inactive) and still need this.
     #[allow(dead_code)]
     pub fn clear_sink() {
         *SINK.lock() = None;
@@ -58,8 +58,8 @@ pub mod console {
 
 /// Drop-in replacement for `println!` in command implementations: same call syntax, but the
 /// formatted line is routed through [`console::emit_line`] instead of straight to stdout.
-/// Exported at the crate root so both SDK layers (`common`, `local`) and the daemon crate's
-/// command implementations can share it.
+/// Exported at the crate root so command implementations in any crate (the daemon's
+/// runtime commands, the TUI's local commands) can share it.
 #[macro_export]
 macro_rules! cprintln {
     () => { $crate::commands::console::emit_line(String::new()) };

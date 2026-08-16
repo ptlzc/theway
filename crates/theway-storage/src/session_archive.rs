@@ -1,8 +1,9 @@
 //! `.theway-session` export/import support.
 //!
 //! The archive is intentionally small and inspectable: a tar file with a manifest, one
-//! session JSONL transcript, and optional session-scoped automation sidecars. It preserves
-//! transcript/tool history, so callers must render a sensitivity warning.
+//! session transcript (rendered as JSONL lines), and optional session-scoped automation
+//! sidecars. It preserves transcript/tool history, so callers must render a sensitivity
+//! warning.
 
 use std::collections::{BTreeMap, HashSet};
 use std::fs::File;
@@ -221,8 +222,8 @@ pub async fn export_session(
 
 /// Render the canonical `session.jsonl` text for an archive: the header line
 /// (metadata) followed by one line per tree entry, plus the entry count.
-/// Backend-agnostic — works for JSONL and SQLite sessions alike; the archive
-/// format itself stays JSONL so old archives and old tooling keep working.
+/// Backend-agnostic — renders from any `SessionStorage`; the archive transcript
+/// stays JSONL so existing archives and tooling keep working.
 async fn render_session_jsonl(
     metadata: &serde_json::Value,
     session: &Session,

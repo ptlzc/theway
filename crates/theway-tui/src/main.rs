@@ -1,18 +1,21 @@
-//! theway — coding agent CLI binary (`[[bin]]` of the `theway` crate). Thin assembly layer
-//! on top of the `theway` SDK library; all runtime logic lives in the library so external
-//! projects can embed it in-process. `--http` / `--grpc` dispatch into the `transport::http`
-//! / `transport::grpc` drivers (crate `server` feature). The bin target requires features
-//! `tui` + `server`, so both are compile-time constants here.
+//! theway — coding agent TUI client binary (bin `theway` of the `theway-tui` crate).
 //!
-//! Modeled on `packages/coding-agent/` (the TS implementation) in spirit: same tools
-//! (`read`/`write`/`edit`/`bash`/`ls`/`grep`/`find` + `memory`), same `--resume` semantics
-//! scoped by cwd hash, same "interactive TUI" mode, dual-root skills loader (project ↻ user).
-//! Trimmed scope: no extensions, no themes, no print/rpc/json modes.
+//! Pure client of the `thewayd` daemon kernel: on startup it reuses a running daemon
+//! (per-cwd discovery file or default port) or spawns `thewayd` in the current
+//! directory and waits for readiness, then runs the ratatui REPL against the transport
+//! client. The agent runtime (harness, session, tools, triggers) lives in the daemon;
+//! this crate links `theway-transport` / `theway-core` / `theway-storage` and never the
+//! daemon kernel.
+//!
+//! Offline session maintenance is the exception: `session export|import` and the
+//! standalone session queries (`--list-sessions`, `--list-all-sessions`,
+//! `--delete-session`) open the local SQLite session repo directly, without the daemon.
 //!
 //! The bin entry is split into submodule directories: [`cli`] (CLI argument types +
 //! standalone session commands), [`startup`] (`run_repl`: daemon discovery/spawn +
-//! connect), and [`ui_mode`] (UI mode resolution + small CLI-level helpers). This file
-//! keeps `fn main` and the CLI command dispatch.
+//! connect), and [`ui`] (the ratatui REPL); feed rendering, local commands, model/resume
+//! pickers, and clipboard image support live in the sibling modules. This file keeps
+//! `fn main` and the CLI command dispatch.
 
 mod cli;
 mod clipboard_image;

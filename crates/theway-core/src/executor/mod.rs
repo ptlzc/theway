@@ -1,13 +1,12 @@
-//! Execution-environment abstraction (openspec change `sdk-split-local-sandbox`,
-//! design decision 1).
+//! Execution-environment abstraction.
 //!
 //! Tool execution is decoupled from the agent runtime: tools are defined against the
 //! [`ToolExecutor`] interface, so the same harness, session, snapshot and command
 //! surfaces run with a **local** executor (local editing mode, the default) or a
 //! **remote sandbox** executor without client-visible changes. The trait lives in
-//! `theway-core` (not the SDK) so tool definitions compile against it directly and
-//! wasm/embedded consumers can provide their own executors; the SDK supplies the
-//! reference `LocalExecutor` and the sandbox stub.
+//! `theway-core` so tool definitions compile against it directly and wasm/embedded
+//! consumers can provide their own executors; the daemon kernel
+//! (`theway-daemon`) supplies the reference `LocalExecutor` and the sandbox stub.
 //!
 //! The trait is a *seam*, not an implementation: core defines no local fs/process
 //! behavior here. All methods are async and the trait is object-safe with
@@ -28,8 +27,8 @@ use async_trait::async_trait;
 /// Execution environment that tools dispatch their effects through.
 ///
 /// Implementations: `LocalExecutor` (local filesystem + process table) and the
-/// sandbox stub (fails with [`ExecutorError::UnsupportedKind`]) in the SDK; tests
-/// and embedded consumers may provide their own.
+/// sandbox stub (fails with [`ExecutorError::UnsupportedKind`]) in the daemon
+/// kernel (`theway-daemon`); tests and embedded consumers may provide their own.
 #[async_trait]
 pub trait ToolExecutor: Send + Sync {
     /// Reports which execution environment this executor dispatches to, so callers

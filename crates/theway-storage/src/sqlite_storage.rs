@@ -1,20 +1,18 @@
 //! SQLite-backed `SessionStorage` (Turso, pure-Rust SQLite).
 //!
-//! Mirrors `jsonl_storage` behaviour exactly — same append-only tree semantics
-//! (entries carry `parent_id`, the leaf is the latest appended entry, `Leaf`
-//! entries move the pointer explicitly) — but persists rows into a Turso
-//! database file instead of a JSONL file. One database file per session
-//! (`<uuid>.db`), with two tables:
+//! Append-only tree semantics (entries carry `parent_id`, the leaf is the latest
+//! appended entry, `Leaf` entries move the pointer explicitly), rows persisted into
+//! a Turso database file. One database file per session (`<uuid>.db`), with two
+//! tables:
 //!
 //! - `meta` (key/value): session header fields (id, created_at, cwd, path,
 //!   parent_session_path, imported_from)
 //! - `entries` (seq, id, parent_id, type, timestamp, payload): one row per
 //!   tree entry; `payload` is the full JSON serialization of the
-//!   `SessionTreeEntry` (identical to one JSONL line)
+//!   `SessionTreeEntry`
 //!
-//! The `seq` column is the append order (AUTOINCREMENT), mirroring JSONL line
-//! order. Reads parse `payload` back into `SessionTreeEntry`, so behaviour is
-//! byte-for-byte compatible with the JSONL backend at the trait surface.
+//! The `seq` column is the append order (AUTOINCREMENT). Reads parse `payload`
+//! back into `SessionTreeEntry`.
 
 use std::path::{Path, PathBuf};
 
@@ -28,8 +26,7 @@ use theway_core::{
 };
 
 /// SQLite-backed session storage. `Connection` is cheap to clone (shared
-/// Arc inside) and all turso operations are `&self` async — the same shape as
-/// the JSONL backend's in-process cache, minus the cache.
+/// Arc inside) and all turso operations are `&self` async.
 pub struct SqliteSessionStorage {
     /// Session file path (the `.db` file).
     path: PathBuf,
@@ -236,9 +233,8 @@ impl SqliteSessionStorage {
         Ok(())
     }
 
-    /// Record import provenance (`.theway-session` archive import), mirroring what
-    /// `rewrite_session_jsonl` does for the JSONL backend: the header gains an
-    /// `importedFrom` entry pointing at the source session. Persists to the `meta`
+    /// Record import provenance (`.theway-session` archive import): the header gains
+    /// an `importedFrom` entry pointing at the source session. Persists to the `meta`
     /// table; `None` clears the field.
     pub async fn set_import_origin(
         &self,
@@ -413,8 +409,7 @@ impl SessionStorage for SqliteSessionStorage {
     }
 
     async fn set_leaf_id(&self, id: Option<String>) -> Result<(), SessionError> {
-        // Record as an explicit `leaf` entry — append-only by design, identical
-        // to the JSONL backend.
+        // Record as an explicit `leaf` entry — append-only by design.
         let entry = SessionTreeEntry::Leaf {
             id: uuidv7(),
             parent_id: self.current_leaf().await?,
@@ -537,7 +532,7 @@ impl SessionStorage for SqliteSessionStorage {
 
     async fn get_label(&self, id: &str) -> Result<Option<String>, SessionError> {
         // Walk Label entries in append order; latest non-None pointing at `id`
-        // wins (mirrors jsonl_storage / memory_storage).
+        // wins (same semantics as memory_storage).
         let conn = self.conn().await?;
         let mut rows = conn
             .query(

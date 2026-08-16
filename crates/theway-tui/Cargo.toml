@@ -1,12 +1,13 @@
 [package]
 name = "theway-tui"
-version = "0.75.0"
-edition = "2024"
-rust-version = "1.85"
-description = "theway CLI binary — REPL/TUI + session commands on top of the theway SDK library (crates/theway-sdk)."
-license = "MIT"
-repository = "https://github.com/ptlzc/theway"
-authors = ["theway contributors"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "theway CLI binary — ratatui REPL/TUI client of the thewayd daemon + offline session commands; depends on theway-transport/core/storage, never on the daemon kernel."
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
 
 [[bin]]
 name = "theway"

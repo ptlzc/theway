@@ -276,7 +276,7 @@ impl TriggerExecutor {
     /// completes (or is cancelled).
     ///
     /// **Known limitation in sub-PR 5a**: the sub-agent's session is in-memory and
-    /// discarded when the task finishes. Per the issue #20 amendment, jsonl-backed retained
+    /// discarded when the task finishes. Per the issue #20 amendment, persisted retained
     /// branches (so `theway --resume <trace_id>` can replay sub-agent transcripts for
     /// archaeology) is a sub-PR 5c follow-up. `trigger_result.summary` is preserved; the
     /// full sub-agent transcript is not.

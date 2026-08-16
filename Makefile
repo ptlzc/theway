@@ -20,7 +20,7 @@ help: ## show this help
 # --- build ------------------------------------------------------------------
 
 .PHONY: build
-build: ## cargo build --workspace (full CLI; SDK-only consumers use -p theway)
+build: ## cargo build --workspace (full CLI; daemon-only consumers use -p theway-daemon)
 	$(CARGO) build --workspace --target-dir $(OUTPUT_DIR)
 	cp $(THEWAY_BINARY) $(dir $(THEWAY_BINARY))tw$(EXE)
 

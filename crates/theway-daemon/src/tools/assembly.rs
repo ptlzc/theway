@@ -1,11 +1,10 @@
 //! `assembly` — engine-side tool assembly for the harness-runtime tools.
 //!
-//! Mirrors the app-layer assembly in the `theway` server crate, but for the tools the
-//! ENGINE itself owns: DAG orchestration (`dag_*`), the `subagent` delegation tool, the
-//! skill family (skill / install / builder / state / remove), and memory. These are
-//! runtime capabilities — they do not depend on the execution environment — so the
-//! engine knows how to wire them. The app layer only supplies its local-execution tools
-//! (bash / fs / git / grep / web) as a factory.
+//! The tools the ENGINE itself owns: DAG orchestration (`dag_*`), the `subagent`
+//! delegation tool, the skill family (skill / install / builder / state / remove), and
+//! memory. These are runtime capabilities — they do not depend on the execution
+//! environment — so the engine knows how to wire them. The local-execution tools
+//! (bash / fs / git / grep / web) are supplied alongside as a factory.
 //!
 //! Tool-set policy:
 //! - Main agent: [`engine_tools`] (everything the engine owns: dag_*, subagent, skills,

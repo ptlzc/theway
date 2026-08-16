@@ -1,12 +1,13 @@
 [package]
 name = "theway-contract"
-version = "0.75.0"
-edition = "2024"
-rust-version = "1.85"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description = "theway shared contract — pure leaf crate holding cross-crate data models (session-scoped trigger sidecar models) and the base-dir/path layout contract. No engine, no protocol, no runtime; never depends on core/llm/transport/storage."
-license = "MIT"
-repository = "https://github.com/ptlzc/theway"
-authors = ["theway contributors"]
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

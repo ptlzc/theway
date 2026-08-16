@@ -1,9 +1,10 @@
-//! Local browser HTTP transport for the coding-agent REPL (`--http` mode).
+//! Local browser HTTP transport (`--http` mode).
 //!
-//! This is intentionally a small loopback-only surface. The browser layer sends commands into the
-//! single-turn event loop owned by [`crate::ui::App`] (`run_transport_loop`) and receives full
-//! feed snapshots over SSE. The protocol model it serializes lives in [`crate::wire`]; the
-//! channels/state bridging the two crates come from [`crate::ui::web_loop::TransportEndpoints`].
+//! This is intentionally a small loopback-only surface. The browser layer sends commands into
+//! the serialized transport event loop (a [`crate::host::TransportHost`] implementation) and
+//! receives full feed snapshots over SSE. The protocol model it serializes lives in
+//! [`crate::wire`]; the channels/state bridging the two sides come from
+//! [`crate::transport::TransportEndpoints`].
 
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};

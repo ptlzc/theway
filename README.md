@@ -21,7 +21,7 @@ only what's new instead of the whole conversation every turn.
 ## Install / build
 
 ```bash
-git clone https://github.com/c4pt0r/theway.git
+git clone https://github.com/ptlzc/theway.git
 cd theway
 cargo build --release
 ```
@@ -121,9 +121,9 @@ with `/cost`.
 
 `theway` is a **pure client**: it connects to the `thewayd` daemon, which owns the
 agent runtime (harness, session, tools, triggers). The client/daemon split mirrors
-the crate layout — the TUI depends on the `theway` SDK crate only, never on the
-daemon runtime; see [Workspace layout](#workspace-layout) and
-[docs/architecture.md](docs/architecture.md). On startup the TUI reuses a
+the crate layout — the TUI links `theway-transport` / `theway-core` /
+`theway-storage`, never the daemon kernel; see [Workspace layout](#workspace-layout)
+and [docs/architecture.md](docs/architecture.md). On startup the TUI reuses a
 running daemon (discovered via `~/.theway/daemon-port-<cwd-hash>` or the default
 port `44777`), or spawns `thewayd` in the current directory and waits for
 readiness.
@@ -133,7 +133,7 @@ with `Ctrl-C` / `SIGTERM`, or start it explicitly:
 ```bash
 # Start the daemon yourself (same flags as the TUI: --provider/--model/--cwd/...)
 ./target/release/thewayd --cwd /path/to/project
-./target/release/thewayd --port 0        # random port, published to ~/.theway/daemon-port
+./target/release/thewayd --port 0        # random port, published to the per-cwd ~/.theway/daemon-port-<cwd-hash>
 ./target/release/thewayd --http          # HTTP/WS surface (workmate) instead of gRPC
 ```
 
@@ -223,7 +223,7 @@ The agent has tools for common coding workflows:
 - run shell commands
 - manage persistent memory
 - delegate focused sub-tasks
-- resume JSONL-backed sessions per project
+- resume SQLite-backed sessions per project
 - attach images to the first prompt with `--image`
 - create session-scoped natural-language triggers that run actions when local checks or MCP
   push events match
@@ -337,16 +337,17 @@ By default, `theway` stores local state under `~/.theway`:
 
 | Path | What |
 |------|------|
-| `~/.theway/sessions/<cwd-hash>/<uuidv7>.jsonl` | Session history for each project |
+| `~/.theway/sessions/<cwd-hash>/<uuidv7>.db` | Session history for each project — one SQLite database per session |
 | `~/.theway/memory/*.md` | Cross-session memory injected into future sessions |
 | `~/.theway/auth.json` | Stored API keys from `/login` |
 | `~/.theway/models.json` | User-global local/custom model definitions |
 | `~/.theway/history` | Prompt history |
 | `~/.theway/mcp.toml` | User-global MCP server config; project config may live at `<repo>/.theway/mcp.toml` |
 | `~/.theway/hooks.toml` | Optional command/webhook hooks |
-| `~/.theway/sessions/<cwd-hash>/<uuidv7>.triggers.json` | Session-scoped dynamic trigger rules |
-| `~/.theway/sessions/<cwd-hash>/<uuidv7>.cron.toml` | Session-scoped cron jobs |
-| `~/.theway/sessions/<cwd-hash>/<uuidv7>.loop-<job-id>.md` | Loop state kept by a stateful cron job |
+| `~/.theway/sessions/<cwd-hash>/<uuidv7>.triggers.json` | Session-scoped dynamic trigger rules (same stem as the session `.db`) |
+| `~/.theway/sessions/<cwd-hash>/<uuidv7>.cron.toml` | Session-scoped cron jobs (same stem as the session `.db`) |
+| `~/.theway/sessions/<cwd-hash>/<uuidv7>.loop-<job-id>.md` | Loop state kept by a stateful cron job (same stem as the session `.db`) |
+| `~/.theway/sessions/<cwd-hash>/<uuidv7>.endpoints.json` | Session-scoped endpoint bindings (same stem as the session `.db`) |
 | `~/.theway/inbox.jsonl` | Global triage inbox written by stateful loops |
 | `~/.theway/daemon-port-<cwd-hash>` | Port + pid the running `thewayd` bound for that cwd (written on bind; clients discover the daemon here) |
 | `~/.theway/config.toml` | Optional user config, including trigger poll interval and TUI scrollback (`[tui] max_feed_lines`) |
@@ -357,22 +358,36 @@ Set `THEWAY_DIR` to use a different base directory.
 
 | Crate | Package | What |
 |-------|---------|------|
-| `crates/theway-sdk` | `theway` | Client SDK — layered by execution environment: `common/` (session/config/feed types + slash-command framework), `local/` (`LocalExecutor`, session repos, auth, history, images, mentions, local commands), `sandbox/` (remote-sandbox executor seam, stub for now). The TUI and external embedders depend on this crate. |
-| `crates/theway-daemon` | `theway-daemon` | Headless daemon runtime (bin `thewayd`): harness assembly, local tool bodies bound to the `ToolExecutor` trait, trigger engine, skills/templates, MCP loader, LSP supervisor. Consumes the `theway` SDK for the client-facing surface. |
-| `crates/theway-tui` | `theway-tui` | Terminal UI (the `theway` CLI binary) — a pure client of the daemon; depends on the SDK only, so its dependency graph contains no daemon runtime code. |
-| `crates/theway-core` | `theway-core` | Agent engine: bare `Agent` + loop, runtime/harness extras, engine tools (DAG/subagents/memory/MCP), and the `ToolExecutor` trait (`theway_core::executor`). |
+| `crates/theway-core` | `theway-core` | Core interface + agent runtime: bare `Agent` + loop, `AgentHarness` (skills, sessions, compaction, permission policy), session storage contracts, multiagent DAG engine machinery, and the `ToolExecutor` trait (`theway_core::executor`). |
+| `crates/theway-daemon` | `theway-daemon` | The single kernel (bin `thewayd`): harness assembly, all tool bodies, the local/sandbox executor policy (fail-closed in sandbox-only builds), trigger/cron runtime, session lifecycle, DAG persistence, skills/templates, MCP/LSP wiring, and the transport servers. |
+| `crates/theway-transport` | `theway-transport` | Protocol layer: wire model + gRPC / HTTP / WebSocket / MCP transports, plus the shared client-contract modules (auth, commands, config, feed, history, images, mentions, triggers). |
+| `crates/theway-tui` | `theway-tui` | Terminal UI (the `theway` CLI binary) — a pure client of the daemon; links `theway-transport` / `theway-core` / `theway-storage`, so its dependency graph contains no daemon kernel code. Offline exception: `session export/import` and the standalone session queries open the local SQLite repo directly. |
+| `crates/theway-contract` | `theway-contract` | Shared contract leaf crate: session-scoped trigger/cron sidecar models and the `~/.theway` base-dir / cwd-hash path layout. No engine, no protocol, no runtime. |
+| `crates/theway-storage` | `theway-storage` | Session storage: one SQLite database per session (`<uuidv7>.db`), session archive export/import, DAG run persistence. Depends on `theway-core` + `theway-contract` only — never on the transport stack. |
 | `crates/theway-llm-provider` | `theway-llm-provider` | Unified streaming LLM client and provider integrations. |
-| `crates/theway-storage` | `theway-storage` | Session storage (hybrid JSONL + SQLite repositories). |
-| `crates/theway-transport` | `theway-transport` | Wire surfaces served by the daemon (gRPC / HTTP). |
 | `crates/theway-mcp` | `theway-mcp` | Minimal MCP client (stdio transport, JSON-RPC framing). |
 | `crates/mermaid-parser` | `mermaid-rs-parser` | Vendored mermaid parser for DAG specs. |
 
-Tool effects flow through the `ToolExecutor` trait: the daemon assembles with the
-SDK's `LocalExecutor` (local editing mode, today); the SDK's `sandbox/` layer is
-the seam for a future remote-sandbox mode (e2b) — swapping the executor swaps the
-execution environment without touching the client, harness, or wire model. See
-[docs/architecture.md](docs/architecture.md) for the full layout, path-compat
-notes, and command layering.
+The TUI renders assistant output through the Grok Build ports
+(`theway-markdown`, `theway-pager-render`, `theway-ratatui-textarea`).
+
+Tool effects flow through the `ToolExecutor` trait. The daemon kernel is the
+single execution authority: in `local` builds (default) the file-content and
+git tools dispatch through the local executor, while the direct-OS tools
+(`bash`, the `exec` shell family, `ls`, `grep`, `find`) run against the host;
+in `sandbox`-only builds those direct-OS tools are dropped from the tool set
+(fail closed, with an explicit warning), and the executor-backed tools answer
+through the sandbox seam. See
+[docs/architecture.md](docs/architecture.md) for the full three-layer layout,
+the tool policy matrix, and the storage contract.
+
+**Versioning**: the runtime crates (`theway-core`, `theway-daemon`,
+`theway-tui`, `theway-transport`, `theway-storage`, `theway-contract`,
+`theway-mcp`, `theway-llm-provider`, `theway-probe`, `tests-bridge-macro`)
+release together at the workspace version. The vendored/port crates keep
+independent versions and licenses: `mermaid-rs-parser` (vendored upstream,
+MIT) and the Grok Build ports `theway-markdown`, `theway-markdown-core`,
+`theway-pager-render`, `theway-ratatui-textarea` (Apache-2.0).
 
 ## Development
 

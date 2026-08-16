@@ -1,5 +1,4 @@
-//! Conversation-feed model (daemon-kernel-layers: moved from the SDK into
-//! transport — the feed is part of the client contract).
+//! Conversation-feed model — the feed is part of the client contract.
 //!
 //! The feed is the scrolling region above the pinned input box. It is an ordered list of
 //! [`Block`]s — user prompts, assistant text, thinking, tool calls/results, and assorted

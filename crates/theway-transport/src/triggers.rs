@@ -1,6 +1,6 @@
 //! shared client contract (not protocol) — zone per the crate-level "Module zones" doc.
-//! Session-scoped automation data models (daemon-kernel-layers: moved from the
-//! SDK into transport — trigger rules cross the wire, so they are contract).
+//! Session-scoped automation data models — trigger rules cross the wire, so
+//! they are contract.
 //!
 //! Issue #64: the models themselves now live in the pure leaf crate
 //! `theway-contract` (`theway_contract::triggers`) so `theway-storage` can

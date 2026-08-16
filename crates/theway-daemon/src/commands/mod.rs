@@ -1,25 +1,24 @@
 //! Slash-command registry — daemon layer.
 //!
 //! The command framework (Registry / SlashCommand / CommandOutcome / CommandCtx, console
-//! sink, `parse`, pure helpers) and the local command set (quit/clear/help/login/logout/
-//! sessions) live in the `theway` SDK (sdk-split-local-sandbox, node 5-commands-layer);
-//! this module keeps the daemon-side surface:
+//! sink, `parse`, pure helpers) lives in `theway_transport::commands` (the shared
+//! client-contract zone); command implementations live with their owners — the client-local
+//! set (quit/clear/help + interactive login) in `theway-tui`, the runtime set here. This
+//! module keeps the daemon-side surface:
 //!
-//! - re-exports of the SDK framework so existing `crate::commands::…` /
+//! - re-exports of the shared framework so existing `crate::commands::…` /
 //!   `theway_daemon::commands::…` paths keep resolving (readline, tests);
-//! - [`DaemonCtx`] — the daemon-only context extras carried by the SDK's generic
+//! - [`DaemonCtx`] — the daemon-only context extras carried by the framework's generic
 //!   `CommandCtx<'_, DaemonCtx>` (the trigger executor handle);
 //! - the daemon command implementations in submodules: [`skills`] / [`skill_cmd`] (skill
 //!   management), [`model`] (`/model`, `/thinking`, `/cost` + model-catalog help), [`goal`]
 //!   (`/goal`, `/goal-start`), [`session`] (session lifecycle), [`triggers`] (automation),
 //!   and [`misc`] (everything else); all implement `SlashCommand<DaemonCtx>`;
-//! - the [`Registry`] wrapper over the SDK's generic registry with
-//!   [`Registry::with_daemon_commands`]: starts from the SDK local command set
-//!   (`Registry::<DaemonCtx>::local()` — local commands implement `SlashCommand<X>` for
-//!   every extras type, so they register unchanged) and appends the daemon runtime
-//!   commands;
-//! - [`dispatch`], which converts the daemon-shaped [`CommandCtx`] into the SDK's generic
-//!   context (extras = [`DaemonCtx`]) and routes `/help` + skill shortcuts.
+//! - the [`Registry`] wrapper over the shared framework's generic registry with
+//!   [`Registry::with_daemon_commands`]: registers the daemon runtime command set
+//!   (the TUI keeps its own client-local set in `theway-tui`);
+//! - [`dispatch`], which converts the daemon-shaped [`CommandCtx`] into the framework's
+//!   generic context (extras = [`DaemonCtx`]) and routes `/help` + skill shortcuts.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -34,14 +33,14 @@ use theway_core::{AgentHarness, AgentTool, SessionTreeEntry, Skill, SkillSource,
 use theway_llm_provider::{Model, Provider, UserContentBlock, get_model};
 use tokio_util::sync::CancellationToken;
 
-// Framework moved to the SDK (node 5-commands-layer). Re-exported so existing
+// Framework lives in the transport crate's shared zone. Re-exported so existing
 // `commands::…` call sites (ui, main, readline, model_picker, tests) keep their paths.
-// The allow keeps the pre-split `commands::…` paths alive in the path-included e2e test
+// The allow keeps the `commands::…` paths alive in the path-included e2e test
 // crate, where this module is private and some re-exports have no in-tree user.
 #[allow(unused_imports)]
 pub use theway_transport::auth::{model_credential_hint, save_api_key};
-/// The SDK's console sink is the single process-wide output sink: daemon commands route
-//  through it too (see the `cprintln!` macro below).
+/// The shared framework's console sink is the single process-wide output sink: daemon
+//  commands route through it too (see the `cprintln!` macro below).
 pub use theway_transport::commands::console;
 pub use theway_transport::commands::{
     CommandOutcome, SlashCommand, WebRelayAction, attach_skill_prompt, cli_model_help_text, parse,
@@ -49,7 +48,7 @@ pub use theway_transport::commands::{
 };
 
 /// Drop-in replacement for `println!` inside this module: same call syntax, but the formatted
-/// line is routed through the (SDK-owned, process-wide) [`console::emit_line`] instead of
+/// line is routed through the (shared-framework, process-wide) [`console::emit_line`] instead of
 /// straight to stdout. Defined before the command submodules so they see it.
 macro_rules! cprintln {
     () => { $crate::commands::console::emit_line(String::new()) };
@@ -77,8 +76,8 @@ pub use misc::print_help;
 #[allow(unused_imports)]
 pub(crate) use triggers::{render_cron_jobs, render_dynamic_trigger_rules, render_triggers_status};
 
-// Daemon command implementations registered by `Registry::with_daemon_commands` (the local
-// set comes from `theway_transport::commands::Registry::<DaemonCtx>::local()`).
+// Daemon command implementations registered by `Registry::with_daemon_commands` (the
+// client-local set lives in the TUI crate's `local_commands`).
 use goal::{GoalCommand, GoalStartCommand};
 use misc::{
     BugReportCommand, CompactCommand, DiagCommand, FindCommand, HistoryCommand, TemplateCommand,
@@ -120,8 +119,8 @@ pub struct CommandCtx<'a> {
     pub cwd: &'a std::path::Path,
 }
 
-/// Daemon-only context extras handed to command implementations through the SDK
-/// framework's generic `CommandCtx::extra` slot (sdk-split-local-sandbox, node 6).
+/// Daemon-only context extras handed to command implementations through the shared
+/// framework's generic `CommandCtx::extra` slot.
 /// Local commands implement `SlashCommand<X>` for every `X` and ignore it; the daemon
 /// runtime commands read the handles they need here instead of reaching for globals.
 pub struct DaemonCtx {
@@ -130,11 +129,11 @@ pub struct DaemonCtx {
     pub trigger_executor: Arc<TriggerExecutor>,
 }
 
-/// Slash-command registry: the SDK's generic registry parameterized by the daemon's
+/// Slash-command registry: the shared framework's generic registry parameterized by the daemon's
 /// [`DaemonCtx`] extras, plus the daemon assembly entry point
 /// ([`Registry::with_daemon_commands`]). Thin wrapper so the daemon can keep its concrete
-/// `Registry` type in the assembly layer while the SDK's constructors only know the local
-/// command set.
+/// `Registry` type in the assembly layer while the shared framework's constructors only
+/// know the local command set.
 pub struct Registry {
     inner: theway_transport::commands::Registry<DaemonCtx>,
     /// Claude-code-format file commands scanned from disk (issue #37); the
@@ -192,9 +191,8 @@ impl Registry {
         r
     }
 
-    /// Compatibility alias for [`Registry::with_daemon_commands`] — the pre-split name,
-    /// still used by the TUI (which switches to the SDK's `Registry::local()` in
-    /// node 9-tui-boundary) and the command e2e suites.
+    /// Compatibility alias for [`Registry::with_daemon_commands`], kept for the command
+    /// e2e suites.
     pub fn with_builtins() -> Self {
         Self::with_daemon_commands()
     }

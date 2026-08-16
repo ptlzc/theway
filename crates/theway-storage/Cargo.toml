@@ -1,12 +1,13 @@
 [package]
 name = "theway-storage"
-version = "0.75.0"
-edition = "2024"
-rust-version = "1.85"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description = "theway storage backends — concrete SessionStorage / DAG-persist implementations (SQLite via Turso) for theway-core contracts."
-license = "MIT"
-repository = "https://github.com/ptlzc/theway"
-authors = ["theway contributors"]
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
 
 [dependencies]
 # Engine contracts + types come from theway-core; this crate only implements

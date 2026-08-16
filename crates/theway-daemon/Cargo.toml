@@ -1,11 +1,13 @@
 [package]
 name = "theway-daemon"
-version = "0.75.0"
-edition = "2024"
-rust-version = "1.85"
-description = "theway daemon — headless agent runtime server (bin `thewayd`): harness assembly, local tools, triggers/cron, skills, MCP/LSP wiring, DAG engine persistence, gRPC/HTTP/MCP transports. Consumes the `theway` SDK for the client-facing surface (session/config/auth/commands); terminal UI lives in the theway-tui crate."
-license = "MIT"
-authors = ["theway contributors"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "theway daemon — the single agent-runtime kernel (bin `thewayd`): harness assembly, local/sandbox tool policy, triggers/cron/session/DAG runtime, skills, MCP/LSP wiring, serving the gRPC/HTTP/MCP transports from theway-transport. Terminal UI lives in the theway-tui crate."
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
 
 [lib]
 name = "theway_daemon"
@@ -52,8 +54,7 @@ tree-sitter-python = "0.25"
 tree-sitter-rust = "0.24"
 tree-sitter-go = "0.25"
 
-# Transport server stack (feature `server`, consolidated transport stack).
-
+# Config readers + session-scoped sidecar formats (trigger/cron/skill files).
 toml = "0.8"
 futures = "0.3"
 async-trait = "0.1"

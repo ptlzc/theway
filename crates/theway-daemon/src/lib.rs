@@ -1,15 +1,17 @@
-//! theway-daemon — the headless agent runtime server.
+//! theway-daemon — the headless agent runtime kernel.
 //!
-//! Runtime-only half of the theway agent: harness assembly (`app`), local tools,
-//! trigger engine + source adapters, skills/templates loading, MCP client wiring,
-//! LSP supervisor, DAG persistence, and the `thewayd` binary (`src/bin/thewayd.rs`)
-//! serving gRPC / HTTP / MCP transports. The client-facing surface (session,
-//! config, auth, history, slash-command framework) lives in the `theway` SDK
-//! crate (`crates/theway-sdk`); the terminal UI lives in `theway-tui`; the wire
-//! protocol servers live in `theway-transport`.
+//! The single kernel of the theway agent: harness assembly, the executor
+//! implementations (`local` / `sandbox` features) and all tool bodies with the
+//! fail-closed sandbox tool gating, trigger engine + source adapters, cron
+//! scheduler, session lifecycle, skills/templates loading, MCP client wiring,
+//! LSP supervisor, DAG persistence, and the `thewayd` binary
+//! (`src/bin/thewayd.rs`) serving the gRPC / HTTP / MCP transports. The shared
+//! client-contract modules (auth, config, history, mentions, slash-command
+//! framework) live in `theway-transport`; session storage and archives live in
+//! `theway-storage`; the terminal UI lives in `theway-tui`.
 //!
-//! The daemon depends on the SDK (`theway`) and adds the runtime-only modules on
-//! top; clients embed the SDK, not this crate.
+//! The daemon is the runtime kernel; the TUI and other clients connect to it
+//! over the transports and never link this crate.
 
 //! Self-alias so `#[path]`-included src modules (integration tests) and lib code
 //! share one absolute path shape: `theway_daemon::tools`, `theway_daemon::...`
@@ -40,12 +42,13 @@ pub mod mcp_loader;
 pub mod model;
 pub mod otlp;
 pub mod turn;
-// SDK surface re-exported for `crate::…` paths used inside this crate (bridged
-// unit tests reach `crate::auth` etc. through these; clients use the `theway`
-// SDK directly and don't need the forwarding).
+// Shared client-contract surface re-exported for `crate::…` paths used inside
+// this crate (bridged unit tests reach `crate::auth` etc. through these;
+// external clients use `theway-transport` directly and don't need the
+// forwarding).
 pub use theway_transport::{auth, config, history, mentions};
-// Session archive export/import lives in the SDK; re-exported because daemon
-// modules reach it through `crate::session_archive` paths.
+// Session archive export/import lives in theway-storage; re-exported because
+// daemon modules reach it through `crate::session_archive` paths.
 pub use theway_storage::session_archive;
 pub mod session_ops;
 pub mod skills;
@@ -55,9 +58,9 @@ pub mod system_prompt;
 // Skill enable/disable overlay lives in the daemon kernel next to the builtin
 // tools that consume it (`SetSkillState` / `RemoveSkill`, `/skills enable|disable`).
 pub mod skill_overrides;
-// Session repo used by the assembly layer: hybrid JSONL+SQLite, new sessions
-// minted as SQLite. Re-exported from the composition root so binaries don't need to
-// depend on theway-storage directly.
+// Session repo used by the assembly layer: one SQLite database per session
+// (`<uuidv7>.db`). Re-exported from the composition root so binaries don't need
+// to depend on theway-storage directly.
 pub use theway_storage::sqlite_repo::SqliteSessionRepo;
 pub mod templates;
 pub mod tools;

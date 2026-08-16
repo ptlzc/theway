@@ -18,8 +18,15 @@ members = [
     "crates/theway-pager-render",
 ]
 
+# Version policy: the runtime crates (theway-core, theway-daemon, theway-tui,
+# theway-transport, theway-storage, theway-contract, theway-mcp,
+# theway-llm-provider, theway-probe, tests-bridge-macro) release together and
+# inherit this version. Vendored/port crates keep independent versions and
+# licenses: `mermaid-rs-parser` (vendored upstream, MIT) and the Grok Build
+# ports (`theway-markdown`, `theway-markdown-core`, `theway-pager-render`,
+# `theway-ratatui-textarea`, Apache-2.0).
 [workspace.package]
-version = "0.1.0"
+version = "0.75.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"

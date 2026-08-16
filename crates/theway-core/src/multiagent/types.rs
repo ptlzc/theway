@@ -3,7 +3,7 @@
 //! The engine provides the subagent CAPABILITY (shared runner, DAG node launcher,
 //! `subagent` tool); it does not define what a "spec" is. The spec concept — its
 //! structure, the table of built-in specs, their system prompts — is app-layer
-//! content (the `theway` server crate, `crate::agent_specs`). The only thing the
+//! content (the daemon kernel, `theway_daemon::agent_specs`). The only thing the
 //! engine needs at launch time is the resolved launch parameters: name, description,
 //! system prompt, iteration budget. The app resolves its spec table into these via
 //! the injected [`AgentRunResolver`] (same pattern as the tool-set resolver).

@@ -289,7 +289,7 @@ pub(super) async fn run_trigger_action(
     // list, and hooks. That means model-facing skill catalog text and the live Skill tool
     // remain available to trigger actions, but parent conversation messages are not copied
     // into the trigger run. In sub-PR 5a the sub-agent transcript lives in memory only and
-    // is discarded when this task finishes. Per the issue #20 amendment, jsonl-backed
+    // is discarded when this task finishes. Per the issue #20 amendment, persisted
     // retained branches land in sub-PR 5c. The `trigger_result.summary` we persist to the
     // parent session is the only durable record of what the sub-agent produced in 5a.
     let sub_storage: Arc<dyn theway_core::agent::session::session::SessionStorage> =

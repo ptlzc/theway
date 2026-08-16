@@ -1,6 +1,6 @@
-//! SQLite-backed `SessionRepo` (Turso). Mirrors `jsonl_repo` — same directory
-//! layout (`<sessions-dir>/<cwd-hash>/<uuid>.db`), same create/open/list/delete
-//! surface, one Turso database file per session.
+//! SQLite-backed `SessionRepo` (Turso): directory layout
+//! `<sessions-dir>/<cwd-hash>/<uuid>.db`, create/open/list/delete surface, one
+//! Turso database file per session.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

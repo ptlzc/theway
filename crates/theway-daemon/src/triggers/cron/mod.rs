@@ -42,7 +42,7 @@ use errors::CronExpression;
 // daemon-side schedule helpers.
 pub use theway_contract::triggers::CronJob;
 
-/// Daemon-side schedule helpers on the SDK `CronJob` data model.
+/// Daemon-side schedule helpers on the shared `CronJob` data model (`theway-contract`).
 pub trait CronJobExt {
     fn next_run_after(&self, after: DateTime<Utc>) -> Option<DateTime<Utc>>;
 }

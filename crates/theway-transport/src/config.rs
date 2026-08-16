@@ -1,6 +1,5 @@
 //! shared client contract (not protocol) — zone per the crate-level "Module zones" doc.
-//! Paths and identity (daemon-kernel-layers: moved from the SDK into transport —
-//! the config surface is shared client contract).
+//! Paths and identity — the config surface is shared client contract.
 //!
 //! Issue #64: the base-dir / cwd-hash path contract itself lives in the pure
 //! leaf crate `theway-contract` (`theway_contract::config`); the re-exports

@@ -2,10 +2,11 @@
 
 ## Purpose
 
-分层收敛为三级:core 只定义 interface 与 engine runtime;daemon 是唯一
-内核(全部工具/executor/运行时数据实现,local|sandbox 双 feature);
-transport 是唯一客户端契约(wire + client + 共享模型);sdk 溶解删除,
-{tui,web} 直连 transport。
+分层收敛为 core / daemon / transport 三级,并抽出一个无 workspace 依赖的
+theway-contract 叶子 crate:core 只定义 interface 与 agent runtime;daemon
+是唯一内核(全部工具/executor/运行时数据实现,local|sandbox 双 feature);
+transport 承载 wire 协议与客户端契约;contract 承载跨层纯数据模型与路径
+布局。sdk 溶解删除,{tui,web} 直连 transport。
 
 ## ADDED Requirements
 
@@ -39,13 +40,32 @@ NativeEnv 实现与运行时数据,并按 local / sandbox 两个 feature 构建�
 
 #### Scenario: Sandbox feature
 - **WHEN** daemon 以 `sandbox` feature 构建(不带 local)
-- **THEN** 工具注入 sandbox executor(stub 显式报 unsupported),
-  组合根不触碰 OS 文件系统;未来接 gRPC executor 时工具本体零改动
+- **THEN** executor-backed 工具注入 sandbox executor(stub 显式报 unsupported);
+  绕过 ToolExecutor 且直接触碰本机 FS/进程表的模型工具不注册并输出 warn;
+  未来接 gRPC executor 时 executor-backed 工具本体零改动
 
 #### Scenario: Single source of process-group kill semantics
 - **WHEN** bash 工具、exec_shell 家族、native env 或 hook 命令执行器需要整树 kill
 - **THEN** 四处共享 daemon 内同一份 setsid/killpg 原语,core 无副本
   (hooks 经注入的命令执行器消费同一原语)
+
+### Requirement: Contract is the pure shared leaf
+
+theway-contract 是无 workspace 依赖的叶子 crate,承载 session 自动化
+sidecar 数据模型与 base-dir/cwd-hash 路径布局;transport 可 re-export 其公共路径,storage/daemon/tui 不得各自复制路径解析规则。
+
+#### Scenario: Trigger model lookup
+- **WHEN** storage 归档 sidecar 或 transport wire 需要 CronJob/DynamicTriggerRule
+- **THEN** 数据模型定义在 theway-contract,transport 只保留兼容 re-export
+
+#### Scenario: Base directory lookup
+- **WHEN** 任何 crate 需要 `${THEWAY_DIR:-~/.theway}` 或 sessions/cwd-hash 布局
+- **THEN** 调用 theway-contract::config 的单一实现,不得内联第二份解析逻辑
+
+#### Scenario: Storage dependency boundary
+- **WHEN** 查看 theway-storage 的 normal 依赖树
+- **THEN** 它依赖 theway-core 与 theway-contract,不依赖 theway-transport,
+  也不引入 axum/tonic/rmcp/tokio-tungstenite 协议栈
 
 ### Requirement: Transport is the sole client contract
 
@@ -56,8 +76,9 @@ daemon 亦不依赖任何客户端 crate。
 
 #### Scenario: Client dependency surface
 - **WHEN** tui 或未来的 web 客户端连接 daemon
-- **THEN** 客户端只依赖 theway-transport(与 core 共享类型),
-  不依赖 theway-daemon
+- **THEN** 协议操作只经 theway-transport(与 core 共享类型),
+  不依赖 theway-daemon;tui 仅 offline session maintenance 可直接使用
+  theway-storage
 
 #### Scenario: Feed model home
 - **WHEN** daemon 生成会话快照、tui 渲染会话
@@ -75,8 +96,13 @@ daemon(运行时数据/实现)、transport(契约/模型)或 tui(客户端本地
 
 #### Scenario: Offline commands split
 - **WHEN** 用户在 tui 输入 quit / clear / help
-- **THEN** 命令由 tui 本地处理;login / logout / sessions 作为
-  daemon 命令经 gRPC 执行
+- **THEN** 命令由 tui 本地处理
+- **WHEN** 用户输入 /sessions 或 /logout
+- **THEN** 命令经 daemon gRPC 执行
+- **WHEN** 用户输入 /login
+- **THEN** TTY 密码提示在 tui 处理并写入共享 auth store,daemon 下一 turn 读取
+- **WHEN** 使用 standalone session CLI 且 daemon 已运行
+- **THEN** list/delete 优先走 daemon RPC;无 daemon 时才降级为本地 SQLite 离线路径
 
 ### Requirement: Feature matrix builds
 
@@ -86,7 +112,7 @@ daemon 的 `local` / `sandbox` 两个 feature 的编译矩阵必须可验证:
 
 #### Scenario: CI gate
 - **WHEN** 运行特性矩阵构建
-- **THEN** 三种组合全部成功,sandbox 组合不依赖本地文件系统实现
+- **THEN** 三种组合全部成功,且 sandbox-only 的 direct-OS 工具门控测试通过
 
 ### Requirement: Sandbox builds never degrade silently
 

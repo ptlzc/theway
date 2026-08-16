@@ -1,9 +1,9 @@
 //! Session entry types + `Session` facade. 1:1 port of
 //! `packages/agent/src/harness/session/session.ts` plus the entry types from `harness/types.ts`.
 //!
-//! Append-only jsonl model: every entry is one of [`SessionTreeEntry`]'s tagged variants. The
-//! `Session` struct wraps a [`SessionStorage`] trait object and adds typed `append_*` helpers
-//! plus `build_context` (parent-chain replay).
+//! Append-only entry-tree model: every entry is one of [`SessionTreeEntry`]'s tagged
+//! variants. The `Session` struct wraps a [`SessionStorage`] trait object and adds typed
+//! `append_*` helpers plus `build_context` (parent-chain replay).
 
 use std::sync::Arc;
 
@@ -20,7 +20,7 @@ use super::super::types::{SessionError, SessionErrorCode};
 // Entry types
 // ──────────────────────────────────────────────────────────────────────────────────────────
 
-/// One row in a session jsonl. Tagged by `type`.
+/// One entry in a session's append-only tree. Tagged by `type`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionTreeEntry {

@@ -110,6 +110,6 @@ pub async fn build(diag: DiagInputs, session: &Session, dest: &Path) -> Result<P
     Ok(dest.to_path_buf())
 }
 
-// The secret redactor (`redact`) lives in the `theway` SDK
+// The secret redactor (`redact`) lives in the transport crate's shared zone
 // (`theway_transport::bug_report::redact`) so both the daemon and client crates share one
 // conservative implementation; imported above.

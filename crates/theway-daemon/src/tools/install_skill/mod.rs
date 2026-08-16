@@ -114,16 +114,9 @@ impl InstallSkillTool {
     }
 }
 
-/// Production skills root: `${THEWAY_DIR:-$HOME/.theway}/skills`. Inlined so this module can be
-/// included by integration tests that pull `tools/mod.rs` via `#[path = ...]` and don't have
-/// access to `crate::config`.
+/// Production skills root from the shared base-dir contract.
 pub(crate) fn default_skills_root() -> PathBuf {
-    if let Ok(p) = std::env::var("THEWAY_DIR") {
-        return PathBuf::from(p).join("skills");
-    }
-    directories::BaseDirs::new()
-        .map(|d| d.home_dir().join(".theway").join("skills"))
-        .unwrap_or_else(|| PathBuf::from(".theway").join("skills"))
+    theway_contract::config::base_dir().join("skills")
 }
 
 #[async_trait]

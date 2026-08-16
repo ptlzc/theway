@@ -1,10 +1,13 @@
 [package]
 name = "theway-probe"
-version = "0.1.0"
-edition = "2024"
-rust-version = "1.85"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description = "gRPC serviceability probe for theway --grpc: health check, multi-session, graceful shutdown"
-license = "MIT"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
 
 [[bin]]
 name = "theway-probe"

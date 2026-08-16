@@ -1,12 +1,13 @@
 [package]
 name = "theway-llm-provider"
-version = "0.75.0"
-edition = "2024"
-rust-version = "1.85"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description = "Rust rewrite of the original pi AI client — unified streaming LLM client across Anthropic / OpenAI / Google / Bedrock / Mistral and OpenAI-compatible endpoints."
-license = "MIT"
-repository = "https://github.com/earendil-works/theway"
-authors = ["theway contributors"]
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
 
 [lib]
 name = "theway_llm_provider"

@@ -15,7 +15,7 @@ use super::{CommandOutput, ExecutorError, ExecutorKind, Result, ToolExecutor};
 enum FailMode {
     #[default]
     None,
-    /// Mimic the SDK sandbox stub: reject with an explicit unsupported-kind error.
+    /// Mimic the daemon's sandbox stub: reject with an explicit unsupported-kind error.
     Unsupported,
     /// Mimic an executor-side I/O / process failure.
     Other(String),

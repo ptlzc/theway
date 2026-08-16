@@ -1,12 +1,13 @@
 [package]
 name = "theway-transport"
-version = "0.75.0"
-edition = "2024"
-rust-version = "1.85"
-description = "theway protocol layer — wire model + HTTP/WS/gRPC/MCP transports, independent of the server business logic."
-license = "MIT"
-repository = "https://github.com/ptlzc/theway"
-authors = ["theway contributors"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "theway protocol layer — wire model + HTTP/WS/gRPC/MCP transports, independent of the server business logic, plus the shared client-contract modules (auth/config/feed/history/images/mentions/commands/triggers)."
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
 
 [dependencies]
 theway-contract = { path = "../theway-contract" }

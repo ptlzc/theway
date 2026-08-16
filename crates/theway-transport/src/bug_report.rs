@@ -1,7 +1,6 @@
 //! shared client contract (not protocol) — zone per the crate-level "Module zones" doc.
-//! Bug-report support shared with clients: the secret redactor
-//! (daemon-kernel-layers: moved from the SDK into transport — the TUI applies
-//! it before rendering, the daemon before writing dumps).
+//! Bug-report support shared with clients: the secret redactor — the TUI
+//! applies it before rendering, the daemon before writing dumps.
 //!
 //! Bug reports are the canonical "give me something to attach to an issue"
 //! artifact, so we trade detail for safety: the redactor is conservative —

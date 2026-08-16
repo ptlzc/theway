@@ -4993,7 +4993,7 @@ dependencies = [
 
 [[package]]
 name = "tests-bridge-macro"
-version = "0.1.0"
+version = "0.75.0"
 
 [[package]]
 name = "textwrap"
@@ -5201,7 +5201,7 @@ dependencies = [
 
 [[package]]
 name = "theway-probe"
-version = "0.1.0"
+version = "0.75.0"
 dependencies = [
  "anyhow",
  "clap",

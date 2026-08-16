@@ -6,8 +6,8 @@
 //!
 //! Dependency direction: this module uses the single-agent runtime's public API
 //! and never the reverse. The spec concept and the tool-set policy live app-side
-//! (`theway` crate); model-facing tools live in `crate::tools` (`dag_tools`,
-//! `subagent`).
+//! (the daemon kernel: `agent_specs` + the tool assembly); model-facing tools live
+//! in the daemon's `tools` module (`dag_tools`, `subagent`).
 //!
 //! ## Event plane
 //!

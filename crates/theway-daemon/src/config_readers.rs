@@ -1,6 +1,5 @@
 //! `~/.theway/config.toml` readers used at startup (built-in skills, trigger
-//! poll interval) — daemon-kernel-layers: moved from the SDK; the TUI/CLI
-//! never calls these.
+//! poll interval) — daemon-side only; the TUI/CLI never calls these.
 
 use theway_transport::config::{
     ModelDefault, parse_builtin_skills_config, parse_model_default,
