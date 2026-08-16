@@ -3,7 +3,46 @@
 use super::*;
 use crate::testing::{FakeSessionOps, empty_sidebar_snapshot};
 use crate::wire::WireContextUsage;
+use std::collections::HashMap;
 use std::time::Duration;
+use theway_core::multiagent::registry::{JobTranscript, JobTranscriptStore};
+
+/// In-memory [`JobTranscriptStore`] test double, shared across registry
+/// instances to model durable storage without the daemon's disk-backed store.
+#[derive(Default)]
+struct MemoryTranscriptStore {
+    nodes: Mutex<HashMap<(String, String), Vec<serde_json::Value>>>,
+    jobs: Mutex<HashMap<String, Vec<serde_json::Value>>>,
+}
+
+impl JobTranscriptStore for MemoryTranscriptStore {
+    fn save(&self, transcript: &JobTranscript) {
+        let messages = transcript.messages.to_vec();
+        match (transcript.run_id, transcript.node_id) {
+            (Some(run), Some(node)) => {
+                self.nodes
+                    .lock()
+                    .insert((run.to_string(), node.to_string()), messages);
+            }
+            _ => {
+                self.jobs
+                    .lock()
+                    .insert(transcript.job_id.to_string(), messages);
+            }
+        }
+    }
+
+    fn load_node(&self, run_id: &str, node_id: &str) -> Option<Vec<serde_json::Value>> {
+        self.nodes
+            .lock()
+            .get(&(run_id.to_string(), node_id.to_string()))
+            .cloned()
+    }
+
+    fn load_job(&self, job_id: &str) -> Option<Vec<serde_json::Value>> {
+        self.jobs.lock().get(job_id).cloned()
+    }
+}
 
 fn fixture_snapshot(feed_line: &str) -> WireStatus {
     WireStatus {
@@ -330,11 +369,11 @@ async fn get_node_output_includes_messages_json() {
 }
 
 #[tokio::test]
-async fn get_node_output_recovers_messages_from_disk_after_restart() {
-    let dir = tempfile::tempdir().unwrap();
-    // First process: job runs, finishes, transcript written to disk.
+async fn get_node_output_falls_back_to_transcript_store_after_registry_recreation() {
+    let store = Arc::new(MemoryTranscriptStore::default());
+    // First process: job runs, finishes, transcript handed to the host store.
     let registry = AgentJobRegistry::new();
-    registry.set_messages_dir(Some(dir.path().join("subagent-jobs")));
+    registry.set_transcript_store(Some(store.clone()));
     let job_id = registry.register(theway_core::multiagent::registry::JobInit {
         agent: "explorer".into(),
         source: "dag".into(),
@@ -354,11 +393,9 @@ async fn get_node_output_recovers_messages_from_disk_after_restart() {
         None,
     );
 
-    // Restart: fresh GrpcState with a fresh registry, same messages dir.
+    // Restart: fresh GrpcState with a fresh registry, same host store.
     let (state, _command_rx) = grpc_state();
-    state
-        .registry
-        .set_messages_dir(Some(dir.path().join("subagent-jobs")));
+    state.registry.set_transcript_store(Some(store.clone()));
     let response = state
         .get_node_output(Request::new(GetNodeOutputRequest {
             run_id: "run-1".into(),
@@ -368,7 +405,7 @@ async fn get_node_output_recovers_messages_from_disk_after_restart() {
         .await
         .unwrap()
         .into_inner();
-    // No live job (404 path avoided) — the disk transcript is served.
+    // No live job (404 path avoided) — the stored transcript is served.
     assert_eq!(response.total, 0);
     let messages: Vec<serde_json::Value> =
         serde_json::from_str(response.messages_json.as_deref().unwrap()).unwrap();
