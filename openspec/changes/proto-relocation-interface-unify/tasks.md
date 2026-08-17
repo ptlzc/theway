@@ -28,8 +28,8 @@ DAG: `issue-70-p0-proto-relocation`。节点文件集不相交，串行为主：
 
 ## 4. [depends: 3-jsonrpc-align] [4-verify] 终态验收
 
-- [ ] 4.1 `cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets -- -D warnings`、
+- [x] 4.1 `cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets -- -D warnings`、
   `cargo test --workspace`
-- [ ] 4.2 feature-gate：sandbox-only check + `sandbox_tool_gate`
-- [ ] 4.3 grep：无 `proto/` 根目录引用；SDK 同步脚本可运行且幂等
-- [ ] 4.4 三接口现有测试全绿（grpc/http/ws/mcp）
+- [x] 4.2 feature-gate：sandbox-only check + `sandbox_tool_gate`
+- [x] 4.3 grep：无 `proto/` 根目录引用；SDK 同步脚本可运行且幂等
+- [x] 4.4 三接口现有测试全绿（grpc/http/ws/mcp）
