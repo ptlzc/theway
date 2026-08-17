@@ -304,6 +304,7 @@ impl TurnHost {
                 .collect(),
             trigger_poll_secs: Some(config.startup.trigger_poll_secs),
             tui_max_feed_lines: config.startup.tui_max_feed_lines,
+            tool_service_addr: None,
         }));
         Self {
             kernel: ReplKernel::new(config.harness, config.trigger_executor, config.retry),

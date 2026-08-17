@@ -108,6 +108,11 @@ pub struct WireDaemonConfig {
     /// TUI feed scrollback cap (`[tui] max_feed_lines`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tui_max_feed_lines: Option<u64>,
+    /// Controller ToolService endpoint (`host:port`) for forwarded file/process
+    /// operations (issue #77). `None` = daemon should not forward (or no
+    /// controller tool server is available).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_service_addr: Option<String>,
 }
 
 impl WireDaemonConfig {
@@ -146,6 +151,10 @@ impl WireDaemonConfig {
         }
         if let Some(lines) = patch.tui_max_feed_lines {
             self.tui_max_feed_lines = Some(lines);
+            touched += 1;
+        }
+        if let Some(addr) = patch.tool_service_addr.clone() {
+            self.tool_service_addr = Some(addr);
             touched += 1;
         }
         touched

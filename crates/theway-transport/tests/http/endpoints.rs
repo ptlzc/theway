@@ -450,7 +450,7 @@ async fn json_rpc_serves_and_updates_daemon_config() {
         provider: Some("anthropic".into()),
         model: Some("claude-x".into()),
         ..Default::default()
-    };
+ };
     let (base, mut command_rx, server) = spawn_config_server(seed).await;
     let client = reqwest::Client::new();
 

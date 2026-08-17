@@ -62,7 +62,16 @@ export interface DaemonConfig {
     | number
     | undefined;
   /** ── tui ── */
-  tuiMaxFeedLines?: number | undefined;
+  tuiMaxFeedLines?:
+    | number
+    | undefined;
+  /**
+   * ── controller tool endpoint (issue #77) ──
+   * Address of the controller's ToolService server (host:port). When set, the
+   * daemon forwards file/process operations to this endpoint instead of
+   * executing them locally.
+   */
+  toolServiceAddr?: string | undefined;
 }
 
 function createBaseDaemonConfig(): DaemonConfig {
@@ -75,6 +84,7 @@ function createBaseDaemonConfig(): DaemonConfig {
     skillsDirs: [],
     triggerPollSecs: undefined,
     tuiMaxFeedLines: undefined,
+    toolServiceAddr: undefined,
   };
 }
 
@@ -103,6 +113,9 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
     }
     if (message.tuiMaxFeedLines !== undefined) {
       writer.uint32(64).uint32(message.tuiMaxFeedLines);
+    }
+    if (message.toolServiceAddr !== undefined) {
+      writer.uint32(74).string(message.toolServiceAddr);
     }
     return writer;
   },
@@ -178,6 +191,14 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
           message.tuiMaxFeedLines = reader.uint32();
           continue;
         }
+        case 9: {
+          if (tag !== 74) {
+            break;
+          }
+
+          message.toolServiceAddr = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -217,6 +238,11 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
         : isSet(object.tui_max_feed_lines)
         ? globalThis.Number(object.tui_max_feed_lines)
         : undefined,
+      toolServiceAddr: isSet(object.toolServiceAddr)
+        ? globalThis.String(object.toolServiceAddr)
+        : isSet(object.tool_service_addr)
+        ? globalThis.String(object.tool_service_addr)
+        : undefined,
     };
   },
 
@@ -246,6 +272,9 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
     if (message.tuiMaxFeedLines !== undefined) {
       obj.tuiMaxFeedLines = Math.round(message.tuiMaxFeedLines);
     }
+    if (message.toolServiceAddr !== undefined) {
+      obj.toolServiceAddr = message.toolServiceAddr;
+    }
     return obj;
   },
 
@@ -262,6 +291,7 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
     message.skillsDirs = object.skillsDirs?.map((e) => e) || [];
     message.triggerPollSecs = object.triggerPollSecs ?? undefined;
     message.tuiMaxFeedLines = object.tuiMaxFeedLines ?? undefined;
+    message.toolServiceAddr = object.toolServiceAddr ?? undefined;
     return message;
   },
 };

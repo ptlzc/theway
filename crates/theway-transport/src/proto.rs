@@ -581,6 +581,7 @@ pub fn daemon_config_to_proto(config: &crate::wire::WireDaemonConfig) -> wire::D
         tui_max_feed_lines: config
             .tui_max_feed_lines
             .map(|lines| lines.min(u32::MAX as u64) as u32),
+        tool_service_addr: config.tool_service_addr.clone(),
     }
 }
 
@@ -596,6 +597,7 @@ pub fn daemon_config_from_proto(config: &wire::DaemonConfig) -> crate::wire::Wir
         skills_dirs: config.skills_dirs.clone(),
         trigger_poll_secs: config.trigger_poll_secs.map(u64::from),
         tui_max_feed_lines: config.tui_max_feed_lines.map(u64::from),
+        tool_service_addr: config.tool_service_addr.clone(),
     }
 }
 

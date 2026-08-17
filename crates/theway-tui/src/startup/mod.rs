@@ -7,16 +7,21 @@
 //! file no longer constructs any runtime state.
 
 use std::io::IsTerminal as _;
+use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
 use theway_storage::session;
 use theway_storage::sqlite_repo::SqliteSessionRepo;
 use theway_transport::client::{GrpcClient, discover, spawn_daemon, wait_ready};
+use theway_transport::grpc::{ToolServiceState, serve_tool_service};
 use theway_transport::proto::wire_status;
+use theway_transport::transport::ToolOps;
 use theway_transport::wire::{WireDaemonConfig, WireStatus};
+use tokio::net::TcpListener;
 
 use crate::cli::Cli;
 use crate::config_payload::{assemble_config, provision_config};
+use crate::local_tool_ops::LocalToolOps;
 use crate::ui;
 
 /// Re-exported for `crate::user_message` compatibility (see `main.rs`); the
@@ -109,7 +114,19 @@ async fn connect_or_spawn(
     cli: &Cli,
     cwd: &std::path::Path,
 ) -> Result<(GrpcClient, WireStatus, bool, Vec<String>)> {
-    let (config, mut notes) = assemble_config(cli).await;
+    // Issue #77: start the controller-side ToolService server first so the
+    // daemon can forward file/process operations back to this TUI process.
+    let tool_addr = {
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let addr = listener.local_addr()?.to_string();
+        let tool_ops: Arc<dyn ToolOps> = Arc::new(LocalToolOps::new(cwd.to_path_buf()));
+        let state = ToolServiceState::new(tool_ops);
+        let _server = serve_tool_service(listener, state);
+        addr
+    };
+
+    let (mut config, mut notes) = assemble_config(cli).await;
+    config.tool_service_addr = Some(tool_addr);
 
     // 1. Reuse a running daemon: per-cwd port file first, default port second.
     if let Some(addr) = discover(std::time::Duration::from_millis(800), cwd).await? {

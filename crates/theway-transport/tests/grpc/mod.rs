@@ -1076,7 +1076,7 @@ async fn get_config_returns_the_shared_config_view() {
         model: Some("claude-x".into()),
         trigger_poll_secs: Some(60),
         ..Default::default()
-    };
+ };
     let (state, _command_rx) = grpc_state_with_daemon_config(seed.clone());
 
     let response = state
@@ -1098,7 +1098,7 @@ async fn set_config_merges_view_and_enqueues_configure_command() {
         provider: Some("anthropic".into()),
         model: Some("claude-x".into()),
         ..Default::default()
-    };
+ };
     let (state, mut command_rx) = grpc_state_with_daemon_config(seed);
 
     let result = state
@@ -1164,7 +1164,7 @@ async fn settings_round_trip_over_transport() {
         provider: Some("anthropic".into()),
         model: Some("claude-x".into()),
         ..Default::default()
-    };
+ };
     let (state, mut command_rx) = grpc_state_with_daemon_config(seed);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

@@ -540,7 +540,7 @@ async fn client_set_config_queues_configure_command() {
         model: Some("claude-x".into()),
         tui_max_feed_lines: Some(8000),
         ..Default::default()
-    };
+ };
     assert!(client.set_config(&patch).await.unwrap());
 
     match command_rx.recv().await.unwrap() {
@@ -563,7 +563,7 @@ async fn client_configure_alias_reaches_the_event_loop() {
     let patch = WireDaemonConfig {
         skills_dirs: vec!["/skills/a".into()],
         ..Default::default()
-    };
+ };
     assert!(client.configure(&patch).await.unwrap());
 
     match command_rx.recv().await.unwrap() {

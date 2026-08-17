@@ -10,6 +10,8 @@
 
 mod tools;
 
+pub use tools::{ToolServiceState, serve_tool_service};
+
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -743,7 +745,9 @@ pub fn serve_grpc(listener: TcpListener, state: GrpcState) -> tokio::task::JoinH
         .add_service(CommandServiceServer::new(state.clone()))
         .add_service(SessionServiceServer::new(state.clone()))
         .add_service(SettingsServiceServer::new(state.clone()))
-        .add_service(ToolServiceServer::new(state.clone()))
+        .add_service(ToolServiceServer::new(ToolServiceState::new(
+            state.tool_ops.clone(),
+        )))
         .add_service(GraphEngineServiceServer::new(state.clone()))
         .add_service(EventServiceServer::new(state))
         .add_service(HealthServer::new(HealthService))
