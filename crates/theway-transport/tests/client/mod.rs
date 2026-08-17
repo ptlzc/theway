@@ -102,7 +102,20 @@ async fn client_and_server(
     mpsc::UnboundedReceiver<crate::wire::WireCommand>,
     broadcast::Sender<WireStatus>,
 ) {
-    let (state, command_rx) = grpc_state();
+    client_and_server_with_path_context(WirePathContext::default()).await
+}
+
+/// `client_and_server` variant seeded with an explicit startup path context
+/// (issue #68: home/base/work_dir fixed at startup plus initial skills_dirs).
+async fn client_and_server_with_path_context(
+    path_context: WirePathContext,
+) -> (
+    GrpcClient,
+    mpsc::UnboundedReceiver<crate::wire::WireCommand>,
+    broadcast::Sender<WireStatus>,
+) {
+    let (mut state, command_rx) = grpc_state();
+    state.path_context = Arc::new(std::sync::RwLock::new(path_context));
     let snapshot_tx = state.snapshots.clone();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -200,6 +213,68 @@ async fn client_switch_session_queues_command_and_rebinds() {
         crate::wire::WireCommand::SwitchSession { id } => assert_eq!(id, "sess-1"),
         other => panic!("unexpected command: {other:?}"),
     }
+}
+
+// ── path context (issue #68) ─────────────────────────────────────────
+
+fn startup_path_context() -> WirePathContext {
+    WirePathContext {
+        home: "/home/dev".into(),
+        base: "/home/dev/.theway".into(),
+        work_dir: "/home/dev/projects/theway".into(),
+        skills_dirs: vec!["/home/dev/.agents/skills".into()],
+    }
+}
+
+#[tokio::test]
+async fn client_get_path_context_returns_startup_paths_and_skill_dirs() {
+    let ctx = startup_path_context();
+    let (mut client, _command_rx, _snapshot_tx) =
+        client_and_server_with_path_context(ctx.clone()).await;
+
+    // Read-only snapshot: startup home/base/work_dir + the initial skills_dirs.
+    let got = client.get_path_context().await.unwrap();
+    assert_eq!(got, ctx);
+}
+
+#[tokio::test]
+async fn client_set_skill_dirs_queues_command_and_updates_path_context() {
+    let ctx = startup_path_context();
+    let (mut client, mut command_rx, _snapshot_tx) =
+        client_and_server_with_path_context(ctx.clone()).await;
+
+    let accepted = client
+        .set_skill_dirs(&["/skills/a".to_string(), "/skills/b".to_string()])
+        .await
+        .unwrap();
+    assert!(accepted);
+
+    // The event loop receives WireCommand::SetSkillDirs for the authoritative
+    // apply (extras replacement + hot-reload).
+    match command_rx.recv().await.unwrap() {
+        crate::wire::WireCommand::SetSkillDirs { dirs } => {
+            assert_eq!(dirs, vec!["/skills/a", "/skills/b"])
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+
+    // Optimistic update: the follow-up read reflects the new dirs while
+    // home/base/work_dir stay startup-fixed.
+    let got = client.get_path_context().await.unwrap();
+    assert_eq!(got.skills_dirs, vec!["/skills/a", "/skills/b"]);
+    assert_eq!(got.home, ctx.home);
+    assert_eq!(got.base, ctx.base);
+    assert_eq!(got.work_dir, ctx.work_dir);
+
+    // Clearing: an empty list is a valid update.
+    let accepted = client.set_skill_dirs(&[]).await.unwrap();
+    assert!(accepted);
+    match command_rx.recv().await.unwrap() {
+        crate::wire::WireCommand::SetSkillDirs { dirs } => assert!(dirs.is_empty()),
+        other => panic!("unexpected command: {other:?}"),
+    }
+    let got = client.get_path_context().await.unwrap();
+    assert!(got.skills_dirs.is_empty());
 }
 
 #[tokio::test]

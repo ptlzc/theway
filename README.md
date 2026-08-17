@@ -142,6 +142,13 @@ The daemon's gRPC surface is split into four domain services —
 `theway.grpc.v1.GraphEngineService`, and `theway.grpc.v1.EventService` — plus
 the standard `grpc.health.v1.Health` service.
 
+`SessionService` also exposes the daemon path context: `GetPathContext`
+returns the startup-fixed `home` / `base` / `work_dir` plus the current
+skill search directories, and `SetSkillDirs` replaces the extra skill
+directories at runtime — the daemon applies the change on its event loop and
+hot-reloads the skill catalog (`home` / `base` / `work_dir` never change
+after startup). See [gRPC path context](docs/architecture.md#grpc-path-context).
+
 ```bash
 # Start the TUI in the current project (spawns/reuses the daemon)
 ./target/release/theway
@@ -356,7 +363,10 @@ Set `THEWAY_DIR` to use a different base directory.
 
 The daemon resolves its host paths once at startup (the `thewayd` CLI
 boundary: `--cwd`, `--home`, repeatable `--skills-dir`; `$THEWAY_DIR` /
-`$HOME` are consulted only there). Skills are scanned in priority order,
+`$HOME` are consulted only there). The only runtime-mutable part is the
+extra skill dirs: the gRPC `SetSkillDirs` RPC replaces them on the fly and
+the daemon hot-reloads the skill catalog (the path context is served
+read-only by `GetPathContext`). Skills are scanned in priority order,
 first-loaded wins on a name collision: `--skills-dir` extras > project roots
 (`<work_dir>/{.agents,.theway,.codex,.claude}/skills`) > `<base>/skills` —
 the target of `install_skill` / `skill_builder` / `remove_skill`, so

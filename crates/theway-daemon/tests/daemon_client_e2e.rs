@@ -31,19 +31,30 @@ impl Drop for DaemonGuard {
 /// port file) and `--cwd` pointing at the temp dir. Returns the guard + the
 /// ready client address (from `wait_ready`, exercising the port-file discovery).
 async fn spawn_daemon(dir: &std::path::Path) -> (DaemonGuard, String) {
+    spawn_daemon_with(dir, |cmd| cmd).await
+}
+
+/// [`spawn_daemon`] with extra launch arguments (e.g. repeatable
+/// `--skills-dir` extras for the path-context e2e, issue #68).
+async fn spawn_daemon_with(
+    dir: &std::path::Path,
+    customize: impl FnOnce(&mut Command) -> &mut Command,
+) -> (DaemonGuard, String) {
     let binary = env!("CARGO_BIN_EXE_thewayd");
-    let child = Command::new(binary)
-        .arg("--port")
-        .arg("0")
-        .arg("--cwd")
-        .arg(dir)
-        // Credential-less start: no provider key in tests; the daemon logs a
-        // warning and starts anyway (turns fail until a key is configured).
-        .env("THEWAY_DIR", dir)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .expect("spawn thewayd");
+    let mut command = Command::new(binary);
+    customize(
+        command
+            .arg("--port")
+            .arg("0")
+            .arg("--cwd")
+            .arg(dir)
+            // Credential-less start: no provider key in tests; the daemon logs
+            // a warning and starts anyway (turns fail until a key is set).
+            .env("THEWAY_DIR", dir)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null()),
+    );
+    let child = command.spawn().expect("spawn thewayd");
     let child_pid = child.id();
     // Give the daemon a moment to exec, then wait for the port file + readiness.
     let addr = tokio::time::timeout(
@@ -262,6 +273,61 @@ async fn list_sessions_marks_current_after_spawn() {
         sessions.iter().any(|s| s.session_id == current),
         "current session listed: {sessions:?}"
     );
+
+    unsafe { std::env::remove_var("THEWAY_DIR") };
+}
+
+/// Issue #68: the gRPC path-context surface against a live daemon. The
+/// startup `--skills-dir` extras are served by `GetPathContext`; `SetSkillDirs`
+/// replaces them dynamically and the change is visible to a follow-up read.
+#[tokio::test]
+async fn path_context_round_trip_against_spawned_daemon() {
+    let _guard = DAEMON_E2E_LOCK.lock().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    // SAFETY: serialized on DAEMON_E2E_LOCK.
+    unsafe { std::env::set_var("THEWAY_DIR", dir.path()) };
+
+    let startup_extra = dir.path().join("extra-skills");
+    std::fs::create_dir_all(&startup_extra).unwrap();
+    let startup_extra_arg = startup_extra.clone();
+
+    let (_daemon, addr) = spawn_daemon_with(dir.path(), move |cmd| {
+        cmd.arg("--skills-dir").arg(&startup_extra_arg)
+    })
+    .await;
+    let mut client = GrpcClient::connect(&addr).await.unwrap();
+
+    // GetPathContext: startup home/base/work_dir + the CLI-supplied extras.
+    let ctx = client.get_path_context().await.unwrap();
+    let expected_work_dir =
+        std::fs::canonicalize(dir.path()).unwrap_or_else(|_| dir.path().to_path_buf());
+    assert_eq!(ctx.work_dir, expected_work_dir.display().to_string());
+    assert_eq!(ctx.base, dir.path().display().to_string());
+    assert!(!ctx.home.is_empty(), "home resolved at startup");
+    assert_eq!(
+        ctx.skills_dirs,
+        vec![startup_extra.display().to_string()],
+        "startup --skills-dir extras served by GetPathContext"
+    );
+
+    // SetSkillDirs: dynamically replace the extras; a follow-up GetPathContext
+    // reflects the new dirs while home/base/work_dir stay startup-fixed.
+    let replacement = dir.path().join("replacement-skills");
+    std::fs::create_dir_all(&replacement).unwrap();
+    let accepted = client
+        .set_skill_dirs(&[replacement.display().to_string()])
+        .await
+        .unwrap();
+    assert!(accepted, "SetSkillDirs command queued");
+
+    let ctx = client.get_path_context().await.unwrap();
+    assert_eq!(
+        ctx.skills_dirs,
+        vec![replacement.display().to_string()],
+        "SetSkillDirs update visible to GetPathContext"
+    );
+    assert_eq!(ctx.work_dir, expected_work_dir.display().to_string());
+    assert_eq!(ctx.base, dir.path().display().to_string());
 
     unsafe { std::env::remove_var("THEWAY_DIR") };
 }

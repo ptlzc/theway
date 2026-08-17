@@ -319,7 +319,9 @@ impl SessionService for GrpcState {
         _request: Request<Empty>,
     ) -> Result<Response<theway_grpc::PathContext>, Status> {
         let ctx = self.path_context.read().unwrap();
-        Ok(Response::new(crate::proto::wire_path_context_to_proto(&ctx)))
+        Ok(Response::new(crate::proto::wire_path_context_to_proto(
+            &ctx,
+        )))
     }
 
     async fn set_skill_dirs(
