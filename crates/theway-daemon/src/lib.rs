@@ -47,6 +47,7 @@ pub mod otlp;
 // resolved values as parameters instead of reading `HOME` / `THEWAY_DIR`.
 pub mod paths;
 pub use paths::DaemonPaths;
+pub mod runtime_storage;
 pub mod turn;
 // Shared client-contract surface re-exported for `crate::…` paths used inside
 // this crate (bridged unit tests reach `crate::auth` etc. through these;
