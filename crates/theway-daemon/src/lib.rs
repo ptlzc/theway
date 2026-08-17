@@ -31,6 +31,7 @@ pub mod env;
 pub mod executor;
 pub mod export;
 pub mod file_commands;
+pub mod forwarding_tool_ops;
 pub mod hook_executors;
 pub mod hooks;
 pub mod job_transcripts;
