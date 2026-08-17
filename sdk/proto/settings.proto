@@ -41,6 +41,12 @@ message DaemonConfig {
 
   // ── tui ──
   optional uint32 tui_max_feed_lines = 8;
+
+  // ── controller tool endpoint (issue #77) ──
+  // Address of the controller's ToolService server (host:port). When set, the
+  // daemon forwards file/process operations to this endpoint instead of
+  // executing them locally.
+  optional string tool_service_addr = 9;
 }
 
 service SettingsService {

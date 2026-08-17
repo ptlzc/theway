@@ -17,14 +17,25 @@
 // Transport endpoints + shared host surface
 // ──────────────────────────────────────────────────────────────────────────
 
+use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
+use futures::Stream;
 use parking_lot::Mutex;
 use tokio::sync::{broadcast, mpsc};
 
-use crate::wire::{SessionSummary, WireCommand, WireDaemonConfig, WirePathContext, WireStatus};
+use crate::wire::{
+    SessionSummary, ToolError, WireCommand, WireDaemonConfig, WirePathContext, WireStatus,
+    WireToolEditRequest, WireToolEditResult, WireToolExecFrame, WireToolExecRequest,
+    WireToolFindRequest, WireToolFindResult, WireToolGrepRequest, WireToolGrepResult,
+    WireToolListDirRequest, WireToolListDirResult, WireToolMemoryForgetRequest,
+    WireToolMemoryForgetResult, WireToolMemoryListRequest, WireToolMemoryListResult,
+    WireToolMemoryReadRequest, WireToolMemoryReadResult, WireToolMemorySaveRequest,
+    WireToolMemorySaveResult, WireToolReadRequest, WireToolReadResult, WireToolSkillInstallRequest,
+    WireToolSkillInstallResult, WireToolWriteRequest, WireToolWriteResult,
+};
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::types::DagEvent;
 use theway_core::multiagent::registry::{AgentJobEvent, AgentJobRegistry};
@@ -50,6 +61,171 @@ pub trait SessionOps: Send + Sync {
     /// what is still running". `Ok(empty)` means the session was deleted. Error semantics
     /// (mapping the refusal onto an RPC/HTTP error) are the caller's job.
     async fn delete(&self, id: &str) -> Result<Vec<String>>;
+}
+
+/// Exec-command frame stream returned by [`ToolOps::exec_command`]: zero or
+/// more output chunks (interleaved stdout/stderr), then a terminal
+/// [`WireToolExecFrame::Exit`] frame.
+pub type ToolExecStream = Pin<Box<dyn Stream<Item = WireToolExecFrame> + Send>>;
+
+/// File/tool operation handler (issue #75): the daemon-side executor behind
+/// the gRPC `ToolService` and the JSON-RPC tool methods. Controllers forward
+/// local FS/process work through the transport surfaces; the daemon kernel
+/// implements this seam against its execution environment (the `ToolExecutor`
+/// seam + memory/skills directories), so the transport crate itself stays
+/// free of FS/process policy.
+#[async_trait]
+pub trait ToolOps: Send + Sync {
+    /// Read a file as UTF-8 text with line pagination (1-based `offset`).
+    async fn read_file(
+        &self,
+        request: &WireToolReadRequest,
+    ) -> Result<WireToolReadResult, ToolError>;
+    /// Write (create/overwrite) a file; missing parent directories are created.
+    async fn write_file(
+        &self,
+        request: &WireToolWriteRequest,
+    ) -> Result<WireToolWriteResult, ToolError>;
+    /// Search-and-replace edit; the result carries the replacement count.
+    async fn edit_file(
+        &self,
+        request: &WireToolEditRequest,
+    ) -> Result<WireToolEditResult, ToolError>;
+    /// Run a shell command line; the stream ends with the exit frame.
+    async fn exec_command(
+        &self,
+        request: &WireToolExecRequest,
+    ) -> Result<ToolExecStream, ToolError>;
+    /// List one directory level (name / kind / size per entry).
+    async fn list_dir(
+        &self,
+        request: &WireToolListDirRequest,
+    ) -> Result<WireToolListDirResult, ToolError>;
+    /// Regex content search under a root (gitignore-aware on the daemon side).
+    async fn grep(&self, request: &WireToolGrepRequest) -> Result<WireToolGrepResult, ToolError>;
+    /// Filename-glob search under a root (gitignore-aware on the daemon side).
+    async fn find(&self, request: &WireToolFindRequest) -> Result<WireToolFindResult, ToolError>;
+    /// Save a cross-session memory entry (name + content + metadata).
+    async fn memory_save(
+        &self,
+        request: &WireToolMemorySaveRequest,
+    ) -> Result<WireToolMemorySaveResult, ToolError>;
+    /// List memory entries (name / description / type / path).
+    async fn memory_list(
+        &self,
+        request: &WireToolMemoryListRequest,
+    ) -> Result<WireToolMemoryListResult, ToolError>;
+    /// Read one memory entry's content.
+    async fn memory_read(
+        &self,
+        request: &WireToolMemoryReadRequest,
+    ) -> Result<WireToolMemoryReadResult, ToolError>;
+    /// Forget (delete) one memory entry; `removed` reports whether it existed.
+    async fn memory_forget(
+        &self,
+        request: &WireToolMemoryForgetRequest,
+    ) -> Result<WireToolMemoryForgetResult, ToolError>;
+    /// Two-phase skill install (preview unless `confirm`), same safety model
+    /// as the `install_skill` agent tool.
+    async fn skill_install(
+        &self,
+        request: &WireToolSkillInstallRequest,
+    ) -> Result<WireToolSkillInstallResult, ToolError>;
+}
+
+/// Placeholder [`ToolOps`] for daemon builds that have not wired the
+/// execution-environment seam yet: every operation fails with
+/// [`ToolError::Other`]. The daemon kernel replaces this with the real
+/// executor-backed implementation in the issue #70 P3 phase; until then the
+/// tool-operation RPC surface (gRPC `ToolService` + JSON-RPC tool methods)
+/// exists end-to-end and reports the gap cleanly instead of failing at
+/// startup.
+#[derive(Clone, Copy, Default)]
+pub struct UnavailableToolOps;
+
+/// Single failure message for every [`UnavailableToolOps`] operation.
+pub const TOOL_OPS_UNAVAILABLE: &str =
+    "tool operations are not wired to this daemon's execution environment yet (issue #70 P3)";
+
+#[async_trait]
+impl ToolOps for UnavailableToolOps {
+    async fn read_file(
+        &self,
+        _request: &WireToolReadRequest,
+    ) -> Result<WireToolReadResult, ToolError> {
+        Err(ToolError::Other(anyhow::anyhow!(TOOL_OPS_UNAVAILABLE)))
+    }
+
+    async fn write_file(
+        &self,
+        _request: &WireToolWriteRequest,
+    ) -> Result<WireToolWriteResult, ToolError> {
+        Err(ToolError::Other(anyhow::anyhow!(TOOL_OPS_UNAVAILABLE)))
+    }
+
+    async fn edit_file(
+        &self,
+        _request: &WireToolEditRequest,
+    ) -> Result<WireToolEditResult, ToolError> {
+        Err(ToolError::Other(anyhow::anyhow!(TOOL_OPS_UNAVAILABLE)))
+    }
+
+    async fn exec_command(
+        &self,
+        _request: &WireToolExecRequest,
+    ) -> Result<ToolExecStream, ToolError> {
+        Err(ToolError::Other(anyhow::anyhow!(TOOL_OPS_UNAVAILABLE)))
+    }
+
+    async fn list_dir(
+        &self,
+        _request: &WireToolListDirRequest,
+    ) -> Result<WireToolListDirResult, ToolError> {
+        Err(ToolError::Other(anyhow::anyhow!(TOOL_OPS_UNAVAILABLE)))
+    }
+
+    async fn grep(&self, _request: &WireToolGrepRequest) -> Result<WireToolGrepResult, ToolError> {
+        Err(ToolError::Other(anyhow::anyhow!(TOOL_OPS_UNAVAILABLE)))
+    }
+
+    async fn find(&self, _request: &WireToolFindRequest) -> Result<WireToolFindResult, ToolError> {
+        Err(ToolError::Other(anyhow::anyhow!(TOOL_OPS_UNAVAILABLE)))
+    }
+
+    async fn memory_save(
+        &self,
+        _request: &WireToolMemorySaveRequest,
+    ) -> Result<WireToolMemorySaveResult, ToolError> {
+        Err(ToolError::Other(anyhow::anyhow!(TOOL_OPS_UNAVAILABLE)))
+    }
+
+    async fn memory_list(
+        &self,
+        _request: &WireToolMemoryListRequest,
+    ) -> Result<WireToolMemoryListResult, ToolError> {
+        Err(ToolError::Other(anyhow::anyhow!(TOOL_OPS_UNAVAILABLE)))
+    }
+
+    async fn memory_read(
+        &self,
+        _request: &WireToolMemoryReadRequest,
+    ) -> Result<WireToolMemoryReadResult, ToolError> {
+        Err(ToolError::Other(anyhow::anyhow!(TOOL_OPS_UNAVAILABLE)))
+    }
+
+    async fn memory_forget(
+        &self,
+        _request: &WireToolMemoryForgetRequest,
+    ) -> Result<WireToolMemoryForgetResult, ToolError> {
+        Err(ToolError::Other(anyhow::anyhow!(TOOL_OPS_UNAVAILABLE)))
+    }
+
+    async fn skill_install(
+        &self,
+        _request: &WireToolSkillInstallRequest,
+    ) -> Result<WireToolSkillInstallResult, ToolError> {
+        Err(ToolError::Other(anyhow::anyhow!(TOOL_OPS_UNAVAILABLE)))
+    }
 }
 
 #[derive(Clone)]
@@ -145,6 +321,10 @@ pub struct TransportEndpoints {
     /// gRPC/HTTP session surfaces. Sync query/mutation only — *switching* the current
     /// session goes through `WireCommand::SwitchSession` on the serialized event loop.
     pub session_ops: Arc<dyn crate::transport::SessionOps>,
+    /// File/tool operation handler (issue #75): backs the gRPC `ToolService`
+    /// and the JSON-RPC tool methods. The daemon kernel implements the seam
+    /// against its execution environment.
+    pub tool_ops: Arc<dyn crate::transport::ToolOps>,
     /// Shared daemon path context (issue #68): served by `GetPathContext`,
     /// optimistically updated by `SetSkillDirs` before the event loop applies
     /// the change authoritatively. Built once in

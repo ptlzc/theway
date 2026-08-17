@@ -4,6 +4,13 @@
 //! into the same single-turn event loop via [`WireCommand`], and state is served
 //! as structured binary protobuf ([`SessionState`]) streamed over server-streaming
 //! RPC instead of SSE. Loopback-only, same bind policy as the web UI.
+//!
+//! Domain split: the `ToolService` implementation (issue #75) lives in
+//! [`tools`](crate::grpc::tools).
+
+mod tools;
+
+pub use tools::{ToolServiceState, serve_tool_service};
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -19,6 +26,7 @@ use tonic::{Request, Response, Status};
 
 use crate::host::TransportHost;
 use crate::transport::SessionOps;
+use crate::transport::ToolOps;
 use crate::transport::TransportMode;
 use crate::wire::{WireCommand, WireDaemonConfig, WirePathContext, WirePromptImage, WireStatus};
 
@@ -39,6 +47,7 @@ use theway_grpc::event_service_server::{EventService, EventServiceServer};
 use theway_grpc::graph_engine_service_server::{GraphEngineService, GraphEngineServiceServer};
 use theway_grpc::session_service_server::{SessionService, SessionServiceServer};
 use theway_grpc::settings_service_server::{SettingsService, SettingsServiceServer};
+use theway_grpc::tool_service_server::ToolServiceServer;
 use theway_grpc::{
     ApproveRequest, CommandResult, CreateSessionRequest, CreateSessionResponse,
     DeleteSessionRequest, DeleteSessionResponse, Empty, GetNodeOutputRequest,
@@ -90,6 +99,10 @@ pub struct GrpcState {
     /// `SetConfig` / `Configure` optimistically merge the patch before the
     /// event loop applies it authoritatively.
     pub daemon_config: Arc<std::sync::RwLock<WireDaemonConfig>>,
+    /// File/tool operation handler (issue #75): backs the `ToolService`
+    /// surface (`ReadFile` / … / `SkillInstall`). The daemon kernel
+    /// implements the seam against its execution environment.
+    pub tool_ops: Arc<dyn ToolOps>,
 }
 
 #[tonic::async_trait]
@@ -712,12 +725,13 @@ pub async fn run_grpc(mut app: Box<dyn TransportHost>, options: GrpcOptions) -> 
         session_id: Arc::new(std::sync::RwLock::new(endpoints.session_id.clone())),
         path_context: endpoints.path_context.clone(),
         daemon_config: endpoints.daemon_config.clone(),
+        tool_ops: endpoints.tool_ops.clone(),
     };
     let server_task = serve_grpc(listener, grpc_state);
 
     println!("theway grpc listening on {actual}");
     println!(
-        "  services: theway.grpc.v1.CommandService / theway.grpc.v1.SessionService / theway.grpc.v1.SettingsService / theway.grpc.v1.GraphEngineService / theway.grpc.v1.EventService + grpc.health.v1.Health · UI: workmate (独立)"
+        "  services: theway.grpc.v1.CommandService / theway.grpc.v1.SessionService / theway.grpc.v1.SettingsService / theway.grpc.v1.ToolService / theway.grpc.v1.GraphEngineService / theway.grpc.v1.EventService + grpc.health.v1.Health · UI: workmate (独立)"
     );
 
     app.run_transport_loop(TransportMode::Grpc, endpoints, server_task)
@@ -731,6 +745,9 @@ pub fn serve_grpc(listener: TcpListener, state: GrpcState) -> tokio::task::JoinH
         .add_service(CommandServiceServer::new(state.clone()))
         .add_service(SessionServiceServer::new(state.clone()))
         .add_service(SettingsServiceServer::new(state.clone()))
+        .add_service(ToolServiceServer::new(ToolServiceState::new(
+            state.tool_ops.clone(),
+        )))
         .add_service(GraphEngineServiceServer::new(state.clone()))
         .add_service(EventServiceServer::new(state))
         .add_service(HealthServer::new(HealthService))
@@ -742,6 +759,6 @@ pub fn serve_grpc(listener: TcpListener, state: GrpcState) -> tokio::task::JoinH
 }
 
 #[cfg(test)]
-// Test files live in `tests/transport/grpc/` (mirror of src), pulled in by
+// Test files live in `tests/grpc/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
 tests_bridge_macro::tests_bridge!("grpc");

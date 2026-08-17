@@ -30,6 +30,7 @@ pub(crate) fn test_router(latest: WireStatus) -> Router {
         daemon_config: std::sync::Arc::new(std::sync::RwLock::new(
             crate::wire::WireDaemonConfig::default(),
         )),
+        tool_ops: std::sync::Arc::new(crate::testing::FakeToolOps::new()),
     })
 }
 

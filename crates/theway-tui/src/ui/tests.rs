@@ -115,6 +115,7 @@ async fn test_app_with_sessions(
         agent_fwd,
         path_context: Arc::new(std::sync::RwLock::new(WirePathContext::default())),
         daemon_config: Arc::new(std::sync::RwLock::new(WireDaemonConfig::default())),
+        tool_ops: Arc::new(theway_transport::UnavailableToolOps),
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap().to_string();

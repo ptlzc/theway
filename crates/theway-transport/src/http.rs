@@ -53,6 +53,10 @@ pub struct HttpState {
     /// `set_config` / `configure` optimistically merge the patch before the
     /// event loop applies it authoritatively.
     pub daemon_config: Arc<RwLock<WireDaemonConfig>>,
+    /// File/tool operation handler (issue #75): backs the JSON-RPC tool
+    /// methods (`read_file` / `write_file` / … / `skill_install`). The
+    /// daemon kernel implements the seam against its execution environment.
+    pub tool_ops: Arc<dyn crate::transport::ToolOps>,
 }
 
 /// Full `--http` driver: bind, wire the transport channels, spawn the axum
@@ -76,6 +80,7 @@ pub async fn run_web(mut app: Box<dyn TransportHost>, options: WebOptions) -> Re
         session_ops: endpoints.session_ops.clone(),
         path_context: endpoints.path_context.clone(),
         daemon_config: endpoints.daemon_config.clone(),
+        tool_ops: endpoints.tool_ops.clone(),
     };
     let server_task = serve_web(listener, state);
 
@@ -131,7 +136,18 @@ async fn healthz() -> &'static str {
 //   get_path_context (session.get_path_context) |
 //   set_skill_dirs (session.set_skill_dirs) |
 //   get_config (settings.get_config) | set_config (settings.set_config) |
-//   configure (settings.configure)
+//   configure (settings.configure) |
+//   read_file (tool.read_file) | write_file (tool.write_file) |
+//   edit_file (tool.edit_file) | exec_command (tool.exec_command) |
+//   list_dir (tool.list_dir) | grep (tool.grep) | find (tool.find) |
+//   memory_save (tool.memory_save) | memory_list (tool.memory_list) |
+//   memory_read (tool.memory_read) | memory_forget (tool.memory_forget) |
+//   skill_install (tool.skill_install)
+//
+// The tool methods (issue #75) return the unary wire shapes from `crate::wire`
+// (`WireTool*`); `exec_command` collects the daemon-side frame stream into the
+// unary `WireToolExecResult` (the gRPC `ToolService.ExecCommand` streams the
+// frames individually).
 
 #[derive(serde::Deserialize)]
 struct RpcIn {
@@ -191,6 +207,22 @@ fn parse_daemon_config(
     };
     serde_json::from_value::<WireDaemonConfig>(value)
         .map_err(|e| (-32602, format!("invalid config params: {e}")))
+}
+
+/// Parse the params object of a tool method (issue #75) into the wire
+/// request type: absent / null params deserialize into types whose fields
+/// are all optional; a missing required field fails with `-32602`.
+fn tool_params<T: serde::de::DeserializeOwned>(
+    params: Option<&serde_json::Value>,
+) -> Result<T, (i64, String)> {
+    let value = params.cloned().unwrap_or(serde_json::Value::Null);
+    serde_json::from_value(value).map_err(|e| (-32602, format!("invalid tool params: {e}")))
+}
+
+/// Serialize a tool result for the JSON-RPC reply (`-32000` on the
+/// theoretically impossible serialization failure).
+fn tool_json<T: serde::Serialize>(result: &T) -> RpcResult {
+    serde_json::to_value(result).map_err(|e| (-32000, e.to_string()))
 }
 
 pub(crate) async fn dispatch(
@@ -484,6 +516,118 @@ pub(crate) async fn dispatch(
                 .send(WireCommand::SetSkillDirs { dirs })
                 .is_ok();
             Ok(serde_json::json!({ "accepted": accepted }))
+        }
+        // ── tool operations (issue #75) ────────────────────────────────
+        "read_file" | "tool.read_file" => {
+            let request: WireToolReadRequest = tool_params(params)?;
+            let result = state
+                .tool_ops
+                .read_file(&request)
+                .await
+                .map_err(crate::tools::tool_rpc_error)?;
+            tool_json(&result)
+        }
+        "write_file" | "tool.write_file" => {
+            let request: WireToolWriteRequest = tool_params(params)?;
+            let result = state
+                .tool_ops
+                .write_file(&request)
+                .await
+                .map_err(crate::tools::tool_rpc_error)?;
+            tool_json(&result)
+        }
+        "edit_file" | "tool.edit_file" => {
+            let request: WireToolEditRequest = tool_params(params)?;
+            let result = state
+                .tool_ops
+                .edit_file(&request)
+                .await
+                .map_err(crate::tools::tool_rpc_error)?;
+            tool_json(&result)
+        }
+        "exec_command" | "tool.exec_command" => {
+            let request: WireToolExecRequest = tool_params(params)?;
+            let stream = state
+                .tool_ops
+                .exec_command(&request)
+                .await
+                .map_err(crate::tools::tool_rpc_error)?;
+            // Unary shape: the frame stream is collected into one result
+            // (the gRPC ToolService streams the frames individually).
+            let result = crate::tools::collect_exec_stream(stream).await;
+            tool_json(&result)
+        }
+        "list_dir" | "tool.list_dir" => {
+            let request: WireToolListDirRequest = tool_params(params)?;
+            let result = state
+                .tool_ops
+                .list_dir(&request)
+                .await
+                .map_err(crate::tools::tool_rpc_error)?;
+            tool_json(&result)
+        }
+        "grep" | "tool.grep" => {
+            let request: WireToolGrepRequest = tool_params(params)?;
+            let result = state
+                .tool_ops
+                .grep(&request)
+                .await
+                .map_err(crate::tools::tool_rpc_error)?;
+            tool_json(&result)
+        }
+        "find" | "tool.find" => {
+            let request: WireToolFindRequest = tool_params(params)?;
+            let result = state
+                .tool_ops
+                .find(&request)
+                .await
+                .map_err(crate::tools::tool_rpc_error)?;
+            tool_json(&result)
+        }
+        "memory_save" | "tool.memory_save" => {
+            let request: WireToolMemorySaveRequest = tool_params(params)?;
+            let result = state
+                .tool_ops
+                .memory_save(&request)
+                .await
+                .map_err(crate::tools::tool_rpc_error)?;
+            tool_json(&result)
+        }
+        "memory_list" | "tool.memory_list" => {
+            let request: WireToolMemoryListRequest = tool_params(params)?;
+            let result = state
+                .tool_ops
+                .memory_list(&request)
+                .await
+                .map_err(crate::tools::tool_rpc_error)?;
+            tool_json(&result)
+        }
+        "memory_read" | "tool.memory_read" => {
+            let request: WireToolMemoryReadRequest = tool_params(params)?;
+            let result = state
+                .tool_ops
+                .memory_read(&request)
+                .await
+                .map_err(crate::tools::tool_rpc_error)?;
+            tool_json(&result)
+        }
+        "memory_forget" | "tool.memory_forget" => {
+            let request: WireToolMemoryForgetRequest = tool_params(params)?;
+            let result = state
+                .tool_ops
+                .memory_forget(&request)
+                .await
+                .map_err(crate::tools::tool_rpc_error)?;
+            tool_json(&result)
+        }
+        "skill_install" | "tool.skill_install" => {
+            let request: WireToolSkillInstallRequest = tool_params(params)?;
+            let result = state
+                .tool_ops
+                .skill_install(&request)
+                .await
+                .map_err(crate::tools::tool_rpc_error)?;
+            tool_json(&result)
         }
         _ => Err((-32601, format!("method not found: {method}"))),
     }

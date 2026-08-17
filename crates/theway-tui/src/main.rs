@@ -23,6 +23,7 @@ mod config_payload;
 mod feed_cache;
 mod feed_render;
 mod local_commands;
+mod local_tool_ops;
 mod model_picker;
 mod resume_picker;
 mod startup;

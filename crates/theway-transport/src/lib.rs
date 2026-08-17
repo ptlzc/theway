@@ -11,7 +11,7 @@
 //! Modules fall into two zones, declared in the two groups below:
 //!
 //! - **protocol** — the wire model and the transport implementations around it:
-//!   `wire`, `grpc`, `http`, `ws`, `mcp`, `proto`, `client`, `host`,
+//!   `wire`, `grpc`, `http`, `ws`, `mcp`, `proto`, `tools`, `client`, `host`,
 //!   `transport`, `inbox`, `testing`. These implement or directly serve the
 //!   protocol surfaces the server and its clients speak.
 //! - **shared** — client/daemon contract helpers (not protocol): `auth`,
@@ -32,6 +32,7 @@ pub mod inbox;
 pub mod mcp;
 pub mod proto;
 pub mod testing;
+pub mod tools;
 pub mod transport;
 pub mod wire;
 pub mod ws;
@@ -47,4 +48,6 @@ pub mod images;
 pub mod mentions;
 pub mod triggers;
 
-pub use transport::{TransportEndpoints, TransportMode};
+pub use transport::{
+    ToolExecStream, ToolOps, TransportEndpoints, TransportMode, UnavailableToolOps,
+};

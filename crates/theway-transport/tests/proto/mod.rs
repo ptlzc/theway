@@ -337,7 +337,8 @@ fn daemon_config_round_trips_wire_and_proto() {
         skills_dirs: vec!["/home/user/.agents/skills".into()],
         trigger_poll_secs: Some(60),
         tui_max_feed_lines: Some(8000),
-    };
+   tool_service_addr: None,
+ };
     let proto = daemon_config_to_proto(&config);
     assert_eq!(proto.provider.as_deref(), Some("anthropic"));
     assert_eq!(proto.model.as_deref(), Some("claude-x"));
@@ -372,12 +373,12 @@ fn daemon_config_merge_replaces_present_fields_only() {
         model: Some("claude-x".into()),
         skills_dirs: vec!["/old".into()],
         ..Default::default()
-    };
+ };
     let patch = WireDaemonConfig {
         model: Some("claude-y".into()),
         trigger_poll_secs: Some(30),
         ..Default::default()
-    };
+ };
     let touched = current.merge_from(&patch);
 
     // Present fields replaced, absent ones kept; repeated-empty does not clear.
@@ -391,7 +392,7 @@ fn daemon_config_merge_replaces_present_fields_only() {
     let dirs = WireDaemonConfig {
         skills_dirs: vec!["/new".into()],
         ..Default::default()
-    };
+ };
     let touched = current.merge_from(&dirs);
     assert_eq!(touched, 1);
     assert_eq!(current.skills_dirs, vec!["/new"]);

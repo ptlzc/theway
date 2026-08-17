@@ -31,6 +31,7 @@ use super::kernel::{QueuedTurn, ReplKernel, TurnState, poll_turn};
 use crate::agent_session::RetrySettings;
 use crate::commands::{self, CommandCtx, CommandOutcome, Registry};
 use crate::control_plane_prompt::UiControlPlanePrompt;
+use crate::forwarding_tool_ops::ForwardingToolOps;
 use crate::paths::DaemonPaths;
 use crate::session_ops::{CurrentSessionState, SessionFactory};
 use crate::tools::assembly::reload::{self, ReloadRuntime};
@@ -39,6 +40,7 @@ use crate::{SqliteSessionRepo, bug_report};
 use theway_llm_provider::{ImageContent, Message, Usage};
 use theway_transport::mentions;
 use theway_transport::transport::SlashCompleter;
+use theway_transport::transport::ToolOps;
 use theway_transport::wire::*;
 use theway_transport::{TransportEndpoints, TransportMode};
 
@@ -151,6 +153,9 @@ pub struct TurnHost {
     /// when `Configure` commands land. Cloned into [`TransportEndpoints`] so
     /// the transport servers and this host observe one authoritative value.
     daemon_config: Arc<std::sync::RwLock<WireDaemonConfig>>,
+    /// Controller tool endpoint forwarder (issue #76): routes `ToolOps`
+    /// calls to the TUI/controller's `ToolService` server.
+    tool_ops: Arc<dyn ToolOps>,
     session_id: String,
     log_path: Option<PathBuf>,
     tool_count: usize,
@@ -304,7 +309,9 @@ impl TurnHost {
                 .collect(),
             trigger_poll_secs: Some(config.startup.trigger_poll_secs),
             tui_max_feed_lines: config.startup.tui_max_feed_lines,
+            tool_service_addr: None,
         }));
+        let tool_ops: Arc<dyn ToolOps> = Arc::new(ForwardingToolOps::new(daemon_config.clone()));
         Self {
             kernel: ReplKernel::new(config.harness, config.trigger_executor, config.retry),
             registry,
@@ -314,6 +321,7 @@ impl TurnHost {
             paths: config.paths,
             path_context,
             daemon_config,
+            tool_ops,
             session_id: config.session_id,
             log_path: config.log_path,
             tool_count: config.tool_count,
@@ -402,6 +410,10 @@ impl TurnHost {
             // handle and optimistically merge `SetConfig` / `Configure`
             // patches into it; the event loop holds the authoritative copy.
             daemon_config: self.daemon_config.clone(),
+            // Issue #76: file/process operations are forwarded to the
+            // controller's ToolService endpoint through the shared config's
+            // `tool_service_addr`.
+            tool_ops: self.tool_ops.clone(),
             session_id: self.session_id.clone(),
             agent_fwd,
         }
