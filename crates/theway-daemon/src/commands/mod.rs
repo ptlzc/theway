@@ -30,6 +30,7 @@ use crate::trigger_engine::notification_hook::{HookState, NotificationHookStatus
 use async_trait::async_trait;
 use serde_json::json;
 use theway_core::{AgentHarness, AgentTool, SessionTreeEntry, Skill, SkillSource, ThinkingLevel};
+use theway_daemon::runtime_storage::{RuntimeStorage, local_runtime_storage};
 use theway_llm_provider::{Model, Provider, UserContentBlock, get_model};
 use tokio_util::sync::CancellationToken;
 
@@ -127,6 +128,9 @@ pub struct DaemonCtx {
     /// Trigger executor of the running daemon session; `/triggers` reads status
     /// snapshots and aborts running trigger actions through it.
     pub trigger_executor: Arc<TriggerExecutor>,
+    /// Runtime storage seam (issue #86): commands open session repos / read
+    /// sidecars through this instead of calling `session::open_repo` directly.
+    pub storage: Arc<dyn RuntimeStorage>,
 }
 
 /// Slash-command registry: the shared framework's generic registry parameterized by the daemon's
@@ -143,6 +147,10 @@ pub struct Registry {
     /// the CLI boundary (`DaemonPaths::home`) and injected via
     /// [`Registry::with_user_home`]; the `/reload` rescan never reads `$HOME`.
     user_home: std::path::PathBuf,
+    /// Runtime storage seam (issue #86): wired by the daemon composition root
+    /// and handed to command implementations through [`DaemonCtx`]. Defaults
+    /// to [`local_runtime_storage`] for tests and embedded hosts.
+    storage: Arc<dyn RuntimeStorage>,
 }
 
 impl Registry {
@@ -154,6 +162,7 @@ impl Registry {
             inner: theway_transport::commands::Registry::new(),
             file_commands: std::sync::RwLock::new(Vec::new()),
             user_home: std::path::PathBuf::new(),
+            storage: local_runtime_storage(),
         }
     }
 
@@ -165,6 +174,7 @@ impl Registry {
             inner: theway_transport::commands::Registry::new(),
             file_commands: std::sync::RwLock::new(Vec::new()),
             user_home: std::path::PathBuf::new(),
+            storage: local_runtime_storage(),
         };
         r.register(Arc::new(auth::LoginCommand));
         r.register(Arc::new(auth::LogoutCommand));
@@ -216,6 +226,15 @@ impl Registry {
     /// [`Registry::with_user_home`]).
     pub fn user_home(&self) -> &std::path::Path {
         &self.user_home
+    }
+
+    /// Inject the runtime storage seam (issue #86). The composition root
+    /// wires the same storage used for session/DAG/trigger/cron state here so
+    /// slash commands never open the local repo directly.
+    #[must_use]
+    pub fn with_storage(mut self, storage: Arc<dyn RuntimeStorage>) -> Self {
+        self.storage = storage;
+        self
     }
 
     pub fn register(&mut self, command: Arc<dyn SlashCommand<DaemonCtx>>) {
@@ -402,6 +421,7 @@ pub async fn dispatch(input: &str, registry: &Registry, ctx: &CommandCtx<'_>) ->
     };
     let extra = DaemonCtx {
         trigger_executor: ctx.trigger_executor.clone(),
+        storage: registry.storage.clone(),
     };
     let sdk_ctx = theway_transport::commands::CommandCtx {
         harness: ctx.harness,

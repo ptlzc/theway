@@ -74,7 +74,7 @@ fn trigger_rules_round_trip_wire_and_proto() {
     let proto = save_trigger_rules_request_to_proto(&request);
     assert_eq!(proto.session_id, "sess-1");
     assert_eq!(proto.rules.len(), 1);
-    assert_eq!(proto.rules[0].fire_once, false);
+    assert!(!proto.rules[0].fire_once);
     assert_eq!(save_trigger_rules_request_from_proto(&proto), request);
 
     let result = WireSaveTriggerRulesResult { count: 1 };

@@ -159,6 +159,12 @@ async fn main() -> Result<()> {
         startup.trigger_poll_secs = secs;
     }
     startup.storage_service_addr = cli.storage_service_addr.clone();
+    // Issue #86: when the controller provides StorageService, treat the daemon
+    // as controller-provisioned and skip the remaining local config-file
+    // discovery (models/mcp/hooks/lsp/templates/skills/ts_extensions).
+    if cli.storage_service_addr.is_some() {
+        startup.load_local_sources = false;
+    }
 
     // Model resolution (same rules as the TUI binary).
     // TODO(#73): custom model definitions are still read from local
@@ -242,20 +248,23 @@ async fn main() -> Result<()> {
         .and_then(|v| v.as_str())
         .unwrap_or("?")
         .to_string();
-    let dynamic_trigger_path = storage.trigger_sidecar_path(&session, &repo).await?;
-
     let _logging = theway_daemon::logging::init(&session_id);
     let (feed_tx, feed_rx) =
         tokio::sync::mpsc::unbounded_channel::<theway_transport::feed::FeedUpdate>();
 
     let stream_fn = stream_fn_with_auth_store();
     let dynamic_trigger_registry = triggers::global_registry().clone();
-    if let Err(err) = dynamic_trigger_registry.load_from_path(dynamic_trigger_path) {
+    if let Err(err) = dynamic_trigger_registry
+        .load_from_storage(storage.clone(), cwd.clone(), session_id.clone())
+        .await
+    {
         tracing::warn!("dynamic triggers: {err}");
     }
     let cron_registry = triggers::global_cron_registry().clone();
-    let cron_path = storage.cron_sidecar_path(&session, &repo).await?;
-    if let Err(err) = cron_registry.load_from_path(cron_path) {
+    if let Err(err) = cron_registry
+        .load_from_storage(storage.clone(), cwd.clone(), session_id.clone())
+        .await
+    {
         tracing::warn!("cron: {err}");
     }
     let memory_dir = config::memory_dir();
@@ -263,11 +272,7 @@ async fn main() -> Result<()> {
         Arc::new(once_cell::sync::OnceCell::new());
     let dag_engine = Arc::new(DagEngine::new());
     let subagent_registry = theway_core::multiagent::registry::AgentJobRegistry::new();
-    subagent_registry.set_transcript_store(Some(
-        theway_daemon::job_transcripts::DiskTranscriptStore::new(
-            cwd.join(".pi").join("subagent-jobs"),
-        ),
-    ));
+    subagent_registry.set_transcript_store(Some(storage.job_transcript_store(&cwd)));
     // Execution-environment seam (daemon-kernel-layers): local tool bodies
     // dispatch through a `ToolExecutor`; the composition root picks the executor
     // by feature — the local filesystem/process executor for `local` builds, the
@@ -355,8 +360,14 @@ async fn main() -> Result<()> {
             diagnostics: Vec::new(),
         }
     };
-    let ts_extensions =
-        theway_daemon::ts_extensions::ExtensionRegistry::discover(&cwd, &paths.base);
+    // TODO(#86): TS extensions are still discovered from local
+    // `.theway/extensions` dirs. When controller provisioning is active
+    // (`load_local_sources == false`), start with an empty registry instead.
+    let ts_extensions = if startup.load_local_sources {
+        theway_daemon::ts_extensions::ExtensionRegistry::discover(&cwd, &paths.base)
+    } else {
+        theway_daemon::ts_extensions::ExtensionRegistry::new()
+    };
     for error in &ts_extensions.errors {
         tracing::warn!(target: "extensions", "{error}");
     }
@@ -383,9 +394,15 @@ async fn main() -> Result<()> {
         &loaded_skills.skills,
     );
     {
-        // TODO(#73): skill overrides still read from a local file; move to
-        // the settings RPC once skill state is controller-provisioned.
-        let state = theway_daemon::skill_overrides::load(&paths.base).await;
+        // TODO(#73/#86): skill overrides still read from a local file; move to
+        // the settings RPC once skill state is controller-provisioned. The
+        // controller-provisioned daemon skips the file and starts with an
+        // empty overlay.
+        let state = if startup.load_local_sources {
+            theway_daemon::skill_overrides::load(&paths.base).await
+        } else {
+            theway_daemon::skill_overrides::SkillOverrides::default()
+        };
         theway_daemon::skill_overrides::apply(&state, &mut combined_skills);
     }
 
@@ -401,16 +418,28 @@ async fn main() -> Result<()> {
     let reload_skills_fn: theway_core::ReloadSkillsFn = {
         let paths = paths.clone();
         let builtins = resolved_builtins.skills.clone();
+        let load_local_sources = startup.load_local_sources;
         Arc::new(move || {
             let paths = paths.clone();
             let builtins = builtins.clone();
             Box::pin(async move {
-                let loaded = skills::load_all(&paths).await;
+                let loaded = if load_local_sources {
+                    skills::load_all(&paths).await
+                } else {
+                    skills::LoadedSkills {
+                        skills: Vec::new(),
+                        diagnostics: Vec::new(),
+                    }
+                };
                 let mut merged = theway_daemon::builtin_skills::merge_with_user_project(
                     builtins,
                     &loaded.skills,
                 );
-                let state = theway_daemon::skill_overrides::load(&paths.base).await;
+                let state = if load_local_sources {
+                    theway_daemon::skill_overrides::load(&paths.base).await
+                } else {
+                    theway_daemon::skill_overrides::SkillOverrides::default()
+                };
                 theway_daemon::skill_overrides::apply(&state, &mut merged);
                 theway_core::LoadSkillsOutput {
                     skills: merged,
@@ -680,7 +709,8 @@ async fn main() -> Result<()> {
         trigger_executor,
         retry: theway_daemon::agent_session::RetrySettings::default(),
         registry: theway_daemon::commands::Registry::with_daemon_commands()
-            .with_user_home(paths.home.clone()),
+            .with_user_home(paths.home.clone())
+            .with_storage(storage.clone()),
         cwd: cwd.clone(),
         home: paths.home.clone(),
         base: paths.base.clone(),

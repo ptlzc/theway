@@ -88,7 +88,10 @@ impl SlashCommand<DaemonCtx> for SessionsCommand {
         "list sessions for this cwd"
     }
     async fn run(&self, _argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
-        let repo = theway_storage::session::open_repo(ctx.cwd).await;
+        let repo = match ctx.extra.storage.open_session_repo(ctx.cwd).await {
+            Ok(repo) => repo,
+            Err(e) => return CommandOutcome::Error(format!("open session repo: {e}")),
+        };
         let entries = match theway_storage::session::list_entries(&repo).await {
             Ok(e) => e,
             Err(e) => return CommandOutcome::Error(format!("list sessions: {e}")),

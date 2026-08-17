@@ -104,11 +104,9 @@ impl ToolOps for LocalToolOps {
         if request.replace_all {
             replacements = text.matches(&request.old_string).count() as u32;
             text = text.replace(&request.old_string, &request.new_string);
-        } else {
-            if let Some(pos) = text.find(&request.old_string) {
-                text.replace_range(pos..pos + request.old_string.len(), &request.new_string);
-                replacements = 1;
-            }
+        } else if let Some(pos) = text.find(&request.old_string) {
+            text.replace_range(pos..pos + request.old_string.len(), &request.new_string);
+            replacements = 1;
         }
         if replacements > 0 {
             tokio::fs::write(&path, &text)
@@ -176,7 +174,7 @@ impl ToolOps for LocalToolOps {
                 Some(duration) => match tokio::time::timeout(duration, child.wait()).await {
                     Ok(status) => status.unwrap_or_default(),
                     Err(_) => {
-                        let _ = child.kill();
+                        let _ = child.kill().await;
                         let _ = child.wait().await;
                         let _ = tx.send(WireToolExecFrame::Exit {
                             code: -1,

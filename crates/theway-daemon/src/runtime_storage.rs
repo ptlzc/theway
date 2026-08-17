@@ -15,23 +15,39 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result};
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use parking_lot::Mutex as ParkingMutex;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::persist::{DagPersistSink, PersistedRun, to_persisted};
 use theway_core::multiagent::graph::types::DagStatus;
+use theway_core::multiagent::registry::JobTranscriptStore;
 use theway_storage::sqlite_repo::SqliteSessionRepo;
 use theway_transport::client::GrpcClient;
-use theway_transport::wire::{WireLoadDagRunsRequest, WireSaveDagRunRequest};
+use theway_transport::triggers::{CronJob, DynamicTriggerRule};
+use theway_transport::wire::{
+    WireLoadCronJobsRequest, WireLoadDagRunsRequest, WireLoadTriggerRulesRequest,
+    WireSaveCronJobsRequest, WireSaveDagRunRequest, WireSaveTriggerRulesRequest, WireStoredCronJob,
+    WireStoredTriggerRule,
+};
 use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinHandle;
 
 use crate::dag_persist::{self, DagPersistHandle};
+use crate::job_transcripts::{DiskTranscriptStore, MemoryTranscriptStore};
+use crate::triggers::cron::{read_jobs_file, write_jobs_file};
+use crate::triggers::dynamic::{read_rules_file, write_rules_file};
 
 /// Persistent runtime state operations owned by the daemon.
 #[async_trait]
 pub trait RuntimeStorage: Send + Sync {
     /// Open (or create) the session repository for `cwd`.
     async fn open_session_repo(&self, cwd: &Path) -> Result<Arc<SqliteSessionRepo>>;
+
+    /// Return the job-transcript store for this runtime storage backend.
+    ///
+    /// Issue #86: local storage keeps the disk store; controller-backed
+    /// storage uses an in-memory store until a transcript RPC exists.
+    fn job_transcript_store(&self, cwd: &Path) -> Arc<dyn JobTranscriptStore>;
 
     /// Load persisted DAG runs for a session.
     async fn load_dag_runs(&self, cwd: &Path, session_id: &str) -> Result<Vec<PersistedRun>>;
@@ -52,6 +68,27 @@ pub trait RuntimeStorage: Send + Sync {
         session: &theway_core::Session,
         repo: &SqliteSessionRepo,
     ) -> Result<PathBuf>;
+
+    /// Load dynamic trigger rules for a session through the storage seam.
+    async fn load_dynamic_triggers(
+        &self,
+        cwd: &Path,
+        session_id: &str,
+    ) -> Result<Vec<DynamicTriggerRule>>;
+
+    /// Persist dynamic trigger rules for a session through the storage seam.
+    async fn save_dynamic_triggers(
+        &self,
+        cwd: &Path,
+        session_id: &str,
+        rules: &[DynamicTriggerRule],
+    ) -> Result<()>;
+
+    /// Load cron jobs for a session through the storage seam.
+    async fn load_cron_jobs(&self, cwd: &Path, session_id: &str) -> Result<Vec<CronJob>>;
+
+    /// Persist cron jobs for a session through the storage seam.
+    async fn save_cron_jobs(&self, cwd: &Path, session_id: &str, jobs: &[CronJob]) -> Result<()>;
 }
 
 /// Local filesystem/SQLite implementation of [`RuntimeStorage`].
@@ -62,6 +99,10 @@ pub struct LocalRuntimeStorage;
 impl RuntimeStorage for LocalRuntimeStorage {
     async fn open_session_repo(&self, cwd: &Path) -> Result<Arc<SqliteSessionRepo>> {
         Ok(Arc::new(theway_storage::session::open_repo(cwd).await))
+    }
+
+    fn job_transcript_store(&self, cwd: &Path) -> Arc<dyn JobTranscriptStore> {
+        DiskTranscriptStore::new(cwd.join(".pi").join("subagent-jobs"))
     }
 
     async fn load_dag_runs(&self, cwd: &Path, session_id: &str) -> Result<Vec<PersistedRun>> {
@@ -86,6 +127,37 @@ impl RuntimeStorage for LocalRuntimeStorage {
         repo: &SqliteSessionRepo,
     ) -> Result<PathBuf> {
         Ok(theway_storage::session::cron_sidecar_path_for_session(session, repo).await?)
+    }
+
+    async fn load_dynamic_triggers(
+        &self,
+        cwd: &Path,
+        session_id: &str,
+    ) -> Result<Vec<DynamicTriggerRule>> {
+        let path = local_sidecar_path(cwd, session_id, SidecarKind::Trigger).await?;
+        Ok(read_rules_file(&path)?)
+    }
+
+    async fn save_dynamic_triggers(
+        &self,
+        _cwd: &Path,
+        session_id: &str,
+        rules: &[DynamicTriggerRule],
+    ) -> Result<()> {
+        let path = local_sidecar_path(_cwd, session_id, SidecarKind::Trigger).await?;
+        write_rules_file(&path, rules)?;
+        Ok(())
+    }
+
+    async fn load_cron_jobs(&self, cwd: &Path, session_id: &str) -> Result<Vec<CronJob>> {
+        let path = local_sidecar_path(cwd, session_id, SidecarKind::Cron).await?;
+        Ok(read_jobs_file(&path)?)
+    }
+
+    async fn save_cron_jobs(&self, _cwd: &Path, session_id: &str, jobs: &[CronJob]) -> Result<()> {
+        let path = local_sidecar_path(_cwd, session_id, SidecarKind::Cron).await?;
+        write_jobs_file(&path, jobs)?;
+        Ok(())
     }
 }
 
@@ -122,6 +194,10 @@ impl RemoteRuntimeStorage {
 impl RuntimeStorage for RemoteRuntimeStorage {
     async fn open_session_repo(&self, cwd: &Path) -> Result<Arc<SqliteSessionRepo>> {
         Ok(Arc::new(theway_storage::session::open_repo(cwd).await))
+    }
+
+    fn job_transcript_store(&self, _cwd: &Path) -> Arc<dyn JobTranscriptStore> {
+        MemoryTranscriptStore::new()
     }
 
     async fn load_dag_runs(&self, cwd: &Path, session_id: &str) -> Result<Vec<PersistedRun>> {
@@ -166,6 +242,148 @@ impl RuntimeStorage for RemoteRuntimeStorage {
     ) -> Result<PathBuf> {
         Ok(theway_storage::session::cron_sidecar_path_for_session(session, repo).await?)
     }
+
+    async fn load_dynamic_triggers(
+        &self,
+        _cwd: &Path,
+        session_id: &str,
+    ) -> Result<Vec<DynamicTriggerRule>> {
+        let mut client = self.client.lock().await;
+        let result = client
+            .state_load_trigger_rules(&WireLoadTriggerRulesRequest {
+                session_id: session_id.to_string(),
+            })
+            .await?;
+        result.rules.iter().map(trigger_from_wire).collect()
+    }
+
+    async fn save_dynamic_triggers(
+        &self,
+        _cwd: &Path,
+        session_id: &str,
+        rules: &[DynamicTriggerRule],
+    ) -> Result<()> {
+        let mut client = self.client.lock().await;
+        client
+            .state_save_trigger_rules(&WireSaveTriggerRulesRequest {
+                session_id: session_id.to_string(),
+                rules: rules.iter().map(trigger_to_wire).collect(),
+            })
+            .await?;
+        Ok(())
+    }
+
+    async fn load_cron_jobs(&self, _cwd: &Path, session_id: &str) -> Result<Vec<CronJob>> {
+        let mut client = self.client.lock().await;
+        let result = client
+            .state_load_cron_jobs(&WireLoadCronJobsRequest {
+                session_id: session_id.to_string(),
+            })
+            .await?;
+        result.jobs.iter().map(cron_from_wire).collect()
+    }
+
+    async fn save_cron_jobs(&self, _cwd: &Path, session_id: &str, jobs: &[CronJob]) -> Result<()> {
+        let mut client = self.client.lock().await;
+        client
+            .state_save_cron_jobs(&WireSaveCronJobsRequest {
+                session_id: session_id.to_string(),
+                jobs: jobs.iter().map(cron_to_wire).collect(),
+            })
+            .await?;
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy)]
+enum SidecarKind {
+    Trigger,
+    Cron,
+}
+
+async fn local_sidecar_path(cwd: &Path, session_id: &str, kind: SidecarKind) -> Result<PathBuf> {
+    let repo = theway_storage::session::open_repo(cwd).await;
+    let session_path = theway_storage::session::find_path_by_id(&repo, session_id)
+        .await?
+        .with_context(|| format!("session {session_id} not found in {}", cwd.display()))?;
+    Ok(match kind {
+        SidecarKind::Trigger => theway_storage::session::trigger_sidecar_path(&session_path),
+        SidecarKind::Cron => theway_storage::session::cron_sidecar_path(&session_path),
+    })
+}
+
+fn trigger_to_wire(rule: &DynamicTriggerRule) -> WireStoredTriggerRule {
+    WireStoredTriggerRule {
+        id: rule.id.clone(),
+        condition: rule.condition.clone(),
+        action: rule.action.clone(),
+        enabled: rule.enabled,
+        fire_once: rule.fire_once,
+        fired_at: rule.fired_at.map(|dt| dt.to_rfc3339()),
+        promote_to_chat: rule.promote_to_chat,
+        created_at: rule.created_at.to_rfc3339(),
+    }
+}
+
+fn trigger_from_wire(rule: &WireStoredTriggerRule) -> Result<DynamicTriggerRule> {
+    Ok(DynamicTriggerRule {
+        id: rule.id.clone(),
+        condition: rule.condition.clone(),
+        action: rule.action.clone(),
+        enabled: rule.enabled,
+        fire_once: rule.fire_once,
+        fired_at: rule.fired_at.as_deref().map(parse_rfc3339).transpose()?,
+        promote_to_chat: rule.promote_to_chat,
+        created_at: parse_rfc3339(&rule.created_at)?,
+    })
+}
+
+fn cron_to_wire(job: &CronJob) -> WireStoredCronJob {
+    WireStoredCronJob {
+        id: job.id.clone(),
+        schedule: job.schedule.clone(),
+        action: job.action.clone(),
+        enabled: job.enabled,
+        running_trace_id: job.running_trace_id.clone(),
+        last_due_at: job.last_due_at.map(|dt| dt.to_rfc3339()),
+        last_fired_at: job.last_fired_at.map(|dt| dt.to_rfc3339()),
+        last_completed_at: job.last_completed_at.map(|dt| dt.to_rfc3339()),
+        last_error: job.last_error.clone(),
+        skipped_overlap_count: job.skipped_overlap_count,
+        stateful: job.stateful,
+        created_at: job.created_at.to_rfc3339(),
+    }
+}
+
+fn cron_from_wire(job: &WireStoredCronJob) -> Result<CronJob> {
+    Ok(CronJob {
+        id: job.id.clone(),
+        schedule: job.schedule.clone(),
+        action: job.action.clone(),
+        enabled: job.enabled,
+        running_trace_id: job.running_trace_id.clone(),
+        last_due_at: job.last_due_at.as_deref().map(parse_rfc3339).transpose()?,
+        last_fired_at: job
+            .last_fired_at
+            .as_deref()
+            .map(parse_rfc3339)
+            .transpose()?,
+        last_completed_at: job
+            .last_completed_at
+            .as_deref()
+            .map(parse_rfc3339)
+            .transpose()?,
+        last_error: job.last_error.clone(),
+        skipped_overlap_count: job.skipped_overlap_count,
+        stateful: job.stateful,
+        created_at: parse_rfc3339(&job.created_at)?,
+    })
+}
+
+fn parse_rfc3339(value: &str) -> Result<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(value)
+        .map(|dt| dt.with_timezone(&Utc))
+        .with_context(|| format!("invalid RFC3339 timestamp: {value}"))
 }
 
 /// Debounced DAG persistence sink backed by the controller `StorageService`.
