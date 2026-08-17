@@ -162,6 +162,10 @@ impl SessionOps for AppSessionOps {
     }
 
     async fn create(&self) -> Result<String> {
+        // work_dir inheritance (issue #66 node 3): `state.cwd` IS this daemon's
+        // work_dir, so a new session is bound to it — the value recorded in the
+        // session's `cwd` metadata is exactly what `SessionHarnessFactory::build`
+        // validates against on switch.
         let cwd = {
             let state = self.current.lock();
             if state.cwd.is_empty() {

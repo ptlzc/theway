@@ -43,7 +43,14 @@ use theway_transport::inbox;
 /// startup model — a `/model` change made before switching is not carried over (the
 /// rehydrated transcript restores the session's own last recorded model when it has one).
 pub struct SessionHarnessFactory {
+    /// This daemon's work_dir. Explicit session↔work_dir binding (issue #66
+    /// node 3): [`Self::build`] refuses to open a session whose recorded `cwd`
+    /// metadata points at a different directory, so a session always runs
+    /// under the daemon that serves its work_dir.
     pub cwd: std::path::PathBuf,
+    /// Theway base dir (issue #66: `DaemonPaths::base`), resolved at the CLI
+    /// boundary; wired into the rebuilt session's skill-family tools.
+    pub base_dir: std::path::PathBuf,
     /// Execution environment the rebuilt harness's tools dispatch through
     /// (sdk-split-local-sandbox node 8); process-level, shared by every session build.
     pub executor: Arc<dyn theway_core::executor::ToolExecutor>,
@@ -86,6 +93,12 @@ impl SessionHarnessFactory {
             .unwrap_or("?")
             .to_string();
 
+        // Explicit work_dir binding (issue #66 node 3): the target session must be
+        // bound to this daemon's work_dir; a foreign session is refused before any
+        // harness state is touched.
+        let target_cwd = meta.get("cwd").and_then(|v| v.as_str());
+        check_work_dir_binding(&session_id, target_cwd, &self.cwd)?;
+
         // Crash-recovery parity with startup: restore this session's persisted DAG runs.
         // `restore` skips ids already live in the engine, so switching back and forth is
         // idempotent.
@@ -106,6 +119,7 @@ impl SessionHarnessFactory {
             std::sync::Arc::new(once_cell::sync::OnceCell::new());
         let mut tools = tools::session_tool_set(
             &self.memory_dir,
+            &self.base_dir,
             &self.dag_engine,
             &self.subagent_registry,
             &self.model,
@@ -228,6 +242,44 @@ impl SessionHarnessFactory {
             .with_context(|| format!("rehydrate session {session_id}"))?;
         Ok(harness)
     }
+}
+
+/// Enforce the explicit session↔work_dir binding on switch (issue #66 node 3).
+///
+/// `target_cwd` is the target session's recorded `cwd` metadata — the work_dir
+/// captured when the session was created. It must match `daemon_cwd`, this
+/// daemon's work_dir. Both sides are canonicalized before comparing (symlinks,
+/// `.` / `..` segments, trailing slashes all normalize away); when either
+/// canonicalize fails (e.g. one side no longer exists on disk) the raw path
+/// strings are compared instead.
+///
+/// A missing or empty `target_cwd` means a pre-binding legacy session: that
+/// passes through (debug-traced) so historical sessions are never locked out.
+fn check_work_dir_binding(
+    session_id: &str,
+    target_cwd: Option<&str>,
+    daemon_cwd: &std::path::Path,
+) -> Result<()> {
+    let Some(target) = target_cwd.map(str::trim).filter(|c| !c.is_empty()) else {
+        tracing::debug!(
+            "session {session_id}: no work_dir (cwd) metadata — legacy session, switch allowed"
+        );
+        return Ok(());
+    };
+    let target_path = std::path::Path::new(target);
+    let matched = match (target_path.canonicalize(), daemon_cwd.canonicalize()) {
+        (Ok(target), Ok(daemon)) => target == daemon,
+        // canonicalize failed on at least one side — fall back to comparing
+        // the original paths.
+        _ => target_path == daemon_cwd,
+    };
+    if matched {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "session {session_id} belongs to work_dir {target}; this daemon serves {} — start theway from that directory",
+        daemon_cwd.display()
+    );
 }
 
 /// Assembly target for notification hooks. The only production impl is the
