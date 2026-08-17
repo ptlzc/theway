@@ -220,7 +220,10 @@ impl SlashCommand<DaemonCtx> for FindCommand {
             return CommandOutcome::Error("usage: /find <query>".into());
         }
         let query = argv.join(" ").to_lowercase();
-        let repo = theway_storage::session::open_repo(ctx.cwd).await;
+        let repo = match ctx.extra.storage.open_session_repo(ctx.cwd).await {
+            Ok(repo) => repo,
+            Err(e) => return CommandOutcome::Error(format!("open session repo: {e}")),
+        };
         let files = match repo.list().await {
             Ok(f) => f,
             Err(e) => return CommandOutcome::Error(format!("list sessions: {e}")),

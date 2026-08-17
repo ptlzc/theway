@@ -1,7 +1,7 @@
 //! Tests for `grpc` — split out of src (see docs/rust-test-files.md).
 
 use super::*;
-use crate::testing::{FakeSessionOps, FakeToolOps, empty_sidebar_snapshot};
+use crate::testing::{FakeSessionOps, FakeStorageOps, FakeToolOps, empty_sidebar_snapshot};
 use crate::wire::{WireContextUsage, WireDaemonConfig, WirePathContext};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -123,6 +123,7 @@ fn grpc_state_with_ops() -> (
             path_context: Arc::new(std::sync::RwLock::new(WirePathContext::default())),
             daemon_config: Arc::new(std::sync::RwLock::new(WireDaemonConfig::default())),
             tool_ops: tool_ops.clone(),
+            storage_ops: Arc::new(FakeStorageOps::new()),
             agent_fwd,
         },
         command_rx,
@@ -1586,6 +1587,112 @@ async fn tool_service_round_trip_over_transport() {
         .await
         .unwrap_err();
     assert_eq!(err.code(), tonic::Code::NotFound);
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn storage_service_dag_trigger_cron_round_trip_over_wire() {
+    use crate::testing::FakeStorageOps;
+
+    let (mut state, _command_rx, _ops, _tools) = grpc_state_with_ops();
+    let storage = Arc::new(FakeStorageOps::new());
+    state.storage_ops = storage.clone();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = serve_grpc(listener, state);
+
+    let mut client = theway_grpc::storage_service_client::StorageServiceClient::connect(format!(
+        "http://{addr}"
+    ))
+    .await
+    .unwrap();
+
+    // DAG run save/load.
+    let saved = client
+        .save_dag_run(theway_grpc::SaveDagRunRequest {
+            session_id: "sess-1".into(),
+            run_id: "dag-9".into(),
+            snapshot: r#"{"id":"dag-9"}"#.into(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(saved.saved);
+    let loaded = client
+        .load_dag_runs(theway_grpc::LoadDagRunsRequest {
+            session_id: "sess-1".into(),
+            run_id: None,
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(loaded.runs.len(), 1);
+    assert_eq!(loaded.runs[0].run_id, "dag-9");
+    assert_eq!(loaded.runs[0].snapshot, r#"{"id":"dag-9"}"#);
+
+    // Trigger rules save/load.
+    let saved = client
+        .save_trigger_rules(theway_grpc::SaveTriggerRulesRequest {
+            session_id: "sess-1".into(),
+            rules: vec![theway_grpc::StoredTriggerRule {
+                id: "tr-1".into(),
+                condition: "file changed".into(),
+                action: "run tests".into(),
+                enabled: true,
+                fire_once: false,
+                fired_at: None,
+                promote_to_chat: true,
+                created_at: "2026-01-01T00:00:00Z".into(),
+            }],
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(saved.count, 1);
+    let loaded = client
+        .load_trigger_rules(theway_grpc::LoadTriggerRulesRequest {
+            session_id: "sess-1".into(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(loaded.rules.len(), 1);
+    assert_eq!(loaded.rules[0].id, "tr-1");
+    assert_eq!(loaded.rules[0].action, "run tests");
+
+    // Cron jobs save/load.
+    let saved = client
+        .save_cron_jobs(theway_grpc::SaveCronJobsRequest {
+            session_id: "sess-1".into(),
+            jobs: vec![theway_grpc::StoredCronJob {
+                id: "cron-1".into(),
+                schedule: "*/5 * * * *".into(),
+                action: "backup".into(),
+                enabled: true,
+                running_trace_id: None,
+                last_due_at: None,
+                last_fired_at: None,
+                last_completed_at: None,
+                last_error: None,
+                skipped_overlap_count: 0,
+                stateful: false,
+                created_at: "2026-01-01T00:00:00Z".into(),
+            }],
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(saved.count, 1);
+    let loaded = client
+        .load_cron_jobs(theway_grpc::LoadCronJobsRequest {
+            session_id: "sess-1".into(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(loaded.jobs.len(), 1);
+    assert_eq!(loaded.jobs[0].id, "cron-1");
 
     server.abort();
 }

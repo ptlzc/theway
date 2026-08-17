@@ -219,7 +219,10 @@ async fn session_import_command(
     } else {
         ctx.cwd.join(archive_path)
     };
-    let repo = theway_storage::session::open_repo(ctx.cwd).await;
+    let repo = match ctx.extra.storage.open_session_repo(ctx.cwd).await {
+        Ok(repo) => repo,
+        Err(e) => return CommandOutcome::Error(format!("open session repo: {e}")),
+    };
 
     emit_session_archive_warning();
     match theway_storage::session_archive::import_session(
@@ -349,7 +352,10 @@ impl SlashCommand<DaemonCtx> for ForkCommand {
                 Err(e) => return CommandOutcome::Error(format!("fork failed: {e}")),
             };
 
-        let repo = theway_storage::session::open_repo(ctx.cwd).await;
+        let repo = match ctx.extra.storage.open_session_repo(ctx.cwd).await {
+            Ok(repo) => repo,
+            Err(e) => return CommandOutcome::Error(format!("open session repo: {e}")),
+        };
         match theway_storage::session::fork_session(&repo, ctx.cwd, session, to_fork).await {
             Ok(new) => {
                 let meta = match new.storage().get_metadata_json().await {

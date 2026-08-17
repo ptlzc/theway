@@ -53,6 +53,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
             crate::wire::WireDaemonConfig::default(),
         )),
         tool_ops: std::sync::Arc::new(crate::testing::FakeToolOps::new()),
+        storage_ops: std::sync::Arc::new(crate::testing::FakeStorageOps::new()),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -261,6 +262,7 @@ async fn websocket_serves_snapshot_and_accepts_commands() {
             crate::wire::WireDaemonConfig::default(),
         )),
         tool_ops: std::sync::Arc::new(crate::testing::FakeToolOps::new()),
+        storage_ops: std::sync::Arc::new(crate::testing::FakeStorageOps::new()),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -433,6 +435,7 @@ async fn spawn_config_server(
         )),
         daemon_config: std::sync::Arc::new(std::sync::RwLock::new(seed)),
         tool_ops: std::sync::Arc::new(crate::testing::FakeToolOps::new()),
+        storage_ops: std::sync::Arc::new(crate::testing::FakeStorageOps::new()),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

@@ -71,7 +71,16 @@ export interface DaemonConfig {
    * daemon forwards file/process operations to this endpoint instead of
    * executing them locally.
    */
-  toolServiceAddr?: string | undefined;
+  toolServiceAddr?:
+    | string
+    | undefined;
+  /**
+   * ── controller storage endpoint (issue #85) ──
+   * Address of the controller's StorageService server (host:port). When set,
+   * the daemon uses controller-backed runtime storage (sessions, DAG runs,
+   * trigger rules, cron jobs) over RPC instead of local storage directly.
+   */
+  storageServiceAddr?: string | undefined;
 }
 
 function createBaseDaemonConfig(): DaemonConfig {
@@ -85,6 +94,7 @@ function createBaseDaemonConfig(): DaemonConfig {
     triggerPollSecs: undefined,
     tuiMaxFeedLines: undefined,
     toolServiceAddr: undefined,
+    storageServiceAddr: undefined,
   };
 }
 
@@ -116,6 +126,9 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
     }
     if (message.toolServiceAddr !== undefined) {
       writer.uint32(74).string(message.toolServiceAddr);
+    }
+    if (message.storageServiceAddr !== undefined) {
+      writer.uint32(82).string(message.storageServiceAddr);
     }
     return writer;
   },
@@ -199,6 +212,14 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
           message.toolServiceAddr = reader.string();
           continue;
         }
+        case 10: {
+          if (tag !== 82) {
+            break;
+          }
+
+          message.storageServiceAddr = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -243,6 +264,11 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
         : isSet(object.tool_service_addr)
         ? globalThis.String(object.tool_service_addr)
         : undefined,
+      storageServiceAddr: isSet(object.storageServiceAddr)
+        ? globalThis.String(object.storageServiceAddr)
+        : isSet(object.storage_service_addr)
+        ? globalThis.String(object.storage_service_addr)
+        : undefined,
     };
   },
 
@@ -275,6 +301,9 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
     if (message.toolServiceAddr !== undefined) {
       obj.toolServiceAddr = message.toolServiceAddr;
     }
+    if (message.storageServiceAddr !== undefined) {
+      obj.storageServiceAddr = message.storageServiceAddr;
+    }
     return obj;
   },
 
@@ -292,6 +321,7 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
     message.triggerPollSecs = object.triggerPollSecs ?? undefined;
     message.tuiMaxFeedLines = object.tuiMaxFeedLines ?? undefined;
     message.toolServiceAddr = object.toolServiceAddr ?? undefined;
+    message.storageServiceAddr = object.storageServiceAddr ?? undefined;
     return message;
   },
 };

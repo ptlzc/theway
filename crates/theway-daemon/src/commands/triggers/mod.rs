@@ -341,7 +341,10 @@ async fn automation_elsewhere_hint_for_ctx(ctx: &CommandCtx<'_, DaemonCtx>) -> O
         .get("path")
         .and_then(|v| v.as_str())
         .map(std::path::PathBuf::from);
-    let repo = theway_storage::session::open_repo(ctx.cwd).await;
+    let repo = match ctx.extra.storage.open_session_repo(ctx.cwd).await {
+        Ok(repo) => repo,
+        Err(_) => return None,
+    };
     theway_storage::session::automation_elsewhere_hint(&repo, current.as_deref()).await
 }
 

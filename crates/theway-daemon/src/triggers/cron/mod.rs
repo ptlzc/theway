@@ -82,10 +82,38 @@ pub struct CronRegistry {
     inner: Arc<Mutex<CronRegistryState>>,
 }
 
+#[derive(Clone, Default)]
+enum CronPersistence {
+    #[default]
+    None,
+    Path(PathBuf),
+    Runtime {
+        storage: Arc<dyn theway_daemon::runtime_storage::RuntimeStorage>,
+        cwd: PathBuf,
+        session_id: String,
+    },
+}
+
+impl std::fmt::Debug for CronPersistence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => f.write_str("None"),
+            Self::Path(path) => f.debug_tuple("Path").field(path).finish(),
+            Self::Runtime {
+                cwd, session_id, ..
+            } => f
+                .debug_struct("Runtime")
+                .field("cwd", cwd)
+                .field("session_id", session_id)
+                .finish(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 struct CronRegistryState {
     jobs: Vec<CronJob>,
-    storage_path: Option<PathBuf>,
+    storage: CronPersistence,
 }
 
 impl CronRegistry {
@@ -105,12 +133,47 @@ impl CronRegistry {
         }
         let mut state = self.inner.lock();
         state.jobs = jobs;
-        state.storage_path = Some(path);
+        state.storage = CronPersistence::Path(path);
+        Ok(())
+    }
+
+    /// Load jobs from the runtime storage seam (issue #86). Mutations are
+    /// persisted back through the same seam; remote storage saves are
+    /// fire-and-forget RPC writes.
+    pub async fn load_from_storage(
+        &self,
+        storage: Arc<dyn theway_daemon::runtime_storage::RuntimeStorage>,
+        cwd: PathBuf,
+        session_id: String,
+    ) -> Result<(), CronStorageError> {
+        let mut jobs = storage
+            .load_cron_jobs(&cwd, &session_id)
+            .await
+            .map_err(|e| CronStorageError::Io(e.to_string()))?;
+        for job in &jobs {
+            CronExpression::parse(&job.schedule)?;
+        }
+        if clear_stale_running_state(&mut jobs) {
+            storage
+                .save_cron_jobs(&cwd, &session_id, &jobs)
+                .await
+                .map_err(|e| CronStorageError::Io(e.to_string()))?;
+        }
+        let mut state = self.inner.lock();
+        state.jobs = jobs;
+        state.storage = CronPersistence::Runtime {
+            storage,
+            cwd,
+            session_id,
+        };
         Ok(())
     }
 
     pub fn storage_path(&self) -> Option<PathBuf> {
-        self.inner.lock().storage_path.clone()
+        match &self.inner.lock().storage {
+            CronPersistence::Path(path) => Some(path.clone()),
+            _ => None,
+        }
     }
 
     pub fn list(&self) -> Vec<CronJob> {
@@ -162,9 +225,7 @@ impl CronRegistry {
         let mut state = self.inner.lock();
         let mut next = state.jobs.clone();
         next.push(job.clone());
-        if let Some(path) = &state.storage_path {
-            write_jobs_file(path, &next)?;
-        }
+        persist_jobs(&state.storage, &next)?;
         state.jobs = next;
         Ok(job)
     }
@@ -177,9 +238,7 @@ impl CronRegistry {
         };
         let mut next = state.jobs.clone();
         let removed = next.remove(pos);
-        if let Some(path) = &state.storage_path {
-            write_jobs_file(path, &next)?;
-        }
+        persist_jobs(&state.storage, &next)?;
         state.jobs = next;
         Ok(Some(removed))
     }
@@ -200,9 +259,7 @@ impl CronRegistry {
             next[pos].running_trace_id = None;
         }
         let updated = next[pos].clone();
-        if let Some(path) = &state.storage_path {
-            write_jobs_file(path, &next)?;
-        }
+        persist_jobs(&state.storage, &next)?;
         state.jobs = next;
         Ok(Some(updated))
     }
@@ -242,9 +299,7 @@ impl CronRegistry {
         // Ticks run every TICK_SECS for every session; only persist real state changes so
         // idle sessions don't accrete empty/rewritten sidecar files.
         if next != state.jobs {
-            if let Some(path) = &state.storage_path {
-                let _ = write_jobs_file(path, &next);
-            }
+            let _ = persist_jobs(&state.storage, &next);
             state.jobs = next;
         }
         due
@@ -274,9 +329,7 @@ impl CronRegistry {
         next[pos].running_trace_id = None;
         next[pos].last_completed_at = Some(Utc::now());
         next[pos].last_error = error;
-        if let Some(path) = &state.storage_path {
-            let _ = write_jobs_file(path, &next);
-        }
+        let _ = persist_jobs(&state.storage, &next);
         state.jobs = next;
     }
 
@@ -292,7 +345,30 @@ struct CronJobsFile {
     jobs: Vec<CronJob>,
 }
 
-fn read_jobs_file(path: &Path) -> Result<Vec<CronJob>, CronStorageError> {
+fn persist_jobs(storage: &CronPersistence, jobs: &[CronJob]) -> Result<(), CronStorageError> {
+    match storage {
+        CronPersistence::Path(path) => write_jobs_file(path, jobs),
+        CronPersistence::Runtime {
+            storage,
+            cwd,
+            session_id,
+        } => {
+            let storage = storage.clone();
+            let cwd = cwd.clone();
+            let session_id = session_id.clone();
+            let jobs = jobs.to_vec();
+            tokio::spawn(async move {
+                if let Err(e) = storage.save_cron_jobs(&cwd, &session_id, &jobs).await {
+                    tracing::warn!(error = %e, "cron remote persist failed");
+                }
+            });
+            Ok(())
+        }
+        CronPersistence::None => Ok(()),
+    }
+}
+
+pub(crate) fn read_jobs_file(path: &Path) -> Result<Vec<CronJob>, CronStorageError> {
     match std::fs::read_to_string(path) {
         Ok(text) => {
             let file: CronJobsFile =
@@ -304,7 +380,7 @@ fn read_jobs_file(path: &Path) -> Result<Vec<CronJob>, CronStorageError> {
     }
 }
 
-fn write_jobs_file(path: &Path, jobs: &[CronJob]) -> Result<(), CronStorageError> {
+pub(crate) fn write_jobs_file(path: &Path, jobs: &[CronJob]) -> Result<(), CronStorageError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|err| CronStorageError::Io(err.to_string()))?;
     }

@@ -27,13 +27,17 @@ use parking_lot::Mutex;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::wire::{
-    SessionSummary, ToolError, WireCommand, WireDaemonConfig, WirePathContext, WireStatus,
-    WireToolEditRequest, WireToolEditResult, WireToolExecFrame, WireToolExecRequest,
-    WireToolFindRequest, WireToolFindResult, WireToolGrepRequest, WireToolGrepResult,
-    WireToolListDirRequest, WireToolListDirResult, WireToolMemoryForgetRequest,
-    WireToolMemoryForgetResult, WireToolMemoryListRequest, WireToolMemoryListResult,
-    WireToolMemoryReadRequest, WireToolMemoryReadResult, WireToolMemorySaveRequest,
-    WireToolMemorySaveResult, WireToolReadRequest, WireToolReadResult, WireToolSkillInstallRequest,
+    SessionSummary, ToolError, WireCommand, WireDaemonConfig, WireLoadCronJobsRequest,
+    WireLoadCronJobsResult, WireLoadDagRunsRequest, WireLoadDagRunsResult,
+    WireLoadTriggerRulesRequest, WireLoadTriggerRulesResult, WirePathContext,
+    WireSaveCronJobsRequest, WireSaveCronJobsResult, WireSaveDagRunRequest, WireSaveDagRunResult,
+    WireSaveTriggerRulesRequest, WireSaveTriggerRulesResult, WireStatus, WireToolEditRequest,
+    WireToolEditResult, WireToolExecFrame, WireToolExecRequest, WireToolFindRequest,
+    WireToolFindResult, WireToolGrepRequest, WireToolGrepResult, WireToolListDirRequest,
+    WireToolListDirResult, WireToolMemoryForgetRequest, WireToolMemoryForgetResult,
+    WireToolMemoryListRequest, WireToolMemoryListResult, WireToolMemoryReadRequest,
+    WireToolMemoryReadResult, WireToolMemorySaveRequest, WireToolMemorySaveResult,
+    WireToolReadRequest, WireToolReadResult, WireToolSkillInstallRequest,
     WireToolSkillInstallResult, WireToolWriteRequest, WireToolWriteResult,
 };
 use theway_core::multiagent::graph::engine::DagEngine;
@@ -131,6 +135,102 @@ pub trait ToolOps: Send + Sync {
         &self,
         request: &WireToolSkillInstallRequest,
     ) -> Result<WireToolSkillInstallResult, ToolError>;
+}
+
+/// Runtime state externalization handler (issue #84): the transport-side seam
+/// behind `state.proto` `StorageService`. It mirrors the daemon-side
+/// `RuntimeStorage` boundary (#79/#80) without coupling the transport crate to
+/// filesystem/SQLite layouts. The daemon kernel implements this seam against
+/// its storage adapter; a controller/storage side can drive the same surface
+/// through gRPC or JSON-RPC.
+#[async_trait]
+pub trait StorageOps: Send + Sync {
+    /// Persist one DAG run snapshot (opaque JSON `PersistedRun`).
+    async fn save_dag_run(&self, request: &WireSaveDagRunRequest) -> Result<WireSaveDagRunResult>;
+
+    /// Load stored DAG runs for a session, optionally one run.
+    async fn load_dag_runs(
+        &self,
+        request: &WireLoadDagRunsRequest,
+    ) -> Result<WireLoadDagRunsResult>;
+
+    /// Replace the session's stored trigger rules.
+    async fn save_trigger_rules(
+        &self,
+        request: &WireSaveTriggerRulesRequest,
+    ) -> Result<WireSaveTriggerRulesResult>;
+
+    /// Load the session's stored trigger rules.
+    async fn load_trigger_rules(
+        &self,
+        request: &WireLoadTriggerRulesRequest,
+    ) -> Result<WireLoadTriggerRulesResult>;
+
+    /// Replace the session's stored cron jobs.
+    async fn save_cron_jobs(
+        &self,
+        request: &WireSaveCronJobsRequest,
+    ) -> Result<WireSaveCronJobsResult>;
+
+    /// Load the session's stored cron jobs.
+    async fn load_cron_jobs(
+        &self,
+        request: &WireLoadCronJobsRequest,
+    ) -> Result<WireLoadCronJobsResult>;
+}
+
+/// Placeholder [`StorageOps`] for daemon builds that have not wired the
+/// runtime-storage seam yet: every operation fails with a clear message. The
+/// daemon kernel replaces this with the storage-backed implementation in the
+/// issue #84/#85 phase; until then the RPC surface exists end-to-end and
+/// reports the gap cleanly instead of failing at startup.
+#[derive(Clone, Copy, Default)]
+pub struct UnavailableStorageOps;
+
+/// Single failure message for every [`UnavailableStorageOps`] operation.
+pub const STORAGE_OPS_UNAVAILABLE: &str =
+    "runtime state storage is not wired to this daemon yet (issue #84)";
+
+#[async_trait]
+impl StorageOps for UnavailableStorageOps {
+    async fn save_dag_run(&self, _request: &WireSaveDagRunRequest) -> Result<WireSaveDagRunResult> {
+        Err(anyhow::anyhow!(STORAGE_OPS_UNAVAILABLE))
+    }
+
+    async fn load_dag_runs(
+        &self,
+        _request: &WireLoadDagRunsRequest,
+    ) -> Result<WireLoadDagRunsResult> {
+        Err(anyhow::anyhow!(STORAGE_OPS_UNAVAILABLE))
+    }
+
+    async fn save_trigger_rules(
+        &self,
+        _request: &WireSaveTriggerRulesRequest,
+    ) -> Result<WireSaveTriggerRulesResult> {
+        Err(anyhow::anyhow!(STORAGE_OPS_UNAVAILABLE))
+    }
+
+    async fn load_trigger_rules(
+        &self,
+        _request: &WireLoadTriggerRulesRequest,
+    ) -> Result<WireLoadTriggerRulesResult> {
+        Err(anyhow::anyhow!(STORAGE_OPS_UNAVAILABLE))
+    }
+
+    async fn save_cron_jobs(
+        &self,
+        _request: &WireSaveCronJobsRequest,
+    ) -> Result<WireSaveCronJobsResult> {
+        Err(anyhow::anyhow!(STORAGE_OPS_UNAVAILABLE))
+    }
+
+    async fn load_cron_jobs(
+        &self,
+        _request: &WireLoadCronJobsRequest,
+    ) -> Result<WireLoadCronJobsResult> {
+        Err(anyhow::anyhow!(STORAGE_OPS_UNAVAILABLE))
+    }
 }
 
 /// Placeholder [`ToolOps`] for daemon builds that have not wired the
@@ -325,6 +425,10 @@ pub struct TransportEndpoints {
     /// and the JSON-RPC tool methods. The daemon kernel implements the seam
     /// against its execution environment.
     pub tool_ops: Arc<dyn crate::transport::ToolOps>,
+    /// Runtime state storage handler (issue #84): backs the gRPC
+    /// `StorageService` and the JSON-RPC state methods. The daemon kernel
+    /// implements the seam against the `RuntimeStorage` adapter.
+    pub storage_ops: Arc<dyn crate::transport::StorageOps>,
     /// Shared daemon path context (issue #68): served by `GetPathContext`,
     /// optimistically updated by `SetSkillDirs` before the event loop applies
     /// the change authoritatively. Built once in

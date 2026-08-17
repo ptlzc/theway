@@ -5327,6 +5327,7 @@ dependencies = [
  "theway-storage",
  "theway-transport",
  "tokio",
+ "toml",
  "tracing",
  "unicode-width 0.2.0",
 ]

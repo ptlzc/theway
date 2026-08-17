@@ -310,6 +310,7 @@ impl TurnHost {
             trigger_poll_secs: Some(config.startup.trigger_poll_secs),
             tui_max_feed_lines: config.startup.tui_max_feed_lines,
             tool_service_addr: None,
+            storage_service_addr: config.startup.storage_service_addr.clone(),
         }));
         let tool_ops: Arc<dyn ToolOps> = Arc::new(ForwardingToolOps::new(daemon_config.clone()));
         Self {
@@ -414,6 +415,10 @@ impl TurnHost {
             // controller's ToolService endpoint through the shared config's
             // `tool_service_addr`.
             tool_ops: self.tool_ops.clone(),
+            // Issue #84: runtime state externalization is wired as an RPC
+            // contract first; the storage-backed implementation lands with
+            // the controller-storage phase (#85/#86).
+            storage_ops: std::sync::Arc::new(theway_transport::UnavailableStorageOps),
             session_id: self.session_id.clone(),
             agent_fwd,
         }

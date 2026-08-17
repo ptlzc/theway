@@ -13,14 +13,17 @@ use anyhow::{Context as _, Result};
 use theway_storage::session;
 use theway_storage::sqlite_repo::SqliteSessionRepo;
 use theway_transport::client::{GrpcClient, discover, spawn_daemon, wait_ready};
-use theway_transport::grpc::{ToolServiceState, serve_tool_service};
+use theway_transport::grpc::{
+    StorageServiceState, ToolServiceState, serve_storage_service, serve_tool_service,
+};
 use theway_transport::proto::wire_status;
-use theway_transport::transport::ToolOps;
+use theway_transport::transport::{SessionOps, StorageOps, ToolOps};
 use theway_transport::wire::{WireDaemonConfig, WireStatus};
 use tokio::net::TcpListener;
 
 use crate::cli::Cli;
 use crate::config_payload::{assemble_config, provision_config};
+use crate::controller_storage::{ControllerSessionOps, ControllerStorageOps};
 use crate::local_tool_ops::LocalToolOps;
 use crate::ui;
 
@@ -87,6 +90,10 @@ fn daemon_launch_args(cli: &Cli, config: &WireDaemonConfig) -> Vec<String> {
         args.push("--trigger-poll-secs".to_string());
         args.push(secs.to_string());
     }
+    if let Some(addr) = &config.storage_service_addr {
+        args.push("--storage-service-addr".to_string());
+        args.push(addr.clone());
+    }
     if cli.debug {
         args.push("--debug".to_string());
     }
@@ -125,8 +132,24 @@ async fn connect_or_spawn(
         addr
     };
 
+    // Issue #85: start the controller-side StorageService server so the
+    // daemon can route session/DAG/trigger/cron persistence back to this
+    // TUI process's local SQLite/filesystem storage.
+    let storage_addr = {
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let addr = listener.local_addr()?.to_string();
+        let repo = Arc::new(session::open_repo(cwd).await);
+        let session_ops: Arc<dyn SessionOps> =
+            Arc::new(ControllerSessionOps::new(repo.clone(), cwd.to_path_buf()));
+        let storage_ops: Arc<dyn StorageOps> = Arc::new(ControllerStorageOps::new(repo));
+        let state = StorageServiceState::new(session_ops, storage_ops);
+        let _server = serve_storage_service(listener, state);
+        addr
+    };
+
     let (mut config, mut notes) = assemble_config(cli).await;
     config.tool_service_addr = Some(tool_addr);
+    config.storage_service_addr = Some(storage_addr);
 
     // 1. Reuse a running daemon: per-cwd port file first, default port second.
     if let Some(addr) = discover(std::time::Duration::from_millis(800), cwd).await? {
@@ -400,6 +423,7 @@ pub(crate) mod test_daemon {
             path_context: Arc::new(std::sync::RwLock::new(WirePathContext::default())),
             daemon_config: Arc::new(std::sync::RwLock::new(WireDaemonConfig::default())),
             tool_ops: Arc::new(theway_transport::UnavailableToolOps),
+            storage_ops: Arc::new(theway_transport::UnavailableStorageOps),
         };
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap().to_string();

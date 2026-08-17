@@ -5,8 +5,9 @@
 //! `JobTranscriptStore` seam; the daemon injects this store into
 //! [`theway_core::multiagent::registry::AgentJobRegistry`] at startup.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use theway_core::multiagent::registry::{JobTranscript, JobTranscriptStore};
 
@@ -58,6 +59,49 @@ impl JobTranscriptStore for DiskTranscriptStore {
 
     fn load_job(&self, job_id: &str) -> Option<Vec<serde_json::Value>> {
         Self::load_messages(&self.messages_path_for_task(job_id))
+    }
+}
+
+/// In-memory [`JobTranscriptStore`] for controller-backed daemon runs.
+///
+/// Issue #86: remote runtime storage does not yet expose a job-transcript
+/// RPC surface, so controller-provisioned daemons keep subagent transcripts
+/// in memory for the process lifetime instead of writing local `.pi` files.
+/// TODO(#86): add a StorageService transcript RPC and replace this store.
+#[derive(Default)]
+pub struct MemoryTranscriptStore {
+    inner: RwLock<HashMap<String, Vec<serde_json::Value>>>,
+}
+
+impl MemoryTranscriptStore {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
+
+    fn key(run_id: Option<&str>, node_id: Option<&str>, job_id: &str) -> String {
+        match (run_id, node_id) {
+            (Some(run), Some(node)) => format!("node:{run}:{node}"),
+            _ => format!("job:{job_id}"),
+        }
+    }
+}
+
+impl JobTranscriptStore for MemoryTranscriptStore {
+    fn save(&self, transcript: &JobTranscript) {
+        let key = Self::key(transcript.run_id, transcript.node_id, transcript.job_id);
+        if let Ok(mut inner) = self.inner.write() {
+            inner.insert(key, transcript.messages.to_vec());
+        }
+    }
+
+    fn load_node(&self, run_id: &str, node_id: &str) -> Option<Vec<serde_json::Value>> {
+        let key = format!("node:{run_id}:{node_id}");
+        self.inner.read().ok()?.get(&key).cloned()
+    }
+
+    fn load_job(&self, job_id: &str) -> Option<Vec<serde_json::Value>> {
+        let key = format!("job:{job_id}");
+        self.inner.read().ok()?.get(&key).cloned()
     }
 }
 

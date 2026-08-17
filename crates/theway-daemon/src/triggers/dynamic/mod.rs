@@ -66,10 +66,38 @@ pub struct DynamicTriggerRegistry {
     inner: Arc<Mutex<DynamicTriggerRegistryState>>,
 }
 
+#[derive(Clone, Default)]
+enum DynamicTriggerPersistence {
+    #[default]
+    None,
+    Path(PathBuf),
+    Runtime {
+        storage: Arc<dyn theway_daemon::runtime_storage::RuntimeStorage>,
+        cwd: PathBuf,
+        session_id: String,
+    },
+}
+
+impl std::fmt::Debug for DynamicTriggerPersistence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => f.write_str("None"),
+            Self::Path(path) => f.debug_tuple("Path").field(path).finish(),
+            Self::Runtime {
+                cwd, session_id, ..
+            } => f
+                .debug_struct("Runtime")
+                .field("cwd", cwd)
+                .field("session_id", session_id)
+                .finish(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 struct DynamicTriggerRegistryState {
     rules: Vec<DynamicTriggerRule>,
-    storage_path: Option<PathBuf>,
+    storage: DynamicTriggerPersistence,
 }
 
 impl DynamicTriggerRegistry {
@@ -85,12 +113,38 @@ impl DynamicTriggerRegistry {
         let rules = read_rules_file(&path)?;
         let mut state = self.inner.lock();
         state.rules = rules;
-        state.storage_path = Some(path);
+        state.storage = DynamicTriggerPersistence::Path(path);
+        Ok(())
+    }
+
+    /// Load rules from the runtime storage seam (issue #86). Mutations are
+    /// persisted back through the same seam; remote storage saves are
+    /// fire-and-forget RPC writes.
+    pub async fn load_from_storage(
+        &self,
+        storage: Arc<dyn theway_daemon::runtime_storage::RuntimeStorage>,
+        cwd: PathBuf,
+        session_id: String,
+    ) -> Result<(), DynamicTriggerStorageError> {
+        let rules = storage
+            .load_dynamic_triggers(&cwd, &session_id)
+            .await
+            .map_err(|e| DynamicTriggerStorageError::Read(e.to_string()))?;
+        let mut state = self.inner.lock();
+        state.rules = rules;
+        state.storage = DynamicTriggerPersistence::Runtime {
+            storage,
+            cwd,
+            session_id,
+        };
         Ok(())
     }
 
     pub fn storage_path(&self) -> Option<PathBuf> {
-        self.inner.lock().storage_path.clone()
+        match &self.inner.lock().storage {
+            DynamicTriggerPersistence::Path(path) => Some(path.clone()),
+            _ => None,
+        }
     }
 
     pub fn add_rule(
@@ -147,9 +201,7 @@ impl DynamicTriggerRegistry {
         let mut state = self.inner.lock();
         let mut next = state.rules.clone();
         next.push(rule.clone());
-        if let Some(path) = &state.storage_path {
-            write_rules_file(path, &next)?;
-        }
+        persist_rules(&state.storage, &next)?;
         state.rules = next;
         Ok(rule)
     }
@@ -169,9 +221,7 @@ impl DynamicTriggerRegistry {
         };
         let mut next = state.rules.clone();
         let removed = next.remove(pos);
-        if let Some(path) = &state.storage_path {
-            write_rules_file(path, &next)?;
-        }
+        persist_rules(&state.storage, &next)?;
         state.rules = next;
         Ok(Some(removed))
     }
@@ -192,9 +242,7 @@ impl DynamicTriggerRegistry {
             next[pos].fired_at = None;
         }
         let updated = next[pos].clone();
-        if let Some(path) = &state.storage_path {
-            write_rules_file(path, &next)?;
-        }
+        persist_rules(&state.storage, &next)?;
         state.rules = next;
         Ok(Some(updated))
     }
@@ -205,9 +253,7 @@ impl DynamicTriggerRegistry {
         if count == 0 {
             return Ok(0);
         }
-        if let Some(path) = &state.storage_path {
-            write_rules_file(path, &[])?;
-        }
+        persist_rules(&state.storage, &[])?;
         state.rules.clear();
         Ok(count)
     }
@@ -235,9 +281,7 @@ impl DynamicTriggerRegistry {
         if changed.is_empty() {
             return Ok(Vec::new());
         }
-        if let Some(path) = &state.storage_path {
-            write_rules_file(path, &next)?;
-        }
+        persist_rules(&state.storage, &next)?;
         state.rules = next;
         Ok(changed)
     }
@@ -287,7 +331,38 @@ struct DynamicTriggerFile {
 
 const DYNAMIC_TRIGGER_FILE_VERSION: u32 = 1;
 
-fn read_rules_file(path: &Path) -> Result<Vec<DynamicTriggerRule>, DynamicTriggerStorageError> {
+fn persist_rules(
+    storage: &DynamicTriggerPersistence,
+    rules: &[DynamicTriggerRule],
+) -> Result<(), DynamicTriggerStorageError> {
+    match storage {
+        DynamicTriggerPersistence::Path(path) => write_rules_file(path, rules),
+        DynamicTriggerPersistence::Runtime {
+            storage,
+            cwd,
+            session_id,
+        } => {
+            let storage = storage.clone();
+            let cwd = cwd.clone();
+            let session_id = session_id.clone();
+            let rules = rules.to_vec();
+            tokio::spawn(async move {
+                if let Err(e) = storage
+                    .save_dynamic_triggers(&cwd, &session_id, &rules)
+                    .await
+                {
+                    tracing::warn!(error = %e, "dynamic trigger remote persist failed");
+                }
+            });
+            Ok(())
+        }
+        DynamicTriggerPersistence::None => Ok(()),
+    }
+}
+
+pub(crate) fn read_rules_file(
+    path: &Path,
+) -> Result<Vec<DynamicTriggerRule>, DynamicTriggerStorageError> {
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
         Err(e) if e.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
@@ -301,7 +376,7 @@ fn read_rules_file(path: &Path) -> Result<Vec<DynamicTriggerRule>, DynamicTrigge
     Ok(file.rules)
 }
 
-fn write_rules_file(
+pub(crate) fn write_rules_file(
     path: &Path,
     rules: &[DynamicTriggerRule],
 ) -> Result<(), DynamicTriggerStorageError> {

@@ -31,6 +31,7 @@ pub mod http;
 pub mod inbox;
 pub mod mcp;
 pub mod proto;
+pub mod state;
 pub mod testing;
 pub mod tools;
 pub mod transport;
@@ -49,5 +50,6 @@ pub mod mentions;
 pub mod triggers;
 
 pub use transport::{
-    ToolExecStream, ToolOps, TransportEndpoints, TransportMode, UnavailableToolOps,
+    StorageOps, ToolExecStream, ToolOps, TransportEndpoints, TransportMode, UnavailableStorageOps,
+    UnavailableToolOps,
 };

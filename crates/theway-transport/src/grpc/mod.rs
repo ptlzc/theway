@@ -8,8 +8,10 @@
 //! Domain split: the `ToolService` implementation (issue #75) lives in
 //! [`tools`](crate::grpc::tools).
 
+mod storage;
 mod tools;
 
+pub use storage::{StorageServiceState, serve_storage_service};
 pub use tools::{ToolServiceState, serve_tool_service};
 
 use std::pin::Pin;
@@ -47,6 +49,7 @@ use theway_grpc::event_service_server::{EventService, EventServiceServer};
 use theway_grpc::graph_engine_service_server::{GraphEngineService, GraphEngineServiceServer};
 use theway_grpc::session_service_server::{SessionService, SessionServiceServer};
 use theway_grpc::settings_service_server::{SettingsService, SettingsServiceServer};
+use theway_grpc::storage_service_server::StorageServiceServer;
 use theway_grpc::tool_service_server::ToolServiceServer;
 use theway_grpc::{
     ApproveRequest, CommandResult, CreateSessionRequest, CreateSessionResponse,
@@ -103,6 +106,10 @@ pub struct GrpcState {
     /// surface (`ReadFile` / … / `SkillInstall`). The daemon kernel
     /// implements the seam against its execution environment.
     pub tool_ops: Arc<dyn ToolOps>,
+    /// Runtime state storage handler (issue #84): backs the `StorageService`
+    /// surface (`SaveDagRun` / `LoadDagRuns` / trigger/cron persistence). The
+    /// daemon kernel implements the seam against the `RuntimeStorage` adapter.
+    pub storage_ops: Arc<dyn crate::transport::StorageOps>,
 }
 
 #[tonic::async_trait]
@@ -726,12 +733,13 @@ pub async fn run_grpc(mut app: Box<dyn TransportHost>, options: GrpcOptions) -> 
         path_context: endpoints.path_context.clone(),
         daemon_config: endpoints.daemon_config.clone(),
         tool_ops: endpoints.tool_ops.clone(),
+        storage_ops: endpoints.storage_ops.clone(),
     };
     let server_task = serve_grpc(listener, grpc_state);
 
     println!("theway grpc listening on {actual}");
     println!(
-        "  services: theway.grpc.v1.CommandService / theway.grpc.v1.SessionService / theway.grpc.v1.SettingsService / theway.grpc.v1.ToolService / theway.grpc.v1.GraphEngineService / theway.grpc.v1.EventService + grpc.health.v1.Health · UI: workmate (独立)"
+        "  services: theway.grpc.v1.CommandService / theway.grpc.v1.SessionService / theway.grpc.v1.SettingsService / theway.grpc.v1.StorageService / theway.grpc.v1.ToolService / theway.grpc.v1.GraphEngineService / theway.grpc.v1.EventService + grpc.health.v1.Health · UI: workmate (独立)"
     );
 
     app.run_transport_loop(TransportMode::Grpc, endpoints, server_task)
@@ -745,6 +753,7 @@ pub fn serve_grpc(listener: TcpListener, state: GrpcState) -> tokio::task::JoinH
         .add_service(CommandServiceServer::new(state.clone()))
         .add_service(SessionServiceServer::new(state.clone()))
         .add_service(SettingsServiceServer::new(state.clone()))
+        .add_service(StorageServiceServer::new(state.clone()))
         .add_service(ToolServiceServer::new(ToolServiceState::new(
             state.tool_ops.clone(),
         )))

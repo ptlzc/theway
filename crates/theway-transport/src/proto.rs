@@ -2,19 +2,20 @@
 //!
 //! `WireStatus` (serde, `crate::wire`) is the internal model shared by the
 //! `--http` JSON surface and the UI event loop; `SessionState` (prost, generated
-//! from the six domain proto files — `commands.proto`, `session.proto`,
-//! `graph_engine.proto`, `events.proto`, `settings.proto`, `tools.proto` —
-//! plus `health.proto` by this crate's build.rs) is the structured wire model
-//! for gRPC. The gRPC server serializes `SessionState` as binary protobuf;
-//! JSON channels keep using `WireStatus` until the protojson migration (see
-//! docs/PROTOCOL.md). The tool-operation (`tools.proto`) codecs live in
-//! [`crate::tools`].
+//! from the seven domain proto files — `commands.proto`, `session.proto`,
+//! `graph_engine.proto`, `events.proto`, `settings.proto`, `tools.proto`,
+//! `state.proto` — plus `health.proto` by this crate's build.rs) is the
+//! structured wire model for gRPC. The gRPC server serializes `SessionState`
+//! as binary protobuf; JSON channels keep using `WireStatus` until the
+//! protojson migration (see docs/PROTOCOL.md). The tool-operation
+//! (`tools.proto`) codecs live in [`crate::tools`]; the runtime-state
+//! (`state.proto`) codecs live in [`crate::state`].
 
 /// Generated protobuf code for package `theway.grpc.v1`, produced by this
 /// crate's `build.rs` into its own OUT_DIR. Each domain proto file carries its
 /// messages, enums, and service in the same package: `commands.proto` /
 /// `session.proto` / `graph_engine.proto` / `events.proto` / `settings.proto`
-/// / `tools.proto`.
+/// / `tools.proto` / `state.proto`.
 pub mod theway_grpc {
     tonic::include_proto!("theway.grpc.v1");
 }
@@ -582,6 +583,7 @@ pub fn daemon_config_to_proto(config: &crate::wire::WireDaemonConfig) -> wire::D
             .tui_max_feed_lines
             .map(|lines| lines.min(u32::MAX as u64) as u32),
         tool_service_addr: config.tool_service_addr.clone(),
+        storage_service_addr: config.storage_service_addr.clone(),
     }
 }
 
@@ -598,6 +600,7 @@ pub fn daemon_config_from_proto(config: &wire::DaemonConfig) -> crate::wire::Wir
         trigger_poll_secs: config.trigger_poll_secs.map(u64::from),
         tui_max_feed_lines: config.tui_max_feed_lines.map(u64::from),
         tool_service_addr: config.tool_service_addr.clone(),
+        storage_service_addr: config.storage_service_addr.clone(),
     }
 }
 

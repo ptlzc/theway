@@ -53,6 +53,9 @@ pub struct StartupConfig {
     /// provisioning work). `WireDaemonConfig` has no matching field yet, so
     /// only a host embedding the daemon can flip it today.
     pub load_local_sources: bool,
+    /// Controller StorageService endpoint (`host:port`) for controller-backed
+    /// runtime storage (issue #85). `None` = use `LocalRuntimeStorage`.
+    pub storage_service_addr: Option<String>,
 }
 
 impl Default for StartupConfig {
@@ -64,6 +67,7 @@ impl Default for StartupConfig {
             tui_max_feed_lines: None,
             thinking_summary: None,
             load_local_sources: true,
+            storage_service_addr: None,
         }
     }
 }
@@ -134,6 +138,7 @@ mod tests {
         assert!(config.tui_max_feed_lines.is_none());
         assert!(config.thinking_summary.is_none());
         assert!(config.load_local_sources, "local scans stay on by default");
+        assert!(config.storage_service_addr.is_none());
     }
 
     #[test]
