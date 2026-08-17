@@ -1,7 +1,7 @@
 //! Tests for `grpc` — split out of src (see docs/rust-test-files.md).
 
 use super::*;
-use crate::testing::{FakeSessionOps, empty_sidebar_snapshot};
+use crate::testing::{FakeSessionOps, FakeToolOps, empty_sidebar_snapshot};
 use crate::wire::{WireContextUsage, WireDaemonConfig, WirePathContext};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -67,16 +67,18 @@ fn fixture_snapshot(feed_line: &str) -> WireStatus {
 }
 
 fn grpc_state() -> (GrpcState, mpsc::UnboundedReceiver<WireCommand>) {
-    let (state, command_rx, _ops) = grpc_state_with_ops();
+    let (state, command_rx, _ops, _tools) = grpc_state_with_ops();
     (state, command_rx)
 }
 
-/// Same fixture plus a handle on the fake SessionOps (seeded with the owning
-/// session) so session RPC tests can mutate the resource set.
+/// Same fixture plus handles on the fake SessionOps (seeded with the owning
+/// session) and the fake ToolOps (issue #75) so RPC tests can seed and
+/// inspect the resource sets.
 fn grpc_state_with_ops() -> (
     GrpcState,
     mpsc::UnboundedReceiver<WireCommand>,
     Arc<FakeSessionOps>,
+    Arc<FakeToolOps>,
 ) {
     let (command_tx, command_rx) = mpsc::unbounded_channel::<WireCommand>();
     let (snapshot_tx, _) = broadcast::channel::<WireStatus>(16);
@@ -106,6 +108,7 @@ fn grpc_state_with_ops() -> (
     let (dag_event_tx, _) = broadcast::channel::<DagEvent>(16);
     let session_ops = Arc::new(FakeSessionOps::new());
     session_ops.add_session("test-session");
+    let tool_ops = Arc::new(FakeToolOps::new());
     (
         GrpcState {
             commands: command_tx,
@@ -119,10 +122,12 @@ fn grpc_state_with_ops() -> (
             session_id: Arc::new(std::sync::RwLock::new("test-session".into())),
             path_context: Arc::new(std::sync::RwLock::new(WirePathContext::default())),
             daemon_config: Arc::new(std::sync::RwLock::new(WireDaemonConfig::default())),
+            tool_ops: tool_ops.clone(),
             agent_fwd,
         },
         command_rx,
         session_ops,
+        tool_ops,
     )
 }
 
@@ -699,7 +704,7 @@ async fn health_service_serves_serving_over_transport() {
 
 #[tokio::test]
 async fn list_sessions_returns_sessions_and_current_marker() {
-    let (state, _rx, ops) = grpc_state_with_ops();
+    let (state, _rx, ops, _tools) = grpc_state_with_ops();
     ops.add_session("other-session");
     let response = state
         .list_sessions(Request::new(Empty {}))
@@ -719,7 +724,7 @@ async fn list_sessions_returns_sessions_and_current_marker() {
 
 #[tokio::test]
 async fn create_session_returns_summary_and_queues_switch() {
-    let (state, mut rx, _ops) = grpc_state_with_ops();
+    let (state, mut rx, _ops, _tools) = grpc_state_with_ops();
     let response = state
         .create_session(Request::new(CreateSessionRequest {
             name: Some("brand new".into()),
@@ -743,7 +748,7 @@ async fn create_session_returns_summary_and_queues_switch() {
 
 #[tokio::test]
 async fn switch_session_rebinds_current_and_get_state_reflects_it() {
-    let (state, mut rx, ops) = grpc_state_with_ops();
+    let (state, mut rx, ops, _tools) = grpc_state_with_ops();
     ops.add_session("target-session");
     let result = state
         .switch_session(Request::new(SwitchSessionRequest {
@@ -768,7 +773,7 @@ async fn switch_session_rebinds_current_and_get_state_reflects_it() {
 
 #[tokio::test]
 async fn switch_session_unknown_target_errors_and_keeps_current() {
-    let (state, _rx, _ops) = grpc_state_with_ops();
+    let (state, _rx, _ops, _tools) = grpc_state_with_ops();
     let err = state
         .switch_session(Request::new(SwitchSessionRequest {
             session_id: "no-such-session".into(),
@@ -781,7 +786,7 @@ async fn switch_session_unknown_target_errors_and_keeps_current() {
 
 #[tokio::test]
 async fn rename_session_is_reflected_in_list() {
-    let (state, _rx, _ops) = grpc_state_with_ops();
+    let (state, _rx, _ops, _tools) = grpc_state_with_ops();
     let result = state
         .rename_session(Request::new(RenameSessionRequest {
             session_id: "test-session".into(),
@@ -824,7 +829,7 @@ async fn rename_session_is_reflected_in_list() {
 
 #[tokio::test]
 async fn delete_session_refused_while_graphs_running() {
-    let (state, _rx, ops) = grpc_state_with_ops();
+    let (state, _rx, ops, _tools) = grpc_state_with_ops();
     ops.add_session("busy-session");
     ops.set_running("busy-session", &["run-1", "run-2"]);
     let err = state
@@ -852,7 +857,7 @@ async fn delete_session_refused_while_graphs_running() {
 
 #[tokio::test]
 async fn delete_current_session_falls_back_to_most_recent() {
-    let (state, mut rx, ops) = grpc_state_with_ops();
+    let (state, mut rx, ops, _tools) = grpc_state_with_ops();
     ops.add_session("next-session");
     let response = state
         .delete_session(Request::new(DeleteSessionRequest {
@@ -883,7 +888,7 @@ async fn delete_current_session_falls_back_to_most_recent() {
 
 #[tokio::test]
 async fn graph_list_filters_runs_by_session() {
-    let (state, _rx, _ops) = grpc_state_with_ops();
+    let (state, _rx, _ops, _tools) = grpc_state_with_ops();
     let run_mine = state
         .dag_engine
         .plan_goal("condition mine", Some("test-session".into()));
@@ -939,7 +944,7 @@ fn startup_path_context() -> WirePathContext {
 fn grpc_state_with_path_context(
     ctx: WirePathContext,
 ) -> (GrpcState, mpsc::UnboundedReceiver<WireCommand>) {
-    let (mut state, command_rx, _ops) = grpc_state_with_ops();
+    let (mut state, command_rx, _ops, _tools) = grpc_state_with_ops();
     state.path_context = Arc::new(std::sync::RwLock::new(ctx));
     (state, command_rx)
 }
@@ -1059,7 +1064,7 @@ async fn path_context_round_trip_over_transport() {
 fn grpc_state_with_daemon_config(
     config: WireDaemonConfig,
 ) -> (GrpcState, mpsc::UnboundedReceiver<WireCommand>) {
-    let (mut state, command_rx, _ops) = grpc_state_with_ops();
+    let (mut state, command_rx, _ops, _tools) = grpc_state_with_ops();
     state.daemon_config = Arc::new(std::sync::RwLock::new(config));
     (state, command_rx)
 }
@@ -1200,6 +1205,387 @@ async fn settings_round_trip_over_transport() {
     assert_eq!(got.model.as_deref(), Some("claude-x"));
     assert_eq!(got.base_url.as_deref(), Some("https://proxy.example.com"));
     assert_eq!(got.thinking, Some(true));
+
+    server.abort();
+}
+
+// ── tool operations (issue #75) ──────────────────────────────────────
+
+#[tokio::test]
+async fn tool_write_read_edit_round_trip_in_process() {
+    use crate::proto::theway_grpc::tool_service_server::ToolService as _;
+
+    let (state, _rx, _ops, tools) = grpc_state_with_ops();
+
+    // Write creates the file in the fake FS.
+    let result = state
+        .write_file(Request::new(theway_grpc::WriteFileRequest {
+            path: "/repo/notes.md".into(),
+            content: "alpha\nbeta\ngamma\n".into(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(result.bytes_written, "alpha\nbeta\ngamma\n".len() as u64);
+    assert_eq!(
+        tools.file_content("/repo/notes.md").as_deref(),
+        Some("alpha\nbeta\ngamma\n")
+    );
+
+    // Read paginates lines (1-based offset).
+    let result = state
+        .read_file(Request::new(theway_grpc::ReadFileRequest {
+            path: "/repo/notes.md".into(),
+            offset: Some(2),
+            limit: Some(1),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(result.content, "beta");
+    assert_eq!(result.total_lines, 3);
+    assert!(result.truncated);
+
+    // Edit replaces and reports the count; the fake FS observes it.
+    let result = state
+        .edit_file(Request::new(theway_grpc::EditFileRequest {
+            path: "/repo/notes.md".into(),
+            old_string: "beta".into(),
+            new_string: "BETA".into(),
+            replace_all: false,
+            range_start: None,
+            range_end: None,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(result.replacements, 1);
+    assert_eq!(
+        tools.file_content("/repo/notes.md").as_deref(),
+        Some("alpha\nBETA\ngamma\n")
+    );
+}
+
+#[tokio::test]
+async fn tool_exec_streams_output_then_exit() {
+    use crate::proto::theway_grpc::tool_service_server::ToolService as _;
+
+    let (state, _rx, _ops, tools) = grpc_state_with_ops();
+    tools.set_exec_frames(vec![
+        crate::wire::WireToolExecFrame::Output {
+            text: "hello ".into(),
+        },
+        crate::wire::WireToolExecFrame::Output {
+            text: "world\n".into(),
+        },
+        crate::wire::WireToolExecFrame::Exit {
+            code: 3,
+            timed_out: false,
+            duration_ms: 12,
+        },
+    ]);
+
+    let stream = state
+        .exec_command(Request::new(theway_grpc::ExecCommandRequest {
+            command: "echo hello world".into(),
+            cwd: Some("/repo".into()),
+            timeout_ms: None,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    let frames: Vec<_> = stream
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .map(|item| item.unwrap())
+        .collect();
+    assert_eq!(frames.len(), 3);
+    match frames[0].kind.as_ref().unwrap() {
+        theway_grpc::exec_output_frame::Kind::Output(text) => assert_eq!(text, "hello "),
+        other => panic!("expected output frame, got {other:?}"),
+    }
+    match frames[2].kind.as_ref().unwrap() {
+        theway_grpc::exec_output_frame::Kind::Exit(exit) => {
+            assert_eq!(exit.code, 3);
+            assert!(!exit.timed_out);
+            assert_eq!(exit.duration_ms, 12);
+        }
+        other => panic!("expected exit frame, got {other:?}"),
+    }
+    // The handler received the wire request intact.
+    let last = tools.last_exec().unwrap();
+    assert_eq!(last.command, "echo hello world");
+    assert_eq!(last.cwd.as_deref(), Some("/repo"));
+}
+
+#[tokio::test]
+async fn tool_errors_map_to_status_codes() {
+    use crate::proto::theway_grpc::tool_service_server::ToolService as _;
+
+    let (state, _rx, _ops, tools) = grpc_state_with_ops();
+    tools.put_file("/repo/dup.txt", "x\nx\n");
+
+    // Missing file → NOT_FOUND.
+    let err = state
+        .read_file(Request::new(theway_grpc::ReadFileRequest {
+            path: "/repo/missing.txt".into(),
+            offset: None,
+            limit: None,
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::NotFound);
+
+    // Ambiguous edit → INVALID_ARGUMENT.
+    let err = state
+        .edit_file(Request::new(theway_grpc::EditFileRequest {
+            path: "/repo/dup.txt".into(),
+            old_string: "x".into(),
+            new_string: "y".into(),
+            replace_all: false,
+            range_start: None,
+            range_end: None,
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    assert!(err.message().contains("not unique"), "{}", err.message());
+}
+
+#[tokio::test]
+async fn tool_list_dir_grep_find_in_process() {
+    use crate::proto::theway_grpc::tool_service_server::ToolService as _;
+
+    let (state, _rx, _ops, tools) = grpc_state_with_ops();
+    tools.seed_dir(
+        "/repo",
+        vec![
+            crate::wire::WireToolDirEntry {
+                name: "src".into(),
+                kind: "dir".into(),
+                size: 0,
+            },
+            crate::wire::WireToolDirEntry {
+                name: "Cargo.toml".into(),
+                kind: "file".into(),
+                size: 512,
+            },
+        ],
+    );
+    tools.put_file("/repo/src/main.rs", "fn main() {\n    run();\n}\n");
+    tools.put_file("/repo/src/lib.rs", "pub fn run() {}\n");
+
+    let result = state
+        .list_dir(Request::new(theway_grpc::ListDirRequest {
+            path: "/repo".into(),
+            limit: None,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(result.entries.len(), 2);
+    assert_eq!(result.entries[0].name, "src");
+    assert_eq!(result.entries[0].kind, "dir");
+    assert_eq!(result.entries[1].size, 512);
+
+    // Grep content mode: matches carry path + 1-based line number.
+    let result = state
+        .grep(Request::new(theway_grpc::GrepRequest {
+            pattern: "fn".into(),
+            path: Some("/repo".into()),
+            glob_filter: Some("*.rs".into()),
+            case_insensitive: false,
+            output_mode: Some("content".into()),
+            max_results: None,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(result.matches.len(), 2);
+    assert_eq!(result.matches[0].path, "/repo/src/lib.rs");
+    assert_eq!(result.matches[1].line_number, 1);
+
+    // Find: filename glob over the fake FS.
+    let result = state
+        .find(Request::new(theway_grpc::FindRequest {
+            pattern: "*.rs".into(),
+            path: Some("/repo".into()),
+            limit: None,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(
+        result.paths,
+        vec!["/repo/src/lib.rs", "/repo/src/main.rs"]
+    );
+}
+
+#[tokio::test]
+async fn tool_memory_and_skill_install_in_process() {
+    use crate::proto::theway_grpc::tool_service_server::ToolService as _;
+
+    let (state, _rx, _ops, _tools) = grpc_state_with_ops();
+
+    // Memory: save → list → read → forget.
+    let saved = state
+        .memory_save(Request::new(theway_grpc::MemorySaveRequest {
+            name: "editor-prefs".into(),
+            content: "tabs".into(),
+            description: Some("editing preferences".into()),
+            memory_type: Some("preference".into()),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(saved.name, "editor-prefs");
+    assert_eq!(saved.path, "/fake-memory/editor-prefs.md");
+
+    let listed = state
+        .memory_list(Request::new(theway_grpc::MemoryListRequest {}))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(listed.entries.len(), 1);
+    assert_eq!(listed.entries[0].memory_type.as_deref(), Some("preference"));
+
+    let read = state
+        .memory_read(Request::new(theway_grpc::MemoryReadRequest {
+            name: "editor-prefs".into(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(read.content, "tabs");
+
+    let forgot = state
+        .memory_forget(Request::new(theway_grpc::MemoryForgetRequest {
+            name: "editor-prefs".into(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(forgot.removed);
+    let forgot_again = state
+        .memory_forget(Request::new(theway_grpc::MemoryForgetRequest {
+            name: "editor-prefs".into(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(!forgot_again.removed);
+
+    // Skill install: preview first (nothing installed), then confirm.
+    let preview = state
+        .skill_install(Request::new(theway_grpc::SkillInstallRequest {
+            source: Some(theway_grpc::skill_install_request::Source::Content(
+                "# skill\nbody".into(),
+            )),
+            confirm: false,
+            overwrite: false,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(!preview.installed);
+    assert_eq!(preview.name, "inline-skill");
+    assert!(preview.content_hash.is_some());
+
+    let installed = state
+        .skill_install(Request::new(theway_grpc::SkillInstallRequest {
+            source: Some(theway_grpc::skill_install_request::Source::Content(
+                "# skill\nbody".into(),
+            )),
+            confirm: true,
+            overwrite: false,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(installed.installed);
+    assert!(!installed.existing);
+}
+
+#[tokio::test]
+async fn tool_service_round_trip_over_transport() {
+    let (state, _rx, _ops, tools) = grpc_state_with_ops();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = serve_grpc(listener, state);
+
+    let mut client = theway_grpc::tool_service_client::ToolServiceClient::connect(format!(
+        "http://{addr}"
+    ))
+    .await
+    .unwrap();
+
+    // Write + read over the wire.
+    client
+        .write_file(theway_grpc::WriteFileRequest {
+            path: "/wire/hello.txt".into(),
+            content: "over the wire\n".into(),
+        })
+        .await
+        .unwrap();
+    let got = client
+        .read_file(theway_grpc::ReadFileRequest {
+            path: "/wire/hello.txt".into(),
+            offset: None,
+            limit: None,
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(got.content, "over the wire\n");
+    assert_eq!(got.total_lines, 1);
+    assert!(!got.truncated);
+
+    // Streaming exec over the wire: chunks then the exit frame.
+    tools.set_exec_frames(vec![
+        crate::wire::WireToolExecFrame::Output {
+            text: "streamed\n".into(),
+        },
+        crate::wire::WireToolExecFrame::Exit {
+            code: 0,
+            timed_out: false,
+            duration_ms: 7,
+        },
+    ]);
+    let mut stream = client
+        .exec_command(theway_grpc::ExecCommandRequest {
+            command: "true".into(),
+            cwd: None,
+            timeout_ms: None,
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    let first = stream.message().await.unwrap().expect("first frame");
+    match first.kind.as_ref().unwrap() {
+        theway_grpc::exec_output_frame::Kind::Output(text) => assert_eq!(text, "streamed\n"),
+        other => panic!("expected output frame, got {other:?}"),
+    }
+    let last = stream.message().await.unwrap().expect("exit frame");
+    match last.kind.as_ref().unwrap() {
+        theway_grpc::exec_output_frame::Kind::Exit(exit) => {
+            assert_eq!(exit.code, 0);
+            assert_eq!(exit.duration_ms, 7);
+        }
+        other => panic!("expected exit frame, got {other:?}"),
+    }
+    assert!(stream.message().await.unwrap().is_none(), "stream ends");
+
+    // Errors cross the wire with their status codes.
+    let err = client
+        .read_file(theway_grpc::ReadFileRequest {
+            path: "/wire/missing.txt".into(),
+            offset: None,
+            limit: None,
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::NotFound);
 
     server.abort();
 }

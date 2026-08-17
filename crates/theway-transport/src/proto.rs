@@ -2,16 +2,19 @@
 //!
 //! `WireStatus` (serde, `crate::wire`) is the internal model shared by the
 //! `--http` JSON surface and the UI event loop; `SessionState` (prost, generated
-//! from the five domain proto files — `commands.proto`, `session.proto`,
-//! `graph_engine.proto`, `events.proto`, `settings.proto` — plus `health.proto`
-//! by this crate's build.rs) is the structured wire model for gRPC. The gRPC
-//! server serializes `SessionState` as binary protobuf; JSON channels keep
-//! using `WireStatus` until the protojson migration (see docs/PROTOCOL.md).
+//! from the six domain proto files — `commands.proto`, `session.proto`,
+//! `graph_engine.proto`, `events.proto`, `settings.proto`, `tools.proto` —
+//! plus `health.proto` by this crate's build.rs) is the structured wire model
+//! for gRPC. The gRPC server serializes `SessionState` as binary protobuf;
+//! JSON channels keep using `WireStatus` until the protojson migration (see
+//! docs/PROTOCOL.md). The tool-operation (`tools.proto`) codecs live in
+//! [`crate::tools`].
 
 /// Generated protobuf code for package `theway.grpc.v1`, produced by this
 /// crate's `build.rs` into its own OUT_DIR. Each domain proto file carries its
 /// messages, enums, and service in the same package: `commands.proto` /
-/// `session.proto` / `graph_engine.proto` / `events.proto` / `settings.proto`.
+/// `session.proto` / `graph_engine.proto` / `events.proto` / `settings.proto`
+/// / `tools.proto`.
 pub mod theway_grpc {
     tonic::include_proto!("theway.grpc.v1");
 }

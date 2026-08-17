@@ -1,0 +1,238 @@
+// Tool-operation domain (issue #75): the file/process/memory/skill operations
+// a controller forwards through the daemon. The daemon implements ToolService
+// against its execution environment (the ToolExecutor seam) so remote
+// controllers can drive the daemon-side FS and process table; the request /
+// response shapes mirror the daemon's agent tools (read / write / edit /
+// exec / ls / grep / find / memory / install_skill).
+
+syntax = "proto3";
+package theway.grpc.v1;
+
+// ── read_file ─────────────────────────────────────────────────────────
+
+// Read a file as UTF-8 text with line pagination: 1-based `offset`, same
+// window semantics as the `read` agent tool.
+message ReadFileRequest {
+  string path = 1;
+  // First line to return (1-based). Absent = from the start.
+  optional uint64 offset = 2;
+  // Maximum number of lines to return. Absent = the whole file.
+  optional uint64 limit = 3;
+}
+
+message ReadFileResponse {
+  string content = 1;
+  uint64 total_lines = 2;
+  // true when more lines follow beyond the returned window.
+  bool truncated = 3;
+}
+
+// ── write_file ────────────────────────────────────────────────────────
+
+message WriteFileRequest {
+  string path = 1;
+  string content = 2;
+}
+
+message WriteFileResponse {
+  uint64 bytes_written = 1;
+}
+
+// ── edit_file ─────────────────────────────────────────────────────────
+
+// Search-and-replace edit (same semantics as the `edit` agent tool):
+// replace `old_string` with `new_string`, optionally restricted to a
+// 1-based inclusive line range.
+message EditFileRequest {
+  string path = 1;
+  string old_string = 2;
+  string new_string = 3;
+  bool replace_all = 4;
+  optional uint64 range_start = 5;
+  optional uint64 range_end = 6;
+}
+
+message EditFileResponse {
+  uint32 replacements = 1;
+}
+
+// ── exec_command ──────────────────────────────────────────────────────
+
+message ExecCommandRequest {
+  // Shell command line, run through the daemon's shell.
+  string command = 1;
+  // Working directory. Absent = the daemon's work dir.
+  optional string cwd = 2;
+  // Wall-clock timeout in milliseconds. Absent = executor default.
+  optional uint64 timeout_ms = 3;
+}
+
+// One streaming exec frame: zero or more output chunks (interleaved
+// stdout/stderr), then a terminal exit frame.
+message ExecOutputFrame {
+  oneof kind {
+    string output = 1;
+    ExecExit exit = 2;
+  }
+}
+
+message ExecExit {
+  int32 code = 1;
+  bool timed_out = 2;
+  uint64 duration_ms = 3;
+}
+
+// ── list_dir ──────────────────────────────────────────────────────────
+
+message ListDirRequest {
+  string path = 1;
+  // Maximum number of entries to return. Absent = all entries.
+  optional uint64 limit = 2;
+}
+
+message DirEntry {
+  string name = 1;
+  // "file" | "dir" | "symlink" | "other"
+  string kind = 2;
+  uint64 size = 3;
+}
+
+message ListDirResponse {
+  repeated DirEntry entries = 1;
+}
+
+// ── grep ──────────────────────────────────────────────────────────────
+
+message GrepRequest {
+  // Regular expression.
+  string pattern = 1;
+  // Search root. Absent = the daemon's work dir.
+  optional string path = 2;
+  // Filename glob filter (e.g. "*.rs").
+  optional string glob_filter = 3;
+  bool case_insensitive = 4;
+  // "content" (default) | "files_with_matches" | "count" — selects which
+  // GrepResponse list is populated.
+  optional string output_mode = 5;
+  optional uint64 max_results = 6;
+}
+
+message GrepMatch {
+  string path = 1;
+  uint64 line_number = 2;
+  string line = 3;
+}
+
+message GrepFileCount {
+  string path = 1;
+  uint64 count = 2;
+}
+
+message GrepResponse {
+  // output_mode "content".
+  repeated GrepMatch matches = 1;
+  // output_mode "files_with_matches".
+  repeated string files = 2;
+  // output_mode "count".
+  repeated GrepFileCount counts = 3;
+}
+
+// ── find ──────────────────────────────────────────────────────────────
+
+message FindRequest {
+  // Filename glob (e.g. "*.proto").
+  string pattern = 1;
+  // Search root. Absent = the daemon's work dir.
+  optional string path = 2;
+  optional uint64 limit = 3;
+}
+
+message FindResponse {
+  repeated string paths = 1;
+}
+
+// ── memory (cross-session memory entries) ─────────────────────────────
+
+message MemorySaveRequest {
+  string name = 1;
+  string content = 2;
+  optional string description = 3;
+  // Memory type tag ("user" | "preference" | ...), free-form.
+  optional string memory_type = 4;
+}
+
+message MemorySaveResponse {
+  string name = 1;
+  string path = 2;
+}
+
+message MemoryListRequest {}
+
+message MemoryEntry {
+  string name = 1;
+  optional string description = 2;
+  optional string memory_type = 3;
+  string path = 4;
+}
+
+message MemoryListResponse {
+  repeated MemoryEntry entries = 1;
+}
+
+message MemoryReadRequest {
+  string name = 1;
+}
+
+message MemoryReadResponse {
+  string name = 1;
+  string content = 2;
+}
+
+message MemoryForgetRequest {
+  string name = 1;
+}
+
+message MemoryForgetResponse {
+  bool removed = 1;
+}
+
+// ── skill_install ─────────────────────────────────────────────────────
+
+message SkillInstallRequest {
+  oneof source {
+    string url = 1;
+    string path = 2;
+    string content = 3;
+  }
+  // Two-phase install (same safety model as the install_skill agent tool):
+  // without `confirm` the call is a read-only preview and installs nothing.
+  bool confirm = 4;
+  bool overwrite = 5;
+}
+
+message SkillInstallResponse {
+  string name = 1;
+  string target_path = 2;
+  // false = preview only (`confirm` was not set); true = installed.
+  bool installed = 3;
+  optional string content_hash = 4;
+  uint64 size = 5;
+  bool existing = 6;
+  optional string warning = 7;
+}
+
+service ToolService {
+  rpc ReadFile(ReadFileRequest) returns (ReadFileResponse);
+  rpc WriteFile(WriteFileRequest) returns (WriteFileResponse);
+  rpc EditFile(EditFileRequest) returns (EditFileResponse);
+  // Streaming output: zero or more output chunks, then the exit frame.
+  rpc ExecCommand(ExecCommandRequest) returns (stream ExecOutputFrame);
+  rpc ListDir(ListDirRequest) returns (ListDirResponse);
+  rpc Grep(GrepRequest) returns (GrepResponse);
+  rpc Find(FindRequest) returns (FindResponse);
+  rpc MemorySave(MemorySaveRequest) returns (MemorySaveResponse);
+  rpc MemoryList(MemoryListRequest) returns (MemoryListResponse);
+  rpc MemoryRead(MemoryReadRequest) returns (MemoryReadResponse);
+  rpc MemoryForget(MemoryForgetRequest) returns (MemoryForgetResponse);
+  rpc SkillInstall(SkillInstallRequest) returns (SkillInstallResponse);
+}

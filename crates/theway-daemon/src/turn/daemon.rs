@@ -40,7 +40,7 @@ use theway_llm_provider::{ImageContent, Message, Usage};
 use theway_transport::mentions;
 use theway_transport::transport::SlashCompleter;
 use theway_transport::wire::*;
-use theway_transport::{TransportEndpoints, TransportMode};
+use theway_transport::{TransportEndpoints, TransportMode, UnavailableToolOps};
 
 /// Model families surfaced in the web/grpc model picker (mirror of the TUI's).
 const SUPPORTED_APIS: [&str; 4] = ["openai-completions", "openai-responses", "anthropic", "ds4"];
@@ -402,6 +402,11 @@ impl TurnHost {
             // handle and optimistically merge `SetConfig` / `Configure`
             // patches into it; the event loop holds the authoritative copy.
             daemon_config: self.daemon_config.clone(),
+            // Issue #75 (P2 contract): the tool-operation RPC surface
+            // (gRPC `ToolService` + JSON-RPC tool methods) is wired end to
+            // end; the executor-backed `ToolOps` implementation replaces
+            // this placeholder in the issue #70 P3 phase.
+            tool_ops: Arc::new(UnavailableToolOps),
             session_id: self.session_id.clone(),
             agent_fwd,
         }

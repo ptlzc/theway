@@ -242,6 +242,35 @@ The HTTP/WS surfaces expose the same operations as JSON-RPC methods
 names also accepted); the `set_config` / `configure` params accept either the
 config fields directly or a nested `{"config": {...}}` object.
 
+### Tool-operation surface
+
+File/tool operations cross the transport on the gRPC `ToolService`
+(issue #75, defined in `proto/tools.proto`): `ReadFile` / `WriteFile` /
+`EditFile` / `ExecCommand` / `ListDir` / `Grep` / `Find`, cross-session
+memory (`MemorySave` / `MemoryList` / `MemoryRead` / `MemoryForget`), and
+two-phase `SkillInstall` (read-only preview unless `confirm`, same safety
+model as the `install_skill` agent tool). `ExecCommand` is server-streaming:
+zero or more `ExecOutputFrame` output chunks followed by the terminal exit
+frame.
+
+The server side delegates to the `ToolOps` handler seam
+(`theway_transport::transport`): the transport crate converts proto
+messages to the `WireTool*` serde twins (`crate::tools` codecs) and stays
+free of FS/process policy; the daemon kernel implements the seam against
+its execution environment (the `ToolExecutor` seam + memory/skills
+directories) in the issue #70 P3 phase. Until then the daemon wires the
+`UnavailableToolOps` placeholder and every call reports the gap cleanly
+(`INTERNAL` / `-32000`).
+
+The HTTP/WS surfaces expose the same operations as unary JSON-RPC methods
+(`tool.read_file` / `tool.write_file` / `tool.edit_file` /
+`tool.exec_command` / `tool.list_dir` / `tool.grep` / `tool.find` /
+`tool.memory_*` / `tool.skill_install`, bare names also accepted);
+`exec_command` collects the frame stream into the unary
+`WireToolExecResult` shape. Errors map consistently on both surfaces:
+`NotFound` → gRPC `NOT_FOUND` / `-32004`, `InvalidArgument` →
+`INVALID_ARGUMENT` / `-32602`, anything else → `INTERNAL` / `-32000`.
+
 ### Executors and the tool policy
 
 The kernel execution backend is a cargo feature:
@@ -310,13 +339,17 @@ archive surface (`theway_storage::session_archive`) for its internal
 Two zones in one crate:
 
 - **Protocol zone**: the wire model (`wire`) and the transports around it —
-  gRPC (`grpc`, five domain services `CommandService` / `SessionService` /
-  `SettingsService` / `GraphEngineService` / `EventService` plus
-  `grpc.health.v1.Health`;
+  gRPC (`grpc`, six domain services `CommandService` / `SessionService` /
+  `SettingsService` / `ToolService` / `GraphEngineService` / `EventService`
+  plus `grpc.health.v1.Health`;
   `SessionService` also serves the daemon path context — `GetPathContext` /
   `SetSkillDirs`, see [gRPC path context](#grpc-path-context);
   `SettingsService` serves the daemon configuration view — `GetConfig` /
-  `SetConfig` / `Configure`, see [Daemon settings view](#daemon-settings-view)),
+  `SetConfig` / `Configure`, see [Daemon settings view](#daemon-settings-view);
+  `ToolService` forwards file/tool operations — `ReadFile` / `WriteFile` /
+  `EditFile` / `ExecCommand` (streaming) / `ListDir` / `Grep` / `Find` /
+  `Memory*` / `SkillInstall`, see
+  [Tool-operation surface](#tool-operation-surface)),
   HTTP/SSE/WS (`http` / `ws`), MCP server (`mcp`), the daemon-discovery
   client (`client`: per-cwd `<base>/daemon-port-<cwd-hash>` file, default
   port `44777`), and the inbox reader (`inbox`).
