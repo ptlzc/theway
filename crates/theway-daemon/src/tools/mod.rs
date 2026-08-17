@@ -300,3 +300,8 @@ pub fn session_tool_set(
     tools.push(set_trigger_state_tool());
     tools
 }
+
+#[cfg(test)]
+// Test files live in `tests/tools/mod.rs` (mirror of src), pulled in by
+// path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
+tests_bridge_macro::tests_bridge!("tools");

@@ -408,6 +408,11 @@ static NEW_TRIGGER_TOOL: once_cell::sync::Lazy<Tool> = once_cell::sync::Lazy::ne
     }
 });
 
+#[cfg(test)]
+// Test files live in `tests/triggers/dynamic/tools/` (mirror of src), pulled in by
+// path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
+tests_bridge_macro::tests_bridge!("triggers/dynamic/tools");
+
 static LIST_TRIGGERS_TOOL: once_cell::sync::Lazy<Tool> = once_cell::sync::Lazy::new(|| {
     Tool {
     name: "list_triggers".into(),
