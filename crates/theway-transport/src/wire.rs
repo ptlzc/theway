@@ -59,6 +59,23 @@ pub enum WireCommand {
     SwitchSession {
         id: String,
     },
+    /// dynamic skills dirs (issue #68): replace the extra skill directories and
+    /// hot-reload skills from disk. The event loop applies this authoritatively;
+    /// the gRPC server optimistically updates the shared path context first.
+    SetSkillDirs {
+        dirs: Vec<String>,
+    },
+}
+
+/// Daemon path context (issue #68): startup-fixed home / base / work_dir plus
+/// the current skill search directories. Served by `GetPathContext`;
+/// `skills_dirs` is the only mutable part (via `SetSkillDirs`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct WirePathContext {
+    pub home: String,
+    pub base: String,
+    pub work_dir: String,
+    pub skills_dirs: Vec<String>,
 }
 
 /// session-resource-model: one session as a managed resource (mirrors

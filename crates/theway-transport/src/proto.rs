@@ -23,7 +23,7 @@ pub mod health {
 }
 
 use crate::feed::{self, WireFeedBlock};
-use crate::wire::WireStatus;
+use crate::wire::{WirePathContext, WireStatus};
 use theway_core::multiagent::graph::types::DagEvent;
 use theway_core::multiagent::registry::AgentJobEvent;
 use theway_grpc as wire;
@@ -538,6 +538,27 @@ pub fn session_summary_wire(summary: &crate::wire::SessionSummary) -> wire::Sess
         active_graph_count: summary.active_graph_count,
         busy: summary.busy,
         preview: summary.preview.clone(),
+    }
+}
+
+/// Convert the daemon path context (issue #68) into the structured wire model.
+pub fn wire_path_context_to_proto(ctx: &WirePathContext) -> wire::PathContext {
+    wire::PathContext {
+        home: ctx.home.clone(),
+        base: ctx.base.clone(),
+        work_dir: ctx.work_dir.clone(),
+        skills_dirs: ctx.skills_dirs.clone(),
+    }
+}
+
+/// Convert a `PathContext` (proto, from a gRPC response) back into the internal
+/// path-context model.
+pub fn wire_path_context_from_proto(p: &wire::PathContext) -> WirePathContext {
+    WirePathContext {
+        home: p.home.clone(),
+        base: p.base.clone(),
+        work_dir: p.work_dir.clone(),
+        skills_dirs: p.skills_dirs.clone(),
     }
 }
 

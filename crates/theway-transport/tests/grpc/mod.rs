@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::testing::{FakeSessionOps, empty_sidebar_snapshot};
-use crate::wire::WireContextUsage;
+use crate::wire::{WireContextUsage, WirePathContext};
 use std::collections::HashMap;
 use std::time::Duration;
 use theway_core::multiagent::registry::{JobTranscript, JobTranscriptStore};
@@ -117,6 +117,7 @@ fn grpc_state_with_ops() -> (
             dag_engine: Arc::new(theway_core::multiagent::graph::engine::DagEngine::new()),
             session_ops: session_ops.clone(),
             session_id: Arc::new(std::sync::RwLock::new("test-session".into())),
+            path_context: Arc::new(std::sync::RwLock::new(WirePathContext::default())),
             agent_fwd,
         },
         command_rx,

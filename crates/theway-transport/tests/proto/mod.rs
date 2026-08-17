@@ -244,6 +244,36 @@ fn session_summary_converts_to_wire_shape() {
 }
 
 #[test]
+fn path_context_round_trips_wire_and_proto() {
+    use crate::wire::WirePathContext;
+
+    let ctx = WirePathContext {
+        home: "/home/user".into(),
+        base: "/home/user/.theway".into(),
+        work_dir: "/home/user/projects/theway".into(),
+        skills_dirs: vec![
+            "/home/user/.agents/skills".into(),
+            "/tmp/extra-skills".into(),
+        ],
+    };
+    let proto = wire_path_context_to_proto(&ctx);
+    assert_eq!(proto.home, "/home/user");
+    assert_eq!(proto.base, "/home/user/.theway");
+    assert_eq!(proto.work_dir, "/home/user/projects/theway");
+    assert_eq!(
+        proto.skills_dirs,
+        vec!["/home/user/.agents/skills", "/tmp/extra-skills"]
+    );
+    assert_eq!(wire_path_context_from_proto(&proto), ctx);
+
+    // Default (all-empty) context round-trips too.
+    let empty = WirePathContext::default();
+    let proto_empty = wire_path_context_to_proto(&empty);
+    assert!(proto_empty.skills_dirs.is_empty());
+    assert_eq!(wire_path_context_from_proto(&proto_empty), empty);
+}
+
+#[test]
 fn goal_run_round_trips_kind_and_dag_event_wire() {
     use theway_core::multiagent::graph::engine::DagEngine;
 

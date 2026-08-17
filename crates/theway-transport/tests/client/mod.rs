@@ -6,7 +6,7 @@ use crate::grpc::{serve_grpc, GrpcState};
 use crate::proto::{session_state, wire_status};
 use crate::testing::{FakeSessionOps, empty_sidebar_snapshot};
 use crate::feed::WireFeedBlock;
-use crate::wire::{ModelEntry, ProviderGroup, WireStatus};
+use crate::wire::{ModelEntry, ProviderGroup, WirePathContext, WireStatus};
 use std::sync::Arc;
 use std::time::Duration;
 use futures::StreamExt as _;
@@ -86,6 +86,7 @@ fn grpc_state() -> (GrpcState, mpsc::UnboundedReceiver<crate::wire::WireCommand>
             dag_engine: Arc::new(DagEngine::new()),
             session_ops,
             session_id: Arc::new(std::sync::RwLock::new("sess-1".into())),
+            path_context: Arc::new(std::sync::RwLock::new(WirePathContext::default())),
             agent_fwd,
         },
         command_rx,
