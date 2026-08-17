@@ -279,6 +279,22 @@ export interface DeleteSessionResponse {
   runningRunIds: string[];
 }
 
+/**
+ * Daemon path context (issue #68): home / base / work_dir are fixed at daemon
+ * startup; skills_dirs reflects the current skill search directories and is
+ * the only mutable part (see SetSkillDirs).
+ */
+export interface PathContext {
+  home: string;
+  base: string;
+  workDir: string;
+  skillsDirs: string[];
+}
+
+export interface SetSkillDirsRequest {
+  dirs: string[];
+}
+
 function createBaseSessionState(): SessionState {
   return {
     sessionId: "",
@@ -4008,6 +4024,180 @@ export const DeleteSessionResponse: MessageFns<DeleteSessionResponse> = {
   },
 };
 
+function createBasePathContext(): PathContext {
+  return { home: "", base: "", workDir: "", skillsDirs: [] };
+}
+
+export const PathContext: MessageFns<PathContext> = {
+  encode(message: PathContext, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.home !== "") {
+      writer.uint32(10).string(message.home);
+    }
+    if (message.base !== "") {
+      writer.uint32(18).string(message.base);
+    }
+    if (message.workDir !== "") {
+      writer.uint32(26).string(message.workDir);
+    }
+    for (const v of message.skillsDirs) {
+      writer.uint32(34).string(v!);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): PathContext {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBasePathContext();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.home = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.base = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.workDir = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.skillsDirs.push(reader.string());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): PathContext {
+    return {
+      home: isSet(object.home) ? globalThis.String(object.home) : "",
+      base: isSet(object.base) ? globalThis.String(object.base) : "",
+      workDir: isSet(object.workDir)
+        ? globalThis.String(object.workDir)
+        : isSet(object.work_dir)
+        ? globalThis.String(object.work_dir)
+        : "",
+      skillsDirs: globalThis.Array.isArray(object?.skillsDirs)
+        ? object.skillsDirs.map((e: any) => globalThis.String(e))
+        : globalThis.Array.isArray(object?.skills_dirs)
+        ? object.skills_dirs.map((e: any) => globalThis.String(e))
+        : [],
+    };
+  },
+
+  toJSON(message: PathContext): unknown {
+    const obj: any = {};
+    if (message.home !== "") {
+      obj.home = message.home;
+    }
+    if (message.base !== "") {
+      obj.base = message.base;
+    }
+    if (message.workDir !== "") {
+      obj.workDir = message.workDir;
+    }
+    if (message.skillsDirs?.length) {
+      obj.skillsDirs = message.skillsDirs;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<PathContext>, I>>(base?: I): PathContext {
+    return PathContext.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<PathContext>, I>>(object: I): PathContext {
+    const message = createBasePathContext();
+    message.home = object.home ?? "";
+    message.base = object.base ?? "";
+    message.workDir = object.workDir ?? "";
+    message.skillsDirs = object.skillsDirs?.map((e) => e) || [];
+    return message;
+  },
+};
+
+function createBaseSetSkillDirsRequest(): SetSkillDirsRequest {
+  return { dirs: [] };
+}
+
+export const SetSkillDirsRequest: MessageFns<SetSkillDirsRequest> = {
+  encode(message: SetSkillDirsRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.dirs) {
+      writer.uint32(10).string(v!);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SetSkillDirsRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSetSkillDirsRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.dirs.push(reader.string());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SetSkillDirsRequest {
+    return { dirs: globalThis.Array.isArray(object?.dirs) ? object.dirs.map((e: any) => globalThis.String(e)) : [] };
+  },
+
+  toJSON(message: SetSkillDirsRequest): unknown {
+    const obj: any = {};
+    if (message.dirs?.length) {
+      obj.dirs = message.dirs;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SetSkillDirsRequest>, I>>(base?: I): SetSkillDirsRequest {
+    return SetSkillDirsRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<SetSkillDirsRequest>, I>>(object: I): SetSkillDirsRequest {
+    const message = createBaseSetSkillDirsRequest();
+    message.dirs = object.dirs?.map((e) => e) || [];
+    return message;
+  },
+};
+
 export type SessionServiceService = typeof SessionServiceService;
 export const SessionServiceService = {
   /** Full structured state (binary protobuf). */
@@ -4073,6 +4263,33 @@ export const SessionServiceService = {
       Buffer.from(DeleteSessionResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): DeleteSessionResponse => DeleteSessionResponse.decode(value),
   },
+  /**
+   * Daemon path context (issue #68): home/base/work_dir plus the current
+   * skill search directories.
+   */
+  getPathContext: {
+    path: "/theway.grpc.v1.SessionService/GetPathContext" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: Empty): Buffer => Buffer.from(Empty.encode(value).finish()),
+    requestDeserialize: (value: Buffer): Empty => Empty.decode(value),
+    responseSerialize: (value: PathContext): Buffer => Buffer.from(PathContext.encode(value).finish()),
+    responseDeserialize: (value: Buffer): PathContext => PathContext.decode(value),
+  },
+  /**
+   * Replace the extra skill directories dynamically; the command is queued
+   * into the event loop, which applies it authoritatively (hot-reload).
+   * `accepted` = the command was queued.
+   */
+  setSkillDirs: {
+    path: "/theway.grpc.v1.SessionService/SetSkillDirs" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: SetSkillDirsRequest): Buffer => Buffer.from(SetSkillDirsRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): SetSkillDirsRequest => SetSkillDirsRequest.decode(value),
+    responseSerialize: (value: CommandResult): Buffer => Buffer.from(CommandResult.encode(value).finish()),
+    responseDeserialize: (value: Buffer): CommandResult => CommandResult.decode(value),
+  },
 } as const;
 
 export interface SessionServiceServer extends UntypedServiceImplementation {
@@ -4088,6 +4305,17 @@ export interface SessionServiceServer extends UntypedServiceImplementation {
   switchSession: handleUnaryCall<SwitchSessionRequest, CommandResult>;
   renameSession: handleUnaryCall<RenameSessionRequest, CommandResult>;
   deleteSession: handleUnaryCall<DeleteSessionRequest, DeleteSessionResponse>;
+  /**
+   * Daemon path context (issue #68): home/base/work_dir plus the current
+   * skill search directories.
+   */
+  getPathContext: handleUnaryCall<Empty, PathContext>;
+  /**
+   * Replace the extra skill directories dynamically; the command is queued
+   * into the event loop, which applies it authoritatively (hot-reload).
+   * `accepted` = the command was queued.
+   */
+  setSkillDirs: handleUnaryCall<SetSkillDirsRequest, CommandResult>;
 }
 
 export interface SessionServiceClient extends Client {
@@ -4183,6 +4411,45 @@ export interface SessionServiceClient extends Client {
     metadata: Metadata,
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: DeleteSessionResponse) => void,
+  ): ClientUnaryCall;
+  /**
+   * Daemon path context (issue #68): home/base/work_dir plus the current
+   * skill search directories.
+   */
+  getPathContext(
+    request: Empty,
+    callback: (error: ServiceError | null, response: PathContext) => void,
+  ): ClientUnaryCall;
+  getPathContext(
+    request: Empty,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: PathContext) => void,
+  ): ClientUnaryCall;
+  getPathContext(
+    request: Empty,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: PathContext) => void,
+  ): ClientUnaryCall;
+  /**
+   * Replace the extra skill directories dynamically; the command is queued
+   * into the event loop, which applies it authoritatively (hot-reload).
+   * `accepted` = the command was queued.
+   */
+  setSkillDirs(
+    request: SetSkillDirsRequest,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  setSkillDirs(
+    request: SetSkillDirsRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  setSkillDirs(
+    request: SetSkillDirsRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
   ): ClientUnaryCall;
 }
 
