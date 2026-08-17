@@ -27,6 +27,9 @@ pub(crate) fn test_router(latest: WireStatus) -> Router {
         path_context: std::sync::Arc::new(std::sync::RwLock::new(
             crate::wire::WirePathContext::default(),
         )),
+        daemon_config: std::sync::Arc::new(std::sync::RwLock::new(
+            crate::wire::WireDaemonConfig::default(),
+        )),
     })
 }
 

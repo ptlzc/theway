@@ -24,7 +24,7 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use tokio::sync::{broadcast, mpsc};
 
-use crate::wire::{SessionSummary, WireCommand, WirePathContext, WireStatus};
+use crate::wire::{SessionSummary, WireCommand, WireDaemonConfig, WirePathContext, WireStatus};
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::types::DagEvent;
 use theway_core::multiagent::registry::{AgentJobEvent, AgentJobRegistry};
@@ -151,6 +151,12 @@ pub struct TransportEndpoints {
     /// [`transport_endpoints`](crate::host::TransportHost::transport_endpoints)
     /// and shared with the kernel-side copy.
     pub path_context: std::sync::Arc<std::sync::RwLock<WirePathContext>>,
+    /// Shared daemon configuration view (issue #72): served by `GetConfig`,
+    /// optimistically merged by `SetConfig` / `Configure` before the event
+    /// loop applies the same patch authoritatively. Built once in
+    /// [`transport_endpoints`](crate::host::TransportHost::transport_endpoints)
+    /// and shared with the kernel-side copy.
+    pub daemon_config: std::sync::Arc<std::sync::RwLock<WireDaemonConfig>>,
     /// Owning session id (checkpoint scope / mount key).
     pub session_id: String,
     /// Abort handle for the registry→events forwarder task spawned in

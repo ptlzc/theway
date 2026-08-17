@@ -97,10 +97,10 @@ pub(crate) struct Cli {
     #[arg(long, value_name = "DIR")]
     pub(crate) home: Option<std::path::PathBuf>,
 
-    /// Extra skill scan root forwarded to a daemon this client spawns. Repeatable;
-    /// each occurrence is passed through as its own `--skills-dir`. Like `--home`,
-    /// this only takes effect when the TUI spawns the daemon; attaching to an
-    /// already-running daemon does not change its existing configuration.
+    /// Extra skill scan root. Repeatable; each occurrence is forwarded as its
+    /// own `--skills-dir` to a daemon this client spawns. When attaching to
+    /// an already-running daemon, the dirs are reconciled through the
+    /// settings RPC (issue #74) — the daemon hot-reloads skills from disk.
     #[arg(long = "skills-dir", value_name = "DIR")]
     pub(crate) skills_dir: Vec<std::path::PathBuf>,
 

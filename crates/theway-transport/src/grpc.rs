@@ -20,7 +20,7 @@ use tonic::{Request, Response, Status};
 use crate::host::TransportHost;
 use crate::transport::SessionOps;
 use crate::transport::TransportMode;
-use crate::wire::{WireCommand, WirePathContext, WirePromptImage, WireStatus};
+use crate::wire::{WireCommand, WireDaemonConfig, WirePathContext, WirePromptImage, WireStatus};
 
 use crate::proto::health::health_check_response::ServingStatus;
 use crate::proto::health::health_server::{Health, HealthServer};
@@ -33,10 +33,12 @@ use crate::proto::{
 use theway_core::multiagent::graph::types::DagEvent;
 use theway_core::multiagent::registry::{AgentJobEvent, AgentJobRegistry};
 
+use theway_grpc::DaemonConfig;
 use theway_grpc::command_service_server::{CommandService, CommandServiceServer};
 use theway_grpc::event_service_server::{EventService, EventServiceServer};
 use theway_grpc::graph_engine_service_server::{GraphEngineService, GraphEngineServiceServer};
 use theway_grpc::session_service_server::{SessionService, SessionServiceServer};
+use theway_grpc::settings_service_server::{SettingsService, SettingsServiceServer};
 use theway_grpc::{
     ApproveRequest, CommandResult, CreateSessionRequest, CreateSessionResponse,
     DeleteSessionRequest, DeleteSessionResponse, Empty, GetNodeOutputRequest,
@@ -84,6 +86,10 @@ pub struct GrpcState {
     /// `SetSkillDirs` optimistically updates `skills_dirs` before the event
     /// loop applies the change authoritatively.
     pub path_context: Arc<std::sync::RwLock<WirePathContext>>,
+    /// Shared daemon configuration view (issue #72): served by `GetConfig`;
+    /// `SetConfig` / `Configure` optimistically merge the patch before the
+    /// event loop applies it authoritatively.
+    pub daemon_config: Arc<std::sync::RwLock<WireDaemonConfig>>,
 }
 
 #[tonic::async_trait]
@@ -337,6 +343,50 @@ impl SessionService for GrpcState {
             .send(WireCommand::SetSkillDirs { dirs })
             .map_err(|_| Status::unavailable("event loop command channel closed"))?;
         Ok(Response::new(CommandResult { accepted: true }))
+    }
+}
+
+// ── settings / config (issue #72) ─────────────────────────────────────
+
+#[tonic::async_trait]
+impl SettingsService for GrpcState {
+    async fn get_config(&self, _request: Request<Empty>) -> Result<Response<DaemonConfig>, Status> {
+        let config = self.daemon_config.read().unwrap();
+        Ok(Response::new(crate::proto::daemon_config_to_proto(&config)))
+    }
+
+    async fn set_config(
+        &self,
+        request: Request<DaemonConfig>,
+    ) -> Result<Response<CommandResult>, Status> {
+        let config = crate::proto::daemon_config_from_proto(&request.into_inner());
+        Ok(Response::new(CommandResult {
+            accepted: self.enqueue_configure(config)?,
+        }))
+    }
+
+    async fn configure(
+        &self,
+        request: Request<DaemonConfig>,
+    ) -> Result<Response<CommandResult>, Status> {
+        let config = crate::proto::daemon_config_from_proto(&request.into_inner());
+        Ok(Response::new(CommandResult {
+            accepted: self.enqueue_configure(config)?,
+        }))
+    }
+}
+
+impl GrpcState {
+    /// Shared SetConfig / Configure body (issue #72): optimistically merge the
+    /// patch into the shared config view — `GetConfig` readers observe it right
+    /// away — then enqueue `WireCommand::Configure` so the serialized event
+    /// loop applies the same patch authoritatively.
+    fn enqueue_configure(&self, config: WireDaemonConfig) -> Result<bool, Status> {
+        self.daemon_config.write().unwrap().merge_from(&config);
+        self.commands
+            .send(WireCommand::Configure { config })
+            .map_err(|_| Status::unavailable("event loop command channel closed"))?;
+        Ok(true)
     }
 }
 
@@ -661,12 +711,13 @@ pub async fn run_grpc(mut app: Box<dyn TransportHost>, options: GrpcOptions) -> 
         agent_fwd,
         session_id: Arc::new(std::sync::RwLock::new(endpoints.session_id.clone())),
         path_context: endpoints.path_context.clone(),
+        daemon_config: endpoints.daemon_config.clone(),
     };
     let server_task = serve_grpc(listener, grpc_state);
 
     println!("theway grpc listening on {actual}");
     println!(
-        "  services: theway.grpc.v1.CommandService / theway.grpc.v1.SessionService / theway.grpc.v1.GraphEngineService / theway.grpc.v1.EventService + grpc.health.v1.Health · UI: workmate (独立)"
+        "  services: theway.grpc.v1.CommandService / theway.grpc.v1.SessionService / theway.grpc.v1.SettingsService / theway.grpc.v1.GraphEngineService / theway.grpc.v1.EventService + grpc.health.v1.Health · UI: workmate (独立)"
     );
 
     app.run_transport_loop(TransportMode::Grpc, endpoints, server_task)
@@ -679,6 +730,7 @@ pub fn serve_grpc(listener: TcpListener, state: GrpcState) -> tokio::task::JoinH
     let server = tonic::transport::Server::builder()
         .add_service(CommandServiceServer::new(state.clone()))
         .add_service(SessionServiceServer::new(state.clone()))
+        .add_service(SettingsServiceServer::new(state.clone()))
         .add_service(GraphEngineServiceServer::new(state.clone()))
         .add_service(EventServiceServer::new(state))
         .add_service(HealthServer::new(HealthService))

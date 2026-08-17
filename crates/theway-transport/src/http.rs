@@ -49,6 +49,10 @@ pub struct HttpState {
     /// `SetSkillDirs` optimistically updates `skills_dirs` before the event
     /// loop applies the change authoritatively.
     pub path_context: Arc<RwLock<WirePathContext>>,
+    /// Shared daemon configuration view (issue #72): served by `get_config`;
+    /// `set_config` / `configure` optimistically merge the patch before the
+    /// event loop applies it authoritatively.
+    pub daemon_config: Arc<RwLock<WireDaemonConfig>>,
 }
 
 /// Full `--http` driver: bind, wire the transport channels, spawn the axum
@@ -71,6 +75,7 @@ pub async fn run_web(mut app: Box<dyn TransportHost>, options: WebOptions) -> Re
         registry: endpoints.registry.clone(),
         session_ops: endpoints.session_ops.clone(),
         path_context: endpoints.path_context.clone(),
+        daemon_config: endpoints.daemon_config.clone(),
     };
     let server_task = serve_web(listener, state);
 
@@ -124,7 +129,9 @@ async fn healthz() -> &'static str {
 //   switch_session (session.switch) | rename_session (session.rename) |
 //   delete_session (session.delete) | get_node_output (graph.get_node_output) |
 //   get_path_context (session.get_path_context) |
-//   set_skill_dirs (session.set_skill_dirs)
+//   set_skill_dirs (session.set_skill_dirs) |
+//   get_config (settings.get_config) | set_config (settings.set_config) |
+//   configure (settings.configure)
 
 #[derive(serde::Deserialize)]
 struct RpcIn {
@@ -165,6 +172,25 @@ fn param<'a>(
     params
         .and_then(|p| p.get(key))
         .ok_or_else(|| (-32602, format!("missing param `{key}`")))
+}
+
+/// Parse a partial `DaemonConfig` (issue #72) from the `set_config` /
+/// `configure` params: either a nested `{"config": {...}}` object (mirroring
+/// the proto request shape) or the config fields directly at the top level.
+/// Every field is optional/defaulted, so an empty or partial object is valid.
+fn parse_daemon_config(
+    params: Option<&serde_json::Value>,
+) -> Result<WireDaemonConfig, (i64, String)> {
+    let value = match params {
+        // Absent or JSON null → empty partial update.
+        None | Some(serde_json::Value::Null) => serde_json::Value::Object(Default::default()),
+        Some(params) => params
+            .get("config")
+            .cloned()
+            .unwrap_or_else(|| params.clone()),
+    };
+    serde_json::from_value::<WireDaemonConfig>(value)
+        .map_err(|e| (-32602, format!("invalid config params: {e}")))
 }
 
 pub(crate) async fn dispatch(
@@ -426,6 +452,21 @@ pub(crate) async fn dispatch(
         "get_path_context" | "session.get_path_context" => {
             let ctx = state.path_context.read().unwrap();
             Ok(serde_json::to_value(&*ctx).unwrap_or_default())
+        }
+        "get_config" | "settings.get_config" => {
+            let config = state.daemon_config.read().unwrap();
+            Ok(serde_json::to_value(&*config).unwrap_or_default())
+        }
+        "set_config" | "settings.set_config" | "configure" | "settings.configure" => {
+            let config = parse_daemon_config(params)?;
+            // Optimistic merge (GetConfig readers observe it immediately), then
+            // enqueue the authoritative command for the serialized event loop.
+            state.daemon_config.write().unwrap().merge_from(&config);
+            let accepted = state
+                .commands
+                .send(WireCommand::Configure { config })
+                .is_ok();
+            Ok(serde_json::json!({ "accepted": accepted }))
         }
         "set_skill_dirs" | "session.set_skill_dirs" => {
             let dirs = params

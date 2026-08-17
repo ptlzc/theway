@@ -13,9 +13,10 @@ use theway_storage::session;
 use theway_storage::sqlite_repo::SqliteSessionRepo;
 use theway_transport::client::{GrpcClient, discover, spawn_daemon, wait_ready};
 use theway_transport::proto::wire_status;
-use theway_transport::wire::WireStatus;
+use theway_transport::wire::{WireDaemonConfig, WireStatus};
 
 use crate::cli::Cli;
+use crate::config_payload::{assemble_config, provision_config};
 use crate::ui;
 
 /// Re-exported for `crate::user_message` compatibility (see `main.rs`); the
@@ -24,7 +25,14 @@ pub use crate::local_commands::user_message;
 
 /// Map the client CLI to daemon launch arguments (design decision 3: session
 /// selection is a daemon launch concern when the TUI spawns it).
-fn daemon_launch_args(cli: &Cli) -> Vec<String> {
+///
+/// Issue #74: the config-shaped flags (model, builtin skills, trigger poll
+/// interval) are emitted from the assembled config payload, not the raw CLI
+/// struct — the payload carries the CLI values PLUS the local `config.toml`
+/// values (the daemon no longer reads that file itself since #73).
+/// `--base-url` / `--thinking` stay CLI-driven: they are CLI-only settings
+/// and the thinking flag needs the full level string.
+fn daemon_launch_args(cli: &Cli, config: &WireDaemonConfig) -> Vec<String> {
     let mut args = Vec::new();
     if cli.continue_ {
         args.push("--continue".to_string());
@@ -33,11 +41,11 @@ fn daemon_launch_args(cli: &Cli) -> Vec<String> {
         args.push("--resume-id".to_string());
         args.push(id.to_string());
     }
-    if let Some(provider) = &cli.provider {
+    if let Some(provider) = &config.provider {
         args.push("--provider".to_string());
         args.push(provider.clone());
     }
-    if let Some(model) = &cli.model {
+    if let Some(model) = &config.model {
         args.push("--model".to_string());
         args.push(model.clone());
     }
@@ -55,7 +63,7 @@ fn daemon_launch_args(cli: &Cli) -> Vec<String> {
     if cli.always_allow {
         args.push("--always-allow".to_string());
     }
-    for skill in &cli.builtin_skill {
+    for skill in &config.builtin_skills {
         args.push("--builtin-skill".to_string());
         args.push(skill.clone());
     }
@@ -70,7 +78,7 @@ fn daemon_launch_args(cli: &Cli) -> Vec<String> {
         args.push("--skills-dir".to_string());
         args.push(dir.display().to_string());
     }
-    if let Some(secs) = cli.trigger_poll_secs {
+    if let Some(secs) = config.trigger_poll_secs {
         args.push("--trigger-poll-secs".to_string());
         args.push(secs.to_string());
     }
@@ -85,16 +93,39 @@ fn daemon_launch_args(cli: &Cli) -> Vec<String> {
 /// attached to an already-running daemon via `discover`. The marker drives
 /// the fresh-attach step in `run_repl` — a freshly spawned daemon
 /// (`reused = false`) already starts on its own new session.
+///
+/// Issue #74: the controller provisions the daemon's configuration on BOTH
+/// paths. The payload is assembled from CLI flags + local `config.toml`
+/// (the daemon reads neither since #73):
+/// - spawn: launch args carry the startup-critical fields; the payload is
+///   then reconciled through the settings RPC after connect (covers what
+///   launch args cannot carry, keeps the `GetConfig` view canonical);
+/// - attach: the settings RPC reconciles the running daemon, with mismatch
+///   notes for values it cannot re-apply at runtime.
+///
+/// The returned `Vec<String>` carries assembly diagnostics + mismatch notes
+/// for the feed.
 async fn connect_or_spawn(
     cli: &Cli,
     cwd: &std::path::Path,
-) -> Result<(GrpcClient, WireStatus, bool)> {
+) -> Result<(GrpcClient, WireStatus, bool, Vec<String>)> {
+    let (config, mut notes) = assemble_config(cli).await;
+
     // 1. Reuse a running daemon: per-cwd port file first, default port second.
     if let Some(addr) = discover(std::time::Duration::from_millis(800), cwd).await? {
         tracing::info!("reusing running daemon at {addr}");
         let mut client = GrpcClient::connect(&addr).await?;
+        let outcome = provision_config(&mut client, &config, true)
+            .await
+            .with_context(|| format!("provision daemon config at {addr}"))?;
+        if outcome.pushed {
+            tracing::info!("provisioned daemon config at {addr} via settings RPC");
+        } else {
+            tracing::debug!("daemon config at {addr} already matches — nothing to push");
+        }
+        notes.extend(outcome.notes);
         let state = client.get_state().await?;
-        return Ok((client, wire_status(&state), true));
+        return Ok((client, wire_status(&state), true, notes));
     }
 
     // 2. Spawn `thewayd` on demand (inherits cwd/env; `--port 0` publishes the
@@ -103,7 +134,7 @@ async fn connect_or_spawn(
         // No TTY: the user cannot see daemon logs; still spawn (detached
         // stdout/stderr inherit so diagnostics stay visible on the pipe).
     }
-    let args = daemon_launch_args(cli);
+    let args = daemon_launch_args(cli, &config);
     let mut child =
         spawn_daemon(cwd, &args).with_context(|| format!("spawn thewayd in {}", cwd.display()))?;
     let addr = match wait_ready(std::time::Duration::from_secs(20), cwd, child.id()).await {
@@ -116,8 +147,17 @@ async fn connect_or_spawn(
     };
     tracing::info!("spawned daemon at {addr}");
     let mut client = GrpcClient::connect(&addr).await?;
+    let outcome = provision_config(&mut client, &config, false)
+        .await
+        .with_context(|| format!("provision daemon config at {addr}"))?;
+    if outcome.pushed {
+        tracing::info!("provisioned daemon config at {addr} via settings RPC");
+    } else {
+        tracing::debug!("daemon config at {addr} already matches — nothing to push");
+    }
+    notes.extend(outcome.notes);
     let state = client.get_state().await?;
-    Ok((client, wire_status(&state), false))
+    Ok((client, wire_status(&state), false, notes))
 }
 
 /// Fresh-attach gate (issue #56): the TUI defaults to a new session only
@@ -184,7 +224,10 @@ pub(crate) async fn run_repl(
     // OLD session, so the fresh-attach step below applies. A freshly
     // spawned daemon (`reused = false`) already starts on its own new
     // session — creating another would leave an extra empty session behind.
-    let (mut client, mut initial, reused) = connect_or_spawn(&cli, &cwd).await?;
+    // Issue #74: `connect_or_spawn` also provisions the daemon config
+    // (settings RPC); `config_notes` carries assembly diagnostics and
+    // attach-time mismatch reports for the feed.
+    let (mut client, mut initial, reused, config_notes) = connect_or_spawn(&cli, &cwd).await?;
 
     // Issue #56: re-entering the TUI with a live daemon defaults to a NEW
     // session (daemon untouched — fresh attach is TUI client semantics).
@@ -225,6 +268,11 @@ pub(crate) async fn run_repl(
         app.client_addr(),
         cwd.display()
     ));
+    // Issue #74: surface config assembly diagnostics + attach-time mismatch
+    // reports (values the running daemon cannot re-apply at runtime).
+    for note in config_notes {
+        app.system_line(note);
+    }
     if let Some(id) = fresh_session_id {
         app.system_line(format!("new session {id}"));
     }
@@ -255,7 +303,7 @@ pub(crate) mod test_daemon {
     use theway_transport::client::GrpcClient;
     use theway_transport::grpc::{GrpcState, serve_grpc};
     use theway_transport::testing::FakeSessionOps;
-    use theway_transport::wire::{WireCommand, WirePathContext, WireStatus};
+    use theway_transport::wire::{WireCommand, WireDaemonConfig, WirePathContext, WireStatus};
     use tokio::sync::{broadcast, mpsc};
 
     pub(crate) fn test_status() -> WireStatus {
@@ -333,6 +381,7 @@ pub(crate) mod test_daemon {
             session_id: Arc::new(std::sync::RwLock::new(current)),
             agent_fwd,
             path_context: Arc::new(std::sync::RwLock::new(WirePathContext::default())),
+            daemon_config: Arc::new(std::sync::RwLock::new(WireDaemonConfig::default())),
         };
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap().to_string();
@@ -396,7 +445,7 @@ mod tests {
     fn daemon_launch_args_forwards_home_and_skills_dirs() {
         // Unset: neither flag appears in the launch args.
         let plain = Cli::parse_from(["theway"]);
-        let args = daemon_launch_args(&plain);
+        let args = daemon_launch_args(&plain, &WireDaemonConfig::default());
         assert!(!args.iter().any(|a| a == "--home"));
         assert!(!args.iter().any(|a| a == "--skills-dir"));
 
@@ -419,8 +468,9 @@ mod tests {
             Some(std::path::Path::new("/tmp/fake-home"))
         );
         assert_eq!(cli.skills_dir.len(), 2);
+        let (config, _) = crate::config_payload::assemble_config_from(&cli, None, "config.toml");
         assert_eq!(
-            daemon_launch_args(&cli)
+            daemon_launch_args(&cli, &config)
                 .iter()
                 .map(String::as_str)
                 .collect::<Vec<_>>(),
@@ -434,6 +484,79 @@ mod tests {
                 "--skills-dir",
                 "/tmp/skills-b",
                 "--debug",
+            ]
+        );
+    }
+
+    /// Issue #74: the config-shaped launch args come from the ASSEMBLED
+    /// payload — CLI flag values flow through it, and so do `config.toml`
+    /// values the daemon can no longer read itself (`[model]` default,
+    /// `[builtin_skills] enabled`, `[triggers] poll_interval_secs`).
+    #[test]
+    fn daemon_launch_args_carries_file_config_through_the_payload() {
+        let toml = "\
+[model]
+provider = \"acme\"
+model = \"warp-9\"
+
+[builtin_skills]
+enabled = [\"debugging\"]
+
+[triggers]
+poll_interval_secs = 45
+";
+        // No CLI config flags at all — every config launch arg is file-derived.
+        let cli = Cli::parse_from(["theway"]);
+        let (config, _) =
+            crate::config_payload::assemble_config_from(&cli, Some(toml), "config.toml");
+        assert_eq!(
+            daemon_launch_args(&cli, &config)
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec![
+                "--provider",
+                "acme",
+                "--model",
+                "warp-9",
+                "--builtin-skill",
+                "debugging",
+                "--trigger-poll-secs",
+                "45",
+            ]
+        );
+
+        // CLI flags win inside the payload (and therefore in the launch args);
+        // file builtins union in after the CLI entries.
+        let cli = Cli::parse_from([
+            "theway",
+            "--provider",
+            "openai",
+            "--model",
+            "gpt-x",
+            "--builtin-skill",
+            "code-review",
+            "--trigger-poll-secs",
+            "15",
+        ]);
+        let (config, _) =
+            crate::config_payload::assemble_config_from(&cli, Some(toml), "config.toml");
+        assert_eq!(
+            daemon_launch_args(&cli, &config)
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec![
+                "--provider",
+                "openai",
+                "--model",
+                "gpt-x",
+                "--builtin-skill",
+                "code-review",
+                "--builtin-skill",
+                "debugging",
+                "--trigger-poll-secs",
+                "15",
             ]
         );
     }

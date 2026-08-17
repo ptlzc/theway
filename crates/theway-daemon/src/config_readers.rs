@@ -1,5 +1,13 @@
-//! `~/.theway/config.toml` readers used at startup (built-in skills, trigger
-//! poll interval) — daemon-side only; the TUI/CLI never calls these.
+//! `~/.theway/config.toml` readers — LEGACY startup path (issue #73).
+//!
+//! Daemon startup no longer calls these readers: the startup settings now
+//! live in-memory in [`crate::startup_config::StartupConfig`], seeded from
+//! built-in defaults and supplied through the settings RPC (issue #72)
+//! instead of being read from local config files. The module is kept — with
+//! its parser coverage — until the remaining `config.toml` consumers are
+//! retired; TODO(#73): remove once controller provisioning replaces the last
+//! local-config reads. The `parse_*` helpers in `theway_transport::config`
+//! stay the definition of the file's semantics.
 
 use theway_transport::config::{
     ModelDefault, parse_builtin_skills_config, parse_model_default,

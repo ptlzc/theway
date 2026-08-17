@@ -321,3 +321,81 @@ fn goal_run_round_trips_kind_and_dag_event_wire() {
         other => panic!("expected NodeStatus, got {other:?}"),
     }
 }
+
+// ── settings / config (issue #72) ─────────────────────────────────────
+
+#[test]
+fn daemon_config_round_trips_wire_and_proto() {
+    use crate::wire::WireDaemonConfig;
+
+    let config = WireDaemonConfig {
+        provider: Some("anthropic".into()),
+        model: Some("claude-x".into()),
+        base_url: Some("https://api.example.com".into()),
+        thinking: Some(true),
+        builtin_skills: vec!["git".into(), "web".into()],
+        skills_dirs: vec!["/home/user/.agents/skills".into()],
+        trigger_poll_secs: Some(60),
+        tui_max_feed_lines: Some(8000),
+    };
+    let proto = daemon_config_to_proto(&config);
+    assert_eq!(proto.provider.as_deref(), Some("anthropic"));
+    assert_eq!(proto.model.as_deref(), Some("claude-x"));
+    assert_eq!(proto.base_url.as_deref(), Some("https://api.example.com"));
+    assert_eq!(proto.thinking, Some(true));
+    assert_eq!(proto.builtin_skills, vec!["git", "web"]);
+    assert_eq!(proto.skills_dirs, vec!["/home/user/.agents/skills"]);
+    assert_eq!(proto.trigger_poll_secs, Some(60));
+    assert_eq!(proto.tui_max_feed_lines, Some(8000));
+    assert_eq!(daemon_config_from_proto(&proto), config);
+
+    // Default (all-absent) config round-trips too: no field gains presence.
+    let empty = WireDaemonConfig::default();
+    let proto_empty = daemon_config_to_proto(&empty);
+    assert!(proto_empty.provider.is_none());
+    assert!(proto_empty.model.is_none());
+    assert!(proto_empty.base_url.is_none());
+    assert!(proto_empty.thinking.is_none());
+    assert!(proto_empty.builtin_skills.is_empty());
+    assert!(proto_empty.skills_dirs.is_empty());
+    assert!(proto_empty.trigger_poll_secs.is_none());
+    assert!(proto_empty.tui_max_feed_lines.is_none());
+    assert_eq!(daemon_config_from_proto(&proto_empty), empty);
+}
+
+#[test]
+fn daemon_config_merge_replaces_present_fields_only() {
+    use crate::wire::WireDaemonConfig;
+
+    let mut current = WireDaemonConfig {
+        provider: Some("anthropic".into()),
+        model: Some("claude-x".into()),
+        skills_dirs: vec!["/old".into()],
+        ..Default::default()
+    };
+    let patch = WireDaemonConfig {
+        model: Some("claude-y".into()),
+        trigger_poll_secs: Some(30),
+        ..Default::default()
+    };
+    let touched = current.merge_from(&patch);
+
+    // Present fields replaced, absent ones kept; repeated-empty does not clear.
+    assert_eq!(touched, 2);
+    assert_eq!(current.provider.as_deref(), Some("anthropic"));
+    assert_eq!(current.model.as_deref(), Some("claude-y"));
+    assert_eq!(current.skills_dirs, vec!["/old"]);
+    assert_eq!(current.trigger_poll_secs, Some(30));
+
+    // Non-empty repeated fields replace the list.
+    let dirs = WireDaemonConfig {
+        skills_dirs: vec!["/new".into()],
+        ..Default::default()
+    };
+    let touched = current.merge_from(&dirs);
+    assert_eq!(touched, 1);
+    assert_eq!(current.skills_dirs, vec!["/new"]);
+
+    // Empty patch touches nothing.
+    assert_eq!(current.merge_from(&WireDaemonConfig::default()), 0);
+}

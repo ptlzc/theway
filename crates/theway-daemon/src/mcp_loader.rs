@@ -95,6 +95,25 @@ pub struct LoadedMcp {
     pub inject_and_run_servers: std::collections::HashSet<String>,
 }
 
+impl LoadedMcp {
+    /// Empty load result — the issue #73 seam for startup without local
+    /// `mcp.toml` scanning: when `StartupConfig::load_local_sources` is
+    /// disabled the composition root uses this instead of [`load_all`].
+    /// TODO(#73): controller-provisioned MCP servers arrive through the
+    /// settings RPC in a later phase.
+    pub fn empty() -> Self {
+        Self {
+            tools: Vec::new(),
+            diagnostics: Vec::new(),
+            client_count: 0,
+            server_names: Vec::new(),
+            notification_hooks: Vec::new(),
+            inject_summary_servers: std::collections::HashSet::new(),
+            inject_and_run_servers: std::collections::HashSet::new(),
+        }
+    }
+}
+
 /// Load and connect every MCP server from the project + user configs. Project entries with
 /// the same `name` as a user entry override.
 pub async fn load_all(cwd: &Path) -> LoadedMcp {

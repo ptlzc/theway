@@ -2,16 +2,16 @@
 //!
 //! `WireStatus` (serde, `crate::wire`) is the internal model shared by the
 //! `--http` JSON surface and the UI event loop; `SessionState` (prost, generated
-//! from the four domain proto files — `commands.proto`, `session.proto`,
-//! `graph_engine.proto`, `events.proto` — plus `health.proto` by this crate's
-//! build.rs) is the structured wire model for gRPC. The gRPC server serializes
-//! `SessionState` as binary protobuf; JSON channels keep using `WireStatus`
-//! until the protojson migration (see docs/PROTOCOL.md).
+//! from the five domain proto files — `commands.proto`, `session.proto`,
+//! `graph_engine.proto`, `events.proto`, `settings.proto` — plus `health.proto`
+//! by this crate's build.rs) is the structured wire model for gRPC. The gRPC
+//! server serializes `SessionState` as binary protobuf; JSON channels keep
+//! using `WireStatus` until the protojson migration (see docs/PROTOCOL.md).
 
 /// Generated protobuf code for package `theway.grpc.v1`, produced by this
 /// crate's `build.rs` into its own OUT_DIR. Each domain proto file carries its
-/// messages, enums, and service in the same package:
-/// `commands.proto` / `session.proto` / `graph_engine.proto` / `events.proto`.
+/// messages, enums, and service in the same package: `commands.proto` /
+/// `session.proto` / `graph_engine.proto` / `events.proto` / `settings.proto`.
 pub mod theway_grpc {
     tonic::include_proto!("theway.grpc.v1");
 }
@@ -559,6 +559,40 @@ pub fn wire_path_context_from_proto(p: &wire::PathContext) -> WirePathContext {
         base: p.base.clone(),
         work_dir: p.work_dir.clone(),
         skills_dirs: p.skills_dirs.clone(),
+    }
+}
+
+/// Convert the daemon configuration view (issue #72) into the structured wire
+/// model.
+pub fn daemon_config_to_proto(config: &crate::wire::WireDaemonConfig) -> wire::DaemonConfig {
+    wire::DaemonConfig {
+        provider: config.provider.clone(),
+        model: config.model.clone(),
+        base_url: config.base_url.clone(),
+        thinking: config.thinking,
+        builtin_skills: config.builtin_skills.clone(),
+        skills_dirs: config.skills_dirs.clone(),
+        trigger_poll_secs: config
+            .trigger_poll_secs
+            .map(|secs| secs.min(u32::MAX as u64) as u32),
+        tui_max_feed_lines: config
+            .tui_max_feed_lines
+            .map(|lines| lines.min(u32::MAX as u64) as u32),
+    }
+}
+
+/// Convert a `DaemonConfig` (proto, from a gRPC request/response) back into
+/// the internal settings model.
+pub fn daemon_config_from_proto(config: &wire::DaemonConfig) -> crate::wire::WireDaemonConfig {
+    crate::wire::WireDaemonConfig {
+        provider: config.provider.clone(),
+        model: config.model.clone(),
+        base_url: config.base_url.clone(),
+        thinking: config.thinking,
+        builtin_skills: config.builtin_skills.clone(),
+        skills_dirs: config.skills_dirs.clone(),
+        trigger_poll_secs: config.trigger_poll_secs.map(u64::from),
+        tui_max_feed_lines: config.tui_max_feed_lines.map(u64::from),
     }
 }
 

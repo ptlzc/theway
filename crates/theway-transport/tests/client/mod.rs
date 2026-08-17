@@ -6,7 +6,7 @@ use crate::grpc::{serve_grpc, GrpcState};
 use crate::proto::{session_state, wire_status};
 use crate::testing::{FakeSessionOps, empty_sidebar_snapshot};
 use crate::feed::WireFeedBlock;
-use crate::wire::{ModelEntry, ProviderGroup, WirePathContext, WireStatus};
+use crate::wire::{ModelEntry, ProviderGroup, WireDaemonConfig, WirePathContext, WireStatus};
 use std::sync::Arc;
 use std::time::Duration;
 use futures::StreamExt as _;
@@ -87,6 +87,7 @@ fn grpc_state() -> (GrpcState, mpsc::UnboundedReceiver<crate::wire::WireCommand>
             session_ops,
             session_id: Arc::new(std::sync::RwLock::new("sess-1".into())),
             path_context: Arc::new(std::sync::RwLock::new(WirePathContext::default())),
+            daemon_config: Arc::new(std::sync::RwLock::new(WireDaemonConfig::default())),
             agent_fwd,
         },
         command_rx,
@@ -517,5 +518,58 @@ fn session_state_round_trips_feed_block_kinds() {
             assert_eq!(*level, crate::feed::Level::System);
         }
         other => panic!("expected Plain block, got {other:?}"),
+    }
+}
+
+// ── settings / config (issue #72) ─────────────────────────────────────
+
+#[tokio::test]
+async fn client_get_config_returns_daemon_view() {
+    let (mut client, _command_rx, _snapshot_tx) = client_and_server().await;
+    // Fresh fixture starts with an empty config view.
+    let config = client.get_config().await.unwrap();
+    assert_eq!(config, WireDaemonConfig::default());
+}
+
+#[tokio::test]
+async fn client_set_config_queues_configure_command() {
+    let (mut client, mut command_rx, _snapshot_tx) = client_and_server().await;
+
+    let patch = WireDaemonConfig {
+        provider: Some("anthropic".into()),
+        model: Some("claude-x".into()),
+        tui_max_feed_lines: Some(8000),
+        ..Default::default()
+    };
+    assert!(client.set_config(&patch).await.unwrap());
+
+    match command_rx.recv().await.unwrap() {
+        crate::wire::WireCommand::Configure { config } => {
+            assert_eq!(config, patch);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+    // The optimistic merge is visible on the follow-up read.
+    let config = client.get_config().await.unwrap();
+    assert_eq!(config.provider.as_deref(), Some("anthropic"));
+    assert_eq!(config.model.as_deref(), Some("claude-x"));
+    assert_eq!(config.tui_max_feed_lines, Some(8000));
+}
+
+#[tokio::test]
+async fn client_configure_alias_reaches_the_event_loop() {
+    let (mut client, mut command_rx, _snapshot_tx) = client_and_server().await;
+
+    let patch = WireDaemonConfig {
+        skills_dirs: vec!["/skills/a".into()],
+        ..Default::default()
+    };
+    assert!(client.configure(&patch).await.unwrap());
+
+    match command_rx.recv().await.unwrap() {
+        crate::wire::WireCommand::Configure { config } => {
+            assert_eq!(config.skills_dirs, vec!["/skills/a"]);
+        }
+        other => panic!("unexpected command: {other:?}"),
     }
 }

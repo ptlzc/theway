@@ -175,7 +175,9 @@ async fn host_with_extras(extras: Vec<PathBuf>) -> (TurnHost, Arc<AtomicU32>, Ve
             trigger_features: Vec::new(),
         },
         thinking_summary: None,
-        tui_max_feed_lines: None,
+        // Issue #73: startup settings are in-memory; defaults here (no
+        // controller payload in this fixture).
+        startup: crate::startup_config::StartupConfig::default(),
     };
 
     (TurnHost::new(config), reload_calls, vec![scratch, repo_dir])
