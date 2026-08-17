@@ -17,6 +17,7 @@ export * from './generated/commands.js';
 export * from './generated/events.js';
 export * from './generated/graph_engine.js';
 export * from './generated/session.js';
+export * from './generated/settings.js';
 export {
   HealthCheckResponse_ServingStatus,
   healthCheckResponse_ServingStatusFromJSON,

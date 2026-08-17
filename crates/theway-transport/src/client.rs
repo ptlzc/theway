@@ -24,13 +24,14 @@ use crate::proto::theway_grpc::command_service_client::CommandServiceClient;
 use crate::proto::theway_grpc::event_service_client::EventServiceClient;
 use crate::proto::theway_grpc::graph_engine_service_client::GraphEngineServiceClient;
 use crate::proto::theway_grpc::session_service_client::SessionServiceClient;
+use crate::proto::theway_grpc::settings_service_client::SettingsServiceClient;
 use crate::proto::theway_grpc::{
     self as proto, ApproveRequest, CreateSessionRequest, DeleteSessionRequest, Empty,
     GetNodeOutputRequest, GraphCancelRequest, GraphListRequest, GraphRetryRequest,
     GraphSkipRequest, RenameSessionRequest, SendMessageRequest, SessionState, SetModelRequest,
     SetSkillDirsRequest, StreamFrame, SwitchSessionRequest,
 };
-use crate::wire::{SessionSummary, WirePathContext, WirePromptImage};
+use crate::wire::{SessionSummary, WireDaemonConfig, WirePathContext, WirePromptImage};
 
 /// Default daemon port when no port file exists (`thewayd` binds this when
 /// started without `--port`).
@@ -134,7 +135,7 @@ pub fn remove_port_file_if_owner(cwd: &Path, pid: u32) {
     }
 }
 
-/// Typed client for the four `theway.grpc.v1` domain services.
+/// Typed client for the five `theway.grpc.v1` domain services.
 ///
 /// Cheap to clone (the underlying channel is `Arc`-shared); command calls take
 /// `&mut self` because tonic's generated unary methods do. `stream_events`
@@ -146,6 +147,7 @@ pub struct GrpcClient {
     command: CommandServiceClient<Channel>,
     graph: GraphEngineServiceClient<Channel>,
     events: EventServiceClient<Channel>,
+    settings: SettingsServiceClient<Channel>,
     addr: String,
 }
 
@@ -161,7 +163,8 @@ impl GrpcClient {
             session: SessionServiceClient::new(channel.clone()),
             command: CommandServiceClient::new(channel.clone()),
             graph: GraphEngineServiceClient::new(channel.clone()),
-            events: EventServiceClient::new(channel),
+            events: EventServiceClient::new(channel.clone()),
+            settings: SettingsServiceClient::new(channel),
             addr: addr.to_string(),
         })
     }
@@ -372,6 +375,41 @@ impl GrpcClient {
             })
             .await
             .map_err(|e| anyhow::anyhow!("set_skill_dirs: {e}"))?;
+        Ok(accepted.into_inner().accepted)
+    }
+
+    // ── settings / config (issue #72) ─────────────────────────────────
+
+    /// Current daemon configuration view (fields the daemon knows about).
+    pub async fn get_config(&mut self) -> Result<WireDaemonConfig> {
+        let response = self
+            .settings
+            .get_config(Empty {})
+            .await
+            .map_err(|e| anyhow::anyhow!("get_config: {e}"))?
+            .into_inner();
+        Ok(crate::proto::daemon_config_from_proto(&response))
+    }
+
+    /// Push a partial configuration update. `Ok(true)` = the daemon queued
+    /// the command; the serialized event loop applies it authoritatively.
+    pub async fn set_config(&mut self, config: &WireDaemonConfig) -> Result<bool> {
+        let accepted = self
+            .settings
+            .set_config(crate::proto::daemon_config_to_proto(config))
+            .await
+            .map_err(|e| anyhow::anyhow!("set_config: {e}"))?;
+        Ok(accepted.into_inner().accepted)
+    }
+
+    /// Same operation as [`set_config`](Self::set_config), on the `Configure`
+    /// method (kept so JSON-RPC / WS / MCP clients can align on one verb).
+    pub async fn configure(&mut self, config: &WireDaemonConfig) -> Result<bool> {
+        let accepted = self
+            .settings
+            .configure(crate::proto::daemon_config_to_proto(config))
+            .await
+            .map_err(|e| anyhow::anyhow!("configure: {e}"))?;
         Ok(accepted.into_inner().accepted)
     }
 

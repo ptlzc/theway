@@ -3,7 +3,7 @@
 
 use super::super::*;
 use crate::wire::WireContextUsage;
-use super::helpers::rpc_call;
+use super::helpers::{rpc_call, rpc_error};
 use crate::testing::{FakeSessionOps, empty_sidebar_snapshot};
 use base64::Engine as _;
 use futures::{SinkExt as _, StreamExt};
@@ -48,6 +48,9 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
         session_ops: Arc::new(FakeSessionOps::new()),
         path_context: std::sync::Arc::new(std::sync::RwLock::new(
             crate::wire::WirePathContext::default(),
+        )),
+        daemon_config: std::sync::Arc::new(std::sync::RwLock::new(
+            crate::wire::WireDaemonConfig::default(),
         )),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -253,6 +256,9 @@ async fn websocket_serves_snapshot_and_accepts_commands() {
         path_context: std::sync::Arc::new(std::sync::RwLock::new(
             crate::wire::WirePathContext::default(),
         )),
+        daemon_config: std::sync::Arc::new(std::sync::RwLock::new(
+            crate::wire::WireDaemonConfig::default(),
+        )),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -374,6 +380,135 @@ async fn healthz_answers_ok_without_snapshot_and_root_404s() {
     // The embedded web UI is gone: root answers 404.
     let response = client.get(format!("{base}/")).send().await.unwrap();
     assert_eq!(response.status(), 404);
+
+    server.abort();
+}
+
+/// Spawn the router with a seeded daemon config view (issue #72); returns the
+/// base URL, the command queue the settings methods feed, and the server handle.
+async fn spawn_config_server(
+    seed: crate::wire::WireDaemonConfig,
+) -> (
+    String,
+    mpsc::UnboundedReceiver<WireCommand>,
+    tokio::task::JoinHandle<()>,
+) {
+    let (command_tx, command_rx) = mpsc::unbounded_channel::<WireCommand>();
+    let (snapshot_tx, _) = broadcast::channel::<WireStatus>(16);
+    let router = web_router(HttpState {
+        commands: command_tx,
+        snapshots: snapshot_tx,
+        latest: Arc::new(Mutex::new(WireStatus {
+            session_id: "sess-1".into(),
+            model: "provider:model".into(),
+            model_catalog: Vec::new(),
+            cwd: "/tmp/theway".into(),
+            busy: false,
+            queued_count: 0,
+            latest_trigger_poll: None,
+            goal: None,
+            control_plane_prompt: None,
+            sidebar: empty_sidebar_snapshot(),
+            feed_blocks: Vec::new(),
+            feed_lines: vec!["ready".into()],
+            feed_lines_base: 0,
+            dags: Vec::new(),
+            subagents: Vec::new(),
+            usage: WireContextUsage::default(),
+            tui_max_feed_lines: None,
+        })),
+        completer: SlashCompleter::from_commands(Vec::new()),
+        events: broadcast::channel::<theway_core::multiagent::registry::AgentJobEvent>(16)
+            .0,
+        dag_events: broadcast::channel::<theway_core::multiagent::graph::types::DagEvent>(
+            16,
+        )
+        .0,
+        registry: theway_core::multiagent::registry::AgentJobRegistry::new(),
+        session_ops: Arc::new(FakeSessionOps::new()),
+        path_context: std::sync::Arc::new(std::sync::RwLock::new(
+            crate::wire::WirePathContext::default(),
+        )),
+        daemon_config: std::sync::Arc::new(std::sync::RwLock::new(seed)),
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, router.into_make_service())
+            .await
+            .unwrap();
+    });
+    (format!("http://{addr}"), command_rx, server)
+}
+
+#[tokio::test]
+async fn json_rpc_serves_and_updates_daemon_config() {
+    let seed = crate::wire::WireDaemonConfig {
+        provider: Some("anthropic".into()),
+        model: Some("claude-x".into()),
+        ..Default::default()
+    };
+    let (base, mut command_rx, server) = spawn_config_server(seed).await;
+    let client = reqwest::Client::new();
+
+    // GetConfig serves the seeded view (bare name + namespaced alias).
+    let config = rpc_call(&client, &base, 1, "get_config", None).await;
+    assert_eq!(config["provider"], "anthropic");
+    assert_eq!(config["model"], "claude-x");
+    let alias = rpc_call(&client, &base, 2, "settings.get_config", None).await;
+    assert_eq!(alias, config);
+
+    // SetConfig with flat params: accepted, merged, and queued as Configure.
+    let accepted = rpc_call(
+        &client,
+        &base,
+        3,
+        "set_config",
+        Some(json!({ "model": "claude-y", "trigger_poll_secs": 30 })),
+    )
+    .await;
+    assert_eq!(accepted["accepted"], true);
+    match command_rx.recv().await.unwrap() {
+        WireCommand::Configure { config } => {
+            assert_eq!(config.model.as_deref(), Some("claude-y"));
+            assert_eq!(config.trigger_poll_secs, Some(30));
+            assert!(config.provider.is_none());
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+    let config = rpc_call(&client, &base, 4, "get_config", None).await;
+    assert_eq!(config["provider"], "anthropic");
+    assert_eq!(config["model"], "claude-y");
+    assert_eq!(config["trigger_poll_secs"], 30);
+
+    // Configure (alias) accepts a nested `config` object too.
+    let accepted = rpc_call(
+        &client,
+        &base,
+        5,
+        "settings.configure",
+        Some(json!({ "config": { "skills_dirs": ["/skills/a"] } })),
+    )
+    .await;
+    assert_eq!(accepted["accepted"], true);
+    match command_rx.recv().await.unwrap() {
+        WireCommand::Configure { config } => {
+            assert_eq!(config.skills_dirs, vec!["/skills/a"])
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+
+    // Malformed field types are invalid params.
+    let (code, message) = rpc_error(
+        &client,
+        &base,
+        6,
+        "set_config",
+        Some(json!({ "thinking": "not-a-bool" })),
+    )
+    .await;
+    assert_eq!(code, -32602);
+    assert!(message.contains("invalid config params"), "{message}");
 
     server.abort();
 }

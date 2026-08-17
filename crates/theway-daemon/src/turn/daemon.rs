@@ -141,6 +141,11 @@ pub struct TurnHost {
     /// when `SetSkillDirs` lands). Cloned into [`TransportEndpoints`] so the
     /// transport servers and this host observe one authoritative value.
     path_context: Arc<std::sync::RwLock<WirePathContext>>,
+    /// Shared daemon configuration view (issue #72): served by `GetConfig`;
+    /// seeded from the startup-resolved settings and merged by the event loop
+    /// when `Configure` commands land. Cloned into [`TransportEndpoints`] so
+    /// the transport servers and this host observe one authoritative value.
+    daemon_config: Arc<std::sync::RwLock<WireDaemonConfig>>,
     session_id: String,
     log_path: Option<PathBuf>,
     tool_count: usize,
@@ -268,6 +273,29 @@ impl TurnHost {
                 .map(|dir| dir.to_string_lossy().into_owned())
                 .collect(),
         }));
+        // Shared daemon configuration view (issue #72): seeded from the
+        // startup-resolved settings (active model, skill dirs, trigger poll
+        // interval, TUI scrollback); `Configure` commands merge into it at
+        // runtime and the transport servers serve it via `GetConfig`.
+        let startup_model = config.harness.agent().state().model.clone();
+        let daemon_config = Arc::new(std::sync::RwLock::new(WireDaemonConfig {
+            provider: startup_model.as_ref().map(|model| model.provider.0.clone()),
+            model: startup_model.as_ref().map(|model| model.id.clone()),
+            base_url: startup_model
+                .as_ref()
+                .map(|model| model.base_url.clone())
+                .filter(|url| !url.is_empty()),
+            thinking: None,
+            builtin_skills: Vec::new(),
+            skills_dirs: config
+                .paths
+                .current_extra_skill_dirs()
+                .into_iter()
+                .map(|dir| dir.to_string_lossy().into_owned())
+                .collect(),
+            trigger_poll_secs: Some(crate::triggers::dynamic::dynamic_trigger_poll_interval_secs()),
+            tui_max_feed_lines: config.tui_max_feed_lines,
+        }));
         Self {
             kernel: ReplKernel::new(config.harness, config.trigger_executor, config.retry),
             registry,
@@ -276,6 +304,7 @@ impl TurnHost {
             cwd: config.cwd,
             paths: config.paths,
             path_context,
+            daemon_config,
             session_id: config.session_id,
             log_path: config.log_path,
             tool_count: config.tool_count,
@@ -360,6 +389,10 @@ impl TurnHost {
             // this handle and apply the `SetSkillDirs` optimistic update
             // against it; the event loop holds the authoritative copy.
             path_context: self.path_context.clone(),
+            // Issue #72: the transport servers serve `GetConfig` from this
+            // handle and optimistically merge `SetConfig` / `Configure`
+            // patches into it; the event loop holds the authoritative copy.
+            daemon_config: self.daemon_config.clone(),
             session_id: self.session_id.clone(),
             agent_fwd,
         }
@@ -483,7 +516,42 @@ impl TurnHost {
             WireCommand::SetModel { spec } => self.set_model_from_spec(&spec).await,
             WireCommand::SwitchSession { id } => self.handle_switch_session(id, turn).await,
             WireCommand::SetSkillDirs { dirs } => self.handle_set_skill_dirs(dirs, turn).await,
+            WireCommand::Configure { config } => self.handle_configure(config, turn).await,
         }
+    }
+
+    /// Apply a `Configure` command authoritatively (issue #72): merge the
+    /// patch into the shared daemon config view (`GetConfig` readers observe
+    /// it immediately), then run the per-field appliers that already exist on
+    /// the serialized loop — skills dirs (same path as `SetSkillDirs`), model
+    /// selection (provider + model form a model spec), the dynamic-trigger
+    /// poll interval, and the TUI scrollback cap (next snapshot carries it).
+    /// Fields without an applier yet (`base_url`, `thinking`,
+    /// `builtin_skills`) land in the view so later phases can act on them.
+    /// The transport servers optimistically merge the same patch before
+    /// enqueuing this command.
+    async fn handle_configure(&mut self, config: WireDaemonConfig, turn: &mut TurnState) {
+        let touched = self.daemon_config.write().unwrap().merge_from(&config);
+        if touched == 0 {
+            self.system_line("configure: empty update, nothing to apply");
+            return;
+        }
+        if !config.skills_dirs.is_empty() {
+            self.handle_set_skill_dirs(config.skills_dirs.clone(), turn)
+                .await;
+        }
+        if let (Some(provider), Some(model)) = (config.provider.as_deref(), config.model.as_deref())
+        {
+            self.set_model_from_spec(&format!("{provider}:{model}"))
+                .await;
+        }
+        if let Some(secs) = config.trigger_poll_secs {
+            crate::triggers::dynamic::set_dynamic_trigger_poll_interval_secs(secs);
+        }
+        if let Some(lines) = config.tui_max_feed_lines {
+            self.tui_max_feed_lines = Some(lines);
+        }
+        self.system_line(format!("configure: applied {touched} setting(s)"));
     }
 
     /// Apply a `SetSkillDirs` command authoritatively (issue #68): replace

@@ -1,0 +1,57 @@
+// Settings domain (issue #72): the daemon configuration surface. Controllers
+// read the daemon's current configuration view (GetConfig) and push partial
+// updates (SetConfig / Configure) that the serialized event loop applies
+// authoritatively — the same optimistic-update + queued-command shape the
+// SessionService.SetSkillDirs path uses.
+
+syntax = "proto3";
+package theway.grpc.v1;
+
+import "commands.proto";
+
+// Daemon configuration snapshot / partial update (issue #72).
+//
+// Update semantics: a present `optional` field replaces the daemon's current
+// value; an absent one keeps it. `repeated` fields cannot track presence in
+// proto3, so they apply only when non-empty — clearing them goes through the
+// dedicated surfaces (e.g. SessionService.SetSkillDirs with an empty list).
+//
+// Covered areas: model selection (provider / model / base_url / thinking),
+// skills (builtin_skills / skills_dirs), triggers (trigger_poll_secs), and
+// TUI display (tui_max_feed_lines). Further config areas (relay,
+// orchestrator, hooks, cron, ...) gain fields here in later phases; field
+// numbers are append-only.
+message DaemonConfig {
+  // ── model selection ──
+  optional string provider = 1;
+  optional string model = 2;
+  // Custom provider endpoint URL.
+  optional string base_url = 3;
+  // Extended-thinking toggle.
+  optional bool thinking = 4;
+
+  // ── skills ──
+  // Enabled builtin skill names.
+  repeated string builtin_skills = 5;
+  // Extra skill search directories (mirrors PathContext.skills_dirs).
+  repeated string skills_dirs = 6;
+
+  // ── triggers ──
+  optional uint32 trigger_poll_secs = 7;
+
+  // ── tui ──
+  optional uint32 tui_max_feed_lines = 8;
+}
+
+service SettingsService {
+  // Current daemon configuration view: the fields the daemon knows about
+  // (startup values merged with every accepted update).
+  rpc GetConfig(Empty) returns (DaemonConfig);
+  // Push a partial configuration update. The command is queued into the
+  // serialized event loop, which applies it authoritatively;
+  // `accepted` = the command was queued.
+  rpc SetConfig(DaemonConfig) returns (CommandResult);
+  // Same operation as SetConfig; kept as a distinct method name so the
+  // JSON-RPC / WS / MCP surfaces can align on a `configure` verb.
+  rpc Configure(DaemonConfig) returns (CommandResult);
+}

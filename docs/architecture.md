@@ -204,6 +204,44 @@ is a valid update (clears the extras). The HTTP/WS surfaces expose the same
 two operations as JSON-RPC methods (`session.get_path_context` /
 `session.set_skill_dirs`); MCP keeps its existing tool surface.
 
+### Daemon settings view
+
+The daemon configuration is served on the gRPC `SettingsService`
+(issue #72, defined in `proto/settings.proto`):
+
+| RPC | Semantics |
+|-----|-----------|
+| `GetConfig` | Read-only snapshot of the daemon's current configuration view (`DaemonConfig`): model selection (`provider` / `model` / `base_url` / `thinking`), skills (`builtin_skills` / `skills_dirs`), `trigger_poll_secs`, and `tui_max_feed_lines`. |
+| `SetConfig` | Push a partial update; returns once the command is queued (`accepted`). |
+| `Configure` | Same operation as `SetConfig`, kept so the JSON-RPC / WS surfaces can align on a `configure` verb. |
+
+Update semantics follow proto3 presence: a present `optional` field replaces
+the current value, an absent one keeps it; `repeated` fields apply only when
+non-empty (clearing goes through the dedicated surfaces, e.g. `SetSkillDirs`
+with an empty list).
+
+Both sides observe ONE shared `Arc<RwLock<WireDaemonConfig>>`: `TurnHost`
+seeds it at startup from the active model, the extra skill dirs, the
+configured trigger poll interval, and `[tui] max_feed_lines`, and clones the
+same handle into `TransportEndpoints` for the servers. `SetConfig` /
+`Configure` apply in the same two steps as `SetSkillDirs`:
+
+1. **Optimistic** (transport handler): merge the patch into the shared view —
+   `GetConfig` readers see it immediately — and enqueue
+   `WireCommand::Configure`.
+2. **Authoritative** (serialized event loop): `TurnHost::handle_configure`
+   merges the patch again and runs the per-field appliers that already exist
+   on the loop — skills dirs through the `SetSkillDirs` path, model
+   selection through the `SetModel` path, the dynamic-trigger poll interval,
+   and the TUI scrollback cap (carried by the next snapshot). Fields without
+   an applier yet land in the view for later phases (persisting to
+   `config.toml` is deliberately deferred).
+
+The HTTP/WS surfaces expose the same operations as JSON-RPC methods
+(`settings.get_config` / `settings.set_config` / `settings.configure`, bare
+names also accepted); the `set_config` / `configure` params accept either the
+config fields directly or a nested `{"config": {...}}` object.
+
 ### Executors and the tool policy
 
 The kernel execution backend is a cargo feature:
@@ -272,10 +310,13 @@ archive surface (`theway_storage::session_archive`) for its internal
 Two zones in one crate:
 
 - **Protocol zone**: the wire model (`wire`) and the transports around it —
-  gRPC (`grpc`, four domain services `CommandService` / `SessionService` /
-  `GraphEngineService` / `EventService` plus `grpc.health.v1.Health`;
+  gRPC (`grpc`, five domain services `CommandService` / `SessionService` /
+  `SettingsService` / `GraphEngineService` / `EventService` plus
+  `grpc.health.v1.Health`;
   `SessionService` also serves the daemon path context — `GetPathContext` /
-  `SetSkillDirs`, see [gRPC path context](#grpc-path-context)),
+  `SetSkillDirs`, see [gRPC path context](#grpc-path-context);
+  `SettingsService` serves the daemon configuration view — `GetConfig` /
+  `SetConfig` / `Configure`, see [Daemon settings view](#daemon-settings-view)),
   HTTP/SSE/WS (`http` / `ws`), MCP server (`mcp`), the daemon-discovery
   client (`client`: per-cwd `<base>/daemon-port-<cwd-hash>` file, default
   port `44777`), and the inbox reader (`inbox`).

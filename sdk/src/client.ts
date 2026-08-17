@@ -45,6 +45,11 @@ import {
   type SessionState,
   type SwitchSessionRequest,
 } from './generated/session.js';
+import {
+  SettingsServiceClient as SettingsServiceClientCtor,
+  type SettingsServiceClient as SettingsServiceClientApi,
+  type DaemonConfig,
+} from './generated/settings.js';
 
 // ── authority cleaning ──
 
@@ -53,9 +58,9 @@ const TRAILING_SLASHES = /\/+$/;
 
 /**
  * Typed gRPC client for the `theway --grpc` loopback server
- * (theway.grpc.v1.CommandService / SessionService / GraphEngineService /
- * EventService). Generated from the domain proto files and health.proto
- * (ts-proto + @grpc/grpc-js) — no runtime proto loading.
+ * (theway.grpc.v1.CommandService / SessionService / SettingsService /
+ * GraphEngineService / EventService). Generated from the domain proto files
+ * and health.proto (ts-proto + @grpc/grpc-js) — no runtime proto loading.
  *
  * Command RPCs (SendMessage / SetModel / …) resolve the raw CommandResult;
  * the convenience wrappers (`prompt`, `setModelSpec`, `abort`, …) throw when
@@ -67,6 +72,7 @@ export class ThewayGrpcClient {
   readonly #command: CommandServiceClientApi;
   readonly #graph: GraphEngineServiceClientApi;
   readonly #events: EventServiceClientApi;
+  readonly #settings: SettingsServiceClientApi;
 
   constructor(
     baseUrl: string,
@@ -77,6 +83,7 @@ export class ThewayGrpcClient {
     this.#command = new CommandServiceClientCtor(authority, credentials);
     this.#graph = new GraphEngineServiceClientCtor(authority, credentials);
     this.#events = new EventServiceClientCtor(authority, credentials);
+    this.#settings = new SettingsServiceClientCtor(authority, credentials);
   }
 
   // ── session state ──
@@ -261,6 +268,40 @@ export class ThewayGrpcClient {
     return this.#call<DeleteSessionRequest, DeleteSessionResponse>(this.#session.deleteSession.bind(this.#session), 'DeleteSession', request);
   }
 
+  // ── settings / config ──
+
+  /** `GetConfig` — the daemon's current configuration view. */
+  getConfig(): Promise<DaemonConfig> {
+    return this.#call<Empty, DaemonConfig>(this.#settings.getConfig.bind(this.#settings), 'GetConfig', {});
+  }
+
+  /**
+   * `SetConfig` — push a partial configuration update. Absent fields keep
+   * the daemon's current value (repeated fields default to empty = no-op).
+   */
+  async setConfig(config: Partial<DaemonConfig>): Promise<void> {
+    const result = await this.#call<DaemonConfig, CommandResult>(
+      this.#settings.setConfig.bind(this.#settings),
+      'SetConfig',
+      fillDaemonConfig(config),
+    );
+    if (!result.accepted) {
+      throw new Error('theway grpc: SetConfig was not accepted by the server');
+    }
+  }
+
+  /** `Configure` — alias of `setConfig` (JSON-RPC / WS / MCP verb alignment). */
+  async configure(config: Partial<DaemonConfig>): Promise<void> {
+    const result = await this.#call<DaemonConfig, CommandResult>(
+      this.#settings.configure.bind(this.#settings),
+      'Configure',
+      fillDaemonConfig(config),
+    );
+    if (!result.accepted) {
+      throw new Error('theway grpc: Configure was not accepted by the server');
+    }
+  }
+
   // ── event stream ──
 
   /**
@@ -316,6 +357,7 @@ export class ThewayGrpcClient {
     this.#command.close();
     this.#graph.close();
     this.#events.close();
+    this.#settings.close();
   }
 
   // ── private helpers ──
@@ -349,4 +391,17 @@ export class ThewayGrpcClient {
 function extractErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
+}
+
+/**
+ * Complete a partial `DaemonConfig` for the wire: ts-proto models proto3
+ * repeated fields as required arrays, and an empty array means "keep the
+ * current value" (repeated fields apply only when non-empty).
+ */
+function fillDaemonConfig(config: Partial<DaemonConfig>): DaemonConfig {
+  return {
+    builtinSkills: [],
+    skillsDirs: [],
+    ...config,
+  };
 }

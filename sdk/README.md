@@ -1,15 +1,16 @@
 # @theway-ai/sdk
 
 Typed TypeScript SDK for the **theway** gRPC daemon (`theway --grpc` loopback server).
-Generated from the four domain protos
+Generated from the five domain protos
 ([`proto/commands.proto`](proto/commands.proto),
 [`proto/session.proto`](proto/session.proto),
 [`proto/graph_engine.proto`](proto/graph_engine.proto),
-[`proto/events.proto`](proto/events.proto)) + [`proto/health.proto`](proto/health.proto)
+[`proto/events.proto`](proto/events.proto),
+[`proto/settings.proto`](proto/settings.proto)) + [`proto/health.proto`](proto/health.proto)
 via ts-proto + `@grpc/grpc-js` — **no runtime proto loading**, no path magic.
 
 `ThewayGrpcClient` routes each RPC to its domain service — `CommandService`,
-`SessionService`, `GraphEngineService`, and `EventService` — while
+`SessionService`, `SettingsService`, `GraphEngineService`, and `EventService` — while
 `HealthClient` covers the standard `grpc.health.v1.Health` service.
 
 Published to the internal Nexus npm-private registry (`https://registry.npmjs.org/repository/npm-private/`).
@@ -39,6 +40,10 @@ await client.resolveControlPlane(true);
 // Graph / session control
 const { resetNodeIds } = await client.graphRetry('dag-1');
 const sessions = await client.listSessions();
+
+// Daemon settings (issue #72) — partial update: only set fields are applied
+const config = await client.getConfig();
+await client.setConfig({ triggerPollSecs: 30, skillsDirs: ['/extra/skills'] });
 
 // Snapshot + event stream (StreamFrame oneof: payload.$case === 'snapshot' | 'event')
 await client.streamEvents((frame) => {

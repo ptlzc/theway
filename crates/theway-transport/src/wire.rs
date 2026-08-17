@@ -65,6 +65,91 @@ pub enum WireCommand {
     SetSkillDirs {
         dirs: Vec<String>,
     },
+    /// Settings/config push (issue #72): apply a partial daemon configuration
+    /// update. The event loop applies it authoritatively (merging into the
+    /// shared config view plus the per-field appliers); the transport servers
+    /// optimistically merge the same patch into the shared view first.
+    Configure {
+        config: WireDaemonConfig,
+    },
+}
+
+/// Daemon configuration snapshot / partial update (issue #72) — the serde twin
+/// of `settings.proto` `DaemonConfig`, shared by the JSON-RPC (`get_config` /
+/// `set_config` / `configure`) and gRPC (`SettingsService`) surfaces.
+///
+/// Update semantics mirror the proto contract: a `Some` optional field
+/// replaces the daemon's current value, `None` keeps it; repeated fields apply
+/// only when non-empty (proto3/serde cannot distinguish "absent" from an empty
+/// list, so clearing goes through the dedicated surfaces, e.g. `SetSkillDirs`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct WireDaemonConfig {
+    /// Model selection: provider name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    /// Model selection: model id within the provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Custom provider endpoint URL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    /// Extended-thinking toggle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<bool>,
+    /// Enabled builtin skill names.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub builtin_skills: Vec<String>,
+    /// Extra skill search directories (mirrors `WirePathContext::skills_dirs`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills_dirs: Vec<String>,
+    /// Trigger poll interval in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trigger_poll_secs: Option<u64>,
+    /// TUI feed scrollback cap (`[tui] max_feed_lines`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tui_max_feed_lines: Option<u64>,
+}
+
+impl WireDaemonConfig {
+    /// Apply a partial update: `Some` optional fields replace the current
+    /// value, non-empty repeated fields replace the current list. Returns the
+    /// number of config areas touched (for diagnostics).
+    pub fn merge_from(&mut self, patch: &WireDaemonConfig) -> usize {
+        let mut touched = 0;
+        if let Some(provider) = patch.provider.clone() {
+            self.provider = Some(provider);
+            touched += 1;
+        }
+        if let Some(model) = patch.model.clone() {
+            self.model = Some(model);
+            touched += 1;
+        }
+        if let Some(base_url) = patch.base_url.clone() {
+            self.base_url = Some(base_url);
+            touched += 1;
+        }
+        if let Some(thinking) = patch.thinking {
+            self.thinking = Some(thinking);
+            touched += 1;
+        }
+        if !patch.builtin_skills.is_empty() {
+            self.builtin_skills = patch.builtin_skills.clone();
+            touched += 1;
+        }
+        if !patch.skills_dirs.is_empty() {
+            self.skills_dirs = patch.skills_dirs.clone();
+            touched += 1;
+        }
+        if let Some(secs) = patch.trigger_poll_secs {
+            self.trigger_poll_secs = Some(secs);
+            touched += 1;
+        }
+        if let Some(lines) = patch.tui_max_feed_lines {
+            self.tui_max_feed_lines = Some(lines);
+            touched += 1;
+        }
+        touched
+    }
 }
 
 /// Daemon path context (issue #68): startup-fixed home / base / work_dir plus
