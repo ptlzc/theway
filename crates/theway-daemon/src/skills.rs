@@ -164,3 +164,6 @@ fn dedupe_first_wins(combined: &mut Vec<Skill>, skill: Skill) {
         combined.push(skill);
     }
 }
+
+#[cfg(all(test, feature = "local"))]
+tests_bridge_macro::tests_bridge!("skills");

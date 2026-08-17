@@ -499,3 +499,8 @@ fn set_dynamic_trigger_enabled(target: Option<&String>, enabled: bool) -> Comman
         Err(e) => CommandOutcome::Error(e.to_string()),
     }
 }
+
+#[cfg(test)]
+// Test files live in `tests/commands/triggers/` (mirror of src), pulled in by
+// path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
+tests_bridge_macro::tests_bridge!("commands/triggers");

@@ -33,3 +33,6 @@ pub fn active_trigger_features() -> Vec<String> {
         "inject-and-run".to_string(),
     ]
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("ui_mode_panel");

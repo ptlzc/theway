@@ -112,3 +112,6 @@ pub async fn save(session: &Session, dest: &Path) -> Result<PathBuf> {
         .with_context(|| format!("write {}", dest.display()))?;
     Ok(dest.to_path_buf())
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("export");

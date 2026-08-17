@@ -85,3 +85,6 @@ pub fn apply(
         }
     }
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("turn/thinking_summary");

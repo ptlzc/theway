@@ -37,3 +37,6 @@ When the user asks to delete, remove, or clear dynamic triggers, call remove_tri
 When the user asks to create, save, or codify a reusable skill, workflow, checklist, or convention, or to summarize recent work or this conversation into a skill (技能, 保存为技能, 把刚才的工作总结成 skill), call skill_builder with structured name/description/instructions. For summarize-into-skill requests, distill the generalizable steps from the conversation — what was actually done, the commands used, the pitfalls — not a transcript. Call once without confirm to preview and show the user the planned name and description, then call with confirm=true after they agree. Use install_skill only for installing an existing SKILL.md from a URL, file, or pasted content."
     )
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("system_prompt");

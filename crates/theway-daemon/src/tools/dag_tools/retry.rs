@@ -87,3 +87,6 @@ static RETRY_DEFINITION: Lazy<Tool> = Lazy::new(|| {
     }),
 }
 });
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("tools/dag_tools/retry");
