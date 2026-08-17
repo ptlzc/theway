@@ -82,3 +82,6 @@ static DEFINITION: Lazy<Tool> = Lazy::new(|| Tool {
         "required": ["path", "content"],
     }),
 });
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("tools/write");

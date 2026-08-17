@@ -69,3 +69,6 @@ pub fn allow_hook() -> OnControlPlanePromptHook {
         },
     )
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("control_plane_prompt");

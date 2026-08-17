@@ -101,3 +101,6 @@ static DEFINITION: Lazy<Tool> = Lazy::new(|| Tool {
         },
     }),
 });
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("tools/ls");

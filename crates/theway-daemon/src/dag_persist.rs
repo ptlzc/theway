@@ -149,3 +149,6 @@ pub async fn load_session_runs(
         }
     }
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("dag_persist");

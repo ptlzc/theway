@@ -233,3 +233,6 @@ fn render_diagnostics(path: &Path, diags: &[Diagnostic]) -> String {
     }
     out
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("lsp_supervisor");

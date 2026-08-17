@@ -87,3 +87,6 @@ fn short(session_id: &str) -> &str {
 
 #[allow(dead_code)]
 fn _path_check(_p: &Path) {}
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("logging");

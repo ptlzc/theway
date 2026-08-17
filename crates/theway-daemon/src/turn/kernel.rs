@@ -182,3 +182,8 @@ impl ReplKernel {
         Box::pin(async move { harness.continue_().await.map(|_| None) })
     }
 }
+
+#[cfg(test)]
+// Test files live in `tests/turn/kernel/` (mirror of src), pulled in by
+// path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
+tests_bridge_macro::tests_bridge!("turn/kernel");

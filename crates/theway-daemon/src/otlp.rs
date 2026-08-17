@@ -222,6 +222,10 @@ impl tracing::field::Visit for AttrCollector {
 mod tests {
     use super::*;
 
+    // Mirrored module tests live in `tests/otlp/` (see docs/rust-test-files.md);
+    // the bridge is nested here because this file already has an inline `mod tests`.
+    tests_bridge_macro::tests_bridge!("otlp");
+
     #[test]
     fn try_layer_returns_none_when_env_unset() {
         // SAFETY: tests share process state; explicitly clear the env var so this is

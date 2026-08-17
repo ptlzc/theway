@@ -196,3 +196,6 @@ impl ToolOps for ForwardingToolOps {
             .map_err(ToolError::other)
     }
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("forwarding_tool_ops");

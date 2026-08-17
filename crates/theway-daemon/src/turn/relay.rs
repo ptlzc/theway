@@ -338,6 +338,6 @@ fn snapshot_frame(snapshot: &WireStatus) -> Option<String> {
 }
 
 #[cfg(test)]
-// Test files live in `tests/ui/relay/` (mirror of src), pulled in by
+// Test files live in `tests/turn/relay/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
-tests_bridge_macro::tests_bridge!("ui/relay");
+tests_bridge_macro::tests_bridge!("turn/relay");

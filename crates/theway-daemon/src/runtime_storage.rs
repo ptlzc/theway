@@ -477,3 +477,6 @@ pub fn local_runtime_storage() -> Arc<dyn RuntimeStorage> {
 pub async fn remote_runtime_storage(addr: &str) -> Result<Arc<dyn RuntimeStorage>> {
     Ok(Arc::new(RemoteRuntimeStorage::connect(addr).await?))
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("runtime_storage");

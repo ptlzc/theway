@@ -363,3 +363,73 @@ async fn bash_run_in_background_returns_shell_id() {
         "got: {fg_text}"
     );
 }
+
+#[tokio::test]
+async fn execute_missing_command_errors() {
+    let tool = BashTool;
+
+    let err = tool
+        .execute("m1", json!({}), CancellationToken::new(), None)
+        .await
+        .expect_err("missing command must fail");
+
+    assert_eq!(err.to_string(), "missing `command`");
+}
+
+#[tokio::test]
+async fn execute_honors_cwd_param() {
+    // Arrange: run `pwd` inside a temp dir so the cwd param is observable.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cwd = dir.path().to_string_lossy().into_owned();
+    let tool = BashTool;
+
+    // Act
+    let result = tool
+        .execute(
+            "m2",
+            json!({ "command": "pwd", "cwd": cwd }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect("pwd in tempdir should succeed");
+
+    // Assert: the tool ran the command with the requested cwd.
+    let text = text_of(&result);
+    assert!(
+        text.contains(&format!("$ pwd\n{cwd}\n[exit 0]")),
+        "got: {text}"
+    );
+}
+
+#[tokio::test]
+async fn execute_adds_newline_after_stdout_without_trailing_newline() {
+    let tool = BashTool;
+
+    let result = tool
+        .execute("m3", json!({ "command": "printf hello" }), CancellationToken::new(), None)
+        .await
+        .expect("printf should succeed");
+
+    let text = text_of(&result);
+    assert!(
+        text.contains("hello\n[exit 0]"),
+        "stdout without trailing newline must get one before the exit marker: {text}"
+    );
+}
+
+#[tokio::test]
+async fn execute_adds_newline_after_stderr_without_trailing_newline() {
+    let tool = BashTool;
+
+    let result = tool
+        .execute("m4", json!({ "command": "printf err >&2" }), CancellationToken::new(), None)
+        .await
+        .expect("printf to stderr should succeed");
+
+    let text = text_of(&result);
+    assert!(
+        text.contains("[stderr]\nerr\n[exit 0]"),
+        "stderr without trailing newline must get one before the exit marker: {text}"
+    );
+}
