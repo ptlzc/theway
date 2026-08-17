@@ -388,3 +388,11 @@ fn source_kind_label(kind: SourceKind) -> &'static str {
 // Test files live in `tests/ui/listener/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
 tests_bridge_macro::tests_bridge!("ui/listener");
+
+#[cfg(test)]
+mod turn_listener_tests {
+    //! Additional listener tests live in `tests/turn/listener/` (mirror of
+    //! src), bridged from a nested module so the primary `tests/ui/listener/`
+    //! bridge stays untouched.
+    tests_bridge_macro::tests_bridge!("turn/listener");
+}

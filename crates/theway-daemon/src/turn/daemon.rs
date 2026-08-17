@@ -1370,3 +1370,10 @@ mod daemon_more_tests {
     //! primary `tests/turn/daemon/mod.rs` bridge stays untouched.
     tests_bridge_macro::tests_bridge!("turn/daemon/more");
 }
+
+#[cfg(test)]
+mod daemon_extra_tests {
+    //! Extra turn-host tests live in `tests/turn/daemon/extra/` so the
+    //! primary `tests/turn/daemon/mod.rs` bridge stays untouched.
+    tests_bridge_macro::tests_bridge!("turn/daemon/extra");
+}
