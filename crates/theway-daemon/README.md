@@ -41,7 +41,7 @@ Transport servers are methods on `App`:
 
 ```rust
 app.run_web(WebOptions { host, port })   // HTTP + SSE (axum)
-app.run_grpc(GrpcOptions { host, port }) // gRPC (tonic, proto/theway_ai_harness_grpc.proto)
+app.run_grpc(GrpcOptions { host, port }) // gRPC (tonic, crates/theway-transport/proto/*.proto)
 ```
 
 Other SDK modules: `commands` (slash-command registry), `tools` (all AgentTools),

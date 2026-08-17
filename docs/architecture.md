@@ -200,8 +200,9 @@ and clones the same handle into `TransportEndpoints` for the servers.
    picks the new extras up with the usual priority order.
 
 `home` / `base` / `work_dir` are never mutated at runtime; an empty dir list
-is a valid update (clears the extras). The HTTP/WS and MCP surfaces keep
-their existing shape — the path context is gRPC-only.
+is a valid update (clears the extras). The HTTP/WS surfaces expose the same
+two operations as JSON-RPC methods (`session.get_path_context` /
+`session.set_skill_dirs`); MCP keeps its existing tool surface.
 
 ### Executors and the tool policy
 

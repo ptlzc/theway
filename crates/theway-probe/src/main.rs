@@ -16,7 +16,7 @@ use anyhow::Result;
 use clap::Parser;
 use tonic::Request;
 
-/// Generated from proto/health.proto (grpc.health.v1).
+/// Generated from crates/theway-transport/proto/health.proto (grpc.health.v1).
 pub mod health {
     tonic::include_proto!("grpc.health.v1");
 }

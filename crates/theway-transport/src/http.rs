@@ -8,7 +8,7 @@
 
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use anyhow::{Context as _, Result, bail};
 use axum::extract::State;
@@ -45,6 +45,10 @@ pub struct HttpState {
     /// session-resource-model: session lifecycle ops behind the `/sessions` routes.
     /// *Switching* the current session goes through `WireCommand::SwitchSession`.
     pub session_ops: Arc<dyn SessionOps>,
+    /// Shared daemon path context (issue #68): served by `GetPathContext`;
+    /// `SetSkillDirs` optimistically updates `skills_dirs` before the event
+    /// loop applies the change authoritatively.
+    pub path_context: Arc<RwLock<WirePathContext>>,
 }
 
 /// Full `--http` driver: bind, wire the transport channels, spawn the axum
@@ -66,6 +70,7 @@ pub async fn run_web(mut app: Box<dyn TransportHost>, options: WebOptions) -> Re
         dag_events: endpoints.dag_events.clone(),
         registry: endpoints.registry.clone(),
         session_ops: endpoints.session_ops.clone(),
+        path_context: endpoints.path_context.clone(),
     };
     let server_task = serve_web(listener, state);
 
@@ -109,11 +114,17 @@ async fn healthz() -> &'static str {
 //
 // The HTTP API speaks JSON-RPC 2.0 over `POST /rpc` (requests/responses) plus
 // server-pushed JSON-RPC notifications on `/events` (SSE) and `/ws` (WebSocket).
-// Method names mirror the pre-JSON-RPC endpoints:
+// Method names mirror the pre-JSON-RPC endpoints, with namespaced aliases
+// aligned to the proto service methods:
 //
-//   get_state | send_message | set_model | complete | abort |
-//   trigger_immediate | control_plane_resolve | list_sessions |
-//   create_session | switch_session | rename_session | delete_session
+//   get_state (session.get_state) | send_message (command.send_message) |
+//   set_model (command.set_model) | complete | abort (command.cancel) |
+//   trigger_immediate | control_plane_resolve (command.approve) |
+//   list_sessions (session.list) | create_session (session.create) |
+//   switch_session (session.switch) | rename_session (session.rename) |
+//   delete_session (session.delete) | get_node_output (graph.get_node_output) |
+//   get_path_context (session.get_path_context) |
+//   set_skill_dirs (session.set_skill_dirs)
 
 #[derive(serde::Deserialize)]
 struct RpcIn {
@@ -162,9 +173,9 @@ pub(crate) async fn dispatch(
     params: Option<&serde_json::Value>,
 ) -> RpcResult {
     match method {
-        "get_state" => Ok(serde_json::json!(state.latest.lock().clone())),
+        "get_state" | "session.get_state" => Ok(serde_json::json!(state.latest.lock().clone())),
         "ping" => Ok(serde_json::Value::Null),
-        "get_node_output" => {
+        "get_node_output" | "graph.get_node_output" => {
             let run_id = param(params, "run_id")?
                 .as_str()
                 .unwrap_or_default()
@@ -215,7 +226,7 @@ pub(crate) async fn dispatch(
                 })),
             }
         }
-        "send_message" => {
+        "send_message" | "command.send_message" => {
             let text = param(params, "text")?
                 .as_str()
                 .unwrap_or_default()
@@ -249,7 +260,7 @@ pub(crate) async fn dispatch(
                 .is_ok();
             Ok(serde_json::json!({ "accepted": accepted }))
         }
-        "set_model" => {
+        "set_model" | "command.set_model" => {
             let spec = param(params, "model")?
                 .as_str()
                 .unwrap_or_default()
@@ -264,7 +275,7 @@ pub(crate) async fn dispatch(
                 .to_string();
             Ok(serde_json::json!({ "completions": state.completer.matches(&text) }))
         }
-        "abort" => {
+        "abort" | "command.cancel" => {
             let accepted = state.commands.send(WireCommand::Abort).is_ok();
             Ok(serde_json::json!({ "accepted": accepted }))
         }
@@ -279,7 +290,7 @@ pub(crate) async fn dispatch(
                 .is_ok();
             Ok(serde_json::json!({ "accepted": accepted }))
         }
-        "control_plane_resolve" => {
+        "control_plane_resolve" | "command.approve" => {
             let approve = param(params, "approve")?.as_bool().unwrap_or(false);
             let accepted = state
                 .commands
@@ -287,7 +298,7 @@ pub(crate) async fn dispatch(
                 .is_ok();
             Ok(serde_json::json!({ "accepted": accepted }))
         }
-        "list_sessions" => {
+        "list_sessions" | "session.list" => {
             let current_session_id = state.latest.lock().session_id.clone();
             let sessions = state
                 .session_ops
@@ -298,7 +309,7 @@ pub(crate) async fn dispatch(
                 serde_json::json!({ "sessions": sessions, "current_session_id": current_session_id }),
             )
         }
-        "create_session" => {
+        "create_session" | "session.create" => {
             let name = params
                 .and_then(|p| p.get("name"))
                 .and_then(|v| v.as_str())
@@ -328,7 +339,7 @@ pub(crate) async fn dispatch(
                 .unwrap_or_else(|| serde_json::json!({ "session_id": new_id }));
             Ok(summary)
         }
-        "switch_session" => {
+        "switch_session" | "session.switch" => {
             let id = param(params, "id")?
                 .as_str()
                 .unwrap_or_default()
@@ -347,7 +358,7 @@ pub(crate) async fn dispatch(
                 .is_ok();
             Ok(serde_json::json!({ "accepted": accepted }))
         }
-        "rename_session" => {
+        "rename_session" | "session.rename" => {
             let id = param(params, "id")?
                 .as_str()
                 .unwrap_or_default()
@@ -370,7 +381,7 @@ pub(crate) async fn dispatch(
                 .map_err(|e| (-32602, e.to_string()))?;
             Ok(serde_json::json!({ "accepted": true }))
         }
-        "delete_session" => {
+        "delete_session" | "session.delete" => {
             let id = param(params, "id")?
                 .as_str()
                 .unwrap_or_default()
@@ -411,6 +422,27 @@ pub(crate) async fn dispatch(
                 }
             }
             Ok(serde_json::json!({ "deleted": true }))
+        }
+        "get_path_context" | "session.get_path_context" => {
+            let ctx = state.path_context.read().unwrap();
+            Ok(serde_json::to_value(&*ctx).unwrap_or_default())
+        }
+        "set_skill_dirs" | "session.set_skill_dirs" => {
+            let dirs = params
+                .and_then(|p| p.get("dirs"))
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            state.path_context.write().unwrap().skills_dirs = dirs.clone();
+            let accepted = state
+                .commands
+                .send(WireCommand::SetSkillDirs { dirs })
+                .is_ok();
+            Ok(serde_json::json!({ "accepted": accepted }))
         }
         _ => Err((-32601, format!("method not found: {method}"))),
     }
