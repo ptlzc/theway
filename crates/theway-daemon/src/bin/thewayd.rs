@@ -610,6 +610,7 @@ async fn main() -> Result<()> {
         cwd: cwd.clone(),
         home: paths.home.clone(),
         base: paths.base.clone(),
+        paths: paths.clone(),
         session_id,
         log_path: _logging.as_ref().map(|l| l.log_path.clone()),
         tool_count: tool_names.len(),

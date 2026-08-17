@@ -6,7 +6,9 @@
 //! (issue #37 first-wins semantics), highest priority first:
 //!
 //! 1. `--skills-dir` extras ([`DaemonPaths::extra_skill_dirs`]) — explicitly
-//!    supplied by the controller, so they beat everything else.
+//!    supplied by the controller, so they beat everything else. The list is
+//!    dynamically replaceable at runtime via `SetSkillDirs` (issue #68); each
+//!    scan reads one consistent snapshot.
 //! 2. Project roots under the work dir: `.agents` / `.theway` / `.codex` /
 //!    `.claude` skills (order unchanged from #37).
 //! 3. `<base>/skills` — the native theway install target. Now part of the
@@ -44,12 +46,19 @@ use tokio_util::sync::CancellationToken;
 /// variant and controller-supplied dirs are user-level additions, not
 /// project-local roots — the source tag is for administration/observability,
 /// while precedence comes purely from the ordering here.
+///
+/// The extras are read through [`DaemonPaths::current_extra_skill_dirs`]
+/// (issue #68): the backing list can be replaced at runtime via `SetSkillDirs`,
+/// so every call snapshots the current value once and scans that snapshot —
+/// a concurrent update lands on the NEXT scan (hot-reload), never mid-scan.
 pub fn skills_dirs(paths: &DaemonPaths) -> Vec<(PathBuf, SkillSource)> {
-    let mut dirs: Vec<(PathBuf, SkillSource)> =
-        Vec::with_capacity(paths.extra_skill_dirs.len() + 9);
+    // Snapshot once so the whole scan sees a consistent set of extras even if
+    // `SetSkillDirs` replaces the list concurrently (issue #68).
+    let extras = paths.current_extra_skill_dirs();
+    let mut dirs: Vec<(PathBuf, SkillSource)> = Vec::with_capacity(extras.len() + 9);
     // a) Controller-supplied extras (`--skills-dir`): explicit wins over
     //    everything else.
-    for extra in &paths.extra_skill_dirs {
+    for extra in &extras {
         dirs.push((extra.clone(), SkillSource::User));
     }
     // b) Project roots under the work dir (issue #37 order unchanged).

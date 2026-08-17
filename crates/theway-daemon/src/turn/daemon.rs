@@ -31,6 +31,7 @@ use super::kernel::{QueuedTurn, ReplKernel, TurnState, poll_turn};
 use crate::agent_session::RetrySettings;
 use crate::commands::{self, CommandCtx, CommandOutcome, Registry};
 use crate::control_plane_prompt::UiControlPlanePrompt;
+use crate::paths::DaemonPaths;
 use crate::session_ops::{CurrentSessionState, SessionFactory};
 use crate::tools::assembly::reload::{self, ReloadRuntime};
 use crate::triggers;
@@ -100,6 +101,10 @@ pub struct DaemonConfig {
     /// Theway base dir (issue #66: `DaemonPaths::base`), resolved at the CLI
     /// boundary — kept alongside `home` so host paths stay explicit.
     pub base: PathBuf,
+    /// Full daemon path context (issue #68): startup-fixed home/base/work_dir
+    /// plus the dynamically replaceable extra skill dirs (`SetSkillDirs`).
+    /// `cwd` / `home` / `base` above stay for the existing call sites.
+    pub paths: DaemonPaths,
     pub session_id: String,
     pub log_path: Option<PathBuf>,
     pub tool_count: usize,
@@ -127,6 +132,15 @@ pub struct TurnHost {
     registry: Arc<Registry>,
     completer: SlashCompleter,
     cwd: PathBuf,
+    /// Daemon path context (issue #68): home/base/work_dir are startup-fixed;
+    /// the extra skill dirs are replaced at runtime by `SetSkillDirs` and the
+    /// skill reload reads the fresh value through the shared `Arc`.
+    paths: DaemonPaths,
+    /// Shared wire path context (issue #68): served by `GetPathContext`;
+    /// `skills_dirs` is the only field mutated at runtime (by the event loop
+    /// when `SetSkillDirs` lands). Cloned into [`TransportEndpoints`] so the
+    /// transport servers and this host observe one authoritative value.
+    path_context: Arc<std::sync::RwLock<WirePathContext>>,
     session_id: String,
     log_path: Option<PathBuf>,
     tool_count: usize,
@@ -240,12 +254,28 @@ impl TurnHost {
             trigger_executor: config.trigger_executor.clone(),
             revision: Arc::new(AtomicU64::new(0)),
         });
+        // Shared wire path context (issue #68): home/base/work_dir are fixed
+        // at startup; `skills_dirs` starts as the CLI-supplied extras and is
+        // the only part mutated at runtime (`SetSkillDirs`).
+        let path_context = Arc::new(std::sync::RwLock::new(WirePathContext {
+            home: config.paths.home.to_string_lossy().into_owned(),
+            base: config.paths.base.to_string_lossy().into_owned(),
+            work_dir: config.paths.work_dir.to_string_lossy().into_owned(),
+            skills_dirs: config
+                .paths
+                .current_extra_skill_dirs()
+                .into_iter()
+                .map(|dir| dir.to_string_lossy().into_owned())
+                .collect(),
+        }));
         Self {
             kernel: ReplKernel::new(config.harness, config.trigger_executor, config.retry),
             registry,
             reload_runtime,
             completer,
             cwd: config.cwd,
+            paths: config.paths,
+            path_context,
             session_id: config.session_id,
             log_path: config.log_path,
             tool_count: config.tool_count,
@@ -326,6 +356,10 @@ impl TurnHost {
                 self.dag_engine.clone(),
                 self.current_session_state.clone(),
             )),
+            // Issue #68: the transport servers serve `GetPathContext` from
+            // this handle and apply the `SetSkillDirs` optimistic update
+            // against it; the event loop holds the authoritative copy.
+            path_context: self.path_context.clone(),
             session_id: self.session_id.clone(),
             agent_fwd,
         }
@@ -448,6 +482,37 @@ impl TurnHost {
             }
             WireCommand::SetModel { spec } => self.set_model_from_spec(&spec).await,
             WireCommand::SwitchSession { id } => self.handle_switch_session(id, turn).await,
+            WireCommand::SetSkillDirs { dirs } => self.handle_set_skill_dirs(dirs, turn).await,
+        }
+    }
+
+    /// Apply a `SetSkillDirs` command authoritatively (issue #68): replace
+    /// the daemon's extra skill dirs, refresh the shared wire path context,
+    /// abort any in-flight turn (its context predates the new catalog), and
+    /// hot-reload skills from disk through the harness's reload closure. The
+    /// gRPC server applies an optimistic `path_context` update with the same
+    /// dirs before enqueuing this command; this step makes it durable.
+    async fn handle_set_skill_dirs(&mut self, dirs: Vec<String>, turn: &mut TurnState) {
+        let dirs: Vec<PathBuf> = dirs.into_iter().map(PathBuf::from).collect();
+        self.paths.set_extra_skill_dirs(dirs);
+        // Keep the shared wire path context in sync with the authoritative
+        // value (`GetPathContext` readers observe it immediately).
+        self.path_context.write().unwrap().skills_dirs = self
+            .paths
+            .current_extra_skill_dirs()
+            .into_iter()
+            .map(|dir| dir.to_string_lossy().into_owned())
+            .collect();
+        if turn.fut.is_some() {
+            self.request_abort(turn);
+        }
+        match self.kernel.harness().reload_skills_from_disk().await {
+            Ok(out) => self.system_line(format!(
+                "set skill dirs: {} loaded, {} diagnostics",
+                out.skills.len(),
+                out.diagnostics.len()
+            )),
+            Err(e) => self.error_line(format!("set skill dirs: {e:#}")),
         }
     }
 

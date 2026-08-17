@@ -14,6 +14,7 @@
 //! inbox) are exempt from the "no env reads in the kernel" rule.
 
 use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
 
 /// Resolved host-path context for one daemon process.
 ///
@@ -33,8 +34,12 @@ pub struct DaemonPaths {
     /// a failed canonicalize keeps the original value.
     pub work_dir: PathBuf,
     /// Extra skill directories supplied via `--skills-dir` (repeatable);
-    /// consumed by the skill-loading node (issue #66 follow-up).
-    pub extra_skill_dirs: Vec<PathBuf>,
+    /// consumed by the skill-loading node (issue #66 follow-up). Dynamically
+    /// replaceable at runtime via `SetSkillDirs` (issue #68) — shared behind
+    /// an `Arc<RwLock<..>>` so every `Clone` of this struct observes the same
+    /// current value; read through [`Self::current_extra_skill_dirs`] and
+    /// written through [`Self::set_extra_skill_dirs`].
+    pub extra_skill_dirs: Arc<RwLock<Vec<PathBuf>>>,
 }
 
 impl DaemonPaths {
@@ -70,13 +75,26 @@ impl DaemonPaths {
             base,
             home,
             work_dir,
-            extra_skill_dirs,
+            extra_skill_dirs: Arc::new(RwLock::new(extra_skill_dirs)),
         }
     }
 
     /// The user-global skills root: `<base>/skills`.
     pub fn skills_root(&self) -> PathBuf {
         self.base.join("skills")
+    }
+
+    /// Replace the extra skill directories at runtime (issue #68: applied by
+    /// the serialized event loop when a `SetSkillDirs` command lands). The
+    /// change is visible through every `Clone` of this struct.
+    pub fn set_extra_skill_dirs(&self, dirs: Vec<PathBuf>) {
+        *self.extra_skill_dirs.write().unwrap() = dirs;
+    }
+
+    /// Snapshot of the current extra skill directories (issue #68: the list
+    /// may be replaced at runtime via [`Self::set_extra_skill_dirs`]).
+    pub fn current_extra_skill_dirs(&self) -> Vec<PathBuf> {
+        self.extra_skill_dirs.read().unwrap().clone()
     }
 }
 
@@ -163,6 +181,54 @@ mod tests {
 
         let extras = vec![PathBuf::from("/a/skills"), PathBuf::from("/b/skills")];
         let paths = DaemonPaths::from_cli(None, Some(PathBuf::from("/h")), extras.clone());
-        assert_eq!(paths.extra_skill_dirs, extras);
+        assert_eq!(paths.current_extra_skill_dirs(), extras);
+    }
+
+    #[test]
+    fn extra_skill_dirs_update_dynamically() {
+        let _serial = ENV_LOCK.lock().unwrap();
+        let _theway = EnvGuard::remove("THEWAY_DIR");
+
+        let paths = DaemonPaths::from_cli(
+            None,
+            Some(PathBuf::from("/h")),
+            vec![PathBuf::from("/a/skills")],
+        );
+        assert_eq!(
+            paths.current_extra_skill_dirs(),
+            vec![PathBuf::from("/a/skills")]
+        );
+
+        // Runtime replacement (issue #68 `SetSkillDirs`): the accessor sees
+        // the new list, not the startup value.
+        paths.set_extra_skill_dirs(vec![PathBuf::from("/x/skills"), PathBuf::from("/y/skills")]);
+        assert_eq!(
+            paths.current_extra_skill_dirs(),
+            vec![PathBuf::from("/x/skills"), PathBuf::from("/y/skills")]
+        );
+
+        // Clearing is a legitimate update too (empty list → no extras).
+        paths.set_extra_skill_dirs(Vec::new());
+        assert!(paths.current_extra_skill_dirs().is_empty());
+    }
+
+    #[test]
+    fn extra_skill_dirs_shared_across_clones() {
+        let _serial = ENV_LOCK.lock().unwrap();
+        let _theway = EnvGuard::remove("THEWAY_DIR");
+
+        let paths = DaemonPaths::from_cli(None, Some(PathBuf::from("/h")), Vec::new());
+        let cloned = paths.clone();
+
+        // The backing list is shared behind an Arc: an update through one
+        // handle is observed through the other (issue #68 — the event loop
+        // and the skill loader may hold separate clones of the same context).
+        paths.set_extra_skill_dirs(vec![PathBuf::from("/shared/skills")]);
+        assert_eq!(
+            cloned.current_extra_skill_dirs(),
+            vec![PathBuf::from("/shared/skills")]
+        );
+        cloned.set_extra_skill_dirs(Vec::new());
+        assert!(paths.current_extra_skill_dirs().is_empty());
     }
 }
