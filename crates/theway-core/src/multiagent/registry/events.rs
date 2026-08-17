@@ -10,7 +10,7 @@ pub const AGENT_JOB_EVENT_BROADCAST_CAPACITY: usize = 256;
 /// High-frequency event plane (graph mode): broadcast by the registry as jobs
 /// start, produce output, update metrics, and complete. Transport-agnostic — the
 /// transport layer converts these into the wire `StreamEvent` (see
-/// `proto/events.proto`).
+/// `crates/theway-transport/proto/events.proto`).
 #[derive(Clone, Debug)]
 pub enum AgentJobEvent {
     Started {

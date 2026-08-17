@@ -6,7 +6,7 @@
 #   scripts/sdk-publish.sh [patch|minor|major] ["#<issue>"]
 #
 # 流程:
-#   1. proto/ 与 sdk/ 必须无未提交改动
+#   1. crates/theway-transport/proto/ 与 sdk/ 必须无未提交改动
 #   2. 重新生成并校验与 HEAD 一致 (仓库无漂移; 漂移说明 proto 改了没 commit)
 #   3. npm version <bump> (不打 tag 不自动 commit, 由本脚本统一 commit)
 #   4. npm publish (registry 取 sdk/package.json 的 publishConfig = 内网 Nexus)
@@ -30,10 +30,10 @@ case "$BUMP" in
     ;;
 esac
 
-# 1. proto/ 与 sdk/ 必须干净
-if [ -n "$(git status --porcelain -- proto/ sdk/)" ]; then
-  echo "error: proto/ 或 sdk/ 有未提交改动, 先 commit/stash" >&2
-  git status --porcelain -- proto/ sdk/ >&2
+# 1. crates/theway-transport/proto/ 与 sdk/ 必须干净
+if [ -n "$(git status --porcelain -- crates/theway-transport/proto/ sdk/)" ]; then
+  echo "error: crates/theway-transport/proto/ 或 sdk/ 有未提交改动, 先 commit/stash" >&2
+  git status --porcelain -- crates/theway-transport/proto/ sdk/ >&2
   exit 1
 fi
 

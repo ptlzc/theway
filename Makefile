@@ -110,11 +110,11 @@ outdated: ## list outdated workspace deps (requires `cargo-outdated`)
 # --- sdk --------------------------------------------------------------------
 
 .PHONY: hooks
-hooks: ## enable the repo git hooks (proto change -> auto sdk regen)
+hooks: ## enable the repo git hooks (transport proto change -> auto sdk regen)
 	git config core.hooksPath .githooks
 
 .PHONY: sdk-sync
-sdk-sync: ## sync proto/ -> sdk/proto + regenerate the TS client (scripts/sdk-sync.sh)
+sdk-sync: ## sync crates/theway-transport/proto/ -> sdk/proto + regenerate the TS client (scripts/sdk-sync.sh)
 	bash scripts/sdk-sync.sh
 
 .PHONY: sdk-publish

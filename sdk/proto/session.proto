@@ -249,6 +249,20 @@ message DeleteSessionResponse {
   repeated string running_run_ids = 1;
 }
 
+// Daemon path context (issue #68): home / base / work_dir are fixed at daemon
+// startup; skills_dirs reflects the current skill search directories and is
+// the only mutable part (see SetSkillDirs).
+message PathContext {
+  string home = 1;
+  string base = 2;
+  string work_dir = 3;
+  repeated string skills_dirs = 4;
+}
+
+message SetSkillDirsRequest {
+  repeated string dirs = 1;
+}
+
 service SessionService {
   // Full structured state (binary protobuf).
   rpc GetState(Empty) returns (SessionState);
@@ -260,4 +274,11 @@ service SessionService {
   rpc SwitchSession(SwitchSessionRequest) returns (CommandResult);
   rpc RenameSession(RenameSessionRequest) returns (CommandResult);
   rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse);
+  // Daemon path context (issue #68): home/base/work_dir plus the current
+  // skill search directories.
+  rpc GetPathContext(Empty) returns (PathContext);
+  // Replace the extra skill directories dynamically; the command is queued
+  // into the event loop, which applies it authoritatively (hot-reload).
+  // `accepted` = the command was queued.
+  rpc SetSkillDirs(SetSkillDirsRequest) returns (CommandResult);
 }

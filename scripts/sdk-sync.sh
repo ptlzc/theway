@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # =============================================================================
-# sdk-sync — 把根 proto/ (唯一事实源) 同步到 sdk/, 并重新生成 TS 客户端。
+# sdk-sync — 把 crates/theway-transport/proto/ (唯一事实源) 同步到 sdk/, 并重新生成 TS 客户端。
 #
-#   1. cp proto/*.proto -> sdk/proto/   (sdk/proto 是镜像拷贝)
+#   1. cp crates/theway-transport/proto/*.proto -> sdk/proto/   (sdk/proto 是镜像拷贝)
 #   2. npm run gen                      (ts-proto -> sdk/src/generated/*.ts)
 #
 # 幂等: proto 未变时重复执行不产生任何 diff (ts-proto 版本由 package-lock 固定)。
@@ -12,8 +12,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-echo "[sdk-sync] sync proto -> sdk/proto"
-cp proto/*.proto sdk/proto/
+echo "[sdk-sync] sync crates/theway-transport/proto -> sdk/proto"
+cp crates/theway-transport/proto/*.proto sdk/proto/
 
 cd "$ROOT/sdk"
 if [ ! -d node_modules ]; then

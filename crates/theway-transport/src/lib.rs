@@ -1,7 +1,7 @@
 //! theway-transport — protocol layer for the theway agent runtime.
 //!
 //! Wire model (`wire`) plus the transport implementations: HTTP/SSE/WS
-//! (`http` / `ws`), gRPC (`grpc`, generated proto in `proto`), and MCP server
+//! (`http` / `ws`), gRPC (`grpc`, generated proto in this crate), and MCP server
 //! (`mcp`, via the rmcp SDK). Independent of the server business logic — the
 //! server programs against this crate's channel surface
 //! ([`TransportEndpoints`]) instead of passing its app internals in.

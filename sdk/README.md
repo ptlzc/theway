@@ -56,7 +56,7 @@ client.close();
 
 ## Regenerating
 
-`proto/` at the repo root is the single source of truth; `proto/*.proto` in this package is a mirror and
+`crates/theway-transport/proto/` at the repo root is the single source of truth; `proto/*.proto` in this package is a mirror and
 `src/generated/` is regenerated from it. Sync and regenerate with:
 
 ```sh
@@ -66,7 +66,7 @@ make sdk-sync              # or: bash scripts/sdk-sync.sh
 ```
 
 The enabled pre-commit hook ([`.githooks/pre-commit`](../.githooks/pre-commit)) runs the sync automatically
-whenever `proto/` changes and stages the regenerated files into the same commit, so the checked-in proto and
+whenever `crates/theway-transport/proto/` changes and stages the regenerated files into the same commit, so the checked-in proto and
 generated client never drift.
 
 Manual generation without the Makefile:

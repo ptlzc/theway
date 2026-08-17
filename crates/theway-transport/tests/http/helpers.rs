@@ -24,6 +24,9 @@ pub(crate) fn test_router(latest: WireStatus) -> Router {
         .0,
         registry: theway_core::multiagent::registry::AgentJobRegistry::new(),
         session_ops: std::sync::Arc::new(crate::testing::FakeSessionOps::new()),
+        path_context: std::sync::Arc::new(std::sync::RwLock::new(
+            crate::wire::WirePathContext::default(),
+        )),
     })
 }
 

@@ -51,6 +51,9 @@ async fn spawn_sessions_server(
         dag_events: broadcast::channel::<DagEvent>(16).0,
         registry: AgentJobRegistry::new(),
         session_ops: ops,
+        path_context: std::sync::Arc::new(std::sync::RwLock::new(
+            crate::wire::WirePathContext::default(),
+        )),
     };
     let router = web_router(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
