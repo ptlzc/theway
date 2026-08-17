@@ -179,6 +179,7 @@ fn test_factory(work_dir: PathBuf) -> (SessionHarnessFactory, TempDir) {
 
     let factory = SessionHarnessFactory {
         cwd: work_dir,
+        storage: crate::runtime_storage::local_runtime_storage(),
         base_dir: state.path().join("base"),
         // Composition-root seam: picks the local executor for `local` builds
         // and the sandbox stub for `sandbox`-only builds, so this suite

@@ -10,6 +10,7 @@ use std::sync::{Arc, OnceLock};
 use crate::SqliteSessionRepo;
 use crate::hook_executors::daemon_executors;
 use crate::hooks;
+use crate::runtime_storage::RuntimeStorage;
 use crate::trigger_engine::notification_hook::DynNotificationHook;
 use crate::{agent_specs, tools, triggers};
 use anyhow::{Context, Result};
@@ -48,6 +49,8 @@ pub struct SessionHarnessFactory {
     /// metadata points at a different directory, so a session always runs
     /// under the daemon that serves its work_dir.
     pub cwd: std::path::PathBuf,
+    /// Runtime state externalization seam (issue #80).
+    pub storage: Arc<dyn RuntimeStorage>,
     /// Theway base dir (issue #66: `DaemonPaths::base`), resolved at the CLI
     /// boundary; wired into the rebuilt session's skill-family tools.
     pub base_dir: std::path::PathBuf,
@@ -104,7 +107,7 @@ impl SessionHarnessFactory {
         // idempotent.
         let restored = self
             .dag_engine
-            .restore(crate::dag_persist::load_session_runs(&self.cwd, &session_id).await);
+            .restore(self.storage.load_dag_runs(&self.cwd, &session_id).await?);
         if !restored.is_empty() {
             tracing::info!(
                 "session {session_id}: restored {} in-flight DAG run(s): {}",

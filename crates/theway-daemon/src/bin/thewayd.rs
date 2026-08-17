@@ -20,6 +20,7 @@ use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::persist::DagPersistSink;
 use theway_core::{AgentHarness, AgentHarnessOptions, PermissionPolicy, ThinkingLevel};
 use theway_daemon::hooks;
+use theway_daemon::runtime_storage::{RuntimeStorage, local_runtime_storage};
 use theway_daemon::startup_config::StartupConfig;
 use theway_daemon::stream_auth::stream_fn_with_auth_store;
 use theway_daemon::system_prompt::compose_system_prompt;
@@ -127,7 +128,11 @@ async fn main() -> Result<()> {
     std::env::set_current_dir(&paths.work_dir)
         .with_context(|| format!("cd into {}", paths.work_dir.display()))?;
     let cwd = std::env::current_dir().context("getting cwd")?;
-    let repo = Arc::new(session::open_repo(&cwd).await);
+    // Issue #80: all persistent runtime state goes through the RuntimeStorage
+    // seam. The default LocalRuntimeStorage keeps current local behavior; a
+    // controller-backed storage can replace it without changing the kernel.
+    let storage: Arc<dyn RuntimeStorage> = local_runtime_storage();
+    let repo = storage.open_session_repo(&cwd).await?;
 
     // Issue #73: config-file-free startup. The daemon no longer reads
     // `config.toml` at startup — every setting lives in the in-memory
@@ -226,7 +231,7 @@ async fn main() -> Result<()> {
         .and_then(|v| v.as_str())
         .unwrap_or("?")
         .to_string();
-    let dynamic_trigger_path = session::trigger_sidecar_path_for_session(&session, &repo).await?;
+    let dynamic_trigger_path = storage.trigger_sidecar_path(&session, &repo).await?;
 
     let _logging = theway_daemon::logging::init(&session_id);
     let (feed_tx, feed_rx) =
@@ -238,7 +243,7 @@ async fn main() -> Result<()> {
         tracing::warn!("dynamic triggers: {err}");
     }
     let cron_registry = triggers::global_cron_registry().clone();
-    let cron_path = session::cron_sidecar_path_for_session(&session, &repo).await?;
+    let cron_path = storage.cron_sidecar_path(&session, &repo).await?;
     if let Err(err) = cron_registry.load_from_path(cron_path) {
         tracing::warn!("cron: {err}");
     }
@@ -269,8 +274,7 @@ async fn main() -> Result<()> {
         skill_harness_cell.clone(),
         executor.clone(),
     )));
-    let restored_dags =
-        dag_engine.restore(theway_daemon::dag_persist::load_session_runs(&cwd, &session_id).await);
+    let restored_dags = dag_engine.restore(storage.load_dag_runs(&cwd, &session_id).await?);
     if !restored_dags.is_empty() {
         tracing::info!(
             "restored {} in-flight DAG run(s): {}",
@@ -278,8 +282,7 @@ async fn main() -> Result<()> {
             restored_dags.join(", ")
         );
     }
-    let _dag_persist =
-        theway_daemon::dag_persist::DagPersistHandle::spawn(dag_engine.clone(), cwd.clone());
+    let _dag_persist = storage.spawn_dag_persist(dag_engine.clone(), cwd.clone());
     let mut tools = theway_daemon::tools::session_tool_set(
         &memory_dir,
         &paths.base,
@@ -519,6 +522,7 @@ async fn main() -> Result<()> {
     let session_factory: session_ops::SessionFactory = {
         let plan = Arc::new(SessionHarnessFactory {
             cwd: cwd.clone(),
+            storage: storage.clone(),
             base_dir: paths.base.clone(),
             executor: executor.clone(),
             model: model.clone(),
