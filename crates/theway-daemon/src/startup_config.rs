@@ -88,9 +88,7 @@ impl StartupConfig {
         // The model default requires the provider/model PAIR — the same rule
         // the legacy `[model]` parse enforced (`parse_model_default` rejects
         // a half-configured default rather than guessing).
-        if let (Some(provider), Some(model)) =
-            (patch.provider.as_deref(), patch.model.as_deref())
-        {
+        if let (Some(provider), Some(model)) = (patch.provider.as_deref(), patch.model.as_deref()) {
             self.model_default = Some(ModelDefault {
                 provider: provider.to_string(),
                 model: model.to_string(),
