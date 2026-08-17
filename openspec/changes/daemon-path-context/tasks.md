@@ -16,36 +16,36 @@ DAG: `issue-66-daemon-path-context`（dag-2）。节点 ID 与编排一致；
 
 ## 2. [depends: 1-paths-context] [2-skills-unify] 统一 skill 根
 
-- [ ] 2.1 `skills.rs`：`skills_dirs(&DaemonPaths)` 按 extras > project > `base/skills`
+- [x] 2.1 `skills.rs`：`skills_dirs(&DaemonPaths)` 按 extras > project > `base/skills`
   > home 根排序；删 `user_config_root()` env 读取；`load_all(&DaemonPaths)`（含 sandbox stub）。
-- [ ] 2.2 `bin/thewayd.rs` 启动与 reload 闭包改用捕获的 `paths`。
-- [ ] 2.3 `SkillSource` / `builtin_skills.rs` 注释与实现口径对齐（无枚举变更）。
-- [ ] 2.4 验收：`cargo test -p theway-daemon`（local）+ sandbox-only 编译；新增用例
+- [x] 2.2 `bin/thewayd.rs` 启动与 reload 闭包改用捕获的 `paths`。
+- [x] 2.3 `SkillSource` / `builtin_skills.rs` 注释与实现口径对齐（无枚举变更）。
+- [x] 2.4 验收：`cargo test -p theway-daemon`（local）+ sandbox-only 编译；新增用例
   （base/skills 可发现 / extra 优先 / base 胜 home）。
 
 ## 3. [depends: 1-paths-context] [3-session-workdir] session work_dir 绑定
 
-- [ ] 3.1 `SessionHarnessFactory::build`：目标 session work_dir 与 `self.cwd`
+- [x] 3.1 `SessionHarnessFactory::build`：目标 session work_dir 与 `self.cwd`
   canonicalize 比较；不一致报含路径错误；无 cwd 元数据放行 + debug 日志。
-- [ ] 3.2 `Session.cwd` 语义注释（work_dir，创建时继承 daemon work_dir）；
+- [x] 3.2 `Session.cwd` 语义注释（work_dir，创建时继承 daemon work_dir）；
   `session_ops.rs` 注释点明继承。
-- [ ] 3.3 验收：session_factory 镜像测试 —— 跨 work_dir 拒绝、同 work_dir 成功、旧数据放行。
+- [x] 3.3 验收：session_factory 镜像测试 —— 跨 work_dir 拒绝、同 work_dir 成功、旧数据放行。
 
 ## 4. [depends: 2-skills-unify, 3-session-workdir] [4-tui-plumb] TUI 透传
 
-- [ ] 4.1 TUI Cli 增 `--home`（Option）/ `--skills-dir`（repeatable）；
+- [x] 4.1 TUI Cli 增 `--home`（Option）/ `--skills-dir`（repeatable）；
   帮助文本说明仅拉起 daemon 时生效。
-- [ ] 4.2 `daemon_launch_args` 转发两个旗标 + 序列断言；离线 session 路径不受影响。
-- [ ] 4.3 验收：`cargo check/test -p theway-tui --all-targets`。
+- [x] 4.2 `daemon_launch_args` 转发两个旗标 + 序列断言；离线 session 路径不受影响。
+- [x] 4.3 验收：`cargo check/test -p theway-tui --all-targets`。
 
 ## 5. [depends: 4-tui-plumb] [5-docs] 文档同步
 
-- [ ] 5.1 `docs/architecture.md`：路径上下文小节（边界解析、根优先级表、work_dir 校验、
+- [x] 5.1 `docs/architecture.md`：路径上下文小节（边界解析、根优先级表、work_dir 校验、
   端口发现 env 例外）。
-- [ ] 5.2 `README.md` 简述并引用 architecture.md。
+- [x] 5.2 `README.md` 简述并引用 architecture.md。
 
 ## 6. [depends: 5-docs] [6-verify] 终态验收
 
-- [ ] 6.1 `cargo fmt/check/clippy/test --workspace` + feature-gate 矩阵。
-- [ ] 6.2 grep：daemon/src 内 env 读取仅 `paths.rs`。
-- [ ] 6.3 issue #66 验收项逐条复核（基于最新 HEAD，不信节点自报）。
+- [x] 6.1 `cargo fmt/check/clippy/test --workspace` + feature-gate 矩阵。
+- [x] 6.2 grep：daemon/src 内 env 读取仅 `paths.rs`。
+- [x] 6.3 issue #66 验收项逐条复核（基于最新 HEAD，不信节点自报）。
