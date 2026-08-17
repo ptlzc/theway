@@ -255,7 +255,7 @@ pub(crate) mod test_daemon {
     use theway_transport::client::GrpcClient;
     use theway_transport::grpc::{GrpcState, serve_grpc};
     use theway_transport::testing::FakeSessionOps;
-    use theway_transport::wire::{WireCommand, WireStatus};
+    use theway_transport::wire::{WireCommand, WirePathContext, WireStatus};
     use tokio::sync::{broadcast, mpsc};
 
     pub(crate) fn test_status() -> WireStatus {
@@ -332,6 +332,7 @@ pub(crate) mod test_daemon {
             session_ops: session_ops.clone(),
             session_id: Arc::new(std::sync::RwLock::new(current)),
             agent_fwd,
+            path_context: Arc::new(std::sync::RwLock::new(WirePathContext::default())),
         };
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap().to_string();

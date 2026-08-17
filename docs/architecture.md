@@ -103,15 +103,18 @@ the environment (`HOME` / `THEWAY_DIR`) is consulted only inside `from_cli`.
 | `base` | `$THEWAY_DIR` when set, else `<home>/.theway` — the theway base dir (`config.toml`, `skill-overrides.json`, `skills/`, `extensions/`, …). |
 | `home` | the `--home` flag when given, else `$HOME` — the user-level `.agents` / `.claude` config + skill roots. |
 | `work_dir` | the `--cwd` flag when given, else the process cwd — session repo + tool execution; canonicalized best-effort, and a failed canonicalize keeps the original value so the composition root can still fail with a "cd into …" error. |
-| `extra_skill_dirs` | repeatable `--skills-dir` flags, kept in CLI order. |
+| `extra_skill_dirs` | repeatable `--skills-dir` flags, kept in CLI order. The ONLY runtime-mutable part of the context: replaceable through the gRPC `SetSkillDirs` RPC (see [gRPC path context](#grpc-path-context)); shared behind an `Arc<RwLock<..>>` so every `DaemonPaths` clone observes the current value. |
 
-The path context is fixed at daemon startup: the TUI forwards `--home` (when
-set) and each `--skills-dir` verbatim in the launch arguments when it spawns
-`thewayd`; attaching to an already-running daemon never changes that daemon's
-existing configuration. Consumers wired from the context include the skill
-scan and the `/skills reload` closure, the skill tool family, the config
-readers and skill overrides, TS extension discovery, the file-command user
-root, and `SessionHarnessFactory`.
+`home` / `base` / `work_dir` are fixed at daemon startup: the TUI forwards
+`--home` (when set) and each `--skills-dir` verbatim in the launch arguments
+when it spawns `thewayd`; attaching to an already-running daemon never
+changes that daemon's existing configuration. Consumers wired from the
+context include the skill scan and the `/skills reload` closure, the skill
+tool family, the config readers and skill overrides, TS extension discovery,
+the file-command user root, and `SessionHarnessFactory`. The skill scan reads
+the extras through `DaemonPaths::current_extra_skill_dirs()`, snapshotting
+once per scan so a concurrent `SetSkillDirs` lands on the NEXT (hot-)reload,
+never mid-scan.
 
 **Skill scan roots.** `skills::skills_dirs(&DaemonPaths)` orders the roots
 highest priority first; `skills::load_all` walks them in that order and the
@@ -170,6 +173,35 @@ templates, `mcp.toml`, `hooks.toml`, `models.json`, LSP config, log /
 bug-report / export destinations, and the `/skills install` / `/skills
 remove` command paths, which construct the tools through their default
 constructors) take their base from the same shared contract derivation.
+
+### gRPC path context
+
+The path context is served on the gRPC `SessionService` as two RPCs
+(issue #68):
+
+| RPC | Semantics |
+|-----|-----------|
+| `GetPathContext` | Read-only snapshot: the startup-fixed `home` / `base` / `work_dir` plus the CURRENT skill search directories (`skills_dirs`). |
+| `SetSkillDirs` | Replace the extra skill directories dynamically; returns once the command is queued (`accepted`). |
+
+Both sides observe ONE shared `Arc<RwLock<WirePathContext>>`: `TurnHost`
+seeds it from `DaemonPaths` at startup (startup extras = CLI `--skills-dir`)
+and clones the same handle into `TransportEndpoints` for the servers.
+`SetSkillDirs` applies in two steps:
+
+1. **Optimistic** (gRPC handler): write the new dirs into the shared state —
+   `GetPathContext` readers see them immediately — and enqueue
+   `WireCommand::SetSkillDirs`.
+2. **Authoritative** (serialized event loop): `TurnHost::handle_set_skill_dirs`
+   replaces the `DaemonPaths` extras, refreshes the shared path context,
+   aborts any in-flight turn (its context predates the new catalog), and
+   hot-reloads the skill catalog through the harness's reload closure — the
+   same loader the startup scan and `/skills reload` use, so the fresh scan
+   picks the new extras up with the usual priority order.
+
+`home` / `base` / `work_dir` are never mutated at runtime; an empty dir list
+is a valid update (clears the extras). The HTTP/WS and MCP surfaces keep
+their existing shape — the path context is gRPC-only.
 
 ### Executors and the tool policy
 
@@ -240,7 +272,9 @@ Two zones in one crate:
 
 - **Protocol zone**: the wire model (`wire`) and the transports around it —
   gRPC (`grpc`, four domain services `CommandService` / `SessionService` /
-  `GraphEngineService` / `EventService` plus `grpc.health.v1.Health`),
+  `GraphEngineService` / `EventService` plus `grpc.health.v1.Health`;
+  `SessionService` also serves the daemon path context — `GetPathContext` /
+  `SetSkillDirs`, see [gRPC path context](#grpc-path-context)),
   HTTP/SSE/WS (`http` / `ws`), MCP server (`mcp`), the daemon-discovery
   client (`client`: per-cwd `<base>/daemon-port-<cwd-hash>` file, default
   port `44777`), and the inbox reader (`inbox`).

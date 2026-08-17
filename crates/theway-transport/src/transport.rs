@@ -24,7 +24,7 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use tokio::sync::{broadcast, mpsc};
 
-use crate::wire::{SessionSummary, WireCommand, WireStatus};
+use crate::wire::{SessionSummary, WireCommand, WirePathContext, WireStatus};
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::types::DagEvent;
 use theway_core::multiagent::registry::{AgentJobEvent, AgentJobRegistry};
@@ -145,6 +145,12 @@ pub struct TransportEndpoints {
     /// gRPC/HTTP session surfaces. Sync query/mutation only — *switching* the current
     /// session goes through `WireCommand::SwitchSession` on the serialized event loop.
     pub session_ops: Arc<dyn crate::transport::SessionOps>,
+    /// Shared daemon path context (issue #68): served by `GetPathContext`,
+    /// optimistically updated by `SetSkillDirs` before the event loop applies
+    /// the change authoritatively. Built once in
+    /// [`transport_endpoints`](crate::host::TransportHost::transport_endpoints)
+    /// and shared with the kernel-side copy.
+    pub path_context: std::sync::Arc<std::sync::RwLock<WirePathContext>>,
     /// Owning session id (checkpoint scope / mount key).
     pub session_id: String,
     /// Abort handle for the registry→events forwarder task spawned in

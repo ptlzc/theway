@@ -20,7 +20,7 @@ use tonic::{Request, Response, Status};
 use crate::host::TransportHost;
 use crate::transport::SessionOps;
 use crate::transport::TransportMode;
-use crate::wire::{WireCommand, WirePromptImage, WireStatus};
+use crate::wire::{WireCommand, WirePathContext, WirePromptImage, WireStatus};
 
 use crate::proto::health::health_check_response::ServingStatus;
 use crate::proto::health::health_server::{Health, HealthServer};
@@ -80,6 +80,10 @@ pub struct GrpcState {
     /// the DeleteSession fallback) rebind it; the event loop re-syncs it via
     /// snapshots.
     pub session_id: Arc<std::sync::RwLock<String>>,
+    /// Shared daemon path context (issue #68): served by `GetPathContext`;
+    /// `SetSkillDirs` optimistically updates `skills_dirs` before the event
+    /// loop applies the change authoritatively.
+    pub path_context: Arc<std::sync::RwLock<WirePathContext>>,
 }
 
 #[tonic::async_trait]
@@ -306,6 +310,33 @@ impl SessionService for GrpcState {
         Ok(Response::new(DeleteSessionResponse {
             running_run_ids: Vec::new(),
         }))
+    }
+
+    // ── path context (issue #68) ───────────────────────────────────────
+
+    async fn get_path_context(
+        &self,
+        _request: Request<Empty>,
+    ) -> Result<Response<theway_grpc::PathContext>, Status> {
+        let ctx = self.path_context.read().unwrap();
+        Ok(Response::new(crate::proto::wire_path_context_to_proto(
+            &ctx,
+        )))
+    }
+
+    async fn set_skill_dirs(
+        &self,
+        request: Request<theway_grpc::SetSkillDirsRequest>,
+    ) -> Result<Response<CommandResult>, Status> {
+        let dirs = request.into_inner().dirs;
+        // Optimistic update: readers (GetPathContext) see the new dirs right
+        // away; the event loop applies the same command authoritatively
+        // (skills hot-reload) and re-publishes snapshots.
+        self.path_context.write().unwrap().skills_dirs = dirs.clone();
+        self.commands
+            .send(WireCommand::SetSkillDirs { dirs })
+            .map_err(|_| Status::unavailable("event loop command channel closed"))?;
+        Ok(Response::new(CommandResult { accepted: true }))
     }
 }
 
@@ -629,6 +660,7 @@ pub async fn run_grpc(mut app: Box<dyn TransportHost>, options: GrpcOptions) -> 
         session_ops: endpoints.session_ops.clone(),
         agent_fwd,
         session_id: Arc::new(std::sync::RwLock::new(endpoints.session_id.clone())),
+        path_context: endpoints.path_context.clone(),
     };
     let server_task = serve_grpc(listener, grpc_state);
 

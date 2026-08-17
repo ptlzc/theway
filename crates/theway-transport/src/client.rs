@@ -28,9 +28,9 @@ use crate::proto::theway_grpc::{
     self as proto, ApproveRequest, CreateSessionRequest, DeleteSessionRequest, Empty,
     GetNodeOutputRequest, GraphCancelRequest, GraphListRequest, GraphRetryRequest,
     GraphSkipRequest, RenameSessionRequest, SendMessageRequest, SessionState, SetModelRequest,
-    StreamFrame, SwitchSessionRequest,
+    SetSkillDirsRequest, StreamFrame, SwitchSessionRequest,
 };
-use crate::wire::{SessionSummary, WirePromptImage};
+use crate::wire::{SessionSummary, WirePathContext, WirePromptImage};
 
 /// Default daemon port when no port file exists (`thewayd` binds this when
 /// started without `--port`).
@@ -345,6 +345,34 @@ impl GrpcClient {
             .await
             .map_err(|e| anyhow::anyhow!("delete_session: {e}"))?;
         Ok(response.into_inner().running_run_ids)
+    }
+
+    // ── path context (issue #68) ───────────────────────────────────────
+
+    /// Daemon path context: home / base / work_dir plus the current skill
+    /// search directories.
+    pub async fn get_path_context(&mut self) -> Result<WirePathContext> {
+        let response = self
+            .session
+            .get_path_context(Empty {})
+            .await
+            .map_err(|e| anyhow::anyhow!("get_path_context: {e}"))?
+            .into_inner();
+        Ok(crate::proto::wire_path_context_from_proto(&response))
+    }
+
+    /// Replace the extra skill directories dynamically. `Ok(true)` = the
+    /// daemon queued the command; the event loop applies it authoritatively
+    /// (hot-reload).
+    pub async fn set_skill_dirs(&mut self, dirs: &[String]) -> Result<bool> {
+        let accepted = self
+            .session
+            .set_skill_dirs(SetSkillDirsRequest {
+                dirs: dirs.to_vec(),
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("set_skill_dirs: {e}"))?;
+        Ok(accepted.into_inner().accepted)
     }
 
     // ── graph control (DAG + goal runs) ────────────────────────────────

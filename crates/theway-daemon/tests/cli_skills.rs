@@ -52,7 +52,9 @@ mod skills_mirror {
         // (the install target), then the home roots; the first copy of each
         // name wins (issue #37).
         let mut roots: Vec<(PathBuf, SkillSource)> = Vec::new();
-        for extra in &paths.extra_skill_dirs {
+        // Snapshot the dynamically updatable extras once (issue #68).
+        let extras = paths.current_extra_skill_dirs();
+        for extra in &extras {
             roots.push((extra.clone(), SkillSource::User));
         }
         roots.push((
@@ -101,7 +103,7 @@ fn daemon_paths(home: &Path, base: &Path, work_dir: &Path, extras: Vec<PathBuf>)
         base: base.to_path_buf(),
         home: home.to_path_buf(),
         work_dir: work_dir.to_path_buf(),
-        extra_skill_dirs: extras,
+        extra_skill_dirs: std::sync::Arc::new(std::sync::RwLock::new(extras)),
     }
 }
 

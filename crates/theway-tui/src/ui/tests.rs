@@ -20,7 +20,9 @@ use theway_transport::feed::WireFeedBlock;
 use theway_transport::grpc::{GrpcState, serve_grpc};
 use theway_transport::history::HistoryStore;
 use theway_transport::testing::FakeSessionOps;
-use theway_transport::wire::{WireCommand, WireContextUsage, WireSkillSnapshot, WireStatus};
+use theway_transport::wire::{
+    WireCommand, WireContextUsage, WirePathContext, WireSkillSnapshot, WireStatus,
+};
 use tokio::sync::{broadcast, mpsc};
 
 fn fixture_status(feed_blocks: Vec<WireFeedBlock>) -> WireStatus {
@@ -111,6 +113,7 @@ async fn test_app_with_sessions(
         session_ops: session_ops.clone(),
         session_id: Arc::new(std::sync::RwLock::new(current)),
         agent_fwd,
+        path_context: Arc::new(std::sync::RwLock::new(WirePathContext::default())),
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap().to_string();
