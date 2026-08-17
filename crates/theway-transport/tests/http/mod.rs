@@ -1,4 +1,4 @@
-//! HTTP transport tests (docs/RUST_TEST_FILES.md): the router e2e in `endpoints`, unit
+//! HTTP transport tests (docs/rust-test-files.md): the router e2e in `endpoints`, unit
 //! helpers in `helpers`.
 
 mod endpoints;

@@ -1,4 +1,4 @@
-//! Tests for `node_launcher` — split out of src (see docs/RUST_TEST_FILES.md).
+//! Tests for `node_launcher` — split out of src (see docs/rust-test-files.md).
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};

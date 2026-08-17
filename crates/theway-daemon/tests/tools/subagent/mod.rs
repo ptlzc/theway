@@ -1,4 +1,4 @@
-//! Tests for `subagent` — split out of src (see docs/RUST_TEST_FILES.md).
+//! Tests for `subagent` — split out of src (see docs/rust-test-files.md).
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};

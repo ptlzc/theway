@@ -1,4 +1,4 @@
-# RUST_TEST_FILES.md — 测试文件管理规范
+# rust-test-files.md — 测试文件管理规范
 
 仓库测试文件布局与命名规范。参考 .NET 解决方案惯例 (src/test 分离、1:1 镜像、
 命名三段式、AAA 模式) 的 Rust 适配版。**本规范是事实源** — 新测试必须遵循,
@@ -123,8 +123,8 @@ fn resolve_spec_rejects_unknown_agent() {
 
 ## 6. 性能测试 (bench)
 
-> bench 在整个测试体系中的定位与完整细则见 [TESTING.md §L4](TESTING.md)。
-> 本章仅覆盖 bench 独有的**文件布局与命令规范**，其余 (分层模型/门禁矩阵/基线管理/防回归判据) 以上游 TESTING.md 为准。
+> bench 在整个测试体系中的定位与完整细则见 [testing.md §L4](testing.md)。
+> 本章仅覆盖 bench 独有的**文件布局与命令规范**，其余 (分层模型/门禁矩阵/基线管理/防回归判据) 以上游 testing.md 为准。
 
 ### 位置
 
@@ -185,4 +185,4 @@ cargo bench -p theway-core --bench dispatch -- --test
 | PR | `cargo bench -p theway-core --bench dispatch -- --test` | 仅编译验证，确保 bench 代码不腐烂 |
 | 手动 / 发布前 | `cargo bench -p theway-core --bench dispatch` | 完整跑，对比基线 |
 
-> bench 编译验证已纳入 PR 门禁矩阵，见 [TESTING.md 门禁矩阵](TESTING.md)。
+> bench 编译验证已纳入 PR 门禁矩阵，见 [testing.md 门禁矩阵](testing.md)。

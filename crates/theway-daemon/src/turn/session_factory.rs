@@ -320,5 +320,5 @@ fn register_notification_hooks(
 
 #[cfg(test)]
 // Test files live in `tests/turn/session_factory/` (mirror of src), pulled in by
-// path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
+// path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
 tests_bridge_macro::tests_bridge!("turn/session_factory");

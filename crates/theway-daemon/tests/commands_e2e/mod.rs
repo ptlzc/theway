@@ -1,5 +1,5 @@
 //! Slash-command e2e tests, split by domain (file-size governance: >800 lines →
-//! directory split, see docs/RUST_TEST_FILES.md).
+//! directory split, see docs/rust-test-files.md).
 //!
 //! The `#[path]` include block that pulls in the `src/` modules under test lives in the
 //! test-crate root (`commands_e2e_main.rs`), **not** here: the included modules reference

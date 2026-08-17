@@ -1,4 +1,4 @@
-//! Tests for `local_models` — split out of src (see docs/RUST_TEST_FILES.md).
+//! Tests for `local_models` — split out of src (see docs/rust-test-files.md).
 
 use super::*;
 use crate::test_env::EnvGuard;

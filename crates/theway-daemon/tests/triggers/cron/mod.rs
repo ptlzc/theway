@@ -1,4 +1,4 @@
-//! Tests for `cron` — split out of src (see docs/RUST_TEST_FILES.md).
+//! Tests for `cron` — split out of src (see docs/rust-test-files.md).
 
 use super::*;
 use chrono::TimeZone;

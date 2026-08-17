@@ -1,4 +1,4 @@
-//! Tests for `mod` — split out of src (see docs/RUST_TEST_FILES.md).
+//! Tests for `mod` — split out of src (see docs/rust-test-files.md).
 
 use super::*;
 use tempfile::tempdir;

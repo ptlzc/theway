@@ -247,5 +247,5 @@ pub(crate) fn dag_event_json(event: &DagEvent) -> Value {
 
 #[cfg(test)]
 // Test files live in `tests/transport/ws/` (mirror of src), pulled in by
-// path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
+// path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
 tests_bridge_macro::tests_bridge!("ws");

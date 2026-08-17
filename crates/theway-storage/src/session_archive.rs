@@ -680,5 +680,5 @@ fn sha256_hex(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 // Test files live in `tests/session_archive/` (mirror of src), pulled in by
-// path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
+// path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
 tests_bridge_macro::tests_bridge!("session_archive");

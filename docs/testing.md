@@ -1,7 +1,7 @@
-# TESTING.md — 测试体系总纲
+# testing.md — 测试体系总纲
 
 仓库完整测试体系分层模型、门禁矩阵与 bench 规范。**本文件是测试体系的入口总纲**，
-与 [RUST_TEST_FILES.md](RUST_TEST_FILES.md)（文件布局与命名细则）互补，双向引用。
+与 [rust-test-files.md](rust-test-files.md)（文件布局与命名细则）互补，双向引用。
 
 ## 分层模型（5 层金字塔）
 
@@ -43,11 +43,11 @@
 | 维度 | 内容 |
 |------|------|
 | **目标** | 验证单个函数/方法的逻辑正确性，可访问被测模块私有项 |
-| **位置** | (a) `src/` 内联 `#[cfg(test)] mod tests { }` — 轻量断言，贴近被测代码；(b) `tests/<镜像路径>/` 多文件模块 — 通过 `#[path]` 桥接以单元语义编译（可调用 `super::` 私有项）。详见 [RUST_TEST_FILES.md §1-2](RUST_TEST_FILES.md) |
+| **位置** | (a) `src/` 内联 `#[cfg(test)] mod tests { }` — 轻量断言，贴近被测代码；(b) `tests/<镜像路径>/` 多文件模块 — 通过 `#[path]` 桥接以单元语义编译（可调用 `super::` 私有项）。详见 [rust-test-files.md §1-2](rust-test-files.md) |
 | **命令** | `cargo test --workspace --lib`（仅 lib target）；`cargo test --workspace` 也包含 |
 | **速度量级** | 毫秒~秒（无 I/O、无网络） |
 | **CI 门禁** | **PR 必过**。所有单测必须 GREEN |
-| **失败责任** | 提交者修复。新功能必须附带对应单测；修改行为需同步更新用例。旧测试按 [RUST_TEST_FILES.md](RUST_TEST_FILES.md) 规范逐步对齐 |
+| **失败责任** | 提交者修复。新功能必须附带对应单测；修改行为需同步更新用例。旧测试按 [rust-test-files.md](rust-test-files.md) 规范逐步对齐 |
 
 ---
 
@@ -179,12 +179,12 @@ ls target/criterion/
 
 ---
 
-## 与 RUST_TEST_FILES.md 的关系
+## 与 rust-test-files.md 的关系
 
-| 维度 | TESTING.md（本文件） | [RUST_TEST_FILES.md](RUST_TEST_FILES.md) |
+| 维度 | testing.md（本文件） | [rust-test-files.md](rust-test-files.md) |
 |------|----------------------|------------------------------------------|
 | 定位 | **体系总纲** — 分层模型、门禁矩阵、bench 规范 | **文件布局与命名细则** — 目录分离、镜像、命名三段式、AAA |
 | bench | L4 完整细则（目标/命名/基线/CI） | §6 位置/命名/harness 配置/命令速查（指向本文件 L4） |
-| 引用 | 多处引用 RUST_TEST_FILES.md 具体规范 | §6 引用本文件 L4 细则 |
+| 引用 | 多处引用 rust-test-files.md 具体规范 | §6 引用本文件 L4 细则 |
 
-**阅读路径**：新贡献者先读本文件理解测试分层与门禁 → 写测试时查 [RUST_TEST_FILES.md](RUST_TEST_FILES.md) 按文件布局与命名规范落代码。
+**阅读路径**：新贡献者先读本文件理解测试分层与门禁 → 写测试时查 [rust-test-files.md](rust-test-files.md) 按文件布局与命名规范落代码。

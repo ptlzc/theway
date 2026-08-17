@@ -1,4 +1,4 @@
-//! Tests for `proto` — split out of src (see docs/RUST_TEST_FILES.md).
+//! Tests for `proto` — split out of src (see docs/rust-test-files.md).
 
 use super::*;
 use crate::wire::{ModelEntry, ProviderGroup, WireContextUsage};

@@ -1,4 +1,4 @@
-//! Triage inbox (issue #23 — docs/issues/23-loops-inbox.md).
+//! Triage inbox (issue #23).
 //!
 //! Where loop findings land instead of interrupting the main chat or sinking into the
 //! audit log. Global JSONL at `~/.theway/inbox.jsonl` (override root for tests): loops run

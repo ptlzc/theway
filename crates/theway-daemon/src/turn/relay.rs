@@ -3,7 +3,7 @@
 //! Maintains one outbound WebSocket to the relay worker (default
 //! `pie.0xfefe.me`), pushing [`theway_transport::wire::WireStatus`] frames and receiving remote
 //! prompt frames. The view token in the public URL is a capability: watch + prompt +
-//! abort, never control-plane approval (see docs/issues/22-web-relay.md). The agent key
+//! abort, never control-plane approval. The agent key
 //! authenticates this process as the snapshot source and never appears in the URL.
 //!
 //! Connection lifecycle: `start()` spawns a task that connects, sends a `hello` frame,
@@ -339,5 +339,5 @@ fn snapshot_frame(snapshot: &WireStatus) -> Option<String> {
 
 #[cfg(test)]
 // Test files live in `tests/ui/relay/` (mirror of src), pulled in by
-// path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
+// path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
 tests_bridge_macro::tests_bridge!("ui/relay");

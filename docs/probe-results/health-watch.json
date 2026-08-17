@@ -1,7 +1,0 @@
-{
-  "name": "health-watch",
-  "passed": true,
-  "evidence": "Watch stream emitted 2 SERVING frames (continuous stream)",
-  "gap": null,
-  "detail": null
-}

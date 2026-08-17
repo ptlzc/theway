@@ -1,1 +1,0 @@
-{"name":"shutdown-SIGINT","passed":true,"evidence":"clean exit code 0 after SIGINT"}

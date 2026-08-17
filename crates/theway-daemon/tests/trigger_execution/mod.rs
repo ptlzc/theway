@@ -4,7 +4,7 @@
 //! the public `TriggerExecutor` API (host-side counterpart of the old
 //! `AgentHarness::handle_trigger`).
 //!
-//! Split into domain submodules (see docs/RUST_TEST_FILES.md): `helpers` holds the shared
+//! Split into domain submodules (see docs/rust-test-files.md): `helpers` holds the shared
 //! faux-model fixtures; `handle_trigger`, `permission`, `sub_agent`, `delivery`, and
 //! `promotion` hold the per-stage test suites.
 

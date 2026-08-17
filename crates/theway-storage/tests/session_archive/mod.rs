@@ -1,4 +1,4 @@
-//! Tests for `session_archive` — split out of src (see docs/RUST_TEST_FILES.md).
+//! Tests for `session_archive` — split out of src (see docs/rust-test-files.md).
 
 use super::*;
 use chrono::Utc;

@@ -4,7 +4,7 @@
 //! `--resume` later restores it.
 //!
 //! Split into domain modules under `commands_e2e/` (file-size governance: >800 lines →
-//! directory split, see docs/RUST_TEST_FILES.md). The `src/` path-include block must stay
+//! directory split, see docs/rust-test-files.md). The `src/` path-include block must stay
 //! here at the test-crate root: the included modules reference each other through
 //! `crate::...`, and the `commands` macros expand to `$crate::commands::...`.
 

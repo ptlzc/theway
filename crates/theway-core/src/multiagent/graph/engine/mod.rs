@@ -632,5 +632,5 @@ impl DagEngine {
 #[cfg(test)]
 // Test files live in `tests/multiagent/graph/engine/` (mirror of
 // `src/multiagent/graph/`), pulled in by path so they keep unit-test
-// semantics (private access). See docs/RUST_TEST_FILES.md.
+// semantics (private access). See docs/rust-test-files.md.
 tests_bridge_macro::tests_bridge!("multiagent/graph/engine");

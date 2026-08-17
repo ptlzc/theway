@@ -1,4 +1,4 @@
-//! Tests for `turn/session_factory` — split out of src (see docs/RUST_TEST_FILES.md).
+//! Tests for `turn/session_factory` — split out of src (see docs/rust-test-files.md).
 //!
 //! Pins the one-shot notification-hook assembly contract of
 //! [`super::register_notification_hooks`]: every hook (MCP push sources, cron

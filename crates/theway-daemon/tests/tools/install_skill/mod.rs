@@ -1,4 +1,4 @@
-//! Tests for `install_skill` — split out of src (see docs/RUST_TEST_FILES.md).
+//! Tests for `install_skill` — split out of src (see docs/rust-test-files.md).
 
 use super::*;
 use once_cell::sync::OnceCell as SyncOnceCell;

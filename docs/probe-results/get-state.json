@@ -1,7 +1,0 @@
-{
-  "name": "get-state",
-  "passed": true,
-  "evidence": "GetState returned SessionState: model=anthropic:claude-haiku-4-5, cwd=/root/workspace/theway, busy=false, blocks=3, sid=019ff3b3-5d1f-7f",
-  "gap": null,
-  "detail": null
-}

@@ -45,7 +45,7 @@ The [`Makefile`](Makefile) mirrors `.github/workflows/ci.yml`; prefer it.
 
 ## Testing
 
-Test layout, naming, and structure follow [`docs/RUST_TEST_FILES.md`](docs/RUST_TEST_FILES.md) — the single source of truth. Multi-file module suites live in `crates/<name>/tests/<mirrored-src-path>/` and are bridged from the src module by one `#[path]` line (unit-test semantics preserved); inline `mod tests` is only for lightweight unit assertions.
+Test layout, naming, and structure follow [`docs/rust-test-files.md`](docs/rust-test-files.md) — the single source of truth. Multi-file module suites live in `crates/<name>/tests/<mirrored-src-path>/` and are bridged from the src module by one `#[path]` line (unit-test semantics preserved); inline `mod tests` is only for lightweight unit assertions.
 
 Tests never hit real provider APIs. CI clears provider API-key environment variables; a test that requires a live call must be explicitly gated.
 

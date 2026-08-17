@@ -1,4 +1,4 @@
-//! Tests for `bedrock_anthropic` — split out of src (see docs/RUST_TEST_FILES.md).
+//! Tests for `bedrock_anthropic` — split out of src (see docs/rust-test-files.md).
 
 use super::*;
 use std::collections::HashMap;

@@ -164,5 +164,5 @@ pub enum HookState {
 
 #[cfg(test)]
 // Test files live in `tests/trigger_engine/notification_hook/` (mirror of src), pulled in by
-// path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
+// path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
 tests_bridge_macro::tests_bridge!("trigger_engine/notification_hook");

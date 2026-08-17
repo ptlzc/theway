@@ -1,4 +1,4 @@
-//! Tests for `commands` — split out of src (see docs/RUST_TEST_FILES.md).
+//! Tests for `commands` — split out of src (see docs/rust-test-files.md).
 
 use super::*;
 use crate::test_env::{EnvGuard, ENV_LOCK};

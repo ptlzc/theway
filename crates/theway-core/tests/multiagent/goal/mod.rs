@@ -1,4 +1,4 @@
-//! Tests for `goal` — split out of goal.rs (see docs/RUST_TEST_FILES.md).
+//! Tests for `goal` — split out of goal.rs (see docs/rust-test-files.md).
 
 use super::*;
 

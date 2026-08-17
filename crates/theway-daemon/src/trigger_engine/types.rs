@@ -162,7 +162,7 @@ pub enum ReplacementPolicy {
 }
 
 /// Audit/authorization summary enum shared with provider/auth credential resolution. v1
-/// values match `docs/issues/29-rfc4...` table. The runtime treats this as opaque and
+/// values are part of the credential-scope contract. The runtime treats this as opaque and
 /// passes it through to the evaluator and the session audit record.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -293,5 +293,5 @@ impl TriggerRecord {
 
 #[cfg(test)]
 // Test files live in `tests/trigger_engine/types/` (mirror of src), pulled in by
-// path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
+// path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
 tests_bridge_macro::tests_bridge!("trigger_engine/types");

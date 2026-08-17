@@ -141,8 +141,7 @@ Loop state is session-scoped like the job that owns it, and is human-readable on
 ### What's next (not yet built)
 
 - **Maker/checker verification**: an optional second sub-agent adversarially reviews
-  findings before they enter the inbox (phase 3 of the design,
-  [docs/issues/23-loops-inbox.md](issues/23-loops-inbox.md)).
+  findings before they enter the inbox (phase 3 of the design).
 - Bundling loop state into `/session export` archives.
 - A web inbox panel with claim/dismiss buttons (today the web sidebar shows the count;
   triage happens via `/inbox`).

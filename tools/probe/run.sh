@@ -17,12 +17,15 @@
 #   <output-dir>/probe-output.log  — Raw server + probe stdout/stderr.
 #   <output-dir>/probe-results/*.json — Per-test structured results.
 #   Exit code 0 = all tests passed.
+#
+# Output defaults to target/probe (not docs/) so test artifacts stay out of
+# repository documentation.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-OUTPUT_DIR="${OUTPUT_DIR:-${WORKSPACE}/docs}"
+OUTPUT_DIR="${OUTPUT_DIR:-${WORKSPACE}/target/probe}"
 RESULTS_DIR="${OUTPUT_DIR}/probe-results"
 LOG_FILE="${OUTPUT_DIR}/probe-output.log"
 REPORT_FILE="${OUTPUT_DIR}/probe-report.md"

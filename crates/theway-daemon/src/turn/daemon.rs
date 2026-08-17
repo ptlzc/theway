@@ -1267,5 +1267,5 @@ fn load_web_prompt_images(images: &[WirePromptImage]) -> Result<Vec<ImageContent
 
 #[cfg(test)]
 // Test files live in `tests/turn/daemon/` (mirror of src), pulled in by
-// path so they keep unit-test semantics (private access). See docs/RUST_TEST_FILES.md.
+// path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
 tests_bridge_macro::tests_bridge!("turn/daemon");

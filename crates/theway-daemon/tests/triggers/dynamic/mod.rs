@@ -1,4 +1,4 @@
-//! Tests for `dynamic` — split out of src (see docs/RUST_TEST_FILES.md).
+//! Tests for `dynamic` — split out of src (see docs/rust-test-files.md).
 
 use super::*;
 use crate::trigger_engine::runtime::TriggerRuntimeSnapshot;
