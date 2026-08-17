@@ -11,6 +11,7 @@
 mod storage;
 mod tools;
 
+pub use storage::{StorageServiceState, serve_storage_service};
 pub use tools::{ToolServiceState, serve_tool_service};
 
 use std::pin::Pin;

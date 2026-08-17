@@ -278,6 +278,26 @@ pub(crate) fn reconcile(
         }
     }
 
+    // Controller service endpoints: the tool endpoint is read at call time by
+    // the daemon, so it can be pushed to a running daemon. The storage
+    // endpoint only takes effect on a freshly spawned daemon; when attaching
+    // to an already-running local daemon it is reported as a mismatch.
+    if let Some(addr) = &desired.tool_service_addr {
+        if current.tool_service_addr.as_deref() != Some(addr.as_str()) {
+            patch.tool_service_addr = Some(addr.clone());
+        }
+    }
+    if let Some(addr) = &desired.storage_service_addr {
+        if current.storage_service_addr.as_deref() != Some(addr.as_str()) {
+            patch.storage_service_addr = Some(addr.clone());
+            if attach {
+                notes.push(format!(
+                    "storage service {addr} requested, but controller-backed storage only changes on daemon (re)spawn"
+                ));
+            }
+        }
+    }
+
     (patch, notes)
 }
 

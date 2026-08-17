@@ -47,6 +47,12 @@ message DaemonConfig {
   // daemon forwards file/process operations to this endpoint instead of
   // executing them locally.
   optional string tool_service_addr = 9;
+
+  // ── controller storage endpoint (issue #85) ──
+  // Address of the controller's StorageService server (host:port). When set,
+  // the daemon uses controller-backed runtime storage (sessions, DAG runs,
+  // trigger rules, cron jobs) over RPC instead of local storage directly.
+  optional string storage_service_addr = 10;
 }
 
 service SettingsService {

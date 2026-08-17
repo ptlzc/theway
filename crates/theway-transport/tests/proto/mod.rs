@@ -337,8 +337,9 @@ fn daemon_config_round_trips_wire_and_proto() {
         skills_dirs: vec!["/home/user/.agents/skills".into()],
         trigger_poll_secs: Some(60),
         tui_max_feed_lines: Some(8000),
-   tool_service_addr: None,
- };
+        tool_service_addr: None,
+        storage_service_addr: None,
+    };
     let proto = daemon_config_to_proto(&config);
     assert_eq!(proto.provider.as_deref(), Some("anthropic"));
     assert_eq!(proto.model.as_deref(), Some("claude-x"));

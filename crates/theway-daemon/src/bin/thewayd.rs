@@ -17,10 +17,11 @@ use std::sync::{Arc, OnceLock};
 use anyhow::{Context, Result};
 use clap::Parser;
 use theway_core::multiagent::graph::engine::DagEngine;
-use theway_core::multiagent::graph::persist::DagPersistSink;
 use theway_core::{AgentHarness, AgentHarnessOptions, PermissionPolicy, ThinkingLevel};
 use theway_daemon::hooks;
-use theway_daemon::runtime_storage::{RuntimeStorage, local_runtime_storage};
+use theway_daemon::runtime_storage::{
+    RuntimeStorage, local_runtime_storage, remote_runtime_storage,
+};
 use theway_daemon::startup_config::StartupConfig;
 use theway_daemon::stream_auth::stream_fn_with_auth_store;
 use theway_daemon::system_prompt::compose_system_prompt;
@@ -106,6 +107,10 @@ struct Cli {
     /// Enable built-in skills by name. Repeatable.
     #[arg(long)]
     builtin_skill: Vec<String>,
+    /// Controller StorageService endpoint (`host:port`) for controller-backed
+    /// runtime storage (issue #85). When unset, the daemon uses local storage.
+    #[arg(long = "storage-service-addr")]
+    storage_service_addr: Option<String>,
 }
 
 #[tokio::main]
@@ -131,7 +136,12 @@ async fn main() -> Result<()> {
     // Issue #80: all persistent runtime state goes through the RuntimeStorage
     // seam. The default LocalRuntimeStorage keeps current local behavior; a
     // controller-backed storage can replace it without changing the kernel.
-    let storage: Arc<dyn RuntimeStorage> = local_runtime_storage();
+    // Issue #85: when the TUI/controller provides a StorageService address,
+    // the daemon uses RemoteRuntimeStorage for the externalized operations.
+    let storage: Arc<dyn RuntimeStorage> = match &cli.storage_service_addr {
+        Some(addr) => remote_runtime_storage(addr).await?,
+        None => local_runtime_storage(),
+    };
     let repo = storage.open_session_repo(&cwd).await?;
 
     // Issue #73: config-file-free startup. The daemon no longer reads
@@ -148,6 +158,7 @@ async fn main() -> Result<()> {
     if let Some(secs) = cli.trigger_poll_secs {
         startup.trigger_poll_secs = secs;
     }
+    startup.storage_service_addr = cli.storage_service_addr.clone();
 
     // Model resolution (same rules as the TUI binary).
     // TODO(#73): custom model definitions are still read from local

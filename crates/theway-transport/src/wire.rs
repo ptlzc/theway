@@ -113,6 +113,11 @@ pub struct WireDaemonConfig {
     /// controller tool server is available).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_service_addr: Option<String>,
+    /// Controller StorageService endpoint (`host:port`) for controller-backed
+    /// runtime storage (issue #85). `None` = daemon keeps using
+    /// `LocalRuntimeStorage`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storage_service_addr: Option<String>,
 }
 
 impl WireDaemonConfig {
@@ -155,6 +160,10 @@ impl WireDaemonConfig {
         }
         if let Some(addr) = patch.tool_service_addr.clone() {
             self.tool_service_addr = Some(addr);
+            touched += 1;
+        }
+        if let Some(addr) = patch.storage_service_addr.clone() {
+            self.storage_service_addr = Some(addr);
             touched += 1;
         }
         touched

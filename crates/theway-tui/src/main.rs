@@ -20,6 +20,7 @@
 mod cli;
 mod clipboard_image;
 mod config_payload;
+mod controller_storage;
 mod feed_cache;
 mod feed_render;
 mod local_commands;

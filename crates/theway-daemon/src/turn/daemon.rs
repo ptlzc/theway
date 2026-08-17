@@ -310,6 +310,7 @@ impl TurnHost {
             trigger_poll_secs: Some(config.startup.trigger_poll_secs),
             tui_max_feed_lines: config.startup.tui_max_feed_lines,
             tool_service_addr: None,
+            storage_service_addr: config.startup.storage_service_addr.clone(),
         }));
         let tool_ops: Arc<dyn ToolOps> = Arc::new(ForwardingToolOps::new(daemon_config.clone()));
         Self {
