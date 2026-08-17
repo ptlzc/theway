@@ -206,6 +206,9 @@ impl SessionHarnessFactory {
             inbox::default_inbox_path(),
         ));
         // CLI hooks are session-scoped (they embed the session id) — reload per switch.
+        // TODO(#73): this still re-reads local `hooks.toml` files on every session
+        // switch; once the startup `load_local_sources` seam is controller-driven,
+        // route it through `hooks::load_with` with the same setting.
         let (hook_model, hook_thinking) = {
             let state = harness.agent().state();
             (state.model.clone(), state.thinking_level)

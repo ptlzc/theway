@@ -122,8 +122,13 @@ pub struct DaemonConfig {
     pub panel_status: PanelStatus,
     /// `[orchestrator] thinking_summary` settings; `None` → thinking stays raw.
     pub thinking_summary: Option<super::thinking_summary::ThinkingSummarySettings>,
-    /// `[tui] max_feed_lines` from config.toml, pushed to the TUI in snapshots.
-    pub tui_max_feed_lines: Option<u64>,
+    /// In-memory startup settings (issue #73): defaults merged with the
+    /// controller's initial settings payload — the values startup previously
+    /// read from `config.toml` (TUI scrollback cap, trigger poll interval,
+    /// enabled builtin skills, …). Seeds the shared `GetConfig` view;
+    /// runtime `Configure` updates merge into the view, not back into this
+    /// startup snapshot.
+    pub startup: crate::startup_config::StartupConfig,
 }
 
 /// Headless transport host for `thewayd` (gRPC / HTTP / MCP).
@@ -173,7 +178,8 @@ pub struct TurnHost {
     control_plane_prompt: Option<UiControlPlanePrompt>,
     model_catalog: Vec<ProviderGroup>,
     panel_status: PanelStatus,
-    /// `[tui] max_feed_lines` from config.toml (None → TUI built-in default).
+    /// `[tui] max_feed_lines` (issue #73: from the in-memory StartupConfig /
+    /// settings RPC; `None` → TUI built-in default).
     tui_max_feed_lines: Option<u64>,
 
     dag_engine: Arc<theway_core::multiagent::graph::engine::DagEngine>,
@@ -275,8 +281,11 @@ impl TurnHost {
         }));
         // Shared daemon configuration view (issue #72): seeded from the
         // startup-resolved settings (active model, skill dirs, trigger poll
-        // interval, TUI scrollback); `Configure` commands merge into it at
-        // runtime and the transport servers serve it via `GetConfig`.
+        // interval, TUI scrollback, enabled builtin skills). Issue #73: the
+        // seed values come from the in-memory `StartupConfig` (defaults +
+        // controller initial payload) — no local config file is read.
+        // `Configure` commands merge into the view at runtime and the
+        // transport servers serve it via `GetConfig`.
         let startup_model = config.harness.agent().state().model.clone();
         let daemon_config = Arc::new(std::sync::RwLock::new(WireDaemonConfig {
             provider: startup_model.as_ref().map(|model| model.provider.0.clone()),
@@ -286,15 +295,15 @@ impl TurnHost {
                 .map(|model| model.base_url.clone())
                 .filter(|url| !url.is_empty()),
             thinking: None,
-            builtin_skills: Vec::new(),
+            builtin_skills: config.startup.builtin_skills.clone(),
             skills_dirs: config
                 .paths
                 .current_extra_skill_dirs()
                 .into_iter()
                 .map(|dir| dir.to_string_lossy().into_owned())
                 .collect(),
-            trigger_poll_secs: Some(crate::triggers::dynamic::dynamic_trigger_poll_interval_secs()),
-            tui_max_feed_lines: config.tui_max_feed_lines,
+            trigger_poll_secs: Some(config.startup.trigger_poll_secs),
+            tui_max_feed_lines: config.startup.tui_max_feed_lines,
         }));
         Self {
             kernel: ReplKernel::new(config.harness, config.trigger_executor, config.retry),
@@ -322,7 +331,7 @@ impl TurnHost {
             control_plane_prompt: None,
             model_catalog: model_catalog(),
             panel_status: config.panel_status,
-            tui_max_feed_lines: config.tui_max_feed_lines,
+            tui_max_feed_lines: config.startup.tui_max_feed_lines,
             dag_engine: config.dag_engine,
             subagent_registry: config.subagent_registry,
             session_factory: config.session_factory,

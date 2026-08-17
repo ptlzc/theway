@@ -19,11 +19,8 @@ use clap::Parser;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::persist::DagPersistSink;
 use theway_core::{AgentHarness, AgentHarnessOptions, PermissionPolicy, ThinkingLevel};
-use theway_daemon::config_readers::{
-    read_builtin_skills_config, read_orchestrator_thinking_summary,
-    read_trigger_poll_interval_secs, read_tui_max_feed_lines,
-};
 use theway_daemon::hooks;
+use theway_daemon::startup_config::StartupConfig;
 use theway_daemon::stream_auth::stream_fn_with_auth_store;
 use theway_daemon::system_prompt::compose_system_prompt;
 use theway_daemon::turn::daemon::{DaemonConfig, PanelStatus, TurnHost};
@@ -132,8 +129,35 @@ async fn main() -> Result<()> {
     let cwd = std::env::current_dir().context("getting cwd")?;
     let repo = Arc::new(session::open_repo(&cwd).await);
 
+    // Issue #73: config-file-free startup. The daemon no longer reads
+    // `config.toml` at startup — every setting lives in the in-memory
+    // `StartupConfig`, seeded with built-in defaults and supplied through
+    // the settings RPC (issue #72). Initial-payload seam: a controller that
+    // launches the daemon with a starting `WireDaemonConfig` merges it here;
+    // until that handshake lands (controller provisioning) the payload is
+    // empty and the pure defaults apply.
+    let initial_settings_payload = theway_transport::wire::WireDaemonConfig::default();
+    let mut startup = StartupConfig::from_wire(&initial_settings_payload);
+    // CLI flags win over the payload (pre-#73 precedence kept: CLI >
+    // settings > built-in default).
+    if let Some(secs) = cli.trigger_poll_secs {
+        startup.trigger_poll_secs = secs;
+    }
+
     // Model resolution (same rules as the TUI binary).
-    let local_models = theway_daemon::local_models::load_all(&cwd, cli.base_url.as_deref()).await?;
+    // TODO(#73): custom model definitions are still read from local
+    // `models.json` files; once the settings RPC provisions custom models,
+    // this local read goes away. The `load_local_sources` seam already
+    // skips the file scans (explicit `--base-url` / DS4 env registration
+    // still applies then).
+    let local_models = if startup.load_local_sources {
+        theway_daemon::local_models::load_all(&cwd, cli.base_url.as_deref()).await?
+    } else {
+        theway_daemon::local_models::load_all_from_paths_with_base_url(
+            &[],
+            cli.base_url.as_deref(),
+        )?
+    };
     if !local_models.models.is_empty() {
         tracing::info!(
             "loaded {} local model(s): {}",
@@ -146,18 +170,15 @@ async fn main() -> Result<()> {
                 .join(", ")
         );
     }
-    // Default provider/model from config.toml ([model]) — applies only when the CLI
-    // specifies neither flag; a lone CLI flag keeps the legacy env auto-detection path.
-    let (model_default, model_default_diag) =
-        theway_daemon::config_readers::read_model_default(&paths.base).await;
-    if let Some(diag) = model_default_diag {
-        tracing::warn!("{diag}");
-    }
+    // Issue #73: the default provider/model comes from the in-memory
+    // StartupConfig (settings RPC), not a `[model]` config.toml read. Until
+    // the controller provisions a default this stays None and the legacy env
+    // auto-detection path applies; a lone CLI flag keeps that path too.
     let cli_overrides_model = cli.provider.is_some() || cli.model.is_some();
     let (provider_override, model_override) = if cli_overrides_model {
         (cli.provider.clone(), cli.model.clone())
     } else {
-        match &model_default {
+        match &startup.model_default {
             Some(default) => (Some(default.provider.clone()), Some(default.model.clone())),
             None => (None, None),
         }
@@ -271,7 +292,15 @@ async fn main() -> Result<()> {
         executor.clone(),
     );
 
-    let mcp = theway_daemon::mcp_loader::load_all(&cwd).await;
+    // TODO(#73): MCP servers are still read from local `mcp.toml` files;
+    // once the settings RPC provisions them, this local read goes away. The
+    // `load_local_sources` seam skips the scan entirely for a fully
+    // controller-provisioned daemon.
+    let mcp = if startup.load_local_sources {
+        theway_daemon::mcp_loader::load_all(&cwd).await
+    } else {
+        theway_daemon::mcp_loader::LoadedMcp::empty()
+    };
     let mcp_tool_count = mcp.tools.len();
     let mcp_tool_names = mcp
         .tools
@@ -292,8 +321,26 @@ async fn main() -> Result<()> {
     let memory_block = theway_daemon::tools::memory::load_memory_block(&memory_dir).await;
     let system_prompt = compose_system_prompt(&cwd, &memory_block, &tool_names);
 
-    let loaded_skills = skills::load_all(&paths).await;
-    let loaded_templates = templates::load_all(&cwd).await;
+    // TODO(#73): skills and templates are still discovered from local
+    // project/user directories; controller provisioning of both lands in a
+    // later phase. Runtime updates already flow through the settings RPC
+    // (`SetSkillDirs` + the harness reload closure).
+    let loaded_skills = if startup.load_local_sources {
+        skills::load_all(&paths).await
+    } else {
+        skills::LoadedSkills {
+            skills: Vec::new(),
+            diagnostics: Vec::new(),
+        }
+    };
+    let loaded_templates = if startup.load_local_sources {
+        templates::load_all(&cwd).await
+    } else {
+        templates::LoadedTemplates {
+            templates: Vec::new(),
+            diagnostics: Vec::new(),
+        }
+    };
     let ts_extensions =
         theway_daemon::ts_extensions::ExtensionRegistry::discover(&cwd, &paths.base);
     for error in &ts_extensions.errors {
@@ -302,19 +349,17 @@ async fn main() -> Result<()> {
     let compact_algorithms = Arc::new(theway_daemon::ts_extensions::compact_algorithm_registry(
         &ts_extensions,
     ));
-    let config_enabled_builtins = read_builtin_skills_config(&paths.base).await;
-    let (trigger_poll_secs, _trigger_config_diagnostic) =
-        read_trigger_poll_interval_secs(&paths.base, cli.trigger_poll_secs).await;
-    triggers::dynamic::set_dynamic_trigger_poll_interval_secs(trigger_poll_secs);
-    let (tui_max_feed_lines, tui_config_diagnostic) = read_tui_max_feed_lines(&paths.base).await;
-    if let Some(diag) = tui_config_diagnostic {
-        tracing::warn!("{diag}");
-    }
-    let (thinking_summary_cfg, thinking_summary_diagnostic) =
-        read_orchestrator_thinking_summary(&paths.base).await;
-    if let Some(diag) = thinking_summary_diagnostic {
-        tracing::warn!("{diag}");
-    }
+    // Issue #73: all of these used to be `config.toml` reads
+    // (`config_readers`); startup now takes them from the in-memory
+    // StartupConfig — defaults until the controller provisions values
+    // through the settings RPC.
+    let config_enabled_builtins = startup.builtin_skills.clone();
+    triggers::dynamic::set_dynamic_trigger_poll_interval_secs(startup.trigger_poll_secs);
+    // TODO(#73): `WireDaemonConfig` has no thinking-summary fields yet, so
+    // `startup.thinking_summary` stays `None` until the settings proto grows
+    // them; the TUI scrollback cap rides the existing `tui_max_feed_lines`
+    // wire field.
+    let thinking_summary_cfg = startup.thinking_summary.clone();
     let resolved_builtins = theway_daemon::builtin_skills::resolve_builtins(
         &cli.builtin_skill,
         &config_enabled_builtins,
@@ -324,6 +369,8 @@ async fn main() -> Result<()> {
         &loaded_skills.skills,
     );
     {
+        // TODO(#73): skill overrides still read from a local file; move to
+        // the settings RPC once skill state is controller-provisioned.
         let state = theway_daemon::skill_overrides::load(&paths.base).await;
         theway_daemon::skill_overrides::apply(&state, &mut combined_skills);
     }
@@ -387,7 +434,14 @@ async fn main() -> Result<()> {
             triggers::before_trigger_action_hook(dynamic_trigger_registry.clone()),
         ),
     );
-    let lsp_supervisor = Arc::new(theway_daemon::lsp_supervisor::LspSupervisor::load(&cwd).await);
+    // TODO(#73): LSP servers are still read from local `lsp.toml` files;
+    // once the settings RPC provisions them, this local read goes away. The
+    // `load_local_sources` seam starts an empty supervisor instead.
+    let lsp_supervisor = Arc::new(if startup.load_local_sources {
+        theway_daemon::lsp_supervisor::LspSupervisor::load(&cwd).await
+    } else {
+        theway_daemon::lsp_supervisor::LspSupervisor::from_config(&cwd, Default::default())
+    });
     let lsp_lang_count = lsp_supervisor.language_count();
     let after_tool_call = if lsp_supervisor.is_empty() {
         None
@@ -437,12 +491,17 @@ async fn main() -> Result<()> {
         let state = harness.agent().state();
         (state.model.clone(), state.thinking_level)
     };
-    let hooks = hooks::load(
+    // TODO(#73): hooks are still read from local `hooks.toml` files; once
+    // the settings RPC provisions them, this local read goes away. The
+    // `load_local_sources` seam skips the scan (rule-less runner) for a
+    // fully controller-provisioned daemon.
+    let hooks = hooks::load_with(
         &cwd,
         session_id.clone(),
         hook_model.as_ref(),
         hook_thinking,
         theway_daemon::hook_executors::daemon_executors(),
+        startup.load_local_sources,
     )
     .await;
 
@@ -627,7 +686,7 @@ async fn main() -> Result<()> {
         )),
         panel_status,
         thinking_summary,
-        tui_max_feed_lines,
+        startup,
     });
 
     let mode_label = match mode {

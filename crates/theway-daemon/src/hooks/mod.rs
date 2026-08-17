@@ -217,6 +217,22 @@ pub async fn load(
     thinking_level: Option<ThinkingLevel>,
     executors: HookExecutors,
 ) -> LoadedHooks {
+    load_with(cwd, session_id, model, thinking_level, executors, true).await
+}
+
+/// Same as [`load`] with an explicit local-file seam (issue #73):
+/// `read_local_files = false` skips the `hooks.toml` scans entirely and
+/// returns a rule-less runner — the shape startup needs once a controller
+/// provisions hooks through the settings RPC instead of local files.
+/// TODO(#73): wire the controller-provisioned rules through here.
+pub async fn load_with(
+    cwd: &Path,
+    session_id: impl Into<String>,
+    model: Option<&theway_llm_provider::Model>,
+    thinking_level: Option<ThinkingLevel>,
+    executors: HookExecutors,
+    read_local_files: bool,
+) -> LoadedHooks {
     let session_id = session_id.into();
     let (model_provider, model_id) = model
         .map(|m| (m.provider.0.clone(), m.id.clone()))
@@ -230,30 +246,32 @@ pub async fn load(
     let mut diagnostics = Vec::new();
     let mut rules = Vec::new();
 
-    let user_file = read_file(&user_path, "user", &mut diagnostics).await;
-    let allow_project = std::env::var("THEWAY_ALLOW_PROJECT_HOOKS")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
-        || user_file
-            .as_ref()
-            .map(|f| f.allow_project_hooks)
-            .unwrap_or(false);
+    if read_local_files {
+        let user_file = read_file(&user_path, "user", &mut diagnostics).await;
+        let allow_project = std::env::var("THEWAY_ALLOW_PROJECT_HOOKS")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+            || user_file
+                .as_ref()
+                .map(|f| f.allow_project_hooks)
+                .unwrap_or(false);
 
-    if let Some(file) = user_file {
-        push_rules(file, "user", &mut rules, &mut diagnostics);
-    }
+        if let Some(file) = user_file {
+            push_rules(file, "user", &mut rules, &mut diagnostics);
+        }
 
-    if project_path.exists() {
-        if allow_project {
-            if let Some(file) = read_file(&project_path, "project", &mut diagnostics).await {
-                push_rules(file, "project", &mut rules, &mut diagnostics);
+        if project_path.exists() {
+            if allow_project {
+                if let Some(file) = read_file(&project_path, "project", &mut diagnostics).await {
+                    push_rules(file, "project", &mut rules, &mut diagnostics);
+                }
+            } else {
+                diagnostics.push(format!(
+                    "project hooks ignored at {}; set allow_project_hooks = true in {} or THEWAY_ALLOW_PROJECT_HOOKS=1",
+                    project_path.display(),
+                    user_path.display()
+                ));
             }
-        } else {
-            diagnostics.push(format!(
-                "project hooks ignored at {}; set allow_project_hooks = true in {} or THEWAY_ALLOW_PROJECT_HOOKS=1",
-                project_path.display(),
-                user_path.display()
-            ));
         }
     }
 

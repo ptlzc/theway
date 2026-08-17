@@ -57,6 +57,7 @@ pub use theway_transport::{auth, config, history, mentions};
 pub use theway_storage::session_archive;
 pub mod session_ops;
 pub mod skills;
+pub mod startup_config;
 pub mod stream_auth;
 pub mod system_prompt;
 
