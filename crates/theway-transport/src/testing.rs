@@ -12,13 +12,17 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use crate::transport::{ToolExecStream, ToolOps};
+use crate::transport::{StorageOps, ToolExecStream, ToolOps};
 use crate::wire::{
-    SessionSummary, ToolError, WireCronSnapshot, WireMcpSnapshot, WireSidebarSnapshot,
-    WireSkillsSnapshot, WireToolDirEntry, WireToolEditRequest, WireToolEditResult,
-    WireToolExecFrame, WireToolExecRequest, WireToolFindRequest, WireToolFindResult,
-    WireToolGrepFileCount, WireToolGrepMatch, WireToolGrepRequest, WireToolGrepResult,
-    WireToolListDirRequest, WireToolListDirResult, WireToolMemoryForgetRequest,
+    SessionSummary, ToolError, WireCronSnapshot, WireLoadCronJobsRequest, WireLoadCronJobsResult,
+    WireLoadDagRunsRequest, WireLoadDagRunsResult, WireLoadTriggerRulesRequest,
+    WireLoadTriggerRulesResult, WireMcpSnapshot, WireSaveCronJobsRequest, WireSaveCronJobsResult,
+    WireSaveDagRunRequest, WireSaveDagRunResult, WireSaveTriggerRulesRequest,
+    WireSaveTriggerRulesResult, WireSidebarSnapshot, WireSkillsSnapshot, WireStoredCronJob,
+    WireStoredDagRun, WireStoredTriggerRule, WireToolDirEntry, WireToolEditRequest,
+    WireToolEditResult, WireToolExecFrame, WireToolExecRequest, WireToolFindRequest,
+    WireToolFindResult, WireToolGrepFileCount, WireToolGrepMatch, WireToolGrepRequest,
+    WireToolGrepResult, WireToolListDirRequest, WireToolListDirResult, WireToolMemoryForgetRequest,
     WireToolMemoryForgetResult, WireToolMemoryListRequest, WireToolMemoryListResult,
     WireToolMemoryReadRequest, WireToolMemoryReadResult, WireToolMemorySaveRequest,
     WireToolMemorySaveResult, WireToolReadRequest, WireToolReadResult, WireToolSkillInstallRequest,
@@ -120,6 +124,153 @@ impl crate::transport::SessionOps for FakeSessionOps {
         inner.sessions.remove(pos);
         inner.running.remove(id);
         Ok(Vec::new())
+    }
+}
+
+// ── FakeStorageOps (issue #84) ───────────────────────────────────────
+
+/// In-memory `StorageOps` for the transport tests. DAG run snapshots,
+/// trigger rules and cron jobs live in maps keyed by session id; the behavior
+/// is enough to round-trip the `StorageService` RPC and JSON-RPC state methods
+/// without a real storage backend.
+#[derive(Default)]
+pub struct FakeStorageOps {
+    inner: Mutex<FakeStorageInner>,
+}
+
+#[derive(Default)]
+struct FakeStorageInner {
+    dag_runs: HashMap<(String, String), String>,
+    trigger_rules: HashMap<String, Vec<WireStoredTriggerRule>>,
+    cron_jobs: HashMap<String, Vec<WireStoredCronJob>>,
+}
+
+impl FakeStorageOps {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Seed a stored DAG run snapshot for a session.
+    pub fn put_dag_run(&self, session_id: &str, run_id: &str, snapshot: &str) {
+        self.inner.lock().unwrap().dag_runs.insert(
+            (session_id.to_string(), run_id.to_string()),
+            snapshot.to_string(),
+        );
+    }
+
+    /// Seed stored trigger rules for a session.
+    pub fn put_trigger_rules(&self, session_id: &str, rules: Vec<WireStoredTriggerRule>) {
+        self.inner
+            .lock()
+            .unwrap()
+            .trigger_rules
+            .insert(session_id.to_string(), rules);
+    }
+
+    /// Seed stored cron jobs for a session.
+    pub fn put_cron_jobs(&self, session_id: &str, jobs: Vec<WireStoredCronJob>) {
+        self.inner
+            .lock()
+            .unwrap()
+            .cron_jobs
+            .insert(session_id.to_string(), jobs);
+    }
+}
+
+#[async_trait]
+impl StorageOps for FakeStorageOps {
+    async fn save_dag_run(&self, request: &WireSaveDagRunRequest) -> Result<WireSaveDagRunResult> {
+        self.inner.lock().unwrap().dag_runs.insert(
+            (request.session_id.clone(), request.run_id.clone()),
+            request.snapshot.clone(),
+        );
+        Ok(WireSaveDagRunResult { saved: true })
+    }
+
+    async fn load_dag_runs(
+        &self,
+        request: &WireLoadDagRunsRequest,
+    ) -> Result<WireLoadDagRunsResult> {
+        let inner = self.inner.lock().unwrap();
+        let runs = match request.run_id.as_deref() {
+            Some(run_id) => inner
+                .dag_runs
+                .get(&(request.session_id.clone(), run_id.to_string()))
+                .map(|snapshot| WireStoredDagRun {
+                    session_id: request.session_id.clone(),
+                    run_id: run_id.to_string(),
+                    snapshot: snapshot.clone(),
+                })
+                .into_iter()
+                .collect(),
+            None => inner
+                .dag_runs
+                .iter()
+                .filter(|((session_id, _), _)| *session_id == request.session_id)
+                .map(|((session_id, run_id), snapshot)| WireStoredDagRun {
+                    session_id: session_id.clone(),
+                    run_id: run_id.clone(),
+                    snapshot: snapshot.clone(),
+                })
+                .collect(),
+        };
+        Ok(WireLoadDagRunsResult { runs })
+    }
+
+    async fn save_trigger_rules(
+        &self,
+        request: &WireSaveTriggerRulesRequest,
+    ) -> Result<WireSaveTriggerRulesResult> {
+        let count = request.rules.len() as u32;
+        self.inner
+            .lock()
+            .unwrap()
+            .trigger_rules
+            .insert(request.session_id.clone(), request.rules.clone());
+        Ok(WireSaveTriggerRulesResult { count })
+    }
+
+    async fn load_trigger_rules(
+        &self,
+        request: &WireLoadTriggerRulesRequest,
+    ) -> Result<WireLoadTriggerRulesResult> {
+        let rules = self
+            .inner
+            .lock()
+            .unwrap()
+            .trigger_rules
+            .get(&request.session_id)
+            .cloned()
+            .unwrap_or_default();
+        Ok(WireLoadTriggerRulesResult { rules })
+    }
+
+    async fn save_cron_jobs(
+        &self,
+        request: &WireSaveCronJobsRequest,
+    ) -> Result<WireSaveCronJobsResult> {
+        let count = request.jobs.len() as u32;
+        self.inner
+            .lock()
+            .unwrap()
+            .cron_jobs
+            .insert(request.session_id.clone(), request.jobs.clone());
+        Ok(WireSaveCronJobsResult { count })
+    }
+
+    async fn load_cron_jobs(
+        &self,
+        request: &WireLoadCronJobsRequest,
+    ) -> Result<WireLoadCronJobsResult> {
+        let jobs = self
+            .inner
+            .lock()
+            .unwrap()
+            .cron_jobs
+            .get(&request.session_id)
+            .cloned()
+            .unwrap_or_default();
+        Ok(WireLoadCronJobsResult { jobs })
     }
 }
 

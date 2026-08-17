@@ -1,0 +1,129 @@
+// Runtime state externalization domain (issue #84): the StorageService RPC
+// contract for the daemon's persistent runtime state. This is the transport
+// twin of the daemon-side RuntimeStorage seam (#79/#80): a controller/storage
+// side can list/create/rename/delete sessions, persist and reload DAG run
+// snapshots, and back up trigger rules and cron jobs without coupling to the
+// local filesystem/SQLite layout.
+//
+// Session methods mirror SessionService so external storage can drive the same
+// resource lifecycle; DAG/trigger/cron methods carry the serde wire twins from
+// `crate::wire` and are implemented by a StorageOps handler in the daemon.
+
+syntax = "proto3";
+package theway.grpc.v1;
+
+import "commands.proto";
+import "session.proto";
+
+// One persisted DAG run. `snapshot` is the portable JSON `PersistedRun` shape
+// used by GraphEngineService checkpoint/restore, so storage backends treat DAG
+// state as opaque JSON (definition + node progress).
+message StoredDagRun {
+  string session_id = 1;
+  string run_id = 2;
+  string snapshot = 3;
+}
+
+message SaveDagRunRequest {
+  string session_id = 1;
+  string run_id = 2;
+  string snapshot = 3;
+}
+
+message SaveDagRunResponse {
+  bool saved = 1;
+}
+
+message LoadDagRunsRequest {
+  string session_id = 1;
+  // Omitted = load every stored run for the session; set = load one run.
+  optional string run_id = 2;
+}
+
+message LoadDagRunsResponse {
+  repeated StoredDagRun runs = 1;
+}
+
+// Session-scoped dynamic trigger rule, persisted in the sidecar format
+// (`triggers.json`) but exposed as a portable storage contract.
+message StoredTriggerRule {
+  string id = 1;
+  string condition = 2;
+  string action = 3;
+  bool enabled = 4;
+  bool fire_once = 5;
+  optional string fired_at = 6; // RFC3339, when the rule has fired
+  bool promote_to_chat = 7;
+  string created_at = 8; // RFC3339
+}
+
+message SaveTriggerRulesRequest {
+  string session_id = 1;
+  repeated StoredTriggerRule rules = 2;
+}
+
+message SaveTriggerRulesResponse {
+  uint32 count = 1;
+}
+
+message LoadTriggerRulesRequest {
+  string session_id = 1;
+}
+
+message LoadTriggerRulesResponse {
+  repeated StoredTriggerRule rules = 1;
+}
+
+// Session-scoped cron job, persisted in the sidecar format (`cron.toml`) but
+// exposed as a portable storage contract.
+message StoredCronJob {
+  string id = 1;
+  string schedule = 2; // standard 5-field cron expression
+  string action = 3;
+  bool enabled = 4;
+  optional string running_trace_id = 5;
+  optional string last_due_at = 6; // RFC3339
+  optional string last_fired_at = 7; // RFC3339
+  optional string last_completed_at = 8; // RFC3339
+  optional string last_error = 9;
+  uint64 skipped_overlap_count = 10;
+  bool stateful = 11;
+  string created_at = 12; // RFC3339
+}
+
+message SaveCronJobsRequest {
+  string session_id = 1;
+  repeated StoredCronJob jobs = 2;
+}
+
+message SaveCronJobsResponse {
+  uint32 count = 1;
+}
+
+message LoadCronJobsRequest {
+  string session_id = 1;
+}
+
+message LoadCronJobsResponse {
+  repeated StoredCronJob jobs = 1;
+}
+
+service StorageService {
+  // Session resources (mirror SessionService).
+  rpc ListSessions(Empty) returns (ListSessionsResponse);
+  rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
+  rpc RenameSession(RenameSessionRequest) returns (CommandResult);
+  rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse);
+
+  // DAG run persistence.
+  rpc SaveDagRun(SaveDagRunRequest) returns (SaveDagRunResponse);
+  rpc LoadDagRuns(LoadDagRunsRequest) returns (LoadDagRunsResponse);
+
+  // Trigger rules persistence.
+  rpc SaveTriggerRules(SaveTriggerRulesRequest) returns (SaveTriggerRulesResponse);
+  rpc LoadTriggerRules(LoadTriggerRulesRequest) returns (LoadTriggerRulesResponse);
+
+  // Cron jobs persistence.
+  rpc SaveCronJobs(SaveCronJobsRequest) returns (SaveCronJobsResponse);
+  rpc LoadCronJobs(LoadCronJobsRequest) returns (LoadCronJobsResponse);
+}

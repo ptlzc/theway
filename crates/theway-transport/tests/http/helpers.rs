@@ -31,6 +31,7 @@ pub(crate) fn test_router(latest: WireStatus) -> Router {
             crate::wire::WireDaemonConfig::default(),
         )),
         tool_ops: std::sync::Arc::new(crate::testing::FakeToolOps::new()),
+        storage_ops: std::sync::Arc::new(crate::testing::FakeStorageOps::new()),
     })
 }
 

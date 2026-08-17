@@ -32,7 +32,7 @@ rm -f "$OUT"/*.ts
   --ts_proto_out="$OUT" \
   --proto_path=proto \
   --ts_proto_opt=outputServices=grpc-js,outputClientImpl=grpc-js,esModuleInterop=true,useOptionals=messages,forceLong=string,oneof=unions,importSuffix=.js \
-  proto/commands.proto proto/session.proto proto/graph_engine.proto proto/events.proto proto/settings.proto proto/tools.proto proto/health.proto
+  proto/commands.proto proto/session.proto proto/graph_engine.proto proto/events.proto proto/settings.proto proto/tools.proto proto/state.proto proto/health.proto
 
 echo "generated:"
 ls "$OUT"

@@ -49,6 +49,7 @@ async fn spawn_tools_server() -> (String, std::sync::Arc<FakeToolOps>, tokio::ta
             crate::wire::WireDaemonConfig::default(),
         )),
         tool_ops: tools.clone(),
+        storage_ops: std::sync::Arc::new(crate::testing::FakeStorageOps::new()),
     };
     let router = web_router(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

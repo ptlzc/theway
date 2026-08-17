@@ -57,6 +57,10 @@ pub struct HttpState {
     /// methods (`read_file` / `write_file` / … / `skill_install`). The
     /// daemon kernel implements the seam against its execution environment.
     pub tool_ops: Arc<dyn crate::transport::ToolOps>,
+    /// Runtime state storage handler (issue #84): backs the JSON-RPC state
+    /// methods (`state.save_dag_run` / `state.load_dag_runs` / …). The daemon
+    /// kernel implements the seam against the `RuntimeStorage` adapter.
+    pub storage_ops: Arc<dyn crate::transport::StorageOps>,
 }
 
 /// Full `--http` driver: bind, wire the transport channels, spawn the axum
@@ -81,6 +85,7 @@ pub async fn run_web(mut app: Box<dyn TransportHost>, options: WebOptions) -> Re
         path_context: endpoints.path_context.clone(),
         daemon_config: endpoints.daemon_config.clone(),
         tool_ops: endpoints.tool_ops.clone(),
+        storage_ops: endpoints.storage_ops.clone(),
     };
     let server_task = serve_web(listener, state);
 
@@ -142,7 +147,14 @@ async fn healthz() -> &'static str {
 //   list_dir (tool.list_dir) | grep (tool.grep) | find (tool.find) |
 //   memory_save (tool.memory_save) | memory_list (tool.memory_list) |
 //   memory_read (tool.memory_read) | memory_forget (tool.memory_forget) |
-//   skill_install (tool.skill_install)
+//   skill_install (tool.skill_install) |
+//   state.save_dag_run | state.load_dag_runs | state.save_trigger_rules |
+//   state.load_trigger_rules | state.save_cron_jobs | state.load_cron_jobs
+//
+// The state-storage methods (issue #84) return the wire shapes from
+// `crate::wire` (`WireSave*Result` / `WireLoad*Result`); session resources are
+// also reachable under `state.list_sessions` / `state.create_session` /
+// `state.rename_session` / `state.delete_session` aliases.
 //
 // The tool methods (issue #75) return the unary wire shapes from `crate::wire`
 // (`WireTool*`); `exec_command` collects the daemon-side frame stream into the
@@ -217,6 +229,14 @@ fn tool_params<T: serde::de::DeserializeOwned>(
 ) -> Result<T, (i64, String)> {
     let value = params.cloned().unwrap_or(serde_json::Value::Null);
     serde_json::from_value(value).map_err(|e| (-32602, format!("invalid tool params: {e}")))
+}
+
+/// Parse the params object of a state-storage method (issue #84) into the wire
+/// request type; same semantics as [`tool_params`].
+fn state_params<T: serde::de::DeserializeOwned>(
+    params: Option<&serde_json::Value>,
+) -> Result<T, (i64, String)> {
+    tool_params(params)
 }
 
 /// Serialize a tool result for the JSON-RPC reply (`-32000` on the
@@ -356,7 +376,7 @@ pub(crate) async fn dispatch(
                 .is_ok();
             Ok(serde_json::json!({ "accepted": accepted }))
         }
-        "list_sessions" | "session.list" => {
+        "list_sessions" | "session.list" | "state.list_sessions" | "storage.list_sessions" => {
             let current_session_id = state.latest.lock().session_id.clone();
             let sessions = state
                 .session_ops
@@ -367,7 +387,7 @@ pub(crate) async fn dispatch(
                 serde_json::json!({ "sessions": sessions, "current_session_id": current_session_id }),
             )
         }
-        "create_session" | "session.create" => {
+        "create_session" | "session.create" | "state.create_session" | "storage.create_session" => {
             let name = params
                 .and_then(|p| p.get("name"))
                 .and_then(|v| v.as_str())
@@ -416,7 +436,7 @@ pub(crate) async fn dispatch(
                 .is_ok();
             Ok(serde_json::json!({ "accepted": accepted }))
         }
-        "rename_session" | "session.rename" => {
+        "rename_session" | "session.rename" | "state.rename_session" | "storage.rename_session" => {
             let id = param(params, "id")?
                 .as_str()
                 .unwrap_or_default()
@@ -439,7 +459,7 @@ pub(crate) async fn dispatch(
                 .map_err(|e| (-32602, e.to_string()))?;
             Ok(serde_json::json!({ "accepted": true }))
         }
-        "delete_session" | "session.delete" => {
+        "delete_session" | "session.delete" | "state.delete_session" | "storage.delete_session" => {
             let id = param(params, "id")?
                 .as_str()
                 .unwrap_or_default()
@@ -627,6 +647,61 @@ pub(crate) async fn dispatch(
                 .skill_install(&request)
                 .await
                 .map_err(crate::tools::tool_rpc_error)?;
+            tool_json(&result)
+        }
+        // ── runtime state storage (issue #84) ───────────────────────────
+        "state.save_dag_run" | "storage.save_dag_run" => {
+            let request: WireSaveDagRunRequest = state_params(params)?;
+            let result = state
+                .storage_ops
+                .save_dag_run(&request)
+                .await
+                .map_err(|e| (-32000, e.to_string()))?;
+            tool_json(&result)
+        }
+        "state.load_dag_runs" | "storage.load_dag_runs" => {
+            let request: WireLoadDagRunsRequest = state_params(params)?;
+            let result = state
+                .storage_ops
+                .load_dag_runs(&request)
+                .await
+                .map_err(|e| (-32000, e.to_string()))?;
+            tool_json(&result)
+        }
+        "state.save_trigger_rules" | "storage.save_trigger_rules" => {
+            let request: WireSaveTriggerRulesRequest = state_params(params)?;
+            let result = state
+                .storage_ops
+                .save_trigger_rules(&request)
+                .await
+                .map_err(|e| (-32000, e.to_string()))?;
+            tool_json(&result)
+        }
+        "state.load_trigger_rules" | "storage.load_trigger_rules" => {
+            let request: WireLoadTriggerRulesRequest = state_params(params)?;
+            let result = state
+                .storage_ops
+                .load_trigger_rules(&request)
+                .await
+                .map_err(|e| (-32000, e.to_string()))?;
+            tool_json(&result)
+        }
+        "state.save_cron_jobs" | "storage.save_cron_jobs" => {
+            let request: WireSaveCronJobsRequest = state_params(params)?;
+            let result = state
+                .storage_ops
+                .save_cron_jobs(&request)
+                .await
+                .map_err(|e| (-32000, e.to_string()))?;
+            tool_json(&result)
+        }
+        "state.load_cron_jobs" | "storage.load_cron_jobs" => {
+            let request: WireLoadCronJobsRequest = state_params(params)?;
+            let result = state
+                .storage_ops
+                .load_cron_jobs(&request)
+                .await
+                .map_err(|e| (-32000, e.to_string()))?;
             tool_json(&result)
         }
         _ => Err((-32601, format!("method not found: {method}"))),

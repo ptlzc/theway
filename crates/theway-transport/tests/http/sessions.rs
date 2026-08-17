@@ -58,6 +58,7 @@ async fn spawn_sessions_server(
             crate::wire::WireDaemonConfig::default(),
         )),
         tool_ops: std::sync::Arc::new(crate::testing::FakeToolOps::new()),
+        storage_ops: std::sync::Arc::new(crate::testing::FakeStorageOps::new()),
     };
     let router = web_router(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
