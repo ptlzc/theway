@@ -1,10 +1,12 @@
 //! Built-in skill catalog.
 //!
 //! Bundles a small, curated set of skills into the `theway` binary so users can opt them in
-//! without manually checking out a skill repo into `~/.theway/skills/`. This is the **lowest
-//! precedence** skill source — any user (`~/.theway/skills/`) or project (`<cwd>/.theway/skills/`)
-//! skill of the same name shadows the built-in version, same as the existing user/project
-//! precedence in [`crate::skills::load_all`].
+//! without manually checking out a skill repo into `<base>/skills` (the native install target,
+//! e.g. `~/.theway/skills/`). This is the **lowest precedence** skill source — any user or
+//! project skill of the same name shadows the built-in version, same as the first-wins
+//! precedence in [`crate::skills::load_all`]. Among the user roots, `<base>/skills` is scanned
+//! before the remaining `$HOME` roots (issue #66), so an installed skill shadows a same-name
+//! copy there too.
 //!
 //! **Default behavior is OFF**: a built-in skill is included in the harness skill catalog
 //! only when the user explicitly enables it via:
@@ -184,12 +186,13 @@ fn strip_frontmatter(content: &str) -> &str {
     content
 }
 
-/// Merge the resolved built-in skills with the user/project skills the existing dual-root
-/// loader returned. Same-name precedence is **user/project wins over built-in** (built-in is
+/// Merge the resolved built-in skills with the user/project skills the multi-root loader
+/// returned. Same-name precedence is **user/project wins over built-in** (built-in is
 /// the lowest tier per #32). The returned `Vec<Skill>` preserves built-in skills first, then
 /// any user/project skills not already shadowing a built-in. Repeated names within
-/// `user_project` follow the loader's existing project-over-user policy and arrive here
-/// already collapsed.
+/// `user_project` follow the loader's first-wins root order (`--skills-dir` extras > project
+/// roots > `<base>/skills` install target > remaining `$HOME` user roots, issue #66) and
+/// arrive here already collapsed.
 ///
 /// This is extracted out of `main.rs` so the wiring path can be unit-tested without spinning
 /// up the full binary (per @CLI-TUI-Dev-Lead's review on PR #34).
