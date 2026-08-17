@@ -13,6 +13,7 @@ workers/fefe-hub/src/viewer_html.generated.ts
 workers/fefe-hub/.wrangler/
 .agents/
 .se/
+.pi/
 
 # pi runtime state (never committed)
 **/.pi/
