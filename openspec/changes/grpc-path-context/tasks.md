@@ -54,7 +54,7 @@ DAG: `issue-68-grpc-path-context`。节点文件集不相交：
 
 ## 5. [depends: 4-tests-docs] [5-verify] 终态验收
 
-- [ ] 5.1 `cargo fmt --all -- --check`、`cargo check --workspace --all-targets`、
+- [x] 5.1 `cargo fmt --all -- --check`、`cargo check --workspace --all-targets`、
   `cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`。
-- [ ] 5.2 feature-gate：sandbox-only check + `sandbox_tool_gate`。
-- [ ] 5.3 grep：新增 RPC 在 proto/client/server 三处齐全；WireCommand 变体被 daemon 处理。
+- [x] 5.2 feature-gate：sandbox-only check + `sandbox_tool_gate`。
+- [x] 5.3 grep：新增 RPC 在 proto/client/server 三处齐全；WireCommand 变体被 daemon 处理。
