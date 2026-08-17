@@ -89,6 +89,21 @@ pub(crate) struct Cli {
     #[arg(long = "builtin-skill", value_name = "NAME")]
     pub(crate) builtin_skill: Vec<String>,
 
+    /// User-level root directory to hand to a daemon this client spawns (user
+    /// config + skill roots resolve from it). When unset, the flag is not passed
+    /// and the daemon resolves the home from the environment itself. Only takes
+    /// effect when the TUI spawns the daemon; attaching to an already-running
+    /// daemon does not change its existing configuration.
+    #[arg(long, value_name = "DIR")]
+    pub(crate) home: Option<std::path::PathBuf>,
+
+    /// Extra skill scan root forwarded to a daemon this client spawns. Repeatable;
+    /// each occurrence is passed through as its own `--skills-dir`. Like `--home`,
+    /// this only takes effect when the TUI spawns the daemon; attaching to an
+    /// already-running daemon does not change its existing configuration.
+    #[arg(long = "skills-dir", value_name = "DIR")]
+    pub(crate) skills_dir: Vec<std::path::PathBuf>,
+
     /// Poll interval for local dynamic trigger checks, in seconds. Defaults to
     /// `[triggers] poll_interval_secs` from `~/.theway/config.toml`, or 600 when unset.
     #[arg(long = "trigger-poll-secs", value_name = "SECONDS", value_parser = clap::value_parser!(u64).range(1..))]
