@@ -9,33 +9,22 @@ use theway_core::agent::session::session::SessionTreeEntry;
 use theway_core::types::AgentMessage;
 use theway_daemon::ts_extensions::{ExtensionRegistry, compact_algorithm_registry};
 
-/// `THEWAY_DIR` is process-global, so discovery tests that point it at a tempdir must be
-/// serialized against each other (and against tests that must not see a stray user dir).
-static ENV_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
 /// Discover with a hermetic user dir: `user_dir` (default: a fresh empty tempdir) is
-/// installed as `$THEWAY_DIR` for the duration of the call, then removed.
+/// passed as the user-global base dir (issue #66: `discover` takes the base as a
+/// parameter, so no `$THEWAY_DIR` env mutation is needed).
 fn discover_with_user_dir(
     cwd: &std::path::Path,
     user_dir: Option<&std::path::Path>,
 ) -> ExtensionRegistry {
-    let _guard = ENV_GUARD.lock().unwrap();
     let owned;
-    let dir = match user_dir {
+    let base = match user_dir {
         Some(d) => d,
         None => {
             owned = tempdir().unwrap();
             owned.path()
         }
     };
-    unsafe {
-        std::env::set_var("THEWAY_DIR", dir);
-    }
-    let registry = ExtensionRegistry::discover(cwd);
-    unsafe {
-        std::env::remove_var("THEWAY_DIR");
-    }
-    registry
+    ExtensionRegistry::discover(cwd, base)
 }
 
 const FULL_EXT: &str = r#"export const kind = "compaction";
@@ -312,7 +301,7 @@ export function decide_compact(ctx: any): boolean { return false; }
     )
     .unwrap();
 
-    // The user dir is `$THEWAY_DIR/extensions`; discovery is guarded (see helper).
+    // The user dir is `<base>/extensions`; base is passed explicitly (issue #66).
     let registry = discover_with_user_dir(project.path(), Some(user.path()));
 
     let ext = registry.get("shadow").expect("extension found");

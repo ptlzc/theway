@@ -91,6 +91,7 @@ pub type LocalToolsFn = Arc<dyn Fn() -> Vec<Arc<dyn AgentTool>> + Send + Sync>;
 #[allow(clippy::too_many_arguments)]
 pub fn engine_tools(
     memory_dir: &Path,
+    base_dir: &Path,
     dag_engine: &Arc<DagEngine>,
     subagent_registry: &AgentJobRegistry,
     subagent_tools: SubagentToolsFn,
@@ -125,7 +126,7 @@ pub fn engine_tools(
     // Skill family — each wires a fresh harness cell per harness build. In
     // sandbox-only builds the direct-FS-write members are left unregistered
     // (see `skill_family`).
-    tools.extend(skill_family(skill_harness_cell));
+    tools.extend(skill_family(skill_harness_cell, base_dir));
     // Reload (issue #50): the LLM's single entry point for `/reload`
     // semantics — rescan file commands + skill catalog and bump the runtime
     // revision so clients re-read local resources. Resolves the process-level
@@ -144,11 +145,14 @@ pub fn engine_tools(
 /// Engine tools a SUBAGENT may have: everything except the two orchestration tools —
 /// no `subagent` (no recursive delegation) and no `dag_*` (no DAG orchestration from
 /// inside a subagent). Skills + memory are engine capabilities a subagent may use.
+/// `base_dir` is the theway base dir (issue #66: `DaemonPaths::base`), wired into
+/// the direct-FS-write skill family.
 pub fn subagent_engine_tools(
     memory_dir: &Path,
+    base_dir: &Path,
     skill_harness_cell: &SkillHarnessCell,
 ) -> Vec<Arc<dyn AgentTool>> {
-    let mut tools = skill_family(skill_harness_cell);
+    let mut tools = skill_family(skill_harness_cell, base_dir);
     push_memory_tool(&mut tools, memory_dir);
     #[cfg(all(not(feature = "local"), feature = "sandbox"))]
     warn_sandbox_omitted_engine_tools();
@@ -172,16 +176,19 @@ fn push_memory_tool(tools: &mut Vec<Arc<dyn AgentTool>>, memory_dir: &Path) {
 /// Build the ONE subagent tool-set resolver: every spec (explorer / planner /
 /// executor-coder / checker / general) gets the same uniform set = engine tools minus
 /// `subagent`/`dag_*` ([`subagent_engine_tools`]) plus the app's local tools. Shared by
-/// the `subagent` tool and the DAG node launcher.
+/// the `subagent` tool and the DAG node launcher. `base_dir` is the theway base dir
+/// (issue #66: `DaemonPaths::base`) for the skill family's host paths.
 pub fn subagent_tools(
     memory_dir: &Path,
+    base_dir: &Path,
     skill_harness_cell: &SkillHarnessCell,
     local_tools: LocalToolsFn,
 ) -> ToolSetResolver {
     let memory_dir = memory_dir.to_path_buf();
+    let base_dir = base_dir.to_path_buf();
     let cell = skill_harness_cell.clone();
     Arc::new(move |_spec_name: &str| {
-        let mut tools = subagent_engine_tools(&memory_dir, &cell);
+        let mut tools = subagent_engine_tools(&memory_dir, &base_dir, &cell);
         tools.extend(local_tools());
         tools
     })
@@ -190,12 +197,19 @@ pub fn subagent_tools(
 /// The skill family: skill / install / builder / state / remove, all wired to the same
 /// harness cell.
 ///
+/// Host paths (issue #66): `base_dir` is the theway base dir resolved once at the CLI
+/// boundary (`DaemonPaths::base`); the direct-FS-write members are constructed with
+/// their explicit-path variants (`with_skills_root` / `with_base_dir`) so no tool in
+/// this set reads `THEWAY_DIR` / `HOME` at construction time. `base_dir.join("skills")`
+/// mirrors `DaemonPaths::skills_root()`.
+///
 /// Feature gating (issue #64, fail closed): `skill` is a pure in-memory catalog lookup
 /// and stays registered in every build. The other four write the host filesystem
 /// directly (`~/.theway/skills/**`, `~/.theway/skill-overrides.json`) without going
 /// through the executor seam, so sandbox-only builds leave them unregistered; the
 /// assembly-level `warn_sandbox_omitted_engine_tools` names them.
-fn skill_family(skill_harness_cell: &SkillHarnessCell) -> Vec<Arc<dyn AgentTool>> {
+#[cfg_attr(not(feature = "local"), allow(unused_variables))]
+fn skill_family(skill_harness_cell: &SkillHarnessCell, base_dir: &Path) -> Vec<Arc<dyn AgentTool>> {
     // `mut` is only needed on the `local` path, which extends the set below.
     #[cfg_attr(not(feature = "local"), allow(unused_mut))]
     let mut tools: Vec<Arc<dyn AgentTool>> =
@@ -203,18 +217,23 @@ fn skill_family(skill_harness_cell: &SkillHarnessCell) -> Vec<Arc<dyn AgentTool>
 
     #[cfg(feature = "local")]
     {
+        let skills_root = base_dir.join("skills");
         tools.extend([
-            Arc::new(install_skill::InstallSkillTool::new(
+            Arc::new(install_skill::InstallSkillTool::with_skills_root(
                 skill_harness_cell.clone(),
+                skills_root.clone(),
             )) as Arc<dyn AgentTool>,
-            Arc::new(skill_builder::SkillBuilderTool::new(
+            Arc::new(skill_builder::SkillBuilderTool::with_skills_root(
                 skill_harness_cell.clone(),
+                skills_root,
             )),
-            Arc::new(set_skill_state::SetSkillStateTool::new(
+            Arc::new(set_skill_state::SetSkillStateTool::with_base_dir(
                 skill_harness_cell.clone(),
+                base_dir.to_path_buf(),
             )),
-            Arc::new(remove_skill::RemoveSkillTool::new(
+            Arc::new(remove_skill::RemoveSkillTool::with_base_dir(
                 skill_harness_cell.clone(),
+                base_dir.to_path_buf(),
             )),
         ]);
     }

@@ -41,6 +41,11 @@ pub mod lsp_supervisor;
 pub mod mcp_loader;
 pub mod model;
 pub mod otlp;
+// Daemon path context (issue #66): one CLI-boundary resolution of every host
+// path (base / home / work dir / extra skill dirs); kernel modules take the
+// resolved values as parameters instead of reading `HOME` / `THEWAY_DIR`.
+pub mod paths;
+pub use paths::DaemonPaths;
 pub mod turn;
 // Shared client-contract surface re-exported for `crate::…` paths used inside
 // this crate (bridged unit tests reach `crate::auth` etc. through these;

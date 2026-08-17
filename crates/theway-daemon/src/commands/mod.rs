@@ -139,6 +139,10 @@ pub struct Registry {
     /// Claude-code-format file commands scanned from disk (issue #37); the
     /// `/reload` special case in [`dispatch`] rewrites this list.
     file_commands: std::sync::RwLock<Vec<crate::file_commands::FileCommand>>,
+    /// User home root for file-command discovery (issue #66): resolved once at
+    /// the CLI boundary (`DaemonPaths::home`) and injected via
+    /// [`Registry::with_user_home`]; the `/reload` rescan never reads `$HOME`.
+    user_home: std::path::PathBuf,
 }
 
 impl Registry {
@@ -149,6 +153,7 @@ impl Registry {
         Self {
             inner: theway_transport::commands::Registry::new(),
             file_commands: std::sync::RwLock::new(Vec::new()),
+            user_home: std::path::PathBuf::new(),
         }
     }
 
@@ -159,6 +164,7 @@ impl Registry {
         let mut r = Self {
             inner: theway_transport::commands::Registry::new(),
             file_commands: std::sync::RwLock::new(Vec::new()),
+            user_home: std::path::PathBuf::new(),
         };
         r.register(Arc::new(auth::LoginCommand));
         r.register(Arc::new(auth::LogoutCommand));
@@ -195,6 +201,21 @@ impl Registry {
     /// e2e suites.
     pub fn with_builtins() -> Self {
         Self::with_daemon_commands()
+    }
+
+    /// Inject the user home root for file-command discovery (issue #66). The
+    /// composition root (`bin/thewayd.rs`) wires `DaemonPaths::home` here; the
+    /// `/reload` rescan uses it instead of reading `$HOME`.
+    #[must_use]
+    pub fn with_user_home(mut self, home: std::path::PathBuf) -> Self {
+        self.user_home = home;
+        self
+    }
+
+    /// The user home root file commands are scanned from (see
+    /// [`Registry::with_user_home`]).
+    pub fn user_home(&self) -> &std::path::Path {
+        &self.user_home
     }
 
     pub fn register(&mut self, command: Arc<dyn SlashCommand<DaemonCtx>>) {
@@ -408,7 +429,7 @@ fn args_tail_of(input: &str, name: &str) -> String {
 /// `/reload` (issue #37): rescan the claude-code-format file commands and
 /// hot-reload the skill catalog from disk.
 async fn reload_everything(registry: &Registry, ctx: &CommandCtx<'_>) -> CommandOutcome {
-    let scanned = crate::file_commands::scan_file_commands(ctx.cwd);
+    let scanned = crate::file_commands::scan_file_commands(ctx.cwd, registry.user_home());
     let count = scanned.len();
     registry.set_file_commands(scanned.clone());
     cprintln!("reloaded commands: {count} file command(s)");

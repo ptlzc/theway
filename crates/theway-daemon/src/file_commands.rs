@@ -11,8 +11,6 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use theway_transport::client::base_dir;
-
 /// A loaded claude-code-format command file.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FileCommand {
@@ -32,33 +30,22 @@ struct CommandFrontmatter {
     description: String,
 }
 
-/// Ordered scan roots, highest priority first.
-pub fn command_dirs(cwd: &Path) -> Vec<PathBuf> {
-    let user = user_config_root();
+/// Ordered scan roots, highest priority first. `home` is the user home root
+/// (issue #66: resolved at the CLI boundary as `DaemonPaths::home`).
+pub fn command_dirs(cwd: &Path, home: &Path) -> Vec<PathBuf> {
     vec![
         cwd.join(".agents").join("commands"),
         cwd.join(".claude").join("commands"),
-        user.join(".agents").join("commands"),
-        user.join(".claude").join("commands"),
+        home.join(".agents").join("commands"),
+        home.join(".claude").join("commands"),
     ]
 }
 
-/// User-config root: `$HOME` when set, else the directory holding
-/// `~/.theway` (so a relocated `THEWAY_DIR` still resolves sensibly).
-fn user_config_root() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            base_dir()
-                .parent()
-                .map(Path::to_path_buf)
-                .unwrap_or_else(base_dir)
-        })
-}
-
-/// Scan the default roots for `cwd` (see [`command_dirs`]).
-pub fn scan_file_commands(cwd: &Path) -> Vec<FileCommand> {
-    scan_file_commands_in(cwd, &user_config_root())
+/// Scan the default roots for `cwd` (see [`command_dirs`]). `home` is the
+/// user home root resolved at the CLI boundary (issue #66:
+/// `DaemonPaths::home`) — the kernel never reads `$HOME` itself.
+pub fn scan_file_commands(cwd: &Path, home: &Path) -> Vec<FileCommand> {
+    scan_file_commands_in(cwd, home)
 }
 
 /// Scan with an explicit user root (tests pin this to a tempdir so the
