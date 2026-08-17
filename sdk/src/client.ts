@@ -50,6 +50,49 @@ import {
   type SettingsServiceClient as SettingsServiceClientApi,
   type DaemonConfig,
 } from './generated/settings.js';
+import {
+  ToolServiceClient as ToolServiceClientCtor,
+  type ToolServiceClient as ToolServiceClientApi,
+  type EditFileRequest,
+  type EditFileResponse,
+  type ExecCommandRequest,
+  type FindRequest,
+  type FindResponse,
+  type GrepRequest,
+  type GrepResponse,
+  type ListDirRequest,
+  type ListDirResponse,
+  type MemoryForgetRequest,
+  type MemoryForgetResponse,
+  type MemoryListRequest,
+  type MemoryListResponse,
+  type MemoryReadRequest,
+  type MemoryReadResponse,
+  type MemorySaveRequest,
+  type MemorySaveResponse,
+  type ReadFileRequest,
+  type ReadFileResponse,
+  type SkillInstallRequest,
+  type SkillInstallResponse,
+  type WriteFileRequest,
+  type WriteFileResponse,
+} from './generated/tools.js';
+import {
+  StorageServiceClient as StorageServiceClientCtor,
+  type StorageServiceClient as StorageServiceClientApi,
+  type LoadCronJobsRequest,
+  type LoadCronJobsResponse,
+  type LoadDagRunsRequest,
+  type LoadDagRunsResponse,
+  type LoadTriggerRulesRequest,
+  type LoadTriggerRulesResponse,
+  type SaveCronJobsRequest,
+  type SaveCronJobsResponse,
+  type SaveDagRunRequest,
+  type SaveDagRunResponse,
+  type SaveTriggerRulesRequest,
+  type SaveTriggerRulesResponse,
+} from './generated/state.js';
 
 // ── authority cleaning ──
 
@@ -59,7 +102,8 @@ const TRAILING_SLASHES = /\/+$/;
 /**
  * Typed gRPC client for the `theway --grpc` loopback server
  * (theway.grpc.v1.CommandService / SessionService / SettingsService /
- * GraphEngineService / EventService). Generated from the domain proto files
+ * ToolService / StorageService / GraphEngineService / EventService).
+ * Generated from the domain proto files
  * and health.proto (ts-proto + @grpc/grpc-js) — no runtime proto loading.
  *
  * Command RPCs (SendMessage / SetModel / …) resolve the raw CommandResult;
@@ -73,6 +117,8 @@ export class ThewayGrpcClient {
   readonly #graph: GraphEngineServiceClientApi;
   readonly #events: EventServiceClientApi;
   readonly #settings: SettingsServiceClientApi;
+  readonly #tools: ToolServiceClientApi;
+  readonly #storage: StorageServiceClientApi;
 
   constructor(
     baseUrl: string,
@@ -84,6 +130,8 @@ export class ThewayGrpcClient {
     this.#graph = new GraphEngineServiceClientCtor(authority, credentials);
     this.#events = new EventServiceClientCtor(authority, credentials);
     this.#settings = new SettingsServiceClientCtor(authority, credentials);
+    this.#tools = new ToolServiceClientCtor(authority, credentials);
+    this.#storage = new StorageServiceClientCtor(authority, credentials);
   }
 
   // ── session state ──
@@ -302,6 +350,120 @@ export class ThewayGrpcClient {
     }
   }
 
+  // ── tool operations ──
+
+  /** `ReadFile` — read a file with line pagination. */
+  toolRead(request: ReadFileRequest): Promise<ReadFileResponse> {
+    return this.#call<ReadFileRequest, ReadFileResponse>(this.#tools.readFile.bind(this.#tools), 'ReadFile', request);
+  }
+
+  /** `WriteFile` — write a file. */
+  toolWrite(request: WriteFileRequest): Promise<WriteFileResponse> {
+    return this.#call<WriteFileRequest, WriteFileResponse>(this.#tools.writeFile.bind(this.#tools), 'WriteFile', request);
+  }
+
+  /** `EditFile` — search-and-replace edit. */
+  toolEdit(request: EditFileRequest): Promise<EditFileResponse> {
+    return this.#call<EditFileRequest, EditFileResponse>(this.#tools.editFile.bind(this.#tools), 'EditFile', request);
+  }
+
+  /** `ExecCommand` — streaming shell execution. */
+  toolExec(request: ExecCommandRequest) {
+    return this.#tools.execCommand(request);
+  }
+
+  /** `ListDir` — list one directory level. */
+  toolListDir(request: ListDirRequest): Promise<ListDirResponse> {
+    return this.#call<ListDirRequest, ListDirResponse>(this.#tools.listDir.bind(this.#tools), 'ListDir', request);
+  }
+
+  /** `Grep` — regex content search. */
+  toolGrep(request: GrepRequest): Promise<GrepResponse> {
+    return this.#call<GrepRequest, GrepResponse>(this.#tools.grep.bind(this.#tools), 'Grep', request);
+  }
+
+  /** `Find` — filename-glob search. */
+  toolFind(request: FindRequest): Promise<FindResponse> {
+    return this.#call<FindRequest, FindResponse>(this.#tools.find.bind(this.#tools), 'Find', request);
+  }
+
+  /** `MemorySave` — save a memory entry. */
+  toolMemorySave(request: MemorySaveRequest): Promise<MemorySaveResponse> {
+    return this.#call<MemorySaveRequest, MemorySaveResponse>(this.#tools.memorySave.bind(this.#tools), 'MemorySave', request);
+  }
+
+  /** `MemoryList` — list memory entries. */
+  toolMemoryList(request: MemoryListRequest): Promise<MemoryListResponse> {
+    return this.#call<MemoryListRequest, MemoryListResponse>(this.#tools.memoryList.bind(this.#tools), 'MemoryList', request);
+  }
+
+  /** `MemoryRead` — read one memory entry. */
+  toolMemoryRead(request: MemoryReadRequest): Promise<MemoryReadResponse> {
+    return this.#call<MemoryReadRequest, MemoryReadResponse>(this.#tools.memoryRead.bind(this.#tools), 'MemoryRead', request);
+  }
+
+  /** `MemoryForget` — forget a memory entry. */
+  toolMemoryForget(request: MemoryForgetRequest): Promise<MemoryForgetResponse> {
+    return this.#call<MemoryForgetRequest, MemoryForgetResponse>(this.#tools.memoryForget.bind(this.#tools), 'MemoryForget', request);
+  }
+
+  /** `SkillInstall` — two-phase skill install. */
+  toolSkillInstall(request: SkillInstallRequest): Promise<SkillInstallResponse> {
+    return this.#call<SkillInstallRequest, SkillInstallResponse>(this.#tools.skillInstall.bind(this.#tools), 'SkillInstall', request);
+  }
+
+  // ── runtime state storage ──
+
+  /** `StorageService.ListSessions` — session list from external storage. */
+  stateListSessions(request: Empty): Promise<import('./generated/session.js').ListSessionsResponse> {
+    return this.#call<Empty, import('./generated/session.js').ListSessionsResponse>(this.#storage.listSessions.bind(this.#storage), 'ListSessions', request);
+  }
+
+  /** `StorageService.CreateSession` — create a session in external storage. */
+  stateCreateSession(request: CreateSessionRequest): Promise<CreateSessionResponse> {
+    return this.#call<CreateSessionRequest, CreateSessionResponse>(this.#storage.createSession.bind(this.#storage), 'CreateSession', request);
+  }
+
+  /** `StorageService.RenameSession` — rename a session in external storage. */
+  stateRenameSession(request: RenameSessionRequest): Promise<CommandResult> {
+    return this.#call<RenameSessionRequest, CommandResult>(this.#storage.renameSession.bind(this.#storage), 'RenameSession', request);
+  }
+
+  /** `StorageService.DeleteSession` — delete a session in external storage. */
+  stateDeleteSession(request: DeleteSessionRequest): Promise<DeleteSessionResponse> {
+    return this.#call<DeleteSessionRequest, DeleteSessionResponse>(this.#storage.deleteSession.bind(this.#storage), 'DeleteSession', request);
+  }
+
+  /** `StorageService.SaveDagRun` — persist a DAG run. */
+  stateSaveDagRun(request: SaveDagRunRequest): Promise<SaveDagRunResponse> {
+    return this.#call<SaveDagRunRequest, SaveDagRunResponse>(this.#storage.saveDagRun.bind(this.#storage), 'SaveDagRun', request);
+  }
+
+  /** `StorageService.LoadDagRuns` — load persisted DAG runs. */
+  stateLoadDagRuns(request: LoadDagRunsRequest): Promise<LoadDagRunsResponse> {
+    return this.#call<LoadDagRunsRequest, LoadDagRunsResponse>(this.#storage.loadDagRuns.bind(this.#storage), 'LoadDagRuns', request);
+  }
+
+  /** `StorageService.SaveTriggerRules` — persist trigger rules. */
+  stateSaveTriggerRules(request: SaveTriggerRulesRequest): Promise<SaveTriggerRulesResponse> {
+    return this.#call<SaveTriggerRulesRequest, SaveTriggerRulesResponse>(this.#storage.saveTriggerRules.bind(this.#storage), 'SaveTriggerRules', request);
+  }
+
+  /** `StorageService.LoadTriggerRules` — load persisted trigger rules. */
+  stateLoadTriggerRules(request: LoadTriggerRulesRequest): Promise<LoadTriggerRulesResponse> {
+    return this.#call<LoadTriggerRulesRequest, LoadTriggerRulesResponse>(this.#storage.loadTriggerRules.bind(this.#storage), 'LoadTriggerRules', request);
+  }
+
+  /** `StorageService.SaveCronJobs` — persist cron jobs. */
+  stateSaveCronJobs(request: SaveCronJobsRequest): Promise<SaveCronJobsResponse> {
+    return this.#call<SaveCronJobsRequest, SaveCronJobsResponse>(this.#storage.saveCronJobs.bind(this.#storage), 'SaveCronJobs', request);
+  }
+
+  /** `StorageService.LoadCronJobs` — load persisted cron jobs. */
+  stateLoadCronJobs(request: LoadCronJobsRequest): Promise<LoadCronJobsResponse> {
+    return this.#call<LoadCronJobsRequest, LoadCronJobsResponse>(this.#storage.loadCronJobs.bind(this.#storage), 'LoadCronJobs', request);
+  }
+
   // ── event stream ──
 
   /**
@@ -358,6 +520,8 @@ export class ThewayGrpcClient {
     this.#graph.close();
     this.#events.close();
     this.#settings.close();
+    this.#tools.close();
+    this.#storage.close();
   }
 
   // ── private helpers ──

@@ -18,6 +18,8 @@ export * from './generated/events.js';
 export * from './generated/graph_engine.js';
 export * from './generated/session.js';
 export * from './generated/settings.js';
+export * from './generated/tools.js';
+export * from './generated/state.js';
 export {
   HealthCheckResponse_ServingStatus,
   healthCheckResponse_ServingStatusFromJSON,
