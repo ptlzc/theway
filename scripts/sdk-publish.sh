@@ -12,7 +12,10 @@
 #   4. npm publish (registry 取 sdk/package.json 的 publishConfig = 内网 Nexus)
 #   5. commit 版本号 + push origin main (gitlab 镜像请手动补推)
 #
-# 鉴权: 发布机 ~/.npmrc 需含 //registry.npmjs.org/... 的 _authToken。
+# 鉴权 (二选一):
+#   - 发布机 ~/.npmrc 含 //registry.npmjs.org/... 的 _authToken (需 nx-npm-theway-ai 角色)
+#   - NEXUS_AUTH 环境变量 = base64("user:pass") (resource-broker 资源 #332 的凭证,
+#     脚本用它生成临时 userconfig, 不动 ~/.npmrc)
 # =============================================================================
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -56,9 +59,16 @@ if npm view "$PKG@$NEW" version >/dev/null 2>&1; then
   exit 1
 fi
 
-# 5. 发布到内网 Nexus
+# 5. 发布到内网 Nexus (NEXUS_AUTH=base64(user:pass) 时用临时 userconfig)
 echo "[sdk-publish] publish $PKG $CUR -> $NEW"
-(cd sdk && npm publish)
+if [ -n "${NEXUS_AUTH:-}" ]; then
+  TMP_NPMRC="$(mktemp)"
+  trap 'rm -f "$TMP_NPMRC"' EXIT
+  printf 'registry=https://registry.npmjs.org/repository/npm-private/\n//registry.npmjs.org/repository/npm-private/:_auth=%s\nalways-auth=true\n' "$NEXUS_AUTH" > "$TMP_NPMRC"
+  (cd sdk && npm publish --userconfig "$TMP_NPMRC")
+else
+  (cd sdk && npm publish)
+fi
 
 # 6. commit 版本号并推送
 git add sdk/package.json sdk/package-lock.json
