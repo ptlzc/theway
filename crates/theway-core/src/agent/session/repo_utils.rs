@@ -66,3 +66,6 @@ pub async fn get_entries_to_fork(
     };
     storage.get_path_to_root(effective_leaf.as_deref()).await
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("agent/session/repo_utils");

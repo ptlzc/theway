@@ -56,3 +56,6 @@ pub async fn summarize_branch(
         usage: out.usage,
     })
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("agent/compaction/branch_summarization");

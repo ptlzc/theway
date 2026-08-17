@@ -62,3 +62,6 @@ impl JobStatus {
         (*self).into()
     }
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("multiagent/registry/events");

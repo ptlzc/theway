@@ -57,3 +57,6 @@ impl Default for MemorySessionRepo {
         Self::new()
     }
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("agent/session/memory_repo");

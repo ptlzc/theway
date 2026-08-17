@@ -28,3 +28,6 @@ pub fn custom(role: impl Into<String>, payload: serde_json::Value) -> AgentMessa
         payload,
     })
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("agent/messages");
