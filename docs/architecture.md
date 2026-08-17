@@ -256,11 +256,13 @@ frame.
 The server side delegates to the `ToolOps` handler seam
 (`theway_transport::transport`): the transport crate converts proto
 messages to the `WireTool*` serde twins (`crate::tools` codecs) and stays
-free of FS/process policy; the daemon kernel implements the seam against
-its execution environment (the `ToolExecutor` seam + memory/skills
-directories) in the issue #70 P3 phase. Until then the daemon wires the
-`UnavailableToolOps` placeholder and every call reports the gap cleanly
-(`INTERNAL` / `-32000`).
+free of FS/process policy. The daemon wires `ForwardingToolOps`
+(`crates/theway-daemon/src/forwarding_tool_ops.rs`): it reads the
+controller's `tool_service_addr` from the shared daemon config and
+forwards every file/process operation to that endpoint. The TUI/controller
+serves the endpoint with `LocalToolOps`
+(`crates/theway-tui/src/local_tool_ops.rs`), which executes read/write/
+edit/exec/list/grep/find/memory/skill-install on the client side.
 
 The HTTP/WS surfaces expose the same operations as unary JSON-RPC methods
 (`tool.read_file` / `tool.write_file` / `tool.edit_file` /
@@ -273,18 +275,17 @@ The HTTP/WS surfaces expose the same operations as unary JSON-RPC methods
 
 ### Executors and the tool policy
 
-The kernel execution backend is a cargo feature:
+Issue #78: the daemon no longer executes file/process operations locally.
+File/tool operations are forwarded over the transport to the controller's
+`ToolService` endpoint; the controller-side executor is the one that
+touches the local filesystem and process table. The daemon's `local` /
+`sandbox` cargo features are retained as compatibility names for the
+controller-side executor selection; the daemon build itself is
+execution-agnostic and delegates through `ForwardingToolOps`.
 
-- `local` (default): `crate::executor::local::LocalExecutor` drives tools
-  straight against the local filesystem (`tokio::fs`) and process table
-  (`tokio::process`).
-- `sandbox`: `crate::executor::sandbox::SandboxExecutor` — every operation
-  answers with an explicit `ExecutorError::UnsupportedKind` (the seam is
-  wired; each call fails fast rather than touching the host).
-
-`crate::executor::default_executor()` picks the executor by feature
-(`local` wins when both are enabled); a build with neither feature is a
-compile error.
+The legacy `crate::executor::local::LocalExecutor` / `SandboxExecutor`
+implementations remain for tests and controller-side embedding, but the
+daemon's tool-operation surface no longer calls them directly.
 
 All tool bodies live in `src/tools/`. The policy splits them by how they
 reach the OS:

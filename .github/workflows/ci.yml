@@ -118,11 +118,9 @@ jobs:
   # L0 feature 门控 — 验证 harness 特性关闭时 core 仍可编译
   # (assembly gated, run_loop ungated)。
   #
-  # daemon 执行后端矩阵 (issue #64, sandbox fail-closed):
-  # - default (`local`): 全量工具集仍编译;
-  # - sandbox-only: 直接触碰本机 FS/进程的工具不再注册,所有 targets
-  #   (含测试) 必须编译,且 sandbox 门控集成测试必须通过;
-  # - all-features: local + sandbox 共存时 local 后端优先,编译不受影响。
+  # daemon 执行后端矩阵 (issue #78): daemon 不再本地执行文件/进程操作,
+  # 工具操作转发给 controller 的 ToolService。`local` / `sandbox` 保留为
+  # 兼容性 feature 名称,矩阵仍验证 default/sandbox-only/all-features 编译。
   # ----------------------------------------------------------------
   feature-gate-check:
     name: feature-gate-check

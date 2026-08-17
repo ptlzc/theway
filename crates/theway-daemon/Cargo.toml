@@ -14,10 +14,11 @@ name = "theway_daemon"
 path = "src/lib.rs"
 
 [features]
-# Kernel execution backends (daemon-kernel-layers): the daemon is the single
-# kernel; `local` drives tools straight against the local FS + process table
-# (LocalExecutor + NativeEnv), `sandbox` injects a sandbox executor stub. Both
-# features share the same tool bodies and assembly.
+# Controller-side execution modes (issue #78): the daemon no longer executes
+# file/process operations locally — they are forwarded to the controller's
+# ToolService endpoint. `local` / `sandbox` are retained as compatibility
+# feature names for the controller-side executor selection; the daemon build
+# itself is execution-agnostic.
 default = ["local"]
 local = []
 sandbox = []
