@@ -244,10 +244,14 @@ pub trait ExecutionEnv: Send + Sync {
 pub enum SkillSource {
     /// Bundled with the `theway` binary; lowest precedence.
     Builtin,
-    /// `~/.theway/skills/` — user-global. Default for directly-constructed skills.
+    /// User-global roots — `<base>/skills` (the native install target,
+    /// scanned first among user roots) and the `$HOME` skill roots. Default
+    /// for directly-constructed skills.
     #[default]
     User,
-    /// `<cwd>/.theway/skills/` — project-local; highest precedence.
+    /// Project-local roots under the work dir (`.agents` / `.theway` /
+    /// `.codex` / `.claude`). Precedes every user root; controller-supplied
+    /// `--skills-dir` extras rank higher still.
     Project,
 }
 

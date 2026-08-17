@@ -1,33 +1,38 @@
-//! End-to-end test for the CLI's skills loader wiring.
+//! End-to-end test for the daemon's skills loader wiring.
 //!
-//! Strategy: simulate the dual-root layout (user-global at `~/.theway/skills/<name>/SKILL.md` +
-//! project-local at `<cwd>/.theway/skills/<name>/SKILL.md`) using a tempdir as the home (`THEWAY_DIR`)
-//! and a separate tempdir as the project cwd. Then run the same loader the CLI runs and assert:
-//!   1. Both skills are loaded.
-//!   2. When user + project define the same skill name, project wins.
+//! Strategy: simulate the root layout — controller extras (`--skills-dir`), project roots
+//! under the work dir, the native install target `<base>/skills`, and the `$HOME` roots —
+//! using tempdirs for home/base/work-dir. Then run the same loader order the daemon runs
+//! and assert:
+//!   1. Skills from every tier are loaded and tagged with the right source.
+//!   2. First-wins on a shared name, in priority order: extras > project > `<base>/skills`
+//!      (install target) > home roots (issues #37 + #66).
 //!   3. Loaded skills are stitched into the final harness system prompt.
 //!
 //! This exercises the public surface only — no direct calls into the harness-internal walker.
-//! If the CLI ever changes how it picks the roots, this test catches it.
+//! If the daemon ever changes how it picks the roots, this test catches it.
 //!
 //! Local-only suite: the loader mirror walks the FS through `NativeEnv`, which is
 //! compiled out of sandbox-only builds (issue #64).
 #![cfg(feature = "local")]
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use tempfile::TempDir;
 use theway_core::{
     AgentHarness, AgentHarnessOptions, MemorySessionStorage, Session, ThinkingLevel,
 };
+use theway_daemon::DaemonPaths;
 
-/// Re-import the binary's skills module by compiling it as a path-include. The crate has a
-/// `[[bin]]` and no `[lib]`, so we recreate the relevant logic verbatim here. Keeping it
-/// duplicated lets us test the loader without restructuring the crate; if the duplicate drifts,
-/// the test fails the next time we touch it.
+/// Mirror of the daemon's `skills` module loader. The ordering is duplicated verbatim from
+/// `theway_daemon::skills::skills_dirs` so the suite also catches accidental drift between
+/// the mirror and the real function (a direct ordering assertion on the real function lives
+/// in [`real_skills_dirs_order_matches_contract`]).
 mod skills_mirror {
-    use std::path::Path;
+    use std::path::PathBuf;
+
     use theway_core::{Skill, SkillDiagnostic, SkillSource, load_skills};
+    use theway_daemon::DaemonPaths;
     use theway_daemon::env::native::NativeEnv;
     use tokio_util::sync::CancellationToken;
 
@@ -36,25 +41,41 @@ mod skills_mirror {
         pub diagnostics: Vec<SkillDiagnostic>,
     }
 
-    pub async fn load_all(cwd: &Path, base_dir: &Path) -> LoadedSkills {
-        let env = NativeEnv::new(cwd.to_string_lossy().to_string());
+    pub async fn load_all(paths: &DaemonPaths) -> LoadedSkills {
+        let env = NativeEnv::new(paths.work_dir.to_string_lossy().to_string());
         let cancel = CancellationToken::new();
         let mut combined = Vec::<Skill>::new();
         let mut diagnostics = Vec::<SkillDiagnostic>::new();
-        // Mirror the real `skills::load_all`: scan roots in priority order
-        // (project before user, `.agents` before the other project roots)
-        // and keep the first copy of each name — `.agents` has the highest
-        // weight (issue #37).
-        let roots = [
-            (cwd.join(".agents").join("skills"), SkillSource::Project),
-            (cwd.join(".theway").join("skills"), SkillSource::Project),
-            (cwd.join(".codex").join("skills"), SkillSource::Project),
-            (cwd.join(".claude").join("skills"), SkillSource::Project),
-            (base_dir.join(".agents").join("skills"), SkillSource::User),
-            (base_dir.join("skills"), SkillSource::User),
-            (base_dir.join(".codex").join("skills"), SkillSource::User),
-            (base_dir.join(".claude").join("skills"), SkillSource::User),
-        ];
+        // Mirror the real `skills::load_all` root order (issue #66): controller
+        // extras (`--skills-dir`) first, then the project roots under the work
+        // dir (`.agents` before the other project roots), then `<base>/skills`
+        // (the install target), then the home roots; the first copy of each
+        // name wins (issue #37).
+        let mut roots: Vec<(PathBuf, SkillSource)> = Vec::new();
+        for extra in &paths.extra_skill_dirs {
+            roots.push((extra.clone(), SkillSource::User));
+        }
+        roots.push((
+            paths.work_dir.join(".agents").join("skills"),
+            SkillSource::Project,
+        ));
+        roots.push((
+            paths.work_dir.join(".theway").join("skills"),
+            SkillSource::Project,
+        ));
+        roots.push((
+            paths.work_dir.join(".codex").join("skills"),
+            SkillSource::Project,
+        ));
+        roots.push((
+            paths.work_dir.join(".claude").join("skills"),
+            SkillSource::Project,
+        ));
+        roots.push((paths.skills_root(), SkillSource::User));
+        roots.push((paths.home.join(".agents").join("skills"), SkillSource::User));
+        roots.push((paths.home.join("skills"), SkillSource::User));
+        roots.push((paths.home.join(".codex").join("skills"), SkillSource::User));
+        roots.push((paths.home.join(".claude").join("skills"), SkillSource::User));
         for (dir, source) in roots {
             let s = dir.to_string_lossy().to_string();
             let out = load_skills(&env, &[s.as_str()], cancel.clone()).await;
@@ -73,6 +94,18 @@ mod skills_mirror {
     }
 }
 
+/// Build a plain [`DaemonPaths`] without touching the env (`from_cli` reads
+/// `HOME` / `THEWAY_DIR`; tests supply every root explicitly).
+fn daemon_paths(home: &Path, base: &Path, work_dir: &Path, extras: Vec<PathBuf>) -> DaemonPaths {
+    DaemonPaths {
+        base: base.to_path_buf(),
+        home: home.to_path_buf(),
+        work_dir: work_dir.to_path_buf(),
+        extra_skill_dirs: extras,
+    }
+}
+
+/// Write `<root>/skills/<name>/SKILL.md`.
 fn write_skill(root: &Path, name: &str, description: &str, body: &str) {
     let dir = root.join("skills").join(name);
     std::fs::create_dir_all(&dir).unwrap();
@@ -101,9 +134,10 @@ fn faux_model() -> theway_llm_provider::Model {
 #[tokio::test]
 async fn project_skill_overrides_user_skill_with_same_name() {
     let home = TempDir::new().unwrap();
+    let base = TempDir::new().unwrap();
     let cwd = TempDir::new().unwrap();
 
-    // user-global skill
+    // user-global skill (home root `<home>/skills`)
     write_skill(home.path(), "shared", "user-version", "USER BODY");
     // project-local skill with same name — should win
     write_skill(
@@ -115,7 +149,8 @@ async fn project_skill_overrides_user_skill_with_same_name() {
     // user-only skill (no project counterpart)
     write_skill(home.path(), "only-user", "user-only", "ONLY USER BODY");
 
-    let loaded = skills_mirror::load_all(cwd.path(), home.path()).await;
+    let paths = daemon_paths(home.path(), base.path(), cwd.path(), Vec::new());
+    let loaded = skills_mirror::load_all(&paths).await;
     assert!(
         loaded.diagnostics.is_empty(),
         "unexpected diagnostics: {:#?}",
@@ -182,8 +217,10 @@ async fn project_skill_overrides_user_skill_with_same_name() {
 #[tokio::test]
 async fn missing_roots_load_cleanly() {
     let home = TempDir::new().unwrap();
+    let base = TempDir::new().unwrap();
     let cwd = TempDir::new().unwrap();
-    let loaded = skills_mirror::load_all(cwd.path(), home.path()).await;
+    let paths = daemon_paths(home.path(), base.path(), cwd.path(), Vec::new());
+    let loaded = skills_mirror::load_all(&paths).await;
     assert!(loaded.skills.is_empty());
     assert!(
         loaded.diagnostics.is_empty(),
@@ -196,13 +233,15 @@ async fn missing_roots_load_cleanly() {
 async fn loader_tags_skill_source_per_root() {
     use theway_core::SkillSource;
     let home = TempDir::new().unwrap();
+    let base = TempDir::new().unwrap();
     let cwd = TempDir::new().unwrap();
 
     // One skill in each root, distinct names so no shadowing.
     write_skill(home.path(), "user-skill", "u", "USER");
     write_skill(&cwd.path().join(".theway"), "project-skill", "p", "PROJECT");
 
-    let loaded = skills_mirror::load_all(cwd.path(), home.path()).await;
+    let paths = daemon_paths(home.path(), base.path(), cwd.path(), Vec::new());
+    let loaded = skills_mirror::load_all(&paths).await;
 
     let user = loaded
         .skills
@@ -218,7 +257,7 @@ async fn loader_tags_skill_source_per_root() {
     assert_eq!(
         user.source,
         SkillSource::User,
-        "skill from ~/.theway/skills must be tagged User"
+        "skill from the $HOME skill roots must be tagged User"
     );
     assert_eq!(
         project.source,
@@ -234,6 +273,7 @@ async fn loader_tags_skill_source_per_root() {
 async fn loader_tags_project_source_when_project_shadows_user() {
     use theway_core::SkillSource;
     let home = TempDir::new().unwrap();
+    let base = TempDir::new().unwrap();
     let cwd = TempDir::new().unwrap();
 
     // Same name in both roots — project wins, and the surviving entry must carry the
@@ -246,7 +286,8 @@ async fn loader_tags_project_source_when_project_shadows_user() {
         "PROJECT BODY",
     );
 
-    let loaded = skills_mirror::load_all(cwd.path(), home.path()).await;
+    let paths = daemon_paths(home.path(), base.path(), cwd.path(), Vec::new());
+    let loaded = skills_mirror::load_all(&paths).await;
     let shared = loaded.skills.iter().find(|s| s.name == "shared").unwrap();
     assert_eq!(
         shared.source,
@@ -258,6 +299,7 @@ async fn loader_tags_project_source_when_project_shadows_user() {
 #[tokio::test]
 async fn agents_skills_have_highest_weight_first_wins() {
     let home = TempDir::new().unwrap();
+    let base = TempDir::new().unwrap();
     let cwd = TempDir::new().unwrap();
 
     // Same name across .agents / .codex / .claude: the .agents copy is
@@ -281,7 +323,8 @@ async fn agents_skills_have_highest_weight_first_wins() {
         "CLAUDE BODY",
     );
 
-    let loaded = skills_mirror::load_all(cwd.path(), home.path()).await;
+    let paths = daemon_paths(home.path(), base.path(), cwd.path(), Vec::new());
+    let loaded = skills_mirror::load_all(&paths).await;
     assert!(
         loaded.diagnostics.is_empty(),
         "unexpected diagnostics: {:#?}",
@@ -295,7 +338,152 @@ async fn agents_skills_have_highest_weight_first_wins() {
     assert_eq!(shared.len(), 1, "only the first copy may be kept");
     assert_eq!(
         shared[0].description, "agents-version",
-        ".agents has the highest weight and must win"
+        ".agents has the highest weight among the project roots and must win"
     );
     assert!(shared[0].content.contains("AGENTS BODY"));
+}
+
+#[tokio::test]
+async fn base_skills_are_discovered_and_tagged_user() {
+    use theway_core::SkillSource;
+    let home = TempDir::new().unwrap();
+    let base = TempDir::new().unwrap();
+    let cwd = TempDir::new().unwrap();
+
+    // The native install target: `<base>/skills/<name>/SKILL.md`. Issue #66: this root was
+    // never scanned before, so an installed skill never showed up — now it must.
+    write_skill(base.path(), "installed", "installed-desc", "INSTALLED BODY");
+
+    let paths = daemon_paths(home.path(), base.path(), cwd.path(), Vec::new());
+    let loaded = skills_mirror::load_all(&paths).await;
+    assert!(
+        loaded.diagnostics.is_empty(),
+        "unexpected diagnostics: {:#?}",
+        loaded.diagnostics
+    );
+    let installed = loaded
+        .skills
+        .iter()
+        .find(|s| s.name == "installed")
+        .expect("skill under <base>/skills (install target) must be discovered");
+    assert_eq!(
+        installed.source,
+        SkillSource::User,
+        "skill from <base>/skills must be tagged User"
+    );
+    assert!(installed.content.contains("INSTALLED BODY"));
+}
+
+#[tokio::test]
+async fn extra_dir_skill_beats_project_root_same_name() {
+    let home = TempDir::new().unwrap();
+    let base = TempDir::new().unwrap();
+    let cwd = TempDir::new().unwrap();
+    let extra = TempDir::new().unwrap();
+
+    // An extra `--skills-dir` root is a skills directory itself: drop
+    // `<name>/SKILL.md` directly inside it.
+    let extra_root = extra.path().join("skills");
+    write_skill(extra.path(), "shared", "extra-version", "EXTRA BODY");
+    // Same name under the two strongest project roots.
+    write_skill(
+        &cwd.path().join(".agents"),
+        "shared",
+        "agents-version",
+        "AGENTS BODY",
+    );
+    write_skill(
+        &cwd.path().join(".theway"),
+        "shared",
+        "project-version",
+        "PROJECT BODY",
+    );
+
+    let paths = daemon_paths(
+        home.path(),
+        base.path(),
+        cwd.path(),
+        vec![extra_root.clone()],
+    );
+    let loaded = skills_mirror::load_all(&paths).await;
+    let shared: Vec<&theway_core::Skill> = loaded
+        .skills
+        .iter()
+        .filter(|s| s.name == "shared")
+        .collect();
+    assert_eq!(shared.len(), 1, "only the first copy may be kept");
+    assert_eq!(
+        shared[0].description, "extra-version",
+        "--skills-dir extras are controller-explicit and must beat project roots"
+    );
+    assert!(shared[0].content.contains("EXTRA BODY"));
+    // The surviving copy comes from the extra root, not a project root.
+    assert!(
+        shared[0]
+            .file_path
+            .starts_with(&extra_root.to_string_lossy().into_owned()),
+        "winning skill must come from the extra dir: {}",
+        shared[0].file_path
+    );
+}
+
+#[tokio::test]
+async fn base_skills_beat_home_skills_same_name() {
+    let home = TempDir::new().unwrap();
+    let base = TempDir::new().unwrap();
+    let cwd = TempDir::new().unwrap();
+
+    // Same name in the install target `<base>/skills` and the `<home>/skills` root:
+    // base is scanned first among the user roots and must win (issue #66).
+    write_skill(base.path(), "shared", "base-version", "BASE BODY");
+    write_skill(home.path(), "shared", "home-version", "HOME BODY");
+
+    let paths = daemon_paths(home.path(), base.path(), cwd.path(), Vec::new());
+    let loaded = skills_mirror::load_all(&paths).await;
+    let shared: Vec<&theway_core::Skill> = loaded
+        .skills
+        .iter()
+        .filter(|s| s.name == "shared")
+        .collect();
+    assert_eq!(shared.len(), 1, "only the first copy may be kept");
+    assert_eq!(
+        shared[0].description, "base-version",
+        "<base>/skills (install target) is scanned before the home roots and must win"
+    );
+    assert!(shared[0].content.contains("BASE BODY"));
+}
+
+#[test]
+fn real_skills_dirs_order_matches_contract() {
+    use theway_core::SkillSource;
+    use theway_daemon::skills::skills_dirs;
+
+    // Assert the REAL function's ordering (not the mirror's): extras first, then the
+    // project roots in #37 order, then `<base>/skills` ahead of the home roots (issue #66).
+    let paths = daemon_paths(
+        Path::new("/h"),
+        Path::new("/b"),
+        Path::new("/w"),
+        vec![PathBuf::from("/x1"), PathBuf::from("/x2")],
+    );
+    let dirs: Vec<(String, SkillSource)> = skills_dirs(&paths)
+        .into_iter()
+        .map(|(p, s)| (p.to_string_lossy().into_owned(), s))
+        .collect();
+    assert_eq!(
+        dirs,
+        vec![
+            ("/x1".to_string(), SkillSource::User),
+            ("/x2".to_string(), SkillSource::User),
+            ("/w/.agents/skills".to_string(), SkillSource::Project),
+            ("/w/.theway/skills".to_string(), SkillSource::Project),
+            ("/w/.codex/skills".to_string(), SkillSource::Project),
+            ("/w/.claude/skills".to_string(), SkillSource::Project),
+            ("/b/skills".to_string(), SkillSource::User),
+            ("/h/.agents/skills".to_string(), SkillSource::User),
+            ("/h/skills".to_string(), SkillSource::User),
+            ("/h/.codex/skills".to_string(), SkillSource::User),
+            ("/h/.claude/skills".to_string(), SkillSource::User),
+        ]
+    );
 }

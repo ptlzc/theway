@@ -202,6 +202,12 @@ pub struct SessionMetadata {
 pub struct JsonlSessionMetadata {
     #[serde(flatten)]
     pub base: SessionMetadata,
+    /// The session's work_dir: the daemon's work_dir captured at creation time
+    /// (`SessionOps::create` inherits it), binding the session to that
+    /// directory. On switch the daemon validates the target session's work_dir
+    /// matches its own (`SessionHarnessFactory::build`, issue #66 node 3);
+    /// legacy sessions may lack it and are treated as compatible. Wire /
+    /// metadata field name stays `cwd`.
     pub cwd: String,
     pub path: String,
     #[serde(

@@ -49,9 +49,10 @@
 //! ## Discovery
 //!
 //! `<cwd>/.theway/extensions/*.ts` (project-local, wins on name collision) then
-//! `$THEWAY_DIR/extensions/*.ts` (default `~/.theway/...`). The file stem is the
-//! extension name. Files without a valid `kind` export are skipped with a diagnostic
-//! (never fatal).
+//! `<base>/extensions/*.ts`, where `base` is the user-global theway base dir
+//! resolved once at the CLI boundary (`DaemonPaths::base`, issue #66) and passed
+//! into [`ExtensionRegistry::discover`]. The file stem is the extension name.
+//! Files without a valid `kind` export are skipped with a diagnostic (never fatal).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -136,25 +137,23 @@ impl ExtensionRegistry {
         }
     }
 
-    /// The theway base dir: `${THEWAY_DIR}` or `~/.theway` — the single
-    /// `theway_contract::config` implementation (issue #64).
-    fn base_dir() -> PathBuf {
-        theway_contract::config::base_dir()
-    }
-
     /// Extension dirs in precedence order (first wins on name collision).
-    fn extension_dirs(cwd: &Path) -> Vec<PathBuf> {
+    /// `base` is the user-global theway base dir (issue #66: resolved at the
+    /// CLI boundary as `DaemonPaths::base`; the kernel never reads
+    /// `THEWAY_DIR` itself).
+    fn extension_dirs(cwd: &Path, base: &Path) -> Vec<PathBuf> {
         vec![
             cwd.join(".theway").join("extensions"),
-            Self::base_dir().join("extensions"),
+            base.join("extensions"),
         ]
     }
 
     /// Scan both extension dirs for `*.ts` files. Project-local files shadow user-global
     /// files of the same stem. Invalid files are skipped with a diagnostic, never fatal.
-    pub fn discover(cwd: &Path) -> Self {
+    /// `base` is the user-global theway base dir (`DaemonPaths::base`).
+    pub fn discover(cwd: &Path, base: &Path) -> Self {
         let mut registry = Self::new();
-        for dir in Self::extension_dirs(cwd) {
+        for dir in Self::extension_dirs(cwd, base) {
             let entries = match std::fs::read_dir(&dir) {
                 Ok(e) => e,
                 Err(_) => continue, // dir absent — fine

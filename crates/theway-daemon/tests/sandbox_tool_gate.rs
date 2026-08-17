@@ -130,6 +130,7 @@ fn engine_tools_omit_direct_fs_writers_but_keep_read_only_skill_surface() {
     let model = faux_model();
     let tools = assembly::engine_tools(
         std::path::Path::new("/nonexistent-memory-dir"),
+        std::path::Path::new("/nonexistent-theway-base"),
         &dag_engine,
         &registry,
         Arc::new(move |_spec: &str| Vec::<Arc<dyn AgentTool>>::new()),
@@ -165,6 +166,7 @@ fn session_tool_set_assembly_is_fail_closed() {
     let model = faux_model();
     let tools = tools::session_tool_set(
         std::path::Path::new("/nonexistent-memory-dir"),
+        std::path::Path::new("/nonexistent-theway-base"),
         &dag_engine,
         &registry,
         &model,
@@ -215,6 +217,7 @@ fn session_tool_set_assembly_is_fail_closed() {
 fn subagent_tool_sets_omit_direct_os_tools_for_every_spec() {
     let resolver = tools::subagent_tool_sets(
         std::path::Path::new("/nonexistent-memory-dir").to_path_buf(),
+        std::path::Path::new("/nonexistent-theway-base").to_path_buf(),
         harness_cell(),
         sandbox_exec(),
     );

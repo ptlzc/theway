@@ -354,6 +354,20 @@ By default, `theway` stores local state under `~/.theway`:
 
 Set `THEWAY_DIR` to use a different base directory.
 
+The daemon resolves its host paths once at startup (the `thewayd` CLI
+boundary: `--cwd`, `--home`, repeatable `--skills-dir`; `$THEWAY_DIR` /
+`$HOME` are consulted only there). Skills are scanned in priority order,
+first-loaded wins on a name collision: `--skills-dir` extras > project roots
+(`<work_dir>/{.agents,.theway,.codex,.claude}/skills`) > `<base>/skills` —
+the target of `install_skill` / `skill_builder` / `remove_skill`, so
+installed skills are discovered by the next load/reload — > the home roots
+under `$HOME`. A session is bound to its daemon's work dir: switching to a
+session recorded under a different directory is refused. One deliberate
+exception stays env-driven: the per-cwd daemon port-file discovery
+(`<base>/daemon-port-<cwd-hash>`), which the client derives the same way.
+See [Daemon path context](docs/architecture.md#daemon-path-context) in
+[docs/architecture.md](docs/architecture.md).
+
 ## Workspace layout
 
 | Crate | Package | What |

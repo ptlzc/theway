@@ -184,6 +184,7 @@ pub fn subagent_tool(
     stream_fn: Option<theway_core::StreamFn>,
     registry: AgentJobRegistry,
     memory_dir: PathBuf,
+    base_dir: PathBuf,
     skill_harness_cell: SkillHarnessCell,
     session_id: Option<String>,
     executor: Arc<dyn ToolExecutor>,
@@ -192,7 +193,7 @@ pub fn subagent_tool(
         subagent::SubagentTool::new(
             model,
             stream_fn,
-            subagent_tool_sets(memory_dir, skill_harness_cell, executor),
+            subagent_tool_sets(memory_dir, base_dir, skill_harness_cell, executor),
             crate::agent_specs::launch_resolver(),
             crate::agent_specs::spec_names(),
             registry,
@@ -206,13 +207,17 @@ pub fn subagent_tool(
 /// orchestration tools (`subagent` / `dag_*`) plus local tools — assembled kernel-side,
 /// [`crate::tools::assembly::subagent_tools`]. Per-spec tool differences are gone;
 /// behavior is defined by the spec's system prompt and the parent's task prompt.
+/// `base_dir` is the theway base dir (issue #66: `DaemonPaths::base`) for the skill
+/// family's host paths.
 pub fn subagent_tool_sets(
     memory_dir: PathBuf,
+    base_dir: PathBuf,
     skill_harness_cell: SkillHarnessCell,
     executor: Arc<dyn ToolExecutor>,
 ) -> ToolSetResolver {
     assembly::subagent_tools(
         &memory_dir,
+        &base_dir,
         &skill_harness_cell,
         // The kernel-side local-tools factory closes over the daemon's executor, so every
         // subagent / DAG-node tool set dispatches through the same execution environment.
@@ -221,6 +226,8 @@ pub fn subagent_tool_sets(
 }
 
 /// Build a DAG node launcher wired to `engine`, with the app-layer tool-set resolver.
+/// `base_dir` is the theway base dir (issue #66: `DaemonPaths::base`) for the skill
+/// family's host paths.
 pub fn node_launcher(
     engine: Arc<DagEngine>,
     model: theway_llm_provider::Model,
@@ -228,6 +235,7 @@ pub fn node_launcher(
     cwd: PathBuf,
     registry: AgentJobRegistry,
     memory_dir: PathBuf,
+    base_dir: PathBuf,
     skill_harness_cell: SkillHarnessCell,
     executor: Arc<dyn ToolExecutor>,
 ) -> Arc<node_launcher::NodeLauncherImpl> {
@@ -237,7 +245,7 @@ pub fn node_launcher(
         stream_fn,
         cwd,
         registry,
-        subagent_tool_sets(memory_dir, skill_harness_cell, executor),
+        subagent_tool_sets(memory_dir, base_dir, skill_harness_cell, executor),
         crate::agent_specs::launch_resolver(),
     )
 }
@@ -251,6 +259,7 @@ pub fn node_launcher(
 /// caller's to add.
 pub fn session_tool_set(
     memory_dir: &std::path::Path,
+    base_dir: &std::path::Path,
     dag_engine: &Arc<DagEngine>,
     subagent_registry: &AgentJobRegistry,
     model: &theway_llm_provider::Model,
@@ -264,10 +273,12 @@ pub fn session_tool_set(
     // same subagent tool-set resolver the DAG node launcher uses.
     tools.extend(assembly::engine_tools(
         memory_dir,
+        base_dir,
         dag_engine,
         subagent_registry,
         subagent_tool_sets(
             memory_dir.to_path_buf(),
+            base_dir.to_path_buf(),
             skill_harness_cell.clone(),
             executor,
         ),

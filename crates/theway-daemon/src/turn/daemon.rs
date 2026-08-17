@@ -94,6 +94,12 @@ pub struct DaemonConfig {
     pub retry: RetrySettings,
     pub registry: Registry,
     pub cwd: PathBuf,
+    /// User home root (issue #66: `DaemonPaths::home`), resolved at the CLI
+    /// boundary — file-command rescans take it instead of reading `$HOME`.
+    pub home: PathBuf,
+    /// Theway base dir (issue #66: `DaemonPaths::base`), resolved at the CLI
+    /// boundary — kept alongside `home` so host paths stay explicit.
+    pub base: PathBuf,
     pub session_id: String,
     pub log_path: Option<PathBuf>,
     pub tool_count: usize,
@@ -220,7 +226,10 @@ impl TurnHost {
         // Scan claude-code-format file commands once at startup; `/reload`
         // rescans them (issue #37).
         let registry = Arc::new(config.registry);
-        registry.set_file_commands(crate::file_commands::scan_file_commands(&config.cwd));
+        registry.set_file_commands(crate::file_commands::scan_file_commands(
+            &config.cwd,
+            &config.home,
+        ));
         let completer = SlashCompleter::from_commands(slash_commands(&registry));
         // Install the process-level reload runtime (issue #50): the `reload`
         // tool reaches the registry / cwd / trigger executor at execute time

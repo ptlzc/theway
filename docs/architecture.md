@@ -91,6 +91,86 @@ the daemon kernel; tests and embedded consumers may provide their own.
 tools, triggers, cron, and DAG runtime, and serves them over the transports.
 The TUI and any other client are consumers of this kernel, never peers.
 
+### Daemon path context
+
+Every host path the kernel needs is resolved ONCE at the CLI boundary —
+`DaemonPaths::from_cli` in `crates/theway-daemon/src/paths.rs`, called from
+`bin/thewayd.rs` — and then handed to kernel modules as plain path values;
+the environment (`HOME` / `THEWAY_DIR`) is consulted only inside `from_cli`.
+
+| Field | Resolution |
+|-------|------------|
+| `base` | `$THEWAY_DIR` when set, else `<home>/.theway` — the theway base dir (`config.toml`, `skill-overrides.json`, `skills/`, `extensions/`, …). |
+| `home` | the `--home` flag when given, else `$HOME` — the user-level `.agents` / `.claude` config + skill roots. |
+| `work_dir` | the `--cwd` flag when given, else the process cwd — session repo + tool execution; canonicalized best-effort, and a failed canonicalize keeps the original value so the composition root can still fail with a "cd into …" error. |
+| `extra_skill_dirs` | repeatable `--skills-dir` flags, kept in CLI order. |
+
+The path context is fixed at daemon startup: the TUI forwards `--home` (when
+set) and each `--skills-dir` verbatim in the launch arguments when it spawns
+`thewayd`; attaching to an already-running daemon never changes that daemon's
+existing configuration. Consumers wired from the context include the skill
+scan and the `/skills reload` closure, the skill tool family, the config
+readers and skill overrides, TS extension discovery, the file-command user
+root, and `SessionHarnessFactory`.
+
+**Skill scan roots.** `skills::skills_dirs(&DaemonPaths)` orders the roots
+highest priority first; `skills::load_all` walks them in that order and the
+FIRST loaded copy of a name wins (missing directories are skipped):
+
+| Priority | Root | Source |
+|----------|------|--------|
+| 1 (highest) | each `--skills-dir` extra, in CLI order | `User` |
+| 2 | `<work_dir>/.agents/skills` | `Project` |
+| 3 | `<work_dir>/.theway/skills` | `Project` |
+| 4 | `<work_dir>/.codex/skills` | `Project` |
+| 5 | `<work_dir>/.claude/skills` | `Project` |
+| 6 | `<base>/skills` — the native theway install target | `User` |
+| 7 | `<home>/.agents/skills` | `User` |
+| 8 | `<home>/skills` | `User` |
+| 9 | `<home>/.codex/skills` | `User` |
+| 10 (lowest) | `<home>/.claude/skills` | `User` |
+
+Extras carry `SkillSource::User` (the enum has no dedicated Extra variant);
+precedence comes purely from the scan order, while the source tag is for
+administration/observability. Opt-in built-in skills (`--builtin-skill`,
+`[builtin_skills]` in `config.toml`) merge below every filesystem root — a
+same-name skill from any root shadows the built-in. `sandbox`-only builds
+load no skills and log an explicit warn.
+
+**Install / builder / remove targets agree with the scan.** The skill tool
+family is constructed with explicit paths from `DaemonPaths::base`
+(`tools::assembly::skill_family`), so no member reads `THEWAY_DIR` / `HOME`
+at construction time: `install_skill` and `skill_builder` write
+`<base>/skills/<name>/SKILL.md`, and `remove_skill` deletes only a direct
+child of `<base>/skills` (the deletion target is derived from the resolved
+skill's recorded file path, never from the caller-supplied name). Because
+`<base>/skills` is scan root 6 above, an installed or built skill is
+discovered by the next startup or `/skills reload` (the reload closure
+captures the same `DaemonPaths`).
+
+**Session ↔ work_dir binding.** A session's recorded `cwd` metadata is its
+work_dir: creation stamps it with this daemon's work_dir. On switch,
+`SessionHarnessFactory::build` validates the target session against this
+daemon's work_dir (`check_work_dir_binding`) before any harness state is
+touched: both sides are canonicalized before comparing (falling back to the
+raw paths when canonicalization fails), a mismatch refuses the switch with an
+error naming both directories, and a session without `cwd` metadata (legacy
+data) passes through so historical sessions are never locked out.
+
+**Exception — the discovery contract stays env-driven.**
+`theway_contract::config::base_dir()` (`${THEWAY_DIR:-$HOME/.theway}`,
+re-exported by `theway_transport::{client, config}`) is consulted at call
+time on purpose for the client↔daemon discovery contract: the TUI/CLI client
+derives the same per-cwd port file (`<base>/daemon-port-<cwd-hash>`) from
+its own process environment to find a running daemon, and the inbox path
+follows the same derivation — both sides must stay identical by
+construction, so the call sites implementing that contract are exempt from
+the CLI-boundary rule. Host surfaces outside the path context (prompt
+templates, `mcp.toml`, `hooks.toml`, `models.json`, LSP config, log /
+bug-report / export destinations, and the `/skills install` / `/skills
+remove` command paths, which construct the tools through their default
+constructors) take their base from the same shared contract derivation.
+
 ### Executors and the tool policy
 
 The kernel execution backend is a cargo feature:
@@ -136,13 +216,16 @@ sandbox-only builds.
   findings to the triage inbox.
 - **Session lifecycle** (`session_ops`, `turn::session_factory`,
   `agent_session`): resume/create/switch/delete against the SQLite session
-  repository; each session gets a fully-wired `AgentHarness`.
+  repository; each session gets a fully-wired `AgentHarness`. Switching
+  validates the session↔work_dir binding (see
+  [Daemon path context](#daemon-path-context)).
 - **DAG persistence** (`dag_persist`): debounced writer behind the core
   `DagPersistSink` contract; run state lives per session in
   `<cwd>/.pi/graph-engineering-state-<sessionId>.db`.
-- **Supporting surfaces**: skills/templates loading (dual-root project ↻
-  user), MCP loader + LSP supervisor, lifecycle hooks (`hooks`,
-  `hook_executors`), TS extension host, OTLP exporters.
+- **Supporting surfaces**: skills loading (multi-root priority scan — see
+  [Daemon path context](#daemon-path-context)), prompt-template loading
+  (dual-root project ↻ user), MCP loader + LSP supervisor, lifecycle hooks
+  (`hooks`, `hook_executors`), TS extension host, OTLP exporters.
 
 The daemon re-exports the shared client-contract modules
 (`theway_transport::{auth, config, history, mentions}`) and the session
@@ -172,10 +255,11 @@ Two zones in one crate:
 
 The `theway` binary is a pure client of the kernel: on startup it reuses a
 running daemon (discovered via the per-cwd port file or the default port),
-or spawns `thewayd` in the current directory and waits for readiness. It
-renders the conversation feed (Markdown via `theway-markdown`), handles
-client-local surfaces (`/login`, feed scrollback, resume picker), and
-forwards everything else to the daemon. The daemon keeps running after the
+or spawns `thewayd` in the current directory and waits for readiness — when
+spawning, it forwards `--home` (when set) and each repeatable `--skills-dir`
+verbatim into the daemon launch arguments. It renders the conversation feed
+(Markdown via `theway-markdown`), handles client-local surfaces (`/login`,
+feed scrollback, resume picker), and forwards everything else to the daemon. The daemon keeps running after the
 TUI exits; multiple clients can share one daemon.
 
 **Offline session maintenance exception**: session archive export/import

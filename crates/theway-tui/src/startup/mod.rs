@@ -59,6 +59,17 @@ fn daemon_launch_args(cli: &Cli) -> Vec<String> {
         args.push("--builtin-skill".to_string());
         args.push(skill.clone());
     }
+    // Issue #66: pass the user-level root and extra skill scan roots through
+    // verbatim. Unset `--home` means no flag at all — the daemon resolves the
+    // home from the environment itself at its CLI boundary.
+    if let Some(home) = &cli.home {
+        args.push("--home".to_string());
+        args.push(home.display().to_string());
+    }
+    for dir in &cli.skills_dir {
+        args.push("--skills-dir".to_string());
+        args.push(dir.display().to_string());
+    }
     if let Some(secs) = cli.trigger_poll_secs {
         args.push("--trigger-poll-secs".to_string());
         args.push(secs.to_string());
@@ -374,6 +385,56 @@ mod tests {
                 "explicit selection must suppress fresh attach: {args:?}"
             );
         }
+    }
+
+    /// Issue #66: `--home` (when set) and each repeatable `--skills-dir`
+    /// forward into the daemon launch args as their own flag/value pairs, in
+    /// CLI order; both are omitted entirely when unset (the daemon then
+    /// resolves the home from the environment itself).
+    #[test]
+    fn daemon_launch_args_forwards_home_and_skills_dirs() {
+        // Unset: neither flag appears in the launch args.
+        let plain = Cli::parse_from(["theway"]);
+        let args = daemon_launch_args(&plain);
+        assert!(!args.iter().any(|a| a == "--home"));
+        assert!(!args.iter().any(|a| a == "--skills-dir"));
+
+        // Set: `--home` becomes one pair; every `--skills-dir` occurrence
+        // becomes its own pair, preserving CLI order.
+        let cli = Cli::parse_from([
+            "theway",
+            "--provider",
+            "acme",
+            "--home",
+            "/tmp/fake-home",
+            "--skills-dir",
+            "/tmp/skills-a",
+            "--skills-dir",
+            "/tmp/skills-b",
+            "--debug",
+        ]);
+        assert_eq!(
+            cli.home.as_deref(),
+            Some(std::path::Path::new("/tmp/fake-home"))
+        );
+        assert_eq!(cli.skills_dir.len(), 2);
+        assert_eq!(
+            daemon_launch_args(&cli)
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec![
+                "--provider",
+                "acme",
+                "--home",
+                "/tmp/fake-home",
+                "--skills-dir",
+                "/tmp/skills-a",
+                "--skills-dir",
+                "/tmp/skills-b",
+                "--debug",
+            ]
+        );
     }
 
     /// Issue #56 reused path: `attach_fresh_session` runs the `/new` path —

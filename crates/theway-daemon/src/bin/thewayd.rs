@@ -68,6 +68,13 @@ struct Cli {
     /// to the current directory.
     #[arg(long)]
     cwd: Option<std::path::PathBuf>,
+    /// User home directory (user-level `.agents` / `.claude` config + skill
+    /// roots). Defaults to `$HOME` (issue #66: resolved once at this boundary).
+    #[arg(long)]
+    home: Option<std::path::PathBuf>,
+    /// Extra skill directory to load skills from. Repeatable.
+    #[arg(long = "skills-dir")]
+    skills_dir: Vec<std::path::PathBuf>,
     /// Provider id (anthropic, openai, openrouter, …). When unset, auto-detected from env.
     #[arg(long)]
     provider: Option<String>,
@@ -105,7 +112,7 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
     let mode = if cli.mcp {
         Mode::Mcp
     } else if cli.http {
@@ -113,9 +120,15 @@ async fn main() -> Result<()> {
     } else {
         Mode::Grpc
     };
-    if let Some(dir) = &cli.cwd {
-        std::env::set_current_dir(dir).with_context(|| format!("cd into {}", dir.display()))?;
-    }
+    // Issue #66: resolve every host path ONCE at this CLI boundary; kernel
+    // modules below receive plain paths and never read `HOME` / `THEWAY_DIR`.
+    let paths = theway_daemon::DaemonPaths::from_cli(
+        cli.cwd.take(),
+        cli.home.clone(),
+        cli.skills_dir.clone(),
+    );
+    std::env::set_current_dir(&paths.work_dir)
+        .with_context(|| format!("cd into {}", paths.work_dir.display()))?;
     let cwd = std::env::current_dir().context("getting cwd")?;
     let repo = Arc::new(session::open_repo(&cwd).await);
 
@@ -136,8 +149,7 @@ async fn main() -> Result<()> {
     // Default provider/model from config.toml ([model]) — applies only when the CLI
     // specifies neither flag; a lone CLI flag keeps the legacy env auto-detection path.
     let (model_default, model_default_diag) =
-        theway_daemon::config_readers::read_model_default(&theway_transport::config::base_dir())
-            .await;
+        theway_daemon::config_readers::read_model_default(&paths.base).await;
     if let Some(diag) = model_default_diag {
         tracing::warn!("{diag}");
     }
@@ -232,6 +244,7 @@ async fn main() -> Result<()> {
         cwd.clone(),
         subagent_registry.clone(),
         memory_dir.clone(),
+        paths.base.clone(),
         skill_harness_cell.clone(),
         executor.clone(),
     )));
@@ -248,6 +261,7 @@ async fn main() -> Result<()> {
         theway_daemon::dag_persist::DagPersistHandle::spawn(dag_engine.clone(), cwd.clone());
     let mut tools = theway_daemon::tools::session_tool_set(
         &memory_dir,
+        &paths.base,
         &dag_engine,
         &subagent_registry,
         &model,
@@ -278,26 +292,26 @@ async fn main() -> Result<()> {
     let memory_block = theway_daemon::tools::memory::load_memory_block(&memory_dir).await;
     let system_prompt = compose_system_prompt(&cwd, &memory_block, &tool_names);
 
-    let loaded_skills = skills::load_all(&cwd).await;
+    let loaded_skills = skills::load_all(&paths).await;
     let loaded_templates = templates::load_all(&cwd).await;
-    let ts_extensions = theway_daemon::ts_extensions::ExtensionRegistry::discover(&cwd);
+    let ts_extensions =
+        theway_daemon::ts_extensions::ExtensionRegistry::discover(&cwd, &paths.base);
     for error in &ts_extensions.errors {
         tracing::warn!(target: "extensions", "{error}");
     }
     let compact_algorithms = Arc::new(theway_daemon::ts_extensions::compact_algorithm_registry(
         &ts_extensions,
     ));
-    let config_enabled_builtins = read_builtin_skills_config(&config::base_dir()).await;
+    let config_enabled_builtins = read_builtin_skills_config(&paths.base).await;
     let (trigger_poll_secs, _trigger_config_diagnostic) =
-        read_trigger_poll_interval_secs(&config::base_dir(), cli.trigger_poll_secs).await;
+        read_trigger_poll_interval_secs(&paths.base, cli.trigger_poll_secs).await;
     triggers::dynamic::set_dynamic_trigger_poll_interval_secs(trigger_poll_secs);
-    let (tui_max_feed_lines, tui_config_diagnostic) =
-        read_tui_max_feed_lines(&config::base_dir()).await;
+    let (tui_max_feed_lines, tui_config_diagnostic) = read_tui_max_feed_lines(&paths.base).await;
     if let Some(diag) = tui_config_diagnostic {
         tracing::warn!("{diag}");
     }
     let (thinking_summary_cfg, thinking_summary_diagnostic) =
-        read_orchestrator_thinking_summary(&config::base_dir()).await;
+        read_orchestrator_thinking_summary(&paths.base).await;
     if let Some(diag) = thinking_summary_diagnostic {
         tracing::warn!("{diag}");
     }
@@ -310,7 +324,7 @@ async fn main() -> Result<()> {
         &loaded_skills.skills,
     );
     {
-        let state = theway_daemon::skill_overrides::load(&config::base_dir()).await;
+        let state = theway_daemon::skill_overrides::load(&paths.base).await;
         theway_daemon::skill_overrides::apply(&state, &mut combined_skills);
     }
 
@@ -324,18 +338,18 @@ async fn main() -> Result<()> {
     opts.compact_algorithms = compact_algorithms.clone();
     opts.stream_fn = Some(stream_fn.clone());
     let reload_skills_fn: theway_core::ReloadSkillsFn = {
-        let cwd = cwd.clone();
+        let paths = paths.clone();
         let builtins = resolved_builtins.skills.clone();
         Arc::new(move || {
-            let cwd = cwd.clone();
+            let paths = paths.clone();
             let builtins = builtins.clone();
             Box::pin(async move {
-                let loaded = skills::load_all(&cwd).await;
+                let loaded = skills::load_all(&paths).await;
                 let mut merged = theway_daemon::builtin_skills::merge_with_user_project(
                     builtins,
                     &loaded.skills,
                 );
-                let state = theway_daemon::skill_overrides::load(&config::base_dir()).await;
+                let state = theway_daemon::skill_overrides::load(&paths.base).await;
                 theway_daemon::skill_overrides::apply(&state, &mut merged);
                 theway_core::LoadSkillsOutput {
                     skills: merged,
@@ -446,6 +460,7 @@ async fn main() -> Result<()> {
     let session_factory: session_ops::SessionFactory = {
         let plan = Arc::new(SessionHarnessFactory {
             cwd: cwd.clone(),
+            base_dir: paths.base.clone(),
             executor: executor.clone(),
             model: model.clone(),
             thinking,
@@ -590,8 +605,11 @@ async fn main() -> Result<()> {
         harness: harness.clone(),
         trigger_executor,
         retry: theway_daemon::agent_session::RetrySettings::default(),
-        registry: theway_daemon::commands::Registry::with_daemon_commands(),
+        registry: theway_daemon::commands::Registry::with_daemon_commands()
+            .with_user_home(paths.home.clone()),
         cwd: cwd.clone(),
+        home: paths.home.clone(),
+        base: paths.base.clone(),
         session_id,
         log_path: _logging.as_ref().map(|l| l.log_path.clone()),
         tool_count: tool_names.len(),
