@@ -105,3 +105,6 @@ pub trait JobTranscriptStore: Send + Sync {
     /// Load an independent task-tool job transcript by job id.
     fn load_job(&self, job_id: &str) -> Option<Vec<serde_json::Value>>;
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("multiagent/registry/transcript");

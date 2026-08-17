@@ -589,3 +589,8 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod skills_walk_tests {
+    tests_bridge_macro::tests_bridge!("agent/skills");
+}

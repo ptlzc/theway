@@ -578,3 +578,6 @@ pub struct BranchSummaryInput {
     pub details: Option<Value>,
     pub from_hook: bool,
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("agent/session/session");

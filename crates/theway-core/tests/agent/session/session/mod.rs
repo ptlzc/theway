@@ -1,0 +1,345 @@
+//! Tests for `agent::session::session` — split out of src
+//! (see docs/rust-test-files.md).
+
+use std::sync::Arc;
+
+use super::*;
+use crate::agent::session::memory_storage::MemorySessionStorage;
+use theway_llm_provider::{
+    AssistantMessage, ContentBlock, Message as PiMessage, StopReason, UserContent, UserMessage,
+    UserRole,
+};
+
+fn user_msg(text: &str) -> AgentMessage {
+    AgentMessage::Llm(PiMessage::User(UserMessage {
+        role: UserRole::User,
+        content: UserContent::Text(text.into()),
+        timestamp: 0,
+    }))
+}
+
+fn assistant_msg(text: &str) -> AgentMessage {
+    AgentMessage::Llm(PiMessage::Assistant(AssistantMessage {
+        role: theway_llm_provider::AssistantRole::Assistant,
+        content: vec![ContentBlock::text(text)],
+        api: theway_llm_provider::Api::from("faux"),
+        provider: theway_llm_provider::Provider::from("faux"),
+        model: "faux".into(),
+        response_model: None,
+        response_id: None,
+        diagnostics: None,
+        usage: theway_llm_provider::Usage::default(),
+        stop_reason: StopReason::Stop,
+        error_message: None,
+        timestamp: 0,
+    }))
+}
+
+fn message_entry(id: &str, parent_id: Option<&str>, message: AgentMessage) -> SessionTreeEntry {
+    SessionTreeEntry::Message {
+        id: id.into(),
+        parent_id: parent_id.map(str::to_string),
+        timestamp: "t".into(),
+        message,
+    }
+}
+
+fn session_with_storage() -> (Session, Arc<MemorySessionStorage>) {
+    let storage = Arc::new(MemorySessionStorage::new());
+    (Session::new(storage.clone()), storage)
+}
+
+#[test]
+fn session_tree_entry_accessors_expose_id_parent_and_type() {
+    let entry = SessionTreeEntry::Message {
+        id: "m1".into(),
+        parent_id: Some("p1".into()),
+        timestamp: "t".into(),
+        message: user_msg("hi"),
+    };
+    assert_eq!(entry.id(), "m1");
+    assert_eq!(entry.parent_id(), Some("p1"));
+    assert_eq!(entry.type_str(), "message");
+
+    let compaction = SessionTreeEntry::Compaction {
+        id: "c1".into(),
+        parent_id: None,
+        timestamp: "t".into(),
+        summary: "summary".into(),
+        first_kept_entry_id: "m2".into(),
+        tokens_before: 10,
+        details: None,
+        from_hook: Some(true),
+    };
+    assert_eq!(compaction.id(), "c1");
+    assert_eq!(compaction.parent_id(), None);
+    assert_eq!(compaction.type_str(), "compaction");
+}
+
+#[test]
+fn build_session_context_replays_messages_and_metadata() {
+    let entries = vec![
+        SessionTreeEntry::ThinkingLevelChange {
+            id: "1".into(),
+            parent_id: None,
+            timestamp: "t".into(),
+            thinking_level: "high".into(),
+        },
+        SessionTreeEntry::ModelChange {
+            id: "2".into(),
+            parent_id: Some("1".into()),
+            timestamp: "t".into(),
+            provider: "faux".into(),
+            model_id: "faux-model".into(),
+        },
+        message_entry("3", Some("2"), user_msg("hello")),
+        message_entry("4", Some("3"), assistant_msg("world")),
+    ];
+
+    let ctx = build_session_context(&entries);
+
+    assert_eq!(ctx.thinking_level, "high");
+    let model = ctx.model.expect("model from assistant override");
+    assert_eq!(model.provider, "faux");
+    assert_eq!(model.model_id, "faux");
+    assert_eq!(ctx.messages.len(), 2);
+}
+
+#[test]
+fn build_session_context_with_compaction_skips_entries_before_first_kept() {
+    let entries = vec![
+        message_entry("1", None, user_msg("old")),
+        message_entry("2", Some("1"), user_msg("kept")),
+        SessionTreeEntry::Compaction {
+            id: "c".into(),
+            parent_id: Some("2".into()),
+            timestamp: "t".into(),
+            summary: "summary".into(),
+            first_kept_entry_id: "2".into(),
+            tokens_before: 1,
+            details: None,
+            from_hook: None,
+        },
+        message_entry("4", Some("c"), assistant_msg("after compaction")),
+    ];
+
+    let ctx = build_session_context(&entries);
+
+    // Compaction summary + the first kept entry + entries after the compaction.
+    assert_eq!(ctx.messages.len(), 3);
+    assert!(matches!(ctx.messages[0], AgentMessage::Custom(_)));
+    assert!(matches!(
+        ctx.messages[1],
+        AgentMessage::Llm(PiMessage::User(_))
+    ));
+    assert!(matches!(
+        ctx.messages[2],
+        AgentMessage::Llm(PiMessage::Assistant(_))
+    ));
+}
+
+#[test]
+fn build_session_context_appends_branch_summary_and_custom_message() {
+    let entries = vec![
+        SessionTreeEntry::BranchSummary {
+            id: "b".into(),
+            parent_id: None,
+            timestamp: "t".into(),
+            from_id: "root".into(),
+            summary: "branch summary".into(),
+            details: None,
+            from_hook: None,
+        },
+        SessionTreeEntry::CustomMessage {
+            id: "cm".into(),
+            parent_id: Some("b".into()),
+            timestamp: "2024-01-01T00:00:00+00:00".into(),
+            custom_type: "custom".into(),
+            content: serde_json::json!({"text": "payload"}),
+            details: None,
+            display: true,
+        },
+        message_entry("m", Some("cm"), user_msg("after")),
+    ];
+
+    let ctx = build_session_context(&entries);
+
+    assert_eq!(ctx.messages.len(), 3);
+    assert!(matches!(ctx.messages[0], AgentMessage::Custom(_)));
+    assert!(matches!(ctx.messages[1], AgentMessage::Custom(_)));
+}
+
+#[tokio::test]
+async fn session_append_helpers_create_typed_entries() {
+    let (session, _storage) = session_with_storage();
+
+    let id = session.append_message(user_msg("hello")).await.unwrap();
+    assert_eq!(session.entries().await.unwrap().len(), 1);
+    assert_eq!(session.get_entry(&id).await.unwrap().unwrap().type_str(), "message");
+
+    session
+        .append_thinking_level_change("high")
+        .await
+        .unwrap();
+    session
+        .append_model_change("faux", "faux-model")
+        .await
+        .unwrap();
+    session
+        .append_compaction("summary", "first", 10, None, true)
+        .await
+        .unwrap();
+    session
+        .append_custom("custom_type", Some(serde_json::json!({"a": 1})))
+        .await
+        .unwrap();
+    session.append_session_name("  session one  ").await.unwrap();
+
+    let entries = session.entries().await.unwrap();
+    assert_eq!(entries.len(), 6);
+    assert_eq!(entries[1].type_str(), "thinking_level_change");
+    assert_eq!(entries[2].type_str(), "model_change");
+    assert_eq!(entries[3].type_str(), "compaction");
+    assert_eq!(entries[4].type_str(), "custom");
+    assert_eq!(entries[5].type_str(), "session_info");
+}
+
+#[tokio::test]
+async fn session_branch_returns_path_to_leaf_or_requested_id() {
+    let (session, _storage) = session_with_storage();
+    let id1 = session.append_message(user_msg("one")).await.unwrap();
+    let id2 = session.append_message(assistant_msg("two")).await.unwrap();
+    let id3 = session.append_message(user_msg("three")).await.unwrap();
+
+    let branch = session.branch(None).await.unwrap();
+    let ids: Vec<&str> = branch.iter().map(|e| e.id()).collect();
+    assert_eq!(ids, vec![id1.as_str(), id2.as_str(), id3.as_str()]);
+
+    let branch = session.branch(Some(&id2)).await.unwrap();
+    let ids: Vec<&str> = branch.iter().map(|e| e.id()).collect();
+    assert_eq!(ids, vec![id1.as_str(), id2.as_str()]);
+}
+
+#[tokio::test]
+async fn session_build_context_replays_appended_messages() {
+    let (session, _storage) = session_with_storage();
+    session.append_message(user_msg("one")).await.unwrap();
+    session.append_message(assistant_msg("two")).await.unwrap();
+
+    let ctx = session.build_context().await.unwrap();
+
+    assert_eq!(ctx.messages.len(), 2);
+}
+
+#[tokio::test]
+async fn session_session_name_finds_latest_non_empty_name() {
+    let (session, _storage) = session_with_storage();
+    session.append_session_name("   ").await.unwrap();
+    session.append_session_name("first").await.unwrap();
+    session.append_session_name("second").await.unwrap();
+
+    assert_eq!(session.session_name().await.unwrap(), Some("second".into()));
+}
+
+#[tokio::test]
+async fn session_move_to_without_summary_sets_leaf_and_returns_none() {
+    let (session, _storage) = session_with_storage();
+    let id1 = session.append_message(user_msg("one")).await.unwrap();
+    let _id2 = session.append_message(user_msg("two")).await.unwrap();
+
+    let result = session.move_to(Some(&id1), None).await.unwrap();
+    assert_eq!(result, None);
+    assert_eq!(session.leaf_id().await.unwrap(), Some(id1.clone()));
+
+    let result = session.move_to(None, None).await.unwrap();
+    assert_eq!(result, None);
+    assert_eq!(session.leaf_id().await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn session_move_to_unknown_entry_returns_not_found() {
+    let (session, _storage) = session_with_storage();
+
+    let err = session.move_to(Some("missing"), None).await.unwrap_err();
+
+    assert_eq!(err.code, crate::agent::types::SessionErrorCode::NotFound);
+    assert!(err.message.contains("missing"));
+}
+
+#[tokio::test]
+async fn session_move_to_with_summary_records_branch_summary() {
+    let (session, _storage) = session_with_storage();
+
+    let summary_id = session
+        .move_to(
+            None,
+            Some(BranchSummaryInput {
+                summary: "forked from root".into(),
+                details: Some(serde_json::json!({"source": "test"})),
+                from_hook: true,
+            }),
+        )
+        .await
+        .unwrap()
+        .expect("summary entry id");
+
+    let entries = session.entries().await.unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].type_str(), "branch_summary");
+    match &entries[0] {
+        SessionTreeEntry::BranchSummary {
+            id,
+            from_id,
+            summary,
+            details,
+            from_hook,
+            ..
+        } => {
+            assert_eq!(id, &summary_id);
+            assert_eq!(from_id, "root");
+            assert_eq!(summary, "forked from root");
+            assert_eq!(details.as_ref().unwrap()["source"], serde_json::json!("test"));
+            assert_eq!(*from_hook, Some(true));
+        }
+        _ => panic!("expected branch summary"),
+    }
+}
+
+#[tokio::test]
+async fn session_label_returns_latest_label_for_target() {
+    let (session, storage) = session_with_storage();
+    let id = session.append_message(user_msg("one")).await.unwrap();
+    session.storage().append_entry(SessionTreeEntry::Label {
+        id: "l1".into(),
+        parent_id: Some(id.clone()),
+        timestamp: "t".into(),
+        target_id: id.clone(),
+        label: Some("first".into()),
+    }).await.unwrap();
+    session.storage().append_entry(SessionTreeEntry::Label {
+        id: "l2".into(),
+        parent_id: Some(id.clone()),
+        timestamp: "t".into(),
+        target_id: id.clone(),
+        label: Some("second".into()),
+    }).await.unwrap();
+
+    assert_eq!(session.label(&id).await.unwrap(), Some("second".into()));
+    assert_eq!(storage.get_label(&id).await.unwrap(), Some("second".into()));
+}
+
+#[tokio::test]
+async fn session_append_compaction_omits_from_hook_when_false() {
+    let (session, _storage) = session_with_storage();
+
+    session
+        .append_compaction("summary", "first", 10, None, false)
+        .await
+        .unwrap();
+
+    let entries = session.entries().await.unwrap();
+    match &entries[0] {
+        SessionTreeEntry::Compaction { from_hook, .. } => assert_eq!(*from_hook, None),
+        _ => panic!("expected compaction entry"),
+    }
+}

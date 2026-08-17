@@ -413,3 +413,6 @@ pub(super) struct ToolOutcome {
     pub(super) result: AgentToolResult,
     pub(super) is_error: bool,
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("agent/run_loop/tools");

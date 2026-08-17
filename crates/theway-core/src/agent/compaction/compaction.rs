@@ -750,3 +750,8 @@ pub async fn summarize_with_llm(
 // Test files live in `tests/runtime/compaction/compaction/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
 tests_bridge_macro::tests_bridge!("agent/compaction/compaction");
+
+#[cfg(test)]
+mod compaction_extra_tests {
+    tests_bridge_macro::tests_bridge!("agent/compaction/compaction/extra");
+}

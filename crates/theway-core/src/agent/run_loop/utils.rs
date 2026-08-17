@@ -160,3 +160,6 @@ pub(super) fn default_prompt_payload(
         "args_hash": compute_args_hash(args),
     })
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("agent/run_loop/utils");

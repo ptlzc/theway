@@ -570,3 +570,8 @@ fn tail_chars(text: &str, max_chars: usize) -> String {
 // Test files live in `tests/runtime/goal/` (mirror of `src/runtime/`), pulled in by
 // path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
 tests_bridge_macro::tests_bridge!("multiagent/goal");
+
+#[cfg(test)]
+mod goal_extra_tests {
+    tests_bridge_macro::tests_bridge!("multiagent/goal/extra");
+}
