@@ -689,3 +689,6 @@ pub fn first_line(text: &str, max: usize) -> String {
         line.to_string()
     }
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("multiagent/graph/model/mermaid_extra");

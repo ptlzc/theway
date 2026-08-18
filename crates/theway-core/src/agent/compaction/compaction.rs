@@ -755,3 +755,8 @@ tests_bridge_macro::tests_bridge!("agent/compaction/compaction");
 mod compaction_extra_tests {
     tests_bridge_macro::tests_bridge!("agent/compaction/compaction/extra");
 }
+
+#[cfg(test)]
+mod compaction_more_tests {
+    tests_bridge_macro::tests_bridge!("agent/compaction/compaction/more");
+}

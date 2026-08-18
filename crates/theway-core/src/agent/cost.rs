@@ -170,3 +170,8 @@ mod tests {
         assert_eq!(t.snapshot().turn_count, 0);
     }
 }
+
+#[cfg(test)]
+mod cost_bridge_tests {
+    tests_bridge_macro::tests_bridge!("agent/cost");
+}

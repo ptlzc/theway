@@ -141,3 +141,6 @@ pub(super) async fn call_llm(
     inner.state.lock().streaming_message = None;
     last_message.ok_or_else(|| AgentRunError::Other("LLM stream produced no message".into()))
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("agent/run_loop/llm");

@@ -416,3 +416,8 @@ pub(super) struct ToolOutcome {
 
 #[cfg(test)]
 tests_bridge_macro::tests_bridge!("agent/run_loop/tools");
+
+#[cfg(test)]
+mod tools_extra_tests {
+    tests_bridge_macro::tests_bridge!("agent/run_loop/tools/extra");
+}

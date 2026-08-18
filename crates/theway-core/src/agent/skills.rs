@@ -594,3 +594,8 @@ mod tests {
 mod skills_walk_tests {
     tests_bridge_macro::tests_bridge!("agent/skills");
 }
+
+#[cfg(test)]
+mod skills_extra_tests {
+    tests_bridge_macro::tests_bridge!("agent/skills/extra");
+}

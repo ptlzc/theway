@@ -299,3 +299,6 @@ impl AgentInner {
             .expect("convert_to_llm is always set in Agent::new")(msgs)
     }
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("agent");

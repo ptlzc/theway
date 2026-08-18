@@ -417,3 +417,6 @@ impl DagEngine {
         }
     }
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("multiagent/graph/engine/run");

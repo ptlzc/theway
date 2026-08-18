@@ -1149,3 +1149,6 @@ fn extract_user_prompt_text(msg: &AgentMessage) -> Option<String> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("agent/assembly");

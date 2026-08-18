@@ -404,3 +404,6 @@ async fn run_one(
         },
     }
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("agent/run_loop");

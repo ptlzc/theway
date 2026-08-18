@@ -642,3 +642,6 @@ pub use theway_llm_provider::{
 // module rather than directly from theway_llm_provider.
 #[allow(dead_code)]
 fn _exports_marker(_: AssistantMessage, _: ImageContent, _: TextContent, _: ToolResultMessage) {}
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("types");

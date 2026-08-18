@@ -53,3 +53,6 @@ pub(super) fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
         "launcher panicked".to_string()
     }
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("multiagent/graph/engine/helpers");

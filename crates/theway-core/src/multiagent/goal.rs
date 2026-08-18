@@ -575,3 +575,8 @@ tests_bridge_macro::tests_bridge!("multiagent/goal");
 mod goal_extra_tests {
     tests_bridge_macro::tests_bridge!("multiagent/goal/extra");
 }
+
+#[cfg(test)]
+mod goal_more_tests {
+    tests_bridge_macro::tests_bridge!("multiagent/goal/more");
+}

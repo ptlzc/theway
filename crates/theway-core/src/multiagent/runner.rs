@@ -368,3 +368,8 @@ pub async fn run_agent(opts: AgentRunOptions) -> AgentRunResult {
 
 #[cfg(test)]
 tests_bridge_macro::tests_bridge!("multiagent/runner");
+
+#[cfg(test)]
+mod runner_extra_tests {
+    tests_bridge_macro::tests_bridge!("multiagent/runner/extra");
+}
