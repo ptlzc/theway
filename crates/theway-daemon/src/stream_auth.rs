@@ -95,3 +95,10 @@ mod tests {
         assert_eq!(opts.base.api_key, None);
     }
 }
+
+#[cfg(test)]
+mod stream_auth_tests {
+    //! Mirrored tests live in `tests/stream_auth/`; wrapped because the
+    //! top-level `mod tests` slot is already used by the inline tests above.
+    tests_bridge_macro::tests_bridge!("stream_auth");
+}

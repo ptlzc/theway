@@ -38,16 +38,22 @@ use uuid::Uuid;
 // `use super::*`; names it uses but this module's own code does not are re-imported here
 // for test builds only.
 #[cfg(test)]
+#[allow(unused_imports)]
 use crate::trigger_engine::execution::{BeforeTriggerActionContext, PromoteAction};
 #[cfg(test)]
+#[allow(unused_imports)]
 use crate::trigger_engine::notification_hook::NotificationHook;
 #[cfg(test)]
+#[allow(unused_imports)]
 use crate::trigger_engine::types::Trigger;
 #[cfg(test)]
+#[allow(unused_imports)]
 use hooks::extract_dynamic_rule_ids;
 #[cfg(test)]
+#[allow(unused_imports)]
 use parse::ZH_WHEN_PREFIX;
 #[cfg(test)]
+#[allow(unused_imports)]
 use theway_core::{AgentTool, PermissionClassification};
 // Data model + poll-interval default live in the pure leaf contract crate
 // (issue #64); `theway_transport::triggers` re-exports the same items.
@@ -55,8 +61,10 @@ pub use theway_contract::triggers::{
     DEFAULT_DYNAMIC_TRIGGER_POLL_INTERVAL_SECS, DynamicTriggerRule,
 };
 #[cfg(test)]
+#[allow(unused_imports)]
 use tokio::time::Duration;
 #[cfg(test)]
+#[allow(unused_imports)]
 use tokio_util::sync::CancellationToken;
 static CONFIGURED_DYNAMIC_TRIGGER_POLL_INTERVAL_SECS: AtomicU64 =
     AtomicU64::new(DEFAULT_DYNAMIC_TRIGGER_POLL_INTERVAL_SECS);

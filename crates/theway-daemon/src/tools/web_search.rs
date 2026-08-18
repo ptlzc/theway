@@ -201,17 +201,6 @@ static DEFINITION: Lazy<Tool> = Lazy::new(|| {
 });
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn definition_lists_query_as_required() {
-        let def = WebSearchTool::new().definition().clone();
-        let req = def
-            .parameters
-            .get("required")
-            .and_then(|v| v.as_array())
-            .unwrap();
-        assert!(req.iter().any(|v| v.as_str() == Some("query")));
-    }
-}
+// Test files live in `tests/tools/web_search/` (mirror of src), pulled in by
+// path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
+tests_bridge_macro::tests_bridge!("tools/web_search");

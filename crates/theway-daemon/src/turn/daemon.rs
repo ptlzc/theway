@@ -1377,3 +1377,11 @@ mod daemon_extra_tests {
     //! primary `tests/turn/daemon/mod.rs` bridge stays untouched.
     tests_bridge_macro::tests_bridge!("turn/daemon/extra");
 }
+
+#[cfg(test)]
+mod daemon_coverage_tests {
+    //! Additional turn-host coverage tests live in
+    //! `tests/turn/daemon/coverage/`; separate bridge to keep the other
+    //! mirrored suites untouched.
+    tests_bridge_macro::tests_bridge!("turn/daemon/coverage");
+}

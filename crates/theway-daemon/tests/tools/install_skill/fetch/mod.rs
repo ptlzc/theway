@@ -1,6 +1,7 @@
 //! Tests for `install_skill::fetch` — split out of src (see docs/rust-test-files.md).
 
 use super::*;
+use tokio::io::AsyncWriteExt;
 
 #[test]
 fn is_private_or_local_host_rejects_loopback_private_linklocal_and_special_names() {
@@ -19,6 +20,7 @@ fn is_private_or_local_host_rejects_loopback_private_linklocal_and_special_names
         "0.0.0.0",
         "255.255.255.255",
         "::1",
+        "::",
         "fc00::1",
     ] {
         assert!(
@@ -30,7 +32,12 @@ fn is_private_or_local_host_rejects_loopback_private_linklocal_and_special_names
 
 #[test]
 fn is_private_or_local_host_allows_public_hostnames_and_ips() {
-    for host in ["example.com", "1.2.3.4", "8.8.8.8"] {
+    for host in [
+        "example.com",
+        "1.2.3.4",
+        "8.8.8.8",
+        "2001:4860:4860::8888",
+    ] {
         assert!(
             !is_private_or_local_host(host),
             "host {host} should be allowed"
@@ -181,4 +188,86 @@ async fn fetch_url_rejects_private_host() {
         .err()
         .expect("loopback must fail");
     assert!(err.to_string().contains("SSRF guard"), "got: {err}");
+}
+
+
+#[tokio::test]
+async fn fetch_url_cancelled_before_send_returns_cancelled() {
+    // Arrange: a local TCP server that accepts and then holds the connection
+    // open. The URL passes the SSRF pre-flight (IPv4-mapped IPv6 loopback), so
+    // the request future can never complete on its own; the pre-cancelled
+    // token is the only select branch that can fire.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .unwrap();
+    let addr = listener.local_addr().unwrap();
+    let url = format!("https://[::ffff:127.0.0.1]:{}/skill.md", addr.port());
+    let server = tokio::spawn(async move {
+        if let Ok((_sock, _)) = listener.accept().await {
+            std::future::pending::<()>().await;
+        }
+    });
+    let cancel = CancellationToken::new();
+    cancel.cancel();
+
+    // Act
+    let err = fetch_url(&url, &cancel)
+        .await
+        .err()
+        .expect("cancelled fetch must fail");
+
+    // Assert
+    assert!(err.to_string().contains("cancelled"), "got: {err}");
+    server.abort();
+}
+
+#[tokio::test]
+async fn fetch_url_reports_connection_errors_for_public_host() {
+    // Arrange: a plain TCP server on loopback that speaks HTTP. The URL uses an
+    // IPv4-mapped IPv6 loopback address, which passes the SSRF pre-flight (it is
+    // not `::1` / unspecified / ULA) but connects straight back to our fake
+    // server. The TLS handshake then fails, so this exercises the send-error
+    // branch without any real network.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .unwrap();
+    let addr = listener.local_addr().unwrap();
+    let url = format!("https://[::ffff:127.0.0.1]:{}/skill.md", addr.port());
+    let server = tokio::spawn(async move {
+        if let Ok((mut sock, _)) = listener.accept().await {
+            let _ = sock
+                .write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n")
+                .await;
+            let _ = sock.shutdown().await;
+        }
+    });
+
+    // Act
+    let err = fetch_url(&url, &CancellationToken::new())
+        .await
+        .err()
+        .expect("fake TLS server must fail");
+
+    // Assert
+    assert!(err.to_string().contains("fetch failed"), "got: {err}");
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn fetch_path_rejects_invalid_utf8() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("bad.md");
+    std::fs::write(&path, [0xff, 0xfe, 0xfd]).unwrap();
+
+    let err = fetch_source(
+        &Source::Path {
+            path: path.to_string_lossy().into_owned(),
+        },
+        &CancellationToken::new(),
+    )
+    .await
+    .err()
+    .expect("invalid utf-8 must fail");
+
+    assert!(err.to_string().contains("read"), "got: {err}");
 }

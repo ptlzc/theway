@@ -457,3 +457,8 @@ fn command_help_text(registry: &Registry, topic: &str, skills: &[Skill]) -> Stri
     }
     lines.join("\n")
 }
+
+#[cfg(test)]
+// Test files live in `tests/commands/misc/` (mirror of src), pulled in by
+// path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
+tests_bridge_macro::tests_bridge!("commands/misc");

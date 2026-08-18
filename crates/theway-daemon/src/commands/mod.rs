@@ -43,6 +43,7 @@ pub use theway_transport::auth::{model_credential_hint, save_api_key};
 /// The shared framework's console sink is the single process-wide output sink: daemon
 //  commands route through it too (see the `cprintln!` macro below).
 pub use theway_transport::commands::console;
+#[allow(unused_imports)]
 pub use theway_transport::commands::{
     CommandOutcome, SlashCommand, WebRelayAction, attach_skill_prompt, cli_model_help_text, parse,
     parse_model_spec,
@@ -92,12 +93,16 @@ use triggers::{CronCommand, InboxCommand, NewTriggerCommand, TriggersCommand};
 
 // Private helpers the `tests/commands/` mirror reaches through `use super::*`.
 #[cfg(test)]
+#[allow(unused_imports)]
 use misc::help_text;
 #[cfg(test)]
+#[allow(unused_imports)]
 use model::{model_catalog_text, model_groups, unknown_model_error, unknown_provider_error};
 #[cfg(test)]
+#[allow(unused_imports)]
 use skills::parse_skill_source;
 #[cfg(test)]
+#[allow(unused_imports)]
 use triggers::{
     collect_trigger_audit_rows, render_running_triggers, render_trigger_audit,
     render_trigger_sources, trigger_decision_details,

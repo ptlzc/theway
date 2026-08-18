@@ -3,6 +3,10 @@ use std::sync::Mutex;
 use theway_core::{AgentToolResult, LoopEvent, SessionEvent};
 use theway_llm_provider::{ToolResultMessage, ToolResultRole, UserContentBlock};
 
+use crate::test_env::{ENV_LOCK, EnvGuard};
+
+mod runner;
+
 /// Details of one command-executor invocation, captured by the fake seam.
 #[derive(Debug)]
 struct CommandCall {
@@ -244,32 +248,6 @@ async fn tool_filter_skips_non_matching_tool() {
     };
     runner.handle_event(&ev, CancellationToken::new()).await;
     assert_eq!(*calls.lock().unwrap(), 0);
-}
-
-static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-struct EnvGuard {
-    key: &'static str,
-    old: Option<String>,
-}
-
-impl EnvGuard {
-    fn set(key: &'static str, value: &std::path::Path) -> Self {
-        let old = std::env::var(key).ok();
-        // Tests in Rust 2024 require acknowledging that process env is global.
-        unsafe { std::env::set_var(key, value) };
-        Self { key, old }
-    }
-}
-
-impl Drop for EnvGuard {
-    fn drop(&mut self) {
-        if let Some(old) = &self.old {
-            unsafe { std::env::set_var(self.key, old) };
-        } else {
-            unsafe { std::env::remove_var(self.key) };
-        }
-    }
 }
 
 /// Without injected executors the loader must report the degraded mode in

@@ -332,3 +332,8 @@ fn preview(input: &str, max_chars: usize) -> String {
     }
     out
 }
+
+#[cfg(test)]
+// Test files live in `tests/triggers/cron/errors/` (mirror of src), pulled in by
+// path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
+tests_bridge_macro::tests_bridge!("triggers/cron/errors");

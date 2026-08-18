@@ -329,3 +329,8 @@ pub(super) fn extract_dynamic_rule_ids(text: &str) -> Vec<String> {
     }
     ids
 }
+
+#[cfg(test)]
+// Test files live in `tests/triggers/dynamic/hooks/` (mirror of src), pulled in by
+// path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
+tests_bridge_macro::tests_bridge!("triggers/dynamic/hooks");

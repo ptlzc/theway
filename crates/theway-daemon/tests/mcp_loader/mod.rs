@@ -4,6 +4,9 @@ use super::*;
 
 use theway_transport::auth::AuthStore;
 
+mod load_all;
+mod streamable_http;
+
 fn stdio_server(name: &str) -> ServerConfig {
     ServerConfig {
         name: name.into(),

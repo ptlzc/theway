@@ -174,3 +174,69 @@ fn definition_is_snake_case_with_effect_hint() {
     assert_eq!(tool.label(), "reload");
     assert!(tool.definition().description.contains("installing a skill"));
 }
+
+
+#[test]
+fn install_runtime_publishes_process_global_runtime() {
+    // Arrange
+    let dir = tempfile::tempdir().unwrap();
+    let (harness, _cell) = build_harness(true);
+    let registry = Arc::new(Registry::with_daemon_commands());
+    let runtime = runtime_for(&harness, dir.path(), registry.clone());
+
+    // Act
+    let _ = install_runtime(ReloadRuntime {
+        registry: runtime.registry.clone(),
+        cwd: runtime.cwd.clone(),
+        trigger_executor: runtime.trigger_executor.clone(),
+        revision: runtime.revision.clone(),
+    });
+
+    // Assert: the installed handle is published (last-write-wins). Another
+    // daemon test may concurrently install a different runtime, so only assert
+    // that the global is populated after installation.
+    assert!(current_runtime().is_some());
+}
+
+#[tokio::test]
+async fn execute_without_pinned_runtime_uses_installed_global_runtime() {
+    // Arrange: temp cwd with a file command; harness reload closure that swaps
+    // in the "reloaded" skill; the runtime is installed globally instead of
+    // pinned on the tool.
+    let dir = tempfile::tempdir().unwrap();
+    let commands_dir = dir.path().join(".agents").join("commands");
+    std::fs::create_dir_all(&commands_dir).unwrap();
+    std::fs::write(
+        commands_dir.join("lint.md"),
+        "---\ndescription: run lint\n---\nrun the linter with $ARGUMENTS\n",
+    )
+    .unwrap();
+    let (harness, cell) = build_harness(true);
+    let registry = Arc::new(Registry::with_daemon_commands());
+    let runtime = runtime_for(&harness, dir.path(), registry.clone());
+    let _ = install_runtime(ReloadRuntime {
+        registry: runtime.registry.clone(),
+        cwd: runtime.cwd.clone(),
+        trigger_executor: runtime.trigger_executor.clone(),
+        revision: runtime.revision.clone(),
+    });
+    let tool = ReloadTool::new(cell);
+
+    // Act
+    let result = tool
+        .execute("c1", serde_json::json!({}), CancellationToken::new(), None)
+        .await;
+
+    // Assert: the global runtime path succeeds. (Another test may overwrite the
+    // global, but every daemon runtime in this target handles `/reload` the same.)
+    let ok = result.unwrap_or_else(|e| panic!("reload should succeed: {e}"));
+    assert!(ok.details["runtime_revision"].is_u64());
+}
+
+#[test]
+fn execution_mode_is_sequential() {
+    let cell: SkillHarnessCell = Arc::new(SyncOnceCell::new());
+    let tool = ReloadTool::new(cell);
+
+    assert_eq!(tool.execution_mode(), Some(ToolExecutionMode::Sequential));
+}

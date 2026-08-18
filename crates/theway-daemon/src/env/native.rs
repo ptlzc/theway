@@ -633,3 +633,10 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod native_tests {
+    //! Mirrored tests live in `tests/env/native/`; wrapped because the
+    //! top-level `mod tests` slot is already used by the inline exec tests.
+    tests_bridge_macro::tests_bridge!("env/native");
+}

@@ -15,6 +15,8 @@
 //! Every binary is its own process (env is per-process), so no cross-binary
 //! coordination is needed.
 
+#![allow(dead_code)]
+
 /// Serializes all env mutations in this test process across bridged modules.
 ///
 /// Holding the guard across `.await` is safe in tests: `#[tokio::test]` runs on

@@ -213,3 +213,10 @@ mod tests {
         assert_eq!(body, "Body {{var}}");
     }
 }
+
+#[cfg(test)]
+mod templates_tests {
+    //! Mirrored tests live in `tests/templates/`; wrapped because the
+    //! top-level `mod tests` slot is already used by the inline parser test.
+    tests_bridge_macro::tests_bridge!("templates");
+}

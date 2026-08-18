@@ -59,19 +59,24 @@ impl CronJobExt for CronJob {
 // `use super::*`; names it uses but this module's own code does not are re-imported here
 // for test builds only.
 #[cfg(test)]
+#[allow(unused_imports)]
 use crate::trigger_engine::event::TriggerEvent;
 #[cfg(test)]
+#[allow(unused_imports)]
 use crate::trigger_engine::execution::{
     BeforeTriggerActionContext, BeforeTriggerActionHook, TriggerAction, TriggerDelivery,
 };
 #[cfg(test)]
+#[allow(unused_imports)]
 use chrono::{Local, Timelike};
 #[cfg(test)]
+#[allow(unused_imports)]
 use hook::{
     compose_stateful_prompt, cron_trigger_for_job, extract_tag_all, extract_tag_block,
     loop_state_path, read_loop_state, write_loop_state,
 };
 #[cfg(test)]
+#[allow(unused_imports)]
 use tokio_util::sync::CancellationToken;
 
 const MAX_ACTION_PREVIEW_CHARS: usize = 120;

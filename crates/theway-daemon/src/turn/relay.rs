@@ -341,3 +341,10 @@ fn snapshot_frame(snapshot: &WireStatus) -> Option<String> {
 // Test files live in `tests/turn/relay/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
 tests_bridge_macro::tests_bridge!("turn/relay");
+
+#[cfg(test)]
+mod relay_extra_tests {
+    //! Extra relay tests live in `tests/turn/relay/extra/` so the primary
+    //! `tests/turn/relay/mod.rs` bridge stays untouched.
+    tests_bridge_macro::tests_bridge!("turn/relay/extra");
+}

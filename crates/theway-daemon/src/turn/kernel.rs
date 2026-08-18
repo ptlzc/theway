@@ -187,3 +187,10 @@ impl ReplKernel {
 // Test files live in `tests/turn/kernel/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
 tests_bridge_macro::tests_bridge!("turn/kernel");
+
+#[cfg(test)]
+mod kernel_extra_tests {
+    //! Extra turn-kernel tests live in `tests/turn/kernel/extra/` so the
+    //! primary `tests/turn/kernel/mod.rs` bridge stays untouched.
+    tests_bridge_macro::tests_bridge!("turn/kernel/extra");
+}
