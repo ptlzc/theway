@@ -471,3 +471,10 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod commands_session_tests {
+    #[allow(unused_imports)]
+    use super::*;
+    tests_bridge_macro::tests_bridge!("commands/session");
+}

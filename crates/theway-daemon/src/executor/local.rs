@@ -329,3 +329,6 @@ impl ToolExecutor for LocalExecutor {
         spawn_and_wait("git", args, &self.cwd, GIT_TIMEOUT).await
     }
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("executor/local");

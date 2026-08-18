@@ -120,3 +120,6 @@ impl SlashCommand<DaemonCtx> for SessionsCommand {
         CommandOutcome::Handled
     }
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("commands/auth");

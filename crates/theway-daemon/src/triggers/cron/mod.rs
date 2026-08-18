@@ -420,3 +420,13 @@ type HarnessCell = Arc<OnceCell<Arc<AgentHarness>>>;
 // Test files live in `tests/triggers/cron/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
 tests_bridge_macro::tests_bridge!("triggers/cron");
+
+#[cfg(test)]
+mod extra_tests {
+    tests_bridge_macro::tests_bridge!("triggers/cron/extra");
+}
+
+#[cfg(test)]
+mod storage_tests {
+    tests_bridge_macro::tests_bridge!("triggers/cron/storage_tests");
+}

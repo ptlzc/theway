@@ -480,3 +480,9 @@ pub async fn remote_runtime_storage(addr: &str) -> Result<Arc<dyn RuntimeStorage
 
 #[cfg(test)]
 tests_bridge_macro::tests_bridge!("runtime_storage");
+
+#[cfg(test)]
+mod runtime_storage_extra_tests {
+    //! Additional mirrored coverage lives in `tests/runtime_storage/extra/`.
+    tests_bridge_macro::tests_bridge!("runtime_storage/extra");
+}

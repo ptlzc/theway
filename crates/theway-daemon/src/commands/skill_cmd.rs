@@ -61,3 +61,6 @@ impl SlashCommand<DaemonCtx> for SkillCommand {
         CommandOutcome::AttachSkill { name: name.clone() }
     }
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("commands/skill_cmd");

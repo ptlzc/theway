@@ -416,3 +416,6 @@ fn string_field(data: &serde_json::Value, name: &str) -> Option<String> {
 fn number_field(data: &serde_json::Value, name: &str) -> Option<u64> {
     data.get(name).and_then(|v| v.as_u64())
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("commands/triggers/render");

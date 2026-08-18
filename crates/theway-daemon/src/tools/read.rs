@@ -219,3 +219,8 @@ mod tests {
         assert!(text.contains("line 199"));
     }
 }
+
+#[cfg(all(test, feature = "local"))]
+mod read_extra {
+    tests_bridge_macro::tests_bridge!("tools/read/extra");
+}

@@ -265,3 +265,8 @@ fn build_definition(spec_names: &[String]) -> Tool {
 
 #[cfg(test)]
 tests_bridge_macro::tests_bridge!("tools/subagent");
+
+#[cfg(test)]
+mod subagent_extra {
+    tests_bridge_macro::tests_bridge!("tools/subagent/extra");
+}

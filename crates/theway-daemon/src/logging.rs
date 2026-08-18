@@ -90,3 +90,9 @@ fn _path_check(_p: &Path) {}
 
 #[cfg(test)]
 tests_bridge_macro::tests_bridge!("logging");
+
+#[cfg(test)]
+mod commands_logging_tests {
+    use super::*;
+    tests_bridge_macro::tests_bridge!("commands/logging");
+}

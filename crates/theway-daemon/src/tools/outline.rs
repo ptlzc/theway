@@ -600,3 +600,8 @@ class Foo {
         assert!(err.to_string().contains("File not found"));
     }
 }
+
+#[cfg(all(test, feature = "local"))]
+mod outline_extra {
+    tests_bridge_macro::tests_bridge!("tools/outline/extra");
+}

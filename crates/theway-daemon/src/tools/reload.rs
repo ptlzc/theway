@@ -165,3 +165,8 @@ impl AgentTool for ReloadTool {
 // Test files live in `tests/tools/reload/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
 tests_bridge_macro::tests_bridge!("tools/reload");
+
+#[cfg(test)]
+mod reload_extra {
+    tests_bridge_macro::tests_bridge!("tools/reload/extra");
+}

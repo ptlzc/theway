@@ -174,3 +174,8 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod commands_model_tests {
+    tests_bridge_macro::tests_bridge!("commands/model");
+}

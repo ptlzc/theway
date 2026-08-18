@@ -369,3 +369,6 @@ impl theway_core::agent::compaction::algorithm::CompactAlgorithm for TsCompactAl
         }
     }
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("ts_extensions");

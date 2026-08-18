@@ -459,3 +459,6 @@ fn resolve_active_skill<'a>(
         )),
     }
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("commands/skills");

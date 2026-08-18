@@ -347,3 +347,8 @@ tests_bridge_macro::tests_bridge!("tools/remove_skill");
 mod remove_skill_extra {
     tests_bridge_macro::tests_bridge!("tools/remove_skill/extra");
 }
+
+#[cfg(all(test, feature = "local"))]
+mod remove_skill_extra_more {
+    tests_bridge_macro::tests_bridge!("tools/remove_skill/extra_more");
+}

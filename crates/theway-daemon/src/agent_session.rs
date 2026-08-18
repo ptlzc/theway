@@ -357,3 +357,10 @@ mod tests {
         )));
     }
 }
+
+#[cfg(test)]
+mod agent_session_mirrored_tests {
+    //! Mirrored tests live in `tests/agent_session/`; wrapped because the
+    //! top-level `mod tests` slot is already used by the inline tests.
+    tests_bridge_macro::tests_bridge!("agent_session");
+}

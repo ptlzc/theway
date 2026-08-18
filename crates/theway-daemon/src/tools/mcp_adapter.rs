@@ -266,3 +266,8 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod mcp_adapter_extra {
+    tests_bridge_macro::tests_bridge!("tools/mcp_adapter/extra");
+}

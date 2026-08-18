@@ -220,3 +220,9 @@ mod templates_tests {
     //! top-level `mod tests` slot is already used by the inline parser test.
     tests_bridge_macro::tests_bridge!("templates");
 }
+
+#[cfg(test)]
+mod templates_extra_tests {
+    //! Additional mirrored coverage lives in `tests/templates/extra/`.
+    tests_bridge_macro::tests_bridge!("templates/extra");
+}

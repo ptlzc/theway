@@ -243,3 +243,9 @@ mod tests {
         assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
     }
 }
+
+#[cfg(test)]
+mod otlp_extra_tests {
+    //! Additional mirrored coverage lives in `tests/otlp/extra/`.
+    tests_bridge_macro::tests_bridge!("otlp/extra");
+}

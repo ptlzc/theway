@@ -303,3 +303,6 @@ async fn read_framed<R: tokio::io::AsyncBufRead + Unpin>(
     let value = serde_json::from_slice(&buf)?;
     Ok(Some(value))
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("lsp");

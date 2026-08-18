@@ -471,3 +471,9 @@ pub(super) async fn run_trigger_action(
     // 8. Remove from registry.
     running_registry.lock().remove(&trace_id);
 }
+
+#[cfg(test)]
+// Test files live in `tests/trigger_engine/execution/action/` (mirror of src),
+// pulled in by path so they keep unit-test semantics (private access).
+// See docs/rust-test-files.md.
+tests_bridge_macro::tests_bridge!("trigger_engine/execution/action");

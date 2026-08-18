@@ -412,3 +412,13 @@ pub(crate) fn write_rules_file(
 // Test files live in `tests/triggers/dynamic/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
 tests_bridge_macro::tests_bridge!("triggers/dynamic");
+
+#[cfg(test)]
+mod extra_tests {
+    tests_bridge_macro::tests_bridge!("triggers/dynamic/extra");
+}
+
+#[cfg(test)]
+mod storage_tests {
+    tests_bridge_macro::tests_bridge!("triggers/dynamic/storage_tests");
+}
