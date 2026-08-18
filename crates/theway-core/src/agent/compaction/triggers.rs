@@ -164,3 +164,8 @@ impl crate::agent::assembly::AgentHarness {
 
 #[cfg(test)]
 tests_bridge_macro::tests_bridge!("agent/compaction/triggers");
+
+#[cfg(test)]
+mod triggers_linecov_tests {
+    tests_bridge_macro::tests_bridge!("agent/compaction/triggers/linecov");
+}

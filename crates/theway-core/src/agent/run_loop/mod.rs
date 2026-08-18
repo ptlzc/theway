@@ -407,3 +407,8 @@ async fn run_one(
 
 #[cfg(test)]
 tests_bridge_macro::tests_bridge!("agent/run_loop");
+
+#[cfg(test)]
+mod run_loop_linecov_tests {
+    tests_bridge_macro::tests_bridge!("agent/run_loop/linecov");
+}

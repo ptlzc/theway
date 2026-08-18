@@ -414,3 +414,8 @@ pub struct SessionError {
 mod types_external_tests {
     tests_bridge_macro::tests_bridge!("agent/types");
 }
+
+#[cfg(test)]
+mod types_linecov_tests {
+    tests_bridge_macro::tests_bridge!("agent/types/linecov");
+}

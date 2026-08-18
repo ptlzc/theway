@@ -599,3 +599,8 @@ mod skills_walk_tests {
 mod skills_extra_tests {
     tests_bridge_macro::tests_bridge!("agent/skills/extra");
 }
+
+#[cfg(test)]
+mod skills_linecov_tests {
+    tests_bridge_macro::tests_bridge!("agent/skills/linecov");
+}

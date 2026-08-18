@@ -580,3 +580,8 @@ mod goal_extra_tests {
 mod goal_more_tests {
     tests_bridge_macro::tests_bridge!("multiagent/goal/more");
 }
+
+#[cfg(test)]
+mod goal_linecov_tests {
+    tests_bridge_macro::tests_bridge!("multiagent/goal/linecov");
+}

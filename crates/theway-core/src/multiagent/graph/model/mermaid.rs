@@ -692,3 +692,8 @@ pub fn first_line(text: &str, max: usize) -> String {
 
 #[cfg(test)]
 tests_bridge_macro::tests_bridge!("multiagent/graph/model/mermaid_extra");
+
+#[cfg(test)]
+mod mermaid_linecov_tests {
+    tests_bridge_macro::tests_bridge!("multiagent/graph/model/mermaid_linecov");
+}

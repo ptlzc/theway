@@ -144,3 +144,8 @@ pub(super) async fn call_llm(
 
 #[cfg(test)]
 tests_bridge_macro::tests_bridge!("agent/run_loop/llm");
+
+#[cfg(test)]
+mod llm_linecov_tests {
+    tests_bridge_macro::tests_bridge!("agent/run_loop/llm/linecov");
+}

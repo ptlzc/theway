@@ -1152,3 +1152,8 @@ fn extract_user_prompt_text(msg: &AgentMessage) -> Option<String> {
 
 #[cfg(test)]
 tests_bridge_macro::tests_bridge!("agent/assembly");
+
+#[cfg(test)]
+mod assembly_linecov_tests {
+    tests_bridge_macro::tests_bridge!("agent/assembly/linecov");
+}

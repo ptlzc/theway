@@ -833,3 +833,8 @@ mod tests {
 mod registry_external_tests {
     tests_bridge_macro::tests_bridge!("multiagent/registry");
 }
+
+#[cfg(test)]
+mod registry_linecov_tests {
+    tests_bridge_macro::tests_bridge!("multiagent/registry/linecov");
+}

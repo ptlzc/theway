@@ -494,3 +494,8 @@ mod tests {
 mod permission_external_tests {
     tests_bridge_macro::tests_bridge!("agent/permission");
 }
+
+#[cfg(test)]
+mod permission_linecov_tests {
+    tests_bridge_macro::tests_bridge!("agent/permission/linecov");
+}

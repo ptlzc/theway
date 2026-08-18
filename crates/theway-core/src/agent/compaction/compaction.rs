@@ -760,3 +760,8 @@ mod compaction_extra_tests {
 mod compaction_more_tests {
     tests_bridge_macro::tests_bridge!("agent/compaction/compaction/more");
 }
+
+#[cfg(test)]
+mod compaction_linecov_tests {
+    tests_bridge_macro::tests_bridge!("agent/compaction/compaction/linecov");
+}

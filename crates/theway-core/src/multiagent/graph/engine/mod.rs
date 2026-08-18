@@ -639,3 +639,8 @@ tests_bridge_macro::tests_bridge!("multiagent/graph/engine");
 mod engine_extra_tests {
     tests_bridge_macro::tests_bridge!("multiagent/graph/engine/extra");
 }
+
+#[cfg(test)]
+mod engine_linecov_tests {
+    tests_bridge_macro::tests_bridge!("multiagent/graph/engine/linecov");
+}

@@ -421,3 +421,8 @@ tests_bridge_macro::tests_bridge!("agent/run_loop/tools");
 mod tools_extra_tests {
     tests_bridge_macro::tests_bridge!("agent/run_loop/tools/extra");
 }
+
+#[cfg(test)]
+mod tools_linecov_tests {
+    tests_bridge_macro::tests_bridge!("agent/run_loop/tools/linecov");
+}

@@ -581,3 +581,8 @@ pub struct BranchSummaryInput {
 
 #[cfg(test)]
 tests_bridge_macro::tests_bridge!("agent/session/session");
+
+#[cfg(test)]
+mod session_linecov_tests {
+    tests_bridge_macro::tests_bridge!("agent/session/session/linecov");
+}

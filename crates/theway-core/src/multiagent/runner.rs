@@ -373,3 +373,8 @@ tests_bridge_macro::tests_bridge!("multiagent/runner");
 mod runner_extra_tests {
     tests_bridge_macro::tests_bridge!("multiagent/runner/extra");
 }
+
+#[cfg(test)]
+mod runner_linecov_tests {
+    tests_bridge_macro::tests_bridge!("multiagent/runner/linecov");
+}
