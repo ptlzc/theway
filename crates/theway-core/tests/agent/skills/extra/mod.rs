@@ -257,3 +257,31 @@ fn prefix_ignore_pattern_handles_negation_without_prefix() {
     assert_eq!(prefix_ignore_pattern("\\!keep.md", ""), Some("keep.md".into()));
     assert_eq!(prefix_ignore_pattern("# comment", ""), None);
 }
+
+#[tokio::test]
+async fn load_sourced_skills_with_empty_inputs_returns_empty() {
+    let env = TinyEnv::default();
+
+    let out = load_sourced_skills::<&str>(&env, &[], CancellationToken::new()).await;
+
+    assert!(out.is_empty());
+}
+
+#[tokio::test]
+async fn resolve_kind_returns_file_or_directory_without_canonical_lookup() {
+    let env = TinyEnv::default();
+    let mut diagnostics = Vec::new();
+
+    let file = TinyEnv::info("/file.md", FileKind::File);
+    assert_eq!(
+        resolve_kind(&env, &file, &mut diagnostics, &CancellationToken::new()).await,
+        Some(FileKind::File)
+    );
+
+    let dir = TinyEnv::info("/dir", FileKind::Directory);
+    assert_eq!(
+        resolve_kind(&env, &dir, &mut diagnostics, &CancellationToken::new()).await,
+        Some(FileKind::Directory)
+    );
+    assert!(diagnostics.is_empty());
+}

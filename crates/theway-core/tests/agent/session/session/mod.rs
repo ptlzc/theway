@@ -343,3 +343,157 @@ async fn session_append_compaction_omits_from_hook_when_false() {
         _ => panic!("expected compaction entry"),
     }
 }
+
+#[test]
+fn session_tree_entry_type_str_covers_all_variants() {
+    let entries = vec![
+        (SessionTreeEntry::Message {
+            id: "1".into(),
+            parent_id: None,
+            timestamp: "t".into(),
+            message: user_msg("hi"),
+        }, "message"),
+        (SessionTreeEntry::ThinkingLevelChange {
+            id: "2".into(),
+            parent_id: None,
+            timestamp: "t".into(),
+            thinking_level: "high".into(),
+        }, "thinking_level_change"),
+        (SessionTreeEntry::ModelChange {
+            id: "3".into(),
+            parent_id: None,
+            timestamp: "t".into(),
+            provider: "faux".into(),
+            model_id: "m".into(),
+        }, "model_change"),
+        (SessionTreeEntry::Compaction {
+            id: "4".into(),
+            parent_id: None,
+            timestamp: "t".into(),
+            summary: "s".into(),
+            first_kept_entry_id: "k".into(),
+            tokens_before: 1,
+            details: None,
+            from_hook: None,
+        }, "compaction"),
+        (SessionTreeEntry::BranchSummary {
+            id: "5".into(),
+            parent_id: None,
+            timestamp: "t".into(),
+            from_id: "root".into(),
+            summary: "s".into(),
+            details: None,
+            from_hook: None,
+        }, "branch_summary"),
+        (SessionTreeEntry::Custom {
+            id: "6".into(),
+            parent_id: None,
+            timestamp: "t".into(),
+            custom_type: "c".into(),
+            data: None,
+        }, "custom"),
+        (SessionTreeEntry::CustomMessage {
+            id: "7".into(),
+            parent_id: None,
+            timestamp: "t".into(),
+            custom_type: "cm".into(),
+            content: serde_json::Value::Null,
+            details: None,
+            display: true,
+        }, "custom_message"),
+        (SessionTreeEntry::Label {
+            id: "8".into(),
+            parent_id: None,
+            timestamp: "t".into(),
+            target_id: "1".into(),
+            label: Some("l".into()),
+        }, "label"),
+        (SessionTreeEntry::SessionInfo {
+            id: "9".into(),
+            parent_id: None,
+            timestamp: "t".into(),
+            name: Some("n".into()),
+        }, "session_info"),
+        (SessionTreeEntry::Leaf {
+            id: "10".into(),
+            parent_id: None,
+            timestamp: "t".into(),
+            target_id: None,
+        }, "leaf"),
+    ];
+
+    for (entry, expected) in entries {
+        assert_eq!(entry.type_str(), expected, "{entry:?}");
+        assert_eq!(entry.id(), entry.id());
+        let _ = entry.parent_id();
+    }
+}
+
+#[test]
+fn build_session_context_skips_empty_branch_summary() {
+    let entries = vec![
+        SessionTreeEntry::BranchSummary {
+            id: "b".into(),
+            parent_id: None,
+            timestamp: "t".into(),
+            from_id: "root".into(),
+            summary: String::new(),
+            details: None,
+            from_hook: None,
+        },
+        message_entry("m", Some("b"), user_msg("after")),
+    ];
+
+    let ctx = build_session_context(&entries);
+
+    assert_eq!(ctx.messages.len(), 1);
+    assert!(matches!(
+        ctx.messages[0],
+        AgentMessage::Llm(PiMessage::User(_))
+    ));
+}
+
+#[test]
+fn build_session_context_custom_message_with_bad_timestamp_falls_back_to_now() {
+    let entries = vec![SessionTreeEntry::CustomMessage {
+        id: "cm".into(),
+        parent_id: None,
+        timestamp: "not-a-timestamp".into(),
+        custom_type: "custom".into(),
+        content: serde_json::json!({"text": "payload"}),
+        details: None,
+        display: true,
+    }];
+
+    let ctx = build_session_context(&entries);
+
+    assert_eq!(ctx.messages.len(), 1);
+    assert!(matches!(ctx.messages[0], AgentMessage::Custom(_)));
+}
+
+#[test]
+fn build_session_context_with_compaction_missing_first_kept_keeps_only_summary() {
+    let entries = vec![
+        message_entry("1", None, user_msg("old")),
+        SessionTreeEntry::Compaction {
+            id: "c".into(),
+            parent_id: Some("1".into()),
+            timestamp: "t".into(),
+            summary: "summary".into(),
+            first_kept_entry_id: "does-not-exist".into(),
+            tokens_before: 1,
+            details: None,
+            from_hook: None,
+        },
+        message_entry("4", Some("c"), assistant_msg("after")),
+    ];
+
+    let ctx = build_session_context(&entries);
+
+    assert_eq!(ctx.messages.len(), 2);
+    assert!(matches!(ctx.messages[0], AgentMessage::Custom(_)));
+    assert!(matches!(
+        ctx.messages[1],
+        AgentMessage::Llm(PiMessage::Assistant(_))
+    ));
+}

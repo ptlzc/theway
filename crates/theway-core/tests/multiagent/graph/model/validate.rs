@@ -49,3 +49,44 @@ fn validate_catches_unknown_agent() {
     let ok = validate_graph(&nodes, None);
     assert!(ok.is_empty());
 }
+
+#[test]
+fn validate_empty_known_agents_accepts_unknown_agent() {
+    let nodes = vec![node_def("a", "bogus", "t", &[])];
+    let errors = validate_graph(&nodes, Some(&[]));
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn validate_catches_invalid_id_missing_agent_and_empty_task() {
+    let nodes = vec![
+        DagNodeDef {
+            id: "bad id!".into(),
+            agent: "x".into(),
+            task: "t".into(),
+            depends_on: None,
+            timeout: None,
+            cwd: None,
+            model: None,
+            thinking: None,
+            max_iterations: None,
+            tools: None,
+        },
+        DagNodeDef {
+            id: "ok".into(),
+            agent: String::new(),
+            task: "   ".into(),
+            depends_on: None,
+            timeout: None,
+            cwd: None,
+            model: None,
+            thinking: None,
+            max_iterations: None,
+            tools: None,
+        },
+    ];
+    let errors = validate_graph(&nodes, None);
+    assert!(errors.iter().any(|e| e.contains("非法")));
+    assert!(errors.iter().any(|e| e.contains("缺少 agent")));
+    assert!(errors.iter().any(|e| e.contains("缺少 task")));
+}

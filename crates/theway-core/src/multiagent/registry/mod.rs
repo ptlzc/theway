@@ -828,3 +828,8 @@ mod tests {
         assert_eq!(messages[0]["text"], serde_json::json!("task transcript"));
     }
 }
+
+#[cfg(test)]
+mod registry_external_tests {
+    tests_bridge_macro::tests_bridge!("multiagent/registry");
+}

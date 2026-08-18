@@ -195,3 +195,64 @@ async fn run_agent_idle_timeout_reports_timeout_error() {
         "idle timeout should finish well under the force-kill grace, took {elapsed:?}"
     );
 }
+
+#[tokio::test]
+async fn run_agent_interrupted_by_control_handle_marks_job_interrupted() {
+    let registry = AgentJobRegistry::new();
+    // A stream that never produces an event keeps the LLM call pending until
+    // the control handle interrupts the in-flight turn.
+    let stream_fn: StreamFn = Arc::new(move |_, _, _| {
+        let (stream, sender) = AssistantMessageEventStream::new();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            drop(sender);
+        });
+        stream
+    });
+    let run_registry = registry.clone();
+    let handle = tokio::spawn(async move {
+        run_agent(AgentRunOptions {
+            launch: AgentRunParams {
+                name: "tester",
+                description: "test",
+                system_prompt: "sys",
+                max_iterations: 1,
+            },
+            tools: Vec::new(),
+            prompt: "go".into(),
+            model: faux_model(),
+            stream_fn: Some(stream_fn),
+            timeout: Some(0),
+            thinking: None,
+            registry: run_registry.clone(),
+            source: "dag".into(),
+            run_id: None,
+            node_id: None,
+            session_id: None,
+            cancel: tokio_util::sync::CancellationToken::new(),
+            system_prompt_extra: None,
+            on_turn_end: None,
+        })
+        .await
+    });
+
+    // Wait for the registry job to appear, then interrupt it.
+    let job_id = loop {
+        let jobs = registry.list();
+        if !jobs.is_empty() {
+            break jobs[0].id.clone();
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    };
+    assert!(registry.interrupt(&job_id));
+
+    let result = tokio::time::timeout(std::time::Duration::from_secs(3), handle)
+        .await
+        .expect("run_agent must finish after interrupt")
+        .expect("task join");
+
+    assert!(!result.success);
+    assert!(result.error.is_some());
+    let job = registry.job(&job_id).unwrap();
+    assert_eq!(job.status, JobStatus::Interrupted);
+}

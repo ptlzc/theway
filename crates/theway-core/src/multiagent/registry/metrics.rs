@@ -129,3 +129,6 @@ fn cap_tool_result(text: &str) -> String {
     let head: String = text.chars().take(CAP).collect();
     format!("{head}…(截断)")
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("multiagent/registry/metrics");

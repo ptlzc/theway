@@ -131,3 +131,60 @@ fn cap_chars_truncates_on_char_boundary() {
     let long = "x".repeat(100);
     assert_eq!(cap_chars(&long, 16).chars().count(), 16);
 }
+
+#[test]
+fn launch_ignores_missing_run_or_node() {
+    let engine = Arc::new(DagEngine::new());
+    let launcher = node_launcher(
+        engine.clone(),
+        faux_model(),
+        Some(faux_stream("unused")),
+        PathBuf::from("."),
+        crate::multiagent::registry::AgentJobRegistry::new(),
+        Arc::new(|_| Vec::new()),
+        test_launch_resolver(),
+    );
+
+    // Neither exists → no panic, no task spawned.
+    NodeLauncher::launch(
+        &*launcher,
+        "no-such-run",
+        "no-such-node",
+        CancellationToken::new(),
+    );
+
+    // Run exists but node does not → same silent return.
+    let run_id = plan_single_node(&engine, "general", "hello", None);
+    NodeLauncher::launch(&*launcher, &run_id, "missing-node", CancellationToken::new());
+}
+
+#[tokio::test]
+async fn model_override_same_id_uses_parent_model() {
+    let engine = engine_with_launcher(faux_model(), faux_stream("ok"));
+    let def = DagRunDef {
+        name: "same-model".into(),
+        nodes: vec![DagNodeDef {
+            id: "a".into(),
+            agent: "general".into(),
+            task: "t".into(),
+            depends_on: None,
+            timeout: None,
+            cwd: None,
+            model: Some("faux".into()),
+            thinking: None,
+            max_iterations: None,
+            tools: None,
+        }],
+        max_concurrency: None,
+        fail_fast: None,
+        direction: None,
+    };
+    let run_id = engine.plan(def, None, None).unwrap().id;
+    let results = engine
+        .wait_for_runs(std::slice::from_ref(&run_id), Duration::from_secs(10), None)
+        .await;
+    assert_eq!(results, vec![(run_id.clone(), false)]);
+    let run = engine.get_run(&run_id).unwrap();
+    assert_eq!(run.status, DagStatus::Completed);
+    assert_eq!(run.node("a").unwrap().status, NodeStatus::Succeeded);
+}

@@ -24,3 +24,29 @@ fn escape_label_handles_quotes_backslashes_newlines() {
     assert_eq!(escape_mermaid_label("a\"b\\c"), "a\\\"b\\\\c");
     assert_eq!(escape_mermaid_label("x\ny\n z"), "x y z");
 }
+
+#[test]
+fn status_label_variants_and_predicates() {
+    assert_eq!(node_status_label(&NodeStatus::Pending), "pending");
+    assert_eq!(node_status_label(&NodeStatus::Ready), "ready");
+    assert_eq!(node_status_label(&NodeStatus::Running), "running");
+    assert_eq!(node_status_label(&NodeStatus::Succeeded), "succeeded");
+    assert_eq!(node_status_label(&NodeStatus::Failed), "failed");
+    assert_eq!(node_status_label(&NodeStatus::Skipped), "skipped");
+    assert_eq!(node_status_label(&NodeStatus::Cancelled), "cancelled");
+
+    assert_eq!(dag_status_label(&DagStatus::Running), "running");
+    assert_eq!(dag_status_label(&DagStatus::Completed), "completed");
+    assert_eq!(dag_status_label(&DagStatus::Failed), "failed");
+    assert_eq!(dag_status_label(&DagStatus::Cancelled), "cancelled");
+
+    assert!(is_terminal(&NodeStatus::Succeeded));
+    assert!(is_terminal(&NodeStatus::Failed));
+    assert!(is_terminal(&NodeStatus::Skipped));
+    assert!(is_terminal(&NodeStatus::Cancelled));
+    assert!(!is_terminal(&NodeStatus::Running));
+
+    assert!(is_blocked(&NodeStatus::Failed));
+    assert!(is_blocked(&NodeStatus::Cancelled));
+    assert!(!is_blocked(&NodeStatus::Running));
+}

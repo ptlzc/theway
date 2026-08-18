@@ -354,3 +354,68 @@ async fn call_llm_returns_turn_interrupted_when_turn_cancel_fires() {
 
     assert!(matches!(result, Err(AgentRunError::TurnInterrupted)));
 }
+
+#[tokio::test]
+async fn call_llm_builds_system_prompt_and_tool_definitions() {
+    // Arrange
+    let captured = Arc::new(Mutex::new(None::<PiContext>));
+    let captured_clone = captured.clone();
+    let stream_fn: StreamFn = Arc::new(move |_, context, _| {
+        *captured_clone.lock().unwrap() = Some(context.clone());
+        done_stream("ok")
+    });
+
+    let mut state = AgentState::default();
+    state.model = Some(faux_model());
+    state.system_prompt = "sys prompt".into();
+    state.thinking_level = None;
+    state.tools = vec![Arc::new(SysPromptTool {
+        def: theway_llm_provider::Tool {
+            name: "echo".into(),
+            description: "echo".into(),
+            parameters: serde_json::json!({"type": "object"}),
+        },
+    })];
+    let agent = Agent::new(AgentOptions {
+        initial_state: Some(state),
+        stream_fn: Some(stream_fn),
+        ..Default::default()
+    });
+
+    // Act
+    call_llm(&agent.inner.clone(), &CancellationToken::new(), &CancellationToken::new())
+        .await
+        .unwrap();
+
+    // Assert
+    let ctx = captured.lock().unwrap().clone().unwrap();
+    assert_eq!(ctx.system_prompt.as_deref(), Some("sys prompt"));
+    let tools = ctx.tools.expect("tools must be present");
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0].name, "echo");
+}
+
+struct SysPromptTool {
+    def: theway_llm_provider::Tool,
+}
+
+#[async_trait::async_trait]
+impl crate::types::AgentTool for SysPromptTool {
+    fn definition(&self) -> &theway_llm_provider::Tool {
+        &self.def
+    }
+
+    fn label(&self) -> &str {
+        "echo"
+    }
+
+    async fn execute(
+        &self,
+        _tool_call_id: &str,
+        _params: serde_json::Value,
+        _cancel: CancellationToken,
+        _on_update: Option<crate::types::AgentToolUpdate>,
+    ) -> Result<crate::types::AgentToolResult, crate::types::AgentToolError> {
+        Ok(crate::types::AgentToolResult::default())
+    }
+}

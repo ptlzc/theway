@@ -409,3 +409,8 @@ pub struct SessionError {
     pub code: SessionErrorCode,
     pub message: String,
 }
+
+#[cfg(test)]
+mod types_external_tests {
+    tests_bridge_macro::tests_bridge!("agent/types");
+}

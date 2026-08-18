@@ -136,3 +136,6 @@ impl SessionStorage for MemorySessionStorage {
         Ok(latest)
     }
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("agent/session/memory_storage");

@@ -357,3 +357,176 @@ async fn set_current_pause_resume_clear_roundtrip() {
     assert_eq!(cleared.status, GoalStatus::Cleared);
     assert!(current(&harness).await.is_none());
 }
+
+// ──────────────────────────────────────────────────────────────────────────────────────────
+// evaluate_stop_hook success / terminal-path coverage
+// ──────────────────────────────────────────────────────────────────────────────────────────
+
+fn harness() -> Arc<AgentHarness> {
+    Arc::new(AgentHarness::new(AgentHarnessOptions::new(
+        faux_model(),
+        Session::new(Arc::new(MemorySessionStorage::new())),
+    )))
+}
+
+fn decision_stream(text: &'static str) -> crate::types::StreamFn {
+    Arc::new(move |_, _, _| {
+        let (stream, mut sender) =
+            theway_llm_provider::AssistantMessageEventStream::new();
+        tokio::spawn(async move {
+            let msg = AssistantMessage {
+                role: theway_llm_provider::AssistantRole::Assistant,
+                content: vec![ContentBlock::text(text)],
+                api: theway_llm_provider::Api::from("faux"),
+                provider: theway_llm_provider::Provider::from("faux"),
+                model: "faux".into(),
+                response_model: None,
+                response_id: None,
+                diagnostics: None,
+                usage: theway_llm_provider::Usage::default(),
+                stop_reason: theway_llm_provider::StopReason::Stop,
+                error_message: None,
+                timestamp: 0,
+            };
+            sender.push(theway_llm_provider::AssistantMessageEvent::Start {
+                partial: msg.clone(),
+            });
+            sender.push(theway_llm_provider::AssistantMessageEvent::Done {
+                reason: theway_llm_provider::DoneReason::Stop,
+                message: msg,
+            });
+        });
+        stream
+    })
+}
+
+fn goal_resolver() -> crate::multiagent::types::AgentRunResolver {
+    let launch = crate::multiagent::types::AgentRunParams {
+        name: "goal-evaluator",
+        description: "judge",
+        system_prompt: evaluator_system_prompt(),
+        max_iterations: 1,
+    };
+    Arc::new(move |name: &str| (name == "goal-evaluator").then_some(launch))
+}
+
+fn ctx_with(transcript: Vec<AgentMessage>) -> OnTurnEndContext {
+    OnTurnEndContext {
+        transcript,
+        continuation_count: 0,
+        last_user_prompt: Some("finish".into()),
+    }
+}
+
+#[tokio::test]
+async fn evaluate_stop_hook_returns_stop_when_goal_achieved() {
+    let h = harness();
+    set(&h, "finish".into()).await.unwrap();
+    let engine = Arc::new(DagEngine::new());
+
+    let decision = evaluate_stop_hook(
+        h.clone(),
+        engine.clone(),
+        goal_resolver(),
+        AgentJobRegistry::new(),
+        Some(decision_stream(r#"{"ok":true,"reason":"all tests pass"}"#)),
+        ctx_with(vec![user_msg("hi")]),
+        tokio_util::sync::CancellationToken::new(),
+    )
+    .await;
+
+    assert!(matches!(decision.action, TurnEndAction::Stop));
+    let state = current(&h).await.unwrap();
+    assert_eq!(state.status, GoalStatus::Achieved);
+    assert_eq!(state.iterations, 1);
+    assert_eq!(state.last_reason.as_deref(), Some("all tests pass"));
+    assert!(decision.payload.is_some());
+}
+
+#[tokio::test]
+async fn evaluate_stop_hook_returns_continue_when_not_achieved() {
+    let h = harness();
+    set(&h, "finish".into()).await.unwrap();
+    let engine = Arc::new(DagEngine::new());
+
+    let decision = evaluate_stop_hook(
+        h.clone(),
+        engine.clone(),
+        goal_resolver(),
+        AgentJobRegistry::new(),
+        Some(decision_stream(r#"{"ok":false,"reason":"missing evidence"}"#)),
+        ctx_with(vec![user_msg("hi")]),
+        tokio_util::sync::CancellationToken::new(),
+    )
+    .await;
+
+    match decision.action {
+        TurnEndAction::Continue { ref prompt } => {
+            assert!(prompt.contains("finish"));
+            assert!(prompt.contains("missing evidence"));
+        }
+        other => panic!("expected Continue, got {other:?}"),
+    }
+    let state = current(&h).await.unwrap();
+    assert_eq!(state.status, GoalStatus::Pursuing);
+    assert_eq!(state.iterations, 1);
+}
+
+#[tokio::test]
+async fn evaluate_stop_hook_budget_limits_after_max_continuations() {
+    let h = harness();
+    set(&h, "finish".into()).await.unwrap();
+    // Pre-set the persisted state one iteration below the cap.
+    let mut state = current(&h).await.unwrap();
+    state.iterations = MAX_CONTINUATIONS - 1;
+    append_state(&h, &state).await.unwrap();
+    let engine = Arc::new(DagEngine::new());
+
+    let decision = evaluate_stop_hook(
+        h.clone(),
+        engine.clone(),
+        goal_resolver(),
+        AgentJobRegistry::new(),
+        Some(decision_stream(r#"{"ok":false,"reason":"still missing"}"#)),
+        ctx_with(vec![user_msg("hi")]),
+        tokio_util::sync::CancellationToken::new(),
+    )
+    .await;
+
+    match decision.action {
+        TurnEndAction::Pause { ref reason } => {
+            assert!(reason.contains("continuation limit reached"));
+        }
+        other => panic!("expected Pause, got {other:?}"),
+    }
+    let state = current(&h).await.unwrap();
+    assert_eq!(state.status, GoalStatus::BudgetLimited);
+    assert_eq!(state.iterations, MAX_CONTINUATIONS);
+}
+
+#[tokio::test]
+async fn evaluate_stop_hook_pauses_on_invalid_evaluator_json() {
+    let h = harness();
+    set(&h, "finish".into()).await.unwrap();
+    let engine = Arc::new(DagEngine::new());
+
+    let decision = evaluate_stop_hook(
+        h.clone(),
+        engine.clone(),
+        goal_resolver(),
+        AgentJobRegistry::new(),
+        Some(decision_stream("not-json")),
+        ctx_with(vec![user_msg("hi")]),
+        tokio_util::sync::CancellationToken::new(),
+    )
+    .await;
+
+    match decision.action {
+        TurnEndAction::Pause { ref reason } => {
+            assert!(reason.contains("goal evaluator failed"), "{reason}");
+        }
+        other => panic!("expected Pause, got {other:?}"),
+    }
+    let state = current(&h).await.unwrap();
+    assert_eq!(state.status, GoalStatus::Paused);
+}

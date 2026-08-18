@@ -489,3 +489,8 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod permission_external_tests {
+    tests_bridge_macro::tests_bridge!("agent/permission");
+}

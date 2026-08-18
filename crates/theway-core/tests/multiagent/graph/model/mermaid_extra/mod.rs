@@ -147,3 +147,51 @@ fn render_tree_survives_dependency_cycle() {
     assert!(tree.contains("[wait]"));
     assert!(tree.lines().count() >= 2);
 }
+
+#[test]
+fn parse_mermaid_empty_input_returns_no_nodes_or_errors() {
+    let res = parse_mermaid("");
+    assert!(res.nodes.is_empty());
+    assert!(res.errors.is_empty());
+}
+
+#[test]
+fn node_summary_line_appends_attempts_and_error() {
+    let mut run = build_run(&DagRunDef {
+        name: "t".into(),
+        nodes: vec![node_def("b", &["a"])],
+        max_concurrency: None,
+        fail_fast: None,
+        direction: None,
+    });
+    let n = run.node_mut("b").unwrap();
+    n.status = NodeStatus::Failed;
+    n.started_at = Some(1_000);
+    n.completed_at = Some(31_000);
+    n.attempt = 3;
+    n.error = Some("went wrong".into());
+
+    let line = node_summary_line(run.node("b").unwrap());
+
+    assert!(line.contains("[fail] [a] b [x] task"));
+    assert!(line.contains("(30.0s)"));
+    assert!(line.contains("attempts=3"));
+    assert!(line.contains("went wrong"));
+}
+
+#[test]
+fn run_token_stats_sums_all_nodes() {
+    let mut run = build_run(&DagRunDef {
+        name: "t".into(),
+        nodes: vec![node_def("a", &[]), node_def("b", &["a"])],
+        max_concurrency: None,
+        fail_fast: None,
+        direction: None,
+    });
+    run.node_mut("a").unwrap().input_tokens = Some(10);
+    run.node_mut("a").unwrap().output_tokens = Some(5);
+    run.node_mut("b").unwrap().input_tokens = Some(7);
+    run.node_mut("b").unwrap().output_tokens = Some(3);
+
+    assert_eq!(run_token_stats(&run), (17, 8));
+}

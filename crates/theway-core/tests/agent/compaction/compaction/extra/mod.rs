@@ -2,6 +2,7 @@
 //! `compaction_extra_tests` because the existing test module was already occupied.
 
 use super::super::*;
+use std::sync::Arc;
 use theway_llm_provider::{
     AssistantMessage, ContentBlock, ImageContent, Message as PiMessage, StopReason, ToolCall,
     ToolResultMessage, ToolResultRole, Usage, UserContent, UserContentBlock, UserMessage, UserRole,
@@ -349,4 +350,83 @@ fn prepare_compaction_splits_prefix_and_sums_message_tokens() {
     assert_eq!(prep.cut.first_kept_entry_id.as_deref(), Some("2"));
     assert_eq!(prep.entries_to_summarize.len(), 1);
     assert!(prep.tokens_before > 0);
+}
+
+#[test]
+fn summary_output_tokens_falls_back_to_default_reserve_when_zero() {
+    let settings = CompactionSettings {
+        reserve_tokens: 0,
+        ..default_settings()
+    };
+    assert_eq!(
+        summary_output_tokens(&faux_model(0, 0), &settings),
+        DEFAULT_COMPACTION_SETTINGS.reserve_tokens
+    );
+    assert_eq!(summary_output_tokens(&faux_model(4_000, 0), &settings), 1_000);
+}
+
+#[test]
+fn serialize_conversation_for_summary_budget_smaller_than_note_truncates_note() {
+    // Budget below the note overhead: the serialized conversation is empty.
+    let text = serialize_conversation_for_summary_budget(&[user("hello")], 1, None);
+    assert!(text.is_empty());
+
+    // Budget that fits part of the note: the note is truncated to the
+    // char-class token estimate for the available budget.
+    let overhead = summary_prompt_overhead_tokens(None);
+    let text = serialize_conversation_for_summary_budget(&[user(&"x".repeat(2000))], overhead + 10, None);
+    assert!(text.contains("[compaction note"));
+    assert!(!text.contains("hello"));
+}
+
+#[tokio::test]
+async fn generate_summary_with_custom_instructions_and_budget() {
+    let captured = std::sync::Arc::new(std::sync::Mutex::new(None::<PiContext>));
+    let captured_clone = captured.clone();
+    let stream_fn: StreamFn = Arc::new(move |_, context, options| {
+        *captured_clone.lock().unwrap() = Some(context.clone());
+        assert!(options.and_then(|o| o.base.max_tokens).is_some());
+        let (stream, mut sender) = theway_llm_provider::AssistantMessageEventStream::new();
+        tokio::spawn(async move {
+            let msg = theway_llm_provider::AssistantMessage {
+                role: theway_llm_provider::AssistantRole::Assistant,
+                content: vec![theway_llm_provider::ContentBlock::text("summary")],
+                api: theway_llm_provider::Api::from("faux"),
+                provider: theway_llm_provider::Provider::from("faux"),
+                model: "faux".into(),
+                response_model: None,
+                response_id: None,
+                diagnostics: None,
+                usage: Usage::default(),
+                stop_reason: StopReason::Stop,
+                error_message: None,
+                timestamp: 0,
+            };
+            sender.push(theway_llm_provider::AssistantMessageEvent::Done {
+                reason: theway_llm_provider::DoneReason::Stop,
+                message: msg,
+            });
+        });
+        stream
+    });
+
+    let out = generate_summary(
+        GenerateSummaryRequest {
+            model: faux_model(128_000, 16_384),
+            messages: vec![user("hello")],
+            custom_instructions: Some("custom instructions".into()),
+            prompt_budget_tokens: Some(8_000),
+            max_output_tokens: Some(1_024),
+            stream_fn: Some(stream_fn),
+        },
+        tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(out.summary, "summary");
+    let ctx = captured.lock().unwrap().clone().unwrap();
+    let system = ctx.system_prompt.expect("system prompt set");
+    assert!(system.contains("custom instructions"));
+    assert!(system.contains(SUMMARIZATION_SYSTEM_PROMPT));
 }

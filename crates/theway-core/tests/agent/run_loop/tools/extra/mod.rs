@@ -316,3 +316,77 @@ async fn execute_tools_terminate_true_sets_all_terminate() {
     assert_eq!(results.len(), 1);
     assert!(all_terminate);
 }
+
+#[tokio::test]
+async fn execute_tools_before_tool_call_hook_block_without_reason_uses_default() {
+    let tool = Arc::new(MockTool::new("echo"));
+    let calls = tool.calls.clone();
+    let options = AgentOptions {
+        before_tool_call: Some(Arc::new(move |_ctx, _cancel| {
+            Box::pin(async move {
+                BeforeToolCallResult {
+                    block: true,
+                    reason: None,
+                    prompt: None,
+                }
+            })
+        })),
+        ..Default::default()
+    };
+    let inner = agent_with(vec![tool as Arc<dyn AgentTool>], options);
+    let assistant = assistant_with_tool_calls(vec![tool_call("call_1", "echo")]);
+
+    let (results, _) = execute_tools(&inner, &assistant, &CancellationToken::new()).await;
+
+    assert_eq!(results.len(), 1);
+    assert!(results[0].is_error);
+    assert!(matches!(
+        &results[0].content[0],
+        UserContentBlock::Text(t) if t.text.contains("blocked by before_tool_call hook")
+    ));
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
+struct FailingTool {
+    def: Tool,
+}
+
+#[async_trait::async_trait]
+impl AgentTool for FailingTool {
+    fn definition(&self) -> &Tool {
+        &self.def
+    }
+
+    fn label(&self) -> &str {
+        "failing"
+    }
+
+    async fn execute(
+        &self,
+        _tool_call_id: &str,
+        _params: serde_json::Value,
+        _cancel: CancellationToken,
+        _on_update: Option<AgentToolUpdate>,
+    ) -> Result<AgentToolResult, AgentToolError> {
+        Err(AgentToolError::Message("kaboom".into()))
+    }
+}
+
+#[tokio::test]
+async fn execute_tools_tool_error_becomes_is_error_result() {
+    let tool = Arc::new(FailingTool {
+        def: tool_def("failing"),
+    });
+    let inner = agent_with(vec![tool as Arc<dyn AgentTool>], AgentOptions::default());
+    let assistant = assistant_with_tool_calls(vec![tool_call("call_1", "failing")]);
+
+    let (results, all_terminate) = execute_tools(&inner, &assistant, &CancellationToken::new()).await;
+
+    assert_eq!(results.len(), 1);
+    assert!(results[0].is_error);
+    assert!(!all_terminate);
+    assert!(matches!(
+        &results[0].content[0],
+        UserContentBlock::Text(t) if t.text == "kaboom"
+    ));
+}

@@ -161,3 +161,6 @@ impl crate::agent::assembly::AgentHarness {
         Ok(true)
     }
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("agent/compaction/triggers");
