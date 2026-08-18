@@ -14,6 +14,14 @@ use tokio_util::sync::CancellationToken;
 
 use super::{HTTP_TIMEOUT_SECS, SKILL_FETCH_OOM_GUARD_BYTES, Source};
 
+#[cfg(test)]
+// Test-only local `reqwest` module (see tests/tools/install_skill/fetch/mock_reqwest.rs):
+// lets the URL success/stream-read branches be driven by scripted local responses without a
+// webpki-trusted TLS fixture. `reqwest::Url` is re-exported from the real crate so parsing
+// and SSRF pre-flight behaviour stay unchanged.
+#[path = "../../../tests/tools/install_skill/fetch/mock_reqwest.rs"]
+mod reqwest;
+
 pub(super) struct Fetched {
     pub(super) content: String,
 }
@@ -176,4 +184,9 @@ tests_bridge_macro::tests_bridge!("tools/install_skill/fetch");
 #[cfg(test)]
 mod fetch_extra {
     tests_bridge_macro::tests_bridge!("tools/install_skill/fetch/extra");
+}
+
+#[cfg(test)]
+mod fetch_mock_success {
+    tests_bridge_macro::tests_bridge!("tools/install_skill/fetch/mock_success");
 }

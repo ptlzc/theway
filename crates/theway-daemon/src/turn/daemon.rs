@@ -1393,3 +1393,11 @@ mod daemon_line_coverage_tests {
     //! mirrored suites untouched.
     tests_bridge_macro::tests_bridge!("turn/daemon/line_coverage");
 }
+
+#[cfg(test)]
+mod daemon_final_coverage_tests {
+    //! Final turn-host line coverage lives in
+    //! `tests/turn/daemon/final_coverage/`; separate bridge to keep the other
+    //! mirrored suites untouched.
+    tests_bridge_macro::tests_bridge!("turn/daemon/final_coverage");
+}

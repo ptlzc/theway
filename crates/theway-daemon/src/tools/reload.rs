@@ -170,3 +170,8 @@ tests_bridge_macro::tests_bridge!("tools/reload");
 mod reload_extra {
     tests_bridge_macro::tests_bridge!("tools/reload/extra");
 }
+
+#[cfg(test)]
+mod reload_no_global {
+    tests_bridge_macro::tests_bridge!("tools/reload/no_global");
+}

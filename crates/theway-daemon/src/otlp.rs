@@ -249,3 +249,9 @@ mod otlp_extra_tests {
     //! Additional mirrored coverage lives in `tests/otlp/extra/`.
     tests_bridge_macro::tests_bridge!("otlp/extra");
 }
+
+#[cfg(test)]
+mod otlp_linecov_tests {
+    //! Line-coverage completion tests live in `tests/otlp/linecov/`.
+    tests_bridge_macro::tests_bridge!("otlp/linecov");
+}

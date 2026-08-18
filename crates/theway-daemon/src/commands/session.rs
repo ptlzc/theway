@@ -478,3 +478,10 @@ mod commands_session_tests {
     use super::*;
     tests_bridge_macro::tests_bridge!("commands/session");
 }
+
+#[cfg(test)]
+mod commands_session_line_coverage_tests {
+    #[allow(unused_imports)]
+    use super::*;
+    tests_bridge_macro::tests_bridge!("commands/session/line_coverage");
+}

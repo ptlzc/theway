@@ -44,7 +44,7 @@ fn skill(name: &str, source: SkillSource) -> Skill {
 
 /// Harness whose reload closure swaps the catalog for `["reloaded"]` when
 /// `with_reload` is set; without it, reload fails (`NotConfigured`).
-fn build_harness(with_reload: bool) -> (Arc<AgentHarness>, SkillHarnessCell) {
+pub(super) fn build_harness(with_reload: bool) -> (Arc<AgentHarness>, SkillHarnessCell) {
     let storage = Arc::new(MemorySessionStorage::new()) as Arc<dyn SessionStorage>;
     let session = Session::new(storage);
     let mut opts = AgentHarnessOptions::new(fake_model(), session);
