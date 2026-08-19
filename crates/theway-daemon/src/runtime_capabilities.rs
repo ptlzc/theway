@@ -1,12 +1,9 @@
-//! Panel-status helpers shared by the daemon and (mirrored in) the TUI: which hook
-//! registrations and trigger-runtime features are wired in this binary. Pure
-//! inventory functions — the TUI keeps its own copy in `ui_mode` with the
-//! UI-mode resolver; the daemon only needs the inventory.
+//! Inventory of hook registrations and automation features wired into the
+//! daemon runtime.
 
 /// Real `*Hook` trait registrations active in this binary. Only names that map to an actual
-/// `AgentHarness` extension point — so users reading the panel learn what hooks they could
-/// plug into. `dedup` / `cycle suppress` / `fire-once rules` / `inject-and-run` are
-/// trigger-runtime *features*, not hooks, and live in [`active_trigger_features`] instead.
+/// `AgentHarness` extension point. Pipeline behavior belongs in
+/// [`active_trigger_features`] instead.
 pub fn active_hook_registrations(lsp_lang_count: usize, cli_hooks_loaded: bool) -> Vec<String> {
     let mut points = vec![
         "before_tool_call".to_string(),
@@ -35,4 +32,4 @@ pub fn active_trigger_features() -> Vec<String> {
 }
 
 #[cfg(test)]
-tests_bridge_macro::tests_bridge!("ui_mode_panel");
+tests_bridge_macro::tests_bridge!("runtime_capabilities");

@@ -19,7 +19,7 @@ async fn set_model_from_spec_switches_to_model_without_credential_hint() {
     let (mut host, _scratch, _repo) = built.into_parts();
     host.set_model_from_spec(&spec).await;
 
-    assert_eq!(current_model_label(host.kernel.harness()), spec);
+    assert_eq!(current_model_label(host.session.kernel.harness()), spec);
 }
 
 struct FailingAppendStorage {
@@ -88,7 +88,7 @@ async fn set_model_from_spec_maps_set_model_errors() {
     host.set_model_from_spec(&spec).await;
 
     // The failed model change must not stick.
-    assert_eq!(current_model_label(host.kernel.harness()), "faux:faux");
+    assert_eq!(current_model_label(host.session.kernel.harness()), "faux:faux");
 }
 
 // ── remaining command-outcome branches ──────────────────────────────────────────
@@ -139,7 +139,7 @@ async fn dispatch_web_slash_lists_overflow_import_activation_ids() {
 async fn dispatch_web_slash_open_model_picker_without_active_model() {
     let built = build_host(harness_with_input(Vec::new()));
     let (mut host, _scratch, _repo) = built.into_parts();
-    host.kernel.harness().agent().state().model = None;
+    host.session.kernel.harness().agent().state().model = None;
 
     let mut turn = TurnState::default();
     host.dispatch_web_slash("/model", &mut turn).await;

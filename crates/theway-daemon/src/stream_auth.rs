@@ -1,6 +1,8 @@
 //! The auth-store-backed stream function wrapper for LLM calls.
 
+#[cfg(test)]
 use theway_core::AgentMessage;
+#[cfg(test)]
 use theway_llm_provider::Message as PiMessage;
 
 pub fn stream_fn_with_auth_store() -> theway_core::StreamFn {
@@ -38,8 +40,8 @@ where
     merged
 }
 
-/// Helper for callers that want to feed a Message (raw theway-llm-provider role variant) into the agent. Not
-/// directly used by the REPL but kept here for the tests.
+/// Build a user message for unit tests of the authentication wrapper.
+#[cfg(test)]
 pub fn user_message(text: &str) -> AgentMessage {
     AgentMessage::Llm(PiMessage::User(theway_llm_provider::UserMessage {
         role: theway_llm_provider::UserRole::User,

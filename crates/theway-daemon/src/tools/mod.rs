@@ -267,7 +267,7 @@ pub fn session_tool_set(
     skill_harness_cell: &SkillHarnessCell,
     session_id: &str,
     executor: Arc<dyn ToolExecutor>,
-    services: &crate::orchestration::DaemonServices,
+    services: &crate::DaemonServices,
 ) -> Vec<Arc<dyn AgentTool>> {
     let mut tools = local_tools(executor.clone());
     // Engine-owned tools (DAG / subagent / skills / memory), assembled kernel-side with the

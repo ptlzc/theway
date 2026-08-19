@@ -1,17 +1,13 @@
 //! theway-daemon — the headless agent runtime kernel.
 //!
-//! The single kernel of the theway agent: harness assembly, the executor
-//! implementations (`local` / `sandbox` features) and all tool bodies with the
-//! fail-closed sandbox tool gating, trigger engine + source adapters, cron
-//! scheduler, session lifecycle, skills/templates loading, MCP client wiring,
-//! LSP supervisor, DAG persistence, and the `thewayd` binary
-//! (`src/bin/thewayd.rs`) serving the gRPC / HTTP / MCP transports. The shared
-//! client-contract modules (auth, config, history, mentions, slash-command
-//! framework) live in `theway-transport`; session storage and archives live in
-//! `theway-storage`; the terminal UI lives in `theway-tui`.
+//! The daemon composes the core agent runtime with storage, tools, automation,
+//! MCP/LSP adapters, and the gRPC/HTTP/MCP protocol servers. Shared wire
+//! contracts live in `theway-transport`; persistence lives in
+//! `theway-storage`; client presentation lives outside this crate.
 //!
-//! The daemon is the runtime kernel; the TUI and other clients connect to it
-//! over the transports and never link this crate.
+//! Most implementation modules are crate-private. The root exports process
+//! startup types, while the public modules below are extension surfaces for
+//! custom executors, hooks, storage adapters, tools, and automation sources.
 
 //! Self-alias so `#[path]`-included src modules (integration tests) and lib code
 //! share one absolute path shape: `theway_daemon::tools`, `theway_daemon::...`
@@ -19,66 +15,57 @@
 //! in by path (same pattern as theway-core's `theway_core` alias).
 extern crate self as theway_daemon;
 
-pub mod agent_session;
+mod agent_session;
 pub mod agent_specs;
-pub mod bug_report;
-pub mod builtin_skills;
-pub mod commands;
-pub mod config_readers;
-pub mod control_plane_prompt;
-pub mod dag_persist;
+mod bug_report;
+mod builtin_skills;
+mod commands;
+mod control_plane_prompt;
+mod dag_persist;
 pub mod env;
 pub mod executor;
-pub mod export;
-pub mod file_commands;
-pub mod forwarding_tool_ops;
+mod export;
+mod file_commands;
+mod forwarding_tool_ops;
 pub mod hook_executors;
 pub mod hooks;
-pub mod job_transcripts;
-pub mod local_models;
-pub mod logging;
-pub mod lsp;
-pub mod lsp_supervisor;
-pub mod mcp_loader;
-pub mod mcp_server;
-pub mod model;
-pub mod observability;
-pub mod orchestration;
+mod job_transcripts;
+mod local_models;
+mod logging;
+mod lsp;
+mod lsp_supervisor;
+mod mcp_loader;
+mod mcp_server;
+mod model;
+mod observability;
+mod orchestration;
 // Daemon path context (issue #66): one CLI-boundary resolution of every host
 // path (base / home / work dir / extra skill dirs); kernel modules take the
 // resolved values as parameters instead of reading `HOME` / `THEWAY_DIR`.
-pub mod paths;
+mod paths;
+pub use agent_session::{AgentSession, RetrySettings};
+pub use orchestration::{DaemonOptions, DaemonServices, DaemonTransport, SessionSelection, run};
 pub use paths::DaemonPaths;
 pub mod runtime_storage;
-pub mod turn;
-// Shared client-contract surface re-exported for `crate::…` paths used inside
-// this crate (bridged unit tests reach `crate::auth` etc. through these;
-// external clients use `theway-transport` directly and don't need the
-// forwarding).
-pub use theway_transport::{auth, config, history, mentions};
-// Session archive export/import lives in theway-storage; re-exported because
-// daemon modules reach it through `crate::session_archive` paths.
-pub use theway_storage::session_archive;
-pub mod session_ops;
+mod turn;
+// Bridged unit tests preserve their original crate-relative auth paths.
+#[cfg(test)]
+pub(crate) use theway_transport::auth;
+mod session_ops;
 pub mod skills;
-pub mod startup_config;
-pub mod stream_auth;
-pub mod system_prompt;
+mod startup_config;
+mod stream_auth;
+mod system_prompt;
 
-// Skill enable/disable overlay lives in the daemon kernel next to the builtin
-// tools that consume it (`SetSkillState` / `RemoveSkill`, `/skills enable|disable`).
-pub mod skill_overrides;
-// Session repo used by the assembly layer: one SQLite database per session
-// (`<uuidv7>.db`). Re-exported from the composition root so binaries don't need
-// to depend on theway-storage directly.
+mod runtime_capabilities;
+mod skill_overrides;
 pub mod templates;
 pub mod tools;
-pub mod transport_adapter;
+mod transport_adapter;
 pub mod trigger_engine;
 pub mod ts_extensions;
-pub mod ui_mode_panel;
 // Server-first: transport is always on (the daemon IS an agent server).
-pub mod triggers;
+mod triggers;
 
 // Test-only env serialization lock shared by every bridged unit-test module
 // that mutates process env (commands, local_models, …) — see the file header

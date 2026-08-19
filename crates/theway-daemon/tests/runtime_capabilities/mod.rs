@@ -1,4 +1,4 @@
-//! Tests for `ui_mode_panel` — split out of src (see docs/rust-test-files.md).
+//! Tests for `runtime_capabilities` — split out of src (see docs/rust-test-files.md).
 
 use super::*;
 

@@ -1,9 +1,8 @@
-//! Shared REPL execution kernel for terminal and future web frontends.
+//! Session-turn execution kernel used by the daemon host.
 //!
 //! This module owns the "what work should the agent run" boundary: prompt futures, abort, model
-//! capability checks, and queued-turn value types. The terminal UI still owns rendering and
-//! keyboard/mouse handling, but it should not construct harness futures directly. Keeping that
-//! split narrow lets the upcoming web UI reuse the same turn semantics without copying TUI code.
+//! capability checks, and queued-turn value types. Client rendering and interaction remain
+//! outside this boundary.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -14,7 +13,7 @@ use crate::orchestration::SessionRuntime;
 use theway_core::{AgentHarness, AgentRunError};
 use theway_llm_provider::{ImageContent, InputModality};
 
-/// In-flight model turn, polled by a frontend event loop.
+/// In-flight model turn, polled by the serialized host event loop.
 ///
 /// Running this as a local future (not `tokio::spawn`) sidesteps the `Send` bound:
 /// `AgentSession::prompt` briefly holds a `parking_lot` guard across an `.await`, so its future is

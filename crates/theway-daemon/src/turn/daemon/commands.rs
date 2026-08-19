@@ -57,7 +57,7 @@ impl TurnHost {
                     &theway_llm_provider::Provider::from(provider),
                     id,
                 ),
-                _ => self.kernel.harness().agent().state().model.clone(),
+                _ => self.session.kernel.harness().agent().state().model.clone(),
             };
             if config.clears("base_url")
                 && let Some(current) = model.as_ref()
@@ -92,7 +92,7 @@ impl TurnHost {
             } else {
                 theway_core::ThinkingLevel::Off
             };
-            match self.kernel.harness().set_thinking_level(level).await {
+            match self.session.kernel.harness().set_thinking_level(level).await {
                 Ok(_) if config.thinking.is_none() => applied.clear_fields.push("thinking".into()),
                 Ok(_) => applied.thinking = Some(enabled),
                 Err(err) => self.error_line(format!("configure thinking: {err}")),
@@ -116,13 +116,14 @@ impl TurnHost {
                 .map(|skill| skill.name.clone())
                 .collect();
             let non_builtin: Vec<_> = self
+                .session
                 .kernel
                 .harness()
                 .skills()
                 .into_iter()
                 .filter(|skill| !matches!(skill.source, theway_core::SkillSource::Builtin))
                 .collect();
-            self.kernel
+            self.session.kernel
                 .harness()
                 .replace_skills(crate::builtin_skills::merge_with_user_project(
                     resolved.skills,
@@ -142,7 +143,7 @@ impl TurnHost {
                 config.skills_dirs.clone()
             };
             self.handle_set_skill_dirs(dirs, turn).await;
-            let actual = self.path_context.read().unwrap().skills_dirs.clone();
+            let actual = self.runtime.path_context.read().unwrap().skills_dirs.clone();
             if actual.is_empty() {
                 applied.clear_fields.push("skills_dirs".into());
             } else {
@@ -154,11 +155,11 @@ impl TurnHost {
             if secs == 0 {
                 self.error_line("configure: trigger_poll_secs must be greater than zero");
             } else {
-                self.services.dynamic_triggers.set_poll_interval_secs(secs);
+                self.automation.services.dynamic_triggers.set_poll_interval_secs(secs);
                 applied.trigger_poll_secs = Some(secs);
             }
         } else if config.clears("trigger_poll_secs") {
-            self.services.dynamic_triggers.set_poll_interval_secs(
+            self.automation.services.dynamic_triggers.set_poll_interval_secs(
                 theway_transport::triggers::DEFAULT_DYNAMIC_TRIGGER_POLL_INTERVAL_SECS,
             );
             applied.clear_fields.push("trigger_poll_secs".into());
@@ -168,11 +169,11 @@ impl TurnHost {
             if lines == 0 {
                 self.error_line("configure: tui_max_feed_lines must be greater than zero");
             } else {
-                self.tui_max_feed_lines = Some(lines);
+                self.runtime.feed_history_limit = Some(lines);
                 applied.tui_max_feed_lines = Some(lines);
             }
         } else if config.clears("tui_max_feed_lines") {
-            self.tui_max_feed_lines = None;
+            self.runtime.feed_history_limit = None;
             applied.clear_fields.push("tui_max_feed_lines".into());
         }
 
@@ -192,7 +193,7 @@ impl TurnHost {
             );
         }
 
-        let touched = self.daemon_config.write().unwrap().merge_from(&applied);
+        let touched = self.runtime.config.write().unwrap().merge_from(&applied);
         if touched == 0 {
             self.system_line("configure: no applicable settings changed");
         } else {
@@ -208,10 +209,11 @@ impl TurnHost {
     /// dirs before enqueuing this command; this step makes it durable.
     async fn handle_set_skill_dirs(&mut self, dirs: Vec<String>, turn: &mut TurnState) {
         let dirs: Vec<PathBuf> = dirs.into_iter().map(PathBuf::from).collect();
-        self.paths.set_extra_skill_dirs(dirs);
+        self.runtime.paths.set_extra_skill_dirs(dirs);
         // Keep the shared wire path context in sync with the authoritative
         // value (`GetPathContext` readers observe it immediately).
-        self.path_context.write().unwrap().skills_dirs = self
+        self.runtime.path_context.write().unwrap().skills_dirs = self
+            .runtime
             .paths
             .current_extra_skill_dirs()
             .into_iter()
@@ -220,7 +222,7 @@ impl TurnHost {
         if turn.fut.is_some() {
             self.request_abort(turn);
         }
-        match self.kernel.harness().reload_skills_from_disk().await {
+        match self.session.kernel.harness().reload_skills_from_disk().await {
             Ok(out) => self.system_line(format!(
                 "set skill dirs: {} loaded, {} diagnostics",
                 out.skills.len(),
@@ -236,11 +238,11 @@ impl TurnHost {
             self.error_line("switch session: missing session id");
             return;
         }
-        if id == self.session_id {
+        if id == self.session.id {
             self.system_line(format!("already on session {id}"));
             return;
         }
-        match self.session_repo.contains(&id).await {
+        match self.session.repository.contains(&id).await {
             Ok(true) => {}
             Ok(false) => {
                 self.error_line(format!("switch session: no session matches id {id}"));
@@ -265,7 +267,7 @@ impl TurnHost {
             self.error_line("trigger: missing rule id");
             return;
         }
-        let Some(rule) = self.services.dynamic_triggers
+        let Some(rule) = self.automation.services.dynamic_triggers
             .list()
             .into_iter()
             .find(|rule| rule.id == id)
@@ -281,7 +283,7 @@ impl TurnHost {
         if turn.fut.is_some() {
             self.queue_user_prompt(display, rule.action, Vec::new());
         } else {
-            self.feed.push_user(display);
+            self.projection.feed.push_user(display);
             self.start_user_prompt_turn(rule.action, Vec::new(), turn);
         }
     }

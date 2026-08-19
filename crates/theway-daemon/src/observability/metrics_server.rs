@@ -5,6 +5,7 @@ use prometheus::Encoder as _;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 pub(super) struct MetricsServer {
+    #[cfg(test)]
     pub(super) addr: SocketAddr,
     stop: tokio::sync::oneshot::Sender<()>,
     task: tokio::task::JoinHandle<()>,
@@ -39,7 +40,12 @@ impl MetricsServer {
             }
         });
         tracing::info!(target: "theway::observability", %addr, "Prometheus listener started");
-        Some(Self { addr, stop, task })
+        Some(Self {
+            #[cfg(test)]
+            addr,
+            stop,
+            task,
+        })
     }
 
     pub(super) async fn shutdown(self) {

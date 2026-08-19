@@ -5,8 +5,8 @@ use std::sync::Arc;
 use crate::runtime_storage::{RuntimeStorage, local_runtime_storage, remote_runtime_storage};
 use crate::startup_config::StartupConfig;
 use crate::stream_auth::stream_fn_with_auth_store;
-use crate::turn::daemon::{DaemonConfig, PanelStatus, TurnHost};
-use crate::{agent_specs, session_ops, skills, templates, triggers, ui_mode_panel};
+use crate::turn::daemon::{DaemonConfig, RuntimeCapabilities, TurnHost};
+use crate::{agent_specs, runtime_capabilities, session_ops, skills, templates, triggers};
 use anyhow::{Context, Result};
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::{PermissionPolicy, ThinkingLevel};
@@ -54,7 +54,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     // Issue #80: all persistent runtime state goes through the RuntimeStorage
     // seam. The default LocalRuntimeStorage keeps current local behavior; a
     // controller-backed storage can replace it without changing the kernel.
-    // Issue #85: when the TUI/controller provides a StorageService address,
+    // Issue #85: when a controller provides a StorageService address,
     // the daemon uses RemoteRuntimeStorage for the externalized operations.
     let storage: Arc<dyn RuntimeStorage> = match &options.storage_service_addr {
         Some(addr) => remote_runtime_storage(addr).await?,
@@ -84,7 +84,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         startup.load_local_sources = false;
     }
 
-    // Model resolution (same rules as the TUI binary).
+    // Resolve the active model from explicit options and provider defaults.
     // TODO(#73): custom model definitions are still read from local
     // `models.json` files; once the settings RPC provisions custom models,
     // this local read goes away. The `load_local_sources` seam already
@@ -205,6 +205,9 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     } else {
         crate::mcp_loader::LoadedMcp::empty()
     };
+    for diagnostic in &mcp.diagnostics {
+        tracing::warn!(target: "mcp", "{diagnostic}");
+    }
     let mcp_tool_count = mcp.tools.len();
     let mcp_tool_names = mcp
         .tools
@@ -253,16 +256,14 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     let compact_algorithms = Arc::new(crate::ts_extensions::compact_algorithm_registry(
         &ts_extensions,
     ));
-    // Issue #73: all of these used to be `config.toml` reads
-    // (`config_readers`); startup now takes them from the in-memory
-    // StartupConfig — defaults until the controller provisions values
-    // through the settings RPC.
+    // Runtime settings come from the in-memory StartupConfig: defaults until
+    // the controller provisions values through the settings RPC.
     let config_enabled_builtins = startup.builtin_skills.clone();
     dynamic_trigger_registry.set_poll_interval_secs(startup.trigger_poll_secs);
     // TODO(#73): `WireDaemonConfig` has no thinking-summary fields yet, so
     // `startup.thinking_summary` stays `None` until the settings proto grows
-    // them; the TUI scrollback cap rides the existing `tui_max_feed_lines`
-    // wire field.
+    // them; the feed-history cap uses the compatibility wire field
+    // `tui_max_feed_lines`.
     let thinking_summary_cfg = startup.thinking_summary.clone();
     let resolved_builtins =
         crate::builtin_skills::resolve_builtins(&options.builtin_skills, &config_enabled_builtins)?;
@@ -392,15 +393,15 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         })
     };
 
-    let panel_status = PanelStatus {
+    let capabilities = RuntimeCapabilities {
         mcp_servers: mcp.client_count,
         mcp_tools: mcp_tool_count,
         mcp_server_names,
         mcp_tool_names,
         tool_names: tool_names.clone(),
         mcp_notification_hooks: mcp_notification_hook_count,
-        hook_points: ui_mode_panel::active_hook_registrations(lsp_lang_count, hooks_active),
-        trigger_features: ui_mode_panel::active_trigger_features(),
+        hook_points: runtime_capabilities::active_hook_registrations(lsp_lang_count, hooks_active),
+        trigger_features: runtime_capabilities::active_trigger_features(),
     };
 
     let thinking_summary = thinking_summary_cfg.map(|cfg| {
@@ -475,8 +476,6 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
             .with_output(services.command_output.clone())
             .with_automations(dynamic_trigger_registry.clone(), cron_registry.clone()),
         cwd: cwd.clone(),
-        home: paths.home.clone(),
-        base: paths.base.clone(),
         paths: paths.clone(),
         session_id,
         log_path: _logging.as_ref().map(|l| l.log_path.clone()),
@@ -492,7 +491,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         current_session_state: Arc::new(parking_lot::Mutex::new(
             session_ops::CurrentSessionState::default(),
         )),
-        panel_status,
+        capabilities,
         thinking_summary,
         startup,
         services,
@@ -510,7 +509,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     );
 
     // Publish the actual bound port + our pid to a per-cwd discovery file so
-    // clients (theway TUI, scripts) can find this daemon without a fixed port.
+    // clients can find this daemon without a fixed port.
     // Written on bind; removed on shutdown only when the entry still names us.
     let port_file = theway_transport::client::port_file_path(&cwd);
     let daemon_pid = std::process::id();

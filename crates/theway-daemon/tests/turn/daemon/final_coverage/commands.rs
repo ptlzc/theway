@@ -5,7 +5,7 @@ async fn handle_web_command_resolve_control_plane_approve_forwards_allow() {
     let built = build_host(harness_with_input(Vec::new()));
     let (mut host, _scratch, _repo) = built.into_parts();
     let (decision_tx, decision_rx) = oneshot::channel();
-    host.show_control_plane_prompt(UiControlPlanePrompt {
+    host.show_control_plane_prompt(PendingControlPlanePrompt {
         request: ControlPlanePromptRequest {
             tool_call_id: "call-approve".into(),
             tool_name: "WriteFile".into(),
@@ -23,7 +23,7 @@ async fn handle_web_command_resolve_control_plane_approve_forwards_allow() {
     )
     .await;
 
-    assert!(host.control_plane_prompt.is_none());
+    assert!(host.projection.control_plane_prompt.is_none());
     assert!(matches!(
         decision_rx.await.unwrap(),
         ControlPlanePromptDecision::Allow
@@ -45,7 +45,7 @@ async fn handle_configure_applies_skill_dirs_and_trigger_poll() {
     host.handle_configure(patch, &mut TurnState::default()).await;
 
     assert_eq!(
-        host.paths.current_extra_skill_dirs(),
+        host.runtime.paths.current_extra_skill_dirs(),
         vec![PathBuf::from("/cfg-skill")]
     );
     assert_eq!(triggers::dynamic::dynamic_trigger_poll_interval_secs(), 123);
@@ -61,7 +61,7 @@ async fn handle_set_skill_dirs_maps_reload_error() {
         .await;
 
     assert_eq!(
-        host.paths.current_extra_skill_dirs(),
+        host.runtime.paths.current_extra_skill_dirs(),
         vec![PathBuf::from("/new")]
     );
 }
@@ -73,13 +73,13 @@ async fn handle_switch_session_reports_repo_errors() {
 
     // Point the repo root at a file so `read_dir` fails.
     let file = tempfile::NamedTempFile::new().unwrap();
-    host.session_repo = Arc::new(SqliteSessionRepo::new(file.path()));
+    host.session.repository = Arc::new(SqliteSessionRepo::new(file.path()));
 
-    let original = host.session_id.clone();
+    let original = host.session.id.clone();
     host.handle_switch_session("some-id".into(), &mut TurnState::default())
         .await;
 
-    assert_eq!(host.session_id, original);
+    assert_eq!(host.session.id, original);
 }
 
 #[tokio::test]
@@ -99,7 +99,7 @@ async fn handle_switch_session_aborts_in_flight_turn_and_maps_switch_error() {
         .await;
 
     assert!(turn.aborted);
-    assert_eq!(host.session_id, "sess-final");
+    assert_eq!(host.session.id, "sess-final");
 }
 
 // ── submit / dispatch branches ──────────────────────────────────────────────────
@@ -148,13 +148,13 @@ async fn dispatch_web_slash_queues_template_and_compaction_when_busy() {
         .await;
     host.dispatch_web_slash("/compact", &mut turn).await;
 
-    assert_eq!(host.queued_turns.len(), 2);
+    assert_eq!(host.session.queue.len(), 2);
     assert!(matches!(
-        &host.queued_turns.front(),
+        &host.session.queue.front(),
         Some(QueuedTurn::PromptTemplate { .. })
     ));
     assert!(matches!(
-        &host.queued_turns.back(),
+        &host.session.queue.back(),
         Some(QueuedTurn::Compaction { .. })
     ));
 }
@@ -218,7 +218,7 @@ async fn start_next_queued_turn_reports_remaining_count() {
 
     let mut turn = TurnState::default();
     assert!(host.start_next_queued_turn(&mut turn));
-    assert_eq!(host.queued_turns.len(), 1);
+    assert_eq!(host.session.queue.len(), 1);
     assert!(turn.fut.is_some());
 }
 
@@ -253,7 +253,7 @@ async fn start_next_queued_turn_handles_all_job_variants() {
     turn = TurnState::default();
     assert!(host.start_next_queued_turn(&mut turn));
     assert_eq!(turn.prefix, "compaction failed: ");
-    assert!(host.queued_turns.is_empty());
+    assert!(host.session.queue.is_empty());
 }
 
 #[tokio::test]
@@ -265,5 +265,5 @@ async fn apply_feed_update_routes_non_trigger_updates() {
 
     // The non-trigger path feeds the console feed rather than the trigger
     // poll slot.
-    assert!(host.latest_trigger_poll.is_none());
+    assert!(host.projection.latest_trigger_poll.is_none());
 }

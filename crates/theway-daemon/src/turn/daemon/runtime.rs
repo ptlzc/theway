@@ -1,11 +1,11 @@
 impl TurnHost {
-    pub fn new(config: DaemonConfig) -> Self {
+    pub(crate) fn new(config: DaemonConfig) -> Self {
         // Scan claude-code-format file commands once at startup; `/reload`
         // rescans them (issue #37).
         let registry = Arc::new(config.registry);
         registry.set_file_commands(crate::file_commands::scan_file_commands(
             &config.cwd,
-            &config.home,
+            &config.paths.home,
         ));
         let completer = SlashCompleter::from_commands(slash_commands(&registry));
         // Bind the application-owned reload slot after the initial session runtime exists.
@@ -31,7 +31,7 @@ impl TurnHost {
         }));
         // Shared daemon configuration view (issue #72): seeded from the
         // startup-resolved settings (active model, skill dirs, trigger poll
-        // interval, TUI scrollback, enabled builtin skills). Issue #73: the
+        // interval, feed-history limit, enabled builtin skills). Issue #73: the
         // seed values come from the in-memory `StartupConfig` (defaults +
         // controller initial payload) — no local config file is read.
         // `Configure` commands merge into the view at runtime and the
@@ -65,66 +65,80 @@ impl TurnHost {
         }));
         let tool_ops: Arc<dyn ToolOps> = Arc::new(ForwardingToolOps::new(daemon_config.clone()));
         Self {
-            kernel: ReplKernel::new(config.harness, config.trigger_executor, config.retry),
-            registry,
-            reload_runtime,
-            services: config.services,
-            completer,
-            cwd: config.cwd,
-            paths: config.paths,
-            path_context,
-            daemon_config,
-            tool_ops,
-            session_id: config.session_id,
-            log_path: config.log_path,
-            tool_count: config.tool_count,
-            feed: Feed::new(),
-            plain_lines_cache: theway_transport::feed::PlainLinesCache::new(100),
-            block_versions: Vec::new(),
-            dirty_blocks: BTreeSet::new(),
-            latest_trigger_poll: None,
-            latest_goal: None,
-            feed_rx: Some(config.feed_rx),
-            feed_tx: config.feed_tx,
-            thinking_summary: config.thinking_summary,
-            thinking_burst: super::thinking_summary::ThinkingBurst::default(),
-            main_run_rx: Some(config.main_run_rx),
-            control_plane_prompt_rx: config.control_plane_prompt_rx,
-            control_plane_prompt: None,
-            model_catalog: model_catalog(),
-            panel_status: config.panel_status,
-            tui_max_feed_lines: config.startup.tui_max_feed_lines,
-            dag_engine: config.dag_engine,
-            subagent_registry: config.subagent_registry,
-            session_factory: config.session_factory,
-            session_repo: config.session_repo,
-            current_session_state: config.current_session_state,
-            busy: false,
-            queued_turns: VecDeque::new(),
+            session: SessionRuntimeState {
+                kernel: ReplKernel::new(config.harness, config.trigger_executor, config.retry),
+                id: config.session_id,
+                log_path: config.log_path,
+                tool_count: config.tool_count,
+                factory: config.session_factory,
+                repository: config.session_repo,
+                shared_state: config.current_session_state,
+                busy: false,
+                queue: VecDeque::new(),
+            },
+            automation: AutomationRuntime {
+                services: config.services,
+                reload: reload_runtime,
+                dag: config.dag_engine,
+                subagents: config.subagent_registry,
+            },
+            runtime: RuntimeConfiguration {
+                registry,
+                completer,
+                cwd: config.cwd,
+                paths: config.paths,
+                path_context,
+                config: daemon_config,
+                tool_ops,
+                model_catalog: model_catalog(),
+                feed_history_limit: config.startup.tui_max_feed_lines,
+            },
+            projection: FeedProjectionState {
+                feed: Feed::new(),
+                plain_lines_cache: theway_transport::feed::PlainLinesCache::new(100),
+                block_versions: Vec::new(),
+                dirty_blocks: BTreeSet::new(),
+                latest_trigger_poll: None,
+                latest_goal: None,
+                thinking_summary: config.thinking_summary,
+                thinking_burst: super::thinking_summary::ThinkingBurst::default(),
+                control_plane_prompt: None,
+                capabilities: config.capabilities,
+            },
+            inputs: RuntimeEventInputs {
+                feed_rx: Some(config.feed_rx),
+                feed_tx: config.feed_tx,
+                main_run_rx: Some(config.main_run_rx),
+                control_plane_prompt_rx: config.control_plane_prompt_rx,
+            },
         }
     }
 
     fn system_line(&mut self, text: impl AsRef<str>) {
-        self.feed.push_plain_untimed(text.as_ref(), Level::System);
+        self.projection
+            .feed
+            .push_plain_untimed(text.as_ref(), Level::System);
     }
 
     fn error_line(&mut self, text: impl AsRef<str>) {
-        self.feed.push_plain_untimed(text.as_ref(), Level::Error);
+        self.projection
+            .feed
+            .push_plain_untimed(text.as_ref(), Level::Error);
     }
 
     /// Build the public transport channels and wire the event planes
     /// ([`theway_transport::host::TransportHost::transport_endpoints`] implementation).
-    pub fn transport_endpoints(&mut self) -> TransportEndpoints {
+    pub(crate) fn transport_endpoints(&mut self) -> TransportEndpoints {
         let (command_tx, command_rx) = mpsc::unbounded_channel::<WireCommand>();
         let (snapshot_tx, _) = broadcast::channel::<WireStatusUpdate>(128);
         let latest = Arc::new(Mutex::new(self.wire_snapshot()));
         let (event_tx, _) = broadcast::channel::<WireAgentEvent>(256);
         let (dag_event_tx, _) = broadcast::channel::<WireDagEvent>(256);
         let (core_dag_event_tx, _) = broadcast::channel::<DagEvent>(256);
-        self.dag_engine
+        self.automation.dag
             .set_event_sender(Some(core_dag_event_tx.clone()));
         let agent_fwd = {
-            let mut agent_rx = self.subagent_registry.subscribe();
+            let mut agent_rx = self.automation.subagents.subscribe();
             let agent_tx = event_tx.clone();
             let mut dag_rx = core_dag_event_tx.subscribe();
             let dag_tx = dag_event_tx.clone();
@@ -172,37 +186,37 @@ impl TurnHost {
             latest,
             events: event_tx,
             dag_events: dag_event_tx,
-            completer: self.completer.clone(),
-            job_ops: Arc::new(CoreJobOps::new(self.subagent_registry.clone())),
-            graph_ops: Arc::new(CoreGraphOps::new(self.dag_engine.clone())),
+            completer: self.runtime.completer.clone(),
+            job_ops: Arc::new(CoreJobOps::new(self.automation.subagents.clone())),
+            graph_ops: Arc::new(CoreGraphOps::new(self.automation.dag.clone())),
             session_ops: Arc::new(crate::session_ops::AppSessionOps::new(
-                self.session_repo.clone(),
-                self.dag_engine.clone(),
-                self.current_session_state.clone(),
+                self.session.repository.clone(),
+                self.automation.dag.clone(),
+                self.session.shared_state.clone(),
             )),
             // Issue #68: the transport servers serve `GetPathContext` from
             // this handle and apply the `SetSkillDirs` optimistic update
             // against it; the event loop holds the authoritative copy.
-            path_context: self.path_context.clone(),
+            path_context: self.runtime.path_context.clone(),
             // The transport servers serve `GetConfig` from this authoritative
             // handle; only the event loop updates it after applying a patch.
-            daemon_config: self.daemon_config.clone(),
+            daemon_config: self.runtime.config.clone(),
             // Issue #76: file/process operations are forwarded to the
             // controller's ToolService endpoint through the shared config's
             // `tool_service_addr`.
-            tool_ops: self.tool_ops.clone(),
+            tool_ops: self.runtime.tool_ops.clone(),
             // Issue #84: runtime state externalization is wired as an RPC
             // contract first; the storage-backed implementation lands with
             // the controller-storage phase (#85/#86).
             storage_ops: std::sync::Arc::new(theway_transport::UnavailableStorageOps),
-            session_id: self.session_id.clone(),
+            session_id: self.session.id.clone(),
             agent_fwd,
         }
     }
 
     /// Serialized transport event loop: drains the endpoint channels into the host
     /// and drives the selected transport server until shutdown.
-    pub async fn run_transport_loop(
+    pub(crate) async fn run_transport_loop(
         mut self,
         mode: TransportMode,
         endpoints: TransportEndpoints,
@@ -213,9 +227,9 @@ impl TurnHost {
         let latest = endpoints.latest;
         let snapshot_tx = endpoints.snapshot_tx;
 
-        let mut feed_rx = self.feed_rx.take().expect("feed_rx taken once");
-        let mut main_run_rx = self.main_run_rx.take().expect("main_run_rx taken once");
-        let mut control_plane_prompt_rx = self.control_plane_prompt_rx.take();
+        let mut feed_rx = self.inputs.feed_rx.take().expect("feed_rx taken once");
+        let mut main_run_rx = self.inputs.main_run_rx.take().expect("main_run_rx taken once");
+        let mut control_plane_prompt_rx = self.inputs.control_plane_prompt_rx.take();
         let mut turn = TurnState::default();
         self.refresh_goal_state().await;
         self.publish_snapshot(&latest, &snapshot_tx, true).await;
@@ -264,7 +278,7 @@ impl TurnHost {
                         Some(rx) => rx.recv().await,
                         None => None,
                     }
-                }, if self.control_plane_prompt.is_none() && control_plane_prompt_rx.is_some() => {
+                }, if self.projection.control_plane_prompt.is_none() && control_plane_prompt_rx.is_some() => {
                     self.show_control_plane_prompt(prompt);
                     dirty = true;
                     metadata_dirty = true;

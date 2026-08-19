@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use clap::Parser;
-use theway_daemon::orchestration::{DaemonOptions, DaemonTransport, SessionSelection, run};
+use theway_daemon::{DaemonOptions, DaemonTransport, SessionSelection, run};
 
 include!(concat!(
     env!("CARGO_MANIFEST_DIR"),

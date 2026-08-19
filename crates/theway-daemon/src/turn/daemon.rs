@@ -1,11 +1,9 @@
 //! `TurnHost` — the headless transport host behind the `thewayd` binary.
 //!
-//! Same turn semantics, snapshot surface and command handling as the TUI's `App`
-//! (the two share [`super::kernel`] and [`super::feed`]), but with no terminal:
-//! it implements [`theway_transport::host::TransportHost`] and is driven by the
-//! gRPC/HTTP/MCP protocol servers from `theway-transport`.
+//! It implements [`theway_transport::host::TransportHost`] and coordinates one
+//! active session with the gRPC/HTTP/MCP servers from `theway-transport`.
 //!
-//! Startup assembly (harness, session, trigger executor, listeners, panel status)
+//! Startup assembly (harness, session, trigger executor, listeners, capabilities)
 //! lives in the `thewayd` binary; this module only owns the serialized transport
 //! event loop and the state it drives.
 
@@ -30,7 +28,7 @@ use super::kernel::{QueuedTurn, ReplKernel, TurnState, poll_turn};
 use crate::agent_session::RetrySettings;
 use crate::bug_report;
 use crate::commands::{self, CommandCtx, CommandOutcome, Registry};
-use crate::control_plane_prompt::UiControlPlanePrompt;
+use crate::control_plane_prompt::PendingControlPlanePrompt;
 use crate::forwarding_tool_ops::ForwardingToolOps;
 use crate::orchestration::DaemonServices;
 use crate::paths::DaemonPaths;
@@ -47,11 +45,11 @@ use theway_transport::transport::ToolOps;
 use theway_transport::wire::*;
 use theway_transport::{TransportEndpoints, TransportMode};
 
-/// Model families surfaced in the web/grpc model picker (mirror of the TUI's).
+/// Model families surfaced through transport snapshots.
 const SUPPORTED_APIS: [&str; 4] = ["openai-completions", "openai-responses", "anthropic", "ds4"];
 
 /// Provider-grouped model catalog for transport snapshots.
-pub fn model_catalog() -> Vec<ProviderGroup> {
+fn model_catalog() -> Vec<ProviderGroup> {
     let mut groups: std::collections::BTreeMap<String, Vec<ModelEntry>> =
         std::collections::BTreeMap::new();
     for model in theway_llm_provider::list_models() {
@@ -79,67 +77,76 @@ pub fn model_catalog() -> Vec<ProviderGroup> {
         .collect()
 }
 
-/// Sidebar/panel statistics snapshot (skills/triggers/cron/MCP/tools/hooks) — the
-/// daemon-side twin of the TUI's `PanelStatus`.
+/// Runtime capabilities and inventory projected into transport snapshots.
 #[derive(Clone, Debug, Default)]
-pub struct PanelStatus {
-    pub mcp_servers: usize,
-    pub mcp_tools: usize,
-    pub mcp_server_names: Vec<String>,
-    pub mcp_tool_names: Vec<String>,
-    pub tool_names: Vec<String>,
-    pub mcp_notification_hooks: usize,
-    pub hook_points: Vec<String>,
-    pub trigger_features: Vec<String>,
+pub(crate) struct RuntimeCapabilities {
+    pub(crate) mcp_servers: usize,
+    pub(crate) mcp_tools: usize,
+    pub(crate) mcp_server_names: Vec<String>,
+    pub(crate) mcp_tool_names: Vec<String>,
+    pub(crate) tool_names: Vec<String>,
+    pub(crate) mcp_notification_hooks: usize,
+    pub(crate) hook_points: Vec<String>,
+    pub(crate) trigger_features: Vec<String>,
 }
 
 /// Everything the daemon needs to run one session, assembled by the `thewayd` binary.
-pub struct DaemonConfig {
-    pub harness: Arc<theway_core::AgentHarness>,
-    pub trigger_executor: Arc<crate::trigger_engine::execution::TriggerExecutor>,
-    pub retry: RetrySettings,
-    pub registry: Registry,
-    pub cwd: PathBuf,
-    /// User home root (issue #66: `DaemonPaths::home`), resolved at the CLI
-    /// boundary — file-command rescans take it instead of reading `$HOME`.
-    pub home: PathBuf,
-    /// Theway base dir (issue #66: `DaemonPaths::base`), resolved at the CLI
-    /// boundary — kept alongside `home` so host paths stay explicit.
-    pub base: PathBuf,
-    /// Full daemon path context (issue #68): startup-fixed home/base/work_dir
-    /// plus the dynamically replaceable extra skill dirs (`SetSkillDirs`).
-    /// `cwd` / `home` / `base` above stay for the existing call sites.
-    pub paths: DaemonPaths,
-    pub session_id: String,
-    pub log_path: Option<PathBuf>,
-    pub tool_count: usize,
-    pub feed_rx: mpsc::UnboundedReceiver<FeedUpdate>,
+pub(crate) struct DaemonConfig {
+    pub(crate) harness: Arc<theway_core::AgentHarness>,
+    pub(crate) trigger_executor: Arc<crate::trigger_engine::execution::TriggerExecutor>,
+    pub(crate) retry: RetrySettings,
+    pub(crate) registry: Registry,
+    pub(crate) cwd: PathBuf,
+    /// Startup-fixed home/base/work directory plus dynamically replaceable
+    /// extra skill directories.
+    pub(crate) paths: DaemonPaths,
+    pub(crate) session_id: String,
+    pub(crate) log_path: Option<PathBuf>,
+    pub(crate) tool_count: usize,
+    pub(crate) feed_rx: mpsc::UnboundedReceiver<FeedUpdate>,
     /// Loopback sender for feed updates produced inside the host (thinking
     /// summarizer backfill); pairs with `feed_rx`.
-    pub feed_tx: mpsc::UnboundedSender<FeedUpdate>,
-    pub main_run_rx: mpsc::UnboundedReceiver<String>,
-    pub control_plane_prompt_rx: Option<mpsc::UnboundedReceiver<UiControlPlanePrompt>>,
-    pub dag_engine: Arc<theway_core::multiagent::graph::engine::DagEngine>,
-    pub subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry,
-    pub session_factory: SessionFactory,
-    pub session_repo: Arc<dyn SessionRepository>,
-    pub current_session_state: Arc<Mutex<CurrentSessionState>>,
-    pub panel_status: PanelStatus,
+    pub(crate) feed_tx: mpsc::UnboundedSender<FeedUpdate>,
+    pub(crate) main_run_rx: mpsc::UnboundedReceiver<String>,
+    pub(crate) control_plane_prompt_rx: Option<mpsc::UnboundedReceiver<PendingControlPlanePrompt>>,
+    pub(crate) dag_engine: Arc<theway_core::multiagent::graph::engine::DagEngine>,
+    pub(crate) subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry,
+    pub(crate) session_factory: SessionFactory,
+    pub(crate) session_repo: Arc<dyn SessionRepository>,
+    pub(crate) current_session_state: Arc<Mutex<CurrentSessionState>>,
+    pub(crate) capabilities: RuntimeCapabilities,
     /// `[orchestrator] thinking_summary` settings; `None` → thinking stays raw.
-    pub thinking_summary: Option<super::thinking_summary::ThinkingSummarySettings>,
+    pub(crate) thinking_summary: Option<super::thinking_summary::ThinkingSummarySettings>,
     /// In-memory startup settings (issue #73): defaults merged with the
     /// controller's initial settings payload — the values startup previously
-    /// read from `config.toml` (TUI scrollback cap, trigger poll interval,
+    /// read from `config.toml` (feed-history cap, trigger poll interval,
     /// enabled builtin skills, …). Seeds the shared `GetConfig` view;
     /// runtime `Configure` updates merge into the view, not back into this
     /// startup snapshot.
-    pub startup: crate::startup_config::StartupConfig,
-    pub services: DaemonServices,
+    pub(crate) startup: crate::startup_config::StartupConfig,
+    pub(crate) services: DaemonServices,
 }
 
-/// Headless transport host for `thewayd` (gRPC / HTTP / MCP).
-pub struct TurnHost {
+struct SessionRuntimeState {
     kernel: ReplKernel,
+    id: String,
+    log_path: Option<PathBuf>,
+    tool_count: usize,
+    factory: SessionFactory,
+    repository: Arc<dyn SessionRepository>,
+    shared_state: Arc<Mutex<CurrentSessionState>>,
+    busy: bool,
+    queue: VecDeque<QueuedTurn>,
+}
+
+struct AutomationRuntime {
+    services: DaemonServices,
+    reload: Arc<ReloadRuntime>,
+    dag: Arc<theway_core::multiagent::graph::engine::DagEngine>,
+    subagents: theway_core::multiagent::jobs::SubagentJobRegistry,
+}
+
+struct RuntimeConfiguration {
     registry: Arc<Registry>,
     completer: SlashCompleter,
     cwd: PathBuf,
@@ -156,19 +163,17 @@ pub struct TurnHost {
     /// seeded from the startup-resolved settings and merged by the event loop
     /// when `Configure` commands land. Cloned into [`TransportEndpoints`] so
     /// the transport servers and this host observe one authoritative value.
-    daemon_config: Arc<std::sync::RwLock<WireDaemonConfig>>,
+    config: Arc<std::sync::RwLock<WireDaemonConfig>>,
     /// Controller tool endpoint forwarder (issue #76): routes `ToolOps`
-    /// calls to the TUI/controller's `ToolService` server.
+    /// calls to the connected controller's `ToolService` server.
     tool_ops: Arc<dyn ToolOps>,
-    session_id: String,
-    log_path: Option<PathBuf>,
-    tool_count: usize,
-    /// Process-level reload state (issue #50): registry / cwd / trigger
-    /// executor for the `reload` tool and the revision counter published in
-    /// sidebar snapshots.
-    reload_runtime: Arc<ReloadRuntime>,
-    services: DaemonServices,
+    model_catalog: Vec<ProviderGroup>,
+    /// Client feed-history preference exposed through the legacy wire field
+    /// `tui_max_feed_lines`.
+    feed_history_limit: Option<u64>,
+}
 
+struct FeedProjectionState {
     feed: Feed,
     /// Incremental plain-text row cache behind full `feed_lines` snapshots.
     plain_lines_cache: theway_transport::feed::PlainLinesCache,
@@ -179,29 +184,32 @@ pub struct TurnHost {
     dirty_blocks: BTreeSet<usize>,
     latest_trigger_poll: Option<TriggerPollStatus>,
     latest_goal: Option<theway_core::multiagent::goal::GoalState>,
+    thinking_summary: Option<super::thinking_summary::ThinkingSummarySettings>,
+    thinking_burst: super::thinking_summary::ThinkingBurst,
+    control_plane_prompt: Option<PendingControlPlanePrompt>,
+    capabilities: RuntimeCapabilities,
+}
+
+struct RuntimeEventInputs {
     feed_rx: Option<mpsc::UnboundedReceiver<FeedUpdate>>,
     /// Loopback sender for feed updates produced inside the host (thinking
     /// summarizer backfill); pairs with `feed_rx`.
     feed_tx: mpsc::UnboundedSender<FeedUpdate>,
-    thinking_summary: Option<super::thinking_summary::ThinkingSummarySettings>,
-    thinking_burst: super::thinking_summary::ThinkingBurst,
     main_run_rx: Option<mpsc::UnboundedReceiver<String>>,
-    control_plane_prompt_rx: Option<mpsc::UnboundedReceiver<UiControlPlanePrompt>>,
-    control_plane_prompt: Option<UiControlPlanePrompt>,
-    model_catalog: Vec<ProviderGroup>,
-    panel_status: PanelStatus,
-    /// `[tui] max_feed_lines` (issue #73: from the in-memory StartupConfig /
-    /// settings RPC; `None` → TUI built-in default).
-    tui_max_feed_lines: Option<u64>,
+    control_plane_prompt_rx: Option<mpsc::UnboundedReceiver<PendingControlPlanePrompt>>,
+}
 
-    dag_engine: Arc<theway_core::multiagent::graph::engine::DagEngine>,
-    subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry,
-    session_factory: SessionFactory,
-    session_repo: Arc<dyn SessionRepository>,
-    current_session_state: Arc<Mutex<CurrentSessionState>>,
-
-    busy: bool,
-    queued_turns: VecDeque<QueuedTurn>,
+/// Headless transport host for `thewayd` (gRPC / HTTP / MCP).
+///
+/// The host is the serialized coordinator; state ownership remains explicit in
+/// session, automation, runtime-configuration, feed-projection, and event-input
+/// partitions.
+pub(crate) struct TurnHost {
+    session: SessionRuntimeState,
+    automation: AutomationRuntime,
+    runtime: RuntimeConfiguration,
+    projection: FeedProjectionState,
+    inputs: RuntimeEventInputs,
 }
 
 fn current_model_label(harness: &Arc<theway_core::AgentHarness>) -> String {
@@ -214,7 +222,7 @@ fn current_model_label(harness: &Arc<theway_core::AgentHarness>) -> String {
 }
 
 /// Resolve the active model's context window (tokens) from the provider
-/// catalog. `0` when unknown — the TUI then hides the percentage indicator.
+/// catalog. `0` when unknown so clients can omit percentage indicators.
 pub(crate) fn context_window_for(label: &str) -> u64 {
     let Some((provider, id)) = label.split_once(':') else {
         return 0;

@@ -3,28 +3,28 @@ impl TurnHost {
         use theway_transport::feed::block_fingerprint;
 
         let dirty_start = self.feed_dirty_start();
-        self.plain_lines_cache
-            .update_from_dirty(&self.feed, 100, dirty_start);
-        self.block_versions = self.feed.blocks().iter().map(block_fingerprint).collect();
-        self.dirty_blocks.clear();
+        self.projection.plain_lines_cache
+            .update_from_dirty(&self.projection.feed, 100, dirty_start);
+        self.projection.block_versions = self.projection.feed.blocks().iter().map(block_fingerprint).collect();
+        self.projection.dirty_blocks.clear();
         self.wire_status(
-            self.feed.wire_blocks(),
+            self.projection.feed.wire_blocks(),
             0,
             Vec::new(),
-            self.plain_lines_cache.rows().to_vec(),
+            self.projection.plain_lines_cache.rows().to_vec(),
             0,
         )
     }
 
     fn wire_update(&mut self) -> WireStatusUpdate {
         let dirty_start = self.feed_dirty_start();
-        self.plain_lines_cache
-            .update_from_dirty(&self.feed, 100, dirty_start);
-        let feed_lines_base = self.plain_lines_cache.last_rebuilt_from_row;
-        let feed_lines = self.plain_lines_cache.rows()[feed_lines_base..].to_vec();
-        let feed_lines_len = self.plain_lines_cache.rows().len();
+        self.projection.plain_lines_cache
+            .update_from_dirty(&self.projection.feed, 100, dirty_start);
+        let feed_lines_base = self.projection.plain_lines_cache.last_rebuilt_from_row;
+        let feed_lines = self.projection.plain_lines_cache.rows()[feed_lines_base..].to_vec();
+        let feed_lines_len = self.projection.plain_lines_cache.rows().len();
         let (feed_blocks_base, feed_block_patches) = self.take_feed_block_patches();
-        let feed_blocks_len = self.feed.blocks().len();
+        let feed_blocks_len = self.projection.feed.blocks().len();
         WireStatusUpdate::delta(
             feed_blocks_base,
             feed_block_patches,
@@ -43,28 +43,28 @@ impl TurnHost {
         feed_lines: Vec<String>,
         feed_lines_base: u64,
     ) -> WireStatus {
-        let model = current_model_label(self.kernel.harness());
+        let model = current_model_label(self.session.kernel.harness());
         let context_window = context_window_for(&model);
         // Last-turn usage (not session-cumulative): the last assistant message's
-        // usage, so the TUI's ctx% divides one turn's token count by the context
-        // window instead of growing past it forever (issue #38).
+        // usage so clients can compare one turn against the context window.
         let usage =
-            last_turn_usage(&self.kernel.harness().agent().state().messages).unwrap_or_default();
+            last_turn_usage(&self.session.kernel.harness().agent().state().messages).unwrap_or_default();
         WireStatus {
-            session_id: self.session_id.clone(),
+            session_id: self.session.id.clone(),
             model,
-            model_catalog: self.model_catalog.clone(),
-            cwd: self.cwd.display().to_string(),
-            busy: self.busy,
-            queued_count: self.queued_turns.len(),
-            latest_trigger_poll: self.latest_trigger_poll.clone(),
-            goal: self.latest_goal.as_ref().map(|goal| WireGoalSnapshot {
+            model_catalog: self.runtime.model_catalog.clone(),
+            cwd: self.runtime.cwd.display().to_string(),
+            busy: self.session.busy,
+            queued_count: self.session.queue.len(),
+            latest_trigger_poll: self.projection.latest_trigger_poll.clone(),
+            goal: self.projection.latest_goal.as_ref().map(|goal| WireGoalSnapshot {
                 condition: bug_report::redact(&goal.condition),
                 status: goal.status.as_str().to_string(),
                 iterations: goal.iterations,
                 last_reason: goal.last_reason.as_deref().map(bug_report::redact),
             }),
             control_plane_prompt: self
+                .projection
                 .control_plane_prompt
                 .as_ref()
                 .map(|prompt| wire_control_plane_prompt_snapshot(&prompt.request)),
@@ -75,17 +75,19 @@ impl TurnHost {
             feed_lines,
             feed_lines_base,
             dags: self
-                .dag_engine
+                .automation
+                .dag
                 .list_runs()
                 .iter()
-                .filter(|run| run.session_id.as_deref() == Some(self.session_id.as_str()))
+                .filter(|run| run.session_id.as_deref() == Some(self.session.id.as_str()))
                 .map(dag_run_snapshot)
                 .collect(),
             subagents: self
-                .subagent_registry
+                .automation
+                .subagents
                 .list()
                 .iter()
-                .filter(|job| job.session_id.as_deref() == Some(self.session_id.as_str()))
+                .filter(|job| job.session_id.as_deref() == Some(self.session.id.as_str()))
                 .map(subagent_job_snapshot)
                 .collect(),
             // Last-turn token usage (input/output/cache/total from the last
@@ -98,18 +100,18 @@ impl TurnHost {
                 total_tokens: usage.total_tokens,
                 context_window,
             },
-            tui_max_feed_lines: self.tui_max_feed_lines,
+            tui_max_feed_lines: self.runtime.feed_history_limit,
         }
     }
 
     fn feed_dirty_start(&self) -> Option<usize> {
-        let block_count = self.feed.blocks().len();
-        if block_count < self.block_versions.len() {
+        let block_count = self.projection.feed.blocks().len();
+        if block_count < self.projection.block_versions.len() {
             return Some(0);
         }
         let appended =
-            (block_count > self.block_versions.len()).then_some(self.block_versions.len());
-        match (self.dirty_blocks.first().copied(), appended) {
+            (block_count > self.projection.block_versions.len()).then_some(self.projection.block_versions.len());
+        match (self.projection.dirty_blocks.first().copied(), appended) {
             (Some(dirty), Some(appended)) => Some(dirty.min(appended)),
             (Some(dirty), None) => Some(dirty),
             (None, appended) => appended,
@@ -119,15 +121,15 @@ impl TurnHost {
     fn take_feed_block_patches(&mut self) -> (u64, Vec<WireFeedBlockPatch>) {
         use theway_transport::feed::block_fingerprint;
 
-        let blocks = self.feed.blocks();
-        if blocks.len() < self.block_versions.len() {
-            self.block_versions = blocks.iter().map(block_fingerprint).collect();
-            self.dirty_blocks.clear();
+        let blocks = self.projection.feed.blocks();
+        if blocks.len() < self.projection.block_versions.len() {
+            self.projection.block_versions = blocks.iter().map(block_fingerprint).collect();
+            self.projection.dirty_blocks.clear();
             return (0, Vec::new());
         }
 
-        let base = self.block_versions.len();
-        let mut dirty = std::mem::take(&mut self.dirty_blocks);
+        let base = self.projection.block_versions.len();
+        let mut dirty = std::mem::take(&mut self.projection.dirty_blocks);
         dirty.extend(base..blocks.len());
         let mut patches = Vec::new();
         for index in dirty {
@@ -135,17 +137,17 @@ impl TurnHost {
                 continue;
             };
             let fingerprint = block_fingerprint(block);
-            if index < self.block_versions.len() {
-                if self.block_versions[index] == fingerprint {
+            if index < self.projection.block_versions.len() {
+                if self.projection.block_versions[index] == fingerprint {
                     continue;
                 }
-                self.block_versions[index] = fingerprint;
-            } else if index == self.block_versions.len() {
-                self.block_versions.push(fingerprint);
+                self.projection.block_versions[index] = fingerprint;
+            } else if index == self.projection.block_versions.len() {
+                self.projection.block_versions.push(fingerprint);
             } else {
                 continue;
             }
-            let Some(wire_block) = self.feed.wire_block(index) else {
+            let Some(wire_block) = self.projection.feed.wire_block(index) else {
                 continue;
             };
             patches.push(WireFeedBlockPatch {
@@ -157,15 +159,15 @@ impl TurnHost {
     }
 
     fn clear_feed(&mut self) {
-        self.feed.clear();
-        self.block_versions.clear();
-        self.dirty_blocks.clear();
+        self.projection.feed.clear();
+        self.projection.block_versions.clear();
+        self.projection.dirty_blocks.clear();
     }
 
     fn wire_sidebar_snapshot(&self) -> WireSidebarSnapshot {
         const ITEM_LIMIT: usize = 8;
 
-        let skills = self.kernel.harness().skills();
+        let skills = self.session.kernel.harness().skills();
         let disabled = skills
             .iter()
             .filter(|skill| skill.disable_model_invocation)
@@ -173,7 +175,7 @@ impl TurnHost {
         let enabled = skills.len().saturating_sub(disabled);
         let source_count = |source| skills.iter().filter(|skill| skill.source == source).count();
 
-        let rules = self.services.dynamic_triggers.list();
+        let rules = self.automation.services.dynamic_triggers.list();
         let trigger_enabled = rules.iter().filter(|rule| rule.enabled).count();
         let trigger_rules = rules
             .iter()
@@ -188,7 +190,7 @@ impl TurnHost {
             })
             .collect::<Vec<_>>();
 
-        let cron_jobs = self.services.cron.list();
+        let cron_jobs = self.automation.services.cron.list();
         let cron_enabled = cron_jobs.iter().filter(|job| job.enabled).count();
         let cron_job_rows = cron_jobs
             .iter()
@@ -237,24 +239,23 @@ impl TurnHost {
                 jobs: cron_job_rows,
             },
             mcp: WireMcpSnapshot {
-                servers: self.panel_status.mcp_servers,
-                tools: self.panel_status.mcp_tools,
-                notification_hooks: self.panel_status.mcp_notification_hooks,
-                server_names: self.panel_status.mcp_server_names.clone(),
-                tool_names: self.panel_status.mcp_tool_names.clone(),
+                servers: self.projection.capabilities.mcp_servers,
+                tools: self.projection.capabilities.mcp_tools,
+                notification_hooks: self.projection.capabilities.mcp_notification_hooks,
+                server_names: self.projection.capabilities.mcp_server_names.clone(),
+                tool_names: self.projection.capabilities.mcp_tool_names.clone(),
             },
             tools: WireToolsSnapshot {
-                total: self.panel_status.tool_names.len(),
-                names: self.panel_status.tool_names.clone(),
+                total: self.projection.capabilities.tool_names.len(),
+                names: self.projection.capabilities.tool_names.clone(),
             },
-            hooks: self.panel_status.hook_points.clone(),
-            runtime: self.panel_status.trigger_features.clone(),
-            // File commands join the snapshot so the TUI popup lists them
-            // and a `/reload` republish refreshes them (issue #37).
-            commands: self.registry.file_command_names(),
+            hooks: self.projection.capabilities.hook_points.clone(),
+            runtime: self.projection.capabilities.trigger_features.clone(),
+            // File commands join the snapshot; `/reload` republishes the list.
+            commands: self.runtime.registry.file_command_names(),
             // Reload epoch (issue #50): clients cache this and re-read local
             // resources (theme.toml) when the `reload` tool bumps it.
-            runtime_revision: self.reload_runtime.revision.load(Ordering::SeqCst),
+            runtime_revision: self.automation.reload.revision.load(Ordering::SeqCst),
         }
     }
 
@@ -281,5 +282,5 @@ impl TurnHost {
         }
     }
 
-    // ── turn lifecycle (mirror of the TUI's app_turns, headless) ──────────────────────
+    // ── turn lifecycle ────────────────────────────────────────────────────────────────
 }

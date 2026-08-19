@@ -29,9 +29,11 @@ use theway_core::AgentTool;
 use theway_core::executor::{ExecutorKind, ToolExecutor};
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::jobs::SubagentJobRegistry;
+use theway_daemon::DaemonServices;
 use theway_daemon::executor::sandbox::SandboxExecutor;
 use theway_daemon::tools;
 use theway_daemon::tools::assembly;
+use theway_daemon::tools::assembly::reload::ReloadRuntimeSlot;
 use theway_daemon::tools::skill::SkillHarnessCell;
 use tokio_util::sync::CancellationToken;
 
@@ -140,6 +142,7 @@ fn engine_tools_omit_direct_fs_writers_but_keep_read_only_skill_surface() {
         None,
         &harness_cell(),
         "session-sandbox-gate",
+        ReloadRuntimeSlot::default(),
     );
     let names = names(&tools);
 
@@ -174,6 +177,7 @@ fn session_tool_set_assembly_is_fail_closed() {
         &harness_cell(),
         "session-sandbox-gate",
         sandbox_exec(),
+        &DaemonServices::new(),
     );
     let names = names(&tools);
 

@@ -2,7 +2,7 @@
 //! config files.
 //!
 //! Before #73, `thewayd` read `<base>/config.toml` at startup (through
-//! `crate::config_readers`) for the default model, the enabled builtin
+//! local config files for the default model, the enabled builtin
 //! skills, the trigger poll interval, the TUI feed scrollback cap, and the
 //! orchestrator thinking-summary settings. Startup no longer touches local
 //! config files: every value lives in [`StartupConfig`], seeded from the

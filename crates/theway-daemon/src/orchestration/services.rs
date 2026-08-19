@@ -8,10 +8,10 @@ use crate::triggers::dynamic::DynamicTriggerRegistry;
 /// Shared services owned by one daemon application instance.
 #[derive(Clone)]
 pub struct DaemonServices {
-    pub command_output: CommandOutput,
-    pub dynamic_triggers: DynamicTriggerRegistry,
-    pub cron: CronRegistry,
-    pub reload: ReloadRuntimeSlot,
+    pub(crate) command_output: CommandOutput,
+    pub(crate) dynamic_triggers: DynamicTriggerRegistry,
+    pub(crate) cron: CronRegistry,
+    pub(crate) reload: ReloadRuntimeSlot,
 }
 
 impl Default for DaemonServices {
@@ -41,7 +41,7 @@ impl DaemonServices {
     }
 
     #[must_use]
-    pub fn with_command_output(mut self, command_output: CommandOutput) -> Self {
+    pub(crate) fn with_command_output(mut self, command_output: CommandOutput) -> Self {
         self.command_output = command_output;
         self
     }

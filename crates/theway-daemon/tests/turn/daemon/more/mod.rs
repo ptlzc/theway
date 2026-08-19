@@ -18,7 +18,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::agent_session::RetrySettings;
 use crate::commands::Registry;
-use crate::control_plane_prompt::UiControlPlanePrompt;
+use crate::control_plane_prompt::PendingControlPlanePrompt;
 use crate::paths::DaemonPaths;
 use crate::session_ops::{CurrentSessionState, SessionFactory};
 use crate::trigger_engine::execution::TriggerExecutor;
@@ -30,7 +30,7 @@ use theway_transport::TransportMode;
 use theway_transport::wire::{WireCommand, WireDaemonConfig, WirePromptImage};
 
 use super::super::{
-    DaemonConfig, PanelStatus, TurnHost, context_window_for, current_model_label,
+    DaemonConfig, RuntimeCapabilities, TurnHost, context_window_for, current_model_label,
     load_web_prompt_images, model_catalog, prompt_display, slash_commands, user_facing_run_error,
     wire_control_plane_prompt_snapshot, wire_preview, wire_prompt_text,
 };
@@ -119,8 +119,6 @@ impl HostFixture {
             retry: RetrySettings::default(),
             registry: Registry::with_daemon_commands(),
             cwd: work_dir.clone(),
-            home,
-            base,
             paths,
             session_id: "sess-more".into(),
             log_path: None,
@@ -136,7 +134,7 @@ impl HostFixture {
             current_session_state: Arc::new(
                 parking_lot::Mutex::new(CurrentSessionState::default()),
             ),
-            panel_status: PanelStatus::default(),
+            capabilities: RuntimeCapabilities::default(),
             thinking_summary: None,
             startup: crate::startup_config::StartupConfig::default(),
             services: crate::orchestration::DaemonServices::new(),
@@ -323,14 +321,14 @@ async fn enqueue_turn_appends_and_start_next_queued_turn_consumes_it() {
     let host = fixture.host();
 
     host.enqueue_turn(user_prompt_turn("queued display", "queued prompt"));
-    assert_eq!(host.queued_turns.len(), 1);
+    assert_eq!(host.session.queue.len(), 1);
 
     let mut turn = TurnState::default();
     assert!(host.start_next_queued_turn(&mut turn));
 
     assert!(turn.fut.is_some());
-    assert!(host.busy);
-    assert!(host.queued_turns.is_empty());
+    assert!(host.session.busy);
+    assert!(host.session.queue.is_empty());
     // With a turn already running, the method reports "still busy" and must
     // not pop a queued job.
     assert!(
@@ -341,7 +339,7 @@ async fn enqueue_turn_appends_and_start_next_queued_turn_consumes_it() {
     // A running turn must not be replaced by another queued job.
     host.enqueue_turn(user_prompt_turn("second", "second prompt"));
     assert!(host.start_next_queued_turn(&mut turn));
-    assert_eq!(host.queued_turns.len(), 1, "existing turn is still running");
+    assert_eq!(host.session.queue.len(), 1, "existing turn is still running");
 }
 
 #[tokio::test]
@@ -354,7 +352,7 @@ async fn start_triggered_turn_queues_continue_turn() {
 
     assert!(turn.fut.is_some());
     assert_eq!(turn.prefix, "triggered turn: ");
-    assert!(host.busy);
+    assert!(host.session.busy);
 }
 
 #[tokio::test]
@@ -380,7 +378,7 @@ async fn finish_turn_reports_ok_and_error_and_aborted() {
     host.finish_turn(&mut turn, Ok(Some("compaction ran".into())))
         .await;
     assert!(turn.fut.is_none());
-    assert!(!host.busy);
+    assert!(!host.session.busy);
 
     let mut turn = TurnState {
         fut: Some(Box::pin(async {
@@ -392,12 +390,12 @@ async fn finish_turn_reports_ok_and_error_and_aborted() {
     host.finish_turn(&mut turn, Err(AgentRunError::Other("boom".into())))
         .await;
     assert!(turn.fut.is_none());
-    assert!(!host.busy);
+    assert!(!host.session.busy);
 
     let mut turn = sample_turn_with_future();
     turn.aborted = true;
     host.finish_turn(&mut turn, Ok(None)).await;
-    assert!(!host.busy);
+    assert!(!host.session.busy);
 }
 
 #[tokio::test]
@@ -410,8 +408,8 @@ async fn finish_turn_starts_next_queued_job() {
     host.finish_turn(&mut turn, Ok(None)).await;
 
     assert!(turn.fut.is_some(), "queued job should start after finish");
-    assert!(host.busy);
-    assert!(host.queued_turns.is_empty());
+    assert!(host.session.busy);
+    assert!(host.session.queue.is_empty());
 }
 
 #[tokio::test]
@@ -419,7 +417,7 @@ async fn show_and_resolve_control_plane_prompt_forwards_decision() {
     let mut fixture = HostFixture::new().await;
     let host = fixture.host();
     let (decision_tx, decision_rx) = oneshot::channel();
-    host.show_control_plane_prompt(UiControlPlanePrompt {
+    host.show_control_plane_prompt(PendingControlPlanePrompt {
         request: ControlPlanePromptRequest {
             tool_call_id: "call-1".into(),
             tool_name: "InstallSkill".into(),
@@ -430,11 +428,11 @@ async fn show_and_resolve_control_plane_prompt_forwards_decision() {
         },
         responder: decision_tx,
     });
-    assert!(host.control_plane_prompt.is_some());
+    assert!(host.projection.control_plane_prompt.is_some());
 
     host.resolve_control_plane_prompt(ControlPlanePromptDecision::Allow);
 
-    assert!(host.control_plane_prompt.is_none());
+    assert!(host.projection.control_plane_prompt.is_none());
     assert!(matches!(
         decision_rx.await.unwrap(),
         ControlPlanePromptDecision::Allow
@@ -456,7 +454,7 @@ async fn handle_web_command_routes_abort_and_control_plane_resolve() {
     assert!(turn.aborted);
 
     let (decision_tx, decision_rx) = oneshot::channel();
-    host.show_control_plane_prompt(UiControlPlanePrompt {
+    host.show_control_plane_prompt(PendingControlPlanePrompt {
         request: ControlPlanePromptRequest {
             tool_call_id: "call-2".into(),
             tool_name: "WriteFile".into(),
@@ -472,7 +470,7 @@ async fn handle_web_command_routes_abort_and_control_plane_resolve() {
         &mut turn,
     )
     .await;
-    assert!(host.control_plane_prompt.is_none());
+    assert!(host.projection.control_plane_prompt.is_none());
     assert!(matches!(
         decision_rx.await.unwrap(),
         ControlPlanePromptDecision::Deny { .. }
@@ -483,27 +481,27 @@ async fn handle_web_command_routes_abort_and_control_plane_resolve() {
 async fn handle_configure_empty_update_is_a_noop() {
     let mut fixture = HostFixture::new().await;
     let host = fixture.host();
-    let before = host.daemon_config.read().unwrap().clone();
+    let before = host.runtime.config.read().unwrap().clone();
 
     host.handle_configure(WireDaemonConfig::default(), &mut TurnState::default())
         .await;
 
-    assert_eq!(*host.daemon_config.read().unwrap(), before);
+    assert_eq!(*host.runtime.config.read().unwrap(), before);
 }
 
 #[tokio::test]
 async fn handle_switch_session_rejects_empty_and_same_id() {
     let mut fixture = HostFixture::new().await;
     let host = fixture.host();
-    let original = host.session_id.clone();
+    let original = host.session.id.clone();
 
     host.handle_switch_session("".into(), &mut TurnState::default())
         .await;
-    assert_eq!(host.session_id, original);
+    assert_eq!(host.session.id, original);
 
     host.handle_switch_session(original.clone(), &mut TurnState::default())
         .await;
-    assert_eq!(host.session_id, original);
+    assert_eq!(host.session.id, original);
 }
 
 #[tokio::test]
@@ -514,11 +512,11 @@ async fn trigger_web_rule_now_rejects_missing_or_unknown_rule() {
 
     host.trigger_web_rule_now("".into(), &mut turn);
     assert!(turn.fut.is_none());
-    assert!(host.queued_turns.is_empty());
+    assert!(host.session.queue.is_empty());
 
     host.trigger_web_rule_now("__definitely_missing_rule__".into(), &mut turn);
     assert!(turn.fut.is_none());
-    assert!(host.queued_turns.is_empty());
+    assert!(host.session.queue.is_empty());
 }
 
 #[tokio::test]
@@ -530,7 +528,7 @@ async fn set_model_from_spec_rejects_invalid_and_unknown_model() {
     host.set_model_from_spec("faux:unknown").await;
 
     // No model switch happened; the host still reports the faux harness model.
-    assert_eq!(current_model_label(host.kernel.harness()), "faux:faux");
+    assert_eq!(current_model_label(host.session.kernel.harness()), "faux:faux");
 }
 
 #[tokio::test]
@@ -543,7 +541,7 @@ async fn submit_web_text_empty_input_returns_early() {
         .await;
 
     assert!(turn.fut.is_none());
-    assert!(!host.busy);
+    assert!(!host.session.busy);
 }
 
 #[tokio::test]
@@ -561,7 +559,7 @@ async fn submit_web_text_rejects_images_for_non_vision_model() {
     .await;
 
     assert!(turn.fut.is_none());
-    assert!(!host.busy);
+    assert!(!host.session.busy);
 }
 
 #[tokio::test]

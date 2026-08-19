@@ -11,7 +11,7 @@ use theway_llm_provider::{InputModality, ModelCost};
 use super::super::*;
 use crate::agent_session::RetrySettings;
 use crate::commands::Registry;
-use crate::control_plane_prompt::UiControlPlanePrompt;
+use crate::control_plane_prompt::PendingControlPlanePrompt;
 use crate::paths::DaemonPaths;
 use crate::session_ops::CurrentSessionState;
 use crate::trigger_engine::execution::TriggerExecutor;
@@ -82,8 +82,6 @@ async fn host_with_input(input: Vec<InputModality>) -> (TurnHost, TempDir, TempD
         retry: RetrySettings::default(),
         registry: Registry::with_daemon_commands(),
         cwd: work_dir,
-        home,
-        base,
         paths,
         session_id: "sess-line-coverage".into(),
         log_path: None,
@@ -107,7 +105,7 @@ async fn host_with_input(input: Vec<InputModality>) -> (TurnHost, TempDir, TempD
         ),
         session_repo: Arc::new(SqliteSessionRepo::new(repo_dir.path())),
         current_session_state: Arc::new(parking_lot::Mutex::new(CurrentSessionState::default())),
-        panel_status: PanelStatus::default(),
+        capabilities: RuntimeCapabilities::default(),
         thinking_summary: None,
         startup: crate::startup_config::StartupConfig::default(),
         services: crate::orchestration::DaemonServices::new(),
@@ -159,14 +157,14 @@ fn load_web_prompt_images_blank_name_uses_index_label_in_decode_errors() {
 #[tokio::test]
 async fn start_triggered_turn_returns_early_when_kernel_is_streaming() {
     let (mut host, _scratch, _repo) = host_with_input(Vec::new()).await;
-    host.kernel.harness().agent().state().is_streaming = true;
+    host.session.kernel.harness().agent().state().is_streaming = true;
     let mut turn = TurnState::default();
 
     host.start_triggered_turn("trace12345678".into(), &mut turn);
 
     assert!(turn.fut.is_none());
-    assert!(!host.busy);
-    host.kernel.harness().agent().state().is_streaming = false;
+    assert!(!host.session.busy);
+    host.session.kernel.harness().agent().state().is_streaming = false;
 }
 
 #[tokio::test]
@@ -177,7 +175,7 @@ async fn start_triggered_turn_shortens_trace_id_and_starts_continue_turn() {
     host.start_triggered_turn("trace12345678".into(), &mut turn);
 
     assert!(turn.fut.is_some());
-    assert!(host.busy);
+    assert!(host.session.busy);
 }
 
 #[tokio::test]
@@ -189,7 +187,7 @@ async fn finish_turn_ok_some_pushes_system_line() {
         .await;
 
     assert!(turn.fut.is_none());
-    assert!(!host.busy);
+    assert!(!host.session.busy);
 }
 
 #[tokio::test]
@@ -205,7 +203,7 @@ async fn request_abort_does_nothing_when_no_turn_is_in_flight() {
 #[tokio::test]
 async fn resolve_control_plane_prompt_noop_without_prompt() {
     let (mut host, _scratch, _repo) = host_with_input(Vec::new()).await;
-    let prompt = UiControlPlanePrompt {
+    let prompt = PendingControlPlanePrompt {
         request: theway_core::ControlPlanePromptRequest {
             tool_call_id: "call-1".into(),
             tool_name: "InstallSkill".into(),
@@ -220,5 +218,5 @@ async fn resolve_control_plane_prompt_noop_without_prompt() {
     host.show_control_plane_prompt(prompt);
     host.resolve_control_plane_prompt(theway_core::ControlPlanePromptDecision::Allow);
 
-    assert!(host.control_plane_prompt.is_none());
+    assert!(host.projection.control_plane_prompt.is_none());
 }

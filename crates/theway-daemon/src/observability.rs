@@ -141,10 +141,7 @@ impl TelemetryHandle {
         self.observer.clone()
     }
 
-    pub fn dropped_observations(&self) -> u64 {
-        self.observer.dropped.load(Ordering::Relaxed)
-    }
-
+    #[cfg(test)]
     pub fn metrics_addr(&self) -> Option<SocketAddr> {
         self.metrics_server.as_ref().map(|server| server.addr)
     }

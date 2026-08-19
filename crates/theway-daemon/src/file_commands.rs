@@ -30,20 +30,8 @@ struct CommandFrontmatter {
     description: String,
 }
 
-/// Ordered scan roots, highest priority first. `home` is the user home root
-/// (issue #66: resolved at the CLI boundary as `DaemonPaths::home`).
-pub fn command_dirs(cwd: &Path, home: &Path) -> Vec<PathBuf> {
-    vec![
-        cwd.join(".agents").join("commands"),
-        cwd.join(".claude").join("commands"),
-        home.join(".agents").join("commands"),
-        home.join(".claude").join("commands"),
-    ]
-}
-
-/// Scan the default roots for `cwd` (see [`command_dirs`]). `home` is the
-/// user home root resolved at the CLI boundary (issue #66:
-/// `DaemonPaths::home`) — the kernel never reads `$HOME` itself.
+/// Scan project and user command roots in priority order. `home` is resolved
+/// once at the process boundary; this module never reads `$HOME` itself.
 pub fn scan_file_commands(cwd: &Path, home: &Path) -> Vec<FileCommand> {
     scan_file_commands_in(cwd, home)
 }

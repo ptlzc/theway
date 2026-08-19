@@ -22,7 +22,7 @@ use theway_transport::commands::{CommandCtx as TransportCommandCtx, CommandOutco
 use super::super::*;
 use crate::agent_session::RetrySettings;
 use crate::commands::{DaemonCtx, Registry};
-use crate::control_plane_prompt::UiControlPlanePrompt;
+use crate::control_plane_prompt::PendingControlPlanePrompt;
 use crate::paths::DaemonPaths;
 use crate::session_ops::{CurrentSessionState, SessionFactory};
 use crate::trigger_engine::execution::TriggerExecutor;
@@ -112,8 +112,6 @@ async fn host_with_registry(input: Vec<InputModality>, registry: Registry) -> (T
         retry: RetrySettings::default(),
         registry,
         cwd: work_dir,
-        home,
-        base,
         paths,
         session_id: "sess-coverage".into(),
         log_path: None,
@@ -127,7 +125,7 @@ async fn host_with_registry(input: Vec<InputModality>, registry: Registry) -> (T
         session_factory,
         session_repo: Arc::new(SqliteSessionRepo::new(repo_dir.path())),
         current_session_state: Arc::new(parking_lot::Mutex::new(CurrentSessionState::default())),
-        panel_status: PanelStatus::default(),
+        capabilities: RuntimeCapabilities::default(),
         thinking_summary: None,
         startup: crate::startup_config::StartupConfig::default(),
         services: crate::orchestration::DaemonServices::new(),
@@ -188,7 +186,7 @@ async fn trigger_web_rule_now_queues_when_turn_is_running() {
     host.trigger_web_rule_now(rule.id.clone(), &mut turn);
 
     assert!(turn.fut.is_some(), "existing turn stays in flight");
-    assert_eq!(host.queued_turns.len(), 1);
+    assert_eq!(host.session.queue.len(), 1);
 
     triggers::global_registry().remove_rule(&rule.id).unwrap();
 }
@@ -202,7 +200,7 @@ async fn dispatch_web_slash_queues_agent_prompt_when_turn_is_running() {
         .await;
 
     assert!(turn.fut.is_some(), "existing turn stays in flight");
-    assert_eq!(host.queued_turns.len(), 1);
+    assert_eq!(host.session.queue.len(), 1);
 }
 
 #[tokio::test]
@@ -214,7 +212,7 @@ async fn dispatch_web_slash_starts_template_and_compaction_turns() {
 
     assert!(turn.fut.is_some());
     assert_eq!(turn.prefix, "template run failed: ");
-    assert!(host.busy);
+    assert!(host.session.busy);
 
     let (mut host2, _scratch2, _repo2) = host_with_input(Vec::new()).await;
     let mut turn2 = TurnState::default();
@@ -223,7 +221,7 @@ async fn dispatch_web_slash_starts_template_and_compaction_turns() {
 
     assert!(turn2.fut.is_some());
     assert_eq!(turn2.prefix, "compaction failed: ");
-    assert!(host2.busy);
+    assert!(host2.session.busy);
 }
 
 #[tokio::test]
@@ -259,7 +257,7 @@ async fn submit_web_text_with_vision_model_starts_image_turn() {
     .await;
 
     assert!(turn.fut.is_some());
-    assert!(host.busy);
+    assert!(host.session.busy);
 }
 
 #[tokio::test]
@@ -276,14 +274,14 @@ async fn handle_configure_applies_model_selection() {
     patch.model = Some(model.id.clone());
     host.handle_configure(patch, &mut TurnState::default()).await;
 
-    assert_eq!(current_model_label(host.kernel.harness()), spec);
+    assert_eq!(current_model_label(host.session.kernel.harness()), spec);
 }
 
 #[tokio::test]
 async fn resolve_control_plane_prompt_timeout_forwards_timeout() {
     let (mut host, _scratch, _repo) = host_with_input(Vec::new()).await;
     let (decision_tx, decision_rx) = oneshot::channel();
-    host.show_control_plane_prompt(UiControlPlanePrompt {
+    host.show_control_plane_prompt(PendingControlPlanePrompt {
         request: ControlPlanePromptRequest {
             tool_call_id: "call-timeout".into(),
             tool_name: "InstallSkill".into(),
@@ -297,7 +295,7 @@ async fn resolve_control_plane_prompt_timeout_forwards_timeout() {
 
     host.resolve_control_plane_prompt(ControlPlanePromptDecision::Timeout);
 
-    assert!(host.control_plane_prompt.is_none());
+    assert!(host.projection.control_plane_prompt.is_none());
     assert!(matches!(
         decision_rx.await.unwrap(),
         ControlPlanePromptDecision::Timeout

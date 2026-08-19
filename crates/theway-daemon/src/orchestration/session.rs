@@ -221,7 +221,7 @@ impl SessionRuntimeBuilder {
         let harness = std::sync::Arc::new(AgentHarness::new(opts));
 
         // Per-session trigger executor: same wiring as the startup path (transport
-        // adapters + trigger UI/cron/dynamic listeners re-registered per harness).
+        // adapters plus cron/dynamic listeners registered per harness).
         let trigger_executor =
             std::sync::Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
                 harness.agent_arc(),
@@ -248,11 +248,9 @@ impl SessionRuntimeBuilder {
         let _ = skill_harness_cell.set(harness.clone());
         let _ = goal_harness_cell.set(harness.clone());
 
-        // Feed listeners via the core broadcast channel (segment 3). Each spawned task
-        // receives from the broadcast Receiver and forwards structured FeedUpdates to
-        // the UI loop. This replaces the old `agent.subscribe()` /
-        // `harness.subscribe_harness()` pattern. The JoinHandle is dropped without being
-        // awaited — the task runs for the harness's lifetime.
+        // Feed listeners receive core broadcasts and forward structured updates
+        // to the serialized host loop. Dropping the join handle detaches the task;
+        // channel closure ends it with the harness lifetime.
         let _agent_broadcast = crate::turn::listener::spawn_agent_broadcast_listener(
             harness.agent().subscribe_broadcast(),
             self.feed_tx.clone(),

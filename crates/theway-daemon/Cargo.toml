@@ -47,10 +47,6 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 tokio-tungstenite = { version = "0.26", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 base64 = "0.22"
 
-# Shared app kernel (feed model renders ratatui lines; the daemon and the TUI
-# both depend on this crate).
-qrcode = { version = "0.14", default-features = false }
-
 # Local-execution tools (`src/tools/`): outline.rs drives tree-sitter structural
 # outlines. Versions stay in lockstep with the engine's former copy.
 tree-sitter = "0.25"
@@ -108,6 +104,7 @@ fs4 = "0.13"
 tests-bridge-macro = { path = "../tests-bridge-macro" }
 tempfile = "3"
 opentelemetry_sdk = { version = "0.31", features = ["testing"] }
+qrcode = { version = "0.14", default-features = false }
 
 [lints]
 workspace = true

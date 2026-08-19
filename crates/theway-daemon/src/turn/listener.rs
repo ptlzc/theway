@@ -1,7 +1,5 @@
-//! Adapters that turn live `LoopEvent`/`SessionEvent` streams into [`FeedUpdate`]s and push
-//! them onto the UI channel. These replace the old stdout-writing `tui::Tui` listeners: the
-//! full-screen app owns the only writer (the ratatui terminal), so listeners must never touch
-//! stdout — they only enqueue structured updates that the run loop drains and renders.
+//! Adapters that turn live `LoopEvent`/`SessionEvent` streams into structured
+//! [`FeedUpdate`] values. Listeners never write to a client output directly.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -10,7 +8,9 @@ use crate::trigger_engine::event::{TriggerEvent, TriggerListener};
 use crate::trigger_engine::types::{SourceKind, TriggerState};
 use chrono::Local;
 use parking_lot::Mutex;
-use theway_core::{LoopEvent, SessionEvent, SessionListener};
+#[cfg(test)]
+use theway_core::SessionListener;
+use theway_core::{LoopEvent, SessionEvent};
 use theway_llm_provider::AssistantMessageEvent;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc::UnboundedSender;
@@ -21,8 +21,7 @@ use super::feed::{
 };
 
 /// Spawn a tokio task that receives [`LoopEvent`]s from the core broadcast channel
-/// (segment 3) and forwards them as [`FeedUpdate`]s to the UI channel. Replaces the
-/// old synchronous `agent.subscribe()` pattern.
+/// and forwards them through the daemon feed channel.
 pub fn spawn_agent_broadcast_listener(
     mut rx: broadcast::Receiver<LoopEvent>,
     tx: UnboundedSender<FeedUpdate>,
@@ -134,8 +133,8 @@ fn tool_start_display(tool_name: &str, args: &serde_json::Value) -> (String, Str
     (tool_name.to_string(), preview(args))
 }
 
-/// Build the harness listener for trigger lifecycle lines. Keeps the same "stay quiet unless a
-/// dynamic periodic check actually matched" behavior the old renderer had.
+/// Build a harness listener used by the event-mapping unit tests.
+#[cfg(test)]
 pub fn harness_listener(tx: UnboundedSender<FeedUpdate>, debug: bool) -> SessionListener {
     Arc::new(move |event| {
         if let Some(update) = map_harness_event(&event, debug) {
@@ -185,8 +184,7 @@ fn map_harness_event(event: &SessionEvent, debug: bool) -> Option<FeedUpdate> {
 }
 
 /// Build the trigger-engine listener. Maps trigger lifecycle events into feed updates,
-/// mirroring the old `SessionEvent::Trigger*` branches (the trigger pipeline now lives in
-/// the CLI host, not the core harness event bus).
+/// for the daemon-owned trigger pipeline.
 pub fn trigger_listener(tx: UnboundedSender<FeedUpdate>, debug: bool) -> TriggerListener {
     let quiet: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
     Arc::new(move |event| {

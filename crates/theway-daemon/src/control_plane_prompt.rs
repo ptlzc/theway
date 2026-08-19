@@ -6,12 +6,12 @@ use theway_core::{
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
-pub struct UiControlPlanePrompt {
+pub struct PendingControlPlanePrompt {
     pub request: ControlPlanePromptRequest,
     pub responder: oneshot::Sender<ControlPlanePromptDecision>,
 }
 
-impl UiControlPlanePrompt {
+impl PendingControlPlanePrompt {
     pub fn resolve(self, decision: ControlPlanePromptDecision) {
         let _ = self.responder.send(decision);
     }
@@ -19,27 +19,27 @@ impl UiControlPlanePrompt {
 
 pub fn interactive_hook() -> (
     OnControlPlanePromptHook,
-    mpsc::UnboundedReceiver<UiControlPlanePrompt>,
+    mpsc::UnboundedReceiver<PendingControlPlanePrompt>,
 ) {
-    let (tx, rx) = mpsc::unbounded_channel::<UiControlPlanePrompt>();
+    let (tx, rx) = mpsc::unbounded_channel::<PendingControlPlanePrompt>();
     let hook: OnControlPlanePromptHook = Arc::new(move |request, cancel| {
         let tx = tx.clone();
         Box::pin(async move {
             let (decision_tx, decision_rx) = oneshot::channel();
             if tx
-                .send(UiControlPlanePrompt {
+                .send(PendingControlPlanePrompt {
                     request,
                     responder: decision_tx,
                 })
                 .is_err()
             {
                 return ControlPlanePromptDecision::Deny {
-                    reason: Some("control-plane prompt UI is unavailable".into()),
+                    reason: Some("control-plane prompt client is unavailable".into()),
                 };
             }
             tokio::select! {
                 decision = decision_rx => decision.unwrap_or(ControlPlanePromptDecision::Deny {
-                    reason: Some("control-plane prompt UI closed before a decision".into()),
+                    reason: Some("control-plane prompt client closed before a decision".into()),
                 }),
                 _ = cancel.cancelled() => ControlPlanePromptDecision::Deny {
                     reason: Some("control-plane prompt cancelled".into()),
@@ -50,6 +50,7 @@ pub fn interactive_hook() -> (
     (hook, rx)
 }
 
+#[cfg(test)]
 pub fn deny_hook(reason: &'static str) -> OnControlPlanePromptHook {
     Arc::new(
         move |_request: ControlPlanePromptRequest, _cancel: CancellationToken| {

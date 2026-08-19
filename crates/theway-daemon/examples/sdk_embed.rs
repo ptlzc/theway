@@ -18,7 +18,7 @@
 use std::sync::Arc;
 
 use theway_core::{AgentHarness, AgentHarnessOptions};
-use theway_daemon::agent_session::{AgentSession, RetrySettings};
+use theway_daemon::{AgentSession, RetrySettings};
 use theway_llm_provider::{Api, Model, ModelCost, Provider};
 use theway_storage::sqlite_repo::SqliteSessionRepo;
 use theway_transport::commands::Registry;

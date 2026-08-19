@@ -29,7 +29,7 @@ use tokio::sync::{mpsc, oneshot};
 use super::super::*;
 use crate::agent_session::RetrySettings;
 use crate::commands::Registry;
-use crate::control_plane_prompt::UiControlPlanePrompt;
+use crate::control_plane_prompt::PendingControlPlanePrompt;
 use crate::paths::DaemonPaths;
 use crate::session_ops::{CurrentSessionState, SessionFactory};
 use crate::test_env::{EnvGuard, ENV_LOCK};
@@ -119,8 +119,8 @@ fn build_host_with(
     session_factory: SessionFactory,
     session_id: &str,
     control_plane_prompt: Option<(
-        mpsc::UnboundedSender<UiControlPlanePrompt>,
-        mpsc::UnboundedReceiver<UiControlPlanePrompt>,
+        mpsc::UnboundedSender<PendingControlPlanePrompt>,
+        mpsc::UnboundedReceiver<PendingControlPlanePrompt>,
     )>,
 ) -> BuiltHost {
     let trigger_executor = trigger_executor_for(&harness);
@@ -147,8 +147,6 @@ fn build_host_with(
         retry: RetrySettings::default(),
         registry,
         cwd: work_dir,
-        home,
-        base,
         paths,
         session_id: session_id.to_string(),
         log_path: None,
@@ -162,7 +160,7 @@ fn build_host_with(
         session_factory,
         session_repo: Arc::new(SqliteSessionRepo::new(repo_dir.path())),
         current_session_state: Arc::new(parking_lot::Mutex::new(CurrentSessionState::default())),
-        panel_status: PanelStatus::default(),
+        capabilities: RuntimeCapabilities::default(),
         thinking_summary: None,
         startup: crate::startup_config::StartupConfig::default(),
         services: crate::orchestration::DaemonServices::new(),

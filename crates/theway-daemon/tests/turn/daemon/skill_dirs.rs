@@ -21,7 +21,7 @@ use theway_core::{
 use theway_llm_provider::ModelCost;
 use tokio::sync::mpsc;
 
-use super::super::{DaemonConfig, PanelStatus, TurnHost};
+use super::super::{DaemonConfig, RuntimeCapabilities, TurnHost};
 use crate::agent_session::RetrySettings;
 use crate::commands::Registry;
 use crate::paths::DaemonPaths;
@@ -150,8 +150,6 @@ async fn host_with_extras(extras: Vec<PathBuf>) -> (TurnHost, Arc<AtomicU32>, Ve
         retry: RetrySettings::default(),
         registry: Registry::new(),
         cwd: work_dir.clone(),
-        home: home.clone(),
-        base: base.clone(),
         paths,
         session_id: "sess-test".into(),
         log_path: None,
@@ -165,7 +163,7 @@ async fn host_with_extras(extras: Vec<PathBuf>) -> (TurnHost, Arc<AtomicU32>, Ve
         session_factory,
         session_repo: Arc::new(SqliteSessionRepo::new(repo_dir.path())),
         current_session_state: Arc::new(parking_lot::Mutex::new(CurrentSessionState::default())),
-        panel_status: PanelStatus {
+        capabilities: RuntimeCapabilities {
             mcp_servers: 0,
             mcp_tools: 0,
             mcp_server_names: Vec::new(),
@@ -192,17 +190,17 @@ async fn startup_path_context_reflects_paths_and_cli_extras() {
 
     // TurnHost::new seeds the shared wire path context from DaemonPaths:
     // home/base/work_dir plus the startup extras, all served by GetPathContext.
-    let ctx = host.path_context.read().unwrap().clone();
-    assert_eq!(ctx.home, host.paths.home.to_string_lossy());
-    assert_eq!(ctx.base, host.paths.base.to_string_lossy());
-    assert_eq!(ctx.work_dir, host.paths.work_dir.to_string_lossy());
+    let ctx = host.runtime.path_context.read().unwrap().clone();
+    assert_eq!(ctx.home, host.runtime.paths.home.to_string_lossy());
+    assert_eq!(ctx.base, host.runtime.paths.base.to_string_lossy());
+    assert_eq!(ctx.work_dir, host.runtime.paths.work_dir.to_string_lossy());
     assert_eq!(ctx.skills_dirs, vec!["/startup/skills"]);
 
     // The transport endpoints share the SAME handle (the gRPC server's
     // optimistic update and the event loop's authoritative apply observe one
     // value).
     let endpoints = host.transport_endpoints();
-    assert!(Arc::ptr_eq(&endpoints.path_context, &host.path_context));
+    assert!(Arc::ptr_eq(&endpoints.path_context, &host.runtime.path_context));
 }
 
 #[tokio::test]
@@ -216,21 +214,21 @@ async fn handle_set_skill_dirs_updates_extras_path_context_and_reloads() {
 
     // 1) Authoritative extras replacement (the skill scan reads this).
     assert_eq!(
-        host.paths.current_extra_skill_dirs(),
+        host.runtime.paths.current_extra_skill_dirs(),
         vec![PathBuf::from("/new/a"), PathBuf::from("/new/b")]
     );
     // 2) Shared wire path context refresh — home/base/work_dir untouched.
     {
-        let ctx = host.path_context.read().unwrap();
+        let ctx = host.runtime.path_context.read().unwrap();
         assert_eq!(ctx.skills_dirs, vec!["/new/a", "/new/b"]);
-        assert_eq!(ctx.home, host.paths.home.to_string_lossy());
-        assert_eq!(ctx.base, host.paths.base.to_string_lossy());
-        assert_eq!(ctx.work_dir, host.paths.work_dir.to_string_lossy());
+        assert_eq!(ctx.home, host.runtime.paths.home.to_string_lossy());
+        assert_eq!(ctx.base, host.runtime.paths.base.to_string_lossy());
+        assert_eq!(ctx.work_dir, host.runtime.paths.work_dir.to_string_lossy());
     }
     // 3) Hot-reload ran exactly once through the harness's reload closure and
     //    replaced the catalog with the freshly "loaded" skills.
     assert_eq!(reload_calls.load(Ordering::SeqCst), 1);
-    let skills = host.kernel.harness().skills();
+    let skills = host.session.kernel.harness().skills();
     assert_eq!(skills.len(), 1);
     assert_eq!(skills[0].name, reloaded_skill().name);
     assert_eq!(skills[0].content, reloaded_skill().content);
@@ -246,8 +244,8 @@ async fn handle_set_skill_dirs_empty_list_clears_extras() {
 
     host.handle_set_skill_dirs(Vec::new(), &mut turn).await;
 
-    assert!(host.paths.current_extra_skill_dirs().is_empty());
-    assert!(host.path_context.read().unwrap().skills_dirs.is_empty());
+    assert!(host.runtime.paths.current_extra_skill_dirs().is_empty());
+    assert!(host.runtime.path_context.read().unwrap().skills_dirs.is_empty());
     // The reload still fires: the catalog must be rebuilt without the extras.
     assert_eq!(reload_calls.load(Ordering::SeqCst), 1);
 }
@@ -268,11 +266,11 @@ async fn handle_web_command_routes_set_skill_dirs_to_handler() {
     .await;
 
     assert_eq!(
-        host.paths.current_extra_skill_dirs(),
+        host.runtime.paths.current_extra_skill_dirs(),
         vec![PathBuf::from("/routed")]
     );
     assert_eq!(
-        host.path_context.read().unwrap().skills_dirs,
+        host.runtime.path_context.read().unwrap().skills_dirs,
         vec!["/routed"]
     );
     assert_eq!(reload_calls.load(Ordering::SeqCst), 1);
@@ -294,7 +292,7 @@ async fn handle_set_skill_dirs_aborts_in_flight_turn() {
     assert!(turn.aborted);
     // The update itself still lands.
     assert_eq!(
-        host.paths.current_extra_skill_dirs(),
+        host.runtime.paths.current_extra_skill_dirs(),
         vec![PathBuf::from("/x")]
     );
 }

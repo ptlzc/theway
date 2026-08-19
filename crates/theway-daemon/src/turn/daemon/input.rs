@@ -26,7 +26,7 @@ impl TurnHost {
         }
 
         if trimmed.starts_with('/') && loaded_images.is_empty() {
-            self.feed.push_user(&trimmed);
+            self.projection.feed.push_user(&trimmed);
             self.dispatch_web_slash(&trimmed, turn).await;
             return;
         }
@@ -34,19 +34,19 @@ impl TurnHost {
         let expanded = if trimmed.is_empty() {
             String::new()
         } else {
-            mentions::expand(&trimmed, &self.cwd).await.0
+            mentions::expand(&trimmed, &self.runtime.cwd).await.0
         };
         let prompt_text = commands::attach_skill_prompt(expanded, None);
         let display = prompt_display(&trimmed, loaded_images.len());
         if interrupt {
             self.request_abort(turn);
-            self.queued_turns.clear();
+            self.session.queue.clear();
             self.system_line("interrupt: stopping current turn for new message");
         }
         if turn.fut.is_some() {
             self.queue_user_prompt(display, prompt_text, loaded_images);
         } else {
-            self.feed.push_user(display);
+            self.projection.feed.push_user(display);
             self.start_user_prompt_turn(prompt_text, loaded_images, turn);
         }
     }
@@ -54,14 +54,14 @@ impl TurnHost {
     async fn dispatch_web_slash(&mut self, input: &str, turn: &mut TurnState) {
         let outcome = {
             let ctx = CommandCtx {
-                harness: self.kernel.harness(),
-                trigger_executor: self.kernel.trigger_executor(),
-                session_id: &self.session_id,
-                log_path: self.log_path.as_ref(),
-                tool_count: self.tool_count,
-                cwd: &self.cwd,
+                harness: self.session.kernel.harness(),
+                trigger_executor: self.session.kernel.trigger_executor(),
+                session_id: &self.session.id,
+                log_path: self.session.log_path.as_ref(),
+                tool_count: self.session.tool_count,
+                cwd: &self.runtime.cwd,
             };
-            commands::dispatch(input, &self.registry, &ctx).await
+            commands::dispatch(input, &self.runtime.registry, &ctx).await
         };
         match outcome {
             CommandOutcome::Quit => {
@@ -110,7 +110,7 @@ impl TurnHost {
                 }
             }
             CommandOutcome::WebRelay(_) => {
-                self.system_line("web relay is a TUI feature; the daemon is already a server");
+                self.system_line("web relay is a client feature; the daemon is already a server");
             }
             CommandOutcome::SessionImportActivation {
                 session_path,
@@ -151,11 +151,11 @@ impl TurnHost {
             } => {
                 let command = recovery_command.unwrap_or_else(|| format!("/login {provider}"));
                 self.error_line(format!(
-                    "login is not implemented in the daemon; run `{command}` from the terminal UI"
+                    "login is not implemented in the daemon; run `{command}` from a client"
                 ));
             }
             CommandOutcome::OpenModelPicker => {
-                let active = match self.kernel.harness().agent().state().model.clone() {
+                let active = match self.session.kernel.harness().agent().state().model.clone() {
                     Some(m) => format!("active model: {}:{}", m.provider.0, m.id),
                     None => "(no model active)".into(),
                 };

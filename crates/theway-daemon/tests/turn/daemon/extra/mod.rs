@@ -22,11 +22,11 @@ use theway_llm_provider::ModelCost;
 use tokio::sync::{mpsc, oneshot};
 
 use super::super::{
-    DaemonConfig, PanelStatus, TurnHost, current_model_label, SUPPORTED_APIS,
+    DaemonConfig, RuntimeCapabilities, TurnHost, current_model_label, SUPPORTED_APIS,
 };
 use crate::agent_session::RetrySettings;
 use crate::commands::Registry;
-use crate::control_plane_prompt::UiControlPlanePrompt;
+use crate::control_plane_prompt::PendingControlPlanePrompt;
 use crate::paths::DaemonPaths;
 use crate::session_ops::{CurrentSessionState, SessionFactory};
 use crate::trigger_engine::execution::TriggerExecutor;
@@ -36,7 +36,9 @@ use crate::turn::kernel::{TurnFut, TurnState};
 use crate::triggers;
 use theway_storage::sqlite_repo::SqliteSessionRepo;
 use theway_transport::TransportMode;
-use theway_transport::wire::{WireCommand, WireDaemonConfig};
+use theway_transport::wire::WireCommand;
+
+mod configuration;
 
 fn faux_model() -> theway_llm_provider::Model {
     theway_llm_provider::Model {
@@ -142,8 +144,6 @@ fn daemon_config(
         retry: RetrySettings::default(),
         registry: Registry::with_daemon_commands(),
         cwd: work_dir,
-        home,
-        base,
         paths,
         session_id: session_id.to_string(),
         log_path: None,
@@ -157,7 +157,7 @@ fn daemon_config(
         session_factory,
         session_repo: Arc::new(SqliteSessionRepo::new(repo_dir.path())),
         current_session_state: Arc::new(parking_lot::Mutex::new(CurrentSessionState::default())),
-        panel_status: PanelStatus::default(),
+        capabilities: RuntimeCapabilities::default(),
         thinking_summary: None,
         startup: crate::startup_config::StartupConfig::default(),
         services: crate::orchestration::DaemonServices::new(),
@@ -238,7 +238,7 @@ async fn handle_web_command_routes_submit_to_start_turn() {
     .await;
 
     assert!(turn.fut.is_some());
-    assert!(host.busy);
+    assert!(host.session.busy);
 }
 
 #[tokio::test]
@@ -257,7 +257,7 @@ async fn handle_web_command_routes_trigger_rule_now_to_start_turn() {
     .await;
 
     assert!(turn.fut.is_some());
-    assert!(host.busy);
+    assert!(host.session.busy);
 
     triggers::global_registry().remove_rule(&rule.id).unwrap();
 }
@@ -266,7 +266,7 @@ async fn handle_web_command_routes_trigger_rule_now_to_start_turn() {
 async fn handle_web_command_routes_set_model_invalid_spec() {
     let mut fixture = HostFixture::new().await;
     let host = fixture.host();
-    let original = current_model_label(host.kernel.harness());
+    let original = current_model_label(host.session.kernel.harness());
 
     host.handle_web_command(
         WireCommand::SetModel {
@@ -276,14 +276,14 @@ async fn handle_web_command_routes_set_model_invalid_spec() {
     )
     .await;
 
-    assert_eq!(current_model_label(host.kernel.harness()), original);
+    assert_eq!(current_model_label(host.session.kernel.harness()), original);
 }
 
 #[tokio::test]
 async fn handle_web_command_routes_switch_session_empty_id() {
     let mut fixture = HostFixture::new().await;
     let host = fixture.host();
-    let original = host.session_id.clone();
+    let original = host.session.id.clone();
 
     host.handle_web_command(
         WireCommand::SwitchSession { id: String::new() },
@@ -291,115 +291,7 @@ async fn handle_web_command_routes_switch_session_empty_id() {
     )
     .await;
 
-    assert_eq!(host.session_id, original);
-}
-
-#[tokio::test]
-async fn handle_web_command_routes_configure_empty_update() {
-    let mut fixture = HostFixture::new().await;
-    let host = fixture.host();
-    let before = host.daemon_config.read().unwrap().clone();
-
-    host.handle_web_command(
-        WireCommand::Configure {
-            config: WireDaemonConfig::default(),
-        },
-        &mut TurnState::default(),
-    )
-    .await;
-
-    assert_eq!(*host.daemon_config.read().unwrap(), before);
-}
-
-#[tokio::test]
-async fn handle_configure_applies_tui_max_feed_lines() {
-    let mut fixture = HostFixture::new().await;
-    let host = fixture.host();
-
-    let mut patch = WireDaemonConfig::default();
-    patch.tui_max_feed_lines = Some(42);
-    host.handle_configure(patch, &mut TurnState::default()).await;
-
-    assert_eq!(host.tui_max_feed_lines, Some(42));
-    assert_eq!(host.daemon_config.read().unwrap().tui_max_feed_lines, Some(42));
-}
-
-#[tokio::test]
-async fn handle_configure_rejections_do_not_publish_unapplied_values() {
-    let mut fixture = HostFixture::new().await;
-    let host = fixture.host();
-    let before = host.daemon_config.read().unwrap().clone();
-
-    host.handle_configure(
-        WireDaemonConfig {
-            provider: Some("missing-provider".into()),
-            model: Some("missing-model".into()),
-            trigger_poll_secs: Some(0),
-            tui_max_feed_lines: Some(0),
-            storage_service_addr: Some("http://startup-only".into()),
-            ..Default::default()
-        },
-        &mut TurnState::default(),
-    )
-    .await;
-
-    assert_eq!(*host.daemon_config.read().unwrap(), before);
-}
-
-#[tokio::test]
-async fn handle_configure_unknown_clear_rejects_the_whole_patch() {
-    let mut fixture = HostFixture::new().await;
-    let host = fixture.host();
-    let before = host.daemon_config.read().unwrap().clone();
-
-    host.handle_configure(
-        WireDaemonConfig {
-            tui_max_feed_lines: Some(42),
-            clear_fields: vec!["not_a_field".into()],
-            ..Default::default()
-        },
-        &mut TurnState::default(),
-    )
-    .await;
-
-    assert_eq!(host.tui_max_feed_lines, before.tui_max_feed_lines);
-    assert_eq!(*host.daemon_config.read().unwrap(), before);
-}
-
-#[tokio::test]
-async fn handle_configure_clear_and_set_follow_patch_precedence() {
-    let mut fixture = HostFixture::new().await;
-    let host = fixture.host();
-
-    host.handle_configure(
-        WireDaemonConfig {
-            thinking: Some(true),
-            tui_max_feed_lines: Some(42),
-            clear_fields: vec!["thinking".into(), "tui_max_feed_lines".into()],
-            ..Default::default()
-        },
-        &mut TurnState::default(),
-    )
-    .await;
-
-    let view = host.daemon_config.read().unwrap().clone();
-    assert_eq!(view.thinking, Some(true));
-    assert_eq!(view.tui_max_feed_lines, Some(42));
-    assert_eq!(host.tui_max_feed_lines, Some(42));
-
-    host.handle_configure(
-        WireDaemonConfig {
-            clear_fields: vec!["thinking".into(), "tui_max_feed_lines".into()],
-            ..Default::default()
-        },
-        &mut TurnState::default(),
-    )
-    .await;
-
-    let view = host.daemon_config.read().unwrap().clone();
-    assert_eq!(view.thinking, None);
-    assert_eq!(view.tui_max_feed_lines, None);
-    assert_eq!(host.tui_max_feed_lines, None);
+    assert_eq!(host.session.id, original);
 }
 
 // ── switch session ───────────────────────────────────────────────────────────────
@@ -408,12 +300,12 @@ async fn handle_configure_clear_and_set_follow_patch_precedence() {
 async fn handle_switch_session_rejects_unknown_id() {
     let mut fixture = HostFixture::new().await;
     let host = fixture.host();
-    let original = host.session_id.clone();
+    let original = host.session.id.clone();
 
     host.handle_switch_session("__missing__".into(), &mut TurnState::default())
         .await;
 
-    assert_eq!(host.session_id, original);
+    assert_eq!(host.session.id, original);
 }
 
 #[tokio::test]
@@ -427,9 +319,9 @@ async fn handle_switch_session_switches_to_known_session_file() {
     host.handle_switch_session("sess-two".into(), &mut TurnState::default())
         .await;
 
-    assert_eq!(host.session_id, "sess-two");
-    assert!(!host.busy);
-    assert!(host.queued_turns.is_empty());
+    assert_eq!(host.session.id, "sess-two");
+    assert!(!host.session.busy);
+    assert!(host.session.queue.is_empty());
 }
 
 // ── model selection / trigger rule / submit text ─────────────────────────────────
@@ -446,7 +338,7 @@ async fn set_model_from_spec_switches_to_supported_catalog_model() {
 
     host.set_model_from_spec(&spec).await;
 
-    assert_eq!(current_model_label(host.kernel.harness()), spec);
+    assert_eq!(current_model_label(host.session.kernel.harness()), spec);
 }
 
 #[tokio::test]
@@ -461,7 +353,7 @@ async fn trigger_web_rule_now_starts_turn_for_known_rule() {
     host.trigger_web_rule_now(rule.id.clone(), &mut turn);
 
     assert!(turn.fut.is_some());
-    assert!(host.busy);
+    assert!(host.session.busy);
 
     triggers::global_registry().remove_rule(&rule.id).unwrap();
 }
@@ -476,7 +368,7 @@ async fn submit_web_text_interrupt_queues_when_turn_is_running() {
         .await;
 
     assert!(turn.aborted);
-    assert_eq!(host.queued_turns.len(), 1);
+    assert_eq!(host.session.queue.len(), 1);
 }
 
 #[tokio::test]
@@ -499,17 +391,17 @@ async fn wire_snapshot_reflects_populated_goal_poll_prompt_and_sidebar_state() {
     let host = fixture.host();
 
     let marker = "sk-test-secret-1234567890";
-    host.latest_goal = Some(GoalState {
+    host.projection.latest_goal = Some(GoalState {
         condition: format!("finish the task with token {marker}"),
         status: GoalStatus::Pursuing,
         iterations: 1,
         last_reason: Some(format!("still working with {marker}")),
         updated_at: "now".into(),
     });
-    host.latest_trigger_poll = Some(poll_status());
-    host.tui_max_feed_lines = Some(7);
-    host.busy = true;
-    host.panel_status = PanelStatus {
+    host.projection.latest_trigger_poll = Some(poll_status());
+    host.runtime.feed_history_limit = Some(7);
+    host.session.busy = true;
+    host.projection.capabilities = RuntimeCapabilities {
         mcp_servers: 2,
         mcp_tools: 3,
         mcp_server_names: vec!["server-a".into()],
@@ -520,7 +412,7 @@ async fn wire_snapshot_reflects_populated_goal_poll_prompt_and_sidebar_state() {
         trigger_features: vec!["dynamic".into()],
     };
     let (prompt_tx, _prompt_rx) = oneshot::channel();
-    host.control_plane_prompt = Some(UiControlPlanePrompt {
+    host.projection.control_plane_prompt = Some(PendingControlPlanePrompt {
         request: ControlPlanePromptRequest {
             tool_call_id: "call-1".into(),
             tool_name: "InstallSkill".into(),
@@ -657,7 +549,7 @@ fn apply_feed_update_records_trigger_poll_status() {
         host.apply_feed_update(FeedUpdate::TriggerPollStatus(status));
 
         assert_eq!(
-            host.latest_trigger_poll.as_ref().unwrap().trace_id,
+            host.projection.latest_trigger_poll.as_ref().unwrap().trace_id,
             "trace-poll"
         );
     });
@@ -671,13 +563,13 @@ fn sync_current_session_state_writes_shared_view() {
     rt.block_on(async {
         let mut fixture = HostFixture::new().await;
         let host = fixture.host();
-        host.session_id = "custom-session".into();
-        host.busy = true;
-        host.cwd = PathBuf::from("/tmp/theway-work");
+        host.session.id = "custom-session".into();
+        host.session.busy = true;
+        host.runtime.cwd = PathBuf::from("/tmp/theway-work");
 
         host.sync_current_session_state();
 
-        let state = host.current_session_state.lock();
+        let state = host.session.shared_state.lock();
         assert_eq!(state.session_id, "custom-session");
         assert!(state.busy);
         assert_eq!(state.cwd, "/tmp/theway-work");
@@ -799,5 +691,5 @@ async fn dispatch_web_slash_unknown_slash_runs_as_agent_prompt() {
         .await;
 
     assert!(turn.fut.is_some());
-    assert!(host.busy);
+    assert!(host.session.busy);
 }

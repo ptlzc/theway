@@ -4,47 +4,47 @@ impl TurnHost {
             &update,
             FeedUpdate::TriggerPollStatus(_) | FeedUpdate::SkillsReloaded { .. }
         );
-        let before_len = self.feed.blocks().len();
+        let before_len = self.projection.feed.blocks().len();
         let targeted = match &update {
             FeedUpdate::ThinkingSummary { block_index, .. } => Some(*block_index),
             FeedUpdate::TextDelta(_) | FeedUpdate::ThinkingDelta(_) => before_len.checked_sub(1),
             FeedUpdate::ToolProgress { tool_call_id, .. }
-            | FeedUpdate::ToolEnd { tool_call_id, .. } => self.feed.tool_result_index(tool_call_id),
+            | FeedUpdate::ToolEnd { tool_call_id, .. } => self.projection.feed.tool_result_index(tool_call_id),
             _ => None,
         };
         match update {
             FeedUpdate::TriggerPollStatus(status) => {
-                self.latest_trigger_poll = Some(status);
+                self.projection.latest_trigger_poll = Some(status);
             }
             FeedUpdate::SkillsReloaded { .. } => {}
             update => super::thinking_summary::apply(
-                &mut self.feed,
-                &mut self.thinking_burst,
-                self.thinking_summary.as_ref(),
-                &self.feed_tx,
+                &mut self.projection.feed,
+                &mut self.projection.thinking_burst,
+                self.projection.thinking_summary.as_ref(),
+                &self.inputs.feed_tx,
                 update,
             ),
         }
         if let Some(index) = targeted {
-            self.dirty_blocks.insert(index);
+            self.projection.dirty_blocks.insert(index);
         }
         metadata_dirty
     }
 
     async fn refresh_goal_state(&mut self) {
-        self.latest_goal = theway_core::multiagent::goal::current(self.kernel.harness()).await;
+        self.projection.latest_goal = theway_core::multiagent::goal::current(self.session.kernel.harness()).await;
     }
 
     fn sync_current_session_state(&self) {
-        let mut state = self.current_session_state.lock();
-        state.session_id = self.session_id.clone();
-        state.busy = self.busy;
-        state.model = current_model_label(self.kernel.harness());
-        state.cwd = self.cwd.display().to_string();
+        let mut state = self.session.shared_state.lock();
+        state.session_id = self.session.id.clone();
+        state.busy = self.session.busy;
+        state.model = current_model_label(self.session.kernel.harness());
+        state.cwd = self.runtime.cwd.display().to_string();
     }
 
     fn current_model_accepts_images(&self) -> bool {
-        self.kernel.current_model_accepts_images()
+        self.session.kernel.current_model_accepts_images()
     }
 
     async fn set_model_from_spec(&mut self, spec: &str) -> bool {
@@ -66,7 +66,7 @@ impl TurnHost {
     async fn apply_model(&mut self, model: theway_llm_provider::Model) -> bool {
         let provider = model.provider.0.clone();
         let id = model.id.clone();
-        match self.kernel.harness().set_model(model).await {
+        match self.session.kernel.harness().set_model(model).await {
             Ok(_) => {
                 if let Some(hint) = commands::model_credential_hint(&provider) {
                     self.system_line(format!(
@@ -75,7 +75,7 @@ impl TurnHost {
                 } else {
                     self.system_line(format!("switched to {provider}:{id}"));
                 }
-                self.model_catalog = model_catalog();
+                self.runtime.model_catalog = model_catalog();
                 true
             }
             Err(e) => {
@@ -86,26 +86,26 @@ impl TurnHost {
     }
 
     async fn switch_session(&mut self, id: String) -> Result<()> {
-        let runtime = (self.session_factory)(id.clone())
+        let runtime = (self.session.factory)(id.clone())
             .await
             .with_context(|| format!("build runtime for session {id}"))?;
-        self.session_id = runtime.session_id.clone();
-        self.kernel.replace_runtime(runtime);
-        self.reload_runtime
-            .set_trigger_executor(self.kernel.trigger_executor().clone());
+        self.session.id = runtime.session_id.clone();
+        self.session.kernel.replace_runtime(runtime);
+        self.automation.reload
+            .set_trigger_executor(self.session.kernel.trigger_executor().clone());
         self.clear_feed();
-        self.system_line(format!("switched to session {}", self.session_id));
-        self.busy = false;
-        self.queued_turns.clear();
-        self.control_plane_prompt = None;
+        self.system_line(format!("switched to session {}", self.session.id));
+        self.session.busy = false;
+        self.session.queue.clear();
+        self.projection.control_plane_prompt = None;
         self.refresh_goal_state().await;
         self.sync_current_session_state();
         Ok(())
     }
 
-    fn show_control_plane_prompt(&mut self, prompt: UiControlPlanePrompt) {
-        self.control_plane_prompt = Some(prompt);
-        if let Some(prompt) = &self.control_plane_prompt {
+    fn show_control_plane_prompt(&mut self, prompt: PendingControlPlanePrompt) {
+        self.projection.control_plane_prompt = Some(prompt);
+        if let Some(prompt) = &self.projection.control_plane_prompt {
             self.system_line(format!(
                 "approval required: {} ({})",
                 prompt.request.label, prompt.request.tool_name
@@ -114,7 +114,7 @@ impl TurnHost {
     }
 
     fn resolve_control_plane_prompt(&mut self, decision: theway_core::ControlPlanePromptDecision) {
-        let Some(prompt) = self.control_plane_prompt.take() else {
+        let Some(prompt) = self.projection.control_plane_prompt.take() else {
             return;
         };
         let outcome = match decision {

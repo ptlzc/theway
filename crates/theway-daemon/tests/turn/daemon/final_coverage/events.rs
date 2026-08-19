@@ -7,12 +7,12 @@ async fn transport_endpoints_forwards_registry_events() {
     let endpoints = host.transport_endpoints();
     let mut rx = endpoints.events.subscribe();
 
-    let id = host.subagent_registry.register(SubagentJobInit {
+    let id = host.automation.subagents.register(SubagentJobInit {
         agent: "faux-agent".into(),
         source: "subagent".into(),
         run_id: None,
         node_id: None,
-        session_id: Some(host.session_id.clone()),
+        session_id: Some(host.session.id.clone()),
     });
 
     let event = tokio::time::timeout(Duration::from_secs(2), rx.recv())
@@ -33,8 +33,9 @@ async fn transport_endpoints_projects_dag_events() {
     let mut rx = endpoints.dag_events.subscribe();
 
     let run_id = host
-        .dag_engine
-        .plan_goal("finish", Some(host.session_id.clone()));
+        .automation
+        .dag
+        .plan_goal("finish", Some(host.session.id.clone()));
 
     let event = tokio::time::timeout(Duration::from_secs(2), rx.recv())
         .await
@@ -64,7 +65,7 @@ async fn transport_endpoints_forwarder_survives_lagged_registry_receiver() {
     // `recv().await` observes `Lagged` and keeps forwarding.
     let registered = SUBAGENT_JOB_EVENT_BROADCAST_CAPACITY + 10;
     for _ in 0..registered {
-        host.subagent_registry.register(SubagentJobInit {
+        host.automation.subagents.register(SubagentJobInit {
             agent: "faux-agent".into(),
             source: "subagent".into(),
             run_id: None,
@@ -74,7 +75,7 @@ async fn transport_endpoints_forwarder_survives_lagged_registry_receiver() {
     }
 
     tokio::time::sleep(Duration::from_millis(100)).await;
-    assert_eq!(host.subagent_registry.list().len(), registered);
+    assert_eq!(host.automation.subagents.list().len(), registered);
 }
 
 #[tokio::test]
@@ -211,7 +212,7 @@ async fn run_transport_loop_starts_triggered_turn_from_main_run() {
 
 #[tokio::test]
 async fn run_transport_loop_shows_control_plane_prompt() {
-    let (control_tx, control_rx) = mpsc::unbounded_channel::<UiControlPlanePrompt>();
+    let (control_tx, control_rx) = mpsc::unbounded_channel::<PendingControlPlanePrompt>();
     let test_control_tx = control_tx.clone();
     let built = build_host_with(
         harness_with_input(Vec::new()),
@@ -226,7 +227,7 @@ async fn run_transport_loop_shows_control_plane_prompt() {
 
     let (prompt_tx, _prompt_rx) = oneshot::channel();
     test_control_tx
-        .send(UiControlPlanePrompt {
+        .send(PendingControlPlanePrompt {
             request: ControlPlanePromptRequest {
                 tool_call_id: "call-ctrl".into(),
                 tool_name: "InstallSkill".into(),

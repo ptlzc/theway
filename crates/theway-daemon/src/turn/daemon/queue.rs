@@ -9,10 +9,10 @@ impl TurnHost {
 
     fn enqueue_turn(&mut self, job: QueuedTurn) {
         let preview = feed::truncate_chars(job.display(), 80);
-        self.queued_turns.push_back(job);
+        self.session.queue.push_back(job);
         self.system_line(format!(
             "queued next message #{}: {preview}",
-            self.queued_turns.len()
+            self.session.queue.len()
         ));
     }
 
@@ -20,10 +20,10 @@ impl TurnHost {
         if turn.fut.is_some() {
             return true;
         }
-        let Some(job) = self.queued_turns.pop_front() else {
+        let Some(job) = self.session.queue.pop_front() else {
             return false;
         };
-        let remaining = self.queued_turns.len();
+        let remaining = self.session.queue.len();
         self.system_line(if remaining == 0 {
             "running queued message".to_string()
         } else {
@@ -35,7 +35,7 @@ impl TurnHost {
                 prompt,
                 images,
             } => {
-                self.feed.push_user(display);
+                self.projection.feed.push_user(display);
                 self.start_user_prompt_turn(prompt, images, turn);
             }
             QueuedTurn::AgentPrompt {
@@ -43,7 +43,7 @@ impl TurnHost {
                 prompt,
                 error_context,
             } => {
-                self.feed.push_user(display);
+                self.projection.feed.push_user(display);
                 self.start_prompt_turn(prompt, error_context, turn);
             }
             QueuedTurn::PromptTemplate {
@@ -51,11 +51,11 @@ impl TurnHost {
                 name,
                 vars,
             } => {
-                self.feed.push_user(display);
+                self.projection.feed.push_user(display);
                 self.start_template_turn(name, vars, turn);
             }
             QueuedTurn::Compaction { display, custom } => {
-                self.feed.push_user(display);
+                self.projection.feed.push_user(display);
                 self.start_compaction_turn(custom, turn);
             }
         }
@@ -68,10 +68,10 @@ impl TurnHost {
         error_context: &'static str,
         turn: &mut TurnState,
     ) {
-        turn.fut = Some(self.kernel.prompt_turn(prompt));
+        turn.fut = Some(self.session.kernel.prompt_turn(prompt));
         turn.aborted = false;
         turn.prefix = error_context;
-        self.busy = true;
+        self.session.busy = true;
     }
 
     fn start_user_prompt_turn(
@@ -80,10 +80,10 @@ impl TurnHost {
         loaded_images: Vec<ImageContent>,
         turn: &mut TurnState,
     ) {
-        turn.fut = Some(self.kernel.user_prompt_turn(prompt_text, loaded_images));
+        turn.fut = Some(self.session.kernel.user_prompt_turn(prompt_text, loaded_images));
         turn.aborted = false;
         turn.prefix = "";
-        self.busy = true;
+        self.session.busy = true;
     }
 
     fn start_template_turn(
@@ -92,35 +92,35 @@ impl TurnHost {
         vars: serde_json::Map<String, serde_json::Value>,
         turn: &mut TurnState,
     ) {
-        turn.fut = Some(self.kernel.template_turn(name, vars));
+        turn.fut = Some(self.session.kernel.template_turn(name, vars));
         turn.aborted = false;
         turn.prefix = "template run failed: ";
-        self.busy = true;
+        self.session.busy = true;
     }
 
     fn start_compaction_turn(&mut self, custom: Option<String>, turn: &mut TurnState) {
-        turn.fut = Some(self.kernel.compaction_turn(custom));
+        turn.fut = Some(self.session.kernel.compaction_turn(custom));
         turn.aborted = false;
         turn.prefix = "compaction failed: ";
-        self.busy = true;
+        self.session.busy = true;
     }
 
     fn start_triggered_turn(&mut self, trace_id: String, turn: &mut TurnState) {
-        if self.kernel.is_streaming() {
+        if self.session.kernel.is_streaming() {
             return;
         }
         let short: String = trace_id.chars().take(8).collect();
         self.system_line(format!("running triggered turn (trace {short})"));
-        turn.fut = Some(self.kernel.continue_turn());
+        turn.fut = Some(self.session.kernel.continue_turn());
         turn.aborted = false;
         turn.prefix = "triggered turn: ";
-        self.busy = true;
+        self.session.busy = true;
     }
 
     fn request_abort(&mut self, turn: &mut TurnState) {
         if turn.fut.is_some() {
             turn.aborted = true;
-            self.kernel.abort();
+            self.session.kernel.abort();
             self.system_line("aborting current turn…");
         }
     }
@@ -131,7 +131,7 @@ impl TurnHost {
         result: Result<Option<String>, theway_core::AgentRunError>,
     ) {
         turn.fut = None;
-        self.busy = false;
+        self.session.busy = false;
         if turn.aborted {
             self.system_line("[aborted]");
         } else {
