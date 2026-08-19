@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# pre-commit — synchronize generated SDK files and verify bilingual documentation.
+# pre-commit — synchronize generated SDK files, documentation, and CodeGraph.
 #
 # Proto changes stage the matching generated SDK files. Paired-document changes
 # must contain synchronized English and Chinese content with current records.
@@ -23,4 +23,13 @@ fi
 if git cat-file -e :scripts/verify-doc-i18n.py 2>/dev/null; then
   echo "[pre-commit] checking staged bilingual documentation pairs"
   scripts/verify-doc-i18n.py --cached
+fi
+
+if [ -d .codegraph ]; then
+  if ! command -v codegraph >/dev/null 2>&1; then
+    echo "[pre-commit] .codegraph exists but the codegraph command is unavailable" >&2
+    exit 1
+  fi
+  echo "[pre-commit] synchronizing CodeGraph index"
+  codegraph sync --quiet
 fi

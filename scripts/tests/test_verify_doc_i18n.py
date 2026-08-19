@@ -79,6 +79,30 @@ class VerifyDocI18nTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("out of sync", result.stderr)
 
+    def test_cross_crate_link_cannot_be_recorded(self) -> None:
+        source = self.root / "crates/demo/README.md"
+        zh = self.root / "crates/demo/README.zh.md"
+        source.write_text(source.read_text(encoding="utf-8") + "\n[Other](../other/README.md)\n", encoding="utf-8")
+        zh.write_text(zh.read_text(encoding="utf-8") + "\n[Other](../other/README.md)\n", encoding="utf-8")
+        result = self.run_script("--write", "crates/demo/README.md")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("escapes crate root", result.stderr)
+
+    def test_agent_document_cannot_link_to_repository_root(self) -> None:
+        path = self.root / "crates/demo/AGENTS.md"
+        path.write_text("# Rules\n\n[Root](../../AGENTS.md)\n", encoding="utf-8")
+        result = self.run_script("crates/demo/AGENTS.md")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("escapes crate root", result.stderr)
+
+    def test_fenced_markdown_example_is_not_a_document_link(self) -> None:
+        path = self.root / "crates/demo/AGENTS.md"
+        path.write_text(
+            "# Rules\n\n```markdown\n[Example](../../AGENTS.md)\n```\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(self.run_script("crates/demo/AGENTS.md").returncode, 0)
+
     def test_structure_mismatch_cannot_be_recorded(self) -> None:
         path = self.root / "crates/demo/README.zh.md"
         path.write_text(path.read_text(encoding="utf-8") + "\n### Extra\n", encoding="utf-8")

@@ -15,6 +15,7 @@ workers/fefe-hub/.wrangler/
 .se/
 .pi/
 .code-review-graph/
+.codegraph/
 openspec/
 
 # pi runtime state (never committed)

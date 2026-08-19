@@ -4,13 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import posixpath
 import re
 import subprocess
 import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Iterator
 
 
 DEFAULT_ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +24,7 @@ HEADING = re.compile(r"^(#{1,6})\s+")
 UNORDERED_ITEM = re.compile(r"^(\s*)[-+*]\s+")
 ORDERED_ITEM = re.compile(r"^(\s*)(\d+)[.)]\s+")
 LINK = re.compile(r"(?<!!)\[[^\]]*\]\(([^)\s]+)(?:\s+[^)]*)?\)")
+URI_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 FENCE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
 
 
@@ -101,6 +103,10 @@ def discover_sources(root: Path, cached: bool) -> list[str]:
             if path.startswith(prefix) and path.endswith(".md") and not path.endswith(".zh.md"):
                 sources.add(path)
     return sorted(sources)
+
+
+def discover_agent_docs(root: Path, cached: bool) -> list[str]:
+    return [f"{member}/AGENTS.md" for member in workspace_members(root, cached)]
 
 
 def pair_paths(source: str) -> PairPaths:
@@ -204,6 +210,59 @@ def structure_errors(paths: PairPaths, source_text: str, zh_text: str) -> list[s
     return errors
 
 
+def markdown_links(text: str) -> Iterator[tuple[int, str]]:
+    fence_char: str | None = None
+    fence_len = 0
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        fence_match = FENCE.match(line)
+        if fence_char is not None:
+            if fence_match and fence_match.group(1)[0] == fence_char and len(fence_match.group(1)) >= fence_len:
+                fence_char = None
+            continue
+        if fence_match:
+            marker = fence_match.group(1)
+            fence_char = marker[0]
+            fence_len = len(marker)
+            continue
+        for match in LINK.finditer(line):
+            yield line_number, match.group(1)
+
+
+def crate_root(path: str) -> str | None:
+    parts = path.split("/")
+    if len(parts) >= 3 and parts[0] == "crates":
+        return "/".join(parts[:2])
+    return None
+
+
+def locality_errors(path: str, text: str) -> list[str]:
+    owner = crate_root(path)
+    if owner is None:
+        return []
+    parent = posixpath.dirname(path)
+    errors: list[str] = []
+    for line_number, target in markdown_links(text):
+        if target.startswith("#") or target.startswith("//") or URI_SCHEME.match(target):
+            continue
+        relative = target.split("#", 1)[0].split("?", 1)[0]
+        if not relative:
+            continue
+        if relative.startswith("/"):
+            resolved = posixpath.normpath(relative.lstrip("/"))
+        else:
+            resolved = posixpath.normpath(posixpath.join(parent, relative))
+        if resolved != owner and not resolved.startswith(f"{owner}/"):
+            errors.append(f"{path}:{line_number}: link target `{target}` escapes crate root `{owner}`")
+    return errors
+
+
+def locality_document_errors(root: Path, path: str, cached: bool) -> list[str]:
+    content = read_file(root, path, cached)
+    if content is None:
+        return [f"{path}: required crate-local document is missing"]
+    return locality_errors(path, content.decode("utf-8"))
+
+
 def git_blob_hash(root: Path, content: bytes, write: bool = False) -> str:
     args = ["hash-object"]
     if write:
@@ -252,6 +311,8 @@ def pair_content_errors(root: Path, paths: PairPaths, cached: bool) -> tuple[lis
     if not has_switcher(zh_text, zh_switcher):
         errors.append(f"{paths.zh}: expected language switcher `{zh_switcher}` after the H1")
     errors.extend(structure_errors(paths, source_text, zh_text))
+    errors.extend(locality_errors(paths.source, source_text))
+    errors.extend(locality_errors(paths.zh, zh_text))
     return errors, source, zh
 
 
@@ -277,13 +338,13 @@ def verify_pair(root: Path, paths: PairPaths, cached: bool) -> list[str]:
     return errors
 
 
-def normalize_anchors(root: Path, anchors: Iterable[str]) -> list[str]:
+def normalize_paths(root: Path, anchors: Iterable[str]) -> list[str]:
     normalized: list[str] = []
     for anchor in anchors:
         path = Path(anchor)
         if path.is_absolute():
             path = path.relative_to(root)
-        normalized.append(pair_paths(path.as_posix()).source)
+        normalized.append(path.as_posix())
     return normalized
 
 
@@ -310,7 +371,9 @@ def write_records(root: Path, sources: list[str]) -> int:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("pairs", nargs="*", help="source, translation, record, or bare pair paths")
+    parser.add_argument(
+        "pairs", nargs="*", help="source, translation, record, bare pair, or AGENTS.md paths"
+    )
     parser.add_argument("--write", action="store_true", help="record confirmed worktree pairs")
     parser.add_argument("--all", action="store_true", help="select the complete corpus with --write")
     parser.add_argument("--list", action="store_true", help="report pair state without failing")
@@ -330,13 +393,26 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     root = args.root.resolve()
     available = discover_sources(root, args.cached)
-    selected = normalize_anchors(root, args.pairs) if args.pairs else available
+    available_agents = discover_agent_docs(root, args.cached)
+    requested = normalize_paths(root, args.pairs)
+    requested_agents = [path for path in requested if path.endswith("/AGENTS.md")]
+    requested_pairs = [path for path in requested if path not in requested_agents]
+    selected = (
+        [pair_paths(path).source for path in requested_pairs] if args.pairs else available
+    )
+    selected_agents = requested_agents if args.pairs else available_agents
     unknown = sorted(set(selected) - set(available))
-    if unknown:
+    unknown_agents = sorted(set(selected_agents) - set(available_agents))
+    if unknown or unknown_agents:
         for source in unknown:
             print(f"verify-doc-i18n: {source} is not an in-scope document", file=sys.stderr)
+        for path in unknown_agents:
+            print(f"verify-doc-i18n: {path} is not an in-scope agent document", file=sys.stderr)
         return 2
     if args.write:
+        if requested_agents:
+            print("verify-doc-i18n: AGENTS.md has no bilingual record to write", file=sys.stderr)
+            return 2
         return write_records(root, available if args.all else selected)
 
     failed = False
@@ -349,11 +425,23 @@ def main(argv: list[str] | None = None) -> int:
             for error in errors:
                 print(f"verify-doc-i18n: {error}", file=sys.stderr)
         failed = failed or bool(errors)
+    for path in selected_agents:
+        errors = locality_document_errors(root, path, args.cached)
+        state = "ok" if not errors else "out-of-scope-link"
+        if args.list:
+            print(f"{state}\t{path}")
+        elif errors:
+            for error in errors:
+                print(f"verify-doc-i18n: {error}", file=sys.stderr)
+        failed = failed or bool(errors)
     if args.list:
         return 0
     if failed:
         return 1
-    print(f"verify-doc-i18n: {len(selected)} bilingual pair(s) are synchronized")
+    print(
+        f"verify-doc-i18n: {len(selected)} bilingual pair(s) are synchronized; "
+        f"{len(selected_agents)} agent document(s) are crate-local"
+    )
     return 0
 
 
