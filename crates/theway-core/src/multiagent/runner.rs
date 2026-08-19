@@ -17,7 +17,8 @@ use theway_core::multiagent::registry::{
 };
 use theway_core::{
     AgentHarness, AgentHarnessOptions, AgentMessage, AgentRunError, AgentTool, LoopEvent,
-    MemorySessionStorage, Session, SessionStorage, StreamFn, ThinkingLevel,
+    MemorySessionStorage, ObservationContext, OperationId, Session, SessionStorage, StreamFn,
+    ThinkingLevel,
 };
 use theway_llm_provider::{Message as PiMessage, Model};
 use tokio_util::sync::CancellationToken;
@@ -51,6 +52,8 @@ pub struct AgentRunOptions {
     /// Owning session stamped on the registry job (`None` for session-less
     /// runs; DAG node jobs inherit it from the run).
     pub session_id: Option<String>,
+    /// Optional parent operation (a DAG node for graph-launched jobs).
+    pub observation_parent: Option<OperationId>,
     /// Parent/engine abort token; fires the inner harness's abort.
     pub cancel: CancellationToken,
     /// Extra system-prompt lines appended after the spec's static prompt (e.g. the
@@ -124,17 +127,30 @@ pub async fn run_agent(opts: AgentRunOptions) -> AgentRunResult {
     let started = Instant::now();
 
     // Graph mode: track this job in the registry (metrics + full-text output).
-    let job_id = opts.registry.register(JobInit {
-        agent: opts.launch.name.to_string(),
-        source: opts.source,
-        run_id: opts.run_id,
-        node_id: opts.node_id,
-        session_id: opts.session_id,
-    });
+    let job_id = opts.registry.register_observed(
+        JobInit {
+            agent: opts.launch.name.to_string(),
+            source: opts.source.clone(),
+            run_id: opts.run_id.clone(),
+            node_id: opts.node_id.clone(),
+            session_id: opts.session_id.clone(),
+        },
+        opts.observation_parent,
+    );
+    let job_operation = opts.registry.operation_id(&job_id);
 
     let storage = Arc::new(MemorySessionStorage::new());
     let session = Session::new(storage as Arc<dyn SessionStorage>);
     let mut harness_opts = AgentHarnessOptions::new(opts.model, session);
+    harness_opts.observer = opts.registry.observer();
+    harness_opts.observation_context = ObservationContext {
+        session_id: opts.session_id.clone(),
+        run_id: opts.run_id.clone(),
+        job_id: Some(job_id.clone()),
+        node_id: opts.node_id.clone(),
+        ..ObservationContext::default()
+    };
+    harness_opts.observation_parent = job_operation;
     harness_opts.system_prompt = match opts.system_prompt_extra {
         Some(extra) => format!("{}\n{extra}", opts.launch.system_prompt),
         None => opts.launch.system_prompt.to_string(),

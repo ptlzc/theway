@@ -14,4 +14,5 @@ pub mod persist;
 pub mod types;
 
 mod engine_state;
+mod observability;
 mod scheduler;

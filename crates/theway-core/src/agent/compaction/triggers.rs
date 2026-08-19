@@ -10,6 +10,9 @@ use crate::agent::assembly::SessionEvent;
 use crate::agent::compaction::compaction::{SummarizeError, compact, estimate_context_tokens};
 use crate::agent::messages::compaction_summary;
 use crate::agent::session::session::SessionTreeEntry;
+use crate::observability::{
+    ErrorCategory, OperationDetail, OperationOutcome, OperationScope, RuntimeMeasurements,
+};
 use crate::types::AgentMessage;
 
 impl crate::agent::assembly::AgentHarness {
@@ -65,6 +68,17 @@ impl crate::agent::assembly::AgentHarness {
             Some(m) => m,
             None => return Ok(false),
         };
+        let settings = self.compaction_settings.lock().clone();
+        let scope = OperationScope::start(
+            self.agent.runtime_observer(),
+            self.agent.active_run_operation(),
+            self.agent.observation_context(),
+            OperationDetail::Compaction {
+                algorithm: settings.algorithm.clone(),
+                provider: model.provider.0.clone(),
+                model: model.id.clone(),
+            },
+        );
 
         // Source of truth: real session entries with their real ids.
         let entries = match self.session.branch(None).await {
@@ -78,11 +92,15 @@ impl crate::agent::assembly::AgentHarness {
                     summary: format!("compaction skipped: session branch read failed: {e}"),
                     tokens_before: 0,
                 });
+                scope.finish(
+                    OperationOutcome::Failed,
+                    Some(ErrorCategory::Persistence),
+                    RuntimeMeasurements::default(),
+                );
                 return Ok(false);
             }
         };
 
-        let settings = self.compaction_settings.lock().clone();
         let algorithm = self.compact_algorithms.algorithm(&settings.algorithm);
         let result = compact(
             algorithm.as_ref(),
@@ -97,15 +115,42 @@ impl crate::agent::assembly::AgentHarness {
 
         let result = match result {
             Ok(r) if !r.summary.is_empty() => r,
-            Ok(_) => return Ok(false),
-            Err(SummarizeError::Aborted) => return Ok(false),
-            Err(e) => return Err(AgentRunError::Other(format!("compaction failed: {e}"))),
+            Ok(r) => {
+                scope.finish(
+                    OperationOutcome::Skipped,
+                    None,
+                    RuntimeMeasurements {
+                        input_tokens: r.usage.input,
+                        output_tokens: r.usage.output,
+                        cache_read_tokens: r.usage.cache_read,
+                        cache_write_tokens: r.usage.cache_write,
+                        ..Default::default()
+                    },
+                );
+                return Ok(false);
+            }
+            Err(SummarizeError::Aborted) => {
+                scope.finish(
+                    OperationOutcome::Cancelled,
+                    Some(ErrorCategory::Cancellation),
+                    RuntimeMeasurements::default(),
+                );
+                return Ok(false);
+            }
+            Err(e) => {
+                scope.finish(
+                    OperationOutcome::Failed,
+                    Some(ErrorCategory::Provider),
+                    RuntimeMeasurements::default(),
+                );
+                return Err(AgentRunError::Other(format!("compaction failed: {e}")));
+            }
         };
 
         let first_kept_entry_id = result.first_kept_entry_id.clone().unwrap_or_default();
 
         // Persist a compaction entry to the session.
-        let _ = self
+        if let Err(e) = self
             .session
             .append_compaction(
                 result.summary.clone(),
@@ -115,7 +160,22 @@ impl crate::agent::assembly::AgentHarness {
                 from_hook,
             )
             .await
-            .map_err(|e| AgentRunError::Other(format!("session append compaction: {e}")))?;
+        {
+            scope.finish(
+                OperationOutcome::Failed,
+                Some(ErrorCategory::Persistence),
+                RuntimeMeasurements {
+                    input_tokens: result.usage.input,
+                    output_tokens: result.usage.output,
+                    cache_read_tokens: result.usage.cache_read,
+                    cache_write_tokens: result.usage.cache_write,
+                    ..Default::default()
+                },
+            );
+            return Err(AgentRunError::Other(format!(
+                "session append compaction: {e}"
+            )));
+        }
 
         self.emit_harness_event(SessionEvent::Compaction {
             from_hook,
@@ -158,6 +218,17 @@ impl crate::agent::assembly::AgentHarness {
 
             s.messages = new_msgs;
         }
+        scope.finish(
+            OperationOutcome::Succeeded,
+            None,
+            RuntimeMeasurements {
+                input_tokens: result.usage.input,
+                output_tokens: result.usage.output,
+                cache_read_tokens: result.usage.cache_read,
+                cache_write_tokens: result.usage.cache_write,
+                ..Default::default()
+            },
+        );
         Ok(true)
     }
 }

@@ -10,12 +10,18 @@ extern crate self as theway_core;
 
 pub mod agent;
 pub mod executor;
+pub mod observability;
 pub mod types;
 
 // Public surface — mirrors `packages/agent/src/index.ts`.
 pub use agent::{
     Agent, AgentOptions, AgentRunError, LOOP_EVENT_BROADCAST_CAPACITY, LoopListener,
     LoopSyncCallback,
+};
+pub use observability::{
+    ErrorCategory, NoopRuntimeObserver, ObservationContext, OperationDetail, OperationFinished,
+    OperationId, OperationKind, OperationOutcome, OperationScope, OperationStarted,
+    RuntimeMeasurements, RuntimeObservation, RuntimeObserver, noop_runtime_observer,
 };
 pub use types::{
     AfterToolCallContext, AfterToolCallHook, AfterToolCallResult, AgentContext, AgentLoopConfig,

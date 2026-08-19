@@ -76,6 +76,7 @@ impl DagEngine {
                 .insert((run_id.to_string(), node_id.to_string()), token.clone());
             (inner.launcher.clone(), token)
         };
+        self.begin_node_observation(run_id, node_id);
         match launcher {
             None => {
                 // No launch context (tests / misconfiguration): fail now.
@@ -164,20 +165,19 @@ impl DagEngine {
                 run_id: run_id.to_string(),
                 session_id: run.session_id.clone().unwrap_or_default(),
                 node_id: node_id.to_string(),
-                status,
+                status: status.clone(),
                 error,
             };
             // `run` borrow ends here (NLL) — jobs map is a separate field.
             inner
                 .jobs
                 .remove(&(run_id.to_string(), node_id.to_string()));
-            (true, event)
+            (event, status)
         };
-        if applied.0 {
-            self.emit(applied.1);
-            self.after_node_terminal(run_id, node_id);
-            self.notify_persist();
-        }
+        self.finish_node_observation(run_id, node_id, applied.1);
+        self.emit(applied.0);
+        self.after_node_terminal(run_id, node_id);
+        self.notify_persist();
     }
 
     /// Live token/preview sync while a node is running (mirrors the TS job
@@ -280,15 +280,19 @@ impl DagEngine {
                 };
                 run.completed_at = Some(now_ms());
                 emit_state(run);
-                Some(DagEvent::RunStatus {
-                    run_id: run_id.to_string(),
-                    session_id: run.session_id.clone().unwrap_or_default(),
-                    status: run.status.clone(),
-                    error: run.error.clone(),
-                })
+                Some((
+                    DagEvent::RunStatus {
+                        run_id: run_id.to_string(),
+                        session_id: run.session_id.clone().unwrap_or_default(),
+                        status: run.status.clone(),
+                        error: run.error.clone(),
+                    },
+                    run.status.clone(),
+                ))
             }
         };
-        if let Some(event) = terminal {
+        if let Some((event, status)) = terminal {
+            self.finish_run_observation(run_id, status);
             self.emit(event);
             self.wake_waiters(run_id);
         }
@@ -316,6 +320,12 @@ impl DagEngine {
             }
         }
         for id in &restored {
+            if self
+                .get_run(id)
+                .is_some_and(|run| run.status == DagStatus::Running)
+            {
+                self.begin_run_observation(id);
+            }
             self.reconcile(id);
             self.tick(id);
         }

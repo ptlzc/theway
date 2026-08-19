@@ -2,7 +2,13 @@
 
 use std::sync::Arc;
 
+use parking_lot::Mutex;
+
 use super::super::*;
+use crate::observability::{
+    ObservationContext, OperationDetail, OperationOutcome, OperationScope, RuntimeMeasurements,
+    RuntimeObservation, RuntimeObserver,
+};
 use crate::types::StreamFn;
 use crate::multiagent::registry::{AgentJobRegistry, JobStatus};
 use crate::multiagent::types::AgentRunParams;
@@ -55,6 +61,91 @@ fn done_stream(text: &str) -> AssistantMessageEventStream {
     stream
 }
 
+#[derive(Default)]
+struct RecordingObserver {
+    observations: Mutex<Vec<RuntimeObservation>>,
+}
+
+impl RuntimeObserver for RecordingObserver {
+    fn observe(&self, observation: RuntimeObservation) {
+        self.observations.lock().push(observation);
+    }
+}
+
+#[tokio::test]
+async fn run_agent_observations_link_job_to_agent_without_content() {
+    let recording = Arc::new(RecordingObserver::default());
+    let observer: Arc<dyn RuntimeObserver> = recording.clone();
+    let registry = AgentJobRegistry::with_observer(observer.clone());
+    let parent = OperationScope::start(
+        observer,
+        None,
+        ObservationContext {
+            run_id: Some("dag-observed".into()),
+            node_id: Some("node-observed".into()),
+            ..ObservationContext::default()
+        },
+        OperationDetail::DagNode,
+    );
+    let parent_id = parent.id();
+    let stream_fn: StreamFn = Arc::new(move |_, _, _| done_stream("secret-result"));
+
+    let result = run_agent(AgentRunOptions {
+        launch: AgentRunParams {
+            name: "tester",
+            description: "test",
+            system_prompt: "sys",
+            max_iterations: 1,
+        },
+        tools: Vec::new(),
+        prompt: "secret-prompt".into(),
+        model: faux_model(),
+        stream_fn: Some(stream_fn),
+        timeout: Some(0),
+        thinking: None,
+        registry,
+        source: "dag".into(),
+        run_id: Some("dag-observed".into()),
+        node_id: Some("node-observed".into()),
+        session_id: Some("session-observed".into()),
+        observation_parent: Some(parent_id),
+        cancel: tokio_util::sync::CancellationToken::new(),
+        system_prompt_extra: None,
+        on_turn_end: None,
+    })
+    .await;
+    assert!(result.success);
+    parent.finish(
+        OperationOutcome::Succeeded,
+        None,
+        RuntimeMeasurements::default(),
+    );
+
+    let observations = recording.observations.lock();
+    let job = observations.iter().find_map(|observation| match observation {
+        RuntimeObservation::OperationStarted(start)
+            if matches!(start.detail, OperationDetail::AgentJob { .. }) =>
+        {
+            Some(start)
+        }
+        _ => None,
+    });
+    let job = job.expect("agent job start");
+    assert_eq!(job.parent_id, Some(parent_id));
+    let agent_run = observations.iter().find_map(|observation| match observation {
+        RuntimeObservation::OperationStarted(start)
+            if matches!(start.detail, OperationDetail::AgentRun) =>
+        {
+            Some(start)
+        }
+        _ => None,
+    });
+    assert_eq!(agent_run.expect("agent run start").parent_id, Some(job.id));
+    let rendered = format!("{observations:?}");
+    assert!(!rendered.contains("secret-prompt"));
+    assert!(!rendered.contains("secret-result"));
+}
+
 #[tokio::test]
 async fn run_agent_succeeds_and_registers_job() {
     let registry = AgentJobRegistry::new();
@@ -79,6 +170,7 @@ async fn run_agent_succeeds_and_registers_job() {
         run_id: Some("dag-1".into()),
         node_id: Some("a".into()),
         session_id: Some("sess-1".into()),
+        observation_parent: None,
         cancel: tokio_util::sync::CancellationToken::new(),
         system_prompt_extra: Some("extra".into()),
         on_turn_end: Some(on_turn_end),
@@ -129,6 +221,7 @@ async fn run_agent_returns_cancelled_when_parent_cancel_fires() {
             run_id: None,
             node_id: None,
             session_id: None,
+            observation_parent: None,
             cancel: cancel_clone,
             system_prompt_extra: None,
             on_turn_end: None,
@@ -181,6 +274,7 @@ async fn run_agent_idle_timeout_reports_timeout_error() {
         run_id: None,
         node_id: None,
         session_id: None,
+        observation_parent: None,
         cancel: tokio_util::sync::CancellationToken::new(),
         system_prompt_extra: None,
         on_turn_end: None,
@@ -229,6 +323,7 @@ async fn run_agent_interrupted_by_control_handle_marks_job_interrupted() {
             run_id: None,
             node_id: None,
             session_id: None,
+            observation_parent: None,
             cancel: tokio_util::sync::CancellationToken::new(),
             system_prompt_extra: None,
             on_turn_end: None,

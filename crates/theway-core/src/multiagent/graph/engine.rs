@@ -11,6 +11,8 @@ use parking_lot::Mutex;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
+use crate::observability::{OperationScope, RuntimeObserver, noop_runtime_observer};
+
 use super::engine_state::{cap_chars, emit_state, push_unique, reset_node, run_counter};
 use super::model::{build_run, downstream_closure, is_blocked, now_ms, validate_graph};
 use super::persist::DagPersistSink;
@@ -44,6 +46,9 @@ pub trait NodeLauncher: Send + Sync {
 /// Shared scheduler handle (cheap clone, same as the TS module singleton).
 pub struct DagEngine {
     pub(super) inner: Arc<Mutex<EngineInner>>,
+    pub(super) observer: Arc<dyn RuntimeObserver>,
+    pub(super) run_operations: Arc<Mutex<HashMap<String, OperationScope>>>,
+    pub(super) node_operations: Arc<Mutex<HashMap<(String, String), OperationScope>>>,
     /// Persistence sink (app-layer debounced writer), stored OUTSIDE the
     /// engine lock so `notify_persist` can fire from any state-change point
     /// without deadlocking (parking_lot is not reentrant).
@@ -68,6 +73,9 @@ impl Clone for DagEngine {
     fn clone(&self) -> Self {
         Self {
             inner: Arc::clone(&self.inner),
+            observer: Arc::clone(&self.observer),
+            run_operations: Arc::clone(&self.run_operations),
+            node_operations: Arc::clone(&self.node_operations),
             persist_sink: Arc::clone(&self.persist_sink),
         }
     }
@@ -90,6 +98,10 @@ impl std::fmt::Debug for DagEngine {
 
 impl DagEngine {
     pub fn new() -> Self {
+        Self::with_observer(noop_runtime_observer())
+    }
+
+    pub fn with_observer(observer: Arc<dyn RuntimeObserver>) -> Self {
         Self {
             inner: Arc::new(Mutex::new(EngineInner {
                 runs: HashMap::new(),
@@ -100,6 +112,9 @@ impl DagEngine {
                 jobs: HashMap::new(),
                 waiters: HashMap::new(),
             })),
+            observer,
+            run_operations: Arc::new(Mutex::new(HashMap::new())),
+            node_operations: Arc::new(Mutex::new(HashMap::new())),
             persist_sink: Arc::new(Mutex::new(None)),
         }
     }
@@ -160,6 +175,7 @@ impl DagEngine {
             run.last_activity_at = now_ms();
             inner.runs.insert(run.id.clone(), run.clone());
         }
+        self.begin_run_observation(&run.id);
         self.reconcile(&run.id);
         self.tick(&run.id);
         self.notify_persist();
@@ -223,6 +239,8 @@ impl DagEngine {
             inner.runs.insert(id.clone(), run);
             id
         };
+        self.begin_run_observation(&id);
+        self.begin_node_observation(&id, "main");
         self.emit(DagEvent::RunStatus {
             run_id: id.clone(),
             session_id: session_id_str,
@@ -300,6 +318,8 @@ impl DagEngine {
         }
         self.notify_persist();
         if done {
+            self.finish_node_observation(run_id, "main", NodeStatus::Succeeded);
+            self.finish_run_observation(run_id, DagStatus::Completed);
             self.wake_waiters(run_id);
         }
         true
@@ -363,6 +383,12 @@ impl DagEngine {
         for event in events {
             self.emit(event);
         }
+        if let Some(run) = self.get_run(run_id) {
+            if let Some(node) = run.node("main") {
+                self.finish_node_observation(run_id, "main", node.status.clone());
+            }
+            self.finish_run_observation(run_id, run.status);
+        }
         self.notify_persist();
         self.wake_waiters(run_id);
     }
@@ -410,7 +436,7 @@ impl DagEngine {
 
     /// Abort the whole run: in-flight jobs killed, pending/ready cancelled.
     pub fn cancel_run(&self, run_id: &str, reason: Option<&str>) {
-        let (cancelled, session_id) = {
+        let (running, cancelled, session_id) = {
             let mut inner = self.inner.lock();
             let Some(run) = inner.runs.get_mut(run_id) else {
                 return;
@@ -420,6 +446,7 @@ impl DagEngine {
             }
             run.error = Some(reason.unwrap_or("cancelled by orchestrator").to_string());
             let mut running_ids: Vec<String> = Vec::new();
+            let mut cancelled_ids: Vec<String> = Vec::new();
             for node in &mut run.nodes {
                 match node.status {
                     NodeStatus::Running => {
@@ -427,11 +454,13 @@ impl DagEngine {
                         node.completed_at = Some(now_ms());
                         node.error = run.error.clone();
                         running_ids.push(node.id.clone());
+                        cancelled_ids.push(node.id.clone());
                     }
                     NodeStatus::Pending | NodeStatus::Ready => {
                         node.status = NodeStatus::Cancelled;
                         node.completed_at = Some(now_ms());
                         node.error = run.error.clone();
+                        cancelled_ids.push(node.id.clone());
                     }
                     _ => {}
                 }
@@ -439,17 +468,26 @@ impl DagEngine {
             run.status = DagStatus::Cancelled;
             run.completed_at = Some(now_ms());
             emit_state(run);
-            (running_ids, run.session_id.clone().unwrap_or_default())
+            (
+                running_ids,
+                cancelled_ids,
+                run.session_id.clone().unwrap_or_default(),
+            )
         };
         // Second lock scope: abort the collected jobs' tokens.
         {
             let mut inner = self.inner.lock();
-            for id in cancelled {
-                if let Some(token) = inner.jobs.remove(&(run_id.to_string(), id)) {
+            for id in &running {
+                if let Some(token) = inner.jobs.remove(&(run_id.to_string(), id.clone())) {
                     token.cancel();
                 }
             }
         }
+        for node_id in &cancelled {
+            self.begin_node_observation(run_id, node_id);
+            self.finish_node_observation(run_id, node_id, NodeStatus::Cancelled);
+        }
+        self.finish_run_observation(run_id, DagStatus::Cancelled);
         self.emit(DagEvent::RunStatus {
             run_id: run_id.to_string(),
             session_id,
@@ -509,6 +547,7 @@ impl DagEngine {
             emit_state(run);
             to_reset
         };
+        self.begin_run_observation(run_id);
         self.reconcile(run_id);
         self.tick(run_id);
         self.maybe_complete(run_id);
@@ -584,6 +623,8 @@ impl DagEngine {
         if let Some(token) = to_abort.0 {
             token.cancel();
         }
+        self.begin_node_observation(run_id, node_id);
+        self.finish_node_observation(run_id, node_id, NodeStatus::Skipped);
         self.emit(to_abort.1);
         self.after_node_terminal(run_id, node_id);
         self.notify_persist();
@@ -609,14 +650,30 @@ impl DagEngine {
 
     /// Test-only: clear all engine state.
     pub fn __reset_for_tests(&self) {
-        let mut inner = self.inner.lock();
-        inner.runs.clear();
-        inner.jobs.clear();
-        inner.waiters.clear();
-        inner.dag_counter = 0;
-        inner.goal_counter = 0;
-        inner.events = None;
-        inner.launcher = None;
+        {
+            let mut inner = self.inner.lock();
+            inner.runs.clear();
+            inner.jobs.clear();
+            inner.waiters.clear();
+            inner.dag_counter = 0;
+            inner.goal_counter = 0;
+            inner.events = None;
+            inner.launcher = None;
+        }
+        let run_scopes: Vec<_> = self
+            .run_operations
+            .lock()
+            .drain()
+            .map(|(_, scope)| scope)
+            .collect();
+        let node_scopes: Vec<_> = self
+            .node_operations
+            .lock()
+            .drain()
+            .map(|(_, scope)| scope)
+            .collect();
+        drop(run_scopes);
+        drop(node_scopes);
     }
 }
 

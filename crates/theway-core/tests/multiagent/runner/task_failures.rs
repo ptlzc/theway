@@ -78,6 +78,7 @@ fn opts(stream_fn: StreamFn, timeout: Option<u64>) -> AgentRunOptions {
         run_id: None,
         node_id: None,
         session_id: None,
+        observation_parent: None,
         cancel: tokio_util::sync::CancellationToken::new(),
         system_prompt_extra: None,
         on_turn_end: None,

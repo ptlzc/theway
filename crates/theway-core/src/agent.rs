@@ -44,6 +44,9 @@ use tokio::sync::{Notify, broadcast};
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::run_loop::{run_agent_loop, run_agent_loop_continue};
+use crate::observability::{
+    ObservationContext, OperationId, RuntimeObserver, noop_runtime_observer,
+};
 use crate::types::*;
 
 use theway_llm_provider::Message;
@@ -69,7 +72,6 @@ pub type LoopSyncCallback = Arc<dyn Fn(&LoopEvent) + Send + Sync>;
 pub const LOOP_EVENT_BROADCAST_CAPACITY: usize = 256;
 
 /// Options accepted by [`Agent::new`].
-#[derive(Default)]
 pub struct AgentOptions {
     pub initial_state: Option<AgentState>,
     pub convert_to_llm: Option<ConvertToLlm>,
@@ -84,6 +86,12 @@ pub struct AgentOptions {
     pub steering_mode: QueueMode,
     pub follow_up_mode: QueueMode,
     pub session_id: Option<String>,
+    /// Content-safe runtime observation port supplied by the embedding application.
+    pub observer: Arc<dyn RuntimeObserver>,
+    /// Correlation values inherited by operations created by this agent.
+    pub observation_context: ObservationContext,
+    /// Optional parent operation supplied by an embedding runtime or subagent launcher.
+    pub observation_parent: Option<OperationId>,
     pub tool_execution: ToolExecutionMode,
     /// Hard cap on loop iterations (one LLM turn attempt each) for this agent.
     /// `None` = unbounded (the interactive main agent). Sub-harnesses
@@ -91,6 +99,31 @@ pub struct AgentOptions {
     /// `max_iterations`; the cap raises `AgentRunError::Other("max iterations
     /// (N) exceeded")` before the call that would exceed it.
     pub max_iterations: Option<u32>,
+}
+
+impl Default for AgentOptions {
+    fn default() -> Self {
+        Self {
+            initial_state: None,
+            convert_to_llm: None,
+            transform_context: None,
+            stream_fn: None,
+            get_api_key: None,
+            before_tool_call: None,
+            after_tool_call: None,
+            on_control_plane_prompt: None,
+            should_stop_after_turn: None,
+            prepare_next_turn: None,
+            steering_mode: QueueMode::default(),
+            follow_up_mode: QueueMode::default(),
+            session_id: None,
+            observer: noop_runtime_observer(),
+            observation_context: ObservationContext::default(),
+            observation_parent: None,
+            tool_execution: ToolExecutionMode::default(),
+            max_iterations: None,
+        }
+    }
 }
 
 /// Stateful wrapper around the low-level agent loop.
@@ -112,6 +145,10 @@ pub(crate) struct AgentInner {
     pub follow_up: Mutex<PendingMessageQueue>,
     pub options: AgentOptions,
     pub active_cancel: Mutex<Option<CancellationToken>>,
+    /// Current observation hierarchy. One run is active at a time; parallel tools read the
+    /// same turn parent without mutating it.
+    pub active_run_operation: Mutex<Option<OperationId>>,
+    pub active_turn_operation: Mutex<Option<(OperationId, u32)>>,
     /// Per-turn cancel token: `interrupt()` cancels the in-flight LLM call only;
     /// the run survives if a steering message is queued, otherwise it ends.
     pub turn_cancel: Mutex<Option<CancellationToken>>,
@@ -154,6 +191,8 @@ impl AgentInner {
             return;
         }
         *self.active_cancel.lock() = None;
+        *self.active_run_operation.lock() = None;
+        *self.active_turn_operation.lock() = None;
         *self.turn_cancel.lock() = None;
         self.state.lock().is_streaming = false;
         *active = false;
@@ -211,6 +250,8 @@ impl Agent {
             follow_up: Mutex::new(PendingMessageQueue::new(options.follow_up_mode)),
             options,
             active_cancel: Mutex::new(None),
+            active_run_operation: Mutex::new(None),
+            active_turn_operation: Mutex::new(None),
             turn_cancel: Mutex::new(None),
             idle: Notify::new(),
             max_iterations,
@@ -263,6 +304,21 @@ impl Agent {
 
     pub fn is_streaming(&self) -> bool {
         self.inner.state.lock().is_streaming
+    }
+
+    /// Return the embedder-owned runtime observer used by this agent.
+    pub fn runtime_observer(&self) -> Arc<dyn RuntimeObserver> {
+        Arc::clone(&self.inner.options.observer)
+    }
+
+    /// Return the content-safe correlation context inherited by this agent.
+    pub fn observation_context(&self) -> ObservationContext {
+        self.inner.options.observation_context.clone()
+    }
+
+    /// Return the current agent-run operation, if a prompt is active.
+    pub fn active_run_operation(&self) -> Option<OperationId> {
+        *self.inner.active_run_operation.lock()
     }
 
     pub fn enqueue_steering(&self, message: AgentMessage) {

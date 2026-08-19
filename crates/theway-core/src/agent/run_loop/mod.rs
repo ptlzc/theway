@@ -55,6 +55,9 @@ use theway_llm_provider::{Message as PiMessage, UserContentBlock};
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::{AgentInner, AgentRunError, AgentRunPermit};
+use crate::observability::{
+    ErrorCategory, OperationDetail, OperationOutcome, OperationScope, RuntimeMeasurements,
+};
 use crate::types::*;
 
 use self::llm::call_llm;
@@ -110,158 +113,255 @@ async fn drive_loop(
     inner: &Arc<AgentInner>,
     cancel: CancellationToken,
 ) -> Result<(), AgentRunError> {
-    let mut iterations: u32 = 0;
-    loop {
-        if cancel.is_cancelled() {
-            return Ok(());
-        }
-        // Iteration budget: each loop pass is one LLM turn attempt (the
-        // TurnInterrupted retry path included — it makes another LLM call).
-        // Unbounded when the harness carries no cap (the interactive main agent).
-        if let Some(max) = inner.max_iterations {
-            if iterations >= max {
-                let msg = format!("max iterations ({max}) exceeded");
-                inner.state.lock().error_message = Some(msg.clone());
-                return Err(AgentRunError::Other(msg));
+    let observer = Arc::clone(&inner.options.observer);
+    let base_context = inner.options.observation_context.clone();
+    let run_scope = OperationScope::start(
+        observer.clone(),
+        inner.options.observation_parent,
+        base_context.clone(),
+        OperationDetail::AgentRun,
+    );
+    let run_operation_id = run_scope.id();
+    *inner.active_run_operation.lock() = Some(run_operation_id);
+    let mut completed_turns = 0_u64;
+    let result = async {
+        let mut iterations: u32 = 0;
+        let mut turn_index: u32 = 0;
+        loop {
+            if cancel.is_cancelled() {
+                return Ok(());
             }
-            iterations += 1;
-        }
-        emit(inner, LoopEvent::TurnStart, &cancel).await;
-
-        // Fresh per-turn cancel token: `interrupt()` targets the in-flight LLM call
-        // only, leaving the run alive to pick up queued steering on the next turn.
-        let turn_cancel = CancellationToken::new();
-        *inner.turn_cancel.lock() = Some(turn_cancel.clone());
-
-        let assistant = match call_llm(inner, &cancel, &turn_cancel).await {
-            Ok(m) => m,
-            // Turn interrupted: finalize whatever the stream produced, then either
-            // carry on with queued steering (next turn) or end the run with the
-            // interrupted outcome.
-            Err(AgentRunError::TurnInterrupted) => {
-                *inner.turn_cancel.lock() = None;
-                finalize_partial_turn(inner, &cancel).await;
-                let mut queued: Vec<AgentMessage> = inner.steering.lock().drain();
-                if queued.is_empty() {
-                    queued = inner.follow_up.lock().drain();
+            // Iteration budget: each loop pass is one LLM turn attempt (the
+            // TurnInterrupted retry path included — it makes another LLM call).
+            // Unbounded when the harness carries no cap (the interactive main agent).
+            if let Some(max) = inner.max_iterations {
+                if iterations >= max {
+                    let msg = format!("max iterations ({max}) exceeded");
+                    inner.state.lock().error_message = Some(msg.clone());
+                    return Err(AgentRunError::Other(msg));
                 }
-                if !queued.is_empty() {
-                    for msg in queued {
-                        inner.state.lock().messages.push(msg.clone());
-                        emit(
-                            inner,
-                            LoopEvent::MessageStart {
-                                message: msg.clone(),
-                            },
-                            &cancel,
-                        )
-                        .await;
-                        emit(inner, LoopEvent::MessageEnd { message: msg }, &cancel).await;
+                iterations += 1;
+            }
+            emit(inner, LoopEvent::TurnStart, &cancel).await;
+            let current_turn = turn_index;
+            turn_index = turn_index.saturating_add(1);
+            let turn_context = base_context.with_turn(current_turn);
+            let turn_scope = OperationScope::start(
+                observer.clone(),
+                Some(run_operation_id),
+                turn_context,
+                OperationDetail::Turn {
+                    index: current_turn,
+                },
+            );
+            *inner.active_turn_operation.lock() = Some((turn_scope.id(), current_turn));
+
+            // Fresh per-turn cancel token: `interrupt()` targets the in-flight LLM call
+            // only, leaving the run alive to pick up queued steering on the next turn.
+            let turn_cancel = CancellationToken::new();
+            *inner.turn_cancel.lock() = Some(turn_cancel.clone());
+
+            let assistant = match call_llm(inner, &cancel, &turn_cancel).await {
+                Ok(m) => m,
+                // Turn interrupted: finalize whatever the stream produced, then either
+                // carry on with queued steering (next turn) or end the run with the
+                // interrupted outcome.
+                Err(AgentRunError::TurnInterrupted) => {
+                    *inner.turn_cancel.lock() = None;
+                    *inner.active_turn_operation.lock() = None;
+                    turn_scope.finish(
+                        OperationOutcome::Interrupted,
+                        Some(ErrorCategory::Cancellation),
+                        RuntimeMeasurements::default(),
+                    );
+                    finalize_partial_turn(inner, &cancel).await;
+                    let mut queued: Vec<AgentMessage> = inner.steering.lock().drain();
+                    if queued.is_empty() {
+                        queued = inner.follow_up.lock().drain();
                     }
-                    continue;
+                    if !queued.is_empty() {
+                        for msg in queued {
+                            inner.state.lock().messages.push(msg.clone());
+                            emit(
+                                inner,
+                                LoopEvent::MessageStart {
+                                    message: msg.clone(),
+                                },
+                                &cancel,
+                            )
+                            .await;
+                            emit(inner, LoopEvent::MessageEnd { message: msg }, &cancel).await;
+                        }
+                        continue;
+                    }
+                    inner.state.lock().error_message =
+                        Some(AgentRunError::TurnInterrupted.to_string());
+                    return Err(AgentRunError::TurnInterrupted);
                 }
-                inner.state.lock().error_message = Some(AgentRunError::TurnInterrupted.to_string());
-                return Err(AgentRunError::TurnInterrupted);
-            }
-            Err(e) => {
-                *inner.turn_cancel.lock() = None;
-                inner.state.lock().error_message = Some(e.to_string());
-                return Err(e);
-            }
-        };
-        *inner.turn_cancel.lock() = None;
-        let assistant_agent = AgentMessage::Llm(PiMessage::Assistant(assistant.clone()));
-        inner.state.lock().messages.push(assistant_agent.clone());
-        emit(
-            inner,
-            LoopEvent::MessageEnd {
-                message: assistant_agent.clone(),
-            },
-            &cancel,
-        )
-        .await;
-
-        let (tool_results, all_terminate) = execute_tools(inner, &assistant, &cancel).await;
-        for tr in &tool_results {
-            let m = AgentMessage::Llm(PiMessage::ToolResult(tr.clone()));
-            inner.state.lock().messages.push(m.clone());
+                Err(e) => {
+                    *inner.turn_cancel.lock() = None;
+                    *inner.active_turn_operation.lock() = None;
+                    let cancelled = cancel.is_cancelled();
+                    turn_scope.finish(
+                        if cancelled {
+                            OperationOutcome::Cancelled
+                        } else {
+                            OperationOutcome::Failed
+                        },
+                        Some(if cancelled {
+                            ErrorCategory::Cancellation
+                        } else {
+                            ErrorCategory::Runtime
+                        }),
+                        RuntimeMeasurements::default(),
+                    );
+                    inner.state.lock().error_message = Some(e.to_string());
+                    return Err(e);
+                }
+            };
+            *inner.turn_cancel.lock() = None;
+            let assistant_agent = AgentMessage::Llm(PiMessage::Assistant(assistant.clone()));
+            inner.state.lock().messages.push(assistant_agent.clone());
             emit(
                 inner,
-                LoopEvent::MessageStart { message: m.clone() },
+                LoopEvent::MessageEnd {
+                    message: assistant_agent.clone(),
+                },
                 &cancel,
             )
             .await;
-            emit(inner, LoopEvent::MessageEnd { message: m }, &cancel).await;
-        }
 
-        emit(
-            inner,
-            LoopEvent::TurnCompleted {
-                message: assistant_agent.clone(),
-                tool_results: tool_results.clone(),
-            },
-            &cancel,
-        )
-        .await;
-
-        // `should_stop_after_turn` — caller can request graceful exit before the next LLM call.
-        if let Some(hook) = inner.options.should_stop_after_turn.clone() {
-            let ctx = ShouldStopAfterTurnContext {
-                message: assistant.clone(),
-                tool_results: tool_results.clone(),
-                context: snapshot_context(inner),
-                new_messages: inner.state.lock().messages.clone(),
-            };
-            if hook(ctx).await {
-                return Ok(());
-            }
-        }
-
-        // Whether to continue based on stop_reason + queue + tool-terminate hint.
-        let continues = matches!(
-            assistant.stop_reason,
-            theway_llm_provider::StopReason::ToolUse
-        );
-        if !tool_results.is_empty() && all_terminate {
-            return Ok(());
-        }
-
-        // `prepare_next_turn` — caller may rewrite context/model/thinking_level mid-run.
-        if let Some(hook) = inner.options.prepare_next_turn.clone() {
-            let ctx = PrepareNextTurnContext {
-                message: assistant.clone(),
-                tool_results: tool_results.clone(),
-                context: snapshot_context(inner),
-                new_messages: inner.state.lock().messages.clone(),
-            };
-            if let Some(update) = hook(ctx).await {
-                apply_turn_update(inner, update);
-            }
-        }
-
-        let mut queued: Vec<AgentMessage> = inner.steering.lock().drain();
-        if !continues && queued.is_empty() {
-            queued = inner.follow_up.lock().drain();
-        }
-        if !queued.is_empty() {
-            for msg in queued {
-                inner.state.lock().messages.push(msg.clone());
+            let (tool_results, all_terminate) = execute_tools(inner, &assistant, &cancel).await;
+            for tr in &tool_results {
+                let m = AgentMessage::Llm(PiMessage::ToolResult(tr.clone()));
+                inner.state.lock().messages.push(m.clone());
                 emit(
                     inner,
-                    LoopEvent::MessageStart {
-                        message: msg.clone(),
-                    },
+                    LoopEvent::MessageStart { message: m.clone() },
                     &cancel,
                 )
                 .await;
-                emit(inner, LoopEvent::MessageEnd { message: msg }, &cancel).await;
+                emit(inner, LoopEvent::MessageEnd { message: m }, &cancel).await;
             }
-            continue;
-        }
-        if !continues {
-            return Ok(());
+
+            emit(
+                inner,
+                LoopEvent::TurnCompleted {
+                    message: assistant_agent.clone(),
+                    tool_results: tool_results.clone(),
+                },
+                &cancel,
+            )
+            .await;
+            *inner.active_turn_operation.lock() = None;
+            let usage = &assistant.usage;
+            turn_scope.finish(
+                if cancel.is_cancelled() {
+                    OperationOutcome::Cancelled
+                } else {
+                    OperationOutcome::Succeeded
+                },
+                cancel.is_cancelled().then_some(ErrorCategory::Cancellation),
+                RuntimeMeasurements {
+                    input_tokens: usage.input,
+                    output_tokens: usage.output,
+                    cache_read_tokens: usage.cache_read,
+                    cache_write_tokens: usage.cache_write,
+                    turns: 1,
+                    tool_calls: tool_results.len() as u64,
+                    ..Default::default()
+                },
+            );
+            completed_turns = completed_turns.saturating_add(1);
+
+            // `should_stop_after_turn` — caller can request graceful exit before the next LLM call.
+            if let Some(hook) = inner.options.should_stop_after_turn.clone() {
+                let ctx = ShouldStopAfterTurnContext {
+                    message: assistant.clone(),
+                    tool_results: tool_results.clone(),
+                    context: snapshot_context(inner),
+                    new_messages: inner.state.lock().messages.clone(),
+                };
+                if hook(ctx).await {
+                    return Ok(());
+                }
+            }
+
+            // Whether to continue based on stop_reason + queue + tool-terminate hint.
+            let continues = matches!(
+                assistant.stop_reason,
+                theway_llm_provider::StopReason::ToolUse
+            );
+            if !tool_results.is_empty() && all_terminate {
+                return Ok(());
+            }
+
+            // `prepare_next_turn` — caller may rewrite context/model/thinking_level mid-run.
+            if let Some(hook) = inner.options.prepare_next_turn.clone() {
+                let ctx = PrepareNextTurnContext {
+                    message: assistant.clone(),
+                    tool_results: tool_results.clone(),
+                    context: snapshot_context(inner),
+                    new_messages: inner.state.lock().messages.clone(),
+                };
+                if let Some(update) = hook(ctx).await {
+                    apply_turn_update(inner, update);
+                }
+            }
+
+            let mut queued: Vec<AgentMessage> = inner.steering.lock().drain();
+            if !continues && queued.is_empty() {
+                queued = inner.follow_up.lock().drain();
+            }
+            if !queued.is_empty() {
+                for msg in queued {
+                    inner.state.lock().messages.push(msg.clone());
+                    emit(
+                        inner,
+                        LoopEvent::MessageStart {
+                            message: msg.clone(),
+                        },
+                        &cancel,
+                    )
+                    .await;
+                    emit(inner, LoopEvent::MessageEnd { message: msg }, &cancel).await;
+                }
+                continue;
+            }
+            if !continues {
+                return Ok(());
+            }
         }
     }
+    .await;
+
+    *inner.active_turn_operation.lock() = None;
+    *inner.active_run_operation.lock() = None;
+    let (outcome, error_category) = match &result {
+        Err(AgentRunError::TurnInterrupted) => (
+            OperationOutcome::Interrupted,
+            Some(ErrorCategory::Cancellation),
+        ),
+        Err(_) if cancel.is_cancelled() => (
+            OperationOutcome::Cancelled,
+            Some(ErrorCategory::Cancellation),
+        ),
+        Err(_) => (OperationOutcome::Failed, Some(ErrorCategory::Runtime)),
+        Ok(()) if cancel.is_cancelled() => (
+            OperationOutcome::Cancelled,
+            Some(ErrorCategory::Cancellation),
+        ),
+        Ok(()) => (OperationOutcome::Succeeded, None),
+    };
+    run_scope.finish(
+        outcome,
+        error_category,
+        RuntimeMeasurements {
+            turns: completed_turns,
+            ..Default::default()
+        },
+    );
+    result
 }
 
 /// Push the partial assistant message accumulated so far (if any) into the
@@ -283,7 +383,22 @@ async fn run_one(
     call: PreparedCall,
     cancel: CancellationToken,
 ) -> ToolOutcome {
-    match call {
+    let (tool_name, blocked) = match &call {
+        PreparedCall::Blocked { name, .. } => (name.clone(), true),
+        PreparedCall::Run { name, .. } => (name.clone(), false),
+    };
+    let active_turn = *inner.active_turn_operation.lock();
+    let context = active_turn
+        .map(|(_, turn)| inner.options.observation_context.with_turn(turn))
+        .unwrap_or_else(|| inner.options.observation_context.clone());
+    let scope = OperationScope::start(
+        Arc::clone(&inner.options.observer),
+        active_turn.map(|(id, _)| id),
+        context,
+        OperationDetail::ToolExecution { tool_name },
+    );
+    let cancel_state = cancel.clone();
+    let outcome = match call {
         PreparedCall::Blocked {
             id,
             name,
@@ -397,7 +512,31 @@ async fn run_one(
                 is_error: true,
             },
         },
-    }
+    };
+    let cancelled = cancel_state.is_cancelled();
+    scope.finish(
+        if cancelled {
+            OperationOutcome::Cancelled
+        } else if outcome.is_error {
+            OperationOutcome::Failed
+        } else {
+            OperationOutcome::Succeeded
+        },
+        if cancelled {
+            Some(ErrorCategory::Cancellation)
+        } else if blocked {
+            Some(ErrorCategory::Permission)
+        } else if outcome.is_error {
+            Some(ErrorCategory::Tool)
+        } else {
+            None
+        },
+        RuntimeMeasurements {
+            tool_calls: 1,
+            ..Default::default()
+        },
+    );
+    outcome
 }
 
 #[cfg(test)]

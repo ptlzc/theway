@@ -219,6 +219,7 @@ async fn run_node(job: NodeJob, cancel: CancellationToken) {
     let launch_gen = job.launch_gen;
     // DAG node jobs inherit the owning session from the run.
     let session_id = engine.get_run(&run_id).and_then(|r| r.session_id);
+    let observation_parent = engine.node_operation_id(&run_id, &node_id);
     // Clones for the per-turn callback: the closure owns them, `run_node` keeps using
     // the originals for the terminal report.
     let engine_cb = engine.clone();
@@ -237,6 +238,7 @@ async fn run_node(job: NodeJob, cancel: CancellationToken) {
         run_id: Some(run_id.clone()),
         node_id: Some(node_id.clone()),
         session_id,
+        observation_parent,
         cancel: cancel.clone(),
         system_prompt_extra: None,
         on_turn_end: Some(Arc::new(move |text, input, output| {

@@ -9,6 +9,7 @@ use crate::multiagent::graph::types::{DagNodeDef, Direction};
 
 mod goal;
 mod lifecycle_edges;
+mod observability;
 mod persist_sink;
 mod plan;
 mod restore;

@@ -5,11 +5,17 @@
 //! the graph mode output panel (`GetNodeOutput`) and the streamed `subagent_output`
 //! events. Snapshot accessors are cheap clones — the registry is a small Vec.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::Utc;
 use parking_lot::Mutex;
 use uuid::Uuid;
+
+use crate::observability::{
+    ErrorCategory, ObservationContext, OperationDetail, OperationId, OperationOutcome,
+    OperationScope, RuntimeMeasurements, RuntimeObserver, noop_runtime_observer,
+};
 
 #[cfg(test)]
 use crate::AgentMessage;
@@ -169,6 +175,8 @@ struct Inner {
 #[derive(Clone)]
 pub struct AgentJobRegistry {
     inner: Arc<Mutex<Inner>>,
+    observer: Arc<dyn RuntimeObserver>,
+    operations: Arc<Mutex<HashMap<String, OperationScope>>>,
     /// Built-in broadcast channel for [`AgentJobEvent`]s. Receivers subscribe
     /// via [`subscribe()`](Self::subscribe); when nobody is listening, `send`
     /// fails silently — no external wiring needed.
@@ -186,11 +194,21 @@ pub struct JobInit {
 
 impl AgentJobRegistry {
     pub fn new() -> Self {
+        Self::with_observer(noop_runtime_observer())
+    }
+
+    pub fn with_observer(observer: Arc<dyn RuntimeObserver>) -> Self {
         let (events, _) = tokio::sync::broadcast::channel(AGENT_JOB_EVENT_BROADCAST_CAPACITY);
         Self {
             inner: Arc::new(Mutex::new(Inner::default())),
+            observer,
+            operations: Arc::new(Mutex::new(HashMap::new())),
             events,
         }
+    }
+
+    pub fn observer(&self) -> Arc<dyn RuntimeObserver> {
+        Arc::clone(&self.observer)
     }
 
     /// Subscribe to the built-in broadcast channel. Each call returns a fresh
@@ -207,7 +225,27 @@ impl AgentJobRegistry {
 
     /// Register a running job and return its stable id.
     pub fn register(&self, init: JobInit) -> String {
+        self.register_observed(init, None)
+    }
+
+    /// Register a job beneath an optional parent operation.
+    pub fn register_observed(&self, init: JobInit, parent: Option<OperationId>) -> String {
         let id = Uuid::now_v7().to_string();
+        let scope = OperationScope::start(
+            self.observer(),
+            parent,
+            ObservationContext {
+                session_id: init.session_id.clone(),
+                run_id: init.run_id.clone(),
+                job_id: Some(id.clone()),
+                node_id: init.node_id.clone(),
+                ..ObservationContext::default()
+            },
+            OperationDetail::AgentJob {
+                agent: init.agent.clone(),
+                source: init.source.clone(),
+            },
+        );
         let mut inner = self.inner.lock();
         inner.jobs.push(AgentJob::new(
             id.clone(),
@@ -219,6 +257,7 @@ impl AgentJobRegistry {
         ));
         Self::evict(&mut inner.jobs);
         drop(inner);
+        self.operations.lock().insert(id.clone(), scope);
         self.emit(AgentJobEvent::Started {
             id: id.clone(),
             agent: init.agent,
@@ -227,6 +266,10 @@ impl AgentJobRegistry {
             node_id: init.node_id,
         });
         id
+    }
+
+    pub fn operation_id(&self, id: &str) -> Option<OperationId> {
+        self.operations.lock().get(id).map(OperationScope::id)
     }
 
     /// Mutate a running job (metrics accumulation, output appends, status).
@@ -331,12 +374,48 @@ impl AgentJobRegistry {
             self.emit(AgentJobEvent::Completed {
                 id: job.id.clone(),
                 status,
-                error,
+                error: error.clone(),
                 chars: job.chars,
                 tokens_in: job.input_tokens,
                 tokens_out: job.output_tokens,
                 tools_called: job.tools_called,
             });
+            if let Some(scope) = self.operations.lock().remove(id) {
+                let timed_out = error.as_deref().is_some_and(|message| {
+                    let message = message.to_ascii_lowercase();
+                    message.contains("timed out") || message.contains("timeout")
+                });
+                let (outcome, category) = match status {
+                    JobStatus::Running => {
+                        (OperationOutcome::Abandoned, Some(ErrorCategory::Runtime))
+                    }
+                    JobStatus::Succeeded => (OperationOutcome::Succeeded, None),
+                    JobStatus::Failed if timed_out => {
+                        (OperationOutcome::TimedOut, Some(ErrorCategory::Timeout))
+                    }
+                    JobStatus::Failed => (OperationOutcome::Failed, Some(ErrorCategory::Runtime)),
+                    JobStatus::Cancelled => (
+                        OperationOutcome::Cancelled,
+                        Some(ErrorCategory::Cancellation),
+                    ),
+                    JobStatus::Interrupted => (
+                        OperationOutcome::Interrupted,
+                        Some(ErrorCategory::Cancellation),
+                    ),
+                };
+                scope.finish(
+                    outcome,
+                    category,
+                    RuntimeMeasurements {
+                        input_tokens: job.input_tokens,
+                        output_tokens: job.output_tokens,
+                        characters: job.chars,
+                        turns: u64::from(job.turn),
+                        tool_calls: job.tools_called,
+                        ..RuntimeMeasurements::default()
+                    },
+                );
+            }
         }
         let mut inner = self.inner.lock();
         Self::evict(&mut inner.jobs);

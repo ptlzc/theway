@@ -28,6 +28,9 @@ use tokio::sync::broadcast;
 
 use crate::agent::session::session::Session;
 use crate::agent::{Agent, AgentOptions, LoopListener};
+use crate::observability::{
+    ObservationContext, OperationId, RuntimeObserver, noop_runtime_observer,
+};
 use crate::types::*;
 
 use self::catalog::build_system_prompt;
@@ -62,6 +65,12 @@ pub struct AgentHarnessOptions {
     pub prompt_templates: Vec<PromptTemplate>,
     pub tools: Vec<Arc<dyn AgentTool>>,
     pub session: Session,
+    /// Embedder-owned runtime observer shared with the inner bare Agent.
+    pub observer: Arc<dyn RuntimeObserver>,
+    /// Session/run/job/node correlation inherited by inner operations.
+    pub observation_context: ObservationContext,
+    /// Optional parent operation for the inner agent run.
+    pub observation_parent: Option<OperationId>,
     pub stream_fn: Option<StreamFn>,
     /// Auto-compaction thresholds. Defaults to [`DEFAULT_COMPACTION_SETTINGS`].
     pub compaction: CompactionSettings,
@@ -94,6 +103,9 @@ impl AgentHarnessOptions {
             prompt_templates: Vec::new(),
             tools: Vec::new(),
             session,
+            observer: noop_runtime_observer(),
+            observation_context: ObservationContext::default(),
+            observation_parent: None,
             stream_fn: None,
             compaction: DEFAULT_COMPACTION_SETTINGS.clone(),
             compact_algorithms: Arc::new(CompactAlgorithmRegistry::new()),
@@ -146,6 +158,7 @@ pub struct AgentHarness {
 
 impl AgentHarness {
     pub fn new(options: AgentHarnessOptions) -> Self {
+        let session_id = options.observation_context.session_id.clone();
         let state = AgentState {
             model: Some(options.model),
             thinking_level: Some(options.thinking_level),
@@ -160,6 +173,10 @@ impl AgentHarness {
             before_tool_call: options.before_tool_call.clone(),
             after_tool_call: options.after_tool_call.clone(),
             on_control_plane_prompt: options.on_control_plane_prompt.clone(),
+            session_id,
+            observer: Arc::clone(&options.observer),
+            observation_context: options.observation_context.clone(),
+            observation_parent: options.observation_parent,
             max_iterations: options.max_iterations,
             ..Default::default()
         });

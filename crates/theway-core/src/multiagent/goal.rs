@@ -378,6 +378,9 @@ async fn evaluate_stop_hook(
         }
     };
     let session_id = session_id_from_harness(&harness).await;
+    let observation_parent = run_id
+        .as_deref()
+        .and_then(|id| dag_engine.node_operation_id(id, "main"));
     let result = run_agent(AgentRunOptions {
         launch,
         tools: Vec::new(),
@@ -391,6 +394,7 @@ async fn evaluate_stop_hook(
         run_id: run_id.clone(),
         node_id: Some("main".into()),
         session_id,
+        observation_parent,
         cancel,
         system_prompt_extra: None,
         on_turn_end: None,
