@@ -29,7 +29,6 @@ Boundary rules: client-specific appearance and interaction belong to [`crates/th
 Source and test files stay under ~800 lines; larger files split into a directory (`foo.rs` → `foo/mod.rs` + domain submodules; `tests/<name>/mod.rs` + domain submodule files), splitting by domain, never mechanically. Exceptions:
 
 - [`crates/mermaid-parser/src/parser.rs`](crates/mermaid-parser/src/parser.rs) — extracted from the third-party `mmdr` parser; kept monolithic to stay diff-compatible with upstream extraction. Do not split it.
-- [`crates/theway-core/src/agent/assembly.rs`](crates/theway-core/src/agent/assembly.rs) — the `AgentHarness` composer (Agent + Session + skills + compaction + permission + lifecycle); kept monolithic so the composed agent API reads as one unit. Do not split it.
 
 ## Build, test, and lint
 

@@ -50,7 +50,12 @@ src/
   types.rs               AgentMessage / AgentState / AgentEvent / AgentTool / AgentLoopConfig
   agent.rs               bare Agent state machine (always on)
   agent/
-    assembly.rs          AgentHarness composer (single file, AGENTS.md exception)
+    assembly/            AgentHarness composer
+      mod.rs             options, composed state, and constructor
+      catalog.rs         skills, prompt templates, and system prompt rebuilds
+      events.rs          session lifecycle and turn-end contracts
+      run.rs             prompt execution and continuation cycles
+      session.rs         session mutation, restore, and persistence listener
     run_loop/            runAgentLoop (llm.rs / tools.rs / utils.rs)
     compaction/          auto-compaction + cut point
                          (algorithm.rs / compaction.rs / triggers.rs / branch_summarization.rs)

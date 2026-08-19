@@ -81,7 +81,7 @@ feature-gate: ## feature-gate checks: thin core/provider builds + daemon backend
 	$(CARGO) test -p theway-daemon --no-default-features --features sandbox --test sandbox_tool_gate
 
 .PHONY: file-size-check
-file-size-check: ## enforce the 800-line limit for non-exempt theway-* Rust files
+file-size-check: ## enforce the 800-line limit for all theway-* Rust files
 	scripts/check-rust-file-size.sh
 
 .PHONY: ci
