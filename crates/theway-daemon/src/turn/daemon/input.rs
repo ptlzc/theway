@@ -1,0 +1,170 @@
+impl TurnHost {
+    async fn submit_web_text(
+        &mut self,
+        text: String,
+        images: Vec<WirePromptImage>,
+        interrupt: bool,
+        turn: &mut TurnState,
+    ) {
+        let trimmed = text.trim().to_string();
+        if trimmed.is_empty() && images.is_empty() {
+            return;
+        }
+        let loaded_images = match load_web_prompt_images(&images) {
+            Ok(images) => images,
+            Err(e) => {
+                self.error_line(format!("pasted image: {e}"));
+                return;
+            }
+        };
+        if !loaded_images.is_empty() && !self.current_model_accepts_images() {
+            self.error_line(format!(
+                "current model does not support image input; switch to a vision-capable model before sending {} image attachment(s)",
+                loaded_images.len()
+            ));
+            return;
+        }
+
+        if trimmed.starts_with('/') && loaded_images.is_empty() {
+            self.feed.push_user(&trimmed);
+            self.dispatch_web_slash(&trimmed, turn).await;
+            return;
+        }
+
+        let expanded = if trimmed.is_empty() {
+            String::new()
+        } else {
+            mentions::expand(&trimmed, &self.cwd).await.0
+        };
+        let prompt_text = commands::attach_skill_prompt(expanded, None);
+        let display = prompt_display(&trimmed, loaded_images.len());
+        if interrupt {
+            self.request_abort(turn);
+            self.queued_turns.clear();
+            self.system_line("interrupt: stopping current turn for new message");
+        }
+        if turn.fut.is_some() {
+            self.queue_user_prompt(display, prompt_text, loaded_images);
+        } else {
+            self.feed.push_user(display);
+            self.start_user_prompt_turn(prompt_text, loaded_images, turn);
+        }
+    }
+
+    async fn dispatch_web_slash(&mut self, input: &str, turn: &mut TurnState) {
+        let outcome = {
+            let ctx = CommandCtx {
+                harness: self.kernel.harness(),
+                trigger_executor: self.kernel.trigger_executor(),
+                session_id: &self.session_id,
+                log_path: self.log_path.as_ref(),
+                tool_count: self.tool_count,
+                cwd: &self.cwd,
+            };
+            commands::dispatch(input, &self.registry, &ctx).await
+        };
+        match outcome {
+            CommandOutcome::Quit => {
+                self.system_line("daemon stays running; stop it with Ctrl-C / SIGTERM");
+            }
+            CommandOutcome::ClearScreen => {
+                self.clear_feed();
+            }
+            CommandOutcome::Error(e) => self.error_line(e),
+            CommandOutcome::AttachSkill { name } => {
+                self.system_line(format!("skill `{name}` attached for the next prompt"));
+            }
+            CommandOutcome::RunAgentPrompt {
+                prompt,
+                error_context,
+            } => {
+                if turn.fut.is_some() {
+                    self.enqueue_turn(QueuedTurn::AgentPrompt {
+                        display: input.to_string(),
+                        prompt,
+                        error_context,
+                    });
+                } else {
+                    self.start_prompt_turn(prompt, error_context, turn);
+                }
+            }
+            CommandOutcome::RunPromptTemplate { name, vars } => {
+                if turn.fut.is_some() {
+                    self.enqueue_turn(QueuedTurn::PromptTemplate {
+                        display: input.to_string(),
+                        name,
+                        vars,
+                    });
+                } else {
+                    self.start_template_turn(name, vars, turn);
+                }
+            }
+            CommandOutcome::RunCompaction { custom } => {
+                if turn.fut.is_some() {
+                    self.enqueue_turn(QueuedTurn::Compaction {
+                        display: input.to_string(),
+                        custom,
+                    });
+                } else {
+                    self.start_compaction_turn(custom, turn);
+                }
+            }
+            CommandOutcome::WebRelay(_) => {
+                self.system_line("web relay is a TUI feature; the daemon is already a server");
+            }
+            CommandOutcome::SessionImportActivation {
+                session_path,
+                trigger_ids,
+                cron_ids,
+            } => {
+                self.system_line(format!(
+                    "imported session {} has automation that was left disabled (imports always \
+                     disable triggers/cron)",
+                    session_path.display()
+                ));
+                // Actionable guidance, not a reference to a nonexistent flag: the daemon
+                // has no `--activate-triggers` (that is a CLI subcommand flag), so list
+                // the ids the source had enabled with the enable commands that do exist.
+                const ID_PREVIEW: usize = 5;
+                let list_ids = |ids: &[String], what: &str, enable_cmd: &str| {
+                    let shown: Vec<&str> =
+                        ids.iter().take(ID_PREVIEW).map(String::as_str).collect();
+                    let mut line =
+                        format!("{what} not enabled ({}): {}", ids.len(), shown.join(", "));
+                    if ids.len() > ID_PREVIEW {
+                        line.push_str(&format!(" … (+{} more)", ids.len() - ID_PREVIEW));
+                    }
+                    line.push_str(&format!(" — enable with `{enable_cmd} <id>`"));
+                    line
+                };
+                if !trigger_ids.is_empty() {
+                    self.system_line(list_ids(&trigger_ids, "triggers", "/triggers enable"));
+                }
+                if !cron_ids.is_empty() {
+                    self.system_line(list_ids(&cron_ids, "cron jobs", "/cron enable"));
+                }
+            }
+            CommandOutcome::LoginSecret {
+                provider,
+                recovery_command,
+                ..
+            } => {
+                let command = recovery_command.unwrap_or_else(|| format!("/login {provider}"));
+                self.error_line(format!(
+                    "login is not implemented in the daemon; run `{command}` from the terminal UI"
+                ));
+            }
+            CommandOutcome::OpenModelPicker => {
+                let active = match self.kernel.harness().agent().state().model.clone() {
+                    Some(m) => format!("active model: {}:{}", m.provider.0, m.id),
+                    None => "(no model active)".into(),
+                };
+                self.system_line(format!("{active} — switch via SetModel (web/grpc client)"));
+            }
+            CommandOutcome::Handled => {}
+        }
+        if input.trim_start().starts_with("/goal") {
+            self.refresh_goal_state().await;
+        }
+    }
+}

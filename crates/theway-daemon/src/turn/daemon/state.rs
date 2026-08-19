@@ -1,0 +1,124 @@
+impl TurnHost {
+    fn apply_feed_update(&mut self, update: FeedUpdate) {
+        let before_len = self.feed.blocks().len();
+        let targeted = match &update {
+            FeedUpdate::ThinkingSummary { block_index, .. } => Some(*block_index),
+            FeedUpdate::TextDelta(_) | FeedUpdate::ThinkingDelta(_) => before_len.checked_sub(1),
+            FeedUpdate::ToolProgress { tool_call_id, .. }
+            | FeedUpdate::ToolEnd { tool_call_id, .. } => self.feed.tool_result_index(tool_call_id),
+            _ => None,
+        };
+        match update {
+            FeedUpdate::TriggerPollStatus(status) => {
+                self.latest_trigger_poll = Some(status);
+            }
+            FeedUpdate::SkillsReloaded { .. } => {}
+            update => super::thinking_summary::apply(
+                &mut self.feed,
+                &mut self.thinking_burst,
+                self.thinking_summary.as_ref(),
+                &self.feed_tx,
+                update,
+            ),
+        }
+        if let Some(index) = targeted {
+            self.dirty_blocks.insert(index);
+        }
+    }
+
+    async fn refresh_goal_state(&mut self) {
+        self.latest_goal = theway_core::multiagent::goal::current(self.kernel.harness()).await;
+    }
+
+    fn sync_current_session_state(&self) {
+        let mut state = self.current_session_state.lock();
+        state.session_id = self.session_id.clone();
+        state.busy = self.busy;
+        state.model = current_model_label(self.kernel.harness());
+        state.cwd = self.cwd.display().to_string();
+    }
+
+    fn current_model_accepts_images(&self) -> bool {
+        self.kernel.current_model_accepts_images()
+    }
+
+    async fn set_model_from_spec(&mut self, spec: &str) -> bool {
+        let Some((provider, id)) = commands::parse_model_spec(spec) else {
+            self.error_line(format!("invalid model spec: {spec}"));
+            return false;
+        };
+        let (provider, id) = (provider.to_string(), id.to_string());
+        let Some(model) = theway_llm_provider::get_model(
+            &theway_llm_provider::Provider::from(provider.as_str()),
+            &id,
+        ) else {
+            self.error_line(format!("unknown model: {provider}:{id}"));
+            return false;
+        };
+        self.apply_model(model).await
+    }
+
+    async fn apply_model(&mut self, model: theway_llm_provider::Model) -> bool {
+        let provider = model.provider.0.clone();
+        let id = model.id.clone();
+        match self.kernel.harness().set_model(model).await {
+            Ok(_) => {
+                if let Some(hint) = commands::model_credential_hint(&provider) {
+                    self.system_line(format!(
+                        "selected {provider}:{id}, but login is required: {hint}"
+                    ));
+                } else {
+                    self.system_line(format!("switched to {provider}:{id}"));
+                }
+                self.model_catalog = model_catalog();
+                true
+            }
+            Err(e) => {
+                self.error_line(format!("set_model failed: {e}"));
+                false
+            }
+        }
+    }
+
+    async fn switch_session(&mut self, id: String) -> Result<()> {
+        let harness = (self.session_factory)(id.clone())
+            .await
+            .with_context(|| format!("build harness for session {id}"))?;
+        self.kernel.replace_harness(harness);
+        self.session_id = id.clone();
+        self.clear_feed();
+        self.system_line(format!("switched to session {id}"));
+        self.busy = false;
+        self.queued_turns.clear();
+        self.control_plane_prompt = None;
+        self.refresh_goal_state().await;
+        self.sync_current_session_state();
+        Ok(())
+    }
+
+    fn show_control_plane_prompt(&mut self, prompt: UiControlPlanePrompt) {
+        self.control_plane_prompt = Some(prompt);
+        if let Some(prompt) = &self.control_plane_prompt {
+            self.system_line(format!(
+                "approval required: {} ({})",
+                prompt.request.label, prompt.request.tool_name
+            ));
+        }
+    }
+
+    fn resolve_control_plane_prompt(&mut self, decision: theway_core::ControlPlanePromptDecision) {
+        let Some(prompt) = self.control_plane_prompt.take() else {
+            return;
+        };
+        let outcome = match decision {
+            theway_core::ControlPlanePromptDecision::Allow => "allowed",
+            theway_core::ControlPlanePromptDecision::Deny { .. } => "denied",
+            theway_core::ControlPlanePromptDecision::Timeout => "timed out",
+        };
+        self.system_line(format!(
+            "permission {outcome}: {}",
+            prompt.request.tool_name
+        ));
+        prompt.resolve(decision);
+    }
+}
