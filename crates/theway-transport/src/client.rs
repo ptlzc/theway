@@ -13,7 +13,7 @@
 
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::process::Child;
+use std::process::{Child, Stdio};
 use std::time::Duration;
 
 use anyhow::{Context as _, Result};
@@ -21,6 +21,9 @@ use futures::{Stream, StreamExt as _};
 use tonic::codec::Streaming;
 use tonic::transport::Channel;
 
+use crate::proto::health::HealthCheckRequest;
+use crate::proto::health::health_check_response::ServingStatus;
+use crate::proto::health::health_client::HealthClient;
 use crate::proto::theway_grpc;
 use crate::proto::theway_grpc::command_service_client::CommandServiceClient;
 use crate::proto::theway_grpc::event_service_client::EventServiceClient;
@@ -199,6 +202,38 @@ pub async fn probe(addr: &str, timeout: Duration) -> Result<SessionState> {
     Ok(state)
 }
 
+/// Controller-storage health probe: connect to `addr` and complete the
+/// standard gRPC health check for `StorageService` within `timeout`.
+///
+/// A daemon's own `get_state` can remain healthy after the controller process
+/// that owns its remote storage has disappeared. Callers use this stronger
+/// probe before reusing a controller-backed daemon so a live protocol socket
+/// is never mistaken for a usable runtime.
+pub async fn probe_storage_service(addr: &str, timeout: Duration) -> Result<()> {
+    let response = tokio::time::timeout(timeout, async {
+        let mut client = HealthClient::connect(format!("http://{addr}"))
+            .await
+            .with_context(|| format!("connect to storage service at {addr}"))?;
+        Ok::<_, anyhow::Error>(
+            client
+                .check(HealthCheckRequest {
+                    service: "theway.grpc.v1.StorageService".to_string(),
+                })
+                .await?,
+        )
+    })
+    .await
+    .with_context(|| format!("storage service at {addr} did not answer within {timeout:?}"))??
+    .into_inner();
+    if response.status != ServingStatus::Serving as i32 {
+        anyhow::bail!(
+            "storage service at {addr} reported status {}",
+            response.status
+        );
+    }
+    Ok(())
+}
+
 /// Candidate address list for discovery: the per-cwd port-file port first
 /// (when present and its pid is alive), then the default port.
 pub fn candidate_addrs(cwd: &Path) -> Vec<String> {
@@ -245,6 +280,22 @@ pub fn daemon_binary() -> Option<PathBuf> {
 /// launch args (model/session selection, approval flags, …). Inherits cwd (overridden
 /// by `--cwd`) and the environment. The caller must [`wait_ready`] for it.
 pub fn spawn_daemon(cwd: &Path, extra_args: &[String]) -> Result<Child> {
+    spawn_daemon_with_stdio(cwd, extra_args, true)
+}
+
+/// Spawn a daemon without inheriting stdout/stderr. Interactive clients use
+/// this while an alternate-screen UI is already active so daemon startup
+/// messages cannot corrupt the terminal frame; structured daemon logs remain
+/// available in the session log file.
+pub fn spawn_daemon_quiet(cwd: &Path, extra_args: &[String]) -> Result<Child> {
+    spawn_daemon_with_stdio(cwd, extra_args, false)
+}
+
+fn spawn_daemon_with_stdio(
+    cwd: &Path,
+    extra_args: &[String],
+    inherit_stdio: bool,
+) -> Result<Child> {
     let binary =
         daemon_binary().context("thewayd binary not found (sibling of theway or on PATH)")?;
     let mut command = std::process::Command::new(&binary);
@@ -252,7 +303,9 @@ pub fn spawn_daemon(cwd: &Path, extra_args: &[String]) -> Result<Child> {
     for arg in extra_args {
         command.arg(arg);
     }
-    // Note: stderr/stdout inherit so daemon diagnostics land on the terminal.
+    if !inherit_stdio {
+        command.stdout(Stdio::null()).stderr(Stdio::null());
+    }
     let child = command
         .spawn()
         .with_context(|| format!("spawn {}", binary.display()))?;

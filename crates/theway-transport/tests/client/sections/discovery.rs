@@ -108,6 +108,23 @@ async fn probe_fails_on_dead_port() {
     assert!(probe(&addr, Duration::from_millis(300)).await.is_err());
 }
 
+#[tokio::test]
+async fn storage_probe_requires_a_live_storage_health_endpoint() {
+    let (client, _command_rx, _snapshot_tx) = client_and_server().await;
+    probe_storage_service(client.addr(), Duration::from_secs(2))
+        .await
+        .unwrap();
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let dead_addr = listener.local_addr().unwrap().to_string();
+    drop(listener);
+    assert!(
+        probe_storage_service(&dead_addr, Duration::from_millis(300))
+            .await
+            .is_err()
+    );
+}
+
 // ── port-file discovery ───────────────────────────────────────────
 
 /// THEWAY_DIR is process-global; all port-file tests serialize on this lock.
