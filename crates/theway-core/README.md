@@ -1,18 +1,21 @@
 # theway-core
 
-`theway-core` is the runtime engine composed by [`theway-daemon`](../theway-daemon). Within this workspace, the daemon is its only direct consumer; [`scripts/check-workspace-layering.py`](../../scripts/check-workspace-layering.py) enforces that boundary.
+`theway-core` is the reusable agent runtime composed by [`theway-daemon`](../theway-daemon/README.md). It owns the single-agent loop, `AgentHarness`, typed runtime sessions, skills and prompt assembly, compaction, lifecycle and permission hooks, the `ToolExecutor` and `RuntimeObserver` interfaces, and multiagent DAG/goal orchestration.
 
-Core owns the single-agent loop, `AgentHarness`, typed runtime sessions, skills and prompt assembly, compaction, lifecycle and permission hooks, the `ToolExecutor` interface, and the multiagent DAG/goal engine. It does not own concrete tools, filesystem/process executor implementations, persistence backends, or protocol servers.
+Core does not own concrete tools, filesystem or process implementations, persistence backends, telemetry exporters, or protocol servers. The workspace layering check permits [`theway-daemon`](../theway-daemon/README.md) as its only direct runtime consumer.
 
-## Persistence boundary
+## Public entry points
 
-Runtime session entries remain typed inside core. [`PersistentSessionStorage`](src/agent/session/persistent_storage.rs) converts them to and from the backend-neutral `SessionReader` / `SessionStore` records in [`theway-contract`](../theway-contract); [`theway-storage`](../theway-storage) implements those leaf interfaces without depending on core.
-
-The DAG engine exposes persisted snapshots through [`multiagent::graph::persist`](src/multiagent/graph/persist.rs). The daemon projects engine state into `theway-contract` records and passes those records to storage.
+- `Agent` and `AgentOptions` run the provider-neutral message and tool loop.
+- `AgentHarness` composes an agent with a typed `Session`, skills, compaction, cost tracking, and cross-turn hooks.
+- `PersistentSessionStorage` adapts typed session entries to the raw `SessionReader` and `SessionStore` records from [`theway-contract`](../theway-contract/README.md).
+- `ToolExecutor` defines filesystem and process effects supplied by an embedding runtime.
+- `RuntimeObserver` receives transport-neutral operation start and finish records.
+- `multiagent` provides nested agent runs, live subagent-job state, DAG scheduling, and goal evaluation when the `harness` feature is enabled.
 
 ## Features
 
-The default build enables `harness` and `default-providers`. `harness` contains sessions, skills, compaction, permissions, and multiagent orchestration; `default-providers` enables the Anthropic and faux provider implementations.
+The default build enables `harness` and `default-providers`. `harness` includes sessions, skills, compaction, permissions, hooks, and multiagent orchestration; `default-providers` enables the Anthropic and faux provider implementations in [`theway-llm-provider`](../theway-llm-provider/README.md).
 
 ```bash
 # Bare Agent loop
@@ -22,30 +25,16 @@ cargo check -p theway-core --no-default-features
 cargo check -p theway-core --no-default-features --features harness
 ```
 
-## Layout
+## Documentation
 
-```text
-src/
-  lib.rs                 public runtime surface
-  types.rs               agent messages, events, hooks, and tool contracts
-  executor.rs            ToolExecutor interface and execution result types
-  agent.rs               bare Agent state machine
-  agent/
-    assembly/            AgentHarness composition
-    run_loop/            LLM and tool-call loop
-    compaction/          context estimation and summarization
-    session/             typed sessions, in-memory stores, persistence adapter
-    cost.rs              token and cost accounting
-    messages.rs          custom message helpers
-    permission.rs        tool permission classification
-    skills.rs            SKILL.md parsing and loading
-    system_prompt.rs     skill catalog rendering
-    types.rs             harness-specific types and ExecutionEnv seam
-  multiagent/            nested runs, registry, and DAG/goal orchestration
-```
+- [Runtime architecture and extension interfaces](docs/architecture.md)
+- [Workspace architecture](../../docs/architecture.md)
+- [Test-file layout](../../docs/rust-test-files.md)
 
-Substantial unit suites live under [`tests/`](tests) and are bridged from their source modules so they retain private-module access. See [`docs/rust-test-files.md`](../../docs/rust-test-files.md).
+## Validation
 
 ```bash
 cargo test -p theway-core
+cargo doc -p theway-core --no-deps --document-private-items
+make layering-check
 ```
