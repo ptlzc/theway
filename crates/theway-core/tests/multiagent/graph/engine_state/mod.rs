@@ -1,5 +1,4 @@
-//! Tests for `multiagent::graph::engine::helpers` — split out of src
-//! (see docs/rust-test-files.md).
+//! Engine state transition helper behavior.
 
 use super::*;
 use crate::multiagent::graph::model::build_run;

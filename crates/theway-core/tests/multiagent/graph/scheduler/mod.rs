@@ -1,4 +1,4 @@
-//! DAG run planning, reconciliation, and terminal behavior.
+//! DAG scheduling, reconciliation, and terminal behavior.
 
 use std::sync::Arc;
 use std::time::Duration;

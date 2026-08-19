@@ -1,7 +1,7 @@
 //! Small state-machine helpers shared by the engine modules.
 
-use super::super::model::now_ms;
-use super::super::types::{DagNode, DagRun, NodeStatus};
+use super::model::now_ms;
+use super::types::{DagNode, DagRun, NodeStatus};
 
 /// TS `emitState` equivalent: stamp last activity (drives the idle watchdog).
 /// State listeners (widget push) are a p3 concern, not wired here yet.
@@ -55,4 +55,4 @@ pub(super) fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
 }
 
 #[cfg(test)]
-tests_bridge_macro::tests_bridge!("multiagent/graph/engine/helpers");
+tests_bridge_macro::tests_bridge!("multiagent/graph/engine_state");

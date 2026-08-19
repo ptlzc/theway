@@ -9,11 +9,11 @@ use std::time::Duration;
 use futures::future::join_all;
 use tokio_util::sync::CancellationToken;
 
-use super::super::model::{is_terminal, now_ms};
-use super::super::persist::{PersistedRun, hydrate, max_run_counter};
-use super::super::types::{DagEvent, DagStatus, NodeResult, NodeStatus};
-use super::helpers::{cap_chars, emit_state, panic_message};
-use super::{DagEngine, NodeOutcome};
+use super::engine::{DagEngine, NodeOutcome};
+use super::engine_state::{cap_chars, emit_state, panic_message};
+use super::model::{is_terminal, now_ms};
+use super::persist::{PersistedRun, hydrate, max_run_counter};
+use super::types::{DagEvent, DagStatus, NodeResult, NodeStatus};
 
 impl DagEngine {
     // ── scheduling ──────────────────────────────────────────────────────────
@@ -228,7 +228,7 @@ impl DagEngine {
         let Some(run) = inner.runs.get_mut(run_id) else {
             return;
         };
-        super::super::model::reconcile(run);
+        super::model::reconcile(run);
         emit_state(run);
     }
 
@@ -419,4 +419,4 @@ impl DagEngine {
 }
 
 #[cfg(test)]
-tests_bridge_macro::tests_bridge!("multiagent/graph/engine/run");
+tests_bridge_macro::tests_bridge!("multiagent/graph/scheduler");

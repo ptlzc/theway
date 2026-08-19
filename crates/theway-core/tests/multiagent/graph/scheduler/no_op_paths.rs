@@ -1,4 +1,4 @@
-//! DAG run no-op behavior for missing or non-runnable state.
+//! DAG scheduler no-op behavior for missing or non-runnable state.
 
 use super::super::*;
 use crate::multiagent::graph::types::{DagNodeDef, DagRunDef};

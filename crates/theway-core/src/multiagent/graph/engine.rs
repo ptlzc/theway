@@ -1,15 +1,8 @@
-//! DAG orchestration engine: the scheduler/state machine. Registers runs,
-//! auto-triggers nodes whose prerequisites all succeeded (event-driven via
-//! launcher callbacks), enforces the concurrency budget, and exposes
-//! retry/skip/cancel/wait. Execution is delegated to a `NodeLauncher`; the
-//! engine only schedules.
+//! DAG orchestration engine entry: run registry, goal coordination, and
+//! retry/skip/cancel operations. Execution is delegated to a `NodeLauncher`.
 //!
-//! Module layout: registry/goal/intervention API lives here; scheduling and
-//! run-lifecycle methods live in [`run`]; small state-machine helpers live in
-//! [`helpers`].
-
-pub mod helpers;
-pub mod run;
+//! Scheduling and run-lifecycle methods live in the sibling `scheduler`
+//! module; lock-local transition helpers live in `engine_state`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -18,6 +11,7 @@ use parking_lot::Mutex;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
+use super::engine_state::{cap_chars, emit_state, push_unique, reset_node, run_counter};
 use super::model::{build_run, downstream_closure, is_blocked, now_ms, validate_graph};
 use super::persist::DagPersistSink;
 // Glob-imported by the bridged tests (`tests/multiagent/graph/engine/`).
@@ -26,8 +20,6 @@ use super::persist::PersistedRun;
 use super::types::{
     DagEvent, DagNode, DagRun, DagRunDef, DagStatus, Direction, NodeStatus, RunKind,
 };
-
-use helpers::{cap_chars, emit_state, push_unique, reset_node, run_counter};
 
 /// Node execution result reported by the launcher when the subagent job ends.
 #[derive(Clone, Debug)]
@@ -51,7 +43,7 @@ pub trait NodeLauncher: Send + Sync {
 
 /// Shared scheduler handle (cheap clone, same as the TS module singleton).
 pub struct DagEngine {
-    inner: Arc<Mutex<EngineInner>>,
+    pub(super) inner: Arc<Mutex<EngineInner>>,
     /// Persistence sink (app-layer debounced writer), stored OUTSIDE the
     /// engine lock so `notify_persist` can fire from any state-change point
     /// without deadlocking (parking_lot is not reentrant).
@@ -132,7 +124,7 @@ impl DagEngine {
     /// Non-blocking dirty notification to the persistence sink (if any).
     /// Takes only the sink lock (never the engine lock), so it is safe to
     /// call from any state-change point, including while `inner` is held.
-    fn notify_persist(&self) {
+    pub(super) fn notify_persist(&self) {
         if let Some(sink) = self.persist_sink.lock().clone() {
             sink.notify_dirty();
         }
