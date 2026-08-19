@@ -95,7 +95,7 @@ i18n-check: ## verify English/Chinese documentation pairs and recorded hashes
 
 .PHONY: i18n-test
 i18n-test: ## test the bilingual documentation verifier
-	$(PYTHON) -m unittest discover -s scripts/tests -p 'test_*.py'
+	$(PYTHON) -B -m unittest discover -s scripts/tests -p 'test_*.py'
 
 .PHONY: doc-sync
 doc-sync: i18n-test i18n-check ## verify bilingual documentation synchronization
