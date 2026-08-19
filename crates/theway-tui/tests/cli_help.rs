@@ -24,6 +24,13 @@ fn help_lists_model_catalog_entry_points() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Model catalog:"), "{stdout}");
     assert!(stdout.contains("Supported providers"), "{stdout}");
+    assert!(
+        stdout.contains("Provider names are model/credential namespaces"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("openai-completions"), "{stdout}");
+    assert!(stdout.contains("openai-responses"), "{stdout}");
+    assert!(stdout.contains("anthropic-messages"), "{stdout}");
     assert!(stdout.contains("anthropic("), "{stdout}");
     assert!(stdout.contains("openai("), "{stdout}");
     assert!(stdout.contains("~/.theway/models.json"), "{stdout}");

@@ -351,6 +351,10 @@ pub fn model_help_summary_lines() -> Vec<String> {
             total,
             provider_summary(&groups)
         ),
+        "  Provider names are model/credential namespaces; each model declares its wire API."
+            .into(),
+        "  OpenAI-compatible APIs: openai-completions and openai-responses; Anthropic API: anthropic-messages."
+            .into(),
         "  Full list: /help models or /model list [provider]".into(),
         "  Custom models: ~/.theway/models.json and <cwd>/.theway/models.json".into(),
         "  Credentials: set provider env vars or run /login <provider>.".into(),

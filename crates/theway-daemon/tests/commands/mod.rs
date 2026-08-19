@@ -134,6 +134,13 @@ fn registry_and_help_do_not_expose_removed_hub_surface() {
 fn model_help_summary_lists_builtin_providers_without_secrets() {
     let text = cli_model_help_text();
     assert!(text.contains("Supported providers"), "{text}");
+    assert!(
+        text.contains("Provider names are model/credential namespaces"),
+        "{text}"
+    );
+    assert!(text.contains("openai-completions"), "{text}");
+    assert!(text.contains("openai-responses"), "{text}");
+    assert!(text.contains("anthropic-messages"), "{text}");
     assert!(text.contains("anthropic("), "{text}");
     assert!(text.contains("openai("), "{text}");
     assert!(text.contains("~/.theway/models.json"), "{text}");
