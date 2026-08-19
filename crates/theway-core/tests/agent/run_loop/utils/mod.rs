@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::agent::{Agent, AgentInner, LoopListener};
+use crate::agent::{Agent, AgentInner, AgentRunError, AgentRunPermit, LoopListener};
 use crate::types::{AgentContext, AgentLoopTurnUpdate, AgentMessage, LoopEvent, ThinkingLevel};
 use theway_llm_provider::{Model, UserContent, UserMessage, UserRole};
 
@@ -169,10 +169,10 @@ async fn emit_isolates_panicking_sync_callback() {
 }
 
 #[tokio::test]
-async fn finalize_emits_run_ended_and_resets_streaming_cancel_tokens() {
+async fn finalize_keeps_admission_closed_until_permit_release() {
     let inner = test_inner();
+    let permit = AgentRunPermit::acquire(inner.clone()).expect("first run admitted");
     inner.state.lock().messages = vec![user_message("done")];
-    inner.state.lock().is_streaming = true;
     *inner.active_cancel.lock() = Some(tokio_util::sync::CancellationToken::new());
     *inner.turn_cancel.lock() = Some(tokio_util::sync::CancellationToken::new());
     let mut rx = inner.broadcast_tx.subscribe();
@@ -183,6 +183,15 @@ async fn finalize_emits_run_ended_and_resets_streaming_cancel_tokens() {
     )
     .await;
 
+    assert!(inner.state.lock().is_streaming);
+    assert!(inner.active_cancel.lock().is_some());
+    assert!(inner.turn_cancel.lock().is_some());
+    assert!(matches!(
+        AgentRunPermit::acquire(inner.clone()),
+        Err(AgentRunError::AlreadyStreaming)
+    ));
+
+    drop(permit);
     assert!(!inner.state.lock().is_streaming);
     assert!(inner.active_cancel.lock().is_none());
     assert!(inner.turn_cancel.lock().is_none());

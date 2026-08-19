@@ -64,7 +64,6 @@ pub(super) async fn emit(inner: &Arc<AgentInner>, event: LoopEvent, cancel: &Can
 pub(super) async fn finalize(inner: &Arc<AgentInner>, cancel: CancellationToken) {
     let messages = inner.state.lock().messages.clone();
     emit(inner, LoopEvent::RunEnded { messages }, &cancel).await;
-    inner.release_run();
 }
 
 /// Canonical-JSON SHA-256 of the prepared tool args. Binds a control-plane prompt
