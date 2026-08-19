@@ -1,16 +1,12 @@
-use super::selection;
 use super::theme::{BlockAlign, Theme};
-use super::{App, AppConfig, FeedSelection, collect_slash_commands, snake_loader};
-use crossterm::event::{
-    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
-};
+use super::{App, AppConfig, collect_slash_commands, snake_loader};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
-use ratatui::text::{Line, Span};
-use std::sync::{Arc, Mutex};
+use ratatui::style::Color;
+use std::sync::Arc;
 use std::time::Duration;
 use theway_transport::client::GrpcClient;
 use theway_transport::feed::WireFeedBlock;
@@ -123,9 +119,6 @@ async fn test_app_with_sessions(
     // tests never depend on the machine's theme file (theme-specific tests
     // set `app.theme` explicitly).
     app.theme = super::theme::Theme::default();
-    // Copy sink default: a no-op success handler so mouse tests never touch
-    // the real clipboard (copy-specific tests override it with a recorder).
-    app.copy_handler = Some(Arc::new(|_: String| true));
     (app, command_rx, session_ops)
 }
 
@@ -142,12 +135,24 @@ fn buffer_text(buf: &Buffer) -> String {
     rows.join("\n")
 }
 
-fn mouse_event(column: u16, row: u16, kind: MouseEventKind) -> MouseEvent {
-    MouseEvent {
-        kind,
-        column,
-        row,
-        modifiers: KeyModifiers::NONE,
+#[test]
+fn terminal_lifecycle_does_not_enable_mouse_tracking() {
+    let mut enter = Vec::new();
+    super::render_utils::write_enter_tui_commands(&mut enter).unwrap();
+    let mut leave = Vec::new();
+    super::render_utils::write_leave_tui_commands(&mut leave).unwrap();
+
+    assert!(enter.windows(8).any(|bytes| bytes == b"\x1b[?2004h"));
+    assert!(leave.windows(8).any(|bytes| bytes == b"\x1b[?2004l"));
+    for mode in [b"\x1b[?1000".as_slice(), b"\x1b[?1002", b"\x1b[?1006"] {
+        assert!(
+            !enter.windows(mode.len()).any(|bytes| bytes == mode),
+            "TUI enter must leave mouse mode {mode:?} to the terminal"
+        );
+        assert!(
+            !leave.windows(mode.len()).any(|bytes| bytes == mode),
+            "TUI leave must not mutate terminal mouse mode {mode:?}"
+        );
     }
 }
 

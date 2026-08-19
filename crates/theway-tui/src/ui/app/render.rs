@@ -99,24 +99,11 @@ impl App {
             }
             capped
         };
-        // Cache the frame geometry for the selection keys (uncapped coords).
-        self.selection_view = SelectionView {
-            top: display_scroll + trimmed,
-            bottom: (display_scroll + trimmed).saturating_add(viewport.saturating_sub(1)),
-            total: uncapped_total,
-        };
-        // Selection highlight (issue #53) is applied by the window draw: map
-        // the uncapped 2D selection onto the capped lines retained by the
-        // cache (head-trimmed rows drop out).
-        let sel_capped = self
-            .feed_selection
-            .and_then(|sel| sel.to_capped(trimmed, total));
         crate::feed_render::render_lines_window(
             frame.buffer_mut(),
             feed_area,
             lines,
             display_scroll,
-            sel_capped,
         );
         // Feed scrollbar (theway-pager-render primitive): right edge of the
         // feed pane, subtle while following, brighter when scrolled up.
@@ -210,7 +197,6 @@ impl App {
             &chrome,
             &self.theme.composer,
         );
-        self.last_text_area = Some(text_area);
         let mut cursor_pos = None;
         if text_area.width > 0 && text_area.height > 0 {
             let input = &self.input;
@@ -231,9 +217,9 @@ impl App {
 
         // Hint line.
         let hint = if self.busy {
-            "Enter queue next · Ctrl-O thinking · Ctrl-T tools · Ctrl-Space select · Ctrl-C abort"
+            "Enter queue next · Ctrl-O thinking · Ctrl-T tools · Ctrl-V paste · Ctrl-C abort"
         } else {
-            "Enter send · Ctrl-O thinking · Ctrl-T tools · Ctrl-Space select · ↑↓ history · Wheel/PgUp scroll · Ctrl-C abort"
+            "Enter send · Ctrl-O thinking · Ctrl-T tools · Ctrl-V paste · ↑↓ history · PgUp/PgDn scroll · Ctrl-C abort"
         };
         frame.render_widget(
             Paragraph::new(Line::styled(

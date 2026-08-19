@@ -34,8 +34,6 @@ impl App {
             return Ok(());
         }
         // Sending resets the dragged composer height (issue #37).
-        self.manual_composer_rows = None;
-        self.resize_drag = None;
         if trimmed.starts_with('/') {
             self.clear_input();
             self.history_idx = None;

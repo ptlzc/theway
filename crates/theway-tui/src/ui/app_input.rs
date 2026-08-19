@@ -16,11 +16,9 @@ use theway_transport::images;
 use theway_transport::transport::SlashCompleter;
 
 use super::App;
-use super::FeedSelection;
 use super::collect_slash_commands;
 use super::prompt_chrome;
 use super::render_utils::{human_bytes, new_textarea};
-use super::selection;
 
 /// Element-kind tag for paste objects (issue #37): pastes over
 /// [`PASTE_OBJECT_MIN_CHARS`] chars are inserted as atomic elements whose
@@ -63,14 +61,9 @@ impl App {
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
         match key.code {
-            KeyCode::Char('c') if ctrl && shift => {
-                self.copy_selection().await;
-            }
-            KeyCode::Char('C') if ctrl => {
-                // Ctrl+Shift+C often arrives as Ctrl+'C' (terminals fold
-                // the shift into the uppercase letter).
-                self.copy_selection().await;
-            }
+            // Terminals normally consume their copy binding. If it is
+            // forwarded, keep it inert: the TUI neither copies nor aborts.
+            KeyCode::Char('c' | 'C') if ctrl && shift => {}
             KeyCode::Char('c') if ctrl => {
                 if self.busy {
                     self.request_abort();
@@ -91,9 +84,7 @@ impl App {
                 }
             }
             KeyCode::Esc => {
-                if self.feed_selection.is_some() {
-                    self.feed_selection = None;
-                } else if !self.completions.is_empty() {
+                if !self.completions.is_empty() {
                     self.completions.clear();
                 } else if self.busy {
                     self.request_abort();
@@ -122,25 +113,6 @@ impl App {
             }
             KeyCode::Char('o') if ctrl => self.cycle_thinking_mode(),
             KeyCode::Char('t') if ctrl => self.toggle_tool_outputs(),
-            KeyCode::Char(' ') if ctrl => self.toggle_feed_selection(),
-            KeyCode::Left if shift && self.feed_selection.is_some() => {
-                self.extend_feed_selection_col(-1);
-            }
-            KeyCode::Right if shift && self.feed_selection.is_some() => {
-                self.extend_feed_selection_col(1);
-            }
-            KeyCode::Up if shift && self.feed_selection.is_some() => {
-                self.extend_feed_selection_row(-1);
-            }
-            KeyCode::Down if shift && self.feed_selection.is_some() => {
-                self.extend_feed_selection_row(1);
-            }
-            KeyCode::PageUp if shift && self.feed_selection.is_some() => {
-                self.extend_feed_selection_row(-(self.last_viewport_h.max(1) as isize));
-            }
-            KeyCode::PageDown if shift && self.feed_selection.is_some() => {
-                self.extend_feed_selection_row(self.last_viewport_h.max(1) as isize);
-            }
             KeyCode::Tab => self.cycle_completion(),
             KeyCode::Up if !self.completions.is_empty() => self.completion_prev(),
             KeyCode::Down if !self.completions.is_empty() => self.completion_next(),
@@ -554,113 +526,6 @@ impl App {
         } else {
             "tool results collapsed (Ctrl+T expands)"
         });
-    }
-
-    /// Ctrl+Space: select the visible page — `(view.top, 0)` to
-    /// `(view.bottom, last-row text width)` — or clear an existing
-    /// selection.
-    pub(super) fn toggle_feed_selection(&mut self) {
-        if self.feed_selection.is_some() {
-            self.feed_selection = None;
-            self.system_line("selection off");
-            return;
-        }
-        let view = self.selection_view;
-        let lines = self.feed_cache.lines();
-        let trimmed = self.feed_cache.trimmed();
-        if lines.is_empty() {
-            self.system_line("nothing to select");
-            return;
-        }
-        let last_row = view.bottom.min(view.total.saturating_sub(1));
-        let last_width = lines
-            .get(last_row.saturating_sub(trimmed))
-            .map(|l| selection::line_text_width(l))
-            .unwrap_or(0);
-        self.feed_selection = Some(FeedSelection {
-            anchor: (view.top, 0),
-            head: (last_row, last_width),
-        });
-        self.system_line("selection on — Shift+arrows extend · Ctrl+Shift+C copy · Esc clear");
-    }
-
-    /// Shift+←/→: move the head one display column, clamped to the head
-    /// row's text width (terminal row-end semantics).
-    pub(super) fn extend_feed_selection_col(&mut self, delta: isize) {
-        let Some(sel) = self.feed_selection else {
-            return;
-        };
-        let width = self.row_text_width(sel.head.0);
-        let sel = self.feed_selection.as_mut().expect("checked above");
-        sel.head.1 = if delta < 0 {
-            sel.head.1.saturating_sub(delta.unsigned_abs())
-        } else {
-            sel.head.1.saturating_add(delta as usize).min(width)
-        }
-        .min(width);
-    }
-
-    /// Shift+↑/↓ and Shift+PgUp/PgDn: move the head by rows, keeping the
-    /// display column (paint/extract clamp it to the destination row).
-    pub(super) fn extend_feed_selection_row(&mut self, delta: isize) {
-        let Some(sel) = self.feed_selection.as_mut() else {
-            return;
-        };
-        let max_row = self.selection_view.total.saturating_sub(1);
-        sel.head.0 = if delta < 0 {
-            sel.head.0.saturating_sub(delta.unsigned_abs())
-        } else {
-            sel.head.0.saturating_add(delta as usize).min(max_row)
-        };
-    }
-
-    /// Display width of the rendered feed row `uncapped_row` (0 when the
-    /// row was head-trimmed or is past the retained window).
-    fn row_text_width(&self, uncapped_row: usize) -> usize {
-        let trimmed = self.feed_cache.trimmed();
-        self.feed_cache
-            .lines()
-            .get(uncapped_row.saturating_sub(trimmed))
-            .map(|l| selection::line_text_width(l))
-            .unwrap_or(0)
-    }
-
-    /// Plain text of `sel` (uncapped coordinates) extracted from the
-    /// rendered lines retained by the feed cache; rows head-trimmed away
-    /// truncate to what remains.
-    fn selected_text(&self, sel: FeedSelection) -> String {
-        let lines = self.feed_cache.lines();
-        let trimmed = self.feed_cache.trimmed();
-        match sel.to_capped(trimmed, lines.len()) {
-            Some(capped) => selection::extract_text(lines, &capped),
-            None => String::new(),
-        }
-    }
-
-    /// Copy the current selection to the clipboard (Ctrl+Shift+C or mouse
-    /// release, issue #53): arboard first, OSC 52 fallback; success pushes
-    /// `copied N chars · M lines`. An empty selection just clears (a plain
-    /// click resets it).
-    pub(super) async fn copy_selection(&mut self) {
-        let Some(sel) = self.feed_selection else {
-            return;
-        };
-        let text = self.selected_text(sel);
-        if text.is_empty() {
-            self.feed_selection = None;
-            return;
-        }
-        let chars = text.chars().count();
-        let lines = text.split('\n').count();
-        let ok = match self.copy_handler.as_ref() {
-            Some(handler) => handler(text.clone()),
-            None => crate::clipboard_image::write_clipboard(&text).await.is_ok(),
-        };
-        if ok {
-            self.system_line(format!("copied {chars} chars · {lines} lines"));
-        } else {
-            self.error_line("clipboard copy failed");
-        }
     }
 
     pub(super) fn input_text(&self) -> String {

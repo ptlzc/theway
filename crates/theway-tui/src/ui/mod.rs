@@ -35,10 +35,6 @@ pub mod dag_band;
 mod pixel_loader;
 pub(crate) mod prompt_chrome;
 mod render_utils;
-/// Character-level feed text selection (issue #53): 2D model + column
-/// clamping + plain-text extraction + column-range painting, shared by the
-/// feed renderer and the input surface.
-pub(crate) mod selection;
 mod snake_loader;
 pub mod stats;
 /// Theme model + `~/.theway/theme.toml` parser (issues #43 + #49). Lives at
@@ -49,8 +45,6 @@ pub(crate) mod theme;
 
 use theme::Theme;
 
-pub(crate) use selection::FeedSelection;
-
 pub use theway_transport::feed::FeedUpdate;
 
 use std::io::IsTerminal;
@@ -60,7 +54,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use anyhow::Result;
-use crossterm::event::{Event, EventStream, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{Event, EventStream, KeyEventKind};
 use futures::StreamExt as _;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
@@ -89,13 +83,9 @@ use render_utils::{
 use render_utils::{enter_tui, leave_tui, new_textarea};
 
 const MAX_INPUT_ROWS: usize = 6;
-/// Upper bound for mouse-dragged composer height (issue #37): dragging the
-/// status rule can grow the input box beyond the content-driven cap.
-const DRAG_MAX_INPUT_ROWS: u16 = 12;
 /// Busy-band frame period: spinner cadence + char/s meter sampling
 /// (issue #38).
 const SPINNER_TICK_MS: u64 = 100;
-const SCROLL_STEP: usize = 3;
 /// Default scrollback cap for the conversation feed: only the newest
 /// `DEFAULT_MAX_FEED_LINES` rendered lines are kept; older lines are trimmed
 /// from the head (issue #27).
@@ -114,10 +104,7 @@ const TRIGGER_PANEL_MIN_TOTAL_WIDTH: u16 = 100;
 /// (the Automation/trigger panel, issue #54).
 const TRIGGER_PANEL_WIDTH: u16 = 36;
 const TRIGGER_PANEL_RULE_LIMIT: usize = 5;
-/// Side-panel drag-resize bounds (issue #54): dragging the panel's left
-/// edge grows/shrinks the panel inside `[min, max]`.
 const SIDE_PANEL_MIN_WIDTH: u16 = 24;
-const SIDE_PANEL_MAX_WIDTH: u16 = 60;
 /// Second-level `/status-panel` menu options (issue #54), in order:
 /// index 0 = show, 1 = hide, 2 = auto.
 const SIDE_PANEL_MENU_ITEMS: [&str; 3] = ["show", "hide", "auto"];
@@ -159,23 +146,6 @@ impl PanelStatus {
     }
 }
 
-/// Per-frame feed geometry (uncapped line indices) cached in the app for the
-/// selection key bindings.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct SelectionView {
-    pub top: usize,
-    pub bottom: usize,
-    pub total: usize,
-}
-
-/// Composer drag-resize state (issue #37): anchored on mouse-down at the
-/// status rule / input-box top border, rows grow as the pointer moves up.
-#[derive(Clone, Copy, Debug)]
-struct ComposerDrag {
-    start_row: u16,
-    start_rows: u16,
-}
-
 /// Side-panel visibility mode (issue #54): `Auto` keeps the pre-existing
 /// content-driven rule (panel content + ≥100 columns → 36 wide); `Shown(w)`
 /// forces the panel at an explicit width; `Hidden` closes it. TUI-local
@@ -185,15 +155,6 @@ pub(crate) enum SidePanelMode {
     Auto,
     Shown(u16),
     Hidden,
-}
-
-/// Live side-panel drag state (issue #54): anchored on mouse-down at the
-/// panel's left border (1-column strip), the width tracks
-/// `start_width + (start_col - col)` while the button is held.
-#[derive(Clone, Copy, Debug)]
-struct PanelDrag {
-    start_col: u16,
-    start_width: u16,
 }
 
 /// One interactive fork-picker row (issue #55): the 1-based number matches
@@ -245,10 +206,6 @@ pub(crate) struct ResumePickerState {
     pub(crate) selected: usize,
     pub(crate) scroll: usize,
 }
-
-/// Clipboard write sink for tests (`true` = copied): `None` routes to the
-/// real arboard/OSC 52 path in `clipboard_image`; tests inject a recorder.
-type CopyHandler = std::sync::Arc<dyn Fn(String) -> bool + Send + Sync>;
 
 /// Everything the client App needs, assembled by `main.rs` after the daemon
 /// is discovered/spawned and the initial snapshot is fetched.
@@ -337,17 +294,9 @@ pub struct App {
     /// change means the daemon-side `reload` ran, so `apply_snapshot`
     /// re-reads `~/.theway/theme.toml` into [`App::theme`].
     last_runtime_revision: u64,
-    /// Feed text selection (issue #53): `(line, display column)` anchor and
-    /// head in UNCAPPED rendered-line coordinates; columns clamp to each
-    /// row's text width at paint/extract time.
-    feed_selection: Option<FeedSelection>,
-    /// Clipboard sink override (`None` = the real arboard/OSC 52 path).
-    copy_handler: Option<CopyHandler>,
     /// Block-level render cache for the feed (issue #34): re-renders only
     /// dirty blocks across snapshot frames.
     feed_cache: crate::feed_cache::FeedRenderCache,
-    /// Per-frame feed geometry (uncapped line indices) for selection keys.
-    selection_view: SelectionView,
     last_viewport_h: usize,
     last_feed_area: Option<Rect>,
 
@@ -367,20 +316,13 @@ pub struct App {
     dag_meters: std::collections::HashMap<String, stats::CpsMeter>,
     /// DAG band animation tick (one per event-loop frame interval).
     dag_tick: u64,
-    /// Mouse-dragged composer height override (issue #37); `None` follows
-    /// the content-driven auto-grow. Reset on submit.
-    manual_composer_rows: Option<u16>,
-    /// Live drag state while resizing the composer via its top rule.
-    resize_drag: Option<ComposerDrag>,
     /// Side-panel visibility mode (issue #54): `Auto` by default; the
-    /// `/status-panel` menu and the left-edge drag change it. Never
-    /// persisted — panel visibility is client-side state.
+    /// `/status-panel` menu changes it. Never persisted — panel visibility
+    /// is client-side state.
     side_panel_mode: SidePanelMode,
     /// Second-level `/status-panel` menu highlight (issue #54): `Some(i)` =
     /// open, highlighting option `SIDE_PANEL_MENU_ITEMS[i]`.
     status_panel_menu: Option<usize>,
-    /// Live drag state while resizing the side panel via its left edge.
-    panel_drag: Option<PanelDrag>,
     /// Interactive `/fork` picker (issue #55): `Some` = popup open over the
     /// current session's User feed blocks; `None` when closed/cancelled.
     fork_picker: Option<ForkPickerState>,
@@ -388,15 +330,11 @@ pub struct App {
     /// the daemon's session list; `None` when closed/cancelled. The startup
     /// `--resume` terminal picker (`resume_picker.rs`) is separate.
     resume_picker: Option<ResumePickerState>,
-    /// Feed drag-selection in progress (mouse button still held).
-    mouse_selecting: bool,
-    /// Composer text-area rect (mouse click forwarding to the textarea).
-    last_text_area: Option<Rect>,
-    /// Status-rule and input-box rects (drag-resize hit testing).
+    /// Last rendered layout rects retained for rendering diagnostics and
+    /// unit assertions.
     last_status_area: Option<Rect>,
     last_input_area: Option<Rect>,
-    /// Rendered side-panel rect (left-edge drag hit testing); `None` when
-    /// the panel is not rendered (issue #54).
+    /// Rendered side-panel rect; `None` when the panel is not rendered.
     last_panel_area: Option<Rect>,
     last_ctrlc: Option<Instant>,
     quit: bool,

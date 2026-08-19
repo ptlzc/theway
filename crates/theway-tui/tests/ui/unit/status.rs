@@ -435,33 +435,6 @@ async fn paste_object_is_atomic_and_keeps_full_text_for_send() {
     assert!(app.input.elements().is_empty());
 }
 
-#[tokio::test]
-async fn drag_on_status_rule_resizes_composer_and_send_resets() {
-    let (mut app, _rx) = test_app().await;
-    let backend = TestBackend::new(60, 20);
-    let mut terminal = Terminal::new(backend).unwrap();
-    terminal.draw(|f| app.render(f)).unwrap();
-    let rule_row = app.last_status_area.unwrap().y;
-    assert_eq!(app.composer_rows(60), 1);
-    app.handle_mouse_down(mouse_event(
-        5,
-        rule_row,
-        MouseEventKind::Down(MouseButton::Left),
-    ));
-    assert!(app.resize_drag.is_some());
-    app.handle_mouse_drag(5, rule_row.saturating_sub(4));
-    assert_eq!(app.manual_composer_rows, Some(5));
-    assert_eq!(app.composer_rows(60), 5);
-    app.handle_mouse_up().await;
-    assert!(app.resize_drag.is_none());
-    // Sending resets the dragged height (issue #37).
-    app.set_input("/quit");
-    app.submit(&mut terminal_placeholder()).await.unwrap();
-    assert!(app.manual_composer_rows.is_none());
-    assert_eq!(app.composer_rows(60), 1);
-    assert!(app.quit);
-}
-
 /// Composer soft-wrap (issue #40): a single logical line that overflows the
 /// input box's content width grows the composer via the textarea's own wrap
 /// measurement instead of clipping.
@@ -495,31 +468,4 @@ async fn composer_rows_caps_very_long_input_at_max() {
     let (mut app, _rx) = test_app().await;
     app.set_input(&"x".repeat(2000));
     assert_eq!(app.composer_rows(60), super::MAX_INPUT_ROWS as u16);
-}
-
-/// Drag override priority (issue #40): the mouse-dragged height outranks
-/// both the computed wrap height and the content cap.
-#[tokio::test]
-async fn composer_rows_drag_override_wins_over_wrapped_height() {
-    let (mut app, _rx) = test_app().await;
-    app.set_input(&"x".repeat(200));
-    let backend = TestBackend::new(60, 20);
-    let mut terminal = Terminal::new(backend).unwrap();
-    terminal.draw(|f| app.render(f)).unwrap();
-    let rule_row = app.last_status_area.unwrap().y;
-    assert_eq!(app.composer_rows(60), 4, "200 chars wrap into 4 rows");
-
-    app.handle_mouse_down(mouse_event(
-        5,
-        rule_row,
-        MouseEventKind::Down(MouseButton::Left),
-    ));
-    app.handle_mouse_drag(5, rule_row.saturating_sub(3));
-    assert_eq!(app.manual_composer_rows, Some(7));
-    assert_eq!(
-        app.composer_rows(60),
-        7,
-        "drag override must win over the computed 4 rows and the 6-row cap"
-    );
-    app.handle_mouse_up().await;
 }

@@ -9,7 +9,6 @@ use ratatui::text::{Line, Span};
 
 use theway_transport::feed::{Block, Level, display_prefix, wrap_str};
 
-use crate::ui::selection::{self, FeedSelection};
 use crate::ui::theme::{BlockAlign, BlockTheme, Theme};
 
 /// Grok tokyonight palette values (xai-grok-pager-render theme/tokyonight.rs).

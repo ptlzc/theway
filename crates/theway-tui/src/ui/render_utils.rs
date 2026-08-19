@@ -109,23 +109,10 @@ pub(super) fn leave_tui() -> Result<()> {
 
 pub(super) fn write_enter_tui_commands(out: &mut impl std::io::Write) -> std::io::Result<()> {
     execute!(out, EnterAlternateScreen, EnableBracketedPaste)?;
-    // Mouse capture is written explicitly instead of via crossterm's
-    // `EnableMouseCapture`: on Windows that command routes through winapi
-    // (`is_ansi_code_supported() == false`) and pokes the real console
-    // directly, so the sequences never reach a non-console writer — the
-    // enter/leave byte streams desync the moment the TUI is redirected
-    // (tests, `tee`, winpty-style wrappers). Windows Terminal and conhost
-    // (Win10+) both implement the VT mouse protocol (?1000h normal +
-    // ?1006h SGR, the two modes the feed wheel needs), so writing them
-    // explicitly is behavior-preserving on a real console and faithful to
-    // the writer here. ?1002h additionally requests button-event tracking
-    // so left-drag is reported (feed selection + composer resize, #37).
-    write!(out, "\x1b[?1000h\x1b[?1002h\x1b[?1006h")?;
     out.flush()
 }
 
 pub(super) fn write_leave_tui_commands(out: &mut impl std::io::Write) -> std::io::Result<()> {
-    write!(out, "\x1b[?1006l\x1b[?1002l\x1b[?1000l")?;
     execute!(out, DisableBracketedPaste, LeaveAlternateScreen)?;
     Ok(())
 }

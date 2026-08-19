@@ -2,9 +2,7 @@
 //!
 //! Terminal paste events only carry text. For image paste we need to query the system clipboard
 //! directly, then convert the platform RGBA buffer into the same `ImageContent` shape used by the
-//! existing `--image` flag. The write side (issue #53) copies feed-selection text: arboard
-//! `set_text` first, falling back to the OSC 52 terminal escape when no system clipboard is
-//! available (SSH / headless).
+//! existing `--image` flag.
 
 use std::io::Cursor;
 
@@ -46,37 +44,6 @@ fn read_clipboard_sync() -> Result<ClipboardPaste> {
         }
     }
     Ok(ClipboardPaste::Empty)
-}
-
-/// Write plain text to the system clipboard (issue #53): arboard
-/// `set_text` on a blocking thread first (clipboard access is synchronous),
-/// falling back to the OSC 52 terminal escape when no system clipboard is
-/// available.
-pub async fn write_clipboard(text: &str) -> Result<()> {
-    let text = text.to_string();
-    tokio::task::spawn_blocking(move || write_clipboard_sync(&text))
-        .await
-        .context("clipboard task failed")?
-}
-
-fn write_clipboard_sync(text: &str) -> Result<()> {
-    match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set_text(text.to_string())) {
-        Ok(()) => Ok(()),
-        Err(e) => write_osc52(text)
-            .with_context(|| format!("system clipboard unavailable ({e}); OSC 52 fallback failed")),
-    }
-}
-
-/// OSC 52 clipboard set (`ESC ] 52 ; c ; <base64> BEL`): the
-/// terminal-escape path most terminals honor for remote sessions.
-fn write_osc52(text: &str) -> Result<()> {
-    use base64::Engine as _;
-    use std::io::Write as _;
-
-    let encoded = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
-    let mut stdout = std::io::stdout().lock();
-    write!(stdout, "\x1b]52;c;{encoded}\x07").context("write OSC 52 clipboard escape")?;
-    stdout.flush().context("flush OSC 52 clipboard escape")
 }
 
 pub(crate) fn encode_rgba_clipboard_image(

@@ -1,17 +1,12 @@
 /// Draw pre-wrapped lines into the visible window only (O(viewport)) — the
 /// cache-friendly replacement for `Paragraph::new(lines).scroll(...)` (issue
 /// #34). Rows outside the window are never touched, and the area is cleared
-/// first so a shrinking feed cannot leave stale cells behind. `selection` is
-/// a 2D feed selection in *capped* line coordinates (`(line, display
-/// column)` pairs, issue #53): only the `[c1, c2)` column slice of each
-/// selected row is painted with the selection background — never the whole
-/// line, never the screen width.
+/// first so a shrinking feed cannot leave stale cells behind.
 pub fn render_lines_window(
     buf: &mut ratatui::buffer::Buffer,
     area: ratatui::layout::Rect,
     lines: &[Line<'static>],
     offset: usize,
-    selection: Option<FeedSelection>,
 ) {
     for y in area.y..area.bottom() {
         for x in area.x..area.right() {
@@ -26,15 +21,7 @@ pub fn render_lines_window(
             break;
         }
         let y = area.y + row as u16;
-        let (c1, c2) = selection
-            .as_ref()
-            .map(|sel| sel.paint_cols(i, line))
-            .unwrap_or((0, 0));
-        if c1 < c2 {
-            selection::highlight_cols(buf, area.x, y, line, c1, c2);
-        } else {
-            set_line_safe(buf, area.x, y, line, area.width);
-        }
+        set_line_safe(buf, area.x, y, line, area.width);
     }
 }
 
