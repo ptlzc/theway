@@ -449,16 +449,11 @@ impl GraphEngineService for GrpcState {
                 request.node_id, request.run_id
             )));
         };
-        let offset = request.offset as usize;
         let text = job.output;
-        let fragment = if offset < text.len() {
-            text[offset..].to_string()
-        } else {
-            String::new()
-        };
+        let (offset, fragment) = crate::text_cursor::slice_from(&text, request.offset);
         Ok(Response::new(GetNodeOutputResponse {
-            text: fragment,
-            offset: request.offset,
+            text: fragment.to_string(),
+            offset,
             total: text.len() as u64,
             truncated: job.truncated,
             messages_json: (!messages_json.is_empty()).then_some(messages_json),

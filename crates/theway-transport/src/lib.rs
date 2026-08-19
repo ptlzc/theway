@@ -33,6 +33,7 @@ pub mod mcp;
 pub mod proto;
 pub mod state;
 pub mod testing;
+mod text_cursor;
 pub mod tools;
 pub mod transport;
 pub mod wire;

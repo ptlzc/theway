@@ -83,6 +83,22 @@ fn append_output_single_oversized_chunk_keeps_only_tail() {
 }
 
 #[test]
+fn append_output_truncates_unicode_on_character_boundaries() {
+    let mut existing = job();
+    existing.output = "🙂".repeat(MAX_OUTPUT_BYTES / 4);
+    append_output(&mut existing, "中文");
+    assert!(existing.truncated);
+    assert!(existing.output.len() <= MAX_OUTPUT_BYTES);
+    assert!(existing.output.ends_with("中文"));
+
+    let mut oversized = job();
+    append_output(&mut oversized, &"🙂".repeat(MAX_OUTPUT_BYTES / 4 + 2));
+    assert!(oversized.truncated);
+    assert!(oversized.output.len() <= MAX_OUTPUT_BYTES);
+    assert!(oversized.output.is_char_boundary(0));
+}
+
+#[test]
 fn append_message_accumulates_under_cap() {
     let mut job = job();
     append_message(&mut job, &serde_json::json!({"role": "user", "text": "one"}));

@@ -12,21 +12,26 @@ pub fn append_output(job: &mut AgentJob, chunk: &str) {
     // A single chunk larger than the cap keeps only its tail.
     let chunk = if chunk.len() > MAX_OUTPUT_BYTES {
         job.truncated = true;
-        &chunk[chunk.len() - MAX_OUTPUT_BYTES..]
+        tail_within_bytes(chunk, MAX_OUTPUT_BYTES)
     } else {
         chunk
     };
     if job.output.len() + chunk.len() > MAX_OUTPUT_BYTES {
         let keep = MAX_OUTPUT_BYTES.saturating_sub(chunk.len());
-        if keep > 0 {
-            let start = job.output.len().saturating_sub(keep);
-            job.output = job.output[start..].to_string();
-        }
+        job.output = tail_within_bytes(&job.output, keep).to_string();
         job.output.push_str(chunk);
         job.truncated = true;
     } else {
         job.output.push_str(chunk);
     }
+}
+
+fn tail_within_bytes(value: &str, max_bytes: usize) -> &str {
+    let mut start = value.len().saturating_sub(max_bytes);
+    while start < value.len() && !value.is_char_boundary(start) {
+        start += 1;
+    }
+    &value[start..]
 }
 
 /// Append one structured message to the job's transcript, honoring the cap.

@@ -279,12 +279,7 @@ pub(crate) async fn dispatch(
             match state.registry.find_node(&run_id, &node_id) {
                 Some(job) => {
                     let output = job.output;
-                    let start = offset as usize;
-                    let text = if start < output.len() {
-                        output[start..].to_string()
-                    } else {
-                        String::new()
-                    };
+                    let (offset, text) = crate::text_cursor::slice_from(&output, offset);
                     Ok(serde_json::json!({
                         "text": text,
                         "offset": offset,
