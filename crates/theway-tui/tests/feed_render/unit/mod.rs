@@ -327,6 +327,7 @@
         let opts = FeedRenderOptions::default();
         assert_eq!(opts.thinking_mode, ThinkingMode::default());
         assert!(!opts.tools_expanded);
+        assert_eq!(opts.color_level, theway_markdown::ColorLevel::TrueColor);
         assert_eq!(opts.thinking_cps, 0.0);
         assert_eq!(opts.thinking_input_tokens, 0);
         assert_eq!(opts.thinking_output_tokens, 0);
@@ -336,7 +337,7 @@
     /// `PartialEq` is hand-implemented (issue #44): the per-frame counters
     /// (cps / in / out / spinner_phase) must NOT participate, otherwise the
     /// feed cache invalidates and fully re-renders every frame; structural
-    /// switches (thinking_mode / tools_expanded / theme) must.
+    /// switches (thinking_mode / tools_expanded / color_level / theme) must.
     #[test]
     fn feed_render_options_equality_ignores_per_frame_counters() {
         let structural = FeedRenderOptions::default();
@@ -359,6 +360,12 @@
         assert_ne!(
             structural, per_frame,
             "tools_expanded change must change equality"
+        );
+        per_frame = FeedRenderOptions::default();
+        per_frame.color_level = theway_markdown::ColorLevel::None;
+        assert_ne!(
+            structural, per_frame,
+            "color capability change must change equality"
         );
         per_frame = FeedRenderOptions::default();
         per_frame.theme.tool_title = Color::Rgb(1, 2, 3);
@@ -561,6 +568,38 @@
         let lines = super::lines(&feed, 80, &opts);
         assert!(lines[0].spans[0].content.starts_with("ai ▸ "));
         assert_eq!(lines[0].spans[0].style.fg, Some(ACCENT_ASSISTANT));
+    }
+
+    #[test]
+    fn syntax_colors_follow_injected_capability() {
+        let feed = feed_with(&[WireFeedBlock::Assistant {
+            text: "```rust\nfn main() { let value = true; }\n```\n".into(),
+            timestamp: None,
+        }]);
+        let mut opts = FeedRenderOptions::default();
+        opts.theme.assistant_text = None;
+
+        opts.color_level = theway_markdown::ColorLevel::None;
+        let plain = super::lines(&feed, 80, &opts);
+        assert!(
+            plain
+                .iter()
+                .flat_map(|line| &line.spans)
+                .filter(|span| !span.content.starts_with(AI_PREFIX))
+                .all(|span| span.style.fg.is_none()),
+            "no-color capability must remove syntax foregrounds: {plain:?}"
+        );
+
+        opts.color_level = theway_markdown::ColorLevel::TrueColor;
+        let colored = super::lines(&feed, 80, &opts);
+        assert!(
+            colored
+                .iter()
+                .flat_map(|line| &line.spans)
+                .filter(|span| !span.content.starts_with(AI_PREFIX))
+                .any(|span| span.style.fg.is_some()),
+            "truecolor capability must retain syntax foregrounds: {colored:?}"
+        );
     }
 
     /// `wrap_str_ranges` must produce rows identical to the transport

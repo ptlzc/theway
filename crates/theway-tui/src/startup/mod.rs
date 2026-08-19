@@ -301,6 +301,7 @@ pub(crate) async fn run_repl(
         history: theway_transport::history::HistoryStore::load(),
         registry: crate::local_commands::local_registry(),
         pending_images: cli.image.clone(),
+        color_level: theway_markdown::get_color_level(),
     });
     app.banner();
     app.system_line(format!(

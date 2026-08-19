@@ -116,6 +116,7 @@ async fn test_app_with_sessions(
         history: HistoryStore::load_from(std::path::Path::new("/nonexistent-theway-history")),
         registry: crate::local_commands::local_registry(),
         pending_images: vec![],
+        color_level: theway_markdown::ColorLevel::TrueColor,
     });
     let mut app = app;
     // App::new loads the real `~/.theway/theme.toml`; force the default so

@@ -267,6 +267,8 @@ pub struct AppConfig {
     pub registry: Registry,
     /// `--image` payloads attached to the first prompt only.
     pub pending_images: Vec<PathBuf>,
+    /// Terminal color capability resolved by the startup boundary.
+    pub color_level: theway_markdown::ColorLevel,
 }
 
 /// Client-side App state: a snapshot cache plus local UI concerns (input,
@@ -325,6 +327,8 @@ pub struct App {
     /// Tool-result expansion toggle (Ctrl+T); collapsed results show a
     /// one-line summary.
     tools_expanded: bool,
+    /// Terminal color capability captured once for deterministic rendering.
+    color_level: theway_markdown::ColorLevel,
     /// Theme loaded once at startup from `~/.theway/theme.toml` (issues #43
     /// and #49): color roles, block layout and composer style threaded into
     /// every render; reloaded on daemon runtime-revision changes (#50).

@@ -41,6 +41,7 @@ impl App {
             scroll_repeat_up: None,
             thinking_mode: crate::feed_render::ThinkingMode::Full,
             tools_expanded: false,
+            color_level: config.color_level,
             theme: Theme::load(),
             last_runtime_revision: initial_runtime_revision,
             feed_selection: None,

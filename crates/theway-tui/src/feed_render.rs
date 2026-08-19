@@ -110,6 +110,9 @@ pub struct FeedRenderOptions {
     pub thinking_mode: ThinkingMode,
     /// Tool results: collapsed to a bordered preview unless expanded (Ctrl+T).
     pub tools_expanded: bool,
+    /// Terminal capability resolved by the owning client. Tests use the
+    /// `TrueColor` default instead of ambient process environment state.
+    pub color_level: theway_markdown::ColorLevel,
     /// Thinking-block throughput (chars/sec over the last 1s window) shown on
     /// the stats line; sourced by the CpsMeter (node 3-spinner).
     pub thinking_cps: f64,
@@ -138,6 +141,7 @@ impl PartialEq for FeedRenderOptions {
     fn eq(&self, other: &Self) -> bool {
         self.thinking_mode == other.thinking_mode
             && self.tools_expanded == other.tools_expanded
+            && self.color_level == other.color_level
             && self.theme == other.theme
     }
 }
@@ -200,7 +204,9 @@ pub fn push_paragraphs(
 /// are then adapted to the terminal's color capabilities via [`adapt`].
 ///
 /// [`adapt`]: theway_markdown::MarkdownStyle::adapt
-pub(crate) fn markdown_style() -> theway_markdown::MarkdownStyle {
+pub(crate) fn markdown_style(
+    color_level: theway_markdown::ColorLevel,
+) -> theway_markdown::MarkdownStyle {
     use anstyle::Style as AStyle;
     theway_markdown::MarkdownStyle {
         heading_inner: [AStyle::new().bold(); 6],
@@ -230,7 +236,7 @@ pub(crate) fn markdown_style() -> theway_markdown::MarkdownStyle {
         text: AStyle::new(),
         math: AStyle::new().italic(),
     }
-    .adapt()
+    .adapt_for(color_level)
 }
 
 /// Table border glyphs: pretty-mode tables render with box-drawing borders
@@ -334,12 +340,15 @@ pub fn push_markdown(
     prefix: &str,
     prefix_style: Style,
     width: usize,
+    color_level: theway_markdown::ColorLevel,
 ) {
     let (rendered, _checkpoint) = theway_markdown::render_markdown_ratatui_full_width(
         text,
-        markdown_style(),
+        markdown_style(color_level),
         true,
-        Some(theway_markdown::default_syntect()),
+        Some(theway_markdown::default_syntect_with_color_level(
+            color_level,
+        )),
         Some(width),
     );
     let width = width.max(1);
@@ -527,7 +536,14 @@ pub(crate) fn render_block(
             // theway-markdown, link underlines from the renderer's
             // hyperlinks, verbatim code/table/mermaid rows, wrapped prose.
             let start = out.len();
-            push_markdown(&mut out, text, AI_PREFIX, ai_prefix_style(theme), width);
+            push_markdown(
+                &mut out,
+                text,
+                AI_PREFIX,
+                ai_prefix_style(theme),
+                width,
+                opts.color_level,
+            );
             // `assistant_text` role: fallback foreground for spans the
             // markdown renderer left uncolored (syntax colors win).
             if let Some(fg) = theme.assistant_text {

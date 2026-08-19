@@ -62,6 +62,7 @@ impl App {
         let opts = crate::feed_render::FeedRenderOptions {
             thinking_mode: self.thinking_mode,
             tools_expanded: self.tools_expanded,
+            color_level: self.color_level,
             // Live throughput + the recent turn's token counts (issue #44):
             // the snapshot usage carries the most recent round, and the wire
             // resets it to 0 between turns, so a 0 naturally renders as 0.

@@ -231,7 +231,12 @@ impl FeedRenderCache {
                 frozen_cache_rows,
             } => {
                 self.lines.truncate(cut + *frozen_cache_rows);
-                renderer.push_and_render(delta, Some(theway_markdown::default_syntect()));
+                renderer.push_and_render(
+                    delta,
+                    Some(theway_markdown::default_syntect_with_color_level(
+                        self.opts.color_level,
+                    )),
+                );
                 let view = renderer.view();
                 // Process newly frozen lines exactly once.
                 let frozen_total = view.lines.len().min(renderer.frozen_lines_count());
@@ -372,7 +377,7 @@ impl StreamState {
         match block {
             Block::Assistant { .. } => {
                 let mut renderer = theway_markdown::StreamingMarkdownRenderer::new(
-                    feed_render::markdown_style(),
+                    feed_render::markdown_style(opts.color_level),
                     true,
                 );
                 renderer.set_max_table_width(Some(width));

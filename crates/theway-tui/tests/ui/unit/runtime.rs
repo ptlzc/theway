@@ -293,6 +293,7 @@ fn assistant_lines(text: &str, width: usize) -> Vec<ratatui::text::Line<'static>
         "ai ▸ ",
         ratatui::style::Style::default(),
         width,
+        theway_markdown::ColorLevel::TrueColor,
     );
     out
 }
