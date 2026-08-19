@@ -60,7 +60,7 @@ programs against:
   hook. The engine machinery lives here; the model-facing tool bodies
   (`dag_*`, `subagent`, skills, memory, MCP adapter) live in the daemon's
   tool assembly.
-- **Runtime observation interface** (`theway_core::observability`): `RuntimeObserver` receives content-safe start/finish records for agent runs, turns, LLM requests, tool execution, compaction, subagent jobs, DAG runs, and DAG nodes. `AgentHarnessOptions`, `AgentJobRegistry`, and `DagEngine` accept one shared observer; the no-op implementation keeps core usable without an exporter. Product streams (`LoopEvent`, `SessionEvent`, `AgentJobEvent`, and `DagEvent`) keep their existing UI, persistence, and wire semantics.
+- **Runtime observation interface** (`theway_core::observability`): `RuntimeObserver` receives content-safe start/finish records for agent runs, turns, LLM requests, tool execution, compaction, subagent jobs, DAG runs, and DAG nodes. `AgentHarnessOptions`, `SubagentJobRegistry`, and `DagEngine` accept one shared observer; the no-op implementation keeps core usable without an exporter. Product streams (`LoopEvent`, `SessionEvent`, `SubagentJobEvent`, and `DagEvent`) keep their existing UI, persistence, and wire semantics.
 - **Executor interface** (`theway_core::executor`): the [`ToolExecutor`]
   trait decouples tool effects from the runtime. Trait surface (async,
   object-safe, `Send + Sync`, shareable as `Arc<dyn ToolExecutor>`):
@@ -88,7 +88,7 @@ The TUI and any other client are consumers of this kernel, never peers.
 
 ### Runtime observability
 
-`thewayd` creates one `DaemonRuntimeObserver` in `crates/theway-daemon/src/bin/thewayd.rs` and injects it into the main and resumed harnesses, `AgentJobRegistry`, and `DagEngine`. `crates/theway-daemon/src/observability.rs` uses a bounded non-blocking queue, maps core operation identities to parented OpenTelemetry spans, emits stable structured log fields, and records counters, histograms, active-operation gauges, token/activity measurements, and dropped-observation counts. Queue or exporter failures do not change runtime results.
+`thewayd` creates one `DaemonRuntimeObserver` in `crates/theway-daemon/src/bin/thewayd.rs` and injects it into the main and resumed harnesses, `SubagentJobRegistry`, and `DagEngine`. `crates/theway-daemon/src/observability.rs` uses a bounded non-blocking queue, maps core operation identities to parented OpenTelemetry spans, emits stable structured log fields, and records counters, histograms, active-operation gauges, token/activity measurements, and dropped-observation counts. Queue or exporter failures do not change runtime results.
 
 The OpenTelemetry trace and metric exporters use OTLP over HTTP/protobuf and activate when `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, or `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` is non-empty. The SDK resource uses `service.name=thewayd`, the workspace version, and a process-specific `service.instance.id`. Shutdown drains the observation queue and calls both SDK providers' `shutdown` methods within bounded timeouts.
 

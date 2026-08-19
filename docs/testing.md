@@ -111,7 +111,7 @@ crates/<name>/Cargo.toml            # [dev-dependencies] criterion = "0.5"
 
 **内容规范**：
 
-1. **优先黑盒公开 API**：bench 应通过 crate pub API 触发被测路径（如 `registry_emit` 通过 `AgentJobRegistry::register` + `finish` 触发内部 emit），不侵入私有实现。
+1. **优先黑盒公开 API**：bench 应通过 crate pub API 触发被测路径（如 `registry_emit` 通过 `SubagentJobRegistry::register` + `finish` 触发内部 emit），不侵入私有实现。
 2. **需复刻内部结构时标注来源**：当 pub API 无法精确隔离被测段时（如 `emit_three_segment` 需要拆分 sync/await/broadcast 三段），在注释中标注复刻来源：
    ```rust
    // Replicates the three-segment dispatch from `crate::agent::run_loop::utils::emit`.
