@@ -375,6 +375,7 @@ async fn execute_runs_git_status_in_local_repo() {
     assert_eq!(result.details["exit_status"], 0);
 }
 
+#[cfg(feature = "local")]
 fn git_available() -> bool {
     std::process::Command::new("git")
         .arg("--version")

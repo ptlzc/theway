@@ -9,6 +9,7 @@ use theway_core::executor::{CommandOutput, ExecutorError, ExecutorKind, ToolExec
 
 type ExecutorResult<T> = Result<T, ExecutorError>;
 
+#[cfg(feature = "local")]
 fn text_of(result: &AgentToolResult) -> String {
     match &result.content[0] {
         UserContentBlock::Text(t) => t.text.clone(),

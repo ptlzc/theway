@@ -1,10 +1,14 @@
 //! Tests for the tool ASSEMBLY layer (`src/tools/mod.rs`) — split out of src
 //! (see docs/rust-test-files.md).
 
+#[cfg(feature = "local")]
 use super::*;
+#[cfg(feature = "local")]
 use once_cell::sync::OnceCell as SyncOnceCell;
+#[cfg(feature = "local")]
 use theway_llm_provider::{Api, Model, ModelCost, Provider};
 
+#[cfg(feature = "local")]
 fn fake_model() -> Model {
     Model {
         id: "faux".into(),
@@ -28,10 +32,12 @@ fn local_exec() -> Arc<dyn ToolExecutor> {
     Arc::new(crate::executor::local::LocalExecutor::new())
 }
 
+#[cfg(feature = "local")]
 fn empty_skill_cell() -> SkillHarnessCell {
     Arc::new(SyncOnceCell::new())
 }
 
+#[cfg(feature = "local")]
 fn names(tools: &[Arc<dyn AgentTool>]) -> Vec<String> {
     tools.iter().map(|t| t.definition().name.clone()).collect()
 }
