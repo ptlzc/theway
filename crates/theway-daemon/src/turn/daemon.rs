@@ -291,7 +291,12 @@ impl TurnHost {
         // controller initial payload) — no local config file is read.
         // `Configure` commands merge into the view at runtime and the
         // transport servers serve it via `GetConfig`.
-        let startup_model = config.harness.agent().state().model.clone();
+        let startup_state = config.harness.agent().state();
+        let startup_model = startup_state.model.clone();
+        let startup_thinking = startup_state
+            .thinking_level
+            .map(|level| level != theway_core::ThinkingLevel::Off);
+        drop(startup_state);
         let daemon_config = Arc::new(std::sync::RwLock::new(WireDaemonConfig {
             provider: startup_model.as_ref().map(|model| model.provider.0.clone()),
             model: startup_model.as_ref().map(|model| model.id.clone()),
@@ -299,7 +304,7 @@ impl TurnHost {
                 .as_ref()
                 .map(|model| model.base_url.clone())
                 .filter(|url| !url.is_empty()),
-            thinking: None,
+            thinking: startup_thinking,
             builtin_skills: config.startup.builtin_skills.clone(),
             skills_dirs: config
                 .paths
@@ -311,6 +316,7 @@ impl TurnHost {
             tui_max_feed_lines: config.startup.tui_max_feed_lines,
             tool_service_addr: None,
             storage_service_addr: config.startup.storage_service_addr.clone(),
+            clear_fields: Vec::new(),
         }));
         let tool_ops: Arc<dyn ToolOps> = Arc::new(ForwardingToolOps::new(daemon_config.clone()));
         Self {
@@ -407,9 +413,8 @@ impl TurnHost {
             // this handle and apply the `SetSkillDirs` optimistic update
             // against it; the event loop holds the authoritative copy.
             path_context: self.path_context.clone(),
-            // Issue #72: the transport servers serve `GetConfig` from this
-            // handle and optimistically merge `SetConfig` / `Configure`
-            // patches into it; the event loop holds the authoritative copy.
+            // The transport servers serve `GetConfig` from this authoritative
+            // handle; only the event loop updates it after applying a patch.
             daemon_config: self.daemon_config.clone(),
             // Issue #76: file/process operations are forwarded to the
             // controller's ToolService endpoint through the shared config's
@@ -539,45 +544,186 @@ impl TurnHost {
                 };
                 self.resolve_control_plane_prompt(decision);
             }
-            WireCommand::SetModel { spec } => self.set_model_from_spec(&spec).await,
+            WireCommand::SetModel { spec } => {
+                self.set_model_from_spec(&spec).await;
+            }
             WireCommand::SwitchSession { id } => self.handle_switch_session(id, turn).await,
             WireCommand::SetSkillDirs { dirs } => self.handle_set_skill_dirs(dirs, turn).await,
             WireCommand::Configure { config } => self.handle_configure(config, turn).await,
         }
     }
 
-    /// Apply a `Configure` command authoritatively (issue #72): merge the
-    /// patch into the shared daemon config view (`GetConfig` readers observe
-    /// it immediately), then run the per-field appliers that already exist on
-    /// the serialized loop — skills dirs (same path as `SetSkillDirs`), model
-    /// selection (provider + model form a model spec), the dynamic-trigger
-    /// poll interval, and the TUI scrollback cap (next snapshot carries it).
-    /// Fields without an applier yet (`base_url`, `thinking`,
-    /// `builtin_skills`) land in the view so later phases can act on them.
-    /// The transport servers optimistically merge the same patch before
-    /// enqueuing this command.
+    /// Apply a configuration patch on the serialized event loop. Only values
+    /// whose runtime applier succeeds are committed to the shared GetConfig
+    /// view; transport admission never mutates that view optimistically.
     async fn handle_configure(&mut self, config: WireDaemonConfig, turn: &mut TurnState) {
-        let touched = self.daemon_config.write().unwrap().merge_from(&config);
-        if touched == 0 {
-            self.system_line("configure: empty update, nothing to apply");
+        let unknown = config.unknown_clear_fields();
+        if !unknown.is_empty() {
+            self.error_line(format!(
+                "configure: unknown clear field(s): {}",
+                unknown.join(", ")
+            ));
             return;
         }
-        if !config.skills_dirs.is_empty() {
-            self.handle_set_skill_dirs(config.skills_dirs.clone(), turn)
-                .await;
-        }
-        if let (Some(provider), Some(model)) = (config.provider.as_deref(), config.model.as_deref())
+
+        let mut applied = WireDaemonConfig::default();
+
+        if (config.clears("provider") && config.provider.is_none())
+            || (config.clears("model") && config.model.is_none())
         {
-            self.set_model_from_spec(&format!("{provider}:{model}"))
-                .await;
+            self.error_line("configure: the active provider/model cannot be cleared");
+        } else if config.provider.is_some() != config.model.is_some() {
+            self.error_line("configure: provider and model must be supplied together");
+        } else if config.provider.is_some()
+            || config.base_url.is_some()
+            || config.clears("base_url")
+        {
+            let mut model = match (config.provider.as_deref(), config.model.as_deref()) {
+                (Some(provider), Some(id)) => theway_llm_provider::get_model(
+                    &theway_llm_provider::Provider::from(provider),
+                    id,
+                ),
+                _ => self.kernel.harness().agent().state().model.clone(),
+            };
+            if config.clears("base_url")
+                && let Some(current) = model.as_ref()
+            {
+                model = theway_llm_provider::get_model(&current.provider, &current.id)
+                    .or_else(|| Some(current.clone()));
+            }
+            if let Some(model) = model.as_mut()
+                && let Some(base_url) = config.base_url.as_ref()
+            {
+                model.base_url = base_url.clone();
+            }
+            match model {
+                Some(model) if self.apply_model(model.clone()).await => {
+                    applied.provider = Some(model.provider.0.clone());
+                    applied.model = Some(model.id.clone());
+                    if model.base_url.is_empty() {
+                        applied.clear_fields.push("base_url".into());
+                    } else {
+                        applied.base_url = Some(model.base_url);
+                    }
+                }
+                Some(_) => {}
+                None => self.error_line("configure: no active or matching model to update"),
+            }
         }
+
+        if config.thinking.is_some() || config.clears("thinking") {
+            let enabled = config.thinking.unwrap_or(false);
+            let level = if enabled {
+                theway_core::ThinkingLevel::High
+            } else {
+                theway_core::ThinkingLevel::Off
+            };
+            match self.kernel.harness().set_thinking_level(level).await {
+                Ok(_) if config.thinking.is_none() => applied.clear_fields.push("thinking".into()),
+                Ok(_) => applied.thinking = Some(enabled),
+                Err(err) => self.error_line(format!("configure thinking: {err}")),
+            }
+        }
+
+        if !config.builtin_skills.is_empty() || config.clears("builtin_skills") {
+            let requested = if config.clears("builtin_skills") && config.builtin_skills.is_empty() {
+                Vec::new()
+            } else {
+                config.builtin_skills.clone()
+            };
+            let resolved = crate::builtin_skills::resolve_builtins(&[], &requested)
+                .expect("an empty CLI list cannot produce a hard builtin error");
+            for diagnostic in resolved.diagnostics {
+                self.error_line(diagnostic);
+            }
+            let enabled: Vec<String> = resolved
+                .skills
+                .iter()
+                .map(|skill| skill.name.clone())
+                .collect();
+            let non_builtin: Vec<_> = self
+                .kernel
+                .harness()
+                .skills()
+                .into_iter()
+                .filter(|skill| !matches!(skill.source, theway_core::SkillSource::Builtin))
+                .collect();
+            self.kernel
+                .harness()
+                .replace_skills(crate::builtin_skills::merge_with_user_project(
+                    resolved.skills,
+                    &non_builtin,
+                ));
+            if enabled.is_empty() {
+                applied.clear_fields.push("builtin_skills".into());
+            } else {
+                applied.builtin_skills = enabled;
+            }
+        }
+
+        if !config.skills_dirs.is_empty() || config.clears("skills_dirs") {
+            let dirs = if config.skills_dirs.is_empty() {
+                Vec::new()
+            } else {
+                config.skills_dirs.clone()
+            };
+            self.handle_set_skill_dirs(dirs, turn).await;
+            let actual = self.path_context.read().unwrap().skills_dirs.clone();
+            if actual.is_empty() {
+                applied.clear_fields.push("skills_dirs".into());
+            } else {
+                applied.skills_dirs = actual;
+            }
+        }
+
         if let Some(secs) = config.trigger_poll_secs {
-            crate::triggers::dynamic::set_dynamic_trigger_poll_interval_secs(secs);
+            if secs == 0 {
+                self.error_line("configure: trigger_poll_secs must be greater than zero");
+            } else {
+                crate::triggers::dynamic::set_dynamic_trigger_poll_interval_secs(secs);
+                applied.trigger_poll_secs = Some(secs);
+            }
+        } else if config.clears("trigger_poll_secs") {
+            crate::triggers::dynamic::set_dynamic_trigger_poll_interval_secs(
+                theway_transport::triggers::DEFAULT_DYNAMIC_TRIGGER_POLL_INTERVAL_SECS,
+            );
+            applied.clear_fields.push("trigger_poll_secs".into());
         }
+
         if let Some(lines) = config.tui_max_feed_lines {
-            self.tui_max_feed_lines = Some(lines);
+            if lines == 0 {
+                self.error_line("configure: tui_max_feed_lines must be greater than zero");
+            } else {
+                self.tui_max_feed_lines = Some(lines);
+                applied.tui_max_feed_lines = Some(lines);
+            }
+        } else if config.clears("tui_max_feed_lines") {
+            self.tui_max_feed_lines = None;
+            applied.clear_fields.push("tui_max_feed_lines".into());
         }
-        self.system_line(format!("configure: applied {touched} setting(s)"));
+
+        if let Some(addr) = config.tool_service_addr.as_ref() {
+            if addr.trim().is_empty() {
+                self.error_line("configure: tool_service_addr must not be empty; clear it instead");
+            } else {
+                applied.tool_service_addr = Some(addr.clone());
+            }
+        } else if config.clears("tool_service_addr") {
+            applied.clear_fields.push("tool_service_addr".into());
+        }
+
+        if config.storage_service_addr.is_some() || config.clears("storage_service_addr") {
+            self.error_line(
+                "configure: storage_service_addr is startup-only and cannot be changed at runtime",
+            );
+        }
+
+        let touched = self.daemon_config.write().unwrap().merge_from(&applied);
+        if touched == 0 {
+            self.system_line("configure: no applicable settings changed");
+        } else {
+            self.system_line(format!("configure: applied {touched} setting(s)"));
+        }
     }
 
     /// Apply a `SetSkillDirs` command authoritatively (issue #68): replace
@@ -1197,10 +1343,10 @@ impl TurnHost {
         self.kernel.current_model_accepts_images()
     }
 
-    async fn set_model_from_spec(&mut self, spec: &str) {
+    async fn set_model_from_spec(&mut self, spec: &str) -> bool {
         let Some((provider, id)) = commands::parse_model_spec(spec) else {
             self.error_line(format!("invalid model spec: {spec}"));
-            return;
+            return false;
         };
         let (provider, id) = (provider.to_string(), id.to_string());
         let Some(model) = theway_llm_provider::get_model(
@@ -1208,8 +1354,14 @@ impl TurnHost {
             &id,
         ) else {
             self.error_line(format!("unknown model: {provider}:{id}"));
-            return;
+            return false;
         };
+        self.apply_model(model).await
+    }
+
+    async fn apply_model(&mut self, model: theway_llm_provider::Model) -> bool {
+        let provider = model.provider.0.clone();
+        let id = model.id.clone();
         match self.kernel.harness().set_model(model).await {
             Ok(_) => {
                 if let Some(hint) = commands::model_credential_hint(&provider) {
@@ -1220,8 +1372,12 @@ impl TurnHost {
                     self.system_line(format!("switched to {provider}:{id}"));
                 }
                 self.model_catalog = model_catalog();
+                true
             }
-            Err(e) => self.error_line(format!("set_model failed: {e}")),
+            Err(e) => {
+                self.error_line(format!("set_model failed: {e}"));
+                false
+            }
         }
     }
 
