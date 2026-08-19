@@ -137,6 +137,11 @@ impl SessionHarnessFactory {
 
         let goal_harness_cell: Arc<OnceLock<Arc<AgentHarness>>> = Arc::new(OnceLock::new());
         let mut opts = AgentHarnessOptions::new(self.model.clone(), session);
+        opts.observer = self.subagent_registry.observer();
+        opts.observation_context = theway_core::ObservationContext {
+            session_id: Some(session_id.clone()),
+            ..theway_core::ObservationContext::default()
+        };
         opts.system_prompt = self.system_prompt.clone();
         opts.thinking_level = self.thinking;
         opts.tools = tools;

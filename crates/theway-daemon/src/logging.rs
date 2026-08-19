@@ -59,15 +59,8 @@ pub fn init(session_id: &str) -> Option<LoggingHandle> {
         .with_thread_ids(true)
         .with_span_events(fmt::format::FmtSpan::CLOSE);
 
-    // Optional OTLP layer (issue #15). Activates only when OTEL_EXPORTER_OTLP_ENDPOINT is set
-    // — silent no-op otherwise.
-    let otlp = crate::otlp::try_layer();
     let registry = tracing_subscriber::registry().with(filter).with(layer);
-    let res = if let Some(otlp_layer) = otlp {
-        registry.with(otlp_layer).try_init()
-    } else {
-        registry.try_init()
-    };
+    let res = registry.try_init();
     if res.is_err() {
         // Another subscriber is already installed (tests usually). Bail silently.
         return None;

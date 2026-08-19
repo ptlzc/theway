@@ -274,6 +274,7 @@ fn run_options(
         run_id: None,
         node_id: None,
         session_id: None,
+        observation_parent: None,
         cancel,
         system_prompt_extra: None,
         on_turn_end: None,

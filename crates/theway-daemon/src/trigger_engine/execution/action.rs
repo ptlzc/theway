@@ -307,6 +307,9 @@ pub(super) async fn run_trigger_action(
         stream_fn,
         before_tool_call,
         after_tool_call,
+        observer: parent_agent.runtime_observer(),
+        observation_context: parent_agent.observation_context(),
+        observation_parent: parent_agent.active_run_operation(),
         ..Default::default()
     });
 

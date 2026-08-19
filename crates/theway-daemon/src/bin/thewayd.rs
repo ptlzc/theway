@@ -174,6 +174,8 @@ async fn main() -> Result<()> {
         .to_string();
     let session = theway_core::Session::from_store(Arc::new(store));
     let _logging = theway_daemon::logging::init(&session_id);
+    let telemetry = theway_daemon::observability::TelemetryHandle::init().await;
+    let runtime_observer = telemetry.observer();
     let (feed_tx, feed_rx) =
         tokio::sync::mpsc::unbounded_channel::<theway_transport::feed::FeedUpdate>();
 
@@ -195,8 +197,10 @@ async fn main() -> Result<()> {
     let memory_dir = config::memory_dir();
     let skill_harness_cell: theway_daemon::tools::skill::SkillHarnessCell =
         Arc::new(once_cell::sync::OnceCell::new());
-    let dag_engine = Arc::new(DagEngine::new());
-    let subagent_registry = theway_core::multiagent::registry::AgentJobRegistry::new();
+    let dag_engine = Arc::new(DagEngine::with_observer(runtime_observer.clone()));
+    let subagent_registry = theway_core::multiagent::registry::AgentJobRegistry::with_observer(
+        runtime_observer.clone(),
+    );
     subagent_registry.set_transcript_store(Some(storage.job_transcript_store(&cwd)));
     // Execution-environment seam (daemon-kernel-layers): local tool bodies
     // dispatch through a `ToolExecutor`; the composition root picks the executor
@@ -333,6 +337,11 @@ async fn main() -> Result<()> {
 
     let goal_harness_cell: Arc<OnceLock<Arc<AgentHarness>>> = Arc::new(OnceLock::new());
     let mut opts = AgentHarnessOptions::new(model.clone(), session.clone());
+    opts.observer = runtime_observer.clone();
+    opts.observation_context = theway_core::ObservationContext {
+        session_id: Some(session_id.clone()),
+        ..theway_core::ObservationContext::default()
+    };
     opts.system_prompt = system_prompt.clone();
     opts.thinking_level = thinking;
     opts.tools = tools;
@@ -606,6 +615,7 @@ async fn main() -> Result<()> {
                         run_id: None,
                         node_id: None,
                         session_id: Some(summarizer_session),
+                        observation_parent: None,
                         cancel: tokio_util::sync::CancellationToken::new(),
                         system_prompt_extra: Some(
                             "You are a thinking summarizer: compress verbose step-by-step \
@@ -729,6 +739,8 @@ async fn main() -> Result<()> {
     };
     _dag_persist.flush().await;
     dag_engine.abort_all_runs("daemon shutdown");
+    telemetry.shutdown().await;
+    drop(_logging);
     // Remove our discovery entry — but only when it still names us (a
     // successor daemon in the same cwd may have overwritten it).
     theway_transport::client::remove_port_file_if_owner(&cwd, daemon_pid);

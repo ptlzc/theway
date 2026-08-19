@@ -189,6 +189,7 @@ impl AgentTool for SubagentTool {
             // session-resource-model: jobs spawned by the subagent tool belong to the session
             // whose harness owns this tool instance (stamped at construction).
             session_id: self.session_id.clone(),
+            observation_parent: None,
             cancel: parent_cancel.clone(),
             // Keep the v1 behaviour: the task description lands in the subagent's
             // system prompt, not just the tool-result details.
