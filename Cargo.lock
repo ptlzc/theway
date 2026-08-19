@@ -5217,7 +5217,6 @@ dependencies = [
  "tempfile",
  "tests-bridge-macro",
  "theway-contract",
- "theway-core",
  "tokio",
  "toml",
  "tracing",

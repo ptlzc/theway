@@ -1,18 +1,11 @@
-//! SQLite-backed DAG state store (Turso) — the heavyweight half of the
-//! [`DagPersistSink`] contract. The sink trait and the serialization
-//! projection (`PersistedRun` / `PersistedNode` / `to_persisted` / `hydrate`)
-//! stay in theway-core (`multiagent::graph::persist`), because the engine
-//! restores runs from them; only the concrete store implementation lives
-//! here so the engine crate stays free of the turso dependency.
+//! SQLite-backed store for engine-independent persisted DAG snapshots.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
+use theway_contract::dag::{NodeStatus, PersistedNode, PersistedRun};
 use turso::{Builder, Connection, Database};
-
-use theway_core::multiagent::graph::persist::{PersistedNode, PersistedRun, to_persisted};
-use theway_core::multiagent::graph::types::{DagRun, DagStatus, NodeStatus};
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS dag_runs (
@@ -151,13 +144,9 @@ impl SqliteDagStore {
         Ok(runs)
     }
 
-    /// Transactional save of only the Running runs (terminal runs drop off
-    /// naturally). Full-table rewrite inside one transaction: atomic,
-    /// idempotent, cheap at this scale (a handful of runs). Best-effort —
-    /// write errors are logged, never fatal. If the write fails, the store is
-    /// rebuilt once (a corrupt file is discarded; harness state is
-    /// re-derivable from the live engine) and the save retried.
-    pub async fn save(&self, runs: &[DagRun]) -> Result<(), String> {
+    /// Transactionally replace the stored snapshot set. The caller projects
+    /// and filters runtime runs before crossing this persistence boundary.
+    pub async fn save(&self, runs: &[PersistedRun]) -> Result<(), String> {
         match self.save_once(runs).await {
             Ok(()) => Ok(()),
             Err(e) => {
@@ -171,22 +160,21 @@ impl SqliteDagStore {
         }
     }
 
-    async fn save_once(&self, runs: &[DagRun]) -> Result<(), String> {
+    async fn save_once(&self, runs: &[PersistedRun]) -> Result<(), String> {
         let mut conn = self.conn()?;
         let tx = conn.transaction().await.map_err(|e| e.to_string())?;
         tx.execute_batch("DELETE FROM dag_nodes; DELETE FROM dag_runs;")
             .await
             .map_err(|e| e.to_string())?;
-        for run in runs.iter().filter(|r| r.status == DagStatus::Running) {
-            let persisted = to_persisted(run);
-            let run_payload = serde_json::to_string(&persisted).map_err(|e| e.to_string())?;
+        for run in runs {
+            let run_payload = serde_json::to_string(run).map_err(|e| e.to_string())?;
             tx.execute(
                 "INSERT INTO dag_runs (id, status, payload) VALUES (?1, ?2, ?3)",
                 [run.id.as_str(), "running", run_payload.as_str()],
             )
             .await
             .map_err(|e| e.to_string())?;
-            for (seq, node) in persisted.nodes.iter().enumerate() {
+            for (seq, node) in run.nodes.iter().enumerate() {
                 let node_payload = serde_json::to_string(&node).map_err(|e| e.to_string())?;
                 tx.execute(
                     "INSERT INTO dag_nodes (run_id, id, seq, status, payload) VALUES (?1, ?2, ?3, ?4, ?5)",

@@ -10,9 +10,6 @@ repository.workspace = true
 homepage.workspace = true
 
 [dependencies]
-# DAG runtime snapshots still come from theway-core until the DAG persistence
-# contract is moved to the leaf contract crate.
-theway-core = { path = "../theway-core" }
 turso = "0.7"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "fs"] }
 async-trait = "0.1"
@@ -21,8 +18,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 parking_lot = "0.12"
 tracing = "0.1"
 uuid = { version = "1", features = ["v7"] }
-# Session helpers + archive: tar/toml/sha2 for `.theway-session` archives;
-# theway-contract owns session persistence, sidecar models, and path layout.
+# Session/archive and DAG snapshots implement pure leaf contracts.
 theway-contract = { path = "../theway-contract" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

@@ -5,8 +5,8 @@
 //! SQLite via Turso stores one `<uuidv7>.db` file per session. The composition
 //! root chooses the backend and adapts it to a core runtime session when needed.
 //!
-//! DAG snapshots still use core runtime types. This crate never depends on the
-//! transport stack, and core never references this crate.
+//! This crate depends only on leaf contracts, never on core or the transport
+//! stack.
 
 //! Self-alias so bridged unit tests (tests_bridge) and lib code share one path
 //! shape (`theway_storage::…`), same pattern as theway-core / theway-daemon.
