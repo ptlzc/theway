@@ -274,12 +274,10 @@ pub(crate) fn reconcile(
         clear_field(&mut patch, "tool_service_addr");
     }
     if let Some(addr) = &desired.storage_service_addr {
-        if current.storage_service_addr.as_deref() != Some(addr.as_str()) {
-            if attach {
-                notes.push(format!(
-                    "storage service {addr} requested, but controller-backed storage only changes on daemon (re)spawn"
-                ));
-            }
+        if current.storage_service_addr.as_deref() != Some(addr.as_str()) && attach {
+            notes.push(format!(
+                "storage service {addr} requested, but controller-backed storage only changes on daemon (re)spawn"
+            ));
         }
     }
 
