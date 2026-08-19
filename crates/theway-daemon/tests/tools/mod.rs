@@ -68,7 +68,7 @@ fn local_tools_registers_all_local_only_bodies() {
 fn session_tool_set_assembles_local_engine_and_trigger_families() {
     let dir = tempfile::tempdir().expect("tempdir");
     let engine = Arc::new(DagEngine::new());
-    let registry = AgentJobRegistry::new();
+    let registry = SubagentJobRegistry::new();
     let model = fake_model();
     let cell = empty_skill_cell();
     let session_id = "session-test";
@@ -122,7 +122,7 @@ fn session_tool_set_assembles_local_engine_and_trigger_families() {
 fn subagent_tool_and_node_launcher_build() {
     let dir = tempfile::tempdir().expect("tempdir");
     let engine = Arc::new(DagEngine::new());
-    let registry = AgentJobRegistry::new();
+    let registry = SubagentJobRegistry::new();
     let model = fake_model();
     let cell = empty_skill_cell();
 

@@ -28,7 +28,7 @@ use theway_core::AgentTool;
 use theway_core::executor::ToolExecutor;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::node_launcher;
-use theway_core::multiagent::registry::AgentJobRegistry;
+use theway_core::multiagent::jobs::SubagentJobRegistry;
 use theway_core::multiagent::types::ToolSetResolver;
 
 use crate::tools::skill::SkillHarnessCell;
@@ -182,7 +182,7 @@ pub fn local_tools(_executor: Arc<dyn ToolExecutor>) -> Vec<Arc<dyn AgentTool>> 
 pub fn subagent_tool(
     model: theway_llm_provider::Model,
     stream_fn: Option<theway_core::StreamFn>,
-    registry: AgentJobRegistry,
+    registry: SubagentJobRegistry,
     memory_dir: PathBuf,
     base_dir: PathBuf,
     skill_harness_cell: SkillHarnessCell,
@@ -233,7 +233,7 @@ pub fn node_launcher(
     model: theway_llm_provider::Model,
     stream_fn: Option<theway_core::StreamFn>,
     cwd: PathBuf,
-    registry: AgentJobRegistry,
+    registry: SubagentJobRegistry,
     memory_dir: PathBuf,
     base_dir: PathBuf,
     skill_harness_cell: SkillHarnessCell,
@@ -261,7 +261,7 @@ pub fn session_tool_set(
     memory_dir: &std::path::Path,
     base_dir: &std::path::Path,
     dag_engine: &Arc<DagEngine>,
-    subagent_registry: &AgentJobRegistry,
+    subagent_registry: &SubagentJobRegistry,
     model: &theway_llm_provider::Model,
     stream_fn: Option<&theway_core::StreamFn>,
     skill_harness_cell: &SkillHarnessCell,

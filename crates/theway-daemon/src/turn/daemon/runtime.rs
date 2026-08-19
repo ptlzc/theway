@@ -137,14 +137,14 @@ impl TurnHost {
                                 let _ = agent_tx.send(agent_event(event));
                             }
                             Err(broadcast::error::RecvError::Lagged(n)) => {
-                                tracing::warn!("AgentJobEvent broadcast lagged by {n}, skipping");
+                                tracing::warn!("SubagentJobEvent broadcast lagged by {n}, skipping");
                                 continue;
                             }
                             Err(broadcast::error::RecvError::Closed) => break,
                         }
                     }
                     tracing::debug!(
-                        "AgentJobEvent registry channel closed; forwarder task exiting"
+                        "SubagentJobEvent registry channel closed; forwarder task exiting"
                     );
                 };
                 let dag_loop = async move {

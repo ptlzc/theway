@@ -119,7 +119,7 @@ pub struct DaemonConfig {
     pub main_run_rx: mpsc::UnboundedReceiver<String>,
     pub control_plane_prompt_rx: Option<mpsc::UnboundedReceiver<UiControlPlanePrompt>>,
     pub dag_engine: Arc<theway_core::multiagent::graph::engine::DagEngine>,
-    pub subagent_registry: theway_core::multiagent::registry::AgentJobRegistry,
+    pub subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry,
     pub session_factory: SessionFactory,
     pub session_repo: Arc<SqliteSessionRepo>,
     pub current_session_state: Arc<Mutex<CurrentSessionState>>,
@@ -192,7 +192,7 @@ pub struct TurnHost {
     tui_max_feed_lines: Option<u64>,
 
     dag_engine: Arc<theway_core::multiagent::graph::engine::DagEngine>,
-    subagent_registry: theway_core::multiagent::registry::AgentJobRegistry,
+    subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry,
     session_factory: SessionFactory,
     session_repo: Arc<SqliteSessionRepo>,
     current_session_state: Arc<Mutex<CurrentSessionState>>,

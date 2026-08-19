@@ -81,7 +81,7 @@ fn test_tool(
         Arc::new(|_| vec![]),
         Arc::new(move |name: &str| (name == launch.name).then_some(launch)),
         spec_names,
-        AgentJobRegistry::new(),
+        SubagentJobRegistry::new(),
     )
 }
 
@@ -143,7 +143,7 @@ async fn execute_unknown_resolver_spec_fails_after_spec_names_check() {
         Arc::new(|_| vec![]),
         Arc::new(|_name: &str| None),
         vec!["general".into()],
-        AgentJobRegistry::new(),
+        SubagentJobRegistry::new(),
     );
 
     let err = tool

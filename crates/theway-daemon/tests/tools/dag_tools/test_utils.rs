@@ -10,7 +10,7 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use serde_json::{Value, json};
 use theway_core::multiagent::graph::engine::{DagEngine, NodeLauncher, NodeOutcome};
-use theway_core::multiagent::registry::AgentJobRegistry;
+use theway_core::multiagent::jobs::SubagentJobRegistry;
 use theway_core::{AgentTool, AgentToolError};
 use theway_llm_provider::UserContentBlock;
 use tokio_util::sync::CancellationToken;
@@ -115,13 +115,13 @@ pub fn spec_names() -> Vec<String> {
 }
 
 pub fn tools(engine: Arc<DagEngine>, session_id: Option<&str>) -> Vec<Arc<dyn AgentTool>> {
-    tools_with_registry(engine, session_id, AgentJobRegistry::new())
+    tools_with_registry(engine, session_id, SubagentJobRegistry::new())
 }
 
 pub fn tools_with_registry(
     engine: Arc<DagEngine>,
     session_id: Option<&str>,
-    registry: AgentJobRegistry,
+    registry: SubagentJobRegistry,
 ) -> Vec<Arc<dyn AgentTool>> {
     crate::tools::dag_tools::DagTools::new(
         engine,

@@ -68,7 +68,7 @@ pub struct SessionHarnessFactory {
         std::sync::Arc<theway_core::agent::compaction::algorithm::CompactAlgorithmRegistry>,
     pub memory_dir: std::path::PathBuf,
     pub dag_engine: Arc<DagEngine>,
-    pub subagent_registry: theway_core::multiagent::registry::AgentJobRegistry,
+    pub subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry,
     pub mcp_tools: Vec<Arc<dyn theway_core::AgentTool>>,
     pub mcp_notification_hooks: Vec<Arc<triggers::McpNotificationHook>>,
     pub dynamic_trigger_registry: triggers::dynamic::DynamicTriggerRegistry,

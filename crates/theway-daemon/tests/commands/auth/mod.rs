@@ -7,7 +7,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::persist::{DagPersistSink, PersistedRun};
-use theway_core::multiagent::registry::JobTranscriptStore;
+use theway_core::multiagent::jobs::JobTranscriptStore;
 use theway_core::{AgentMessage, MemorySessionStorage, Session, SessionStorage};
 use theway_llm_provider::{Message, UserContent, UserMessage, UserRole};
 use theway_storage::sqlite_repo::SqliteSessionRepo;

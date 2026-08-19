@@ -68,9 +68,9 @@ async fn inspect_completed_node_shows_result_text() {
 
 #[tokio::test]
 async fn inspect_transcript_renders_typed_messages() {
-    use theway_core::multiagent::registry::{AgentJobRegistry, JobInit, append_message};
+    use theway_core::multiagent::jobs::{SubagentJobRegistry, SubagentJobInit, append_message};
     let (engine, _) = engine_with(FakeLauncher::stuck());
-    let registry = AgentJobRegistry::new();
+    let registry = SubagentJobRegistry::new();
     let tools = tools_with_registry(engine, None, registry.clone());
     exec(
         tool_by(&tools, "dag_plan"),
@@ -80,7 +80,7 @@ async fn inspect_transcript_renders_typed_messages() {
     .unwrap();
     // Register the registry job a real launcher would create for node b, and
     // append the typed entries the metrics listener produces.
-    let job_id = registry.register(JobInit {
+    let job_id = registry.register(SubagentJobInit {
         agent: "planner".into(),
         source: "dag".into(),
         run_id: Some("dag-1".into()),

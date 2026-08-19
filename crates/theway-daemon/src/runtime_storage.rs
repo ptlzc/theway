@@ -21,7 +21,7 @@ use theway_contract::dag::PersistedRun;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::persist::{DagPersistSink, to_persisted};
 use theway_core::multiagent::graph::types::DagStatus;
-use theway_core::multiagent::registry::JobTranscriptStore;
+use theway_core::multiagent::jobs::JobTranscriptStore;
 use theway_storage::sqlite_repo::SqliteSessionRepo;
 use theway_transport::client::GrpcClient;
 use theway_transport::triggers::{CronJob, DynamicTriggerRule};

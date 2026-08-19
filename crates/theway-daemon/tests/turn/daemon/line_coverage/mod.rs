@@ -93,7 +93,7 @@ async fn host_with_input(input: Vec<InputModality>) -> (TurnHost, TempDir, TempD
         main_run_rx,
         control_plane_prompt_rx: None,
         dag_engine: Arc::new(theway_core::multiagent::graph::engine::DagEngine::new()),
-        subagent_registry: theway_core::multiagent::registry::AgentJobRegistry::new(),
+        subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry::new(),
         session_factory: Arc::new(
             |_id: String| -> std::pin::Pin<
                 Box<

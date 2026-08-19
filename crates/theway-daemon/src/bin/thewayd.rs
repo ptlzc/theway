@@ -198,9 +198,8 @@ async fn main() -> Result<()> {
     let skill_harness_cell: theway_daemon::tools::skill::SkillHarnessCell =
         Arc::new(once_cell::sync::OnceCell::new());
     let dag_engine = Arc::new(DagEngine::with_observer(runtime_observer.clone()));
-    let subagent_registry = theway_core::multiagent::registry::AgentJobRegistry::with_observer(
-        runtime_observer.clone(),
-    );
+    let subagent_registry =
+        theway_core::multiagent::jobs::SubagentJobRegistry::with_observer(runtime_observer.clone());
     subagent_registry.set_transcript_store(Some(storage.job_transcript_store(&cwd)));
     // Execution-environment seam (daemon-kernel-layers): local tool bodies
     // dispatch through a `ToolExecutor`; the composition root picks the executor

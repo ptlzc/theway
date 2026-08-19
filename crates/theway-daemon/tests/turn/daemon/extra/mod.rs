@@ -143,7 +143,7 @@ fn daemon_config(
         main_run_rx,
         control_plane_prompt_rx: None,
         dag_engine: Arc::new(theway_core::multiagent::graph::engine::DagEngine::new()),
-        subagent_registry: theway_core::multiagent::registry::AgentJobRegistry::new(),
+        subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry::new(),
         session_factory,
         session_repo: Arc::new(SqliteSessionRepo::new(repo_dir.path())),
         current_session_state: Arc::new(parking_lot::Mutex::new(CurrentSessionState::default())),

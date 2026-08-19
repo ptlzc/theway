@@ -287,7 +287,7 @@ async fn goal_evaluator_false_returns_continuation_and_audits_reason() {
     ));
     let harness_cell = Arc::new(OnceLock::new());
     assert!(harness_cell.set(harness.clone()).is_ok());
-    let registry = theway_core::multiagent::registry::AgentJobRegistry::new();
+    let registry = theway_core::multiagent::jobs::SubagentJobRegistry::new();
     let hook = goal::stop_hook(
         harness_cell,
         std::sync::Arc::new(theway_core::multiagent::graph::engine::DagEngine::new()),

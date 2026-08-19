@@ -192,6 +192,6 @@ fn subagent_tool(stream: StreamFn, tools: Vec<Arc<dyn AgentTool>>) -> SubagentTo
         Arc::new(move |_| tools.clone()),
         spec_launch_resolver(),
         vec!["general".into()],
-        AgentJobRegistry::new(),
+        SubagentJobRegistry::new(),
     )
 }

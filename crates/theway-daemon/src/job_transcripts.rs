@@ -3,13 +3,13 @@
 //! Owns the concrete transcript persistence: directory layout, path
 //! sanitization, JSON serialization, and std::fs IO. Core sees only the
 //! `JobTranscriptStore` seam; the daemon injects this store into
-//! [`theway_core::multiagent::registry::AgentJobRegistry`] at startup.
+//! [`theway_core::multiagent::jobs::SubagentJobRegistry`] at startup.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
-use theway_core::multiagent::registry::{JobTranscript, JobTranscriptStore};
+use theway_core::multiagent::jobs::{JobTranscript, JobTranscriptStore};
 
 pub struct DiskTranscriptStore {
     dir: PathBuf,

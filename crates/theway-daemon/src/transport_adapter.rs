@@ -10,7 +10,9 @@ use theway_core::multiagent::graph::persist::{PersistedRun, to_persisted};
 use theway_core::multiagent::graph::types::{
     DagEvent, DagNode, DagRun, DagStatus, Direction, NodeResult, NodeStatus, RunKind,
 };
-use theway_core::multiagent::registry::{AgentJob, AgentJobEvent, AgentJobRegistry, JobStatus};
+use theway_core::multiagent::jobs::{
+    SubagentJob, SubagentJobEvent, SubagentJobRegistry, SubagentJobStatus,
+};
 use theway_transport::transport::{GraphOps, JobOps};
 use theway_transport::wire::{
     WireAgentEvent, WireAgentJobSnapshot, WireDagEvent, WireDagNodeSnapshot, WireDagRunSnapshot,
@@ -19,11 +21,11 @@ use theway_transport::wire::{
 
 #[derive(Clone)]
 pub struct CoreJobOps {
-    registry: AgentJobRegistry,
+    registry: SubagentJobRegistry,
 }
 
 impl CoreJobOps {
-    pub fn new(registry: AgentJobRegistry) -> Self {
+    pub fn new(registry: SubagentJobRegistry) -> Self {
         Self { registry }
     }
 }
@@ -171,7 +173,7 @@ fn node_result_snapshot(result: &NodeResult) -> WireNodeResultSnapshot {
     }
 }
 
-pub fn subagent_job_snapshot(job: &AgentJob) -> WireAgentJobSnapshot {
+pub fn subagent_job_snapshot(job: &SubagentJob) -> WireAgentJobSnapshot {
     WireAgentJobSnapshot {
         id: job.id.clone(),
         agent: job.agent.clone(),
@@ -191,7 +193,7 @@ pub fn subagent_job_snapshot(job: &AgentJob) -> WireAgentJobSnapshot {
         output_tokens: Some(job.output_tokens),
         error: job.error.clone(),
         output_tail: Some(job.output.clone()),
-        live_preview: (job.status == JobStatus::Running).then(|| job.output.clone()),
+        live_preview: (job.status == SubagentJobStatus::Running).then(|| job.output.clone()),
         tps: job.tps(),
         cps: job.cps(),
         chars: Some(job.chars),
@@ -200,9 +202,9 @@ pub fn subagent_job_snapshot(job: &AgentJob) -> WireAgentJobSnapshot {
     }
 }
 
-pub fn agent_event(event: AgentJobEvent) -> WireAgentEvent {
+pub fn agent_event(event: SubagentJobEvent) -> WireAgentEvent {
     match event {
-        AgentJobEvent::Started {
+        SubagentJobEvent::Started {
             id,
             agent,
             source,
@@ -215,8 +217,8 @@ pub fn agent_event(event: AgentJobEvent) -> WireAgentEvent {
             run_id,
             node_id,
         },
-        AgentJobEvent::Output { id, chunk } => WireAgentEvent::Output { id, chunk },
-        AgentJobEvent::Metrics {
+        SubagentJobEvent::Output { id, chunk } => WireAgentEvent::Output { id, chunk },
+        SubagentJobEvent::Metrics {
             id,
             tps,
             cps,
@@ -235,7 +237,7 @@ pub fn agent_event(event: AgentJobEvent) -> WireAgentEvent {
             tools_called,
             turn,
         },
-        AgentJobEvent::Completed {
+        SubagentJobEvent::Completed {
             id,
             status,
             error,
@@ -308,12 +310,12 @@ fn dag_status_str(status: &DagStatus) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use theway_core::multiagent::registry::JobInit;
+    use theway_core::multiagent::jobs::SubagentJobInit;
 
     #[test]
     fn job_ops_projects_output_and_messages() {
-        let registry = AgentJobRegistry::new();
-        let id = registry.register(JobInit {
+        let registry = SubagentJobRegistry::new();
+        let id = registry.register(SubagentJobInit {
             agent: "explorer".into(),
             source: "dag".into(),
             run_id: Some("run-1".into()),

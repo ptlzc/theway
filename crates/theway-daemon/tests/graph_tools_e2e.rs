@@ -95,7 +95,7 @@ async fn dag_plan_wait_status_completes_2_node_dag_with_real_launcher() {
         faux_model(),
         Some(faux_stream("node result")),
         std::env::temp_dir(),
-        theway_core::multiagent::registry::AgentJobRegistry::new(),
+        theway_core::multiagent::jobs::SubagentJobRegistry::new(),
         // Tool-set resolver: subagents never call tools in this e2e (the faux model
         // stops after one turn), so an empty tool set per spec suffices.
         Arc::new(|_| Vec::new()),
@@ -120,7 +120,7 @@ async fn dag_plan_wait_status_completes_2_node_dag_with_real_launcher() {
             "checker".into(),
             "general".into(),
         ],
-        theway_core::multiagent::registry::AgentJobRegistry::new(),
+        theway_core::multiagent::jobs::SubagentJobRegistry::new(),
     );
 
     // dag_plan: 2-node mermaid DAG (A → B), both nodes are `explorer` subagents.

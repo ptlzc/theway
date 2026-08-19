@@ -7,7 +7,7 @@ async fn transport_endpoints_forwards_registry_events() {
     let endpoints = host.transport_endpoints();
     let mut rx = endpoints.events.subscribe();
 
-    let id = host.subagent_registry.register(JobInit {
+    let id = host.subagent_registry.register(SubagentJobInit {
         agent: "faux-agent".into(),
         source: "subagent".into(),
         run_id: None,
@@ -62,9 +62,9 @@ async fn transport_endpoints_forwarder_survives_lagged_registry_receiver() {
     // The forwarder task is spawned on the current-thread runtime and has not
     // run yet. Push more events than the broadcast capacity so its first
     // `recv().await` observes `Lagged` and keeps forwarding.
-    let registered = AGENT_JOB_EVENT_BROADCAST_CAPACITY + 10;
+    let registered = SUBAGENT_JOB_EVENT_BROADCAST_CAPACITY + 10;
     for _ in 0..registered {
-        host.subagent_registry.register(JobInit {
+        host.subagent_registry.register(SubagentJobInit {
             agent: "faux-agent".into(),
             source: "subagent".into(),
             run_id: None,

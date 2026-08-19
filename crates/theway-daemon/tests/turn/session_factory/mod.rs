@@ -196,7 +196,7 @@ fn test_factory(work_dir: PathBuf) -> (SessionHarnessFactory, TempDir) {
         ),
         memory_dir: state.path().join("memory"),
         dag_engine: std::sync::Arc::new(theway_core::multiagent::graph::engine::DagEngine::new()),
-        subagent_registry: theway_core::multiagent::registry::AgentJobRegistry::new(),
+        subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry::new(),
         mcp_tools: Vec::new(),
         mcp_notification_hooks: Vec::new(),
         dynamic_trigger_registry: crate::triggers::dynamic::DynamicTriggerRegistry::new(),

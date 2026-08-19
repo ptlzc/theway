@@ -14,7 +14,7 @@ use std::time::Duration;
 use theway_core::multiagent::goal;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::types::RunKind;
-use theway_core::multiagent::registry::{AgentJobRegistry, JobStatus};
+use theway_core::multiagent::jobs::{SubagentJobRegistry, SubagentJobStatus};
 use theway_core::multiagent::types::{AgentRunParams, AgentRunResolver};
 use theway_core::{
     AgentHarness, AgentHarnessOptions, AgentMessage, AgentTool, MemorySessionStorage, Session,
@@ -139,7 +139,7 @@ async fn goal_evaluator_runs_as_node_job_and_continues() {
     ]);
     let (harness, cell) = build_harness(stream.clone());
     let engine = Arc::new(DagEngine::new());
-    let registry = AgentJobRegistry::new();
+    let registry = SubagentJobRegistry::new();
     let hook = goal::stop_hook(
         cell,
         engine.clone(),
@@ -168,7 +168,7 @@ async fn goal_evaluator_runs_as_node_job_and_continues() {
         .iter()
         .find(|j| j.source == "dag" && j.node_id.as_deref() == Some("main"))
         .expect("evaluator job registered");
-    assert_eq!(evaluator.status, JobStatus::Succeeded);
+    assert_eq!(evaluator.status, SubagentJobStatus::Succeeded);
     assert_eq!(evaluator.run_id.as_deref(), Some("goal-1"));
     // Transcript captured the evaluator's JSON reply.
     assert!(
@@ -198,7 +198,7 @@ async fn goal_evaluator_can_be_interrupted_via_node_control() {
     let stream = sequence_stream(vec![("", 30_000)]);
     let (harness, cell) = build_harness(stream.clone());
     let engine = Arc::new(DagEngine::new());
-    let registry = AgentJobRegistry::new();
+    let registry = SubagentJobRegistry::new();
     let hook = goal::stop_hook(
         cell,
         engine.clone(),

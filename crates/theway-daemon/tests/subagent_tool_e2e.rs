@@ -83,7 +83,7 @@ async fn subagent_returns_final_text() {
         Arc::new(|_| Vec::new()),
         test_launch_resolver(),
         vec!["general".to_string()],
-        theway_core::multiagent::registry::AgentJobRegistry::new(),
+        theway_core::multiagent::jobs::SubagentJobRegistry::new(),
     );
     let res = tool
         .execute(
@@ -113,7 +113,7 @@ async fn subagent_unknown_type_errors() {
         Arc::new(|_| Vec::new()),
         test_launch_resolver(),
         vec!["general".to_string()],
-        theway_core::multiagent::registry::AgentJobRegistry::new(),
+        theway_core::multiagent::jobs::SubagentJobRegistry::new(),
     );
     let err = tool
         .execute(
@@ -139,7 +139,7 @@ async fn subagent_missing_prompt_errors() {
         Arc::new(|_| Vec::new()),
         test_launch_resolver(),
         vec!["general".to_string()],
-        theway_core::multiagent::registry::AgentJobRegistry::new(),
+        theway_core::multiagent::jobs::SubagentJobRegistry::new(),
     );
     let err = tool
         .execute("t-3", serde_json::json!({}), CancellationToken::new(), None)
@@ -167,7 +167,7 @@ async fn subagent_parent_abort_cascades() {
         Arc::new(|_| Vec::new()),
         test_launch_resolver(),
         vec!["general".to_string()],
-        theway_core::multiagent::registry::AgentJobRegistry::new(),
+        theway_core::multiagent::jobs::SubagentJobRegistry::new(),
     );
     let cancel = CancellationToken::new();
     let cancel2 = cancel.clone();
@@ -197,7 +197,7 @@ use std::sync::Arc as StdArc;
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::time::Duration;
 
-use theway_core::multiagent::registry::{AgentJobRegistry, JobStatus};
+use theway_core::multiagent::jobs::{SubagentJobRegistry, SubagentJobStatus};
 use theway_core::multiagent::runner::{AgentRunOptions, run_agent};
 
 /// Per-call scripted stream: `(text, delay_ms)` for each LLM call; calls past the
@@ -246,7 +246,7 @@ fn stall_then_reply(text: &'static str) -> StreamFn {
     sequence_stream(vec![("", 30_000), (text, 0)])
 }
 
-async fn wait_for_job(registry: &AgentJobRegistry) -> String {
+async fn wait_for_job(registry: &SubagentJobRegistry) -> String {
     for _ in 0..100 {
         if let Some(job) = registry.list().first() {
             return job.id.clone();
@@ -257,7 +257,7 @@ async fn wait_for_job(registry: &AgentJobRegistry) -> String {
 }
 
 fn run_options(
-    registry: AgentJobRegistry,
+    registry: SubagentJobRegistry,
     stream: StreamFn,
     cancel: CancellationToken,
 ) -> AgentRunOptions {
@@ -283,7 +283,7 @@ fn run_options(
 
 #[tokio::test]
 async fn interrupt_without_steer_ends_run_interrupted() {
-    let registry = AgentJobRegistry::new();
+    let registry = SubagentJobRegistry::new();
     let cancel = CancellationToken::new();
     let handle = tokio::spawn(run_agent(run_options(
         registry.clone(),
@@ -301,13 +301,13 @@ async fn interrupt_without_steer_ends_run_interrupted() {
     assert_eq!(result.error.as_deref(), Some("turn interrupted"));
 
     let job = registry.job(&id).unwrap();
-    assert_eq!(job.status, JobStatus::Interrupted);
+    assert_eq!(job.status, SubagentJobStatus::Interrupted);
     assert!(job.control.is_none(), "control detached after finish");
 }
 
 #[tokio::test]
 async fn interrupt_with_steer_continues_into_next_turn() {
-    let registry = AgentJobRegistry::new();
+    let registry = SubagentJobRegistry::new();
     let cancel = CancellationToken::new();
     let handle = tokio::spawn(run_agent(run_options(
         registry.clone(),
@@ -331,7 +331,7 @@ async fn interrupt_with_steer_continues_into_next_turn() {
     assert_eq!(result.text, "done after steer");
 
     let job = registry.job(&id).unwrap();
-    assert_eq!(job.status, JobStatus::Succeeded);
+    assert_eq!(job.status, SubagentJobStatus::Succeeded);
     // The steer message landed in the transcript at the next turn.
     let steered = job
         .messages
@@ -348,7 +348,7 @@ async fn interrupt_with_steer_continues_into_next_turn() {
 async fn steer_mid_turn_lands_at_next_natural_turn() {
     // Steer without interrupt: queued while the first turn is in flight (300 ms
     // scripted delay), drained at the natural turn boundary, next turn carries it.
-    let registry = AgentJobRegistry::new();
+    let registry = SubagentJobRegistry::new();
     let cancel = CancellationToken::new();
     let handle = tokio::spawn(run_agent(run_options(
         registry.clone(),

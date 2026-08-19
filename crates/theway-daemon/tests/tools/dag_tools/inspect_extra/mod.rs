@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use theway_core::multiagent::graph::persist::{PersistedNode, PersistedRun};
 use theway_core::multiagent::graph::types::{Direction, NodeStatus, RunKind};
-use theway_core::multiagent::registry::JobInit;
+use theway_core::multiagent::jobs::SubagentJobInit;
 
 use super::*;
 
@@ -132,7 +132,7 @@ async fn inspect_missing_dep_shows_missing_marker() {
 #[tokio::test]
 async fn inspect_transcript_appends_live_text_for_running_job() {
     let engine = engine_with_stuck_launcher();
-    let registry = AgentJobRegistry::new();
+    let registry = SubagentJobRegistry::new();
     let tools = tools_with_registry(engine.clone(), None, registry.clone());
     exec(
         tool_by(&tools, "dag_plan"),
@@ -146,7 +146,7 @@ async fn inspect_transcript_appends_live_text_for_running_job() {
     )
     .await
     .unwrap();
-    let job_id = registry.register(JobInit {
+    let job_id = registry.register(SubagentJobInit {
         agent: "planner".into(),
         source: "dag".into(),
         run_id: Some("dag-1".into()),
@@ -170,8 +170,8 @@ async fn inspect_transcript_appends_live_text_for_running_job() {
 
 #[test]
 fn render_transcript_covers_all_message_shapes() {
-    let registry = AgentJobRegistry::new();
-    let job_id = registry.register(JobInit {
+    let registry = SubagentJobRegistry::new();
+    let job_id = registry.register(SubagentJobInit {
         agent: "planner".into(),
         source: "dag".into(),
         run_id: Some("r1".into()),

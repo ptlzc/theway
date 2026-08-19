@@ -395,7 +395,7 @@ fn trace_attributes(start: &theway_core::OperationStarted) -> Vec<KeyValue> {
             attributes.push(KeyValue::new("gen_ai.provider.name", provider.clone()));
             attributes.push(KeyValue::new("gen_ai.request.model", model.clone()));
         }
-        OperationDetail::AgentJob { agent, source } => {
+        OperationDetail::SubagentJob { agent, source } => {
             attributes.push(KeyValue::new("theway.agent.name", agent.clone()));
             attributes.push(KeyValue::new("theway.agent.source", source.clone()));
         }

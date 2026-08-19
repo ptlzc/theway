@@ -24,7 +24,7 @@ use std::sync::Arc;
 use theway_llm_provider::Model;
 
 use theway_core::multiagent::graph::engine::DagEngine;
-use theway_core::multiagent::registry::AgentJobRegistry;
+use theway_core::multiagent::jobs::SubagentJobRegistry;
 use theway_core::multiagent::types::ToolSetResolver;
 use theway_core::{AgentTool, StreamFn};
 
@@ -93,7 +93,7 @@ pub fn engine_tools(
     memory_dir: &Path,
     base_dir: &Path,
     dag_engine: &Arc<DagEngine>,
-    subagent_registry: &AgentJobRegistry,
+    subagent_registry: &SubagentJobRegistry,
     subagent_tools: SubagentToolsFn,
     launch_resolver: AgentRunResolver,
     spec_names: Vec<String>,

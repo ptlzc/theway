@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use theway_core::AgentTool;
 use theway_core::multiagent::graph::engine::DagEngine;
-use theway_core::multiagent::registry::AgentJobRegistry;
+use theway_core::multiagent::jobs::SubagentJobRegistry;
 
 // The test mirror (`tests/tools/dag_tools/`, bridged at the bottom of this
 // file) resolves these names through this module's scope via `use super::*`;
@@ -78,7 +78,7 @@ impl DagTools {
         engine: Arc<DagEngine>,
         session_id: Option<String>,
         spec_names: Vec<String>,
-        registry: AgentJobRegistry,
+        registry: SubagentJobRegistry,
     ) -> Vec<Arc<dyn AgentTool>> {
         vec![
             Arc::new(DagPlanTool {

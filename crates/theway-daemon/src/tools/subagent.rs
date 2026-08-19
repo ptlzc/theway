@@ -27,7 +27,7 @@
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use theway_core::multiagent::registry::AgentJobRegistry;
+use theway_core::multiagent::jobs::SubagentJobRegistry;
 use theway_core::{
     AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate, StreamFn, ToolExecutionMode,
 };
@@ -64,7 +64,7 @@ pub struct SubagentTool {
     /// populated from the app's spec table (not static).
     definition: Tool,
     /// Subagent job registry (graph mode metrics/output).
-    registry: AgentJobRegistry,
+    registry: SubagentJobRegistry,
     /// Owning session stamped on every spawned job (session-resource-model). `None` for
     /// session-less construction (e2e tests); the CLI wires `Some(current)` via
     /// the CLI's session factory.
@@ -78,7 +78,7 @@ impl SubagentTool {
         subagent_tools: SubagentToolsFn,
         launch_resolver: AgentRunResolver,
         spec_names: Vec<String>,
-        registry: AgentJobRegistry,
+        registry: SubagentJobRegistry,
     ) -> Self {
         Self {
             definition: build_definition(&spec_names),

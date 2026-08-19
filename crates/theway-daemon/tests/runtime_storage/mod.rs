@@ -8,7 +8,7 @@ use theway_core::multiagent::graph::persist::{PersistedNode, PersistedRun};
 use theway_core::multiagent::graph::types::{
     DagNodeDef, DagRunDef, Direction, NodeStatus, RunKind,
 };
-use theway_core::multiagent::registry::JobTranscript;
+use theway_core::multiagent::jobs::JobTranscript;
 use theway_transport::grpc::{serve_storage_service, StorageServiceState};
 use theway_transport::transport::{SessionOps, StorageOps};
 use theway_transport::wire::{

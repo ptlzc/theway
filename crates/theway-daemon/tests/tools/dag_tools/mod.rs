@@ -6,7 +6,7 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use theway_core::multiagent::graph::engine::{NodeLauncher, NodeOutcome};
 use theway_core::multiagent::graph::mermaid::node_summary_line;
-use theway_core::multiagent::registry::AgentJobRegistry;
+use theway_core::multiagent::jobs::SubagentJobRegistry;
 
 use super::*;
 
@@ -113,13 +113,13 @@ fn engine_with(launcher: FakeLauncher) -> (Arc<DagEngine>, Arc<FakeLauncher>) {
 }
 
 fn tools(engine: Arc<DagEngine>, session_id: Option<&str>) -> Vec<Arc<dyn AgentTool>> {
-    tools_with_registry(engine, session_id, AgentJobRegistry::new())
+    tools_with_registry(engine, session_id, SubagentJobRegistry::new())
 }
 
 fn tools_with_registry(
     engine: Arc<DagEngine>,
     session_id: Option<&str>,
-    registry: AgentJobRegistry,
+    registry: SubagentJobRegistry,
 ) -> Vec<Arc<dyn AgentTool>> {
     DagTools::new(
         engine,

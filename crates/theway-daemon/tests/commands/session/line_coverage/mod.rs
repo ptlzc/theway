@@ -363,7 +363,7 @@ async fn session_import_maps_open_repo_error() {
         fn job_transcript_store(
             &self,
             _cwd: &Path,
-        ) -> Arc<dyn theway_core::multiagent::registry::JobTranscriptStore> {
+        ) -> Arc<dyn theway_core::multiagent::jobs::JobTranscriptStore> {
             unreachable!("not used by /session import")
         }
         async fn load_dag_runs(

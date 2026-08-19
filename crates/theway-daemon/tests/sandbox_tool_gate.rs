@@ -28,7 +28,7 @@ use std::sync::Arc;
 use theway_core::AgentTool;
 use theway_core::executor::{ExecutorKind, ToolExecutor};
 use theway_core::multiagent::graph::engine::DagEngine;
-use theway_core::multiagent::registry::AgentJobRegistry;
+use theway_core::multiagent::jobs::SubagentJobRegistry;
 use theway_daemon::executor::sandbox::SandboxExecutor;
 use theway_daemon::tools;
 use theway_daemon::tools::assembly;
@@ -126,7 +126,7 @@ fn local_tools_omits_every_direct_os_tool() {
 #[test]
 fn engine_tools_omit_direct_fs_writers_but_keep_read_only_skill_surface() {
     let dag_engine = Arc::new(DagEngine::new());
-    let registry = AgentJobRegistry::new();
+    let registry = SubagentJobRegistry::new();
     let model = faux_model();
     let tools = assembly::engine_tools(
         std::path::Path::new("/nonexistent-memory-dir"),
@@ -162,7 +162,7 @@ fn engine_tools_omit_direct_fs_writers_but_keep_read_only_skill_surface() {
 #[test]
 fn session_tool_set_assembly_is_fail_closed() {
     let dag_engine = Arc::new(DagEngine::new());
-    let registry = AgentJobRegistry::new();
+    let registry = SubagentJobRegistry::new();
     let model = faux_model();
     let tools = tools::session_tool_set(
         std::path::Path::new("/nonexistent-memory-dir"),

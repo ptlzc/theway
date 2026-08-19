@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::model::node_status_label;
 use theway_core::multiagent::graph::types::DagNode;
-use theway_core::multiagent::registry::{AgentJob, AgentJobRegistry, JobStatus};
+use theway_core::multiagent::jobs::{SubagentJob, SubagentJobRegistry, SubagentJobStatus};
 use theway_core::{AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate, ToolExecutionMode};
 use theway_llm_provider::Tool;
 use tokio_util::sync::CancellationToken;
@@ -22,7 +22,7 @@ use super::utils::{node_result_text, ok_text, resolve_dag, tail_truncate};
 pub struct DagInspectTool {
     pub(super) engine: Arc<DagEngine>,
     pub(super) session_id: Option<String>,
-    pub(super) registry: AgentJobRegistry,
+    pub(super) registry: SubagentJobRegistry,
 }
 
 #[async_trait]
@@ -119,7 +119,7 @@ fn summary_text(node: &DagNode, tail: usize, deps: &str) -> String {
 fn transcript_text(
     node: &DagNode,
     run_id: &str,
-    registry: &AgentJobRegistry,
+    registry: &SubagentJobRegistry,
     tail: usize,
 ) -> String {
     let mut parts = vec![format!(
@@ -142,7 +142,7 @@ fn transcript_text(
         return parts.join("\n");
     };
     let mut body = render_transcript(&job);
-    if job.status == JobStatus::Running {
+    if job.status == SubagentJobStatus::Running {
         // In-flight assistant text not yet captured at MessageEnd.
         let live = tail_truncate(&job.output, 2000);
         if !live.is_empty() {
@@ -166,7 +166,7 @@ fn transcript_text(
 /// messages serialize with the wire `role` discriminator ("user" / "assistant"
 /// / "toolResult"); synthetic entries use "toolCall" / "toolResult" plus name /
 /// args / content fields. Tolerant: unknown shapes degrade to a one-line dump.
-fn render_transcript(job: &AgentJob) -> String {
+fn render_transcript(job: &SubagentJob) -> String {
     let mut out = String::new();
     for msg in &job.messages {
         let role = msg

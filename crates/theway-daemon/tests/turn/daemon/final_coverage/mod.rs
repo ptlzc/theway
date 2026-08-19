@@ -17,8 +17,8 @@ use theway_core::{
     ControlPlanePromptRequest, MemorySessionStorage, Session, SessionError, SessionErrorCode,
     SessionStorage, SessionTreeEntry, Skill, SkillSource, StreamFn,
 };
-use theway_core::multiagent::registry::{
-    AGENT_JOB_EVENT_BROADCAST_CAPACITY, AgentJobRegistry, JobInit,
+use theway_core::multiagent::jobs::{
+    SUBAGENT_JOB_EVENT_BROADCAST_CAPACITY, SubagentJobRegistry, SubagentJobInit,
 };
 use theway_llm_provider::{
     Api, AssistantMessageEventSender, AssistantMessageEventStream, InputModality, Model,
@@ -156,7 +156,7 @@ fn build_host_with(
         main_run_rx,
         control_plane_prompt_rx,
         dag_engine: Arc::new(theway_core::multiagent::graph::engine::DagEngine::new()),
-        subagent_registry: AgentJobRegistry::new(),
+        subagent_registry: SubagentJobRegistry::new(),
         session_factory,
         session_repo: Arc::new(SqliteSessionRepo::new(repo_dir.path())),
         current_session_state: Arc::new(parking_lot::Mutex::new(CurrentSessionState::default())),
