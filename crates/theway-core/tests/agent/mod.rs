@@ -43,19 +43,20 @@ fn pending_message_queue_one_at_a_time_empty_is_noop() {
 }
 
 #[test]
-fn guard_not_streaming_rejects_while_streaming() {
-    let mut state = AgentState::default();
-    state.is_streaming = true;
-    let agent = Agent::new(AgentOptions {
-        initial_state: Some(state),
-        ..Default::default()
-    });
+fn run_permit_rejects_second_owner_and_releases_on_drop() {
+    let agent = Agent::new(AgentOptions::default());
+    let permit = AgentRunPermit::acquire(agent.inner.clone()).unwrap();
+    assert!(agent.is_streaming());
 
-    let err = agent.guard_not_streaming().unwrap_err();
+    let err = match AgentRunPermit::acquire(agent.inner.clone()) {
+        Ok(_) => panic!("second run permit must be rejected"),
+        Err(err) => err,
+    };
     assert!(matches!(err, AgentRunError::AlreadyStreaming));
 
-    agent.state().is_streaming = false;
-    assert!(agent.guard_not_streaming().is_ok());
+    drop(permit);
+    assert!(!agent.is_streaming());
+    assert!(AgentRunPermit::acquire(agent.inner.clone()).is_ok());
 }
 
 #[test]

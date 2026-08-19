@@ -54,7 +54,7 @@ use std::sync::Arc;
 use theway_llm_provider::{Message as PiMessage, UserContentBlock};
 use tokio_util::sync::CancellationToken;
 
-use crate::agent::{AgentInner, AgentRunError};
+use crate::agent::{AgentInner, AgentRunError, AgentRunPermit};
 use crate::types::*;
 
 use self::llm::call_llm;
@@ -65,12 +65,8 @@ pub(crate) async fn run_agent_loop(
     inner: Arc<AgentInner>,
     new_messages: Vec<AgentMessage>,
 ) -> Result<(), AgentRunError> {
+    let _permit = AgentRunPermit::acquire(inner.clone())?;
     let cancel = CancellationToken::new();
-    {
-        let mut g = inner.state.lock();
-        g.is_streaming = true;
-        g.error_message = None;
-    }
     *inner.active_cancel.lock() = Some(cancel.clone());
 
     emit(&inner, LoopEvent::RunStarted, &cancel).await;
@@ -94,14 +90,13 @@ pub(crate) async fn run_agent_loop(
 }
 
 pub(crate) async fn run_agent_loop_continue(inner: Arc<AgentInner>) -> Result<(), AgentRunError> {
+    let _permit = AgentRunPermit::acquire(inner.clone())?;
     let cancel = CancellationToken::new();
     {
-        let mut g = inner.state.lock();
+        let g = inner.state.lock();
         if g.messages.is_empty() {
             return Err(AgentRunError::Other("No messages to continue from".into()));
         }
-        g.is_streaming = true;
-        g.error_message = None;
     }
     *inner.active_cancel.lock() = Some(cancel.clone());
     emit(&inner, LoopEvent::RunStarted, &cancel).await;

@@ -102,6 +102,8 @@ pub struct Agent {
 }
 
 pub(crate) struct AgentInner {
+    /// Serializes admission and cleanup for one active prompt/continue run.
+    pub run_active: Mutex<bool>,
     pub state: Mutex<AgentState>,
     /// Segment 1: synchronous callbacks (memory-only, <1µs). Each wrapped in `catch_unwind`.
     pub sync_callbacks: Mutex<Vec<LoopSyncCallback>>,
@@ -119,6 +121,48 @@ pub(crate) struct AgentInner {
     pub idle: Notify,
     /// Hard cap on loop iterations (see [`AgentOptions::max_iterations`]).
     pub max_iterations: Option<u32>,
+}
+
+pub(crate) struct AgentRunPermit {
+    inner: Arc<AgentInner>,
+}
+
+impl AgentRunPermit {
+    pub(crate) fn acquire(inner: Arc<AgentInner>) -> Result<Self, AgentRunError> {
+        let mut active = inner.run_active.lock();
+        if *active {
+            return Err(AgentRunError::AlreadyStreaming);
+        }
+        *active = true;
+        {
+            let mut state = inner.state.lock();
+            state.is_streaming = true;
+            state.error_message = None;
+        }
+        drop(active);
+        Ok(Self { inner })
+    }
+}
+
+impl Drop for AgentRunPermit {
+    fn drop(&mut self) {
+        self.inner.release_run();
+    }
+}
+
+impl AgentInner {
+    pub(crate) fn release_run(&self) {
+        let mut active = self.run_active.lock();
+        if !*active {
+            return;
+        }
+        *self.active_cancel.lock() = None;
+        *self.turn_cancel.lock() = None;
+        self.state.lock().is_streaming = false;
+        *active = false;
+        drop(active);
+        self.idle.notify_waiters();
+    }
 }
 
 pub(crate) struct PendingMessageQueue {
@@ -161,6 +205,7 @@ impl Agent {
         let max_iterations = options.max_iterations;
         let (broadcast_tx, _) = broadcast::channel(LOOP_EVENT_BROADCAST_CAPACITY);
         let inner = AgentInner {
+            run_active: Mutex::new(false),
             state: Mutex::new(state),
             sync_callbacks: Mutex::new(Vec::new()),
             await_listeners: Mutex::new(Vec::new()),
@@ -258,21 +303,12 @@ impl Agent {
 
     /// Start a new prompt with a batch of messages.
     pub async fn prompt_many(&self, messages: Vec<AgentMessage>) -> Result<(), AgentRunError> {
-        self.guard_not_streaming()?;
         run_agent_loop(self.inner.clone(), messages).await
     }
 
     /// Continue from the current transcript without appending new user messages.
     pub async fn continue_(&self) -> Result<(), AgentRunError> {
-        self.guard_not_streaming()?;
         run_agent_loop_continue(self.inner.clone()).await
-    }
-
-    fn guard_not_streaming(&self) -> Result<(), AgentRunError> {
-        if self.is_streaming() {
-            return Err(AgentRunError::AlreadyStreaming);
-        }
-        Ok(())
     }
 }
 

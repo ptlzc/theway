@@ -237,6 +237,53 @@ async fn run_agent_loop_appends_new_messages_and_runs() {
 }
 
 #[tokio::test]
+async fn concurrent_prompts_admit_exactly_one_run() {
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let stream: StreamFn = Arc::new({
+        let entered = entered.clone();
+        let release = release.clone();
+        move |_, _, _| {
+            let (stream, mut sender) = theway_llm_provider::AssistantMessageEventStream::new();
+            let entered = entered.clone();
+            let release = release.clone();
+            tokio::spawn(async move {
+                entered.notify_one();
+                release.notified().await;
+                let message = assistant_with_stop("ok", StopReason::Stop);
+                sender.push(theway_llm_provider::AssistantMessageEvent::Start {
+                    partial: message.clone(),
+                });
+                sender.push(theway_llm_provider::AssistantMessageEvent::Done {
+                    reason: theway_llm_provider::DoneReason::Stop,
+                    message,
+                });
+            });
+            stream
+        }
+    });
+    let mut state = AgentState::default();
+    state.model = Some(faux_model());
+    let agent = Arc::new(Agent::new(AgentOptions {
+        initial_state: Some(state),
+        stream_fn: Some(stream),
+        ..Default::default()
+    }));
+
+    let first = tokio::spawn({
+        let agent = agent.clone();
+        async move { agent.prompt(user_message("first")).await }
+    });
+    entered.notified().await;
+    let second = agent.prompt(user_message("second")).await.unwrap_err();
+    assert!(matches!(second, AgentRunError::AlreadyStreaming));
+
+    release.notify_one();
+    first.await.unwrap().unwrap();
+    assert!(!agent.is_streaming());
+}
+
+#[tokio::test]
 async fn drive_loop_errors_when_max_iterations_exceeded() {
     let mut inner = inner_with_model_and_stream(stream_that_returns(
         "loop",
