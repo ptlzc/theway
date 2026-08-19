@@ -14,6 +14,13 @@ env:
   # only applies to first-party clippy lints.
 
 jobs:
+  file-size:
+    name: Rust file-size governance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/check-rust-file-size.sh
+
   fmt:
     name: rustfmt
     runs-on: ubuntu-latest
