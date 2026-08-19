@@ -21,11 +21,10 @@ use std::sync::Arc;
 use anyhow::{Context as _, Result, bail};
 use async_trait::async_trait;
 use parking_lot::Mutex;
-use theway_contract::session::{SessionError, SessionReader};
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::types::DagStatus;
-use theway_storage::sqlite_repo::SqliteSessionRepo;
 
+use crate::runtime_storage::SessionRepository;
 use theway_transport::transport::SessionOps;
 use theway_transport::wire::SessionSummary;
 
@@ -65,16 +64,16 @@ pub struct CurrentSessionState {
 /// 3.5/3.6). All ops are repo-backed; `delete` additionally consults the DAG engine for
 /// the delete-protection rule.
 ///
-/// `SessionOps` over the cwd-scoped [`SqliteSessionRepo`] + the process-wide [`DagEngine`].
+/// `SessionOps` over a cwd-scoped [`SessionRepository`] and the process DAG engine.
 pub struct AppSessionOps {
-    repo: Arc<SqliteSessionRepo>,
+    repo: Arc<dyn SessionRepository>,
     dag_engine: Arc<DagEngine>,
     current: Arc<Mutex<CurrentSessionState>>,
 }
 
 impl AppSessionOps {
     pub fn new(
-        repo: Arc<SqliteSessionRepo>,
+        repo: Arc<dyn SessionRepository>,
         dag_engine: Arc<DagEngine>,
         current: Arc<Mutex<CurrentSessionState>>,
     ) -> Self {
@@ -93,65 +92,31 @@ impl SessionOps for AppSessionOps {
         let runs = self.dag_engine.list_runs();
 
         let mut summaries = Vec::new();
-        for path in self.repo.list().await.map_err(repo_err)? {
-            let session = self.repo.open(&path).await.map_err(repo_err)?;
-            let meta = session.get_metadata_json().await.map_err(repo_err)?;
-            let session_id = meta
-                .get("id")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .to_string();
-            let created_at = meta
-                .get("createdAt")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .to_string();
-            let cwd = meta
-                .get("cwd")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .to_string();
-
-            let name = theway_storage::session::session_name(&session)
-                .await
-                .unwrap_or_default();
-            let preview = theway_storage::session::first_user_text(&session).await;
-            let model = theway_storage::session::last_model_change(&session).await;
-
-            // Last activity: transcript mtime (epoch millis). Cheap, and a session is only
-            // ever written when something actually happened in it.
-            let last_activity_at = tokio::fs::metadata(&path)
-                .await
-                .ok()
-                .and_then(|m| m.modified().ok())
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_millis() as i64)
-                .unwrap_or(0);
-
+        for record in self.repo.list().await? {
             let session_runs = runs
                 .iter()
-                .filter(|run| run.session_id.as_deref() == Some(session_id.as_str()));
+                .filter(|run| run.session_id.as_deref() == Some(record.id.as_str()));
             let graph_count = session_runs.clone().count() as u32;
             let active_graph_count = session_runs
                 .filter(|run| run.status == DagStatus::Running)
                 .count() as u32;
 
-            let is_current = current.session_id == session_id;
+            let is_current = current.session_id == record.id;
             summaries.push(SessionSummary {
-                session_id,
-                name,
-                cwd,
+                session_id: record.id,
+                name: record.name.unwrap_or_default(),
+                cwd: record.cwd,
                 model: if is_current && !current.model.is_empty() {
                     current.model.clone()
                 } else {
-                    model
+                    record.model
                 },
-                created_at,
-                last_activity_at,
+                created_at: record.created_at,
+                last_activity_at: record.last_activity_at,
                 graph_count,
                 active_graph_count,
                 busy: is_current && current.busy,
-                preview,
+                preview: record.preview,
             });
         }
         Ok(summaries)
@@ -170,8 +135,8 @@ impl SessionOps for AppSessionOps {
                 state.cwd.clone()
             }
         };
-        let session = self.repo.create(cwd).await.map_err(repo_err)?;
-        let meta = session.get_metadata_json().await.map_err(repo_err)?;
+        let session = self.repo.create(std::path::Path::new(&cwd)).await?;
+        let meta = session.get_metadata_json().await?;
         Ok(meta
             .get("id")
             .and_then(|v| v.as_str())
@@ -184,23 +149,22 @@ impl SessionOps for AppSessionOps {
         if name.is_empty() {
             bail!("session name must not be empty");
         }
-        let path = theway_storage::session::find_path_by_id(&self.repo, id)
+        let session = self
+            .repo
+            .open(id)
             .await?
             .with_context(|| format!("no session matches id {id}"))?;
-        let session = self.repo.open(&path).await.map_err(repo_err)?;
-        theway_storage::session::append_session_name(&session, name)
-            .await
-            .map_err(repo_err)?;
+        theway_storage::session::append_session_name(session.as_ref(), name).await?;
         Ok(())
     }
 
     async fn delete(&self, id: &str) -> Result<Vec<String>> {
-        let path = theway_storage::session::find_path_by_id(&self.repo, id)
+        let session = self
+            .repo
+            .open(id)
             .await?
             .with_context(|| format!("no session matches id {id}"))?;
-        // Resolve the metadata id first: DAG runs are stamped with it, not the file stem.
-        let session = self.repo.open(&path).await.map_err(repo_err)?;
-        let meta = session.get_metadata_json().await.map_err(repo_err)?;
+        let meta = session.get_metadata_json().await?;
         let session_id = meta
             .get("id")
             .and_then(|v| v.as_str())
@@ -222,22 +186,20 @@ impl SessionOps for AppSessionOps {
             return Ok(active);
         }
 
-        theway_storage::session::delete_by_id(&self.repo, id).await?;
+        self.repo.delete(id).await?;
         Ok(Vec::new())
     }
-}
-
-fn repo_err(e: SessionError) -> anyhow::Error {
-    anyhow::Error::msg(e.to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::tempdir;
+    use theway_contract::session::SessionReader;
+    use theway_storage::sqlite_repo::SqliteSessionRepo;
 
     fn ops(
-        repo: Arc<SqliteSessionRepo>,
+        repo: Arc<dyn SessionRepository>,
         current_id: &str,
     ) -> (AppSessionOps, Arc<Mutex<CurrentSessionState>>) {
         let engine = Arc::new(DagEngine::new());

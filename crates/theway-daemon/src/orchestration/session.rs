@@ -2,11 +2,10 @@
 
 use std::sync::{Arc, OnceLock};
 
-use crate::SqliteSessionRepo;
 use crate::hook_executors::daemon_executors;
 use crate::hooks;
 use crate::orchestration::DaemonServices;
-use crate::runtime_storage::RuntimeStorage;
+use crate::runtime_storage::{RuntimeStorage, SessionRepository};
 use crate::trigger_engine::notification_hook::DynNotificationHook;
 use crate::{agent_specs, tools, triggers};
 use anyhow::{Context, Result};
@@ -14,7 +13,6 @@ use theway_contract::session::SessionStore;
 use theway_core::multiagent::goal;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::{AgentHarness, AgentHarnessOptions, ThinkingLevel};
-use theway_storage::session;
 use theway_transport::feed::FeedUpdate;
 use theway_transport::inbox;
 
@@ -115,12 +113,12 @@ impl SessionRuntime {
 
 impl SessionRuntimeBuilder {
     /// Build (and rehydrate) a harness for `id` (full session id or unique prefix).
-    pub async fn build(&self, repo: &SqliteSessionRepo, id: &str) -> Result<SessionRuntime> {
-        // Resume semantics: same lookup as CLI --resume-id.
-        let store = session::resume(repo, Some(id))
+    pub async fn build(&self, repo: &dyn SessionRepository, id: &str) -> Result<SessionRuntime> {
+        let store = repo
+            .resume(Some(id))
             .await
             .with_context(|| format!("open session {id}"))?;
-        self.build_opened(Arc::new(store), true).await
+        self.build_opened(store, true).await
     }
 
     /// Assemble the complete session runtime from an already-opened persistent store.

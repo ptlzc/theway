@@ -166,7 +166,7 @@ async fn remote_runtime_storage_connect_error_surfaces_addr() {
 }
 
 #[tokio::test]
-async fn remote_runtime_storage_opens_local_repo_and_resolves_sidecar_paths() {
+async fn remote_runtime_storage_opens_session_repository() {
     // Arrange
     let _env_lock = crate::test_env::ENV_LOCK.lock().unwrap();
     let dir = tempfile::tempdir().unwrap();
@@ -178,22 +178,13 @@ async fn remote_runtime_storage_opens_local_repo_and_resolves_sidecar_paths() {
     let storage = RemoteRuntimeStorage::connect(&addr).await.unwrap();
 
     // Act
-    let repo = storage.open_session_repo(&cwd).await.unwrap();
-    let store = theway_storage::session::create(&repo, &cwd).await.unwrap();
-    let session = theway_core::Session::from_store(Arc::new(store));
-    let trigger_path = storage.trigger_sidecar_path(&session, &repo).await.unwrap();
-    let cron_path = storage.cron_sidecar_path(&session, &repo).await.unwrap();
+    let repo = storage.session_repository(&cwd).await.unwrap();
+    let store = repo.create(&cwd).await.unwrap();
+    let metadata = store.get_metadata_json().await.unwrap();
+    let session_id = metadata.get("id").and_then(|id| id.as_str()).unwrap();
 
     // Assert
-    assert!(repo.root().join("does-not-exist").parent().is_some());
-    assert!(
-        trigger_path.to_string_lossy().ends_with("triggers.json"),
-        "{trigger_path:?}"
-    );
-    assert!(
-        cron_path.to_string_lossy().ends_with("cron.toml"),
-        "{cron_path:?}"
-    );
+    assert!(repo.open(session_id).await.unwrap().is_some());
 }
 
 // ── RemoteDagPersistHandle debounce loop + error/logging arms ───────────────

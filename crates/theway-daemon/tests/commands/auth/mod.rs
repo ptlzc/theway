@@ -10,7 +10,6 @@ use theway_core::multiagent::graph::persist::{DagPersistSink, PersistedRun};
 use theway_core::multiagent::jobs::JobTranscriptStore;
 use theway_core::{AgentMessage, MemorySessionStorage, Session, SessionStorage};
 use theway_llm_provider::{Message, UserContent, UserMessage, UserRole};
-use theway_storage::sqlite_repo::SqliteSessionRepo;
 use theway_transport::auth::{AuthStore, ProviderCredential};
 use theway_transport::commands::{CommandCtx, CommandOutcome};
 use theway_transport::triggers::{CronJob, DynamicTriggerRule};
@@ -18,13 +17,15 @@ use theway_transport::triggers::{CronJob, DynamicTriggerRule};
 use super::*;
 use crate::commands::DaemonCtx;
 use crate::test_env::{EnvGuard, ENV_LOCK};
-use theway_daemon::runtime_storage::{RuntimeStorage, local_runtime_storage};
+use theway_daemon::runtime_storage::{
+    RuntimeStorage, SessionRepository, local_runtime_storage,
+};
 
 struct FailingStorage;
 
 #[async_trait]
 impl RuntimeStorage for FailingStorage {
-    async fn open_session_repo(&self, _cwd: &Path) -> Result<Arc<SqliteSessionRepo>> {
+    async fn session_repository(&self, _cwd: &Path) -> Result<Arc<dyn SessionRepository>> {
         Err(anyhow::anyhow!("session repo unavailable"))
     }
 
@@ -37,22 +38,6 @@ impl RuntimeStorage for FailingStorage {
     }
 
     fn spawn_dag_persist(&self, _engine: Arc<DagEngine>, _cwd: std::path::PathBuf) -> Arc<dyn DagPersistSink> {
-        todo!()
-    }
-
-    async fn trigger_sidecar_path(
-        &self,
-        _session: &theway_core::Session,
-        _repo: &SqliteSessionRepo,
-    ) -> Result<std::path::PathBuf> {
-        todo!()
-    }
-
-    async fn cron_sidecar_path(
-        &self,
-        _session: &theway_core::Session,
-        _repo: &SqliteSessionRepo,
-    ) -> Result<std::path::PathBuf> {
         todo!()
     }
 

@@ -8,10 +8,8 @@ use crate::stream_auth::stream_fn_with_auth_store;
 use crate::turn::daemon::{DaemonConfig, PanelStatus, TurnHost};
 use crate::{agent_specs, session_ops, skills, templates, triggers, ui_mode_panel};
 use anyhow::{Context, Result};
-use theway_contract::session::SessionReader;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::{PermissionPolicy, ThinkingLevel};
-use theway_storage::session;
 use theway_transport::config;
 
 use super::{DaemonServices, SessionRuntimeBuilder};
@@ -62,7 +60,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         Some(addr) => remote_runtime_storage(addr).await?,
         None => local_runtime_storage(),
     };
-    let repo = storage.open_session_repo(&cwd).await?;
+    let repo = storage.session_repository(&cwd).await?;
 
     // Issue #73: config-file-free startup. The daemon no longer reads
     // `config.toml` at startup — every setting lives in the in-memory
@@ -146,9 +144,9 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     let thinking = options.thinking;
 
     let (store, resumed) = match &options.session {
-        SessionSelection::New => (session::create(&repo, &cwd).await?, false),
-        SessionSelection::Latest => (session::resume(&repo, None).await?, true),
-        SessionSelection::Id(id) => (session::resume(&repo, Some(id)).await?, true),
+        SessionSelection::New => (repo.create(&cwd).await?, false),
+        SessionSelection::Latest => (repo.resume(None).await?, true),
+        SessionSelection::Id(id) => (repo.resume(Some(id)).await?, true),
     };
     let session_metadata = store.get_metadata_json().await?;
     let session_id = session_metadata
@@ -377,9 +375,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         debug: options.debug,
         load_local_sources: startup.load_local_sources,
     });
-    let initial_runtime = session_runtime_builder
-        .build_opened(Arc::new(store), resumed)
-        .await?;
+    let initial_runtime = session_runtime_builder.build_opened(store, resumed).await?;
     let harness = initial_runtime.harness.clone();
     let trigger_executor = initial_runtime.trigger_executor.clone();
     let tool_names = initial_runtime.tool_names;
@@ -392,7 +388,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         Arc::new(move |id: String| {
             let plan = plan.clone();
             let repo = repo.clone();
-            Box::pin(async move { plan.build(&repo, &id).await })
+            Box::pin(async move { plan.build(repo.as_ref(), &id).await })
         })
     };
 

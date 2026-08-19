@@ -251,7 +251,7 @@ async fn local_runtime_storage_opens_repo_and_disk_transcript_store() {
     let storage = local_runtime_storage();
 
     // Act
-    let repo = storage.open_session_repo(&cwd).await.unwrap();
+    let repo = storage.session_repository(&cwd).await.unwrap();
     let transcript_store = storage.job_transcript_store(&cwd);
     let messages = vec![serde_json::json!({ "role": "user", "content": "hi" })];
     transcript_store.save(&JobTranscript {
@@ -262,7 +262,7 @@ async fn local_runtime_storage_opens_repo_and_disk_transcript_store() {
     });
 
     // Assert
-    assert!(repo.root().join("does-not-exist").parent().is_some());
+    assert!(repo.list().await.unwrap().is_empty());
     assert_eq!(
         transcript_store.load_node("run-1", "node-1").as_deref(),
         Some(messages.as_slice())
@@ -287,7 +287,6 @@ async fn local_runtime_storage_round_trips_sidecar_automation() {
         .and_then(|v| v.as_str())
         .unwrap()
         .to_string();
-    let session = theway_core::Session::from_store(Arc::new(store));
     let storage = local_runtime_storage();
     let rules = vec![dynamic_rule("rule-1")];
     let jobs = vec![cron_job("job-1")];
@@ -306,14 +305,10 @@ async fn local_runtime_storage_round_trips_sidecar_automation() {
         .await
         .unwrap();
     let loaded_jobs = storage.load_cron_jobs(&cwd, &session_id).await.unwrap();
-    let trigger_path = storage.trigger_sidecar_path(&session, &repo).await.unwrap();
-    let cron_path = storage.cron_sidecar_path(&session, &repo).await.unwrap();
 
     // Assert
     assert_eq!(loaded_rules, rules);
     assert_eq!(loaded_jobs, jobs);
-    assert!(trigger_path.exists(), "{}", trigger_path.display());
-    assert!(cron_path.exists(), "{}", cron_path.display());
     assert!(storage
         .load_dag_runs(&cwd, &session_id)
         .await

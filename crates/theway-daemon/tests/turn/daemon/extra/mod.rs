@@ -33,7 +33,8 @@ use crate::trigger_engine::execution::TriggerExecutor;
 use crate::trigger_engine::runtime::TriggerRuntimeConfig;
 use crate::turn::feed::{FeedUpdate, TriggerPollStatus};
 use crate::turn::kernel::{TurnFut, TurnState};
-use crate::{SqliteSessionRepo, triggers};
+use crate::triggers;
+use theway_storage::sqlite_repo::SqliteSessionRepo;
 use theway_transport::TransportMode;
 use theway_transport::wire::{WireCommand, WireDaemonConfig};
 

@@ -220,21 +220,21 @@ impl SlashCommand<DaemonCtx> for FindCommand {
             return CommandOutcome::Error("usage: /find <query>".into());
         }
         let query = argv.join(" ").to_lowercase();
-        let repo = match ctx.extra.storage.open_session_repo(ctx.cwd).await {
+        let repo = match ctx.extra.storage.session_repository(ctx.cwd).await {
             Ok(repo) => repo,
             Err(e) => return CommandOutcome::Error(format!("open session repo: {e}")),
         };
-        let files = match repo.list().await {
-            Ok(f) => f,
+        let sessions = match repo.list().await {
+            Ok(sessions) => sessions,
             Err(e) => return CommandOutcome::Error(format!("list sessions: {e}")),
         };
         let mut hits = 0usize;
-        for path in files {
-            let session = match repo.open(&path).await {
-                Ok(s) => s,
-                Err(_) => continue,
+        for record in sessions {
+            let session = match repo.open(&record.id).await {
+                Ok(Some(session)) => session,
+                Ok(None) | Err(_) => continue,
             };
-            let entries = theway_contract::session::SessionReader::get_entries(&session)
+            let entries = theway_contract::session::SessionReader::get_entries(session.as_ref())
                 .await
                 .unwrap_or_default();
             for e in entries {
@@ -246,8 +246,8 @@ impl SlashCommand<DaemonCtx> for FindCommand {
                             .take(120)
                             .collect::<String>()
                             .replace('\n', " ");
-                        let path_short = path.file_stem().and_then(|s| s.to_str()).unwrap_or("?");
-                        cprintln!("  {path_short}  {snip}");
+                        let id_short = record.id.chars().take(16).collect::<String>();
+                        cprintln!("  {id_short}  {snip}");
                     }
                 }
             }

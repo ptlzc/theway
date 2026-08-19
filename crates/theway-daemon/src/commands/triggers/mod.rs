@@ -334,15 +334,16 @@ async fn automation_elsewhere_hint_for_ctx(ctx: &CommandCtx<'_, DaemonCtx>) -> O
         .get_metadata_json()
         .await
         .ok()?;
-    let current = metadata
-        .get("path")
+    let current_id = metadata
+        .get("id")
         .and_then(|v| v.as_str())
-        .map(std::path::PathBuf::from);
-    let repo = match ctx.extra.storage.open_session_repo(ctx.cwd).await {
+        .unwrap_or_default();
+    let repo = match ctx.extra.storage.session_repository(ctx.cwd).await {
         Ok(repo) => repo,
         Err(_) => return None,
     };
-    theway_storage::session::automation_elsewhere_hint(&repo, current.as_deref()).await
+    let records = repo.list().await.ok()?;
+    theway_daemon::runtime_storage::automation_elsewhere_hint(&records, current_id)
 }
 
 pub struct InboxCommand;

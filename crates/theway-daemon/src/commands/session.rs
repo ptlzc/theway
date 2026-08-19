@@ -224,20 +224,13 @@ async fn session_import_command(
     } else {
         ctx.cwd.join(archive_path)
     };
-    let repo = match ctx.extra.storage.open_session_repo(ctx.cwd).await {
+    let repo = match ctx.extra.storage.session_repository(ctx.cwd).await {
         Ok(repo) => repo,
         Err(e) => return CommandOutcome::Error(format!("open session repo: {e}")),
     };
 
     emit_session_archive_warning();
-    match theway_storage::session_archive::import_session(
-        &repo,
-        &archive_path,
-        ctx.cwd,
-        theway_storage::session_archive::ActivateTriggers::Off,
-    )
-    .await
-    {
+    match repo.import(&archive_path, ctx.cwd).await {
         Ok(summary) => {
             cprintln!("imported session: {}", short_id(&summary.session_id));
             cprintln!("path: {}", summary.session_path.display());
@@ -360,7 +353,7 @@ impl SlashCommand<DaemonCtx> for ForkCommand {
                 Err(e) => return CommandOutcome::Error(format!("fork failed: {e}")),
             };
 
-        let repo = match ctx.extra.storage.open_session_repo(ctx.cwd).await {
+        let repo = match ctx.extra.storage.session_repository(ctx.cwd).await {
             Ok(repo) => repo,
             Err(e) => return CommandOutcome::Error(format!("open session repo: {e}")),
         };
@@ -372,11 +365,9 @@ impl SlashCommand<DaemonCtx> for ForkCommand {
             Ok(entries) => entries,
             Err(e) => return CommandOutcome::Error(format!("fork failed: {e}")),
         };
-        match theway_storage::session::fork_session(&repo, ctx.cwd, session, to_fork).await {
+        match repo.fork(ctx.cwd, session, to_fork).await {
             Ok(new) => {
-                let meta = match theway_contract::session::SessionReader::get_metadata_json(&new)
-                    .await
-                {
+                let meta = match new.get_metadata_json().await {
                     Ok(m) => m,
                     Err(e) => {
                         return CommandOutcome::Error(format!("fork created but unreadable: {e}"));

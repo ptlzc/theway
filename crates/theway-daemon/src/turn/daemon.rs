@@ -28,17 +28,18 @@ use theway_core::multiagent::graph::types::DagEvent;
 use super::feed::{self, Feed, FeedUpdate, Level, TriggerPollStatus};
 use super::kernel::{QueuedTurn, ReplKernel, TurnState, poll_turn};
 use crate::agent_session::RetrySettings;
+use crate::bug_report;
 use crate::commands::{self, CommandCtx, CommandOutcome, Registry};
 use crate::control_plane_prompt::UiControlPlanePrompt;
 use crate::forwarding_tool_ops::ForwardingToolOps;
 use crate::orchestration::DaemonServices;
 use crate::paths::DaemonPaths;
+use crate::runtime_storage::SessionRepository;
 use crate::session_ops::{CurrentSessionState, SessionFactory};
 use crate::tools::assembly::reload::ReloadRuntime;
 use crate::transport_adapter::{
     CoreGraphOps, CoreJobOps, agent_event, dag_event, dag_run_snapshot, subagent_job_snapshot,
 };
-use crate::{SqliteSessionRepo, bug_report};
 use theway_llm_provider::{ImageContent, Message, Usage};
 use theway_transport::mentions;
 use theway_transport::transport::SlashCompleter;
@@ -121,7 +122,7 @@ pub struct DaemonConfig {
     pub dag_engine: Arc<theway_core::multiagent::graph::engine::DagEngine>,
     pub subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry,
     pub session_factory: SessionFactory,
-    pub session_repo: Arc<SqliteSessionRepo>,
+    pub session_repo: Arc<dyn SessionRepository>,
     pub current_session_state: Arc<Mutex<CurrentSessionState>>,
     pub panel_status: PanelStatus,
     /// `[orchestrator] thinking_summary` settings; `None` → thinking stays raw.
@@ -196,7 +197,7 @@ pub struct TurnHost {
     dag_engine: Arc<theway_core::multiagent::graph::engine::DagEngine>,
     subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry,
     session_factory: SessionFactory,
-    session_repo: Arc<SqliteSessionRepo>,
+    session_repo: Arc<dyn SessionRepository>,
     current_session_state: Arc<Mutex<CurrentSessionState>>,
 
     busy: bool,

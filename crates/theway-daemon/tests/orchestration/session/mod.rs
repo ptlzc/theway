@@ -215,7 +215,10 @@ fn test_factory(work_dir: PathBuf) -> (SessionRuntimeBuilder, TempDir) {
 
 /// Create a session in `repo` with the given recorded `cwd` metadata and
 /// return its metadata id.
-async fn create_session_with_cwd(repo: &crate::SqliteSessionRepo, cwd: &str) -> String {
+async fn create_session_with_cwd(
+    repo: &theway_storage::sqlite_repo::SqliteSessionRepo,
+    cwd: &str,
+) -> String {
     let session = repo.create(cwd.to_string()).await.unwrap();
     theway_contract::session::SessionReader::get_metadata_json(&session)
         .await
@@ -297,7 +300,7 @@ async fn build_same_work_dir_session_succeeds() {
 
     let work_dir = TempDir::new().unwrap();
     let repo_root = TempDir::new().unwrap();
-    let repo = crate::SqliteSessionRepo::new(repo_root.path());
+    let repo = theway_storage::sqlite_repo::SqliteSessionRepo::new(repo_root.path());
     let id = create_session_with_cwd(&repo, work_dir.path().to_str().unwrap()).await;
 
     let (factory, _state) = test_factory(work_dir.path().to_path_buf());
@@ -321,7 +324,7 @@ async fn build_refuses_session_from_different_work_dir_and_names_both_paths() {
     let work_dir = TempDir::new().unwrap();
     let foreign_dir = TempDir::new().unwrap();
     let repo_root = TempDir::new().unwrap();
-    let repo = crate::SqliteSessionRepo::new(repo_root.path());
+    let repo = theway_storage::sqlite_repo::SqliteSessionRepo::new(repo_root.path());
     let id = create_session_with_cwd(&repo, foreign_dir.path().to_str().unwrap()).await;
 
     let (factory, _state) = test_factory(work_dir.path().to_path_buf());
@@ -350,7 +353,7 @@ async fn build_allows_legacy_session_without_cwd_metadata() {
 
     let work_dir = TempDir::new().unwrap();
     let repo_root = TempDir::new().unwrap();
-    let repo = crate::SqliteSessionRepo::new(repo_root.path());
+    let repo = theway_storage::sqlite_repo::SqliteSessionRepo::new(repo_root.path());
     let id = create_session_with_cwd(&repo, "").await;
 
     let (factory, _state) = test_factory(work_dir.path().to_path_buf());

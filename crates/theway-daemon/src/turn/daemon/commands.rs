@@ -240,9 +240,9 @@ impl TurnHost {
             self.system_line(format!("already on session {id}"));
             return;
         }
-        match theway_storage::session::find_path_by_id(&self.session_repo, &id).await {
-            Ok(Some(_)) => {}
-            Ok(None) => {
+        match self.session_repo.contains(&id).await {
+            Ok(true) => {}
+            Ok(false) => {
                 self.error_line(format!("switch session: no session matches id {id}"));
                 return;
             }

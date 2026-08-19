@@ -24,7 +24,8 @@ use crate::session_ops::{CurrentSessionState, SessionFactory};
 use crate::trigger_engine::execution::TriggerExecutor;
 use crate::trigger_engine::runtime::TriggerRuntimeConfig;
 use crate::turn::kernel::{QueuedTurn, TurnFut, TurnState};
-use crate::{SqliteSessionRepo, turn::feed::FeedUpdate};
+use crate::turn::feed::FeedUpdate;
+use theway_storage::sqlite_repo::SqliteSessionRepo;
 use theway_transport::TransportMode;
 use theway_transport::wire::{WireCommand, WireDaemonConfig, WirePromptImage};
 

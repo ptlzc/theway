@@ -71,7 +71,6 @@ pub mod skill_overrides;
 // Session repo used by the assembly layer: one SQLite database per session
 // (`<uuidv7>.db`). Re-exported from the composition root so binaries don't need
 // to depend on theway-storage directly.
-pub use theway_storage::sqlite_repo::SqliteSessionRepo;
 pub mod templates;
 pub mod tools;
 pub mod transport_adapter;

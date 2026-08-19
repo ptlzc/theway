@@ -356,10 +356,12 @@ async fn session_import_maps_open_repo_error() {
     struct FailingOpenStorage;
     #[async_trait::async_trait]
     impl theway_daemon::runtime_storage::RuntimeStorage for FailingOpenStorage {
-        async fn open_session_repo(
+        async fn session_repository(
             &self,
             _cwd: &Path,
-        ) -> anyhow::Result<Arc<theway_storage::sqlite_repo::SqliteSessionRepo>> {
+        ) -> anyhow::Result<
+            Arc<dyn theway_daemon::runtime_storage::SessionRepository>,
+        > {
             anyhow::bail!("synthetic open failure")
         }
         fn job_transcript_store(
@@ -380,20 +382,6 @@ async fn session_import_maps_open_repo_error() {
             _engine: Arc<theway_core::multiagent::graph::engine::DagEngine>,
             _cwd: PathBuf,
         ) -> Arc<dyn theway_core::multiagent::graph::persist::DagPersistSink> {
-            unreachable!("not used by /session import")
-        }
-        async fn trigger_sidecar_path(
-            &self,
-            _session: &Session,
-            _repo: &theway_storage::sqlite_repo::SqliteSessionRepo,
-        ) -> anyhow::Result<PathBuf> {
-            unreachable!("not used by /session import")
-        }
-        async fn cron_sidecar_path(
-            &self,
-            _session: &Session,
-            _repo: &theway_storage::sqlite_repo::SqliteSessionRepo,
-        ) -> anyhow::Result<PathBuf> {
             unreachable!("not used by /session import")
         }
         async fn load_dynamic_triggers(

@@ -88,11 +88,11 @@ impl SlashCommand<DaemonCtx> for SessionsCommand {
         "list sessions for this cwd"
     }
     async fn run(&self, _argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
-        let repo = match ctx.extra.storage.open_session_repo(ctx.cwd).await {
+        let repo = match ctx.extra.storage.session_repository(ctx.cwd).await {
             Ok(repo) => repo,
             Err(e) => return CommandOutcome::Error(format!("open session repo: {e}")),
         };
-        let entries = match theway_storage::session::list_entries(&repo).await {
+        let entries = match repo.list().await {
             Ok(e) => e,
             Err(e) => return CommandOutcome::Error(format!("list sessions: {e}")),
         };
@@ -101,7 +101,7 @@ impl SlashCommand<DaemonCtx> for SessionsCommand {
             return CommandOutcome::Handled;
         }
         cprintln!("Sessions (tree — forks nested under their parent):");
-        for row in theway_storage::session::flatten_session_tree(&entries) {
+        for row in entries {
             let preview = row.preview.as_deref().unwrap_or("(empty)");
             let badge = row
                 .automation
@@ -111,7 +111,7 @@ impl SlashCommand<DaemonCtx> for SessionsCommand {
             let id_short: String = row.id.chars().take(16).collect();
             cprintln!(
                 "  {}{}  {}{badge}  {}",
-                row.prefix,
+                row.tree_prefix,
                 id_short,
                 row.created_at,
                 preview

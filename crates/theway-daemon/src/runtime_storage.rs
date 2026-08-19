@@ -1,13 +1,9 @@
-//! Runtime state externalization seam (issue #79): the daemon's persistent
-//! state (session repo, DAG runs, trigger/cron sidecars) is accessed through
-//! this trait so a future controller/storage side can replace the local
-//! filesystem/SQLite implementation without changing the daemon kernel.
+//! Daemon persistence ports and their local/controller-backed adapters.
 //!
-//! The default [`LocalRuntimeStorage`] keeps the current local behavior.
-//! [`RemoteRuntimeStorage`] implements the same seam by calling a
-//! controller-side `StorageService` gRPC server (issue #85) for DAG run
-//! persistence; session transcript files remain local until the session
-//! transport surface grows a full remote repository.
+//! [`SessionRepository`] hides transcript repository implementations from application
+//! orchestration. [`RuntimeStorage`] owns DAG, trigger, cron, and subagent transcript state.
+//! The controller-backed adapter delegates DAG and automation state over gRPC while using the
+//! local session repository adapter for transcripts.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -18,6 +14,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use parking_lot::Mutex as ParkingMutex;
 use theway_contract::dag::PersistedRun;
+use theway_contract::session::{SessionReader, SessionStore, StoredSessionEntry};
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::persist::{DagPersistSink, to_persisted};
 use theway_core::multiagent::graph::types::DagStatus;
@@ -41,8 +38,8 @@ use crate::triggers::dynamic::{read_rules_file, write_rules_file};
 /// Persistent runtime state operations owned by the daemon.
 #[async_trait]
 pub trait RuntimeStorage: Send + Sync {
-    /// Open (or create) the session repository for `cwd`.
-    async fn open_session_repo(&self, cwd: &Path) -> Result<Arc<SqliteSessionRepo>>;
+    /// Open the application-facing session repository for `cwd`.
+    async fn session_repository(&self, cwd: &Path) -> Result<Arc<dyn SessionRepository>>;
 
     /// Return the job-transcript store for this runtime storage backend.
     ///
@@ -55,20 +52,6 @@ pub trait RuntimeStorage: Send + Sync {
 
     /// Spawn a DAG persistence sink for the engine.
     fn spawn_dag_persist(&self, engine: Arc<DagEngine>, cwd: PathBuf) -> Arc<dyn DagPersistSink>;
-
-    /// Resolve the dynamic-trigger sidecar path for a session.
-    async fn trigger_sidecar_path(
-        &self,
-        session: &theway_core::Session,
-        repo: &SqliteSessionRepo,
-    ) -> Result<PathBuf>;
-
-    /// Resolve the cron sidecar path for a session.
-    async fn cron_sidecar_path(
-        &self,
-        session: &theway_core::Session,
-        repo: &SqliteSessionRepo,
-    ) -> Result<PathBuf>;
 
     /// Load dynamic trigger rules for a session through the storage seam.
     async fn load_dynamic_triggers(
@@ -92,13 +75,221 @@ pub trait RuntimeStorage: Send + Sync {
     async fn save_cron_jobs(&self, cwd: &Path, session_id: &str, jobs: &[CronJob]) -> Result<()>;
 }
 
+/// Session metadata used by daemon application services. Persistence handles and database
+/// implementation types remain behind [`SessionRepository`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SessionRecord {
+    pub id: String,
+    pub created_at: String,
+    pub preview: Option<String>,
+    pub tree_prefix: String,
+    pub name: Option<String>,
+    pub cwd: String,
+    pub model: String,
+    pub last_activity_at: i64,
+    pub automation: AutomationCounts,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AutomationCounts {
+    pub cron_enabled: usize,
+    pub cron_total: usize,
+    pub trigger_enabled: usize,
+    pub trigger_total: usize,
+}
+
+impl AutomationCounts {
+    pub fn any_enabled(&self) -> bool {
+        self.cron_enabled > 0 || self.trigger_enabled > 0
+    }
+
+    pub fn badge(&self) -> Option<String> {
+        if self.cron_total == 0 && self.trigger_total == 0 {
+            return None;
+        }
+        let mut parts = Vec::new();
+        if self.cron_enabled > 0 {
+            parts.push(format!("{} cron", self.cron_enabled));
+        }
+        if self.trigger_enabled > 0 {
+            parts.push(format!("{} trigger", self.trigger_enabled));
+        }
+        Some(if parts.is_empty() {
+            "automation off".into()
+        } else {
+            parts.join(", ")
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct SessionImport {
+    pub session_id: String,
+    pub session_path: PathBuf,
+    pub entry_count: usize,
+    pub triggers_imported: usize,
+    pub cron_imported: usize,
+    pub automation_enabled: bool,
+    pub originally_enabled_triggers: Vec<String>,
+    pub originally_enabled_cron: Vec<String>,
+}
+
+/// Cwd-scoped session catalog and transcript lifecycle port used by daemon application code.
+#[async_trait]
+pub trait SessionRepository: Send + Sync {
+    async fn create(&self, cwd: &Path) -> Result<Arc<dyn SessionStore>>;
+    async fn resume(&self, explicit_id: Option<&str>) -> Result<Arc<dyn SessionStore>>;
+    async fn contains(&self, id: &str) -> Result<bool>;
+    async fn open(&self, id: &str) -> Result<Option<Arc<dyn SessionStore>>>;
+    async fn list(&self) -> Result<Vec<SessionRecord>>;
+    async fn delete(&self, id: &str) -> Result<()>;
+    async fn fork(
+        &self,
+        cwd: &Path,
+        parent: &theway_core::Session,
+        entries: Vec<StoredSessionEntry>,
+    ) -> Result<Arc<dyn SessionStore>>;
+    async fn import(&self, archive_path: &Path, cwd: &Path) -> Result<SessionImport>;
+}
+
+#[async_trait]
+impl SessionRepository for SqliteSessionRepo {
+    async fn create(&self, cwd: &Path) -> Result<Arc<dyn SessionStore>> {
+        Ok(Arc::new(theway_storage::session::create(self, cwd).await?))
+    }
+
+    async fn resume(&self, explicit_id: Option<&str>) -> Result<Arc<dyn SessionStore>> {
+        Ok(Arc::new(
+            theway_storage::session::resume(self, explicit_id).await?,
+        ))
+    }
+
+    async fn contains(&self, id: &str) -> Result<bool> {
+        Ok(theway_storage::session::find_path_by_id(self, id)
+            .await?
+            .is_some())
+    }
+
+    async fn open(&self, id: &str) -> Result<Option<Arc<dyn SessionStore>>> {
+        let Some(path) = theway_storage::session::find_path_by_id(self, id).await? else {
+            return Ok(None);
+        };
+        Ok(Some(Arc::new(SqliteSessionRepo::open(self, path).await?)))
+    }
+
+    async fn list(&self) -> Result<Vec<SessionRecord>> {
+        let entries = theway_storage::session::list_entries(self).await?;
+        let entries = theway_storage::session::flatten_session_tree(&entries);
+        let mut records = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let (name, cwd, model) = match SqliteSessionRepo::open(self, &entry.path).await {
+                Ok(session) => {
+                    let metadata = session.get_metadata_json().await.unwrap_or_default();
+                    (
+                        theway_storage::session::session_name(&session).await,
+                        metadata
+                            .get("cwd")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or_default()
+                            .to_string(),
+                        theway_storage::session::last_model_change(&session).await,
+                    )
+                }
+                Err(_) => (None, String::new(), String::new()),
+            };
+            let last_activity_at = tokio::fs::metadata(&entry.path)
+                .await
+                .ok()
+                .and_then(|metadata| metadata.modified().ok())
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|duration| duration.as_millis() as i64)
+                .unwrap_or(0);
+            records.push(SessionRecord {
+                id: entry.id,
+                created_at: entry.created_at,
+                preview: entry.preview,
+                tree_prefix: entry.prefix,
+                name,
+                cwd,
+                model,
+                last_activity_at,
+                automation: AutomationCounts {
+                    cron_enabled: entry.automation.cron_enabled,
+                    cron_total: entry.automation.cron_total,
+                    trigger_enabled: entry.automation.trigger_enabled,
+                    trigger_total: entry.automation.trigger_total,
+                },
+            });
+        }
+        Ok(records)
+    }
+
+    async fn delete(&self, id: &str) -> Result<()> {
+        theway_storage::session::delete_by_id(self, id).await?;
+        Ok(())
+    }
+
+    async fn fork(
+        &self,
+        cwd: &Path,
+        parent: &theway_core::Session,
+        entries: Vec<StoredSessionEntry>,
+    ) -> Result<Arc<dyn SessionStore>> {
+        Ok(Arc::new(
+            theway_storage::session::fork_session(self, cwd, parent, entries).await?,
+        ))
+    }
+
+    async fn import(&self, archive_path: &Path, cwd: &Path) -> Result<SessionImport> {
+        let summary = theway_storage::session_archive::import_session(
+            self,
+            archive_path,
+            cwd,
+            theway_storage::session_archive::ActivateTriggers::Off,
+        )
+        .await?;
+        Ok(SessionImport {
+            session_id: summary.session_id,
+            session_path: summary.session_path,
+            entry_count: summary.entry_count,
+            triggers_imported: summary.triggers_imported,
+            cron_imported: summary.cron_imported,
+            automation_enabled: summary.automation_enabled,
+            originally_enabled_triggers: summary.originally_enabled_triggers,
+            originally_enabled_cron: summary.originally_enabled_cron,
+        })
+    }
+}
+
+pub fn automation_elsewhere_hint(
+    records: &[SessionRecord],
+    current_session_id: &str,
+) -> Option<String> {
+    let mut holders = records
+        .iter()
+        .filter(|record| record.id != current_session_id && record.automation.any_enabled())
+        .collect::<Vec<_>>();
+    let extra = holders.len().saturating_sub(1);
+    let record = holders.pop()?;
+    let short_id = record.id.chars().take(16).collect::<String>();
+    let badge = record.automation.badge().unwrap_or_default();
+    let more = if extra > 0 {
+        format!(" (+{extra} more session(s))")
+    } else {
+        String::new()
+    };
+    Some(format!(
+        "automation is session-scoped: session {short_id} has {badge} enabled{more}; resume it with `theway --resume-id {short_id}`"
+    ))
+}
+
 /// Local filesystem/SQLite implementation of [`RuntimeStorage`].
 #[derive(Clone, Copy, Default)]
 pub struct LocalRuntimeStorage;
 
 #[async_trait]
 impl RuntimeStorage for LocalRuntimeStorage {
-    async fn open_session_repo(&self, cwd: &Path) -> Result<Arc<SqliteSessionRepo>> {
+    async fn session_repository(&self, cwd: &Path) -> Result<Arc<dyn SessionRepository>> {
         Ok(Arc::new(theway_storage::session::open_repo(cwd).await))
     }
 
@@ -112,22 +303,6 @@ impl RuntimeStorage for LocalRuntimeStorage {
 
     fn spawn_dag_persist(&self, engine: Arc<DagEngine>, cwd: PathBuf) -> Arc<dyn DagPersistSink> {
         DagPersistHandle::spawn(engine, cwd)
-    }
-
-    async fn trigger_sidecar_path(
-        &self,
-        session: &theway_core::Session,
-        repo: &SqliteSessionRepo,
-    ) -> Result<PathBuf> {
-        Ok(theway_storage::session::trigger_sidecar_path_for_session(session, repo).await?)
-    }
-
-    async fn cron_sidecar_path(
-        &self,
-        session: &theway_core::Session,
-        repo: &SqliteSessionRepo,
-    ) -> Result<PathBuf> {
-        Ok(theway_storage::session::cron_sidecar_path_for_session(session, repo).await?)
     }
 
     async fn load_dynamic_triggers(
@@ -193,7 +368,7 @@ impl RemoteRuntimeStorage {
 
 #[async_trait]
 impl RuntimeStorage for RemoteRuntimeStorage {
-    async fn open_session_repo(&self, cwd: &Path) -> Result<Arc<SqliteSessionRepo>> {
+    async fn session_repository(&self, cwd: &Path) -> Result<Arc<dyn SessionRepository>> {
         Ok(Arc::new(theway_storage::session::open_repo(cwd).await))
     }
 
@@ -226,22 +401,6 @@ impl RuntimeStorage for RemoteRuntimeStorage {
 
     fn spawn_dag_persist(&self, engine: Arc<DagEngine>, cwd: PathBuf) -> Arc<dyn DagPersistSink> {
         RemoteDagPersistHandle::spawn(engine, cwd, self.clone())
-    }
-
-    async fn trigger_sidecar_path(
-        &self,
-        session: &theway_core::Session,
-        repo: &SqliteSessionRepo,
-    ) -> Result<PathBuf> {
-        Ok(theway_storage::session::trigger_sidecar_path_for_session(session, repo).await?)
-    }
-
-    async fn cron_sidecar_path(
-        &self,
-        session: &theway_core::Session,
-        repo: &SqliteSessionRepo,
-    ) -> Result<PathBuf> {
-        Ok(theway_storage::session::cron_sidecar_path_for_session(session, repo).await?)
     }
 
     async fn load_dynamic_triggers(
