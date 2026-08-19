@@ -12,17 +12,62 @@
 //! behavior here. All methods are async and the trait is object-safe with
 //! `Send + Sync` bounds, so executors can be shared as `Arc<dyn ToolExecutor>`.
 
-mod types;
-
-#[cfg(test)]
-mod tests;
-
-pub use types::{CommandOutput, ExecutorError, ExecutorKind, Result};
-
 use std::path::Path;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+use strum::Display;
+
+/// Which execution environment a [`ToolExecutor`] dispatches tool calls to.
+///
+/// Callers (daemons, tests) branch on this to distinguish local editing mode from
+/// remote-sandbox execution; tool *definitions* never depend on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum ExecutorKind {
+    /// Local filesystem and process table (the default editing mode).
+    Local,
+    /// Remote sandbox environment (stub until a real backend such as e2b lands).
+    Sandbox,
+}
+
+/// Captured result of a command executed through [`ToolExecutor::run_command`]
+/// or [`ToolExecutor::git`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandOutput {
+    /// Decoded standard output of the process.
+    pub stdout: String,
+    /// Decoded standard error of the process.
+    pub stderr: String,
+    /// Process exit code (`0` conventionally means success).
+    pub exit_code: i32,
+}
+
+impl CommandOutput {
+    /// `true` when the process exited with code `0`.
+    pub fn success(&self) -> bool {
+        self.exit_code == 0
+    }
+}
+
+/// Errors surfaced by [`ToolExecutor`] implementations.
+#[derive(Debug, thiserror::Error)]
+pub enum ExecutorError {
+    /// The executor kind does not support the requested operation — e.g. any call
+    /// routed to the sandbox stub before a real sandbox backend exists. Always a
+    /// prompt, explicit failure (never a hang).
+    #[error("unsupported executor kind: {0}")]
+    UnsupportedKind(ExecutorKind),
+    /// Any other executor-side failure (I/O, process spawn, timeout) reported with a
+    /// human-readable message.
+    #[error("executor error: {0}")]
+    Other(String),
+}
+
+/// Convenience result alias for [`ToolExecutor`] methods.
+pub type Result<T, E = ExecutorError> = std::result::Result<T, E>;
 
 /// Execution environment that tools dispatch their effects through.
 ///
@@ -62,3 +107,6 @@ pub trait ToolExecutor: Send + Sync {
     /// Runs a git invocation with `args` in the repository context of the executor.
     async fn git(&self, args: &[String]) -> Result<CommandOutput>;
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("executor");
