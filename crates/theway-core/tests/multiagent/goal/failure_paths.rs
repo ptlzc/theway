@@ -8,7 +8,7 @@ use crate::agent::session::memory_storage::MemorySessionStorage;
 use crate::agent::session::session::{Session, SessionStorage, SessionTreeEntry};
 use crate::agent::types::SessionError;
 use crate::multiagent::graph::engine::DagEngine;
-use crate::multiagent::registry::AgentJobRegistry;
+use crate::multiagent::jobs::SubagentJobRegistry;
 use crate::multiagent::types::AgentRunParams;
 use theway_llm_provider::{
     AssistantMessage, ContentBlock, ImageContent, Message as PiMessage, ToolResultMessage,
@@ -158,7 +158,7 @@ async fn evaluate_stop_hook_returns_noop_when_goal_not_pursuing() {
         h.clone(),
         Arc::new(DagEngine::new()),
         goal_resolver(),
-        AgentJobRegistry::new(),
+        SubagentJobRegistry::new(),
         None,
         ctx(),
         tokio_util::sync::CancellationToken::new(),
@@ -179,7 +179,7 @@ async fn evaluate_stop_hook_pauses_when_evaluator_cancelled() {
         h.clone(),
         Arc::new(DagEngine::new()),
         goal_resolver(),
-        AgentJobRegistry::new(),
+        SubagentJobRegistry::new(),
         None,
         ctx(),
         cancel,

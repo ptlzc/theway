@@ -10,7 +10,7 @@ use crate::observability::{
     RuntimeObservation, RuntimeObserver,
 };
 use crate::types::StreamFn;
-use crate::multiagent::registry::{AgentJobRegistry, JobStatus};
+use crate::multiagent::jobs::{SubagentJobRegistry, SubagentJobStatus};
 use crate::multiagent::types::AgentRunParams;
 use theway_llm_provider::{
     AssistantMessageEvent, AssistantMessageEventStream, AssistantRole, ContentBlock, DoneReason,
@@ -76,7 +76,7 @@ impl RuntimeObserver for RecordingObserver {
 async fn run_agent_observations_link_job_to_agent_without_content() {
     let recording = Arc::new(RecordingObserver::default());
     let observer: Arc<dyn RuntimeObserver> = recording.clone();
-    let registry = AgentJobRegistry::with_observer(observer.clone());
+    let registry = SubagentJobRegistry::with_observer(observer.clone());
     let parent = OperationScope::start(
         observer,
         None,
@@ -124,7 +124,7 @@ async fn run_agent_observations_link_job_to_agent_without_content() {
     let observations = recording.observations.lock();
     let job = observations.iter().find_map(|observation| match observation {
         RuntimeObservation::OperationStarted(start)
-            if matches!(start.detail, OperationDetail::AgentJob { .. }) =>
+            if matches!(start.detail, OperationDetail::SubagentJob { .. }) =>
         {
             Some(start)
         }
@@ -148,7 +148,7 @@ async fn run_agent_observations_link_job_to_agent_without_content() {
 
 #[tokio::test]
 async fn run_agent_succeeds_and_registers_job() {
-    let registry = AgentJobRegistry::new();
+    let registry = SubagentJobRegistry::new();
     let stream_fn: StreamFn = Arc::new(move |_, _, _| done_stream("hello subagent"));
     let on_turn_end: Arc<dyn Fn(&str, u64, u64) + Send + Sync> =
         Arc::new(|_text: &str, _input: u64, _output: u64| {});
@@ -182,7 +182,7 @@ async fn run_agent_succeeds_and_registers_job() {
     assert!(result.error.is_none());
 
     let job = registry.job(&result.job_id).unwrap();
-    assert_eq!(job.status, JobStatus::Succeeded);
+    assert_eq!(job.status, SubagentJobStatus::Succeeded);
     assert_eq!(job.source, "dag");
     assert_eq!(job.run_id.as_deref(), Some("dag-1"));
     assert_eq!(job.node_id.as_deref(), Some("a"));
@@ -191,7 +191,7 @@ async fn run_agent_succeeds_and_registers_job() {
 
 #[tokio::test]
 async fn run_agent_returns_cancelled_when_parent_cancel_fires() {
-    let registry = AgentJobRegistry::new();
+    let registry = SubagentJobRegistry::new();
     let stream_fn: StreamFn = Arc::new(move |_, _, _| {
         let (stream, sender) = AssistantMessageEventStream::new();
         tokio::spawn(async move {
@@ -243,7 +243,7 @@ async fn run_agent_returns_cancelled_when_parent_cancel_fires() {
 
 #[tokio::test]
 async fn run_agent_idle_timeout_reports_timeout_error() {
-    let registry = AgentJobRegistry::new();
+    let registry = SubagentJobRegistry::new();
     // A stream that never produces an event keeps the LLM call pending until
     // the idle watchdog aborts it.
     let stream_fn: StreamFn = Arc::new(move |_, _, _| {
@@ -292,7 +292,7 @@ async fn run_agent_idle_timeout_reports_timeout_error() {
 
 #[tokio::test]
 async fn run_agent_interrupted_by_control_handle_marks_job_interrupted() {
-    let registry = AgentJobRegistry::new();
+    let registry = SubagentJobRegistry::new();
     // A stream that never produces an event keeps the LLM call pending until
     // the control handle interrupts the in-flight turn.
     let stream_fn: StreamFn = Arc::new(move |_, _, _| {
@@ -349,5 +349,5 @@ async fn run_agent_interrupted_by_control_handle_marks_job_interrupted() {
     assert!(!result.success);
     assert!(result.error.is_some());
     let job = registry.job(&job_id).unwrap();
-    assert_eq!(job.status, JobStatus::Interrupted);
+    assert_eq!(job.status, SubagentJobStatus::Interrupted);
 }

@@ -13,7 +13,7 @@ use serde_json::json;
 use strum::IntoStaticStr;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::types::{DagStatus, RunKind};
-use theway_core::multiagent::registry::AgentJobRegistry;
+use theway_core::multiagent::jobs::SubagentJobRegistry;
 use theway_core::multiagent::runner::{AgentRunOptions, run_agent};
 use theway_core::multiagent::types::AgentRunResolver;
 use theway_core::{
@@ -229,7 +229,7 @@ pub fn stop_hook(
     harness_cell: Arc<OnceLock<Arc<AgentHarness>>>,
     dag_engine: std::sync::Arc<DagEngine>,
     run_resolver: AgentRunResolver,
-    registry: AgentJobRegistry,
+    registry: SubagentJobRegistry,
     stream_fn: Option<theway_core::StreamFn>,
 ) -> OnTurnEndHook {
     Arc::new(move |ctx, cancel| {
@@ -339,7 +339,7 @@ async fn evaluate_stop_hook(
     harness: Arc<AgentHarness>,
     dag_engine: Arc<DagEngine>,
     run_resolver: AgentRunResolver,
-    registry: AgentJobRegistry,
+    registry: SubagentJobRegistry,
     stream_fn: Option<theway_core::StreamFn>,
     ctx: OnTurnEndContext,
     cancel: tokio_util::sync::CancellationToken,

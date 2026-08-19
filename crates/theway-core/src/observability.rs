@@ -1,6 +1,6 @@
 //! Transport-neutral runtime observations.
 //!
-//! Product events (`LoopEvent`, `SessionEvent`, `AgentJobEvent`, and `DagEvent`) retain
+//! Product events (`LoopEvent`, `SessionEvent`, `SubagentJobEvent`, and `DagEvent`) retain
 //! their UI, persistence, and wire semantics. This module is a separate, content-safe port
 //! for embedders that need traces, metrics, or structured operational logs.
 
@@ -67,7 +67,7 @@ pub enum OperationKind {
     LlmRequest,
     ToolExecution,
     Compaction,
-    AgentJob,
+    SubagentJob,
     DagRun,
     DagNode,
 }
@@ -80,7 +80,7 @@ impl OperationKind {
             Self::LlmRequest => "llm.request",
             Self::ToolExecution => "tool.execute",
             Self::Compaction => "session.compaction",
-            Self::AgentJob => "multiagent.job",
+            Self::SubagentJob => "multiagent.job",
             Self::DagRun => "dag.run",
             Self::DagNode => "dag.node",
         }
@@ -172,7 +172,7 @@ pub enum OperationDetail {
         provider: String,
         model: String,
     },
-    AgentJob {
+    SubagentJob {
         agent: String,
         source: String,
     },
@@ -188,7 +188,7 @@ impl OperationDetail {
             Self::LlmRequest { .. } => OperationKind::LlmRequest,
             Self::ToolExecution { .. } => OperationKind::ToolExecution,
             Self::Compaction { .. } => OperationKind::Compaction,
-            Self::AgentJob { .. } => OperationKind::AgentJob,
+            Self::SubagentJob { .. } => OperationKind::SubagentJob,
             Self::DagRun => OperationKind::DagRun,
             Self::DagNode => OperationKind::DagNode,
         }

@@ -2,17 +2,17 @@
 
 use strum::IntoStaticStr;
 
-/// Capacity of the built-in broadcast channel for [`AgentJobEvent`]s.
+/// Capacity of the built-in broadcast channel for [`SubagentJobEvent`]s.
 /// Same sizing rationale as `LOOP_EVENT_BROADCAST_CAPACITY`: enough for
 /// bursty output without backpressure on the subagent runner.
-pub const AGENT_JOB_EVENT_BROADCAST_CAPACITY: usize = 256;
+pub const SUBAGENT_JOB_EVENT_BROADCAST_CAPACITY: usize = 256;
 
 /// High-frequency event plane (graph mode): broadcast by the registry as jobs
 /// start, produce output, update metrics, and complete. Transport-agnostic — the
 /// transport layer converts these into the wire `StreamEvent` (see
 /// `crates/theway-transport/proto/events.proto`).
 #[derive(Clone, Debug)]
-pub enum AgentJobEvent {
+pub enum SubagentJobEvent {
     Started {
         id: String,
         agent: String,
@@ -36,7 +36,7 @@ pub enum AgentJobEvent {
     },
     Completed {
         id: String,
-        status: JobStatus,
+        status: SubagentJobStatus,
         error: Option<String>,
         chars: u64,
         tokens_in: u64,
@@ -47,21 +47,21 @@ pub enum AgentJobEvent {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, IntoStaticStr)]
 #[strum(serialize_all = "lowercase")]
-pub enum JobStatus {
+pub enum SubagentJobStatus {
     Running,
     Succeeded,
     Failed,
     Cancelled,
-    /// The current turn was interrupted (`AgentControlHandle::interrupt`) and no
+    /// The current turn was interrupted (`SubagentControlHandle::interrupt`) and no
     /// steering was queued, so the run ended at the turn boundary.
     Interrupted,
 }
 
-impl JobStatus {
+impl SubagentJobStatus {
     pub fn as_str(&self) -> &'static str {
         (*self).into()
     }
 }
 
 #[cfg(test)]
-tests_bridge_macro::tests_bridge!("multiagent/registry/events");
+tests_bridge_macro::tests_bridge!("multiagent/job_events");

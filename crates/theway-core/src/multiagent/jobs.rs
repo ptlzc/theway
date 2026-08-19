@@ -24,13 +24,11 @@ use crate::LoopEvent;
 #[cfg(test)]
 use theway_llm_provider::Message as PiMessage;
 
-mod events;
-mod metrics;
-mod transcript;
-
-pub use events::{AGENT_JOB_EVENT_BROADCAST_CAPACITY, AgentJobEvent, JobStatus};
-pub use metrics::metrics_listener;
-pub use transcript::{
+pub use super::job_events::{
+    SUBAGENT_JOB_EVENT_BROADCAST_CAPACITY, SubagentJobEvent, SubagentJobStatus,
+};
+pub use super::job_metrics::metrics_listener;
+pub use super::job_transcript::{
     JobTranscript, JobTranscriptStore, agent_message_to_json, append_message, append_output,
 };
 
@@ -50,7 +48,7 @@ pub const MAX_MESSAGES_BYTES: usize = 512 * 1024;
 /// agent, graph UI, gRPC control plane) steer a run that `run_agent` is
 /// awaiting in another task.
 #[derive(Clone)]
-pub struct AgentControlHandle {
+pub struct SubagentControlHandle {
     /// Stop the current turn's LLM call. The run ends unless a steering message
     /// is queued (then the next turn carries it).
     pub interrupt: Arc<dyn Fn() + Send + Sync>,
@@ -58,15 +56,15 @@ pub struct AgentControlHandle {
     pub steer: Arc<dyn Fn(String) + Send + Sync>,
 }
 
-impl std::fmt::Debug for AgentControlHandle {
+impl std::fmt::Debug for SubagentControlHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("AgentControlHandle")
+        f.write_str("SubagentControlHandle")
     }
 }
 
 /// One tracked subagent job.
 #[derive(Clone, Debug)]
-pub struct AgentJob {
+pub struct SubagentJob {
     pub id: String,
     pub agent: String,
     /// "subagent" (independent subagent tool) or "dag" (DAG node).
@@ -76,7 +74,7 @@ pub struct AgentJob {
     /// Owning session (`None` for session-less headless runs; stamped by the
     /// launch path — DAG node jobs inherit it from the run).
     pub session_id: Option<String>,
-    pub status: JobStatus,
+    pub status: SubagentJobStatus,
     pub started_at: Option<i64>,
     pub completed_at: Option<i64>,
     pub attempt: u32,
@@ -101,10 +99,10 @@ pub struct AgentJob {
     pub messages_truncated: bool,
     /// Live control handle while the run is in flight (`None` for jobs that
     /// never registered one, or after finish).
-    pub control: Option<AgentControlHandle>,
+    pub control: Option<SubagentControlHandle>,
 }
 
-impl AgentJob {
+impl SubagentJob {
     fn new(
         id: String,
         agent: String,
@@ -120,7 +118,7 @@ impl AgentJob {
             run_id,
             node_id,
             session_id,
-            status: JobStatus::Running,
+            status: SubagentJobStatus::Running,
             started_at: Some(now_ms()),
             completed_at: None,
             attempt: 1,
@@ -165,7 +163,7 @@ impl AgentJob {
 
 #[derive(Default)]
 struct Inner {
-    jobs: Vec<AgentJob>,
+    jobs: Vec<SubagentJob>,
     /// Host-provided transcript persistence. `None` = transcripts stay in
     /// memory only (the default).
     transcript_store: Option<Arc<dyn JobTranscriptStore>>,
@@ -173,17 +171,17 @@ struct Inner {
 
 /// Thread-safe registry (cheap clone via `Arc`).
 #[derive(Clone)]
-pub struct AgentJobRegistry {
+pub struct SubagentJobRegistry {
     inner: Arc<Mutex<Inner>>,
     observer: Arc<dyn RuntimeObserver>,
     operations: Arc<Mutex<HashMap<String, OperationScope>>>,
-    /// Built-in broadcast channel for [`AgentJobEvent`]s. Receivers subscribe
+    /// Built-in broadcast channel for [`SubagentJobEvent`]s. Receivers subscribe
     /// via [`subscribe()`](Self::subscribe); when nobody is listening, `send`
     /// fails silently — no external wiring needed.
-    events: tokio::sync::broadcast::Sender<AgentJobEvent>,
+    events: tokio::sync::broadcast::Sender<SubagentJobEvent>,
 }
 
-pub struct JobInit {
+pub struct SubagentJobInit {
     pub agent: String,
     pub source: String,
     pub run_id: Option<String>,
@@ -192,13 +190,13 @@ pub struct JobInit {
     pub session_id: Option<String>,
 }
 
-impl AgentJobRegistry {
+impl SubagentJobRegistry {
     pub fn new() -> Self {
         Self::with_observer(noop_runtime_observer())
     }
 
     pub fn with_observer(observer: Arc<dyn RuntimeObserver>) -> Self {
-        let (events, _) = tokio::sync::broadcast::channel(AGENT_JOB_EVENT_BROADCAST_CAPACITY);
+        let (events, _) = tokio::sync::broadcast::channel(SUBAGENT_JOB_EVENT_BROADCAST_CAPACITY);
         Self {
             inner: Arc::new(Mutex::new(Inner::default())),
             observer,
@@ -213,7 +211,7 @@ impl AgentJobRegistry {
 
     /// Subscribe to the built-in broadcast channel. Each call returns a fresh
     /// receiver that picks up events from this point forward (not historic).
-    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<AgentJobEvent> {
+    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<SubagentJobEvent> {
         self.events.subscribe()
     }
 
@@ -224,12 +222,12 @@ impl AgentJobRegistry {
     }
 
     /// Register a running job and return its stable id.
-    pub fn register(&self, init: JobInit) -> String {
+    pub fn register(&self, init: SubagentJobInit) -> String {
         self.register_observed(init, None)
     }
 
     /// Register a job beneath an optional parent operation.
-    pub fn register_observed(&self, init: JobInit, parent: Option<OperationId>) -> String {
+    pub fn register_observed(&self, init: SubagentJobInit, parent: Option<OperationId>) -> String {
         let id = Uuid::now_v7().to_string();
         let scope = OperationScope::start(
             self.observer(),
@@ -241,13 +239,13 @@ impl AgentJobRegistry {
                 node_id: init.node_id.clone(),
                 ..ObservationContext::default()
             },
-            OperationDetail::AgentJob {
+            OperationDetail::SubagentJob {
                 agent: init.agent.clone(),
                 source: init.source.clone(),
             },
         );
         let mut inner = self.inner.lock();
-        inner.jobs.push(AgentJob::new(
+        inner.jobs.push(SubagentJob::new(
             id.clone(),
             init.agent.clone(),
             init.source.clone(),
@@ -258,7 +256,7 @@ impl AgentJobRegistry {
         Self::evict(&mut inner.jobs);
         drop(inner);
         self.operations.lock().insert(id.clone(), scope);
-        self.emit(AgentJobEvent::Started {
+        self.emit(SubagentJobEvent::Started {
             id: id.clone(),
             agent: init.agent,
             source: init.source,
@@ -273,7 +271,7 @@ impl AgentJobRegistry {
     }
 
     /// Mutate a running job (metrics accumulation, output appends, status).
-    pub fn update(&self, id: &str, f: impl FnOnce(&mut AgentJob)) {
+    pub fn update(&self, id: &str, f: impl FnOnce(&mut SubagentJob)) {
         let mut inner = self.inner.lock();
         if let Some(job) = inner.jobs.iter_mut().find(|j| j.id == id) {
             f(job);
@@ -282,7 +280,7 @@ impl AgentJobRegistry {
 
     /// Attach (or detach, `None`) the live control handle for a job. The runner
     /// registers it right after the job starts; `finish` detaches automatically.
-    pub fn set_control(&self, id: &str, control: Option<AgentControlHandle>) {
+    pub fn set_control(&self, id: &str, control: Option<SubagentControlHandle>) {
         self.update(id, |job| job.control = control);
     }
 
@@ -325,7 +323,7 @@ impl AgentJobRegistry {
     /// Clone the control handle out of the lock (never invoke closures while
     /// holding the registry mutex — the harness may touch the registry from its
     /// event listeners).
-    fn control_for(&self, id: &str) -> Option<AgentControlHandle> {
+    fn control_for(&self, id: &str) -> Option<SubagentControlHandle> {
         self.inner
             .lock()
             .jobs
@@ -336,7 +334,7 @@ impl AgentJobRegistry {
     }
 
     /// Look up a single job (P3 GetNodeOutput / dag_inspect consumers).
-    pub fn job(&self, id: &str) -> Option<AgentJob> {
+    pub fn job(&self, id: &str) -> Option<SubagentJob> {
         let inner = self.inner.lock();
         inner.jobs.iter().find(|j| j.id == id).cloned()
     }
@@ -346,7 +344,7 @@ impl AgentJobRegistry {
     /// `dag_inspect kind=transcript` resolves the engine node to its registry
     /// job through this (engine-dispatched nodes keep only a placeholder job
     /// id, so the lookup key is the (run_id, node_id) pair stamped at launch).
-    pub fn job_for_node(&self, run_id: &str, node_id: &str) -> Option<AgentJob> {
+    pub fn job_for_node(&self, run_id: &str, node_id: &str) -> Option<SubagentJob> {
         let inner = self.inner.lock();
         inner
             .jobs
@@ -358,7 +356,7 @@ impl AgentJobRegistry {
 
     /// Terminal state: status + error + completion time. Detaches the live
     /// control handle so a finished job can no longer steer anything.
-    pub fn finish(&self, id: &str, status: JobStatus, error: Option<String>) {
+    pub fn finish(&self, id: &str, status: SubagentJobStatus, error: Option<String>) {
         self.update(id, |job| {
             job.status = status;
             job.error = error.clone();
@@ -371,7 +369,7 @@ impl AgentJobRegistry {
             // store survives a restart and is served by `node_messages` /
             // `job_messages`).
             self.persist_messages(&job);
-            self.emit(AgentJobEvent::Completed {
+            self.emit(SubagentJobEvent::Completed {
                 id: job.id.clone(),
                 status,
                 error: error.clone(),
@@ -386,19 +384,21 @@ impl AgentJobRegistry {
                     message.contains("timed out") || message.contains("timeout")
                 });
                 let (outcome, category) = match status {
-                    JobStatus::Running => {
+                    SubagentJobStatus::Running => {
                         (OperationOutcome::Abandoned, Some(ErrorCategory::Runtime))
                     }
-                    JobStatus::Succeeded => (OperationOutcome::Succeeded, None),
-                    JobStatus::Failed if timed_out => {
+                    SubagentJobStatus::Succeeded => (OperationOutcome::Succeeded, None),
+                    SubagentJobStatus::Failed if timed_out => {
                         (OperationOutcome::TimedOut, Some(ErrorCategory::Timeout))
                     }
-                    JobStatus::Failed => (OperationOutcome::Failed, Some(ErrorCategory::Runtime)),
-                    JobStatus::Cancelled => (
+                    SubagentJobStatus::Failed => {
+                        (OperationOutcome::Failed, Some(ErrorCategory::Runtime))
+                    }
+                    SubagentJobStatus::Cancelled => (
                         OperationOutcome::Cancelled,
                         Some(ErrorCategory::Cancellation),
                     ),
-                    JobStatus::Interrupted => (
+                    SubagentJobStatus::Interrupted => (
                         OperationOutcome::Interrupted,
                         Some(ErrorCategory::Cancellation),
                     ),
@@ -446,7 +446,7 @@ impl AgentJobRegistry {
     }
 
     /// Hand the finished job's transcript to the host store (best-effort).
-    fn persist_messages(&self, job: &AgentJob) {
+    fn persist_messages(&self, job: &SubagentJob) {
         if job.messages.is_empty() {
             return;
         }
@@ -463,17 +463,17 @@ impl AgentJobRegistry {
 
     /// Broadcast an event-plane message (no receiver → silently dropped, same
     /// as [`LoopEvent`]'s built-in plane).
-    pub(crate) fn emit(&self, event: AgentJobEvent) {
+    pub(crate) fn emit(&self, event: SubagentJobEvent) {
         let _ = self.events.send(event);
     }
 
     /// Look up a DAG node job by run/node (GetNodeOutput).
-    pub fn find_node(&self, run_id: &str, node_id: &str) -> Option<AgentJob> {
+    pub fn find_node(&self, run_id: &str, node_id: &str) -> Option<SubagentJob> {
         self.job_for_node(run_id, node_id)
     }
 
     /// Snapshot of all jobs, newest first (graph UI shows the latest runs on top).
-    pub fn list(&self) -> Vec<AgentJob> {
+    pub fn list(&self) -> Vec<SubagentJob> {
         let inner = self.inner.lock();
         let mut jobs = inner.jobs.clone();
         jobs.reverse();
@@ -481,9 +481,12 @@ impl AgentJobRegistry {
     }
 
     /// Evict oldest terminal jobs beyond MAX_JOBS.
-    fn evict(jobs: &mut Vec<AgentJob>) {
+    fn evict(jobs: &mut Vec<SubagentJob>) {
         while jobs.len() > MAX_JOBS {
-            let Some(idx) = jobs.iter().position(|job| job.status != JobStatus::Running) else {
+            let Some(idx) = jobs
+                .iter()
+                .position(|job| job.status != SubagentJobStatus::Running)
+            else {
                 break;
             };
             jobs.remove(idx);
@@ -496,4 +499,4 @@ fn now_ms() -> i64 {
 }
 
 #[cfg(test)]
-tests_bridge_macro::tests_bridge!("multiagent/registry");
+tests_bridge_macro::tests_bridge!("multiagent/jobs");

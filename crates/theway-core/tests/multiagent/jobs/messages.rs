@@ -4,8 +4,8 @@ use super::super::*;
 
 #[test]
 fn job_messages_returns_in_memory_messages_when_present() {
-    let registry = AgentJobRegistry::new();
-    let id = registry.register(JobInit {
+    let registry = SubagentJobRegistry::new();
+    let id = registry.register(SubagentJobInit {
         agent: "tester".into(),
         source: "dag".into(),
         run_id: Some("run-1".into()),

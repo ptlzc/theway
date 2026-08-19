@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use super::super::*;
 use crate::multiagent::graph::types::{DagNodeDef, DagRunDef};
-use crate::multiagent::registry::AgentJobRegistry;
+use crate::multiagent::jobs::SubagentJobRegistry;
 use crate::multiagent::types::{AgentRunParams, AgentRunResolver, ToolSetResolver};
 use theway_llm_provider::{
     AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, AssistantRole,
@@ -115,7 +115,7 @@ fn launch_returns_early_when_cancel_is_already_cancelled() {
         faux_model(),
         None,
         PathBuf::from("."),
-        AgentJobRegistry::new(),
+        SubagentJobRegistry::new(),
         tools_resolver(),
         launch_resolver(),
     );
@@ -171,7 +171,7 @@ async fn launch_logs_debug_fields_when_subscriber_enabled() {
         faux_model(),
         Some(quick_stream()),
         PathBuf::from("."),
-        AgentJobRegistry::new(),
+        SubagentJobRegistry::new(),
         tools_resolver(),
         launch_resolver(),
     );

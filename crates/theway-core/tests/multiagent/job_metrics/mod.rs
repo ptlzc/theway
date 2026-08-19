@@ -1,8 +1,8 @@
-//! Tests for `multiagent::registry::metrics` — split out of src
+//! Tests for `multiagent::job_metrics` — split out of src
 //! (see docs/rust-test-files.md).
 
 use super::*;
-use crate::multiagent::registry::AgentJobRegistry;
+use crate::multiagent::jobs::SubagentJobRegistry;
 
 #[test]
 fn cap_tool_result_keeps_short_text_unchanged() {
@@ -20,8 +20,8 @@ fn cap_tool_result_truncates_long_text_on_char_boundary() {
 
 #[test]
 fn metrics_listener_tool_execution_end_extracts_text_content_only() {
-    let registry = AgentJobRegistry::new();
-    let id = registry.register(crate::multiagent::registry::JobInit {
+    let registry = SubagentJobRegistry::new();
+    let id = registry.register(crate::multiagent::jobs::SubagentJobInit {
         agent: "g".into(),
         source: "subagent".into(),
         run_id: None,
@@ -61,8 +61,8 @@ fn metrics_listener_tool_execution_end_extracts_text_content_only() {
 
 #[test]
 fn metrics_listener_message_end_counts_tokens_for_assistant() {
-    let registry = AgentJobRegistry::new();
-    let id = registry.register(crate::multiagent::registry::JobInit {
+    let registry = SubagentJobRegistry::new();
+    let id = registry.register(crate::multiagent::jobs::SubagentJobInit {
         agent: "g".into(),
         source: "subagent".into(),
         run_id: None,

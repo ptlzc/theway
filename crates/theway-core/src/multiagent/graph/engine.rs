@@ -125,7 +125,7 @@ impl DagEngine {
     }
 
     /// Wire the event-plane broadcast (transport setup calls this once);
-    /// `None` detaches (same contract as AgentJobRegistry).
+    /// `None` detaches (same contract as SubagentJobRegistry).
     pub fn set_event_sender(&self, tx: Option<tokio::sync::broadcast::Sender<DagEvent>>) {
         self.inner.lock().events = tx;
     }

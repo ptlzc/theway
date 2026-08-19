@@ -7,7 +7,7 @@ mod operations;
 
 #[test]
 fn job_tps_and_cps_need_elapsed_time() {
-    let mut job = AgentJob::new(
+    let mut job = SubagentJob::new(
         "j1".into(),
         "agent".into(),
         "subagent".into(),
@@ -26,7 +26,7 @@ fn job_tps_and_cps_need_elapsed_time() {
 
 #[test]
 fn job_tps_and_cps_return_none_for_zero_elapsed() {
-    let mut job = AgentJob::new(
+    let mut job = SubagentJob::new(
         "j1".into(),
         "agent".into(),
         "subagent".into(),
@@ -42,15 +42,15 @@ fn job_tps_and_cps_return_none_for_zero_elapsed() {
 
 #[test]
 fn list_returns_newest_first() {
-    let registry = AgentJobRegistry::new();
-    let first = registry.register(JobInit {
+    let registry = SubagentJobRegistry::new();
+    let first = registry.register(SubagentJobInit {
         agent: "a".into(),
         source: "subagent".into(),
         run_id: None,
         node_id: None,
         session_id: None,
     });
-    let second = registry.register(JobInit {
+    let second = registry.register(SubagentJobInit {
         agent: "b".into(),
         source: "dag".into(),
         run_id: None,
@@ -65,10 +65,10 @@ fn list_returns_newest_first() {
 
 #[test]
 fn update_finish_and_find_with_unknown_id_are_noops() {
-    let registry = AgentJobRegistry::new();
+    let registry = SubagentJobRegistry::new();
     registry.update("missing", |job| job.chars += 1);
     registry.set_control("missing", None);
-    registry.finish("missing", JobStatus::Succeeded, None);
+    registry.finish("missing", SubagentJobStatus::Succeeded, None);
     assert!(registry.job("missing").is_none());
     assert!(registry.job_for_node("run", "node").is_none());
     assert!(registry.find_node("run", "node").is_none());
@@ -80,9 +80,9 @@ fn update_finish_and_find_with_unknown_id_are_noops() {
 
 #[test]
 fn subscribe_returns_receiver() {
-    let registry = AgentJobRegistry::new();
+    let registry = SubagentJobRegistry::new();
     let mut rx = registry.subscribe();
-    let id = registry.register(JobInit {
+    let id = registry.register(SubagentJobInit {
         agent: "a".into(),
         source: "subagent".into(),
         run_id: None,
@@ -91,17 +91,17 @@ fn subscribe_returns_receiver() {
     });
     let event = rx.try_recv().expect("started event");
     match event {
-        AgentJobEvent::Started { id: started_id, .. } => assert_eq!(started_id, id),
+        SubagentJobEvent::Started { id: started_id, .. } => assert_eq!(started_id, id),
         other => panic!("expected Started event, got {other:?}"),
     }
 }
 
 #[test]
 fn registry_keeps_all_running_jobs_over_history_cap() {
-    let registry = AgentJobRegistry::new();
+    let registry = SubagentJobRegistry::new();
     let mut first = None;
     for i in 0..(MAX_JOBS + 2) {
-        let id = registry.register(JobInit {
+        let id = registry.register(SubagentJobInit {
             agent: "a".into(),
             source: "subagent".into(),
             run_id: None,
@@ -120,8 +120,8 @@ fn registry_keeps_all_running_jobs_over_history_cap() {
 fn node_operations_target_latest_registered_attempt() {
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    let registry = AgentJobRegistry::new();
-    let old = registry.register(JobInit {
+    let registry = SubagentJobRegistry::new();
+    let old = registry.register(SubagentJobInit {
         agent: "a".into(),
         source: "dag".into(),
         run_id: Some("run".into()),
@@ -132,11 +132,11 @@ fn node_operations_target_latest_registered_attempt() {
         job.output = "old".into();
         job.messages = vec![serde_json::json!({"text": "old"})];
     });
-    registry.finish(&old, JobStatus::Failed, Some("retry".into()));
+    registry.finish(&old, SubagentJobStatus::Failed, Some("retry".into()));
 
     let interrupted = Arc::new(AtomicBool::new(false));
     let steered = Arc::new(std::sync::Mutex::new(None));
-    let latest = registry.register(JobInit {
+    let latest = registry.register(SubagentJobInit {
         agent: "a".into(),
         source: "dag".into(),
         run_id: Some("run".into()),
@@ -149,7 +149,7 @@ fn node_operations_target_latest_registered_attempt() {
     });
     registry.set_control(
         &latest,
-        Some(AgentControlHandle {
+        Some(SubagentControlHandle {
             interrupt: {
                 let interrupted = interrupted.clone();
                 Arc::new(move || interrupted.store(true, Ordering::SeqCst))
@@ -171,9 +171,9 @@ fn node_operations_target_latest_registered_attempt() {
 
 #[test]
 fn control_handle_debug_does_not_leak() {
-    let handle = AgentControlHandle {
+    let handle = SubagentControlHandle {
         interrupt: Arc::new(|| {}),
         steer: Arc::new(|_| {}),
     };
-    assert_eq!(format!("{handle:?}"), "AgentControlHandle");
+    assert_eq!(format!("{handle:?}"), "SubagentControlHandle");
 }

@@ -250,7 +250,7 @@ fn engine_with_launcher(model: Model, stream: StreamFn) -> Arc<DagEngine> {
         model,
         Some(stream),
         PathBuf::from("."),
-        crate::multiagent::registry::AgentJobRegistry::new(),
+        crate::multiagent::jobs::SubagentJobRegistry::new(),
         // Tool-set resolver: these tests drive the engine with a faux stream that
         // never calls tools, so an empty tool set per spec suffices.
         Arc::new(|_| Vec::new()),
@@ -274,7 +274,7 @@ fn engine_with_tools(
         model,
         Some(stream),
         PathBuf::from("."),
-        crate::multiagent::registry::AgentJobRegistry::new(),
+        crate::multiagent::jobs::SubagentJobRegistry::new(),
         Arc::new(move |_| tools.clone()),
         test_launch_resolver(),
     );

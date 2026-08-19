@@ -8,7 +8,7 @@ use crate::agent::session::memory_storage::MemorySessionStorage;
 use crate::agent::session::session::{Session, SessionStorage};
 use crate::multiagent::graph::engine::DagEngine;
 use crate::multiagent::graph::types::DagStatus;
-use crate::multiagent::registry::AgentJobRegistry;
+use crate::multiagent::jobs::SubagentJobRegistry;
 use crate::multiagent::types::AgentRunParams;
 use theway_llm_provider::{Message as PiMessage, UserContent, UserMessage, UserRole};
 
@@ -92,7 +92,7 @@ async fn stop_hook_returns_pause_when_harness_cell_unset() {
         harness_cell,
         Arc::new(DagEngine::new()),
         Arc::new(|_| None),
-        AgentJobRegistry::new(),
+        SubagentJobRegistry::new(),
         None,
     );
     let ctx = OnTurnEndContext {
@@ -121,7 +121,7 @@ async fn evaluate_stop_hook_returns_noop_without_goal() {
         h.clone(),
         engine,
         Arc::new(|_| None),
-        AgentJobRegistry::new(),
+        SubagentJobRegistry::new(),
         None,
         ctx,
         tokio_util::sync::CancellationToken::new(),
@@ -147,7 +147,7 @@ async fn evaluate_stop_hook_pauses_when_no_model() {
         h.clone(),
         engine.clone(),
         Arc::new(|_| None),
-        AgentJobRegistry::new(),
+        SubagentJobRegistry::new(),
         None,
         ctx,
         tokio_util::sync::CancellationToken::new(),
@@ -177,7 +177,7 @@ async fn evaluate_stop_hook_pauses_when_no_evaluator_spec() {
         h.clone(),
         engine.clone(),
         Arc::new(|_| None),
-        AgentJobRegistry::new(),
+        SubagentJobRegistry::new(),
         None,
         ctx,
         tokio_util::sync::CancellationToken::new(),

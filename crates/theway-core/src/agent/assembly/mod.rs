@@ -8,7 +8,7 @@
 //!
 //! - [`LoopEvent`](crate::agent::LoopEvent) covers single turn-loop internals.
 //! - [`SessionEvent`] covers cross-turn session lifecycle and configuration changes.
-//! - `AgentJobEvent` covers multi-agent graph job telemetry through `AgentJobRegistry`.
+//! - `SubagentJobEvent` covers multi-agent graph job telemetry through `SubagentJobRegistry`.
 //!
 //! External consumers subscribe through [`AgentHarness::subscribe_session_broadcast`].
 //! Synchronous callbacks registered with [`AgentHarness::subscribe_harness`] are isolated

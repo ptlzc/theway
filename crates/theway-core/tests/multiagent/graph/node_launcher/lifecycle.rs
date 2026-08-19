@@ -140,7 +140,7 @@ fn launch_ignores_missing_run_or_node() {
         faux_model(),
         Some(faux_stream("unused")),
         PathBuf::from("."),
-        crate::multiagent::registry::AgentJobRegistry::new(),
+        crate::multiagent::jobs::SubagentJobRegistry::new(),
         Arc::new(|_| Vec::new()),
         test_launch_resolver(),
     );

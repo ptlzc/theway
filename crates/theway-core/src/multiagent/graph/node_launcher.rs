@@ -36,7 +36,7 @@ use theway_core::{AgentTool, StreamFn};
 use theway_llm_provider::Model;
 use tokio_util::sync::CancellationToken;
 
-use crate::multiagent::registry::AgentJobRegistry;
+use crate::multiagent::jobs::SubagentJobRegistry;
 use crate::multiagent::runner::{AgentRunOptions, filter_tool_set, run_agent};
 use crate::multiagent::types::{AgentRunParams, AgentRunResolver, ToolSetResolver};
 
@@ -62,7 +62,7 @@ struct NodeJob {
     /// (cancelled/skipped/retried meanwhile) are dropped by the engine.
     launch_gen: u64,
     /// Subagent job registry (graph mode metrics/output).
-    registry: AgentJobRegistry,
+    registry: SubagentJobRegistry,
 }
 
 /// Real subagent launcher for the DAG engine. Cheap to clone via [`Arc`].
@@ -77,7 +77,7 @@ pub struct NodeLauncherImpl {
     /// path is recorded for diagnostics and future per-node cwd support).
     cwd: PathBuf,
     /// Subagent job registry (graph mode metrics/output).
-    registry: AgentJobRegistry,
+    registry: SubagentJobRegistry,
     /// App-layer tool-set resolver (spec name → tools), injected at construction.
     tools_resolver: ToolSetResolver,
     /// App-layer launch resolver (spec name → launch params), injected at construction.
@@ -193,7 +193,7 @@ pub fn node_launcher(
     model: Model,
     stream_fn: Option<StreamFn>,
     cwd: PathBuf,
-    registry: AgentJobRegistry,
+    registry: SubagentJobRegistry,
     tools_resolver: ToolSetResolver,
     launch_resolver: AgentRunResolver,
 ) -> Arc<NodeLauncherImpl> {

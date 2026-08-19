@@ -2,10 +2,10 @@
 
 use crate::AgentMessage;
 
-use super::{AgentJob, MAX_MESSAGES_BYTES, MAX_OUTPUT_BYTES};
+use super::jobs::{MAX_MESSAGES_BYTES, MAX_OUTPUT_BYTES, SubagentJob};
 
 /// Append a chunk to the job's full-text buffer, honoring the cap.
-pub fn append_output(job: &mut AgentJob, chunk: &str) {
+pub fn append_output(job: &mut SubagentJob, chunk: &str) {
     if chunk.is_empty() {
         return;
     }
@@ -38,7 +38,7 @@ fn tail_within_bytes(value: &str, max_bytes: usize) -> &str {
 /// Oversized transcripts drop the oldest messages and keep the tail (the
 /// newest messages are the ones a recovery/inspection flow cares about); the
 /// newest message is never dropped even if it alone exceeds the cap.
-pub fn append_message(job: &mut AgentJob, message: &serde_json::Value) {
+pub fn append_message(job: &mut SubagentJob, message: &serde_json::Value) {
     job.messages.push(message.clone());
     let mut total = 0usize;
     for m in &job.messages {
@@ -112,4 +112,4 @@ pub trait JobTranscriptStore: Send + Sync {
 }
 
 #[cfg(test)]
-tests_bridge_macro::tests_bridge!("multiagent/registry/transcript");
+tests_bridge_macro::tests_bridge!("multiagent/job_transcript");

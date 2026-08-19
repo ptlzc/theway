@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::super::*;
-use crate::multiagent::registry::AgentJobRegistry;
+use crate::multiagent::jobs::SubagentJobRegistry;
 use crate::multiagent::types::AgentRunParams;
 use theway_llm_provider::{
     AssistantMessageEvent, AssistantMessageEventStream, AssistantRole, ContentBlock, DoneReason,
@@ -73,7 +73,7 @@ fn opts(stream_fn: StreamFn, timeout: Option<u64>) -> AgentRunOptions {
         stream_fn: Some(stream_fn),
         timeout,
         thinking: None,
-        registry: AgentJobRegistry::new(),
+        registry: SubagentJobRegistry::new(),
         source: "dag".into(),
         run_id: None,
         node_id: None,

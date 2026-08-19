@@ -1,8 +1,10 @@
-//! Tests for `multiagent::registry::transcript` — split out of src
+//! Tests for `multiagent::job_transcript` — split out of src
 //! (see docs/rust-test-files.md).
 
-use super::super::{AgentJob, MAX_MESSAGES_BYTES, MAX_OUTPUT_BYTES};
 use super::{JobTranscript, JobTranscriptStore, agent_message_to_json, append_message, append_output};
+use crate::multiagent::jobs::{
+    MAX_MESSAGES_BYTES, MAX_OUTPUT_BYTES, SubagentJob, SubagentJobStatus,
+};
 
 use crate::types::AgentMessage;
 use theway_llm_provider::{
@@ -10,15 +12,15 @@ use theway_llm_provider::{
     ToolResultRole, Usage, UserContent, UserContentBlock, UserMessage, UserRole,
 };
 
-fn job() -> AgentJob {
-    AgentJob {
+fn job() -> SubagentJob {
+    SubagentJob {
         id: "j1".into(),
         agent: "general".into(),
         source: "subagent".into(),
         run_id: None,
         node_id: None,
         session_id: None,
-        status: super::super::events::JobStatus::Running,
+        status: SubagentJobStatus::Running,
         started_at: Some(0),
         completed_at: None,
         attempt: 1,

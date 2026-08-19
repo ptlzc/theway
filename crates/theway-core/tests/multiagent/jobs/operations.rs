@@ -43,8 +43,8 @@
     #[test]
     fn control_handle_routes_interrupt_and_steer_by_job_id() {
         use std::sync::atomic::{AtomicBool, Ordering};
-        let registry = AgentJobRegistry::new();
-        let id = registry.register(JobInit {
+        let registry = SubagentJobRegistry::new();
+        let id = registry.register(SubagentJobInit {
             agent: "general".into(),
             source: "subagent".into(),
             run_id: None,
@@ -56,7 +56,7 @@
         let steered = Arc::new(std::sync::Mutex::new(None::<String>));
         registry.set_control(
             &id,
-            Some(AgentControlHandle {
+            Some(SubagentControlHandle {
                 interrupt: {
                     let flag = interrupted.clone();
                     Arc::new(move || flag.store(true, Ordering::SeqCst))
@@ -78,7 +78,7 @@
         assert_eq!(steered.lock().unwrap().as_deref(), Some("use plan B"));
 
         // finish detaches the handle -> no longer controllable.
-        registry.finish(&id, JobStatus::Succeeded, None);
+        registry.finish(&id, SubagentJobStatus::Succeeded, None);
         assert!(!registry.interrupt(&id));
         assert!(registry.job(&id).unwrap().control.is_none());
     }
@@ -86,8 +86,8 @@
     #[test]
     fn control_handle_routes_by_run_node_ids() {
         use std::sync::atomic::{AtomicBool, Ordering};
-        let registry = AgentJobRegistry::new();
-        let id = registry.register(JobInit {
+        let registry = SubagentJobRegistry::new();
+        let id = registry.register(SubagentJobInit {
             agent: "explorer".into(),
             source: "dag".into(),
             run_id: Some("run-9".into()),
@@ -98,7 +98,7 @@
         let steered = Arc::new(std::sync::Mutex::new(None::<String>));
         registry.set_control(
             &id,
-            Some(AgentControlHandle {
+            Some(SubagentControlHandle {
                 interrupt: {
                     let flag = interrupted.clone();
                     Arc::new(move || flag.store(true, Ordering::SeqCst))
@@ -122,8 +122,8 @@
 
     #[test]
     fn register_list_finish_roundtrip() {
-        let registry = AgentJobRegistry::new();
-        let id = registry.register(JobInit {
+        let registry = SubagentJobRegistry::new();
+        let id = registry.register(SubagentJobInit {
             agent: "general".into(),
             source: "subagent".into(),
             run_id: None,
@@ -131,17 +131,17 @@
             session_id: None,
         });
         let job = registry.job(&id).unwrap();
-        assert_eq!(job.status, JobStatus::Running);
+        assert_eq!(job.status, SubagentJobStatus::Running);
         assert_eq!(job.source, "subagent");
 
         registry.update(&id, |job| {
             job.chars = 10;
             append_output(job, "hello world");
         });
-        registry.finish(&id, JobStatus::Succeeded, None);
+        registry.finish(&id, SubagentJobStatus::Succeeded, None);
 
         let job = registry.job(&id).unwrap();
-        assert_eq!(job.status, JobStatus::Succeeded);
+        assert_eq!(job.status, SubagentJobStatus::Succeeded);
         assert_eq!(job.chars, 10);
         assert_eq!(job.output, "hello world");
         assert!(!job.truncated);
@@ -151,7 +151,7 @@
 
     #[test]
     fn output_buffer_caps_and_flags_truncated() {
-        let mut job = AgentJob::new(
+        let mut job = SubagentJob::new(
             "j1".into(),
             "general".into(),
             "subagent".into(),
@@ -169,10 +169,10 @@
 
     #[test]
     fn evicts_oldest_terminal_job_when_over_cap() {
-        let registry = AgentJobRegistry::new();
+        let registry = SubagentJobRegistry::new();
         let mut first_id = None;
         for i in 0..(MAX_JOBS + 5) {
-            let id = registry.register(JobInit {
+            let id = registry.register(SubagentJobInit {
                 agent: "general".into(),
                 source: "subagent".into(),
                 run_id: None,
@@ -184,7 +184,7 @@
             }
             // terminal states for all but the last, which stays running
             if i < MAX_JOBS + 4 {
-                registry.finish(&id, JobStatus::Succeeded, None);
+                registry.finish(&id, SubagentJobStatus::Succeeded, None);
             }
         }
         assert_eq!(registry.list().len(), MAX_JOBS);
@@ -194,15 +194,15 @@
         let jobs = registry.list();
         let running = jobs
             .iter()
-            .find(|j| j.status == JobStatus::Running)
+            .find(|j| j.status == SubagentJobStatus::Running)
             .expect("running job kept");
         assert!(running.completed_at.is_none());
     }
 
     #[test]
     fn metrics_listener_counts_tools_and_turns() {
-        let registry = AgentJobRegistry::new();
-        let id = registry.register(JobInit {
+        let registry = SubagentJobRegistry::new();
+        let id = registry.register(SubagentJobInit {
             agent: "general".into(),
             source: "subagent".into(),
             run_id: None,
@@ -231,8 +231,8 @@
             AssistantMessage, ContentBlock, StopReason, ToolResultMessage, ToolResultRole, Usage,
             UserContent, UserContentBlock, UserMessage, UserRole,
         };
-        let registry = AgentJobRegistry::new();
-        let id = registry.register(JobInit {
+        let registry = SubagentJobRegistry::new();
+        let id = registry.register(SubagentJobInit {
             agent: "explorer".into(),
             source: "dag".into(),
             run_id: Some("run-1".into()),
@@ -310,7 +310,7 @@
 
     #[test]
     fn message_buffer_caps_drops_oldest_keeps_newest() {
-        let mut job = AgentJob::new(
+        let mut job = SubagentJob::new(
             "j1".into(),
             "general".into(),
             "subagent".into(),
@@ -334,9 +334,9 @@
     #[test]
     fn finish_saves_transcript_to_host_store() {
         let store = Arc::new(MemoryTranscriptStore::default());
-        let registry = AgentJobRegistry::new();
+        let registry = SubagentJobRegistry::new();
         registry.set_transcript_store(Some(store.clone()));
-        let id = registry.register(JobInit {
+        let id = registry.register(SubagentJobInit {
             agent: "explorer".into(),
             source: "dag".into(),
             run_id: Some("run-1".into()),
@@ -350,11 +350,11 @@
             );
         });
 
-        registry.finish(&id, JobStatus::Succeeded, None);
+        registry.finish(&id, SubagentJobStatus::Succeeded, None);
 
         // Simulated restart: a fresh registry (empty memory) with the same
         // host store resolves the finished transcript through the seam.
-        let restarted = AgentJobRegistry::new();
+        let restarted = SubagentJobRegistry::new();
         restarted.set_transcript_store(Some(store.clone()));
         let messages = restarted
             .node_messages("run-1", "node-1")
@@ -371,9 +371,9 @@
     #[test]
     fn job_messages_fall_back_to_host_store_after_restart() {
         let store = Arc::new(MemoryTranscriptStore::default());
-        let registry = AgentJobRegistry::new();
+        let registry = SubagentJobRegistry::new();
         registry.set_transcript_store(Some(store.clone()));
-        let id = registry.register(JobInit {
+        let id = registry.register(SubagentJobInit {
             agent: "general".into(),
             source: "subagent".into(),
             run_id: None,
@@ -386,9 +386,9 @@
                 &serde_json::json!({"role": "note", "text": "task transcript"}),
             );
         });
-        registry.finish(&id, JobStatus::Succeeded, None);
+        registry.finish(&id, SubagentJobStatus::Succeeded, None);
 
-        let restarted = AgentJobRegistry::new();
+        let restarted = SubagentJobRegistry::new();
         restarted.set_transcript_store(Some(store.clone()));
         let messages = restarted.job_messages(&id).unwrap();
         assert_eq!(messages.len(), 1);

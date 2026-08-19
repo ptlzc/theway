@@ -12,8 +12,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
-use theway_core::multiagent::registry::{
-    AgentControlHandle, AgentJobRegistry, JobInit, JobStatus, metrics_listener,
+use theway_core::multiagent::jobs::{
+    SubagentControlHandle, SubagentJobInit, SubagentJobRegistry, SubagentJobStatus,
+    metrics_listener,
 };
 use theway_core::{
     AgentHarness, AgentHarnessOptions, AgentMessage, AgentRunError, AgentTool, LoopEvent,
@@ -44,7 +45,7 @@ pub struct AgentRunOptions {
     pub timeout: Option<u64>,
     pub thinking: Option<String>,
     /// Subagent job registry (graph mode metrics/output).
-    pub registry: AgentJobRegistry,
+    pub registry: SubagentJobRegistry,
     /// "subagent" or "dag" — the registry job's `source` field.
     pub source: String,
     pub run_id: Option<String>,
@@ -128,7 +129,7 @@ pub async fn run_agent(opts: AgentRunOptions) -> AgentRunResult {
 
     // Graph mode: track this job in the registry (metrics + full-text output).
     let job_id = opts.registry.register_observed(
-        JobInit {
+        SubagentJobInit {
             agent: opts.launch.name.to_string(),
             source: opts.source.clone(),
             run_id: opts.run_id.clone(),
@@ -180,7 +181,7 @@ pub async fn run_agent(opts: AgentRunOptions) -> AgentRunResult {
         let sub_steer = sub.clone();
         opts.registry.set_control(
             &job_id,
-            Some(AgentControlHandle {
+            Some(SubagentControlHandle {
                 interrupt: Arc::new(move || sub_ctl.interrupt()),
                 steer: Arc::new(move |text: String| {
                     let msg =
@@ -345,7 +346,8 @@ pub async fn run_agent(opts: AgentRunOptions) -> AgentRunResult {
         // Aborted by the caller: registry record goes Cancelled; the caller flips its
         // own state (task returns Err("cancelled"); the engine has already marked the
         // node Cancelled, so node_launcher drops the report).
-        opts.registry.finish(&job_id, JobStatus::Cancelled, None);
+        opts.registry
+            .finish(&job_id, SubagentJobStatus::Cancelled, None);
         return AgentRunResult {
             text: String::new(),
             success: false,
@@ -363,11 +365,11 @@ pub async fn run_agent(opts: AgentRunOptions) -> AgentRunResult {
     opts.registry.finish(
         &job_id,
         if interrupted {
-            JobStatus::Interrupted
+            SubagentJobStatus::Interrupted
         } else if success {
-            JobStatus::Succeeded
+            SubagentJobStatus::Succeeded
         } else {
-            JobStatus::Failed
+            SubagentJobStatus::Failed
         },
         error.clone(),
     );

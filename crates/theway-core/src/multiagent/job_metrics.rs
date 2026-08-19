@@ -8,8 +8,8 @@ use theway_llm_provider::UserContentBlock;
 
 use crate::{AgentMessage, LoopEvent};
 
-use super::{
-    AgentJobEvent, AgentJobRegistry, agent_message_to_json, append_message, append_output,
+use super::jobs::{
+    SubagentJobEvent, SubagentJobRegistry, agent_message_to_json, append_message, append_output,
 };
 
 /// Build a synchronous [`crate::agent::LoopSyncCallback`] that accumulates metrics + output
@@ -18,7 +18,7 @@ use super::{
 ///
 /// Attach to the sub-harness (`sub.agent().subscribe_sync(...)`) right after registering.
 pub fn metrics_listener(
-    registry: AgentJobRegistry,
+    registry: SubagentJobRegistry,
     job_id: String,
 ) -> crate::agent::LoopSyncCallback {
     Arc::new(move |event| match event {
@@ -32,7 +32,7 @@ pub fn metrics_listener(
                 job.chars = job.chars.saturating_add(delta.chars().count() as u64);
                 append_output(job, &delta);
             });
-            registry.emit(AgentJobEvent::Output {
+            registry.emit(SubagentJobEvent::Output {
                 id: job_id.clone(),
                 chunk: delta,
             });
@@ -57,7 +57,7 @@ pub fn metrics_listener(
                 }
             });
             if let Some(job) = registry.job(&job_id) {
-                registry.emit(AgentJobEvent::Metrics {
+                registry.emit(SubagentJobEvent::Metrics {
                     id: job_id.clone(),
                     tps: job.tps(),
                     cps: job.cps(),
@@ -131,4 +131,4 @@ fn cap_tool_result(text: &str) -> String {
 }
 
 #[cfg(test)]
-tests_bridge_macro::tests_bridge!("multiagent/registry/metrics");
+tests_bridge_macro::tests_bridge!("multiagent/job_metrics");

@@ -1,4 +1,4 @@
-//! Tests for `multiagent::registry::events` — split out of src
+//! Tests for `multiagent::job_events` — split out of src
 //! (see docs/rust-test-files.md).
 
 use super::*;
@@ -6,7 +6,7 @@ use super::*;
 #[test]
 fn broadcast_capacity_is_256() {
     // Arrange/Act
-    let capacity = AGENT_JOB_EVENT_BROADCAST_CAPACITY;
+    let capacity = SUBAGENT_JOB_EVENT_BROADCAST_CAPACITY;
 
     // Assert
     assert_eq!(capacity, 256);
@@ -15,17 +15,17 @@ fn broadcast_capacity_is_256() {
 #[test]
 fn job_status_as_str_returns_lowercase_variant_names() {
     // Arrange/Act/Assert
-    assert_eq!(JobStatus::Running.as_str(), "running");
-    assert_eq!(JobStatus::Succeeded.as_str(), "succeeded");
-    assert_eq!(JobStatus::Failed.as_str(), "failed");
-    assert_eq!(JobStatus::Cancelled.as_str(), "cancelled");
-    assert_eq!(JobStatus::Interrupted.as_str(), "interrupted");
+    assert_eq!(SubagentJobStatus::Running.as_str(), "running");
+    assert_eq!(SubagentJobStatus::Succeeded.as_str(), "succeeded");
+    assert_eq!(SubagentJobStatus::Failed.as_str(), "failed");
+    assert_eq!(SubagentJobStatus::Cancelled.as_str(), "cancelled");
+    assert_eq!(SubagentJobStatus::Interrupted.as_str(), "interrupted");
 }
 
 #[test]
 fn job_status_into_static_str_matches_as_str() {
     // Arrange
-    let status = JobStatus::Succeeded;
+    let status = SubagentJobStatus::Succeeded;
 
     // Act
     let as_static: &'static str = status.into();
@@ -38,18 +38,18 @@ fn job_status_into_static_str_matches_as_str() {
 #[test]
 fn agent_job_event_variants_carry_their_fields() {
     // Arrange
-    let started = AgentJobEvent::Started {
+    let started = SubagentJobEvent::Started {
         id: "job-1".into(),
         agent: "researcher".into(),
         source: "dag".into(),
         run_id: Some("run-1".into()),
         node_id: Some("node-1".into()),
     };
-    let output = AgentJobEvent::Output {
+    let output = SubagentJobEvent::Output {
         id: "job-1".into(),
         chunk: "partial output".into(),
     };
-    let metrics = AgentJobEvent::Metrics {
+    let metrics = SubagentJobEvent::Metrics {
         id: "job-1".into(),
         tps: Some(12.5),
         cps: None,
@@ -59,9 +59,9 @@ fn agent_job_event_variants_carry_their_fields() {
         tools_called: 2,
         turn: 1,
     };
-    let completed = AgentJobEvent::Completed {
+    let completed = SubagentJobEvent::Completed {
         id: "job-1".into(),
-        status: JobStatus::Succeeded,
+        status: SubagentJobStatus::Succeeded,
         error: None,
         chars: 100,
         tokens_in: 20,
@@ -74,7 +74,7 @@ fn agent_job_event_variants_carry_their_fields() {
 
     // Assert
     match &events[0] {
-        AgentJobEvent::Started {
+        SubagentJobEvent::Started {
             id,
             agent,
             source,
@@ -90,14 +90,14 @@ fn agent_job_event_variants_carry_their_fields() {
         other => panic!("expected Started event, got {other:?}"),
     }
     match &events[1] {
-        AgentJobEvent::Output { id, chunk } => {
+        SubagentJobEvent::Output { id, chunk } => {
             assert_eq!(id, "job-1");
             assert_eq!(chunk, "partial output");
         }
         other => panic!("expected Output event, got {other:?}"),
     }
     match &events[2] {
-        AgentJobEvent::Metrics {
+        SubagentJobEvent::Metrics {
             id,
             tps,
             cps,
@@ -119,7 +119,7 @@ fn agent_job_event_variants_carry_their_fields() {
         other => panic!("expected Metrics event, got {other:?}"),
     }
     match &events[3] {
-        AgentJobEvent::Completed {
+        SubagentJobEvent::Completed {
             id,
             status,
             error,
@@ -129,7 +129,7 @@ fn agent_job_event_variants_carry_their_fields() {
             tools_called,
         } => {
             assert_eq!(id, "job-1");
-            assert_eq!(*status, JobStatus::Succeeded);
+            assert_eq!(*status, SubagentJobStatus::Succeeded);
             assert_eq!(error.as_deref(), None);
             assert_eq!(*chars, 100);
             assert_eq!(*tokens_in, 20);
@@ -143,7 +143,7 @@ fn agent_job_event_variants_carry_their_fields() {
 #[test]
 fn agent_job_events_are_clone_and_debug() {
     // Arrange
-    let event = AgentJobEvent::Started {
+    let event = SubagentJobEvent::Started {
         id: "job-1".into(),
         agent: "researcher".into(),
         source: "dag".into(),

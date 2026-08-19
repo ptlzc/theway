@@ -18,7 +18,7 @@ use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use parking_lot::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use theway_core::multiagent::registry::{AgentJobRegistry, JobInit, JobStatus};
+use theway_core::multiagent::jobs::{SubagentJobInit, SubagentJobRegistry, SubagentJobStatus};
 use theway_core::{LoopEvent, LoopListener, LoopSyncCallback};
 
 // ── a. emit_three_segment ──────────────────────────────────────────────────
@@ -208,26 +208,26 @@ fn bench_broadcast_multi_receiver(c: &mut Criterion) {
 
 // ── e. registry_emit ──────────────────────────────────────────────────────
 //
-// Real path: AgentJobRegistry::register + finish triggers internal emit
-// (AgentJobEvent::Started + Completed via broadcast send). The registry's
+// Real path: SubagentJobRegistry::register + finish triggers internal emit
+// (SubagentJobEvent::Started + Completed via broadcast send). The registry's
 // `emit` is pub(crate), so we exercise the public register/finish API
 // which internally dispatches to the broadcast channel.
 
 fn bench_registry_emit(c: &mut Criterion) {
     c.bench_function("registry_emit", |b| {
-        let registry = AgentJobRegistry::new();
+        let registry = SubagentJobRegistry::new();
         // Subscribe so the broadcast channel has live receivers.
         let mut _rx = registry.subscribe();
 
         b.iter(|| {
-            let id = registry.register(JobInit {
+            let id = registry.register(SubagentJobInit {
                 agent: "general".into(),
                 source: "bench".into(),
                 run_id: None,
                 node_id: None,
                 session_id: None,
             });
-            registry.finish(&id, JobStatus::Succeeded, None);
+            registry.finish(&id, SubagentJobStatus::Succeeded, None);
             black_box(());
         });
     });
