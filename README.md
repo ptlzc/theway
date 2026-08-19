@@ -214,15 +214,21 @@ The daemon resolves its host paths once at startup (`--cwd`, `--home`, repeatabl
 
 | Crate | Package | What |
 |-------|---------|------|
-| `crates/theway-core` | `theway-core` | Daemon runtime core: bare `Agent`, `AgentHarness`, typed runtime sessions, multiagent DAG engine, and the `ToolExecutor` trait. |
-| `crates/theway-daemon` | `theway-daemon` | The single kernel (bin `thewayd`): harness assembly, all tool bodies, local/sandbox executor policy, trigger/cron runtime, session lifecycle, DAG persistence, skills/templates, MCP/LSP wiring, and transport servers. |
-| `crates/theway-transport` | `theway-transport` | Protocol layer: wire model + gRPC / HTTP / WebSocket / MCP transports, plus shared client-contract modules. |
-| `crates/theway-tui` | `theway-tui` | Terminal UI (the `theway` CLI binary): daemon client plus offline session maintenance through storage contracts; never links core or daemon. |
-| `crates/theway-contract` | `theway-contract` | Shared leaf contract: raw session persistence, persisted DAG snapshots, trigger/cron sidecars, and base-dir / cwd-hash paths. |
-| `crates/theway-storage` | `theway-storage` | SQLite session storage, archive export/import, and DAG snapshots; depends only on the leaf contract among runtime crates. |
-| `crates/theway-llm-provider` | `theway-llm-provider` | Unified streaming LLM client and provider integrations. |
-| `crates/theway-mcp` | `theway-mcp` | Minimal MCP client. |
-| `crates/mermaid-parser` | `mermaid-rs-parser` | Vendored mermaid parser for DAG specs. |
+| [`crates/theway-core`](crates/theway-core/README.md) | `theway-core` | Daemon runtime core: agent loop and harness, runtime ports, typed sessions, and multiagent DAG engine. |
+| [`crates/theway-daemon`](crates/theway-daemon/README.md) | `theway-daemon` | `thewayd` composition root: runtime assembly, tools, automation, orchestration, integrations, observability, and protocol servers. |
+| [`crates/theway-transport`](crates/theway-transport/README.md) | `theway-transport` | Cross-client wire model plus gRPC, HTTP/JSON-RPC, SSE, and WebSocket carriers. |
+| [`crates/theway-tui`](crates/theway-tui/README.md) | `theway-tui` | `theway` terminal client/controller and offline session-maintenance commands. |
+| [`crates/theway-contract`](crates/theway-contract/README.md) | `theway-contract` | Leaf persistence and path contracts with no workspace dependencies. |
+| [`crates/theway-storage`](crates/theway-storage/README.md) | `theway-storage` | SQLite session and DAG persistence plus session archives. |
+| [`crates/theway-llm-provider`](crates/theway-llm-provider/README.md) | `theway-llm-provider` | Normalized streaming LLM client, provider integrations, and model catalogs. |
+| [`crates/theway-mcp`](crates/theway-mcp/README.md) | `theway-mcp` | MCP stdio client and JSON-RPC framing. |
+| [`crates/theway-probe`](crates/theway-probe/README.md) | `theway-probe` | gRPC serviceability probe. |
+| [`crates/theway-markdown-core`](crates/theway-markdown-core/README.md) | `theway-markdown-core` | Headless Markdown parser policy, analysis, and diagnostics. |
+| [`crates/theway-markdown`](crates/theway-markdown/README.md) | `theway-markdown` | Streaming terminal Markdown renderer. |
+| [`crates/theway-pager-render`](crates/theway-pager-render/README.md) | `theway-pager-render` | Ratatui pager and feed rendering primitives. |
+| [`crates/theway-ratatui-textarea`](crates/theway-ratatui-textarea/README.md) | `theway-ratatui-textarea` | Grapheme-aware multiline editor and ratatui widget. |
+| [`crates/mermaid-parser`](crates/mermaid-parser/README.md) | `mermaid-rs-parser` | Vendored Mermaid source-to-IR parse stage. |
+| [`crates/tests-bridge-macro`](crates/tests-bridge-macro/README.md) | `tests-bridge-macro` | Proc macro for crate-root-anchored mirrored unit-test suites. |
 
 See [docs/architecture.md](docs/architecture.md) for the full three-layer layout, tool policy matrix, and storage contract.
 

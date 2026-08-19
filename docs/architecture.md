@@ -8,7 +8,7 @@ theway is a three-layer agent runtime:
    policy, all tool bodies, the trigger/cron runtime, session lifecycle, DAG
    persistence, skills/templates, MCP/LSP wiring, and the transport servers.
 3. **Transport protocol + clients** — `theway-transport` (wire model,
-   gRPC/HTTP/WS/MCP transports, and the shared client-contract modules) and
+   gRPC/HTTP/SSE/WS carriers, and the shared client-contract modules) and
    `theway-tui` (the ratatui client binary `theway`).
 
 `theway-contract` is the shared leaf contract for raw session persistence, persisted DAG snapshots, sidecar models, and paths. `theway-storage` implements those persistence contracts and depends only on `theway-contract` among runtime workspace crates; the daemon adapts storage records to core runtime types.
@@ -17,19 +17,21 @@ theway is a three-layer agent runtime:
 
 | Crate | Package | Role |
 |-------|---------|------|
-| `crates/theway-core` | `theway-core` | Agent engine: bare `Agent` + agent loop, `AgentHarness` layer (skills, prompt templates, sessions, compaction, permission policy), session storage contracts (`SessionStorage` / `SessionRepo`) with an in-memory default, multiagent orchestration (DAG/goal graph engine, job registry, nested runner), the transport-neutral `RuntimeObserver` port, and the `ToolExecutor` trait (`theway_core::executor`). Defines no tool bodies, exporters, or local fs/process behavior. |
-| `crates/theway-daemon` | `theway-daemon` | The single kernel (bin `thewayd`): harness assembly, executor implementations (`local` / `sandbox` features), all tool bodies (engine + local + web), trigger engine, cron scheduler, session ops, DAG persistence, skills/templates, MCP loader, LSP supervisor, hooks, and OpenTelemetry/Prometheus export. Serves the gRPC / HTTP / MCP transports. |
-| `crates/theway-transport` | `theway-transport` | Protocol layer: wire model + gRPC / HTTP/SSE / WebSocket / MCP transports, plus the shared client-contract modules (auth, bug report, commands, config, feed, history, images, mentions, triggers). |
-| `crates/theway-tui` | `theway-tui` | Terminal client (the `theway` CLI binary): ratatui REPL, feed rendering, local commands. Connects to a running daemon or spawns `thewayd`; never links the daemon kernel. |
-| `crates/theway-contract` | `theway-contract` | Shared contract leaf crate: session-scoped automation sidecar models (`triggers`) and the base-dir / cwd-hash path layout (`config`). No engine, no protocol, no runtime; depends on no workspace crate. |
-| `crates/theway-storage` | `theway-storage` | Durable persistence: SQLite (Turso) session repository — one `<uuidv7>.db` per session — session archive export/import (`.theway-session`), and persisted DAG snapshots. Implements `theway-contract` records and interfaces without depending on core or transport. |
-| `crates/theway-llm-provider` | `theway-llm-provider` | Unified streaming LLM client and provider integrations (Anthropic / OpenAI / Google / Bedrock / Mistral and OpenAI-compatible endpoints). |
-| `crates/theway-mcp` | `theway-mcp` | Minimal MCP client (stdio transport, JSON-RPC framing). |
-| `crates/mermaid-parser` | `mermaid-rs-parser` | Vendored mermaid parser used for DAG specs. |
-
-UI rendering crates consumed by the TUI: `theway-markdown` /
-`theway-markdown-core` (streaming Markdown renderer), `theway-pager-render`
-(render primitives), `theway-ratatui-textarea` (textarea widget).
+| [`crates/theway-core`](../crates/theway-core/README.md) | `theway-core` | Agent engine and harness, runtime ports, typed sessions, multiagent orchestration, and no host tool bodies or exporters. |
+| [`crates/theway-daemon`](../crates/theway-daemon/README.md) | `theway-daemon` | `thewayd` composition root: runtime assembly, executors, tools, automation, persistence adapters, MCP/LSP/hooks, observability, and protocol servers. |
+| [`crates/theway-transport`](../crates/theway-transport/README.md) | `theway-transport` | Cross-client wire model and operations carried over gRPC, HTTP/JSON-RPC, SSE, and WebSocket; no MCP implementation. |
+| [`crates/theway-tui`](../crates/theway-tui/README.md) | `theway-tui` | `theway` terminal client/controller, daemon discovery, controller tool/storage services, and offline session commands. |
+| [`crates/theway-contract`](../crates/theway-contract/README.md) | `theway-contract` | Leaf persistence records, interfaces, automation sidecars, and path derivation with no workspace dependencies. |
+| [`crates/theway-storage`](../crates/theway-storage/README.md) | `theway-storage` | SQLite session/DAG persistence and session archives implementing contract interfaces without core or transport dependencies. |
+| [`crates/theway-llm-provider`](../crates/theway-llm-provider/README.md) | `theway-llm-provider` | Normalized streaming LLM client, provider implementations, message transforms, and model/image catalogs. |
+| [`crates/theway-mcp`](../crates/theway-mcp/README.md) | `theway-mcp` | External MCP stdio client, JSON-RPC framing, tool discovery, and tool calls. |
+| [`crates/theway-probe`](../crates/theway-probe/README.md) | `theway-probe` | gRPC serviceability probe for health, watch, multi-session, and state checks. |
+| [`crates/theway-markdown-core`](../crates/theway-markdown-core/README.md) | `theway-markdown-core` | Headless Markdown parser policy, analysis, statistics, and structural diagnostics. |
+| [`crates/theway-markdown`](../crates/theway-markdown/README.md) | `theway-markdown` | Streaming terminal Markdown renderer with syntax, math, diagrams, links, and source mapping. |
+| [`crates/theway-pager-render`](../crates/theway-pager-render/README.md) | `theway-pager-render` | Ratatui feed/pager line, color, scrollbar, OSC 8, and path primitives. |
+| [`crates/theway-ratatui-textarea`](../crates/theway-ratatui-textarea/README.md) | `theway-ratatui-textarea` | Grapheme-aware multiline editing and ratatui widget state/rendering. |
+| [`crates/mermaid-parser`](../crates/mermaid-parser/README.md) | `mermaid-rs-parser` | Vendored Mermaid parse stage used behind core's DAG flowchart adapter. |
+| [`crates/tests-bridge-macro`](../crates/tests-bridge-macro/README.md) | `tests-bridge-macro` | Proc macro that anchors mirrored unit-test modules at the owning crate root. |
 
 Dependency direction:
 

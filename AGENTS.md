@@ -4,17 +4,21 @@
 
 Rust 2024 Cargo workspace. The root [`Cargo.toml`](Cargo.toml) is the authoritative member list; this section is a lookup aid.
 
-- `crates/theway-llm-provider` — unified streaming LLM client: providers, model/image catalogs, SSE and OAuth helpers.
-- `crates/theway-core` — daemon runtime core: agent loop and harness, typed runtime sessions, skills loading, compaction, lifecycle hooks, executor seam, and the multiagent DAG engine.
-- `crates/theway-contract` — pure leaf contract crate: raw session persistence interfaces, persisted DAG snapshots, session-scoped trigger/cron sidecar models, and the `~/.theway` base-dir/path layout; no workspace dependencies.
-- `crates/theway-storage` — SQLite persistence (one `<uuidv7>.db` per session, session archives, DAG run snapshots); depends only on contract among runtime workspace crates, never core or transport.
-- `crates/theway-daemon` — headless `thewayd` daemon (bin `src/bin/thewayd.rs`): harness assembly, tools, triggers, MCP/LSP wiring.
-- `crates/theway-tui` — the `theway` CLI binary: ratatui REPL plus local session commands.
-- `crates/theway-mcp` — MCP client: stdio transport, JSON-RPC framing, tools list/call.
-- `crates/theway-transport` — gRPC/web (HTTP+SSE+WS) transport and wire types.
-- `crates/mermaid-parser` — vendored mermaid parse stage consumed by `dag_plan`'s flowchart subset.
-- `crates/theway-probe` — gRPC serviceability probe binary (`theway --grpc`).
-- `crates/tests-bridge-macro` — proc macro anchoring mirrored `#[path]` test modules to the crate root.
+- [`crates/theway-llm-provider`](crates/theway-llm-provider/README.md) — unified streaming LLM client: providers, model/image catalogs, SSE and OAuth helpers.
+- [`crates/theway-core`](crates/theway-core/README.md) — daemon runtime core: agent loop and harness, typed runtime sessions, skills loading, compaction, lifecycle hooks, executor seam, and the multiagent DAG engine.
+- [`crates/theway-contract`](crates/theway-contract/README.md) — pure leaf contract crate: raw session persistence interfaces, persisted DAG snapshots, session-scoped trigger/cron sidecar models, and the `~/.theway` base-dir/path layout; no workspace dependencies.
+- [`crates/theway-storage`](crates/theway-storage/README.md) — SQLite persistence (one `<uuidv7>.db` per session, session archives, DAG run snapshots); depends only on contract among runtime workspace crates, never core or transport.
+- [`crates/theway-daemon`](crates/theway-daemon/README.md) — headless `thewayd` daemon: harness assembly, tools, triggers, MCP/LSP wiring, and protocol servers.
+- [`crates/theway-tui`](crates/theway-tui/README.md) — the `theway` CLI binary: ratatui client/controller plus offline session commands.
+- [`crates/theway-mcp`](crates/theway-mcp/README.md) — MCP client: stdio transport, JSON-RPC framing, tools list/call.
+- [`crates/theway-transport`](crates/theway-transport/README.md) — gRPC/web (HTTP+SSE+WS) transport and wire types.
+- [`crates/theway-probe`](crates/theway-probe/README.md) — gRPC serviceability probe binary.
+- [`crates/theway-markdown-core`](crates/theway-markdown-core/README.md) — headless Markdown parser policy, analysis, statistics, and structural diagnostics.
+- [`crates/theway-markdown`](crates/theway-markdown/README.md) — streaming terminal Markdown renderer.
+- [`crates/theway-pager-render`](crates/theway-pager-render/README.md) — ratatui pager and feed rendering primitives.
+- [`crates/theway-ratatui-textarea`](crates/theway-ratatui-textarea/README.md) — reusable multiline editor and ratatui widget.
+- [`crates/mermaid-parser`](crates/mermaid-parser/README.md) — vendored Mermaid parse stage consumed by `dag_plan`'s flowchart adapter.
+- [`crates/tests-bridge-macro`](crates/tests-bridge-macro/README.md) — proc macro anchoring mirrored `#[path]` test modules to the crate root.
 
 Layering: `theway-daemon` is the only direct consumer of `theway-core` and composes core, storage, and transport; `theway-tui` depends on transport/storage/contract but never core or daemon; `theway-storage` depends only on `theway-contract` among runtime workspace crates; `theway-transport` never depends on core or storage. Provider-specific code lives under `crates/theway-llm-provider/src/providers/`; daemon tool implementations live under `crates/theway-daemon/src/tools/`. `make layering-check` enforces these edges.
 

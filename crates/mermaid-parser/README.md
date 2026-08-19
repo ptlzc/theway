@@ -1,53 +1,23 @@
 # mermaid-rs-parser
 
-Vendored **parse stage** of [`mermaid-rs-renderer`](https://github.com/1jehuang/mermaid-rs-renderer)
-(mmd) 0.3.1: Mermaid source → structured IR [`Graph`](src/ir.rs), without the
-layout engine / SVG renderer / font stack / CLI.
+`mermaid-rs-parser` 是 theway 使用的 vendored Mermaid 解析阶段。它将 Mermaid 源文本转换为结构化 [`Graph`](src/ir.rs)，不包含 SVG renderer、布局引擎、字体栈或 CLI。
 
-- Upstream license: MIT (see [LICENSE](LICENSE), copyright held by the
-  mermaid-rs-renderer contributors)
-- Vendoring: `src/parser.rs` + `src/ir.rs` + `src/error.rs` copied verbatim —
-  the crate shell (`Cargo.toml` / `src/lib.rs`) is the only new code. Upstream
-  clippy noise is `#![allow]`ed at the `parser.rs` module header to keep the
-  vendored diff at zero.
-- Verification: `cargo test` — all 98 upstream inline unit tests + 1 doctest
-  pass unchanged.
+公开函数 [`parse_mermaid`](src/parser.rs) 返回 [`ParseOutput`](src/parser.rs)，其中包含解析后的 graph 和可选初始化 directive。中间表示记录检测到的图类型、方向、节点、边、subgraph 和图类型专用数据。
 
-Consumed by `theway-core`'s `graph_engineering::graph::parse_mermaid` (the
-dag_plan mermaid subset): a preprocess line scan normalizes dag_plan hyphen
-ids (`impl-api` → `impl_api`, mmdr treats `-` as edge syntax), the vendored
-parser does the actual parsing, and a postprocess maps ids back, splits
-`agent: task` labels, derives `depends_on`, and cross-checks the parsed node
-set against the declared one so mmdr's silent tolerance of unknown lines /
-stray commas surfaces as explicit line-numbered errors.
+## 工作区用途
 
-## Dependency footprint
+[`theway-core` 的 DAG 适配器](../theway-core/src/multiagent/graph/mermaid.rs) 为 `dag_plan` 接受更小的 flowchart 契约。适配器预处理 DAG 节点标识与行级语法，调用本 crate 完成 Mermaid 解析，再恢复标识并推导 agent、task 和依赖字段。子集校验属于适配器；本 crate 保持为通用解析阶段。
 
-```text
-anyhow, json5, once_cell, regex, serde_json, thiserror   (6 in total)
+## Vendored 源码
+
+[`src/parser.rs`](src/parser.rs)、[`src/ir.rs`](src/ir.rs) 和 [`src/error.rs`](src/error.rs) 承载源自 `mermaid-rs-renderer`（`mmdr`）0.3.1 的解析阶段代码。[`src/lib.rs`](src/lib.rs) 和 [`Cargo.toml`](Cargo.toml) 组成本地 crate shell。上游署名与许可证见 [`LICENSE`](LICENSE)。
+
+Vendored parser 保持单文件，便于与来源代码比较。修改前阅读 [`AGENTS.md`](AGENTS.md)；parser 与 DAG 适配器的边界见 [`docs/architecture.md`](docs/architecture.md)。
+
+## 验证
+
+```bash
+cargo test -p mermaid-rs-parser
+cargo doc -p mermaid-rs-parser --no-deps --document-private-items
+cargo run -p mermaid-rs-parser --example dag_plan_demo
 ```
-
-The full mmdr renderer additionally pulls `clap / fontdb / resvg /
-ttf-parser / usvg / serde / criterion`; the extracted parse side only has the
-lightweight six. `Graph.nodes` is a `BTreeMap<String, Node>` (no serde, pure
-std).
-
-## dag_plan subset compatibility (verified, see examples/dag_plan_demo.rs)
-
-| dag_plan syntax | Result |
-|---|---|
-| `graph TD\|LR` / `flowchart TD\|LR` | ✅ correct direction (TopDown/LeftRight; TB/RL/BT also parse) |
-| `A["agent: task"]` | ✅ label lands in `Node.label`, shape=Rectangle |
-| `A --> B` | ✅ `EdgeStyle::Solid` |
-| `A -.-> B` | ✅ `EdgeStyle::Dotted` (distinguishable in the IR) |
-| `A --> B & C` (standard mermaid multi-target) | ✅ 2 edges |
-| `A --> B, C` (former dag_plan extension syntax) | ❌ non-standard; **removed from dag_plan** (pi-src cab2995) — now an explicit error in `theway`'s parser |
-| `%%` comments (line / trailing) | ✅ |
-| Semicolon-separated / chained `A --> B --> C` | ✅ |
-
-### Comma syntax removal (2026-08 decision)
-
-dag_plan used to declare `A --> B, C` as multi-target edges — not standard
-mermaid. Removed in pi-src commit `cab2995`: the parser now uses standard `&`,
-and stray-comma input is an **explicit error** (no more silent garbage). No
-preprocessing is needed when consuming this lib — standard syntax only.
