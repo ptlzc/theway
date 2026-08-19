@@ -80,7 +80,10 @@ as its TS counterpart (snake_case instead of kebab-case).
 ## Build
 
 ```bash
-cargo check
+cargo check --no-default-features          # registry/types, no concrete provider
+cargo check --no-default-features --features amazon-bedrock
 cargo build --features all-providers
 cargo run --example anthropic_hello --features anthropic   # needs ANTHROPIC_API_KEY
 ```
+
+Provider features compile only their implementation modules and provider-specific dependencies. In particular, `amazon-bedrock` owns the SigV4/HMAC stack and `faux` owns UUID generation; neither dependency tree is present in a no-default-features build.

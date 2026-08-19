@@ -4,6 +4,7 @@
 //! a transitive SDK dep would balloon cold-start cost.
 
 pub mod abort;
+#[cfg(feature = "amazon-bedrock")]
 pub mod aws_eventstream;
 pub mod diagnostics;
 pub mod event_stream;

@@ -2,7 +2,9 @@
 //! `packages/ai/src/`. The barrel re-exports the public surface.
 
 pub mod api_registry;
+#[cfg(feature = "amazon-bedrock")]
 pub mod bedrock_anthropic;
+#[cfg(feature = "amazon-bedrock")]
 pub mod bedrock_provider;
 pub mod env_api_keys;
 pub mod event_stream;
@@ -14,10 +16,12 @@ pub mod models;
 pub mod models_generated;
 pub mod providers;
 pub mod session_resources;
+#[cfg(feature = "amazon-bedrock")]
 pub mod sigv4;
 pub mod stream;
 pub mod types;
 pub mod utils;
+#[cfg(feature = "google-vertex")]
 pub mod vertex_provider;
 
 // Public surface — mirrors `packages/ai/src/index.ts`.

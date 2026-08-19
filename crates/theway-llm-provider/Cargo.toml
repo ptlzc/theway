@@ -24,10 +24,10 @@ openai-codex-responses = []
 azure-openai-responses = []
 google = []
 google-vertex = []
-amazon-bedrock = []
+amazon-bedrock = ["dep:async-stream", "dep:hex", "dep:hmac", "dep:sha2"]
 cloudflare = []
 mistral = []
-faux = []
+faux = ["dep:uuid"]
 
 # Image-generation providers are gated separately.
 openrouter-images = []
@@ -68,16 +68,14 @@ strum = { version = "0.28", features = ["derive"] }
 thiserror = "2"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 url = "2"
-percent-encoding = "2"
 once_cell = "1"
 rand = "0.9"
 base64 = "0.22"
-sha2 = "0.10"
-hex = "0.4"
-hmac = "0.12"
-async-stream = "0.3"
-jsonwebtoken = { version = "9", default-features = false, features = ["use_pem"] }
-uuid = { version = "1", features = ["v4", "serde"] }
+sha2 = { version = "0.10", optional = true }
+hex = { version = "0.4", optional = true }
+hmac = { version = "0.12", optional = true }
+async-stream = { version = "0.3", optional = true }
+uuid = { version = "1", features = ["v4", "serde"], optional = true }
 tracing = "0.1"
 regex = "1"
 
