@@ -9,8 +9,8 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 use super::super::types::{SessionError, SessionErrorCode};
+use super::repo_utils::uuidv7;
 use super::session::{SessionMetadata, SessionStorage, SessionTreeEntry};
-use super::uuid::uuidv7;
 
 #[derive(Default)]
 struct Inner {

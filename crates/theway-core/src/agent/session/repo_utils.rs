@@ -1,12 +1,17 @@
-//! Session-repo helpers. 1:1 port of `packages/agent/src/harness/session/repo-utils.ts`.
+//! Session repository construction, identifiers, timestamps, and fork helpers.
 
 use std::sync::Arc;
 
 use crate::types::AgentMessage;
+use uuid::Uuid;
 
 use super::super::types::{SessionError, SessionErrorCode};
 use super::session::{Session, SessionStorage, SessionTreeEntry};
-use super::uuid::uuidv7;
+
+/// Mint a fresh UUIDv7 string (lowercase, hyphenated).
+pub(crate) fn uuidv7() -> String {
+    Uuid::now_v7().to_string()
+}
 
 pub fn create_session_id() -> String {
     uuidv7()

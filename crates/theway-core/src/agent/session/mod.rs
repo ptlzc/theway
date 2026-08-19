@@ -5,4 +5,3 @@ pub mod memory_storage;
 pub mod persistent_storage;
 pub mod repo_utils;
 pub mod session;
-pub mod uuid;

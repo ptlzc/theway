@@ -72,7 +72,6 @@ pub use agent::session::{
         SessionImportOrigin, SessionMetadata, SessionStorage, SessionTreeEntry,
         build_session_context,
     },
-    uuid::uuidv7,
 };
 #[cfg(feature = "harness")]
 pub use agent::skills::{

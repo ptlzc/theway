@@ -51,6 +51,18 @@ fn create_session_id_returns_non_empty_uuidv7_string() {
 }
 
 #[test]
+fn uuidv7_ids_are_time_ordered() {
+    // Arrange/Act
+    let first = uuidv7();
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    let second = uuidv7();
+
+    // Assert
+    assert_ne!(first, second);
+    assert!(first < second, "{first} should sort before {second}");
+}
+
+#[test]
 fn create_timestamp_parses_as_rfc3339() {
     // Arrange/Act
     let timestamp = create_timestamp();
