@@ -4,7 +4,7 @@
 //! Focus: web-command routing arms, `Configure`/`SwitchSession` event-loop
 //! paths, a successful model switch through the catalog, populated
 //! `wire_snapshot` state (goal/trigger-poll/control-plane/sidebar), feed
-//! line incrementality, and two additional `run_transport_loop` exits
+//! block patching, and two additional `run_transport_loop` exits
 //! (server error, aborted server task, feed update drain).
 
 use std::path::PathBuf;
@@ -539,25 +539,91 @@ async fn wire_snapshot_reflects_populated_goal_poll_prompt_and_sidebar_state() {
     assert_eq!(snapshot.sidebar.runtime, vec!["dynamic"]);
 }
 
-#[test]
-fn wire_snapshot_feed_lines_are_incremental() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let mut fixture = HostFixture::new().await;
-        let host = fixture.host();
+#[tokio::test]
+async fn wire_snapshot_keeps_full_lines_and_emits_append_patch() {
+    let mut fixture = HostFixture::new().await;
+    let host = fixture.host();
 
-        host.system_line("one");
-        let first = host.wire_snapshot();
-        assert!(first.feed_lines.iter().any(|line| line.contains("one")));
+    host.system_line("one");
+    let first = host.wire_snapshot();
+    assert_eq!(first.feed_lines_base, 0);
+    assert!(first.feed_lines.iter().any(|line| line.contains("one")));
+    assert_eq!(first.feed_blocks_base, 0);
+    assert_eq!(first.feed_block_patches.len(), 1);
+    assert_eq!(first.feed_block_patches[0].index, 0);
 
-        host.system_line("two");
-        let second = host.wire_snapshot();
-        assert_eq!(second.feed_lines_base, first.feed_lines.len() as u64);
-        assert!(second.feed_lines.iter().any(|line| line.contains("two")));
-        assert!(!second.feed_lines.iter().any(|line| line.contains("one")));
+    host.system_line("two");
+    let second = host.wire_snapshot();
+    assert_eq!(second.feed_lines_base, 0);
+    assert!(second.feed_lines.iter().any(|line| line.contains("one")));
+    assert!(second.feed_lines.iter().any(|line| line.contains("two")));
+    assert_eq!(second.feed_blocks_base, 1);
+    assert_eq!(second.feed_block_patches.len(), 1);
+    assert_eq!(second.feed_block_patches[0].index, 1);
+}
+
+#[tokio::test]
+async fn wire_snapshot_emits_streaming_replacement_patch() {
+    let mut fixture = HostFixture::new().await;
+    let host = fixture.host();
+
+    host.apply_feed_update(FeedUpdate::TextDelta("hello".into()));
+    host.wire_snapshot();
+    host.apply_feed_update(FeedUpdate::TextDelta(" world".into()));
+    let snapshot = host.wire_snapshot();
+
+    assert_eq!(snapshot.feed_blocks_base, 1);
+    assert_eq!(snapshot.feed_block_patches.len(), 1);
+    assert_eq!(snapshot.feed_block_patches[0].index, 0);
+    assert!(matches!(
+        &snapshot.feed_block_patches[0].block,
+        theway_transport::feed::WireFeedBlock::Assistant { text, .. }
+            if text == "hello world"
+    ));
+}
+
+#[tokio::test]
+async fn wire_snapshot_emits_thinking_summary_replacement_patch() {
+    let mut fixture = HostFixture::new().await;
+    let host = fixture.host();
+
+    host.apply_feed_update(FeedUpdate::ThinkingDelta("private reasoning".into()));
+    host.wire_snapshot();
+    host.apply_feed_update(FeedUpdate::ThinkingSummary {
+        block_index: 0,
+        summary: "summary".into(),
     });
+    let snapshot = host.wire_snapshot();
+
+    assert_eq!(snapshot.feed_blocks_base, 1);
+    assert_eq!(snapshot.feed_block_patches.len(), 1);
+    assert_eq!(snapshot.feed_block_patches[0].index, 0);
+    assert!(matches!(
+        &snapshot.feed_block_patches[0].block,
+        theway_transport::feed::WireFeedBlock::Thinking { text, .. }
+            if text == "summary"
+    ));
+}
+
+#[tokio::test]
+async fn clear_feed_restarts_patch_sequence_from_zero() {
+    let mut fixture = HostFixture::new().await;
+    let host = fixture.host();
+
+    host.system_line("old");
+    host.wire_snapshot();
+    host.clear_feed();
+    host.system_line("new");
+    let snapshot = host.wire_snapshot();
+
+    assert_eq!(snapshot.feed_blocks_base, 0);
+    assert_eq!(snapshot.feed_block_patches.len(), 1);
+    assert_eq!(snapshot.feed_block_patches[0].index, 0);
+    assert_eq!(snapshot.feed_blocks.len(), 1);
+    assert!(matches!(
+        &snapshot.feed_blocks[0],
+        theway_transport::feed::WireFeedBlock::Plain { text, .. } if text == "new"
+    ));
 }
 
 #[test]

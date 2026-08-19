@@ -9,7 +9,7 @@
 //! lives in the `thewayd` binary; this module only owns the serialized transport
 //! event loop and the state it drives.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -167,11 +167,13 @@ pub struct TurnHost {
     reload_runtime: Arc<ReloadRuntime>,
 
     feed: Feed,
-    /// Incremental plain-text row cache behind `feed_lines` snapshots
-    /// (issue #35): only rows appended since the last publish are sent.
+    /// Incremental plain-text row cache behind full `feed_lines` snapshots.
     plain_lines_cache: theway_transport::feed::PlainLinesCache,
-    /// Absolute row count published by the last snapshot.
-    published_rows: usize,
+    /// Fingerprint of each block as last published on the patch stream.
+    block_versions: Vec<u64>,
+    /// In-place mutations since the last published snapshot. Appends and
+    /// truncation are also detected from block counts.
+    dirty_blocks: BTreeSet<usize>,
     latest_trigger_poll: Option<TriggerPollStatus>,
     latest_goal: Option<theway_core::multiagent::goal::GoalState>,
     feed_rx: Option<mpsc::UnboundedReceiver<FeedUpdate>>,
@@ -336,7 +338,8 @@ impl TurnHost {
             tool_count: config.tool_count,
             feed: Feed::new(),
             plain_lines_cache: theway_transport::feed::PlainLinesCache::new(100),
-            published_rows: 0,
+            block_versions: Vec::new(),
+            dirty_blocks: BTreeSet::new(),
             latest_trigger_poll: None,
             latest_goal: None,
             feed_rx: Some(config.feed_rx),
@@ -907,7 +910,7 @@ impl TurnHost {
                 self.system_line("daemon stays running; stop it with Ctrl-C / SIGTERM");
             }
             CommandOutcome::ClearScreen => {
-                self.feed.clear();
+                self.clear_feed();
             }
             CommandOutcome::Error(e) => self.error_line(e),
             CommandOutcome::AttachSkill { name } => {
@@ -1015,16 +1018,15 @@ impl TurnHost {
         // window instead of growing past it forever (issue #38).
         let usage =
             last_turn_usage(&self.kernel.harness().agent().state().messages).unwrap_or_default();
-        // Incremental plain rows (issue #35): only the tail appended since the
-        // last publish goes on the wire; `feed_lines_base` anchors it.
-        let (feed_lines, feed_lines_base) = {
-            self.plain_lines_cache.update(&self.feed, 100);
-            let rows = self.plain_lines_cache.rows();
-            let start = self.published_rows.min(rows.len());
-            let tail = rows[start..].to_vec();
-            self.published_rows = rows.len();
-            (tail, start as u64)
-        };
+        // Authoritative snapshots always carry the full transcript. The cache
+        // consumes the event-driven dirty index so clean frames do not scan
+        // historical blocks; per-client tail slicing belongs to gRPC.
+        let dirty_start = self.feed_dirty_start();
+        self.plain_lines_cache
+            .update_from_dirty(&self.feed, 100, dirty_start);
+        let feed_lines = self.plain_lines_cache.rows().to_vec();
+        let feed_blocks = self.feed.wire_blocks();
+        let (feed_blocks_base, feed_block_patches) = self.take_feed_block_patches(&feed_blocks);
         WireStatus {
             session_id: self.session_id.clone(),
             model,
@@ -1044,9 +1046,11 @@ impl TurnHost {
                 .as_ref()
                 .map(|prompt| wire_control_plane_prompt_snapshot(&prompt.request)),
             sidebar: self.wire_sidebar_snapshot(),
-            feed_blocks: self.feed.wire_blocks(),
+            feed_blocks,
+            feed_blocks_base,
+            feed_block_patches,
             feed_lines,
-            feed_lines_base,
+            feed_lines_base: 0,
             dags: self
                 .dag_engine
                 .list_runs()
@@ -1073,6 +1077,66 @@ impl TurnHost {
             },
             tui_max_feed_lines: self.tui_max_feed_lines,
         }
+    }
+
+    fn feed_dirty_start(&self) -> Option<usize> {
+        let block_count = self.feed.blocks().len();
+        if block_count < self.block_versions.len() {
+            return Some(0);
+        }
+        let appended =
+            (block_count > self.block_versions.len()).then_some(self.block_versions.len());
+        match (self.dirty_blocks.first().copied(), appended) {
+            (Some(dirty), Some(appended)) => Some(dirty.min(appended)),
+            (Some(dirty), None) => Some(dirty),
+            (None, appended) => appended,
+        }
+    }
+
+    fn take_feed_block_patches(
+        &mut self,
+        wire_blocks: &[theway_transport::feed::WireFeedBlock],
+    ) -> (u64, Vec<WireFeedBlockPatch>) {
+        use theway_transport::feed::block_fingerprint;
+
+        let blocks = self.feed.blocks();
+        if blocks.len() < self.block_versions.len() {
+            self.block_versions = blocks.iter().map(block_fingerprint).collect();
+            self.dirty_blocks.clear();
+            return (0, Vec::new());
+        }
+
+        let base = self.block_versions.len();
+        let mut dirty = std::mem::take(&mut self.dirty_blocks);
+        dirty.extend(base..blocks.len());
+        let mut patches = Vec::new();
+        for index in dirty {
+            let Some(block) = blocks.get(index) else {
+                continue;
+            };
+            let fingerprint = block_fingerprint(block);
+            if index < self.block_versions.len() {
+                if self.block_versions[index] == fingerprint {
+                    continue;
+                }
+                self.block_versions[index] = fingerprint;
+            } else if index == self.block_versions.len() {
+                self.block_versions.push(fingerprint);
+            } else {
+                continue;
+            }
+            patches.push(WireFeedBlockPatch {
+                index: index as u64,
+                block: wire_blocks[index].clone(),
+            });
+        }
+        (base as u64, patches)
+    }
+
+    fn clear_feed(&mut self) {
+        self.feed.clear();
+        self.block_versions.clear();
+        self.dirty_blocks.clear();
     }
 
     fn wire_sidebar_snapshot(&self) -> WireSidebarSnapshot {
@@ -1339,10 +1403,19 @@ impl TurnHost {
     // ── state helpers ──────────────────────────────────────────────────────────────────
 
     fn apply_feed_update(&mut self, update: FeedUpdate) {
+        let before_len = self.feed.blocks().len();
+        let targeted = match &update {
+            FeedUpdate::ThinkingSummary { block_index, .. } => Some(*block_index),
+            FeedUpdate::TextDelta(_) | FeedUpdate::ThinkingDelta(_) => before_len.checked_sub(1),
+            FeedUpdate::ToolProgress { tool_call_id, .. }
+            | FeedUpdate::ToolEnd { tool_call_id, .. } => self.feed.tool_result_index(tool_call_id),
+            _ => None,
+        };
         match update {
             FeedUpdate::TriggerPollStatus(status) => {
                 self.latest_trigger_poll = Some(status);
             }
+            FeedUpdate::SkillsReloaded { .. } => {}
             update => super::thinking_summary::apply(
                 &mut self.feed,
                 &mut self.thinking_burst,
@@ -1350,6 +1423,9 @@ impl TurnHost {
                 &self.feed_tx,
                 update,
             ),
+        }
+        if let Some(index) = targeted {
+            self.dirty_blocks.insert(index);
         }
     }
 
@@ -1413,7 +1489,7 @@ impl TurnHost {
             .with_context(|| format!("build harness for session {id}"))?;
         self.kernel.replace_harness(harness);
         self.session_id = id.clone();
-        self.feed.clear();
+        self.clear_feed();
         self.system_line(format!("switched to session {id}"));
         self.busy = false;
         self.queued_turns.clear();

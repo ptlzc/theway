@@ -247,6 +247,8 @@ fn sample_wire_status(feed_lines: Vec<String>) -> WireStatus {
             level: Level::System,
             timestamp: None,
         }],
+        feed_blocks_base: 0,
+        feed_block_patches: Vec::new(),
         feed_lines,
         feed_lines_base: 0,
         dags: Vec::new(),
