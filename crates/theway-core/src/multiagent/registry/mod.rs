@@ -309,10 +309,8 @@ impl AgentJobRegistry {
         inner
             .jobs
             .iter()
-            .filter(|j| {
-                j.run_id.as_deref() == Some(run_id) && j.node_id.as_deref() == Some(node_id)
-            })
-            .max_by_key(|j| j.started_at)
+            .rev()
+            .find(|j| j.run_id.as_deref() == Some(run_id) && j.node_id.as_deref() == Some(node_id))
             .cloned()
     }
 
@@ -341,6 +339,8 @@ impl AgentJobRegistry {
                 tools_called: job.tools_called,
             });
         }
+        let mut inner = self.inner.lock();
+        Self::evict(&mut inner.jobs);
     }
 
     /// Look up a DAG node's transcript: in-memory job first, then the host
@@ -391,12 +391,7 @@ impl AgentJobRegistry {
 
     /// Look up a DAG node job by run/node (GetNodeOutput).
     pub fn find_node(&self, run_id: &str, node_id: &str) -> Option<AgentJob> {
-        let inner = self.inner.lock();
-        inner
-            .jobs
-            .iter()
-            .find(|j| j.run_id.as_deref() == Some(run_id) && j.node_id.as_deref() == Some(node_id))
-            .cloned()
+        self.job_for_node(run_id, node_id)
     }
 
     /// Snapshot of all jobs, newest first (graph UI shows the latest runs on top).
@@ -409,20 +404,11 @@ impl AgentJobRegistry {
 
     /// Evict oldest terminal jobs beyond MAX_JOBS.
     fn evict(jobs: &mut Vec<AgentJob>) {
-        if jobs.len() <= MAX_JOBS {
-            return;
-        }
-        let mut terminal_oldest = None;
-        for (idx, job) in jobs.iter().enumerate() {
-            if job.status != JobStatus::Running && terminal_oldest.is_none() {
-                terminal_oldest = Some(idx);
-            }
-        }
-        if let Some(idx) = terminal_oldest {
+        while jobs.len() > MAX_JOBS {
+            let Some(idx) = jobs.iter().position(|job| job.status != JobStatus::Running) else {
+                break;
+            };
             jobs.remove(idx);
-        } else {
-            // All running and over cap: drop the oldest anyway (defensive).
-            jobs.remove(0);
         }
     }
 }
