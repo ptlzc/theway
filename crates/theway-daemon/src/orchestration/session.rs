@@ -1,9 +1,4 @@
-//! `SessionHarnessFactory` — rebuilds a fully-wired harness for any session id
-//! (the in-process `--resume-id` path used by `TurnHost::switch_session`).
-//!
-//! Split out of `main.rs`. Mechanical module extraction — behavior is unchanged;
-//! the former `crate::agent_specs::launch_resolver` self-reference now resolves
-//! through this module's own `agent_specs` import.
+//! Session-scoped runtime assembly shared by daemon startup and session switching.
 
 use std::sync::{Arc, OnceLock};
 
@@ -14,7 +9,7 @@ use crate::runtime_storage::RuntimeStorage;
 use crate::trigger_engine::notification_hook::DynNotificationHook;
 use crate::{agent_specs, tools, triggers};
 use anyhow::{Context, Result};
-use theway_contract::session::SessionReader;
+use theway_contract::session::SessionStore;
 use theway_core::multiagent::goal;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::{AgentHarness, AgentHarnessOptions, ThinkingLevel};
@@ -44,7 +39,7 @@ use theway_transport::inbox;
 /// NOT reloaded from the target session's sidecars on switch; the harness starts on the
 /// startup model — a `/model` change made before switching is not carried over (the
 /// rehydrated transcript restores the session's own last recorded model when it has one).
-pub struct SessionHarnessFactory {
+pub struct SessionRuntimeBuilder {
     /// This daemon's work_dir. Explicit session↔work_dir binding (issue #66
     /// node 3): [`Self::build`] refuses to open a session whose recorded `cwd`
     /// metadata points at a different directory, so a session always runs
@@ -61,7 +56,7 @@ pub struct SessionHarnessFactory {
     pub model: theway_llm_provider::Model,
     pub thinking: ThinkingLevel,
     pub stream_fn: theway_core::StreamFn,
-    pub system_prompt: String,
+    pub memory_block: String,
     pub skills: Vec<theway_core::Skill>,
     pub templates: Vec<theway_core::PromptTemplate>,
     pub compact_algorithms:
@@ -70,7 +65,8 @@ pub struct SessionHarnessFactory {
     pub dag_engine: Arc<DagEngine>,
     pub subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry,
     pub mcp_tools: Vec<Arc<dyn theway_core::AgentTool>>,
-    pub mcp_notification_hooks: Vec<Arc<triggers::McpNotificationHook>>,
+    /// MCP notification receivers are process-scoped and may be attached only once.
+    pub mcp_notification_hooks: parking_lot::Mutex<Vec<Arc<triggers::McpNotificationHook>>>,
     pub dynamic_trigger_registry: triggers::dynamic::DynamicTriggerRegistry,
     pub cron_registry: triggers::cron::CronRegistry,
     pub reload_skills_fn: theway_core::ReloadSkillsFn,
@@ -81,15 +77,59 @@ pub struct SessionHarnessFactory {
     pub feed_tx: tokio::sync::mpsc::UnboundedSender<FeedUpdate>,
     pub main_run_tx: tokio::sync::mpsc::UnboundedSender<String>,
     pub debug: bool,
+    pub load_local_sources: bool,
 }
 
-impl SessionHarnessFactory {
+/// Session-scoped services that must be replaced as one unit.
+pub struct SessionRuntime {
+    pub session_id: String,
+    pub harness: Arc<AgentHarness>,
+    pub trigger_executor: Arc<crate::trigger_engine::execution::TriggerExecutor>,
+    pub tool_names: Vec<String>,
+    pub hooks_active: bool,
+}
+
+#[cfg(test)]
+impl SessionRuntime {
+    pub(crate) fn for_test(session_id: impl Into<String>, harness: Arc<AgentHarness>) -> Self {
+        let trigger_executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+            harness.agent_arc(),
+            harness.session().clone(),
+            crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ));
+        Self {
+            session_id: session_id.into(),
+            harness,
+            trigger_executor,
+            tool_names: Vec::new(),
+            hooks_active: false,
+        }
+    }
+}
+
+impl SessionRuntimeBuilder {
     /// Build (and rehydrate) a harness for `id` (full session id or unique prefix).
-    pub async fn build(&self, repo: &SqliteSessionRepo, id: &str) -> Result<Arc<AgentHarness>> {
+    pub async fn build(&self, repo: &SqliteSessionRepo, id: &str) -> Result<SessionRuntime> {
         // Resume semantics: same lookup as CLI --resume-id.
         let store = session::resume(repo, Some(id))
             .await
             .with_context(|| format!("open session {id}"))?;
+        self.build_opened(Arc::new(store), true).await
+    }
+
+    /// Assemble the complete session runtime from an already-opened persistent store.
+    /// Daemon startup and in-process session switching both enter through this method.
+    pub async fn build_opened(
+        &self,
+        store: Arc<dyn SessionStore>,
+        rehydrate: bool,
+    ) -> Result<SessionRuntime> {
         let meta = store.get_metadata_json().await?;
         let session_id = meta
             .get("id")
@@ -102,7 +142,7 @@ impl SessionHarnessFactory {
         // harness state is touched.
         let target_cwd = meta.get("cwd").and_then(|v| v.as_str());
         check_work_dir_binding(&session_id, target_cwd, &self.cwd)?;
-        let session = theway_core::Session::from_store(Arc::new(store));
+        let session = theway_core::Session::from_store(store);
 
         // Crash-recovery parity with startup: restore this session's persisted DAG runs.
         // `restore` skips ids already live in the engine, so switching back and forth is
@@ -134,6 +174,24 @@ impl SessionHarnessFactory {
             self.executor.clone(),
         );
         tools.extend(self.mcp_tools.iter().cloned());
+        let tool_names = tools
+            .iter()
+            .map(|tool| tool.definition().name.clone())
+            .collect::<Vec<_>>();
+        let system_prompt =
+            crate::system_prompt::compose_system_prompt(&self.cwd, &self.memory_block, &tool_names);
+
+        self.dag_engine.set_launcher(Some(tools::node_launcher(
+            self.dag_engine.clone(),
+            self.model.clone(),
+            Some(self.stream_fn.clone()),
+            self.cwd.clone(),
+            self.subagent_registry.clone(),
+            self.memory_dir.clone(),
+            self.base_dir.clone(),
+            skill_harness_cell.clone(),
+            self.executor.clone(),
+        )));
 
         let goal_harness_cell: Arc<OnceLock<Arc<AgentHarness>>> = Arc::new(OnceLock::new());
         let mut opts = AgentHarnessOptions::new(self.model.clone(), session);
@@ -142,7 +200,7 @@ impl SessionHarnessFactory {
             session_id: Some(session_id.clone()),
             ..theway_core::ObservationContext::default()
         };
-        opts.system_prompt = self.system_prompt.clone();
+        opts.system_prompt = system_prompt;
         opts.thinking_level = self.thinking;
         opts.tools = tools;
         opts.skills = self.skills.clone();
@@ -180,9 +238,10 @@ impl SessionHarnessFactory {
         // Notification hooks: MCP push sources are Arc'd clones of the process-level
         // set; cron / dynamic-trigger hooks are constructed fresh per executor.
         // Registered exactly once per executor — see `register_notification_hooks`.
+        let mcp_notification_hooks = std::mem::take(&mut *self.mcp_notification_hooks.lock());
         register_notification_hooks(
             &trigger_executor,
-            &self.mcp_notification_hooks,
+            &mcp_notification_hooks,
             &self.cron_registry,
             &self.dynamic_trigger_registry,
         );
@@ -223,12 +282,13 @@ impl SessionHarnessFactory {
             let state = harness.agent().state();
             (state.model.clone(), state.thinking_level)
         };
-        let loaded_hooks = hooks::load(
+        let loaded_hooks = hooks::load_with(
             &self.cwd,
             session_id.clone(),
             hook_model.as_ref(),
             hook_thinking,
             daemon_executors(),
+            self.load_local_sources,
         )
         .await;
         for diag in &loaded_hooks.diagnostics {
@@ -249,11 +309,19 @@ impl SessionHarnessFactory {
         ));
 
         // Resume semantics: rebuild the agent's in-memory state from the transcript.
-        harness
-            .rehydrate_from_session()
-            .await
-            .with_context(|| format!("rehydrate session {session_id}"))?;
-        Ok(harness)
+        if rehydrate {
+            harness
+                .rehydrate_from_session()
+                .await
+                .with_context(|| format!("rehydrate session {session_id}"))?;
+        }
+        Ok(SessionRuntime {
+            session_id,
+            harness,
+            trigger_executor,
+            tool_names,
+            hooks_active: !loaded_hooks.runner.is_empty(),
+        })
     }
 }
 
@@ -332,6 +400,6 @@ fn register_notification_hooks(
 }
 
 #[cfg(test)]
-// Test files live in `tests/turn/session_factory/` (mirror of src), pulled in by
+// Test files live in `tests/orchestration/session/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
-tests_bridge_macro::tests_bridge!("turn/session_factory");
+tests_bridge_macro::tests_bridge!("orchestration/session");

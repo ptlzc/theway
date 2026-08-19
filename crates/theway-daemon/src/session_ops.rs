@@ -3,9 +3,9 @@
 //!
 //! Two pieces live here:
 //!
-//! * [`SessionFactory`] — builds a fresh, fully-wired `AgentHarness` for any session id
+//! * [`SessionFactory`] — builds a fresh, fully-wired session runtime for any session id
 //!   (resume semantics, the in-process version of CLI `--resume-id`). Built by the daemon
-//!   binary (`turn::session_factory::SessionHarnessFactory`) and carried by the transport
+//!   orchestration layer (`orchestration::SessionRuntimeBuilder`) and carried by the transport
 //!   host (`turn::daemon::TurnHost`), which invokes it on `SwitchSession`.
 //! * [`SessionOps`] — sync query/mutation ops that do NOT need the event loop
 //!   (list / create / rename / delete). Switching the *current* session is deliberately
@@ -29,18 +29,21 @@ use theway_storage::sqlite_repo::SqliteSessionRepo;
 use theway_transport::transport::SessionOps;
 use theway_transport::wire::SessionSummary;
 
-/// Builds a fresh, fully-wired [`theway_core::AgentHarness`] for the session identified by
+/// Builds a fresh, fully-wired [`crate::orchestration::SessionRuntime`] for the session identified by
 /// the given id (resume semantics: full id or unique prefix, same as CLI `--resume-id`).
 ///
 /// Async because opening the transcript, restoring per-session DAG state and rehydrating
-/// the agent are all IO. The returned harness carries its own session-stamped tools
-/// (dag_* / task), listeners and notification hooks; the process-level pieces (DAG engine,
-/// subagent registry, feed channel) are shared with the original harness.
+/// the agent are all IO. The returned runtime keeps the harness and trigger executor
+/// together so a session switch cannot retain session-scoped services from the previous
+/// session.
 pub type SessionFactory = Arc<
     dyn Fn(
             String,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<Arc<theway_core::AgentHarness>>> + Send>,
+            Box<
+                dyn std::future::Future<Output = Result<crate::orchestration::SessionRuntime>>
+                    + Send,
+            >,
         > + Send
         + Sync,
 >;
@@ -157,7 +160,7 @@ impl SessionOps for AppSessionOps {
     async fn create(&self) -> Result<String> {
         // work_dir inheritance (issue #66 node 3): `state.cwd` IS this daemon's
         // work_dir, so a new session is bound to it — the value recorded in the
-        // session's `cwd` metadata is exactly what `SessionHarnessFactory::build`
+        // session's `cwd` metadata is exactly what `SessionRuntimeBuilder::build`
         // validates against on switch.
         let cwd = {
             let state = self.current.lock();

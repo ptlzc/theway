@@ -86,13 +86,13 @@ impl TurnHost {
     }
 
     async fn switch_session(&mut self, id: String) -> Result<()> {
-        let harness = (self.session_factory)(id.clone())
+        let runtime = (self.session_factory)(id.clone())
             .await
-            .with_context(|| format!("build harness for session {id}"))?;
-        self.kernel.replace_harness(harness);
-        self.session_id = id.clone();
+            .with_context(|| format!("build runtime for session {id}"))?;
+        self.session_id = runtime.session_id.clone();
+        self.kernel.replace_runtime(runtime);
         self.clear_feed();
-        self.system_line(format!("switched to session {id}"));
+        self.system_line(format!("switched to session {}", self.session_id));
         self.busy = false;
         self.queued_turns.clear();
         self.control_plane_prompt = None;

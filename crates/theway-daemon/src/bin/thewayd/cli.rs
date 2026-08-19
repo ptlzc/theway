@@ -1,12 +1,3 @@
-/// UI-mode resolution is TUI-crate specific; the daemon always runs a transport
-/// mode chosen by its own flags (gRPC default). Kept as a tiny local enum.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Mode {
-    Grpc,
-    Http,
-    Mcp,
-}
-
 #[derive(Parser, Debug)]
 #[command(
     name = "thewayd",

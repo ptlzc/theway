@@ -82,8 +82,9 @@ fn bailing_session_factory() -> SessionFactory {
     Arc::new(
         |_id: String| -> std::pin::Pin<
             Box<
-                dyn std::future::Future<Output = anyhow::Result<Arc<theway_core::AgentHarness>>>
-                    + Send,
+                dyn std::future::Future<
+                        Output = anyhow::Result<crate::orchestration::SessionRuntime>,
+                    > + Send,
             >,
         > { Box::pin(async { anyhow::bail!("session factory unused in daemon-extra tests") }) },
     )
@@ -91,12 +92,20 @@ fn bailing_session_factory() -> SessionFactory {
 
 fn returning_session_factory() -> SessionFactory {
     Arc::new(
-        |_id: String| -> std::pin::Pin<
+        |id: String| -> std::pin::Pin<
             Box<
-                dyn std::future::Future<Output = anyhow::Result<Arc<theway_core::AgentHarness>>>
-                    + Send,
+                dyn std::future::Future<
+                        Output = anyhow::Result<crate::orchestration::SessionRuntime>,
+                    > + Send,
             >,
-        > { Box::pin(async { Ok(test_harness()) }) },
+        > {
+            Box::pin(async {
+                Ok(crate::orchestration::SessionRuntime::for_test(
+                    id,
+                    test_harness(),
+                ))
+            })
+        },
     )
 }
 

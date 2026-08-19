@@ -135,7 +135,7 @@ async fn host_with_extras(extras: Vec<PathBuf>) -> (TurnHost, Arc<AtomicU32>, Ve
         |_id: String| -> std::pin::Pin<
             Box<
                 dyn std::future::Future<
-                        Output = anyhow::Result<Arc<theway_core::AgentHarness>>,
+                        Output = anyhow::Result<crate::orchestration::SessionRuntime>,
                     > + Send,
             >,
         > {

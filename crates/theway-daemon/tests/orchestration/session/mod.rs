@@ -1,4 +1,4 @@
-//! Tests for `turn/session_factory` — split out of src (see docs/rust-test-files.md).
+//! Tests for `orchestration/session` — split out of src (see docs/rust-test-files.md).
 //!
 //! Pins the one-shot notification-hook assembly contract of
 //! [`super::register_notification_hooks`]: every hook (MCP push sources, cron
@@ -8,7 +8,7 @@
 //!
 //! Also covers the explicit session↔work_dir binding on switch (issue #66 node 3):
 //! [`super::check_work_dir_binding`] semantics (canonicalized comparison, string
-//! fallback, legacy pass-through) and the full [`super::SessionHarnessFactory::build`]
+//! fallback, legacy pass-through) and the full [`super::SessionRuntimeBuilder::build`]
 //! outcomes for same / different / missing work_dir metadata.
 
 use std::cell::RefCell;
@@ -113,7 +113,7 @@ use std::path::{Path, PathBuf};
 
 use tempfile::TempDir;
 
-use super::{SessionHarnessFactory, check_work_dir_binding};
+use super::{SessionRuntimeBuilder, check_work_dir_binding};
 use crate::test_env::{ENV_LOCK, EnvGuard};
 
 /// Faux model — the build tests never prompt, so the stream is never invoked.
@@ -144,7 +144,7 @@ fn faux_stream() -> theway_core::StreamFn {
 
 /// Minimal fully-wired factory rooted at `work_dir`. The `TempDir` it returns
 /// owns the `base_dir` / `memory_dir` paths and must outlive the factory.
-fn test_factory(work_dir: PathBuf) -> (SessionHarnessFactory, TempDir) {
+fn test_factory(work_dir: PathBuf) -> (SessionRuntimeBuilder, TempDir) {
     let state = TempDir::new().unwrap();
     let (feed_tx, _feed_rx) = tokio::sync::mpsc::unbounded_channel();
     let (main_run_tx, _main_run_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -177,7 +177,7 @@ fn test_factory(work_dir: PathBuf) -> (SessionHarnessFactory, TempDir) {
             },
         );
 
-    let factory = SessionHarnessFactory {
+    let factory = SessionRuntimeBuilder {
         cwd: work_dir,
         storage: crate::runtime_storage::local_runtime_storage(),
         base_dir: state.path().join("base"),
@@ -188,7 +188,7 @@ fn test_factory(work_dir: PathBuf) -> (SessionHarnessFactory, TempDir) {
         model: faux_model(),
         thinking: theway_core::ThinkingLevel::Off,
         stream_fn: faux_stream(),
-        system_prompt: "test system prompt".into(),
+        memory_block: "test memory".into(),
         skills: Vec::new(),
         templates: Vec::new(),
         compact_algorithms: std::sync::Arc::new(
@@ -198,7 +198,7 @@ fn test_factory(work_dir: PathBuf) -> (SessionHarnessFactory, TempDir) {
         dag_engine: std::sync::Arc::new(theway_core::multiagent::graph::engine::DagEngine::new()),
         subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry::new(),
         mcp_tools: Vec::new(),
-        mcp_notification_hooks: Vec::new(),
+        mcp_notification_hooks: parking_lot::Mutex::new(Vec::new()),
         dynamic_trigger_registry: crate::triggers::dynamic::DynamicTriggerRegistry::new(),
         cron_registry: crate::triggers::cron::CronRegistry::new(),
         reload_skills_fn,
@@ -209,6 +209,7 @@ fn test_factory(work_dir: PathBuf) -> (SessionHarnessFactory, TempDir) {
         feed_tx,
         main_run_tx,
         debug: false,
+        load_local_sources: true,
     };
     (factory, state)
 }
@@ -301,11 +302,19 @@ async fn build_same_work_dir_session_succeeds() {
     let id = create_session_with_cwd(&repo, work_dir.path().to_str().unwrap()).await;
 
     let (factory, _state) = test_factory(work_dir.path().to_path_buf());
-    let harness = factory
+    let runtime = factory
         .build(&repo, &id)
         .await
         .expect("session bound to this daemon's work_dir builds");
-    assert!(harness.session().storage().get_metadata_json().await.is_ok());
+    assert!(
+        runtime
+            .harness
+            .session()
+            .storage()
+            .get_metadata_json()
+            .await
+            .is_ok()
+    );
 }
 
 #[tokio::test]

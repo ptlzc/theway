@@ -103,8 +103,9 @@ impl HostFixture {
         let session_factory: SessionFactory = Arc::new(
             |_id: String| -> std::pin::Pin<
                 Box<
-                    dyn std::future::Future<Output = anyhow::Result<Arc<theway_core::AgentHarness>>>
-                        + Send,
+                    dyn std::future::Future<
+                            Output = anyhow::Result<crate::orchestration::SessionRuntime>,
+                        > + Send,
                 >,
             > {
                 Box::pin(async { anyhow::bail!("session factory unused in daemon-more tests") })

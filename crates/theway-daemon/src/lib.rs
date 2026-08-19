@@ -43,6 +43,7 @@ pub mod mcp_loader;
 pub mod mcp_server;
 pub mod model;
 pub mod observability;
+pub mod orchestration;
 // Daemon path context (issue #66): one CLI-boundary resolution of every host
 // path (base / home / work dir / extra skill dirs); kernel modules take the
 // resolved values as parameters instead of reading `HOME` / `THEWAY_DIR`.

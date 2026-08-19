@@ -98,8 +98,9 @@ async fn host_with_registry(input: Vec<InputModality>, registry: Registry) -> (T
     let session_factory: SessionFactory = Arc::new(
         |_id: String| -> std::pin::Pin<
             Box<
-                dyn std::future::Future<Output = anyhow::Result<Arc<theway_core::AgentHarness>>>
-                    + Send,
+                dyn std::future::Future<
+                        Output = anyhow::Result<crate::orchestration::SessionRuntime>,
+                    > + Send,
             >,
         > { Box::pin(async { bail!("session factory unused in daemon coverage tests") }) },
     );

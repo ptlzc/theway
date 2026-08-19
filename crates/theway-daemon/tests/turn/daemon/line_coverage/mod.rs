@@ -97,8 +97,9 @@ async fn host_with_input(input: Vec<InputModality>) -> (TurnHost, TempDir, TempD
         session_factory: Arc::new(
             |_id: String| -> std::pin::Pin<
                 Box<
-                    dyn std::future::Future<Output = anyhow::Result<Arc<AgentHarness>>>
-                        + Send,
+                    dyn std::future::Future<
+                            Output = anyhow::Result<crate::orchestration::SessionRuntime>,
+                        > + Send,
                 >,
             > {
                 Box::pin(async { anyhow::bail!("session factory unused in line coverage tests") })

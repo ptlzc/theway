@@ -150,14 +150,21 @@ fn kernel_current_model_accepts_images_detects_vision_input() {
 }
 
 #[test]
-fn kernel_replace_harness_swaps_harness_only() {
+fn kernel_replace_runtime_swaps_all_session_scoped_services() {
     let (mut kernel, original) = kernel_with_input(Vec::new());
     let replacement = harness_with_input(vec![InputModality::Image]);
+    let runtime =
+        crate::orchestration::SessionRuntime::for_test("replacement", replacement.clone());
+    let replacement_trigger_executor = runtime.trigger_executor.clone();
 
-    kernel.replace_harness(replacement.clone());
+    kernel.replace_runtime(runtime);
 
     assert!(Arc::ptr_eq(kernel.harness(), &replacement));
     assert!(!Arc::ptr_eq(kernel.harness(), &original));
+    assert!(Arc::ptr_eq(
+        kernel.trigger_executor(),
+        &replacement_trigger_executor
+    ));
     // Retry settings and model capability follow the replacement harness.
     assert!(kernel.current_model_accepts_images());
 }
