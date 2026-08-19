@@ -18,7 +18,8 @@ use theway_transport::grpc::{GrpcState, serve_grpc};
 use theway_transport::history::HistoryStore;
 use theway_transport::testing::FakeSessionOps;
 use theway_transport::wire::{
-    WireCommand, WireContextUsage, WireDaemonConfig, WirePathContext, WireSkillSnapshot, WireStatus,
+    WireCommand, WireContextUsage, WireDaemonConfig, WireFeedBlockPatch, WirePathContext,
+    WireSkillSnapshot, WireStatus,
 };
 use tokio::sync::{broadcast, mpsc};
 
@@ -42,6 +43,8 @@ fn fixture_status(feed_blocks: Vec<WireFeedBlock>) -> WireStatus {
         control_plane_prompt: None,
         sidebar: theway_transport::testing::empty_sidebar_snapshot(),
         feed_blocks,
+        feed_blocks_base: 0,
+        feed_block_patches: Vec::new(),
         feed_lines: Vec::new(),
         feed_lines_base: 0,
         dags: Vec::new(),
@@ -1524,18 +1527,19 @@ async fn snapshot_rebuilds_feed_and_resyncs_busy_panel() {
 }
 
 #[tokio::test]
-async fn snapshot_with_unchanged_feed_keeps_local_annotations() {
+async fn authoritative_snapshot_replaces_local_feed_annotations() {
     let (mut app, _rx) = test_app().await;
     let status = fixture_status(app.latest.feed_blocks.clone());
     app.system_line("local note");
     app.apply_snapshot(status);
-    // feed_blocks unchanged → feed not rebuilt → the local note survives.
+    // Full frames replace the local render model even when the authoritative
+    // transcript itself is unchanged.
     let text = feed_text(&app);
-    assert!(text.contains("local note"), "{text}");
+    assert!(!text.contains("local note"), "{text}");
 }
 
 #[tokio::test]
-async fn snapshot_tail_append_pushes_only_new_blocks() {
+async fn snapshot_append_patch_pushes_only_new_block() {
     let (mut app, _rx) = test_app().await;
     let first = fixture_status(vec![WireFeedBlock::Plain {
         text: "banner".into(),
@@ -1545,16 +1549,86 @@ async fn snapshot_tail_append_pushes_only_new_blocks() {
     app.apply_snapshot(first);
     // Local annotations survive a pure tail append (no full rebuild).
     app.system_line("local note");
-    let mut second = fixture_status(app.latest.feed_blocks.clone());
-    second.feed_blocks.push(WireFeedBlock::Assistant {
+    let appended = WireFeedBlock::Assistant {
         text: "appended answer".into(),
         timestamp: None,
-    });
+    };
+    let mut second = fixture_status(Vec::new());
+    second.feed_blocks_base = app.latest.feed_blocks.len() as u64;
+    second.feed_block_patches = vec![WireFeedBlockPatch {
+        index: second.feed_blocks_base,
+        block: appended,
+    }];
     app.apply_snapshot(second);
     let text = feed_text(&app);
     assert!(text.contains("banner"), "{text}");
     assert!(text.contains("appended answer"), "{text}");
     assert!(text.contains("local note"), "{text}");
+}
+
+#[tokio::test]
+async fn snapshot_replacement_patch_updates_one_block() {
+    let (mut app, _rx) = test_app().await;
+    let first = fixture_status(vec![WireFeedBlock::Assistant {
+        text: "partial".into(),
+        timestamp: None,
+    }]);
+    app.apply_snapshot(first);
+    let mut patch = fixture_status(Vec::new());
+    patch.feed_blocks_base = 1;
+    patch.feed_block_patches = vec![WireFeedBlockPatch {
+        index: 0,
+        block: WireFeedBlock::Assistant {
+            text: "complete".into(),
+            timestamp: None,
+        },
+    }];
+
+    app.apply_snapshot(patch);
+
+    assert!(!app.resync_pending);
+    assert_eq!(app.latest.feed_blocks.len(), 1);
+    let text = feed_text(&app);
+    assert!(text.contains("complete"), "{text}");
+    assert!(!text.contains("partial"), "{text}");
+}
+
+#[tokio::test]
+async fn snapshot_patch_gap_requests_authoritative_resync() {
+    let (mut app, _rx) = test_app().await;
+    let first = fixture_status(vec![WireFeedBlock::Assistant {
+        text: "stable".into(),
+        timestamp: None,
+    }]);
+    app.apply_snapshot(first);
+    let mut gap = fixture_status(Vec::new());
+    gap.feed_blocks_base = 2;
+    gap.feed_block_patches = vec![WireFeedBlockPatch {
+        index: 2,
+        block: WireFeedBlock::Assistant {
+            text: "missed".into(),
+            timestamp: None,
+        },
+    }];
+
+    app.apply_snapshot(gap);
+
+    assert!(app.resync_pending);
+    assert_eq!(app.latest.feed_blocks.len(), 1);
+    assert!(feed_text(&app).contains("stable"));
+}
+
+#[test]
+fn headless_line_cursor_replays_after_transcript_shrink() {
+    let mut printed = 5;
+
+    let start = super::headless_unprinted_start(0, 2, &mut printed);
+
+    assert_eq!(start, Some(0));
+    assert_eq!(printed, 2);
+    assert_eq!(super::headless_unprinted_start(2, 1, &mut printed), Some(0));
+    assert_eq!(printed, 3);
+    assert_eq!(super::headless_unprinted_start(2, 1, &mut printed), None);
 }
 
 #[tokio::test]

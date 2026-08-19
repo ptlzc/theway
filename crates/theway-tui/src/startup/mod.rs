@@ -356,6 +356,8 @@ pub(crate) mod test_daemon {
             control_plane_prompt: None,
             sidebar: theway_transport::testing::empty_sidebar_snapshot(),
             feed_blocks: Vec::new(),
+            feed_blocks_base: 0,
+            feed_block_patches: Vec::new(),
             feed_lines: Vec::new(),
             feed_lines_base: 0,
             dags: Vec::new(),

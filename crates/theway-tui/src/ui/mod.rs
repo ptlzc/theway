@@ -399,6 +399,10 @@ pub struct App {
 
     /// Stream connection state: `Some` while the frame stream is open.
     connected: bool,
+    /// An incremental feed frame did not continue from the local block
+    /// count. The event loop resolves this with the authoritative GetState
+    /// path before accepting another delta.
+    resync_pending: bool,
 }
 
 impl App {
@@ -474,6 +478,7 @@ impl App {
             last_ctrlc: None,
             quit: false,
             connected: true,
+            resync_pending: false,
         }
     }
 
@@ -521,14 +526,59 @@ impl App {
 
     // ── snapshot application (the daemon owns the transcript) ──────────────────────────
 
-    /// Apply a full snapshot: refresh the cache, sync the feed, and resync
-    /// every renderable status field. The daemon transcript is append-only
-    /// while a turn streams, so a snapshot whose blocks share a prefix with
-    /// the previous one pushes only the new tail instead of rebuilding the
-    /// whole feed (the longer the feed, the bigger the win).
-    pub(super) fn apply_snapshot(&mut self, status: WireStatus) {
-        let feed_changed = self.latest.feed_blocks != status.feed_blocks;
-        let old_blocks = self.latest.feed_blocks.clone();
+    /// Apply either an authoritative full snapshot or a per-stream feed
+    /// patch frame, then resync every renderable status field.
+    pub(super) fn apply_snapshot(&mut self, mut status: WireStatus) {
+        let full_feed = status.feed_blocks_base == 0 && status.feed_block_patches.is_empty();
+        if full_feed {
+            self.feed.replace_blocks(&status.feed_blocks);
+            self.resync_pending = false;
+        } else if status.feed_blocks_base == self.latest.feed_blocks.len() as u64 {
+            let mut blocks = self.latest.feed_blocks.clone();
+            let valid = status.feed_block_patches.iter().all(|patch| {
+                let Ok(index) = usize::try_from(patch.index) else {
+                    return false;
+                };
+                if index == blocks.len() {
+                    blocks.push(patch.block.clone());
+                    true
+                } else if let Some(current) = blocks.get_mut(index)
+                    && std::mem::discriminant(current) == std::mem::discriminant(&patch.block)
+                {
+                    *current = patch.block.clone();
+                    true
+                } else {
+                    false
+                }
+            });
+            if valid {
+                let mut render_out_of_sync = false;
+                for patch in &status.feed_block_patches {
+                    let index = patch.index as usize;
+                    if index == self.latest.feed_blocks.len() || index >= self.feed.blocks().len() {
+                        self.feed.append_blocks(std::slice::from_ref(&patch.block));
+                    } else if !self.feed.replace_block(index, &patch.block) {
+                        render_out_of_sync = true;
+                        break;
+                    }
+                }
+                if render_out_of_sync {
+                    self.feed.replace_blocks(&blocks);
+                }
+                status.feed_blocks = blocks;
+                self.resync_pending = false;
+            } else {
+                status.feed_blocks = self.latest.feed_blocks.clone();
+                self.resync_pending = true;
+            }
+        } else {
+            status.feed_blocks = self.latest.feed_blocks.clone();
+            self.resync_pending = true;
+        }
+        // `latest` is always an authoritative local cache, never another
+        // incremental frame waiting to be applied.
+        status.feed_blocks_base = 0;
+        status.feed_block_patches.clear();
         self.latest = status;
         self.session_id = self.latest.session_id.clone();
         // Daemon-side reload (issue #50): the `reload` tool bumped the
@@ -553,29 +603,13 @@ impl App {
         self.latest_goal = self.latest.goal.clone();
         self.latest_trigger_poll = self.latest.latest_trigger_poll.clone();
         self.connected = true;
-        if feed_changed {
-            let new_blocks = &self.latest.feed_blocks;
-            let prefix = old_blocks
-                .iter()
-                .zip(new_blocks)
-                .take_while(|(a, b)| a == b)
-                .count();
-            if prefix == old_blocks.len() {
-                // Pure tail append: push only the new blocks.
-                self.feed.append_blocks(&new_blocks[prefix..]);
-            } else {
-                // Truncation/reordering: rebuild.
-                self.feed.replace_blocks(new_blocks);
-            }
-            // NOTE: `follow` is deliberately NOT forced here. A scrolled-up
-            // view stays pinned while the stream appends (issue #33); follow
-            // is only re-enabled by an explicit user action (submit) or by
-            // scrolling back to the bottom (render() clamp).
-        }
+        // `follow` is deliberately NOT forced here. A scrolled-up view stays
+        // pinned while the stream appends; follow is only re-enabled by an
+        // explicit user action or by scrolling back to the bottom.
     }
 
-    /// Apply one stream frame. Snapshots carry the full state (feed diffed in
-    /// `apply_snapshot`). `StreamEvent` carries graph-plane increments
+    /// Apply one stream frame. Snapshots carry full non-feed state plus either
+    /// a full transcript or feed patches. `StreamEvent` carries graph-plane increments
     /// (subagent_*/node_status/run_status); the TUI has no graph panel yet —
     /// `latest.dags`/`latest.subagents` refresh via snapshots only. There is
     /// no feed event kind, so feed blocks travel in snapshots; events are
@@ -639,7 +673,16 @@ impl App {
                 }
                 frame = async { stream.as_mut()?.next().await }, if stream.is_some() => {
                     match frame {
-                        Some(Ok(frame)) => self.apply_frame(frame),
+                        Some(Ok(frame)) => {
+                            self.apply_frame(frame);
+                            if self.resync_pending {
+                                self.resync_pending = false;
+                                match self.client.get_state().await {
+                                    Ok(state) => self.apply_snapshot(wire_status(&state)),
+                                    Err(e) => self.error_line(format!("get_state: {e}")),
+                                }
+                            }
+                        }
                         Some(Err(e)) => {
                             self.connected = false;
                             self.error_line(format!("daemon stream: {e}"));
@@ -1922,16 +1965,12 @@ impl App {
             while let Some(frame) = stream.next().await {
                 let Ok(frame) = frame else { continue };
                 if let Some(stream_frame::Payload::Snapshot(state)) = frame.payload {
-                    // Issue #35: snapshots carry only rows appended since the
-                    // last publish; `feed_lines_base` anchors their absolute
-                    // index in the transcript.
                     let base = state.feed_lines_base as usize;
                     let lines = state.feed_lines;
-                    if base + lines.len() > printed {
-                        for line in &lines[printed.saturating_sub(base)..] {
+                    if let Some(start) = headless_unprinted_start(base, lines.len(), &mut printed) {
+                        for line in &lines[start..] {
                             println!("{line}");
                         }
-                        printed = base + lines.len();
                         let _ = std::io::stdout().flush();
                     }
                 }
@@ -2000,6 +2039,19 @@ impl App {
         printer.abort();
         Ok(())
     }
+}
+
+fn headless_unprinted_start(base: usize, len: usize, printed: &mut usize) -> Option<usize> {
+    let end = base.saturating_add(len);
+    if end < *printed {
+        *printed = 0;
+    }
+    if end <= *printed {
+        return None;
+    }
+    let start = printed.saturating_sub(base).min(len);
+    *printed = end;
+    Some(start)
 }
 
 /// Pure side-panel width resolution (issue #54), split from
