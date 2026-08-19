@@ -2,45 +2,74 @@
 
 use super::*;
 use crate::testing::{FakeSessionOps, FakeStorageOps, FakeToolOps, empty_sidebar_snapshot};
-use crate::wire::{WireContextUsage, WireDaemonConfig, WirePathContext};
+use crate::wire::{
+    WireAgentEvent, WireContextUsage, WireDaemonConfig, WireDagEvent, WireDagRunSnapshot,
+    WireNodeOutput, WirePathContext,
+};
 use std::collections::HashMap;
 use std::time::Duration;
-use theway_core::multiagent::registry::{JobTranscript, JobTranscriptStore};
 
-/// In-memory [`JobTranscriptStore`] test double, shared across registry
-/// instances to model durable storage without the daemon's disk-backed store.
 #[derive(Default)]
-struct MemoryTranscriptStore {
-    nodes: Mutex<HashMap<(String, String), Vec<serde_json::Value>>>,
-    jobs: Mutex<HashMap<String, Vec<serde_json::Value>>>,
+struct TestJobOps {
+    nodes: Mutex<HashMap<(String, String), WireNodeOutput>>,
 }
 
-impl JobTranscriptStore for MemoryTranscriptStore {
-    fn save(&self, transcript: &JobTranscript) {
-        let messages = transcript.messages.to_vec();
-        match (transcript.run_id, transcript.node_id) {
-            (Some(run), Some(node)) => {
-                self.nodes
-                    .lock()
-                    .insert((run.to_string(), node.to_string()), messages);
-            }
-            _ => {
-                self.jobs
-                    .lock()
-                    .insert(transcript.job_id.to_string(), messages);
-            }
-        }
+impl TestJobOps {
+    fn insert(&self, run_id: &str, node_id: &str, output: WireNodeOutput) {
+        self.nodes
+            .lock()
+            .insert((run_id.to_string(), node_id.to_string()), output);
     }
+}
 
-    fn load_node(&self, run_id: &str, node_id: &str) -> Option<Vec<serde_json::Value>> {
+impl JobOps for TestJobOps {
+    fn node_output(&self, run_id: &str, node_id: &str) -> WireNodeOutput {
         self.nodes
             .lock()
             .get(&(run_id.to_string(), node_id.to_string()))
             .cloned()
+            .unwrap_or_default()
     }
 
-    fn load_job(&self, job_id: &str) -> Option<Vec<serde_json::Value>> {
-        self.jobs.lock().get(job_id).cloned()
+    fn interrupt_node(&self, _run_id: &str, _node_id: &str) -> bool {
+        false
+    }
+
+    fn steer_node(&self, _run_id: &str, _node_id: &str, _text: String) -> bool {
+        false
+    }
+}
+
+#[derive(Default)]
+struct TestGraphOps {
+    runs: Mutex<HashMap<String, Vec<WireDagRunSnapshot>>>,
+}
+
+impl GraphOps for TestGraphOps {
+    fn cancel_run(&self, _run_id: &str, _reason: Option<&str>) {}
+
+    fn retry(&self, _run_id: &str, _node_ids: Option<&[String]>) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn skip(&self, _run_id: &str, _node_id: &str) -> bool {
+        false
+    }
+
+    fn checkpoints(
+        &self,
+        _session_id: &str,
+        _run_id: Option<&str>,
+    ) -> anyhow::Result<Vec<crate::wire::WireGraphCheckpoint>> {
+        Ok(Vec::new())
+    }
+
+    fn restore(&self, _session_id: &str, _snapshot: &str) -> anyhow::Result<String> {
+        anyhow::bail!("not configured")
+    }
+
+    fn list(&self, session_id: &str) -> Vec<WireDagRunSnapshot> {
+        self.runs.lock().get(session_id).cloned().unwrap_or_default()
     }
 }
 
@@ -83,29 +112,9 @@ fn grpc_state_with_ops() -> (
     let (command_tx, command_rx) = mpsc::unbounded_channel::<WireCommand>();
     let (snapshot_tx, _) = broadcast::channel::<WireStatus>(16);
     let latest = Arc::new(Mutex::new(fixture_snapshot("ready")));
-    let (event_tx, _) = broadcast::channel::<AgentJobEvent>(16);
-    let registry = AgentJobRegistry::new();
-    // Forward registry built-in broadcast → event_tx (merged stream for tests).
-    let agent_fwd = {
-        let mut rx = registry.subscribe();
-        let fwd_tx = event_tx.clone();
-        tokio::spawn(async move {
-            loop {
-                match rx.recv().await {
-                    Ok(event) => {
-                        let _ = fwd_tx.send(event);
-                    }
-                    Err(broadcast::error::RecvError::Lagged(n)) => {
-                        eprintln!("AgentJobEvent broadcast lagged by {n}, skipping");
-                        continue;
-                    }
-                    Err(broadcast::error::RecvError::Closed) => break,
-                }
-            }
-        })
-        .abort_handle()
-    };
-    let (dag_event_tx, _) = broadcast::channel::<DagEvent>(16);
+    let (event_tx, _) = broadcast::channel::<WireAgentEvent>(16);
+    let agent_fwd = tokio::spawn(std::future::pending::<()>()).abort_handle();
+    let (dag_event_tx, _) = broadcast::channel::<WireDagEvent>(16);
     let session_ops = Arc::new(FakeSessionOps::new());
     session_ops.add_session("test-session");
     let tool_ops = Arc::new(FakeToolOps::new());
@@ -116,8 +125,8 @@ fn grpc_state_with_ops() -> (
             latest,
             events: event_tx,
             dag_events: dag_event_tx,
-            registry,
-            dag_engine: Arc::new(theway_core::multiagent::graph::engine::DagEngine::new()),
+            job_ops: Arc::new(TestJobOps::default()),
+            graph_ops: Arc::new(TestGraphOps::default()),
             session_ops: session_ops.clone(),
             session_id: Arc::new(std::sync::RwLock::new("test-session".into())),
             path_context: Arc::new(std::sync::RwLock::new(WirePathContext::default())),
@@ -283,19 +292,17 @@ async fn stream_events_emits_published_snapshots() {
 
 #[tokio::test]
 async fn get_node_output_returns_fragment_from_offset() {
-    let (state, _command_rx) = grpc_state();
-    let job_id = state
-        .registry
-        .register(theway_core::multiagent::registry::JobInit {
-            agent: "explorer".into(),
-            source: "dag".into(),
-            run_id: Some("run-1".into()),
-            node_id: Some("node-1".into()),
-            session_id: None,
-        });
-    state.registry.update(&job_id, |job| {
-        job.output = "hello graph".into();
-    });
+    let (mut state, _command_rx) = grpc_state();
+    let jobs = Arc::new(TestJobOps::default());
+    jobs.insert(
+        "run-1",
+        "node-1",
+        WireNodeOutput {
+            output: Some("hello graph".into()),
+            ..Default::default()
+        },
+    );
+    state.job_ops = jobs;
 
     let response = state
         .get_node_output(Request::new(GetNodeOutputRequest {
@@ -338,26 +345,21 @@ async fn get_node_output_returns_fragment_from_offset() {
 
 #[tokio::test]
 async fn get_node_output_includes_messages_json() {
-    let (state, _command_rx) = grpc_state();
-    let job_id = state
-        .registry
-        .register(theway_core::multiagent::registry::JobInit {
-            agent: "explorer".into(),
-            source: "dag".into(),
-            run_id: Some("run-1".into()),
-            node_id: Some("node-1".into()),
-            session_id: None,
-        });
-    state.registry.update(&job_id, |job| {
-        theway_core::multiagent::registry::append_message(
-            job,
-            &serde_json::json!({"role": "user", "content": "explore"}),
-        );
-        theway_core::multiagent::registry::append_message(
-            job,
-            &serde_json::json!({"role": "assistant", "content": [{"type": "text", "text": "done"}]}),
-        );
-    });
+    let (mut state, _command_rx) = grpc_state();
+    let jobs = Arc::new(TestJobOps::default());
+    jobs.insert(
+        "run-1",
+        "node-1",
+        WireNodeOutput {
+            output: Some(String::new()),
+            messages: Some(vec![
+                serde_json::json!({"role": "user", "content": "explore"}),
+                serde_json::json!({"role": "assistant", "content": [{"type": "text", "text": "done"}]}),
+            ]),
+            ..Default::default()
+        },
+    );
+    state.job_ops = jobs;
 
     let response = state
         .get_node_output(Request::new(GetNodeOutputRequest {
@@ -377,33 +379,21 @@ async fn get_node_output_includes_messages_json() {
 }
 
 #[tokio::test]
-async fn get_node_output_falls_back_to_transcript_store_after_registry_recreation() {
-    let store = Arc::new(MemoryTranscriptStore::default());
-    // First process: job runs, finishes, transcript handed to the host store.
-    let registry = AgentJobRegistry::new();
-    registry.set_transcript_store(Some(store.clone()));
-    let job_id = registry.register(theway_core::multiagent::registry::JobInit {
-        agent: "explorer".into(),
-        source: "dag".into(),
-        run_id: Some("run-1".into()),
-        node_id: Some("node-1".into()),
-        session_id: None,
-    });
-    registry.update(&job_id, |job| {
-        theway_core::multiagent::registry::append_message(
-            job,
-            &serde_json::json!({"role": "assistant", "content": [{"type": "text", "text": "survives"}]}),
-        );
-    });
-    registry.finish(
-        &job_id,
-        theway_core::multiagent::registry::JobStatus::Succeeded,
-        None,
+async fn get_node_output_serves_retained_messages_without_a_live_job() {
+    let (mut state, _command_rx) = grpc_state();
+    let jobs = Arc::new(TestJobOps::default());
+    jobs.insert(
+        "run-1",
+        "node-1",
+        WireNodeOutput {
+            messages: Some(vec![serde_json::json!({
+                "role": "assistant",
+                "content": [{"type": "text", "text": "survives"}],
+            })]),
+            ..Default::default()
+        },
     );
-
-    // Restart: fresh GrpcState with a fresh registry, same host store.
-    let (state, _command_rx) = grpc_state();
-    state.registry.set_transcript_store(Some(store.clone()));
+    state.job_ops = jobs;
     let response = state
         .get_node_output(Request::new(GetNodeOutputRequest {
             run_id: "run-1".into(),
@@ -413,7 +403,7 @@ async fn get_node_output_falls_back_to_transcript_store_after_registry_recreatio
         .await
         .unwrap()
         .into_inner();
-    // No live job (404 path avoided) — the stored transcript is served.
+    // No live output (404 path avoided) — the retained transcript is served.
     assert_eq!(response.total, 0);
     let messages: Vec<serde_json::Value> =
         serde_json::from_str(response.messages_json.as_deref().unwrap()).unwrap();
@@ -500,17 +490,17 @@ async fn stream_events_merges_snapshot_and_event_payloads() {
     state.snapshots.send(fixture_snapshot("snap")).unwrap();
     state
         .events
-        .send(AgentJobEvent::Output {
+        .send(WireAgentEvent::Output {
             id: "job-1".into(),
             chunk: "hi".into(),
         })
         .unwrap();
     state
         .dag_events
-        .send(DagEvent::RunStatus {
+        .send(WireDagEvent::RunStatus {
             run_id: "goal-1".into(),
             session_id: String::new(),
-            status: theway_core::multiagent::graph::types::DagStatus::Running,
+            status: "running".into(),
             error: None,
         })
         .unwrap();
@@ -555,11 +545,11 @@ async fn stream_events_forwards_dag_node_status_frames() {
 
     state
         .dag_events
-        .send(DagEvent::NodeStatus {
+        .send(WireDagEvent::NodeStatus {
             run_id: "goal-1".into(),
             session_id: String::new(),
             node_id: "main".into(),
-            status: theway_core::multiagent::graph::types::NodeStatus::Failed,
+            status: "failed".into(),
             error: Some("condition broken".into()),
         })
         .unwrap();
@@ -889,13 +879,30 @@ async fn delete_current_session_falls_back_to_most_recent() {
 
 #[tokio::test]
 async fn graph_list_filters_runs_by_session() {
-    let (state, _rx, _ops, _tools) = grpc_state_with_ops();
-    let run_mine = state
-        .dag_engine
-        .plan_goal("condition mine", Some("test-session".into()));
-    let run_other = state
-        .dag_engine
-        .plan_goal("condition other", Some("other-session".into()));
+    let (mut state, _rx, _ops, _tools) = grpc_state_with_ops();
+    let graph = Arc::new(TestGraphOps::default());
+    let run = |id: &str, name: &str| WireDagRunSnapshot {
+        id: id.into(),
+        name: name.into(),
+        kind: "goal".into(),
+        status: "running".into(),
+        fail_fast: false,
+        max_concurrency: 1,
+        direction: "TD".into(),
+        created_at: 1,
+        completed_at: None,
+        error: None,
+        nodes: Vec::new(),
+    };
+    graph.runs.lock().insert(
+        "test-session".into(),
+        vec![run("goal-mine", "condition mine")],
+    );
+    graph.runs.lock().insert(
+        "other-session".into(),
+        vec![run("goal-other", "condition other")],
+    );
+    state.graph_ops = graph;
 
     let response = state
         .graph_list(Request::new(GraphListRequest {
@@ -905,7 +912,7 @@ async fn graph_list_filters_runs_by_session() {
         .unwrap()
         .into_inner();
     assert_eq!(response.runs.len(), 1);
-    assert_eq!(response.runs[0].id, run_mine);
+    assert_eq!(response.runs[0].id, "goal-mine");
 
     let response = state
         .graph_list(Request::new(GraphListRequest {
@@ -915,7 +922,7 @@ async fn graph_list_filters_runs_by_session() {
         .unwrap()
         .into_inner();
     assert_eq!(response.runs.len(), 1);
-    assert_eq!(response.runs[0].id, run_other);
+    assert_eq!(response.runs[0].id, "goal-other");
 
     // Unknown session → empty list.
     let response = state

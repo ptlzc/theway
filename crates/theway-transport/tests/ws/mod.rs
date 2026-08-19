@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 fn event_json_matches_wire_shape() {
-    let event = AgentJobEvent::Output {
+    let event = WireAgentEvent::Output {
         id: "job-1".into(),
         chunk: "hi".into(),
     };
@@ -13,9 +13,9 @@ fn event_json_matches_wire_shape() {
     assert_eq!(value["id"], "job-1");
     assert_eq!(value["chunk"], "hi");
 
-    let event = AgentJobEvent::Completed {
+    let event = WireAgentEvent::Completed {
         id: "job-1".into(),
-        status: theway_core::multiagent::registry::JobStatus::Succeeded,
+        status: "succeeded".into(),
         error: None,
         chars: 10,
         tokens_in: 5,
@@ -31,12 +31,10 @@ fn event_json_matches_wire_shape() {
 
 #[test]
 fn dag_event_json_matches_wire_shape() {
-    use theway_core::multiagent::graph::types::{DagStatus, NodeStatus};
-
-    let value = dag_event_json(&DagEvent::RunStatus {
+    let value = dag_event_json(&WireDagEvent::RunStatus {
         run_id: "goal-1".into(),
         session_id: "sess-1".into(),
-        status: DagStatus::Running,
+        status: "running".into(),
         error: None,
     });
     assert_eq!(value["event"], "run_status");
@@ -45,11 +43,11 @@ fn dag_event_json_matches_wire_shape() {
     assert_eq!(value["status"], "running");
     assert!(value["error"].is_null());
 
-    let value = dag_event_json(&DagEvent::NodeStatus {
+    let value = dag_event_json(&WireDagEvent::NodeStatus {
         run_id: "goal-1".into(),
         session_id: "sess-1".into(),
         node_id: "main".into(),
-        status: NodeStatus::Failed,
+        status: "failed".into(),
         error: Some("condition broken".into()),
     });
     assert_eq!(value["event"], "node_status");

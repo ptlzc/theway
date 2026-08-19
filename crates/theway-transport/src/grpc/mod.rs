@@ -27,10 +27,11 @@ use tokio_stream::wrappers::{BroadcastStream, TcpListenerStream};
 use tonic::{Request, Response, Status};
 
 use crate::host::TransportHost;
-use crate::transport::SessionOps;
-use crate::transport::ToolOps;
-use crate::transport::TransportMode;
-use crate::wire::{WireCommand, WireDaemonConfig, WirePathContext, WirePromptImage, WireStatus};
+use crate::transport::{GraphOps, JobOps, SessionOps, ToolOps, TransportMode};
+use crate::wire::{
+    WireAgentEvent, WireCommand, WireDaemonConfig, WireDagEvent, WireGraphKind, WirePathContext,
+    WirePromptImage, WireStatus,
+};
 
 use crate::proto::health::health_check_response::ServingStatus;
 use crate::proto::health::health_server::{Health, HealthServer};
@@ -40,9 +41,6 @@ use crate::proto::{
     dag_event_wire, dag_run_wire, resolve_session_id, session_state, session_summary_wire,
     stream_event_wire,
 };
-use theway_core::multiagent::graph::types::DagEvent;
-use theway_core::multiagent::registry::{AgentJobEvent, AgentJobRegistry};
-
 use theway_grpc::DaemonConfig;
 use theway_grpc::command_service_server::{CommandService, CommandServiceServer};
 use theway_grpc::event_service_server::{EventService, EventServiceServer};
@@ -77,13 +75,13 @@ pub struct GrpcState {
     pub snapshots: broadcast::Sender<WireStatus>,
     pub latest: Arc<Mutex<WireStatus>>,
     /// Event plane (graph mode): subagent started/output/metrics/completed.
-    pub events: broadcast::Sender<AgentJobEvent>,
+    pub events: broadcast::Sender<WireAgentEvent>,
     /// Event plane (graph mode): DAG engine node_status / run_status.
-    pub dag_events: broadcast::Sender<DagEvent>,
-    /// Job registry backing GetNodeOutput.
-    pub registry: AgentJobRegistry,
-    /// DAG orchestration engine (graph engineering mode): GraphCancel/Retry/…
-    pub dag_engine: Arc<theway_core::multiagent::graph::engine::DagEngine>,
+    pub dag_events: broadcast::Sender<WireDagEvent>,
+    /// Job operations backing GetNodeOutput/interrupt/steer.
+    pub job_ops: Arc<dyn JobOps>,
+    /// DAG orchestration operations backing GraphCancel/Retry/…
+    pub graph_ops: Arc<dyn GraphOps>,
     /// session-resource-model: session lifecycle ops (list/create/rename/delete).
     /// Switching the *current* session goes through `WireCommand::SwitchSession`.
     pub session_ops: Arc<dyn SessionOps>,
@@ -416,19 +414,14 @@ impl GraphEngineService for GrpcState {
         let request = request.into_inner();
         // Transcript first (memory, then disk — a finished node's messages
         // survive a process restart via the per-node file), text tail second.
-        let messages = self
-            .registry
-            .node_messages(&request.run_id, &request.node_id);
+        let node_output = self.job_ops.node_output(&request.run_id, &request.node_id);
+        let messages = node_output.messages;
         let messages_json = messages
             .as_ref()
             .map(|m| serde_json::to_string(m).unwrap_or_default())
             .unwrap_or_default();
-        let messages_truncated = self
-            .registry
-            .find_node(&request.run_id, &request.node_id)
-            .map(|job| job.messages_truncated)
-            .unwrap_or(false);
-        let Some(job) = self.registry.find_node(&request.run_id, &request.node_id) else {
+        let messages_truncated = node_output.messages_truncated;
+        let Some(text) = node_output.output else {
             // Recovery path: job is gone (restart) but a disk transcript may
             // still exist — serve it instead of 404-ing.
             if !messages_json.is_empty() {
@@ -446,13 +439,12 @@ impl GraphEngineService for GrpcState {
                 request.node_id, request.run_id
             )));
         };
-        let text = job.output;
         let (offset, fragment) = crate::text_cursor::slice_from(&text, request.offset);
         Ok(Response::new(GetNodeOutputResponse {
             text: fragment.to_string(),
             offset,
             total: text.len() as u64,
-            truncated: job.truncated,
+            truncated: node_output.truncated,
             messages_json: (!messages_json.is_empty()).then_some(messages_json),
             messages_truncated,
         }))
@@ -465,7 +457,7 @@ impl GraphEngineService for GrpcState {
         request: Request<GraphCancelRequest>,
     ) -> Result<Response<CommandResult>, Status> {
         let run_id = request.into_inner().run_id;
-        self.dag_engine
+        self.graph_ops
             .cancel_run(&run_id, Some("cancelled via rpc"));
         Ok(Response::new(CommandResult { accepted: true }))
     }
@@ -476,7 +468,7 @@ impl GraphEngineService for GrpcState {
     ) -> Result<Response<GraphRetryResponse>, Status> {
         let request = request.into_inner();
         let node_ids = request.node_id.as_deref().map(|id| vec![id.to_string()]);
-        let reset = self.dag_engine.retry(&request.run_id, node_ids.as_deref());
+        let reset = self.graph_ops.retry(&request.run_id, node_ids.as_deref());
         Ok(Response::new(GraphRetryResponse {
             reset_node_ids: reset,
         }))
@@ -487,7 +479,7 @@ impl GraphEngineService for GrpcState {
         request: Request<GraphSkipRequest>,
     ) -> Result<Response<GraphSkipResponse>, Status> {
         let request = request.into_inner();
-        let skipped = self.dag_engine.skip(&request.run_id, &request.node_id);
+        let skipped = self.graph_ops.skip(&request.run_id, &request.node_id);
         Ok(Response::new(GraphSkipResponse { skipped }))
     }
 
@@ -497,7 +489,7 @@ impl GraphEngineService for GrpcState {
     ) -> Result<Response<CommandResult>, Status> {
         let request = request.into_inner();
         let accepted = self
-            .registry
+            .job_ops
             .interrupt_node(&request.run_id, &request.node_id);
         Ok(Response::new(CommandResult { accepted }))
     }
@@ -508,7 +500,7 @@ impl GraphEngineService for GrpcState {
     ) -> Result<Response<CommandResult>, Status> {
         let request = request.into_inner();
         let accepted = self
-            .registry
+            .job_ops
             .steer_node(&request.run_id, &request.node_id, request.text);
         Ok(Response::new(CommandResult { accepted }))
     }
@@ -517,52 +509,34 @@ impl GraphEngineService for GrpcState {
         &self,
         request: Request<GraphCheckpointRequest>,
     ) -> Result<Response<GraphCheckpointResponse>, Status> {
-        use theway_core::multiagent::graph::persist::to_persisted;
-        use theway_core::multiagent::graph::types::RunKind;
         let request = request.into_inner();
         let session_id = request
             .session_id
             .clone()
             .unwrap_or_else(|| self.session_id.read().unwrap().clone());
 
-        // Single-run export, or every run owned by the session.
-        let runs: Vec<theway_core::multiagent::graph::types::DagRun> = match request.run_id {
-            Some(run_id) => self
-                .dag_engine
-                .get_run(&run_id)
-                .into_iter()
-                .filter(|r| r.session_id.as_deref().is_none_or(|sid| sid == session_id))
-                .collect(),
-            None => self
-                .dag_engine
-                .list_runs()
-                .into_iter()
-                .filter(|r| r.session_id.as_deref().is_none_or(|sid| sid == session_id))
-                .collect(),
-        };
-
-        let mut checkpoints = Vec::new();
-        for run in &runs {
-            let persisted = to_persisted(run);
-            let snapshot =
-                serde_json::to_string(&persisted).map_err(|e| Status::internal(e.to_string()))?;
-            checkpoints.push(theway_grpc::GraphSnapshotEntry {
-                kind: match run.kind {
-                    RunKind::Goal => GraphKind::GraphGoal as i32,
-                    _ => GraphKind::GraphDag as i32,
-                },
-                run_id: run.id.clone(),
-                snapshot,
-            });
-        }
-        let error = if runs.is_empty() {
+        let checkpoints = self
+            .graph_ops
+            .checkpoints(&session_id, request.run_id.as_deref())
+            .map_err(|error| Status::internal(error.to_string()))?;
+        let error = if checkpoints.is_empty() {
             Some(format!("no runs for session {session_id}"))
         } else {
             None
         };
         Ok(Response::new(GraphCheckpointResponse {
             session_id,
-            checkpoints,
+            checkpoints: checkpoints
+                .into_iter()
+                .map(|checkpoint| theway_grpc::GraphSnapshotEntry {
+                    kind: match checkpoint.kind {
+                        WireGraphKind::Goal => GraphKind::GraphGoal as i32,
+                        WireGraphKind::Dag => GraphKind::GraphDag as i32,
+                    },
+                    run_id: checkpoint.run_id,
+                    snapshot: checkpoint.snapshot,
+                })
+                .collect(),
             error,
         }))
     }
@@ -572,22 +546,16 @@ impl GraphEngineService for GrpcState {
         request: Request<GraphRestoreRequest>,
     ) -> Result<Response<GraphRestoreResponse>, Status> {
         let request = request.into_inner();
-        let mut persisted: theway_core::multiagent::graph::persist::PersistedRun =
-            serde_json::from_str(&request.snapshot)
-                .map_err(|e| Status::invalid_argument(format!("invalid snapshot: {e}")))?;
-        // Re-attach to the requesting session (snapshots are portable).
-        persisted.session_id = Some(request.session_id.clone());
-        let ids = self.dag_engine.restore(vec![persisted]);
-        let Some(run_id) = ids.first() else {
-            return Ok(Response::new(GraphRestoreResponse {
-                run_id: String::new(),
-                error: Some("restore produced no run".into()),
-            }));
-        };
-        Ok(Response::new(GraphRestoreResponse {
-            run_id: run_id.clone(),
-            error: None,
-        }))
+        match self
+            .graph_ops
+            .restore(&request.session_id, &request.snapshot)
+        {
+            Ok(run_id) => Ok(Response::new(GraphRestoreResponse {
+                run_id,
+                error: None,
+            })),
+            Err(error) => Err(Status::invalid_argument(error.to_string())),
+        }
     }
 
     async fn graph_list(
@@ -596,11 +564,10 @@ impl GraphEngineService for GrpcState {
     ) -> Result<Response<GraphListResponse>, Status> {
         let session_id = request.into_inner().session_id;
         let runs = self
-            .dag_engine
-            .list_runs()
-            .into_iter()
-            .filter(|run| run.session_id.as_deref() == Some(session_id.as_str()))
-            .map(|run| dag_run_wire(&WireStatus::from_dag_run(&run)))
+            .graph_ops
+            .list(&session_id)
+            .iter()
+            .map(dag_run_wire)
             .collect();
         Ok(Response::new(GraphListResponse { runs }))
     }
@@ -717,8 +684,8 @@ pub async fn run_grpc(mut app: Box<dyn TransportHost>, options: GrpcOptions) -> 
         latest: endpoints.latest.clone(),
         events: endpoints.events.clone(),
         dag_events: endpoints.dag_events.clone(),
-        registry: endpoints.registry.clone(),
-        dag_engine: endpoints.dag_engine.clone(),
+        job_ops: endpoints.job_ops.clone(),
+        graph_ops: endpoints.graph_ops.clone(),
         session_ops: endpoints.session_ops.clone(),
         agent_fwd,
         session_id: Arc::new(std::sync::RwLock::new(endpoints.session_id.clone())),

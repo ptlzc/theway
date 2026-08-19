@@ -10,9 +10,6 @@ use crate::wire::{ModelEntry, ProviderGroup, WireDaemonConfig, WirePathContext, 
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
-use theway_core::multiagent::graph::engine::DagEngine;
-use theway_core::multiagent::graph::types::DagEvent;
-use theway_core::multiagent::registry::{AgentJobEvent, AgentJobRegistry};
 
 fn fixture_status(feed_line: &str) -> WireStatus {
     WireStatus {
@@ -50,28 +47,9 @@ fn grpc_state() -> (GrpcState, mpsc::UnboundedReceiver<crate::wire::WireCommand>
     let (command_tx, command_rx) = mpsc::unbounded_channel::<crate::wire::WireCommand>();
     let (snapshot_tx, _) = broadcast::channel::<WireStatus>(16);
     let latest = Arc::new(parking_lot::Mutex::new(fixture_status("ready")));
-    let (event_tx, _) = broadcast::channel::<AgentJobEvent>(16);
-    let (dag_event_tx, _) = broadcast::channel::<DagEvent>(16);
-    let registry = AgentJobRegistry::new();
-    let agent_fwd = {
-        let mut rx = registry.subscribe();
-        let fwd_tx = event_tx.clone();
-        tokio::spawn(async move {
-            loop {
-                match rx.recv().await {
-                    Ok(event) => {
-                        let _ = fwd_tx.send(event);
-                    }
-                    Err(broadcast::error::RecvError::Lagged(n)) => {
-                        eprintln!("AgentJobEvent broadcast lagged by {n}, skipping");
-                        continue;
-                    }
-                    Err(broadcast::error::RecvError::Closed) => break,
-                }
-            }
-        })
-        .abort_handle()
-    };
+    let (event_tx, _) = broadcast::channel::<crate::wire::WireAgentEvent>(16);
+    let (dag_event_tx, _) = broadcast::channel::<crate::wire::WireDagEvent>(16);
+    let agent_fwd = tokio::spawn(std::future::pending::<()>()).abort_handle();
     let session_ops = Arc::new(FakeSessionOps::new());
     session_ops.add_session("sess-1");
     (
@@ -81,8 +59,8 @@ fn grpc_state() -> (GrpcState, mpsc::UnboundedReceiver<crate::wire::WireCommand>
             latest,
             events: event_tx,
             dag_events: dag_event_tx,
-            registry,
-            dag_engine: Arc::new(DagEngine::new()),
+            job_ops: Arc::new(crate::UnavailableJobOps),
+            graph_ops: Arc::new(crate::UnavailableGraphOps),
             session_ops,
             session_id: Arc::new(std::sync::RwLock::new("sess-1".into())),
             path_context: Arc::new(std::sync::RwLock::new(WirePathContext::default())),

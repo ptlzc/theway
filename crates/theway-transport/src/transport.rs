@@ -27,10 +27,11 @@ use parking_lot::Mutex;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::wire::{
-    SessionSummary, ToolError, WireCommand, WireDaemonConfig, WireLoadCronJobsRequest,
-    WireLoadCronJobsResult, WireLoadDagRunsRequest, WireLoadDagRunsResult,
-    WireLoadTriggerRulesRequest, WireLoadTriggerRulesResult, WirePathContext,
-    WireSaveCronJobsRequest, WireSaveCronJobsResult, WireSaveDagRunRequest, WireSaveDagRunResult,
+    SessionSummary, ToolError, WireAgentEvent, WireCommand, WireDaemonConfig, WireDagEvent,
+    WireDagRunSnapshot, WireGraphCheckpoint, WireLoadCronJobsRequest, WireLoadCronJobsResult,
+    WireLoadDagRunsRequest, WireLoadDagRunsResult, WireLoadTriggerRulesRequest,
+    WireLoadTriggerRulesResult, WireNodeOutput, WirePathContext, WireSaveCronJobsRequest,
+    WireSaveCronJobsResult, WireSaveDagRunRequest, WireSaveDagRunResult,
     WireSaveTriggerRulesRequest, WireSaveTriggerRulesResult, WireStatus, WireToolEditRequest,
     WireToolEditResult, WireToolExecFrame, WireToolExecRequest, WireToolFindRequest,
     WireToolFindResult, WireToolGrepRequest, WireToolGrepResult, WireToolListDirRequest,
@@ -40,9 +41,79 @@ use crate::wire::{
     WireToolReadRequest, WireToolReadResult, WireToolSkillInstallRequest,
     WireToolSkillInstallResult, WireToolWriteRequest, WireToolWriteResult,
 };
-use theway_core::multiagent::graph::engine::DagEngine;
-use theway_core::multiagent::graph::types::DagEvent;
-use theway_core::multiagent::registry::{AgentJobEvent, AgentJobRegistry};
+
+/// Read/control access to subagent jobs. Protocol servers depend on this seam,
+/// not on the runtime registry that happens to back it in the daemon.
+pub trait JobOps: Send + Sync {
+    fn node_output(&self, run_id: &str, node_id: &str) -> WireNodeOutput;
+    fn interrupt_node(&self, run_id: &str, node_id: &str) -> bool;
+    fn steer_node(&self, run_id: &str, node_id: &str, text: String) -> bool;
+}
+
+/// DAG control/checkpoint access owned by the host application. All values
+/// crossing this seam are transport DTOs or serialized snapshots.
+pub trait GraphOps: Send + Sync {
+    fn cancel_run(&self, run_id: &str, reason: Option<&str>);
+    fn retry(&self, run_id: &str, node_ids: Option<&[String]>) -> Vec<String>;
+    fn skip(&self, run_id: &str, node_id: &str) -> bool;
+    fn checkpoints(
+        &self,
+        session_id: &str,
+        run_id: Option<&str>,
+    ) -> Result<Vec<WireGraphCheckpoint>>;
+    fn restore(&self, session_id: &str, snapshot: &str) -> Result<String>;
+    fn list(&self, session_id: &str) -> Vec<WireDagRunSnapshot>;
+}
+
+/// Empty operation seams for clients/tests that only exercise unrelated
+/// protocol services.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct UnavailableJobOps;
+
+impl JobOps for UnavailableJobOps {
+    fn node_output(&self, _run_id: &str, _node_id: &str) -> WireNodeOutput {
+        WireNodeOutput::default()
+    }
+
+    fn interrupt_node(&self, _run_id: &str, _node_id: &str) -> bool {
+        false
+    }
+
+    fn steer_node(&self, _run_id: &str, _node_id: &str, _text: String) -> bool {
+        false
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct UnavailableGraphOps;
+
+impl GraphOps for UnavailableGraphOps {
+    fn cancel_run(&self, _run_id: &str, _reason: Option<&str>) {}
+
+    fn retry(&self, _run_id: &str, _node_ids: Option<&[String]>) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn skip(&self, _run_id: &str, _node_id: &str) -> bool {
+        false
+    }
+
+    fn checkpoints(
+        &self,
+        _session_id: &str,
+        _run_id: Option<&str>,
+    ) -> Result<Vec<WireGraphCheckpoint>> {
+        Ok(Vec::new())
+    }
+
+    fn restore(&self, _session_id: &str, _snapshot: &str) -> Result<String> {
+        Err(anyhow::anyhow!("graph operations are unavailable"))
+    }
+
+    fn list(&self, _session_id: &str) -> Vec<WireDagRunSnapshot> {
+        Vec::new()
+    }
+}
 
 #[async_trait]
 pub trait SessionOps: Send + Sync {
@@ -408,15 +479,15 @@ pub struct TransportEndpoints {
     /// Latest snapshot (served by `GET /state` / `GetState`).
     pub latest: Arc<Mutex<WireStatus>>,
     /// Event plane (graph mode): subagent started/output/metrics/completed.
-    pub events: broadcast::Sender<AgentJobEvent>,
+    pub events: broadcast::Sender<WireAgentEvent>,
     /// Event plane (graph mode): DAG engine node_status / run_status.
-    pub dag_events: broadcast::Sender<DagEvent>,
+    pub dag_events: broadcast::Sender<WireDagEvent>,
     /// Slash-command completer backing `POST /complete`.
     pub completer: SlashCompleter,
-    /// Subagent job registry (GetNodeOutput / snapshot source).
-    pub registry: AgentJobRegistry,
-    /// DAG orchestration engine (graph cancel/retry/skip/checkpoint/restore).
-    pub dag_engine: Arc<DagEngine>,
+    /// Subagent job read/control operations.
+    pub job_ops: Arc<dyn JobOps>,
+    /// DAG orchestration operations.
+    pub graph_ops: Arc<dyn GraphOps>,
     /// session-resource-model: session lifecycle ops (list/create/rename/delete) for the
     /// gRPC/HTTP session surfaces. Sync query/mutation only — *switching* the current
     /// session goes through `WireCommand::SwitchSession` on the serialized event loop.

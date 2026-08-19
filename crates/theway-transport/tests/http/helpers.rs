@@ -16,13 +16,9 @@ pub(crate) fn test_router(latest: WireStatus) -> Router {
         snapshots: snapshot_tx,
         latest: Arc::new(Mutex::new(latest)),
         completer: SlashCompleter::from_commands(vec!["/help".into(), "/model".into(), "/goal".into()]),
-        events: broadcast::channel::<theway_core::multiagent::registry::AgentJobEvent>(16)
-            .0,
-        dag_events: broadcast::channel::<theway_core::multiagent::graph::types::DagEvent>(
-            16,
-        )
-        .0,
-        registry: theway_core::multiagent::registry::AgentJobRegistry::new(),
+        events: broadcast::channel::<crate::wire::WireAgentEvent>(16).0,
+        dag_events: broadcast::channel::<crate::wire::WireDagEvent>(16).0,
+        job_ops: std::sync::Arc::new(crate::UnavailableJobOps),
         session_ops: std::sync::Arc::new(crate::testing::FakeSessionOps::new()),
         path_context: std::sync::Arc::new(std::sync::RwLock::new(
             crate::wire::WirePathContext::default(),

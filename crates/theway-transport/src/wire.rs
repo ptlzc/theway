@@ -22,8 +22,6 @@ pub struct ProviderGroup {
     pub models: Vec<ModelEntry>,
 }
 
-use theway_core::multiagent::graph::types::{DagNode, DagRun, Direction, NodeResult, NodeStatus};
-
 #[derive(Clone)]
 pub struct WebOptions {
     pub host: String,
@@ -226,8 +224,8 @@ pub struct WirePathContext {
 
 /// session-resource-model: one session as a managed resource (mirrors
 /// `crates/theway-transport/proto/session.proto` SessionSummary). Produced by the app-side SessionOps
-/// from the SqliteSessionRepo plus live DagEngine state; served verbatim on
-/// the JSON surface and mapped onto the proto message by `theway-server`.
+/// by the host's [`crate::transport::SessionOps`] implementation; served
+/// verbatim on JSON and mapped onto the protobuf message by this crate.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionSummary {
     pub session_id: String,
@@ -287,9 +285,87 @@ pub struct WireNodeResultSnapshot {
     pub total_attempts: u32,
 }
 
-/// graph mode: one subagent job (mirrors `crates/theway-transport/proto/graph_engine.proto` SubagentJobSnapshot).
-/// Populated from the AgentJobRegistry in P2; the type ships now so the wire
-/// shape is stable.
+/// Node transcript/output returned by the transport-side
+/// [`crate::transport::JobOps`] seam.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct WireNodeOutput {
+    /// `None` means no live or retained job exists for this run/node pair.
+    pub output: Option<String>,
+    pub truncated: bool,
+    pub messages: Option<Vec<serde_json::Value>>,
+    pub messages_truncated: bool,
+}
+
+/// Portable graph checkpoint returned by the transport-side
+/// [`crate::transport::GraphOps`] seam.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WireGraphCheckpoint {
+    pub kind: WireGraphKind,
+    pub run_id: String,
+    pub snapshot: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WireGraphKind {
+    Dag,
+    Goal,
+}
+
+/// Subagent event already projected into protocol-owned values.
+#[derive(Clone, Debug, PartialEq)]
+pub enum WireAgentEvent {
+    Started {
+        id: String,
+        agent: String,
+        source: String,
+        run_id: Option<String>,
+        node_id: Option<String>,
+    },
+    Output {
+        id: String,
+        chunk: String,
+    },
+    Metrics {
+        id: String,
+        tps: Option<f64>,
+        cps: Option<f64>,
+        chars: u64,
+        tokens_in: u64,
+        tokens_out: u64,
+        tools_called: u64,
+        turn: u32,
+    },
+    Completed {
+        id: String,
+        status: String,
+        error: Option<String>,
+        chars: u64,
+        tokens_in: u64,
+        tokens_out: u64,
+        tools_called: u64,
+    },
+}
+
+/// DAG event already projected into protocol-owned string statuses.
+#[derive(Clone, Debug, PartialEq)]
+pub enum WireDagEvent {
+    NodeStatus {
+        run_id: String,
+        session_id: String,
+        node_id: String,
+        status: String,
+        error: Option<String>,
+    },
+    RunStatus {
+        run_id: String,
+        session_id: String,
+        status: String,
+        error: Option<String>,
+    },
+}
+
+/// Graph mode: one subagent job projected by the host's job adapter (mirrors
+/// `crates/theway-transport/proto/graph_engine.proto` SubagentJobSnapshot).
 #[derive(Clone, Debug, Serialize)]
 pub struct WireAgentJobSnapshot {
     pub id: String,
@@ -352,114 +428,6 @@ pub struct WireStatus {
     /// TUI display settings resolved by the daemon from `config.toml`
     /// (`[tui] max_feed_lines`); `None` → the TUI built-in default applies.
     pub tui_max_feed_lines: Option<u64>,
-}
-
-impl WireStatus {
-    /// Convert a `DagRun` (engine state) into the wire snapshot form.
-    pub fn from_dag_run(run: &DagRun) -> WireDagRunSnapshot {
-        WireDagRunSnapshot {
-            id: run.id.clone(),
-            name: run.name.clone(),
-            kind: run.kind.as_str().to_string(),
-            status: dag_status_str(&run.status).to_string(),
-            fail_fast: run.fail_fast,
-            max_concurrency: run.max_concurrency,
-            direction: match run.direction {
-                Direction::Td => "TD".to_string(),
-                Direction::Lr => "LR".to_string(),
-            },
-            created_at: run.created_at,
-            completed_at: run.completed_at,
-            error: run.error.clone(),
-            nodes: run.nodes.iter().map(WireStatus::from_dag_node).collect(),
-        }
-    }
-
-    fn from_dag_node(node: &DagNode) -> WireDagNodeSnapshot {
-        WireDagNodeSnapshot {
-            id: node.id.clone(),
-            agent: node.agent.clone(),
-            status: node_status_str(&node.status).to_string(),
-            depends_on: node.depends_on.clone(),
-            job_id: node.job_id.clone(),
-            attempt: node.attempt,
-            started_at: node.started_at,
-            completed_at: node.completed_at,
-            error: node.error.clone(),
-            input_tokens: node.input_tokens,
-            output_tokens: node.output_tokens,
-            result: node.result.as_ref().map(WireStatus::from_node_result),
-            output_tail: node.output.clone(),
-            live_preview: node.live_preview.clone(),
-        }
-    }
-
-    fn from_node_result(result: &NodeResult) -> WireNodeResultSnapshot {
-        WireNodeResultSnapshot {
-            success: result.success,
-            error: result.error.clone(),
-            duration_ms: result.duration_ms,
-            attempt: result.attempt,
-            total_attempts: result.total_attempts,
-        }
-    }
-}
-
-/// Convert one subagent job (registry state) into the wire snapshot form.
-pub fn subagent_job_snapshot(
-    job: &theway_core::multiagent::registry::AgentJob,
-) -> WireAgentJobSnapshot {
-    WireAgentJobSnapshot {
-        id: job.id.clone(),
-        agent: job.agent.clone(),
-        source: job.source.clone(),
-        run_id: job.run_id.clone(),
-        node_id: job.node_id.clone(),
-        status: job.status.as_str().to_string(),
-        started_at: job.started_at,
-        completed_at: job.completed_at,
-        duration_ms: job
-            .completed_at
-            .zip(job.started_at)
-            .map(|(end, start)| (end - start).max(0) as u64),
-        attempt: job.attempt,
-        total_attempts: job.total_attempts,
-        input_tokens: Some(job.input_tokens),
-        output_tokens: Some(job.output_tokens),
-        error: job.error.clone(),
-        output_tail: Some(job.output.clone()),
-        live_preview: if job.status == theway_core::multiagent::registry::JobStatus::Running {
-            Some(job.output.clone())
-        } else {
-            None
-        },
-        tps: job.tps(),
-        cps: job.cps(),
-        chars: Some(job.chars),
-        tools_called: Some(job.tools_called),
-        turn: Some(job.turn),
-    }
-}
-
-pub fn node_status_str(status: &NodeStatus) -> &'static str {
-    match status {
-        NodeStatus::Pending => "pending",
-        NodeStatus::Ready => "ready",
-        NodeStatus::Running => "running",
-        NodeStatus::Succeeded => "succeeded",
-        NodeStatus::Failed => "failed",
-        NodeStatus::Skipped => "skipped",
-        NodeStatus::Cancelled => "cancelled",
-    }
-}
-
-pub fn dag_status_str(status: &theway_core::multiagent::graph::types::DagStatus) -> &'static str {
-    match status {
-        theway_core::multiagent::graph::types::DagStatus::Running => "running",
-        theway_core::multiagent::graph::types::DagStatus::Completed => "completed",
-        theway_core::multiagent::graph::types::DagStatus::Failed => "failed",
-        theway_core::multiagent::graph::types::DagStatus::Cancelled => "cancelled",
-    }
 }
 
 #[derive(Clone, Debug, Serialize)]

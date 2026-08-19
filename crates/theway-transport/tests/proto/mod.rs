@@ -1,7 +1,10 @@
 //! Tests for `proto` — split out of src (see docs/rust-test-files.md).
 
 use super::*;
-use crate::wire::{ModelEntry, ProviderGroup, WireContextUsage};
+use crate::wire::{
+    ModelEntry, ProviderGroup, WireContextUsage, WireDagEvent, WireDagNodeSnapshot,
+    WireDagRunSnapshot,
+};
 use crate::feed::{Level, TriggerPollStatus};
 use crate::wire::{
     WireCronSnapshot, WireMcpSnapshot, WireSidebarSnapshot, WireSkillsSnapshot, WireToolsSnapshot,
@@ -132,52 +135,36 @@ fn converts_full_snapshot_to_session_state() {
 }
 
 #[test]
-fn dag_run_converts_to_wire_shape() {
-    use theway_core::multiagent::graph::types::{
-        DagNode, DagRun, DagStatus, Direction, NodeStatus, RunKind,
-    };
-
-    let run = DagRun {
+fn dag_run_wire_shape_maps_to_proto() {
+    let web = WireDagRunSnapshot {
         id: "dag-1".into(),
         name: "test-run".into(),
-        nodes: vec![DagNode {
+        kind: "dag".into(),
+        status: "running".into(),
+        fail_fast: false,
+        max_concurrency: 4,
+        direction: "TD".into(),
+        created_at: 999,
+        completed_at: None,
+        error: None,
+        nodes: vec![WireDagNodeSnapshot {
             id: "impl-a".into(),
             agent: "executor-coder".into(),
-            task: "do the thing".into(),
+            status: "running".into(),
             depends_on: vec!["explore".into()],
-            timeout: None,
-            cwd: None,
-            model: None,
-            thinking: None,
-            max_iterations: None,
-            tools: None,
-            status: NodeStatus::Running,
             job_id: Some("job-7".into()),
             attempt: 1,
-            launch_gen: 3,
             started_at: Some(1000),
             completed_at: None,
             error: None,
             input_tokens: Some(120),
             output_tokens: Some(80),
             result: None,
-            output: Some("partial output".into()),
+            output_tail: Some("partial output".into()),
             live_preview: Some("live".into()),
-            last_active_at: None,
         }],
-        status: DagStatus::Running,
-        kind: RunKind::Dag,
-        max_concurrency: 4,
-        fail_fast: false,
-        direction: Direction::Td,
-        created_at: 999,
-        session_id: Some("sess-1".into()),
-        completed_at: None,
-        last_activity_at: 1000,
-        error: None,
     };
 
-    let web = crate::wire::WireStatus::from_dag_run(&run);
     assert_eq!(web.id, "dag-1");
     assert_eq!(web.kind, "dag");
     assert_eq!(web.status, "running");
@@ -190,7 +177,6 @@ fn dag_run_converts_to_wire_shape() {
     assert_eq!(node.output_tail.as_deref(), Some("partial output"));
     assert_eq!(node.live_preview.as_deref(), Some("live"));
     assert_eq!(node.input_tokens, Some(120));
-    // task text stays off the wire model.
     assert_eq!(node.depends_on, vec!["explore"]);
 
     let state = session_state(&{
@@ -275,12 +261,20 @@ fn path_context_round_trips_wire_and_proto() {
 
 #[test]
 fn goal_run_round_trips_kind_and_dag_event_wire() {
-    use theway_core::multiagent::graph::engine::DagEngine;
-
-    let engine = DagEngine::new();
-    let id = engine.plan_goal("finish the migration", Some("sess-1".into()));
-    let run = engine.get_run(&id).expect("goal run");
-    let web = crate::wire::WireStatus::from_dag_run(&run);
+    let id = "goal-1".to_string();
+    let web = WireDagRunSnapshot {
+        id: id.clone(),
+        name: "finish the migration".into(),
+        kind: "goal".into(),
+        status: "running".into(),
+        fail_fast: false,
+        max_concurrency: 1,
+        direction: "TD".into(),
+        created_at: 1,
+        completed_at: None,
+        error: None,
+        nodes: Vec::new(),
+    };
     assert_eq!(web.kind, "goal");
     let state = session_state(&{
         let mut snap = fixture_snapshot();
@@ -289,11 +283,10 @@ fn goal_run_round_trips_kind_and_dag_event_wire() {
     });
     assert_eq!(state.dags[0].kind, "goal");
 
-    // Engine event → wire: run_status (running) + node_status.
-    let event = dag_event_wire(&DagEvent::RunStatus {
+    let event = dag_event_wire(&WireDagEvent::RunStatus {
         run_id: id.clone(),
         session_id: String::new(),
-        status: theway_core::multiagent::graph::types::DagStatus::Running,
+        status: "running".into(),
         error: None,
     });
     match event.kind {
@@ -304,11 +297,11 @@ fn goal_run_round_trips_kind_and_dag_event_wire() {
         }
         other => panic!("expected RunStatus, got {other:?}"),
     }
-    let event = dag_event_wire(&DagEvent::NodeStatus {
+    let event = dag_event_wire(&WireDagEvent::NodeStatus {
         run_id: id.clone(),
         session_id: String::new(),
         node_id: "main".into(),
-        status: theway_core::multiagent::graph::types::NodeStatus::Running,
+        status: "running".into(),
         error: Some("not yet".into()),
     });
     match event.kind {

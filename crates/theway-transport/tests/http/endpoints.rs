@@ -38,13 +38,9 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
         snapshots: snapshot_tx.clone(),
         latest,
         completer: SlashCompleter::from_commands(vec!["/help".into(), "/model".into(), "/goal".into()]),
-        events: broadcast::channel::<theway_core::multiagent::registry::AgentJobEvent>(16)
-            .0,
-        dag_events: broadcast::channel::<theway_core::multiagent::graph::types::DagEvent>(
-            16,
-        )
-        .0,
-        registry: theway_core::multiagent::registry::AgentJobRegistry::new(),
+        events: broadcast::channel::<WireAgentEvent>(16).0,
+        dag_events: broadcast::channel::<WireDagEvent>(16).0,
+        job_ops: Arc::new(crate::UnavailableJobOps),
         session_ops: Arc::new(FakeSessionOps::new()),
         path_context: std::sync::Arc::new(std::sync::RwLock::new(
             crate::wire::WirePathContext::default(),
@@ -247,13 +243,9 @@ async fn websocket_serves_snapshot_and_accepts_commands() {
         snapshots: snapshot_tx.clone(),
         latest,
         completer: SlashCompleter::from_commands(vec!["/help".into(), "/model".into(), "/goal".into()]),
-        events: broadcast::channel::<theway_core::multiagent::registry::AgentJobEvent>(16)
-            .0,
-        dag_events: broadcast::channel::<theway_core::multiagent::graph::types::DagEvent>(
-            16,
-        )
-        .0,
-        registry: theway_core::multiagent::registry::AgentJobRegistry::new(),
+        events: broadcast::channel::<WireAgentEvent>(16).0,
+        dag_events: broadcast::channel::<WireDagEvent>(16).0,
+        job_ops: Arc::new(crate::UnavailableJobOps),
         session_ops: Arc::new(FakeSessionOps::new()),
         path_context: std::sync::Arc::new(std::sync::RwLock::new(
             crate::wire::WirePathContext::default(),
@@ -422,13 +414,9 @@ async fn spawn_config_server(
             tui_max_feed_lines: None,
         })),
         completer: SlashCompleter::from_commands(Vec::new()),
-        events: broadcast::channel::<theway_core::multiagent::registry::AgentJobEvent>(16)
-            .0,
-        dag_events: broadcast::channel::<theway_core::multiagent::graph::types::DagEvent>(
-            16,
-        )
-        .0,
-        registry: theway_core::multiagent::registry::AgentJobRegistry::new(),
+        events: broadcast::channel::<WireAgentEvent>(16).0,
+        dag_events: broadcast::channel::<WireDagEvent>(16).0,
+        job_ops: Arc::new(crate::UnavailableJobOps),
         session_ops: Arc::new(FakeSessionOps::new()),
         path_context: std::sync::Arc::new(std::sync::RwLock::new(
             crate::wire::WirePathContext::default(),

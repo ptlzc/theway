@@ -41,9 +41,9 @@ async fn spawn_state_server() -> (
             tui_max_feed_lines: None,
         })),
         completer: SlashCompleter::from_commands(vec!["/help".into()]),
-        events: broadcast::channel::<AgentJobEvent>(16).0,
-        dag_events: broadcast::channel::<DagEvent>(16).0,
-        registry: AgentJobRegistry::new(),
+        events: broadcast::channel::<WireAgentEvent>(16).0,
+        dag_events: broadcast::channel::<WireDagEvent>(16).0,
+        job_ops: Arc::new(crate::UnavailableJobOps),
         session_ops: Arc::new(FakeSessionOps::new()),
         path_context: std::sync::Arc::new(std::sync::RwLock::new(
             crate::wire::WirePathContext::default(),

@@ -51,6 +51,6 @@ pub mod mentions;
 pub mod triggers;
 
 pub use transport::{
-    StorageOps, ToolExecStream, ToolOps, TransportEndpoints, TransportMode, UnavailableStorageOps,
-    UnavailableToolOps,
+    GraphOps, JobOps, StorageOps, ToolExecStream, ToolOps, TransportEndpoints, TransportMode,
+    UnavailableGraphOps, UnavailableJobOps, UnavailableStorageOps, UnavailableToolOps,
 };

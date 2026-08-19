@@ -47,9 +47,9 @@ async fn spawn_sessions_server(
         snapshots: snapshot_tx,
         latest: Arc::new(Mutex::new(wire_status(current))),
         completer: SlashCompleter::from_commands(vec!["/help".into(), "/model".into(), "/goal".into()]),
-        events: broadcast::channel::<AgentJobEvent>(16).0,
-        dag_events: broadcast::channel::<DagEvent>(16).0,
-        registry: AgentJobRegistry::new(),
+        events: broadcast::channel::<WireAgentEvent>(16).0,
+        dag_events: broadcast::channel::<WireDagEvent>(16).0,
+        job_ops: Arc::new(crate::UnavailableJobOps),
         session_ops: ops,
         path_context: std::sync::Arc::new(std::sync::RwLock::new(
             crate::wire::WirePathContext::default(),

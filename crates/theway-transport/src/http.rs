@@ -21,27 +21,25 @@ use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::host::TransportHost;
-use crate::transport::SessionOps;
 use crate::transport::SlashCompleter;
 use crate::transport::TransportMode;
+use crate::transport::{JobOps, SessionOps};
 use crate::wire::*;
-use theway_core::multiagent::graph::types::DagEvent;
-use theway_core::multiagent::registry::{AgentJobEvent, AgentJobRegistry};
 
 use crate::ws::ws_upgrade;
 
 /// Shared axum state: command queue + snapshot/event broadcasts + the
-/// completer/registry backing `/complete` and `/ws` node-output.
+/// completer/job operations backing `/complete` and `/ws` node-output.
 #[derive(Clone)]
 pub struct HttpState {
     pub commands: mpsc::UnboundedSender<WireCommand>,
     pub snapshots: broadcast::Sender<WireStatus>,
     pub latest: Arc<Mutex<WireStatus>>,
     pub completer: SlashCompleter,
-    pub events: broadcast::Sender<AgentJobEvent>,
+    pub events: broadcast::Sender<WireAgentEvent>,
     /// DAG engine event plane (node_status / run_status), shared with /ws.
-    pub dag_events: broadcast::Sender<DagEvent>,
-    pub registry: AgentJobRegistry,
+    pub dag_events: broadcast::Sender<WireDagEvent>,
+    pub job_ops: Arc<dyn JobOps>,
     /// session-resource-model: session lifecycle ops behind the `/sessions` routes.
     /// *Switching* the current session goes through `WireCommand::SwitchSession`.
     pub session_ops: Arc<dyn SessionOps>,
@@ -79,7 +77,7 @@ pub async fn run_web(mut app: Box<dyn TransportHost>, options: WebOptions) -> Re
         completer: endpoints.completer.clone(),
         events: endpoints.events.clone(),
         dag_events: endpoints.dag_events.clone(),
-        registry: endpoints.registry.clone(),
+        job_ops: endpoints.job_ops.clone(),
         session_ops: endpoints.session_ops.clone(),
         path_context: endpoints.path_context.clone(),
         daemon_config: endpoints.daemon_config.clone(),
@@ -265,25 +263,20 @@ pub(crate) async fn dispatch(
                 .and_then(|p| p.get("offset"))
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            let messages = state
-                .registry
-                .node_messages(&run_id, &node_id)
+            let node_output = state.job_ops.node_output(&run_id, &node_id);
+            let messages = node_output
+                .messages
                 .map(|m| serde_json::to_value(m).unwrap_or_default())
                 .unwrap_or(serde_json::Value::Null);
-            let messages_truncated = state
-                .registry
-                .find_node(&run_id, &node_id)
-                .map(|job| job.messages_truncated)
-                .unwrap_or(false);
-            match state.registry.find_node(&run_id, &node_id) {
-                Some(job) => {
-                    let output = job.output;
+            let messages_truncated = node_output.messages_truncated;
+            match node_output.output {
+                Some(output) => {
                     let (offset, text) = crate::text_cursor::slice_from(&output, offset);
                     Ok(serde_json::json!({
                         "text": text,
                         "offset": offset,
                         "total": output.len(),
-                        "truncated": job.truncated,
+                        "truncated": node_output.truncated,
                         "messages": messages,
                         "messages_truncated": messages_truncated,
                     }))

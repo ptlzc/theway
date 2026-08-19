@@ -27,9 +27,8 @@ pub mod health {
 }
 
 use crate::feed::{self, WireFeedBlock};
+use crate::wire::{WireAgentEvent, WireDagEvent};
 use crate::wire::{WirePathContext, WireStatus};
-use theway_core::multiagent::graph::types::DagEvent;
-use theway_core::multiagent::registry::AgentJobEvent;
 use theway_grpc as wire;
 
 /// Convert the internal snapshot into the structured wire model.
@@ -666,10 +665,10 @@ fn dag_node_wire(node: &crate::wire::WireDagNodeSnapshot) -> wire::DagNodeSnapsh
 }
 
 /// Convert an event-plane message into the wire `StreamEvent`.
-pub fn stream_event_wire(event: &AgentJobEvent) -> wire::StreamEvent {
+pub fn stream_event_wire(event: &WireAgentEvent) -> wire::StreamEvent {
     use wire::stream_event::Kind;
     let kind = match event {
-        AgentJobEvent::Started {
+        WireAgentEvent::Started {
             id,
             agent,
             source,
@@ -682,11 +681,11 @@ pub fn stream_event_wire(event: &AgentJobEvent) -> wire::StreamEvent {
             run_id: run_id.clone(),
             node_id: node_id.clone(),
         }),
-        AgentJobEvent::Output { id, chunk } => Kind::SubagentOutput(wire::SubagentOutput {
+        WireAgentEvent::Output { id, chunk } => Kind::SubagentOutput(wire::SubagentOutput {
             id: id.clone(),
             chunk: chunk.clone(),
         }),
-        AgentJobEvent::Metrics {
+        WireAgentEvent::Metrics {
             id,
             tps,
             cps,
@@ -705,7 +704,7 @@ pub fn stream_event_wire(event: &AgentJobEvent) -> wire::StreamEvent {
             tools_called: *tools_called,
             turn: *turn,
         }),
-        AgentJobEvent::Completed {
+        WireAgentEvent::Completed {
             id,
             status,
             error,
@@ -715,7 +714,7 @@ pub fn stream_event_wire(event: &AgentJobEvent) -> wire::StreamEvent {
             tools_called,
         } => Kind::SubagentCompleted(wire::SubagentCompleted {
             id: id.clone(),
-            status: status.as_str().to_string(),
+            status: status.clone(),
             error: error.clone(),
             duration_ms: None,
             chars: *chars,
@@ -729,11 +728,10 @@ pub fn stream_event_wire(event: &AgentJobEvent) -> wire::StreamEvent {
 
 /// Convert a DAG engine event-plane message (node_status / run_status) into
 /// the wire `StreamEvent`.
-pub fn dag_event_wire(event: &DagEvent) -> wire::StreamEvent {
-    use crate::wire::{dag_status_str, node_status_str};
+pub fn dag_event_wire(event: &WireDagEvent) -> wire::StreamEvent {
     use wire::stream_event::Kind;
     let kind = match event {
-        DagEvent::NodeStatus {
+        WireDagEvent::NodeStatus {
             run_id,
             node_id,
             status,
@@ -742,17 +740,17 @@ pub fn dag_event_wire(event: &DagEvent) -> wire::StreamEvent {
         } => Kind::NodeStatus(wire::NodeStatus {
             run_id: run_id.clone(),
             node_id: node_id.clone(),
-            status: node_status_str(status).to_string(),
+            status: status.clone(),
             error: error.clone(),
         }),
-        DagEvent::RunStatus {
+        WireDagEvent::RunStatus {
             run_id,
             status,
             error,
             .. // `session_id` has no wire field yet (proto change pending).
         } => Kind::RunStatus(wire::RunStatus {
             run_id: run_id.clone(),
-            status: dag_status_str(status).to_string(),
+            status: status.clone(),
             error: error.clone(),
         }),
     };

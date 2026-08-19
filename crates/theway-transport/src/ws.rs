@@ -28,11 +28,8 @@ use serde_json::{Value, json};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
-use theway_core::multiagent::graph::types::DagEvent;
-use theway_core::multiagent::registry::AgentJobEvent;
-
 use super::http::HttpState;
-use crate::wire::{dag_status_str, node_status_str};
+use crate::wire::{WireAgentEvent, WireDagEvent};
 
 /// `GET /ws` upgrade handler.
 pub(crate) async fn ws_upgrade(
@@ -150,9 +147,9 @@ async fn handle_client_frame(text: &str, state: &HttpState) -> Option<Message> {
 
 /// Serialize an event-plane message to the tagged-JSON wire shape (mirrors the
 /// gRPC `StreamEvent` oneof fields, snake_case).
-pub(crate) fn event_json(event: &AgentJobEvent) -> Value {
+pub(crate) fn event_json(event: &WireAgentEvent) -> Value {
     match event {
-        AgentJobEvent::Started {
+        WireAgentEvent::Started {
             id,
             agent,
             source,
@@ -166,12 +163,12 @@ pub(crate) fn event_json(event: &AgentJobEvent) -> Value {
             "run_id": run_id,
             "node_id": node_id,
         }),
-        AgentJobEvent::Output { id, chunk } => json!({
+        WireAgentEvent::Output { id, chunk } => json!({
             "event": "subagent_output",
             "id": id,
             "chunk": chunk,
         }),
-        AgentJobEvent::Metrics {
+        WireAgentEvent::Metrics {
             id,
             tps,
             cps,
@@ -191,7 +188,7 @@ pub(crate) fn event_json(event: &AgentJobEvent) -> Value {
             "tools_called": tools_called,
             "turn": turn,
         }),
-        AgentJobEvent::Completed {
+        WireAgentEvent::Completed {
             id,
             status,
             error,
@@ -202,7 +199,7 @@ pub(crate) fn event_json(event: &AgentJobEvent) -> Value {
         } => json!({
             "event": "subagent_completed",
             "id": id,
-            "status": status.as_str(),
+            "status": status,
             "error": error,
             "chars": chars,
             "tokens_in": tokens_in,
@@ -214,9 +211,9 @@ pub(crate) fn event_json(event: &AgentJobEvent) -> Value {
 
 /// Serialize a DAG engine event-plane message to the tagged-JSON wire shape
 /// (mirrors the gRPC `NodeStatus` / `RunStatus` messages, snake_case).
-pub(crate) fn dag_event_json(event: &DagEvent) -> Value {
+pub(crate) fn dag_event_json(event: &WireDagEvent) -> Value {
     match event {
-        DagEvent::NodeStatus {
+        WireDagEvent::NodeStatus {
             run_id,
             session_id,
             node_id,
@@ -227,10 +224,10 @@ pub(crate) fn dag_event_json(event: &DagEvent) -> Value {
             "run_id": run_id,
             "session_id": session_id,
             "node_id": node_id,
-            "status": node_status_str(status),
+            "status": status,
             "error": error,
         }),
-        DagEvent::RunStatus {
+        WireDagEvent::RunStatus {
             run_id,
             session_id,
             status,
@@ -239,7 +236,7 @@ pub(crate) fn dag_event_json(event: &DagEvent) -> Value {
             "event": "run_status",
             "run_id": run_id,
             "session_id": session_id,
-            "status": dag_status_str(status),
+            "status": status,
             "error": error,
         }),
     }
