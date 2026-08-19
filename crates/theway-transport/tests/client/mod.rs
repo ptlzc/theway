@@ -6,7 +6,9 @@ use crate::grpc::{serve_grpc, GrpcState};
 use crate::proto::{session_state, wire_status};
 use crate::testing::{FakeSessionOps, FakeStorageOps, FakeToolOps, empty_sidebar_snapshot};
 use crate::feed::WireFeedBlock;
-use crate::wire::{ModelEntry, ProviderGroup, WireDaemonConfig, WirePathContext, WireStatus};
+use crate::wire::{
+    ModelEntry, ProviderGroup, WireDaemonConfig, WirePathContext, WireStatus, WireStatusUpdate,
+};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
@@ -47,7 +49,7 @@ fn fixture_status(feed_line: &str) -> WireStatus {
 
 fn grpc_state() -> (GrpcState, mpsc::UnboundedReceiver<crate::wire::WireCommand>) {
     let (command_tx, command_rx) = mpsc::unbounded_channel::<crate::wire::WireCommand>();
-    let (snapshot_tx, _) = broadcast::channel::<WireStatus>(16);
+    let (snapshot_tx, _) = broadcast::channel::<WireStatusUpdate>(16);
     let latest = Arc::new(parking_lot::Mutex::new(fixture_status("ready")));
     let (event_tx, _) = broadcast::channel::<crate::wire::WireAgentEvent>(16);
     let (dag_event_tx, _) = broadcast::channel::<crate::wire::WireDagEvent>(16);
@@ -82,7 +84,7 @@ async fn client_and_server(
 ) -> (
     GrpcClient,
     mpsc::UnboundedReceiver<crate::wire::WireCommand>,
-    broadcast::Sender<WireStatus>,
+    broadcast::Sender<WireStatusUpdate>,
 ) {
     client_and_server_with_path_context(WirePathContext::default()).await
 }
@@ -94,7 +96,7 @@ async fn client_and_server_with_path_context(
 ) -> (
     GrpcClient,
     mpsc::UnboundedReceiver<crate::wire::WireCommand>,
-    broadcast::Sender<WireStatus>,
+    broadcast::Sender<WireStatusUpdate>,
 ) {
     let (mut state, command_rx) = grpc_state();
     state.path_context = Arc::new(std::sync::RwLock::new(path_context));

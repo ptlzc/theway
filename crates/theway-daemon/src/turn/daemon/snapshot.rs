@@ -1,5 +1,48 @@
 impl TurnHost {
     fn wire_snapshot(&mut self) -> WireStatus {
+        use theway_transport::feed::block_fingerprint;
+
+        let dirty_start = self.feed_dirty_start();
+        self.plain_lines_cache
+            .update_from_dirty(&self.feed, 100, dirty_start);
+        self.block_versions = self.feed.blocks().iter().map(block_fingerprint).collect();
+        self.dirty_blocks.clear();
+        self.wire_status(
+            self.feed.wire_blocks(),
+            0,
+            Vec::new(),
+            self.plain_lines_cache.rows().to_vec(),
+            0,
+        )
+    }
+
+    fn wire_update(&mut self) -> WireStatusUpdate {
+        let dirty_start = self.feed_dirty_start();
+        self.plain_lines_cache
+            .update_from_dirty(&self.feed, 100, dirty_start);
+        let feed_lines_base = self.plain_lines_cache.last_rebuilt_from_row;
+        let feed_lines = self.plain_lines_cache.rows()[feed_lines_base..].to_vec();
+        let feed_lines_len = self.plain_lines_cache.rows().len();
+        let (feed_blocks_base, feed_block_patches) = self.take_feed_block_patches();
+        let feed_blocks_len = self.feed.blocks().len();
+        WireStatusUpdate::delta(
+            feed_blocks_base,
+            feed_block_patches,
+            feed_blocks_len,
+            feed_lines_base as u64,
+            feed_lines,
+            feed_lines_len,
+        )
+    }
+
+    fn wire_status(
+        &self,
+        feed_blocks: Vec<theway_transport::feed::WireFeedBlock>,
+        feed_blocks_base: u64,
+        feed_block_patches: Vec<WireFeedBlockPatch>,
+        feed_lines: Vec<String>,
+        feed_lines_base: u64,
+    ) -> WireStatus {
         let model = current_model_label(self.kernel.harness());
         let context_window = context_window_for(&model);
         // Last-turn usage (not session-cumulative): the last assistant message's
@@ -7,15 +50,6 @@ impl TurnHost {
         // window instead of growing past it forever (issue #38).
         let usage =
             last_turn_usage(&self.kernel.harness().agent().state().messages).unwrap_or_default();
-        // Authoritative snapshots always carry the full transcript. The cache
-        // consumes the event-driven dirty index so clean frames do not scan
-        // historical blocks; per-client tail slicing belongs to gRPC.
-        let dirty_start = self.feed_dirty_start();
-        self.plain_lines_cache
-            .update_from_dirty(&self.feed, 100, dirty_start);
-        let feed_lines = self.plain_lines_cache.rows().to_vec();
-        let feed_blocks = self.feed.wire_blocks();
-        let (feed_blocks_base, feed_block_patches) = self.take_feed_block_patches(&feed_blocks);
         WireStatus {
             session_id: self.session_id.clone(),
             model,
@@ -39,7 +73,7 @@ impl TurnHost {
             feed_blocks_base,
             feed_block_patches,
             feed_lines,
-            feed_lines_base: 0,
+            feed_lines_base,
             dags: self
                 .dag_engine
                 .list_runs()
@@ -82,10 +116,7 @@ impl TurnHost {
         }
     }
 
-    fn take_feed_block_patches(
-        &mut self,
-        wire_blocks: &[theway_transport::feed::WireFeedBlock],
-    ) -> (u64, Vec<WireFeedBlockPatch>) {
+    fn take_feed_block_patches(&mut self) -> (u64, Vec<WireFeedBlockPatch>) {
         use theway_transport::feed::block_fingerprint;
 
         let blocks = self.feed.blocks();
@@ -114,9 +145,12 @@ impl TurnHost {
             } else {
                 continue;
             }
+            let Some(wire_block) = self.feed.wire_block(index) else {
+                continue;
+            };
             patches.push(WireFeedBlockPatch {
                 index: index as u64,
-                block: wire_blocks[index].clone(),
+                block: wire_block,
             });
         }
         (base as u64, patches)
@@ -227,12 +261,24 @@ impl TurnHost {
     async fn publish_snapshot(
         &mut self,
         latest: &Arc<Mutex<WireStatus>>,
-        snapshots: &broadcast::Sender<WireStatus>,
+        snapshots: &broadcast::Sender<WireStatusUpdate>,
+        metadata_dirty: bool,
     ) {
         self.sync_current_session_state();
-        let snapshot = self.wire_snapshot();
-        *latest.lock() = snapshot.clone();
-        let _ = snapshots.send(snapshot);
+        if metadata_dirty {
+            let snapshot = self.wire_snapshot();
+            *latest.lock() = snapshot.clone();
+            let _ = snapshots.send(WireStatusUpdate::full(snapshot));
+            return;
+        }
+        let update = self.wire_update();
+        if update.apply_to(&mut latest.lock()) {
+            let _ = snapshots.send(update);
+        } else {
+            let snapshot = self.wire_snapshot();
+            *latest.lock() = snapshot.clone();
+            let _ = snapshots.send(WireStatusUpdate::full(snapshot));
+        }
     }
 
     // ── turn lifecycle (mirror of the TUI's app_turns, headless) ──────────────────────

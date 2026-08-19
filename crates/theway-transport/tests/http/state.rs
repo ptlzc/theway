@@ -17,7 +17,7 @@ async fn spawn_state_server() -> (
 ) {
     let storage = std::sync::Arc::new(FakeStorageOps::new());
     let (command_tx, _command_rx) = mpsc::unbounded_channel::<WireCommand>();
-    let (snapshot_tx, _) = broadcast::channel::<WireStatus>(16);
+    let (snapshot_tx, _) = broadcast::channel::<WireStatusUpdate>(16);
     let state = HttpState {
         commands: command_tx,
         snapshots: snapshot_tx,

@@ -10,7 +10,7 @@ use serde_json::json;
 /// that only need a snapshot fixture.
 pub(crate) fn test_router(latest: WireStatus) -> Router {
     let (command_tx, _) = mpsc::unbounded_channel::<WireCommand>();
-    let (snapshot_tx, _) = broadcast::channel::<WireStatus>(16);
+    let (snapshot_tx, _) = broadcast::channel::<WireStatusUpdate>(16);
     web_router(HttpState {
         commands: command_tx,
         snapshots: snapshot_tx,

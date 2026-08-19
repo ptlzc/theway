@@ -4,10 +4,12 @@ use super::*;
 use crate::testing::{FakeSessionOps, FakeStorageOps, FakeToolOps, empty_sidebar_snapshot};
 use crate::wire::{
     WireAgentEvent, WireContextUsage, WireDaemonConfig, WireDagEvent, WireDagRunSnapshot,
-    WireFeedBlockPatch, WireNodeOutput, WirePathContext,
+    WireFeedBlockPatch, WireNodeOutput, WirePathContext, WireStatusUpdate,
 };
 use std::collections::HashMap;
 use std::time::Duration;
+
+mod stream;
 
 #[derive(Default)]
 struct TestJobOps {
@@ -112,7 +114,7 @@ fn grpc_state_with_ops() -> (
     Arc<FakeToolOps>,
 ) {
     let (command_tx, command_rx) = mpsc::unbounded_channel::<WireCommand>();
-    let (snapshot_tx, _) = broadcast::channel::<WireStatus>(16);
+    let (snapshot_tx, _) = broadcast::channel::<WireStatusUpdate>(16);
     let latest = Arc::new(Mutex::new(fixture_snapshot("ready")));
     let (event_tx, _) = broadcast::channel::<WireAgentEvent>(16);
     let agent_fwd = tokio::spawn(std::future::pending::<()>()).abort_handle();
@@ -164,71 +166,6 @@ fn plain_block(text: &str) -> crate::feed::WireFeedBlock {
     }
 }
 
-#[test]
-fn stream_snapshot_first_frame_is_authoritative() {
-    let mut snapshot = fixture_snapshot("one");
-    snapshot.feed_blocks = vec![plain_block("one")];
-    snapshot.feed_block_patches = vec![WireFeedBlockPatch {
-        index: 0,
-        block: plain_block("one"),
-    }];
-
-    let state = project_stream_snapshot(&snapshot, &mut StreamCursor::default());
-
-    assert_eq!(state.feed_blocks.len(), 1);
-    assert!(state.feed_block_patches.is_empty());
-    assert_eq!(state.feed_blocks_base, 0);
-    assert_eq!(state.feed_lines, vec!["one"]);
-}
-
-#[test]
-fn stream_snapshot_slices_normal_incremental_frame() {
-    let mut cursor = StreamCursor::default();
-    let mut first = fixture_snapshot("one");
-    first.feed_blocks = vec![plain_block("one")];
-    project_stream_snapshot(&first, &mut cursor);
-
-    let mut next = fixture_snapshot("one");
-    next.feed_lines.push("two".into());
-    next.feed_blocks = vec![plain_block("one"), plain_block("two")];
-    next.feed_blocks_base = 1;
-    next.feed_block_patches = vec![WireFeedBlockPatch {
-        index: 1,
-        block: plain_block("two"),
-    }];
-    let state = project_stream_snapshot(&next, &mut cursor);
-
-    assert!(state.feed_blocks.is_empty());
-    assert_eq!(state.feed_blocks_base, 1);
-    assert_eq!(state.feed_block_patches.len(), 1);
-    assert_eq!(state.feed_lines_base, 1);
-    assert_eq!(state.feed_lines, vec!["two"]);
-}
-
-#[test]
-fn stream_snapshot_resyncs_after_lag_or_clear() {
-    let mut cursor = StreamCursor::default();
-    let mut first = fixture_snapshot("one");
-    first.feed_blocks = vec![plain_block("one"), plain_block("two")];
-    project_stream_snapshot(&first, &mut cursor);
-
-    cursor.resync_pending = true;
-    let lagged = project_stream_snapshot(&first, &mut cursor);
-    assert_eq!(lagged.feed_blocks.len(), 2);
-    assert!(lagged.feed_block_patches.is_empty());
-
-    let mut cleared = fixture_snapshot("new");
-    cleared.feed_blocks = vec![plain_block("new")];
-    cleared.feed_block_patches = vec![WireFeedBlockPatch {
-        index: 0,
-        block: plain_block("new"),
-    }];
-    let reset = project_stream_snapshot(&cleared, &mut cursor);
-    assert_eq!(reset.feed_blocks.len(), 1);
-    assert!(reset.feed_block_patches.is_empty());
-    assert_eq!(reset.feed_blocks_base, 0);
-}
-
 #[tokio::test]
 async fn lagged_snapshot_stream_emits_latest_full_state() {
     let (state, _command_rx) = grpc_state();
@@ -240,7 +177,7 @@ async fn lagged_snapshot_stream_emits_latest_full_state() {
     for index in 0..20 {
         state
             .snapshots
-            .send(fixture_snapshot(&format!("stale-{index}")))
+            .send(fixture_snapshot(&format!("stale-{index}")).into())
             .unwrap();
     }
     let mut latest = fixture_snapshot("latest");
@@ -366,7 +303,10 @@ async fn stream_events_emits_published_snapshots() {
         .into_inner();
     tokio::pin!(response);
 
-    state.snapshots.send(fixture_snapshot("streamed")).unwrap();
+    state
+        .snapshots
+        .send(fixture_snapshot("streamed").into())
+        .unwrap();
     let item = tokio::time::timeout(Duration::from_secs(2), response.next())
         .await
         .expect("timed out")
@@ -546,7 +486,10 @@ async fn two_simultaneous_subscribers_both_receive_frames() {
     tokio::pin!(first);
     tokio::pin!(second);
 
-    state.snapshots.send(fixture_snapshot("fan-out")).unwrap();
+    state
+        .snapshots
+        .send(fixture_snapshot("fan-out").into())
+        .unwrap();
 
     for (label, stream) in [("first", &mut first), ("second", &mut second)] {
         let item = tokio::time::timeout(Duration::from_secs(2), stream.next())
@@ -564,8 +507,12 @@ async fn two_simultaneous_subscribers_both_receive_frames() {
 
     // A lagging subscriber catches up on the next publish instead of hanging.
     let mut next = fixture_snapshot("fan-out");
-    next.feed_lines.push("second-wave".into());
-    state.snapshots.send(next).unwrap();
+    next.feed_lines = vec!["second-wave".into()];
+    next.feed_lines_base = 1;
+    state
+        .snapshots
+        .send(WireStatusUpdate::delta_from_status(next, 0, 2))
+        .unwrap();
     let item = tokio::time::timeout(Duration::from_secs(2), first.next())
         .await
         .expect("timed out")
@@ -590,7 +537,10 @@ async fn stream_events_merges_snapshot_and_event_payloads() {
         .into_inner();
     tokio::pin!(response);
 
-    state.snapshots.send(fixture_snapshot("snap")).unwrap();
+    state
+        .snapshots
+        .send(fixture_snapshot("snap").into())
+        .unwrap();
     state
         .events
         .send(WireAgentEvent::Output {

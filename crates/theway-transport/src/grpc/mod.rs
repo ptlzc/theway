@@ -9,9 +9,11 @@
 //! [`tools`](crate::grpc::tools).
 
 mod storage;
+mod stream;
 mod tools;
 
 pub use storage::{StorageServiceState, serve_storage_service};
+use stream::{StreamCursor, project_authoritative_snapshot, project_stream_snapshot};
 pub use tools::{ToolServiceState, serve_tool_service};
 
 use std::pin::Pin;
@@ -30,7 +32,7 @@ use crate::host::TransportHost;
 use crate::transport::{GraphOps, JobOps, SessionOps, ToolOps, TransportMode};
 use crate::wire::{
     WireAgentEvent, WireCommand, WireDaemonConfig, WireDagEvent, WireGraphKind, WirePathContext,
-    WirePromptImage, WireStatus,
+    WirePromptImage, WireStatus, WireStatusUpdate,
 };
 
 use crate::proto::health::health_check_response::ServingStatus;
@@ -72,7 +74,7 @@ pub struct GrpcOptions {
 #[derive(Clone)]
 pub struct GrpcState {
     pub commands: mpsc::UnboundedSender<WireCommand>,
-    pub snapshots: broadcast::Sender<WireStatus>,
+    pub snapshots: broadcast::Sender<WireStatusUpdate>,
     pub latest: Arc<Mutex<WireStatus>>,
     /// Event plane (graph mode): subagent started/output/metrics/completed.
     pub events: broadcast::Sender<WireAgentEvent>,
@@ -580,8 +582,9 @@ impl EventService for GrpcState {
         &self,
         _request: Request<Empty>,
     ) -> Result<Response<Self::StreamEventsStream>, Status> {
-        // Merge the snapshot broadcast (low-frequency full state) with the event plane
-        // (high-frequency increments) into one typed frame stream.
+        // Merge snapshot publications with the event plane. Routine daemon
+        // publications contain only transcript deltas; `latest` remains the
+        // authoritative source for first frames and resynchronization.
         let snapshot_cursor = Arc::new(Mutex::new(StreamCursor::default()));
         let snapshot_latest = self.latest.clone();
         let snapshots = BroadcastStream::new(self.snapshots.subscribe()).filter_map(move |item| {
@@ -589,19 +592,24 @@ impl EventService for GrpcState {
             let latest = snapshot_latest.clone();
             async move {
                 match item {
-                    Ok(snapshot) => Some(Ok(StreamFrame {
-                        payload: Some(theway_grpc::stream_frame::Payload::Snapshot(
-                            project_stream_snapshot(&snapshot, &mut cursor.lock()),
-                        )),
-                    })),
+                    Ok(update) => {
+                        let latest = latest.lock();
+                        let mut cursor = cursor.lock();
+                        Some(Ok(StreamFrame {
+                            payload: Some(theway_grpc::stream_frame::Payload::Snapshot(
+                                project_stream_snapshot(&update, &latest, &mut cursor),
+                            )),
+                        }))
+                    }
                     // A slow subscriber receives the current authoritative state
                     // immediately; its cursors restart from that full frame.
                     Err(BroadcastStreamRecvError::Lagged(_)) => {
                         let snapshot = latest.lock();
-                        cursor.lock().resync_pending = true;
+                        let mut cursor = cursor.lock();
+                        cursor.resync_pending = true;
                         Some(Ok(StreamFrame {
                             payload: Some(theway_grpc::stream_frame::Payload::Snapshot(
-                                project_stream_snapshot(&snapshot, &mut cursor.lock()),
+                                project_authoritative_snapshot(&snapshot, &mut cursor),
                             )),
                         }))
                     }
@@ -635,58 +643,6 @@ impl EventService for GrpcState {
             futures::stream::select(snapshots, futures::stream::select(events, dag_events));
         Ok(Response::new(Box::pin(stream)))
     }
-}
-
-#[derive(Debug)]
-struct StreamCursor {
-    feed_lines: usize,
-    feed_blocks: usize,
-    first_frame: bool,
-    resync_pending: bool,
-}
-
-impl Default for StreamCursor {
-    fn default() -> Self {
-        Self {
-            feed_lines: 0,
-            feed_blocks: 0,
-            first_frame: true,
-            resync_pending: false,
-        }
-    }
-}
-
-fn project_stream_snapshot(snapshot: &WireStatus, cursor: &mut StreamCursor) -> SessionState {
-    let mut next_block_count = cursor.feed_blocks;
-    let patches_are_contiguous = snapshot.feed_blocks_base == cursor.feed_blocks as u64
-        && snapshot.feed_block_patches.iter().all(|patch| {
-            let Ok(index) = usize::try_from(patch.index) else {
-                return false;
-            };
-            if index > next_block_count {
-                return false;
-            }
-            if index == next_block_count {
-                next_block_count += 1;
-            }
-            true
-        })
-        && next_block_count == snapshot.feed_blocks.len();
-    let needs_full = cursor.first_frame
-        || cursor.resync_pending
-        || cursor.feed_lines > snapshot.feed_lines.len()
-        || !patches_are_contiguous;
-
-    let state = if needs_full {
-        session_state(snapshot)
-    } else {
-        incremental_session_state(snapshot, cursor.feed_lines)
-    };
-    cursor.feed_lines = snapshot.feed_lines.len();
-    cursor.feed_blocks = snapshot.feed_blocks.len();
-    cursor.first_frame = false;
-    cursor.resync_pending = false;
-    state
 }
 
 /// Standard `grpc.health.v1` service: the server is live as long as the

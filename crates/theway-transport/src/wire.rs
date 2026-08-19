@@ -444,6 +444,161 @@ pub struct WireFeedBlockPatch {
     pub block: crate::feed::WireFeedBlock,
 }
 
+#[derive(Clone, Debug)]
+pub struct WireFeedDelta {
+    pub feed_blocks_base: u64,
+    pub feed_block_patches: Vec<WireFeedBlockPatch>,
+    pub feed_blocks_len: usize,
+    pub feed_lines_base: u64,
+    pub feed_lines: Vec<String>,
+    pub feed_lines_len: usize,
+}
+
+/// One daemon publication: either a full authoritative status (for startup,
+/// metadata changes, and resync) or a transcript-only delta for streaming.
+#[derive(Clone, Debug)]
+pub enum WireStatusUpdate {
+    Full(WireStatus),
+    Delta(WireFeedDelta),
+}
+
+impl WireStatusUpdate {
+    pub fn full(mut status: WireStatus) -> Self {
+        status.feed_blocks_base = 0;
+        status.feed_block_patches.clear();
+        status.feed_lines_base = 0;
+        Self::Full(status)
+    }
+
+    pub fn delta(
+        feed_blocks_base: u64,
+        feed_block_patches: Vec<WireFeedBlockPatch>,
+        feed_blocks_len: usize,
+        feed_lines_base: u64,
+        feed_lines: Vec<String>,
+        feed_lines_len: usize,
+    ) -> Self {
+        Self::Delta(WireFeedDelta {
+            feed_blocks_base,
+            feed_block_patches,
+            feed_blocks_len,
+            feed_lines_base,
+            feed_lines,
+            feed_lines_len,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn delta_from_status(
+        mut status: WireStatus,
+        feed_blocks_len: usize,
+        feed_lines_len: usize,
+    ) -> Self {
+        Self::delta(
+            status.feed_blocks_base,
+            std::mem::take(&mut status.feed_block_patches),
+            feed_blocks_len,
+            status.feed_lines_base,
+            std::mem::take(&mut status.feed_lines),
+            feed_lines_len,
+        )
+    }
+
+    pub fn full_status(&self) -> Option<&WireStatus> {
+        match self {
+            Self::Full(status) => Some(status),
+            Self::Delta(_) => None,
+        }
+    }
+
+    pub fn feed_delta(&self) -> Option<&WireFeedDelta> {
+        match self {
+            Self::Full(_) => None,
+            Self::Delta(delta) => Some(delta),
+        }
+    }
+
+    /// Apply an incremental publication to a cached authoritative snapshot.
+    /// Returns `false` on a cursor/kind gap so the producer can fall back to a
+    /// freshly built full snapshot.
+    pub fn apply_to(&self, latest: &mut WireStatus) -> bool {
+        let delta = match self {
+            Self::Full(status) => {
+                *latest = status.clone();
+                return true;
+            }
+            Self::Delta(delta) => delta,
+        };
+
+        let Ok(block_base) = usize::try_from(delta.feed_blocks_base) else {
+            return false;
+        };
+        let reset_blocks = block_base == 0;
+        if !reset_blocks && block_base != latest.feed_blocks.len() {
+            return false;
+        }
+        let mut projected_len = block_base;
+        let mut appended = Vec::new();
+        for patch in &delta.feed_block_patches {
+            let Ok(index) = usize::try_from(patch.index) else {
+                return false;
+            };
+            if index > projected_len {
+                return false;
+            }
+            let existing = if index < block_base {
+                latest.feed_blocks.get(index)
+            } else if index < projected_len {
+                appended.get(index - block_base).copied()
+            } else {
+                None
+            };
+            if let Some(existing) = existing
+                && std::mem::discriminant(existing) != std::mem::discriminant(&patch.block)
+            {
+                return false;
+            }
+            if index == projected_len {
+                appended.push(&patch.block);
+                projected_len += 1;
+            }
+        }
+        if projected_len != delta.feed_blocks_len {
+            return false;
+        }
+
+        let Ok(line_base) = usize::try_from(delta.feed_lines_base) else {
+            return false;
+        };
+        if line_base > latest.feed_lines.len()
+            || line_base + delta.feed_lines.len() != delta.feed_lines_len
+        {
+            return false;
+        }
+
+        if reset_blocks {
+            latest.feed_blocks.clear();
+        }
+        for patch in &delta.feed_block_patches {
+            let index = patch.index as usize;
+            if index == latest.feed_blocks.len() {
+                latest.feed_blocks.push(patch.block.clone());
+            } else {
+                latest.feed_blocks[index] = patch.block.clone();
+            }
+        }
+        latest.feed_lines.truncate(line_base);
+        latest.feed_lines.extend(delta.feed_lines.iter().cloned());
+        true
+    }
+}
+
+impl From<WireStatus> for WireStatusUpdate {
+    fn from(status: WireStatus) -> Self {
+        Self::full(status)
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct WireGoalSnapshot {
     pub condition: String,

@@ -138,18 +138,21 @@ fn converts_full_snapshot_to_session_state() {
 
 #[test]
 fn incremental_feed_block_patches_round_trip_through_proto() {
-    let mut snapshot = fixture_snapshot();
-    snapshot.feed_blocks.clear();
-    snapshot.feed_blocks_base = 2;
-    snapshot.feed_block_patches = vec![crate::wire::WireFeedBlockPatch {
+    let authoritative = fixture_snapshot();
+    let mut delta_status = fixture_snapshot();
+    delta_status.feed_blocks.clear();
+    delta_status.feed_blocks_base = 2;
+    delta_status.feed_block_patches = vec![crate::wire::WireFeedBlockPatch {
         index: 1,
         block: WireFeedBlock::Thinking {
             text: "summary".into(),
             timestamp: Some("10:00".into()),
         },
     }];
+    let update = crate::wire::WireStatusUpdate::delta_from_status(delta_status, 2, 1);
+    let delta = update.feed_delta().unwrap();
 
-    let proto = incremental_session_state(&snapshot, 0);
+    let proto = incremental_session_state(&authoritative, delta, 0);
     assert_eq!(proto.feed_blocks_base, 2);
     assert!(proto.feed_blocks.is_empty());
     assert_eq!(proto.feed_block_patches.len(), 1);
@@ -157,7 +160,7 @@ fn incremental_feed_block_patches_round_trip_through_proto() {
 
     let restored = wire_status(&proto);
     assert_eq!(restored.feed_blocks_base, 2);
-    assert_eq!(restored.feed_block_patches, snapshot.feed_block_patches);
+    assert_eq!(restored.feed_block_patches, delta.feed_block_patches);
 }
 
 #[test]

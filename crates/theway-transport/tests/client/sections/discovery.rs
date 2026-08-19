@@ -65,7 +65,9 @@ async fn client_stream_events_receives_snapshot_frames() {
     let (mut client, _command_rx, snapshot_tx) = client_and_server().await;
     let mut stream = client.stream_events().await.unwrap();
     // The fixture publishes on demand (no event loop in tests).
-    snapshot_tx.send(fixture_status("streamed")).unwrap();
+    snapshot_tx
+        .send(fixture_status("streamed").into())
+        .unwrap();
     let frame = tokio::time::timeout(Duration::from_secs(2), stream.next())
         .await
         .expect("timed out waiting for frame")

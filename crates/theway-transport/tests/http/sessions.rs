@@ -43,7 +43,7 @@ async fn spawn_sessions_server(
     tokio::task::JoinHandle<()>,
 ) {
     let (command_tx, command_rx) = mpsc::unbounded_channel::<WireCommand>();
-    let (snapshot_tx, _) = broadcast::channel::<WireStatus>(16);
+    let (snapshot_tx, _) = broadcast::channel::<WireStatusUpdate>(16);
     let state = HttpState {
         commands: command_tx,
         snapshots: snapshot_tx,

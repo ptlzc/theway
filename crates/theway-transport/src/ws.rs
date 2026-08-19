@@ -51,17 +51,22 @@ async fn run_ws(mut socket: WebSocket, state: HttpState) {
         .await;
 
     // Merge snapshot + subagent-event + dag-event broadcasts into one outbound frame stream.
-    let snapshots =
-        BroadcastStream::new(state.snapshots.subscribe()).filter_map(|item| async move {
-            match item {
-                Ok(snapshot) => Some(Ok::<Message, ()>(Message::Text(
-                    json!({ "jsonrpc": "2.0", "method": "status", "params": snapshot })
-                        .to_string()
-                        .into(),
-                ))),
-                Err(BroadcastStreamRecvError::Lagged(_)) => None,
-            }
-        });
+    let snapshot_latest = state.latest.clone();
+    let snapshots = BroadcastStream::new(state.snapshots.subscribe()).filter_map(move |item| {
+        let latest = snapshot_latest.clone();
+        async move {
+            let snapshot = match item {
+                Ok(crate::wire::WireStatusUpdate::Full(snapshot)) => snapshot,
+                Ok(crate::wire::WireStatusUpdate::Delta(_))
+                | Err(BroadcastStreamRecvError::Lagged(_)) => latest.lock().clone(),
+            };
+            Some(Ok::<Message, ()>(Message::Text(
+                json!({ "jsonrpc": "2.0", "method": "status", "params": snapshot })
+                    .to_string()
+                    .into(),
+            )))
+        }
+    });
     let events = BroadcastStream::new(state.events.subscribe()).filter_map(|item| async move {
         match item {
             Ok(event) => Some(Ok::<Message, ()>(Message::Text(

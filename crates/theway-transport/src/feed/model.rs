@@ -586,51 +586,58 @@ impl Feed {
     }
 
     pub fn wire_blocks(&self) -> Vec<WireFeedBlock> {
-        self.blocks
-            .iter()
-            .map(|block| match block {
-                Block::User { text, timestamp } => WireFeedBlock::User {
-                    text: text.clone(),
-                    timestamp: timestamp.clone(),
-                },
-                Block::Assistant { text, timestamp } => WireFeedBlock::Assistant {
-                    text: text.clone(),
-                    timestamp: timestamp.clone(),
-                },
-                Block::Thinking { text, timestamp } => WireFeedBlock::Thinking {
-                    text: text.clone(),
-                    timestamp: timestamp.clone(),
-                },
-                Block::Tool {
-                    name,
-                    args,
-                    timestamp,
-                } => WireFeedBlock::Tool {
-                    name: name.clone(),
-                    args: args.clone(),
-                    timestamp: timestamp.clone(),
-                },
-                Block::ToolResult {
-                    lines,
-                    is_error,
-                    timestamp,
-                    ..
-                } => WireFeedBlock::ToolResult {
-                    lines: lines.clone(),
-                    is_error: *is_error,
-                    timestamp: timestamp.clone(),
-                },
-                Block::Plain {
-                    text,
-                    level,
-                    timestamp,
-                } => WireFeedBlock::Plain {
-                    text: text.clone(),
-                    level: *level,
-                    timestamp: timestamp.clone(),
-                },
-            })
-            .collect()
+        self.blocks.iter().map(wire_block).collect()
+    }
+
+    /// Convert one block for an incremental wire patch without cloning the
+    /// rest of the transcript.
+    pub fn wire_block(&self, index: usize) -> Option<WireFeedBlock> {
+        self.blocks.get(index).map(wire_block)
+    }
+}
+
+fn wire_block(block: &Block) -> WireFeedBlock {
+    match block {
+        Block::User { text, timestamp } => WireFeedBlock::User {
+            text: text.clone(),
+            timestamp: timestamp.clone(),
+        },
+        Block::Assistant { text, timestamp } => WireFeedBlock::Assistant {
+            text: text.clone(),
+            timestamp: timestamp.clone(),
+        },
+        Block::Thinking { text, timestamp } => WireFeedBlock::Thinking {
+            text: text.clone(),
+            timestamp: timestamp.clone(),
+        },
+        Block::Tool {
+            name,
+            args,
+            timestamp,
+        } => WireFeedBlock::Tool {
+            name: name.clone(),
+            args: args.clone(),
+            timestamp: timestamp.clone(),
+        },
+        Block::ToolResult {
+            lines,
+            is_error,
+            timestamp,
+            ..
+        } => WireFeedBlock::ToolResult {
+            lines: lines.clone(),
+            is_error: *is_error,
+            timestamp: timestamp.clone(),
+        },
+        Block::Plain {
+            text,
+            level,
+            timestamp,
+        } => WireFeedBlock::Plain {
+            text: text.clone(),
+            level: *level,
+            timestamp: timestamp.clone(),
+        },
     }
 }
 

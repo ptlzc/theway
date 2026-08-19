@@ -32,13 +32,13 @@ use crate::wire::{
     WireLoadDagRunsRequest, WireLoadDagRunsResult, WireLoadTriggerRulesRequest,
     WireLoadTriggerRulesResult, WireNodeOutput, WirePathContext, WireSaveCronJobsRequest,
     WireSaveCronJobsResult, WireSaveDagRunRequest, WireSaveDagRunResult,
-    WireSaveTriggerRulesRequest, WireSaveTriggerRulesResult, WireStatus, WireToolEditRequest,
-    WireToolEditResult, WireToolExecFrame, WireToolExecRequest, WireToolFindRequest,
-    WireToolFindResult, WireToolGrepRequest, WireToolGrepResult, WireToolListDirRequest,
-    WireToolListDirResult, WireToolMemoryForgetRequest, WireToolMemoryForgetResult,
-    WireToolMemoryListRequest, WireToolMemoryListResult, WireToolMemoryReadRequest,
-    WireToolMemoryReadResult, WireToolMemorySaveRequest, WireToolMemorySaveResult,
-    WireToolReadRequest, WireToolReadResult, WireToolSkillInstallRequest,
+    WireSaveTriggerRulesRequest, WireSaveTriggerRulesResult, WireStatus, WireStatusUpdate,
+    WireToolEditRequest, WireToolEditResult, WireToolExecFrame, WireToolExecRequest,
+    WireToolFindRequest, WireToolFindResult, WireToolGrepRequest, WireToolGrepResult,
+    WireToolListDirRequest, WireToolListDirResult, WireToolMemoryForgetRequest,
+    WireToolMemoryForgetResult, WireToolMemoryListRequest, WireToolMemoryListResult,
+    WireToolMemoryReadRequest, WireToolMemoryReadResult, WireToolMemorySaveRequest,
+    WireToolMemorySaveResult, WireToolReadRequest, WireToolReadResult, WireToolSkillInstallRequest,
     WireToolSkillInstallResult, WireToolWriteRequest, WireToolWriteResult,
 };
 
@@ -474,8 +474,9 @@ pub struct TransportEndpoints {
     pub command_tx: mpsc::UnboundedSender<WireCommand>,
     /// Event-loop side of the command queue.
     pub command_rx: mpsc::UnboundedReceiver<WireCommand>,
-    /// Full `WireStatus` snapshots broadcast to SSE / WS / gRPC subscribers.
-    pub snapshot_tx: broadcast::Sender<WireStatus>,
+    /// Snapshot publications. The authoritative state stays in `latest`;
+    /// routine publications carry only transcript deltas.
+    pub snapshot_tx: broadcast::Sender<WireStatusUpdate>,
     /// Latest snapshot (served by `GET /state` / `GetState`).
     pub latest: Arc<Mutex<WireStatus>>,
     /// Event plane (graph mode): subagent started/output/metrics/completed.

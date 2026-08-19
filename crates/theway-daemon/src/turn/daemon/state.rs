@@ -1,5 +1,9 @@
 impl TurnHost {
-    fn apply_feed_update(&mut self, update: FeedUpdate) {
+    fn apply_feed_update(&mut self, update: FeedUpdate) -> bool {
+        let metadata_dirty = matches!(
+            &update,
+            FeedUpdate::TriggerPollStatus(_) | FeedUpdate::SkillsReloaded { .. }
+        );
         let before_len = self.feed.blocks().len();
         let targeted = match &update {
             FeedUpdate::ThinkingSummary { block_index, .. } => Some(*block_index),
@@ -24,6 +28,7 @@ impl TurnHost {
         if let Some(index) = targeted {
             self.dirty_blocks.insert(index);
         }
+        metadata_dirty
     }
 
     async fn refresh_goal_state(&mut self) {

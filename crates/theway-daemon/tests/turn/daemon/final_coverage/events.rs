@@ -152,8 +152,8 @@ async fn run_transport_loop_drains_multiple_queued_feed_updates() {
         let seen = loop {
             let snapshot = snapshot_rx.recv().await.map_err(anyhow::Error::from)?;
             if snapshot
-                .latest_trigger_poll
-                .as_ref()
+                .full_status()
+                .and_then(|status| status.latest_trigger_poll.as_ref())
                 .is_some_and(|poll| poll.trace_id == "trace-second")
             {
                 break snapshot;
@@ -177,7 +177,12 @@ async fn run_transport_loop_drains_multiple_queued_feed_updates() {
         .expect("driver task panicked")
         .expect("driver failed");
     assert_eq!(
-        seen.latest_trigger_poll.as_ref().unwrap().trace_id,
+        seen.full_status()
+            .unwrap()
+            .latest_trigger_poll
+            .as_ref()
+            .unwrap()
+            .trace_id,
         "trace-second"
     );
 }

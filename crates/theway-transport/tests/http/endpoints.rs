@@ -13,7 +13,7 @@ use std::time::Duration;
 #[tokio::test]
 async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
     let (command_tx, mut command_rx) = mpsc::unbounded_channel::<WireCommand>();
-    let (snapshot_tx, _) = broadcast::channel::<WireStatus>(16);
+    let (snapshot_tx, _) = broadcast::channel::<WireStatusUpdate>(16);
     let latest = Arc::new(Mutex::new(WireStatus {
         session_id: "sess-1".into(),
         model: "provider:model".into(),
@@ -38,7 +38,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
     let router = web_router(HttpState {
         commands: command_tx,
         snapshots: snapshot_tx.clone(),
-        latest,
+        latest: latest.clone(),
         completer: SlashCompleter::from_commands(vec!["/help".into(), "/model".into(), "/goal".into()]),
         events: broadcast::channel::<WireAgentEvent>(16).0,
         dag_events: broadcast::channel::<WireDagEvent>(16).0,
@@ -185,7 +185,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
     assert!(response.status().is_success());
     let mut stream = response.bytes_stream();
     snapshot_tx
-        .send(WireStatus {
+        .send(WireStatusUpdate::full(WireStatus {
             session_id: "sess-1".into(),
             model: "provider:model".into(),
             model_catalog: Vec::new(),
@@ -205,7 +205,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
             subagents: Vec::new(),
             usage: WireContextUsage::default(),
             tui_max_feed_lines: None,
-        })
+        }))
         .unwrap();
     let chunk = tokio::time::timeout(Duration::from_secs(2), stream.next())
         .await
@@ -216,13 +216,28 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
     assert!(text.contains("event: message"), "{text}");
     assert!(text.contains("streamed"), "{text}");
 
+    latest.lock().feed_lines = vec!["ready".into(), "delta-visible".into()];
+    snapshot_tx
+        .send(WireStatusUpdate::delta(0, Vec::new(), 0, 1, vec![
+            "delta-visible".into(),
+        ], 2))
+        .unwrap();
+    let chunk = tokio::time::timeout(Duration::from_secs(2), stream.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let text = String::from_utf8_lossy(&chunk);
+    assert!(text.contains("ready"), "{text}");
+    assert!(text.contains("delta-visible"), "{text}");
+
     server.abort();
 }
 
 #[tokio::test]
 async fn websocket_serves_snapshot_and_accepts_commands() {
     let (command_tx, mut command_rx) = mpsc::unbounded_channel::<WireCommand>();
-    let (snapshot_tx, _) = broadcast::channel::<WireStatus>(16);
+    let (snapshot_tx, _) = broadcast::channel::<WireStatusUpdate>(16);
     let latest = Arc::new(Mutex::new(WireStatus {
         session_id: "sess-1".into(),
         model: "provider:model".into(),
@@ -247,7 +262,7 @@ async fn websocket_serves_snapshot_and_accepts_commands() {
     let router = web_router(HttpState {
         commands: command_tx,
         snapshots: snapshot_tx.clone(),
-        latest,
+        latest: latest.clone(),
         completer: SlashCompleter::from_commands(vec!["/help".into(), "/model".into(), "/goal".into()]),
         events: broadcast::channel::<WireAgentEvent>(16).0,
         dag_events: broadcast::channel::<WireDagEvent>(16).0,
@@ -286,6 +301,29 @@ async fn websocket_serves_snapshot_and_accepts_commands() {
     assert!(text.contains(r#""jsonrpc":"2.0""#), "{text}");
     assert!(text.contains(r#""method":"status""#), "{text}");
     assert!(text.contains("sess-1"), "{text}");
+
+    latest.lock().feed_lines = vec!["ready".into(), "ws-delta-visible".into()];
+    snapshot_tx
+        .send(WireStatusUpdate::delta(
+            0,
+            Vec::new(),
+            0,
+            1,
+            vec!["ws-delta-visible".into()],
+            2,
+        ))
+        .unwrap();
+    let frame = tokio::time::timeout(Duration::from_secs(2), ws.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let text = match frame {
+        tokio_tungstenite::tungstenite::Message::Text(t) => t.to_string(),
+        other => panic!("expected text frame, got {other:?}"),
+    };
+    assert!(text.contains("ready"), "{text}");
+    assert!(text.contains("ws-delta-visible"), "{text}");
 
     // Prompt round-trips into the command queue with an accepted reply.
     ws.send(tokio_tungstenite::tungstenite::Message::Text(
@@ -398,7 +436,7 @@ async fn spawn_config_server(
     tokio::task::JoinHandle<()>,
 ) {
     let (command_tx, command_rx) = mpsc::unbounded_channel::<WireCommand>();
-    let (snapshot_tx, _) = broadcast::channel::<WireStatus>(16);
+    let (snapshot_tx, _) = broadcast::channel::<WireStatusUpdate>(16);
     let router = web_router(HttpState {
         commands: command_tx,
         snapshots: snapshot_tx,

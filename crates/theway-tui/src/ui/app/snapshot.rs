@@ -9,32 +9,48 @@ impl App {
             self.feed.replace_blocks(&status.feed_blocks);
             self.resync_pending = false;
         } else if status.feed_blocks_base == self.latest.feed_blocks.len() as u64 {
-            let mut blocks = self.latest.feed_blocks.clone();
+            let current_len = self.latest.feed_blocks.len();
+            let mut projected_len = current_len;
+            let mut appended = Vec::new();
             let valid = status.feed_block_patches.iter().all(|patch| {
                 let Ok(index) = usize::try_from(patch.index) else {
                     return false;
                 };
-                if index == blocks.len() {
-                    blocks.push(patch.block.clone());
-                    true
-                } else if let Some(current) = blocks.get_mut(index)
-                    && std::mem::discriminant(current) == std::mem::discriminant(&patch.block)
-                {
-                    *current = patch.block.clone();
-                    true
-                } else {
-                    false
+                if index > projected_len {
+                    return false;
                 }
+                let existing = if index < current_len {
+                    self.latest.feed_blocks.get(index)
+                } else if index < projected_len {
+                    appended.get(index - current_len).copied()
+                } else {
+                    None
+                };
+                if let Some(existing) = existing
+                    && std::mem::discriminant(existing)
+                        != std::mem::discriminant(&patch.block)
+                {
+                    return false;
+                }
+                if index == projected_len {
+                    appended.push(&patch.block);
+                    projected_len += 1;
+                }
+                true
             });
             if valid {
+                let mut blocks = std::mem::take(&mut self.latest.feed_blocks);
                 let mut render_out_of_sync = false;
                 for patch in &status.feed_block_patches {
                     let index = patch.index as usize;
-                    if index == self.latest.feed_blocks.len() || index >= self.feed.blocks().len() {
+                    if index == blocks.len() {
                         self.feed.append_blocks(std::slice::from_ref(&patch.block));
-                    } else if !self.feed.replace_block(index, &patch.block) {
-                        render_out_of_sync = true;
-                        break;
+                        blocks.push(patch.block.clone());
+                    } else {
+                        blocks[index] = patch.block.clone();
+                        if !self.feed.replace_block(index, &patch.block) {
+                            render_out_of_sync = true;
+                        }
                     }
                 }
                 if render_out_of_sync {
@@ -43,11 +59,11 @@ impl App {
                 status.feed_blocks = blocks;
                 self.resync_pending = false;
             } else {
-                status.feed_blocks = self.latest.feed_blocks.clone();
+                status.feed_blocks = std::mem::take(&mut self.latest.feed_blocks);
                 self.resync_pending = true;
             }
         } else {
-            status.feed_blocks = self.latest.feed_blocks.clone();
+            status.feed_blocks = std::mem::take(&mut self.latest.feed_blocks);
             self.resync_pending = true;
         }
         // `latest` is always an authoritative local cache, never another

@@ -28,7 +28,7 @@ pub mod health {
 
 use crate::feed::{self, WireFeedBlock};
 use crate::wire::{WireAgentEvent, WireDagEvent};
-use crate::wire::{WirePathContext, WireStatus};
+use crate::wire::{WireFeedDelta, WirePathContext, WireStatus};
 use theway_grpc as wire;
 
 /// Convert the internal snapshot into the structured wire model.
@@ -48,14 +48,17 @@ pub fn session_state(snapshot: &WireStatus) -> wire::SessionState {
 /// and block patches after that subscriber's cursors.
 pub(crate) fn incremental_session_state(
     snapshot: &WireStatus,
+    delta: &WireFeedDelta,
     feed_lines_start: usize,
 ) -> wire::SessionState {
+    let feed_lines_base = delta.feed_lines_base as usize;
+    let suffix_start = feed_lines_start.saturating_sub(feed_lines_base);
     session_state_with_feed(
         snapshot,
         &[],
-        &snapshot.feed_block_patches,
-        &snapshot.feed_lines[feed_lines_start..],
-        snapshot.feed_blocks_base,
+        &delta.feed_block_patches,
+        &delta.feed_lines[suffix_start..],
+        delta.feed_blocks_base,
         feed_lines_start as u64,
     )
 }

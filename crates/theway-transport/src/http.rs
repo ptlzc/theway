@@ -33,7 +33,7 @@ use crate::ws::ws_upgrade;
 #[derive(Clone)]
 pub struct HttpState {
     pub commands: mpsc::UnboundedSender<WireCommand>,
-    pub snapshots: broadcast::Sender<WireStatus>,
+    pub snapshots: broadcast::Sender<WireStatusUpdate>,
     pub latest: Arc<Mutex<WireStatus>>,
     pub completer: SlashCompleter,
     pub events: broadcast::Sender<WireAgentEvent>,
@@ -698,22 +698,25 @@ async fn events(
     State(state): State<HttpState>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let rx = state.snapshots.subscribe();
-    let stream = futures::stream::unfold(rx, |mut rx| async move {
-        loop {
-            match rx.recv().await {
-                Ok(snapshot) => {
-                    let data = serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "method": "status",
-                        "params": snapshot,
-                    })
-                    .to_string();
-                    return Some((Ok(Event::default().event("message").data(data)), rx));
-                }
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(broadcast::error::RecvError::Closed) => return None,
+    let latest = state.latest;
+    let stream = futures::stream::unfold((rx, latest), |(mut rx, latest)| async move {
+        let snapshot = match rx.recv().await {
+            Ok(WireStatusUpdate::Full(snapshot)) => snapshot,
+            Ok(WireStatusUpdate::Delta(_)) | Err(broadcast::error::RecvError::Lagged(_)) => {
+                latest.lock().clone()
             }
-        }
+            Err(broadcast::error::RecvError::Closed) => return None,
+        };
+        let data = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "status",
+            "params": snapshot,
+        })
+        .to_string();
+        Some((
+            Ok(Event::default().event("message").data(data)),
+            (rx, latest),
+        ))
     });
     Sse::new(stream).keep_alive(KeepAlive::default())
 }

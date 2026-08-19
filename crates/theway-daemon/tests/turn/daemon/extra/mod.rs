@@ -208,6 +208,8 @@ fn poll_status() -> TriggerPollStatus {
 
 // ── event-loop command routing ───────────────────────────────────────────────────
 
+mod benchmark;
+
 #[tokio::test]
 async fn handle_web_command_routes_submit_to_start_turn() {
     let mut fixture = HostFixture::new().await;
@@ -540,12 +542,13 @@ async fn wire_snapshot_reflects_populated_goal_poll_prompt_and_sidebar_state() {
 }
 
 #[tokio::test]
-async fn wire_snapshot_keeps_full_lines_and_emits_append_patch() {
+async fn wire_update_emits_only_the_dirty_line_suffix_and_append_patch() {
     let mut fixture = HostFixture::new().await;
     let host = fixture.host();
 
     host.system_line("one");
-    let first = host.wire_snapshot();
+    let first = host.wire_update();
+    let first = first.feed_delta().unwrap();
     assert_eq!(first.feed_lines_base, 0);
     assert!(first.feed_lines.iter().any(|line| line.contains("one")));
     assert_eq!(first.feed_blocks_base, 0);
@@ -553,9 +556,10 @@ async fn wire_snapshot_keeps_full_lines_and_emits_append_patch() {
     assert_eq!(first.feed_block_patches[0].index, 0);
 
     host.system_line("two");
-    let second = host.wire_snapshot();
-    assert_eq!(second.feed_lines_base, 0);
-    assert!(second.feed_lines.iter().any(|line| line.contains("one")));
+    let second = host.wire_update();
+    let second = second.feed_delta().unwrap();
+    assert_eq!(second.feed_lines_base, 1);
+    assert!(!second.feed_lines.iter().any(|line| line.contains("one")));
     assert!(second.feed_lines.iter().any(|line| line.contains("two")));
     assert_eq!(second.feed_blocks_base, 1);
     assert_eq!(second.feed_block_patches.len(), 1);
@@ -568,9 +572,10 @@ async fn wire_snapshot_emits_streaming_replacement_patch() {
     let host = fixture.host();
 
     host.apply_feed_update(FeedUpdate::TextDelta("hello".into()));
-    host.wire_snapshot();
+    host.wire_update();
     host.apply_feed_update(FeedUpdate::TextDelta(" world".into()));
-    let snapshot = host.wire_snapshot();
+    let snapshot = host.wire_update();
+    let snapshot = snapshot.feed_delta().unwrap();
 
     assert_eq!(snapshot.feed_blocks_base, 1);
     assert_eq!(snapshot.feed_block_patches.len(), 1);
@@ -588,12 +593,13 @@ async fn wire_snapshot_emits_thinking_summary_replacement_patch() {
     let host = fixture.host();
 
     host.apply_feed_update(FeedUpdate::ThinkingDelta("private reasoning".into()));
-    host.wire_snapshot();
+    host.wire_update();
     host.apply_feed_update(FeedUpdate::ThinkingSummary {
         block_index: 0,
         summary: "summary".into(),
     });
-    let snapshot = host.wire_snapshot();
+    let snapshot = host.wire_update();
+    let snapshot = snapshot.feed_delta().unwrap();
 
     assert_eq!(snapshot.feed_blocks_base, 1);
     assert_eq!(snapshot.feed_block_patches.len(), 1);
@@ -611,17 +617,18 @@ async fn clear_feed_restarts_patch_sequence_from_zero() {
     let host = fixture.host();
 
     host.system_line("old");
-    host.wire_snapshot();
+    host.wire_update();
     host.clear_feed();
     host.system_line("new");
-    let snapshot = host.wire_snapshot();
+    let snapshot = host.wire_update();
+    let status = snapshot.feed_delta().unwrap();
 
-    assert_eq!(snapshot.feed_blocks_base, 0);
-    assert_eq!(snapshot.feed_block_patches.len(), 1);
-    assert_eq!(snapshot.feed_block_patches[0].index, 0);
-    assert_eq!(snapshot.feed_blocks.len(), 1);
+    assert_eq!(status.feed_blocks_base, 0);
+    assert_eq!(status.feed_block_patches.len(), 1);
+    assert_eq!(status.feed_block_patches[0].index, 0);
+    assert_eq!(status.feed_blocks_len, 1);
     assert!(matches!(
-        &snapshot.feed_blocks[0],
+        &status.feed_block_patches[0].block,
         theway_transport::feed::WireFeedBlock::Plain { text, .. } if text == "new"
     ));
 }
@@ -724,7 +731,10 @@ async fn run_transport_loop_drains_feed_updates_before_server_finishes() {
     let feed_tx_driver = feed_tx.clone();
     let driver = tokio::spawn(async move {
         let initial = snapshot_rx.recv().await.map_err(anyhow::Error::from)?;
-        if initial.latest_trigger_poll.is_some() {
+        if initial
+            .full_status()
+            .is_some_and(|status| status.latest_trigger_poll.is_some())
+        {
             bail!("startup snapshot already has a trigger poll status");
         }
         feed_tx_driver
@@ -732,7 +742,10 @@ async fn run_transport_loop_drains_feed_updates_before_server_finishes() {
             .map_err(|_| anyhow::anyhow!("feed receiver closed"))?;
         let poll_snapshot = loop {
             let snapshot = snapshot_rx.recv().await.map_err(anyhow::Error::from)?;
-            if snapshot.latest_trigger_poll.is_some() {
+            if snapshot
+                .full_status()
+                .is_some_and(|status| status.latest_trigger_poll.is_some())
+            {
                 break snapshot;
             }
         };
@@ -753,8 +766,10 @@ async fn run_transport_loop_drains_feed_updates_before_server_finishes() {
         .expect("driver timed out")
         .expect("driver task panicked")
         .expect("driver failed");
+    let initial = initial.full_status().unwrap();
     assert!(!initial.busy);
     assert!(initial.latest_trigger_poll.is_none());
+    let poll_snapshot = poll_snapshot.full_status().unwrap();
     assert_eq!(
         poll_snapshot.latest_trigger_poll.as_ref().unwrap().trace_id,
         "trace-poll"

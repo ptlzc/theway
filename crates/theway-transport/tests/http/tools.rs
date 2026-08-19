@@ -14,7 +14,7 @@ use serde_json::json;
 async fn spawn_tools_server() -> (String, std::sync::Arc<FakeToolOps>, tokio::task::JoinHandle<()>) {
     let tools = std::sync::Arc::new(FakeToolOps::new());
     let (command_tx, _command_rx) = mpsc::unbounded_channel::<WireCommand>();
-    let (snapshot_tx, _) = broadcast::channel::<WireStatus>(16);
+    let (snapshot_tx, _) = broadcast::channel::<WireStatusUpdate>(16);
     let state = HttpState {
         commands: command_tx,
         snapshots: snapshot_tx,

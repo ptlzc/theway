@@ -91,6 +91,9 @@ pub struct PlainLinesCache {
     width: usize,
     /// Blocks re-rendered by the last `update` (0 = everything was cached).
     pub last_rebuilt: usize,
+    /// Absolute row where the last rebuild began. Replacing the authoritative
+    /// rows from this point applies the update without cloning the prefix.
+    pub last_rebuilt_from_row: usize,
 }
 
 impl PlainLinesCache {
@@ -101,6 +104,7 @@ impl PlainLinesCache {
             fingerprints: Vec::new(),
             width: width.max(1),
             last_rebuilt: 0,
+            last_rebuilt_from_row: 0,
         }
     }
 
@@ -158,13 +162,13 @@ impl PlainLinesCache {
         }
         let blocks = feed.blocks();
         self.last_rebuilt = blocks.len().saturating_sub(first_dirty);
+        self.last_rebuilt_from_row = self
+            .block_starts
+            .get(first_dirty)
+            .copied()
+            .unwrap_or(self.rows.len());
         if first_dirty < self.fingerprints.len() || blocks.len() != self.fingerprints.len() {
-            let cut = self
-                .block_starts
-                .get(first_dirty)
-                .copied()
-                .unwrap_or(self.rows.len());
-            self.rows.truncate(cut);
+            self.rows.truncate(self.last_rebuilt_from_row);
             self.block_starts.truncate(first_dirty);
             self.fingerprints.truncate(first_dirty);
         }

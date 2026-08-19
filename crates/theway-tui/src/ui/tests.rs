@@ -73,7 +73,7 @@ async fn test_app_with_sessions(
     Arc<FakeSessionOps>,
 ) {
     let (command_tx, command_rx) = mpsc::unbounded_channel::<WireCommand>();
-    let (snapshot_tx, _) = broadcast::channel::<WireStatus>(16);
+    let (snapshot_tx, _) = broadcast::channel::<theway_transport::wire::WireStatusUpdate>(16);
     let latest = Arc::new(parking_lot::Mutex::new(fixture_status(Vec::new())));
     let (event_tx, _) = broadcast::channel::<theway_transport::wire::WireAgentEvent>(16);
     let (dag_event_tx, _) = broadcast::channel::<theway_transport::wire::WireDagEvent>(16);

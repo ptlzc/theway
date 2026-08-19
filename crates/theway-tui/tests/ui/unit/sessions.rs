@@ -65,6 +65,77 @@ async fn snapshot_replacement_patch_updates_one_block() {
     assert!(!text.contains("partial"), "{text}");
 }
 
+/// Release-only consumer half of the issue #36 synthetic benchmark. The
+/// daemon benchmark measures publication/materialization; this measures the
+/// TUI's no-change, streaming-tail, and middle-backfill patch application.
+#[tokio::test]
+#[ignore = "run with cargo test -p theway-tui --release synthetic_10k -- --ignored --nocapture"]
+async fn synthetic_10k_snapshot_apply_costs_scale_with_delta() {
+    use std::time::Instant;
+
+    let (mut app, _rx) = test_app().await;
+    let mut blocks = Vec::with_capacity(10_000);
+    for index in 0..9_999 {
+        blocks.push(WireFeedBlock::Plain {
+            text: format!("history-{index}"),
+            level: theway_transport::feed::Level::System,
+            timestamp: None,
+        });
+    }
+    blocks.push(WireFeedBlock::Assistant {
+        text: "seed".into(),
+        timestamp: None,
+    });
+    app.apply_snapshot(fixture_status(blocks));
+
+    let mut no_change = fixture_status(Vec::new());
+    no_change.feed_blocks_base = 10_000;
+    const NO_CHANGE_SAMPLES: u32 = 10_000;
+    let started = Instant::now();
+    for _ in 0..NO_CHANGE_SAMPLES {
+        app.apply_snapshot(no_change.clone());
+    }
+    let no_change = started.elapsed() / NO_CHANGE_SAMPLES;
+
+    const PATCH_SAMPLES: u32 = 1_000;
+    let started = Instant::now();
+    for index in 0..PATCH_SAMPLES {
+        let mut patch = fixture_status(Vec::new());
+        patch.feed_blocks_base = 10_000;
+        patch.feed_block_patches = vec![WireFeedBlockPatch {
+            index: 9_999,
+            block: WireFeedBlock::Assistant {
+                text: format!("stream-{index}"),
+                timestamp: None,
+            },
+        }];
+        app.apply_snapshot(patch);
+    }
+    let streaming = started.elapsed() / PATCH_SAMPLES;
+
+    let mut backfill = fixture_status(Vec::new());
+    backfill.feed_blocks_base = 10_000;
+    backfill.feed_block_patches = vec![WireFeedBlockPatch {
+        index: 5_000,
+        block: WireFeedBlock::Plain {
+            text: "backfilled".into(),
+            level: theway_transport::feed::Level::System,
+            timestamp: None,
+        },
+    }];
+    let started = Instant::now();
+    app.apply_snapshot(backfill);
+    let backfill = started.elapsed();
+
+    eprintln!(
+        "10k TUI snapshot: no-change={no_change:?}, streaming={streaming:?}, backfill={backfill:?}"
+    );
+    assert!(
+        no_change.as_micros() < 20,
+        "10k no-change apply must stay below 20us, measured {no_change:?}"
+    );
+}
+
 #[tokio::test]
 async fn snapshot_patch_gap_requests_authoritative_resync() {
     let (mut app, _rx) = test_app().await;

@@ -117,7 +117,7 @@ impl TurnHost {
     /// ([`theway_transport::host::TransportHost::transport_endpoints`] implementation).
     pub fn transport_endpoints(&mut self) -> TransportEndpoints {
         let (command_tx, command_rx) = mpsc::unbounded_channel::<WireCommand>();
-        let (snapshot_tx, _) = broadcast::channel::<WireStatus>(128);
+        let (snapshot_tx, _) = broadcast::channel::<WireStatusUpdate>(128);
         let latest = Arc::new(Mutex::new(self.wire_snapshot()));
         let (event_tx, _) = broadcast::channel::<WireAgentEvent>(256);
         let (dag_event_tx, _) = broadcast::channel::<WireDagEvent>(256);
@@ -219,13 +219,14 @@ impl TurnHost {
         let mut control_plane_prompt_rx = self.control_plane_prompt_rx.take();
         let mut turn = TurnState::default();
         self.refresh_goal_state().await;
-        self.publish_snapshot(&latest, &snapshot_tx).await;
+        self.publish_snapshot(&latest, &snapshot_tx, true).await;
 
         // Snapshot coalescing (issue #35): events mark the state dirty and a
         // 50ms tick flushes at most one snapshot per tick, so token floods
         // publish ~20fps instead of once per chunk. Command latency stays
         // within one tick.
         let mut dirty = false;
+        let mut metadata_dirty = false;
         let mut publish_tick = tokio::time::interval(Duration::from_millis(50));
         publish_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         publish_tick.reset();
@@ -240,21 +241,24 @@ impl TurnHost {
                 result = poll_turn(&mut turn.fut), if turn.fut.is_some() => {
                     self.finish_turn(&mut turn, result).await;
                     dirty = true;
+                    metadata_dirty = true;
                 }
                 Some(command) = command_rx.recv() => {
                     self.handle_web_command(command, &mut turn).await;
                     dirty = true;
+                    metadata_dirty = true;
                 }
                 Some(update) = feed_rx.recv() => {
-                    self.apply_feed_update(update);
+                    metadata_dirty |= self.apply_feed_update(update);
                     while let Ok(update) = feed_rx.try_recv() {
-                        self.apply_feed_update(update);
+                        metadata_dirty |= self.apply_feed_update(update);
                     }
                     dirty = true;
                 }
                 Some(trace_id) = main_run_rx.recv(), if turn.fut.is_none() => {
                     self.start_triggered_turn(trace_id, &mut turn);
                     dirty = true;
+                    metadata_dirty = true;
                 }
                 Some(prompt) = async {
                     match control_plane_prompt_rx.as_mut() {
@@ -264,15 +268,17 @@ impl TurnHost {
                 }, if self.control_plane_prompt.is_none() && control_plane_prompt_rx.is_some() => {
                     self.show_control_plane_prompt(prompt);
                     dirty = true;
+                    metadata_dirty = true;
                 }
                 _ = publish_tick.tick(), if dirty => {
                     dirty = false;
-                    self.publish_snapshot(&latest, &snapshot_tx).await;
+                    self.publish_snapshot(&latest, &snapshot_tx, metadata_dirty).await;
+                    metadata_dirty = false;
                 }
                 _ = tokio::signal::ctrl_c() => {
                     if turn.fut.is_some() {
                         self.request_abort(&mut turn);
-                        self.publish_snapshot(&latest, &snapshot_tx).await;
+                        self.publish_snapshot(&latest, &snapshot_tx, true).await;
                     }
                     break;
                 }
@@ -280,7 +286,7 @@ impl TurnHost {
                     self.system_line(format!("[{label}] received SIGTERM, shutting down"));
                     if turn.fut.is_some() {
                         self.request_abort(&mut turn);
-                        self.publish_snapshot(&latest, &snapshot_tx).await;
+                        self.publish_snapshot(&latest, &snapshot_tx, true).await;
                     }
                     break;
                 }
