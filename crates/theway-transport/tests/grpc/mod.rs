@@ -563,10 +563,9 @@ async fn two_simultaneous_subscribers_both_receive_frames() {
     }
 
     // A lagging subscriber catches up on the next publish instead of hanging.
-    state
-        .snapshots
-        .send(fixture_snapshot("second-wave"))
-        .unwrap();
+    let mut next = fixture_snapshot("fan-out");
+    next.feed_lines.push("second-wave".into());
+    state.snapshots.send(next).unwrap();
     let item = tokio::time::timeout(Duration::from_secs(2), first.next())
         .await
         .expect("timed out")
@@ -575,6 +574,7 @@ async fn two_simultaneous_subscribers_both_receive_frames() {
     match item.payload {
         Some(theway_grpc::stream_frame::Payload::Snapshot(state)) => {
             assert_eq!(state.feed_lines, vec!["second-wave"]);
+            assert_eq!(state.feed_lines_base, 1);
         }
         other => panic!("expected snapshot, got {other:?}"),
     }

@@ -137,7 +137,7 @@ fn converts_full_snapshot_to_session_state() {
 }
 
 #[test]
-fn feed_block_patches_round_trip_through_proto() {
+fn incremental_feed_block_patches_round_trip_through_proto() {
     let mut snapshot = fixture_snapshot();
     snapshot.feed_blocks.clear();
     snapshot.feed_blocks_base = 2;
@@ -149,7 +149,7 @@ fn feed_block_patches_round_trip_through_proto() {
         },
     }];
 
-    let proto = session_state(&snapshot);
+    let proto = incremental_session_state(&snapshot, 0);
     assert_eq!(proto.feed_blocks_base, 2);
     assert!(proto.feed_blocks.is_empty());
     assert_eq!(proto.feed_block_patches.len(), 1);
