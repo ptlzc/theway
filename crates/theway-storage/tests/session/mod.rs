@@ -160,6 +160,39 @@ async fn resume_with_no_id_picks_most_recent_session() {
     );
 }
 
+#[tokio::test]
+async fn explicit_session_prefix_must_be_unique() {
+    let dir = tempdir().unwrap();
+    let repo = SqliteSessionRepo::new(dir.path());
+    for id in ["shared-prefix-one", "shared-prefix-two"] {
+        let path = dir.path().join(format!("{id}.db"));
+        crate::sqlite_storage::SqliteSessionStorage::create_with_id(
+            path,
+            "/cwd",
+            Some(id.to_string()),
+        )
+        .await
+        .unwrap();
+    }
+
+    let err = find_path_by_id(&repo, "shared-prefix").await.unwrap_err();
+    assert!(err.to_string().contains("ambiguous"));
+    let err = match resume(&repo, Some("shared-prefix")).await {
+        Ok(_) => panic!("ambiguous prefix must not resume a session"),
+        Err(err) => err,
+    };
+    assert!(err.to_string().contains("ambiguous"));
+    let err = delete_by_id(&repo, "shared-prefix").await.unwrap_err();
+    assert!(err.to_string().contains("ambiguous"));
+    assert_eq!(repo.list().await.unwrap().len(), 2);
+
+    let exact = find_path_by_id(&repo, "shared-prefix-one")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(exact.file_stem().unwrap(), "shared-prefix-one");
+}
+
 #[test]
 fn trigger_sidecar_path_lives_next_to_session_file() {
     let path = std::path::Path::new("/tmp/session-id.jsonl");

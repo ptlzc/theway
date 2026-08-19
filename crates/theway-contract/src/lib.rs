@@ -15,4 +15,5 @@
 //!   the same implementation instead of inlining copies.
 
 pub mod config;
+pub mod session_id;
 pub mod triggers;

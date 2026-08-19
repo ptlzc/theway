@@ -8,7 +8,10 @@ use crate::sqlite_repo::SqliteSessionRepo;
 use anyhow::{Context, Result, bail};
 use theway_core::{Session, SessionStorage};
 
-use theway_contract::config::sessions_dir_for_cwd;
+use theway_contract::{
+    config::sessions_dir_for_cwd,
+    session_id::{PrefixMatch, resolve_unique_prefix},
+};
 
 pub struct SessionEntry {
     #[allow(dead_code)] // listed via the public API; not read by the CLI itself.
@@ -409,33 +412,43 @@ async fn find_session_path(
     // imported sessions (uuidv7, see SqliteSessionStorage::create /
     // create_with_id). Never opens a db, so a live daemon holding the WAL
     // lock on the newest session can't block resolving an older one.
-    for path in files {
-        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-        if stem == id || stem.starts_with(id) {
-            return Ok(Some(path.clone()));
+    let stems = files
+        .iter()
+        .filter_map(|path| path.file_stem().and_then(|stem| stem.to_str()));
+    match resolve_unique_prefix(stems, id) {
+        PrefixMatch::Unique(matched) => {
+            return Ok(files
+                .iter()
+                .find(|path| path.file_stem().and_then(|stem| stem.to_str()) == Some(matched))
+                .cloned());
         }
+        PrefixMatch::Ambiguous => bail!("session id prefix {id} is ambiguous"),
+        PrefixMatch::None => {}
     }
     // Slow path: files whose stem was renamed away from the metadata id. Each
     // open may collide with a live daemon's lock; only reachable when no stem
     // matched.
+    let mut metadata = Vec::with_capacity(files.len());
     for path in files {
         let session = repo.open(path).await?;
-        let metadata_id = session
+        if let Some(metadata_id) = session
             .storage()
             .get_metadata_json()
             .await?
             .get("id")
             .and_then(|v| v.as_str())
-            .map(str::to_string);
-        if metadata_id
-            .as_deref()
-            .map(|s| s == id || s.starts_with(id))
-            .unwrap_or(false)
+            .map(str::to_string)
         {
-            return Ok(Some(path.clone()));
+            metadata.push((path.clone(), metadata_id));
         }
     }
-    Ok(None)
+    match resolve_unique_prefix(metadata.iter().map(|(_, id)| id.as_str()), id) {
+        PrefixMatch::Unique(matched) => Ok(metadata
+            .iter()
+            .find_map(|(path, metadata_id)| (metadata_id == matched).then(|| path.clone()))),
+        PrefixMatch::Ambiguous => bail!("session id prefix {id} is ambiguous"),
+        PrefixMatch::None => Ok(None),
+    }
 }
 
 /// Resolve a session id (full UUIDv7 or unique prefix) to its transcript path.

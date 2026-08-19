@@ -611,14 +611,14 @@ pub(crate) fn resolve_session_id(
     sessions: &[crate::wire::SessionSummary],
     id: &str,
 ) -> Option<String> {
-    if let Some(exact) = sessions.iter().find(|s| s.session_id == id) {
-        return Some(exact.session_id.clone());
+    match theway_contract::session_id::resolve_unique_prefix(
+        sessions.iter().map(|session| session.session_id.as_str()),
+        id,
+    ) {
+        theway_contract::session_id::PrefixMatch::Unique(id) => Some(id.to_string()),
+        theway_contract::session_id::PrefixMatch::None
+        | theway_contract::session_id::PrefixMatch::Ambiguous => None,
     }
-    let mut matches = sessions
-        .iter()
-        .filter(|s| !id.is_empty() && s.session_id.starts_with(id));
-    let first = matches.next()?.session_id.clone();
-    matches.next().map_or(Some(first), |_| None)
 }
 
 /// Convert one DAG run snapshot into the wire form.
