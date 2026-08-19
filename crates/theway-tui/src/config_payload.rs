@@ -12,11 +12,9 @@
 //!   the settings RPC right after connect — the delta push covers what launch
 //!   args cannot carry (`tui_max_feed_lines`) and keeps the daemon's
 //!   `GetConfig` view canonical.
-//! - **Attach**: the same settings RPC reconciles the running daemon. Fields
-//!   with a runtime applier (model pair, skills dirs, trigger poll interval,
-//!   TUI scrollback) are pushed when they differ; fields the daemon cannot
-//!   re-apply at runtime (builtin skills, base URL, thinking) are reported as
-//!   mismatch notes instead of silently dropped.
+//! - **Attach**: the same settings RPC reconciles the running daemon. Runtime
+//!   fields are applied by the serialized daemon loop; startup-only fields are
+//!   reported as mismatch notes instead of entering the applied config view.
 //!
 //! Precedence is unchanged from the pre-#73 daemon behavior:
 //! CLI flag > config file > daemon built-in default.
@@ -176,16 +174,22 @@ pub(crate) fn assemble_config_from(
 
 /// Reconcile the desired payload against the daemon's current `GetConfig`
 /// view: the patch to push through the settings RPC (only fields that
-/// actually differ) plus mismatch notes for desired values a running daemon
-/// cannot re-apply at runtime (`attach` = attached to an already-running
-/// daemon; on a fresh spawn the launch args already applied them).
+/// actually differ) plus mismatch notes for startup-only desired values
+/// (`attach` = attached to an already-running daemon; on a fresh spawn the
+/// launch args already applied them).
 ///
 /// Field rules mirror the daemon's `Configure` appliers:
 /// - model applies only as a provider+model pair (`SetModel`);
 /// - skills dirs trigger a hot-reload only when they differ;
 /// - trigger poll interval and TUI scrollback apply directly;
-/// - builtin skills / base URL / thinking have no runtime applier yet — they
-///   land in the daemon's config view and are reported as mismatches on attach.
+/// - base URL, thinking and builtin skills are runtime-applied;
+/// - storage service ownership remains startup-only.
+fn clear_field(patch: &mut WireDaemonConfig, field: &str) {
+    if !patch.clear_fields.iter().any(|existing| existing == field) {
+        patch.clear_fields.push(field.to_string());
+    }
+}
+
 pub(crate) fn reconcile(
     desired: &WireDaemonConfig,
     current: &WireDaemonConfig,
@@ -212,70 +216,50 @@ pub(crate) fn reconcile(
         _ => {}
     }
 
-    // Base URL: recorded in the config view, but the running model's endpoint
-    // only changes on (re)spawn.
-    if let Some(url) = &desired.base_url {
-        if current.base_url.as_deref() != Some(url.as_str()) {
-            patch.base_url = Some(url.clone());
-            if attach {
-                notes.push(format!(
-                    "base url {url} requested, but the running daemon uses {} — it takes effect when this client spawns the daemon",
-                    current
-                        .base_url
-                        .as_deref()
-                        .unwrap_or("the provider default endpoint")
-                ));
-            }
+    match desired.base_url.as_ref() {
+        Some(url) if current.base_url.as_ref() != Some(url) => patch.base_url = Some(url.clone()),
+        None if desired.clears("base_url") && current.base_url.is_some() => {
+            clear_field(&mut patch, "base_url");
         }
+        _ => {}
     }
 
-    // Thinking toggle: same posture — view-only at runtime.
-    if let Some(thinking) = desired.thinking {
-        if current.thinking != Some(thinking) {
-            patch.thinking = Some(thinking);
-            if attach {
-                notes.push(
-                    "thinking requested, but the running daemon cannot change it at runtime — it takes effect when this client spawns the daemon"
-                        .to_string(),
-                );
-            }
+    match desired.thinking {
+        Some(thinking) if current.thinking != Some(thinking) => patch.thinking = Some(thinking),
+        None if desired.clears("thinking") && current.thinking.is_some() => {
+            clear_field(&mut patch, "thinking");
         }
+        _ => {}
     }
 
-    // Builtin skills: no runtime applier — the daemon's skill set is fixed at
-    // startup. The value still lands in the config view (kept canonical).
     if !desired.builtin_skills.is_empty() && desired.builtin_skills != current.builtin_skills {
         patch.builtin_skills = desired.builtin_skills.clone();
-        if attach {
-            let running = if current.builtin_skills.is_empty() {
-                "none".to_string()
-            } else {
-                current.builtin_skills.join(", ")
-            };
-            notes.push(format!(
-                "builtin skills [{}] requested, daemon runs [{}] — builtin skills only change on daemon (re)spawn",
-                desired.builtin_skills.join(", "),
-                running
-            ));
-        }
+    } else if desired.clears("builtin_skills") && !current.builtin_skills.is_empty() {
+        clear_field(&mut patch, "builtin_skills");
     }
 
     // Skills dirs: the daemon hot-reloads (and aborts an in-flight turn) on
     // change — an equal list skips the push entirely.
     if !desired.skills_dirs.is_empty() && desired.skills_dirs != current.skills_dirs {
         patch.skills_dirs = desired.skills_dirs.clone();
+    } else if desired.clears("skills_dirs") && !current.skills_dirs.is_empty() {
+        clear_field(&mut patch, "skills_dirs");
     }
 
     if let Some(secs) = desired.trigger_poll_secs {
         if current.trigger_poll_secs != Some(secs) {
             patch.trigger_poll_secs = Some(secs);
         }
+    } else if desired.clears("trigger_poll_secs") && current.trigger_poll_secs.is_some() {
+        clear_field(&mut patch, "trigger_poll_secs");
     }
 
     if let Some(lines) = desired.tui_max_feed_lines {
         if current.tui_max_feed_lines != Some(lines) {
             patch.tui_max_feed_lines = Some(lines);
         }
+    } else if desired.clears("tui_max_feed_lines") && current.tui_max_feed_lines.is_some() {
+        clear_field(&mut patch, "tui_max_feed_lines");
     }
 
     // Controller service endpoints: the tool endpoint is read at call time by
@@ -286,10 +270,11 @@ pub(crate) fn reconcile(
         if current.tool_service_addr.as_deref() != Some(addr.as_str()) {
             patch.tool_service_addr = Some(addr.clone());
         }
+    } else if desired.clears("tool_service_addr") && current.tool_service_addr.is_some() {
+        clear_field(&mut patch, "tool_service_addr");
     }
     if let Some(addr) = &desired.storage_service_addr {
         if current.storage_service_addr.as_deref() != Some(addr.as_str()) {
-            patch.storage_service_addr = Some(addr.clone());
             if attach {
                 notes.push(format!(
                     "storage service {addr} requested, but controller-backed storage only changes on daemon (re)spawn"
@@ -622,7 +607,7 @@ max_feed_lines = 0
     }
 
     #[test]
-    fn reconcile_reports_view_only_fields_on_attach() {
+    fn reconcile_pushes_runtime_fields_without_mismatch_notes() {
         let current = WireDaemonConfig {
             builtin_skills: vec!["old".into()],
             base_url: Some("http://old".into()),
@@ -635,20 +620,14 @@ max_feed_lines = 0
             ..Default::default()
         };
         let (patch, notes) = reconcile(&desired, &current, true);
-        // The values still land in the config view …
         assert_eq!(patch.builtin_skills, vec!["new".to_string()]);
         assert_eq!(patch.base_url.as_deref(), Some("http://new"));
         assert_eq!(patch.thinking, Some(true));
-        // … and each mismatch is reported.
-        assert_eq!(notes.len(), 3, "{notes:?}");
-        assert!(notes[0].contains("base url http://new"), "{notes:?}");
-        assert!(notes[1].contains("thinking"), "{notes:?}");
-        assert!(notes[2].contains("builtin skills [new]"), "{notes:?}");
-        assert!(notes[2].contains("[old]"), "{notes:?}");
+        assert!(notes.is_empty(), "{notes:?}");
     }
 
     #[test]
-    fn reconcile_matching_view_only_fields_stay_quiet() {
+    fn reconcile_matching_runtime_fields_stay_quiet() {
         let current = WireDaemonConfig {
             builtin_skills: vec!["same".into()],
             base_url: Some("http://same".into()),
@@ -658,6 +637,34 @@ max_feed_lines = 0
         let desired = current.clone();
         let (patch, notes) = reconcile(&desired, &current, true);
         assert_eq!(patch, WireDaemonConfig::default());
+        assert!(notes.is_empty(), "{notes:?}");
+    }
+
+    #[test]
+    fn reconcile_forwards_explicit_clears_but_not_absent_preferences() {
+        let current = WireDaemonConfig {
+            base_url: Some("http://current".into()),
+            thinking: Some(true),
+            skills_dirs: vec!["/current".into()],
+            tui_max_feed_lines: Some(42),
+            ..Default::default()
+        };
+
+        let (absent, _) = reconcile(&WireDaemonConfig::default(), &current, true);
+        assert_eq!(absent, WireDaemonConfig::default());
+
+        let desired = WireDaemonConfig {
+            clear_fields: vec![
+                "base_url".into(),
+                "thinking".into(),
+                "skills_dirs".into(),
+                "tui_max_feed_lines".into(),
+            ],
+            ..Default::default()
+        };
+        let (patch, notes) = reconcile(&desired, &current, true);
+
+        assert_eq!(patch.clear_fields, desired.clear_fields);
         assert!(notes.is_empty(), "{notes:?}");
     }
 
@@ -696,28 +703,14 @@ max_feed_lines = 0
             other => panic!("expected Configure, got {other:?}"),
         }
 
-        // The GetConfig view reflects the pushed payload (round-trip).
+        // Admission alone does not mutate the daemon's authoritative view.
         let view = client.get_config().await.unwrap();
-        assert_eq!(view.provider.as_deref(), Some("acme"));
-        assert_eq!(view.trigger_poll_secs, Some(30));
-        assert_eq!(view.tui_max_feed_lines, Some(8000));
+        assert_eq!(view, WireDaemonConfig::default());
     }
 
     #[tokio::test]
-    async fn attach_path_pushes_delta_and_reports_mismatches() {
+    async fn attach_path_pushes_runtime_fields() {
         let (mut client, mut rx, _ops) = test_daemon_client().await;
-        // Seed the daemon's view: a running model + builtin skill set.
-        let seed = WireDaemonConfig {
-            provider: Some("acme".into()),
-            model: Some("warp-9".into()),
-            builtin_skills: vec!["old".into()],
-            trigger_poll_secs: Some(600),
-            ..Default::default()
-        };
-        assert!(client.configure(&seed).await.unwrap());
-        rx.recv().await.expect("seed configure");
-
-        // Attach with a different model + builtin set + new scrollback cap.
         let desired = WireDaemonConfig {
             provider: Some("acme".into()),
             model: Some("warp-10".into()),
@@ -728,24 +721,15 @@ max_feed_lines = 0
         };
         let outcome = provision_config(&mut client, &desired, true).await.unwrap();
         assert!(outcome.pushed);
+        assert!(outcome.notes.is_empty(), "{:?}", outcome.notes);
 
-        // The builtin mismatch is reported (no runtime applier).
-        assert_eq!(outcome.notes.len(), 1, "{:?}", outcome.notes);
-        assert!(
-            outcome.notes[0].contains("builtin skills [new]"),
-            "{:?}",
-            outcome.notes
-        );
-
-        // The pushed patch carries only the differing fields: the matching
-        // trigger interval stays out.
         let cmd = rx.recv().await.expect("configure command");
         match cmd {
             WireCommand::Configure { config } => {
                 assert_eq!(config.model.as_deref(), Some("warp-10"));
                 assert_eq!(config.builtin_skills, vec!["new".to_string()]);
                 assert_eq!(config.tui_max_feed_lines, Some(8000));
-                assert_eq!(config.trigger_poll_secs, None, "matching field skipped");
+                assert_eq!(config.trigger_poll_secs, Some(600));
             }
             other => panic!("expected Configure, got {other:?}"),
         }
@@ -754,16 +738,8 @@ max_feed_lines = 0
     #[tokio::test]
     async fn provision_skips_rpc_when_daemon_already_matches() {
         let (mut client, mut rx, _ops) = test_daemon_client().await;
-        let desired = WireDaemonConfig {
-            provider: Some("acme".into()),
-            model: Some("warp-9".into()),
-            trigger_poll_secs: Some(600),
-            ..Default::default()
-        };
-        assert!(client.configure(&desired).await.unwrap());
-        rx.recv().await.expect("seed configure");
+        let desired = WireDaemonConfig::default();
 
-        // Second push of the same payload: nothing differs → no RPC.
         let outcome = provision_config(&mut client, &desired, true).await.unwrap();
         assert!(!outcome.pushed);
         assert!(outcome.notes.is_empty(), "{:?}", outcome.notes);
