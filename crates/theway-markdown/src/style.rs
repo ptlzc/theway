@@ -5,7 +5,7 @@
 
 use anstyle::{Effects, Style};
 
-use crate::colors::adapt_style;
+use crate::colors::{ColorLevel, adapt_style_for, get_color_level};
 
 /// Table border characters for rendering tables in pretty mode.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -165,47 +165,53 @@ impl MarkdownStyle {
     ///
     /// This downgrades RGB colors to 256-color or 16-color as needed.
     pub fn adapt(self) -> Self {
+        self.adapt_for(get_color_level())
+    }
+
+    /// Adapt all styles for an explicitly supplied terminal capability.
+    pub fn adapt_for(self, color_level: ColorLevel) -> Self {
+        let adapt = |style| adapt_style_for(style, color_level);
         Self {
             heading_inner: [
-                adapt_style(self.heading_inner[0]),
-                adapt_style(self.heading_inner[1]),
-                adapt_style(self.heading_inner[2]),
-                adapt_style(self.heading_inner[3]),
-                adapt_style(self.heading_inner[4]),
-                adapt_style(self.heading_inner[5]),
+                adapt(self.heading_inner[0]),
+                adapt(self.heading_inner[1]),
+                adapt(self.heading_inner[2]),
+                adapt(self.heading_inner[3]),
+                adapt(self.heading_inner[4]),
+                adapt(self.heading_inner[5]),
             ],
             heading_outer: [
-                adapt_style(self.heading_outer[0]),
-                adapt_style(self.heading_outer[1]),
-                adapt_style(self.heading_outer[2]),
-                adapt_style(self.heading_outer[3]),
-                adapt_style(self.heading_outer[4]),
-                adapt_style(self.heading_outer[5]),
+                adapt(self.heading_outer[0]),
+                adapt(self.heading_outer[1]),
+                adapt(self.heading_outer[2]),
+                adapt(self.heading_outer[3]),
+                adapt(self.heading_outer[4]),
+                adapt(self.heading_outer[5]),
             ],
-            strong_inner: adapt_style(self.strong_inner),
-            strong_outer: adapt_style(self.strong_outer),
-            emphasis_inner: adapt_style(self.emphasis_inner),
-            emphasis_outer: adapt_style(self.emphasis_outer),
-            strikethrough_inner: adapt_style(self.strikethrough_inner),
-            strikethrough_outer: adapt_style(self.strikethrough_outer),
-            inline_code_inner: adapt_style(self.inline_code_inner),
-            inline_code_outer: adapt_style(self.inline_code_outer),
-            blockquote_outer: adapt_style(self.blockquote_outer),
-            task_checked: adapt_style(self.task_checked),
-            task_unchecked: adapt_style(self.task_unchecked),
-            list_item: adapt_style(self.list_item),
-            rule: adapt_style(self.rule),
-            link_outer: adapt_style(self.link_outer),
-            link_text: adapt_style(self.link_text),
-            link_url: adapt_style(self.link_url),
-            link_title: adapt_style(self.link_title),
-            code_outer: adapt_style(self.code_outer),
-            code_language: adapt_style(self.code_language),
-            code_untagged: adapt_style(self.code_untagged),
-            code_background: adapt_style(self.code_background),
-            table_outer: adapt_style(self.table_outer),
-            text: adapt_style(self.text),
-            math: adapt_style(self.math),
+            strong_inner: adapt(self.strong_inner),
+            strong_outer: adapt(self.strong_outer),
+            emphasis_inner: adapt(self.emphasis_inner),
+            emphasis_outer: adapt(self.emphasis_outer),
+            strikethrough_inner: adapt(self.strikethrough_inner),
+            strikethrough_outer: adapt(self.strikethrough_outer),
+            inline_code_inner: adapt(self.inline_code_inner),
+            inline_code_outer: adapt(self.inline_code_outer),
+            blockquote_outer: adapt(self.blockquote_outer),
+            task_checked: adapt(self.task_checked),
+            task_unchecked: adapt(self.task_unchecked),
+            list_item: adapt(self.list_item),
+            rule: adapt(self.rule),
+            link_outer: adapt(self.link_outer),
+            link_text: adapt(self.link_text),
+            link_url: adapt(self.link_url),
+            link_title: adapt(self.link_title),
+            code_outer: adapt(self.code_outer),
+            code_language: adapt(self.code_language),
+            code_untagged: adapt(self.code_untagged),
+            code_background: adapt(self.code_background),
+            table_outer: adapt(self.table_outer),
+            text: adapt(self.text),
+            math: adapt(self.math),
         }
     }
 }

@@ -47,8 +47,9 @@ mod url_scan;
 pub use buffers::MarkdownBuffers;
 pub use checkpoint::{Checkpoint, CheckpointKind};
 pub use colors::{
-    ColorLevel, adapt_color, adapt_style, detect_color_level, get_color_level,
-    polarity_safe_syntax, polarity_safe_syntax_ansi, set_color_level_cap, set_polarity_safe_syntax,
+    ColorLevel, adapt_color, adapt_color_for, adapt_style, adapt_style_for, detect_color_level,
+    get_color_level, polarity_safe_syntax, polarity_safe_syntax_ansi, set_color_level_cap,
+    set_polarity_safe_syntax,
 };
 pub use latex_delimiters::{LatexDelimiterNormalizer, normalize_latex_delimiters};
 pub use mermaid::{MermaidArt, MermaidStyles, render_mermaid_art};
@@ -57,7 +58,7 @@ pub use parse::{MarkdownParser, ParsedMarkdown};
 pub use source_map::SourceMap;
 pub use streaming::StreamingMarkdownRenderer;
 pub use style::{MarkdownStyle, TableBorders};
-pub use syntax::{Syntect, default_syntect};
+pub use syntax::{Syntect, default_syntect, default_syntect_with_color_level};
 
 // Re-export test helpers when fuzzing
 #[cfg(fuzzing)]

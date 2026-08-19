@@ -12,6 +12,8 @@ use syntect::{
     parsing::{SyntaxReference, SyntaxSet},
 };
 
+use crate::colors::{ColorLevel, get_color_level};
+
 /// Syntax highlighting configuration.
 ///
 /// Holds the theme and syntax definitions for code highlighting.
@@ -21,6 +23,7 @@ pub struct Syntect {
     pub theme: SyntectTheme,
     /// The syntax definitions (supports 250+ languages via two-face).
     pub syntax_set: SyntaxSet,
+    color_level: ColorLevel,
 }
 
 impl Syntect {
@@ -35,11 +38,25 @@ impl Syntect {
     /// let syntect = Syntect::new(include_bytes!("assets/tokyo-night.tmTheme"));
     /// ```
     pub fn new(theme_bytes: &[u8]) -> Self {
+        Self::with_color_level(theme_bytes, get_color_level())
+    }
+
+    /// Create a syntax highlighter with an explicit terminal color capability.
+    pub fn with_color_level(theme_bytes: &[u8], color_level: ColorLevel) -> Self {
         let mut cursor = Cursor::new(theme_bytes);
         let theme = ThemeSet::load_from_reader(&mut cursor).expect("Failed to load theme");
         // Use two-face's extended syntax set which includes 250+ languages from bat
         let syntax_set = two_face::syntax::extra_newlines();
-        Self { theme, syntax_set }
+        Self {
+            theme,
+            syntax_set,
+            color_level,
+        }
+    }
+
+    /// Terminal capability used when converting highlighted syntax colors.
+    pub fn color_level(&self) -> ColorLevel {
+        self.color_level
     }
 
     /// Find a syntax definition by file path extension.
@@ -168,7 +185,12 @@ pub(crate) fn syntax_highlight_raw(
 pub fn test_syntect() -> &'static Syntect {
     use std::sync::OnceLock;
     static TEST_SYNTECT: OnceLock<Syntect> = OnceLock::new();
-    TEST_SYNTECT.get_or_init(|| Syntect::new(include_bytes!("../assets/tokyo-night.tmTheme")))
+    TEST_SYNTECT.get_or_init(|| {
+        Syntect::with_color_level(
+            include_bytes!("../assets/tokyo-night.tmTheme"),
+            ColorLevel::TrueColor,
+        )
+    })
 }
 
 /// Get the shared default [`Syntect`] instance for production renders.
@@ -177,9 +199,28 @@ pub fn test_syntect() -> &'static Syntect {
 /// process-wide static, so consumers (e.g. the TUI feed renderer) share one
 /// syntax set + theme instead of shipping or embedding their own copy.
 pub fn default_syntect() -> &'static Syntect {
+    default_syntect_with_color_level(get_color_level())
+}
+
+/// Get the shared default syntax highlighter for an explicit color capability.
+///
+/// Each capability has its own lazy slot, so tests can request deterministic
+/// rendering without changing the process-wide terminal detection cache.
+pub fn default_syntect_with_color_level(color_level: ColorLevel) -> &'static Syntect {
     use std::sync::OnceLock;
-    static DEFAULT_SYNTECT: OnceLock<Syntect> = OnceLock::new();
-    DEFAULT_SYNTECT.get_or_init(|| Syntect::new(include_bytes!("../assets/grok-night.tmTheme")))
+    static NONE: OnceLock<Syntect> = OnceLock::new();
+    static BASIC: OnceLock<Syntect> = OnceLock::new();
+    static ANSI256: OnceLock<Syntect> = OnceLock::new();
+    static TRUE_COLOR: OnceLock<Syntect> = OnceLock::new();
+    let slot = match color_level {
+        ColorLevel::None => &NONE,
+        ColorLevel::Basic => &BASIC,
+        ColorLevel::Ansi256 => &ANSI256,
+        ColorLevel::TrueColor => &TRUE_COLOR,
+    };
+    slot.get_or_init(|| {
+        Syntect::with_color_level(include_bytes!("../assets/grok-night.tmTheme"), color_level)
+    })
 }
 
 #[cfg(test)]

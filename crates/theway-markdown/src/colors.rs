@@ -193,11 +193,21 @@ pub fn set_color_level(level: ColorLevel) -> Result<(), ColorLevel> {
 /// When [`polarity_safe_syntax`] is enabled (minimal mode), RGB tokens take
 /// the dual-polarity path instead of nearest-ANSI16.
 pub fn adapt_color(color: Color) -> Option<Color> {
+    adapt_color_for(color, get_color_level())
+}
+
+/// Convert a color for an explicitly supplied terminal capability.
+///
+/// Renderers use this path when the caller has already resolved terminal
+/// support, keeping tests and concurrent clients independent of ambient
+/// process environment initialization.
+pub fn adapt_color_for(color: Color, level: ColorLevel) -> Option<Color> {
+    if level == ColorLevel::None {
+        return None;
+    }
     if polarity_safe_syntax() {
         return adapt_color_polarity_safe(color);
     }
-
-    let level = get_color_level();
 
     match level {
         ColorLevel::None => None,
@@ -316,8 +326,17 @@ fn ansi256_to_rgb(idx: u8) -> (u8, u8, u8) {
 
 /// Convert an `anstyle::Style` to the appropriate color level.
 pub fn adapt_style(style: anstyle::Style) -> anstyle::Style {
-    let fg = style.get_fg_color().and_then(adapt_color);
-    let bg = style.get_bg_color().and_then(adapt_color);
+    adapt_style_for(style, get_color_level())
+}
+
+/// Convert a style for an explicitly supplied terminal capability.
+pub fn adapt_style_for(style: anstyle::Style, level: ColorLevel) -> anstyle::Style {
+    let fg = style
+        .get_fg_color()
+        .and_then(|color| adapt_color_for(color, level));
+    let bg = style
+        .get_bg_color()
+        .and_then(|color| adapt_color_for(color, level));
     let effects = style.get_effects();
 
     let mut new_style = anstyle::Style::new();
@@ -440,12 +459,10 @@ mod tests {
     }
 
     #[test]
-    fn adapt_color_polarity_safe_flag_drops_gray_rgb() {
-        set_polarity_safe_syntax(true);
-        let out = adapt_color(Color::Rgb(RgbColor(0xc8, 0xc8, 0xc8)));
+    fn adapt_color_polarity_safe_drops_gray_rgb() {
+        let out = adapt_color_polarity_safe(Color::Rgb(RgbColor(0xc8, 0xc8, 0xc8)));
         assert_eq!(out, None, "gray body must inherit default fg");
-        let magenta = adapt_color(Color::Rgb(RgbColor(0xbb, 0x9a, 0xf7)));
+        let magenta = adapt_color_polarity_safe(Color::Rgb(RgbColor(0xbb, 0x9a, 0xf7)));
         assert_eq!(magenta, Some(Color::Ansi(AnsiColor::Magenta)));
-        set_polarity_safe_syntax(false);
     }
 }

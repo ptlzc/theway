@@ -290,7 +290,7 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
                                     full_style.bg_color(self.ms.code_background.get_bg_color());
                                 // This is the only legitimate inline adapt_style call
                                 // for dynamically created syntect+background combo
-                                let adapted = adapt_style(with_bg);
+                                let adapted = adapt_style_for(with_bg, self.color_level);
                                 let ratatui_style: ratatui::style::Style = adapted.style_into();
 
                                 for (idx, segment) in text.split('\n').enumerate() {

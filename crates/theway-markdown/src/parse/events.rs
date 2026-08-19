@@ -86,6 +86,8 @@ impl<'a, 'b, 'syn, 'oc> MarkdownParser<'a, 'b, 'syn, 'oc> {
             self.buffers,
             self.last_checkpoint,
             self.link_id_counter,
+            self.syntect
+                .map_or_else(get_color_level, Syntect::color_level),
         )
     }
 

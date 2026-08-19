@@ -138,7 +138,8 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
                         out.push_str(&Reset.to_string());
 
                         let repl = &self.buffers.replaces[ev.index];
-                        let ansi_content = render_replace_ansi(&repl.highlighted);
+                        let ansi_content =
+                            render_replace_ansi(&repl.highlighted, self.color_level);
 
                         let replace_text_len: usize = repl
                             .highlighted

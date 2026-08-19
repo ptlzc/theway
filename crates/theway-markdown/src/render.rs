@@ -14,7 +14,7 @@ use syntect::highlighting::Style as SyntectStyle;
 
 use crate::buffers::{MarkdownBuffers, RenderEvent, RenderEventKind, unicode_display_width};
 use crate::checkpoint::Checkpoint;
-use crate::colors::adapt_style;
+use crate::colors::{ColorLevel, adapt_style_for};
 use crate::hyperlinks::{ChunkLinkRange, chunk_link_offsets, emit_segment_hyperlinks};
 use crate::output::{HyperlinkTarget, MarkdownRenderOutput};
 use crate::parse::ParsedMarkdown;
@@ -91,7 +91,10 @@ fn anstyle_to_ratatui_color(color: anstyle::Color) -> ratatui::style::Color {
 }
 
 /// Render raw highlighted spans to an ANSI string.
-fn render_replace_ansi(highlighted: &[Vec<(SyntectStyle, String)>]) -> String {
+fn render_replace_ansi(
+    highlighted: &[Vec<(SyntectStyle, String)>],
+    color_level: ColorLevel,
+) -> String {
     let mut out = String::new();
     for line_spans in highlighted {
         for (style, text) in line_spans {
@@ -100,7 +103,7 @@ fn render_replace_ansi(highlighted: &[Vec<(SyntectStyle, String)>]) -> String {
             }
             let full_style = anstyle_syntect::to_anstyle(*style);
             let fg_only = full_style.bg_color(None);
-            let adapted = adapt_style(fg_only);
+            let adapted = adapt_style_for(fg_only, color_level);
             if adapted != Style::new() {
                 write!(out, "{adapted}{text}\x1b[0m").ok();
             } else {

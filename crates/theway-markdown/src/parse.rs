@@ -19,6 +19,7 @@ use crate::buffers::{
     TableReplace, TableState, Transform, floor_char_boundary, unicode_display_width,
 };
 use crate::checkpoint::CheckpointKind;
+use crate::colors::{ColorLevel, get_color_level};
 use crate::latex;
 use crate::open_code_highlighter::OpenCodeHighlighter;
 use crate::style::{MarkdownStyle, TableBorders};
@@ -430,6 +431,7 @@ pub struct ParsedMarkdown<'a, 'b> {
     pub(crate) buffers: &'b mut MarkdownBuffers,
     pub(crate) last_checkpoint: Option<(CheckpointKind, usize)>,
     pub(crate) next_link_id: u32,
+    pub(crate) color_level: ColorLevel,
 }
 
 impl<'a, 'b> ParsedMarkdown<'a, 'b> {
@@ -439,6 +441,7 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
         buffers: &'b mut MarkdownBuffers,
         last_checkpoint: Option<(CheckpointKind, usize)>,
         next_link_id: u32,
+        color_level: ColorLevel,
     ) -> Self {
         Self {
             text,
@@ -446,6 +449,7 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
             buffers,
             last_checkpoint,
             next_link_id,
+            color_level,
         }
     }
 }
