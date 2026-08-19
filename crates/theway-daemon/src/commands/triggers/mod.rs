@@ -99,7 +99,7 @@ impl SlashCommand<DaemonCtx> for TriggersCommand {
             }
             "audit" => {
                 let limit = argv.get(1).and_then(|s| s.parse().ok()).unwrap_or(10);
-                let entries = match ctx.harness.session().entries().await {
+                let entries = match ctx.extra.harness.session().entries().await {
                     Ok(entries) => entries,
                     Err(e) => return CommandOutcome::Error(format!("read trigger audit: {e}")),
                 };
@@ -312,6 +312,7 @@ async fn write_cron_control_plane_audit(
     let job = after.or(before);
     let audit = crate::triggers::cron::cron_control_plane_audit(op, "slash", before, after);
     if let Err(e) = ctx
+        .extra
         .harness
         .session()
         .append_custom("cron_control_plane", Some(audit))
@@ -331,6 +332,7 @@ async fn write_cron_control_plane_audit(
 /// when the user's jobs simply live in another session.
 async fn automation_elsewhere_hint_for_ctx(ctx: &CommandCtx<'_, DaemonCtx>) -> Option<String> {
     let metadata = ctx
+        .extra
         .harness
         .session()
         .storage()

@@ -23,7 +23,7 @@ impl SlashCommand<DaemonCtx> for SkillCommand {
             return CommandOutcome::Error("usage: /skill <name>".into());
         }
         let name = &argv[0];
-        let skills = ctx.harness.skills();
+        let skills = ctx.extra.harness.skills();
         let Some(skill) = skills.iter().find(|s| s.name == *name) else {
             let mut matches = skills
                 .iter()

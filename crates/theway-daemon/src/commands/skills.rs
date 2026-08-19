@@ -20,7 +20,7 @@ impl SlashCommand<DaemonCtx> for SkillsCommand {
     async fn run(&self, argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
         match argv.first().map(String::as_str) {
             None | Some("list" | "ls") => {
-                print_skills_list(&ctx.harness.skills());
+                print_skills_list(&ctx.extra.harness.skills());
                 CommandOutcome::Handled
             }
             Some("install") => install_skill(&argv[1..], ctx).await,
@@ -67,7 +67,7 @@ fn show_skill(argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcom
         Ok(source) => source,
         Err(e) => return CommandOutcome::Error(e),
     };
-    let skills = ctx.harness.skills();
+    let skills = ctx.extra.harness.skills();
     let skill = match resolve_active_skill(&skills, name, source) {
         Ok(skill) => skill,
         Err(e) => return CommandOutcome::Error(e),
@@ -90,7 +90,7 @@ fn show_skill(argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcom
 }
 
 async fn reload_skills(ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
-    match ctx.harness.reload_skills_from_disk().await {
+    match ctx.extra.harness.reload_skills_from_disk().await {
         Ok(out) => {
             cprintln!(
                 "reloaded skills: {} loaded, {} diagnostics",
@@ -234,7 +234,7 @@ async fn set_skill_enabled(
         Ok(source) => source,
         Err(e) => return CommandOutcome::Error(e),
     };
-    let skills = ctx.harness.skills();
+    let skills = ctx.extra.harness.skills();
     let skill = match resolve_active_skill(&skills, name, source) {
         Ok(skill) => skill,
         Err(e) => return CommandOutcome::Error(e),
@@ -263,7 +263,7 @@ async fn set_skill_enabled(
     {
         return CommandOutcome::Error(format!("persist skill state failed: {e}"));
     }
-    match ctx.harness.reload_skills_from_disk().await {
+    match ctx.extra.harness.reload_skills_from_disk().await {
         Ok(out) => {
             write_skill_state_audit(ctx, &name, source, was_enabled, enabled).await;
             let diagnostics = if out.diagnostics.is_empty() {
@@ -376,7 +376,7 @@ fn skill_harness_cell(
     let cell = std::sync::Arc::new(once_cell::sync::OnceCell::new());
     // This is a fresh cell scoped to a single slash command invocation, so set() can only fail
     // if this helper is called incorrectly inside the same invocation.
-    let _ = cell.set(ctx.harness.clone());
+    let _ = cell.set(ctx.extra.harness.clone());
     cell
 }
 
@@ -408,6 +408,7 @@ async fn write_skill_state_audit(
         "after_enabled": after_enabled,
     });
     if let Err(e) = ctx
+        .extra
         .harness
         .session()
         .append_custom("skill_control_plane", Some(audit))

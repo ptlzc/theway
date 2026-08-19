@@ -33,6 +33,7 @@ theway-core = { path = "../theway-core" }
 theway-storage = { path = "../theway-storage" }
 theway-mcp = { path = "../theway-mcp" }
 theway-transport = { path = "../theway-transport" }
+rmcp = { version = "3", features = ["server", "transport-io"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "fs", "io-util", "io-std", "process", "signal"] }
 tokio-util = { version = "0.7", features = ["io"] }
 tracing = "0.1"
@@ -105,4 +106,3 @@ tempfile = "3"
 
 [lints]
 workspace = true
-

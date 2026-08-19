@@ -74,20 +74,19 @@ fn executor_for(harness: &Arc<AgentHarness>) -> Arc<TriggerExecutor> {
     ))
 }
 
-fn daemon_ctx(executor: Arc<TriggerExecutor>) -> DaemonCtx {
+fn daemon_ctx(harness: &Arc<AgentHarness>, executor: Arc<TriggerExecutor>) -> DaemonCtx {
     DaemonCtx {
+        harness: harness.clone(),
         trigger_executor: executor,
         storage: local_runtime_storage(),
     }
 }
 
 fn command_ctx<'a>(
-    harness: &'a Arc<AgentHarness>,
     extra: &'a DaemonCtx,
     cwd: &'a Path,
 ) -> CommandCtx<'a, DaemonCtx> {
     CommandCtx {
-        harness,
         session_id: "test-session",
         log_path: None,
         tool_count: 0,
@@ -125,8 +124,8 @@ fn leaf_entry(id: &str) -> SessionTreeEntry {
 async fn save_command_writes_absolute_path() {
     let session = new_session();
     let (tmp, harness, executor) = setup(session);
-    let extra = daemon_ctx(executor.clone());
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let dest = tmp.path().join("absolute.md");
     let outcome = SaveCommand
@@ -143,8 +142,8 @@ async fn save_command_writes_absolute_path() {
 async fn name_command_reads_back_configured_name() {
     let session = new_session();
     let (tmp, harness, executor) = setup(session.clone());
-    let extra = daemon_ctx(executor.clone());
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = NameCommand.run(&["work".into()], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Handled));
@@ -181,8 +180,8 @@ async fn share_command_passes_public_flag_to_gh() {
 
     let session = new_session();
     let (tmp, harness, executor) = setup(session);
-    let extra = daemon_ctx(executor.clone());
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = ShareCommand.run(&["--public".into()], &ctx).await;
 
@@ -202,8 +201,8 @@ async fn session_export_succeeds_for_disk_backed_session() {
     let work = tempfile::tempdir().unwrap();
     let session = sqlite_session(&work.path().join("source.db"), work.path()).await;
     let (tmp, harness, executor) = setup(session);
-    let extra = daemon_ctx(executor.clone());
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SessionCommand
         .run(&["export".into(), "backup.theway-session".into()], &ctx)
@@ -303,8 +302,8 @@ async fn session_import_succeeds_and_returns_activation_for_enabled_sidecars() {
     let archive = create_archive_with_sidecars(work.path(), "with-sidecars.theway-session").await;
     let session = new_session();
     let (_tmp, harness, executor) = setup(session);
-    let extra = daemon_ctx(executor.clone());
-    let ctx = command_ctx(&harness, &extra, work.path());
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, work.path());
 
     let outcome = SessionCommand
         .run(
@@ -336,8 +335,8 @@ async fn session_import_succeeds_without_sidecars_as_handled() {
     let _archive = create_plain_archive(work.path(), "plain.theway-session").await;
     let session = new_session();
     let (_tmp, harness, executor) = setup(session);
-    let extra = daemon_ctx(executor.clone());
-    let ctx = command_ctx(&harness, &extra, work.path());
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, work.path());
 
     let outcome = SessionCommand
         .run(&["import".into(), "plain.theway-session".into()], &ctx)
@@ -430,10 +429,11 @@ async fn session_import_maps_open_repo_error() {
     let session = new_session();
     let (tmp, harness, executor) = setup(session);
     let extra = DaemonCtx {
+        harness: harness.clone(),
         trigger_executor: executor.clone(),
         storage: Arc::new(FailingOpenStorage),
     };
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SessionCommand
         .run(&["import".into(), "missing.theway-session".into()], &ctx)
@@ -457,8 +457,8 @@ async fn fork_command_succeeds_for_disk_backed_session() {
     let session = sqlite_session(&work.path().join("source.db"), work.path()).await;
     session.append_message(user_message("fork me")).await.unwrap();
     let (tmp, harness, executor) = setup(session);
-    let extra = daemon_ctx(executor.clone());
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = ForkCommand.run(&["1".into()], &ctx).await;
 
@@ -476,8 +476,8 @@ async fn fork_listing_skips_non_message_entries() {
     session.append_message(user_message("first")).await.unwrap();
 
     let (tmp, harness, executor) = setup(session);
-    let extra = daemon_ctx(executor.clone());
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = ForkCommand.run(&[], &ctx).await;
 

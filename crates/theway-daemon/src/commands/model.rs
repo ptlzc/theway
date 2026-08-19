@@ -48,7 +48,7 @@ impl SlashCommand<DaemonCtx> for ModelCommand {
         let Some(model) = get_model(&provider_obj, &id) else {
             return CommandOutcome::Error(unknown_model_error(&provider, &id));
         };
-        match ctx.harness.set_model(model.clone()).await {
+        match ctx.extra.harness.set_model(model.clone()).await {
             Ok(_) => {
                 if let Some(hint) = model_credential_hint(&provider) {
                     cprintln!("selected {provider}:{id}, but login is required: {hint}");
@@ -77,7 +77,7 @@ impl SlashCommand<DaemonCtx> for ThinkingCommand {
     }
     async fn run(&self, argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
         if argv.is_empty() {
-            let lvl = ctx.harness.agent().state().thinking_level;
+            let lvl = ctx.extra.harness.agent().state().thinking_level;
             cprintln!("thinking level: {}", lvl.map(|l| l.as_str()).unwrap_or("?"));
             return CommandOutcome::Handled;
         }
@@ -88,7 +88,7 @@ impl SlashCommand<DaemonCtx> for ThinkingCommand {
                 return CommandOutcome::Error(format!("invalid level: {e}"));
             }
         };
-        match ctx.harness.set_thinking_level(level).await {
+        match ctx.extra.harness.set_thinking_level(level).await {
             Ok(_) => {
                 cprintln!("thinking level: {}", level.as_str());
                 CommandOutcome::Handled
@@ -195,11 +195,11 @@ impl SlashCommand<DaemonCtx> for CostCommand {
     }
     async fn run(&self, argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
         if argv.first().map(|s| s.as_str()) == Some("reset") {
-            ctx.harness.reset_cost();
+            ctx.extra.harness.reset_cost();
             cprintln!("cost counters reset");
             return CommandOutcome::Handled;
         }
-        let snap = ctx.harness.cost();
+        let snap = ctx.extra.harness.cost();
         cprintln!("{}", theway_core::cost_full_breakdown(&snap));
         CommandOutcome::Handled
     }

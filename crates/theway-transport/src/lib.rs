@@ -1,9 +1,8 @@
 //! theway-transport — protocol layer for the theway agent runtime.
 //!
 //! Wire model (`wire`) plus the transport implementations: HTTP/SSE/WS
-//! (`http` / `ws`), gRPC (`grpc`, generated proto in this crate), and MCP server
-//! (`mcp`, via the rmcp SDK). Independent of the server business logic — the
-//! server programs against this crate's channel surface
+//! (`http` / `ws`) and gRPC (`grpc`, generated proto in this crate). Independent
+//! of the server business logic — the server programs against this crate's channel surface
 //! ([`TransportEndpoints`]) instead of passing its app internals in.
 //!
 //! # Module zones
@@ -11,7 +10,7 @@
 //! Modules fall into two zones, declared in the two groups below:
 //!
 //! - **protocol** — the wire model and the transport implementations around it:
-//!   `wire`, `grpc`, `http`, `ws`, `mcp`, `proto`, `tools`, `client`, `host`,
+//!   `wire`, `grpc`, `http`, `ws`, `proto`, `tools`, `client`, `host`,
 //!   `transport`, `inbox`, `testing`. These implement or directly serve the
 //!   protocol surfaces the server and its clients speak.
 //! - **shared** — client/daemon contract helpers (not protocol): `auth`,
@@ -29,7 +28,6 @@ pub mod grpc;
 pub mod host;
 pub mod http;
 pub mod inbox;
-pub mod mcp;
 pub mod proto;
 pub mod state;
 pub mod testing;

@@ -72,12 +72,10 @@ fn executor_for(harness: &Arc<AgentHarness>) -> Arc<TriggerExecutor> {
 }
 
 fn command_ctx<'a>(
-    harness: &'a Arc<AgentHarness>,
     extra: &'a DaemonCtx,
     cwd: &'a Path,
 ) -> CommandCtx<'a, DaemonCtx> {
     CommandCtx {
-        harness,
         session_id: "test-session",
         log_path: None,
         tool_count: 0,
@@ -104,10 +102,11 @@ fn skill_command_metadata_is_stable() {
 async fn skill_command_requires_exactly_one_name() {
     let (tmp, harness, executor) = setup(vec![]);
     let extra = DaemonCtx {
+        harness: harness.clone(),
         trigger_executor: executor.clone(),
         storage: local_runtime_storage(),
     };
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SkillCommand.run(&[], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("usage: /skill <name>")));
@@ -120,10 +119,11 @@ async fn skill_command_requires_exactly_one_name() {
 async fn skill_command_attaches_loaded_skill() {
     let (tmp, harness, executor) = setup(vec![skill("review-pr", false, SkillSource::User)]);
     let extra = DaemonCtx {
+        harness: harness.clone(),
         trigger_executor: executor.clone(),
         storage: local_runtime_storage(),
     };
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SkillCommand.run(&["review-pr".into()], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::AttachSkill { name } if name == "review-pr"));
@@ -133,10 +133,11 @@ async fn skill_command_attaches_loaded_skill() {
 async fn skill_command_rejects_disabled_skill() {
     let (tmp, harness, executor) = setup(vec![skill("review-pr", true, SkillSource::User)]);
     let extra = DaemonCtx {
+        harness: harness.clone(),
         trigger_executor: executor.clone(),
         storage: local_runtime_storage(),
     };
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SkillCommand.run(&["review-pr".into()], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("disabled (disable_model_invocation=true)")));
@@ -150,10 +151,11 @@ async fn skill_command_suggests_prefix_and_contains_matches() {
         skill("daily-rust-digest", false, SkillSource::User),
     ]);
     let extra = DaemonCtx {
+        harness: harness.clone(),
         trigger_executor: executor.clone(),
         storage: local_runtime_storage(),
     };
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SkillCommand.run(&["review".into()], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("Did you mean: review-pr?")));
@@ -166,10 +168,11 @@ async fn skill_command_suggests_prefix_and_contains_matches() {
 async fn skill_command_unknown_name_has_no_hint() {
     let (tmp, harness, executor) = setup(vec![skill("review-pr", false, SkillSource::User)]);
     let extra = DaemonCtx {
+        harness: harness.clone(),
         trigger_executor: executor.clone(),
         storage: local_runtime_storage(),
     };
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SkillCommand.run(&["zzz".into()], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("no skill named 'zzz'") && !msg.contains("Did you mean")));

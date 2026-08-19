@@ -95,20 +95,19 @@ fn executor_for(harness: &Arc<AgentHarness>) -> Arc<TriggerExecutor> {
     ))
 }
 
-fn daemon_ctx(executor: Arc<TriggerExecutor>) -> DaemonCtx {
+fn daemon_ctx(harness: &Arc<AgentHarness>, executor: Arc<TriggerExecutor>) -> DaemonCtx {
     DaemonCtx {
+        harness: harness.clone(),
         trigger_executor: executor,
         storage: local_runtime_storage(),
     }
 }
 
 fn command_ctx<'a>(
-    harness: &'a Arc<AgentHarness>,
     extra: &'a DaemonCtx,
     cwd: &'a Path,
 ) -> CommandCtx<'a, DaemonCtx> {
     CommandCtx {
-        harness,
         session_id: "test-session",
         log_path: None,
         tool_count: 0,
@@ -140,11 +139,10 @@ async fn diag_prints_model_thinking_tools_skills_cost_and_log() {
     harness.agent().state().thinking_level = Some(ThinkingLevel::High);
 
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
+    let extra = daemon_ctx(&harness, executor);
     let tmp = tempfile::tempdir().unwrap();
     let log_path = tmp.path().join("session.log");
     let ctx = CommandCtx {
-        harness: &harness,
         session_id: "sess-1",
         log_path: Some(&log_path),
         tool_count: 3,
@@ -179,9 +177,9 @@ async fn diag_handles_missing_model_and_thinking() {
     }
 
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
+    let extra = daemon_ctx(&harness, executor);
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = DiagCommand.run(&[], &ctx).await;
 
@@ -202,9 +200,9 @@ async fn template_lists_empty_catalog_message() {
     let session = new_session();
     let harness = harness_with(session);
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
+    let extra = daemon_ctx(&harness, executor);
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = TemplateCommand.run(&[], &ctx).await;
 
@@ -236,9 +234,9 @@ async fn template_lists_loaded_templates() {
     };
     let harness = Arc::new(AgentHarness::new(options));
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
+    let extra = daemon_ctx(&harness, executor);
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = TemplateCommand.run(&[], &ctx).await;
 
@@ -254,9 +252,9 @@ async fn template_with_name_returns_run_prompt_template() {
     let session = new_session();
     let harness = harness_with(session);
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
+    let extra = daemon_ctx(&harness, executor);
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = TemplateCommand
         .run(&["greet".into(), "who=world".into(), "x=1".into()], &ctx)
@@ -277,9 +275,9 @@ async fn template_rejects_arg_without_equals() {
     let session = new_session();
     let harness = harness_with(session);
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
+    let extra = daemon_ctx(&harness, executor);
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = TemplateCommand
         .run(&["greet".into(), "badarg".into()], &ctx)
@@ -299,9 +297,9 @@ async fn compact_without_args_uses_no_custom_instructions() {
     let session = new_session();
     let harness = harness_with(session);
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
+    let extra = daemon_ctx(&harness, executor);
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = CompactCommand.run(&[], &ctx).await;
 
@@ -313,9 +311,9 @@ async fn compact_joins_args_into_custom_instructions() {
     let session = new_session();
     let harness = harness_with(session);
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
+    let extra = daemon_ctx(&harness, executor);
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = CompactCommand
         .run(&["keep".into(), "the".into(), "details".into()], &ctx)
@@ -340,8 +338,8 @@ async fn bug_report_writes_redacted_dump_to_base_dir() {
     let session = new_session();
     let harness = harness_with(session);
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let extra = daemon_ctx(&harness, executor);
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = BugReportCommand.run(&[], &ctx).await;
 
@@ -367,8 +365,8 @@ async fn bug_report_returns_error_when_dest_cannot_be_created() {
     let session = new_session();
     let harness = harness_with(session);
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let extra = daemon_ctx(&harness, executor);
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = BugReportCommand.run(&[], &ctx).await;
 
@@ -386,9 +384,9 @@ async fn web_connect_dispatches_connect_status_and_rejects_unknown() {
     let session = new_session();
     let harness = harness_with(session);
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
+    let extra = daemon_ctx(&harness, executor);
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     assert!(matches!(
         WebConnectCommand.run(&[], &ctx).await,
@@ -411,9 +409,9 @@ async fn web_disconnect_returns_relay_disconnect() {
     let session = new_session();
     let harness = harness_with(session);
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
+    let extra = daemon_ctx(&harness, executor);
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     assert!(matches!(
         WebDisconnectCommand.run(&[], &ctx).await,
@@ -430,9 +428,9 @@ async fn find_without_query_returns_usage_error() {
     let session = new_session();
     let harness = harness_with(session);
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
+    let extra = daemon_ctx(&harness, executor);
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = FindCommand.run(&[], &ctx).await;
 
@@ -498,8 +496,8 @@ async fn find_searches_session_repo_messages() {
     let session = new_session();
     let harness = harness_with(session);
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let extra = daemon_ctx(&harness, executor);
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = FindCommand.run(&["needle".into()], &ctx).await;
 
@@ -530,8 +528,8 @@ async fn history_prints_empty_notice_when_no_store() {
     let session = new_session();
     let harness = harness_with(session);
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let extra = daemon_ctx(&harness, executor);
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = HistoryCommand.run(&[], &ctx).await;
 
@@ -555,8 +553,8 @@ async fn history_lists_tail_with_limit_and_truncates_long_entries() {
     let session = new_session();
     let harness = harness_with(session);
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let extra = daemon_ctx(&harness, executor);
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = HistoryCommand.run(&["1".into()], &ctx).await;
 

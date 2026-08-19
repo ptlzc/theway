@@ -16,7 +16,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use theway_core::AgentHarness;
 use theway_llm_provider::Model;
 
 /// Sink for slash-command output. The full-screen TUI owns the only terminal writer, so
@@ -183,11 +182,9 @@ impl std::fmt::Debug for CommandOutcome {
 }
 
 /// Context handed to a command at runtime. Kept narrow so each command's dependencies are
-/// explicit. The `extra` field carries execution-environment extras (generic so the daemon
-/// can layer its runtime context in node 6 without changing local commands, which implement
-/// `SlashCommand<X>` for every `X`).
+/// explicit. Runtime-specific state belongs in the generic `extra` value; the transport
+/// framework does not know about an agent harness or any other daemon implementation type.
 pub struct CommandCtx<'a, X = ()> {
-    pub harness: &'a Arc<AgentHarness>,
     pub session_id: &'a str,
     pub log_path: Option<&'a PathBuf>,
     pub tool_count: usize,

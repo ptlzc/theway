@@ -1,11 +1,4 @@
-//! MCP server transport — expose the theway local-execution tool set over the Model
-//! Context Protocol (stdio JSON-RPC 2.0), using the [`rmcp`] SDK (the industry-standard
-//! Rust MCP implementation) instead of a hand-written JSON-RPC loop.
-//!
-//! In `--mcp` mode the theway process *is* an MCP server: any MCP client (Claude Code,
-//! Codex, IDEs, other agents) can call theway's local tools (bash / fs / git / web /
-//! exec group) as standard MCP tools over stdio. `initialize` / `ping` / protocol
-//! negotiation come from `rmcp`; this module supplies the tool surface and dispatch.
+//! MCP stdio server exposing daemon-owned agent tools through the `rmcp` SDK.
 
 use std::sync::Arc;
 
@@ -37,32 +30,34 @@ struct ToolDispatcher {
 
 impl ToolDispatcher {
     fn find(&self, name: &str) -> Option<&Arc<dyn AgentTool>> {
-        self.tools.iter().find(|t| t.definition().name == name)
+        self.tools
+            .iter()
+            .find(|tool| tool.definition().name == name)
     }
 
     fn mcp_tool(&self, tool: &dyn AgentTool) -> Tool {
-        let def = tool.definition();
+        let definition = tool.definition();
         let schema: Arc<rmcp::model::JsonObject> =
-            Arc::new(serde_json::from_value(def.parameters.clone()).unwrap_or_default());
-        Tool::new(def.name.clone(), def.description.clone(), schema)
+            Arc::new(serde_json::from_value(definition.parameters.clone()).unwrap_or_default());
+        Tool::new(
+            definition.name.clone(),
+            definition.description.clone(),
+            schema,
+        )
     }
 }
 
-/// Render an `AgentToolResult` as MCP text content (text blocks joined; structured
-/// `details` appended as JSON when present).
 fn render_tool_result(result: &AgentToolResult) -> String {
     let mut text = String::new();
     for block in &result.content {
         match block {
-            UserContentBlock::Text(t) => {
-                text.push_str(&t.text);
-                if !t.text.ends_with('\n') {
+            UserContentBlock::Text(block) => {
+                text.push_str(&block.text);
+                if !block.text.ends_with('\n') {
                     text.push('\n');
                 }
             }
-            other => {
-                text.push_str(&format!("[{other:?}]\n"));
-            }
+            other => text.push_str(&format!("[{other:?}]\n")),
         }
     }
     if result.details != Value::Object(Default::default()) {
@@ -86,7 +81,7 @@ impl ServerHandler for ToolDispatcher {
             tools: self
                 .tools
                 .iter()
-                .map(|t| self.mcp_tool(t.as_ref()))
+                .map(|tool| self.mcp_tool(tool.as_ref()))
                 .collect(),
             next_cursor: None,
             ..Default::default()
@@ -101,7 +96,7 @@ impl ServerHandler for ToolDispatcher {
         let name = &request.name;
         let arguments = request
             .arguments
-            .map(|a| serde_json::to_value(a).unwrap_or_default())
+            .map(|arguments| serde_json::to_value(arguments).unwrap_or_default())
             .unwrap_or_else(|| Value::Object(Default::default()));
         let tool = self.find(name).ok_or_else(|| {
             McpError::new(
@@ -117,14 +112,13 @@ impl ServerHandler for ToolDispatcher {
             Ok(result) => Ok(CallToolResponse::Complete(CallToolResult::success(vec![
                 ContentBlock::Text(TextContent::new(render_tool_result(&result))),
             ]))),
-            // Tool execution failures are tool results with isError, not RPC errors.
-            Err(AgentToolError::Message(msg)) => {
+            Err(AgentToolError::Message(message)) => {
                 Ok(CallToolResponse::Complete(CallToolResult::error(vec![
-                    ContentBlock::Text(TextContent::new(msg)),
+                    ContentBlock::Text(TextContent::new(message)),
                 ])))
             }
-            Err(e) => Ok(CallToolResponse::Complete(CallToolResult::error(vec![
-                ContentBlock::Text(TextContent::new(e.to_string())),
+            Err(error) => Ok(CallToolResponse::Complete(CallToolResult::error(vec![
+                ContentBlock::Text(TextContent::new(error.to_string())),
             ]))),
         }
     }

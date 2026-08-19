@@ -40,6 +40,7 @@ pub mod logging;
 pub mod lsp;
 pub mod lsp_supervisor;
 pub mod mcp_loader;
+pub mod mcp_server;
 pub mod model;
 pub mod otlp;
 // Daemon path context (issue #66): one CLI-boundary resolution of every host

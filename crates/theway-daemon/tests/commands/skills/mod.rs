@@ -85,20 +85,19 @@ fn executor_for(harness: &Arc<AgentHarness>) -> Arc<TriggerExecutor> {
     ))
 }
 
-fn daemon_ctx(executor: Arc<TriggerExecutor>) -> DaemonCtx {
+fn daemon_ctx(harness: &Arc<AgentHarness>, executor: Arc<TriggerExecutor>) -> DaemonCtx {
     DaemonCtx {
+        harness: harness.clone(),
         trigger_executor: executor,
         storage: local_runtime_storage(),
     }
 }
 
 fn command_ctx<'a>(
-    harness: &'a Arc<AgentHarness>,
     extra: &'a DaemonCtx,
     cwd: &'a Path,
 ) -> CommandCtx<'a, DaemonCtx> {
     CommandCtx {
-        harness,
         session_id: "test-session",
         log_path: None,
         tool_count: 0,
@@ -326,8 +325,8 @@ fn tool_result_text_joins_text_blocks_and_skips_images() {
 #[tokio::test]
 async fn skills_list_empty_is_handled() {
     let (tmp, harness, executor) = setup_with_skills(vec![]);
-    let extra = daemon_ctx(executor.clone());
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SkillsCommand.run(&[], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Handled));
@@ -336,8 +335,8 @@ async fn skills_list_empty_is_handled() {
 #[tokio::test]
 async fn skills_show_requires_name_and_valid_source() {
     let (tmp, harness, executor) = setup_with_skills(vec![sample_skill("foo", SkillSource::User)]);
-    let extra = daemon_ctx(executor.clone());
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SkillsCommand.run(&["show".into()], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("usage: /skills show")));
@@ -349,8 +348,8 @@ async fn skills_show_requires_name_and_valid_source() {
 #[tokio::test]
 async fn skills_show_renders_active_skill() {
     let (tmp, harness, executor) = setup_with_skills(vec![sample_skill("foo", SkillSource::User)]);
-    let extra = daemon_ctx(executor.clone());
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SkillsCommand.run(&["show".into(), "foo".into()], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Handled));
@@ -361,9 +360,9 @@ async fn skills_reload_maps_not_configured_error() {
     let session = new_session();
     let harness = harness_with_reload_fn(session, vec![], None);
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor.clone());
+    let extra = daemon_ctx(&harness, executor.clone());
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SkillsCommand.run(&["reload".into()], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("reload skills failed:")));
@@ -382,9 +381,9 @@ async fn skills_reload_prints_summary_on_success() {
     });
     let harness = harness_with_reload_fn(session, vec![], Some(reload));
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor.clone());
+    let extra = daemon_ctx(&harness, executor.clone());
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SkillsCommand.run(&["reload".into()], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Handled));
@@ -393,8 +392,8 @@ async fn skills_reload_prints_summary_on_success() {
 #[tokio::test]
 async fn skills_install_command_validates_args() {
     let (tmp, harness, executor) = setup_with_skills(vec![]);
-    let extra = daemon_ctx(executor.clone());
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SkillsCommand.run(&["install".into()], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("usage: /skills install")));
@@ -418,8 +417,8 @@ async fn skills_install_command_previews_local_skill() {
         "---\nname: foo-skill\ndescription: A foo skill\n---\nbody\n",
     )
     .unwrap();
-    let extra = daemon_ctx(executor.clone());
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SkillsCommand
         .run(&["install".into(), skill_dir.join("SKILL.md").to_string_lossy().to_string()], &ctx)
@@ -430,8 +429,8 @@ async fn skills_install_command_previews_local_skill() {
 #[tokio::test]
 async fn skills_enable_missing_name_and_invalid_source_are_errors() {
     let (tmp, harness, executor) = setup_with_skills(vec![sample_skill("foo", SkillSource::User)]);
-    let extra = daemon_ctx(executor.clone());
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SkillsCommand.run(&["enable".into()], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("usage: /skills enable")));
@@ -443,8 +442,8 @@ async fn skills_enable_missing_name_and_invalid_source_are_errors() {
 #[tokio::test]
 async fn skills_enable_already_enabled_is_handled() {
     let (tmp, harness, executor) = setup_with_skills(vec![sample_skill("foo", SkillSource::User)]);
-    let extra = daemon_ctx(executor.clone());
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SkillsCommand.run(&["enable".into(), "foo".into()], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Handled));
@@ -467,9 +466,9 @@ async fn skills_disable_persists_and_reloads() {
     });
     let harness = harness_with_reload_fn(session, vec![sample_skill("foo", SkillSource::User)], Some(reload));
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor.clone());
+    let extra = daemon_ctx(&harness, executor.clone());
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SkillsCommand.run(&["disable".into(), "foo".into()], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Handled), "{outcome:?}");
@@ -485,9 +484,9 @@ async fn skills_disable_reload_error_is_mapped() {
     let session = new_session();
     let harness = harness_with_reload_fn(session, vec![sample_skill("foo", SkillSource::User)], None);
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor.clone());
+    let extra = daemon_ctx(&harness, executor.clone());
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SkillsCommand.run(&["disable".into(), "foo".into()], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("reload after skill state change failed:")));
@@ -496,8 +495,8 @@ async fn skills_disable_reload_error_is_mapped() {
 #[tokio::test]
 async fn skills_remove_command_validates_args() {
     let (tmp, harness, executor) = setup_with_skills(vec![sample_skill("foo", SkillSource::User)]);
-    let extra = daemon_ctx(executor.clone());
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SkillsCommand.run(&["remove".into()], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("usage: /skills remove")));
@@ -509,8 +508,8 @@ async fn skills_remove_command_validates_args() {
 #[tokio::test]
 async fn skills_unknown_subcommand_returns_usage_error() {
     let (tmp, harness, executor) = setup_with_skills(vec![]);
-    let extra = daemon_ctx(executor.clone());
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SkillsCommand.run(&["bogus".into()], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("usage: /skills")));

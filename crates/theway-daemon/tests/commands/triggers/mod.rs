@@ -67,20 +67,22 @@ pub(super) fn executor_for(harness: &Arc<AgentHarness>) -> Arc<TriggerExecutor> 
     ))
 }
 
-pub(super) fn daemon_ctx(executor: Arc<TriggerExecutor>) -> DaemonCtx {
+pub(super) fn daemon_ctx(
+    harness: &Arc<AgentHarness>,
+    executor: Arc<TriggerExecutor>,
+) -> DaemonCtx {
     DaemonCtx {
+        harness: harness.clone(),
         trigger_executor: executor,
         storage: local_runtime_storage(),
     }
 }
 
 pub(super) fn command_ctx<'a>(
-    harness: &'a Arc<AgentHarness>,
     extra: &'a DaemonCtx,
     cwd: &'a Path,
 ) -> CommandCtx<'a, DaemonCtx> {
     CommandCtx {
-        harness,
         session_id: "test-session",
         log_path: None,
         tool_count: 0,
@@ -124,9 +126,9 @@ async fn new_trigger_rejects_empty_request() {
     let session = new_session();
     let harness = harness_with(session);
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
+    let extra = daemon_ctx(&harness, executor);
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = NewTriggerCommand.run(&[], &ctx).await;
 
@@ -138,9 +140,9 @@ async fn new_trigger_prompt_embeds_user_request() {
     let session = new_session();
     let harness = harness_with(session);
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
+    let extra = daemon_ctx(&harness, executor);
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = NewTriggerCommand
         .run(
@@ -165,9 +167,9 @@ async fn triggers_status_rules_sources_running_audit_are_handled() {
     let session = new_session();
     let harness = harness_with(session);
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
+    let extra = daemon_ctx(&harness, executor);
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     for subcommand in ["status", "rules", "sources", "running", "audit"] {
         let argv = vec![subcommand.to_string()];
@@ -186,9 +188,9 @@ async fn triggers_remove_validates_usage_and_unknown_id() {
     let session = new_session();
     let harness = harness_with(session);
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
+    let extra = daemon_ctx(&harness, executor);
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = TriggersCommand.run(&["remove".into()], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("usage: /triggers remove")));
@@ -207,9 +209,9 @@ async fn triggers_enable_disable_remove_roundtrip() {
     let session = new_session();
     let harness = harness_with(session);
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
+    let extra = daemon_ctx(&harness, executor);
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     // Retry once if a sibling test cleared the process-global registry between
     // our add and the command under test.
@@ -279,9 +281,9 @@ async fn triggers_abort_validates_target() {
     let session = new_session();
     let harness = harness_with(session);
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
+    let extra = daemon_ctx(&harness, executor);
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = TriggersCommand.run(&["abort".into()], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("usage: /triggers abort")));
@@ -300,9 +302,9 @@ async fn triggers_unknown_subcommand_returns_error() {
     let session = new_session();
     let harness = harness_with(session);
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
+    let extra = daemon_ctx(&harness, executor);
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = TriggersCommand.run(&["bogus".into()], &ctx).await;
 
@@ -316,9 +318,9 @@ async fn cron_list_empty_is_handled() {
     let session = new_session();
     let harness = harness_with(session);
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
+    let extra = daemon_ctx(&harness, executor);
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = CronCommand.run(&[], &ctx).await;
 
@@ -332,9 +334,9 @@ async fn cron_add_validates_args() {
     let session = new_session();
     let harness = harness_with(session);
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
+    let extra = daemon_ctx(&harness, executor);
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = CronCommand.run(&["add".into()], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("usage: /cron add")));
@@ -352,9 +354,9 @@ async fn cron_add_and_remove_roundtrip() {
     let session = new_session();
     let harness = harness_with(session.clone());
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
+    let extra = daemon_ctx(&harness, executor);
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let mut audit_entries = None;
     for attempt in 0..4 {
@@ -410,9 +412,9 @@ async fn cron_enable_disable_and_remove_validate_target() {
     let session = new_session();
     let harness = harness_with(session);
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
+    let extra = daemon_ctx(&harness, executor);
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = CronCommand.run(&["enable".into()], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("usage: /cron enable")));
@@ -432,9 +434,9 @@ async fn cron_unknown_subcommand_returns_error() {
     let session = new_session();
     let harness = harness_with(session);
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
+    let extra = daemon_ctx(&harness, executor);
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = CronCommand.run(&["bogus".into()], &ctx).await;
 
@@ -446,9 +448,9 @@ async fn inbox_claim_dismiss_validate_target() {
     let session = new_session();
     let harness = harness_with(session);
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
+    let extra = daemon_ctx(&harness, executor);
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = InboxCommand.run(&["claim".into()], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("usage: /inbox claim|dismiss")));
@@ -462,9 +464,9 @@ async fn inbox_unknown_subcommand_returns_error() {
     let session = new_session();
     let harness = harness_with(session);
     let executor = executor_for(&harness);
-    let extra = daemon_ctx(executor);
+    let extra = daemon_ctx(&harness, executor);
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = InboxCommand.run(&["bogus".into()], &ctx).await;
 

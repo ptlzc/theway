@@ -696,7 +696,7 @@ async fn main() -> Result<()> {
                     let _ = std::fs::remove_file(&port_file);
                 }
             }
-            theway_transport::mcp::run_mcp_server(theway_daemon::tools::local_tools(
+            theway_daemon::mcp_server::run_mcp_server(theway_daemon::tools::local_tools(
                 executor.clone(),
             ))
             .await

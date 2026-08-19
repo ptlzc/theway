@@ -18,7 +18,7 @@ impl SlashCommand<DaemonCtx> for DiagCommand {
         "show diagnostic info (model, thinking, cost, log path)"
     }
     async fn run(&self, _argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
-        let state = ctx.harness.agent().state();
+        let state = ctx.extra.harness.agent().state();
         let model = state
             .model
             .as_ref()
@@ -29,8 +29,8 @@ impl SlashCommand<DaemonCtx> for DiagCommand {
             .map(|l| l.as_str())
             .unwrap_or("?")
             .to_string();
-        let skill_count = ctx.harness.skills().len();
-        let cost = ctx.harness.cost();
+        let skill_count = ctx.extra.harness.skills().len();
+        let cost = ctx.extra.harness.cost();
         let log = ctx
             .log_path
             .map(|p| p.display().to_string())
@@ -67,7 +67,7 @@ impl SlashCommand<DaemonCtx> for TemplateCommand {
     }
     async fn run(&self, argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
         if argv.is_empty() {
-            let templates = ctx.harness.templates();
+            let templates = ctx.extra.harness.templates();
             if templates.is_empty() {
                 cprintln!(
                     "(no templates loaded — drop `.md` files under ~/.theway/templates/ or <cwd>/.theway/templates/)"
@@ -132,7 +132,7 @@ impl SlashCommand<DaemonCtx> for BugReportCommand {
         // Snapshot the model + thinking with the lock held briefly; the MutexGuard cannot
         // cross an .await so we copy what we need and drop it.
         let (model, thinking) = {
-            let state = ctx.harness.agent().state();
+            let state = ctx.extra.harness.agent().state();
             let m = state
                 .model
                 .as_ref()
@@ -144,18 +144,18 @@ impl SlashCommand<DaemonCtx> for BugReportCommand {
                 .to_string();
             (m, t)
         };
-        let cost = ctx.harness.cost();
+        let cost = ctx.extra.harness.cost();
         let diag = crate::bug_report::DiagInputs {
             session_id: ctx.session_id.to_string(),
             model,
             thinking,
             tool_count: ctx.tool_count,
-            skill_count: ctx.harness.skills().len(),
+            skill_count: ctx.extra.harness.skills().len(),
             cost_summary: theway_core::cost_one_line_summary(&cost),
             log_path: ctx.log_path.cloned(),
         };
         let dest = crate::bug_report::default_dest();
-        match crate::bug_report::build(diag, ctx.harness.session(), &dest).await {
+        match crate::bug_report::build(diag, ctx.extra.harness.session(), &dest).await {
             Ok(path) => {
                 cprintln!("wrote bug report: {}", path.display());
                 CommandOutcome::Handled

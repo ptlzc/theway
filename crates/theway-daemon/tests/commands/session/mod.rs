@@ -59,20 +59,19 @@ fn executor_for(harness: &Arc<AgentHarness>) -> Arc<TriggerExecutor> {
     ))
 }
 
-fn daemon_ctx(executor: Arc<TriggerExecutor>) -> DaemonCtx {
+fn daemon_ctx(harness: &Arc<AgentHarness>, executor: Arc<TriggerExecutor>) -> DaemonCtx {
     DaemonCtx {
+        harness: harness.clone(),
         trigger_executor: executor,
         storage: local_runtime_storage(),
     }
 }
 
 fn command_ctx<'a>(
-    harness: &'a Arc<AgentHarness>,
     extra: &'a DaemonCtx,
     cwd: &'a Path,
 ) -> CommandCtx<'a, DaemonCtx> {
     CommandCtx {
-        harness,
         session_id: "test-session",
         log_path: None,
         tool_count: 0,
@@ -114,8 +113,8 @@ async fn save_command_writes_default_export_under_base_dir() {
 
     let session = new_session();
     let (tmp, harness, executor) = setup(session);
-    let extra = daemon_ctx(executor.clone());
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SaveCommand.run(&[], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Handled));
@@ -126,8 +125,8 @@ async fn save_command_writes_default_export_under_base_dir() {
 async fn name_command_read_and_set_are_handled() {
     let session = new_session();
     let (tmp, harness, executor) = setup(session.clone());
-    let extra = daemon_ctx(executor.clone());
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = NameCommand.run(&[], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Handled));
@@ -168,8 +167,8 @@ async fn share_command_uses_gh_shim_and_prints_url() {
 
     let session = new_session();
     let (tmp, harness, executor) = setup(session);
-    let extra = daemon_ctx(executor.clone());
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = ShareCommand.run(&[], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Handled), "{outcome:?}");
@@ -182,8 +181,8 @@ async fn share_command_maps_spawn_error() {
 
     let session = new_session();
     let (tmp, harness, executor) = setup(session);
-    let extra = daemon_ctx(executor.clone());
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = ShareCommand.run(&[], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("failed to spawn")));
@@ -206,8 +205,8 @@ async fn share_command_maps_nonzero_exit_and_stderr() {
 
     let session = new_session();
     let (tmp, harness, executor) = setup(session);
-    let extra = daemon_ctx(executor.clone());
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = ShareCommand.run(&[], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("exited 7") && msg.contains("gist exploded")));
@@ -217,8 +216,8 @@ async fn share_command_maps_nonzero_exit_and_stderr() {
 async fn session_export_parses_exclude_triggers_flag() {
     let session = new_session();
     let (tmp, harness, executor) = setup(session);
-    let extra = daemon_ctx(executor.clone());
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
 
     // Memory sessions don't carry the on-disk path export_session needs; the
     // flag parsing itself is still exercised and the export error is mapped.
@@ -232,8 +231,8 @@ async fn session_export_parses_exclude_triggers_flag() {
 async fn session_import_requires_exactly_one_path() {
     let session = new_session();
     let (tmp, harness, executor) = setup(session);
-    let extra = daemon_ctx(executor.clone());
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SessionCommand.run(&["import".into()], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("usage: /session import <path>")));

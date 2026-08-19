@@ -32,10 +32,9 @@ fn setup(session: Session) -> (tempfile::TempDir, Arc<AgentHarness>, Arc<Trigger
 
 fn ctx<'a>(
     tmp: &'a tempfile::TempDir,
-    harness: &'a Arc<AgentHarness>,
     extra: &'a DaemonCtx,
 ) -> CommandCtx<'a, DaemonCtx> {
-    command_ctx(harness, extra, tmp.path())
+    command_ctx(extra, tmp.path())
 }
 
 #[test]
@@ -63,8 +62,8 @@ fn session_command_metadata_is_stable() {
 async fn save_command_writes_transcript_relative_to_cwd() {
     let session = new_session();
     let (tmp, harness, executor) = setup(session);
-    let extra = daemon_ctx(executor.clone());
-    let ctx = ctx(&tmp, &harness, &extra);
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = ctx(&tmp, &extra);
 
     let outcome = SaveCommand.run(&["out.md".into()], &ctx).await;
 
@@ -76,8 +75,8 @@ async fn save_command_writes_transcript_relative_to_cwd() {
 async fn name_command_shows_unnamed_and_sets_name() {
     let session = new_session();
     let (tmp, harness, executor) = setup(session.clone());
-    let extra = daemon_ctx(executor.clone());
-    let ctx = ctx(&tmp, &harness, &extra);
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = ctx(&tmp, &extra);
 
     let outcome = NameCommand.run(&[], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Handled));
@@ -96,8 +95,8 @@ async fn name_command_shows_unnamed_and_sets_name() {
 async fn undo_command_requires_a_user_message() {
     let session = new_session();
     let (tmp, harness, executor) = setup(session);
-    let extra = daemon_ctx(executor.clone());
-    let ctx = ctx(&tmp, &harness, &extra);
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = ctx(&tmp, &extra);
 
     let outcome = UndoCommand.run(&[], &ctx).await;
 
@@ -108,8 +107,8 @@ async fn undo_command_requires_a_user_message() {
 async fn undo_command_moves_to_parent_of_latest_user_message() {
     let session = new_session();
     let (tmp, harness, executor) = setup(session.clone());
-    let extra = daemon_ctx(executor.clone());
-    let ctx = ctx(&tmp, &harness, &extra);
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = ctx(&tmp, &extra);
 
     session.append_message(user_message("hello")).await.unwrap();
 
@@ -126,8 +125,8 @@ async fn undo_command_moves_to_parent_of_latest_user_message() {
 async fn session_command_routes_unknown_subcommand_and_usage_errors() {
     let session = new_session();
     let (tmp, harness, executor) = setup(session);
-    let extra = daemon_ctx(executor.clone());
-    let ctx = ctx(&tmp, &harness, &extra);
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = ctx(&tmp, &extra);
 
     let outcome = SessionCommand.run(&["bogus".into()], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("unknown /session subcommand")));
@@ -148,8 +147,8 @@ async fn session_command_routes_unknown_subcommand_and_usage_errors() {
 async fn session_export_reports_memory_session_missing_metadata() {
     let session = new_session();
     let (tmp, harness, executor) = setup(session);
-    let extra = daemon_ctx(executor.clone());
-    let ctx = ctx(&tmp, &harness, &extra);
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = ctx(&tmp, &extra);
 
     let outcome = SessionCommand
         .run(&["export".into(), "backup.theway-session".into()], &ctx)
@@ -162,8 +161,8 @@ async fn session_export_reports_memory_session_missing_metadata() {
 async fn session_import_reports_missing_archive() {
     let session = new_session();
     let (tmp, harness, executor) = setup(session);
-    let extra = daemon_ctx(executor.clone());
-    let ctx = ctx(&tmp, &harness, &extra);
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = ctx(&tmp, &extra);
 
     let outcome = SessionCommand
         .run(&["import".into(), "missing.theway-session".into()], &ctx)
@@ -176,8 +175,8 @@ async fn session_import_reports_missing_archive() {
 async fn fork_command_lists_messages_and_validates_index() {
     let session = new_session();
     let (tmp, harness, executor) = setup(session.clone());
-    let extra = daemon_ctx(executor.clone());
-    let ctx = ctx(&tmp, &harness, &extra);
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = ctx(&tmp, &extra);
 
     let outcome = ForkCommand.run(&[], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("no user messages to fork from")));

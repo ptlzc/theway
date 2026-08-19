@@ -87,12 +87,10 @@ fn new_memory_session() -> Session {
 }
 
 fn command_ctx<'a>(
-    harness: &'a Arc<theway_core::AgentHarness>,
     extra: &'a DaemonCtx,
     cwd: &'a Path,
 ) -> CommandCtx<'a, DaemonCtx> {
     CommandCtx {
-        harness,
         session_id: "test-session",
         log_path: None,
         tool_count: 0,
@@ -120,6 +118,7 @@ fn daemon_ctx_with(
     storage: Arc<dyn RuntimeStorage>,
 ) -> DaemonCtx {
     DaemonCtx {
+        harness: harness.clone(),
         trigger_executor: executor_for(harness),
         storage,
     }
@@ -166,7 +165,7 @@ async fn login_requires_exactly_one_provider() {
     let harness = harness();
     let extra = daemon_ctx_with(&harness, local_runtime_storage());
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = LoginCommand.run(&[], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("usage: /login")));
@@ -181,7 +180,7 @@ async fn logout_requires_provider_and_maps_load_errors() {
     let harness = harness();
     let extra = daemon_ctx_with(&harness, local_runtime_storage());
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = LogoutCommand.run(&[], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("usage: /logout")));
@@ -207,7 +206,7 @@ async fn logout_removes_stored_credential_and_prints_result() {
     let harness = harness();
     let extra = daemon_ctx_with(&harness, local_runtime_storage());
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = LogoutCommand.run(&["openai".into()], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Handled));
@@ -223,7 +222,7 @@ async fn logout_prints_no_credential_when_nothing_stored() {
     let harness = harness();
     let extra = daemon_ctx_with(&harness, local_runtime_storage());
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = LogoutCommand.run(&["openai".into()], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Handled));
@@ -243,7 +242,7 @@ async fn logout_maps_save_errors() {
     let harness = harness();
     let extra = daemon_ctx_with(&harness, local_runtime_storage());
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = LogoutCommand.run(&["openai".into()], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("save auth store:")));
@@ -254,7 +253,7 @@ async fn sessions_maps_open_repo_errors() {
     let harness = harness();
     let extra = daemon_ctx_with(&harness, Arc::new(FailingStorage));
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SessionsCommand.run(&[], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("open session repo:")));
@@ -269,7 +268,7 @@ async fn sessions_lists_empty_repo() {
     let harness = harness();
     let extra = daemon_ctx_with(&harness, local_runtime_storage());
     let tmp = tempfile::tempdir().unwrap();
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SessionsCommand.run(&[], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Handled));
@@ -299,7 +298,7 @@ async fn sessions_lists_repo_entries_with_tree_rows() {
 
     let harness = harness();
     let extra = daemon_ctx_with(&harness, local_runtime_storage());
-    let ctx = command_ctx(&harness, &extra, tmp.path());
+    let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SessionsCommand.run(&[], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Handled));

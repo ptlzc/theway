@@ -31,7 +31,7 @@ impl SlashCommand<DaemonCtx> for SaveCommand {
         } else {
             ctx.cwd.join(dest)
         };
-        match crate::export::save(ctx.harness.session(), &dest).await {
+        match crate::export::save(ctx.extra.harness.session(), &dest).await {
             Ok(p) => {
                 cprintln!("saved transcript: {}", p.display());
                 CommandOutcome::Handled
@@ -52,7 +52,7 @@ impl SlashCommand<DaemonCtx> for UndoCommand {
         "remove the most recent user+assistant turn from the active branch"
     }
     async fn run(&self, _argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
-        let session = ctx.harness.session();
+        let session = ctx.extra.harness.session();
         let path = match session.branch(None).await {
             Ok(p) => p,
             Err(e) => return CommandOutcome::Error(format!("read branch: {e}")),
@@ -76,7 +76,12 @@ impl SlashCommand<DaemonCtx> for UndoCommand {
         if !found {
             return CommandOutcome::Error("no user message to undo".into());
         }
-        match ctx.harness.move_to(target_parent.as_deref(), None).await {
+        match ctx
+            .extra
+            .harness
+            .move_to(target_parent.as_deref(), None)
+            .await
+        {
             Ok(_) => {
                 cprintln!("undid last turn");
                 CommandOutcome::Handled
@@ -100,7 +105,7 @@ impl SlashCommand<DaemonCtx> for NameCommand {
         "[slug]"
     }
     async fn run(&self, argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
-        let session = ctx.harness.session();
+        let session = ctx.extra.harness.session();
         if argv.is_empty() {
             match session.session_name().await {
                 Ok(Some(n)) => cprintln!("session name: {n}"),
@@ -182,7 +187,7 @@ async fn session_export_command(
 
     emit_session_archive_warning();
     match theway_storage::session_archive::export_session(
-        ctx.harness.session(),
+        ctx.extra.harness.session(),
         &output_path,
         exclude_triggers,
     )
@@ -294,7 +299,7 @@ impl SlashCommand<DaemonCtx> for ForkCommand {
         "[n]"
     }
     async fn run(&self, argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
-        let session = ctx.harness.session();
+        let session = ctx.extra.harness.session();
         let entries = match session.storage().get_entries().await {
             Ok(e) => e,
             Err(e) => return CommandOutcome::Error(format!("read session: {e}")),
@@ -421,7 +426,7 @@ impl SlashCommand<DaemonCtx> for ShareCommand {
             return CommandOutcome::Error(format!("share tmp dir: {e}"));
         }
         let file = dir.join("transcript.md");
-        if let Err(e) = crate::export::save(ctx.harness.session(), &file).await {
+        if let Err(e) = crate::export::save(ctx.extra.harness.session(), &file).await {
             return CommandOutcome::Error(format!("save transcript: {e}"));
         }
 

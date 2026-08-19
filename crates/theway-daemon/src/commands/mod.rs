@@ -130,6 +130,8 @@ pub struct CommandCtx<'a> {
 /// Local commands implement `SlashCommand<X>` for every `X` and ignore it; the daemon
 /// runtime commands read the handles they need here instead of reaching for globals.
 pub struct DaemonCtx {
+    /// Agent runtime used by daemon-owned commands.
+    pub harness: Arc<AgentHarness>,
     /// Trigger executor of the running daemon session; `/triggers` reads status
     /// snapshots and aborts running trigger actions through it.
     pub trigger_executor: Arc<TriggerExecutor>,
@@ -425,11 +427,11 @@ pub async fn dispatch(input: &str, registry: &Registry, ctx: &CommandCtx<'_>) ->
         });
     };
     let extra = DaemonCtx {
+        harness: ctx.harness.clone(),
         trigger_executor: ctx.trigger_executor.clone(),
         storage: registry.storage.clone(),
     };
     let sdk_ctx = theway_transport::commands::CommandCtx {
-        harness: ctx.harness,
         session_id: ctx.session_id,
         log_path: ctx.log_path,
         tool_count: ctx.tool_count,
