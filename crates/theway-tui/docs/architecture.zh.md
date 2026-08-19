@@ -21,16 +21,20 @@
 1. 启动由 [`local_tool_ops.rs`](../src/local_tool_ops.rs) 支持、以所选工作目录为根的 loopback 工具服务。
 2. 启动由 [`controller_storage.rs`](../src/controller_storage.rs) 与本地会话仓库支持的 loopback 存储服务。
 3. 把两个服务地址写入 daemon 配置载荷。
-4. 通过按工作目录区分的 port 文件或默认端口发现兼容 daemon；找不到时启动 `thewayd` 并等待就绪。
+4. 通过按工作目录区分的 port 文件或默认端口发现兼容 daemon，再通过限定服务的 gRPC 健康检查验证其已配置的 controller 存储；不存在可用 daemon 时启动 `thewayd` 并等待就绪。
 5. 下发配置、获取初始 snapshot、应用客户端负责的新建/恢复选择，并构造 `ui::App`。
 
 `LocalToolOps` 为文件读写编辑、命令执行、目录/搜索、memory 和 skill 安装实现 transport `ToolOps`。`ControllerSessionOps` 与 `ControllerStorageOps` 实现会话生命周期和 DAG/trigger/cron 持久化。这些是 controller 策略，不会把 TUI 变成 agent 运行时。
+
+[`startup/connection.rs`](../src/startup/connection.rs) 在整个应用生命周期内持有 controller 服务 task 和 daemon 启动配置。由另一个 controller 持有的健康 daemon 保留其工具与存储端点组合。若 daemon 的 gRPC 状态端点有响应，但已配置的存储服务无响应，该 daemon 不可用：connector 会启动替代进程并恢复当前会话，而不会连接这个半存活进程。
 
 ## 应用状态与事件
 
 [`ui/mod.rs`](../src/ui/mod.rs) 负责 `App`、展示状态、overlay、scroll 状态、composer 状态和最新 transport snapshot。[`ui/app/event_loop.rs`](../src/ui/app/event_loop.rs) 与同级模块拆分事件轮询、frame 应用、渲染、交互、panel、status 和 headless 输出，但不创建新的状态归属层。
 
 [`ui/app/snapshot.rs`](../src/ui/app/snapshot.rs) 应用完整 snapshot 与增量 stream frame。会话标识变化会重置会话级展示 cache。Feed delta 只在预期 base 上应用；不匹配或 lag 后由完整 snapshot 恢复。
+
+事件流关闭时，[`ui/app/event_loop.rs`](../src/ui/app/event_loop.rs) 请求 `DaemonConnector` 重新发现或替换 daemon，并恢复 `App::session_id`。只有新事件流和权威 snapshot 都成功后，UI 才标记为已连接并输出 `reconnected to daemon at …; state synchronized` 或 `daemon restarted at …; restored session …`。有界的客户端连接日志会在后续权威 snapshot 后重新加入这些生命周期消息；失败的重试只进入结构化 debug 日志，不会每秒向 feed 添加一行。
 
 用户动作调用带类型的 `GrpcClient` 方法或入队 transport 命令。UI 不调用 `AgentHarness`、图引擎内部模块或 daemon 私有服务。
 
@@ -50,6 +54,8 @@
 
 - 本 crate 不依赖 `theway-core` 或 `theway-daemon`。
 - Controller 工具和存储服务绑定 loopback，并显式下发给 daemon。
+- 复用 daemon 要求 daemon 状态 RPC 与其已配置的 controller 存储 RPC 都可用；只有协议端点响应并不充分。
+- 连接由另一个存活 controller 持有的 daemon 时，不替换该 controller 的工具或存储端点。
 - 运行时状态来自 transport snapshot/event；UI cache 是可重置派生状态。
 - 客户端外观与输入选择不会进入共享 wire 类型，除非其他客户端也需要相同行为。
 - 交互会话变更使用 transport 操作；直接 SQLite 访问仅限 controller storage 实现和离线维护。

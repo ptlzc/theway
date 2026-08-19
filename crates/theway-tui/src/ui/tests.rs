@@ -107,6 +107,7 @@ async fn test_app_with_sessions(
     }]);
     let app = App::new(AppConfig {
         client,
+        connector: None,
         initial,
         cwd: std::path::PathBuf::from("/tmp/theway"),
         history: HistoryStore::load_from(std::path::Path::new("/nonexistent-theway-history")),

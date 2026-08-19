@@ -76,6 +76,8 @@ use theway_transport::proto::{theway_grpc, wire_status};
 use theway_transport::transport::SlashCompleter;
 use theway_transport::wire::WireStatus;
 
+use crate::startup::DaemonConnector;
+
 use render_utils::{
     centered_rect, panel_line, panel_rule_preview, safe_control_prompt_label,
     safe_control_prompt_text,
@@ -212,6 +214,9 @@ pub(crate) struct ResumePickerState {
 pub struct AppConfig {
     /// Connected gRPC client (the only way to reach the runtime).
     pub client: GrpcClient,
+    /// Controller-side daemon discovery/spawn state. Unit fixtures without a
+    /// process boundary leave this unset.
+    pub(crate) connector: Option<DaemonConnector>,
     /// Initial snapshot (`get_state` result) — seeds the feed, the panel and
     /// the status line before the first stream frame arrives.
     pub initial: WireStatus,
@@ -233,6 +238,7 @@ pub struct AppConfig {
 /// turn scheduling — the daemon owns all of it.
 pub struct App {
     client: GrpcClient,
+    connector: Option<DaemonConnector>,
     /// Latest snapshot cache: updated from the initial `get_state` and every
     /// stream snapshot frame; everything renderable reads from here.
     latest: WireStatus,
@@ -251,6 +257,9 @@ pub struct App {
 
     /// cwd-scoped session repo backing the local-only `/session` export/import.
     feed: Feed,
+    /// Bounded client-lifecycle messages re-applied after authoritative daemon
+    /// snapshots so reconnect evidence remains visible in the feed.
+    connection_log: Vec<String>,
     panel_status: PanelStatus,
     model_catalog: Vec<theway_transport::wire::ProviderGroup>,
     /// UI-only mirrors of snapshot fields (kept as fields so the render paths

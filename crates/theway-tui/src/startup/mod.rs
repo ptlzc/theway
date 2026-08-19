@@ -6,27 +6,18 @@
 //! triggers) moved to the daemon (`theway-server/src/bin/thewayd.rs`) — this
 //! file no longer constructs any runtime state.
 
-use std::io::IsTerminal as _;
-use std::sync::Arc;
-
-use anyhow::{Context as _, Result};
+use anyhow::Result;
 use theway_contract::session::SessionReader;
 use theway_storage::session;
 use theway_storage::sqlite_repo::SqliteSessionRepo;
-use theway_transport::client::{GrpcClient, discover, spawn_daemon, wait_ready};
-use theway_transport::grpc::{
-    StorageServiceState, ToolServiceState, serve_storage_service, serve_tool_service,
-};
-use theway_transport::proto::wire_status;
-use theway_transport::transport::{SessionOps, StorageOps, ToolOps};
-use theway_transport::wire::{WireDaemonConfig, WireStatus};
-use tokio::net::TcpListener;
+use theway_transport::client::GrpcClient;
+use theway_transport::wire::WireDaemonConfig;
 
 use crate::cli::Cli;
-use crate::config_payload::{assemble_config, provision_config};
-use crate::controller_storage::{ControllerSessionOps, ControllerStorageOps};
-use crate::local_tool_ops::LocalToolOps;
 use crate::ui;
+
+mod connection;
+pub(crate) use connection::DaemonConnector;
 
 /// Map the client CLI to daemon launch arguments (design decision 3: session
 /// selection is a daemon launch concern when the TUI spawns it).
@@ -46,6 +37,15 @@ fn daemon_launch_args(cli: &Cli, config: &WireDaemonConfig) -> Vec<String> {
         args.push("--resume-id".to_string());
         args.push(id.to_string());
     }
+    args.extend(daemon_runtime_args(cli, config));
+    args
+}
+
+/// Daemon arguments that are stable across initial spawn and recovery. Session
+/// selection is deliberately excluded so reconnect can prepend the App's
+/// authoritative current session id.
+fn daemon_runtime_args(cli: &Cli, config: &WireDaemonConfig) -> Vec<String> {
+    let mut args = Vec::new();
     if let Some(provider) = &config.provider {
         args.push("--provider".to_string());
         args.push(provider.clone());
@@ -95,106 +95,6 @@ fn daemon_launch_args(cli: &Cli, config: &WireDaemonConfig) -> Vec<String> {
         args.push("--debug".to_string());
     }
     args
-}
-
-/// Find a daemon or spawn one, then return a connected client + initial
-/// state + a `reused` marker (issue #56): `true` only when the client
-/// attached to an already-running daemon via `discover`. The marker drives
-/// the fresh-attach step in `run_repl` — a freshly spawned daemon
-/// (`reused = false`) already starts on its own new session.
-///
-/// Issue #74: the controller provisions the daemon's configuration on BOTH
-/// paths. The payload is assembled from CLI flags + local `config.toml`
-/// (the daemon reads neither since #73):
-/// - spawn: launch args carry the startup-critical fields; the payload is
-///   then reconciled through the settings RPC after connect (covers what
-///   launch args cannot carry, keeps the `GetConfig` view canonical);
-/// - attach: the settings RPC reconciles the running daemon, with mismatch
-///   notes for values it cannot re-apply at runtime.
-///
-/// The returned `Vec<String>` carries assembly diagnostics + mismatch notes
-/// for the feed.
-async fn connect_or_spawn(
-    cli: &Cli,
-    cwd: &std::path::Path,
-) -> Result<(GrpcClient, WireStatus, bool, Vec<String>)> {
-    // Issue #77: start the controller-side ToolService server first so the
-    // daemon can forward file/process operations back to this TUI process.
-    let tool_addr = {
-        let listener = TcpListener::bind("127.0.0.1:0").await?;
-        let addr = listener.local_addr()?.to_string();
-        let tool_ops: Arc<dyn ToolOps> = Arc::new(LocalToolOps::new(cwd.to_path_buf()));
-        let state = ToolServiceState::new(tool_ops);
-        let _server = serve_tool_service(listener, state);
-        addr
-    };
-
-    // Issue #85: start the controller-side StorageService server so the
-    // daemon can route session/DAG/trigger/cron persistence back to this
-    // TUI process's local SQLite/filesystem storage.
-    let storage_addr = {
-        let listener = TcpListener::bind("127.0.0.1:0").await?;
-        let addr = listener.local_addr()?.to_string();
-        let repo = Arc::new(session::open_repo(cwd).await);
-        let session_ops: Arc<dyn SessionOps> =
-            Arc::new(ControllerSessionOps::new(repo.clone(), cwd.to_path_buf()));
-        let storage_ops: Arc<dyn StorageOps> = Arc::new(ControllerStorageOps::new(repo));
-        let state = StorageServiceState::new(session_ops, storage_ops);
-        let _server = serve_storage_service(listener, state);
-        addr
-    };
-
-    let (mut config, mut notes) = assemble_config(cli).await;
-    config.tool_service_addr = Some(tool_addr);
-    config.storage_service_addr = Some(storage_addr);
-
-    // 1. Reuse a running daemon: per-cwd port file first, default port second.
-    if let Some(addr) = discover(std::time::Duration::from_millis(800), cwd).await? {
-        tracing::info!("reusing running daemon at {addr}");
-        let mut client = GrpcClient::connect(&addr).await?;
-        let outcome = provision_config(&mut client, &config, true)
-            .await
-            .with_context(|| format!("provision daemon config at {addr}"))?;
-        if outcome.pushed {
-            tracing::info!("provisioned daemon config at {addr} via settings RPC");
-        } else {
-            tracing::debug!("daemon config at {addr} already matches — nothing to push");
-        }
-        notes.extend(outcome.notes);
-        let state = client.get_state().await?;
-        return Ok((client, wire_status(&state), true, notes));
-    }
-
-    // 2. Spawn `thewayd` on demand (inherits cwd/env; `--port 0` publishes the
-    //    actual port to the port file).
-    if !std::io::stdin().is_terminal() {
-        // No TTY: the user cannot see daemon logs; still spawn (detached
-        // stdout/stderr inherit so diagnostics stay visible on the pipe).
-    }
-    let args = daemon_launch_args(cli, &config);
-    let mut child =
-        spawn_daemon(cwd, &args).with_context(|| format!("spawn thewayd in {}", cwd.display()))?;
-    let addr = match wait_ready(std::time::Duration::from_secs(20), cwd, child.id()).await {
-        Ok(addr) => addr,
-        Err(e) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(e);
-        }
-    };
-    tracing::info!("spawned daemon at {addr}");
-    let mut client = GrpcClient::connect(&addr).await?;
-    let outcome = provision_config(&mut client, &config, false)
-        .await
-        .with_context(|| format!("provision daemon config at {addr}"))?;
-    if outcome.pushed {
-        tracing::info!("provisioned daemon config at {addr} via settings RPC");
-    } else {
-        tracing::debug!("daemon config at {addr} already matches — nothing to push");
-    }
-    notes.extend(outcome.notes);
-    let state = client.get_state().await?;
-    Ok((client, wire_status(&state), false, notes))
 }
 
 /// Fresh-attach gate (issue #56): the TUI defaults to a new session only
@@ -261,10 +161,14 @@ pub(crate) async fn run_repl(
     // OLD session, so the fresh-attach step below applies. A freshly
     // spawned daemon (`reused = false`) already starts on its own new
     // session — creating another would leave an extra empty session behind.
-    // Issue #74: `connect_or_spawn` also provisions the daemon config
-    // (settings RPC); `config_notes` carries assembly diagnostics and
-    // attach-time mismatch reports for the feed.
-    let (mut client, mut initial, reused, config_notes) = connect_or_spawn(&cli, &cwd).await?;
+    // DaemonConnector also provisions the daemon config through the settings
+    // RPC; `config_notes` carries assembly diagnostics and attach-time
+    // mismatch reports for the feed.
+    let (connector, connection) = DaemonConnector::start(&cli, &cwd, repo.clone()).await?;
+    let mut client = connection.client;
+    let mut initial = connection.status;
+    let reused = connection.reused;
+    let config_notes = connection.notes;
 
     // Issue #56: re-entering the TUI with a live daemon defaults to a NEW
     // session (daemon untouched — fresh attach is TUI client semantics).
@@ -293,6 +197,7 @@ pub(crate) async fn run_repl(
 
     let mut app = ui::App::new(ui::AppConfig {
         client,
+        connector: Some(connector),
         initial,
         cwd: cwd.clone(),
         history: theway_transport::history::HistoryStore::load(),
@@ -504,6 +409,31 @@ mod tests {
                 "/tmp/skills-b",
                 "--debug",
             ]
+        );
+    }
+
+    #[test]
+    fn daemon_runtime_args_leave_session_selection_to_recovery() {
+        let cli = Cli::parse_from([
+            "theway",
+            "--continue",
+            "--provider",
+            "openai",
+            "--model",
+            "gpt-test",
+        ]);
+        let config = WireDaemonConfig {
+            provider: cli.provider.clone(),
+            model: cli.model.clone(),
+            ..WireDaemonConfig::default()
+        };
+
+        let args = daemon_runtime_args(&cli, &config);
+        assert!(!args.iter().any(|arg| arg == "--continue"));
+        assert!(!args.iter().any(|arg| arg == "--resume-id"));
+        assert_eq!(
+            args.iter().map(String::as_str).collect::<Vec<_>>(),
+            vec!["--provider", "openai", "--model", "gpt-test"]
         );
     }
 

@@ -12,6 +12,7 @@ impl App {
         ));
         Self {
             client: config.client,
+            connector: config.connector,
             session_id: initial.session_id.clone(),
             cwd: config.cwd,
             registry: config.registry,
@@ -23,6 +24,7 @@ impl App {
             pending_images: config.pending_images,
             pending_pasted_images: Vec::new(),
             feed,
+            connection_log: Vec::new(),
             panel_status: PanelStatus::from_sidebar(&initial.sidebar),
             model_catalog: initial.model_catalog.clone(),
             model_picker: None,
@@ -103,6 +105,16 @@ impl App {
 
     pub fn system_line(&mut self, text: impl AsRef<str>) {
         self.feed.push_plain(text.as_ref(), Level::System);
+    }
+
+    pub(super) fn connection_line(&mut self, text: impl Into<String>) {
+        const MAX_CONNECTION_LOG_LINES: usize = 8;
+        let text = text.into();
+        if self.connection_log.len() == MAX_CONNECTION_LOG_LINES {
+            self.connection_log.remove(0);
+        }
+        self.connection_log.push(text.clone());
+        self.system_line(text);
     }
 
     pub fn error_line(&mut self, text: impl AsRef<str>) {

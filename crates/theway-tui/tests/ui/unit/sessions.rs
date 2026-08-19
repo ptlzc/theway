@@ -11,6 +11,19 @@ async fn authoritative_snapshot_replaces_local_feed_annotations() {
 }
 
 #[tokio::test]
+async fn connection_log_survives_authoritative_snapshot() {
+    let (mut app, _rx) = test_app().await;
+    app.connection_line("daemon restarted; restored session sess-1");
+    app.apply_snapshot(fixture_status(app.latest.feed_blocks.clone()));
+
+    let text = feed_text(&app);
+    assert!(
+        text.contains("daemon restarted; restored session sess-1"),
+        "{text}"
+    );
+}
+
+#[tokio::test]
 async fn snapshot_append_patch_pushes_only_new_block() {
     let (mut app, _rx) = test_app().await;
     let first = fixture_status(vec![WireFeedBlock::Plain {

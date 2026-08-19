@@ -7,6 +7,9 @@ impl App {
         let full_feed = status.feed_blocks_base == 0 && status.feed_block_patches.is_empty();
         if full_feed {
             self.feed.replace_blocks(&status.feed_blocks);
+            for line in &self.connection_log {
+                self.feed.push_plain(line, Level::System);
+            }
             self.resync_pending = false;
         } else if status.feed_blocks_base == self.latest.feed_blocks.len() as u64 {
             let current_len = self.latest.feed_blocks.len();

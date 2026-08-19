@@ -159,14 +159,9 @@ impl ControllerStorageOps {
         let path = session::find_path_by_id(&self.repo, session_id)
             .await?
             .with_context(|| format!("no session matches id {session_id}"))?;
-        let session = self.repo.open(&path).await.map_err(repo_err)?;
         match kind {
-            SidecarKind::Trigger => {
-                Ok(session::trigger_sidecar_path_for_session(&session, &self.repo).await?)
-            }
-            SidecarKind::Cron => {
-                Ok(session::cron_sidecar_path_for_session(&session, &self.repo).await?)
-            }
+            SidecarKind::Trigger => Ok(session::trigger_sidecar_path(&path)),
+            SidecarKind::Cron => Ok(session::cron_sidecar_path(&path)),
         }
     }
 }
@@ -434,3 +429,6 @@ async fn write_cron_jobs(path: &Path, jobs: &[CronJob]) -> Result<()> {
         .await
         .with_context(|| format!("write {}", path.display()))
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("controller_storage");

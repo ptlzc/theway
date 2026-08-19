@@ -67,26 +67,63 @@ impl App {
                             self.connected = false;
                             stream = None;
                             if !self.quit {
-                                self.system_line(
-                                    "daemon connection lost — reconnecting…",
-                                );
+                                self.connection_line("daemon connection lost — reconnecting…");
                             }
                         }
                     }
                 }
                 _ = reconnect.tick(), if stream.is_none() => {
-                    if !self.quit
-                        && let Ok(s) = self.client.stream_events().await
-                    {
-                        self.connected = true;
-                        self.system_line("reconnected to daemon");
-                        // Re-fetch the full state in case we missed
-                        // snapshots while down.
-                        match self.client.get_state().await {
-                            Ok(state) => self.apply_snapshot(wire_status(&state)),
-                            Err(e) => self.error_line(format!("get_state: {e}")),
+                    if !self.quit {
+                        let session_id = self.session_id.clone();
+                        let attempt: Result<(GrpcClient, bool, Vec<String>)> =
+                            if let Some(connector) = self.connector.as_mut() {
+                                connector.recover(&session_id).await.map(|connection| {
+                                    (connection.client, connection.reused, connection.notes)
+                                })
+                            } else {
+                                Ok((self.client.clone(), true, Vec::new()))
+                            };
+
+                        match attempt {
+                            Ok((mut candidate, reused, notes)) => {
+                                // A recovery is announced only after both the
+                                // event stream and an authoritative snapshot
+                                // succeed on the candidate connection.
+                                match candidate.stream_events().await {
+                                    Ok(candidate_stream) => match candidate.get_state().await {
+                                        Ok(state) => {
+                                            let addr = candidate.addr().to_string();
+                                            self.client = candidate;
+                                            self.apply_snapshot(wire_status(&state));
+                                            self.connected = true;
+                                            if reused {
+                                                self.connection_line(format!(
+                                                    "reconnected to daemon at {addr}; state synchronized"
+                                                ));
+                                            } else {
+                                                self.connection_line(format!(
+                                                    "daemon restarted at {addr}; restored session {}",
+                                                    self.session_id
+                                                ));
+                                            }
+                                            for note in notes {
+                                                self.connection_line(note);
+                                            }
+                                            stream = Some(candidate_stream);
+                                        }
+                                        Err(error) => tracing::debug!(
+                                            "daemon recovery snapshot failed: {error}"
+                                        ),
+                                    },
+                                    Err(error) => tracing::debug!(
+                                        "daemon recovery stream failed: {error}"
+                                    ),
+                                }
+                            }
+                            Err(error) => {
+                                tracing::debug!("daemon recovery attempt failed: {error}");
+                            }
                         }
-                        stream = Some(s);
                     }
                 }
                 _ = tick.tick() => {
