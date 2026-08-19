@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use chrono::{TimeZone, Utc};
 use crate::triggers::cron::{CronRegistry, CronStorageError};
+use theway_contract::session::SessionReader;
 use theway_daemon::runtime_storage::{LocalRuntimeStorage, RuntimeStorage};
 
 #[test]
@@ -45,7 +46,6 @@ async fn load_from_storage_runtime_persist_spawns_save() {
         .await
         .unwrap();
     let session_id = session
-        .storage()
         .get_metadata_json()
         .await
         .unwrap()

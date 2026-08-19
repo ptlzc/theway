@@ -106,7 +106,7 @@ async fn sqlite_session(path: &Path, cwd: &Path) -> Session {
     let storage = SqliteSessionStorage::create(path, cwd.to_string_lossy().to_string())
         .await
         .unwrap();
-    Session::new(Arc::new(storage) as Arc<dyn SessionStorage>)
+    Session::from_store(Arc::new(storage))
 }
 
 fn leaf_entry(id: &str) -> SessionTreeEntry {

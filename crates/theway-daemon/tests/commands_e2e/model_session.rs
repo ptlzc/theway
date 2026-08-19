@@ -70,10 +70,14 @@ async fn dispatch_session_export_writes_archive_with_bounded_output() {
     let cwd = temp.path().join("repo");
     tokio::fs::create_dir_all(&cwd).await.unwrap();
     let repo = theway_storage::sqlite_repo::SqliteSessionRepo::new(temp.path().join("sessions"));
-    let session = repo
+    let store = repo
         .create(cwd.to_string_lossy().to_string())
         .await
         .unwrap();
+    let metadata = theway_contract::session::SessionReader::get_metadata_json(&store)
+        .await
+        .unwrap();
+    let session = Session::from_store(Arc::new(store));
     session
         .append_custom(
             "test_payload",
@@ -81,7 +85,6 @@ async fn dispatch_session_export_writes_archive_with_bounded_output() {
         )
         .await
         .unwrap();
-    let metadata = session.storage().get_metadata_json().await.unwrap();
     let session_id = metadata["id"].as_str().unwrap().to_string();
     let opts = AgentHarnessOptions::new(faux_model(), session);
     let harness = Arc::new(AgentHarness::new(opts));

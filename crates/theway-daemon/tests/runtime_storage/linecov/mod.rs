@@ -179,7 +179,8 @@ async fn remote_runtime_storage_opens_local_repo_and_resolves_sidecar_paths() {
 
     // Act
     let repo = storage.open_session_repo(&cwd).await.unwrap();
-    let session = theway_storage::session::create(&repo, &cwd).await.unwrap();
+    let store = theway_storage::session::create(&repo, &cwd).await.unwrap();
+    let session = theway_core::Session::from_store(Arc::new(store));
     let trigger_path = storage.trigger_sidecar_path(&session, &repo).await.unwrap();
     let cron_path = storage.cron_sidecar_path(&session, &repo).await.unwrap();
 

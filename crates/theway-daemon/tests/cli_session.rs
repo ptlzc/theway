@@ -78,19 +78,18 @@ async fn create_persist_reopen_resume_round_trips() {
 
     {
         let repo = SqliteSessionRepo::new(dir.path());
-        let session = repo
+        let store = repo
             .create("/some/cwd")
             .await
             .expect("create jsonl session");
-        session_id = session
-            .storage()
-            .get_metadata_json()
+        session_id = theway_contract::session::SessionReader::get_metadata_json(&store)
             .await
             .unwrap()
             .get("id")
             .and_then(|v| v.as_str())
             .unwrap()
             .to_string();
+        let session = Session::from_store(Arc::new(store));
 
         let mut opts = AgentHarnessOptions::new(faux_model(), session.clone());
         opts.thinking_level = ThinkingLevel::Off;
@@ -105,10 +104,8 @@ async fn create_persist_reopen_resume_round_trips() {
     let files = repo.list().await.unwrap();
     assert_eq!(files.len(), 1, "expected exactly one session file");
 
-    let reopened = repo.open(&files[0]).await.unwrap();
-    let reopened_id = reopened
-        .storage()
-        .get_metadata_json()
+    let store = repo.open(&files[0]).await.unwrap();
+    let reopened_id = theway_contract::session::SessionReader::get_metadata_json(&store)
         .await
         .unwrap()
         .get("id")
@@ -120,6 +117,7 @@ async fn create_persist_reopen_resume_round_trips() {
         "metadata id must survive close/reopen"
     );
 
+    let reopened = Session::from_store(Arc::new(store));
     let ctx = reopened.build_context().await.unwrap();
     // 2 user prompts + 2 assistant replies on the active branch.
     assert_eq!(

@@ -21,7 +21,7 @@ use std::sync::Arc;
 use anyhow::{Context as _, Result, bail};
 use async_trait::async_trait;
 use parking_lot::Mutex;
-use theway_core::SessionTreeEntry;
+use theway_contract::session::{SessionError, SessionReader};
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::types::DagStatus;
 use theway_storage::sqlite_repo::SqliteSessionRepo;
@@ -92,11 +92,7 @@ impl SessionOps for AppSessionOps {
         let mut summaries = Vec::new();
         for path in self.repo.list().await.map_err(repo_err)? {
             let session = self.repo.open(&path).await.map_err(repo_err)?;
-            let meta = session
-                .storage()
-                .get_metadata_json()
-                .await
-                .map_err(repo_err)?;
+            let meta = session.get_metadata_json().await.map_err(repo_err)?;
             let session_id = meta
                 .get("id")
                 .and_then(|v| v.as_str())
@@ -113,14 +109,11 @@ impl SessionOps for AppSessionOps {
                 .unwrap_or_default()
                 .to_string();
 
-            let name = session
-                .session_name()
+            let name = theway_storage::session::session_name(&session)
                 .await
-                .ok()
-                .flatten()
                 .unwrap_or_default();
             let preview = theway_storage::session::first_user_text(&session).await;
-            let model = last_model_change(&session).await;
+            let model = theway_storage::session::last_model_change(&session).await;
 
             // Last activity: transcript mtime (epoch millis). Cheap, and a session is only
             // ever written when something actually happened in it.
@@ -175,11 +168,7 @@ impl SessionOps for AppSessionOps {
             }
         };
         let session = self.repo.create(cwd).await.map_err(repo_err)?;
-        let meta = session
-            .storage()
-            .get_metadata_json()
-            .await
-            .map_err(repo_err)?;
+        let meta = session.get_metadata_json().await.map_err(repo_err)?;
         Ok(meta
             .get("id")
             .and_then(|v| v.as_str())
@@ -196,7 +185,9 @@ impl SessionOps for AppSessionOps {
             .await?
             .with_context(|| format!("no session matches id {id}"))?;
         let session = self.repo.open(&path).await.map_err(repo_err)?;
-        session.append_session_name(name).await.map_err(repo_err)?;
+        theway_storage::session::append_session_name(&session, name)
+            .await
+            .map_err(repo_err)?;
         Ok(())
     }
 
@@ -206,11 +197,7 @@ impl SessionOps for AppSessionOps {
             .with_context(|| format!("no session matches id {id}"))?;
         // Resolve the metadata id first: DAG runs are stamped with it, not the file stem.
         let session = self.repo.open(&path).await.map_err(repo_err)?;
-        let meta = session
-            .storage()
-            .get_metadata_json()
-            .await
-            .map_err(repo_err)?;
+        let meta = session.get_metadata_json().await.map_err(repo_err)?;
         let session_id = meta
             .get("id")
             .and_then(|v| v.as_str())
@@ -237,25 +224,7 @@ impl SessionOps for AppSessionOps {
     }
 }
 
-/// Last recorded model in the transcript (`provider:model-id`), or "" when the session
-/// never switched models explicitly.
-async fn last_model_change(session: &theway_core::Session) -> String {
-    let Ok(entries) = session.entries().await else {
-        return String::new();
-    };
-    let mut model = String::new();
-    for entry in entries {
-        if let SessionTreeEntry::ModelChange {
-            provider, model_id, ..
-        } = entry
-        {
-            model = format!("{provider}:{model_id}");
-        }
-    }
-    model
-}
-
-fn repo_err(e: theway_core::SessionError) -> anyhow::Error {
+fn repo_err(e: SessionError) -> anyhow::Error {
     anyhow::Error::msg(e.to_string())
 }
 
@@ -279,9 +248,8 @@ mod tests {
         (ops, current)
     }
 
-    async fn session_id_of(session: &theway_core::Session) -> String {
+    async fn session_id_of(session: &(impl SessionReader + ?Sized)) -> String {
         session
-            .storage()
             .get_metadata_json()
             .await
             .unwrap()

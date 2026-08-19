@@ -6,6 +6,7 @@
 use crate::triggers::dynamic::*;
 use std::sync::Arc;
 
+use theway_contract::session::SessionReader;
 use theway_daemon::runtime_storage::RuntimeStorage;
 
 #[test]
@@ -160,7 +161,6 @@ async fn load_from_storage_reads_rules_saved_through_storage_seam() {
         .await
         .unwrap();
     let session_id = session
-        .storage()
         .get_metadata_json()
         .await
         .unwrap()

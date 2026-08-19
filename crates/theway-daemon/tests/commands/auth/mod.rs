@@ -283,9 +283,10 @@ async fn sessions_lists_repo_entries_with_tree_rows() {
     // Arrange: one session in the cwd-scoped repo with a user message.
     let tmp = tempfile::tempdir().unwrap();
     let repo = theway_storage::session::open_repo(tmp.path()).await;
-    let session = theway_storage::session::create(&repo, tmp.path())
+    let store = theway_storage::session::create(&repo, tmp.path())
         .await
         .unwrap();
+    let session = theway_core::Session::from_store(Arc::new(store));
     session
         .append_message(AgentMessage::Llm(Message::User(UserMessage {
             role: UserRole::User,

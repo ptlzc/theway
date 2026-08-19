@@ -217,9 +217,7 @@ fn test_factory(work_dir: PathBuf) -> (SessionHarnessFactory, TempDir) {
 /// return its metadata id.
 async fn create_session_with_cwd(repo: &crate::SqliteSessionRepo, cwd: &str) -> String {
     let session = repo.create(cwd.to_string()).await.unwrap();
-    session
-        .storage()
-        .get_metadata_json()
+    theway_contract::session::SessionReader::get_metadata_json(&session)
         .await
         .unwrap()
         .get("id")

@@ -449,9 +449,10 @@ async fn find_searches_session_repo_messages() {
     // Arrange: create one session in the cwd repo with user text, user blocks,
     // and assistant text that contain (and miss) the query.
     let repo = theway_storage::session::open_repo(tmp.path()).await;
-    let session = theway_storage::session::create(&repo, tmp.path())
+    let store = theway_storage::session::create(&repo, tmp.path())
         .await
         .unwrap();
+    let session = theway_core::Session::from_store(Arc::new(store));
     session
         .append_message(AgentMessage::Llm(Message::User(UserMessage {
             role: UserRole::User,

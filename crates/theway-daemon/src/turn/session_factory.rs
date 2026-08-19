@@ -14,6 +14,7 @@ use crate::runtime_storage::RuntimeStorage;
 use crate::trigger_engine::notification_hook::DynNotificationHook;
 use crate::{agent_specs, tools, triggers};
 use anyhow::{Context, Result};
+use theway_contract::session::SessionReader;
 use theway_core::multiagent::goal;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::{AgentHarness, AgentHarnessOptions, ThinkingLevel};
@@ -86,10 +87,10 @@ impl SessionHarnessFactory {
     /// Build (and rehydrate) a harness for `id` (full session id or unique prefix).
     pub async fn build(&self, repo: &SqliteSessionRepo, id: &str) -> Result<Arc<AgentHarness>> {
         // Resume semantics: same lookup as CLI --resume-id.
-        let session = session::resume(repo, Some(id))
+        let store = session::resume(repo, Some(id))
             .await
             .with_context(|| format!("open session {id}"))?;
-        let meta = session.storage().get_metadata_json().await?;
+        let meta = store.get_metadata_json().await?;
         let session_id = meta
             .get("id")
             .and_then(|v| v.as_str())
@@ -101,6 +102,7 @@ impl SessionHarnessFactory {
         // harness state is touched.
         let target_cwd = meta.get("cwd").and_then(|v| v.as_str());
         check_work_dir_binding(&session_id, target_cwd, &self.cwd)?;
+        let session = theway_core::Session::from_store(Arc::new(store));
 
         // Crash-recovery parity with startup: restore this session's persisted DAG runs.
         // `restore` skips ids already live in the engine, so switching back and forth is

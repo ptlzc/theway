@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use chrono::{TimeZone, Utc};
 use theway_daemon::runtime_storage::RuntimeStorage;
+use theway_contract::session::SessionReader;
 
 fn sample_job(action: &str) -> CronJob {
     CronJob {
@@ -173,7 +174,6 @@ async fn load_from_storage_reads_jobs_and_clears_stale_running_state() {
         .await
         .unwrap();
     let session_id = session
-        .storage()
         .get_metadata_json()
         .await
         .unwrap()

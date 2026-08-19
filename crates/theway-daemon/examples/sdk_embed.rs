@@ -29,8 +29,8 @@ async fn main() -> anyhow::Result<()> {
     let repo = Arc::new(SqliteSessionRepo::new(
         std::env::temp_dir().join("sdk-demo-sessions"),
     ));
-    let session =
-        theway_storage::session::create(&repo, std::env::current_dir()?.as_path()).await?;
+    let store = theway_storage::session::create(&repo, std::env::current_dir()?.as_path()).await?;
+    let session = theway_core::Session::from_store(Arc::new(store));
     let model = Model {
         id: "faux".into(),
         name: "Faux".into(),

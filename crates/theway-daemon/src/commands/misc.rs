@@ -234,38 +234,11 @@ impl SlashCommand<DaemonCtx> for FindCommand {
                 Ok(s) => s,
                 Err(_) => continue,
             };
-            let entries = session.entries().await.unwrap_or_default();
+            let entries = theway_contract::session::SessionReader::get_entries(&session)
+                .await
+                .unwrap_or_default();
             for e in entries {
-                if let theway_core::SessionTreeEntry::Message { message, .. } = e {
-                    let text = match &message {
-                        theway_core::AgentMessage::Llm(theway_llm_provider::Message::User(u)) => {
-                            match &u.content {
-                                theway_llm_provider::UserContent::Text(s) => s.clone(),
-                                theway_llm_provider::UserContent::Blocks(blocks) => blocks
-                                    .iter()
-                                    .filter_map(|b| match b {
-                                        theway_llm_provider::UserContentBlock::Text(t) => {
-                                            Some(t.text.clone())
-                                        }
-                                        _ => None,
-                                    })
-                                    .collect::<Vec<_>>()
-                                    .join(" "),
-                            }
-                        }
-                        theway_core::AgentMessage::Llm(
-                            theway_llm_provider::Message::Assistant(a),
-                        ) => a
-                            .content
-                            .iter()
-                            .filter_map(|b| match b {
-                                theway_llm_provider::ContentBlock::Text(t) => Some(t.text.clone()),
-                                _ => None,
-                            })
-                            .collect::<Vec<_>>()
-                            .join(" "),
-                        _ => continue,
-                    };
+                if let Some(text) = theway_storage::session::message_text(&e) {
                     if text.to_lowercase().contains(&query) {
                         hits += 1;
                         let snip = text

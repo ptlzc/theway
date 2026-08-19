@@ -278,13 +278,16 @@ async fn local_runtime_storage_round_trips_sidecar_automation() {
     let cwd = dir.path().join("work");
     std::fs::create_dir_all(&cwd).unwrap();
     let repo = theway_storage::session::open_repo(&cwd).await;
-    let session = theway_storage::session::create(&repo, &cwd).await.unwrap();
-    let metadata = session.storage().get_metadata_json().await.unwrap();
+    let store = theway_storage::session::create(&repo, &cwd).await.unwrap();
+    let metadata = theway_contract::session::SessionReader::get_metadata_json(&store)
+        .await
+        .unwrap();
     let session_id = metadata
         .get("id")
         .and_then(|v| v.as_str())
         .unwrap()
         .to_string();
+    let session = theway_core::Session::from_store(Arc::new(store));
     let storage = local_runtime_storage();
     let rules = vec![dynamic_rule("rule-1")];
     let jobs = vec![cron_job("job-1")];

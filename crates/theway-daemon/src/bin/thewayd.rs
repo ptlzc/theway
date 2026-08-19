@@ -16,6 +16,7 @@ use std::sync::{Arc, OnceLock};
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use theway_contract::session::SessionReader;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::{AgentHarness, AgentHarnessOptions, PermissionPolicy, ThinkingLevel};
 use theway_daemon::hooks;
@@ -152,7 +153,7 @@ async fn main() -> Result<()> {
     let thinking: ThinkingLevel = cli.thinking.parse().map_err(anyhow::Error::msg)?;
 
     // Session resolve/create.
-    let (session, resumed) = if let Some(id) =
+    let (store, resumed) = if let Some(id) =
         cli.resume_id
             .as_deref()
             .or(if cli.continue_ { Some("") } else { None })
@@ -165,12 +166,13 @@ async fn main() -> Result<()> {
     } else {
         (session::create(&repo, &cwd).await?, false)
     };
-    let session_metadata = session.storage().get_metadata_json().await?;
+    let session_metadata = store.get_metadata_json().await?;
     let session_id = session_metadata
         .get("id")
         .and_then(|v| v.as_str())
         .unwrap_or("?")
         .to_string();
+    let session = theway_core::Session::from_store(Arc::new(store));
     let _logging = theway_daemon::logging::init(&session_id);
     let (feed_tx, feed_rx) =
         tokio::sync::mpsc::unbounded_channel::<theway_transport::feed::FeedUpdate>();

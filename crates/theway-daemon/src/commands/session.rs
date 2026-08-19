@@ -312,7 +312,10 @@ impl SlashCommand<DaemonCtx> for ForkCommand {
                 let theway_core::SessionTreeEntry::Message { id, .. } = e else {
                     return None;
                 };
-                theway_storage::session::user_message_text(e).map(|preview| (id.clone(), preview))
+                theway_core::encode_session_entry(e).ok().and_then(|entry| {
+                    theway_storage::session::user_message_text(&entry)
+                        .map(|preview| (id.clone(), preview))
+                })
             })
             .collect();
         if users.is_empty() {
@@ -361,9 +364,19 @@ impl SlashCommand<DaemonCtx> for ForkCommand {
             Ok(repo) => repo,
             Err(e) => return CommandOutcome::Error(format!("open session repo: {e}")),
         };
+        let to_fork = match to_fork
+            .iter()
+            .map(theway_core::encode_session_entry)
+            .collect::<Result<Vec<_>, _>>()
+        {
+            Ok(entries) => entries,
+            Err(e) => return CommandOutcome::Error(format!("fork failed: {e}")),
+        };
         match theway_storage::session::fork_session(&repo, ctx.cwd, session, to_fork).await {
             Ok(new) => {
-                let meta = match new.storage().get_metadata_json().await {
+                let meta = match theway_contract::session::SessionReader::get_metadata_json(&new)
+                    .await
+                {
                     Ok(m) => m,
                     Err(e) => {
                         return CommandOutcome::Error(format!("fork created but unreadable: {e}"));
