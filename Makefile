@@ -69,8 +69,12 @@ lint: ## clippy with -D warnings (matches CI)
 	$(CARGO) clippy --workspace --all-targets -- -D warnings
 
 .PHONY: feature-gate
-feature-gate: ## feature-gate checks: core no-default + daemon default/sandbox-only/all-features (CI job feature-gate-check, issue #78)
+feature-gate: ## feature-gate checks: thin core/provider builds + daemon backend matrix
 	$(CARGO) check -p theway-core --no-default-features
+	$(CARGO) check -p theway-core --no-default-features --features harness
+	$(CARGO) check -p theway-llm-provider --no-default-features
+	$(CARGO) check -p theway-llm-provider --no-default-features --features amazon-bedrock
+	$(CARGO) check -p theway-llm-provider --all-features
 	$(CARGO) check -p theway-daemon --all-targets
 	$(CARGO) check -p theway-daemon --no-default-features --features sandbox --all-targets
 	$(CARGO) check -p theway-daemon --all-features --all-targets

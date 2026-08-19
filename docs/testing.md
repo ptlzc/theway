@@ -162,7 +162,7 @@ ls target/criterion/
 |---|------|------|----|------|
 | 1 | rustfmt | `cargo fmt --all --check` | L0 | 代码格式一致，差异 `cargo fmt --all` 修复 |
 | 2 | clippy | `cargo clippy --workspace --all-targets -- -D warnings` | L0 | lint 全部 target（lib/bin/test/bench） |
-| 3 | feature 门控 | `cargo check -p theway-core --no-default-features` | L0 | 无默认 feature 仍可编译（条件编译完整性） |
+| 3 | feature 门控 | `make feature-gate` | L0 | bare core/provider、harness、Bedrock、全 provider 与 daemon backend 矩阵均可编译 |
 | 4 | 单元+集成 | `cargo test --workspace` | L1+L2 | 所有 lib + 集成 target 全 GREEN |
 | 5 | E2E | `cargo test --workspace` | L3 | e2e target 随 `--workspace` 运行 |
 | 6 | bench 编译 | `cargo bench -p theway-core --bench dispatch -- --test` | L4 | bench 可编译，不实际跑 |
@@ -172,7 +172,7 @@ ls target/criterion/
 > ```bash
 > cargo fmt --all --check \
 >   && cargo clippy --workspace --all-targets -- -D warnings \
->   && cargo check -p theway-core --no-default-features \
+>   && make feature-gate \
 >   && cargo test --workspace --no-fail-fast \
 >   && cargo bench -p theway-core --bench dispatch -- --test
 > ```

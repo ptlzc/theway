@@ -115,8 +115,8 @@ jobs:
       - run: cargo bench -p theway-core --bench dispatch -- --test
 
   # ----------------------------------------------------------------
-  # L0 feature 门控 — 验证 harness 特性关闭时 core 仍可编译
-  # (assembly gated, run_loop ungated)。
+  # L0 feature 门控 — 验证 bare core/provider 不携带 harness 或具体
+  # provider 的实现树，并单独覆盖 harness、Bedrock 和全 provider 组合。
   #
   # daemon 执行后端矩阵 (issue #78): daemon 不再本地执行文件/进程操作,
   # 工具操作转发给 controller 的 ToolService。`local` / `sandbox` 保留为
@@ -141,6 +141,14 @@ jobs:
           restore-keys: |
             gate-${{ runner.os }}-
       - run: cargo check -p theway-core --no-default-features
+      - name: core harness without default providers
+        run: cargo check -p theway-core --no-default-features --features harness
+      - name: provider registry without concrete providers
+        run: cargo check -p theway-llm-provider --no-default-features
+      - name: provider Bedrock dependency gate
+        run: cargo check -p theway-llm-provider --no-default-features --features amazon-bedrock
+      - name: provider all features
+        run: cargo check -p theway-llm-provider --all-features
       - name: daemon default features
         run: cargo check -p theway-daemon --all-targets
       - name: daemon sandbox-only
