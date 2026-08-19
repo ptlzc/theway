@@ -1,25 +1,25 @@
-# theway-core 修改规则
+# AGENTS.md — theway-core
 
-本文件适用于 `crates/theway-core/`，并补充仓库级规则 [`../../AGENTS.md`](../../AGENTS.md)。修改 agent、会话或多 agent 行为前，先阅读 [crate 概览](README.md)和[运行时架构](docs/architecture.md)。
+This file adds crate-specific instructions to [`../../AGENTS.md`](../../AGENTS.md). Read the [crate overview](README.md) and [runtime architecture](docs/architecture.md) before changing agent, session, or multiagent behavior.
 
-## 边界规则
+## Boundary rules
 
-- 具体工具实现、宿主文件系统或进程代码、SQLite 类型、协议消息和遥测 exporter 不得进入 core。
-- 只有当运行时机制可在 daemon 之外复用时，才通过明确的 trait 或注入闭包引入宿主相关行为。
-- 保持 `theway-daemon` 为唯一直接消费运行时的工作区 crate；依赖变化后运行 `make layering-check`。
-- 不启用 `harness` 和具体 provider feature 时，基础 `Agent` 构建仍须可用。
+- Keep concrete tool bodies, host filesystem/process code, SQLite types, protocol messages, and telemetry exporters out of core.
+- Introduce host-dependent behavior through an explicit trait or injected closure only when the runtime mechanism is reusable outside the daemon.
+- Preserve `theway-daemon` as the only direct runtime workspace consumer; run `make layering-check` after dependency changes.
+- Keep the bare `Agent` build usable without `harness` and without concrete provider features.
 
-## 运行时规则
+## Runtime rules
 
-- 修改 `Agent` 或 `run_loop` 时，必须同时维护单运行准入、取消清理和终止生命周期事件。
-- 带类型的会话解释留在 `agent/session`；持久化实现只通过 `PersistentSessionStorage` 接收 [`theway-contract`](../theway-contract/README.md) 记录。
-- 产品事件（`LoopEvent`、`SessionEvent`、`SubagentJobEvent`、`DagEvent`）与内容安全的 `RuntimeObserver` 记录保持分离。
-- DAG 状态转换校验留在 `multiagent/graph/model.rs`，调度留在 `multiagent/graph/scheduler.rs`；面向工具的命令属于 daemon。
-- job 输出、transcript、队列和续轮循环必须由各自运行时类型设置上限。
+- Maintain single-run admission, cancellation cleanup, and terminal lifecycle events together when changing `Agent` or `run_loop`.
+- Keep typed session interpretation in `agent/session`; persistence implementations receive only [`theway-contract`](../theway-contract/README.md) records through `PersistentSessionStorage`.
+- Keep product events (`LoopEvent`, `SessionEvent`, `SubagentJobEvent`, `DagEvent`) separate from content-safe `RuntimeObserver` records.
+- Preserve DAG transition validation in `multiagent/graph/model.rs` and scheduling in `multiagent/graph/scheduler.rs`; tool-facing commands belong to the daemon.
+- Bound job output, transcripts, queues, and continuation loops at their owning runtime type.
 
-## 测试与文档
+## Tests and documentation
 
-- 遵循 [`../../docs/rust-test-files.md`](../../docs/rust-test-files.md) 的镜像单元测试规则；多文件测试套件不得放在 `src/` 下。
-- 修改异步运行时代码时，为成功、失败、超时、取消和 drop 路径补生命周期测试。
-- 公开接口、归属边界、事件平面或图/会话生命周期变化时，更新 [`docs/architecture.md`](docs/architecture.md)。
-- 运行 `cargo test -p theway-core`、[README](README.md) 中两个 `--no-default-features` 检查、`cargo doc -p theway-core --no-deps --document-private-items` 和 `make layering-check`。
+- Follow the mirrored unit-test rules in [`../../docs/rust-test-files.md`](../../docs/rust-test-files.md); do not place multi-file test suites under `src/`.
+- Add lifecycle tests for success, failure, timeout, cancellation, and drop paths when changing asynchronous runtime code.
+- Update [docs/architecture.md](docs/architecture.md) when a public interface, ownership boundary, event plane, or graph/session lifecycle changes.
+- Run `cargo test -p theway-core`, both `--no-default-features` checks from [README.md](README.md), `cargo doc -p theway-core --no-deps --document-private-items`, and `make layering-check`.

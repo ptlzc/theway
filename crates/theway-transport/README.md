@@ -1,26 +1,28 @@
 # theway-transport
 
-`theway-transport` 负责跨客户端 wire 模型，以及控制 theway daemon 的 gRPC 与 web 传输。它提供生成的 protobuf 服务、HTTP JSON-RPC、SSE、WebSocket 事件、带类型的 gRPC 客户端、daemon 发现辅助函数和面向传输的操作 trait。
+English | [中文](README.zh.md)
 
-本 crate 独立于 [`theway-core`](../theway-core/README.md)、[`theway-daemon`](../theway-daemon/README.md) 和 [`theway-storage`](../theway-storage/README.md)。服务端实现 `TransportHost` 并提供 `TransportEndpoints`；客户端只使用 wire/protobuf 类型和 `GrpcClient`，不访问运行时内部状态。
+`theway-transport` owns the cross-client wire model and the gRPC and web transports used to control a theway daemon. It provides generated protobuf services, HTTP JSON-RPC, server-sent events, WebSocket events, a typed gRPC client, daemon discovery helpers, and transport-facing operation traits.
 
-## 协议入口
+The crate is independent of [`theway-core`](../theway-core/README.md), [`theway-daemon`](../theway-daemon/README.md), and [`theway-storage`](../theway-storage/README.md). A server implements `TransportHost` and supplies `TransportEndpoints`; clients use wire/protobuf types and `GrpcClient` without accessing runtime internals.
 
-- `wire` 定义命令、完整和增量状态 snapshot、图/job 事件、配置及操作请求/结果记录。
-- `transport` 定义 `TransportEndpoints` 以及 `SessionOps`、`JobOps`、`GraphOps`、`ToolOps`、`StorageOps`。
-- `grpc`、`http` 和 `ws` 通过 protobuf RPC、JSON-RPC、SSE 与 WebSocket 暴露这些操作。
-- `proto`、`tools` 和 `state` 在内部 wire 记录与生成的 protobuf 消息之间转换。
-- `client` 包装 tonic 客户端，并按工作目录发现或启动 daemon。
-- `feed`、`commands`、`auth`、`history`、`images`、`mentions` 等共享模块定义不绑定具体 carrier 的客户端/daemon 数据。
+## Protocol entry points
 
-MCP 传输不在本 crate 实现：外部 MCP 客户端位于 [`theway-mcp`](../theway-mcp/README.md)，daemon 的 MCP server 位于 [`theway-daemon`](../theway-daemon/README.md)。
+- `wire` defines commands, complete and incremental status snapshots, graph/job events, configuration, and operation request/result records.
+- `transport` defines `TransportEndpoints` plus `SessionOps`, `JobOps`, `GraphOps`, `ToolOps`, and `StorageOps`.
+- `grpc`, `http`, and `ws` expose those operations over protobuf RPC, JSON-RPC, SSE, and WebSocket connections.
+- `proto`, `tools`, and `state` convert between internal wire records and generated protobuf messages.
+- `client` wraps tonic clients and discovers or starts a per-working-directory daemon.
+- Shared modules such as `feed`, `commands`, `auth`, `history`, `images`, and `mentions` define client/daemon data that is not tied to a particular carrier.
 
-## 文档
+MCP transport is not implemented here: external MCP clients live in [`theway-mcp`](../theway-mcp/README.md), and the daemon's MCP server lives in [`theway-daemon`](../theway-daemon/README.md).
 
-- [Wire 与传输架构](docs/architecture.md)
-- [工作区架构](../../docs/architecture.md)
+## Documentation
 
-## 验证
+- [Wire and transport architecture](docs/architecture.md)
+- [Workspace architecture](../../docs/architecture.md)
+
+## Validation
 
 ```bash
 cargo test -p theway-transport

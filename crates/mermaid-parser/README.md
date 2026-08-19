@@ -1,20 +1,22 @@
 # mermaid-rs-parser
 
-`mermaid-rs-parser` 是 theway 使用的 vendored Mermaid 解析阶段。它将 Mermaid 源文本转换为结构化 [`Graph`](src/ir.rs)，不包含 SVG renderer、布局引擎、字体栈或 CLI。
+English | [中文](README.zh.md)
 
-公开函数 [`parse_mermaid`](src/parser.rs) 返回 [`ParseOutput`](src/parser.rs)，其中包含解析后的 graph 和可选初始化 directive。中间表示记录检测到的图类型、方向、节点、边、subgraph 和图类型专用数据。
+`mermaid-rs-parser` is the vendored Mermaid parsing stage used by theway. It transforms Mermaid source text into a structured [`Graph`](src/ir.rs) without an SVG renderer, layout engine, font stack, or CLI.
 
-## 工作区用途
+The public [`parse_mermaid`](src/parser.rs) function returns [`ParseOutput`](src/parser.rs), which contains the parsed graph and an optional initialization directive. The intermediate representation records the detected diagram kind, direction, nodes, edges, subgraphs, and diagram-specific data.
 
-[`theway-core` 的 DAG 适配器](../theway-core/src/multiagent/graph/mermaid.rs) 为 `dag_plan` 接受更小的 flowchart 契约。适配器预处理 DAG 节点标识与行级语法，调用本 crate 完成 Mermaid 解析，再恢复标识并推导 agent、task 和依赖字段。子集校验属于适配器；本 crate 保持为通用解析阶段。
+## Workspace use
 
-## Vendored 源码
+The [`theway-core` DAG adapter](../theway-core/src/multiagent/graph/mermaid.rs) accepts a smaller flowchart contract for `dag_plan`. The adapter preprocesses DAG node identifiers and line-level syntax, invokes this crate for Mermaid parsing, then restores identifiers and derives the agent, task, and dependency fields. Subset validation belongs to the adapter; this crate remains a general parsing stage.
 
-[`src/parser.rs`](src/parser.rs)、[`src/ir.rs`](src/ir.rs) 和 [`src/error.rs`](src/error.rs) 承载源自 `mermaid-rs-renderer`（`mmdr`）0.3.1 的解析阶段代码。[`src/lib.rs`](src/lib.rs) 和 [`Cargo.toml`](Cargo.toml) 组成本地 crate shell。上游署名与许可证见 [`LICENSE`](LICENSE)。
+## Vendored source
 
-Vendored parser 保持单文件，便于与来源代码比较。修改前阅读 [`AGENTS.md`](AGENTS.md)；parser 与 DAG 适配器的边界见 [`docs/architecture.md`](docs/architecture.md)。
+[`src/parser.rs`](src/parser.rs), [`src/ir.rs`](src/ir.rs), and [`src/error.rs`](src/error.rs) contain parsing-stage code sourced from `mermaid-rs-renderer` (`mmdr`) 0.3.1. [`src/lib.rs`](src/lib.rs) and [`Cargo.toml`](Cargo.toml) form the local crate shell. Upstream attribution and licensing are recorded in [`LICENSE`](LICENSE).
 
-## 验证
+The vendored parser stays in one file so it can be compared with its source. Read [`AGENTS.md`](AGENTS.md) before modifying it; the parser and DAG adapter boundary is documented in [`docs/architecture.md`](docs/architecture.md).
+
+## Validation
 
 ```bash
 cargo test -p mermaid-rs-parser

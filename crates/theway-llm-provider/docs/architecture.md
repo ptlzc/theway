@@ -1,56 +1,58 @@
-# theway-llm-provider 架构
+# theway-llm-provider architecture
 
-## 规范化数据模型
+English | [中文](architecture.zh.md)
 
-[`types.rs`](../src/types.rs) 定义与 provider 无关的模型：
+## Normalized data model
 
-- `Model` 标识 provider、wire API、端点、能力、上下文窗口、成本和支持的 thinking level。
-- `Context` 包含有序 user/assistant/tool-result 消息与工具定义。
-- `StreamOptions` 包含请求级上限、thinking、cache、transport、header、中止和密钥解析行为。
-- `AssistantMessageEvent` 是文本、thinking、工具调用 delta、完成与错误的有序流协议。
-- `AssistantMessage` 是收集后的终止结果，包含内容、用量、stop reason、provider/模型标识和可选错误。
+[`types.rs`](../src/types.rs) defines the provider-independent model:
 
-Provider 模块只在该模型与外部 wire 协议之间转换。`AgentMessage`、工具调度、会话条目或权限决策等运行时概念不进入本 crate。
+- `Model` identifies a provider, wire API, endpoint, capabilities, context window, cost, and supported thinking levels.
+- `Context` contains ordered user, assistant, and tool-result messages plus tool definitions.
+- `StreamOptions` contains request-level limits, thinking, cache, transport, headers, abort, and key-resolution behavior.
+- `AssistantMessageEvent` is the ordered streaming protocol for text, thinking, tool-call deltas, completion, and error.
+- `AssistantMessage` is the collected terminal result with content, usage, stop reason, provider/model identity, and optional error.
 
-## Provider 注册与 dispatch
+Provider modules convert only between this model and an external wire protocol. Runtime concepts such as `AgentMessage`, tool scheduling, session entries, or permission decisions do not cross this crate.
 
-[`api_registry.rs`](../src/api_registry.rs) 定义 `ApiProvider` 和按 API id 索引的进程注册表。查找返回自有 `RegisteredHandle`，因此请求解析到 provider 后，即使注册来源并发移除也能完成。
+## Provider registration and dispatch
 
-[`providers/register_builtins.rs`](../src/providers/register_builtins.rs) 通过 `OnceLock` 只注册一次已启用内置实现。Cargo feature 控制编译哪些实现与 provider 专用依赖。运行时扩展可按 source id 注册 provider，并移除该来源的全部 provider。
+[`api_registry.rs`](../src/api_registry.rs) defines `ApiProvider` and a process registry keyed by API id. A lookup returns an owned `RegisteredHandle`, so a request already resolved to a provider can finish even if its registration source is removed concurrently.
 
-[`stream.rs`](../src/stream.rs) 确保内置实现已注册，解析 `model.api` 并委托给 provider。缺失或不匹配 provider 与 provider 失败使用相同终止错误流形式。`complete` 消费流结果，不实现第二条请求路径。
+[`providers/register_builtins.rs`](../src/providers/register_builtins.rs) registers enabled built-ins once through `OnceLock`. Cargo features control which implementations and provider-specific dependencies compile. Runtime extensions may register providers with a source id and later unregister every provider from that source.
 
-## 请求与流流水线
+[`stream.rs`](../src/stream.rs) ensures built-ins are registered, resolves `model.api`, and delegates to the provider. A missing or mismatched provider produces the same terminal error-stream form as a provider failure. `complete` consumes the stream's result instead of implementing a second request path.
 
-发送请求前，[`providers/transform_messages.rs`](../src/providers/transform_messages.rs) 按目标模型能力调整历史。它可以降级不支持的图像、转换不兼容 thinking block、规范化工具调用标识、移除不可用错误 turn，并补全缺失工具结果，使 provider API 收到合法工具序列。
+## Request and stream pipeline
 
-[`providers/mod.rs`](../src/providers/mod.rs) 下每个 provider 模块负责请求 body、认证 header、端点选择、流解码、usage/stop reason 映射和协议专用工具/thinking 转换。共享 Responses、Google、prompt cache、SSE、AWS event stream、retry、overflow、validation 和 Unicode 辅助逻辑保留在 `providers/` 对应共享模块或 [`utils/mod.rs`](../src/utils/mod.rs)。
+Before a provider sends a request, [`providers/transform_messages.rs`](../src/providers/transform_messages.rs) reconciles history with target-model capabilities. It can downgrade unsupported images, convert incompatible thinking blocks, normalize tool-call ids, remove unusable error turns, and synthesize missing tool results so provider APIs receive a valid tool sequence.
 
-[`utils/event_stream.rs`](../src/utils/event_stream.rs) 将 `AssistantMessageEventSender` 与 `AssistantMessageEventStream` 配对。Sender 发布有序事件并完成一个最终 `AssistantMessage`；stream 支持增量消费和等待终止结果。
+Each provider module under [`providers/mod.rs`](../src/providers/mod.rs) owns request-body construction, authentication headers, endpoint selection, stream decoding, usage mapping, stop-reason mapping, and protocol-specific tool/thinking conversion. Shared Responses, Google, prompt-cache, SSE, AWS event-stream, retry, overflow, validation, and Unicode helpers stay in their corresponding shared modules under `providers/` or [`utils/mod.rs`](../src/utils/mod.rs).
 
-取消或 provider 失败必须以规范化 stop/error 记录终止流。Provider 网络 task 退出后不得留下仍在等待终止结果的调用方。
+[`utils/event_stream.rs`](../src/utils/event_stream.rs) couples `AssistantMessageEventSender` with `AssistantMessageEventStream`. The sender publishes ordered events and resolves one final `AssistantMessage`; the stream supports both incremental consumption and awaiting the terminal result.
 
-## 目录与凭证
+Cancellation and provider failures terminate the stream with normalized stop/error records. Provider modules must not leave callers waiting for a terminal result after their network task exits.
 
-[`models.rs`](../src/models.rs) 把运行时自定义模型覆盖到 [`models_generated.rs`](../src/models_generated.rs) 和 [`models.generated.json`](../src/models.generated.json) 的生成目录上。[`image_models.rs`](../src/image_models.rs) 提供相应图像目录。
+## Catalogs and credentials
 
-[`env_api_keys.rs`](../src/env_api_keys.rs) 将 provider 标识映射到环境变量。调用方也可通过 stream options 提供 `get_api_key`；provider 流水线消费解析后的凭证但不持久化。
+[`models.rs`](../src/models.rs) overlays runtime custom models on the generated catalog in [`models_generated.rs`](../src/models_generated.rs) and [`models.generated.json`](../src/models.generated.json). [`image_models.rs`](../src/image_models.rs) provides the corresponding image catalog.
 
-[`session_resources.rs`](../src/session_resources.rs) 暴露 provider 自有会话资源清理。长连接 cache 属于 provider 基础设施，不成为 agent 会话状态。
+[`env_api_keys.rs`](../src/env_api_keys.rs) maps provider identifiers to environment keys. Callers may also supply `get_api_key` through stream options; the provider pipeline consumes resolved credentials but does not persist them.
 
-## 添加 provider
+[`session_resources.rs`](../src/session_resources.rs) exposes cleanup for provider-owned session resources. Long-lived connection caches remain provider infrastructure and must not become agent-session state.
 
-1. 在 [`Cargo.toml`](../Cargo.toml) 中添加 feature 及该协议所需的最小依赖。
-2. 在 provider 模块实现 `ApiProvider`；只有 wire 协议确实共享时才复用请求/流辅助逻辑。
-3. 在 `providers/register_builtins.rs` 的同一 feature 下注册实现。
-4. 将所有内容、工具、thinking、usage、stop、取消和错误路径映射到规范化类型。
-5. 添加无需密钥的请求/流 fixture 和 feature 矩阵编译覆盖。
+## Adding a provider
 
-## 不变量
+1. Add a feature and only the dependencies required by that protocol in [`Cargo.toml`](../Cargo.toml).
+2. Implement `ApiProvider` in a provider module, reusing shared request/stream helpers where the wire protocol is genuinely shared.
+3. Register the implementation under the same feature in `providers/register_builtins.rs`.
+4. Map every content, tool, thinking, usage, stop, cancellation, and error path to normalized types.
+5. Add keyless request/stream fixtures and feature-matrix compilation coverage.
 
-- Provider 专用 JSON、header、事件名和错误 body 留在 provider 模块。
-- 每个已启动流只完成一次规范化终止结果。
-- 工具调用 delta 保留 provider 关联，同时生成稳定规范化标识与参数文本。
-- 消息转换保留合法历史顺序，不静默发送模型不支持的内容。
-- 凭证由调用方或环境提供，不写入目录、消息、诊断或会话资源。
-- 未启用 feature 的 provider 及其可选依赖树不进入精简构建。
+## Invariants
+
+- Provider-specific JSON, headers, event names, and error bodies remain inside provider modules.
+- Every started stream reaches exactly one normalized terminal result.
+- Tool-call deltas preserve provider correlation while producing stable normalized ids and argument text.
+- Message transformation preserves valid history ordering and never sends unsupported content silently.
+- Credentials remain caller- or environment-supplied and are not stored in catalogs, messages, diagnostics, or session resources.
+- Feature-disabled providers and their optional dependency trees do not compile into thin builds.

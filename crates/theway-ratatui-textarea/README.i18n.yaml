@@ -1,0 +1,4 @@
+# English-first bilingual documentation record. Update both files, then run:
+#   scripts/verify-doc-i18n.py --write crates/theway-ratatui-textarea/README.md
+README.md: 204834a0a045205afb24c343831ab75d02e4bda6
+README.zh.md: 5705f84582814cfc7b60ec1fe8caca5c2ff12848

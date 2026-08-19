@@ -1,25 +1,25 @@
-# theway-transport 修改规则
+# AGENTS.md — theway-transport
 
-本文件适用于 `crates/theway-transport/`，并补充仓库级规则 [`../../AGENTS.md`](../../AGENTS.md)。修改 wire 记录、protobuf 服务或 carrier 行为前，先阅读 [crate 概览](README.md)和[传输架构](docs/architecture.md)。
+This file adds crate-specific instructions to [`../../AGENTS.md`](../../AGENTS.md). Read the [crate overview](README.md) and [transport architecture](docs/architecture.md) before changing wire records, protobuf services, or carrier behavior.
 
-## 边界规则
+## Boundary rules
 
-- 本 crate 与 `theway-core`、`theway-daemon`、`theway-storage` 及所有 UI crate 保持独立。
-- 跨客户端请求、结果、snapshot 和事件记录先在这里定义，再实现 daemon 或客户端行为。
-- 模型、会话、工具和图策略留在服务端实现；gRPC、HTTP、SSE 和 WebSocket handler 只做转换与路由。
-- MCP 客户端与 server 行为分别放在 [`theway-mcp`](../theway-mcp/README.md) 和 [`theway-daemon`](../theway-daemon/README.md)。
+- Keep this crate independent of `theway-core`, `theway-daemon`, `theway-storage`, and all UI crates.
+- Define cross-client request, result, snapshot, and event records here before implementing daemon or client behavior.
+- Keep model/session/tool/graph policy in the server implementation; gRPC, HTTP, SSE, and WebSocket handlers translate and route only.
+- Keep MCP client and server behavior in [`theway-mcp`](../theway-mcp/README.md) and [`theway-daemon`](../theway-daemon/README.md), respectively.
 
-## 协议规则
+## Protocol rules
 
-- 需要有序执行的运行时变更通过 `WireCommand` 路由；独立读取和控制使用操作 trait。
-- 修改增量 feed/status frame 时，保留完整 snapshot 恢复路径。
-- Proto 文件、Rust 转换模块、服务实现、客户端包装和 TypeScript SDK 必须一起修改；proto 变化后运行 `make sdk-sync`。
-- 共享操作与错误在 gRPC 和 web carrier 上保持语义一致。
-- 复用 [`theway-contract`](../theway-contract/README.md) 的叶子记录，不创建 transport 自有副本。
+- Route ordered runtime mutations through `WireCommand`; use operation traits for independent reads and controls.
+- Preserve complete-snapshot recovery whenever changing incremental feed/status frames.
+- Change proto files, Rust conversion modules, service implementations, client wrappers, and the TypeScript SDK together; run `make sdk-sync` after proto changes.
+- Keep gRPC and web carriers semantically aligned for shared operations and errors.
+- Reuse leaf records from [`theway-contract`](../theway-contract/README.md) instead of introducing transport-owned duplicates.
 
-## 测试与文档
+## Tests and documentation
 
-- 每个新 protobuf 字段要补转换往返测试；carrier 要覆盖路由、校验、流式传输、lag 和断线行为。
-- 镜像测试遵循 [`../../docs/rust-test-files.md`](../../docs/rust-test-files.md)。
-- 端点归属、snapshot 语义、carrier、发现机制或协议生成变化时，更新 [`docs/architecture.md`](docs/architecture.md)。
-- 运行 `cargo test -p theway-transport`、`cargo doc -p theway-transport --no-deps --document-private-items` 和 `make layering-check`；proto 变化还要运行 `make sdk-sync` 及生成差异检查。
+- Add conversion round trips for every new protobuf field and carrier tests for routing, validation, streaming, lag, and disconnect behavior.
+- Follow [`../../docs/rust-test-files.md`](../../docs/rust-test-files.md) for mirrored suites.
+- Update [docs/architecture.md](docs/architecture.md) when endpoint ownership, snapshot semantics, a carrier, discovery, or protocol generation changes.
+- Run `cargo test -p theway-transport`, `cargo doc -p theway-transport --no-deps --document-private-items`, and `make layering-check`; run `make sdk-sync` and its generated diff checks for proto changes.

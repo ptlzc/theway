@@ -1,21 +1,25 @@
 # theway-markdown
 
-`theway-markdown` 为终端应用渲染完整或增量到达的 Markdown。它输出 ANSI 文本或带样式的 ratatui line，并携带 source map、hyperlink target、代码块 span 和稳定流式 checkpoint。
+English | [中文](README.zh.md)
 
-## 能力
+`theway-markdown` renders complete or incrementally arriving Markdown for terminal applications. It produces ANSI text or styled ratatui lines and carries source maps, hyperlink targets, code-block spans, and stable streaming checkpoints alongside the visual output.
 
-- 使用冻结前缀与重新渲染的可变尾部进行增量渲染。
-- 支持 GFM 表格、task list、代码块、行内样式、blockquote 和列表。
-- 提供语法高亮与终端色彩级别适配。
-- 将支持的 LaTeX 数学语法转换为 Unicode 近似表示。
-- 对 Mermaid 渲染限制宽度；不支持或过大的图回退为源文本。
-- 生成 OSC 8 hyperlink 元数据和源到渲染行的映射。
+## Capabilities
 
-Parser feature 与仅双波浪线删除线策略来自 [`theway-markdown-core`](../theway-markdown-core/README.md)。Token 流使用 [`StreamingMarkdownRenderer`](src/streaming.rs)，完整文档使用 [`src/lib.rs`](src/lib.rs) 中的一次性函数。
+- Incremental rendering with a frozen prefix and a re-rendered mutable tail.
+- GFM tables, task lists, code blocks, inline styles, block quotes, and lists.
+- Syntax highlighting with terminal color-level adaptation.
+- Unicode approximations for supported LaTeX math syntax.
+- Width-bounded Mermaid rendering with a source fallback for unsupported or oversized diagrams.
+- OSC 8 hyperlink metadata and source-to-rendered-line mapping.
 
-## 开发
+The parser feature set and double-tilde-only strikethrough policy come from [`theway-markdown-core`](../theway-markdown-core/README.md). Applications should use [`StreamingMarkdownRenderer`](src/streaming.rs) for token streams and the one-shot functions in [`src/lib.rs`](src/lib.rs) for complete documents.
 
-渲染流水线与流式契约见 [`docs/architecture.md`](docs/architecture.md)，目录修改规则见 [`AGENTS.md`](AGENTS.md)，代码来源见 [`NOTICE`](NOTICE)。
+## Development
+
+The rendering pipeline and streaming contract are documented in [`docs/architecture.md`](docs/architecture.md). Directory-specific modification rules are in [`AGENTS.md`](AGENTS.md), and code lineage is recorded in [`NOTICE`](NOTICE).
+
+Run the crate checks from the workspace root:
 
 ```bash
 cargo test -p theway-markdown

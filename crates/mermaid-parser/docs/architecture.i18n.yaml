@@ -1,0 +1,4 @@
+# English-first bilingual documentation record. Update both files, then run:
+#   scripts/verify-doc-i18n.py --write crates/mermaid-parser/docs/architecture.md
+architecture.md: 72a16f7f191833fc847ead86c316eb83958a0391
+architecture.zh.md: 3c07ddf28871b3e3c3df9bba3d9b8a2a5d8b7d22

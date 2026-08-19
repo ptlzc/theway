@@ -1,28 +1,30 @@
 # theway-tui
 
-`theway-tui` 构建 `theway` 命令：一个面向 `thewayd` 的 ratatui client/controller，以及离线会话维护命令。它负责终端布局、输入、feed 渲染、picker、clipboard 集成、本地命令展示、daemon 发现/启动，以及连接 daemon 使用的 controller 侧工具与存储服务。
+English | [中文](README.zh.md)
 
-本 crate 依赖 [`theway-transport`](../theway-transport/README.md)、[`theway-storage`](../theway-storage/README.md) 和渲染 widget，但绝不依赖 [`theway-core`](../theway-core/README.md) 或 [`theway-daemon`](../theway-daemon/README.md)。运行时 turn、trigger、暴露给模型的工具和编排状态由 daemon 负责。
+`theway-tui` builds the `theway` command: a ratatui client/controller for `thewayd` plus offline session-maintenance commands. It owns terminal layout, input, feed rendering, pickers, clipboard integration, local command presentation, daemon discovery/spawn, and the controller-side tool and storage services used by a connected daemon.
 
-## 运行模式
+The crate depends on [`theway-transport`](../theway-transport/README.md), [`theway-storage`](../theway-storage/README.md), and rendering widgets, but never on [`theway-core`](../theway-core/README.md) or [`theway-daemon`](../theway-daemon/README.md). Runtime turns, triggers, tools exposed to the model, and orchestration state remain daemon-owned.
 
-- 交互模式启动 loopback `ToolService` 和 `StorageService` 实现，发现或启动 `thewayd`，向 daemon 下发配置，消费 snapshot/event，并运行终端应用。
-- 无需活动运行时协调时，离线会话命令直接打开本地 `SqliteSessionRepo`，完成导出、导入、列举和删除。
-- Headless/非交互渲染复用相同应用状态与 transport frame，不构建 agent 运行时。
+## Runtime modes
 
-## UI 组件
+- Interactive mode starts loopback `ToolService` and `StorageService` implementations, discovers or spawns `thewayd`, provisions daemon configuration, consumes snapshots/events, and runs the terminal application.
+- Offline session commands open the local `SqliteSessionRepo` directly for export, import, listing, and deletion when no live runtime coordination is required.
+- Headless/non-interactive rendering reuses the same application state and transport frames without constructing an agent runtime.
 
-- [`theway-markdown`](../theway-markdown/README.md) 渲染流式 assistant 内容、代码、数学、表格、链接与 Mermaid 图。
-- [`theway-ratatui-textarea`](../theway-ratatui-textarea/README.md) 提供 composer 编辑器。
-- [`theway-pager-render`](../theway-pager-render/README.md) 提供宽度、scrollbar、颜色、路径和 OSC 8 链接辅助逻辑。
+## UI building blocks
 
-## 文档
+- [`theway-markdown`](../theway-markdown/README.md) renders streaming assistant content, code, math, tables, links, and Mermaid diagrams.
+- [`theway-ratatui-textarea`](../theway-ratatui-textarea/README.md) provides the composer editor.
+- [`theway-pager-render`](../theway-pager-render/README.md) provides width, scrollbar, color, path, and OSC 8 link helpers.
 
-- [Client/controller 架构](docs/architecture.md)
-- [传输协议](../theway-transport/docs/architecture.md)
-- [工作区架构](../../docs/architecture.md)
+## Documentation
 
-## 验证
+- [Client/controller architecture](docs/architecture.md)
+- [Transport protocol](../theway-transport/docs/architecture.md)
+- [Workspace architecture](../../docs/architecture.md)
+
+## Validation
 
 ```bash
 cargo test -p theway-tui

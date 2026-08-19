@@ -1,0 +1,4 @@
+# English-first bilingual documentation record. Update both files, then run:
+#   scripts/verify-doc-i18n.py --write crates/theway-pager-render/README.md
+README.md: 2ee8c92e1b652439e2f34dfcaf6d49e225769dc5
+README.zh.md: 534f99869f01cdf8aafd2ca2c5283416d43c41f4

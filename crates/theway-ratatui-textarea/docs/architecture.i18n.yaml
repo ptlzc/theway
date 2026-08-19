@@ -1,0 +1,4 @@
+# English-first bilingual documentation record. Update both files, then run:
+#   scripts/verify-doc-i18n.py --write crates/theway-ratatui-textarea/docs/architecture.md
+architecture.md: f29c7ff07a217183a147c2564beeefebe494da56
+architecture.zh.md: f246c7436d7b6b3b6002278ac220644e2250f3fd

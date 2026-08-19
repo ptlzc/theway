@@ -1,24 +1,24 @@
-# theway-mcp 修改规则
+# AGENTS.md — theway-mcp
 
-本文件适用于 `crates/theway-mcp/`，并补充仓库级规则 [`../../AGENTS.md`](../../AGENTS.md)。修改请求关联或传输行为前，先阅读 [crate 概览](README.md)和[客户端架构](docs/architecture.md)。
+This file adds crate-specific instructions to [`../../AGENTS.md`](../../AGENTS.md). Read the [crate overview](README.md) and [client architecture](docs/architecture.md) before changing request correlation or transport behavior.
 
-## 边界规则
+## Boundary rules
 
-- 本 crate 与 `theway-core`、daemon 配置、工具策略、trigger 投递和 UI 代码保持独立。
-- MCP 到 `AgentTool` 的转换和 MCP server 行为保留在 [`theway-daemon`](../theway-daemon/README.md)。
-- 只为客户端已实现操作，或解码其响应和 notification 所必需的内容添加协议记录。
+- Keep the crate independent of `theway-core`, daemon configuration, tool policy, trigger delivery, and UI code.
+- Keep MCP-to-`AgentTool` conversion and MCP server behavior in [`theway-daemon`](../theway-daemon/README.md).
+- Add protocol records only for operations implemented by this client or required to decode their responses and notifications.
 
-## 生命周期与安全规则
+## Lifecycle and security rules
 
-- 收到响应、超时、取消、transport 关闭或 future drop 时，都要移除对应 in-flight 请求。
-- 保持响应关联与 server notification 投递相互独立。
-- Stdio 与 HTTP 在 `Transport` trait 层表现一致。
-- HTTP body、SSE buffer、空闲等待、重连延迟和取消发送都必须有界。
-- Debug 输出、诊断和错误不得泄漏 bearer 凭证。
+- Remove every in-flight request on response, timeout, cancellation, transport close, and future drop.
+- Preserve the separation between response correlation and server notification delivery.
+- Keep stdio and HTTP behavior equivalent at the `Transport` trait.
+- Bound HTTP bodies, SSE buffers, idle waits, reconnect delays, and cancellation sends.
+- Redact bearer credentials from debug output, diagnostics, and errors.
 
-## 测试与文档
+## Tests and documentation
 
-- 使用本地子进程或 HTTP fixture；测试不得连接外部 MCP server。
-- 相关路径变化时覆盖分片 SSE、heartbeat、直接 JSON 响应、重连/取消、响应不匹配、notification 投递和子进程关闭。
-- 握手、请求生命周期、协议子集或 transport 行为变化时，更新 [`docs/architecture.md`](docs/architecture.md)。
-- 运行 `cargo test -p theway-mcp` 和 `cargo doc -p theway-mcp --no-deps --document-private-items`。
+- Use local subprocess or HTTP fixtures; tests must not contact external MCP servers.
+- Cover fragmented SSE, heartbeat events, direct JSON responses, reconnect/cancel paths, response mismatch, notification delivery, and child shutdown when those paths change.
+- Update [docs/architecture.md](docs/architecture.md) when the handshake, request lifecycle, protocol subset, or transport behavior changes.
+- Run `cargo test -p theway-mcp` and `cargo doc -p theway-mcp --no-deps --document-private-items`.

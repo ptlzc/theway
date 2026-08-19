@@ -1,23 +1,25 @@
 # theway-mcp
 
-`theway-mcp` 是与应用 transport 无关的 MCP 客户端，[`theway-daemon`](../theway-daemon/README.md) 用它加载外部工具并接收 server notification。它实现 JSON-RPC 2.0 请求关联、MCP initialize 握手、`tools/list`、`tools/call`、取消 notification、stdio 子进程传输和 Streamable HTTP 传输。
+English | [中文](README.zh.md)
 
-本 crate 不依赖 [`theway-core`](../theway-core/README.md)，也不把 MCP 工具转换为 agent 工具。该适配器及所有 server 侧 MCP 行为属于 daemon。
+`theway-mcp` is a transport-independent MCP client used by [`theway-daemon`](../theway-daemon/README.md) to load external tools and receive server notifications. It implements JSON-RPC 2.0 request correlation, the MCP initialize handshake, `tools/list`, `tools/call`, cancellation notification, stdio subprocess transport, and Streamable HTTP transport.
 
-## 公开 API
+The crate does not depend on [`theway-core`](../theway-core/README.md) and does not convert MCP tools into agent tools. That adapter and all server-side MCP behavior belong to the daemon.
 
-- `McpClient` 负责初始化状态、请求标识、in-flight 响应、缓存工具目录、取消和 notification receiver。
-- `Transport` 是客户端使用的异步换行分隔 JSON 抽象。
-- `StdioTransport` 通过 stdin/stdout 启动并监管 MCP 子进程。
-- `HttpMcpTransport` 通过 HTTP 发送请求并接收直接响应或 SSE 响应，同时限制 body、空闲超时、bearer 认证和重连策略。
-- `protocol` 包含已实现 MCP 操作使用的请求、响应、notification、工具、server info 和内容记录。
+## Public API
 
-## 文档
+- `McpClient` owns initialization state, request ids, in-flight responses, the cached tool catalog, cancellation, and the notification receiver.
+- `Transport` is the asynchronous newline-delimited JSON abstraction used by the client.
+- `StdioTransport` starts and supervises an MCP subprocess over stdin/stdout.
+- `HttpMcpTransport` sends requests over HTTP and receives direct or SSE responses with bounded bodies, idle timeouts, bearer authentication, and reconnect policy.
+- `protocol` contains the request, response, notification, tool, server-info, and content records used by the implemented MCP operations.
 
-- [客户端与传输架构](docs/architecture.md)
-- [Daemon MCP 集成](../theway-daemon/docs/architecture.md)
+## Documentation
 
-## 验证
+- [Client and transport architecture](docs/architecture.md)
+- [Daemon MCP integration](../theway-daemon/docs/architecture.md)
+
+## Validation
 
 ```bash
 cargo test -p theway-mcp

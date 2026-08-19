@@ -1,18 +1,22 @@
 # theway-markdown-core
 
-`theway-markdown-core` 是无终端依赖的 Markdown 策略与分析 crate。它暴露终端 renderer 使用的 parser 配置、保留 offset 的事件流、元素统计和结构诊断，不依赖 ratatui、语法高亮或终端能力。
+English | [中文](README.zh.md)
 
-## 公开 API
+`theway-markdown-core` is the headless Markdown policy and analysis crate. It exposes the parser configuration used by the terminal renderer, an offset-preserving event stream, element statistics, and structural diagnostics without depending on ratatui, syntax highlighting, or terminal capabilities.
 
-- [`parser_options`](src/lib.rs) 定义启用的 `pulldown-cmark` 扩展：GFM、表格、task list、数学和删除线。
-- [`offset_events`](src/lib.rs) 返回带源字节范围的 parser 事件，并执行“只有 `~~双波浪线~~` 表示删除线”的项目规则。
-- [`analyze`](src/lib.rs) 生成 [`MarkdownAnalysis`](src/lib.rs)，组合 [`MarkdownStats`](src/lib.rs) 与渲染保真度 [`StructuralIssue`](src/lib.rs)。
+## Public API
 
-调用方只需检查 Markdown、不希望引入 [`theway-markdown`](../theway-markdown/README.md) 时使用本 crate。Renderer 也应使用 `offset_events`，而不是自行构造 parser，确保分析与渲染对同一源文本作出一致解释。
+- [`parser_options`](src/lib.rs) defines the enabled `pulldown-cmark` extensions: GFM, tables, task lists, math, and strikethrough.
+- [`offset_events`](src/lib.rs) returns parser events with source byte ranges and preserves the project rule that only `~~double tilde~~` is strikethrough.
+- [`analyze`](src/lib.rs) produces [`MarkdownAnalysis`](src/lib.rs), combining [`MarkdownStats`](src/lib.rs) with render-fidelity [`StructuralIssue`](src/lib.rs) values.
 
-## 开发
+Use this crate when a caller needs to inspect Markdown without pulling in [`theway-markdown`](../theway-markdown/README.md). Consumers that render Markdown should also use `offset_events` instead of constructing an independent parser so analysis and rendering interpret the same source consistently.
 
-机制与不变量见 [`docs/architecture.md`](docs/architecture.md)，目录修改规则见 [`AGENTS.md`](AGENTS.md)，代码来源见 [`NOTICE`](NOTICE)。
+## Development
+
+The mechanism and invariants are documented in [`docs/architecture.md`](docs/architecture.md). Directory-specific modification rules are in [`AGENTS.md`](AGENTS.md), and code lineage is recorded in [`NOTICE`](NOTICE).
+
+Run the crate checks from the workspace root:
 
 ```bash
 cargo test -p theway-markdown-core

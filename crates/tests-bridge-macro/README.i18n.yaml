@@ -1,0 +1,4 @@
+# English-first bilingual documentation record. Update both files, then run:
+#   scripts/verify-doc-i18n.py --write crates/tests-bridge-macro/README.md
+README.md: 04d22b3fd573e223ce1777371907bf7cb105bed5
+README.zh.md: 19efd9718e61d0dc22d4013f4774b1f002b22aa5

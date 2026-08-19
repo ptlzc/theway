@@ -1,0 +1,4 @@
+# English-first bilingual documentation record. Update both files, then run:
+#   scripts/verify-doc-i18n.py --write crates/tests-bridge-macro/docs/architecture.md
+architecture.md: 9748c6ad5dd35385d6fb199e98e45c01b0929dae
+architecture.zh.md: 4e30faff457571876fa7ee77c256523b6fbac6cb

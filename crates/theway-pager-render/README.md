@@ -1,20 +1,24 @@
 # theway-pager-render
 
-`theway-pager-render` 为 feed 和 pager 风格视图提供可复用 ratatui 渲染原语。它不包含会话状态、daemon 协议或应用事件循环。
+English | [中文](README.zh.md)
 
-## 模块
+`theway-pager-render` provides reusable ratatui rendering primitives for feed and pager-style views. It deliberately contains no session state, daemon protocol, or application event loop.
 
-- [`color`](src/color.rs) 混合与清理终端 buffer 区域。
-- [`line_utils`](src/line_utils.rs) 按终端 display width 测量、切片、截断和转换带样式 ratatui line。
-- [`scrollbar`](src/scrollbar.rs) 为 feed pane 适配 `tui-scrollbar`。
-- [`osc8`](src/osc8.rs) 检测安全 web link 与文件引用，并覆盖 OSC 8 元数据。
-- [`tool_paths`](src/tool_paths.rs) 解析并缩短工具报告的路径用于展示。
+## Modules
 
-TUI 把这些原语与自身视图状态和交互策略组合。链接打开仍由应用负责；本 crate 只识别并标注 target。
+- [`color`](src/color.rs) blends and clears terminal buffer regions.
+- [`line_utils`](src/line_utils.rs) measures, slices, truncates, and converts styled ratatui lines using terminal display width.
+- [`scrollbar`](src/scrollbar.rs) adapts `tui-scrollbar` for feed panes.
+- [`osc8`](src/osc8.rs) detects safe web links and file references and overlays OSC 8 metadata.
+- [`tool_paths`](src/tool_paths.rs) resolves and shortens tool-reported paths for display.
 
-## 开发
+The TUI composes these primitives with its own view state and interaction policy. Link activation remains an application responsibility; this crate only recognizes and annotates targets.
 
-模块边界与安全规则见 [`docs/architecture.md`](docs/architecture.md)，目录修改规则见 [`AGENTS.md`](AGENTS.md)，代码来源见 [`NOTICE`](NOTICE)。
+## Development
+
+The module boundaries and safety rules are documented in [`docs/architecture.md`](docs/architecture.md). Directory-specific modification rules are in [`AGENTS.md`](AGENTS.md), and code lineage is recorded in [`NOTICE`](NOTICE).
+
+Run the crate checks from the workspace root:
 
 ```bash
 cargo test -p theway-pager-render

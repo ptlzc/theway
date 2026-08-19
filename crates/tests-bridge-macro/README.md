@@ -1,21 +1,23 @@
 # tests-bridge-macro
 
-`tests-bridge-macro` 提供 `tests_bridge!` 过程宏，将镜像多文件测试套件挂载到其归属源码模块。它解决 `#[path]` 只能接受字面路径的问题，同时保留单元测试访问私有项的语义。
+English | [中文](README.zh.md)
 
-源码模块中的调用：
+`tests-bridge-macro` provides the `tests_bridge!` procedural macro, which attaches a mirrored multi-file test suite to its owning source module. It solves the requirement that `#[path]` accept only a literal path while preserving unit-test access to private items.
+
+A call in a source module:
 
 ```rust,ignore
 #[cfg(test)]
 tests_bridge_macro::tests_bridge!("agent/session");
 ```
 
-会在归属 crate 的单元测试 target 中生成以 `CARGO_MANIFEST_DIR` 为根的绝对 `#[path = "…/tests/agent/session/mod.rs"] mod tests;`。源码调用点负责 `#[cfg(test)]`，该宏通常作为 dev-dependency 使用。
+expands in the owning crate's unit-test target to an absolute `#[path = "…/tests/agent/session/mod.rs"] mod tests;` rooted at `CARGO_MANIFEST_DIR`. The source call site owns `#[cfg(test)]`, and the macro is normally used as a dev-dependency.
 
-同一源码被 integration-test crate 通过 path 引入时，宏比较 Cargo target 环境并不生成任何 token。这样可避免镜像套件针对不同 crate root 编译两次，或对进程全局测试状态产生竞争。
+When an integration-test crate imports the same source by path, the macro compares the Cargo target environment and emits no tokens. This prevents the mirrored suite from compiling under two crate roots or racing over process-global test state.
 
-测试布局和 bridge 放置由 [`../../docs/rust-test-files.md`](../../docs/rust-test-files.md) 统一规定。展开机制见 [`docs/architecture.md`](docs/architecture.md)，修改规则见 [`AGENTS.md`](AGENTS.md)。
+Test layout and bridge placement are defined centrally in [`../../docs/rust-test-files.md`](../../docs/rust-test-files.md). The expansion mechanism is documented in [`docs/architecture.md`](docs/architecture.md), and modification rules are in [`AGENTS.md`](AGENTS.md).
 
-## 验证
+## Validation
 
 ```bash
 cargo test -p tests-bridge-macro

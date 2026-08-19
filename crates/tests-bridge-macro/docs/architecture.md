@@ -1,27 +1,29 @@
-# Test bridge 架构
+# Test bridge architecture
 
-## 职责
+English | [中文](architecture.zh.md)
 
-`tests-bridge-macro` 在宏展开期间把镜像测试路径转换为以 crate 根为锚点的模块声明。它只提供路径锚定；归属源码模块决定测试是否编译，[`docs/rust-test-files.md`](../../../docs/rust-test-files.md) 决定套件存放位置。
+## Responsibility
 
-## 展开流程
+During macro expansion, `tests-bridge-macro` turns a mirrored test path into a module declaration anchored at the crate root. It provides path anchoring only; the owning source module decides whether tests compile, and [`docs/rust-test-files.md`](../../../docs/rust-test-files.md) decides where the suite lives.
 
-[`tests_bridge`](../src/lib.rs) 执行以下操作：
+## Expansion flow
 
-1. 读取 `CARGO_CRATE_NAME`、`CARGO_PKG_NAME` 和 `CARGO_BIN_NAME`，把 package 与 binary 名中的连字符规范化为下划线。
-2. 活动 target 不是 package 自身 library 或 binary 单元测试 target 时，返回空 token stream。
-3. 将输入 token stream 转成字符串、去掉外围引号字符，并拒绝空 mirror 或包含 `..` 的 mirror。
-4. 拼接 `CARGO_MANIFEST_DIR`、`tests`、mirror 和 `mod.rs`，将 separator 规范化为正斜杠，然后生成 `#[path = "<absolute path>"] mod tests;`。
+[`tests_bridge`](../src/lib.rs) performs these steps:
 
-调用契约是 `"agent/session"` 这样的带引号相对 mirror。上面逐项列出宏实际执行的校验；修改输入解析或路径 containment 需要专门的编译展开覆盖。
+1. Read `CARGO_CRATE_NAME`, `CARGO_PKG_NAME`, and `CARGO_BIN_NAME`, then normalize hyphens in package and binary names to underscores.
+2. Return an empty token stream when the active target is not the package's own library or binary unit-test target.
+3. Convert the input token stream to a string, strip surrounding quote characters, and reject an empty mirror or a mirror containing `..`.
+4. Join `CARGO_MANIFEST_DIR`, `tests`, the mirror, and `mod.rs`, normalize separators to forward slashes, and emit `#[path = "<absolute path>"] mod tests;`.
 
-## Target 过滤
+The call contract is a quoted relative mirror such as `"agent/session"`. The steps above enumerate the validation the macro actually performs; changes to input parsing or path containment require dedicated compile-expansion coverage.
 
-Integration test 可以在启用 `cfg(test)` 时通过 path 引入源码模块。此时 `CARGO_CRATE_NAME` 指向 integration target，而不是归属 package 或 binary，因此宏展开为空。原始套件只在 library/binary crate root 下编译一次，并保留单元测试可见性。
+## Target filtering
 
-## 边界与不变量
+An integration test can import a source module by path while `cfg(test)` is enabled. In that case, `CARGO_CRATE_NAME` names the integration target rather than the owning package or binary, so the macro expands to nothing. The original suite compiles once under the library or binary crate root and retains unit-test visibility.
 
-- 源码调用点保留 `#[cfg(test)]`；生产编译不需要该 dev-dependency。
-- 生成模块名固定为 `tests`，target 文件固定为 mirror 下的 `mod.rs`。
-- 展开只依赖编译期 Cargo 环境，不执行运行时工作。
-- 宏没有非 std 依赖，也不包含测试发现或执行策略。
+## Boundaries and invariants
+
+- The source call site retains `#[cfg(test)]`; production compilation does not require the dev-dependency.
+- The generated module name remains `tests`, and the target file remains `mod.rs` under the mirror.
+- Expansion depends only on the compile-time Cargo environment and performs no runtime work.
+- The macro has no non-std dependencies and contains no test-discovery or execution policy.

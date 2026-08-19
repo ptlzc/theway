@@ -1,0 +1,4 @@
+# English-first bilingual documentation record. Update both files, then run:
+#   scripts/verify-doc-i18n.py --write crates/theway-markdown-core/docs/architecture.md
+architecture.md: a86101514226c6f8cb97791a7fde4d220d24ab78
+architecture.zh.md: 2a30850cdcfc5c4811a06493af79bd2043a56317

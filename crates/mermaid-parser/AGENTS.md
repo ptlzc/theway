@@ -1,21 +1,21 @@
-# Mermaid parser 修改规则
+# Mermaid parser modification rules
 
-本文件适用于 `crates/mermaid-parser/`。同时遵循 [`../../AGENTS.md`](../../AGENTS.md) 和 [`docs/architecture.md`](docs/architecture.md) 的归属边界。
+This file applies to `crates/mermaid-parser/`. Also follow [`../../AGENTS.md`](../../AGENTS.md) and the ownership boundaries in [`docs/architecture.md`](docs/architecture.md).
 
-## Vendored 源码
+## Vendored source
 
-- [`src/parser.rs`](src/parser.rs) 保持单文件；它是工作区 800 行限制的明确例外。
-- 不对 [`src/parser.rs`](src/parser.rs)、[`src/ir.rs`](src/ir.rs) 和 [`src/error.rs`](src/error.rs) 做机械拆分、格式化、重命名或清理；来源比较依赖较小 diff。
-- 上游同步必须作为独立变更，显式核验上游来源与许可证。
-- 本地 lint allow 只附着在 vendored 代码边界，不为满足工作区样式而重写来源代码。
+- Keep [`src/parser.rs`](src/parser.rs) monolithic; it is an explicit exception to the workspace 800-line limit.
+- Do not mechanically split, format, rename, or clean up [`src/parser.rs`](src/parser.rs), [`src/ir.rs`](src/ir.rs), or [`src/error.rs`](src/error.rs); source comparison depends on small diffs.
+- Make an upstream synchronization a separate change and explicitly verify its source and license.
+- Attach local lint allowances only at the vendored-code boundary; do not rewrite source code to satisfy workspace style.
 
-## 边界
+## Boundaries
 
-- 布局、SVG、字体、CLI 和终端渲染依赖不得进入本 parse-only crate。
-- Theway 的 `dag_plan` 子集策略保留在 [`../theway-core/src/multiagent/graph/mermaid.rs`](../theway-core/src/multiagent/graph/mermaid.rs)。
-- 除非同一变更同步更新消费者，否则保持稳定 graph 顺序和 [`src/lib.rs`](src/lib.rs) 的公开重新导出。
-- 来源署名与许可证变化记录在 [`LICENSE`](LICENSE) 和 crate 文档中。
+- Keep layout, SVG, font, CLI, and terminal-rendering dependencies out of this parse-only crate.
+- Keep theway's `dag_plan` subset policy in [`../theway-core/src/multiagent/graph/mermaid.rs`](../theway-core/src/multiagent/graph/mermaid.rs).
+- Preserve stable graph ordering and the public re-exports in [`src/lib.rs`](src/lib.rs) unless the same change updates consumers.
+- Record changes to source attribution and licensing in [`LICENSE`](LICENSE) and the crate documentation.
 
-## 验证
+## Validation
 
-运行 `cargo test -p mermaid-rs-parser` 和 `cargo doc -p mermaid-rs-parser --no-deps --document-private-items`。可能影响 DAG 适配器的变更还要运行 `cargo test -p theway-core multiagent::graph::mermaid`。
+Run `cargo test -p mermaid-rs-parser` and `cargo doc -p mermaid-rs-parser --no-deps --document-private-items`. For changes that may affect the DAG adapter, also run `cargo test -p theway-core multiagent::graph::mermaid`.

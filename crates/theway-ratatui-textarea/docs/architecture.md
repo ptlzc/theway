@@ -1,29 +1,31 @@
-# Textarea 架构
+# Textarea architecture
 
-## 职责
+English | [中文](architecture.zh.md)
 
-`theway-ratatui-textarea` 负责可复用文本编辑与 widget 行为。嵌入应用提供外围表单、命令路由、clipboard 实现、主题，以及 atomic text element 事件的业务含义。
+## Responsibility
 
-## 编辑引擎
+`theway-ratatui-textarea` owns reusable text-editing and widget behavior. The embedding application supplies the surrounding form, command routing, clipboard implementation, theme, and meaning of atomic text-element events.
 
-[`editor.rs`](../src/editor.rs) 包含 `EditBuffer`、命令分类、edit plan 和校验后应用。Cursor position 与 replacement range 规范化到 Unicode grapheme boundary。Atomic byte range 在规划前也会规范化，因此 cursor 移动与删除不能拆分应用定义的 element。
+## Edit engine
 
-`EditPlan` 创建时捕获 buffer identity 与 generation。对过期或其他 buffer 的 plan 执行应用会失败，不会修改错误文本状态。编辑结果同时携带文本 delta 与 cursor 结果，方便上层显式更新依赖范围。
+[`editor.rs`](../src/editor.rs) contains `EditBuffer`, command classification, edit planning, and validated edit application. Cursor positions and replacement ranges are normalized to Unicode grapheme boundaries. Atomic byte ranges are also normalized before planning so cursor movement and deletion cannot split an application-defined element.
 
-## Widget 状态与交互
+An `EditPlan` captures its buffer identity and generation at creation. Applying a stale or foreign plan fails instead of mutating a different text state. Edit results carry both text deltas and cursor outcomes so higher layers can update dependent ranges explicitly.
 
-[`textarea.rs`](../src/textarea.rs) 暴露 widget 与状态。[`textarea/model.rs`](../src/textarea/model.rs)、[`textarea/navigation.rs`](../src/textarea/navigation.rs)、[`textarea/mouse.rs`](../src/textarea/mouse.rs)、[`textarea/elements_wrap.rs`](../src/textarea/elements_wrap.rs) 和 [`textarea/history.rs`](../src/textarea/history.rs) 拆分对应机制，但保持一个公开归属边界。
+## Widget state and interaction
 
-[`textarea/history.rs`](../src/textarea/history.rs) 记录 undo/redo 状态，并支持把多个编辑组成一个用户动作。[`textarea/mouse.rs`](../src/textarea/mouse.rs) 将终端坐标映射为文本位置与 selection action。Clipboard 操作使用调用方提供的 `ClipboardProvider` 或内部 fallback。
+[`textarea.rs`](../src/textarea.rs) exposes the widget and its state. [`textarea/model.rs`](../src/textarea/model.rs), [`textarea/navigation.rs`](../src/textarea/navigation.rs), [`textarea/mouse.rs`](../src/textarea/mouse.rs), [`textarea/elements_wrap.rs`](../src/textarea/elements_wrap.rs), and [`textarea/history.rs`](../src/textarea/history.rs) separate those mechanisms while retaining one public ownership boundary.
 
-## Wrap 与渲染
+[`textarea/history.rs`](../src/textarea/history.rs) records undo and redo states and supports grouping edits that should behave as one user action. [`textarea/mouse.rs`](../src/textarea/mouse.rs) maps terminal coordinates to text positions and selection actions. Clipboard operations use the caller-provided `ClipboardProvider` or the internal fallback.
 
-[`wrapping.rs`](../src/wrapping.rs) 将逻辑文本与 styled span 映射为可视行，同时保留 grapheme boundary、终端 display width 和源位置。[`render/mod.rs`](../src/render/mod.rs) 从状态绘制内容、selection、cursor 与 scrollbar，不修改编辑模型。
+## Wrapping and rendering
 
-## 边界与不变量
+[`wrapping.rs`](../src/wrapping.rs) maps logical text and styled spans into visual rows while preserving grapheme boundaries, terminal display width, and source positions. [`render/mod.rs`](../src/render/mod.rs) draws content, selection, cursor, and scrollbar from the state without changing the edit model.
 
-- Cursor 与 edit boundary 是始终落在 grapheme boundary 的 UTF-8 字节 offset。
-- Atomic text element 以不可拆分 range 移动、选择和删除。
-- Plan 只能修改创建它的 buffer identity 与 generation。
-- Wrap 保留样式，并按终端 display width 把 visual cell 映射回 logical position。
-- Windows 上按需把 Ctrl+Alt 区分为 AltGr；其他平台使用其组合输入行为。
+## Boundaries and invariants
+
+- Cursor and edit boundaries are UTF-8 byte offsets that always land on grapheme boundaries.
+- Atomic text elements move, select, and delete as indivisible ranges.
+- A plan can mutate only the buffer identity and generation from which it was created.
+- Wrapping preserves styles and maps visual cells back to logical positions using terminal display width.
+- On Windows, Ctrl+Alt input is distinguished as AltGr where required; other platforms use their composed input behavior.

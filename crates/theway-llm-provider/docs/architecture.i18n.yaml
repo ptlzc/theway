@@ -1,0 +1,4 @@
+# English-first bilingual documentation record. Update both files, then run:
+#   scripts/verify-doc-i18n.py --write crates/theway-llm-provider/docs/architecture.md
+architecture.md: 6ef5d3efff9a77078ccf5a859e967c565b73b8b6
+architecture.zh.md: bfb236ce758e05a3914be03970c668c8a3d1d0a2

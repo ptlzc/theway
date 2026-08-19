@@ -1,27 +1,27 @@
-# Markdown renderer 修改规则
+# Markdown renderer modification rules
 
-本文件适用于 `crates/theway-markdown/`。同时遵循 [`../../AGENTS.md`](../../AGENTS.md) 和 [`docs/architecture.md`](docs/architecture.md)。
+This file applies to `crates/theway-markdown/`. Follow the workspace rules in [`../../AGENTS.md`](../../AGENTS.md) and the pipeline contract in [`docs/architecture.md`](docs/architecture.md).
 
-## 归属
+## Ownership
 
-- 应用 feed 状态、输入事件和 transport 逻辑不得进入本 crate。
-- 共享 parser 选项或删除线解释在 [`theway-markdown-core`](../theway-markdown-core/AGENTS.md) 修改，并验证两个 crate。
-- 添加渲染转换时保留 source map、hyperlink range 和代码块 span。
-- 终端布局使用 display width 与 grapheme 边界。
+- Keep application feed state, input events, and transport concerns outside this crate.
+- Change shared parser options or strikethrough interpretation in [`theway-markdown-core`](../theway-markdown-core/AGENTS.md), then verify both crates.
+- Preserve source maps, hyperlink ranges, and code-block spans when adding a render transform.
+- Use display width and grapheme boundaries for terminal layout.
 
-## 流式契约
+## Streaming contract
 
-- 相同规范化源文本与设置下，完成后的流式渲染必须与一次性渲染一致。
-- 只有后续 chunk 无法改变某段的解析或渲染含义时，才冻结 checkpoint。
-- Link id 与开放代码块高亮状态穿过尾部重渲染，不从渲染文本反推稳定元数据。
-- Mermaid 解析与布局保持有界，并提供可读源文本 fallback。
+- A completed streaming render must agree with the one-shot render for the same normalized source and settings.
+- Freeze a checkpoint only when later chunks cannot alter its parsed or rendered meaning.
+- Thread link identifiers and open-code highlighting state through tail re-renders; do not derive stable metadata from rendered text.
+- Keep Mermaid parsing and layout bounded, with a readable source fallback.
 
-## 兼容性
+## Compatibility
 
-- 代码来源细节保留在 [`NOTICE`](NOTICE)。
-- 更新共享来源代码时保留本地 parser 策略、终端色彩适配和宽度上限。
-- 聚焦测试按 [`../../docs/rust-test-files.md`](../../docs/rust-test-files.md) 放入镜像测试布局。
+- Keep code-lineage details in [`NOTICE`](NOTICE).
+- Preserve the intent of local changes when updating code with shared lineage, including the parser policy, terminal color adaptation, and width limits.
+- Add focused tests under the mirrored test layout described by [`../../docs/rust-test-files.md`](../../docs/rust-test-files.md).
 
-## 验证
+## Verification
 
-运行 `cargo test -p theway-markdown-core -p theway-markdown` 和 `cargo doc -p theway-markdown --no-deps --document-private-items`。
+Run `cargo test -p theway-markdown-core -p theway-markdown` and `cargo doc -p theway-markdown --no-deps --document-private-items`.
