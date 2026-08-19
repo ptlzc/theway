@@ -12,7 +12,7 @@ use anyhow::{Context, Result, bail};
 
 #[derive(Clone, Debug)]
 pub struct ClipboardImage {
-    pub image: theway_llm_provider::ImageContent,
+    pub image: theway_transport::images::EncodedImage,
     pub width: usize,
     pub height: usize,
     pub encoded_bytes: usize,

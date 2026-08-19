@@ -2,9 +2,8 @@
 //! Image attachment payload helpers — image payloads cross the wire, so the
 //! encode/validation contract lives here; the fs-side loaders live in the daemon.
 //!
-//! Infers mime type from magic bytes, base64-encodes, and returns a
-//! `theway_llm_provider::ImageContent` ready to hand to
-//! `AgentHarness::prompt_with_images`.
+//! Infers mime type from magic bytes and base64-encodes the payload. Runtime
+//! provider conversion belongs to the daemon.
 
 use anyhow::{Context, Result, bail};
 use std::path::Path;
@@ -12,9 +11,15 @@ use std::path::Path;
 pub const MAX_PER_IMAGE_BYTES: usize = 10 * 1024 * 1024;
 pub const MAX_IMAGES_PER_MESSAGE: usize = 10;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EncodedImage {
+    pub data: String,
+    pub mime_type: String,
+}
+
 /// Build an image attachment from already-read bytes. Used by both `--image` paths and
 /// clipboard paste, so format and size validation stay identical.
-pub fn load_bytes(label: &str, bytes: &[u8]) -> Result<theway_llm_provider::ImageContent> {
+pub fn load_bytes(label: &str, bytes: &[u8]) -> Result<EncodedImage> {
     if bytes.len() > MAX_PER_IMAGE_BYTES {
         bail!(
             "image {} exceeds {}MB cap ({} bytes)",
@@ -31,7 +36,7 @@ pub fn load_bytes(label: &str, bytes: &[u8]) -> Result<theway_llm_provider::Imag
     })?;
     use base64::Engine;
     let data = base64::engine::general_purpose::STANDARD.encode(bytes);
-    Ok(theway_llm_provider::ImageContent {
+    Ok(EncodedImage {
         data,
         mime_type: mime.to_string(),
     })
@@ -55,7 +60,7 @@ pub fn infer_mime(bytes: &[u8]) -> Option<&'static str> {
     None
 }
 
-pub async fn load_one(path: &Path) -> Result<theway_llm_provider::ImageContent> {
+pub async fn load_one(path: &Path) -> Result<EncodedImage> {
     let bytes = tokio::fs::read(path)
         .await
         .with_context(|| format!("read image {}", path.display()))?;
@@ -64,9 +69,7 @@ pub async fn load_one(path: &Path) -> Result<theway_llm_provider::ImageContent> 
 
 /// Load every path. Errors on the first failure so the user gets a clear, surfaceable error
 /// instead of a partial attachment list.
-pub async fn load_all(
-    paths: &[std::path::PathBuf],
-) -> Result<Vec<theway_llm_provider::ImageContent>> {
+pub async fn load_all(paths: &[std::path::PathBuf]) -> Result<Vec<EncodedImage>> {
     if paths.len() > MAX_IMAGES_PER_MESSAGE {
         bail!(
             "{} images exceeds per-message cap of {}",

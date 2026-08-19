@@ -70,12 +70,12 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap};
 use theway_ratatui_textarea::{TextArea, TextAreaState};
 
-use theway_llm_provider::ImageContent;
 use theway_transport::client::GrpcClient;
 use theway_transport::commands;
 use theway_transport::commands::Registry;
 use theway_transport::feed::{Feed, Level, TriggerPollStatus};
 use theway_transport::history::HistoryStore;
+use theway_transport::images::EncodedImage;
 use theway_transport::mentions;
 use theway_transport::proto::theway_grpc::stream_frame;
 use theway_transport::proto::{theway_grpc, wire_status};
@@ -290,7 +290,7 @@ pub struct App {
     draft: String,
     pending_skill: Option<String>,
     pending_images: Vec<PathBuf>,
-    pending_pasted_images: Vec<ImageContent>,
+    pending_pasted_images: Vec<EncodedImage>,
 
     /// cwd-scoped session repo backing the local-only `/session` export/import.
     feed: Feed,

@@ -371,7 +371,11 @@ fn load_web_prompt_images(images: &[WirePromptImage]) -> Result<Vec<ImageContent
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(data)
             .with_context(|| format!("decode {label}"))?;
-        out.push(theway_transport::images::load_bytes(&label, &bytes)?);
+        let image = theway_transport::images::load_bytes(&label, &bytes)?;
+        out.push(ImageContent {
+            data: image.data,
+            mime_type: image.mime_type,
+        });
     }
     Ok(out)
 }
