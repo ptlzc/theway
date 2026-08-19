@@ -1,11 +1,8 @@
-# Architecture: core interface, single daemon kernel, protocol + clients
+# Architecture: daemon runtime core, single daemon kernel, protocol + clients
 
 theway is a three-layer agent runtime:
 
-1. **Core interface + agent runtime** — `theway-core` on top of
-   `theway-llm-provider`: the `Agent` loop, the `AgentHarness`, the session
-   contracts, the multiagent DAG engine machinery, and the `ToolExecutor` seam
-   used by executor-backed tool effects.
+1. **Daemon runtime core** — `theway-core` on top of `theway-contract` and `theway-llm-provider`: the `Agent` loop, `AgentHarness`, typed runtime sessions, multiagent DAG engine machinery, and the `ToolExecutor` seam used by executor-backed tool effects. The daemon is its only direct workspace consumer.
 2. **Daemon kernel** — `theway-daemon` (bin `thewayd`): the single kernel.
    Harness assembly, the executor implementations with the local/sandbox tool
    policy, all tool bodies, the trigger/cron runtime, session lifecycle, DAG
@@ -14,10 +11,7 @@ theway is a three-layer agent runtime:
    gRPC/HTTP/WS/MCP transports, and the shared client-contract modules) and
    `theway-tui` (the ratatui client binary `theway`).
 
-`theway-contract` is the shared leaf contract (sidecar data models + path
-layout) used across layers; `theway-storage` holds the SQLite backends and
-depends only on `theway-core` + `theway-contract` — never on the transport
-stack.
+`theway-contract` is the shared leaf contract for raw session persistence, persisted DAG snapshots, sidecar models, and paths. `theway-storage` implements those persistence contracts and depends only on `theway-contract` among runtime workspace crates; the daemon adapts storage records to core runtime types.
 
 ## Crate layout
 
@@ -28,7 +22,7 @@ stack.
 | `crates/theway-transport` | `theway-transport` | Protocol layer: wire model + gRPC / HTTP/SSE / WebSocket / MCP transports, plus the shared client-contract modules (auth, bug report, commands, config, feed, history, images, mentions, triggers). |
 | `crates/theway-tui` | `theway-tui` | Terminal client (the `theway` CLI binary): ratatui REPL, feed rendering, local commands. Connects to a running daemon or spawns `thewayd`; never links the daemon kernel. |
 | `crates/theway-contract` | `theway-contract` | Shared contract leaf crate: session-scoped automation sidecar models (`triggers`) and the base-dir / cwd-hash path layout (`config`). No engine, no protocol, no runtime; depends on no workspace crate. |
-| `crates/theway-storage` | `theway-storage` | Durable persistence: SQLite (Turso) session repository — one `<uuidv7>.db` per session — session archive export/import (`.theway-session`), and DAG run persistence. Depends on `theway-core` (contracts) and `theway-contract` (sidecar models + paths); never on `theway-transport`. |
+| `crates/theway-storage` | `theway-storage` | Durable persistence: SQLite (Turso) session repository — one `<uuidv7>.db` per session — session archive export/import (`.theway-session`), and persisted DAG snapshots. Implements `theway-contract` records and interfaces without depending on core or transport. |
 | `crates/theway-llm-provider` | `theway-llm-provider` | Unified streaming LLM client and provider integrations (Anthropic / OpenAI / Google / Bedrock / Mistral and OpenAI-compatible endpoints). |
 | `crates/theway-mcp` | `theway-mcp` | Minimal MCP client (stdio transport, JSON-RPC framing). |
 | `crates/mermaid-parser` | `mermaid-rs-parser` | Vendored mermaid parser used for DAG specs. |
@@ -40,16 +34,16 @@ UI rendering crates consumed by the TUI: `theway-markdown` /
 Dependency direction:
 
 ```text
-theway-tui       ──► theway-transport, theway-core, theway-storage, theway-llm-provider
+theway-tui       ──► theway-transport, theway-storage, theway-contract
 theway-daemon    ──► theway-core, theway-storage, theway-transport, theway-mcp,
                      theway-contract, theway-llm-provider            (bin `thewayd`)
-theway-transport ──► theway-core, theway-contract, theway-llm-provider
-theway-storage   ──► theway-core, theway-contract            (never theway-transport)
-theway-core      ──► theway-llm-provider
+theway-transport ──► theway-contract, theway-llm-provider    (never core/storage)
+theway-storage   ──► theway-contract                         (never core/transport)
+theway-core      ──► theway-contract, theway-llm-provider
 theway-contract  ──► (none — pure leaf)
 ```
 
-## Layer 1 — core interface + agent runtime (`theway-core`)
+## Layer 1 — daemon runtime core (`theway-core`)
 
 The core crate owns the agent runtime and the interfaces everything else
 programs against:
@@ -381,9 +375,10 @@ to the local repo when no daemon is up; export/import always go repo-direct.
 
 ## Shared contract (`theway-contract`) and storage layering
 
-`theway-contract` is a pure leaf crate — data models and path functions, no
-engine, no protocol, no runtime, no workspace dependencies:
+`theway-contract` is a pure leaf crate — persistence interfaces and records, sidecar data models, and path functions; no engine, protocol, runtime, or workspace dependencies:
 
+- `session` — backend-neutral raw session records plus `SessionReader` / `SessionStore`; `theway-core::PersistentSessionStorage` converts them to typed runtime entries.
+- `dag` — engine-independent persisted DAG run/node snapshots and state-path layout; the daemon projects core engine state into these records.
 - `triggers` — the session-scoped automation models (dynamic trigger rules,
   cron jobs) serialized into session sidecars and `.theway-session`
   archives. `theway_transport::triggers` re-exports them.
@@ -391,21 +386,16 @@ engine, no protocol, no runtime, no workspace dependencies:
   (`${THEWAY_DIR:-$HOME/.theway}`, `<base>/sessions/<cwd-hash>/…`,
   `cwd_hash`). `theway_transport::{client, config}` re-export it.
 
-`theway-storage` implements the durable backends against the core contracts
-and the contract crate's models/paths:
+`theway-storage` implements durable backends directly against the leaf contract's records and interfaces:
 
-- `sqlite_repo` / `sqlite_storage` — one Turso SQLite database per session:
+- `sqlite_repo` / `sqlite_storage` — one Turso SQLite database per session and implementations of `SessionReader` / `SessionStore`:
   `<base>/sessions/<cwd-hash>/<uuidv7>.db` (a `meta` key/value table + an
   append-only `entries` table mirroring the session tree).
 - `session_archive` — `.theway-session` export/import bundles (transcript +
   automation sidecars).
-- `sqlite_dag` — the `DagPersistSink` backend consumed by the daemon's DAG
-  persistence.
+- `sqlite_dag` — persisted `PersistedRun` snapshots consumed by the daemon's core-to-storage adapter.
 
-Storage's dependency rule is the layering guarantee here: it depends on
-`theway-core` (traits + types) and `theway-contract` (sidecar models + path
-layout), and **never** on `theway-transport` — session persistence must not
-pull in the protocol stack.
+Storage's dependency rule is the layering guarantee here: it depends on `theway-contract` and **never** on `theway-core` or `theway-transport`. `scripts/check-workspace-layering.py` enforces this boundary and that `theway-daemon` remains core's only direct workspace consumer.
 
 ## Session storage layout
 

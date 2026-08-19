@@ -1,77 +1,51 @@
-# theway-core (Rust)
+# theway-core
 
-Rust port of [`@earendil-works/pie-agent-core`](https://github.com/earendil-works/pi) — the
-stateful agent runtime layered on top of [`theway-llm-provider`](../theway-llm-provider). Provides the agent loop, tool
-execution, session persistence, compaction, skills resolution, and prompt-template plumbing.
+`theway-core` is the runtime engine composed by [`theway-daemon`](../theway-daemon). Within this workspace, the daemon is its only direct consumer; [`scripts/check-workspace-layering.py`](../../scripts/check-workspace-layering.py) enforces that boundary.
+
+Core owns the single-agent loop, `AgentHarness`, typed runtime sessions, skills and prompt assembly, compaction, lifecycle and permission hooks, the `ToolExecutor` interface, and the multiagent DAG/goal engine. It does not own concrete tools, filesystem/process executor implementations, persistence backends, or protocol servers.
+
+## Persistence boundary
+
+Runtime session entries remain typed inside core. [`PersistentSessionStorage`](src/agent/session/persistent_storage.rs) converts them to and from the backend-neutral `SessionReader` / `SessionStore` records in [`theway-contract`](../theway-contract); [`theway-storage`](../theway-storage) implements those leaf interfaces without depending on core.
+
+The DAG engine exposes persisted snapshots through [`multiagent::graph::persist`](src/multiagent/graph/persist.rs). The daemon projects engine state into `theway-contract` records and passes those records to storage.
 
 ## Features
 
-The default build enables `harness` and `default-providers`. `harness` contains sessions, skills, compaction, permissions, and multiagent orchestration; `default-providers` enables the Anthropic and faux implementations in `theway-llm-provider`.
-
-Embedders can compile the bare `Agent` loop without either implementation tree:
+The default build enables `harness` and `default-providers`. `harness` contains sessions, skills, compaction, permissions, and multiagent orchestration; `default-providers` enables the Anthropic and faux provider implementations.
 
 ```bash
+# Bare Agent loop
 cargo check -p theway-core --no-default-features
-```
 
-The harness can also be enabled independently of concrete providers:
-
-```bash
+# Harness without concrete providers
 cargo check -p theway-core --no-default-features --features harness
-```
-
-## Status
-
-1:1 source-level port with the upstream TS `packages/agent/` as reference. All four target subsystems —
-**harness, Agent loop, session, compaction** — are functional and covered by integration tests
-against a synthetic stream.
-
-| Layer | Status |
-|-------|--------|
-| Core types (`types.rs`) | implemented |
-| `Agent` + `run_agent_loop` | implemented (sequential tool execution, lifecycle events, abort, queues) |
-| `AgentHarness` | implemented (composes Agent + Session + skills + system prompt, persists to session) |
-| Skills (`agent/skills.rs`) | implemented + tested against tempdirs |
-| System-prompt builder | implemented |
-| Prompt templates | implemented (loader stub + `{{var}}` interpolation) |
-| Session repo (jsonl + memory) | implemented; both backends share `SessionStorage` trait |
-| Compaction + branch summarization | implemented (token estimation, cut-point, generate_summary, compact) |
-| Native env adapter | implemented (std::fs + tokio::process) |
-
-```
-cargo test     # lib unit tests + run_loop / harness_e2e / session / skills / permission suites
 ```
 
 ## Layout
 
-```
+```text
 src/
-  lib.rs                 barrel + re-exports (AgentHarness, compaction, …)
-  types.rs               AgentMessage / AgentState / AgentEvent / AgentTool / AgentLoopConfig
-  agent.rs               bare Agent state machine (always on)
+  lib.rs                 public runtime surface
+  types.rs               agent messages, events, hooks, and tool contracts
+  executor.rs            ToolExecutor interface and execution result types
+  agent.rs               bare Agent state machine
   agent/
-    assembly/            AgentHarness composer
-      mod.rs             options, composed state, and constructor
-      catalog.rs         skills, prompt templates, and system prompt rebuilds
-      events.rs          session lifecycle and turn-end contracts
-      run.rs             prompt execution and continuation cycles
-      session.rs         session mutation, restore, and persistence listener
-    run_loop/            runAgentLoop (llm.rs / tools.rs / utils.rs)
-    compaction/          auto-compaction + cut point
-                         (algorithm.rs / compaction.rs / triggers.rs / branch_summarization.rs)
-    session/             session shape + jsonl/memory repos + uuid + repo_utils
-    env/                 native std::fs ExecutionEnv adapter
-    hooks/               lifecycle hooks
-    utils/               truncate.rs
-    cost.rs              token/cost tracking
-    messages.rs          custom AgentMessage variant helpers
-    permission.rs        dangerous-tool permission policy
-    skills.rs            loadSkills (SKILL.md discovery)
-    system_prompt.rs     formatSkillsForSystemPrompt
-    types.rs             ExecutionEnv, Skill, repo interfaces
-  multiagent/            DAG orchestration (graph/ + registry/)
-  proxy.rs               re-exports from theway-llm-provider (HTTP_PROXY helpers)
-  node.rs                native entry wiring the std::fs env adapter
-  skill_overrides.rs
-  tools/                 core tool implementations (dag_tools/, install_skill/)
+    assembly/            AgentHarness composition
+    run_loop/            LLM and tool-call loop
+    compaction/          context estimation and summarization
+    session/             typed sessions, in-memory stores, persistence adapter
+    cost.rs              token and cost accounting
+    messages.rs          custom message helpers
+    permission.rs        tool permission classification
+    skills.rs            SKILL.md parsing and loading
+    system_prompt.rs     skill catalog rendering
+    types.rs             harness-specific types and ExecutionEnv seam
+  multiagent/            nested runs, registry, and DAG/goal orchestration
+```
+
+Substantial unit suites live under [`tests/`](tests) and are bridged from their source modules so they retain private-module access. See [`docs/rust-test-files.md`](../../docs/rust-test-files.md).
+
+```bash
+cargo test -p theway-core
 ```

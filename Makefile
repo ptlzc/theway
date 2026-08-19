@@ -84,8 +84,12 @@ feature-gate: ## feature-gate checks: thin core/provider builds + daemon backend
 file-size-check: ## enforce the 800-line limit for all theway-* Rust files
 	scripts/check-rust-file-size.sh
 
+.PHONY: layering-check
+layering-check: ## enforce workspace crate dependency boundaries
+	scripts/check-workspace-layering.py
+
 .PHONY: ci
-ci: fmt-check file-size-check lint feature-gate test ## run the full CI pipeline locally
+ci: fmt-check file-size-check layering-check lint feature-gate test ## run the full CI pipeline locally
 
 # --- run / install ----------------------------------------------------------
 

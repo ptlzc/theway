@@ -214,12 +214,12 @@ The daemon resolves its host paths once at startup (`--cwd`, `--home`, repeatabl
 
 | Crate | Package | What |
 |-------|---------|------|
-| `crates/theway-core` | `theway-core` | Core interface + agent runtime: bare `Agent`, `AgentHarness`, session storage contracts, multiagent DAG engine, and the `ToolExecutor` trait. |
+| `crates/theway-core` | `theway-core` | Daemon runtime core: bare `Agent`, `AgentHarness`, typed runtime sessions, multiagent DAG engine, and the `ToolExecutor` trait. |
 | `crates/theway-daemon` | `theway-daemon` | The single kernel (bin `thewayd`): harness assembly, all tool bodies, local/sandbox executor policy, trigger/cron runtime, session lifecycle, DAG persistence, skills/templates, MCP/LSP wiring, and transport servers. |
 | `crates/theway-transport` | `theway-transport` | Protocol layer: wire model + gRPC / HTTP / WebSocket / MCP transports, plus shared client-contract modules. |
-| `crates/theway-tui` | `theway-tui` | Terminal UI (the `theway` CLI binary) — a pure client of the daemon. |
-| `crates/theway-contract` | `theway-contract` | Shared leaf contract: trigger/cron sidecar models and base-dir / cwd-hash path layout. |
-| `crates/theway-storage` | `theway-storage` | SQLite session storage, archive export/import, DAG run persistence. |
+| `crates/theway-tui` | `theway-tui` | Terminal UI (the `theway` CLI binary): daemon client plus offline session maintenance through storage contracts; never links core or daemon. |
+| `crates/theway-contract` | `theway-contract` | Shared leaf contract: raw session persistence, persisted DAG snapshots, trigger/cron sidecars, and base-dir / cwd-hash paths. |
+| `crates/theway-storage` | `theway-storage` | SQLite session storage, archive export/import, and DAG snapshots; depends only on the leaf contract among runtime crates. |
 | `crates/theway-llm-provider` | `theway-llm-provider` | Unified streaming LLM client and provider integrations. |
 | `crates/theway-mcp` | `theway-mcp` | Minimal MCP client. |
 | `crates/mermaid-parser` | `mermaid-rs-parser` | Vendored mermaid parser for DAG specs. |
