@@ -1,24 +1,26 @@
 #!/usr/bin/env bash
 # =============================================================================
-# pre-commit — crates/theway-transport/proto/ 变更时自动同步 SDK (镜像拷贝 + 重新生成), 并一起 stage。
+# pre-commit — synchronize generated SDK files and verify bilingual documentation.
 #
-# 保证 proto 与 sdk/src/generated 永不漂移: 任何 proto 修改都会让生成产物
-# 随同一个 commit 落库。发布仍由 scripts/sdk-publish.sh 手动执行。
+# Proto changes stage the matching generated SDK files. Paired-document changes
+# must contain synchronized English and Chinese content with current records.
 #
-# 启用 (每个 clone 一次): make hooks   (等价 git config core.hooksPath .githooks)
+# Enable once per clone with `make hooks`.
 # =============================================================================
 set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
-# crates/theway-transport/proto/ 与 sdk/proto 均无变更 (staged/unstaged/untracked) 则直接放行
-if [ -z "$(git status --porcelain -- crates/theway-transport/proto/ sdk/proto)" ]; then
-  exit 0
+if [ -n "$(git status --porcelain -- crates/theway-transport/proto/ sdk/proto)" ]; then
+  echo "[pre-commit] crates/theway-transport/proto/ changed — syncing sdk (mirror + regenerate)"
+  bash scripts/sdk-sync.sh
+
+  # Include regenerated and newly created SDK files in the current commit.
+  git add sdk/proto sdk/src/generated
+  echo "[pre-commit] staged sdk/proto + sdk/src/generated"
 fi
 
-echo "[pre-commit] crates/theway-transport/proto/ changed — syncing sdk (mirror + regenerate)"
-bash scripts/sdk-sync.sh
-
-# 生成产物随本次 commit 一起落库 (含新增的未跟踪文件)
-git add sdk/proto sdk/src/generated
-echo "[pre-commit] staged sdk/proto + sdk/src/generated"
+if git cat-file -e :scripts/verify-doc-i18n.py 2>/dev/null; then
+  echo "[pre-commit] checking staged bilingual documentation pairs"
+  scripts/verify-doc-i18n.py --cached
+fi

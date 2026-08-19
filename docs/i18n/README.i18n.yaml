@@ -1,0 +1,4 @@
+# English-first bilingual documentation record. Update both files, then run:
+#   scripts/verify-doc-i18n.py --write docs/i18n/README.md
+README.md: 4dfbe9e39421ca58ae429e2a0cd07bcbd0704262
+README.zh.md: 4a27fef6c7700a307e59eb77bfc3754f11d8f402

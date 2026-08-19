@@ -1,0 +1,4 @@
+# English-first bilingual documentation record. Update both files, then run:
+#   scripts/verify-doc-i18n.py --write docs/i18n/translation-rules.md
+translation-rules.md: d62f23b2e9b2c6a2403f1bc131db9a5d9f99bfe9
+translation-rules.zh.md: 790d28c22b673ba8c1d1eecdbd9186c3ae13e58f

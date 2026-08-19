@@ -28,6 +28,13 @@ jobs:
       - uses: actions/checkout@v4
       - run: scripts/check-rust-file-size.sh
 
+  documentation:
+    name: Bilingual documentation synchronization
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make doc-sync
+
   fmt:
     name: rustfmt
     runs-on: ubuntu-latest

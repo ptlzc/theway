@@ -4,6 +4,7 @@
 # proxy for what main-branch pushes will see. `make help` lists everything.
 
 CARGO ?= cargo
+PYTHON ?= python3
 BIN   ?= theway
 OUTPUT_DIR ?= output
 THEWAY_BINARY ?= $(OUTPUT_DIR)/debug/$(BIN)
@@ -88,8 +89,19 @@ file-size-check: ## enforce the 800-line limit for all theway-* Rust files
 layering-check: ## enforce workspace crate dependency boundaries
 	scripts/check-workspace-layering.py
 
+.PHONY: i18n-check
+i18n-check: ## verify English/Chinese documentation pairs and recorded hashes
+	scripts/verify-doc-i18n.py
+
+.PHONY: i18n-test
+i18n-test: ## test the bilingual documentation verifier
+	$(PYTHON) -m unittest discover -s scripts/tests -p 'test_*.py'
+
+.PHONY: doc-sync
+doc-sync: i18n-test i18n-check ## verify bilingual documentation synchronization
+
 .PHONY: ci
-ci: fmt-check file-size-check layering-check lint feature-gate test ## run the full CI pipeline locally
+ci: fmt-check file-size-check layering-check doc-sync lint feature-gate test ## run the full CI pipeline locally
 
 # --- run / install ----------------------------------------------------------
 

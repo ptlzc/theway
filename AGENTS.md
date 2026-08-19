@@ -43,7 +43,8 @@ The [`Makefile`](Makefile) mirrors `.github/workflows/ci.yml`; prefer it.
 - `make test` — `cargo test --workspace`.
 - `make lint` — `cargo clippy --workspace --all-targets -- -D warnings`.
 - `make fmt` / `make fmt-check` — rustfmt rewrite / CI check.
-- `make ci` — the full local pipeline (fmt-check + lint + test).
+- `make doc-sync` — verify English/Chinese documentation pairs, structure, and recorded blob hashes.
+- `make ci` — the full local pipeline (format, file-size, layering, documentation synchronization, lint, feature-gate, and test checks).
 - `make run` / `make install` — run the REPL / install into `~/.cargo/bin`.
 
 ## Testing
@@ -76,6 +77,7 @@ Operating rules for any orchestrator driving the built-in subagents (`subagent` 
 
 ## Documentation standards
 
+- Crate `README.md` and `docs/*.md` files are English defaults paired with sibling `.zh.md` translations and `.i18n.yaml` records; [`docs/i18n/README.md`](docs/i18n/README.md) is the contract. `AGENTS.md` files remain English-only. Update both sides in one change, run `scripts/verify-doc-i18n.py --write <source.md>`, then run `make doc-sync`.
 - Documents state the current mechanism, not change history. Avoid "previously/now/no longer", PR/commit references, and migration narration in durable prose; change stories belong in commit messages or memory notes.
 - Cross-reference repository files with relative Markdown paths, never bare filenames.
 - One physical line per paragraph (editor soft-wrap). Code blocks, tables, and list structure keep their own formatting.
