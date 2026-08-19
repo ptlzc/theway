@@ -1,8 +1,24 @@
 # theway-core (Rust)
 
 Rust port of [`@earendil-works/pie-agent-core`](https://github.com/earendil-works/pi) — the
-stateful agent runtime layered on top of [`theway-llm-provider`](../llm-provider). Provides the agent loop, tool
+stateful agent runtime layered on top of [`theway-llm-provider`](../theway-llm-provider). Provides the agent loop, tool
 execution, session persistence, compaction, skills resolution, and prompt-template plumbing.
+
+## Features
+
+The default build enables `harness` and `default-providers`. `harness` contains sessions, skills, compaction, permissions, and multiagent orchestration; `default-providers` enables the Anthropic and faux implementations in `theway-llm-provider`.
+
+Embedders can compile the bare `Agent` loop without either implementation tree:
+
+```bash
+cargo check -p theway-core --no-default-features
+```
+
+The harness can also be enabled independently of concrete providers:
+
+```bash
+cargo check -p theway-core --no-default-features --features harness
+```
 
 ## Status
 

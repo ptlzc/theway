@@ -14,46 +14,57 @@ name = "theway_core"
 path = "src/lib.rs"
 
 [features]
-default = ["harness"]
+default = ["harness", "default-providers"]
 
 # Bare Agent + agent-loop. Always on.
 # Harness layer (skills, prompt templates, sessions, compaction, system prompt). Opt-out for
 # embedders that only want the bare Agent (e.g. browser-side consumers).
-harness = []
+harness = [
+    "dep:ignore",
+    "dep:mermaid-rs-parser",
+    "dep:once_cell",
+    "dep:regex",
+    "dep:serde_yaml",
+    "dep:tracing",
+    "dep:uuid",
+]
+# Preserve the crate's standalone default provider catalog while allowing
+# `--no-default-features` embedders to omit every concrete provider.
+default-providers = [
+    "theway-llm-provider/anthropic",
+    "theway-llm-provider/faux",
+]
 
 [dependencies]
-theway-llm-provider = { path = "../theway-llm-provider" }
+theway-llm-provider = { path = "../theway-llm-provider", default-features = false }
 
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "fs", "io-util"] }
-tokio-util = { version = "0.7", features = ["io"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+tokio-util = "0.7"
 futures = "0.3"
 async-trait = "0.1"
 parking_lot = "0.12"
 
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-serde_yaml = "0.9"
+serde_yaml = { version = "0.9", optional = true }
 # Enum ↔ string mapping derives (parse/as_str/Display). Also pulled in by ratatui-core.
 strum = { version = "0.28", features = ["derive"] }
 
 thiserror = "2"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
-uuid = { version = "1", features = ["v7", "serde"] }
-ignore = "0.4"
-regex = "1"
+uuid = { version = "1", features = ["v7", "serde"], optional = true }
+ignore = { version = "0.4", optional = true }
+regex = { version = "1", optional = true }
 # Vendored mermaid parse stage (mmdr 0.3.1) — see crates/mermaid-parser.
-mermaid-rs-parser = { path = "../mermaid-parser" }
+mermaid-rs-parser = { path = "../mermaid-parser", optional = true }
 
 # hooks (user-configured CLI hooks) and goal (session goal stop-hook) live in the
 # engine. Hook side effects (process spawn / kill, webhook HTTP) are injected seams
 # — the implementations live in theway-daemon, so core no longer needs reqwest or
 # libc here. The remaining deps serve the agent runtime itself: toml parses hook
 # rules, anyhow is the hook runner's error type, directories resolves hook cwd paths.
-once_cell = "1"
-tracing = "0.1"
-directories = "5"
-toml = "0.8"
-anyhow = "1"
+once_cell = { version = "1", optional = true }
+tracing = { version = "0.1", optional = true }
 # Stable content hash for trigger_promotion audit. Used only to fingerprint promotion
 # template bodies for cross-process replay verification — never used as a credential
 # / authentication primitive. SHA-256 is overkill cryptographically for this purpose
