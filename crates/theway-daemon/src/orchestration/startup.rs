@@ -78,69 +78,21 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     }
     startup.storage_service_addr = options.storage_service_addr.clone();
     // Issue #86: when the controller provides StorageService, treat the daemon
-    // as controller-provisioned and skip the remaining local config-file
-    // discovery (models/mcp/hooks/lsp/templates/skills/ts_extensions).
+    // as controller-provisioned and skip local auxiliary-source discovery
+    // (mcp/hooks/lsp/templates/skills/ts_extensions). Custom model definitions
+    // remain local until the settings RPC can provision them.
     if options.storage_service_addr.is_some() {
         startup.load_local_sources = false;
     }
 
-    // Resolve the active model from explicit options and provider defaults.
-    // TODO(#73): custom model definitions are still read from local
-    // `models.json` files; once the settings RPC provisions custom models,
-    // this local read goes away. The `load_local_sources` seam already
-    // skips the file scans (explicit `--base-url` / DS4 env registration
-    // still applies then).
-    let local_models = if startup.load_local_sources {
-        crate::local_models::load_all(&cwd, options.base_url.as_deref()).await?
-    } else {
-        crate::local_models::load_all_from_paths_with_base_url(&[], options.base_url.as_deref())?
-    };
-    if !local_models.models.is_empty() {
-        tracing::info!(
-            "loaded {} local model(s): {}",
-            local_models.models.len(),
-            local_models
-                .models
-                .iter()
-                .map(|m| format!("{}:{}", m.provider.0, m.id))
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-    }
-    // Issue #73: the default provider/model comes from the in-memory
-    // StartupConfig (settings RPC), not a `[model]` config.toml read. Until
-    // the controller provisions a default this stays None and the legacy env
-    // auto-detection path applies; a lone CLI flag keeps that path too.
-    let cli_overrides_model = options.provider.is_some() || options.model.is_some();
-    let (provider_override, model_override) = if cli_overrides_model {
-        (options.provider.clone(), options.model.clone())
-    } else {
-        match &startup.model_default {
-            Some(default) => (Some(default.provider.clone()), Some(default.model.clone())),
-            None => (None, None),
-        }
-    };
-    let mut model = match crate::model::auto_detect_model(
-        provider_override.as_deref(),
-        model_override.as_deref(),
-    ) {
-        Ok(model) => model,
-        Err(e) if provider_override.is_none() && model_override.is_none() => {
-            tracing::warn!(
-                "no credential found: {e}; starting credential-less (turns will fail until a key is configured)"
-            );
-            crate::model::credential_less_default()
-        }
-        Err(e) => return Err(e),
-    };
-    if let Some(base_url) = options
-        .base_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|url| !url.is_empty())
-    {
-        model.base_url = base_url.to_string();
-    }
+    let model = resolve_startup_model(
+        &cwd,
+        options.provider.as_deref(),
+        options.model.as_deref(),
+        options.base_url.as_deref(),
+        &startup,
+    )
+    .await?;
     let thinking = options.thinking;
 
     let (store, resumed) = match &options.session {
@@ -572,3 +524,66 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     theway_transport::client::remove_port_file_if_owner(&cwd, daemon_pid);
     result
 }
+
+async fn resolve_startup_model(
+    cwd: &std::path::Path,
+    cli_provider: Option<&str>,
+    cli_model: Option<&str>,
+    cli_base_url: Option<&str>,
+    startup: &StartupConfig,
+) -> Result<theway_llm_provider::Model> {
+    // TODO(#73): custom model definitions are still read from local
+    // `models.json` files; once the settings RPC provisions custom models,
+    // this local read goes away. A controller-provided StorageService owns
+    // persistence only; it must not hide models selected by the controller
+    // from the daemon that resolves them.
+    let local_models = crate::local_models::load_all(cwd, cli_base_url).await?;
+    if !local_models.models.is_empty() {
+        tracing::info!(
+            "loaded {} local model(s): {}",
+            local_models.models.len(),
+            local_models
+                .models
+                .iter()
+                .map(|m| format!("{}:{}", m.provider.0, m.id))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+
+    // Issue #73: the default provider/model comes from the in-memory
+    // StartupConfig (settings RPC), not a `[model]` config.toml read. Until
+    // the controller provisions a default this stays None and the legacy env
+    // auto-detection path applies; a lone CLI flag keeps that path too.
+    let cli_overrides_model = cli_provider.is_some() || cli_model.is_some();
+    let (provider_override, model_override) = if cli_overrides_model {
+        (cli_provider, cli_model)
+    } else {
+        match &startup.model_default {
+            Some(default) => (
+                Some(default.provider.as_str()),
+                Some(default.model.as_str()),
+            ),
+            None => (None, None),
+        }
+    };
+    let mut model = match crate::model::auto_detect_model(provider_override, model_override) {
+        Ok(model) => model,
+        Err(e) if provider_override.is_none() && model_override.is_none() => {
+            tracing::warn!(
+                "no credential found: {e}; starting credential-less (turns will fail until a key is configured)"
+            );
+            crate::model::credential_less_default()
+        }
+        Err(e) => return Err(e),
+    };
+    if let Some(base_url) = cli_base_url.map(str::trim).filter(|url| !url.is_empty()) {
+        model.base_url = base_url.to_string();
+    }
+    Ok(model)
+}
+
+#[cfg(test)]
+// Test files live in `tests/orchestration/startup/` (mirror of src), pulled in by
+// path so they keep unit-test semantics. See docs/rust-test-files.md.
+tests_bridge_macro::tests_bridge!("orchestration/startup");
