@@ -37,7 +37,10 @@ pub fn plan_from_definition(
     let (def_nodes, mermaid_dir) = if trimmed.starts_with("graph ") {
         let parsed = parse_mermaid(trimmed);
         if !parsed.errors.is_empty() {
-            return Err(format!("mermaid 解析失败:\n{}", parsed.errors.join("\n")));
+            return Err(format!(
+                "Mermaid parse failed:\n{}",
+                parsed.errors.join("\n")
+            ));
         }
         (parsed.nodes, Some(parsed.direction))
     } else {

@@ -78,7 +78,7 @@ async fn plan_param_errors() {
     )
     .await
     .unwrap();
-    assert!(text.starts_with("mermaid 解析失败:\n"), "{text}");
+    assert!(text.starts_with("Mermaid parse failed:\n"), "{text}");
     // Invalid graph (unknown dep).
     let text = exec(
         t,
