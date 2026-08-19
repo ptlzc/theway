@@ -5,11 +5,12 @@
 use std::path::PathBuf;
 
 use crate::sqlite_repo::SqliteSessionRepo;
+use crate::sqlite_storage::SqliteSessionStorage;
 use anyhow::{Context, Result, bail};
-use theway_core::{Session, SessionStorage};
 
 use theway_contract::{
     config::sessions_dir_for_cwd,
+    session::{SessionReader, SessionStore, StoredSessionEntry, validate_session_entries},
     session_id::{PrefixMatch, resolve_unique_prefix},
 };
 
@@ -43,11 +44,11 @@ pub fn cron_sidecar_path(session_path: &std::path::Path) -> PathBuf {
 ///
 /// Sessions record their absolute database path in metadata. Older or synthetic
 /// sessions may not have that field, so keep a deterministic fallback under the repo root.
-pub async fn trigger_sidecar_path_for_session(
-    session: &Session,
+pub async fn trigger_sidecar_path_for_session<R: SessionReader + ?Sized>(
+    session: &R,
     repo: &SqliteSessionRepo,
 ) -> Result<PathBuf> {
-    let metadata = session.storage().get_metadata_json().await?;
+    let metadata = session.get_metadata_json().await?;
     if let Some(path) = metadata.get("path").and_then(|v| v.as_str()) {
         return Ok(trigger_sidecar_path(std::path::Path::new(path)));
     }
@@ -65,11 +66,11 @@ pub fn endpoint_sidecar_path(session_path: &std::path::Path) -> PathBuf {
 }
 
 /// Return the cron sidecar for a live session.
-pub async fn cron_sidecar_path_for_session(
-    session: &Session,
+pub async fn cron_sidecar_path_for_session<R: SessionReader + ?Sized>(
+    session: &R,
     repo: &SqliteSessionRepo,
 ) -> Result<PathBuf> {
-    let metadata = session.storage().get_metadata_json().await?;
+    let metadata = session.get_metadata_json().await?;
     if let Some(path) = metadata.get("path").and_then(|v| v.as_str()) {
         return Ok(cron_sidecar_path(std::path::Path::new(path)));
     }
@@ -82,12 +83,18 @@ pub async fn cron_sidecar_path_for_session(
 }
 
 /// Create a brand-new session under the current cwd's sessions dir.
-pub async fn create(repo: &SqliteSessionRepo, cwd: &std::path::Path) -> Result<Session> {
+pub async fn create(
+    repo: &SqliteSessionRepo,
+    cwd: &std::path::Path,
+) -> Result<SqliteSessionStorage> {
     Ok(repo.create(cwd.to_string_lossy().to_string()).await?)
 }
 
 /// Resume the most recent session for this cwd, or a specific one by id when supplied.
-pub async fn resume(repo: &SqliteSessionRepo, explicit_id: Option<&str>) -> Result<Session> {
+pub async fn resume(
+    repo: &SqliteSessionRepo,
+    explicit_id: Option<&str>,
+) -> Result<SqliteSessionStorage> {
     let files = repo.list().await?;
     if files.is_empty() {
         bail!("no sessions to resume in {}", repo.root().display());
@@ -141,7 +148,7 @@ pub async fn list_entries(repo: &SqliteSessionRepo) -> Result<Vec<SessionEntry>>
                 continue;
             }
         };
-        let meta = session.storage().get_metadata_json().await?;
+        let meta = session.get_metadata_json().await?;
         let id = meta
             .get("id")
             .and_then(|v| v.as_str())
@@ -196,30 +203,23 @@ pub async fn list_entries(repo: &SqliteSessionRepo) -> Result<Vec<SessionEntry>>
 /// Entry ids and their `parentId` chain are preserved verbatim, so the fork replays the
 /// parent's history up to the fork point. `current_leaf` in the new database resolves to
 /// the last replayed entry, so the next appended message continues from the fork point.
-pub async fn fork_session(
+pub async fn fork_session<R: SessionReader + ?Sized>(
     repo: &SqliteSessionRepo,
     cwd: &std::path::Path,
-    parent: &Session,
-    entries: Vec<theway_core::SessionTreeEntry>,
-) -> Result<Session> {
-    let parent_meta = parent.storage().get_metadata_json().await?;
+    parent: &R,
+    entries: Vec<StoredSessionEntry>,
+) -> Result<SqliteSessionStorage> {
+    validate_session_entries(&entries).context("validate fork transcript")?;
+    let parent_meta = parent.get_metadata_json().await?;
     let parent_path = parent_meta
         .get("path")
         .and_then(|v| v.as_str())
         .map(std::path::PathBuf::from)
         .with_context(|| "parent session has no recorded path")?;
-    let parent_id = parent_meta
-        .get("id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("?")
-        .to_string();
-
     tokio::fs::create_dir_all(repo.root())
         .await
         .with_context(|| format!("create {}", repo.root().display()))?;
-    let file = repo
-        .root()
-        .join(format!("{}.db", theway_core::create_session_id()));
+    let file = repo.root().join(format!("{}.db", uuid::Uuid::now_v7()));
     let storage = crate::sqlite_storage::SqliteSessionStorage::create(
         &file,
         cwd.to_string_lossy().to_string(),
@@ -233,15 +233,7 @@ pub async fn fork_session(
         .checkpoint()
         .await
         .with_context(|| format!("checkpoint {}", file.display()))?;
-    let session = Session::new(
-        std::sync::Arc::new(storage) as std::sync::Arc<dyn theway_core::SessionStorage>
-    );
-    // Validate the replay the same way archive import does.
-    session
-        .build_context()
-        .await
-        .with_context(|| format!("validate forked session (forked from {parent_id})"))?;
-    Ok(session)
+    Ok(storage)
 }
 
 // ── tree-shaped history (pi parity) ────────────────────────────────────────────────────
@@ -333,25 +325,45 @@ pub fn flatten_session_tree(entries: &[SessionEntry]) -> Vec<SessionTreeRow> {
 /// Text of a user message entry (text or text blocks joined), truncated and
 /// newline-flattened for listing use. Public so the daemon's `/fork` listing can
 /// reuse the same preview shape as `first_user_text`.
-pub fn user_message_text(entry: &theway_core::SessionTreeEntry) -> Option<String> {
-    let theway_core::SessionTreeEntry::Message {
-        message: theway_core::AgentMessage::Llm(theway_llm_provider::Message::User(u)),
-        ..
-    } = entry
-    else {
+pub fn user_message_text(entry: &StoredSessionEntry) -> Option<String> {
+    let message = entry.payload.get("message")?;
+    if entry.entry_type != "message" || message.get("role")?.as_str()? != "user" {
         return None;
-    };
-    let text = match &u.content {
-        theway_llm_provider::UserContent::Text(s) => s.clone(),
-        theway_llm_provider::UserContent::Blocks(blocks) => blocks
-            .iter()
-            .filter_map(|b| match b {
-                theway_llm_provider::UserContentBlock::Text(t) => Some(t.text.clone()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join(" "),
-    };
+    }
+    preview_text(&message_content_text(message)?)
+}
+
+/// Searchable text of a user or assistant message entry.
+pub fn message_text(entry: &StoredSessionEntry) -> Option<String> {
+    let message = entry.payload.get("message")?;
+    if entry.entry_type != "message"
+        || !matches!(message.get("role")?.as_str()?, "user" | "assistant")
+    {
+        return None;
+    }
+    message_content_text(message)
+}
+
+fn message_content_text(message: &serde_json::Value) -> Option<String> {
+    match message.get("content")? {
+        serde_json::Value::String(text) => Some(text.clone()),
+        serde_json::Value::Array(blocks) => Some(
+            blocks
+                .iter()
+                .filter_map(|block| {
+                    if block.get("type")?.as_str()? != "text" {
+                        return None;
+                    }
+                    block.get("text")?.as_str().map(str::to_string)
+                })
+                .collect::<Vec<_>>()
+                .join(" "),
+        ),
+        _ => None,
+    }
+}
+
+fn preview_text(text: &str) -> Option<String> {
     let text = text.replace('\n', " ");
     let preview = if text.chars().count() > 80 {
         let mut p: String = text.chars().take(80).collect();
@@ -365,14 +377,60 @@ pub fn user_message_text(entry: &theway_core::SessionTreeEntry) -> Option<String
 
 /// First user message text, truncated to a short preview. Public so the daemon's
 /// session-ops layer (which no longer owns this module) can build listings from it.
-pub async fn first_user_text(session: &Session) -> Option<String> {
-    let entries = session.entries().await.ok()?;
+pub async fn first_user_text<R: SessionReader + ?Sized>(session: &R) -> Option<String> {
+    let entries = session.get_entries().await.ok()?;
     for e in entries {
         if let Some(preview) = user_message_text(&e) {
             return Some(preview);
         }
     }
     None
+}
+
+/// Latest non-empty session name recorded in append order.
+pub async fn session_name<R: SessionReader + ?Sized>(session: &R) -> Option<String> {
+    let entries = session.find_entries("session_info").await.ok()?;
+    entries.into_iter().rev().find_map(|entry| {
+        entry
+            .payload
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+    })
+}
+
+/// Append a session name without introducing runtime message types into storage.
+pub async fn append_session_name<S: SessionStore + ?Sized>(
+    session: &S,
+    name: impl Into<String>,
+) -> Result<String, theway_contract::session::SessionError> {
+    let id = session.create_entry_id().await?;
+    let entry = StoredSessionEntry::session_info(
+        id.clone(),
+        session.get_leaf_id().await?,
+        chrono::Utc::now().to_rfc3339(),
+        name.into(),
+    )?;
+    session.append_entry(entry).await?;
+    Ok(id)
+}
+
+/// Last explicit model change (`provider:model-id`) in append order.
+pub async fn last_model_change<R: SessionReader + ?Sized>(session: &R) -> String {
+    let Ok(entries) = session.find_entries("model_change").await else {
+        return String::new();
+    };
+    entries
+        .into_iter()
+        .rev()
+        .find_map(|entry| {
+            let provider = entry.payload.get("provider")?.as_str()?;
+            let model_id = entry.payload.get("modelId")?.as_str()?;
+            Some(format!("{provider}:{model_id}"))
+        })
+        .unwrap_or_default()
 }
 
 /// Delete a session by id (full UUIDv7) or a unique prefix.
@@ -432,7 +490,6 @@ async fn find_session_path(
     for path in files {
         let session = repo.open(path).await?;
         if let Some(metadata_id) = session
-            .storage()
             .get_metadata_json()
             .await?
             .get("id")

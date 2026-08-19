@@ -1,7 +1,5 @@
-//! In-memory `SessionRepo`. 1:1 port of
-//! `packages/agent/src/harness/session/memory-repo.ts` (~50 lines). Holds a `Vec<Session>`
-//! created from `MemorySessionStorage`. Used by tests and any embedder that doesn't want to
-//! touch disk.
+//! In-memory collection of runtime sessions for tests and embedders that do not
+//! need durable persistence.
 
 use std::sync::{Arc, Mutex};
 

@@ -1,18 +1,45 @@
-//! End-to-end SQLite session storage tests. The `SessionStorage` contract and
-//! `Session` come from theway-core; the SQLite backend under test lives in
-//! this crate (`sqlite_repo` / `sqlite_storage`).
+//! End-to-end tests for the raw session persistence contract implemented by SQLite.
 
 use tempfile::tempdir;
+use theway_contract::session::{SessionErrorCode, SessionReader, SessionStore, StoredSessionEntry};
 use theway_storage::sqlite_repo::SqliteSessionRepo;
 
-fn user_message(text: &str) -> theway_core::AgentMessage {
-    theway_core::AgentMessage::Llm(theway_llm_provider::Message::User(
-        theway_llm_provider::UserMessage {
-            role: theway_llm_provider::UserRole::User,
-            content: theway_llm_provider::UserContent::Text(text.into()),
-            timestamp: chrono::Utc::now().timestamp_millis(),
-        },
-    ))
+fn message(id: &str, parent_id: Option<&str>, text: &str) -> StoredSessionEntry {
+    StoredSessionEntry::from_payload(serde_json::json!({
+        "type": "message",
+        "id": id,
+        "parentId": parent_id,
+        "timestamp": "2026-08-19T00:00:00Z",
+        "message": { "role": "user", "content": text, "timestamp": 1 }
+    }))
+    .unwrap()
+}
+
+fn compaction(id: &str, parent_id: &str, first_kept: &str) -> StoredSessionEntry {
+    StoredSessionEntry::from_payload(serde_json::json!({
+        "type": "compaction",
+        "id": id,
+        "parentId": parent_id,
+        "timestamp": "2026-08-19T00:00:00Z",
+        "summary": "summary text",
+        "firstKeptEntryId": first_kept,
+        "tokensBefore": 100,
+        "details": null,
+        "preserveThinking": false
+    }))
+    .unwrap()
+}
+
+async fn append_message(
+    store: &impl SessionStore,
+    text: &str,
+) -> Result<String, theway_contract::session::SessionError> {
+    let id = store.create_entry_id().await?;
+    let parent_id = store.get_leaf_id().await?;
+    store
+        .append_entry(message(&id, parent_id.as_deref(), text))
+        .await?;
+    Ok(id)
 }
 
 #[tokio::test]
@@ -21,16 +48,14 @@ async fn sqlite_session_persists_across_open() {
     let repo = SqliteSessionRepo::new(dir.path());
 
     let session = repo.create("/some/cwd").await.unwrap();
-    session.append_message(user_message("hello")).await.unwrap();
-    let leaf = session.leaf_id().await.unwrap().expect("leaf id");
+    let leaf = append_message(&session, "hello").await.unwrap();
 
-    // Re-open the database and verify the message is still there.
     let files = repo.list().await.unwrap();
     assert_eq!(files.len(), 1);
     let reopened = repo.open(&files[0]).await.unwrap();
-    let entries = reopened.entries().await.unwrap();
+    let entries = reopened.get_entries().await.unwrap();
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].id(), leaf);
+    assert_eq!(entries[0].id, leaf);
 }
 
 #[tokio::test]
@@ -41,7 +66,7 @@ async fn sqlite_metadata_id_matches_session_file_stem() {
     let session = repo.create("/some/cwd").await.unwrap();
     let files = repo.list().await.unwrap();
     let stem = files[0].file_stem().and_then(|s| s.to_str()).unwrap();
-    let meta = session.storage().get_metadata_json().await.unwrap();
+    let meta = session.get_metadata_json().await.unwrap();
 
     assert_eq!(meta.get("id").and_then(|v| v.as_str()), Some(stem));
 }
@@ -52,21 +77,22 @@ async fn sqlite_explicit_leaf_moves_are_overridden_by_new_entries() {
     let repo = SqliteSessionRepo::new(dir.path());
 
     let session = repo.create("/some/cwd").await.unwrap();
-    let id_a = session.append_message(user_message("a")).await.unwrap();
-    let _id_b = session.append_message(user_message("b")).await.unwrap();
+    let id_a = append_message(&session, "a").await.unwrap();
+    let _id_b = append_message(&session, "b").await.unwrap();
 
-    session.move_to(Some(&id_a), None).await.unwrap();
-    let id_c = session.append_message(user_message("c")).await.unwrap();
+    session.set_leaf_id(Some(id_a.clone())).await.unwrap();
+    let id_c = append_message(&session, "c").await.unwrap();
 
     let files = repo.list().await.unwrap();
     let reopened = repo.open(&files[0]).await.unwrap();
     assert_eq!(
-        reopened.leaf_id().await.unwrap().as_deref(),
+        reopened.get_leaf_id().await.unwrap().as_deref(),
         Some(id_c.as_str())
     );
 
-    let branch = reopened.branch(None).await.unwrap();
-    let ids: Vec<&str> = branch.iter().map(|e| e.id()).collect();
+    let leaf = reopened.get_leaf_id().await.unwrap();
+    let branch = reopened.get_path_to_root(leaf.as_deref()).await.unwrap();
+    let ids: Vec<&str> = branch.iter().map(|entry| entry.id.as_str()).collect();
     assert_eq!(ids, vec![id_a.as_str(), id_c.as_str()]);
 }
 
@@ -76,45 +102,36 @@ async fn sqlite_can_move_leaf_to_root() {
     let repo = SqliteSessionRepo::new(dir.path());
 
     let session = repo.create("/some/cwd").await.unwrap();
-    session.append_message(user_message("a")).await.unwrap();
-    session.move_to(None, None).await.unwrap();
+    append_message(&session, "a").await.unwrap();
+    session.set_leaf_id(None).await.unwrap();
 
     let files = repo.list().await.unwrap();
     let reopened = repo.open(&files[0]).await.unwrap();
-    assert_eq!(reopened.leaf_id().await.unwrap(), None);
-    assert!(reopened.branch(None).await.unwrap().is_empty());
+    assert_eq!(reopened.get_leaf_id().await.unwrap(), None);
+    assert!(reopened.get_path_to_root(None).await.unwrap().is_empty());
 }
 
 #[tokio::test]
-async fn sqlite_compaction_summary_replaces_history_up_to_first_kept() {
+async fn sqlite_persists_compaction_payload_without_interpreting_runtime_semantics() {
     let dir = tempdir().unwrap();
     let repo = SqliteSessionRepo::new(dir.path());
 
     let session = repo.create("/some/cwd").await.unwrap();
-    let _id1 = session
-        .append_message(user_message("dropped"))
+    append_message(&session, "dropped").await.unwrap();
+    let first_kept = append_message(&session, "kept").await.unwrap();
+    let compaction_id = session.create_entry_id().await.unwrap();
+    session
+        .append_entry(compaction(&compaction_id, &first_kept, &first_kept))
         .await
         .unwrap();
-    let first_kept = session.append_message(user_message("kept")).await.unwrap();
-    let _comp = session
-        .append_compaction("summary text", &first_kept, 100, None, false)
-        .await
-        .unwrap();
-    let _id3 = session.append_message(user_message("after")).await.unwrap();
+    append_message(&session, "after").await.unwrap();
 
-    let ctx = session.build_context().await.unwrap();
-    assert_eq!(ctx.messages.len(), 3);
-    match &ctx.messages[0] {
-        theway_core::AgentMessage::Custom(c) => assert_eq!(c.role, "compaction_summary"),
-        _ => panic!("expected compaction_summary custom message"),
-    }
+    let persisted = session.get_entry(&compaction_id).await.unwrap().unwrap();
+    assert_eq!(persisted.entry_type, "compaction");
+    assert_eq!(persisted.payload["summary"], "summary text");
+    assert_eq!(persisted.payload["firstKeptEntryId"], first_kept);
 }
 
-// ── SQLite corruption handling ─────────────────────────────────────────────
-
-/// A session db with a clobbered header must fail open with Corrupted and
-/// leave the file in place (no auto-rebuild, no delete — the transcript is the
-/// user's data; they decide).
 #[tokio::test]
 async fn sqlite_corrupt_header_reports_corrupted_and_keeps_file() {
     use std::io::{Seek, SeekFrom, Write};
@@ -123,38 +140,26 @@ async fn sqlite_corrupt_header_reports_corrupted_and_keeps_file() {
 
     let files = {
         let session = repo.create("/some/cwd").await.unwrap();
-        session
-            .append_message(user_message("precious"))
-            .await
-            .unwrap();
+        append_message(&session, "precious").await.unwrap();
         let files = repo.list().await.unwrap();
         assert_eq!(files.len(), 1);
         files
     };
-    // Drop the session so the process-local turso handle is released, then
-    // clobber the header (first 64 bytes) — simulates a damaged file on disk
-    // that a fresh open must detect.
-    let mut f = std::fs::OpenOptions::new()
+    let mut file = std::fs::OpenOptions::new()
         .write(true)
         .open(&files[0])
         .unwrap();
-    let zeros = [0u8; 64];
-    f.seek(SeekFrom::Start(0)).unwrap();
-    f.write_all(&zeros).unwrap();
-    drop(f);
+    file.seek(SeekFrom::Start(0)).unwrap();
+    file.write_all(&[0u8; 64]).unwrap();
+    drop(file);
 
     match repo.open(&files[0]).await {
-        Err(e) => {
-            assert_eq!(e.code, theway_core::SessionErrorCode::Corrupted);
-        }
+        Err(error) => assert_eq!(error.code, SessionErrorCode::Corrupted),
         Ok(_) => panic!("corrupt db must not open"),
     }
-    // File still exists (we never delete user data).
     assert!(files[0].exists());
 }
 
-/// A session db with a damaged data page (but intact header) must be caught
-/// by the quick_check integrity scan on open.
 #[tokio::test]
 async fn sqlite_corrupt_data_page_caught_by_integrity_check() {
     use std::io::{Seek, SeekFrom, Write};
@@ -163,34 +168,23 @@ async fn sqlite_corrupt_data_page_caught_by_integrity_check() {
 
     let path = {
         let session = repo.create("/some/cwd").await.unwrap();
-        // Enough messages to spill past page 1 (4096 B) so a middle data
-        // page exists to corrupt.
         for i in 0..300 {
-            session
-                .append_message(user_message(&format!("msg {i} {}", "x".repeat(200))))
+            append_message(&session, &format!("msg {i} {}", "x".repeat(200)))
                 .await
                 .unwrap();
         }
-        let files = repo.list().await.unwrap();
-        assert_eq!(files.len(), 1);
-        files[0].clone()
+        repo.list().await.unwrap().into_iter().next().unwrap()
     };
-    // Sanity: the db really has >1 page (else the corruption below would
-    // land past EOF and be ignored).
     let len = std::fs::metadata(&path).unwrap().len();
     assert!(len > 4096, "db too small for page-corruption test: {len} B");
-    // Corrupt page 2 (a data page; page 1 is the root — turso tolerates
-    // root-page damage, so we hit a real data page).
-    let mut f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
-    let garbage = [0xFFu8; 4096];
-    f.seek(SeekFrom::Start(4096)).unwrap();
-    f.write_all(&garbage).unwrap();
-    drop(f);
+    let mut file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+    file.seek(SeekFrom::Start(4096)).unwrap();
+    file.write_all(&[0xFFu8; 4096]).unwrap();
+    drop(file);
 
     match repo.open(&path).await {
-        Err(e) => assert_eq!(e.code, theway_core::SessionErrorCode::Corrupted),
+        Err(error) => assert_eq!(error.code, SessionErrorCode::Corrupted),
         Ok(_) => panic!("corrupt data page must be caught by quick_check"),
     }
-    // File untouched (never deleted).
     assert!(path.exists());
 }

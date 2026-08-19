@@ -1,41 +1,15 @@
-//! SQLite-backed `SessionRepo` (Turso): directory layout
+//! SQLite-backed session repository (Turso): directory layout
 //! `<sessions-dir>/<cwd-hash>/<uuid>.db`, create/open/list/delete surface, one
 //! Turso database file per session.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-
-use async_trait::async_trait;
-use theway_core::{Session, SessionError, SessionErrorCode, SessionRepo, uuidv7};
+use theway_contract::session::{SessionError, SessionErrorCode};
 
 use crate::sqlite_storage::SqliteSessionStorage;
 
 pub struct SqliteSessionRepo {
     /// Root sessions dir, e.g. `~/.theway/sessions/<cwd-hash>`.
     root: PathBuf,
-}
-
-#[async_trait]
-impl SessionRepo for SqliteSessionRepo {
-    fn root(&self) -> &Path {
-        &self.root
-    }
-
-    async fn create(&self, cwd: String) -> Result<Session, SessionError> {
-        self.create(cwd).await
-    }
-
-    async fn open(&self, path: &Path) -> Result<Session, SessionError> {
-        self.open(path).await
-    }
-
-    async fn list(&self) -> Result<Vec<PathBuf>, SessionError> {
-        self.list().await
-    }
-
-    async fn delete(&self, path: &Path) -> Result<bool, SessionError> {
-        self.delete(path).await
-    }
 }
 
 impl SqliteSessionRepo {
@@ -49,30 +23,27 @@ impl SqliteSessionRepo {
 
     /// Mint a new session database under `root` for the given `cwd`. The file
     /// is named `<uuidv7>.db` to keep directory listings chronologically sorted.
-    pub async fn create(&self, cwd: impl Into<String>) -> Result<Session, SessionError> {
+    pub async fn create(
+        &self,
+        cwd: impl Into<String>,
+    ) -> Result<SqliteSessionStorage, SessionError> {
         tokio::fs::create_dir_all(&self.root)
             .await
             .map_err(io_err)?;
-        let file = self.root.join(format!("{}.db", uuidv7()));
-        let storage = SqliteSessionStorage::create(file, cwd).await?;
-        Ok(Session::new(
-            Arc::new(storage) as Arc<dyn theway_core::SessionStorage>
-        ))
+        let file = self.root.join(format!("{}.db", uuid::Uuid::now_v7()));
+        SqliteSessionStorage::create(file, cwd).await
     }
 
     /// Open an existing session database. Path may be absolute or relative to
     /// `root`.
-    pub async fn open(&self, path: impl AsRef<Path>) -> Result<Session, SessionError> {
+    pub async fn open(&self, path: impl AsRef<Path>) -> Result<SqliteSessionStorage, SessionError> {
         let p = path.as_ref();
         let abs = if p.is_absolute() {
             p.to_path_buf()
         } else {
             self.root.join(p)
         };
-        let storage = SqliteSessionStorage::open(abs).await?;
-        Ok(Session::new(
-            Arc::new(storage) as Arc<dyn theway_core::SessionStorage>
-        ))
+        SqliteSessionStorage::open(abs).await
     }
 
     /// List session databases in `root`, sorted ascending by name (≈ creation

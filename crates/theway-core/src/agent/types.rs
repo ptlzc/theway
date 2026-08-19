@@ -15,6 +15,8 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
+pub use theway_contract::session::{SessionError, SessionErrorCode};
+
 // ──────────────────────────────────────────────────────────────────────────────────────────
 // Result helpers — TS uses `{ok, value|error}`; Rust uses `std::result::Result`. The TS aliases
 // `ok()` / `err()` / `getOrThrow()` have direct Rust equivalents (`Ok`/`Err`/`unwrap`); we
@@ -389,24 +391,6 @@ pub enum CompactionErrorCode {
 #[error("{message}")]
 pub struct CompactionError {
     pub code: CompactionErrorCode,
-    pub message: String,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SessionErrorCode {
-    NotFound,
-    AlreadyExists,
-    Corrupted,
-    StorageFailure,
-    Aborted,
-    Unknown,
-}
-
-#[derive(Clone, Debug, thiserror::Error)]
-#[error("{message}")]
-pub struct SessionError {
-    pub code: SessionErrorCode,
     pub message: String,
 }
 

@@ -1,7 +1,7 @@
 //! theway-contract — pure leaf contract crate for the theway agent runtime.
 //!
-//! Holds cross-crate shared *data* contracts only: no engine, no protocol, no
-//! runtime. Depended on by `theway-storage`, `theway-transport` and
+//! Holds cross-crate persistence and data contracts only: no engine, no protocol,
+//! no runtime. Depended on by `theway-storage`, `theway-transport` and
 //! `theway-daemon`; it never depends on any workspace crate itself (issue #64:
 //! breaks the former storage→transport layering leak).
 //!
@@ -13,7 +13,10 @@
 //!   (`${THEWAY_DIR:-$HOME/.theway}`). Transport `client`/`config` re-export
 //!   it for compatibility; the daemon (hooks, TS extensions, ...) consumes
 //!   the same implementation instead of inlining copies.
+//! - [`session`] — engine-independent session metadata, raw append-only entry
+//!   records, and persistence reader/store interfaces.
 
 pub mod config;
+pub mod session;
 pub mod session_id;
 pub mod triggers;

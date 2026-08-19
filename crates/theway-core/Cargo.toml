@@ -36,6 +36,7 @@ default-providers = [
 ]
 
 [dependencies]
+theway-contract = { path = "../theway-contract" }
 theway-llm-provider = { path = "../theway-llm-provider", default-features = false }
 
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }

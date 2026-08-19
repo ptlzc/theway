@@ -59,7 +59,7 @@ pub use agent::permission::{PermissionCategory, PermissionDecision, PermissionPo
 pub use agent::session::{
     memory_repo::MemorySessionRepo,
     memory_storage::MemorySessionStorage,
-    repo::SessionRepo,
+    persistent_storage::{PersistentSessionStorage, decode_session_entry, encode_session_entry},
     repo_utils::{
         ForkOptions, ForkPosition, create_session_id, create_timestamp, get_entries_to_fork,
         to_session,

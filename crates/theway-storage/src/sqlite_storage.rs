@@ -1,4 +1,4 @@
-//! SQLite-backed `SessionStorage` (Turso, pure-Rust SQLite).
+//! SQLite-backed raw session store (Turso, pure-Rust SQLite).
 //!
 //! Append-only tree semantics (entries carry `parent_id`, the leaf is the latest
 //! appended entry, `Leaf` entries move the pointer explicitly), rows persisted into
@@ -9,10 +9,10 @@
 //!   parent_session_path, imported_from)
 //! - `entries` (seq, id, parent_id, type, timestamp, payload): one row per
 //!   tree entry; `payload` is the full JSON serialization of the
-//!   `SessionTreeEntry`
+//!   tagged session entry
 //!
 //! The `seq` column is the append order (AUTOINCREMENT). Reads parse `payload`
-//! back into `SessionTreeEntry`.
+//! back into validated [`StoredSessionEntry`] records.
 
 use std::path::{Path, PathBuf};
 
@@ -20,10 +20,14 @@ use async_trait::async_trait;
 use serde_json::Value;
 use turso::{Builder, Connection, Database};
 
-use theway_core::{
-    JsonlSessionMetadata, SessionError, SessionErrorCode, SessionMetadata, SessionStorage,
-    SessionTreeEntry, uuidv7,
+use theway_contract::session::{
+    JsonlSessionMetadata, SessionError, SessionErrorCode, SessionImportOrigin, SessionMetadata,
+    SessionReader, SessionStore, StoredSessionEntry,
 };
+
+fn uuidv7() -> String {
+    uuid::Uuid::now_v7().to_string()
+}
 
 /// SQLite-backed session storage. `Connection` is cheap to clone (shared
 /// Arc inside) and all turso operations are `&self` async.
@@ -238,7 +242,7 @@ impl SqliteSessionStorage {
     /// table; `None` clears the field.
     pub async fn set_import_origin(
         &self,
-        origin: Option<theway_core::SessionImportOrigin>,
+        origin: Option<SessionImportOrigin>,
     ) -> Result<(), SessionError> {
         {
             let mut m = self.metadata.lock();
@@ -292,14 +296,13 @@ impl SqliteSessionStorage {
         let r#type: String = row.get(0).map_err(map_err)?;
         let payload: String = row.get(1).map_err(map_err)?;
         if r#type == "leaf" {
-            let entry: SessionTreeEntry = serde_json::from_str(&payload).map_err(json_err)?;
-            let SessionTreeEntry::Leaf { target_id, .. } = entry else {
-                return Ok(None);
-            };
-            Ok(target_id)
+            let payload = serde_json::from_str(&payload).map_err(json_err)?;
+            let entry = StoredSessionEntry::from_payload(payload)?;
+            Ok(entry.leaf_target_id().flatten().map(str::to_string))
         } else {
-            let entry: SessionTreeEntry = serde_json::from_str(&payload).map_err(json_err)?;
-            Ok(Some(entry.id().to_string()))
+            let payload = serde_json::from_str(&payload).map_err(json_err)?;
+            let entry = StoredSessionEntry::from_payload(payload)?;
+            Ok(Some(entry.id))
         }
     }
 
@@ -399,7 +402,7 @@ async fn read_meta(db: &Database) -> Result<JsonlSessionMetadata, SessionError> 
 }
 
 #[async_trait]
-impl SessionStorage for SqliteSessionStorage {
+impl SessionReader for SqliteSessionStorage {
     async fn get_metadata_json(&self) -> Result<Value, SessionError> {
         Ok(serde_json::to_value(&*self.metadata.lock()).unwrap())
     }
@@ -408,40 +411,7 @@ impl SessionStorage for SqliteSessionStorage {
         self.current_leaf().await
     }
 
-    async fn set_leaf_id(&self, id: Option<String>) -> Result<(), SessionError> {
-        // Record as an explicit `leaf` entry — append-only by design.
-        let entry = SessionTreeEntry::Leaf {
-            id: uuidv7(),
-            parent_id: self.current_leaf().await?,
-            timestamp: chrono::Utc::now().to_rfc3339(),
-            target_id: id,
-        };
-        self.append_entry(entry).await
-    }
-
-    async fn create_entry_id(&self) -> Result<String, SessionError> {
-        Ok(uuidv7())
-    }
-
-    async fn append_entry(&self, entry: SessionTreeEntry) -> Result<(), SessionError> {
-        let conn = self.conn().await?;
-        let payload = serde_json::to_string(&entry).map_err(json_err)?;
-        conn.execute(
-            "INSERT INTO entries (id, parent_id, type, timestamp, payload) VALUES (?1, ?2, ?3, ?4, ?5)",
-            [
-                entry.id().to_string(),
-                entry.parent_id().unwrap_or("").to_string(),
-                entry.type_str().to_string(),
-                entry_timestamp(&entry),
-                payload,
-            ],
-        )
-        .await
-        .map_err(map_err)?;
-        Ok(())
-    }
-
-    async fn get_entry(&self, id: &str) -> Result<Option<SessionTreeEntry>, SessionError> {
+    async fn get_entry(&self, id: &str) -> Result<Option<StoredSessionEntry>, SessionError> {
         let conn = self.conn().await?;
         let mut rows = conn
             .query("SELECT payload FROM entries WHERE id = ?1", [id])
@@ -451,10 +421,11 @@ impl SessionStorage for SqliteSessionStorage {
             return Ok(None);
         };
         let payload: String = row.get(0).map_err(map_err)?;
-        Ok(Some(serde_json::from_str(&payload).map_err(json_err)?))
+        let payload = serde_json::from_str(&payload).map_err(json_err)?;
+        Ok(Some(StoredSessionEntry::from_payload(payload)?))
     }
 
-    async fn get_entries(&self) -> Result<Vec<SessionTreeEntry>, SessionError> {
+    async fn get_entries(&self) -> Result<Vec<StoredSessionEntry>, SessionError> {
         let conn = self.conn().await?;
         let mut rows = conn
             .query("SELECT payload FROM entries ORDER BY seq", ())
@@ -463,7 +434,8 @@ impl SessionStorage for SqliteSessionStorage {
         let mut out = Vec::new();
         while let Some(row) = rows.next().await.map_err(map_err)? {
             let payload: String = row.get(0).map_err(map_err)?;
-            out.push(serde_json::from_str(&payload).map_err(json_err)?);
+            let payload = serde_json::from_str(&payload).map_err(json_err)?;
+            out.push(StoredSessionEntry::from_payload(payload)?);
         }
         Ok(out)
     }
@@ -471,12 +443,12 @@ impl SessionStorage for SqliteSessionStorage {
     async fn get_path_to_root(
         &self,
         leaf_id: Option<&str>,
-    ) -> Result<Vec<SessionTreeEntry>, SessionError> {
+    ) -> Result<Vec<StoredSessionEntry>, SessionError> {
         let Some(start) = leaf_id else {
             return Ok(Vec::new());
         };
         let conn = self.conn().await?;
-        let mut chain: Vec<SessionTreeEntry> = Vec::new();
+        let mut chain: Vec<StoredSessionEntry> = Vec::new();
         let mut current = Some(start.to_string());
         let mut seen = std::collections::HashSet::new();
         while let Some(id) = current {
@@ -501,7 +473,8 @@ impl SessionStorage for SqliteSessionStorage {
             };
             let payload: String = row.get(0).map_err(map_err)?;
             let parent: String = row.get(1).map_err(map_err)?;
-            let entry: SessionTreeEntry = serde_json::from_str(&payload).map_err(json_err)?;
+            let payload = serde_json::from_str(&payload).map_err(json_err)?;
+            let entry = StoredSessionEntry::from_payload(payload)?;
             current = if parent.is_empty() {
                 None
             } else {
@@ -513,7 +486,10 @@ impl SessionStorage for SqliteSessionStorage {
         Ok(chain)
     }
 
-    async fn find_entries(&self, entry_type: &str) -> Result<Vec<SessionTreeEntry>, SessionError> {
+    async fn find_entries(
+        &self,
+        entry_type: &str,
+    ) -> Result<Vec<StoredSessionEntry>, SessionError> {
         let conn = self.conn().await?;
         let mut rows = conn
             .query(
@@ -525,7 +501,8 @@ impl SessionStorage for SqliteSessionStorage {
         let mut out = Vec::new();
         while let Some(row) = rows.next().await.map_err(map_err)? {
             let payload: String = row.get(0).map_err(map_err)?;
-            out.push(serde_json::from_str(&payload).map_err(json_err)?);
+            let payload = serde_json::from_str(&payload).map_err(json_err)?;
+            out.push(StoredSessionEntry::from_payload(payload)?);
         }
         Ok(out)
     }
@@ -544,140 +521,52 @@ impl SessionStorage for SqliteSessionStorage {
         let mut latest: Option<String> = None;
         while let Some(row) = rows.next().await.map_err(map_err)? {
             let payload: String = row.get(0).map_err(map_err)?;
-            let entry: SessionTreeEntry = serde_json::from_str(&payload).map_err(json_err)?;
-            if let SessionTreeEntry::Label {
-                target_id, label, ..
-            } = entry
+            let payload = serde_json::from_str(&payload).map_err(json_err)?;
+            let entry = StoredSessionEntry::from_payload(payload)?;
+            if let Some((target_id, label)) = entry.label_update()
+                && target_id == id
             {
-                if target_id == id {
-                    latest = label;
-                }
+                latest = label.map(str::to_string);
             }
         }
         Ok(latest)
     }
 }
 
-fn entry_timestamp(entry: &SessionTreeEntry) -> String {
-    match entry {
-        SessionTreeEntry::Message { timestamp, .. }
-        | SessionTreeEntry::ThinkingLevelChange { timestamp, .. }
-        | SessionTreeEntry::ModelChange { timestamp, .. }
-        | SessionTreeEntry::Compaction { timestamp, .. }
-        | SessionTreeEntry::BranchSummary { timestamp, .. }
-        | SessionTreeEntry::Custom { timestamp, .. }
-        | SessionTreeEntry::CustomMessage { timestamp, .. }
-        | SessionTreeEntry::Label { timestamp, .. }
-        | SessionTreeEntry::SessionInfo { timestamp, .. }
-        | SessionTreeEntry::Leaf { timestamp, .. } => timestamp.clone(),
+#[async_trait]
+impl SessionStore for SqliteSessionStorage {
+    async fn set_leaf_id(&self, id: Option<String>) -> Result<(), SessionError> {
+        let entry = StoredSessionEntry::leaf(
+            uuidv7(),
+            self.current_leaf().await?,
+            chrono::Utc::now().to_rfc3339(),
+            id,
+        )?;
+        self.append_entry(entry).await
+    }
+
+    async fn create_entry_id(&self) -> Result<String, SessionError> {
+        Ok(uuidv7())
+    }
+
+    async fn append_entry(&self, entry: StoredSessionEntry) -> Result<(), SessionError> {
+        let conn = self.conn().await?;
+        let payload = serde_json::to_string(&entry.payload).map_err(json_err)?;
+        conn.execute(
+            "INSERT INTO entries (id, parent_id, type, timestamp, payload) VALUES (?1, ?2, ?3, ?4, ?5)",
+            [
+                entry.id,
+                entry.parent_id.unwrap_or_default(),
+                entry.entry_type,
+                entry.timestamp,
+                payload,
+            ],
+        )
+        .await
+        .map_err(map_err)?;
+        Ok(())
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::tempdir;
-
-    #[tokio::test]
-    async fn create_writes_header_and_rejects_existing() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join(format!("{}.db", uuidv7()));
-        let s = SqliteSessionStorage::create(&path, "/some/cwd")
-            .await
-            .unwrap();
-        assert!(path.exists());
-        assert_eq!(s.metadata().base.id.len(), 36);
-        let dup = SqliteSessionStorage::create(&path, "/other").await;
-        assert!(matches!(
-            dup.err().map(|e| e.code),
-            Some(SessionErrorCode::AlreadyExists)
-        ));
-    }
-
-    #[tokio::test]
-    async fn open_recovers_metadata_and_entries() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("s.db");
-        {
-            let s = SqliteSessionStorage::create(&path, "/cwd").await.unwrap();
-            let entry = SessionTreeEntry::Message {
-                id: "m1".into(),
-                parent_id: None,
-                timestamp: "2024-01-01T00:00:00Z".into(),
-                message: serde_json::from_value(serde_json::json!({
-                    "role": "user",
-                    "content": "hi",
-                    "timestamp": 1
-                }))
-                .unwrap(),
-            };
-            s.append_entry(entry).await.unwrap();
-        }
-        let s = SqliteSessionStorage::open(&path).await.unwrap();
-        assert_eq!(s.metadata().cwd, "/cwd");
-        let entries = s.get_entries().await.unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].id(), "m1");
-    }
-
-    #[tokio::test]
-    async fn leaf_and_path_to_root_follow_tree() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("s.db");
-        let s = SqliteSessionStorage::create(&path, "/cwd").await.unwrap();
-        let e1 = SessionTreeEntry::Message {
-            id: "a".into(),
-            parent_id: None,
-            timestamp: "t".into(),
-            message: serde_json::from_value(serde_json::json!({
-                "role": "user",
-                "content": "1",
-                "timestamp": 1
-            }))
-            .unwrap(),
-        };
-        let e2 = SessionTreeEntry::Message {
-            id: "b".into(),
-            parent_id: Some("a".into()),
-            timestamp: "t".into(),
-            message: serde_json::from_value(serde_json::json!({
-                "role": "assistant",
-                "content": [{"type": "text", "text": "2"}],
-                "timestamp": 2
-            }))
-            .unwrap(),
-        };
-        s.append_entry(e1).await.unwrap();
-        s.append_entry(e2).await.unwrap();
-        assert_eq!(s.get_leaf_id().await.unwrap().as_deref(), Some("b"));
-        let path = s.get_path_to_root(Some("b")).await.unwrap();
-        assert_eq!(
-            path.iter().map(|e| e.id()).collect::<Vec<_>>(),
-            vec!["a", "b"]
-        );
-    }
-
-    #[tokio::test]
-    async fn label_entries_apply_in_append_order() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("s.db");
-        let s = SqliteSessionStorage::create(&path, "/cwd").await.unwrap();
-        let l1 = SessionTreeEntry::Label {
-            id: "l1".into(),
-            parent_id: None,
-            timestamp: "t".into(),
-            target_id: "m1".into(),
-            label: Some("first".into()),
-        };
-        let l2 = SessionTreeEntry::Label {
-            id: "l2".into(),
-            parent_id: None,
-            timestamp: "t".into(),
-            target_id: "m1".into(),
-            label: Some("second".into()),
-        };
-        s.append_entry(l1).await.unwrap();
-        s.append_entry(l2).await.unwrap();
-        assert_eq!(s.get_label("m1").await.unwrap().as_deref(), Some("second"));
-    }
-}
+tests_bridge_macro::tests_bridge!("sqlite_storage");

@@ -5,11 +5,10 @@
 //! sidecars. It preserves transcript/tool history, so callers must render a sensitivity
 //! warning.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{Cursor, Read};
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
 
 use crate::sqlite_repo::SqliteSessionRepo;
 use crate::sqlite_storage::SqliteSessionStorage;
@@ -17,8 +16,9 @@ use anyhow::{Context, Result, anyhow, bail};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use theway_core::{
-    JsonlSessionMetadata, Session, SessionImportOrigin, SessionStorage, SessionTreeEntry, uuidv7,
+use theway_contract::session::{
+    JsonlSessionMetadata, SessionImportOrigin, SessionReader, SessionStore, StoredSessionEntry,
+    validate_session_entries,
 };
 
 use theway_contract::triggers::CronJob;
@@ -100,7 +100,7 @@ struct ManifestSensitivity {
 
 #[derive(Debug)]
 struct ParsedSession {
-    entries: Vec<SessionTreeEntry>,
+    entries: Vec<StoredSessionEntry>,
     active_leaf_id: Option<String>,
 }
 
@@ -116,13 +116,12 @@ struct CronJobsFile {
     jobs: Vec<CronJob>,
 }
 
-pub async fn export_session(
-    session: &Session,
+pub async fn export_session<R: SessionReader + ?Sized>(
+    session: &R,
     output_path: &Path,
     exclude_triggers: bool,
 ) -> Result<ExportSummary> {
     let metadata = session
-        .storage()
         .get_metadata_json()
         .await
         .context("read session metadata")?;
@@ -146,7 +145,7 @@ pub async fn export_session(
         .unwrap_or_default()
         .to_string();
     let session_hash = sha256_hex(session_jsonl.as_bytes());
-    let active_leaf_id = session.leaf_id().await.context("read active leaf")?;
+    let active_leaf_id = session.get_leaf_id().await.context("read active leaf")?;
 
     let trigger_path = crate::session::trigger_sidecar_path(&session_path);
     let cron_path = crate::session::cron_sidecar_path(&session_path);
@@ -224,33 +223,21 @@ pub async fn export_session(
 /// (metadata) followed by one line per tree entry, plus the entry count.
 /// Backend-agnostic — renders from any `SessionStorage`; the archive transcript
 /// stays JSONL so existing archives and tooling keep working.
-async fn render_session_jsonl(
+async fn render_session_jsonl<R: SessionReader + ?Sized>(
     metadata: &serde_json::Value,
-    session: &Session,
+    session: &R,
 ) -> Result<(String, usize)> {
     let header: JsonlSessionMetadata = serde_json::from_value(metadata.clone())
         .context("session metadata is not a valid header")?;
     let mut out = serde_json::to_string(&header)?;
     out.push('\n');
-    let entries = session.entries().await.context("read session entries")?;
-    let mut seen = HashSet::new();
+    let entries = session
+        .get_entries()
+        .await
+        .context("read session entries")?;
+    validate_session_entries(&entries).context("validate session transcript")?;
     for entry in &entries {
-        let id = entry.id().to_string();
-        if !seen.insert(id.clone()) {
-            bail!("session transcript contains duplicate entry id");
-        }
-        if let Some(parent) = entry.parent_id()
-            && !seen.contains(parent)
-        {
-            bail!("session transcript contains dangling parent reference");
-        }
-        if let SessionTreeEntry::Leaf { target_id, .. } = entry
-            && let Some(target) = target_id
-            && !seen.contains(target)
-        {
-            bail!("session transcript contains dangling leaf target");
-        }
-        out.push_str(&serde_json::to_string(entry)?);
+        out.push_str(&serde_json::to_string(&entry.payload)?);
         out.push('\n');
     }
     Ok((out, entries.len()))
@@ -329,13 +316,13 @@ pub async fn import_session(
     tokio::fs::create_dir_all(repo.root())
         .await
         .with_context(|| format!("create {}", repo.root().display()))?;
-    let new_id = uuidv7();
+    let new_id = uuid::Uuid::now_v7().to_string();
     let session_path = repo.root().join(format!("{new_id}.db"));
     if tokio::fs::try_exists(&session_path).await? {
         bail!("import destination already exists");
     }
     let temp_path = repo.root().join(format!("{new_id}.db.tmp"));
-    let origin = Some(theway_core::SessionImportOrigin {
+    let origin = Some(SessionImportOrigin {
         session_id: manifest.source.session_id.clone(),
         cwd: manifest.source.cwd.clone(),
         exported_at: manifest.created_at.clone(),
@@ -443,35 +430,18 @@ fn parse_session_jsonl(text: &str) -> Result<ParsedSession> {
         bail!("session metadata is missing id");
     }
     let mut entries = Vec::new();
-    let mut seen = HashSet::new();
-    let mut active_leaf_id = None;
     for (idx, line) in lines.enumerate() {
         if line.trim().is_empty() {
             continue;
         }
-        let entry: SessionTreeEntry = serde_json::from_str(line)
+        let payload = serde_json::from_str(line)
             .with_context(|| format!("parse session entry line {}", idx + 2))?;
-        let id = entry.id().to_string();
-        if !seen.insert(id.clone()) {
-            bail!("session transcript contains duplicate entry id");
-        }
-        if let Some(parent) = entry.parent_id()
-            && !seen.contains(parent)
-        {
-            bail!("session transcript contains dangling parent reference");
-        }
-        if let SessionTreeEntry::Leaf { target_id, .. } = &entry
-            && let Some(target) = target_id
-            && !seen.contains(target)
-        {
-            bail!("session transcript contains dangling leaf target");
-        }
-        active_leaf_id = match &entry {
-            SessionTreeEntry::Leaf { target_id, .. } => target_id.clone(),
-            _ => Some(id),
-        };
+        let entry = StoredSessionEntry::from_payload(payload)
+            .with_context(|| format!("parse session entry line {}", idx + 2))?;
         entries.push(entry);
     }
+    let active_leaf_id =
+        validate_session_entries(&entries).context("validate session transcript")?;
     Ok(ParsedSession {
         entries,
         active_leaf_id,
@@ -486,7 +456,7 @@ fn parse_session_jsonl(text: &str) -> Result<ParsedSession> {
 async fn commit_import(
     session_path: &Path,
     temp_path: &Path,
-    entries: &[SessionTreeEntry],
+    entries: &[StoredSessionEntry],
     cwd: &Path,
     origin: Option<SessionImportOrigin>,
     sidecars: &[(PathBuf, String)],
@@ -523,12 +493,6 @@ async fn commit_import(
             .checkpoint()
             .await
             .map_err(|e| anyhow!("checkpoint session db: {e}"))?;
-        let session = Session::new(Arc::new(storage) as Arc<dyn SessionStorage>);
-        session
-            .build_context()
-            .await
-            .context("validate imported session")?;
-        drop(session);
         for (path, content) in sidecars {
             tokio::fs::write(path, content)
                 .await

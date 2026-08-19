@@ -1,15 +1,12 @@
-//! theway-storage — concrete persistence backends for theway-core contracts.
+//! theway-storage — concrete persistence backends for leaf contracts.
 //!
-//! The engine (`theway-core`) defines the storage *contracts* (`SessionStorage`,
-//! `SessionRepo`, `DagPersistSink`) and ships an in-memory default so embedders
-//! work out of the box. The durable backends — SQLite via Turso, one `<uuidv7>.db`
-//! file per session — live here, keeping the engine crate dependency-light and
-//! leaving the *choice* of backend to the composition root (the `thewayd` daemon
-//! and the `theway` TUI binary).
+//! Session persistence implements the raw reader/store interfaces from
+//! `theway-contract`; runtime entry interpretation stays in `theway-core`.
+//! SQLite via Turso stores one `<uuidv7>.db` file per session. The composition
+//! root chooses the backend and adapts it to a core runtime session when needed.
 //!
-//! Dependencies: theway-core (traits + types) and theway-contract (session
-//! sidecar models + base-dir/path layout). This crate never depends on
-//! theway-transport; the core never references this crate, so there is no cycle.
+//! DAG snapshots still use core runtime types. This crate never depends on the
+//! transport stack, and core never references this crate.
 
 //! Self-alias so bridged unit tests (tests_bridge) and lib code share one path
 //! shape (`theway_storage::…`), same pattern as theway-core / theway-daemon.

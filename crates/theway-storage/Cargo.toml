@@ -3,15 +3,15 @@ name = "theway-storage"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "theway storage backends — concrete SessionStorage / DAG-persist implementations (SQLite via Turso) for theway-core contracts."
+description = "theway storage backends — concrete session and DAG persistence implementations (SQLite via Turso) for leaf contracts."
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
 
 [dependencies]
-# Engine contracts + types come from theway-core; this crate only implements
-# them. No reverse dependency (core never sees this crate).
+# DAG runtime snapshots still come from theway-core until the DAG persistence
+# contract is moved to the leaf contract crate.
 theway-core = { path = "../theway-core" }
 turso = "0.7"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "fs"] }
@@ -20,12 +20,10 @@ serde_json = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 parking_lot = "0.12"
 tracing = "0.1"
-# Session helpers + archive (daemon-kernel-layers: moved from the SDK): tar/toml/sha2
-# for `.theway-session` archives, serde for sidecar models, theway-contract for the
-# shared trigger models + base-dir/path contract (issue #64: storage depends on the
-# pure leaf contract crate, never on the transport stack).
+uuid = { version = "1", features = ["v7"] }
+# Session helpers + archive: tar/toml/sha2 for `.theway-session` archives;
+# theway-contract owns session persistence, sidecar models, and path layout.
 theway-contract = { path = "../theway-contract" }
-theway-llm-provider = { path = "../theway-llm-provider" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 tar = "0.4"
@@ -36,7 +34,6 @@ hex = "0.4"
 [dev-dependencies]
 tests-bridge-macro = { path = "../tests-bridge-macro" }
 tempfile = "3"
-theway-llm-provider = { path = "../theway-llm-provider" }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 [lints]

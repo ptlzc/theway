@@ -2,7 +2,45 @@
 
 use super::*;
 use chrono::Utc;
+use theway_contract::session::{SessionReader, SessionStore, StoredSessionEntry};
 use theway_storage::sqlite_repo::SqliteSessionRepo;
+
+trait RawSessionTestExt: SessionStore {
+    async fn append_custom(
+        &self,
+        custom_type: &str,
+        data: Option<serde_json::Value>,
+    ) -> Result<String, theway_contract::session::SessionError> {
+        let id = self.create_entry_id().await?;
+        let parent_id = self.get_leaf_id().await?;
+        let entry = StoredSessionEntry::from_payload(serde_json::json!({
+            "type": "custom",
+            "id": id,
+            "parentId": parent_id,
+            "timestamp": "2026-08-19T00:00:00Z",
+            "customType": custom_type,
+            "data": data,
+        }))?;
+        self.append_entry(entry).await?;
+        Ok(id)
+    }
+
+    async fn move_to(
+        &self,
+        id: Option<&str>,
+        _summary: Option<&str>,
+    ) -> Result<(), theway_contract::session::SessionError> {
+        self.set_leaf_id(id.map(str::to_string)).await
+    }
+
+    async fn entries(
+        &self,
+    ) -> Result<Vec<StoredSessionEntry>, theway_contract::session::SessionError> {
+        self.get_entries().await
+    }
+}
+
+impl<T: SessionStore + ?Sized> RawSessionTestExt for T {}
 
 #[tokio::test]
 async fn export_import_rewrites_metadata_and_disables_automation() {
@@ -23,7 +61,7 @@ async fn export_import_rewrites_metadata_and_disables_automation() {
         )
         .await
         .unwrap();
-    let source_meta = source.storage().get_metadata_json().await.unwrap();
+    let source_meta = source.get_metadata_json().await.unwrap();
     let source_path = PathBuf::from(source_meta["path"].as_str().unwrap());
 
     let trigger_path = crate::session::trigger_sidecar_path(&source_path);
@@ -85,7 +123,7 @@ async fn export_import_rewrites_metadata_and_disables_automation() {
 
     let imported_session = dest_repo.open(&imported.session_path).await.unwrap();
     let meta = imported_session
-        .storage()
+
         .get_metadata_json()
         .await
         .unwrap();
@@ -225,7 +263,7 @@ async fn export_manifest_uses_explicit_leaf_target_not_leaf_row_id() {
     let last_entry = session_text.last().unwrap();
     assert_ne!(
         manifest.content.active_leaf_id.as_deref(),
-        Some(last_entry.id())
+        Some(last_entry.id.as_str())
     );
 }
 
@@ -284,7 +322,7 @@ async fn make_exported_session(
         .append_custom("entry", Some(serde_json::json!({"n": 1})))
         .await
         .unwrap();
-    let source_meta = source.storage().get_metadata_json().await.unwrap();
+    let source_meta = source.get_metadata_json().await.unwrap();
     let source_path = PathBuf::from(source_meta["path"].as_str().unwrap());
     if !rules.is_empty() {
         let trigger_file = DynamicTriggerFile { version: 1, rules };
@@ -382,7 +420,7 @@ async fn import_records_source_provenance_in_metadata() {
         .unwrap();
 
     let session = dest_repo.open(&imported.session_path).await.unwrap();
-    let meta = session.storage().get_metadata_json().await.unwrap();
+    let meta = session.get_metadata_json().await.unwrap();
     let origin = &meta["importedFrom"];
     assert_eq!(origin["sessionId"].as_str(), Some(source_id.as_str()));
     assert_eq!(

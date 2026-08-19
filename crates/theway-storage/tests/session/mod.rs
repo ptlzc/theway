@@ -3,6 +3,18 @@
 use super::*;
 use tempfile::tempdir;
 
+fn custom_entry(id: &str, parent_id: Option<&str>) -> StoredSessionEntry {
+    StoredSessionEntry::from_payload(serde_json::json!({
+        "type": "custom",
+        "id": id,
+        "parentId": parent_id,
+        "timestamp": "2026-08-14T10:00:00Z",
+        "customType": "test",
+        "data": null,
+    }))
+    .unwrap()
+}
+
 #[tokio::test]
 async fn automation_counts_reads_enabled_and_total_from_sidecars() {
     let dir = tempdir().unwrap();
@@ -64,13 +76,13 @@ async fn automation_elsewhere_hint_names_newest_session_with_enabled_automation(
     let dir = tempdir().unwrap();
     let repo = SqliteSessionRepo::new(dir.path());
     let older = repo.create("/cwd").await.unwrap();
-    let older_meta = older.storage().get_metadata_json().await.unwrap();
+    let older_meta = older.get_metadata_json().await.unwrap();
     let older_path = PathBuf::from(older_meta["path"].as_str().unwrap());
     let older_id = older_meta["id"].as_str().unwrap().to_string();
     tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     let newer = repo.create("/cwd").await.unwrap();
     let newer_path = PathBuf::from(
-        newer.storage().get_metadata_json().await.unwrap()["path"]
+        newer.get_metadata_json().await.unwrap()["path"]
             .as_str()
             .unwrap(),
     );
@@ -121,7 +133,7 @@ async fn resume_with_no_id_picks_most_recent_session() {
     // First, older session.
     let older = repo.create("/cwd").await.unwrap();
     let older_id = older
-        .storage()
+
         .get_metadata_json()
         .await
         .unwrap()
@@ -134,7 +146,7 @@ async fn resume_with_no_id_picks_most_recent_session() {
 
     let newer = repo.create("/cwd").await.unwrap();
     let newer_id = newer
-        .storage()
+
         .get_metadata_json()
         .await
         .unwrap()
@@ -146,7 +158,7 @@ async fn resume_with_no_id_picks_most_recent_session() {
 
     let picked = resume(&repo, None).await.unwrap();
     let picked_id = picked
-        .storage()
+
         .get_metadata_json()
         .await
         .unwrap()
@@ -211,7 +223,7 @@ async fn sidecar_paths_survive_session_resume() {
     let dir = tempdir().unwrap();
     let repo = SqliteSessionRepo::new(dir.path());
     let created = repo.create("/cwd").await.unwrap();
-    let metadata = created.storage().get_metadata_json().await.unwrap();
+    let metadata = created.get_metadata_json().await.unwrap();
     let session_id = metadata.get("id").and_then(|v| v.as_str()).unwrap();
     let session_path = metadata.get("path").and_then(|v| v.as_str()).unwrap();
     let expected_trigger = trigger_sidecar_path(std::path::Path::new(session_path));
@@ -269,7 +281,7 @@ async fn delete_removes_endpoint_sidecar() {
     let repo = SqliteSessionRepo::new(dir.path());
     let session = repo.create("/cwd").await.unwrap();
     let id = session
-        .storage()
+
         .get_metadata_json()
         .await
         .unwrap()
@@ -293,7 +305,7 @@ async fn delete_removes_session_sidecars() {
     let repo = SqliteSessionRepo::new(dir.path());
     let session = repo.create("/cwd").await.unwrap();
     let id = session
-        .storage()
+
         .get_metadata_json()
         .await
         .unwrap()
@@ -368,33 +380,21 @@ async fn fork_session_replays_entries_and_records_parent_lineage() {
     let dir = tempdir().unwrap();
     let repo = SqliteSessionRepo::new(dir.path());
     let parent = repo.create("/cwd").await.unwrap();
-    let parent_meta = parent.storage().get_metadata_json().await.unwrap();
+    let parent_meta = parent.get_metadata_json().await.unwrap();
     let parent_path = PathBuf::from(parent_meta["path"].as_str().unwrap());
     let parent_id = parent_meta["id"].as_str().unwrap().to_string();
 
     // Two-entry parent chain: u1 (root) -> c1.
-    let u1 = theway_core::SessionTreeEntry::Custom {
-        id: "u1".into(),
-        parent_id: None,
-        timestamp: "2026-08-14T10:00:00Z".into(),
-        custom_type: "test".into(),
-        data: None,
-    };
-    let c1 = theway_core::SessionTreeEntry::Custom {
-        id: "c1".into(),
-        parent_id: Some("u1".into()),
-        timestamp: "2026-08-14T10:01:00Z".into(),
-        custom_type: "test".into(),
-        data: None,
-    };
-    parent.storage().append_entry(u1.clone()).await.unwrap();
-    parent.storage().append_entry(c1.clone()).await.unwrap();
+    let u1 = custom_entry("u1", None);
+    let c1 = custom_entry("c1", Some("u1"));
+    parent.append_entry(u1.clone()).await.unwrap();
+    parent.append_entry(c1).await.unwrap();
 
     // Fork before c1: the new session must contain exactly [u1].
     let fork = fork_session(&repo, std::path::Path::new("/cwd"), &parent, vec![u1.clone()])
         .await
         .unwrap();
-    let fork_meta = fork.storage().get_metadata_json().await.unwrap();
+    let fork_meta = fork.get_metadata_json().await.unwrap();
     let fork_path = PathBuf::from(fork_meta["path"].as_str().unwrap());
     assert_ne!(fork_path, parent_path, "fork must be a new file");
     assert_eq!(
@@ -402,21 +402,15 @@ async fn fork_session_replays_entries_and_records_parent_lineage() {
         parent_path.to_str().unwrap()
     );
 
-    let fork_entries = fork.storage().get_entries().await.unwrap();
+    let fork_entries = fork.get_entries().await.unwrap();
     assert_eq!(fork_entries.len(), 1);
-    assert_eq!(fork_entries[0].id(), "u1");
-    assert_eq!(fork_entries[0].parent_id(), None);
+    assert_eq!(fork_entries[0].id, "u1");
+    assert_eq!(fork_entries[0].parent_id, None);
 
     // Continue from the fork point: the next entry chains onto the replayed leaf (u1).
-    let new_msg = theway_core::SessionTreeEntry::Custom {
-        id: "c2".into(),
-        parent_id: Some("u1".into()),
-        timestamp: "2026-08-14T10:02:00Z".into(),
-        custom_type: "test".into(),
-        data: None,
-    };
-    fork.storage().append_entry(new_msg).await.unwrap();
-    let leaf = fork.storage().get_leaf_id().await.unwrap();
+    let new_msg = custom_entry("c2", Some("u1"));
+    fork.append_entry(new_msg).await.unwrap();
+    let leaf = fork.get_leaf_id().await.unwrap();
     assert_eq!(leaf.as_deref(), Some("c2"));
 
     // list_entries resolves the lineage for the tree display.

@@ -16,6 +16,8 @@ use crate::types::AgentMessage;
 use super::super::messages::{branch_summary, compaction_summary, custom};
 use super::super::types::{SessionError, SessionErrorCode};
 
+pub use theway_contract::session::{JsonlSessionMetadata, SessionImportOrigin, SessionMetadata};
+
 // ──────────────────────────────────────────────────────────────────────────────────────────
 // Entry types
 // ──────────────────────────────────────────────────────────────────────────────────────────
@@ -189,52 +191,6 @@ pub struct SessionContextModel {
     pub provider: String,
     #[serde(rename = "modelId")]
     pub model_id: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SessionMetadata {
-    pub id: String,
-    #[serde(rename = "createdAt")]
-    pub created_at: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct JsonlSessionMetadata {
-    #[serde(flatten)]
-    pub base: SessionMetadata,
-    /// The session's work_dir: the daemon's work_dir captured at creation time
-    /// (`SessionOps::create` inherits it), binding the session to that
-    /// directory. On switch the daemon validates the target session's work_dir
-    /// matches its own (`SessionHarnessFactory::build`, issue #66 node 3);
-    /// legacy sessions may lack it and are treated as compatible. Wire /
-    /// metadata field name stays `cwd`.
-    pub cwd: String,
-    pub path: String,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        rename = "parentSessionPath"
-    )]
-    pub parent_session_path: Option<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        rename = "importedFrom"
-    )]
-    pub imported_from: Option<SessionImportOrigin>,
-}
-
-/// Provenance of a session created by importing a `.theway-session` archive. The importing
-/// environment assigns a fresh id; this records where the transcript originally came from.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SessionImportOrigin {
-    #[serde(rename = "sessionId")]
-    pub session_id: String,
-    pub cwd: String,
-    #[serde(rename = "exportedAt")]
-    pub exported_at: String,
-    #[serde(rename = "thewayVersion")]
-    pub theway_version: String,
 }
 
 // ──────────────────────────────────────────────────────────────────────────────────────────
