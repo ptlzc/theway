@@ -18,7 +18,7 @@ use theway_core::{
     SessionStorage, SessionTreeEntry, Skill, SkillSource, StreamFn,
 };
 use theway_core::multiagent::registry::{
-    AGENT_JOB_EVENT_BROADCAST_CAPACITY, MAX_JOBS, AgentJobEvent, AgentJobRegistry, JobInit,
+    AGENT_JOB_EVENT_BROADCAST_CAPACITY, AgentJobRegistry, JobInit,
 };
 use theway_llm_provider::{
     Api, AssistantMessageEventSender, AssistantMessageEventStream, InputModality, Model,
@@ -232,8 +232,36 @@ async fn transport_endpoints_forwards_registry_events() {
         .expect("forwarded event timed out")
         .expect("registry closed before forwarding");
     match event {
-        AgentJobEvent::Started { id: event_id, .. } => assert_eq!(event_id, id),
+        WireAgentEvent::Started { id: event_id, .. } => assert_eq!(event_id, id),
         other => panic!("expected Started event, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn transport_endpoints_projects_dag_events() {
+    let built = build_host(harness_with_input(Vec::new()));
+    let (mut host, _scratch, _repo) = built.into_parts();
+    let endpoints = host.transport_endpoints();
+    let mut rx = endpoints.dag_events.subscribe();
+
+    let run_id = host
+        .dag_engine
+        .plan_goal("finish", Some(host.session_id.clone()));
+
+    let event = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+        .await
+        .expect("forwarded event timed out")
+        .expect("DAG channel closed before forwarding");
+    match event {
+        WireDagEvent::RunStatus {
+            run_id: event_id,
+            status,
+            ..
+        } => {
+            assert_eq!(event_id, run_id);
+            assert_eq!(status, "running");
+        }
+        other => panic!("expected RunStatus event, got {other:?}"),
     }
 }
 
@@ -246,7 +274,8 @@ async fn transport_endpoints_forwarder_survives_lagged_registry_receiver() {
     // The forwarder task is spawned on the current-thread runtime and has not
     // run yet. Push more events than the broadcast capacity so its first
     // `recv().await` observes `Lagged` and keeps forwarding.
-    for _ in 0..AGENT_JOB_EVENT_BROADCAST_CAPACITY + 10 {
+    let registered = AGENT_JOB_EVENT_BROADCAST_CAPACITY + 10;
+    for _ in 0..registered {
         host.subagent_registry.register(JobInit {
             agent: "faux-agent".into(),
             source: "subagent".into(),
@@ -257,7 +286,7 @@ async fn transport_endpoints_forwarder_survives_lagged_registry_receiver() {
     }
 
     tokio::time::sleep(Duration::from_millis(100)).await;
-    assert_eq!(host.subagent_registry.list().len(), MAX_JOBS);
+    assert_eq!(host.subagent_registry.list().len(), registered);
 }
 
 #[tokio::test]

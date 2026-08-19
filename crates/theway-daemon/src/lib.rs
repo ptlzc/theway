@@ -72,6 +72,7 @@ pub mod skill_overrides;
 pub use theway_storage::sqlite_repo::SqliteSessionRepo;
 pub mod templates;
 pub mod tools;
+pub mod transport_adapter;
 pub mod trigger_engine;
 pub mod ts_extensions;
 pub mod ui_mode_panel;

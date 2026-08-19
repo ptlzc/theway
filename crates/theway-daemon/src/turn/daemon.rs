@@ -24,7 +24,6 @@ use tokio::sync::{broadcast, mpsc};
 use theway_core::AgentMessage;
 use theway_core::SkillSource;
 use theway_core::multiagent::graph::types::DagEvent;
-use theway_core::multiagent::registry::AgentJobEvent;
 
 use super::feed::{self, Feed, FeedUpdate, Level, TriggerPollStatus};
 use super::kernel::{QueuedTurn, ReplKernel, TurnState, poll_turn};
@@ -35,6 +34,9 @@ use crate::forwarding_tool_ops::ForwardingToolOps;
 use crate::paths::DaemonPaths;
 use crate::session_ops::{CurrentSessionState, SessionFactory};
 use crate::tools::assembly::reload::{self, ReloadRuntime};
+use crate::transport_adapter::{
+    CoreGraphOps, CoreJobOps, agent_event, dag_event, dag_run_snapshot, subagent_job_snapshot,
+};
 use crate::triggers;
 use crate::{SqliteSessionRepo, bug_report};
 use theway_llm_provider::{ImageContent, Message, Usage};
@@ -371,29 +373,53 @@ impl TurnHost {
         let (command_tx, command_rx) = mpsc::unbounded_channel::<WireCommand>();
         let (snapshot_tx, _) = broadcast::channel::<WireStatus>(128);
         let latest = Arc::new(Mutex::new(self.wire_snapshot()));
-        let (event_tx, _) = broadcast::channel::<AgentJobEvent>(256);
+        let (event_tx, _) = broadcast::channel::<WireAgentEvent>(256);
+        let (dag_event_tx, _) = broadcast::channel::<WireDagEvent>(256);
+        let (core_dag_event_tx, _) = broadcast::channel::<DagEvent>(256);
+        self.dag_engine
+            .set_event_sender(Some(core_dag_event_tx.clone()));
         let agent_fwd = {
-            let mut rx = self.subagent_registry.subscribe();
-            let fwd_tx = event_tx.clone();
+            let mut agent_rx = self.subagent_registry.subscribe();
+            let agent_tx = event_tx.clone();
+            let mut dag_rx = core_dag_event_tx.subscribe();
+            let dag_tx = dag_event_tx.clone();
             tokio::spawn(async move {
-                loop {
-                    match rx.recv().await {
-                        Ok(event) => {
-                            let _ = fwd_tx.send(event);
+                let agent_loop = async move {
+                    loop {
+                        match agent_rx.recv().await {
+                            Ok(event) => {
+                                let _ = agent_tx.send(agent_event(event));
+                            }
+                            Err(broadcast::error::RecvError::Lagged(n)) => {
+                                tracing::warn!("AgentJobEvent broadcast lagged by {n}, skipping");
+                                continue;
+                            }
+                            Err(broadcast::error::RecvError::Closed) => break,
                         }
-                        Err(broadcast::error::RecvError::Lagged(n)) => {
-                            tracing::warn!("AgentJobEvent broadcast lagged by {n}, skipping");
-                            continue;
-                        }
-                        Err(broadcast::error::RecvError::Closed) => break,
                     }
-                }
-                tracing::debug!("AgentJobEvent registry channel closed; forwarder task exiting");
+                    tracing::debug!(
+                        "AgentJobEvent registry channel closed; forwarder task exiting"
+                    );
+                };
+                let dag_loop = async move {
+                    loop {
+                        match dag_rx.recv().await {
+                            Ok(event) => {
+                                let _ = dag_tx.send(dag_event(event));
+                            }
+                            Err(broadcast::error::RecvError::Lagged(n)) => {
+                                tracing::warn!("DagEvent broadcast lagged by {n}, skipping");
+                                continue;
+                            }
+                            Err(broadcast::error::RecvError::Closed) => break,
+                        }
+                    }
+                    tracing::debug!("DagEvent channel closed; forwarder task exiting");
+                };
+                tokio::join!(agent_loop, dag_loop);
             })
             .abort_handle()
         };
-        let (dag_event_tx, _) = broadcast::channel::<DagEvent>(256);
-        self.dag_engine.set_event_sender(Some(dag_event_tx.clone()));
         TransportEndpoints {
             command_tx,
             command_rx,
@@ -402,8 +428,8 @@ impl TurnHost {
             events: event_tx,
             dag_events: dag_event_tx,
             completer: self.completer.clone(),
-            registry: self.subagent_registry.clone(),
-            dag_engine: self.dag_engine.clone(),
+            job_ops: Arc::new(CoreJobOps::new(self.subagent_registry.clone())),
+            graph_ops: Arc::new(CoreGraphOps::new(self.dag_engine.clone())),
             session_ops: Arc::new(crate::session_ops::AppSessionOps::new(
                 self.session_repo.clone(),
                 self.dag_engine.clone(),
@@ -1026,7 +1052,7 @@ impl TurnHost {
                 .list_runs()
                 .iter()
                 .filter(|run| run.session_id.as_deref() == Some(self.session_id.as_str()))
-                .map(WireStatus::from_dag_run)
+                .map(dag_run_snapshot)
                 .collect(),
             subagents: self
                 .subagent_registry
