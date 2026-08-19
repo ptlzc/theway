@@ -24,6 +24,9 @@ unicode-width = "0.2"
 url = "2"
 theway-markdown-core = { path = "../theway-markdown-core" }
 
+[dev-dependencies]
+tests-bridge-macro = { path = "../tests-bridge-macro" }
+
 # NOTE: cargo 1.91 rejects combining `[lints] workspace = true` with additional
 # lint tables (such as the `unexpected_cfgs` check-cfg declaration below), so the
 # workspace clippy policy is replicated here instead of inherited. Keep this
@@ -41,4 +44,3 @@ redundant_guards = "allow"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
-

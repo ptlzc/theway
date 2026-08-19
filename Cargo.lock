@@ -5111,6 +5111,7 @@ dependencies = [
  "ratatui",
  "supports-color",
  "syntect",
+ "tests-bridge-macro",
  "textwrap",
  "theway-markdown-core",
  "two-face",
@@ -5124,6 +5125,7 @@ name = "theway-markdown-core"
 version = "0.1.0"
 dependencies = [
  "pulldown-cmark",
+ "tests-bridge-macro",
 ]
 
 [[package]]
@@ -5188,6 +5190,7 @@ dependencies = [
  "rand 0.9.5",
  "ratatui",
  "ratatui-core",
+ "tests-bridge-macro",
  "textwrap",
  "tui-scrollbar",
  "unicode-segmentation",
