@@ -559,15 +559,14 @@
     }
 
     #[test]
-    fn assistant_prefix_is_magenta() {
+    fn assistant_response_has_no_role_prefix() {
         let feed = feed_with(&[WireFeedBlock::Assistant {
             text: "plain answer".into(),
             timestamp: None,
         }]);
         let opts = FeedRenderOptions::default();
         let lines = super::lines(&feed, 80, &opts);
-        assert!(lines[0].spans[0].content.starts_with("ai ▸ "));
-        assert_eq!(lines[0].spans[0].style.fg, Some(ACCENT_ASSISTANT));
+        assert_eq!(flat(&lines), "plain answer");
     }
 
     #[test]
@@ -585,7 +584,6 @@
             plain
                 .iter()
                 .flat_map(|line| &line.spans)
-                .filter(|span| !span.content.starts_with(AI_PREFIX))
                 .all(|span| span.style.fg.is_none()),
             "no-color capability must remove syntax foregrounds: {plain:?}"
         );
@@ -596,7 +594,6 @@
             colored
                 .iter()
                 .flat_map(|line| &line.spans)
-                .filter(|span| !span.content.starts_with(AI_PREFIX))
                 .any(|span| span.style.fg.is_some()),
             "truecolor capability must retain syntax foregrounds: {colored:?}"
         );

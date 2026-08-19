@@ -173,7 +173,7 @@ async fn renders_feed_above_pinned_input_box() {
         "feed user line missing:\n{text}"
     );
     assert!(
-        text.contains("ai ▸ hi there, the box is pinned"),
+        text.contains("hi there, the box is pinned"),
         "assistant line missing:\n{text}"
     );
     assert!(
@@ -244,20 +244,23 @@ async fn busy_status_shows_snake_loader_with_elapsed() {
         text.contains("2 queued"),
         "queue depth missing from the busy band:\n{text}"
     );
-    // Single-row layout (issue #42): the 9-cell snake track starts at
-    // x+1, the working label at x+12, and the stats share the same row.
+    // The nine-dot track occupies a stable 3×3 grid at x+1; the label and
+    // stats share its center row.
     let status_area = app.last_status_area.unwrap();
-    for c in 0..9u16 {
-        assert_eq!(
-            buf[(status_area.x + 1 + c, status_area.y)].symbol(),
-            "●",
-            "track cell {c} must render the snake glyph:\n{text}"
-        );
+    assert_eq!(status_area.height, 3);
+    for row in 0..3u16 {
+        for col in 0..3u16 {
+            assert_eq!(
+                buf[(status_area.x + 1 + col, status_area.y + row)].symbol(),
+                "•",
+                "track cell ({row}, {col}) must render the snake glyph:\n{text}"
+            );
+        }
     }
     assert_eq!(
-        buf[(status_area.x + 12, status_area.y)].symbol(),
+        buf[(status_area.x + 6, status_area.y + 1)].symbol(),
         "w",
-        "working label must start at x+12:\n{text}"
+        "working label must start beside the grid on its center row:\n{text}"
     );
     assert!(
         text.contains("char/s"),
@@ -271,8 +274,8 @@ async fn busy_status_shows_snake_loader_with_elapsed() {
         .expect("composer top border missing");
     assert_eq!(
         border_row,
-        label_row + 1,
-        "composer should sit directly below the single-row busy band:\n{text}"
+        label_row + 2,
+        "composer should sit directly below the three-row busy band:\n{text}"
     );
     // The busy window timer arms on the false→true edge and clears on idle.
     assert!(app.busy_started.is_some());

@@ -290,7 +290,7 @@ fn assistant_lines(text: &str, width: usize) -> Vec<ratatui::text::Line<'static>
     crate::feed_render::push_markdown(
         &mut out,
         text,
-        "ai ▸ ",
+        "",
         ratatui::style::Style::default(),
         width,
         theway_markdown::ColorLevel::TrueColor,
@@ -362,7 +362,7 @@ fn markdown_fenced_code_renders_verbatim_no_wrap() {
 fn markdown_parity_bold_italic_inline_code_spans() {
     use ratatui::style::Modifier;
     let lines = assistant_lines("**bold** *em* `code`", 80);
-    assert_eq!(line_text(&lines[0]), "ai ▸ bold em code");
+    assert_eq!(line_text(&lines[0]), "bold em code");
     let span = |content: &str| {
         lines[0]
             .spans
@@ -393,7 +393,7 @@ fn markdown_parity_heading_is_styled() {
     use ratatui::style::Modifier;
     let lines = assistant_lines("# h", 80);
     // Pretty mode hides the `# ` marker; the heading text is styled.
-    assert_eq!(line_text(&lines[0]), "ai ▸ h");
+    assert_eq!(line_text(&lines[0]), "h");
     let heading = lines[0]
         .spans
         .iter()
@@ -465,7 +465,7 @@ fn markdown_parity_mermaid_renders_diagram_art() {
 fn markdown_parity_latex_math_transforms() {
     use ratatui::style::Modifier;
     let lines = assistant_lines("$x^2$", 80);
-    assert_eq!(line_text(&lines[0]), "ai ▸ x²");
+    assert_eq!(line_text(&lines[0]), "x²");
     let math = lines[0]
         .spans
         .iter()
@@ -554,14 +554,10 @@ fn markdown_link_underline_survives_wrapping() {
 }
 
 #[test]
-fn markdown_prefix_only_on_first_rendered_line() {
+fn markdown_assistant_response_has_no_role_prefix() {
     let lines = assistant_lines("hello\n\nworld", 80);
     let text: Vec<String> = lines.iter().map(line_text).collect();
-    assert_eq!(text[0], "ai ▸ hello", "{text:#?}");
-    assert!(
-        text.iter().skip(1).all(|l| !l.contains("ai ▸")),
-        "{text:#?}"
-    );
+    assert_eq!(text[0], "hello", "{text:#?}");
     assert!(text.iter().any(|l| l == "world"), "{text:#?}");
 }
 

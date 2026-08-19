@@ -33,11 +33,11 @@ async fn thinking_stats_line_shows_cps_and_in_out_tokens() {
 
 // ── busy snake loader (issue #42) ─────────────────────────────────────────
 
-/// Head trajectory: the triangular wave walks 0→8→0 and bounces at both
-/// ends of the fixed 9-cell track.
+/// Head trajectory: the triangular wave follows the row-snake order through
+/// the 3×3 grid and reverses at both ends.
 #[test]
-fn snake_head_bounces_along_the_nine_cell_track() {
-    let expected = [0usize, 1, 2, 3, 4, 5, 6, 7, 8, 7, 6, 5, 4, 3, 2, 1];
+fn snake_head_bounces_through_the_three_by_three_track() {
+    let expected = [0usize, 1, 2, 5, 4, 3, 6, 7, 8, 7, 6, 3, 4, 5, 2, 1];
     for (step, &want) in expected.iter().enumerate() {
         assert_eq!(snake_loader::head_pos(step as u64), want, "step {step}");
     }
@@ -57,11 +57,11 @@ fn snake_head_bounces_along_the_nine_cell_track() {
 /// at a reversal the tail flips to the far side of the motion direction.
 #[test]
 fn snake_tail_follows_head_history_and_flips_at_reversal() {
-    // Moving right: head at 8, the tail trails to its left.
+    // At the final grid cell, the tail follows the preceding bottom-row dots.
     assert_eq!(snake_loader::segment_pos(8, 0), Some(8));
     assert_eq!(snake_loader::segment_pos(8, 1), Some(7));
     assert_eq!(snake_loader::segment_pos(8, 2), Some(6));
-    // Step 9 reverses: head at 7, the tail now trails on the right.
+    // Step 9 reverses: head returns to 7 and the tail remains at endpoint 8.
     assert_eq!(snake_loader::segment_pos(9, 0), Some(7));
     assert_eq!(snake_loader::segment_pos(9, 1), Some(8));
     // History predating the wave start is out of range: the segment has
@@ -103,13 +103,12 @@ fn snake_rainbow_hues_advance_per_step_and_segment() {
 }
 
 /// Trail length: 2 segments at rest growing with throughput, capped at
-/// 8; segments whose history predates the wave start stay dim.
+/// 5; segments whose history predates the wave start stay dim.
 #[test]
-fn snake_trail_grows_from_two_to_eight_segments() {
+fn snake_trail_grows_from_two_to_five_segments() {
     assert_eq!(snake_loader::trail_len(0.0), 2.0);
-    assert_eq!(snake_loader::trail_len(1e9), 8.0);
-    // Mid-wave step 16 (head at 0 moving right): the history is a
-    // straight run, so the lit count equals the trail length.
+    assert_eq!(snake_loader::trail_len(1e9), 5.0);
+    // A full-cycle step has enough history to fill the complete trail.
     let idle = snake_loader::snake_frame(16, 0.0);
     assert_eq!(
         idle.cells.iter().filter(|c| c.lit > 0.0).count(),
@@ -119,8 +118,8 @@ fn snake_trail_grows_from_two_to_eight_segments() {
     let fast = snake_loader::snake_frame(16, 1e9);
     assert_eq!(
         fast.cells.iter().filter(|c| c.lit > 0.0).count(),
-        8,
-        "speed-cap trail must light 8 cells"
+        5,
+        "speed-cap trail must light 5 cells"
     );
     // History predating the wave start renders dim: only the head lit.
     let early = snake_loader::snake_frame(0, 1e9);
@@ -129,29 +128,33 @@ fn snake_trail_grows_from_two_to_eight_segments() {
 }
 
 /// Track stability: all nine cells render every frame — lit cells carry
-/// the rainbow body, unlit ones stay as dim dots on a dim background so
-/// the single-row band never changes shape.
+/// the rainbow body and unlit ones stay as dim dots.
 #[test]
-fn snake_track_always_shows_all_nine_cells_with_dim_background() {
+fn snake_track_always_shows_all_nine_round_dots() {
     for step in [0u64, 4, 8, 9, 15, 23, 100] {
         for cps in [0.0, 500.0, 1e9] {
             let frame = snake_loader::snake_frame(step, cps);
             assert_eq!(frame.cells.len(), 9, "step {step}");
             for (i, cell) in frame.cells.iter().enumerate() {
-                assert_eq!(cell.glyph, '●', "step {step} cell {i}");
-                if cell.lit > 0.0 {
-                    assert_eq!(cell.bg, Color::Reset, "step {step} cell {i}");
-                } else {
-                    assert_eq!(cell.lit, 0.0, "step {step} cell {i}");
-                    assert_ne!(
-                        cell.bg,
-                        Color::Reset,
-                        "step {step} cell {i}: unlit track dots need a dim background"
-                    );
+                assert_eq!(cell.glyph, '•', "step {step} cell {i}");
+                assert_eq!(cell.bg, Color::Reset, "step {step} cell {i}");
+                if cell.lit == 0.0 {
+                    assert_eq!(cell.fg, Color::DarkGray, "step {step} cell {i}");
                 }
             }
         }
     }
+}
+
+#[tokio::test]
+async fn local_display_toggles_do_not_append_operation_logs() {
+    let (mut app, _rx) = test_app().await;
+    let before = feed_text(&app);
+
+    app.cycle_thinking_mode();
+    app.toggle_tool_outputs();
+
+    assert_eq!(feed_text(&app), before);
 }
 
 #[tokio::test]

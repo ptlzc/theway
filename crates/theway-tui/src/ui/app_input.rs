@@ -510,22 +510,11 @@ impl App {
             ThinkingMode::Peek => ThinkingMode::Hidden,
             ThinkingMode::Hidden => ThinkingMode::Full,
         };
-        let label = match self.thinking_mode {
-            ThinkingMode::Full => "thinking: full (Ctrl+O cycles)",
-            ThinkingMode::Peek => "thinking: peek — last lines only (Ctrl+O cycles)",
-            ThinkingMode::Hidden => "thinking: hidden (Ctrl+O cycles)",
-        };
-        self.system_line(label);
     }
 
     /// Ctrl+T: expand/collapse tool results in the feed.
     pub(super) fn toggle_tool_outputs(&mut self) {
         self.tools_expanded = !self.tools_expanded;
-        self.system_line(if self.tools_expanded {
-            "tool results expanded (Ctrl+T collapses)"
-        } else {
-            "tool results collapsed (Ctrl+T expands)"
-        });
     }
 
     pub(super) fn input_text(&self) -> String {

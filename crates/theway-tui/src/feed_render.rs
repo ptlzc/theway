@@ -13,7 +13,7 @@ use crate::ui::theme::{BlockAlign, BlockTheme, Theme};
 
 /// Grok tokyonight palette values (xai-grok-pager-render theme/tokyonight.rs).
 const ACCENT_USER: Color = Color::Rgb(122, 162, 247); // BLUE — user `❯` prefix
-const ACCENT_ASSISTANT: Color = Color::Rgb(187, 154, 247); // MAGENTA — `ai ▸` prefix
+const ACCENT_ASSISTANT: Color = Color::Rgb(187, 154, 247); // legacy theme role
 const ACCENT_TOOL: Color = Color::Rgb(115, 122, 162); // DARK5 — tool name
 const TEXT_PRIMARY: Color = Color::Rgb(192, 202, 245); // FG — body text
 const BG_HIGHLIGHT: Color = Color::Rgb(41, 46, 66); // BG_HIGHLIGHT — user band / selection
@@ -37,7 +37,6 @@ pub(crate) const THINKING_TEXT_DEFAULT: Color = Color::DarkGray;
 pub(crate) const THINKING_BG_DEFAULT: Option<Color> = None;
 
 pub(crate) const USER_PREFIX: &str = "\u{276F} "; // ❯ (2 cols, grok prompt_arrow)
-pub(crate) const AI_PREFIX: &str = "ai \u{25b8} "; // ai ▸
 pub(crate) const TOOL_PREFIX: &str = "\u{23f5} "; // ⏵
 const USER_BAND_INDENT: &str = "  ";
 
@@ -47,12 +46,6 @@ const USER_STYLE: Style = Style::new().fg(ACCENT_USER).add_modifier(Modifier::BO
 pub(crate) const THINKING_STYLE: Style = Style::new()
     .fg(Color::DarkGray)
     .add_modifier(Modifier::ITALIC);
-/// Default assistant prefix style; the streaming markdown path in
-/// `feed_cache` reuses this const (theme-aware colors apply to one-shot
-/// renders).
-pub(crate) const AI_PREFIX_STYLE: Style = Style::new()
-    .fg(ACCENT_ASSISTANT)
-    .add_modifier(Modifier::BOLD);
 pub(crate) const RESULT_SUMMARY_STYLE: Style = Style::new().fg(Color::DarkGray);
 
 fn user_body_style(theme: &Theme) -> Style {
@@ -60,11 +53,6 @@ fn user_body_style(theme: &Theme) -> Style {
 }
 fn band_style(theme: &Theme) -> Style {
     Style::new().bg(theme.user_bg)
-}
-fn ai_prefix_style(theme: &Theme) -> Style {
-    Style::new()
-        .fg(theme.assistant_prefix)
-        .add_modifier(Modifier::BOLD)
 }
 fn tool_name_style(theme: &Theme) -> Style {
     Style::new()
@@ -325,7 +313,7 @@ struct MappedLine {
 /// Render assistant markdown through `theway-markdown` (one-shot full render,
 /// pretty mode) and push width-wrapped `ratatui` lines.
 ///
-/// `prefix` (e.g. `ai ▸ `) is prepended to the first rendered line only, in
+/// A non-empty `prefix` is prepended to the first rendered line only, in
 /// `prefix_style`. Fenced-code body lines (per the renderer's `code_blocks`
 /// output ranges) and table rows stay verbatim; every other line wraps with
 /// `wrap_str`. The width-aware render entry passes `max_table_width` so fenced
@@ -395,7 +383,7 @@ pub(crate) fn push_rendered_markdown_line(
 
     let mapped = if keep || unicode_width::UnicodeWidthStr::width(source.as_str()) <= width {
         let mut line = line;
-        if first {
+        if first && !prefix.is_empty() {
             line.spans
                 .insert(0, Span::styled(prefix.to_string(), prefix_style));
         }
@@ -414,7 +402,7 @@ pub(crate) fn push_rendered_markdown_line(
         let prefix_len = if first { prefix.len() } else { 0 };
         let mut pieces: Vec<(std::ops::Range<usize>, Style)> =
             Vec::with_capacity(line.spans.len() + 1);
-        if first {
+        if first && !prefix.is_empty() {
             pieces.push((0..prefix_len, prefix_style));
         }
         let mut offset = prefix_len;
@@ -538,8 +526,8 @@ pub(crate) fn render_block(
             push_markdown(
                 &mut out,
                 text,
-                AI_PREFIX,
-                ai_prefix_style(theme),
+                "",
+                Style::default(),
                 width,
                 opts.color_level,
             );

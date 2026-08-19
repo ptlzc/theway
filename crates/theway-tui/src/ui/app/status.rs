@@ -20,12 +20,8 @@ impl App {
         Paragraph::new(Line::styled(text, Style::default().fg(Color::DarkGray)))
     }
 
-    /// Busy rule (issue #42): a single row with the 9-cell rainbow snake
-    /// track at `x+1` (head bounces 0→8→0, tail decays along the trail),
-    /// the shimmering `working` label with the live elapsed timer, queue
-    /// depth and scrolled-up marker at `x+12`, and the throughput stats
-    /// right-aligned on the same row (issue #38). One row for both busy
-    /// and idle keeps the layout from jumping.
+    /// Busy band: a 3×3 nine-dot rainbow snake at the left, with the working
+    /// label and throughput stats centered vertically beside it.
     fn render_busy_status(&self, frame: &mut ratatui::Frame, area: Rect) {
         if area.height == 0 {
             return;
@@ -35,8 +31,11 @@ impl App {
         let snake = snake_loader::snake_frame(self.spinner.step(), cps);
         let track_x = area.x.saturating_add(1);
         for (idx, cell) in snake.cells.iter().enumerate() {
-            let x = track_x.saturating_add(idx as u16);
-            if x >= area.right() {
+            let x = track_x.saturating_add((idx % snake_loader::GRID_WIDTH) as u16);
+            let y = area
+                .y
+                .saturating_add((idx / snake_loader::GRID_WIDTH) as u16);
+            if x >= area.right() || y >= area.bottom() {
                 break;
             }
             let mut style = Style::default().fg(cell.fg).bg(cell.bg);
@@ -45,9 +44,10 @@ impl App {
             }
             frame
                 .buffer_mut()
-                .set_string(x, area.y, cell.glyph.to_string(), style);
+                .set_string(x, y, cell.glyph.to_string(), style);
         }
-        let label_x = area.x.saturating_add(12);
+        let center_y = area.y.saturating_add(area.height / 2);
+        let label_x = area.x.saturating_add(6);
         if label_x < area.right() {
             let mut spans = vec![
                 Span::styled("working", shimmer_style(tick)),
@@ -70,7 +70,7 @@ impl App {
             }
             let line = Line::from(spans);
             let w = area.right().saturating_sub(label_x);
-            frame.buffer_mut().set_line(label_x, area.y, &line, w);
+            frame.buffer_mut().set_line(label_x, center_y, &line, w);
         }
         self.render_busy_stats(frame, area);
     }
@@ -95,7 +95,12 @@ impl App {
         let x = right.saturating_sub(width).saturating_sub(1);
         frame
             .buffer_mut()
-            .set_string(x, area.y, text, Style::default().fg(Color::DarkGray));
+            .set_string(
+                x,
+                area.y.saturating_add(area.height / 2),
+                text,
+                Style::default().fg(Color::DarkGray),
+            );
     }
 
     /// Elapsed time since the busy window began (`m s` after a minute).

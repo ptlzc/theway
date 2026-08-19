@@ -1,15 +1,10 @@
-//! Single-row rainbow snake loader for the busy status band (issue #42).
+//! Three-by-three rainbow snake loader for the busy status band.
 //!
-//! The busy band is one row: a fixed 9-cell horizontal track carries a
-//! snake whose head bounces back and forth (triangular wave 0→8→0) and
-//! whose tail segments follow the head's history positions — at a
-//! reversal the tail therefore flips to the far side of the motion
-//! direction. Lit cells decay along the trail (2 segments at rest up to 8
-//! at the speed cap); each segment's hue advances 15° per step plus a 40°
-//! offset per trail segment, converted through the shared
-//! [`super::pixel_loader::hsv_to_rgb`]. Unlit track cells stay visible as
-//! dim dots on a dim background, so the track never changes shape and the
-//! busy row has no layout jump.
+//! The fixed nine-dot track follows a row-snake order through a 3×3 grid:
+//! left-to-right, right-to-left, then left-to-right. The head bounces along
+//! that path and its history forms a 2-to-5-dot tail. Throughput controls
+//! both the App spinner cadence and the tail length. Each segment has its
+//! own rainbow hue; unlit cells stay visible as dim dots.
 //!
 //! This module is pure: one step in, one frame out. The DAG band's
 //! mini-spinner keeps rendering through `pixel_loader::rainbow_frame`
@@ -17,34 +12,36 @@
 
 use ratatui::style::Color;
 
-/// Track length in cells — the nine busy dots flattened into one row.
+/// Grid dimensions and row-major cell count.
+pub(crate) const GRID_WIDTH: usize = 3;
+pub(crate) const GRID_HEIGHT: usize = 3;
 pub(crate) const TRACK_CELLS: usize = 9;
-/// One full bounce cycle: 0→8 takes 8 steps, 8→0 another 8.
+/// Pinned row-snake traversal through the row-major grid.
+pub(crate) const TRACK_ORDER: [usize; TRACK_CELLS] = [0, 1, 2, 5, 4, 3, 6, 7, 8];
+/// One full bounce cycle: first-to-last takes 8 steps and the return takes 8.
 const BOUNCE_STEPS: u64 = 16;
-/// The unified snake glyph (the busy-band integration test asserts it).
-pub(crate) const SNAKE_GLYPH: char = '●';
+/// A compact round dot; nine of these form the stable 3×3 track.
+pub(crate) const SNAKE_GLYPH: char = '•';
 /// Hue advance per snake step: one full color wheel per 24 steps.
 const HUE_STEP_DEG: f32 = 15.0;
 /// Hue offset per trail segment — the rainbow trail along the snake body.
 const HUE_SEGMENT_OFFSET_DEG: f32 = 40.0;
-/// Throughput at which the trail reaches its 8-segment cap (the same
-/// speed-mapping anchor as the pixel loader).
-const CPS_AT_SPEED_CAP: f64 = 2300.0;
+/// Throughput at which the trail reaches its 5-segment cap, matching the
+/// fastest cadence bucket in the shared spinner.
+const CPS_AT_SPEED_CAP: f64 = 60.0;
 /// Foreground of an unlit track dot.
 const DIM_FG: Color = Color::DarkGray;
-/// Background of an unlit track dot — keeps the full track visible under
-/// the lit snake.
-const DIM_BG: Color = Color::Rgb(45, 45, 45);
+const DIM_BG: Color = Color::Reset;
 
-/// One cell of the 9-cell track at a given step.
+/// One cell of the 3×3 nine-dot track at a given step.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct SnakeCell {
-    /// The cell glyph (`●`).
+    /// The cell glyph (`•`).
     pub(crate) glyph: char,
     /// Cell foreground: the rainbow body color when lit, the dim
     /// foreground for resting track dots.
     pub(crate) fg: Color,
-    /// Cell background: dim for resting track dots, reset for lit cells.
+    /// Cell background; reset for both resting and lit dots.
     pub(crate) bg: Color,
     /// Normalized lit amount (0 = resting dim track dot, 1 = head peak).
     pub(crate) lit: f32,
@@ -55,15 +52,16 @@ pub(crate) struct SnakeFrame {
     pub(crate) cells: [SnakeCell; 9],
 }
 
-/// Head position for `step`: a triangular wave 0→8→0 across the track.
+/// Head grid cell for `step`: a triangular wave through [`TRACK_ORDER`].
 #[must_use]
 pub(crate) fn head_pos(step: u64) -> usize {
     let phase = step % BOUNCE_STEPS;
-    if phase < TRACK_CELLS as u64 {
+    let order_pos = if phase < TRACK_CELLS as u64 {
         phase as usize
     } else {
         (BOUNCE_STEPS - phase) as usize
-    }
+    };
+    TRACK_ORDER[order_pos]
 }
 
 /// Position of trail segment `i` (0 = head): the head's position `i`
@@ -74,8 +72,8 @@ pub(crate) fn segment_pos(step: u64, i: usize) -> Option<usize> {
     step.checked_sub(i as u64).map(head_pos)
 }
 
-/// Trail length in segments: 2 at rest, growing with throughput up to 8
-/// at [`CPS_AT_SPEED_CAP`] (issue #42's 2→8 mapping).
+/// Trail length in segments: 2 at rest, growing with throughput up to 5
+/// at [`CPS_AT_SPEED_CAP`].
 #[must_use]
 pub(crate) fn trail_len(cps: f64) -> f32 {
     let energy = if cps.is_finite() && cps > 0.0 {
@@ -83,16 +81,15 @@ pub(crate) fn trail_len(cps: f64) -> f32 {
     } else {
         0.0
     };
-    2.0 + 6.0 * energy as f32
+    2.0 + 3.0 * energy as f32
 }
 
-/// One frame of the single-row rainbow snake.
+/// One frame of the 3×3 rainbow snake.
 ///
-/// `step` walks the head along the bounce wave and rotates every
-/// segment's hue by 15°; `cps` stretches the trail from 2 segments at
-/// rest to 8 at the speed cap. Lit segments decay linearly along the
-/// trail; cells left unlit render as dim track dots so all nine track
-/// cells are always present.
+/// `step` walks the head along the bounce wave and rotates every segment's
+/// hue by 15°; `cps` stretches the trail from 2 segments at rest to 5 at
+/// the speed cap. Lit segments decay linearly along the trail; cells left
+/// unlit render as dim track dots so all nine grid cells are always present.
 #[must_use]
 pub(crate) fn snake_frame(step: u64, cps: f64) -> SnakeFrame {
     let trail = trail_len(cps);

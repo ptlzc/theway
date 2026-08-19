@@ -328,7 +328,7 @@ async fn snapshot_rebuilds_feed_and_resyncs_busy_panel() {
     assert_eq!(app.latest.queued_count, 2);
     let text = feed_text(&app);
     assert!(text.contains("❯ snap question"), "{text}");
-    assert!(text.contains("ai ▸ snap answer"), "{text}");
+    assert!(text.contains("snap answer"), "{text}");
     // The old banner block is gone (whole-replacement semantics).
     assert!(!text.contains("banner"), "{text}");
     assert!(!app.follow, "snapshot append must not re-enable follow");

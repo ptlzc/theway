@@ -42,6 +42,10 @@
 
 [`feed_cache.rs`](../src/feed_cache.rs) 缓存已渲染 feed line，维护有界窗口，并对仅追加的 assistant/thinking block 增量渲染；非追加编辑回退到完整渲染。[`feed_render.rs`](../src/feed_render.rs) 把 transport feed block 映射为主题化 ratatui line、代码块 span 和链接 overlay。
 
+Assistant Markdown 直接渲染，不添加 `ai` 角色前缀。`Ctrl+O` 与 `Ctrl+T` 只修改客户端展示状态中的 thinking 可见性和工具结果展开状态；这些本地展示操作不会向 feed 追加 system 行。
+
+Turn 忙碌期间，状态区域高度为三行，[`ui/snake_loader.rs`](../src/ui/snake_loader.rs) 渲染由九个圆点组成的稳定 3×3 网格。彩虹蛇头及渐隐尾迹按行蛇形顺序 `0,1,2,5,4,3,6,7,8` 往返；实时字符速率计从 130 ms 到 10 ms 的五档动画间隔中选择速度，并把尾迹从两个点延长到五个点。空闲状态仍占一行。
+
 [`ui/app_input.rs`](../src/ui/app_input.rs) 与 [`ui/app_input/history.rs`](../src/ui/app_input/history.rs) 负责 composer 输入、补全、历史、粘贴和提交。编辑器状态来自 `theway-ratatui-textarea`；终端渲染辅助、链接与 scrollbar 行为来自 `theway-pager-render`。
 
 [`theme.rs`](../src/theme.rs) 是终端外观归属。颜色、间距、前缀、加载指示与 panel 布局不进入 daemon snapshot 或 core event。

@@ -42,6 +42,10 @@ User actions call typed `GrpcClient` methods or enqueue transport commands. The 
 
 [`feed_cache.rs`](../src/feed_cache.rs) caches rendered feed lines, maintains a bounded window, and incrementally renders append-only assistant/thinking blocks while falling back to a full render after non-append edits. [`feed_render.rs`](../src/feed_render.rs) maps transport feed blocks to themed ratatui lines, code-block spans, and link overlays.
 
+Assistant Markdown renders directly without an `ai` role prefix. `Ctrl+O` and `Ctrl+T` change thinking visibility and tool-result expansion only in client presentation state; these local display operations do not append system rows to the feed.
+
+While a turn is busy, the status area is three rows high and [`ui/snake_loader.rs`](../src/ui/snake_loader.rs) renders a stable 3×3 grid of nine round dots. The rainbow head and its fading trail bounce through the row-snake order `0,1,2,5,4,3,6,7,8`; the live character-rate meter selects one of five animation intervals from 130 ms down to 10 ms and lengthens the trail from two to five dots. Idle status remains one row.
+
 [`ui/app_input.rs`](../src/ui/app_input.rs) and [`ui/app_input/history.rs`](../src/ui/app_input/history.rs) own composer input, completion, history, paste, and submission. The editor state comes from `theway-ratatui-textarea`; terminal rendering helpers and link/scrollbar behavior come from `theway-pager-render`.
 
 [`theme.rs`](../src/theme.rs) is the terminal appearance owner. Color, spacing, prefixes, loading indicators, and panel layout do not enter daemon snapshots or core events.

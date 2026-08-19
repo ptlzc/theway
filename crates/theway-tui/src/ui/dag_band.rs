@@ -31,7 +31,7 @@ pub const MAX_RUNS: usize = 2;
 pub const MAX_NODE_ROWS: usize = 3;
 /// Spinner animation cadence — one tick per event-loop frame interval,
 /// matching `SPINNER_TICK_MS` in `ui/mod.rs`.
-const TICK_MS: u64 = 100;
+const TICK_MS: u64 = 10;
 /// Error summary length after a failed/cancelled node (chars).
 const ERROR_SUMMARY_CHARS: usize = 20;
 /// Node separator.

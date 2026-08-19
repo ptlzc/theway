@@ -154,8 +154,8 @@ fn header_mini_spinner_when_running() {
 
 #[test]
 fn mini_spinner_speed_follows_cps() {
-    // tick 1 = 100 ms: idle (250 ms/step) stays at step 0; fast
-    // streaming (20 ms/step) is already several steps around.
+    // tick 1 = 10 ms: idle (130 ms/step) stays at step 0; fast
+    // streaming (10 ms/step) advances immediately.
     assert_eq!(mini_spinner(0, 0.0).content, mini_spinner(1, 0.0).content);
     assert_ne!(
         mini_spinner(1, 0.0).content,

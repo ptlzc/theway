@@ -21,6 +21,7 @@ impl App {
     ) -> Result<()> {
         let mut reader = EventStream::new();
         let mut tick = tokio::time::interval(Duration::from_millis(SPINNER_TICK_MS));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut reconnect = tokio::time::interval(Duration::from_secs(1));
         let mut stream = match self.client.stream_events().await {
             Ok(stream) => Some(stream),
@@ -126,7 +127,7 @@ impl App {
                         }
                     }
                 }
-                _ = tick.tick() => {
+                _ = tick.tick(), if self.busy || !self.latest.dags.is_empty() => {
                     if self.busy {
                         self.spinner_frame = self.spinner_frame.wrapping_add(1);
                         self.cps_meter

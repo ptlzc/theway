@@ -85,9 +85,9 @@ use render_utils::{
 use render_utils::{enter_tui, leave_tui, new_textarea};
 
 const MAX_INPUT_ROWS: usize = 6;
-/// Busy-band frame period: spinner cadence + char/s meter sampling
-/// (issue #38).
-const SPINNER_TICK_MS: u64 = 100;
+/// Active-animation frame period: the timer branch is disabled while both
+/// the main turn and DAG band are idle.
+const SPINNER_TICK_MS: u64 = 10;
 /// Default scrollback cap for the conversation feed: only the newest
 /// `DEFAULT_MAX_FEED_LINES` rendered lines are kept; older lines are trimmed
 /// from the head (issue #27).

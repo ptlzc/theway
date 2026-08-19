@@ -4,39 +4,43 @@
 //! A shared 3×3 spinner: nine dots light along three pinned rotation-order
 //! tables (rounds of 9, 8, 7 lit dots) while rainbow HSV colors advance with
 //! the step. Throughput drives speed — [`RainbowSpinner::advance`] maps
-//! char/s to a step delay (`250 ms` base down to a `20 ms` cap, falling back
-//! to the base with no streaming). This module is pure: one step in, one
-//! frame out. The busy band, the thinking-block indicator, and the DAG band
-//! mini-spinner all render through [`rainbow_frame`].
+//! char/s to five stable buckets (`130 ms` base down to a `10 ms` cap,
+//! falling back to the base with no streaming). This module is pure: one
+//! step in, one frame out. The thinking-block indicator and DAG-band
+//! mini-spinner render through [`rainbow_frame`]; the busy snake shares its
+//! cadence and color helper.
 
 use ratatui::style::Color;
 
-/// Base step delay (no streaming throughput): ~1 step per 250 ms.
-pub const BASE_STEP_DELAY_MS: u64 = 250;
-/// Fastest allowed step delay — the 20 ms cap keeps the spinner from
+/// Base step delay (no streaming throughput): ~1 step per 130 ms.
+pub const BASE_STEP_DELAY_MS: u64 = 130;
+/// Fastest allowed step delay — the 10 ms cap keeps the spinner from
 /// strobing at very high throughput.
-pub const MIN_STEP_DELAY_MS: u64 = 20;
-/// Throughput at which the step delay reaches [`MIN_STEP_DELAY_MS`]
-/// (`250 / (1 + cps/200) == 20`).
-const CPS_AT_SPEED_CAP: f64 = 2300.0;
+pub const MIN_STEP_DELAY_MS: u64 = 10;
+/// Throughput at which the 3×3 mini-spinner trail reaches full length.
+const CPS_AT_TRAIL_CAP: f64 = 2300.0;
 /// Hue advance per spinner step: one full color wheel per 24-step cycle.
 const HUE_STEP_DEG: f32 = 15.0;
 /// Per-cell hue offset along the round's order table (360° / 9 dots).
 const HUE_TRAIL_OFFSET_DEG: f32 = 40.0;
-/// The unified spinner glyph (the busy-band integration test asserts it).
+/// The unified 3×3 mini-spinner glyph.
 const GLYPH: char = '■';
 
-/// Step delay for throughput `cps` (char/s):
-/// `clamp(base / (1 + cps/200), 20ms, base)`. Higher throughput spins
-/// faster; zero/absent throughput falls back to the base delay.
+/// Step delay for throughput `cps` (char/s). Five stable buckets keep small
+/// rate changes from jittering the animation rhythm.
 #[must_use]
 pub fn step_delay_ms(cps: f64) -> u64 {
-    // No streaming (zero/negative/NaN/infinite throughput) → base rhythm.
-    if !cps.is_finite() || cps <= 0.0 {
-        return BASE_STEP_DELAY_MS;
+    if !cps.is_finite() || cps < 5.0 {
+        BASE_STEP_DELAY_MS
+    } else if cps < 15.0 {
+        85
+    } else if cps < 30.0 {
+        50
+    } else if cps < 60.0 {
+        25
+    } else {
+        MIN_STEP_DELAY_MS
     }
-    let delay = BASE_STEP_DELAY_MS as f64 / (1.0 + cps / 200.0);
-    (delay.round() as u64).clamp(MIN_STEP_DELAY_MS, BASE_STEP_DELAY_MS)
 }
 
 /// Round 1 — all nine dots lit (user-given ASCII, pinned):
@@ -191,10 +195,10 @@ fn locate_round(mut pos: usize) -> (usize, usize) {
 }
 
 /// Comet-trail length in dots: 2 at rest, growing with throughput up to 5
-/// at [`CPS_AT_SPEED_CAP`].
+/// at [`CPS_AT_TRAIL_CAP`].
 fn trail_len(cps: f64) -> f32 {
     let energy = if cps.is_finite() && cps > 0.0 {
-        (cps / CPS_AT_SPEED_CAP).clamp(0.0, 1.0)
+        (cps / CPS_AT_TRAIL_CAP).clamp(0.0, 1.0)
     } else {
         0.0
     };
@@ -251,9 +255,7 @@ mod tests {
 
     #[test]
     fn speed_mapping_is_monotonic_and_capped() {
-        let cps_values = [
-            0.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2300.0, 10_000.0, 1e9,
-        ];
+        let cps_values = [0.0, 4.9, 5.0, 14.9, 15.0, 29.9, 30.0, 59.9, 60.0, 1e9];
         let mut previous = u64::MAX;
         for cps in cps_values {
             let delay = step_delay_ms(cps);
@@ -264,35 +266,34 @@ mod tests {
             assert!((MIN_STEP_DELAY_MS..=BASE_STEP_DELAY_MS).contains(&delay));
             previous = delay;
         }
-        // The cap kicks in exactly at 2300 char/s and holds beyond.
-        assert_eq!(step_delay_ms(2300.0), MIN_STEP_DELAY_MS);
+        assert_eq!(step_delay_ms(4.9), 130);
+        assert_eq!(step_delay_ms(5.0), 85);
+        assert_eq!(step_delay_ms(15.0), 50);
+        assert_eq!(step_delay_ms(30.0), 25);
+        assert_eq!(step_delay_ms(60.0), MIN_STEP_DELAY_MS);
         assert_eq!(step_delay_ms(1e9), MIN_STEP_DELAY_MS);
-        // Mid-range check: 250 / (1 + 1000/200) ≈ 42 ms.
-        assert_eq!(step_delay_ms(1000.0), 42);
     }
 
     #[test]
     fn spinner_advances_steps_per_delay() {
         let mut spinner = RainbowSpinner::new();
-        // Idle rhythm: 250 ms per step → one step after 3 frame ticks of
-        // 100 ms (300 ms), remainder carried over.
-        spinner.tick(100);
+        // Idle rhythm: 130 ms per step, with remainder carried over.
         spinner.tick(100);
         assert_eq!(spinner.step(), 0);
-        spinner.tick(100);
+        spinner.tick(30);
         assert_eq!(spinner.step(), 1);
 
-        // Streaming: 1000 char/s → 42 ms delay → several steps in one
-        // 100 ms tick (100 + 50 carried = 150 ms = 3×42 + 24 remainder).
+        // Fast streaming uses the 10 ms bucket.
         spinner.advance(1000.0);
         spinner.tick(100);
-        assert_eq!(spinner.step(), 4);
+        assert_eq!(spinner.step(), 11);
 
-        // Throughput gone → back to the base 250 ms delay, so the next
-        // 100 ms tick fires no step (24 carried + 100 < 250).
+        // Throughput gone returns to the 130 ms base bucket.
         spinner.advance(0.0);
         spinner.tick(100);
-        assert_eq!(spinner.step(), 4);
+        assert_eq!(spinner.step(), 11);
+        spinner.tick(30);
+        assert_eq!(spinner.step(), 12);
     }
 
     // ── order tables: pinned per design §4.3 ────────────────────────────
