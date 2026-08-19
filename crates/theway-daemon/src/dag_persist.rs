@@ -23,8 +23,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
+use theway_contract::dag::{PersistedRun, state_path_for_project};
 use theway_core::multiagent::graph::engine::DagEngine;
-use theway_core::multiagent::graph::persist::{DagPersistSink, state_path_for_project};
+use theway_core::multiagent::graph::persist::{DagPersistSink, to_persisted};
+use theway_core::multiagent::graph::types::DagStatus;
 use theway_storage::sqlite_dag::SqliteDagStore;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
@@ -90,15 +92,12 @@ impl DagPersistHandle {
     async fn save_all(&self) -> Result<(), String> {
         let runs = self.engine.list_runs();
         // Group by session id so each run lands in its own session's file.
-        let mut by_session: HashMap<
-            Option<String>,
-            Vec<theway_core::multiagent::graph::types::DagRun>,
-        > = HashMap::new();
+        let mut by_session: HashMap<Option<String>, Vec<PersistedRun>> = HashMap::new();
         for run in runs {
-            by_session
-                .entry(run.session_id.clone())
-                .or_default()
-                .push(run);
+            let snapshots = by_session.entry(run.session_id.clone()).or_default();
+            if run.status == DagStatus::Running {
+                snapshots.push(to_persisted(&run));
+            }
         }
         for (session_id, session_runs) in by_session {
             let store = self.store_for(session_id.as_deref()).await?;

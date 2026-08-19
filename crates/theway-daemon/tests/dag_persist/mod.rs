@@ -151,6 +151,25 @@ async fn spawn_wires_sink_and_flush_persists_running_runs_grouped_by_session() {
 }
 
 #[tokio::test]
+async fn flush_removes_terminal_runs_from_the_session_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_path_buf();
+    let engine = Arc::new(DagEngine::new());
+    engine.set_launcher(Some(Arc::new(NoopLauncher)));
+    let run = engine
+        .plan(run_def("terminal-run"), None, Some("sess-1".into()))
+        .unwrap();
+    let handle = handle_without_task(engine.clone(), cwd.clone());
+    handle.save_all().await.unwrap();
+    assert_eq!(load_session_runs(&cwd, "sess-1").await.len(), 1);
+
+    engine.cancel_run(&run.id, Some("test complete"));
+    handle.save_all().await.unwrap();
+
+    assert!(load_session_runs(&cwd, "sess-1").await.is_empty());
+}
+
+#[tokio::test]
 async fn load_session_runs_returns_empty_for_missing_state() {
     // Arrange
     let dir = tempfile::tempdir().unwrap();
