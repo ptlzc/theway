@@ -33,6 +33,41 @@ use theway_grpc as wire;
 
 /// Convert the internal snapshot into the structured wire model.
 pub fn session_state(snapshot: &WireStatus) -> wire::SessionState {
+    session_state_with_feed(
+        snapshot,
+        &snapshot.feed_blocks,
+        &[],
+        &snapshot.feed_lines,
+        0,
+        0,
+    )
+}
+
+/// Project an authoritative snapshot into a per-subscriber incremental frame.
+/// Non-feed fields remain complete; transcript fields contain only the rows
+/// and block patches after that subscriber's cursors.
+pub(crate) fn incremental_session_state(
+    snapshot: &WireStatus,
+    feed_lines_start: usize,
+) -> wire::SessionState {
+    session_state_with_feed(
+        snapshot,
+        &[],
+        &snapshot.feed_block_patches,
+        &snapshot.feed_lines[feed_lines_start..],
+        snapshot.feed_blocks_base,
+        feed_lines_start as u64,
+    )
+}
+
+fn session_state_with_feed(
+    snapshot: &WireStatus,
+    feed_blocks: &[WireFeedBlock],
+    feed_block_patches: &[crate::wire::WireFeedBlockPatch],
+    feed_lines: &[String],
+    feed_blocks_base: u64,
+    feed_lines_base: u64,
+) -> wire::SessionState {
     wire::SessionState {
         session_id: snapshot.session_id.clone(),
         model: snapshot.model.clone(),
@@ -155,9 +190,17 @@ pub fn session_state(snapshot: &WireStatus) -> wire::SessionState {
             commands: snapshot.sidebar.commands.clone(),
             runtime_revision: snapshot.sidebar.runtime_revision,
         }),
-        feed_blocks: snapshot.feed_blocks.iter().map(feed_block).collect(),
-        feed_lines: snapshot.feed_lines.clone(),
-        feed_lines_base: snapshot.feed_lines_base,
+        feed_blocks: feed_blocks.iter().map(feed_block).collect(),
+        feed_blocks_base,
+        feed_block_patches: feed_block_patches
+            .iter()
+            .map(|patch| wire::FeedBlockPatch {
+                index: patch.index,
+                block: Some(feed_block(&patch.block)),
+            })
+            .collect(),
+        feed_lines: feed_lines.to_vec(),
+        feed_lines_base,
         dags: snapshot.dags.iter().map(dag_run_wire).collect(),
         subagents: snapshot.subagents.iter().map(subagent_wire).collect(),
         context_usage: Some(wire::ContextUsage {
@@ -228,6 +271,20 @@ pub fn wire_status(state: &wire::SessionState) -> WireStatus {
         }),
         sidebar: sidebar_wire(state.sidebar.as_ref()),
         feed_blocks: state.feed_blocks.iter().map(wire_feed_block).collect(),
+        feed_blocks_base: state.feed_blocks_base,
+        feed_block_patches: state
+            .feed_block_patches
+            .iter()
+            .filter_map(|patch| {
+                patch
+                    .block
+                    .as_ref()
+                    .map(|block| crate::wire::WireFeedBlockPatch {
+                        index: patch.index,
+                        block: wire_feed_block(block),
+                    })
+            })
+            .collect(),
         feed_lines: state.feed_lines.clone(),
         feed_lines_base: state.feed_lines_base,
         dags: state.dags.iter().map(wire_dag_run).collect(),

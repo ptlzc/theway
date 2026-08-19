@@ -33,6 +33,8 @@ async fn spawn_state_server() -> (
             control_plane_prompt: None,
             sidebar: empty_sidebar_snapshot(),
             feed_blocks: Vec::new(),
+            feed_blocks_base: 0,
+            feed_block_patches: Vec::new(),
             feed_lines: Vec::new(),
             feed_lines_base: 0,
             dags: Vec::new(),

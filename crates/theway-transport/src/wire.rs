@@ -414,9 +414,17 @@ pub struct WireStatus {
     pub control_plane_prompt: Option<WireControlPlanePromptSnapshot>,
     pub sidebar: WireSidebarSnapshot,
     pub feed_blocks: Vec<crate::feed::WireFeedBlock>,
+    /// Required consumer block count before applying
+    /// [`Self::feed_block_patches`]. Zero with no patches is a full frame.
+    #[serde(default)]
+    pub feed_blocks_base: u64,
+    /// Incremental block appends/replacements for gRPC stream consumers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub feed_block_patches: Vec<WireFeedBlockPatch>,
     pub feed_lines: Vec<String>,
-    /// Absolute index of `feed_lines[0]` in the full transcript (issue #35):
-    /// stream snapshots carry only appended rows.
+    /// Absolute index of `feed_lines[0]` in a gRPC incremental stream frame.
+    /// Authoritative `WireStatus` snapshots keep this at zero and carry every
+    /// row; per-client stream projection applies the non-zero cursor.
     #[serde(default)]
     pub feed_lines_base: u64,
     pub dags: Vec<WireDagRunSnapshot>,
@@ -428,6 +436,12 @@ pub struct WireStatus {
     /// TUI display settings resolved by the daemon from `config.toml`
     /// (`[tui] max_feed_lines`); `None` → the TUI built-in default applies.
     pub tui_max_feed_lines: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct WireFeedBlockPatch {
+    pub index: u64,
+    pub block: crate::feed::WireFeedBlock,
 }
 
 #[derive(Clone, Debug, Serialize)]

@@ -57,6 +57,22 @@ export interface SessionState {
    * initial get_state snapshot carries everything (base 0).
    */
   feedLinesBase: string;
+  /**
+   * Incremental gRPC snapshot frames require this many blocks to already be
+   * present on the consumer. Zero denotes a full replacement frame.
+   */
+  feedBlocksBase: string;
+  /** Appends/replacements since feed_blocks_base. Full frames leave this empty. */
+  feedBlockPatches: FeedBlockPatch[];
+}
+
+export interface FeedBlockPatch {
+  /**
+   * index == consumer length appends; index < length replaces; index > length
+   * is a gap and requires a full GetState resync.
+   */
+  index: string;
+  block?: FeedBlock | undefined;
 }
 
 /** Token usage for the current/last turn, plus the model's context window size. */
@@ -314,6 +330,8 @@ function createBaseSessionState(): SessionState {
     tuiMaxFeedLines: undefined,
     contextUsage: undefined,
     feedLinesBase: "0",
+    feedBlocksBase: "0",
+    feedBlockPatches: [],
   };
 }
 
@@ -369,6 +387,12 @@ export const SessionState: MessageFns<SessionState> = {
     }
     if (message.feedLinesBase !== "0") {
       writer.uint32(136).uint64(message.feedLinesBase);
+    }
+    if (message.feedBlocksBase !== "0") {
+      writer.uint32(144).uint64(message.feedBlocksBase);
+    }
+    for (const v of message.feedBlockPatches) {
+      FeedBlockPatch.encode(v!, writer.uint32(154).fork()).join();
     }
     return writer;
   },
@@ -516,6 +540,22 @@ export const SessionState: MessageFns<SessionState> = {
           message.feedLinesBase = reader.uint64().toString();
           continue;
         }
+        case 18: {
+          if (tag !== 144) {
+            break;
+          }
+
+          message.feedBlocksBase = reader.uint64().toString();
+          continue;
+        }
+        case 19: {
+          if (tag !== 154) {
+            break;
+          }
+
+          message.feedBlockPatches.push(FeedBlockPatch.decode(reader, reader.uint32()));
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -588,6 +628,16 @@ export const SessionState: MessageFns<SessionState> = {
         : isSet(object.feed_lines_base)
         ? globalThis.String(object.feed_lines_base)
         : "0",
+      feedBlocksBase: isSet(object.feedBlocksBase)
+        ? globalThis.String(object.feedBlocksBase)
+        : isSet(object.feed_blocks_base)
+        ? globalThis.String(object.feed_blocks_base)
+        : "0",
+      feedBlockPatches: globalThis.Array.isArray(object?.feedBlockPatches)
+        ? object.feedBlockPatches.map((e: any) => FeedBlockPatch.fromJSON(e))
+        : globalThis.Array.isArray(object?.feed_block_patches)
+        ? object.feed_block_patches.map((e: any) => FeedBlockPatch.fromJSON(e))
+        : [],
     };
   },
 
@@ -644,6 +694,12 @@ export const SessionState: MessageFns<SessionState> = {
     if (message.feedLinesBase !== "0") {
       obj.feedLinesBase = message.feedLinesBase;
     }
+    if (message.feedBlocksBase !== "0") {
+      obj.feedBlocksBase = message.feedBlocksBase;
+    }
+    if (message.feedBlockPatches?.length) {
+      obj.feedBlockPatches = message.feedBlockPatches.map((e) => FeedBlockPatch.toJSON(e));
+    }
     return obj;
   },
 
@@ -679,6 +735,86 @@ export const SessionState: MessageFns<SessionState> = {
       ? ContextUsage.fromPartial(object.contextUsage)
       : undefined;
     message.feedLinesBase = object.feedLinesBase ?? "0";
+    message.feedBlocksBase = object.feedBlocksBase ?? "0";
+    message.feedBlockPatches = object.feedBlockPatches?.map((e) => FeedBlockPatch.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseFeedBlockPatch(): FeedBlockPatch {
+  return { index: "0", block: undefined };
+}
+
+export const FeedBlockPatch: MessageFns<FeedBlockPatch> = {
+  encode(message: FeedBlockPatch, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.index !== "0") {
+      writer.uint32(8).uint64(message.index);
+    }
+    if (message.block !== undefined) {
+      FeedBlock.encode(message.block, writer.uint32(18).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): FeedBlockPatch {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseFeedBlockPatch();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.index = reader.uint64().toString();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.block = FeedBlock.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): FeedBlockPatch {
+    return {
+      index: isSet(object.index) ? globalThis.String(object.index) : "0",
+      block: isSet(object.block) ? FeedBlock.fromJSON(object.block) : undefined,
+    };
+  },
+
+  toJSON(message: FeedBlockPatch): unknown {
+    const obj: any = {};
+    if (message.index !== "0") {
+      obj.index = message.index;
+    }
+    if (message.block !== undefined) {
+      obj.block = FeedBlock.toJSON(message.block);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<FeedBlockPatch>, I>>(base?: I): FeedBlockPatch {
+    return FeedBlockPatch.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<FeedBlockPatch>, I>>(object: I): FeedBlockPatch {
+    const message = createBaseFeedBlockPatch();
+    message.index = object.index ?? "0";
+    message.block = (object.block !== undefined && object.block !== null)
+      ? FeedBlock.fromPartial(object.block)
+      : undefined;
     return message;
   },
 };

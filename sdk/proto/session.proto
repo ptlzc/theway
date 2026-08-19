@@ -34,6 +34,18 @@ message SessionState {
   // stream snapshots carry only rows appended since the last publish; the
   // initial get_state snapshot carries everything (base 0).
   uint64 feed_lines_base = 17;
+  // Incremental gRPC snapshot frames require this many blocks to already be
+  // present on the consumer. Zero denotes a full replacement frame.
+  uint64 feed_blocks_base = 18;
+  // Appends/replacements since feed_blocks_base. Full frames leave this empty.
+  repeated FeedBlockPatch feed_block_patches = 19;
+}
+
+message FeedBlockPatch {
+  // index == consumer length appends; index < length replaces; index > length
+  // is a gap and requires a full GetState resync.
+  uint64 index = 1;
+  FeedBlock block = 2;
 }
 
 // Token usage for the current/last turn, plus the model's context window size.

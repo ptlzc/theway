@@ -129,6 +129,34 @@ impl PlainLinesCache {
         {
             first_dirty += 1;
         }
+        self.rebuild_from(feed, width, first_dirty);
+    }
+
+    /// Reconcile from an event-provided dirty block without scanning or
+    /// hashing the clean prefix. Appends and truncation are detected from the
+    /// cached/current lengths; callers only need to name in-place mutations.
+    pub fn update_from_dirty(&mut self, feed: &Feed, width: usize, dirty: Option<usize>) {
+        let width = width.max(1);
+        let blocks = feed.blocks();
+        let first_dirty = if width != self.width {
+            0
+        } else {
+            dirty
+                .unwrap_or(blocks.len())
+                .min(blocks.len())
+                .min(self.fingerprints.len())
+        };
+        self.rebuild_from(feed, width, first_dirty);
+    }
+
+    fn rebuild_from(&mut self, feed: &Feed, width: usize, first_dirty: usize) {
+        if width != self.width {
+            self.rows.clear();
+            self.block_starts.clear();
+            self.fingerprints.clear();
+            self.width = width;
+        }
+        let blocks = feed.blocks();
         self.last_rebuilt = blocks.len().saturating_sub(first_dirty);
         if first_dirty < self.fingerprints.len() || blocks.len() != self.fingerprints.len() {
             let cut = self

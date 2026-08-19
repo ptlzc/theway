@@ -145,12 +145,106 @@ impl Feed {
         &self.blocks
     }
 
+    /// Locate the newest tool-result block for event-driven dirty tracking.
+    pub fn tool_result_index(&self, tool_call_id: &str) -> Option<usize> {
+        self.blocks.iter().rposition(|block| {
+            matches!(
+                block,
+                Block::ToolResult {
+                    tool_call_id: candidate,
+                    ..
+                } if candidate == tool_call_id
+            )
+        })
+    }
+
     /// Replace the whole feed with finished wire blocks (client mode: the
     /// daemon owns the transcript and publishes full snapshots; the TUI
     /// rebuilds its feed from `WireStatus.feed_blocks` on every snapshot).
     pub fn replace_blocks(&mut self, blocks: &[WireFeedBlock]) {
         self.clear();
         self.append_blocks(blocks);
+    }
+
+    /// Replace one block without rebuilding the feed. A mismatched kind or an
+    /// out-of-range index is rejected so a stale patch cannot corrupt layout.
+    pub fn replace_block(&mut self, index: usize, wire: &WireFeedBlock) -> bool {
+        let Some(block) = self.blocks.get_mut(index) else {
+            return false;
+        };
+        match (block, wire) {
+            (
+                Block::User { text, .. },
+                WireFeedBlock::User {
+                    text: next,
+                    timestamp: _,
+                },
+            )
+            | (
+                Block::Assistant { text, .. },
+                WireFeedBlock::Assistant {
+                    text: next,
+                    timestamp: _,
+                },
+            )
+            | (
+                Block::Thinking { text, .. },
+                WireFeedBlock::Thinking {
+                    text: next,
+                    timestamp: _,
+                },
+            ) => {
+                *text = next.clone();
+            }
+            (
+                Block::Plain {
+                    text,
+                    level,
+                    timestamp: _,
+                },
+                WireFeedBlock::Plain {
+                    text: next,
+                    level: next_level,
+                    timestamp: _,
+                },
+            ) => {
+                *text = next.clone();
+                *level = *next_level;
+            }
+            (
+                Block::Tool {
+                    name,
+                    args,
+                    timestamp: _,
+                },
+                WireFeedBlock::Tool {
+                    name: next_name,
+                    args: next_args,
+                    timestamp: _,
+                },
+            ) => {
+                *name = next_name.clone();
+                *args = next_args.clone();
+            }
+            (
+                Block::ToolResult {
+                    lines,
+                    is_error,
+                    timestamp: _,
+                    ..
+                },
+                WireFeedBlock::ToolResult {
+                    lines: next_lines,
+                    is_error: next_error,
+                    timestamp: _,
+                },
+            ) => {
+                *lines = next_lines.clone();
+                *is_error = *next_error;
+            }
+            _ => return false,
+        }
+        true
     }
 
     /// Append finished wire blocks without clearing. The snapshot feed is
@@ -848,5 +942,66 @@ mod tests {
         let rendered = plain_text(&feed.plain_lines(80));
         assert!(!rendered.contains("progress"));
         assert!(rendered.contains("final result"));
+    }
+
+    #[test]
+    fn replace_block_updates_matching_kind_and_rejects_gaps() {
+        let mut feed = Feed::new();
+        feed.replace_blocks(&[
+            WireFeedBlock::Thinking {
+                text: "old".into(),
+                timestamp: Some("09:00".into()),
+            },
+            WireFeedBlock::ToolResult {
+                lines: vec!["progress".into()],
+                is_error: false,
+                timestamp: None,
+            },
+        ]);
+
+        assert!(feed.replace_block(
+            0,
+            &WireFeedBlock::Thinking {
+                text: "summary".into(),
+                timestamp: Some("09:01".into()),
+            }
+        ));
+        assert!(feed.replace_block(
+            1,
+            &WireFeedBlock::ToolResult {
+                lines: vec!["done".into()],
+                is_error: true,
+                timestamp: Some("09:02".into()),
+            }
+        ));
+        assert!(!feed.replace_block(
+            0,
+            &WireFeedBlock::Assistant {
+                text: "wrong kind".into(),
+                timestamp: None,
+            }
+        ));
+        assert!(!feed.replace_block(
+            2,
+            &WireFeedBlock::Thinking {
+                text: "gap".into(),
+                timestamp: None,
+            }
+        ));
+
+        let blocks = feed.blocks();
+        assert!(matches!(
+            &blocks[0],
+            Block::Thinking { text, timestamp }
+                if text == "summary" && timestamp.as_deref() == Some("09:00")
+        ));
+        assert!(matches!(
+            &blocks[1],
+            Block::ToolResult { tool_call_id, lines, is_error, timestamp }
+                if tool_call_id.is_empty()
+                    && lines == &["done"]
+                    && *is_error
+                    && timestamp.is_none()
+        ));
     }
 }

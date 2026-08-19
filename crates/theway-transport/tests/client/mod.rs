@@ -34,6 +34,8 @@ fn fixture_status(feed_line: &str) -> WireStatus {
             text: feed_line.into(),
             timestamp: None,
         }],
+        feed_blocks_base: 0,
+        feed_block_patches: Vec::new(),
         feed_lines: vec![feed_line.into()],
         feed_lines_base: 0,
         dags: Vec::new(),

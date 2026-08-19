@@ -38,8 +38,8 @@ use crate::proto::health::health_server::{Health, HealthServer};
 use crate::proto::health::{HealthCheckRequest, HealthCheckResponse};
 use crate::proto::theway_grpc;
 use crate::proto::{
-    dag_event_wire, dag_run_wire, resolve_session_id, session_state, session_summary_wire,
-    stream_event_wire,
+    dag_event_wire, dag_run_wire, incremental_session_state, resolve_session_id, session_state,
+    session_summary_wire, stream_event_wire,
 };
 use theway_grpc::DaemonConfig;
 use theway_grpc::command_service_server::{CommandService, CommandServiceServer};
@@ -582,18 +582,29 @@ impl EventService for GrpcState {
     ) -> Result<Response<Self::StreamEventsStream>, Status> {
         // Merge the snapshot broadcast (low-frequency full state) with the event plane
         // (high-frequency increments) into one typed frame stream.
-        let snapshots = BroadcastStream::new(self.snapshots.subscribe()).filter_map(|item| {
+        let snapshot_cursor = Arc::new(Mutex::new(StreamCursor::default()));
+        let snapshot_latest = self.latest.clone();
+        let snapshots = BroadcastStream::new(self.snapshots.subscribe()).filter_map(move |item| {
+            let cursor = snapshot_cursor.clone();
+            let latest = snapshot_latest.clone();
             async move {
                 match item {
                     Ok(snapshot) => Some(Ok(StreamFrame {
-                        payload: Some(theway_grpc::stream_frame::Payload::Snapshot(session_state(
-                            &snapshot,
-                        ))),
+                        payload: Some(theway_grpc::stream_frame::Payload::Snapshot(
+                            project_stream_snapshot(&snapshot, &mut cursor.lock()),
+                        )),
                     })),
-                    // Lagged subscribers drop stale frames and catch up on the next
-                    // publish; a closed channel ends the stream (broadcast is dropped
-                    // when the event loop exits).
-                    Err(BroadcastStreamRecvError::Lagged(_)) => None,
+                    // A slow subscriber receives the current authoritative state
+                    // immediately; its cursors restart from that full frame.
+                    Err(BroadcastStreamRecvError::Lagged(_)) => {
+                        let snapshot = latest.lock();
+                        cursor.lock().resync_pending = true;
+                        Some(Ok(StreamFrame {
+                            payload: Some(theway_grpc::stream_frame::Payload::Snapshot(
+                                project_stream_snapshot(&snapshot, &mut cursor.lock()),
+                            )),
+                        }))
+                    }
                 }
             }
         });
@@ -624,6 +635,58 @@ impl EventService for GrpcState {
             futures::stream::select(snapshots, futures::stream::select(events, dag_events));
         Ok(Response::new(Box::pin(stream)))
     }
+}
+
+#[derive(Debug)]
+struct StreamCursor {
+    feed_lines: usize,
+    feed_blocks: usize,
+    first_frame: bool,
+    resync_pending: bool,
+}
+
+impl Default for StreamCursor {
+    fn default() -> Self {
+        Self {
+            feed_lines: 0,
+            feed_blocks: 0,
+            first_frame: true,
+            resync_pending: false,
+        }
+    }
+}
+
+fn project_stream_snapshot(snapshot: &WireStatus, cursor: &mut StreamCursor) -> SessionState {
+    let mut next_block_count = cursor.feed_blocks;
+    let patches_are_contiguous = snapshot.feed_blocks_base == cursor.feed_blocks as u64
+        && snapshot.feed_block_patches.iter().all(|patch| {
+            let Ok(index) = usize::try_from(patch.index) else {
+                return false;
+            };
+            if index > next_block_count {
+                return false;
+            }
+            if index == next_block_count {
+                next_block_count += 1;
+            }
+            true
+        })
+        && next_block_count == snapshot.feed_blocks.len();
+    let needs_full = cursor.first_frame
+        || cursor.resync_pending
+        || cursor.feed_lines > snapshot.feed_lines.len()
+        || !patches_are_contiguous;
+
+    let state = if needs_full {
+        session_state(snapshot)
+    } else {
+        incremental_session_state(snapshot, cursor.feed_lines)
+    };
+    cursor.feed_lines = snapshot.feed_lines.len();
+    cursor.feed_blocks = snapshot.feed_blocks.len();
+    cursor.first_frame = false;
+    cursor.resync_pending = false;
+    state
 }
 
 /// Standard `grpc.health.v1` service: the server is live as long as the

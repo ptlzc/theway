@@ -4,7 +4,7 @@ use super::*;
 use crate::testing::{FakeSessionOps, FakeStorageOps, FakeToolOps, empty_sidebar_snapshot};
 use crate::wire::{
     WireAgentEvent, WireContextUsage, WireDaemonConfig, WireDagEvent, WireDagRunSnapshot,
-    WireNodeOutput, WirePathContext,
+    WireFeedBlockPatch, WireNodeOutput, WirePathContext,
 };
 use std::collections::HashMap;
 use std::time::Duration;
@@ -86,6 +86,8 @@ fn fixture_snapshot(feed_line: &str) -> WireStatus {
         control_plane_prompt: None,
         sidebar: empty_sidebar_snapshot(),
         feed_blocks: Vec::new(),
+        feed_blocks_base: 0,
+        feed_block_patches: Vec::new(),
         feed_lines: vec![feed_line.into()],
         feed_lines_base: 0,
         dags: Vec::new(),
@@ -152,6 +154,107 @@ async fn get_state_returns_structured_session_state() {
     assert_eq!(state.session_id, "sess-1");
     assert_eq!(state.cwd, "/tmp/theway");
     assert_eq!(state.feed_lines, vec!["ready"]);
+}
+
+fn plain_block(text: &str) -> crate::feed::WireFeedBlock {
+    crate::feed::WireFeedBlock::Plain {
+        text: text.into(),
+        level: crate::feed::Level::System,
+        timestamp: None,
+    }
+}
+
+#[test]
+fn stream_snapshot_first_frame_is_authoritative() {
+    let mut snapshot = fixture_snapshot("one");
+    snapshot.feed_blocks = vec![plain_block("one")];
+    snapshot.feed_block_patches = vec![WireFeedBlockPatch {
+        index: 0,
+        block: plain_block("one"),
+    }];
+
+    let state = project_stream_snapshot(&snapshot, &mut StreamCursor::default());
+
+    assert_eq!(state.feed_blocks.len(), 1);
+    assert!(state.feed_block_patches.is_empty());
+    assert_eq!(state.feed_blocks_base, 0);
+    assert_eq!(state.feed_lines, vec!["one"]);
+}
+
+#[test]
+fn stream_snapshot_slices_normal_incremental_frame() {
+    let mut cursor = StreamCursor::default();
+    let mut first = fixture_snapshot("one");
+    first.feed_blocks = vec![plain_block("one")];
+    project_stream_snapshot(&first, &mut cursor);
+
+    let mut next = fixture_snapshot("one");
+    next.feed_lines.push("two".into());
+    next.feed_blocks = vec![plain_block("one"), plain_block("two")];
+    next.feed_blocks_base = 1;
+    next.feed_block_patches = vec![WireFeedBlockPatch {
+        index: 1,
+        block: plain_block("two"),
+    }];
+    let state = project_stream_snapshot(&next, &mut cursor);
+
+    assert!(state.feed_blocks.is_empty());
+    assert_eq!(state.feed_blocks_base, 1);
+    assert_eq!(state.feed_block_patches.len(), 1);
+    assert_eq!(state.feed_lines_base, 1);
+    assert_eq!(state.feed_lines, vec!["two"]);
+}
+
+#[test]
+fn stream_snapshot_resyncs_after_lag_or_clear() {
+    let mut cursor = StreamCursor::default();
+    let mut first = fixture_snapshot("one");
+    first.feed_blocks = vec![plain_block("one"), plain_block("two")];
+    project_stream_snapshot(&first, &mut cursor);
+
+    cursor.resync_pending = true;
+    let lagged = project_stream_snapshot(&first, &mut cursor);
+    assert_eq!(lagged.feed_blocks.len(), 2);
+    assert!(lagged.feed_block_patches.is_empty());
+
+    let mut cleared = fixture_snapshot("new");
+    cleared.feed_blocks = vec![plain_block("new")];
+    cleared.feed_block_patches = vec![WireFeedBlockPatch {
+        index: 0,
+        block: plain_block("new"),
+    }];
+    let reset = project_stream_snapshot(&cleared, &mut cursor);
+    assert_eq!(reset.feed_blocks.len(), 1);
+    assert!(reset.feed_block_patches.is_empty());
+    assert_eq!(reset.feed_blocks_base, 0);
+}
+
+#[tokio::test]
+async fn lagged_snapshot_stream_emits_latest_full_state() {
+    let (state, _command_rx) = grpc_state();
+    let mut stream = state
+        .stream_events(Request::new(Empty {}))
+        .await
+        .unwrap()
+        .into_inner();
+    for index in 0..20 {
+        state
+            .snapshots
+            .send(fixture_snapshot(&format!("stale-{index}")))
+            .unwrap();
+    }
+    let mut latest = fixture_snapshot("latest");
+    latest.feed_blocks = vec![plain_block("latest")];
+    *state.latest.lock() = latest;
+
+    let frame = stream.next().await.unwrap().unwrap();
+    let Some(theway_grpc::stream_frame::Payload::Snapshot(snapshot)) = frame.payload else {
+        panic!("expected snapshot frame");
+    };
+    assert_eq!(snapshot.feed_lines, vec!["latest"]);
+    assert_eq!(snapshot.feed_blocks.len(), 1);
+    assert!(snapshot.feed_block_patches.is_empty());
+    assert_eq!(snapshot.feed_blocks_base, 0);
 }
 
 #[tokio::test]

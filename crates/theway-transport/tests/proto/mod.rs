@@ -85,6 +85,8 @@ fn fixture_snapshot() -> WireStatus {
                 timestamp: Some("ts".into()),
             },
         ],
+        feed_blocks_base: 0,
+        feed_block_patches: Vec::new(),
         feed_lines: vec!["line".into()],
         feed_lines_base: 0,
         dags: Vec::new(),
@@ -132,6 +134,30 @@ fn converts_full_snapshot_to_session_state() {
     // graph mode planes are empty until P1/P2.
     assert!(state.dags.is_empty());
     assert!(state.subagents.is_empty());
+}
+
+#[test]
+fn feed_block_patches_round_trip_through_proto() {
+    let mut snapshot = fixture_snapshot();
+    snapshot.feed_blocks.clear();
+    snapshot.feed_blocks_base = 2;
+    snapshot.feed_block_patches = vec![crate::wire::WireFeedBlockPatch {
+        index: 1,
+        block: WireFeedBlock::Thinking {
+            text: "summary".into(),
+            timestamp: Some("10:00".into()),
+        },
+    }];
+
+    let proto = session_state(&snapshot);
+    assert_eq!(proto.feed_blocks_base, 2);
+    assert!(proto.feed_blocks.is_empty());
+    assert_eq!(proto.feed_block_patches.len(), 1);
+    assert_eq!(proto.feed_block_patches[0].index, 1);
+
+    let restored = wire_status(&proto);
+    assert_eq!(restored.feed_blocks_base, 2);
+    assert_eq!(restored.feed_block_patches, snapshot.feed_block_patches);
 }
 
 #[test]
