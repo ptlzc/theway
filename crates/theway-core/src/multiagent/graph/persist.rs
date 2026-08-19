@@ -18,13 +18,11 @@
 //!   calls `notify_dirty()` (non-blocking, safe under the engine lock), the
 //!   app layer debounces and flushes asynchronously.
 
-use std::path::{Path, PathBuf};
-
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 
 use super::model::now_ms;
-use super::types::{DagNode, DagRun, DagStatus, Direction, NodeResult, NodeStatus, RunKind};
+use super::types::{DagNode, DagRun, DagStatus, NodeStatus};
+pub use theway_contract::dag::{PersistedNode, PersistedRun, state_path_for_project};
 
 /// Sink contract the engine uses to signal "something changed, persist me".
 /// Implementations are app-layer (they own the debounce loop and the store);
@@ -37,87 +35,6 @@ pub trait DagPersistSink: Send + Sync {
     /// Synchronously persist the current engine state (shutdown path). Must
     /// return only after the write is durable.
     async fn flush(&self);
-}
-
-/// Persisted projection of a node (snake_case fields, camelCase JSON keys —
-/// matches the TS `PersistedNode` shape on disk).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PersistedNode {
-    pub id: String,
-    pub agent: String,
-    pub task: String,
-    pub depends_on: Vec<String>,
-    pub timeout: Option<u64>,
-    pub cwd: Option<String>,
-    pub model: Option<String>,
-    pub thinking: Option<String>,
-    /// Defaults to None for state written before the budget field existed.
-    #[serde(default)]
-    pub max_iterations: Option<u32>,
-    /// Defaults to None for state written before the allowlist field existed.
-    #[serde(default)]
-    pub tools: Option<Vec<String>>,
-    pub status: NodeStatus,
-    pub attempt: u32,
-    pub started_at: Option<i64>,
-    pub completed_at: Option<i64>,
-    pub error: Option<String>,
-    pub input_tokens: Option<u64>,
-    pub output_tokens: Option<u64>,
-    pub result: Option<NodeResult>,
-    pub output: Option<String>,
-    pub live_preview: Option<String>,
-}
-
-/// Persisted projection of a run. Runtime-only fields (`last_activity_at`,
-/// `error`) are not persisted — only Running runs are ever saved.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PersistedRun {
-    pub id: String,
-    pub name: String,
-    pub max_concurrency: usize,
-    pub fail_fast: bool,
-    pub direction: Direction,
-    pub created_at: i64,
-    pub session_id: Option<String>,
-    /// Defaults to Dag for state files written before the kind field existed.
-    #[serde(default)]
-    pub kind: RunKind,
-    pub nodes: Vec<PersistedNode>,
-}
-
-/// State file path for a project's `.pi` dir (caller passes `<cwd>/.pi`). With
-/// a session id the file is session-scoped so concurrent agent sessions in the
-/// same project never resume/overwrite each other's runs.
-pub fn state_path_for_project(pi_dir: &Path, session_id: Option<&str>) -> PathBuf {
-    match session_id {
-        Some(id) => pi_dir.join(format!(
-            "graph-engineering-state-{}.db",
-            sanitize_session_id(id)
-        )),
-        None => pi_dir.join("graph-engineering-state.db"),
-    }
-}
-
-fn sanitize_session_id(session_id: &str) -> String {
-    let clean: String = session_id
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .take(60)
-        .collect();
-    if clean.is_empty() {
-        "default".to_string()
-    } else {
-        clean
-    }
 }
 
 /// Project a run onto its persisted form (definition + node progress).

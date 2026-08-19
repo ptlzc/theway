@@ -1,7 +1,9 @@
 use super::*;
 
 use crate::multiagent::graph::model::build_run;
-use crate::multiagent::graph::types::{DagNodeDef, DagRunDef};
+use crate::multiagent::graph::types::{
+    DagNodeDef, DagRunDef, DagStatus, Direction, NodeResult, NodeStatus, RunKind,
+};
 
 fn budgeted_run() -> DagRun {
     let def = DagRunDef {
@@ -99,4 +101,116 @@ fn legacy_state_without_budget_fields_hydrates_none() {
     let node = run.node("a").unwrap();
     assert_eq!(node.max_iterations, None);
     assert_eq!(node.tools, None);
+}
+
+#[test]
+fn hydrate_demotes_running_nodes_and_preserves_terminal_results() {
+    let snapshot = PersistedRun {
+        id: "dag-9".into(),
+        name: "restore".into(),
+        max_concurrency: 2,
+        fail_fast: false,
+        direction: Direction::Lr,
+        created_at: 1,
+        session_id: None,
+        kind: RunKind::Dag,
+        nodes: vec![
+            PersistedNode {
+                id: "a".into(),
+                agent: "x".into(),
+                task: "t".into(),
+                depends_on: vec![],
+                timeout: None,
+                cwd: None,
+                model: None,
+                thinking: None,
+                max_iterations: None,
+                tools: None,
+                status: NodeStatus::Running,
+                attempt: 1,
+                started_at: Some(42),
+                completed_at: None,
+                error: None,
+                input_tokens: Some(3),
+                output_tokens: None,
+                result: None,
+                output: None,
+                live_preview: Some("live".into()),
+            },
+            PersistedNode {
+                id: "b".into(),
+                agent: "x".into(),
+                task: "t".into(),
+                depends_on: vec!["a".into()],
+                timeout: None,
+                cwd: None,
+                model: None,
+                thinking: None,
+                max_iterations: None,
+                tools: None,
+                status: NodeStatus::Succeeded,
+                attempt: 3,
+                started_at: Some(10),
+                completed_at: Some(20),
+                error: None,
+                input_tokens: Some(1),
+                output_tokens: Some(2),
+                result: Some(NodeResult {
+                    success: true,
+                    error: None,
+                    duration_ms: Some(5),
+                    attempt: 3,
+                    total_attempts: 3,
+                }),
+                output: Some("out".into()),
+                live_preview: None,
+            },
+        ],
+    };
+
+    let run = hydrate(snapshot);
+
+    assert_eq!(run.status, DagStatus::Running);
+    assert!(run.last_activity_at > 0);
+    let running = run.node("a").unwrap();
+    assert_eq!(running.status, NodeStatus::Ready);
+    assert_eq!(running.started_at, None);
+    assert_eq!(running.job_id, None);
+    assert_eq!(running.live_preview.as_deref(), Some("live"));
+    let succeeded = run.node("b").unwrap();
+    assert_eq!(succeeded.status, NodeStatus::Succeeded);
+    assert_eq!(succeeded.started_at, Some(10));
+    assert_eq!(succeeded.completed_at, Some(20));
+    assert!(succeeded.result.is_some());
+    assert_eq!(run.direction, Direction::Lr);
+    assert_eq!(run.created_at, 1);
+}
+
+#[test]
+fn max_run_counter_uses_only_well_formed_dag_ids() {
+    let run = |id: &str| DagRun {
+        id: id.into(),
+        name: String::new(),
+        nodes: vec![],
+        status: DagStatus::Running,
+        kind: RunKind::Dag,
+        max_concurrency: 1,
+        fail_fast: false,
+        direction: Direction::Td,
+        created_at: 0,
+        session_id: None,
+        completed_at: None,
+        last_activity_at: 0,
+        error: None,
+    };
+
+    assert_eq!(max_run_counter(&[]), 0);
+    assert_eq!(
+        max_run_counter(&[run("dag-1"), run("dag-7"), run("dag-3")]),
+        7
+    );
+    assert_eq!(
+        max_run_counter(&[run("run-2"), run("dag-12x"), run("x-dag-4")]),
+        0
+    );
 }

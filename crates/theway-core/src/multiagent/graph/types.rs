@@ -2,27 +2,7 @@
 //! `types.ts` (pi-src/extensions/dag-orchestrator).
 
 use serde::{Deserialize, Serialize};
-use strum::IntoStaticStr;
-
-/// Lifecycle of a single DAG node.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum NodeStatus {
-    /// Dependencies not all done yet.
-    Pending,
-    /// All deps succeeded/skipped, waiting for a concurrency slot.
-    Ready,
-    /// Subagent job in flight.
-    Running,
-    /// Job completed successfully.
-    Succeeded,
-    /// Job failed.
-    Failed,
-    /// Orchestrator skipped it (counts as success for downstream).
-    Skipped,
-    /// Blocked by a failed dep, or the run was cancelled.
-    Cancelled,
-}
+pub use theway_contract::dag::{Direction, NodeResult, NodeStatus, RunKind};
 
 /// Overall run lifecycle.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -32,32 +12,6 @@ pub enum DagStatus {
     Completed,
     Failed,
     Cancelled,
-}
-
-/// Run flavour. Goal runs are single-node self-loops driven by the goal.rs
-/// hook (no DAG edges; termination is condition-based, not dependency-based).
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Default, Serialize, Deserialize, IntoStaticStr)]
-#[serde(rename_all = "lowercase")]
-#[strum(serialize_all = "lowercase")]
-pub enum RunKind {
-    #[default]
-    Dag,
-    Goal,
-}
-
-impl RunKind {
-    pub fn as_str(&self) -> &'static str {
-        self.into()
-    }
-}
-
-/// Mermaid graph direction.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum Direction {
-    #[serde(rename = "TD")]
-    Td,
-    #[serde(rename = "LR")]
-    Lr,
 }
 
 /// User-declared node (before validation / runtime state).
@@ -98,16 +52,6 @@ pub struct DagRunDef {
     pub fail_fast: Option<bool>,
     /// Mermaid graph direction. Default TD.
     pub direction: Option<Direction>,
-}
-
-/// Lightweight result summary (full output lives in the BgJob registry).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct NodeResult {
-    pub success: bool,
-    pub error: Option<String>,
-    pub duration_ms: Option<u64>,
-    pub attempt: u32,
-    pub total_attempts: u32,
 }
 
 /// A node with runtime state.

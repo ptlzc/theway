@@ -15,8 +15,10 @@
 //!   the same implementation instead of inlining copies.
 //! - [`session`] — engine-independent session metadata, raw append-only entry
 //!   records, and persistence reader/store interfaces.
+//! - [`dag`] — persisted DAG snapshots and their session-scoped database path.
 
 pub mod config;
+pub mod dag;
 pub mod session;
 pub mod session_id;
 pub mod triggers;
