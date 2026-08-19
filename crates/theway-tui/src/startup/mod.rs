@@ -10,6 +10,7 @@ use std::io::IsTerminal as _;
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
+use theway_contract::session::SessionReader;
 use theway_storage::session;
 use theway_storage::sqlite_repo::SqliteSessionRepo;
 use theway_transport::client::{GrpcClient, discover, spawn_daemon, wait_ready};
@@ -320,9 +321,8 @@ pub(crate) async fn run_repl(
     app.run().await
 }
 
-async fn session_id_of(session: &theway_core::Session) -> String {
+async fn session_id_of(session: &(impl SessionReader + ?Sized)) -> String {
     session
-        .storage()
         .get_metadata_json()
         .await
         .ok()

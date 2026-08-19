@@ -233,9 +233,10 @@
         assert!(err.contains("no session matches id"), "{err}");
     }
 
-    async fn session_id_of(session: &theway_core::Session) -> String {
+    async fn session_id_of(
+        session: &(impl theway_contract::session::SessionReader + ?Sized),
+    ) -> String {
         session
-            .storage()
             .get_metadata_json()
             .await
             .unwrap()

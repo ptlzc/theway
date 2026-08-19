@@ -34,6 +34,7 @@ use std::io::IsTerminal as _;
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use theway_contract::session::SessionReader;
 use theway_storage::session;
 use theway_storage::session_archive;
 use theway_storage::sqlite_repo::SqliteSessionRepo;
@@ -114,7 +115,7 @@ async fn run_session_cli_command(
                 })?
             };
             let session = repo.open(&session_path).await?;
-            let metadata = session.storage().get_metadata_json().await?;
+            let metadata = session.get_metadata_json().await?;
             let session_id = metadata
                 .get("id")
                 .and_then(|v| v.as_str())

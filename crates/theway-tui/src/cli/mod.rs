@@ -490,7 +490,7 @@ async fn delete_session_offline(repo: &SqliteSessionRepo, id: &str) -> Result<()
 pub(crate) async fn select_resume_session(
     repo: &SqliteSessionRepo,
     cwd: &std::path::Path,
-) -> Result<(theway_core::Session, bool)> {
+) -> Result<(theway_storage::sqlite_storage::SqliteSessionStorage, bool)> {
     let entries = session::list_entries(repo).await?;
     if entries.is_empty() {
         anyhow::bail!("no sessions to resume in {}", repo.root().display());
