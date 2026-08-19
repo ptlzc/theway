@@ -309,8 +309,3 @@ pub fn reconcile(run: &mut DagRun) {
 
 #[cfg(test)]
 tests_bridge_macro::tests_bridge!("multiagent/graph/model");
-
-#[cfg(test)]
-mod model_linecov_tests {
-    tests_bridge_macro::tests_bridge!("multiagent/graph/model/linecov");
-}

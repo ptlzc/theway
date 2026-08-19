@@ -1,4 +1,4 @@
-//! Additional line-coverage tests for `multiagent::graph::engine` (see docs/rust-test-files.md).
+//! DAG goal completion and terminal transition paths.
 
 use super::super::*;
 

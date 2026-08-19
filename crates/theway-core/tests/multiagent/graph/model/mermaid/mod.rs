@@ -1,5 +1,8 @@
 use super::*;
 
+mod error_paths;
+mod helpers_and_rendering;
+
 #[test]
 fn parse_basic_graph() {
     let res = parse_mermaid("graph TD\nA[\"explorer: 调研代码库\"] --> B[\"planner: 制定计划\"]\n");

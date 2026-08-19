@@ -8,12 +8,14 @@ use crate::multiagent::graph::persist::PersistedNode;
 use crate::multiagent::graph::types::{DagNodeDef, Direction};
 
 mod goal;
+mod lifecycle_edges;
 mod persist_sink;
 mod plan;
 mod restore;
 mod retry_skip_cancel;
 mod schedule;
 mod terminal;
+mod terminal_paths;
 mod wait;
 
 /// Records launches; the test drives completion via `on_node_completed`

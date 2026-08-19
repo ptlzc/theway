@@ -1,7 +1,9 @@
-//! External tests for `multiagent::registry` — split out of src
-//! (see docs/rust-test-files.md).
+//! Registry metrics, lifecycle, and control behavior.
 
-use super::super::*;
+use super::*;
+
+mod messages;
+mod operations;
 
 #[test]
 fn job_tps_and_cps_need_elapsed_time() {

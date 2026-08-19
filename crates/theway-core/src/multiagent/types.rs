@@ -20,9 +20,7 @@ pub struct AgentRunParams {
     pub description: &'static str,
     /// Short (1–3 sentences) system prompt.
     pub system_prompt: &'static str,
-    /// Iteration budget. The harness has no hard per-run cap today (the agent loop runs
-    /// until the model stops); the field mirrors the documented budget and is reserved
-    /// for future enforcement.
+    /// Iteration budget applied to the subagent harness for this run.
     pub max_iterations: u32,
 }
 
@@ -33,6 +31,6 @@ pub type AgentRunResolver = Arc<dyn Fn(&str) -> Option<AgentRunParams> + Send + 
 
 /// App-layer tool-set resolver: spec name -> tool set for the sub-harness. Injected at
 /// construction (same pattern as [`AgentRunResolver`]); the app owns which tools each spec
-/// gets. The engine does not know which tools exist (local tools live in the `theway`
-/// crate, and may become remote sandbox execution later).
+/// gets. The engine does not know which tools exist; the daemon owns local tool construction
+/// and may resolve tools to remote sandbox execution.
 pub type ToolSetResolver = Arc<dyn Fn(&str) -> Vec<Arc<dyn AgentTool>> + Send + Sync>;

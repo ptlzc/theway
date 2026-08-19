@@ -418,14 +418,4 @@ fn now_ms() -> i64 {
 }
 
 #[cfg(test)]
-tests_bridge_macro::tests_bridge!("multiagent/registry/unit");
-
-#[cfg(test)]
-mod registry_external_tests {
-    tests_bridge_macro::tests_bridge!("multiagent/registry");
-}
-
-#[cfg(test)]
-mod registry_linecov_tests {
-    tests_bridge_macro::tests_bridge!("multiagent/registry/linecov");
-}
+tests_bridge_macro::tests_bridge!("multiagent/registry");

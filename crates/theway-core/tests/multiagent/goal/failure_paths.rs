@@ -1,4 +1,4 @@
-//! Additional line-coverage tests for `multiagent::goal` (see docs/rust-test-files.md).
+//! Goal persistence and evaluator failure paths.
 
 use std::sync::Arc;
 

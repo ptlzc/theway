@@ -1,4 +1,4 @@
-//! Extra tests for `multiagent::runner` — bridged through `runner_extra_tests`.
+//! Subagent runner lifecycle behavior.
 
 use std::sync::Arc;
 

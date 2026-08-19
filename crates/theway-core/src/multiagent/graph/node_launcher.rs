@@ -305,8 +305,3 @@ fn cap_chars(text: &str, max: usize) -> String {
 
 #[cfg(test)]
 tests_bridge_macro::tests_bridge!("multiagent/graph/node_launcher");
-
-#[cfg(test)]
-mod node_launcher_linecov_tests {
-    tests_bridge_macro::tests_bridge!("multiagent/graph/node_launcher/linecov");
-}

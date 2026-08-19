@@ -1,4 +1,4 @@
-//! Additional line-coverage tests for `multiagent::graph::model::mermaid` (see docs/rust-test-files.md).
+//! Mermaid parse and rendering error paths.
 
 use super::super::*;
 use crate::multiagent::graph::types::{DagNode, DagRun, DagStatus, Direction, NodeStatus, RunKind};

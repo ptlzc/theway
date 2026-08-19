@@ -1,4 +1,4 @@
-//! Extra tests for `multiagent::goal` — bridged through `goal_more_tests`.
+//! Goal lifecycle fallback behavior.
 
 use std::sync::Arc;
 

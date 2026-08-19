@@ -1,4 +1,4 @@
-//! Additional line-coverage tests for `multiagent::runner` (see docs/rust-test-files.md).
+//! Subagent task and watchdog failure paths.
 
 use std::sync::Arc;
 use std::time::Duration;

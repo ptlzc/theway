@@ -1,5 +1,4 @@
-//! Tests for `multiagent::graph::engine::run` — split out of src
-//! (see docs/rust-test-files.md).
+//! DAG run planning, reconciliation, and terminal behavior.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -8,6 +7,8 @@ use super::*;
 use crate::multiagent::graph::engine::NodeLauncher;
 use crate::multiagent::graph::types::{DagNodeDef, DagRunDef};
 use tokio_util::sync::CancellationToken;
+
+mod no_op_paths;
 
 fn run_def(name: &str, max_conc: Option<usize>, fail_fast: Option<bool>) -> DagRunDef {
     DagRunDef {

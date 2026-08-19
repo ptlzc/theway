@@ -2,9 +2,9 @@ use super::*;
 
 mod build;
 mod helpers;
-mod mermaid;
 mod reconcile;
 mod render;
+mod status;
 mod validate;
 
 fn node_def(id: &str, agent: &str, task: &str, deps: &[&str]) -> DagNodeDef {

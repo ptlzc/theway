@@ -1,22 +1,10 @@
-//! Disk persistence for running DAG runs (SQLite via Turso; the JSON-file
-//! approach was replaced because running nodes were never actually persisted —
-//! `save_runs` only ran once at shutdown, and it ran *after* `abort_all_runs`
-//! had already demoted every running run to a terminal state, so the file was
-//! always empty on the one path that could have written it).
+//! Persistence boundary for DAG runs.
 //!
-//! Design:
-//! - One Turso database file per session: `<project>/.pi/graph-engineering-state-<sessionId>.db`.
-//! - Two tables: `dag_runs` (one row per run, full `DagRun` JSON payload +
-//!   status column) and `dag_nodes` (one row per node, full `DagNode` JSON
-//!   payload + status column). Status columns let `load` filter cheaply.
-//! - `save_runs` is transactional (DELETE-all + INSERT live runs): atomic,
-//!   idempotent, best-effort (write errors are logged, never fatal).
-//! - Only non-terminal runs are saved; terminal runs drop off naturally.
-//!   Running nodes are persisted as "running" and demoted to "ready" on
-//!   resume — their jobs died with the process and must be re-launched.
-//! - The engine drives saves through a [`DagPersistSink`]: every state change
-//!   calls `notify_dirty()` (non-blocking, safe under the engine lock), the
-//!   app layer debounces and flushes asynchronously.
+//! Core projects runtime state to the persistence DTOs owned by
+//! `theway-contract` and hydrates those DTOs back into engine state. The engine
+//! reports dirty state through [`DagPersistSink`]; daemon adapters coordinate
+//! debounce and flush behavior with the storage implementation. Core does not
+//! select a database or perform database I/O.
 
 use async_trait::async_trait;
 

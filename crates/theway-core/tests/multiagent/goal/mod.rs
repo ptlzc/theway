@@ -1,6 +1,10 @@
-//! Tests for `goal` — split out of goal.rs (see docs/rust-test-files.md).
+//! Goal decision parsing and transcript boundary behavior.
 
 use super::*;
+
+mod failure_paths;
+mod fallbacks;
+mod state_and_evaluation;
 
 #[test]
 fn parses_json_decision_inside_text() {

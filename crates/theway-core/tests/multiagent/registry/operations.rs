@@ -1,4 +1,6 @@
-    use super::*;
+//! Registry control, lifecycle, buffering, metrics, and transcript behavior.
+
+    use super::super::*;
 
     /// Shared in-memory `JobTranscriptStore` test double (stands in for the
     /// daemon's disk-backed store without touching the filesystem).

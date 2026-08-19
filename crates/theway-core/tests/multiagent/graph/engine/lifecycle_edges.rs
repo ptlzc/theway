@@ -1,5 +1,4 @@
-//! Extra tests for `multiagent::graph::engine` — bridged through
-//! `engine_extra_tests` because the existing test module was already occupied.
+//! DAG engine lifecycle edge cases.
 
 use std::sync::Arc;
 

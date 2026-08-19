@@ -1,4 +1,4 @@
-//! Tests for `node_launcher` — split out of src (see docs/rust-test-files.md).
+//! Node launcher fixtures and lifecycle behavior.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -13,6 +13,7 @@ use theway_llm_provider::{
 };
 
 mod budget;
+mod cancellation_and_tracing;
 mod lifecycle;
 
 fn faux_model() -> Model {

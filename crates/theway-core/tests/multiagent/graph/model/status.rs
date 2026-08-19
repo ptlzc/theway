@@ -1,4 +1,4 @@
-//! Additional line-coverage tests for `multiagent::graph::model` (see docs/rust-test-files.md).
+//! DAG model status labels.
 
 use super::super::*;
 

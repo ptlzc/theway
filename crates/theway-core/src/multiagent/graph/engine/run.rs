@@ -420,8 +420,3 @@ impl DagEngine {
 
 #[cfg(test)]
 tests_bridge_macro::tests_bridge!("multiagent/graph/engine/run");
-
-#[cfg(test)]
-mod run_linecov_tests {
-    tests_bridge_macro::tests_bridge!("multiagent/graph/engine/run/linecov");
-}

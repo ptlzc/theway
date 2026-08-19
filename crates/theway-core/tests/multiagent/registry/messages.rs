@@ -1,4 +1,4 @@
-//! Additional line-coverage tests for `multiagent::registry` (see docs/rust-test-files.md).
+//! Registry message lookup behavior.
 
 use super::super::*;
 

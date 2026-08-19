@@ -1,11 +1,8 @@
-//! Tests for `multiagent::graph::model::mermaid` — split out of src
-//! (see docs/rust-test-files.md). The mirror directory is `mermaid_extra`
-//! because `tests/multiagent/graph/model/mermaid.rs` already exists for the
-//! model module's public-facing test suite.
+//! Mermaid parsing helpers and run rendering behavior.
 
 use std::collections::HashMap;
 
-use super::*;
+use super::super::*;
 use crate::multiagent::graph::model::build_run;
 use crate::multiagent::graph::types::{DagNodeDef, DagRunDef, Direction, NodeStatus};
 

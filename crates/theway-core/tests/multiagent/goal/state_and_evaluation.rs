@@ -1,5 +1,4 @@
-//! Extra tests for `multiagent::goal` — bridged through `goal_extra_tests`
-//! because the existing `multiagent/goal` test module was already occupied.
+//! Goal state, transcript, decision parsing, and evaluator behavior.
 
 use std::sync::Arc;
 

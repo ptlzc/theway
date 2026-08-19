@@ -1,4 +1,4 @@
-//! Additional line-coverage tests for `multiagent::graph::node_launcher` (see docs/rust-test-files.md).
+//! Node launcher cancellation and tracing behavior.
 
 use std::path::PathBuf;
 use std::sync::Arc;
