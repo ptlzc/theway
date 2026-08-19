@@ -1,20 +1,20 @@
-# Pager rendering modification rules
+# Pager 渲染修改规则
 
-This file applies to `crates/theway-pager-render/`. Follow the workspace rules in [`../../AGENTS.md`](../../AGENTS.md) and the module contract in [`docs/architecture.md`](docs/architecture.md).
+本文件适用于 `crates/theway-pager-render/`。同时遵循 [`../../AGENTS.md`](../../AGENTS.md) 和 [`docs/architecture.md`](docs/architecture.md)。
 
-## Ownership
+## 归属
 
-- Keep session, protocol, event-loop, key-binding, and target-opening policy in the caller.
-- Keep line operations style-preserving, grapheme-aware, and based on terminal display width.
-- Require explicit geometry and path context where behavior depends on viewport or working-directory state.
-- Keep URL annotation limited to safe supported schemes; annotation must not execute or open the target.
+- 会话、协议、事件循环、键绑定和 target 打开策略留在调用方。
+- Line 操作保持样式不丢失、grapheme-aware，并以终端 display width 为单位。
+- 行为依赖 viewport 或工作目录时，要求调用方显式传入 geometry 与路径上下文。
+- URL 标注只接受安全且支持的 scheme；标注不得执行或打开 target。
 
-## Compatibility
+## 兼容性
 
-- Keep code-lineage details in [`NOTICE`](NOTICE).
-- Preserve resolved targets independently of abbreviated display labels.
-- Add focused tests next to the affected module unless a multi-file suite is required by [`../../docs/rust-test-files.md`](../../docs/rust-test-files.md).
+- 代码来源细节保留在 [`NOTICE`](NOTICE)。
+- 缩短展示 label 时独立保留解析后的真实 target。
+- 聚焦测试放在受影响模块附近；多文件套件按 [`../../docs/rust-test-files.md`](../../docs/rust-test-files.md) 组织。
 
-## Verification
+## 验证
 
-Run `cargo test -p theway-pager-render` and `cargo doc -p theway-pager-render --no-deps --document-private-items`.
+运行 `cargo test -p theway-pager-render` 和 `cargo doc -p theway-pager-render --no-deps --document-private-items`。

@@ -1,21 +1,21 @@
-# AGENTS.md — theway-contract
+# theway-contract 修改规则
 
-This file adds crate-specific instructions to the repository rules in [`../../AGENTS.md`](../../AGENTS.md). Read the [crate overview](README.md) and [architecture reference](docs/architecture.md) before changing persisted records or path rules.
+本文件适用于 `crates/theway-contract/`，并补充仓库级规则 [`../../AGENTS.md`](../../AGENTS.md)。修改持久化记录或路径规则前，先阅读[crate 概览](README.md)和[架构说明](docs/architecture.md)。
 
-## Ownership rules
+## 归属规则
 
-- Add a type here only when multiple runtime layers need the same engine-independent representation or persistence interface.
-- Keep runtime policy, database code, protocol conversion, and UI behavior out of this crate.
-- Do not add workspace dependencies; `theway-contract` remains the dependency leaf for runtime data.
+- 只有当多个运行时层需要同一种与引擎无关的表示或持久化接口时，才把类型放入本 crate。
+- 运行时策略、数据库代码、协议转换和 UI 行为不得进入本 crate。
+- 不得添加工作区依赖；`theway-contract` 必须保持为运行时数据的依赖叶子。
 
-## Compatibility rules
+## 兼容性规则
 
-- Treat serde names, enum encodings, optional-field defaults, and `StoredSessionEntry` validation as persisted-format behavior.
-- Keep `config::cwd_hash`, session-directory layout, and session-id validation compatible with existing on-disk names.
-- Put conversion between raw records and core runtime types in [`theway-core`](../theway-core/README.md), and conversion to protocol messages in [`theway-transport`](../theway-transport/README.md).
+- serde 字段名、枚举编码、可选字段默认值和 `StoredSessionEntry` 校验均属于持久化格式契约。
+- `config::cwd_hash`、会话目录布局和会话标识校验必须兼容已有磁盘名称。
+- 原始记录与 core 运行时类型之间的转换放在 [`theway-core`](../theway-core/README.md)，协议消息转换放在 [`theway-transport`](../theway-transport/README.md)。
 
-## Tests and documentation
+## 测试与文档
 
-- Add round-trip tests for record changes and invalid-input tests for validation changes.
-- Update [docs/architecture.md](docs/architecture.md) when module ownership, compatibility behavior, or a public trait changes.
-- Run `cargo test -p theway-contract` and `cargo doc -p theway-contract --no-deps`.
+- 记录结构变化要补往返测试，校验规则变化要补非法输入测试。
+- 模块归属、兼容性行为或公开 trait 变化时，更新 [`docs/architecture.md`](docs/architecture.md)。
+- 运行 `cargo test -p theway-contract` 和 `cargo doc -p theway-contract --no-deps`。

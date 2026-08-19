@@ -1,20 +1,20 @@
-# Markdown core modification rules
+# Markdown core 修改规则
 
-This file applies to `crates/theway-markdown-core/`. Follow the workspace rules in [`../../AGENTS.md`](../../AGENTS.md) and the mechanism in [`docs/architecture.md`](docs/architecture.md).
+本文件适用于 `crates/theway-markdown-core/`。同时遵循 [`../../AGENTS.md`](../../AGENTS.md) 和 [`docs/architecture.md`](docs/architecture.md)。
 
-## Ownership
+## 归属
 
-- Keep this crate headless. Do not add ratatui, syntect, terminal capability, UI state, or transport dependencies.
-- Keep [`parser_options`](src/lib.rs) as the single parser-feature definition and route consumers through [`offset_events`](src/lib.rs).
-- Preserve source ranges as UTF-8 byte offsets into the caller's original input.
-- Add a [`StructuralIssue`](src/lib.rs) only for a bounded render-fidelity check; normal CommonMark fallback is not an error.
+- 本 crate 保持 headless，不添加 ratatui、syntect、终端能力、UI 状态或 transport 依赖。
+- [`parser_options`](src/lib.rs) 是唯一 parser feature 定义；消费者统一经过 [`offset_events`](src/lib.rs)。
+- 源范围保持为调用方原始输入中的 UTF-8 字节 offset。
+- 只有有界的渲染保真度检查才能成为 [`StructuralIssue`](src/lib.rs)；正常 CommonMark fallback 不是错误。
 
-## Compatibility
+## 兼容性
 
-- Preserve the double-tilde-only strikethrough policy unless the renderer and analysis contract change together.
-- Update [`MarkdownStats::as_pairs`](src/lib.rs) whenever a statistics field changes; its exhaustive mapping is part of the drift check.
-- Keep code-lineage details in [`NOTICE`](NOTICE), not in API or architecture prose.
+- 除非 renderer 与分析契约一起变化，否则保留仅双波浪线删除线策略。
+- 修改统计字段时同步更新 [`MarkdownStats::as_pairs`](src/lib.rs)；其穷举映射负责防止下游漂移。
+- 代码来源细节写入 [`NOTICE`](NOTICE)，不写入 API 或架构叙述。
 
-## Verification
+## 验证
 
-Run `cargo test -p theway-markdown-core` and `cargo doc -p theway-markdown-core --no-deps --document-private-items`. Changes to parser events also require `cargo test -p theway-markdown`.
+运行 `cargo test -p theway-markdown-core` 和 `cargo doc -p theway-markdown-core --no-deps --document-private-items`。Parser 事件变化还要运行 `cargo test -p theway-markdown`。

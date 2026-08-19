@@ -1,67 +1,67 @@
-# theway-core architecture
+# theway-core 架构
 
-## Responsibility and dependencies
+## 职责与依赖
 
-`theway-core` depends on [`theway-contract`](../../theway-contract/README.md) for raw persisted records and on [`theway-llm-provider`](../../theway-llm-provider/README.md) for normalized model messages and streams. The optional Mermaid parser is used by the `harness` feature to parse DAG plans.
+`theway-core` 使用 [`theway-contract`](../../theway-contract/README.md) 的原始持久化记录，并使用 [`theway-llm-provider`](../../theway-llm-provider/README.md) 的规范化模型消息与流。启用 `harness` feature 时，可选 Mermaid parser 用于解析 DAG plan。
 
-The crate exposes runtime mechanisms and host interfaces. [`theway-daemon`](../../theway-daemon/docs/architecture.md) supplies tools, storage implementations, process and filesystem behavior, telemetry export, configuration sources, and protocol adaptation.
+本 crate 暴露运行时机制和宿主接口。[`theway-daemon`](../../theway-daemon/docs/architecture.md) 提供工具、存储实现、进程和文件系统行为、遥测导出、配置来源与协议适配。
 
-## Single-agent execution
+## 单 agent 执行
 
-[`agent.rs`](../src/agent.rs) owns `Agent`, mutable `AgentState`, run admission, steering and follow-up queues, cancellation, and lifecycle subscriptions. Only one prompt or continuation may run for an `Agent`; concurrent admission returns `AgentRunError::AlreadyStreaming`.
+[`agent.rs`](../src/agent.rs) 负责 `Agent`、可变 `AgentState`、运行准入、steering 与 follow-up 队列、取消和生命周期订阅。一个 `Agent` 同时只能运行一个 prompt 或续轮；并发准入返回 `AgentRunError::AlreadyStreaming`。
 
-[`agent/run_loop/mod.rs`](../src/agent/run_loop/mod.rs) drives each turn:
+[`agent/run_loop/mod.rs`](../src/agent/run_loop/mod.rs) 驱动每个 turn：
 
-1. Convert runtime messages to provider messages and start a normalized LLM stream.
-2. Apply stream updates to agent state and emit `LoopEvent` records.
-3. Classify, authorize, and launch tool calls, allowing independent calls to run concurrently.
-4. Append tool results, drain queued steering or follow-up messages according to `QueueMode`, and decide whether another turn is required.
-5. Finalize partial output on cancellation or interruption so state and emitted events agree.
+1. 将运行时消息转换为 provider 消息并启动规范化 LLM 流。
+2. 把流更新写入 agent 状态并发出 `LoopEvent`。
+3. 对工具调用进行分类、授权和启动，互相独立的调用可并发运行。
+4. 追加工具结果，按照 `QueueMode` 排空 steering 或 follow-up 消息，并决定是否继续下一 turn。
+5. 取消或中断时收束部分输出，使状态与已发事件一致。
 
-Tool bodies implement `AgentTool`. Host-level filesystem and process operations use the object-safe [`ToolExecutor`](../src/executor.rs) trait; the core crate provides no executor implementation.
+工具实现 `AgentTool`。宿主级文件系统与进程操作使用对象安全的 [`ToolExecutor`](../src/executor.rs) trait；core 不提供 executor 实现。
 
-## Harness and sessions
+## Harness 与会话
 
-[`agent/assembly/mod.rs`](../src/agent/assembly/mod.rs) builds `AgentHarness` from a model, typed `Session`, skills, prompt templates, tools, hooks, an observer, and optional provider stream override. The harness persists prompt-cycle state, emits `SessionEvent` records, tracks cost, reloads skills through an injected closure, and enforces the configured turn-continuation cap.
+[`agent/assembly/mod.rs`](../src/agent/assembly/mod.rs) 由模型、带类型的 `Session`、skill、prompt template、工具、hook、observer 和可选 provider 流覆盖构建 `AgentHarness`。Harness 持久化 prompt 周期状态，发出 `SessionEvent`，统计成本，通过注入闭包重载 skill，并执行配置的续轮上限。
 
-[`agent/session/session.rs`](../src/agent/session/session.rs) defines typed append-only `SessionTreeEntry` values and derives the active branch. `MemorySessionStorage` supports isolated embedders and tests. `PersistentSessionStorage` encodes typed entries into [`theway-contract::StoredSessionEntry`](../../theway-contract/src/session.rs) and delegates all I/O to an injected `SessionStore`.
+[`agent/session/session.rs`](../src/agent/session/session.rs) 定义追加式 `SessionTreeEntry` 并推导活动分支。`MemorySessionStorage` 服务于隔离嵌入场景和测试。`PersistentSessionStorage` 将带类型的条目编码为 [`theway-contract::StoredSessionEntry`](../../theway-contract/src/session.rs)，并把所有 I/O 委托给注入的 `SessionStore`。
 
-[`agent/compaction/mod.rs`](../src/agent/compaction/mod.rs) estimates context use, chooses a cut point, produces or invokes a summarizer, and records compaction metadata without knowing which persistence backend stores the session.
+[`agent/compaction/mod.rs`](../src/agent/compaction/mod.rs) 估算上下文占用、选择切分点、生成或调用摘要器，并记录压缩元数据，不感知会话使用哪种持久化后端。
 
-## Multiagent runtime
+## 多 agent 运行时
 
-[`multiagent/runner.rs`](../src/multiagent/runner.rs) launches a fresh harness for one nested agent run, filters its tool set, enforces idle-timeout cancellation, and returns normalized output and usage.
+[`multiagent/runner.rs`](../src/multiagent/runner.rs) 为一次嵌套 agent 运行启动全新 harness，过滤工具集合，执行空闲超时取消，并返回规范化输出与用量。
 
-[`multiagent/jobs.rs`](../src/multiagent/jobs.rs) owns `SubagentJobRegistry`, the bounded live view of nested jobs. It tracks lifecycle, metrics, messages, control handles for interrupt/steer, and optional transcript persistence through `JobTranscriptStore`.
+[`multiagent/jobs.rs`](../src/multiagent/jobs.rs) 负责 `SubagentJobRegistry`，即嵌套 job 的有界实时视图。它跟踪生命周期、指标、消息、interrupt/steer 控制句柄，并可通过 `JobTranscriptStore` 持久化 transcript。
 
-[`multiagent/graph.rs`](../src/multiagent/graph.rs) owns DAG and goal-run scheduling:
+[`multiagent/graph.rs`](../src/multiagent/graph.rs) 负责 DAG 与 goal 运行调度：
 
-- `model.rs` validates definitions, builds runs, derives downstream closure, and reconciles node readiness.
-- `mermaid.rs` adapts Mermaid flowchart text to DAG definitions and renders run state.
-- `engine.rs` owns run state, retry/skip/cancel transitions, events, persistence notification, and launcher injection.
-- `scheduler.rs` selects ready nodes subject to concurrency and dependency state.
-- `node_launcher.rs` adapts graph nodes to nested agent runs.
-- `persist.rs` converts live runs to and from persistence records through an injected `DagPersistSink`.
+- `model.rs` 校验定义、构建运行、推导下游闭包并协调节点就绪状态。
+- `mermaid.rs` 将 Mermaid flowchart 文本适配为 DAG 定义，并渲染运行状态。
+- `engine.rs` 负责运行状态、retry/skip/cancel 转换、事件、持久化通知和 launcher 注入。
+- `scheduler.rs` 在并发和依赖状态约束下选择就绪节点。
+- `node_launcher.rs` 将图节点适配为嵌套 agent 运行。
+- `persist.rs` 通过注入的 `DagPersistSink` 在活动运行与持久化记录之间转换。
 
-[`multiagent/goal.rs`](../src/multiagent/goal.rs) stores goal state in the session and implements the turn-end evaluator that either completes the goal, pauses it, or requests another turn. DAG and goal runs share `DagEngine`; the run kind distinguishes their lifecycle rules.
+[`multiagent/goal.rs`](../src/multiagent/goal.rs) 在会话中存储 goal 状态，并实现 turn 结束评估器：完成 goal、暂停，或请求下一 turn。DAG 与 goal 运行共用 `DagEngine`，由运行类型区分生命周期规则。
 
-## Observation and product events
+## 可观测记录与产品事件
 
-[`observability.rs`](../src/observability.rs) defines `RuntimeObserver`, correlated operation identities, stable outcome and error categories, and `OperationScope`. Dropping an unfinished scope emits an abandoned finish record. Observer calls are isolated from runtime results, and the default observer is a no-op.
+[`observability.rs`](../src/observability.rs) 定义 `RuntimeObserver`、关联操作标识、稳定结果与错误分类，以及 `OperationScope`。未完成的 scope 在 drop 时发出 abandoned 结束记录。Observer 调用与运行时结果隔离，默认实现为空操作。
 
-Observation records are not product event streams. `LoopEvent`, `SessionEvent`, `SubagentJobEvent`, and `DagEvent` carry runtime state to persistence, tools, and clients; `RuntimeObservation` carries content-safe operational measurements to an embedder-owned exporter.
+可观测记录不是产品事件流。`LoopEvent`、`SessionEvent`、`SubagentJobEvent` 和 `DagEvent` 向持久化、工具与客户端传递运行时状态；`RuntimeObservation` 向嵌入方拥有的 exporter 传递不含内容的运行测量。
 
-## Extension rules
+## 扩展规则
 
-- Add provider protocols and model catalogs in [`theway-llm-provider`](../../theway-llm-provider/README.md), not in the agent loop.
-- Add model-facing tool implementations and host integrations in [`theway-daemon`](../../theway-daemon/docs/architecture.md); add only their reusable traits and data types here.
-- Add a storage backend in [`theway-storage`](../../theway-storage/docs/architecture.md) or another crate implementing the leaf traits; keep typed-entry conversion in `PersistentSessionStorage`.
-- Add telemetry exporters in the embedding runtime by implementing `RuntimeObserver`.
-- Add graph execution backends through `NodeLauncher` and persistence through `DagPersistSink`.
+- Provider 协议和模型目录放在 [`theway-llm-provider`](../../theway-llm-provider/README.md)，不放入 agent 循环。
+- 面向模型的工具实现和宿主集成放在 [`theway-daemon`](../../theway-daemon/docs/architecture.md)；这里只添加可复用 trait 与数据类型。
+- 存储后端放在 [`theway-storage`](../../theway-storage/docs/architecture.md) 或其他实现叶子 trait 的 crate；带类型条目转换保留在 `PersistentSessionStorage`。
+- 遥测 exporter 由嵌入运行时实现 `RuntimeObserver` 提供。
+- 图执行后端通过 `NodeLauncher` 扩展，持久化通过 `DagPersistSink` 扩展。
 
-## Invariants
+## 不变量
 
-- Core remains independent of concrete storage, transport, telemetry, and host-execution libraries.
-- Persisted state crosses the crate boundary through `theway-contract` records, never backend types.
-- Cancellation produces a terminal runtime outcome and releases run admission and control handles.
-- Event payloads and operation correlation remain deterministic enough for the daemon to project snapshots without accessing private core state.
+- Core 与具体存储、传输、遥测和宿主执行库保持独立。
+- 持久化状态通过 `theway-contract` 记录跨越 crate 边界，不传递后端类型。
+- 取消会产生终止运行结果，并释放运行准入和控制句柄。
+- 事件载荷和操作关联保持足够确定，使 daemon 无需访问 core 私有状态即可投影 snapshot。

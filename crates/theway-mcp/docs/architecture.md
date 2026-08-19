@@ -1,38 +1,38 @@
-# theway-mcp architecture
+# theway-mcp 架构
 
-## Scope
+## 范围
 
-`theway-mcp` implements the client half of the Model Context Protocol needed by theway: initialize, tool discovery and invocation, request cancellation, and server notifications over stdio or Streamable HTTP. Sampling, resource subscriptions, and MCP server behavior are outside this crate.
+`theway-mcp` 实现 theway 所需的 Model Context Protocol 客户端部分：通过 stdio 或 Streamable HTTP 完成 initialize、工具发现与调用、请求取消和 server notification。Sampling、resource subscription 和 MCP server 行为不属于本 crate。
 
-No runtime-engine types appear in the public API. [`theway-daemon`](../../theway-daemon/docs/architecture.md) wraps `McpTool` definitions as model-facing tools and decides how notifications enter trigger processing.
+公开 API 不出现运行时引擎类型。[`theway-daemon`](../../theway-daemon/docs/architecture.md) 把 `McpTool` 定义包装成面向模型的工具，并决定 notification 如何进入 trigger 处理。
 
-## Protocol records
+## 协议记录
 
-[`protocol.rs`](../src/protocol.rs) defines the negotiated protocol version, initialization records, tool definitions and results, supported content variants, JSON-RPC requests/errors/notifications, and request builders. Unknown or unsupported server payloads fail through [`McpError`](../src/errors.rs) rather than being converted into agent-runtime errors here.
+[`protocol.rs`](../src/protocol.rs) 定义协商协议版本、初始化记录、工具定义与结果、支持的内容变体、JSON-RPC 请求/错误/notification 和请求 builder。未知或不支持的 server 载荷通过 [`McpError`](../src/errors.rs) 失败，不在这里转换成 agent 运行时错误。
 
-## Client lifecycle
+## 客户端生命周期
 
-[`client.rs`](../src/client.rs) owns one `Arc<dyn Transport>`, monotonically increasing request ids, an in-flight response map, initialization state, cached tools, and a server-notification channel.
+[`client.rs`](../src/client.rs) 持有一个 `Arc<dyn Transport>`、单调递增请求标识、in-flight 响应表、初始化状态、缓存工具和 server notification channel。
 
-The client read loop classifies each received JSON line as a response or notification. Responses complete the matching in-flight request; notifications are forwarded to the receiver obtained through `take_notifications`. Dropping an in-flight guard removes its pending map entry so timed-out or cancelled calls do not leak correlation state.
+客户端读取循环把每行 JSON 分类为响应或 notification。响应完成匹配的 in-flight 请求；notification 转发给 `take_notifications` 获取的 receiver。In-flight guard 被 drop 时移除 pending 表条目，因此超时或取消调用不会泄漏关联状态。
 
-`initialize` records server information and capabilities, then sends the initialized notification. `tools_list` refreshes the catalog. `tools_call` supports an optional cancellation token; cancellation sends `notifications/cancelled` within a bounded send budget and completes the local call with the corresponding error.
+`initialize` 记录 server info 与能力，然后发送 initialized notification。`tools_list` 刷新目录。`tools_call` 支持可选取消 token；取消会在有界发送预算内发送 `notifications/cancelled`，并以对应错误结束本地调用。
 
-`close` closes the transport and terminates pending activity. Request timeouts are client configuration and apply consistently across transport implementations.
+`close` 关闭 transport 并终止 pending 活动。请求超时属于客户端配置，并在各 transport 实现间保持一致。
 
-## Transport implementations
+## Transport 实现
 
-[`transport.rs`](../src/transport.rs) defines newline-oriented `send_line`, `recv_line`, and `close` operations. Framing remains below `McpClient`, while JSON-RPC correlation remains above it.
+[`transport.rs`](../src/transport.rs) 定义面向换行帧的 `send_line`、`recv_line` 和 `close`。Framing 位于 `McpClient` 下方，JSON-RPC 关联位于其上方。
 
-[`stdio.rs`](../src/stdio.rs) spawns a child with piped stdin and stdout, writes one JSON document per line, reads stdout lines, and terminates the subprocess on close.
+[`stdio.rs`](../src/stdio.rs) 启动 stdin/stdout 管道子进程，每行写入一个 JSON 文档、逐行读取 stdout，并在 close 时终止子进程。
 
-[`http.rs`](../src/http.rs) implements Streamable HTTP. Outbound JSON-RPC messages are POSTed to the configured endpoint. Response bodies may contain JSON directly or an SSE stream; the SSE parser ignores heartbeat events and forwards data fields as JSON lines. Body caps, request timeout, SSE idle timeout, reconnect backoff, last-event-id handling, and cancellation bound network resource use. The `Debug` implementation for `HttpMcpAuth` redacts bearer tokens.
+[`http.rs`](../src/http.rs) 实现 Streamable HTTP。出站 JSON-RPC 消息 POST 到配置端点；响应 body 可以是直接 JSON 或 SSE 流。SSE parser 忽略 heartbeat，并把 data 字段作为 JSON 行转发。Body 上限、请求超时、SSE 空闲超时、重连退避、last-event-id 处理和取消共同限制网络资源。`HttpMcpAuth` 的 `Debug` 实现会遮蔽 bearer token。
 
-## Invariants
+## 不变量
 
-- Request ids identify exactly one in-flight response and are removed on completion, timeout, cancellation, or drop.
-- Server notifications never satisfy a pending request and responses never enter the notification stream.
-- Both transports present the same newline-delimited JSON behavior to `McpClient`.
-- HTTP response and SSE buffers remain bounded, and idle streams are cancellable.
-- Authentication values are not emitted by debug formatting or error messages.
-- Agent-tool adaptation, notification delivery policy, and MCP server mode remain daemon-owned.
+- 一个请求标识只对应一个 in-flight 响应，并在完成、超时、取消或 drop 时移除。
+- Server notification 不会完成 pending 请求，响应也不会进入 notification 流。
+- 两种 transport 向 `McpClient` 提供相同的换行分隔 JSON 行为。
+- HTTP 响应和 SSE buffer 保持有界，空闲流可以取消。
+- Debug 格式和错误消息不输出认证值。
+- Agent 工具适配、notification 投递策略和 MCP server 模式由 daemon 负责。

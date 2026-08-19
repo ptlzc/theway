@@ -1,37 +1,37 @@
 # theway-core
 
-`theway-core` is the reusable agent runtime composed by [`theway-daemon`](../theway-daemon/README.md). It owns the single-agent loop, `AgentHarness`, typed runtime sessions, skills and prompt assembly, compaction, lifecycle and permission hooks, the `ToolExecutor` and `RuntimeObserver` interfaces, and multiagent DAG/goal orchestration.
+`theway-core` 是由 [`theway-daemon`](../theway-daemon/README.md) 组装的可复用 agent 运行时。它负责单 agent 循环、`AgentHarness`、带类型的运行时会话、skill 与 prompt 组装、上下文压缩、生命周期与权限 hook、`ToolExecutor` 和 `RuntimeObserver` 接口，以及多 agent DAG/goal 编排。
 
-Core does not own concrete tools, filesystem or process implementations, persistence backends, telemetry exporters, or protocol servers. The workspace layering check permits [`theway-daemon`](../theway-daemon/README.md) as its only direct runtime consumer.
+Core 不负责具体工具、文件系统或进程实现、持久化后端、遥测 exporter 或协议服务。工作区分层检查只允许 [`theway-daemon`](../theway-daemon/README.md) 直接消费该运行时。
 
-## Public entry points
+## 公开入口
 
-- `Agent` and `AgentOptions` run the provider-neutral message and tool loop.
-- `AgentHarness` composes an agent with a typed `Session`, skills, compaction, cost tracking, and cross-turn hooks.
-- `PersistentSessionStorage` adapts typed session entries to the raw `SessionReader` and `SessionStore` records from [`theway-contract`](../theway-contract/README.md).
-- `ToolExecutor` defines filesystem and process effects supplied by an embedding runtime.
-- `RuntimeObserver` receives transport-neutral operation start and finish records.
-- `multiagent` provides nested agent runs, live subagent-job state, DAG scheduling, and goal evaluation when the `harness` feature is enabled.
+- `Agent` 和 `AgentOptions` 运行与 provider 无关的消息及工具循环。
+- `AgentHarness` 将 agent 与带类型的 `Session`、skill、压缩、成本统计和跨 turn hook 组合起来。
+- `PersistentSessionStorage` 在带类型的会话条目与 [`theway-contract`](../theway-contract/README.md) 的原始 `SessionReader`、`SessionStore` 记录之间转换。
+- `ToolExecutor` 定义由嵌入式运行环境提供的文件系统和进程操作。
+- `RuntimeObserver` 接收与传输无关的操作开始与结束记录。
+- 启用 `harness` feature 时，`multiagent` 提供嵌套 agent 运行、实时 subagent job 状态、DAG 调度和 goal 评估。
 
-## Features
+## 功能开关
 
-The default build enables `harness` and `default-providers`. `harness` includes sessions, skills, compaction, permissions, hooks, and multiagent orchestration; `default-providers` enables the Anthropic and faux provider implementations in [`theway-llm-provider`](../theway-llm-provider/README.md).
+默认构建启用 `harness` 和 `default-providers`。`harness` 包含会话、skill、压缩、权限、hook 与多 agent 编排；`default-providers` 启用 [`theway-llm-provider`](../theway-llm-provider/README.md) 中的 Anthropic 和 faux provider 实现。
 
 ```bash
-# Bare Agent loop
+# 仅 Agent 循环
 cargo check -p theway-core --no-default-features
 
-# Harness without concrete providers
+# 不包含具体 provider 的 Harness
 cargo check -p theway-core --no-default-features --features harness
 ```
 
-## Documentation
+## 文档
 
-- [Runtime architecture and extension interfaces](docs/architecture.md)
-- [Workspace architecture](../../docs/architecture.md)
-- [Test-file layout](../../docs/rust-test-files.md)
+- [运行时架构与扩展接口](docs/architecture.md)
+- [工作区架构](../../docs/architecture.md)
+- [测试文件布局](../../docs/rust-test-files.md)
 
-## Validation
+## 验证
 
 ```bash
 cargo test -p theway-core
