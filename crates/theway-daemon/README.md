@@ -2,9 +2,9 @@
 
 English | [中文](README.zh.md)
 
-`theway-daemon` is the headless application kernel and the `thewayd` binary. It composes [`theway-core`](../theway-core/README.md), [`theway-storage`](../theway-storage/README.md), [`theway-transport`](../theway-transport/README.md), [`theway-llm-provider`](../theway-llm-provider/README.md), and [`theway-mcp`](../theway-mcp/README.md) into one long-running service.
+`theway-daemon` is the headless application kernel and the `thewayd` binary. It composes `theway-core`, `theway-storage`, `theway-transport`, `theway-llm-provider`, and `theway-mcp` into one long-running service.
 
-The daemon owns session runtime assembly, model-facing tools, local and sandbox executor selection, hooks, triggers and cron jobs, nested-agent orchestration, MCP/LSP integration, telemetry export, and protocol-side behavior. It has no client-form or terminal-presentation concepts; [`theway-tui`](../theway-tui/README.md) is one protocol client.
+The daemon owns session runtime assembly, model-facing tools, local and sandbox executor selection, hooks, triggers and cron jobs, nested-agent orchestration, MCP/LSP integration, telemetry export, and protocol-side behavior. It has no client-form or terminal-presentation concepts; `theway-tui` is one protocol client.
 
 ## Entry points
 
@@ -24,4 +24,4 @@ cargo test -p theway-daemon
 cargo doc -p theway-daemon --no-deps --document-private-items
 ```
 
-See [the daemon architecture](docs/architecture.md) for startup, session, storage, tool, protocol, and observability ownership. The [workspace architecture](../../docs/architecture.md) defines cross-crate layering.
+See [the daemon architecture](docs/architecture.md) for startup, session, storage, tool, protocol, and observability ownership.

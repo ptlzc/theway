@@ -15,7 +15,7 @@ expands in the owning crate's unit-test target to an absolute `#[path = "…/tes
 
 When an integration-test crate imports the same source by path, the macro compares the Cargo target environment and emits no tokens. This prevents the mirrored suite from compiling under two crate roots or racing over process-global test state.
 
-Test layout and bridge placement are defined centrally in [`../../docs/rust-test-files.md`](../../docs/rust-test-files.md). The expansion mechanism is documented in [`docs/architecture.md`](docs/architecture.md), and modification rules are in [`AGENTS.md`](AGENTS.md).
+Multi-file suites live under `tests/<mirrored-src-path>/` and are bridged from their owning source module. The expansion mechanism is documented in [`docs/architecture.md`](docs/architecture.md), and modification rules are in [`AGENTS.md`](AGENTS.md).
 
 ## Validation
 

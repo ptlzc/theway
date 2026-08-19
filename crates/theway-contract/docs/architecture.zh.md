@@ -23,13 +23,13 @@
 - `SessionReader` 暴露元数据与树查询。
 - `SessionStore` 在读取能力上增加条目创建、追加和叶节点移动。
 
-[`theway-core::PersistentSessionStorage`](../../theway-core/src/agent/session/persistent_storage.rs) 负责对带类型的 `SessionTreeEntry` 进行编解码。本 crate 不解释 prompt、模型切换、压缩记录或自定义运行时事件。
+`theway-core::PersistentSessionStorage` 负责对带类型的 `SessionTreeEntry` 进行编解码。本 crate 不解释 prompt、模型切换、压缩记录或自定义运行时事件。
 
 ## DAG 与自动化记录
 
-[`dag.rs`](../src/dag.rs) 包含持久化图引擎快照所需的可序列化运行、节点、结果、状态和方向记录。图调度器与状态转换规则位于 [`theway-core`](../../theway-core/docs/architecture.md)。
+[`dag.rs`](../src/dag.rs) 包含持久化图引擎快照所需的可序列化运行、节点、结果、状态和方向记录。图调度器与状态转换规则位于 `theway-core`。
 
-[`triggers.rs`](../src/triggers.rs) 包含动态 trigger 规则和 cron job 的 sidecar 表示。轮询、调度、提升和投递位于 [`theway-daemon`](../../theway-daemon/docs/architecture.md)。
+[`triggers.rs`](../src/triggers.rs) 包含动态 trigger 规则和 cron job 的 sidecar 表示。轮询、调度、提升和投递位于 `theway-daemon`。
 
 ## 不变量
 

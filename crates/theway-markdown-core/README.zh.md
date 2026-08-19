@@ -10,7 +10,7 @@
 - [`offset_events`](src/lib.rs) 返回带源字节范围的 parser 事件，并执行“只有 `~~双波浪线~~` 表示删除线”的项目规则。
 - [`analyze`](src/lib.rs) 生成 [`MarkdownAnalysis`](src/lib.rs)，组合 [`MarkdownStats`](src/lib.rs) 与渲染保真度 [`StructuralIssue`](src/lib.rs)。
 
-调用方只需检查 Markdown、不希望引入 [`theway-markdown`](../theway-markdown/README.md) 时使用本 crate。Renderer 也应使用 `offset_events`，而不是自行构造 parser，确保分析与渲染对同一源文本作出一致解释。
+调用方只需检查 Markdown、不希望引入 `theway-markdown` 时使用本 crate。Renderer 也应使用 `offset_events`，而不是自行构造 parser，确保分析与渲染对同一源文本作出一致解释。
 
 ## 开发
 

@@ -1,11 +1,11 @@
 # AGENTS.md — theway-daemon
 
-This file adds crate-specific instructions to [`../../AGENTS.md`](../../AGENTS.md). Read the [crate overview](README.md), [daemon architecture](docs/architecture.md), and [workspace daemon positioning](../../AGENTS.md#daemon-positioning) before changing application assembly or protocol behavior.
+This file contains the complete crate-local modification rules for `theway-daemon`. Read the [crate overview](README.md) and [daemon architecture](docs/architecture.md) before changing application assembly or protocol behavior.
 
 ## Ownership rules
 
-- Keep reusable agent-loop, session, observability, and graph-engine mechanics in [`theway-core`](../theway-core/README.md); keep concrete host policy and adapters here.
-- Keep wire records and transport servers in [`theway-transport`](../theway-transport/README.md), persistence implementations in [`theway-storage`](../theway-storage/README.md), and all client appearance and interaction in [`theway-tui`](../theway-tui/Cargo.toml).
+- Keep reusable agent-loop, session, observability, and graph-engine mechanics in `theway-core`; keep concrete host policy and adapters here.
+- Keep wire records and transport servers in `theway-transport`, persistence implementations in `theway-storage`, and all client appearance and interaction in `theway-tui`.
 - Add model-facing tool bodies under `src/tools/`; do not move concrete tool behavior into core.
 - Keep the public exports in `src/lib.rs` intentional; new internal modules remain private unless an embedder needs a supported extension point.
 
@@ -20,7 +20,7 @@ This file adds crate-specific instructions to [`../../AGENTS.md`](../../AGENTS.m
 
 ## Tests and documentation
 
-- Follow [`../../docs/rust-test-files.md`](../../docs/rust-test-files.md) for mirrored unit suites and use process/network tests only for assembled behavior.
+- Keep multi-file unit suites under `tests/<mirrored-src-path>/` and bridge them from the owning source module; use process or network tests only for assembled behavior.
 - Cover startup, resume, session switch, cancellation, service replacement, local/remote storage, and transport adaptation when their paths change.
 - Update [docs/architecture.md](docs/architecture.md) when composition ownership, public extension points, storage ports, session assembly, or protocol adaptation changes.
 - Run `cargo test -p theway-daemon`, `cargo doc -p theway-daemon --no-deps --document-private-items`, and `make layering-check`; run the relevant transport or storage crate tests when their adapter behavior changes.

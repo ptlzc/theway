@@ -4,7 +4,7 @@
 
 ## 归属与依赖方向
 
-`theway-tui` 负责终端客户端形态和 controller 本地资源。它只使用 [`theway-transport`](../../theway-transport/docs/architecture.md) 的记录与服务，并用 [`theway-storage`](../../theway-storage/docs/architecture.md) 进行 controller 本地持久化；不导入 agent 运行时或 daemon 应用 crate。
+`theway-tui` 负责终端客户端形态和 controller 本地资源。它只使用 `theway-transport` 的记录与服务，并用 `theway-storage` 进行 controller 本地持久化；不导入 agent 运行时或 daemon 应用 crate。
 
 客户端专用行为包括终端布局、键鼠处理、feed 渲染、本地 picker 与命令、clipboard 图像、daemon 连接默认值，以及如何通过 controller 服务暴露本地文件/进程。跨客户端运行时行为从 transport 记录开始，并由 daemon 实现。
 

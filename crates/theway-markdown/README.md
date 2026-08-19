@@ -13,7 +13,7 @@ English | [中文](README.zh.md)
 - Width-bounded Mermaid rendering with a source fallback for unsupported or oversized diagrams.
 - OSC 8 hyperlink metadata and source-to-rendered-line mapping.
 
-The parser feature set and double-tilde-only strikethrough policy come from [`theway-markdown-core`](../theway-markdown-core/README.md). Applications should use [`StreamingMarkdownRenderer`](src/streaming.rs) for token streams and the one-shot functions in [`src/lib.rs`](src/lib.rs) for complete documents.
+The parser feature set and double-tilde-only strikethrough policy come from `theway-markdown-core`. Applications should use [`StreamingMarkdownRenderer`](src/streaming.rs) for token streams and the one-shot functions in [`src/lib.rs`](src/lib.rs) for complete documents.
 
 ## Development
 

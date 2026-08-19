@@ -14,7 +14,7 @@ English | [中文](architecture.zh.md)
 
 ## DAG adapter boundary
 
-[`theway-core/src/multiagent/graph/mermaid.rs`](../../theway-core/src/multiagent/graph/mermaid.rs) owns the `dag_plan` flowchart subset. Its preprocessor classifies source lines, normalizes hyphenated identifiers for the vendored parser, and collects line-numbered diagnostics; its postprocessor restores identifiers, splits `agent: task` labels, derives dependencies, and rejects parser output that differs from the declared node set.
+The consuming `dag_plan` adapter owns the supported flowchart subset. Its preprocessor classifies source lines, normalizes hyphenated identifiers for the vendored parser, and collects line-numbered diagnostics; its postprocessor restores identifiers, splits `agent: task` labels, derives dependencies, and rejects parser output that differs from the declared node set.
 
 This crate does not absorb DAG-specific labels, identifier rewriting, dependency rules, or user-correction policy. The adapter remains separate so the vendored parser can continue serving the broader Mermaid intermediate representation.
 

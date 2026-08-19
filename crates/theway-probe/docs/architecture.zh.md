@@ -4,7 +4,7 @@
 
 ## 构建期协议归属
 
-[`build.rs`](../build.rs) 读取 `theway-transport` 拥有的 protobuf 源，包括 [`commands.proto`](../../theway-transport/proto/commands.proto) 和 [`health.proto`](../../theway-transport/proto/health.proto)，使用 `protox` 编译 command、session、graph、event、health 定义，并用 `tonic-prost-build` 生成客户端。Probe 不依赖 Rust `theway-transport`，以独立消费者身份验证外部 gRPC 服务。
+[`build.rs`](../build.rs) 读取 `theway-transport` 拥有的 protobuf 源，包括 `commands.proto` 和 `health.proto`，使用 `protox` 编译 command、session、graph、event、health 定义，并用 `tonic-prost-build` 生成客户端。Probe 不依赖 Rust `theway-transport`，以独立消费者身份验证外部 gRPC 服务。
 
 任何影响已导入服务的 protobuf 变化，都必须保证该构建脚本仍能编译完整 import graph。Transport crate 是 proto 定义的唯一来源。
 

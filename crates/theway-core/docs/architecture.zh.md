@@ -4,9 +4,9 @@
 
 ## 职责与依赖
 
-`theway-core` 使用 [`theway-contract`](../../theway-contract/README.md) 的原始持久化记录，并使用 [`theway-llm-provider`](../../theway-llm-provider/README.md) 的规范化模型消息与流。启用 `harness` feature 时，可选 Mermaid parser 用于解析 DAG plan。
+`theway-core` 使用 `theway-contract` 的原始持久化记录，并使用 `theway-llm-provider` 的规范化模型消息与流。启用 `harness` feature 时，可选 Mermaid parser 用于解析 DAG plan。
 
-本 crate 暴露运行时机制和宿主接口。[`theway-daemon`](../../theway-daemon/docs/architecture.md) 提供工具、存储实现、进程和文件系统行为、遥测导出、配置来源与协议适配。
+本 crate 暴露运行时机制和宿主接口。`theway-daemon` 提供工具、存储实现、进程和文件系统行为、遥测导出、配置来源与协议适配。
 
 ## 单 agent 执行
 
@@ -26,7 +26,7 @@
 
 [`agent/assembly/mod.rs`](../src/agent/assembly/mod.rs) 由模型、带类型的 `Session`、skill、prompt template、工具、hook、observer 和可选 provider 流覆盖构建 `AgentHarness`。Harness 持久化 prompt 周期状态，发出 `SessionEvent`，统计成本，通过注入闭包重载 skill，并执行配置的续轮上限。
 
-[`agent/session/session.rs`](../src/agent/session/session.rs) 定义追加式 `SessionTreeEntry` 并推导活动分支。`MemorySessionStorage` 服务于隔离嵌入场景和测试。`PersistentSessionStorage` 将带类型的条目编码为 [`theway-contract::StoredSessionEntry`](../../theway-contract/src/session.rs)，并把所有 I/O 委托给注入的 `SessionStore`。
+[`agent/session/session.rs`](../src/agent/session/session.rs) 定义追加式 `SessionTreeEntry` 并推导活动分支。`MemorySessionStorage` 服务于隔离嵌入场景和测试。`PersistentSessionStorage` 将带类型的条目编码为 `theway-contract::StoredSessionEntry`，并把所有 I/O 委托给注入的 `SessionStore`。
 
 [`agent/compaction/mod.rs`](../src/agent/compaction/mod.rs) 估算上下文占用、选择切分点、生成或调用摘要器，并记录压缩元数据，不感知会话使用哪种持久化后端。
 
@@ -55,9 +55,9 @@
 
 ## 扩展规则
 
-- Provider 协议和模型目录放在 [`theway-llm-provider`](../../theway-llm-provider/README.md)，不放入 agent 循环。
-- 面向模型的工具实现和宿主集成放在 [`theway-daemon`](../../theway-daemon/docs/architecture.md)；这里只添加可复用 trait 与数据类型。
-- 存储后端放在 [`theway-storage`](../../theway-storage/docs/architecture.md) 或其他实现叶子 trait 的 crate；带类型条目转换保留在 `PersistentSessionStorage`。
+- Provider 协议和模型目录放在 `theway-llm-provider`，不放入 agent 循环。
+- 面向模型的工具实现和宿主集成放在 `theway-daemon`；这里只添加可复用 trait 与数据类型。
+- 存储后端放在 `theway-storage` 或其他实现叶子 trait 的 crate；带类型条目转换保留在 `PersistentSessionStorage`。
 - 遥测 exporter 由嵌入运行时实现 `RuntimeObserver` 提供。
 - 图执行后端通过 `NodeLauncher` 扩展，持久化通过 `DagPersistSink` 扩展。
 

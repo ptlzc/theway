@@ -1,11 +1,11 @@
 # Markdown renderer modification rules
 
-This file applies to `crates/theway-markdown/`. Follow the workspace rules in [`../../AGENTS.md`](../../AGENTS.md) and the pipeline contract in [`docs/architecture.md`](docs/architecture.md).
+This file contains the complete crate-local modification rules for `theway-markdown`. Read the pipeline contract in [`docs/architecture.md`](docs/architecture.md) before changing renderer behavior.
 
 ## Ownership
 
 - Keep application feed state, input events, and transport concerns outside this crate.
-- Change shared parser options or strikethrough interpretation in [`theway-markdown-core`](../theway-markdown-core/AGENTS.md), then verify both crates.
+- Change shared parser options or strikethrough interpretation in `theway-markdown-core`, then verify both crates.
 - Preserve source maps, hyperlink ranges, and code-block spans when adding a render transform.
 - Use display width and grapheme boundaries for terminal layout.
 
@@ -20,7 +20,7 @@ This file applies to `crates/theway-markdown/`. Follow the workspace rules in [`
 
 - Keep code-lineage details in [`NOTICE`](NOTICE).
 - Preserve the intent of local changes when updating code with shared lineage, including the parser policy, terminal color adaptation, and width limits.
-- Add focused tests under the mirrored test layout described by [`../../docs/rust-test-files.md`](../../docs/rust-test-files.md).
+- Add focused multi-file suites under `tests/<mirrored-src-path>/` and bridge them from the owning source module.
 
 ## Verification
 

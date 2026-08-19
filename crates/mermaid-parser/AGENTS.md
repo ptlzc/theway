@@ -1,6 +1,6 @@
 # Mermaid parser modification rules
 
-This file applies to `crates/mermaid-parser/`. Also follow [`../../AGENTS.md`](../../AGENTS.md) and the ownership boundaries in [`docs/architecture.md`](docs/architecture.md).
+This file contains the complete crate-local modification rules for `mermaid-rs-parser`. Read the ownership boundaries in [`docs/architecture.md`](docs/architecture.md) before changing parser behavior.
 
 ## Vendored source
 
@@ -12,7 +12,7 @@ This file applies to `crates/mermaid-parser/`. Also follow [`../../AGENTS.md`](.
 ## Boundaries
 
 - Keep layout, SVG, font, CLI, and terminal-rendering dependencies out of this parse-only crate.
-- Keep theway's `dag_plan` subset policy in [`../theway-core/src/multiagent/graph/mermaid.rs`](../theway-core/src/multiagent/graph/mermaid.rs).
+- Keep theway's `dag_plan` subset policy outside this general-purpose parser crate.
 - Preserve stable graph ordering and the public re-exports in [`src/lib.rs`](src/lib.rs) unless the same change updates consumers.
 - Record changes to source attribution and licensing in [`LICENSE`](LICENSE) and the crate documentation.
 

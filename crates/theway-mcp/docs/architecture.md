@@ -6,7 +6,7 @@ English | [中文](architecture.zh.md)
 
 `theway-mcp` implements the client half of the Model Context Protocol needed by theway: initialize, tool discovery and invocation, request cancellation, and server notifications over stdio or Streamable HTTP. Sampling, resource subscriptions, and MCP server behavior are outside this crate.
 
-No runtime-engine types appear in the public API. [`theway-daemon`](../../theway-daemon/docs/architecture.md) wraps `McpTool` definitions as model-facing tools and decides how notifications enter trigger processing.
+No runtime-engine types appear in the public API. `theway-daemon` wraps `McpTool` definitions as model-facing tools and decides how notifications enter trigger processing.
 
 ## Protocol records
 

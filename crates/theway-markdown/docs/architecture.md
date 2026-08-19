@@ -11,7 +11,7 @@ English | [中文](architecture.zh.md)
 One-shot rendering follows this sequence:
 
 1. [`latex_delimiters.rs`](../src/latex_delimiters.rs) normalizes supported LaTeX delimiters into the canonical forms stored by the renderer.
-2. [`parse.rs`](../src/parse.rs) consumes the offset event stream from [`theway-markdown-core`](../../theway-markdown-core/docs/architecture.md) and builds `ParsedMarkdown`.
+2. [`parse.rs`](../src/parse.rs) consumes the offset event stream from `theway-markdown-core` and builds `ParsedMarkdown`.
 3. [`render.rs`](../src/render.rs) emits ANSI text or ratatui lines while preserving source-line and source-byte associations.
 4. [`url_scan.rs`](../src/url_scan.rs) detects plain URLs that did not originate from Markdown link syntax and appends hyperlink targets.
 

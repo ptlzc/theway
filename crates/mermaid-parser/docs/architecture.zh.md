@@ -14,7 +14,7 @@
 
 ## DAG 适配器边界
 
-[`theway-core/src/multiagent/graph/mermaid.rs`](../../theway-core/src/multiagent/graph/mermaid.rs) 负责 `dag_plan` 的 flowchart 子集。它的 preprocessor 分类源行、为 vendored parser 规范化带连字符标识，并收集带行号诊断；postprocessor 恢复标识、拆分 `agent: task` label、推导依赖，并拒绝与声明节点集合不一致的 parser 输出。
+消费方的 `dag_plan` 适配器负责受支持的 flowchart 子集。它的 preprocessor 分类源行、为 vendored parser 规范化带连字符标识，并收集带行号诊断；postprocessor 恢复标识、拆分 `agent: task` label、推导依赖，并拒绝与声明节点集合不一致的 parser 输出。
 
 本 crate 不吸收 DAG 专用 label、标识重写、依赖规则或用户纠错策略。适配器保持独立，使 vendored parser 可继续服务更广泛的 Mermaid 中间表示。
 

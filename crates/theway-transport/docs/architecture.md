@@ -4,7 +4,7 @@ English | [中文](architecture.zh.md)
 
 ## Dependency position
 
-`theway-transport` depends on [`theway-contract`](../../theway-contract/docs/architecture.md) for shared persisted records and on [`theway-llm-provider`](../../theway-llm-provider/README.md) for model-facing data reused in configuration and snapshots. It does not depend on the runtime engine, daemon application, or storage implementation.
+`theway-transport` depends on `theway-contract` for shared persisted records and on `theway-llm-provider` for model-facing data reused in configuration and snapshots. It does not depend on the runtime engine, daemon application, or storage implementation.
 
 This direction lets any server or client use the protocol without linking `AgentHarness`, SQLite, terminal rendering, or daemon-owned tools.
 

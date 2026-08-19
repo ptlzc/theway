@@ -6,9 +6,9 @@
 
 公开函数 [`parse_mermaid`](src/parser.rs) 返回 [`ParseOutput`](src/parser.rs)，其中包含解析后的 graph 和可选初始化 directive。中间表示记录检测到的图类型、方向、节点、边、subgraph 和图类型专用数据。
 
-## 工作区用途
+## 消费方契约
 
-[`theway-core` 的 DAG 适配器](../theway-core/src/multiagent/graph/mermaid.rs) 为 `dag_plan` 接受更小的 flowchart 契约。适配器预处理 DAG 节点标识与行级语法，调用本 crate 完成 Mermaid 解析，再恢复标识并推导 agent、task 和依赖字段。子集校验属于适配器；本 crate 保持为通用解析阶段。
+`theway-core` 的 DAG 适配器为 `dag_plan` 接受更小的 flowchart 契约。适配器预处理 DAG 节点标识与行级语法，调用本 crate 完成 Mermaid 解析，再恢复标识并推导 agent、task 和依赖字段。子集校验属于适配器；本 crate 保持为通用解析阶段。
 
 ## Vendored 源码
 

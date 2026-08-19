@@ -6,7 +6,7 @@
 
 `theway-mcp` 实现 theway 所需的 Model Context Protocol 客户端部分：通过 stdio 或 Streamable HTTP 完成 initialize、工具发现与调用、请求取消和 server notification。Sampling、resource subscription 和 MCP server 行为不属于本 crate。
 
-公开 API 不出现运行时引擎类型。[`theway-daemon`](../../theway-daemon/docs/architecture.md) 把 `McpTool` 定义包装成面向模型的工具，并决定 notification 如何进入 trigger 处理。
+公开 API 不出现运行时引擎类型。`theway-daemon` 把 `McpTool` 定义包装成面向模型的工具，并决定 notification 如何进入 trigger 处理。
 
 ## 协议记录
 

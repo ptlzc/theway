@@ -6,9 +6,9 @@ English | [中文](README.zh.md)
 
 The public [`parse_mermaid`](src/parser.rs) function returns [`ParseOutput`](src/parser.rs), which contains the parsed graph and an optional initialization directive. The intermediate representation records the detected diagram kind, direction, nodes, edges, subgraphs, and diagram-specific data.
 
-## Workspace use
+## Consumer contract
 
-The [`theway-core` DAG adapter](../theway-core/src/multiagent/graph/mermaid.rs) accepts a smaller flowchart contract for `dag_plan`. The adapter preprocesses DAG node identifiers and line-level syntax, invokes this crate for Mermaid parsing, then restores identifiers and derives the agent, task, and dependency fields. Subset validation belongs to the adapter; this crate remains a general parsing stage.
+The `theway-core` DAG adapter accepts a smaller flowchart contract for `dag_plan`. The adapter preprocesses DAG node identifiers and line-level syntax, invokes this crate for Mermaid parsing, then restores identifiers and derives the agent, task, and dependency fields. Subset validation belongs to the adapter; this crate remains a general parsing stage.
 
 ## Vendored source
 

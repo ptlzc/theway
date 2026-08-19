@@ -10,7 +10,7 @@ English | [中文](README.zh.md)
 - [`offset_events`](src/lib.rs) returns parser events with source byte ranges and preserves the project rule that only `~~double tilde~~` is strikethrough.
 - [`analyze`](src/lib.rs) produces [`MarkdownAnalysis`](src/lib.rs), combining [`MarkdownStats`](src/lib.rs) with render-fidelity [`StructuralIssue`](src/lib.rs) values.
 
-Use this crate when a caller needs to inspect Markdown without pulling in [`theway-markdown`](../theway-markdown/README.md). Consumers that render Markdown should also use `offset_events` instead of constructing an independent parser so analysis and rendering interpret the same source consistently.
+Use this crate when a caller needs to inspect Markdown without pulling in `theway-markdown`. Consumers that render Markdown should also use `offset_events` instead of constructing an independent parser so analysis and rendering interpret the same source consistently.
 
 ## Development
 

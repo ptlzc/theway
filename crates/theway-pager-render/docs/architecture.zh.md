@@ -4,7 +4,7 @@
 
 ## 职责
 
-`theway-pager-render` 是 [`theway-tui`](../../theway-tui/docs/architecture.md) 下方的展示工具层。函数操作 ratatui buffer、styled line、scroll geometry、URL 和路径；调用方负责应用状态、输入处理、导航和 target 打开。
+`theway-pager-render` 是 `theway-tui` 下方的展示工具层。函数操作 ratatui buffer、styled line、scroll geometry、URL 和路径；调用方负责应用状态、输入处理、导航和 target 打开。
 
 ## 文本与 geometry
 

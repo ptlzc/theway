@@ -4,7 +4,7 @@ English | [中文](architecture.zh.md)
 
 ## Application role
 
-`theway-daemon` is the only workspace crate that directly consumes [`theway-core`](../../theway-core/docs/architecture.md). It supplies concrete host behavior and adapts core state to the persistence and protocol crates. Reusable runtime mechanics stay in core; wire representations stay in [`theway-transport`](../../theway-transport/docs/architecture.md); terminal interaction stays in [`theway-tui`](../../theway-tui/README.md).
+`theway-daemon` is the only workspace crate that directly consumes `theway-core`. It supplies concrete host behavior and adapts core state to the persistence and protocol crates. Reusable runtime mechanics stay in core; wire representations stay in `theway-transport`; terminal interaction stays in `theway-tui`.
 
 [`src/lib.rs`](../src/lib.rs) exposes a narrow application API around `DaemonOptions`, `DaemonServices`, `DaemonTransport`, `SessionSelection`, `DaemonPaths`, and `run`. Most orchestration and state modules remain crate-private.
 
@@ -42,7 +42,7 @@ English | [中文](architecture.zh.md)
 - `RuntimeStorage` supplies session repositories, DAG snapshots, job transcripts, trigger rules, cron jobs, and a persistence sink.
 - `SessionRepository` supplies create, resume, open, list, delete, fork, and import operations using `Arc<dyn SessionStore>` rather than a concrete database type.
 
-The local adapter uses [`theway-storage`](../../theway-storage/docs/architecture.md). `RemoteRuntimeStorage` uses the storage RPC operations from [`theway-transport`](../../theway-transport/docs/architecture.md). Orchestration code depends on these daemon traits and does not expose SQLite types.
+The local adapter uses `theway-storage`. `RemoteRuntimeStorage` uses the storage RPC operations from `theway-transport`. Orchestration code depends on these daemon traits and does not expose SQLite types.
 
 ## Tools and host integrations
 
@@ -50,9 +50,9 @@ The local adapter uses [`theway-storage`](../../theway-storage/docs/architecture
 
 [`executor/mod.rs`](../src/executor/mod.rs) implements `theway-core::ToolExecutor`. The default `local` feature provides `LocalExecutor`; `sandbox` without `local` provides a fail-fast placeholder. [`forwarding_tool_ops.rs`](../src/forwarding_tool_ops.rs) is a separate protocol adapter that sends `ToolOps` requests to the controller address in `WireDaemonConfig` and refreshes its cached client when that address changes.
 
-[`hooks/mod.rs`](../src/hooks/mod.rs), [`hook_executors.rs`](../src/hook_executors.rs), [`trigger_engine/mod.rs`](../src/trigger_engine/mod.rs), and [`triggers/mod.rs`](../src/triggers/mod.rs) own process/webhook effects, dynamic trigger polling and promotion, cron execution, and notification delivery. Persisted sidecar records come from [`theway-contract`](../../theway-contract/docs/architecture.md); scheduling and delivery policy remains here.
+[`hooks/mod.rs`](../src/hooks/mod.rs), [`hook_executors.rs`](../src/hook_executors.rs), [`trigger_engine/mod.rs`](../src/trigger_engine/mod.rs), and [`triggers/mod.rs`](../src/triggers/mod.rs) own process/webhook effects, dynamic trigger polling and promotion, cron execution, and notification delivery. Persisted sidecar records come from `theway-contract`; scheduling and delivery policy remains here.
 
-[`mcp_loader.rs`](../src/mcp_loader.rs) uses [`theway-mcp`](../../theway-mcp/docs/architecture.md) to discover external MCP tools and notifications. [`mcp_server.rs`](../src/mcp_server.rs) exposes the daemon as an MCP server. [`lsp_supervisor.rs`](../src/lsp_supervisor.rs) owns language-server process lifecycle.
+[`mcp_loader.rs`](../src/mcp_loader.rs) uses `theway-mcp` to discover external MCP tools and notifications. [`mcp_server.rs`](../src/mcp_server.rs) exposes the daemon as an MCP server. [`lsp_supervisor.rs`](../src/lsp_supervisor.rs) owns language-server process lifecycle.
 
 ## Protocol adaptation
 

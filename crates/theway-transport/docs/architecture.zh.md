@@ -4,7 +4,7 @@
 
 ## 依赖位置
 
-`theway-transport` 使用 [`theway-contract`](../../theway-contract/docs/architecture.md) 的共享持久化记录，并使用 [`theway-llm-provider`](../../theway-llm-provider/README.md) 中被配置和 snapshot 复用的模型数据。它不依赖运行时引擎、daemon 应用或存储实现。
+`theway-transport` 使用 `theway-contract` 的共享持久化记录，并使用 `theway-llm-provider` 中被配置和 snapshot 复用的模型数据。它不依赖运行时引擎、daemon 应用或存储实现。
 
 该依赖方向使服务端或客户端无需链接 `AgentHarness`、SQLite、终端渲染或 daemon 工具即可使用协议。
 

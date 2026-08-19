@@ -15,7 +15,7 @@ These rules apply when creating or updating the Chinese counterpart of an Englis
 - Preserve heading depth and order, list type and item count, table rows and columns, and emphasis spans.
 - Keep fenced code blocks byte-identical, including their information strings, comments, and line endings.
 - Keep inline code, commands, flags, configuration keys, paths, API names, event names, versions, and numeric values verbatim.
-- Keep every ordinary link target identical across the pair and point both sides at the unsuffixed English document. Only the language switcher uses a `.zh.md` target.
+- Keep every ordinary link target identical across the pair and point both sides at the unsuffixed English document. Within crate documentation, repository-relative links stay inside the owning crate; describe root or sibling-crate concepts without links. Only the language switcher uses a `.zh.md` target.
 
 ## Terminology
 

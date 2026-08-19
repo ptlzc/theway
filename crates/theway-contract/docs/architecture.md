@@ -23,13 +23,13 @@ The crate owns representation and compatibility rules only. Selection policy, ex
 - `SessionReader` exposes metadata and tree queries.
 - `SessionStore` extends the reader operations with entry creation, append, and leaf movement.
 
-[`theway-core::PersistentSessionStorage`](../../theway-core/src/agent/session/persistent_storage.rs) is the adapter that encodes and decodes typed `SessionTreeEntry` values. This crate does not interpret prompts, model changes, compaction records, or custom runtime events.
+`theway-core::PersistentSessionStorage` is the adapter that encodes and decodes typed `SessionTreeEntry` values. This crate does not interpret prompts, model changes, compaction records, or custom runtime events.
 
 ## DAG and automation records
 
-[`dag.rs`](../src/dag.rs) contains the serializable run, node, result, status, and direction records needed to persist graph-engine snapshots. The graph scheduler and transition rules live in [`theway-core`](../../theway-core/docs/architecture.md).
+[`dag.rs`](../src/dag.rs) contains the serializable run, node, result, status, and direction records needed to persist graph-engine snapshots. The graph scheduler and transition rules live in `theway-core`.
 
-[`triggers.rs`](../src/triggers.rs) contains the sidecar representation for dynamic trigger rules and cron jobs. Polling, scheduling, promotion, and delivery live in [`theway-daemon`](../../theway-daemon/docs/architecture.md).
+[`triggers.rs`](../src/triggers.rs) contains the sidecar representation for dynamic trigger rules and cron jobs. Polling, scheduling, promotion, and delivery live in `theway-daemon`.
 
 ## Invariants
 

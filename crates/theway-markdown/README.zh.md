@@ -13,7 +13,7 @@
 - 对 Mermaid 渲染限制宽度；不支持或过大的图回退为源文本。
 - 生成 OSC 8 hyperlink 元数据和源到渲染行的映射。
 
-Parser feature 与仅双波浪线删除线策略来自 [`theway-markdown-core`](../theway-markdown-core/README.md)。Token 流使用 [`StreamingMarkdownRenderer`](src/streaming.rs)，完整文档使用 [`src/lib.rs`](src/lib.rs) 中的一次性函数。
+Parser feature 与仅双波浪线删除线策略来自 `theway-markdown-core`。Token 流使用 [`StreamingMarkdownRenderer`](src/streaming.rs)，完整文档使用 [`src/lib.rs`](src/lib.rs) 中的一次性函数。
 
 ## 开发
 

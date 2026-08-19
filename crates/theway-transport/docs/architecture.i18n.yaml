@@ -1,4 +1,4 @@
 # English-first bilingual documentation record. Update both files, then run:
 #   scripts/verify-doc-i18n.py --write crates/theway-transport/docs/architecture.md
-architecture.md: 7fc9eafdd95d5d3616e369964dc64a801a5eb3ef
-architecture.zh.md: 48f5b645ae0e729486f25fdac1778c083cf12e03
+architecture.md: d59069a974fec53c6d15313d4e217b817aa31626
+architecture.zh.md: 3a38eb6c4b8f58dadcb6034b39ae3339b1c7e77a

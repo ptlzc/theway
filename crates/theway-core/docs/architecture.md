@@ -4,9 +4,9 @@ English | [中文](architecture.zh.md)
 
 ## Responsibility and dependencies
 
-`theway-core` depends on [`theway-contract`](../../theway-contract/README.md) for raw persisted records and on [`theway-llm-provider`](../../theway-llm-provider/README.md) for normalized model messages and streams. The optional Mermaid parser is used by the `harness` feature to parse DAG plans.
+`theway-core` depends on `theway-contract` for raw persisted records and on `theway-llm-provider` for normalized model messages and streams. The optional Mermaid parser is used by the `harness` feature to parse DAG plans.
 
-The crate exposes runtime mechanisms and host interfaces. [`theway-daemon`](../../theway-daemon/docs/architecture.md) supplies tools, storage implementations, process and filesystem behavior, telemetry export, configuration sources, and protocol adaptation.
+The crate exposes runtime mechanisms and host interfaces. `theway-daemon` supplies tools, storage implementations, process and filesystem behavior, telemetry export, configuration sources, and protocol adaptation.
 
 ## Single-agent execution
 
@@ -26,7 +26,7 @@ Tool bodies implement `AgentTool`. Host-level filesystem and process operations 
 
 [`agent/assembly/mod.rs`](../src/agent/assembly/mod.rs) builds `AgentHarness` from a model, typed `Session`, skills, prompt templates, tools, hooks, an observer, and optional provider stream override. The harness persists prompt-cycle state, emits `SessionEvent` records, tracks cost, reloads skills through an injected closure, and enforces the configured turn-continuation cap.
 
-[`agent/session/session.rs`](../src/agent/session/session.rs) defines typed append-only `SessionTreeEntry` values and derives the active branch. `MemorySessionStorage` supports isolated embedders and tests. `PersistentSessionStorage` encodes typed entries into [`theway-contract::StoredSessionEntry`](../../theway-contract/src/session.rs) and delegates all I/O to an injected `SessionStore`.
+[`agent/session/session.rs`](../src/agent/session/session.rs) defines typed append-only `SessionTreeEntry` values and derives the active branch. `MemorySessionStorage` supports isolated embedders and tests. `PersistentSessionStorage` encodes typed entries into `theway-contract::StoredSessionEntry` and delegates all I/O to an injected `SessionStore`.
 
 [`agent/compaction/mod.rs`](../src/agent/compaction/mod.rs) estimates context use, chooses a cut point, produces or invokes a summarizer, and records compaction metadata without knowing which persistence backend stores the session.
 
@@ -55,9 +55,9 @@ Observation records are not product event streams. `LoopEvent`, `SessionEvent`, 
 
 ## Extension rules
 
-- Add provider protocols and model catalogs in [`theway-llm-provider`](../../theway-llm-provider/README.md), not in the agent loop.
-- Add model-facing tool implementations and host integrations in [`theway-daemon`](../../theway-daemon/docs/architecture.md); add only their reusable traits and data types here.
-- Add a storage backend in [`theway-storage`](../../theway-storage/docs/architecture.md) or another crate implementing the leaf traits; keep typed-entry conversion in `PersistentSessionStorage`.
+- Add provider protocols and model catalogs in `theway-llm-provider`, not in the agent loop.
+- Add model-facing tool implementations and host integrations in `theway-daemon`; add only their reusable traits and data types here.
+- Add a storage backend in `theway-storage` or another crate implementing the leaf traits; keep typed-entry conversion in `PersistentSessionStorage`.
 - Add telemetry exporters in the embedding runtime by implementing `RuntimeObserver`.
 - Add graph execution backends through `NodeLauncher` and persistence through `DagPersistSink`.
 

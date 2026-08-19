@@ -1,6 +1,6 @@
 # Test bridge modification rules
 
-This file applies to `crates/tests-bridge-macro/`. Also follow [`../../AGENTS.md`](../../AGENTS.md) and the test-layout source of truth in [`../../docs/rust-test-files.md`](../../docs/rust-test-files.md).
+This file contains the complete crate-local modification rules for `tests-bridge-macro`. Read [`docs/architecture.md`](docs/architecture.md) before changing expansion behavior.
 
 ## Expansion contract
 
@@ -13,7 +13,7 @@ This file applies to `crates/tests-bridge-macro/`. Also follow [`../../AGENTS.md
 ## Boundaries
 
 - Do not add runtime dependencies, test-runner behavior, fixture loading, or source-module policy to this procedural macro.
-- Define standard suite layout and inline-test exceptions only in [`../../docs/rust-test-files.md`](../../docs/rust-test-files.md); this file only references that contract.
+- Keep multi-file suites under `tests/<mirrored-src-path>/`, bridge them from the owning source module, and reserve inline tests for lightweight assertions.
 - Validate at least one real consumer when expansion semantics change.
 
 ## Validation

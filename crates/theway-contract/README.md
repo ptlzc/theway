@@ -14,12 +14,11 @@ English | [中文](README.zh.md)
 | [`dag`](src/dag.rs) | Define persisted DAG run and node snapshots and their state-file path. |
 | [`triggers`](src/triggers.rs) | Define session-scoped dynamic-trigger and cron sidecar records. |
 
-[`theway-core`](../theway-core/README.md) converts typed runtime session entries to these raw records. [`theway-storage`](../theway-storage/README.md) implements the persistence traits, while [`theway-transport`](../theway-transport/README.md) reuses or re-exports the client-visible data that belongs at this leaf.
+`theway-core` converts typed runtime session entries to these raw records. `theway-storage` implements the persistence traits, while `theway-transport` reuses or re-exports the client-visible data that belongs at this leaf.
 
 ## Documentation
 
 - [Architecture and invariants](docs/architecture.md)
-- [Workspace architecture](../../docs/architecture.md)
 
 ## Validation
 

@@ -1,11 +1,11 @@
 # AGENTS.md — theway-probe
 
-This file adds crate-specific instructions to [`../../AGENTS.md`](../../AGENTS.md). Read the [crate overview](README.md) and [probe architecture](docs/architecture.md) before changing protocol coverage.
+This file contains the complete crate-local modification rules for `theway-probe`. Read the [crate overview](README.md) and [probe architecture](docs/architecture.md) before changing protocol coverage.
 
 ## Boundary rules
 
 - Keep the probe a standalone external gRPC client; do not depend on `theway-daemon`, `theway-core`, or the Rust `theway-transport` crate.
-- Compile protobuf clients from the definitions owned beside [`../theway-transport/proto/health.proto`](../theway-transport/proto/health.proto) and do not copy protocol files here.
+- Compile protobuf clients from the transport-owned protocol definitions through [`build.rs`](build.rs); do not copy protocol files into this crate.
 - Keep checks deterministic, keyless, and safe against an operator-supplied daemon endpoint.
 - Do not add daemon process startup, shutdown, filesystem mutation, or LLM calls to a serviceability check without an explicit scope change.
 

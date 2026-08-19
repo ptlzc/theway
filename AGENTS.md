@@ -80,6 +80,7 @@ Operating rules for any orchestrator driving the built-in subagents (`subagent` 
 - Crate `README.md` and `docs/*.md` files are English defaults paired with sibling `.zh.md` translations and `.i18n.yaml` records; [`docs/i18n/README.md`](docs/i18n/README.md) is the contract. `AGENTS.md` files remain English-only. Update both sides in one change, run `scripts/verify-doc-i18n.py --write <source.md>`, then run `make doc-sync`.
 - Documents state the current mechanism, not change history. Avoid "previously/now/no longer", PR/commit references, and migration narration in durable prose; change stories belong in commit messages or memory notes.
 - Cross-reference repository files with relative Markdown paths, never bare filenames.
+- Links in a crate's `README.md`, `docs/*.md`, and `AGENTS.md` must resolve inside that crate; describe workspace-root and sibling-crate concepts without repository links so every crate documentation set remains self-contained.
 - One physical line per paragraph (editor soft-wrap). Code blocks, tables, and list structure keep their own formatting.
 - Name the exact mechanism — function, file path, command, flag — not metaphorical "gate", "surface", or "vocabulary".
 - No implementation-status annotations in prose or diagrams ("implemented!", "future: …"); the repo layout and manifests carry status. Unimplemented work is marked `TODO` in code with what is missing, never "deliberate" or "by design".

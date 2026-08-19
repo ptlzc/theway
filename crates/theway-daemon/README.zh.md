@@ -2,9 +2,9 @@
 
 [English](README.md) | 中文
 
-`theway-daemon` 是无头应用内核及 `thewayd` 二进制。它把 [`theway-core`](../theway-core/README.md)、[`theway-storage`](../theway-storage/README.md)、[`theway-transport`](../theway-transport/README.md)、[`theway-llm-provider`](../theway-llm-provider/README.md) 和 [`theway-mcp`](../theway-mcp/README.md) 组装成一个长驻服务。
+`theway-daemon` 是无头应用内核及 `thewayd` 二进制。它把 `theway-core`、`theway-storage`、`theway-transport`、`theway-llm-provider` 和 `theway-mcp` 组装成一个长驻服务。
 
-Daemon 负责会话运行时组装、面向模型的工具、本地与 sandbox executor 选择、hook、trigger、cron job、嵌套 agent 编排、MCP/LSP 集成、遥测导出和协议侧行为。它没有客户端形态或终端展示概念；[`theway-tui`](../theway-tui/README.md) 只是一个协议客户端。
+Daemon 负责会话运行时组装、面向模型的工具、本地与 sandbox executor 选择、hook、trigger、cron job、嵌套 agent 编排、MCP/LSP 集成、遥测导出和协议侧行为。它没有客户端形态或终端展示概念；`theway-tui` 只是一个协议客户端。
 
 ## 入口
 
@@ -24,4 +24,4 @@ cargo test -p theway-daemon
 cargo doc -p theway-daemon --no-deps --document-private-items
 ```
 
-[Daemon 架构](docs/architecture.md)说明启动、会话、存储、工具、协议和可观测性归属；[工作区架构](../../docs/architecture.md)定义跨 crate 分层。
+[Daemon 架构](docs/architecture.md)说明启动、会话、存储、工具、协议和可观测性归属。

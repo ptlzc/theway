@@ -1,11 +1,11 @@
 # AGENTS.md — theway-mcp
 
-This file adds crate-specific instructions to [`../../AGENTS.md`](../../AGENTS.md). Read the [crate overview](README.md) and [client architecture](docs/architecture.md) before changing request correlation or transport behavior.
+This file contains the complete crate-local modification rules for `theway-mcp`. Read the [crate overview](README.md) and [client architecture](docs/architecture.md) before changing request correlation or transport behavior.
 
 ## Boundary rules
 
 - Keep the crate independent of `theway-core`, daemon configuration, tool policy, trigger delivery, and UI code.
-- Keep MCP-to-`AgentTool` conversion and MCP server behavior in [`theway-daemon`](../theway-daemon/README.md).
+- Keep MCP-to-`AgentTool` conversion and MCP server behavior in `theway-daemon`.
 - Add protocol records only for operations implemented by this client or required to decode their responses and notifications.
 
 ## Lifecycle and security rules

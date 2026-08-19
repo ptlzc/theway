@@ -14,12 +14,11 @@
 | [`dag`](src/dag.rs) | 定义持久化 DAG 运行与节点快照及其状态文件路径。 |
 | [`triggers`](src/triggers.rs) | 定义会话级动态 trigger 与 cron sidecar 记录。 |
 
-[`theway-core`](../theway-core/README.md) 负责在带类型的运行时会话条目和这些原始记录之间转换。[`theway-storage`](../theway-storage/README.md) 实现持久化 trait；[`theway-transport`](../theway-transport/README.md) 复用或重新导出适合位于该叶子层的客户端可见数据。
+`theway-core` 负责在带类型的运行时会话条目和这些原始记录之间转换。`theway-storage` 实现持久化 trait；`theway-transport` 复用或重新导出适合位于该叶子层的客户端可见数据。
 
 ## 文档
 
 - [架构与不变量](docs/architecture.md)
-- [工作区架构](../../docs/architecture.md)
 
 ## 验证
 

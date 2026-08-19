@@ -1,4 +1,4 @@
 # English-first bilingual documentation record. Update both files, then run:
 #   scripts/verify-doc-i18n.py --write crates/mermaid-parser/README.md
-README.md: bbfa3999b51bd4f1a1e65228f56f95c92caa20a6
-README.zh.md: 0fb8445e4e6b02e2127d517aca48dc498c185de4
+README.md: 4db7add13be134d078f0f63417931ba59d129f14
+README.zh.md: c9d51352ce113505424f573a7850a7119f3dcd65

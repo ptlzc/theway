@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-`theway-llm-provider` is the normalized streaming LLM client used by [`theway-core`](../theway-core/README.md), [`theway-daemon`](../theway-daemon/README.md), and protocol-facing model catalogs. Provider-specific HTTP payloads and stream frames enter through one `ApiProvider` implementation and leave as common `AssistantMessageEvent` records.
+`theway-llm-provider` is the normalized streaming LLM client used by `theway-core`, `theway-daemon`, and protocol-facing model catalogs. Provider-specific HTTP payloads and stream frames enter through one `ApiProvider` implementation and leave as common `AssistantMessageEvent` records.
 
 The crate owns model and image catalogs, provider registration, environment-key lookup, message normalization, SSE and event-stream utilities, and provider protocol implementations. It does not own agent loops, tool execution, session persistence, retries across agent turns, or user interaction.
 
@@ -29,4 +29,3 @@ Examples under [`examples/`](examples/anthropic_hello.rs) that contact a provide
 ## Documentation
 
 - [Provider pipeline and extension rules](docs/architecture.md)
-- [Workspace architecture](../../docs/architecture.md)

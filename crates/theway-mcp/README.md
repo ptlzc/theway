@@ -2,9 +2,9 @@
 
 English | [中文](README.zh.md)
 
-`theway-mcp` is a transport-independent MCP client used by [`theway-daemon`](../theway-daemon/README.md) to load external tools and receive server notifications. It implements JSON-RPC 2.0 request correlation, the MCP initialize handshake, `tools/list`, `tools/call`, cancellation notification, stdio subprocess transport, and Streamable HTTP transport.
+`theway-mcp` is a transport-independent MCP client used by `theway-daemon` to load external tools and receive server notifications. It implements JSON-RPC 2.0 request correlation, the MCP initialize handshake, `tools/list`, `tools/call`, cancellation notification, stdio subprocess transport, and Streamable HTTP transport.
 
-The crate does not depend on [`theway-core`](../theway-core/README.md) and does not convert MCP tools into agent tools. That adapter and all server-side MCP behavior belong to the daemon.
+The crate does not depend on `theway-core` and does not convert MCP tools into agent tools. That adapter and all server-side MCP behavior belong to the daemon.
 
 ## Public API
 
@@ -17,7 +17,6 @@ The crate does not depend on [`theway-core`](../theway-core/README.md) and does 
 ## Documentation
 
 - [Client and transport architecture](docs/architecture.md)
-- [Daemon MCP integration](../theway-daemon/docs/architecture.md)
 
 ## Validation
 

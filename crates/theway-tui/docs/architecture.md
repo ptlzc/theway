@@ -4,7 +4,7 @@ English | [中文](architecture.zh.md)
 
 ## Ownership and dependency direction
 
-`theway-tui` owns the terminal client form and controller-local resources. It speaks only records and services from [`theway-transport`](../../theway-transport/docs/architecture.md) and uses [`theway-storage`](../../theway-storage/docs/architecture.md) for controller-local persistence. It does not import the agent runtime or daemon application crates.
+`theway-tui` owns the terminal client form and controller-local resources. It speaks only records and services from `theway-transport` and uses `theway-storage` for controller-local persistence. It does not import the agent runtime or daemon application crates.
 
 Client-specific behavior includes terminal layout, keyboard and mouse handling, feed rendering, local pickers and commands, clipboard images, daemon attachment defaults, and how local files/processes are exposed through the controller services. Cross-client runtime behavior starts in transport records and is implemented by the daemon.
 

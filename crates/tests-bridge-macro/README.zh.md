@@ -15,7 +15,7 @@ tests_bridge_macro::tests_bridge!("agent/session");
 
 同一源码被 integration-test crate 通过 path 引入时，宏比较 Cargo target 环境并不生成任何 token。这样可避免镜像套件针对不同 crate root 编译两次，或对进程全局测试状态产生竞争。
 
-测试布局和 bridge 放置由 [`../../docs/rust-test-files.md`](../../docs/rust-test-files.md) 统一规定。展开机制见 [`docs/architecture.md`](docs/architecture.md)，修改规则见 [`AGENTS.md`](AGENTS.md)。
+多文件套件放在 `tests/<mirrored-src-path>/` 下，并由归属源码模块完成 bridge。展开机制见 [`docs/architecture.md`](docs/architecture.md)，修改规则见 [`AGENTS.md`](AGENTS.md)。
 
 ## 验证
 

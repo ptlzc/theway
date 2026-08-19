@@ -1,6 +1,6 @@
 # Textarea modification rules
 
-This file applies to `crates/theway-ratatui-textarea/`. Follow the workspace rules in [`../../AGENTS.md`](../../AGENTS.md) and the state model in [`docs/architecture.md`](docs/architecture.md).
+This file contains the complete crate-local modification rules for `theway-ratatui-textarea`. Read the state model in [`docs/architecture.md`](docs/architecture.md) before changing editor behavior.
 
 ## Ownership
 
@@ -21,7 +21,7 @@ This file applies to `crates/theway-ratatui-textarea/`. Follow the workspace rul
 
 - Keep code-lineage details in [`NOTICE`](NOTICE).
 - Update the demo when a public interaction contract changes.
-- Follow the mirrored test layout in [`../../docs/rust-test-files.md`](../../docs/rust-test-files.md) for multi-file suites.
+- Place multi-file suites under `tests/<mirrored-src-path>/` and bridge them from the owning source module.
 
 ## Verification
 

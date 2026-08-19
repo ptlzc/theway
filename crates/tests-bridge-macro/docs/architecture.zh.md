@@ -4,7 +4,7 @@
 
 ## 职责
 
-`tests-bridge-macro` 在宏展开期间把镜像测试路径转换为以 crate 根为锚点的模块声明。它只提供路径锚定；归属源码模块决定测试是否编译，[`docs/rust-test-files.md`](../../../docs/rust-test-files.md) 决定套件存放位置。
+`tests-bridge-macro` 在宏展开期间把镜像测试路径转换为以 crate 根为锚点的模块声明。它只提供路径锚定；归属源码模块决定测试是否编译，套件存放在 `tests/<mirrored-src-path>/` 下。
 
 ## 展开流程
 

@@ -1,4 +1,4 @@
 # English-first bilingual documentation record. Update both files, then run:
 #   scripts/verify-doc-i18n.py --write crates/theway-markdown-core/README.md
-README.md: 40934ac62fa05f8a0ebd472214fb3c6bdd0a5050
-README.zh.md: 2c65f94b62a0f1b356edc736589ddef215bff446
+README.md: ae75c2dbf53e4ba91a6c89dcbd4db6bf6f4be9e5
+README.zh.md: 8535b727d9b07862545904f6ebcf65f5d918c127

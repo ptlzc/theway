@@ -4,7 +4,7 @@ English | [中文](architecture.zh.md)
 
 ## Responsibility
 
-`theway-pager-render` is a presentation utility layer below [`theway-tui`](../../theway-tui/docs/architecture.md). Its functions operate on ratatui buffers, styled lines, scroll geometry, URLs, and paths; the caller owns application state, input handling, navigation, and target activation.
+`theway-pager-render` is a presentation utility layer below `theway-tui`. Its functions operate on ratatui buffers, styled lines, scroll geometry, URLs, and paths; the caller owns application state, input handling, navigation, and target activation.
 
 ## Text and geometry
 

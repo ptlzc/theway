@@ -11,7 +11,7 @@
 一次性渲染按以下顺序执行：
 
 1. [`latex_delimiters.rs`](../src/latex_delimiters.rs) 将支持的 LaTeX delimiter 规范化为 renderer 存储的标准形式。
-2. [`parse.rs`](../src/parse.rs) 消费 [`theway-markdown-core`](../../theway-markdown-core/docs/architecture.md) 的 offset 事件流并构建 `ParsedMarkdown`。
+2. [`parse.rs`](../src/parse.rs) 消费 `theway-markdown-core` 的 offset 事件流并构建 `ParsedMarkdown`。
 3. [`render.rs`](../src/render.rs) 输出 ANSI 文本或 ratatui line，同时保留源行与源字节关联。
 4. [`url_scan.rs`](../src/url_scan.rs) 检测不来自 Markdown link 语法的普通 URL，并追加 hyperlink target。
 

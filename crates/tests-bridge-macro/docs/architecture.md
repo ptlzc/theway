@@ -4,7 +4,7 @@ English | [中文](architecture.zh.md)
 
 ## Responsibility
 
-During macro expansion, `tests-bridge-macro` turns a mirrored test path into a module declaration anchored at the crate root. It provides path anchoring only; the owning source module decides whether tests compile, and [`docs/rust-test-files.md`](../../../docs/rust-test-files.md) decides where the suite lives.
+During macro expansion, `tests-bridge-macro` turns a mirrored test path into a module declaration anchored at the crate root. It provides path anchoring only; the owning source module decides whether tests compile, and the suite lives under `tests/<mirrored-src-path>/`.
 
 ## Expansion flow
 

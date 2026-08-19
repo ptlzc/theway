@@ -8,7 +8,7 @@ The crate documentation corpus uses English as its default source and Simplified
 
 - An authored pair consists of three sibling files: English `foo.md`, Chinese `foo.zh.md`, and `foo.i18n.yaml`.
 - The unsuffixed English file is the default entry point and source of truth. The Chinese file must express the same current mechanism without adding or dropping behavior.
-- Both Markdown files carry a language switcher immediately after the H1 heading. Ordinary links in both files target unsuffixed English paths; only the switcher links to `.zh.md`.
+- Both Markdown files carry a language switcher immediately after the H1 heading. Ordinary links in both files target unsuffixed English paths; only the switcher links to `.zh.md`. Repository-relative links in crate documentation remain inside the owning crate.
 - The sidecar records each file's Git blob hash at the last reviewed synchronization. Editing either side without updating the other side and re-recording the pair fails `make doc-sync`.
 - Heading levels, list shape, table shape, link targets, and fenced code blocks remain structurally aligned. Code blocks are byte-identical.
 

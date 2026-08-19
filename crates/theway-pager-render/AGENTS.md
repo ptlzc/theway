@@ -1,6 +1,6 @@
 # Pager rendering modification rules
 
-This file applies to `crates/theway-pager-render/`. Follow the workspace rules in [`../../AGENTS.md`](../../AGENTS.md) and the module contract in [`docs/architecture.md`](docs/architecture.md).
+This file contains the complete crate-local modification rules for `theway-pager-render`. Read the module contract in [`docs/architecture.md`](docs/architecture.md) before changing rendering behavior.
 
 ## Ownership
 
@@ -13,7 +13,7 @@ This file applies to `crates/theway-pager-render/`. Follow the workspace rules i
 
 - Keep code-lineage details in [`NOTICE`](NOTICE).
 - Preserve resolved targets independently of abbreviated display labels.
-- Add focused tests next to the affected module unless a multi-file suite is required by [`../../docs/rust-test-files.md`](../../docs/rust-test-files.md).
+- Add focused tests next to the affected module; place a multi-file suite under `tests/<mirrored-src-path>/` and bridge it from the owning source module.
 
 ## Verification
 

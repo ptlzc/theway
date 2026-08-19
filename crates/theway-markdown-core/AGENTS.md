@@ -1,6 +1,6 @@
 # Markdown core modification rules
 
-This file applies to `crates/theway-markdown-core/`. Follow the workspace rules in [`../../AGENTS.md`](../../AGENTS.md) and the mechanism in [`docs/architecture.md`](docs/architecture.md).
+This file contains the complete crate-local modification rules for `theway-markdown-core`. Read the mechanism in [`docs/architecture.md`](docs/architecture.md) before changing parser behavior.
 
 ## Ownership
 

@@ -1,4 +1,4 @@
 # English-first bilingual documentation record. Update both files, then run:
 #   scripts/verify-doc-i18n.py --write crates/theway-pager-render/docs/architecture.md
-architecture.md: db1d0203656af826c8567e0d865d600c98cf2840
-architecture.zh.md: f892dd3b63587020c09ab6e2ae181af35babc68c
+architecture.md: 03eeb6056f464d4ed3a6fef0e10ded6352e48bbd
+architecture.zh.md: 80564ac298d570d8313341a48958ef63a3764199

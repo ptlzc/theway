@@ -2,9 +2,9 @@
 
 English | [中文](README.zh.md)
 
-`theway-storage` provides the local durable implementations of the raw persistence interfaces in [`theway-contract`](../theway-contract/README.md). It stores one Turso/SQLite database per session, manages session discovery and sidecar paths, imports and exports `.theway-session` archives, and stores persisted DAG snapshots.
+`theway-storage` provides the local durable implementations of the raw persistence interfaces in `theway-contract`. It stores one Turso/SQLite database per session, manages session discovery and sidecar paths, imports and exports `.theway-session` archives, and stores persisted DAG snapshots.
 
-The crate does not interpret typed agent messages or DAG transition rules. It depends only on `theway-contract` among the runtime workspace crates and never imports [`theway-core`](../theway-core/README.md) or [`theway-transport`](../theway-transport/README.md).
+The crate does not interpret typed agent messages or DAG transition rules. It depends only on `theway-contract` among the runtime workspace crates and never imports `theway-core` or `theway-transport`.
 
 ## Public modules
 
@@ -19,8 +19,6 @@ The crate does not interpret typed agent messages or DAG transition rules. It de
 ## Documentation
 
 - [Persistence architecture and failure behavior](docs/architecture.md)
-- [Leaf record definitions](../theway-contract/docs/architecture.md)
-- [Workspace architecture](../../docs/architecture.md)
 
 ## Validation
 

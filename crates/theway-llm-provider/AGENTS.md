@@ -1,6 +1,6 @@
 # AGENTS.md — theway-llm-provider
 
-This file adds crate-specific instructions to [`../../AGENTS.md`](../../AGENTS.md). Read the [crate overview](README.md) and [provider architecture](docs/architecture.md) before changing normalized types or a wire implementation.
+This file contains the complete crate-local modification rules for `theway-llm-provider`. Read the [crate overview](README.md) and [provider architecture](docs/architecture.md) before changing normalized types or a wire implementation.
 
 ## Boundary rules
 

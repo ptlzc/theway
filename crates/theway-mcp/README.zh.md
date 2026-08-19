@@ -2,9 +2,9 @@
 
 [English](README.md) | 中文
 
-`theway-mcp` 是与应用 transport 无关的 MCP 客户端，[`theway-daemon`](../theway-daemon/README.md) 用它加载外部工具并接收 server notification。它实现 JSON-RPC 2.0 请求关联、MCP initialize 握手、`tools/list`、`tools/call`、取消 notification、stdio 子进程传输和 Streamable HTTP 传输。
+`theway-mcp` 是与应用 transport 无关的 MCP 客户端，`theway-daemon` 用它加载外部工具并接收 server notification。它实现 JSON-RPC 2.0 请求关联、MCP initialize 握手、`tools/list`、`tools/call`、取消 notification、stdio 子进程传输和 Streamable HTTP 传输。
 
-本 crate 不依赖 [`theway-core`](../theway-core/README.md)，也不把 MCP 工具转换为 agent 工具。该适配器及所有 server 侧 MCP 行为属于 daemon。
+本 crate 不依赖 `theway-core`，也不把 MCP 工具转换为 agent 工具。该适配器及所有 server 侧 MCP 行为属于 daemon。
 
 ## 公开 API
 
@@ -17,7 +17,6 @@
 ## 文档
 
 - [客户端与传输架构](docs/architecture.md)
-- [Daemon MCP 集成](../theway-daemon/docs/architecture.md)
 
 ## 验证
 

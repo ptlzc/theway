@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-`theway-llm-provider` 是 [`theway-core`](../theway-core/README.md)、[`theway-daemon`](../theway-daemon/README.md) 和协议侧模型目录使用的规范化流式 LLM 客户端。Provider 专用 HTTP 载荷与流 frame 从 `ApiProvider` 实现进入，统一转换为 `AssistantMessageEvent` 记录输出。
+`theway-llm-provider` 是 `theway-core`、`theway-daemon` 和协议侧模型目录使用的规范化流式 LLM 客户端。Provider 专用 HTTP 载荷与流 frame 从 `ApiProvider` 实现进入，统一转换为 `AssistantMessageEvent` 记录输出。
 
 本 crate 负责模型与图像目录、provider 注册、环境变量密钥查找、消息规范化、SSE/event-stream 辅助函数和 provider 协议实现。它不负责 agent 循环、工具执行、会话持久化、跨 turn 重试或用户交互。
 
@@ -29,4 +29,3 @@ cargo test -p theway-llm-provider --all-features
 ## 文档
 
 - [Provider 流水线与扩展规则](docs/architecture.md)
-- [工作区架构](../../docs/architecture.md)

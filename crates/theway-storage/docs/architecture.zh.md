@@ -4,7 +4,7 @@
 
 ## 依赖位置
 
-`theway-storage` 实现 [`theway-contract`](../../theway-contract/docs/architecture.md) 的记录和异步 trait。它不依赖 [`theway-core`](../../theway-core/docs/architecture.md) 的带类型运行时，也不依赖 [`theway-transport`](../../theway-transport/docs/architecture.md) 的协议类型。
+`theway-storage` 实现 `theway-contract` 的记录和异步 trait。它不依赖 `theway-core` 的带类型运行时，也不依赖 `theway-transport` 的协议类型。
 
 Daemon 和 TUI 决定何时使用本地持久化。本 crate 负责本地文件及其恢复行为，不负责会话执行或客户端协调。
 

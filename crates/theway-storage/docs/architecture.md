@@ -4,7 +4,7 @@ English | [中文](architecture.zh.md)
 
 ## Dependency position
 
-`theway-storage` implements records and asynchronous traits from [`theway-contract`](../../theway-contract/docs/architecture.md). It does not depend on the typed runtime in [`theway-core`](../../theway-core/docs/architecture.md) or on protocol types from [`theway-transport`](../../theway-transport/docs/architecture.md).
+`theway-storage` implements records and asynchronous traits from `theway-contract`. It does not depend on the typed runtime in `theway-core` or on protocol types from `theway-transport`.
 
 The daemon and TUI choose when local persistence is appropriate. This crate owns local files and their recovery behavior, not session execution or client coordination.
 

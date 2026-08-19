@@ -1,6 +1,6 @@
 # AGENTS.md — theway-contract
 
-This file adds crate-specific instructions to the repository rules in [`../../AGENTS.md`](../../AGENTS.md). Read the [crate overview](README.md) and [architecture reference](docs/architecture.md) before changing persisted records or path rules.
+This file contains the complete crate-local modification rules for `theway-contract`. Read the [crate overview](README.md) and [architecture reference](docs/architecture.md) before changing persisted records or path rules.
 
 ## Ownership rules
 
@@ -12,7 +12,7 @@ This file adds crate-specific instructions to the repository rules in [`../../AG
 
 - Treat serde names, enum encodings, optional-field defaults, and `StoredSessionEntry` validation as persisted-format behavior.
 - Keep `config::cwd_hash`, session-directory layout, and session-id validation compatible with existing on-disk names.
-- Put conversion between raw records and core runtime types in [`theway-core`](../theway-core/README.md), and conversion to protocol messages in [`theway-transport`](../theway-transport/README.md).
+- Put conversion between raw records and core runtime types in `theway-core`, and conversion to protocol messages in `theway-transport`.
 
 ## Tests and documentation
 
