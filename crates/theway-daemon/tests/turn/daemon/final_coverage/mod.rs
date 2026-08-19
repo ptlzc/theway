@@ -164,6 +164,7 @@ fn build_host_with(
         panel_status: PanelStatus::default(),
         thinking_summary: None,
         startup: crate::startup_config::StartupConfig::default(),
+        services: crate::orchestration::DaemonServices::new(),
     };
 
     BuiltHost {

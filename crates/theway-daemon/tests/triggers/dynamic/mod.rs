@@ -25,7 +25,7 @@ fn new_trigger_permission_reason_is_value_free() {
     ];
 
     for args in cases {
-        let cls = NewTriggerTool.permission_classification(&args);
+        let cls = NewTriggerTool::new(crate::triggers::global_registry().clone()).permission_classification(&args);
         let PermissionClassification::Prompt { reason } = cls else {
             panic!("NewTrigger must always Prompt, got {cls:?} for args {args}");
         };

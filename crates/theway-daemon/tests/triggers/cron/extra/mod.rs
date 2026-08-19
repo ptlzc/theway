@@ -144,8 +144,8 @@ fn clear_stale_running_state_returns_false_when_no_stale_running() {
 #[test]
 fn global_cron_registry_is_a_stable_singleton() {
     assert!(std::ptr::eq(
-        global_cron_registry(),
-        global_cron_registry()
+        crate::triggers::global_cron_registry(),
+        crate::triggers::global_cron_registry()
     ));
 }
 

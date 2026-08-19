@@ -83,6 +83,7 @@ fn session_tool_set_assembles_local_engine_and_trigger_families() {
         &cell,
         session_id,
         local_exec(),
+        &crate::orchestration::DaemonServices::new(),
     );
 
     let names = names(&tools);

@@ -121,6 +121,8 @@ fn daemon_ctx_with(
         harness: harness.clone(),
         trigger_executor: executor_for(harness),
         storage,
+        dynamic_triggers: crate::triggers::global_registry().clone(),
+        cron: crate::triggers::global_cron_registry().clone(),
     }
 }
 

@@ -106,7 +106,9 @@ async fn home_helloworld_trigger_prints_file_contents() {
     let mut opts = AgentHarnessOptions::new(faux_model(), session.clone());
     opts.on_control_plane_prompt = Some(allow_all_control_plane_hook());
     opts.tools = vec![
-        Arc::new(triggers::NewTriggerTool) as Arc<dyn AgentTool>,
+        Arc::new(triggers::NewTriggerTool::new(
+            triggers::global_registry().clone(),
+        )) as Arc<dyn AgentTool>,
         Arc::new(HomeFileBashTool::new(bash_calls.clone())) as Arc<dyn AgentTool>,
     ];
     opts.stream_fn = Some(dynamic_trigger_stream());

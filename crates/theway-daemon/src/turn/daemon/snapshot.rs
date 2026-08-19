@@ -173,7 +173,7 @@ impl TurnHost {
         let enabled = skills.len().saturating_sub(disabled);
         let source_count = |source| skills.iter().filter(|skill| skill.source == source).count();
 
-        let rules = triggers::global_registry().list();
+        let rules = self.services.dynamic_triggers.list();
         let trigger_enabled = rules.iter().filter(|rule| rule.enabled).count();
         let trigger_rules = rules
             .iter()
@@ -188,7 +188,7 @@ impl TurnHost {
             })
             .collect::<Vec<_>>();
 
-        let cron_jobs = triggers::global_cron_registry().list();
+        let cron_jobs = self.services.cron.list();
         let cron_enabled = cron_jobs.iter().filter(|job| job.enabled).count();
         let cron_job_rows = cron_jobs
             .iter()

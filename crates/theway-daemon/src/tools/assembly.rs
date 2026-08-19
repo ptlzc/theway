@@ -101,6 +101,7 @@ pub fn engine_tools(
     stream_fn: Option<&StreamFn>,
     skill_harness_cell: &SkillHarnessCell,
     session_id: &str,
+    reload_runtime: reload::ReloadRuntimeSlot,
 ) -> Vec<Arc<dyn AgentTool>> {
     let mut tools = Vec::new();
     // DAG tools (session-stamped: dag_* refuse runs owned by another session).
@@ -127,12 +128,11 @@ pub fn engine_tools(
     // sandbox-only builds the direct-FS-write members are left unregistered
     // (see `skill_family`).
     tools.extend(skill_family(skill_harness_cell, base_dir));
-    // Reload (issue #50): the LLM's single entry point for `/reload`
-    // semantics — rescan file commands + skill catalog and bump the runtime
-    // revision so clients re-read local resources. Resolves the process-level
-    // runtime installed by `TurnHost::new` at execute time.
+    // Reload: the LLM's entry point for rescan semantics. The application-owned
+    // runtime slot is bound after TurnHost construction.
     tools.push(Arc::new(reload::ReloadTool::new(
         skill_harness_cell.clone(),
+        reload_runtime,
     )));
     // Memory: same dir as the parent's store. Direct `tokio::fs` writes — gated
     // the same way as the skill writers (issue #64).

@@ -22,7 +22,9 @@ async fn natural_language_prompt_creates_dynamic_trigger_and_runtime_event_execu
     let mut opts = AgentHarnessOptions::new(faux_model(), session.clone());
     opts.on_control_plane_prompt = Some(allow_all_control_plane_hook());
     opts.tools = vec![
-        Arc::new(triggers::NewTriggerTool) as Arc<dyn AgentTool>,
+        Arc::new(triggers::NewTriggerTool::new(
+            triggers::global_registry().clone(),
+        )) as Arc<dyn AgentTool>,
         Arc::new(RecordingBashTool::new(bash_calls.clone())) as Arc<dyn AgentTool>,
     ];
     opts.stream_fn = Some(dynamic_trigger_stream());
@@ -112,8 +114,13 @@ async fn natural_language_scheduled_job_creates_cron_not_dynamic_trigger_chinese
     let mut opts = AgentHarnessOptions::new(faux_model(), session);
     opts.on_control_plane_prompt = Some(allow_all_control_plane_hook());
     opts.tools = vec![
-        Arc::new(triggers::NewCronJobTool::new(None)) as Arc<dyn AgentTool>,
-        Arc::new(triggers::NewTriggerTool) as Arc<dyn AgentTool>,
+        Arc::new(triggers::NewCronJobTool::new(
+            None,
+            triggers::global_cron_registry().clone(),
+        )) as Arc<dyn AgentTool>,
+        Arc::new(triggers::NewTriggerTool::new(
+            triggers::global_registry().clone(),
+        )) as Arc<dyn AgentTool>,
     ];
     opts.stream_fn = Some(dynamic_trigger_stream());
     let before_trigger_action: Option<
@@ -161,8 +168,13 @@ async fn natural_language_scheduled_job_creates_cron_not_dynamic_trigger_english
     let mut opts = AgentHarnessOptions::new(faux_model(), session);
     opts.on_control_plane_prompt = Some(allow_all_control_plane_hook());
     opts.tools = vec![
-        Arc::new(triggers::NewCronJobTool::new(None)) as Arc<dyn AgentTool>,
-        Arc::new(triggers::NewTriggerTool) as Arc<dyn AgentTool>,
+        Arc::new(triggers::NewCronJobTool::new(
+            None,
+            triggers::global_cron_registry().clone(),
+        )) as Arc<dyn AgentTool>,
+        Arc::new(triggers::NewTriggerTool::new(
+            triggers::global_registry().clone(),
+        )) as Arc<dyn AgentTool>,
     ];
     opts.stream_fn = Some(dynamic_trigger_stream());
     let before_trigger_action: Option<

@@ -10,37 +10,48 @@ use super::errors::{
     cron_job_details_for_model, normalize_schedule, preview_redacted, render_cron_jobs_for_tool,
     write_tool_cron_control_audit,
 };
-use super::{HarnessCell, MAX_ACTION_PREVIEW_CHARS, global_cron_registry};
+use super::{CronRegistry, HarnessCell, MAX_ACTION_PREVIEW_CHARS};
 
 pub struct NewCronJobTool {
     harness: Option<HarnessCell>,
+    registry: CronRegistry,
 }
 
-pub struct ListCronJobsTool;
+pub struct ListCronJobsTool {
+    registry: CronRegistry,
+}
 
 pub struct RemoveCronJobTool {
     harness: Option<HarnessCell>,
+    registry: CronRegistry,
 }
 
 pub struct SetCronJobStateTool {
     harness: Option<HarnessCell>,
+    registry: CronRegistry,
 }
 
 impl NewCronJobTool {
-    pub fn new(harness: Option<HarnessCell>) -> Self {
-        Self { harness }
+    pub fn new(harness: Option<HarnessCell>, registry: CronRegistry) -> Self {
+        Self { harness, registry }
+    }
+}
+
+impl ListCronJobsTool {
+    pub fn new(registry: CronRegistry) -> Self {
+        Self { registry }
     }
 }
 
 impl RemoveCronJobTool {
-    pub fn new(harness: Option<HarnessCell>) -> Self {
-        Self { harness }
+    pub fn new(harness: Option<HarnessCell>, registry: CronRegistry) -> Self {
+        Self { harness, registry }
     }
 }
 
 impl SetCronJobStateTool {
-    pub fn new(harness: Option<HarnessCell>) -> Self {
-        Self { harness }
+    pub fn new(harness: Option<HarnessCell>, registry: CronRegistry) -> Self {
+        Self { harness, registry }
     }
 }
 
@@ -78,7 +89,8 @@ impl AgentTool for NewCronJobTool {
             .get("stateful")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        let job = global_cron_registry()
+        let job = self
+            .registry
             .add_job_full(&schedule, action, stateful)
             .map_err(|e| AgentToolError::Message(e.to_string()))?;
 
@@ -127,8 +139,9 @@ impl AgentTool for ListCronJobsTool {
         _cancel: CancellationToken,
         _on_update: Option<AgentToolUpdate>,
     ) -> Result<AgentToolResult, AgentToolError> {
-        let jobs = global_cron_registry().list();
-        let storage_path = global_cron_registry()
+        let jobs = self.registry.list();
+        let storage_path = self
+            .registry
             .storage_path()
             .map(|path| path.display().to_string());
         Ok(AgentToolResult {
@@ -169,10 +182,7 @@ impl AgentTool for RemoveCronJobTool {
             .get("id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| AgentToolError::from("missing required arg: id"))?;
-        let job = global_cron_registry()
-            .list()
-            .into_iter()
-            .find(|job| job.id == id);
+        let job = self.registry.list().into_iter().find(|job| job.id == id);
         let Some(job) = job else {
             return Err(AgentToolError::Message(format!(
                 "no cron job with id '{id}'"
@@ -201,7 +211,8 @@ impl AgentTool for RemoveCronJobTool {
             });
         }
 
-        let removed = global_cron_registry()
+        let removed = self
+            .registry
             .remove_job(id)
             .map_err(|e| AgentToolError::Message(e.to_string()))?;
         let Some(job) = removed else {
@@ -265,11 +276,9 @@ impl AgentTool for SetCronJobStateTool {
                     .into(),
             ));
         }
-        let before = global_cron_registry()
-            .list()
-            .into_iter()
-            .find(|job| job.id == id);
-        let updated = global_cron_registry()
+        let before = self.registry.list().into_iter().find(|job| job.id == id);
+        let updated = self
+            .registry
             .set_job_enabled(id, enabled)
             .map_err(|e| AgentToolError::Message(e.to_string()))?;
         let Some(job) = updated else {

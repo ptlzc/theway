@@ -4,10 +4,8 @@
 //! re-read local resources (the TUI re-loads `~/.theway/theme.toml`).
 //!
 //! Shares the `/reload` command's code path (`commands::dispatch("/reload")`
-//! → `reload_everything`); no logic is duplicated. The process-level
-//! [`ReloadRuntime`] (registry / cwd / trigger executor / revision counter)
-//! is installed by `TurnHost::new` — tool sets are rebuilt per harness, so
-//! the tool resolves it at execute time instead of construction time.
+//! → `reload_everything`); no logic is duplicated. The orchestration layer owns
+//! a [`ReloadRuntimeSlot`] and injects it into every session tool set.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -15,7 +13,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
-use parking_lot::Mutex;
+use parking_lot::RwLock;
 use serde_json::{Value, json};
 use theway_core::{AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate, ToolExecutionMode};
 use theway_llm_provider::{Tool, UserContentBlock};
@@ -28,52 +26,72 @@ use crate::trigger_engine::execution::TriggerExecutor;
 /// Process-level state the `reload` tool reaches at execute time: the slash
 /// command registry (file-command rescan target), the daemon cwd (scan root),
 /// the trigger executor (shared `/reload` dispatch context) and the revision
-/// counter published in sidebar snapshots. Installed once per daemon by
-/// `TurnHost::new`; tests pin their own runtime per tool.
+/// counter published in sidebar snapshots.
 pub struct ReloadRuntime {
     pub registry: Arc<Registry>,
     pub cwd: PathBuf,
-    pub trigger_executor: Arc<TriggerExecutor>,
+    trigger_executor: RwLock<Arc<TriggerExecutor>>,
     pub revision: Arc<AtomicU64>,
 }
 
-/// The runtime most recently installed by `TurnHost` (or a test). Last write
-/// wins — one daemon process has one host.
-static CURRENT_RUNTIME: Mutex<Option<Arc<ReloadRuntime>>> = Mutex::new(None);
+impl ReloadRuntime {
+    pub fn new(
+        registry: Arc<Registry>,
+        cwd: PathBuf,
+        trigger_executor: Arc<TriggerExecutor>,
+        revision: Arc<AtomicU64>,
+    ) -> Self {
+        Self {
+            registry,
+            cwd,
+            trigger_executor: RwLock::new(trigger_executor),
+            revision,
+        }
+    }
 
-/// Install the process runtime and return its handle.
-pub fn install_runtime(runtime: ReloadRuntime) -> Arc<ReloadRuntime> {
-    let runtime = Arc::new(runtime);
-    *CURRENT_RUNTIME.lock() = Some(runtime.clone());
-    runtime
+    pub fn set_trigger_executor(&self, trigger_executor: Arc<TriggerExecutor>) {
+        *self.trigger_executor.write() = trigger_executor;
+    }
+
+    pub fn trigger_executor(&self) -> Arc<TriggerExecutor> {
+        self.trigger_executor.read().clone()
+    }
 }
 
-fn current_runtime() -> Option<Arc<ReloadRuntime>> {
-    CURRENT_RUNTIME.lock().clone()
+/// Late-bound runtime reference that breaks the harness/tool construction cycle without
+/// introducing process-global state. Each daemon application owns one slot.
+#[derive(Clone, Default)]
+pub struct ReloadRuntimeSlot {
+    current: Arc<RwLock<Option<Arc<ReloadRuntime>>>>,
+}
+
+impl ReloadRuntimeSlot {
+    pub fn install(&self, runtime: ReloadRuntime) -> Arc<ReloadRuntime> {
+        let runtime = Arc::new(runtime);
+        *self.current.write() = Some(runtime.clone());
+        runtime
+    }
+
+    pub fn current(&self) -> Option<Arc<ReloadRuntime>> {
+        self.current.read().clone()
+    }
 }
 
 pub struct ReloadTool {
     harness: SkillHarnessCell,
-    /// Explicit runtime pin (tests); `None` (production) resolves the runtime
-    /// installed by `TurnHost::new` at execute time.
-    runtime: Option<Arc<ReloadRuntime>>,
+    runtime: ReloadRuntimeSlot,
 }
 
 impl ReloadTool {
-    pub fn new(harness: SkillHarnessCell) -> Self {
-        Self {
-            harness,
-            runtime: None,
-        }
+    pub fn new(harness: SkillHarnessCell, runtime: ReloadRuntimeSlot) -> Self {
+        Self { harness, runtime }
     }
 
-    /// Pin an explicit runtime so execute-time state is hermetic instead of
-    /// reaching the process-global installed by `TurnHost::new`.
+    /// Construct a tool around one explicit runtime.
     pub fn with_runtime(harness: SkillHarnessCell, runtime: Arc<ReloadRuntime>) -> Self {
-        Self {
-            harness,
-            runtime: Some(runtime),
-        }
+        let slot = ReloadRuntimeSlot::default();
+        *slot.current.write() = Some(runtime);
+        Self::new(harness, slot)
     }
 }
 
@@ -116,24 +134,21 @@ impl AgentTool for ReloadTool {
         let harness = self.harness.get().ok_or_else(|| {
             AgentToolError::Message("reload: harness cell not initialized".into())
         })?;
-        let runtime = match &self.runtime {
-            Some(runtime) => runtime.clone(),
-            None => current_runtime().ok_or_else(|| {
-                AgentToolError::Message(
-                    "reload: runtime not installed (the tool is wired only inside the daemon)"
-                        .into(),
-                )
-            })?,
-        };
+        let runtime = self.runtime.current().ok_or_else(|| {
+            AgentToolError::Message(
+                "reload: runtime not installed (the tool is wired only inside the daemon)".into(),
+            )
+        })?;
 
         // One code path with the `/reload` command: `dispatch` special-cases
         // `reload` → `reload_everything` (file-command rescan + skill-catalog
         // hot reload). The reload path never reads session_id / log_path /
         // tool_count, so dummies are safe there; cwd, harness and trigger
         // executor are the live daemon values.
+        let trigger_executor = runtime.trigger_executor();
         let ctx = CommandCtx {
             harness,
-            trigger_executor: &runtime.trigger_executor,
+            trigger_executor: &trigger_executor,
             session_id: "",
             log_path: None,
             tool_count: 0,

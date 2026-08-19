@@ -31,17 +31,17 @@ fn block_text(block: &UserContentBlock) -> String {
 
 fn add_job(tag: &str) -> CronJob {
     let action = unique_action(tag);
-    global_cron_registry()
+    crate::triggers::global_cron_registry()
         .add_job_full("*/10 * * * *", &action, false)
         .unwrap_or_else(|e| panic!("add_job_full failed: {e}"))
 }
 
 #[test]
 fn tool_definitions_labels_and_modes_are_stable() {
-    let new = NewCronJobTool::new(None);
-    let list = ListCronJobsTool;
-    let remove = RemoveCronJobTool::new(None);
-    let state = SetCronJobStateTool::new(None);
+    let new = NewCronJobTool::new(None, crate::triggers::global_cron_registry().clone());
+    let list = ListCronJobsTool::new(crate::triggers::global_cron_registry().clone());
+    let remove = RemoveCronJobTool::new(None, crate::triggers::global_cron_registry().clone());
+    let state = SetCronJobStateTool::new(None, crate::triggers::global_cron_registry().clone());
 
     assert_eq!(new.definition().name, "new_cron_job");
     assert_eq!(new.label(), "new_cron_job");
@@ -60,7 +60,7 @@ fn tool_definitions_labels_and_modes_are_stable() {
 
 #[tokio::test]
 async fn new_cron_job_execute_validates_required_args_and_schedule() {
-    let tool = NewCronJobTool::new(None);
+    let tool = NewCronJobTool::new(None, crate::triggers::global_cron_registry().clone());
 
     let missing_schedule = execute(&tool, json!({}))
         .await
@@ -92,7 +92,7 @@ async fn new_cron_job_execute_validates_required_args_and_schedule() {
 
 #[tokio::test]
 async fn new_cron_job_execute_creates_session_scoped_job() {
-    let tool = NewCronJobTool::new(None);
+    let tool = NewCronJobTool::new(None, crate::triggers::global_cron_registry().clone());
     let action = unique_action("create");
 
     let result = execute(
@@ -106,7 +106,7 @@ async fn new_cron_job_execute_creates_session_scoped_job() {
     .await
     .expect("create should succeed");
 
-    let job = global_cron_registry()
+    let job = crate::triggers::global_cron_registry()
         .list()
         .into_iter()
         .find(|job| job.action == action)
@@ -126,14 +126,14 @@ async fn new_cron_job_execute_creates_session_scoped_job() {
         result.content
     );
 
-    global_cron_registry().remove_job(&job.id).unwrap();
+    crate::triggers::global_cron_registry().remove_job(&job.id).unwrap();
 }
 
 #[tokio::test]
 async fn list_cron_jobs_execute_renders_registry() {
     let job = add_job("list");
 
-    let result = execute(&ListCronJobsTool, json!({}))
+    let result = execute(&ListCronJobsTool::new(crate::triggers::global_cron_registry().clone()), json!({}))
         .await
         .expect("list should succeed");
 
@@ -145,12 +145,12 @@ async fn list_cron_jobs_execute_renders_registry() {
     assert!(content.contains("session cron jobs:"), "{content}");
     assert!(content.contains(&job.id), "{content}");
 
-    global_cron_registry().remove_job(&job.id).unwrap();
+    crate::triggers::global_cron_registry().remove_job(&job.id).unwrap();
 }
 
 #[tokio::test]
 async fn remove_cron_job_execute_validates_id_and_confirmation() {
-    let tool = RemoveCronJobTool::new(None);
+    let tool = RemoveCronJobTool::new(None, crate::triggers::global_cron_registry().clone());
 
     let missing = execute(&tool, json!({}))
         .await
@@ -186,7 +186,7 @@ async fn remove_cron_job_execute_validates_id_and_confirmation() {
     assert_eq!(removed.details["removed_count"], 1);
     assert_eq!(removed.details["id"], job.id);
     assert!(
-        global_cron_registry()
+        crate::triggers::global_cron_registry()
             .list()
             .iter()
             .all(|existing| existing.id != job.id),
@@ -196,7 +196,7 @@ async fn remove_cron_job_execute_validates_id_and_confirmation() {
 
 #[tokio::test]
 async fn set_cron_job_state_execute_validates_args_and_refuses_enable() {
-    let tool = SetCronJobStateTool::new(None);
+    let tool = SetCronJobStateTool::new(None, crate::triggers::global_cron_registry().clone());
 
     let missing_id = execute(&tool, json!({ "enabled": false }))
         .await
@@ -236,7 +236,7 @@ async fn set_cron_job_state_execute_validates_args_and_refuses_enable() {
 
 #[tokio::test]
 async fn set_cron_job_state_execute_disables_job() {
-    let tool = SetCronJobStateTool::new(None);
+    let tool = SetCronJobStateTool::new(None, crate::triggers::global_cron_registry().clone());
     let job = add_job("disable");
 
     let result = execute(&tool, json!({ "id": job.id, "enabled": false }))
@@ -252,10 +252,10 @@ async fn set_cron_job_state_execute_disables_job() {
         result.content
     );
 
-    let jobs = global_cron_registry().list();
+    let jobs = crate::triggers::global_cron_registry().list();
     let updated = jobs.iter().find(|j| j.id == job.id).expect("job exists");
     assert!(!updated.enabled);
     assert!(updated.running_trace_id.is_none());
 
-    global_cron_registry().remove_job(&job.id).unwrap();
+    crate::triggers::global_cron_registry().remove_job(&job.id).unwrap();
 }

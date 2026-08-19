@@ -8,15 +8,13 @@ impl TurnHost {
             &config.home,
         ));
         let completer = SlashCompleter::from_commands(slash_commands(&registry));
-        // Install the process-level reload runtime (issue #50): the `reload`
-        // tool reaches the registry / cwd / trigger executor at execute time
-        // and bumps the revision this host publishes in sidebar snapshots.
-        let reload_runtime = reload::install_runtime(ReloadRuntime {
-            registry: registry.clone(),
-            cwd: config.cwd.clone(),
-            trigger_executor: config.trigger_executor.clone(),
-            revision: Arc::new(AtomicU64::new(0)),
-        });
+        // Bind the application-owned reload slot after the initial session runtime exists.
+        let reload_runtime = config.services.reload.install(ReloadRuntime::new(
+            registry.clone(),
+            config.cwd.clone(),
+            config.trigger_executor.clone(),
+            Arc::new(AtomicU64::new(0)),
+        ));
         // Shared wire path context (issue #68): home/base/work_dir are fixed
         // at startup; `skills_dirs` starts as the CLI-supplied extras and is
         // the only part mutated at runtime (`SetSkillDirs`).
@@ -70,6 +68,7 @@ impl TurnHost {
             kernel: ReplKernel::new(config.harness, config.trigger_executor, config.retry),
             registry,
             reload_runtime,
+            services: config.services,
             completer,
             cwd: config.cwd,
             paths: config.paths,

@@ -91,6 +91,8 @@ impl TurnHost {
             .with_context(|| format!("build runtime for session {id}"))?;
         self.session_id = runtime.session_id.clone();
         self.kernel.replace_runtime(runtime);
+        self.reload_runtime
+            .set_trigger_executor(self.kernel.trigger_executor().clone());
         self.clear_feed();
         self.system_line(format!("switched to session {}", self.session_id));
         self.busy = false;

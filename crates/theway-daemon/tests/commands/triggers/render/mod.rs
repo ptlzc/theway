@@ -103,7 +103,8 @@ fn render_triggers_status_renders_empty_runtime() {
         },
         running: vec![],
     };
-    let lines = render_triggers_status(&snapshot);
+    let registry = crate::triggers::dynamic::DynamicTriggerRegistry::default();
+    let lines = render_triggers_status(&snapshot, &registry);
     let text = lines.join("\n");
     assert!(text.contains("dynamic rules: 0 total"), "{text}");
     assert!(text.contains("engine: accepted=0"), "{text}");

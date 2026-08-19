@@ -1,7 +1,7 @@
 //! Slash-command registry — daemon layer.
 //!
-//! The command framework (Registry / SlashCommand / CommandOutcome / CommandCtx, console
-//! sink, `parse`, pure helpers) lives in `theway_transport::commands` (the shared
+//! The command framework (Registry / SlashCommand / CommandOutcome / CommandCtx,
+//! `parse`, pure helpers) lives in `theway_transport::commands` (the shared
 //! client-contract zone); command implementations live with their owners — the client-local
 //! set (quit/clear/help + interactive login) in `theway-tui`, the runtime set here. This
 //! module keeps the daemon-side surface:
@@ -21,6 +21,7 @@
 //!   generic context (extras = [`DaemonCtx`]) and routes `/help` + skill shortcuts.
 
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -40,8 +41,9 @@ use tokio_util::sync::CancellationToken;
 // crate, where this module is private and some re-exports have no in-tree user.
 #[allow(unused_imports)]
 pub use theway_transport::auth::{model_credential_hint, save_api_key};
-/// The shared framework's console sink is the single process-wide output sink: daemon
-//  commands route through it too (see the `cprintln!` macro below).
+// Compatibility surface for path-bridged tests. Production daemon commands use the
+// instance-owned `CommandOutput` below.
+#[cfg(test)]
 pub use theway_transport::commands::console;
 #[allow(unused_imports)]
 pub use theway_transport::commands::{
@@ -49,12 +51,65 @@ pub use theway_transport::commands::{
     parse_model_spec,
 };
 
-/// Drop-in replacement for `println!` inside this module: same call syntax, but the formatted
-/// line is routed through the (shared-framework, process-wide) [`console::emit_line`] instead of
-/// straight to stdout. Defined before the command submodules so they see it.
+/// One daemon instance's slash-command output destination.
+#[derive(Clone)]
+pub struct CommandOutput {
+    emit: Arc<dyn Fn(String) + Send + Sync>,
+}
+
+impl CommandOutput {
+    pub fn new(emit: impl Fn(String) + Send + Sync + 'static) -> Self {
+        Self {
+            emit: Arc::new(emit),
+        }
+    }
+
+    pub fn stdout() -> Self {
+        Self::new(|line| println!("{line}"))
+    }
+
+    fn emit_line(&self, line: String) {
+        (self.emit)(line);
+    }
+
+    async fn scope<F>(&self, future: F) -> F::Output
+    where
+        F: Future,
+    {
+        ACTIVE_COMMAND_OUTPUT.scope(self.clone(), future).await
+    }
+}
+
+impl Default for CommandOutput {
+    fn default() -> Self {
+        #[cfg(test)]
+        {
+            Self::new(console::emit_line)
+        }
+        #[cfg(not(test))]
+        Self::stdout()
+    }
+}
+
+tokio::task_local! {
+    static ACTIVE_COMMAND_OUTPUT: CommandOutput;
+}
+
+fn emit_command_line(line: String) {
+    let fallback = line.clone();
+    if ACTIVE_COMMAND_OUTPUT
+        .try_with(|output| output.emit_line(line))
+        .is_err()
+    {
+        CommandOutput::default().emit_line(fallback);
+    }
+}
+
+/// Drop-in replacement for `println!` inside this module. The dispatcher scopes it to the
+/// output destination owned by the current command registry.
 macro_rules! cprintln {
-    () => { $crate::commands::console::emit_line(String::new()) };
-    ($($arg:tt)*) => { $crate::commands::console::emit_line(std::format!($($arg)*)) };
+    () => { $crate::commands::emit_command_line(String::new()) };
+    ($($arg:tt)*) => { $crate::commands::emit_command_line(std::format!($($arg)*)) };
 }
 
 pub mod auth;
@@ -138,6 +193,8 @@ pub struct DaemonCtx {
     /// Runtime storage seam (issue #86): commands open session repos / read
     /// sidecars through this instead of calling `session::open_repo` directly.
     pub storage: Arc<dyn RuntimeStorage>,
+    pub dynamic_triggers: crate::triggers::dynamic::DynamicTriggerRegistry,
+    pub cron: crate::triggers::cron::CronRegistry,
 }
 
 /// Slash-command registry: the shared framework's generic registry parameterized by the daemon's
@@ -158,6 +215,27 @@ pub struct Registry {
     /// and handed to command implementations through [`DaemonCtx`]. Defaults
     /// to [`local_runtime_storage`] for tests and embedded hosts.
     storage: Arc<dyn RuntimeStorage>,
+    output: CommandOutput,
+    dynamic_triggers: crate::triggers::dynamic::DynamicTriggerRegistry,
+    cron: crate::triggers::cron::CronRegistry,
+}
+
+fn default_dynamic_trigger_registry() -> crate::triggers::dynamic::DynamicTriggerRegistry {
+    #[cfg(test)]
+    {
+        crate::triggers::global_registry().clone()
+    }
+    #[cfg(not(test))]
+    crate::triggers::dynamic::DynamicTriggerRegistry::new()
+}
+
+fn default_cron_registry() -> crate::triggers::cron::CronRegistry {
+    #[cfg(test)]
+    {
+        crate::triggers::global_cron_registry().clone()
+    }
+    #[cfg(not(test))]
+    crate::triggers::cron::CronRegistry::new()
 }
 
 impl Registry {
@@ -170,6 +248,9 @@ impl Registry {
             file_commands: std::sync::RwLock::new(Vec::new()),
             user_home: std::path::PathBuf::new(),
             storage: local_runtime_storage(),
+            output: CommandOutput::default(),
+            dynamic_triggers: default_dynamic_trigger_registry(),
+            cron: default_cron_registry(),
         }
     }
 
@@ -182,6 +263,9 @@ impl Registry {
             file_commands: std::sync::RwLock::new(Vec::new()),
             user_home: std::path::PathBuf::new(),
             storage: local_runtime_storage(),
+            output: CommandOutput::default(),
+            dynamic_triggers: default_dynamic_trigger_registry(),
+            cron: default_cron_registry(),
         };
         r.register(Arc::new(auth::LoginCommand));
         r.register(Arc::new(auth::LogoutCommand));
@@ -241,6 +325,22 @@ impl Registry {
     #[must_use]
     pub fn with_storage(mut self, storage: Arc<dyn RuntimeStorage>) -> Self {
         self.storage = storage;
+        self
+    }
+
+    #[must_use]
+    pub fn with_output(mut self, output: CommandOutput) -> Self {
+        self.output = output;
+        self
+    }
+
+    pub fn with_automations(
+        mut self,
+        dynamic_triggers: crate::triggers::dynamic::DynamicTriggerRegistry,
+        cron: crate::triggers::cron::CronRegistry,
+    ) -> Self {
+        self.dynamic_triggers = dynamic_triggers;
+        self.cron = cron;
         self
     }
 
@@ -384,6 +484,17 @@ fn run_skill_shortcut(
 }
 
 pub async fn dispatch(input: &str, registry: &Registry, ctx: &CommandCtx<'_>) -> CommandOutcome {
+    registry
+        .output
+        .scope(dispatch_with_output(input, registry, ctx))
+        .await
+}
+
+async fn dispatch_with_output(
+    input: &str,
+    registry: &Registry,
+    ctx: &CommandCtx<'_>,
+) -> CommandOutcome {
     let (name, argv) = match parse(input) {
         Some(parts) => parts,
         None => return CommandOutcome::Error("not a slash command".into()),
@@ -430,6 +541,8 @@ pub async fn dispatch(input: &str, registry: &Registry, ctx: &CommandCtx<'_>) ->
         harness: ctx.harness.clone(),
         trigger_executor: ctx.trigger_executor.clone(),
         storage: registry.storage.clone(),
+        dynamic_triggers: registry.dynamic_triggers.clone(),
+        cron: registry.cron.clone(),
     };
     let sdk_ctx = theway_transport::commands::CommandCtx {
         session_id: ctx.session_id,

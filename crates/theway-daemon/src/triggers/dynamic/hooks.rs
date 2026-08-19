@@ -24,7 +24,7 @@ use tokio::time::{Duration, MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use super::{DynamicTriggerRegistry, DynamicTriggerRule, dynamic_trigger_poll_interval_secs};
+use super::{DynamicTriggerRegistry, DynamicTriggerRule};
 
 pub struct DynamicTriggerCheckHook {
     registry: DynamicTriggerRegistry,
@@ -34,10 +34,8 @@ pub struct DynamicTriggerCheckHook {
 
 impl DynamicTriggerCheckHook {
     pub fn new(registry: DynamicTriggerRegistry) -> Self {
-        Self::with_interval(
-            registry,
-            Duration::from_secs(dynamic_trigger_poll_interval_secs()),
-        )
+        let interval = Duration::from_secs(registry.poll_interval_secs());
+        Self::with_interval(registry, interval)
     }
 
     pub fn with_interval(registry: DynamicTriggerRegistry, interval: Duration) -> Self {

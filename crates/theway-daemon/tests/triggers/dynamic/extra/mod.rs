@@ -98,8 +98,8 @@ fn poll_interval_defaults_and_clamps_to_one_second() {
 #[test]
 fn global_registry_is_a_stable_singleton() {
     assert!(std::ptr::eq(
-        global_registry(),
-        global_registry()
+        crate::triggers::global_registry(),
+        crate::triggers::global_registry()
     ));
 }
 

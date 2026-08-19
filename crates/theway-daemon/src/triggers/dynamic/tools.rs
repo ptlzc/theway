@@ -10,15 +10,38 @@ use theway_core::{
 use theway_llm_provider::{Tool, UserContentBlock};
 use tokio_util::sync::CancellationToken;
 
-use super::{DynamicTriggerRule, global_registry};
+use super::{DynamicTriggerRegistry, DynamicTriggerRule};
 
-pub struct NewTriggerTool;
+pub struct NewTriggerTool {
+    registry: DynamicTriggerRegistry,
+}
 
-pub struct ListTriggersTool;
+pub struct ListTriggersTool {
+    registry: DynamicTriggerRegistry,
+}
 
-pub struct RemoveTriggerTool;
+pub struct RemoveTriggerTool {
+    registry: DynamicTriggerRegistry,
+}
 
-pub struct SetTriggerStateTool;
+pub struct SetTriggerStateTool {
+    registry: DynamicTriggerRegistry,
+}
+
+macro_rules! registry_constructor {
+    ($tool:ident) => {
+        impl $tool {
+            pub fn new(registry: DynamicTriggerRegistry) -> Self {
+                Self { registry }
+            }
+        }
+    };
+}
+
+registry_constructor!(NewTriggerTool);
+registry_constructor!(ListTriggersTool);
+registry_constructor!(RemoveTriggerTool);
+registry_constructor!(SetTriggerStateTool);
 
 #[async_trait]
 impl AgentTool for NewTriggerTool {
@@ -95,13 +118,14 @@ impl AgentTool for NewTriggerTool {
         }
         let rule = match (condition, action) {
             (Some(condition), Some(action)) => {
-                global_registry().add_rule_with_flags(condition, action, fire_once, promote_to_chat)
+                self.registry
+                    .add_rule_with_flags(condition, action, fire_once, promote_to_chat)
             }
             _ => {
                 let spec = params.get("spec").and_then(|v| v.as_str()).ok_or_else(|| {
                     AgentToolError::from("missing required args: provide condition and action")
                 })?;
-                global_registry().add_from_spec(spec)
+                self.registry.add_from_spec(spec)
             }
         }
         .map_err(|e| AgentToolError::Message(e.to_string()))?;
@@ -145,8 +169,9 @@ impl AgentTool for ListTriggersTool {
         _cancel: CancellationToken,
         _on_update: Option<AgentToolUpdate>,
     ) -> Result<AgentToolResult, AgentToolError> {
-        let rules = global_registry().list();
-        let storage_path = global_registry()
+        let rules = self.registry.list();
+        let storage_path = self
+            .registry
             .storage_path()
             .map(|path| path.display().to_string());
         Ok(AgentToolResult {
@@ -204,7 +229,8 @@ impl AgentTool for RemoveTriggerTool {
         _on_update: Option<AgentToolUpdate>,
     ) -> Result<AgentToolResult, AgentToolError> {
         if params.get("all").and_then(|v| v.as_bool()) == Some(true) {
-            let count = global_registry()
+            let count = self
+                .registry
                 .clear_rules()
                 .map_err(|e| AgentToolError::Message(e.to_string()))?;
             return Ok(AgentToolResult {
@@ -220,7 +246,8 @@ impl AgentTool for RemoveTriggerTool {
             .get("id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| AgentToolError::from("missing required arg: id"))?;
-        let removed = global_registry()
+        let removed = self
+            .registry
             .remove_rule(id)
             .map_err(|e| AgentToolError::Message(e.to_string()))?;
         let Some(rule) = removed else {
@@ -294,7 +321,8 @@ impl AgentTool for SetTriggerStateTool {
             .get("enabled")
             .and_then(|v| v.as_bool())
             .ok_or_else(|| AgentToolError::from("missing required arg: enabled"))?;
-        let updated = global_registry()
+        let updated = self
+            .registry
             .set_rule_enabled(id, enabled)
             .map_err(|e| AgentToolError::Message(e.to_string()))?;
         let Some(rule) = updated else {

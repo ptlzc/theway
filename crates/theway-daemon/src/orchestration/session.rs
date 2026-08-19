@@ -5,6 +5,7 @@ use std::sync::{Arc, OnceLock};
 use crate::SqliteSessionRepo;
 use crate::hook_executors::daemon_executors;
 use crate::hooks;
+use crate::orchestration::DaemonServices;
 use crate::runtime_storage::RuntimeStorage;
 use crate::trigger_engine::notification_hook::DynNotificationHook;
 use crate::{agent_specs, tools, triggers};
@@ -67,8 +68,7 @@ pub struct SessionRuntimeBuilder {
     pub mcp_tools: Vec<Arc<dyn theway_core::AgentTool>>,
     /// MCP notification receivers are process-scoped and may be attached only once.
     pub mcp_notification_hooks: parking_lot::Mutex<Vec<Arc<triggers::McpNotificationHook>>>,
-    pub dynamic_trigger_registry: triggers::dynamic::DynamicTriggerRegistry,
-    pub cron_registry: triggers::cron::CronRegistry,
+    pub services: DaemonServices,
     pub reload_skills_fn: theway_core::ReloadSkillsFn,
     pub before_tool_call: Option<theway_core::BeforeToolCallHook>,
     pub before_trigger_action: crate::trigger_engine::execution::BeforeTriggerActionHook,
@@ -172,6 +172,7 @@ impl SessionRuntimeBuilder {
             &skill_harness_cell,
             &session_id,
             self.executor.clone(),
+            &self.services,
         );
         tools.extend(self.mcp_tools.iter().cloned());
         let tool_names = tools
@@ -242,8 +243,8 @@ impl SessionRuntimeBuilder {
         register_notification_hooks(
             &trigger_executor,
             &mcp_notification_hooks,
-            &self.cron_registry,
-            &self.dynamic_trigger_registry,
+            &self.services.cron,
+            &self.services.dynamic_triggers,
         );
         // Each build owns its cells, so `set` cannot fail; ignore the Result anyway.
         let _ = skill_harness_cell.set(harness.clone());
@@ -268,10 +269,10 @@ impl SessionRuntimeBuilder {
             self.debug,
         ));
         let _ = trigger_executor.subscribe(triggers::fire_once_trigger_listener(
-            self.dynamic_trigger_registry.clone(),
+            self.services.dynamic_triggers.clone(),
         ));
         let _ = trigger_executor.subscribe(triggers::cron_trigger_listener(
-            self.cron_registry.clone(),
+            self.services.cron.clone(),
             inbox::default_inbox_path(),
         ));
         // CLI hooks are session-scoped (they embed the session id) — reload per switch.

@@ -21,7 +21,9 @@ async fn dispatch_new_trigger_registers_dynamic_rule() {
     let storage = Arc::new(MemorySessionStorage::new());
     let session = Session::new(storage as Arc<dyn SessionStorage>);
     let mut opts = AgentHarnessOptions::new(faux_model(), session.clone());
-    opts.tools = vec![Arc::new(triggers::NewTriggerTool) as Arc<dyn AgentTool>];
+    opts.tools = vec![Arc::new(triggers::NewTriggerTool::new(
+        triggers::global_registry().clone(),
+    )) as Arc<dyn AgentTool>];
     opts.stream_fn = Some(new_trigger_extraction_stream());
     // Issue #110 sub-PR 3: NewTriggerTool::permission_classification returns
     // Prompt — without an explicit hook the harness defaults to fail-closed
@@ -82,7 +84,10 @@ async fn dispatch_new_trigger_registers_dynamic_rule() {
     assert_eq!(rules.len(), 1);
     assert_eq!(rules[0].condition, condition);
     assert_eq!(rules[0].action, action);
-    let status_lines = commands::render_triggers_status(&executor.notification_status_snapshot());
+    let status_lines = commands::render_triggers_status(
+        &executor.notification_status_snapshot(),
+        triggers::global_registry(),
+    );
     assert!(
         status_lines
             .iter()

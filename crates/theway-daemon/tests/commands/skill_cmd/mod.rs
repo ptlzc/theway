@@ -105,6 +105,8 @@ async fn skill_command_requires_exactly_one_name() {
         harness: harness.clone(),
         trigger_executor: executor.clone(),
         storage: local_runtime_storage(),
+        dynamic_triggers: crate::triggers::global_registry().clone(),
+        cron: crate::triggers::global_cron_registry().clone(),
     };
     let ctx = command_ctx(&extra, tmp.path());
 
@@ -122,6 +124,8 @@ async fn skill_command_attaches_loaded_skill() {
         harness: harness.clone(),
         trigger_executor: executor.clone(),
         storage: local_runtime_storage(),
+        dynamic_triggers: crate::triggers::global_registry().clone(),
+        cron: crate::triggers::global_cron_registry().clone(),
     };
     let ctx = command_ctx(&extra, tmp.path());
 
@@ -136,6 +140,8 @@ async fn skill_command_rejects_disabled_skill() {
         harness: harness.clone(),
         trigger_executor: executor.clone(),
         storage: local_runtime_storage(),
+        dynamic_triggers: crate::triggers::global_registry().clone(),
+        cron: crate::triggers::global_cron_registry().clone(),
     };
     let ctx = command_ctx(&extra, tmp.path());
 
@@ -154,6 +160,8 @@ async fn skill_command_suggests_prefix_and_contains_matches() {
         harness: harness.clone(),
         trigger_executor: executor.clone(),
         storage: local_runtime_storage(),
+        dynamic_triggers: crate::triggers::global_registry().clone(),
+        cron: crate::triggers::global_cron_registry().clone(),
     };
     let ctx = command_ctx(&extra, tmp.path());
 
@@ -171,6 +179,8 @@ async fn skill_command_unknown_name_has_no_hint() {
         harness: harness.clone(),
         trigger_executor: executor.clone(),
         storage: local_runtime_storage(),
+        dynamic_triggers: crate::triggers::global_registry().clone(),
+        cron: crate::triggers::global_cron_registry().clone(),
     };
     let ctx = command_ctx(&extra, tmp.path());
 

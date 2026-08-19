@@ -110,6 +110,7 @@ async fn host_with_input(input: Vec<InputModality>) -> (TurnHost, TempDir, TempD
         panel_status: PanelStatus::default(),
         thinking_summary: None,
         startup: crate::startup_config::StartupConfig::default(),
+        services: crate::orchestration::DaemonServices::new(),
     };
 
     (TurnHost::new(config), scratch, repo_dir)

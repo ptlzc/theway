@@ -49,10 +49,13 @@ fn preview_cron_text(input: &str, max_chars: usize) -> String {
     out
 }
 
-pub(crate) fn render_triggers_status(snapshot: &NotificationStatusSnapshot) -> Vec<String> {
+pub(crate) fn render_triggers_status(
+    snapshot: &NotificationStatusSnapshot,
+    registry: &crate::triggers::dynamic::DynamicTriggerRegistry,
+) -> Vec<String> {
     let mut lines = Vec::new();
     let runtime = snapshot.runtime;
-    let dynamic_rules = crate::triggers::global_registry().list();
+    let dynamic_rules = registry.list();
     let enabled_count = dynamic_rules.iter().filter(|rule| rule.enabled).count();
     let disabled_count = dynamic_rules.len().saturating_sub(enabled_count);
     let fire_once_count = dynamic_rules.iter().filter(|rule| rule.fire_once).count();
@@ -84,13 +87,13 @@ pub(crate) fn render_triggers_status(snapshot: &NotificationStatusSnapshot) -> V
     lines.push(format!(
         "  local dynamic checker: {} registered, polls every {}s while enabled rules exist",
         dynamic_checker_count,
-        crate::triggers::dynamic::dynamic_trigger_poll_interval_secs()
+        registry.poll_interval_secs()
     ));
     lines.push(format!(
         "  push trigger sources: {} configured source(s) feed server-pushed events into the same trigger runtime",
         notification_hook_count
     ));
-    let storage = crate::triggers::global_registry()
+    let storage = registry
         .storage_path()
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| "memory".into());

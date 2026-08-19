@@ -85,12 +85,12 @@ fn runtime_for(
         None,
         None,
     ));
-    Arc::new(ReloadRuntime {
+    Arc::new(ReloadRuntime::new(
         registry,
-        cwd: cwd.to_path_buf(),
+        cwd.to_path_buf(),
         trigger_executor,
-        revision: Arc::new(AtomicU64::new(0)),
-    })
+        Arc::new(AtomicU64::new(0)),
+    ))
 }
 
 #[tokio::test]
@@ -151,7 +151,7 @@ async fn execute_failure_does_not_bump_revision() {
 async fn execute_without_harness_cell_returns_error_not_panic() {
     // Arrange: the harness cell is intentionally never set.
     let cell: SkillHarnessCell = Arc::new(SyncOnceCell::new());
-    let tool = ReloadTool::new(cell);
+    let tool = ReloadTool::new(cell, ReloadRuntimeSlot::default());
 
     // Act
     let result = tool
@@ -168,7 +168,7 @@ async fn execute_without_harness_cell_returns_error_not_panic() {
 #[test]
 fn definition_is_snake_case_with_effect_hint() {
     let cell: SkillHarnessCell = Arc::new(SyncOnceCell::new());
-    let tool = ReloadTool::new(cell);
+    let tool = ReloadTool::new(cell, ReloadRuntimeSlot::default());
 
     assert_eq!(tool.definition().name, "reload");
     assert_eq!(tool.label(), "reload");
@@ -177,7 +177,7 @@ fn definition_is_snake_case_with_effect_hint() {
 
 
 #[test]
-fn install_runtime_publishes_process_global_runtime() {
+fn runtime_slot_publishes_only_its_owned_runtime() {
     // Arrange
     let dir = tempfile::tempdir().unwrap();
     let (harness, _cell) = build_harness(true);
@@ -185,24 +185,19 @@ fn install_runtime_publishes_process_global_runtime() {
     let runtime = runtime_for(&harness, dir.path(), registry.clone());
 
     // Act
-    let _ = install_runtime(ReloadRuntime {
-        registry: runtime.registry.clone(),
-        cwd: runtime.cwd.clone(),
-        trigger_executor: runtime.trigger_executor.clone(),
-        revision: runtime.revision.clone(),
-    });
+    let slot = ReloadRuntimeSlot::default();
+    let installed = slot.install(ReloadRuntime::new(
+        runtime.registry.clone(),
+        runtime.cwd.clone(),
+        runtime.trigger_executor(),
+        runtime.revision.clone(),
+    ));
 
-    // Assert: the installed handle is published (last-write-wins). Another
-    // daemon test may concurrently install a different runtime, so only assert
-    // that the global is populated after installation.
-    assert!(current_runtime().is_some());
+    assert!(Arc::ptr_eq(&slot.current().unwrap(), &installed));
 }
 
 #[tokio::test]
-async fn execute_without_pinned_runtime_uses_installed_global_runtime() {
-    // Arrange: temp cwd with a file command; harness reload closure that swaps
-    // in the "reloaded" skill; the runtime is installed globally instead of
-    // pinned on the tool.
+async fn execute_uses_the_injected_runtime_slot() {
     let dir = tempfile::tempdir().unwrap();
     let commands_dir = dir.path().join(".agents").join("commands");
     std::fs::create_dir_all(&commands_dir).unwrap();
@@ -214,21 +209,20 @@ async fn execute_without_pinned_runtime_uses_installed_global_runtime() {
     let (harness, cell) = build_harness(true);
     let registry = Arc::new(Registry::with_daemon_commands());
     let runtime = runtime_for(&harness, dir.path(), registry.clone());
-    let _ = install_runtime(ReloadRuntime {
-        registry: runtime.registry.clone(),
-        cwd: runtime.cwd.clone(),
-        trigger_executor: runtime.trigger_executor.clone(),
-        revision: runtime.revision.clone(),
-    });
-    let tool = ReloadTool::new(cell);
+    let slot = ReloadRuntimeSlot::default();
+    slot.install(ReloadRuntime::new(
+        runtime.registry.clone(),
+        runtime.cwd.clone(),
+        runtime.trigger_executor(),
+        runtime.revision.clone(),
+    ));
+    let tool = ReloadTool::new(cell, slot);
 
     // Act
     let result = tool
         .execute("c1", serde_json::json!({}), CancellationToken::new(), None)
         .await;
 
-    // Assert: the global runtime path succeeds. (Another test may overwrite the
-    // global, but every daemon runtime in this target handles `/reload` the same.)
     let ok = result.unwrap_or_else(|e| panic!("reload should succeed: {e}"));
     assert!(ok.details["runtime_revision"].is_u64());
 }
@@ -236,7 +230,7 @@ async fn execute_without_pinned_runtime_uses_installed_global_runtime() {
 #[test]
 fn execution_mode_is_sequential() {
     let cell: SkillHarnessCell = Arc::new(SyncOnceCell::new());
-    let tool = ReloadTool::new(cell);
+    let tool = ReloadTool::new(cell, ReloadRuntimeSlot::default());
 
     assert_eq!(tool.execution_mode(), Some(ToolExecutionMode::Sequential));
 }

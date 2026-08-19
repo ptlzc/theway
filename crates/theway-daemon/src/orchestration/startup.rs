@@ -14,7 +14,7 @@ use theway_core::{PermissionPolicy, ThinkingLevel};
 use theway_storage::session;
 use theway_transport::config;
 
-use super::SessionRuntimeBuilder;
+use super::{DaemonServices, SessionRuntimeBuilder};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DaemonTransport {
@@ -163,14 +163,24 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         tokio::sync::mpsc::unbounded_channel::<theway_transport::feed::FeedUpdate>();
 
     let stream_fn = stream_fn_with_auth_store();
-    let dynamic_trigger_registry = triggers::global_registry().clone();
+    let command_output = {
+        let tx = feed_tx.clone();
+        crate::commands::CommandOutput::new(move |line| {
+            let _ = tx.send(theway_transport::feed::FeedUpdate::Plain {
+                text: line,
+                level: theway_transport::feed::Level::Output,
+            });
+        })
+    };
+    let services = DaemonServices::new().with_command_output(command_output);
+    let dynamic_trigger_registry = services.dynamic_triggers.clone();
     if let Err(err) = dynamic_trigger_registry
         .load_from_storage(storage.clone(), cwd.clone(), session_id.clone())
         .await
     {
         tracing::warn!("dynamic triggers: {err}");
     }
-    let cron_registry = triggers::global_cron_registry().clone();
+    let cron_registry = services.cron.clone();
     if let Err(err) = cron_registry
         .load_from_storage(storage.clone(), cwd.clone(), session_id.clone())
         .await
@@ -250,7 +260,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     // StartupConfig — defaults until the controller provisions values
     // through the settings RPC.
     let config_enabled_builtins = startup.builtin_skills.clone();
-    triggers::dynamic::set_dynamic_trigger_poll_interval_secs(startup.trigger_poll_secs);
+    dynamic_trigger_registry.set_poll_interval_secs(startup.trigger_poll_secs);
     // TODO(#73): `WireDaemonConfig` has no thinking-summary fields yet, so
     // `startup.thinking_summary` stays `None` until the settings proto grows
     // them; the TUI scrollback cap rides the existing `tui_max_feed_lines`
@@ -337,15 +347,6 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
             lsp_supervisor.clone(),
         ))
     };
-    {
-        let tx = feed_tx.clone();
-        crate::commands::console::set_sink(Box::new(move |line| {
-            let _ = tx.send(theway_transport::feed::FeedUpdate::Plain {
-                text: line,
-                level: theway_transport::feed::Level::Output,
-            });
-        }));
-    }
     let (main_run_tx, main_run_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
 
     let session_runtime_builder = Arc::new(SessionRuntimeBuilder {
@@ -365,8 +366,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         subagent_registry: subagent_registry.clone(),
         mcp_tools: mcp_tools_for_factory,
         mcp_notification_hooks: parking_lot::Mutex::new(mcp_notification_hooks),
-        dynamic_trigger_registry: dynamic_trigger_registry.clone(),
-        cron_registry: cron_registry.clone(),
+        services: services.clone(),
         reload_skills_fn,
         before_tool_call: Some(before_tool_call.clone()),
         before_trigger_action,
@@ -475,7 +475,9 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         retry: crate::agent_session::RetrySettings::default(),
         registry: crate::commands::Registry::with_daemon_commands()
             .with_user_home(paths.home.clone())
-            .with_storage(storage.clone()),
+            .with_storage(storage.clone())
+            .with_output(services.command_output.clone())
+            .with_automations(dynamic_trigger_registry.clone(), cron_registry.clone()),
         cwd: cwd.clone(),
         home: paths.home.clone(),
         base: paths.base.clone(),
@@ -497,6 +499,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         panel_status,
         thinking_summary,
         startup,
+        services,
     });
 
     let mode_label = match mode {

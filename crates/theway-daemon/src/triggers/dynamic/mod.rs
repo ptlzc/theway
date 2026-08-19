@@ -29,6 +29,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use chrono::Utc;
+#[cfg(test)]
 use once_cell::sync::OnceCell;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -66,12 +67,21 @@ use tokio::time::Duration;
 #[cfg(test)]
 #[allow(unused_imports)]
 use tokio_util::sync::CancellationToken;
-static CONFIGURED_DYNAMIC_TRIGGER_POLL_INTERVAL_SECS: AtomicU64 =
-    AtomicU64::new(DEFAULT_DYNAMIC_TRIGGER_POLL_INTERVAL_SECS);
-
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct DynamicTriggerRegistry {
     inner: Arc<Mutex<DynamicTriggerRegistryState>>,
+    poll_interval_secs: Arc<AtomicU64>,
+}
+
+impl Default for DynamicTriggerRegistry {
+    fn default() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(DynamicTriggerRegistryState::default())),
+            poll_interval_secs: Arc::new(AtomicU64::new(
+                DEFAULT_DYNAMIC_TRIGGER_POLL_INTERVAL_SECS,
+            )),
+        }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -111,6 +121,15 @@ struct DynamicTriggerRegistryState {
 impl DynamicTriggerRegistry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn set_poll_interval_secs(&self, secs: u64) {
+        self.poll_interval_secs
+            .store(secs.max(1), Ordering::Relaxed);
+    }
+
+    pub fn poll_interval_secs(&self) -> u64 {
+        self.poll_interval_secs.load(Ordering::Relaxed)
     }
 
     pub fn load_from_path(
@@ -300,17 +319,20 @@ impl DynamicTriggerRegistry {
     }
 }
 
+#[cfg(test)]
 pub fn global_registry() -> &'static DynamicTriggerRegistry {
     static CELL: OnceCell<DynamicTriggerRegistry> = OnceCell::new();
     CELL.get_or_init(DynamicTriggerRegistry::new)
 }
 
+#[cfg(test)]
 pub fn set_dynamic_trigger_poll_interval_secs(secs: u64) {
-    CONFIGURED_DYNAMIC_TRIGGER_POLL_INTERVAL_SECS.store(secs.max(1), Ordering::Relaxed);
+    global_registry().set_poll_interval_secs(secs);
 }
 
+#[cfg(test)]
 pub fn dynamic_trigger_poll_interval_secs() -> u64 {
-    CONFIGURED_DYNAMIC_TRIGGER_POLL_INTERVAL_SECS.load(Ordering::Relaxed)
+    global_registry().poll_interval_secs()
 }
 
 #[derive(Clone, Debug, thiserror::Error, PartialEq, Eq)]

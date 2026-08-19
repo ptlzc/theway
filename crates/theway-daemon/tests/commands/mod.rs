@@ -240,7 +240,8 @@ fn render_triggers_status_summarizes_runtime_hooks_and_running() {
         }],
     };
 
-    let status = render_triggers_status(&snapshot).join("\n");
+    let registry = crate::triggers::dynamic::DynamicTriggerRegistry::default();
+    let status = render_triggers_status(&snapshot, &registry).join("\n");
     assert!(status.contains("accepted=7"));
     assert!(status.contains("recent_traces=6"));
     assert!(status.contains("1 total"));

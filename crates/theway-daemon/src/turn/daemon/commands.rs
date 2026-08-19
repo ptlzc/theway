@@ -154,11 +154,11 @@ impl TurnHost {
             if secs == 0 {
                 self.error_line("configure: trigger_poll_secs must be greater than zero");
             } else {
-                crate::triggers::dynamic::set_dynamic_trigger_poll_interval_secs(secs);
+                self.services.dynamic_triggers.set_poll_interval_secs(secs);
                 applied.trigger_poll_secs = Some(secs);
             }
         } else if config.clears("trigger_poll_secs") {
-            crate::triggers::dynamic::set_dynamic_trigger_poll_interval_secs(
+            self.services.dynamic_triggers.set_poll_interval_secs(
                 theway_transport::triggers::DEFAULT_DYNAMIC_TRIGGER_POLL_INTERVAL_SECS,
             );
             applied.clear_fields.push("trigger_poll_secs".into());
@@ -265,7 +265,7 @@ impl TurnHost {
             self.error_line("trigger: missing rule id");
             return;
         }
-        let Some(rule) = triggers::global_registry()
+        let Some(rule) = self.services.dynamic_triggers
             .list()
             .into_iter()
             .find(|rule| rule.id == id)

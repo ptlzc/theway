@@ -31,13 +31,13 @@ use crate::agent_session::RetrySettings;
 use crate::commands::{self, CommandCtx, CommandOutcome, Registry};
 use crate::control_plane_prompt::UiControlPlanePrompt;
 use crate::forwarding_tool_ops::ForwardingToolOps;
+use crate::orchestration::DaemonServices;
 use crate::paths::DaemonPaths;
 use crate::session_ops::{CurrentSessionState, SessionFactory};
-use crate::tools::assembly::reload::{self, ReloadRuntime};
+use crate::tools::assembly::reload::ReloadRuntime;
 use crate::transport_adapter::{
     CoreGraphOps, CoreJobOps, agent_event, dag_event, dag_run_snapshot, subagent_job_snapshot,
 };
-use crate::triggers;
 use crate::{SqliteSessionRepo, bug_report};
 use theway_llm_provider::{ImageContent, Message, Usage};
 use theway_transport::mentions;
@@ -133,6 +133,7 @@ pub struct DaemonConfig {
     /// runtime `Configure` updates merge into the view, not back into this
     /// startup snapshot.
     pub startup: crate::startup_config::StartupConfig,
+    pub services: DaemonServices,
 }
 
 /// Headless transport host for `thewayd` (gRPC / HTTP / MCP).
@@ -165,6 +166,7 @@ pub struct TurnHost {
     /// executor for the `reload` tool and the revision counter published in
     /// sidebar snapshots.
     reload_runtime: Arc<ReloadRuntime>,
+    services: DaemonServices,
 
     feed: Feed,
     /// Incremental plain-text row cache behind full `feed_lines` snapshots.

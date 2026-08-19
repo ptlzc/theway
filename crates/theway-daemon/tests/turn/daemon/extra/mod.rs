@@ -159,6 +159,7 @@ fn daemon_config(
         panel_status: PanelStatus::default(),
         thinking_summary: None,
         startup: crate::startup_config::StartupConfig::default(),
+        services: crate::orchestration::DaemonServices::new(),
     };
 
     (config, feed_tx, main_run_tx)

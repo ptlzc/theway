@@ -79,6 +79,8 @@ fn daemon_ctx(harness: &Arc<AgentHarness>, executor: Arc<TriggerExecutor>) -> Da
         harness: harness.clone(),
         trigger_executor: executor,
         storage: local_runtime_storage(),
+        dynamic_triggers: crate::triggers::global_registry().clone(),
+        cron: crate::triggers::global_cron_registry().clone(),
     }
 }
 
@@ -432,6 +434,8 @@ async fn session_import_maps_open_repo_error() {
         harness: harness.clone(),
         trigger_executor: executor.clone(),
         storage: Arc::new(FailingOpenStorage),
+        dynamic_triggers: crate::triggers::global_registry().clone(),
+        cron: crate::triggers::global_cron_registry().clone(),
     };
     let ctx = command_ctx(&extra, tmp.path());
 

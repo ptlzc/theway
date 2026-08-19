@@ -11,58 +11,77 @@ use std::sync::Arc;
 use theway_core::AgentTool;
 use theway_daemon::tools::skill::SkillHarnessCell;
 
+use crate::triggers::cron::CronRegistry;
+use crate::triggers::dynamic::DynamicTriggerRegistry;
+
 /// Build the session-scoped cron creation tool. This is the model-facing counterpart to
 /// `/cron add`: when the user asks in ordinary conversation for a scheduled / recurring
 /// job, the model can register it without falling back to a dynamic trigger.
-pub fn new_cron_job_tool(harness_cell: SkillHarnessCell) -> Arc<dyn AgentTool> {
-    Arc::new(crate::triggers::NewCronJobTool::new(Some(harness_cell)))
+pub fn new_cron_job_tool(
+    harness_cell: SkillHarnessCell,
+    registry: CronRegistry,
+) -> Arc<dyn AgentTool> {
+    Arc::new(crate::triggers::NewCronJobTool::new(
+        Some(harness_cell),
+        registry,
+    ))
 }
 
 /// Build the session-scoped cron listing tool. This is the model-facing counterpart to
 /// `/cron list` and returns redacted previews rather than raw action text.
-pub fn list_cron_jobs_tool() -> Arc<dyn AgentTool> {
-    Arc::new(crate::triggers::ListCronJobsTool)
+pub fn list_cron_jobs_tool(registry: CronRegistry) -> Arc<dyn AgentTool> {
+    Arc::new(crate::triggers::ListCronJobsTool::new(registry))
 }
 
 /// Build the session-scoped cron removal tool. This is the model-facing counterpart to
 /// `/cron remove`: it previews by default and only removes after explicit confirmation,
 /// then writes the same control-plane audit as slash commands.
-pub fn remove_cron_job_tool(harness_cell: SkillHarnessCell) -> Arc<dyn AgentTool> {
-    Arc::new(crate::triggers::RemoveCronJobTool::new(Some(harness_cell)))
+pub fn remove_cron_job_tool(
+    harness_cell: SkillHarnessCell,
+    registry: CronRegistry,
+) -> Arc<dyn AgentTool> {
+    Arc::new(crate::triggers::RemoveCronJobTool::new(
+        Some(harness_cell),
+        registry,
+    ))
 }
 
 /// Build the session-scoped cron state tool. This lets the model disable a cron job without
 /// deleting the schedule/action text; enable fails closed to `/cron enable` until
 /// control-plane confirmation is wired for model-facing writes.
-pub fn set_cron_job_state_tool(harness_cell: SkillHarnessCell) -> Arc<dyn AgentTool> {
-    Arc::new(crate::triggers::SetCronJobStateTool::new(Some(
-        harness_cell,
-    )))
+pub fn set_cron_job_state_tool(
+    harness_cell: SkillHarnessCell,
+    registry: CronRegistry,
+) -> Arc<dyn AgentTool> {
+    Arc::new(crate::triggers::SetCronJobStateTool::new(
+        Some(harness_cell),
+        registry,
+    ))
 }
 
 /// Build the dynamic trigger creation tool. This is model-facing counterpart to the
 /// `/new-trigger` slash command: when the user asks in ordinary conversation to create an
 /// automation, the model can register the rule without requiring slash-command syntax.
-pub fn new_trigger_tool() -> Arc<dyn AgentTool> {
-    Arc::new(crate::triggers::NewTriggerTool)
+pub fn new_trigger_tool(registry: DynamicTriggerRegistry) -> Arc<dyn AgentTool> {
+    Arc::new(crate::triggers::NewTriggerTool::new(registry))
 }
 
 /// Build the dynamic trigger listing tool. This is the model-facing counterpart to
 /// `/triggers rules`: it lets the assistant inspect current rule ids before answering or
 /// removing a rule.
-pub fn list_triggers_tool() -> Arc<dyn AgentTool> {
-    Arc::new(crate::triggers::ListTriggersTool)
+pub fn list_triggers_tool(registry: DynamicTriggerRegistry) -> Arc<dyn AgentTool> {
+    Arc::new(crate::triggers::ListTriggersTool::new(registry))
 }
 
 /// Build the dynamic trigger removal tool. This is the model-facing counterpart to
 /// `/triggers remove`: when the user asks in ordinary conversation to delete a trigger,
 /// the model can remove the rule by id or clear all rules when explicitly requested.
-pub fn remove_trigger_tool() -> Arc<dyn AgentTool> {
-    Arc::new(crate::triggers::RemoveTriggerTool)
+pub fn remove_trigger_tool(registry: DynamicTriggerRegistry) -> Arc<dyn AgentTool> {
+    Arc::new(crate::triggers::RemoveTriggerTool::new(registry))
 }
 
 /// Build the dynamic trigger state tool. This lets the model pause/resume a trigger without
 /// deleting the rule and losing its condition/action text.
-pub fn set_trigger_state_tool() -> Arc<dyn AgentTool> {
-    Arc::new(crate::triggers::SetTriggerStateTool)
+pub fn set_trigger_state_tool(registry: DynamicTriggerRegistry) -> Arc<dyn AgentTool> {
+    Arc::new(crate::triggers::SetTriggerStateTool::new(registry))
 }

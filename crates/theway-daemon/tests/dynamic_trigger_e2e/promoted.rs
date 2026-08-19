@@ -25,7 +25,9 @@ async fn promoted_dynamic_trigger_fails_closed_until_marker_details_are_wired() 
     let mut opts = AgentHarnessOptions::new(faux_model(), session.clone());
     opts.on_control_plane_prompt = Some(allow_all_control_plane_hook());
     opts.tools = vec![
-        Arc::new(triggers::NewTriggerTool) as Arc<dyn AgentTool>,
+        Arc::new(triggers::NewTriggerTool::new(
+            triggers::global_registry().clone(),
+        )) as Arc<dyn AgentTool>,
         Arc::new(RecordingBashTool::new(bash_calls.clone())) as Arc<dyn AgentTool>,
     ];
     opts.stream_fn = Some(dynamic_trigger_stream());

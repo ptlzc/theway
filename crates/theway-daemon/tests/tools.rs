@@ -135,7 +135,7 @@ async fn new_trigger_tool_registers_dynamic_rule() {
     let _guard = DYNAMIC_TRIGGER_LOCK.lock().unwrap();
     triggers::global_registry().clear_for_tests();
 
-    let tool = tools_asm::new_trigger_tool();
+    let tool = tools_asm::new_trigger_tool(triggers::global_registry().clone());
     let result = tool
         .execute(
             "new-trigger-1",
@@ -169,7 +169,7 @@ async fn new_trigger_tool_rejects_fixed_schedule_jobs() {
     let _guard = DYNAMIC_TRIGGER_LOCK.lock().unwrap();
     triggers::global_registry().clear_for_tests();
 
-    let tool = tools_asm::new_trigger_tool();
+    let tool = tools_asm::new_trigger_tool(triggers::global_registry().clone());
     let err = tool
         .execute(
             "new-trigger-scheduled-1",
@@ -195,7 +195,7 @@ async fn new_trigger_tool_rejects_fixed_schedule_in_action_or_spec() {
     let _guard = DYNAMIC_TRIGGER_LOCK.lock().unwrap();
     triggers::global_registry().clear_for_tests();
 
-    let tool = tools_asm::new_trigger_tool();
+    let tool = tools_asm::new_trigger_tool(triggers::global_registry().clone());
     let err = tool
         .execute(
             "new-trigger-scheduled-bypass-1",
@@ -222,7 +222,7 @@ async fn new_cron_job_tool_registers_session_cron_job() {
     let _guard = CRON_LOCK.lock().unwrap();
     triggers::global_cron_registry().clear_for_tests();
 
-    let tool = triggers::NewCronJobTool::new(None);
+    let tool = triggers::NewCronJobTool::new(None, triggers::global_cron_registry().clone());
     let result = tool
         .execute(
             "new-cron-1",
@@ -253,10 +253,11 @@ async fn new_cron_job_tool_registers_session_cron_job() {
 #[test]
 fn cron_management_tool_builders_expose_expected_catalog_names() {
     let cell: tools::skill::SkillHarnessCell = Arc::new(once_cell::sync::OnceCell::new());
-    let new = tools_asm::new_cron_job_tool(cell.clone());
-    let list = tools_asm::list_cron_jobs_tool();
-    let remove = tools_asm::remove_cron_job_tool(cell.clone());
-    let state = tools_asm::set_cron_job_state_tool(cell);
+    let new = tools_asm::new_cron_job_tool(cell.clone(), triggers::global_cron_registry().clone());
+    let list = tools_asm::list_cron_jobs_tool(triggers::global_cron_registry().clone());
+    let remove =
+        tools_asm::remove_cron_job_tool(cell.clone(), triggers::global_cron_registry().clone());
+    let state = tools_asm::set_cron_job_state_tool(cell, triggers::global_cron_registry().clone());
     let names = [
         new.definition().name.as_str(),
         list.definition().name.as_str(),
@@ -283,7 +284,7 @@ async fn list_cron_jobs_tool_returns_redacted_session_jobs() {
         .add_job("0 * * * *", &format!("fetch Hacker News with {secret}"))
         .unwrap();
 
-    let tool = tools_asm::list_cron_jobs_tool();
+    let tool = tools_asm::list_cron_jobs_tool(triggers::global_cron_registry().clone());
     let result = tool
         .execute(
             "list-cron-1",
@@ -315,7 +316,7 @@ async fn remove_cron_job_tool_removes_session_job() {
         .add_job("0 * * * *", "Check the Hacker News front page")
         .unwrap();
 
-    let tool = triggers::RemoveCronJobTool::new(None);
+    let tool = triggers::RemoveCronJobTool::new(None, triggers::global_cron_registry().clone());
     let preview = tool
         .execute(
             "preview-remove-cron-1",
@@ -354,7 +355,7 @@ async fn set_cron_job_state_tool_disables_and_fails_closed_on_enable() {
     let job = triggers::global_cron_registry()
         .add_job("0 * * * *", "Check the Hacker News front page")
         .unwrap();
-    let tool = triggers::SetCronJobStateTool::new(None);
+    let tool = triggers::SetCronJobStateTool::new(None, triggers::global_cron_registry().clone());
 
     let disabled = tool
         .execute(
@@ -389,7 +390,7 @@ async fn new_trigger_tool_can_request_chat_promotion() {
     let _guard = DYNAMIC_TRIGGER_LOCK.lock().unwrap();
     triggers::global_registry().clear_for_tests();
 
-    let tool = tools_asm::new_trigger_tool();
+    let tool = tools_asm::new_trigger_tool(triggers::global_registry().clone());
     let result = tool
         .execute(
             "new-trigger-promote-1",
@@ -418,7 +419,7 @@ async fn list_triggers_tool_returns_dynamic_rules() {
         .add_rule("event says list me", "echo listed")
         .expect("rule");
 
-    let tool = tools_asm::list_triggers_tool();
+    let tool = tools_asm::list_triggers_tool(triggers::global_registry().clone());
     let result = tool
         .execute(
             "list-triggers-1",
@@ -448,7 +449,7 @@ async fn remove_trigger_tool_removes_dynamic_rule() {
         .add_rule("event says remove me", "echo removed")
         .expect("rule");
 
-    let tool = tools_asm::remove_trigger_tool();
+    let tool = tools_asm::remove_trigger_tool(triggers::global_registry().clone());
     let result = tool
         .execute(
             "remove-trigger-1",
@@ -475,7 +476,7 @@ async fn set_trigger_state_tool_disables_and_enables_rule() {
         .add_rule("event says pause me", "echo paused")
         .expect("rule");
 
-    let tool = tools_asm::set_trigger_state_tool();
+    let tool = tools_asm::set_trigger_state_tool(triggers::global_registry().clone());
     let disabled = tool
         .execute(
             "set-trigger-state-1",

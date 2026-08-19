@@ -409,6 +409,7 @@ fn clear_stale_running_state(jobs: &mut [CronJob]) -> bool {
     changed
 }
 
+#[cfg(test)]
 pub fn global_cron_registry() -> &'static CronRegistry {
     static CELL: once_cell::sync::OnceCell<CronRegistry> = once_cell::sync::OnceCell::new();
     CELL.get_or_init(CronRegistry::new)

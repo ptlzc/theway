@@ -23,7 +23,9 @@ async fn dispatch_triggers_status_is_read_only_and_available() {
     let storage = Arc::new(MemorySessionStorage::new());
     let session = Session::new(storage as Arc<dyn SessionStorage>);
     let mut opts = AgentHarnessOptions::new(faux_model(), session.clone());
-    opts.tools = vec![Arc::new(triggers::NewTriggerTool) as Arc<dyn AgentTool>];
+    opts.tools = vec![Arc::new(triggers::NewTriggerTool::new(
+        triggers::global_registry().clone(),
+    )) as Arc<dyn AgentTool>];
     opts.stream_fn = Some(new_trigger_extraction_stream());
     let harness = Arc::new(AgentHarness::new(opts));
     let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(

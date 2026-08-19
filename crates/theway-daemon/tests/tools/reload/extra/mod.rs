@@ -9,7 +9,7 @@ use theway_core::ToolExecutionMode;
 #[test]
 fn execution_mode_is_sequential() {
     let cell: SkillHarnessCell = Arc::new(SyncOnceCell::new());
-    let tool = ReloadTool::new(cell);
+    let tool = ReloadTool::new(cell, ReloadRuntimeSlot::default());
 
     assert_eq!(tool.execution_mode(), Some(ToolExecutionMode::Sequential));
 }

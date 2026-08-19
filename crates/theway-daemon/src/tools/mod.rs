@@ -267,6 +267,7 @@ pub fn session_tool_set(
     skill_harness_cell: &SkillHarnessCell,
     session_id: &str,
     executor: Arc<dyn ToolExecutor>,
+    services: &crate::orchestration::DaemonServices,
 ) -> Vec<Arc<dyn AgentTool>> {
     let mut tools = local_tools(executor.clone());
     // Engine-owned tools (DAG / subagent / skills / memory), assembled kernel-side with the
@@ -288,16 +289,26 @@ pub fn session_tool_set(
         stream_fn,
         skill_harness_cell,
         session_id,
+        services.reload.clone(),
     ));
     // Trigger/cron family: harness-adjacent but implemented in this crate.
-    tools.push(new_cron_job_tool(skill_harness_cell.clone()));
-    tools.push(list_cron_jobs_tool());
-    tools.push(remove_cron_job_tool(skill_harness_cell.clone()));
-    tools.push(set_cron_job_state_tool(skill_harness_cell.clone()));
-    tools.push(new_trigger_tool());
-    tools.push(list_triggers_tool());
-    tools.push(remove_trigger_tool());
-    tools.push(set_trigger_state_tool());
+    tools.push(new_cron_job_tool(
+        skill_harness_cell.clone(),
+        services.cron.clone(),
+    ));
+    tools.push(list_cron_jobs_tool(services.cron.clone()));
+    tools.push(remove_cron_job_tool(
+        skill_harness_cell.clone(),
+        services.cron.clone(),
+    ));
+    tools.push(set_cron_job_state_tool(
+        skill_harness_cell.clone(),
+        services.cron.clone(),
+    ));
+    tools.push(new_trigger_tool(services.dynamic_triggers.clone()));
+    tools.push(list_triggers_tool(services.dynamic_triggers.clone()));
+    tools.push(remove_trigger_tool(services.dynamic_triggers.clone()));
+    tools.push(set_trigger_state_tool(services.dynamic_triggers.clone()));
     tools
 }
 

@@ -3,8 +3,10 @@
 //! This layer owns construction order and service lifetimes. Reusable runtime policy
 //! remains in `theway-core`; host effects remain in daemon adapters.
 
+mod services;
 pub mod session;
 mod startup;
 
+pub use services::DaemonServices;
 pub use session::{SessionRuntime, SessionRuntimeBuilder};
 pub use startup::{DaemonOptions, DaemonTransport, SessionSelection, run};

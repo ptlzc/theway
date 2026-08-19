@@ -37,13 +37,13 @@ impl SlashCommand<DaemonCtx> for TriggersCommand {
         match subcommand {
             "status" => {
                 let snapshot = trigger_executor.notification_status_snapshot();
-                for line in render_triggers_status(&snapshot) {
+                for line in render_triggers_status(&snapshot, &ctx.extra.dynamic_triggers) {
                     cprintln!("{line}");
                 }
                 CommandOutcome::Handled
             }
             "rules" => {
-                let rules = crate::triggers::global_registry().list();
+                let rules = ctx.extra.dynamic_triggers.list();
                 for line in render_dynamic_trigger_rules(&rules, usize::MAX) {
                     cprintln!("{line}");
                 }
@@ -59,7 +59,7 @@ impl SlashCommand<DaemonCtx> for TriggersCommand {
                     return CommandOutcome::Error("usage: /triggers remove <id>|--all".into());
                 };
                 if target == "--all" {
-                    match crate::triggers::global_registry().clear_rules() {
+                    match ctx.extra.dynamic_triggers.clear_rules() {
                         Ok(count) => {
                             cprintln!("removed {count} dynamic trigger rule(s)");
                             CommandOutcome::Handled
@@ -67,7 +67,7 @@ impl SlashCommand<DaemonCtx> for TriggersCommand {
                         Err(e) => CommandOutcome::Error(e.to_string()),
                     }
                 } else {
-                    match crate::triggers::global_registry().remove_rule(target) {
+                    match ctx.extra.dynamic_triggers.remove_rule(target) {
                         Ok(Some(rule)) => {
                             cprintln!("removed trigger {}", rule.id);
                             cprintln!("  condition: {}", rule.condition);
@@ -81,8 +81,8 @@ impl SlashCommand<DaemonCtx> for TriggersCommand {
                     }
                 }
             }
-            "enable" | "resume" => set_dynamic_trigger_enabled(argv.get(1), true),
-            "disable" | "pause" => set_dynamic_trigger_enabled(argv.get(1), false),
+            "enable" | "resume" => set_dynamic_trigger_enabled(ctx, argv.get(1), true),
+            "disable" | "pause" => set_dynamic_trigger_enabled(ctx, argv.get(1), false),
             "sources" | "hooks" => {
                 let snapshot = trigger_executor.notification_status_snapshot();
                 for line in render_trigger_sources(&snapshot.hooks) {
@@ -195,7 +195,7 @@ impl SlashCommand<DaemonCtx> for CronCommand {
         let subcommand = argv.first().map(String::as_str).unwrap_or("list");
         match subcommand {
             "list" | "ls" | "status" => {
-                let jobs = crate::triggers::global_cron_registry().list();
+                let jobs = ctx.extra.cron.list();
                 for line in render_cron_jobs(&jobs) {
                     cprintln!("{line}");
                 }
@@ -227,9 +227,7 @@ impl SlashCommand<DaemonCtx> for CronCommand {
                     .map(|s| s.as_str())
                     .collect::<Vec<_>>()
                     .join(" ");
-                match crate::triggers::global_cron_registry()
-                    .add_job_full(schedule, &action, stateful)
-                {
+                match ctx.extra.cron.add_job_full(schedule, &action, stateful) {
                     Ok(job) => {
                         write_cron_control_plane_audit(ctx, "add", None, Some(&job)).await;
                         cprintln!("added cron job {}", job.id);
@@ -249,7 +247,7 @@ impl SlashCommand<DaemonCtx> for CronCommand {
                 let Some(id) = argv.get(1) else {
                     return CommandOutcome::Error("usage: /cron remove <id>".into());
                 };
-                match crate::triggers::global_cron_registry().remove_job(id) {
+                match ctx.extra.cron.remove_job(id) {
                     Ok(Some(job)) => {
                         write_cron_control_plane_audit(ctx, "remove", Some(&job), None).await;
                         cprintln!("removed cron job {}", job.id);
@@ -278,11 +276,8 @@ async fn set_cron_enabled(
             if enabled { "enable" } else { "disable" }
         ));
     };
-    let before = crate::triggers::global_cron_registry()
-        .list()
-        .into_iter()
-        .find(|job| job.id == *id);
-    match crate::triggers::global_cron_registry().set_job_enabled(id, enabled) {
+    let before = ctx.extra.cron.list().into_iter().find(|job| job.id == *id);
+    match ctx.extra.cron.set_job_enabled(id, enabled) {
         Ok(Some(job)) => {
             write_cron_control_plane_audit(
                 ctx,
@@ -481,12 +476,16 @@ fn resolve_inbox_target(
         .ok_or_else(|| format!("no new inbox entry matching '{arg}'"))
 }
 
-fn set_dynamic_trigger_enabled(target: Option<&String>, enabled: bool) -> CommandOutcome {
+fn set_dynamic_trigger_enabled(
+    ctx: &CommandCtx<'_, DaemonCtx>,
+    target: Option<&String>,
+    enabled: bool,
+) -> CommandOutcome {
     let Some(id) = target else {
         let action = if enabled { "enable" } else { "disable" };
         return CommandOutcome::Error(format!("usage: /triggers {action} <id>"));
     };
-    match crate::triggers::global_registry().set_rule_enabled(id, enabled) {
+    match ctx.extra.dynamic_triggers.set_rule_enabled(id, enabled) {
         Ok(Some(rule)) => {
             let state = if rule.enabled { "enabled" } else { "disabled" };
             cprintln!("{state} trigger {}", rule.id);
