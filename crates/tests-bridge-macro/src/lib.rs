@@ -29,20 +29,24 @@ use std::path::PathBuf;
 
 #[proc_macro]
 pub fn tests_bridge(input: TokenStream) -> TokenStream {
-    // Only bridge tests when compiling the library's own unit-test target.
+    // Only bridge tests when compiling the package's own library or binary
+    // unit-test target.
     // Integration-test crates often path-include source modules (to reach private
     // code / macros); in that context `cfg(test)` is also true, but the bridge's
     // `crate::...` paths refer to the test-crate root instead of the lib, and the
     // bridged tests run a second time in a binary that already has its own
     // integration tests. That duplicate execution also races on process-global
     // state (console sinks, registries, env locks). Compare CARGO_CRATE_NAME to
-    // CARGO_PKG_NAME so the bridge is only emitted for the lib target, not for
-    // `tests/*.rs` binaries.
+    // CARGO_PKG_NAME or CARGO_BIN_NAME so the bridge is emitted for the owning
+    // target, not for `tests/*.rs` integration binaries.
     let crate_name = env::var("CARGO_CRATE_NAME").unwrap_or_default();
-    let lib_name = env::var("CARGO_PKG_NAME")
+    let package_name = env::var("CARGO_PKG_NAME")
         .unwrap_or_default()
         .replace('-', "_");
-    if crate_name != lib_name {
+    let bin_name = env::var("CARGO_BIN_NAME")
+        .unwrap_or_default()
+        .replace('-', "_");
+    if crate_name != package_name && crate_name != bin_name {
         return TokenStream::new();
     }
 

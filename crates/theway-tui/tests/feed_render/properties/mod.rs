@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod wrap_property_tests {
-    use super::IncrementalWrap;
+    use crate::feed_render::IncrementalWrap;
     use theway_transport::feed::wrap_str;
 
     #[test]
