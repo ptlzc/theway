@@ -193,7 +193,7 @@ fn preprocess(text: &str) -> Preprocessed {
                             ids.push((norm, None));
                         }
                         errors.push(format!(
-                            "第 {line_no} 行: 无法解析目标节点 \"{}\"",
+                            "Line {line_no}: unable to parse target node \"{}\"",
                             seg.trim()
                         ));
                     }
@@ -240,7 +240,7 @@ fn preprocess(text: &str) -> Preprocessed {
 
         let shown: String = line.chars().take(60).collect();
         errors.push(format!(
-            "第 {line_no} 行: 无法解析 \"{shown}\" (仅支持 graph TD|LR、A[\"agent: task\"]、--> / -.-> 边)"
+            "Line {line_no}: unable to parse \"{shown}\" (supported syntax: graph/flowchart TD|TB|LR, A[\"agent: task\"], and --> / -.-> edges)"
         ));
     }
 
@@ -296,7 +296,7 @@ pub fn parse_mermaid(text: &str) -> MermaidParseResult {
         let parsed = match mermaid_rs_parser::parse_mermaid(&prep.normalized) {
             Ok(p) => p,
             Err(e) => {
-                errors.push(format!("mermaid 解析失败: {e}"));
+                errors.push(format!("Mermaid parse failed: {e}"));
                 return MermaidParseResult {
                     direction: prep.direction,
                     nodes: Vec::new(),
@@ -307,7 +307,7 @@ pub fn parse_mermaid(text: &str) -> MermaidParseResult {
         let graph = parsed.graph;
         if graph.kind != mermaid_rs_parser::DiagramKind::Flowchart {
             errors.push(format!(
-                "仅支持 flowchart (graph/flowchart), 收到 {:?}",
+                "Only Mermaid flowcharts (graph/flowchart) are supported; got {:?}",
                 graph.kind
             ));
         }
@@ -318,12 +318,18 @@ pub fn parse_mermaid(text: &str) -> MermaidParseResult {
         let declared_ids: HashSet<&str> = prep.declared.iter().map(|s| s.as_str()).collect();
         for id in &declared_ids {
             if !parsed_ids.contains(id) {
-                errors.push(format!("节点 \"{}\" 未被解析器识别", id));
+                errors.push(format!(
+                    "Node \"{}\" was not recognized by the Mermaid parser",
+                    id
+                ));
             }
         }
         for id in &parsed_ids {
             if !declared_ids.contains(id) {
-                errors.push(format!("解析出未声明的节点 \"{}\"", id));
+                errors.push(format!(
+                    "Mermaid parser produced undeclared node \"{}\"",
+                    id
+                ));
             }
         }
 
@@ -349,7 +355,9 @@ pub fn parse_mermaid(text: &str) -> MermaidParseResult {
             };
             // Malformed label (mmdr swallowed a stray comma): surface it.
             if label.contains('"') || label.contains(']') {
-                errors.push(format!("节点 \"{orig}\" 的 label 畸形 (含未闭合引号)"));
+                errors.push(format!(
+                    "Node \"{orig}\" has a malformed label (possibly an unclosed quote)"
+                ));
             }
             let (agent, task) = split_label(&label);
             nodes.push(DagNodeDef {
@@ -392,12 +400,12 @@ pub fn parse_mermaid(text: &str) -> MermaidParseResult {
         for n in &nodes {
             if n.agent.is_empty() {
                 errors.push(format!(
-                    "节点 \"{}\" 的 label 需以 \"agent: task\" 格式 (如 A[\"explorer: 调研代码库\"])",
+                    "Label for node \"{}\" must use the \"agent: task\" format (for example, A[\"explorer: inspect the codebase\"])",
                     n.id
                 ));
             }
             if n.task.is_empty() {
-                errors.push(format!("节点 \"{}\" 缺少 task 描述", n.id));
+                errors.push(format!("Node \"{}\" is missing a task description", n.id));
             }
         }
 

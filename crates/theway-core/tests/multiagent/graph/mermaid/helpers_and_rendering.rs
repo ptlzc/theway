@@ -79,8 +79,16 @@ fn preprocess_blank_and_comment_only_yields_empty_declared() {
 #[test]
 fn parse_mermaid_unlabeled_node_reports_missing_agent_and_task() {
     let res = parse_mermaid("graph TD\nA");
-    assert!(res.errors.iter().any(|e| e.contains("label 需以")));
-    assert!(res.errors.iter().any(|e| e.contains("缺少 task")));
+    assert!(
+        res.errors
+            .iter()
+            .any(|e| e.contains("must use the \"agent: task\" format"))
+    );
+    assert!(
+        res.errors
+            .iter()
+            .any(|e| e.contains("missing a task description"))
+    );
 }
 
 #[test]

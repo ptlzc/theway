@@ -16,7 +16,7 @@ fn parse_mermaid_mmdr_error_returns_parse_failure() {
     let res = parse_mermaid("A --> B -->");
 
     assert!(
-        res.errors.iter().any(|e| e.contains("mermaid 解析失败")),
+        res.errors.iter().any(|e| e.contains("Mermaid parse failed")),
         "{:?}",
         res.errors
     );
@@ -28,11 +28,19 @@ fn parse_mermaid_reports_non_flowchart_diagram_kind() {
     let res = parse_mermaid("classDiagram --> foo");
 
     assert!(
-        res.errors.iter().any(|e| e.contains("仅支持 flowchart")),
+        res.errors
+            .iter()
+            .any(|e| e.contains("Only Mermaid flowcharts")),
         "{:?}",
         res.errors
     );
-    assert!(res.errors.iter().any(|e| e.contains("未被解析器识别")), "{:?}", res.errors);
+    assert!(
+        res.errors
+            .iter()
+            .any(|e| e.contains("was not recognized by the Mermaid parser")),
+        "{:?}",
+        res.errors
+    );
 }
 
 #[test]
@@ -40,7 +48,9 @@ fn parse_mermaid_malformed_segment_without_id_prefix_is_an_error() {
     let res = parse_mermaid("graph TD\nA[\"a: 1\"] --> ,");
 
     assert!(
-        res.errors.iter().any(|e| e.contains("无法解析目标节点")),
+        res.errors
+            .iter()
+            .any(|e| e.contains("unable to parse target node")),
         "{:?}",
         res.errors
     );
@@ -51,7 +61,7 @@ fn parse_mermaid_reports_malformed_label_with_unclosed_quote() {
     let res = parse_mermaid("graph TD\nA[\"unclosed]");
 
     assert!(
-        res.errors.iter().any(|e| e.contains("label 畸形")),
+        res.errors.iter().any(|e| e.contains("malformed label")),
         "{:?}",
         res.errors
     );

@@ -57,7 +57,7 @@ fn parse_comma_multi_target_reports_error() {
     assert!(
         res.errors
             .iter()
-            .any(|e| e.contains("第 2 行") && e.contains("无法解析目标节点")),
+            .any(|e| e.contains("Line 2") && e.contains("unable to parse target node")),
         "{:?}",
         res.errors
     );
@@ -106,15 +106,19 @@ fn parse_reports_bad_lines() {
     assert!(
         res.errors
             .iter()
-            .any(|e| e.contains("第 2 行") && e.contains("无法解析"))
+            .any(|e| e.contains("Line 2") && e.contains("unable to parse"))
     );
     assert!(
         res.errors
             .iter()
-            .any(|e| e.contains("第 3 行") && e.contains("无法解析目标节点"))
+            .any(|e| e.contains("Line 3") && e.contains("unable to parse target node"))
     );
     // B registered via the edge but has no label.
-    assert!(res.errors.iter().any(|e| e.contains("缺少 task")));
+    assert!(
+        res.errors
+            .iter()
+            .any(|e| e.contains("missing a task description"))
+    );
 }
 
 #[test]
