@@ -1,4 +1,4 @@
-//! Mermaid parse and rendering error paths.
+//! Mermaid parsing and rendering error paths.
 
 use super::super::*;
 use crate::multiagent::graph::types::{DagNode, DagRun, DagStatus, Direction, NodeStatus, RunKind};

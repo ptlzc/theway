@@ -8,8 +8,8 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use super::super::types::{DagNode, DagNodeDef, DagRun, DagStatus, Direction, NodeStatus};
-use super::{dag_status_label, deps_prefix, fmt_dur, node_status_label, now_ms, status_tag};
+use super::model::{dag_status_label, deps_prefix, fmt_dur, node_status_label, now_ms, status_tag};
+use super::types::{DagNode, DagNodeDef, DagRun, DagStatus, Direction, NodeStatus};
 
 // ── mermaid parsing (input: dag_plan's `mermaid` param) ──────────────────────
 //
@@ -691,4 +691,4 @@ pub fn first_line(text: &str, max: usize) -> String {
 }
 
 #[cfg(test)]
-tests_bridge_macro::tests_bridge!("multiagent/graph/model/mermaid");
+tests_bridge_macro::tests_bridge!("multiagent/graph/mermaid");

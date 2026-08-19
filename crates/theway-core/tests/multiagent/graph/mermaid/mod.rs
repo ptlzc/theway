@@ -2,6 +2,7 @@ use super::*;
 
 mod error_paths;
 mod helpers_and_rendering;
+mod output;
 
 #[test]
 fn parse_basic_graph() {

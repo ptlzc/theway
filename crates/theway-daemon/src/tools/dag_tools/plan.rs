@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use serde_json::{Value, json};
 use theway_core::multiagent::graph::engine::DagEngine;
-use theway_core::multiagent::graph::model::{parse_mermaid, render_mermaid, run_summary_line};
+use theway_core::multiagent::graph::mermaid::{parse_mermaid, render_mermaid, run_summary_line};
 use theway_core::multiagent::graph::types::{DagRunDef, Direction};
 use theway_core::{AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate, ToolExecutionMode};
 use theway_llm_provider::{Tool, UserContentBlock};

@@ -1,12 +1,6 @@
 //! Pure DAG graph logic (no IO): status presentation, validation (cycles,
 //! unknown refs), run construction, dependency reconciliation (the
-//! "auto-trigger" state derivation), downstream closure; mermaid
-//! parse/render lives in [`mermaid`]. 1:1 port of the dag-orchestrator
-//! extension's `graph.ts`.
-
-pub mod mermaid;
-
-pub use mermaid::*;
+//! "auto-trigger" state derivation), and downstream closure.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;

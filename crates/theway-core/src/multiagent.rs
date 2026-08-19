@@ -1,4 +1,4 @@
-//! Multi-agent orchestration — everything above the single-agent runtime
+//! Multi-agent runtime orchestration — everything above the single-agent runtime
 //! (`crate::agent::assembly` / the bare `crate::agent`): spawning nested agent runs
 //! ([`runner`]), the job registry + live control ([`registry`]), the run data
 //! contract ([`types`]), the DAG/goal graph engine ([`graph`]), and the goal

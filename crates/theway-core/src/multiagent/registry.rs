@@ -1,7 +1,6 @@
 //! Global registry of subagent jobs — the `subagent` tool and DAG node launches.
 //!
-//! Mirrors the dag-orchestrator extension's BgJob registry semantics: every job
-//! gets a stable id, a status, token/chars/tools metrics (from the sub-harness
+//! Every job gets a stable id, a status, token/chars/tools metrics (from the sub-harness
 //! `LoopEvent` stream), and a full-text output buffer (capped) that later feeds
 //! the graph mode output panel (`GetNodeOutput`) and the streamed `subagent_output`
 //! events. Snapshot accessors are cheap clones — the registry is a small Vec.

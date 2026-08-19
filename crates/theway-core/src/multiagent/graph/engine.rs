@@ -1,9 +1,8 @@
 //! DAG orchestration engine: the scheduler/state machine. Registers runs,
 //! auto-triggers nodes whose prerequisites all succeeded (event-driven via
 //! launcher callbacks), enforces the concurrency budget, and exposes
-//! retry/skip/cancel/wait. 1:1 port of the dag-orchestrator extension's
-//! `engine.ts`; execution is delegated to a `NodeLauncher` (implemented by
-//! the coding-agent side — the engine only schedules).
+//! retry/skip/cancel/wait. Execution is delegated to a `NodeLauncher`; the
+//! engine only schedules.
 //!
 //! Module layout: registry/goal/intervention API lives here; scheduling and
 //! run-lifecycle methods live in [`run`]; small state-machine helpers live in

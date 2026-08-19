@@ -1,4 +1,4 @@
-//! Mermaid parsing helpers and run rendering behavior.
+//! Mermaid helpers and run rendering behavior.
 
 use std::collections::HashMap;
 
@@ -33,6 +33,12 @@ fn run_def(direction: Direction) -> DagRunDef {
         fail_fast: None,
         direction: Some(direction),
     }
+}
+
+#[test]
+fn escape_label_handles_quotes_backslashes_newlines() {
+    assert_eq!(escape_mermaid_label("a\"b\\c"), "a\\\"b\\\\c");
+    assert_eq!(escape_mermaid_label("x\ny\n z"), "x y z");
 }
 
 #[test]

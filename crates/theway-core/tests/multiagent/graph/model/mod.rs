@@ -3,7 +3,6 @@ use super::*;
 mod build;
 mod helpers;
 mod reconcile;
-mod render;
 mod status;
 mod validate;
 

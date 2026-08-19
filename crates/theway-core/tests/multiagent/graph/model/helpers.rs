@@ -20,12 +20,6 @@ fn status_tags_and_prefix() {
 }
 
 #[test]
-fn escape_label_handles_quotes_backslashes_newlines() {
-    assert_eq!(escape_mermaid_label("a\"b\\c"), "a\\\"b\\\\c");
-    assert_eq!(escape_mermaid_label("x\ny\n z"), "x y z");
-}
-
-#[test]
 fn status_label_variants_and_predicates() {
     assert_eq!(node_status_label(&NodeStatus::Pending), "pending");
     assert_eq!(node_status_label(&NodeStatus::Ready), "ready");

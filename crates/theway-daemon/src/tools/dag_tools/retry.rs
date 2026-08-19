@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use serde_json::{Value, json};
 use theway_core::multiagent::graph::engine::DagEngine;
-use theway_core::multiagent::graph::model::{render_tree, run_summary_line};
+use theway_core::multiagent::graph::mermaid::{render_tree, run_summary_line};
 use theway_core::{AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate, ToolExecutionMode};
 use theway_llm_provider::Tool;
 use tokio_util::sync::CancellationToken;
