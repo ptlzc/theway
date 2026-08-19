@@ -28,10 +28,6 @@ use crate::controller_storage::{ControllerSessionOps, ControllerStorageOps};
 use crate::local_tool_ops::LocalToolOps;
 use crate::ui;
 
-/// Re-exported for `crate::user_message` compatibility (see `main.rs`); the
-/// client path no longer uses it directly.
-pub use crate::local_commands::user_message;
-
 /// Map the client CLI to daemon launch arguments (design decision 3: session
 /// selection is a daemon launch concern when the TUI spawns it).
 ///

@@ -4,8 +4,7 @@
 //! (per-cwd discovery file or default port) or spawns `thewayd` in the current
 //! directory and waits for readiness, then runs the ratatui REPL against the transport
 //! client. The agent runtime (harness, session, tools, triggers) lives in the daemon;
-//! this crate links `theway-transport` / `theway-core` / `theway-storage` and never the
-//! daemon kernel.
+//! this crate links transport, storage, and leaf contracts, never the runtime core.
 //!
 //! Offline session maintenance is the exception: `session export|import` and the
 //! standalone session queries (`--list-sessions`, `--list-all-sessions`,
@@ -45,10 +44,6 @@ use cli::{
     print_session_archive_warning, short_id, yes_no,
 };
 use startup::run_repl;
-
-// Test/feed helper kept at crate-root visibility (it was `pub` on the old monolithic
-// `main.rs`); re-exported so `crate::user_message` resolves exactly as before.
-pub use startup::user_message;
 
 #[tokio::main]
 async fn main() -> Result<()> {

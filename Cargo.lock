@@ -5283,8 +5283,6 @@ dependencies = [
  "tempfile",
  "tests-bridge-macro",
  "theway-contract",
- "theway-core",
- "theway-llm-provider",
  "theway-markdown",
  "theway-pager-render",
  "theway-ratatui-textarea",

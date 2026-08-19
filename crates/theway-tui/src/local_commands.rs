@@ -90,14 +90,3 @@ pub async fn prompt_for_api_key(provider: &str) -> anyhow::Result<String> {
     .await
     .context("login prompt task")?
 }
-
-/// Helper for tests / prompt construction: a raw llm-provider user message.
-pub fn user_message(text: &str) -> theway_core::AgentMessage {
-    theway_core::AgentMessage::Llm(theway_llm_provider::Message::User(
-        theway_llm_provider::UserMessage {
-            role: theway_llm_provider::UserRole::User,
-            content: theway_llm_provider::UserContent::Text(text.into()),
-            timestamp: chrono::Utc::now().timestamp_millis(),
-        },
-    ))
-}

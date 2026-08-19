@@ -3,7 +3,7 @@ name = "theway-tui"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "theway CLI binary — ratatui REPL/TUI client of the thewayd daemon + offline session commands; depends on theway-transport/core/storage, never on the daemon kernel."
+description = "theway CLI binary — ratatui client of thewayd plus offline session commands; depends on transport/storage contracts, never on the daemon runtime core."
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -15,10 +15,8 @@ path = "src/main.rs"
 
 [dependencies]
 theway-contract = { path = "../theway-contract" }
-theway-core = { path = "../theway-core" }
 theway-storage = { path = "../theway-storage" }
 theway-transport = { path = "../theway-transport" }
-theway-llm-provider = { path = "../theway-llm-provider" }
 theway-markdown = { path = "../theway-markdown" }
 
 # Terminal UI surface (moved out of the daemon crate; the ratatui full-screen REPL,
