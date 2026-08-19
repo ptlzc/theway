@@ -12,9 +12,6 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use theway_core::multiagent::graph::engine::DagEngine;
-use theway_core::multiagent::graph::types::DagEvent;
-use theway_core::multiagent::registry::{AgentJobEvent, AgentJobRegistry};
 use theway_transport::client::GrpcClient;
 use theway_transport::feed::WireFeedBlock;
 use theway_transport::grpc::{GrpcState, serve_grpc};
@@ -75,28 +72,9 @@ async fn test_app_with_sessions(
     let (command_tx, command_rx) = mpsc::unbounded_channel::<WireCommand>();
     let (snapshot_tx, _) = broadcast::channel::<WireStatus>(16);
     let latest = Arc::new(parking_lot::Mutex::new(fixture_status(Vec::new())));
-    let (event_tx, _) = broadcast::channel::<AgentJobEvent>(16);
-    let (dag_event_tx, _) = broadcast::channel::<DagEvent>(16);
-    let registry = AgentJobRegistry::new();
-    let agent_fwd = {
-        let mut rx = registry.subscribe();
-        let fwd_tx = event_tx.clone();
-        tokio::spawn(async move {
-            loop {
-                match rx.recv().await {
-                    Ok(event) => {
-                        let _ = fwd_tx.send(event);
-                    }
-                    Err(broadcast::error::RecvError::Lagged(n)) => {
-                        eprintln!("AgentJobEvent broadcast lagged by {n}, skipping");
-                        continue;
-                    }
-                    Err(broadcast::error::RecvError::Closed) => break,
-                }
-            }
-        })
-        .abort_handle()
-    };
+    let (event_tx, _) = broadcast::channel::<theway_transport::wire::WireAgentEvent>(16);
+    let (dag_event_tx, _) = broadcast::channel::<theway_transport::wire::WireDagEvent>(16);
+    let agent_fwd = tokio::spawn(std::future::pending::<()>()).abort_handle();
     let session_ops = Arc::new(FakeSessionOps::new());
     for id in seeds {
         session_ops.add_session(id);
@@ -108,8 +86,8 @@ async fn test_app_with_sessions(
         latest,
         events: event_tx,
         dag_events: dag_event_tx,
-        registry,
-        dag_engine: Arc::new(DagEngine::new()),
+        job_ops: Arc::new(theway_transport::UnavailableJobOps),
+        graph_ops: Arc::new(theway_transport::UnavailableGraphOps),
         session_ops: session_ops.clone(),
         session_id: Arc::new(std::sync::RwLock::new(current)),
         agent_fwd,
