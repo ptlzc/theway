@@ -3,7 +3,7 @@
 use crate::test_env::{ENV_LOCK, EnvGuard};
 use tempfile::TempDir;
 
-use super::resolve_startup_model;
+use super::{monitor_controller_storage, resolve_startup_model};
 
 #[tokio::test]
 async fn controller_backing_keeps_user_custom_models_available() {
@@ -52,4 +52,22 @@ async fn controller_backing_keeps_user_custom_models_available() {
     assert_eq!(model.id, model_id);
     assert_eq!(model.api.0, "openai-responses");
     theway_llm_provider::unregister_custom_model(&model.provider, &model.id);
+}
+
+#[tokio::test]
+async fn controller_storage_monitor_exits_after_consecutive_dead_probes() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    drop(listener);
+
+    monitor_controller_storage(
+        &addr,
+        std::time::Duration::from_millis(5),
+        std::time::Duration::from_millis(20),
+        2,
+    )
+    .await
+    .unwrap();
 }

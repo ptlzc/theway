@@ -1,6 +1,8 @@
 //! Daemon process bootstrap and transport lifecycle orchestration.
 
+use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::runtime_storage::{RuntimeStorage, local_runtime_storage, remote_runtime_storage};
 use crate::startup_config::StartupConfig;
@@ -43,6 +45,70 @@ pub struct DaemonOptions {
     pub trigger_poll_secs: Option<u64>,
     pub builtin_skills: Vec<String>,
     pub storage_service_addr: Option<String>,
+}
+
+const STORAGE_WATCH_INTERVAL: Duration = Duration::from_secs(1);
+const STORAGE_WATCH_TIMEOUT: Duration = Duration::from_millis(700);
+const STORAGE_WATCH_FAILURES: usize = 3;
+
+/// Keep a controller-backed daemon alive only while its storage owner is
+/// reachable. The protocol server itself can remain healthy after the TUI
+/// process disappears, so transport liveness alone is not sufficient.
+async fn monitor_controller_storage(
+    addr: &str,
+    interval: Duration,
+    timeout: Duration,
+    failure_limit: usize,
+) -> Result<()> {
+    debug_assert!(failure_limit > 0);
+    let mut ticker = tokio::time::interval(interval);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut failures = 0usize;
+
+    loop {
+        ticker.tick().await;
+        match theway_transport::client::probe_storage_service(addr, timeout).await {
+            Ok(()) => {
+                if failures > 0 {
+                    tracing::info!(
+                        "controller storage at {addr} recovered after {failures} failed probe(s)"
+                    );
+                }
+                failures = 0;
+            }
+            Err(error) => {
+                failures += 1;
+                tracing::warn!(
+                    "controller storage probe {failures}/{failure_limit} failed at {addr}: {error}"
+                );
+                if failures >= failure_limit {
+                    tracing::warn!(
+                        "controller storage at {addr} remained unavailable for {failure_limit} consecutive probes; shutting down daemon"
+                    );
+                    return Ok(());
+                }
+            }
+        }
+    }
+}
+
+async fn supervise_controller_storage<F>(storage_addr: Option<&str>, server: F) -> Result<()>
+where
+    F: Future<Output = Result<()>>,
+{
+    let Some(addr) = storage_addr else {
+        return server.await;
+    };
+    tokio::pin!(server);
+    tokio::select! {
+        result = &mut server => result,
+        result = monitor_controller_storage(
+            addr,
+            STORAGE_WATCH_INTERVAL,
+            STORAGE_WATCH_TIMEOUT,
+            STORAGE_WATCH_FAILURES,
+        ) => result,
+    }
 }
 
 pub async fn run(options: DaemonOptions) -> Result<()> {
@@ -488,29 +554,38 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
                     let _ = std::fs::remove_file(&port_file);
                 }
             }
-            crate::mcp_server::run_mcp_server(crate::tools::local_tools(executor.clone()))
-                .await
-                .map_err(|e| anyhow::anyhow!("mcp server: {e}"))
+            supervise_controller_storage(options.storage_service_addr.as_deref(), async {
+                crate::mcp_server::run_mcp_server(crate::tools::local_tools(executor.clone()))
+                    .await
+                    .map_err(|e| anyhow::anyhow!("mcp server: {e}"))
+            })
+            .await
         }
         DaemonTransport::Grpc => {
-            theway_transport::grpc::run_grpc(
-                Box::new(host),
-                theway_transport::grpc::GrpcOptions {
-                    host: options.host.clone(),
-                    port: options.port,
-                    on_listen: Some(on_listen.clone()),
-                },
+            supervise_controller_storage(
+                options.storage_service_addr.as_deref(),
+                theway_transport::grpc::run_grpc(
+                    Box::new(host),
+                    theway_transport::grpc::GrpcOptions {
+                        host: options.host.clone(),
+                        port: options.port,
+                        on_listen: Some(on_listen.clone()),
+                    },
+                ),
             )
             .await
         }
         DaemonTransport::Http => {
-            theway_transport::http::run_web(
-                Box::new(host),
-                theway_transport::wire::WebOptions {
-                    host: options.host.clone(),
-                    port: options.port,
-                    on_listen: Some(on_listen.clone()),
-                },
+            supervise_controller_storage(
+                options.storage_service_addr.as_deref(),
+                theway_transport::http::run_web(
+                    Box::new(host),
+                    theway_transport::wire::WebOptions {
+                        host: options.host.clone(),
+                        port: options.port,
+                        on_listen: Some(on_listen.clone()),
+                    },
+                ),
             )
             .await
         }

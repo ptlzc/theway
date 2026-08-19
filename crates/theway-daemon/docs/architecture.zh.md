@@ -17,7 +17,7 @@
 3. 解析模型配置并构建 provider 流函数。
 4. 创建进程生命周期服务，加载 trigger/cron 状态，并用同一个 observer 构建 DAG engine 与 subagent job registry。
 5. 选择 `ToolExecutor`，加载可选 MCP/LSP/hook/template/skill/extension 来源，并组装面向模型的工具。
-6. 构建初始 `SessionRuntime`，创建 `TurnHost`，交给所选 gRPC、HTTP 或 MCP 服务生命周期。
+6. 构建初始 `SessionRuntime`，创建 `TurnHost`，交给所选 gRPC、HTTP 或 MCP 服务生命周期；配置远程 controller 存储时，以有界存储探测监督该生命周期。
 
 [`paths.rs`](../src/paths.rs) 在 CLI 边界解析 base、home、工作目录和额外 skill 目录。运行时模块只接收 `DaemonPaths` 或显式路径，不自行解析 `HOME`、`THEWAY_DIR` 或进程当前目录。
 
@@ -43,6 +43,8 @@
 - `SessionRepository` 使用 `Arc<dyn SessionStore>` 提供创建、恢复、打开、列举、删除、fork 和导入，而不暴露具体数据库类型。
 
 本地适配器使用 `theway-storage`。`RemoteRuntimeStorage` 使用 `theway-transport` 的存储 RPC 操作。编排代码依赖这些 daemon trait，不暴露 SQLite 类型。
+
+配置 controller 存储的 daemon 仅在该存储服务可访问时有效。[`orchestration/startup.rs`](../src/orchestration/startup.rs) 每秒完成一次限定服务的 gRPC 健康检查，在连接恢复后重置失败计数并记录恢复日志。连续三次探测失败会结束协议生命周期并正常关闭 daemon；关闭过程会刷新 DAG 持久化、终止活动 graph run、排空遥测，并且仅在 discovery 记录仍属于当前进程时将其删除。
 
 ## 工具与宿主集成
 
@@ -70,6 +72,7 @@
 
 - 启动与切换会话只有一条 `SessionRuntimeBuilder` 构建路径。
 - 进程服务和存储实现通过 owned handle 与 trait 注入，不使用隐藏全局变量或具体 SQLite 类型。
+- 使用 controller 存储的 daemon 不会在构建与持久化会话运行时所需的 controller 存储退出后继续存活。
 - Daemon 负责运行时语义，不持有客户端展示状态。
 - 协议转换由 daemon 适配器针对 transport 拥有的消息完成。
 - 宿主路径只解析一次并显式传递。

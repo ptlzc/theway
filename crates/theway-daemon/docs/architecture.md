@@ -17,7 +17,7 @@ English | [中文](architecture.zh.md)
 3. Resolve model configuration and build the provider stream function.
 4. Create process-lifetime services, load trigger/cron state, and construct the DAG engine and subagent-job registry with one shared observer.
 5. Select a `ToolExecutor`, load optional MCP/LSP/hooks/templates/skills/extensions sources, and assemble model-facing tools.
-6. Build the initial `SessionRuntime`, create the `TurnHost`, and hand it to the selected gRPC, HTTP, or MCP server lifecycle.
+6. Build the initial `SessionRuntime`, create the `TurnHost`, and hand it to the selected gRPC, HTTP, or MCP server lifecycle. When remote controller storage is configured, supervise that lifecycle with bounded storage probes.
 
 [`paths.rs`](../src/paths.rs) resolves base, home, work directory, and additional skill directories at the CLI boundary. Runtime modules receive `DaemonPaths` or explicit paths rather than resolving `HOME`, `THEWAY_DIR`, or the process current directory independently.
 
@@ -43,6 +43,8 @@ English | [中文](architecture.zh.md)
 - `SessionRepository` supplies create, resume, open, list, delete, fork, and import operations using `Arc<dyn SessionStore>` rather than a concrete database type.
 
 The local adapter uses `theway-storage`. `RemoteRuntimeStorage` uses the storage RPC operations from `theway-transport`. Orchestration code depends on these daemon traits and does not expose SQLite types.
+
+A daemon configured with controller storage is valid only while that storage service remains reachable. [`orchestration/startup.rs`](../src/orchestration/startup.rs) completes a service-scoped gRPC health check once per second, resets the failure count after recovery, and logs the recovery. Three consecutive failed probes end the protocol lifecycle and shut the daemon down normally; shutdown flushes DAG persistence, aborts active graph runs, drains telemetry, and removes the discovery entry only when it still belongs to that process.
 
 ## Tools and host integrations
 
@@ -70,6 +72,7 @@ One observer instance is injected into the primary and resumed harnesses, `Subag
 
 - Session construction has one `SessionRuntimeBuilder` path for startup and switching.
 - Process services and storage implementations are injected through owned handles and traits rather than hidden globals or concrete SQLite types.
+- A controller-backed daemon does not outlive the controller storage required to build and persist session runtimes.
 - The daemon owns runtime semantics but no client presentation state.
 - Protocol conversion occurs in daemon adapters against transport-owned messages.
 - Host paths are resolved once and passed explicitly.
