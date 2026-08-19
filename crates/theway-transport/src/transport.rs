@@ -435,9 +435,8 @@ pub struct TransportEndpoints {
     /// [`transport_endpoints`](crate::host::TransportHost::transport_endpoints)
     /// and shared with the kernel-side copy.
     pub path_context: std::sync::Arc<std::sync::RwLock<WirePathContext>>,
-    /// Shared daemon configuration view (issue #72): served by `GetConfig`,
-    /// optimistically merged by `SetConfig` / `Configure` before the event
-    /// loop applies the same patch authoritatively. Built once in
+    /// Shared authoritative daemon configuration view served by `GetConfig`.
+    /// The event loop updates it after applying a patch. Built once in
     /// [`transport_endpoints`](crate::host::TransportHost::transport_endpoints)
     /// and shared with the kernel-side copy.
     pub daemon_config: std::sync::Arc<std::sync::RwLock<WireDaemonConfig>>,

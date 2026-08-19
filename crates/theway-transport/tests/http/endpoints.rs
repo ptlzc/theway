@@ -448,7 +448,7 @@ async fn spawn_config_server(
 }
 
 #[tokio::test]
-async fn json_rpc_serves_and_updates_daemon_config() {
+async fn json_rpc_serves_authoritative_daemon_config_and_queues_updates() {
     let seed = crate::wire::WireDaemonConfig {
         provider: Some("anthropic".into()),
         model: Some("claude-x".into()),
@@ -464,7 +464,7 @@ async fn json_rpc_serves_and_updates_daemon_config() {
     let alias = rpc_call(&client, &base, 2, "settings.get_config", None).await;
     assert_eq!(alias, config);
 
-    // SetConfig with flat params: accepted, merged, and queued as Configure.
+    // SetConfig with flat params is accepted and queued as Configure.
     let accepted = rpc_call(
         &client,
         &base,
@@ -484,8 +484,8 @@ async fn json_rpc_serves_and_updates_daemon_config() {
     }
     let config = rpc_call(&client, &base, 4, "get_config", None).await;
     assert_eq!(config["provider"], "anthropic");
-    assert_eq!(config["model"], "claude-y");
-    assert_eq!(config["trigger_poll_secs"], 30);
+    assert_eq!(config["model"], "claude-x");
+    assert!(config.get("trigger_poll_secs").is_none());
 
     // Configure (alias) accepts a nested `config` object too.
     let accepted = rpc_call(

@@ -98,9 +98,8 @@ pub struct GrpcState {
     /// `SetSkillDirs` optimistically updates `skills_dirs` before the event
     /// loop applies the change authoritatively.
     pub path_context: Arc<std::sync::RwLock<WirePathContext>>,
-    /// Shared daemon configuration view (issue #72): served by `GetConfig`;
-    /// `SetConfig` / `Configure` optimistically merge the patch before the
-    /// event loop applies it authoritatively.
+    /// Shared authoritative daemon configuration view, served by `GetConfig`
+    /// and updated by the event loop after applying a patch.
     pub daemon_config: Arc<std::sync::RwLock<WireDaemonConfig>>,
     /// File/tool operation handler (issue #75): backs the `ToolService`
     /// surface (`ReadFile` / … / `SkillInstall`). The daemon kernel
@@ -397,12 +396,10 @@ impl SettingsService for GrpcState {
 }
 
 impl GrpcState {
-    /// Shared SetConfig / Configure body (issue #72): optimistically merge the
-    /// patch into the shared config view — `GetConfig` readers observe it right
-    /// away — then enqueue `WireCommand::Configure` so the serialized event
-    /// loop applies the same patch authoritatively.
+    /// Shared SetConfig / Configure body: enqueue the patch for the serialized
+    /// daemon event loop. The shared GetConfig view changes only after the
+    /// daemon validates and applies the requested fields.
     fn enqueue_configure(&self, config: WireDaemonConfig) -> Result<bool, Status> {
-        self.daemon_config.write().unwrap().merge_from(&config);
         self.commands
             .send(WireCommand::Configure { config })
             .map_err(|_| Status::unavailable("event loop command channel closed"))?;

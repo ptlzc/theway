@@ -1,8 +1,7 @@
 // Settings domain (issue #72): the daemon configuration surface. Controllers
 // read the daemon's current configuration view (GetConfig) and push partial
 // updates (SetConfig / Configure) that the serialized event loop applies
-// authoritatively — the same optimistic-update + queued-command shape the
-// SessionService.SetSkillDirs path uses.
+// authoritatively.
 
 syntax = "proto3";
 package theway.grpc.v1;
@@ -12,9 +11,10 @@ import "commands.proto";
 // Daemon configuration snapshot / partial update (issue #72).
 //
 // Update semantics: a present `optional` field replaces the daemon's current
-// value; an absent one keeps it. `repeated` fields cannot track presence in
-// proto3, so they apply only when non-empty — clearing them goes through the
-// dedicated surfaces (e.g. SessionService.SetSkillDirs with an empty list).
+// value; an absent one keeps it. Non-empty repeated values replace lists.
+// `clear_fields` explicitly clears optional or repeated fields, avoiding
+// proto3's absent-vs-empty ambiguity. When a field is both cleared and set in
+// one request, the set value wins.
 //
 // Covered areas: model selection (provider / model / base_url / thinking),
 // skills (builtin_skills / skills_dirs), triggers (trigger_poll_secs), and
@@ -53,11 +53,15 @@ message DaemonConfig {
   // the daemon uses controller-backed runtime storage (sessions, DAG runs,
   // trigger rules, cron jobs) over RPC instead of local storage directly.
   optional string storage_service_addr = 10;
+
+  // Field names to clear before applying values present in this message.
+  // Unknown names make the daemon reject the patch without partial changes.
+  repeated string clear_fields = 11;
 }
 
 service SettingsService {
-  // Current daemon configuration view: the fields the daemon knows about
-  // (startup values merged with every accepted update).
+  // Current daemon configuration view: only values successfully applied by
+  // the serialized daemon event loop. `clear_fields` is empty in snapshots.
   rpc GetConfig(Empty) returns (DaemonConfig);
   // Push a partial configuration update. The command is queued into the
   // serialized event loop, which applies it authoritatively;

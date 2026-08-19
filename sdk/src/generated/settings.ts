@@ -26,9 +26,10 @@ export const protobufPackage = "theway.grpc.v1";
  * Daemon configuration snapshot / partial update (issue #72).
  *
  * Update semantics: a present `optional` field replaces the daemon's current
- * value; an absent one keeps it. `repeated` fields cannot track presence in
- * proto3, so they apply only when non-empty — clearing them goes through the
- * dedicated surfaces (e.g. SessionService.SetSkillDirs with an empty list).
+ * value; an absent one keeps it. Non-empty repeated values replace lists.
+ * `clear_fields` explicitly clears optional or repeated fields, avoiding
+ * proto3's absent-vs-empty ambiguity. When a field is both cleared and set in
+ * one request, the set value wins.
  *
  * Covered areas: model selection (provider / model / base_url / thinking),
  * skills (builtin_skills / skills_dirs), triggers (trigger_poll_secs), and
@@ -80,7 +81,14 @@ export interface DaemonConfig {
    * the daemon uses controller-backed runtime storage (sessions, DAG runs,
    * trigger rules, cron jobs) over RPC instead of local storage directly.
    */
-  storageServiceAddr?: string | undefined;
+  storageServiceAddr?:
+    | string
+    | undefined;
+  /**
+   * Field names to clear before applying values present in this message.
+   * Unknown names make the daemon reject the patch without partial changes.
+   */
+  clearFields: string[];
 }
 
 function createBaseDaemonConfig(): DaemonConfig {
@@ -95,6 +103,7 @@ function createBaseDaemonConfig(): DaemonConfig {
     tuiMaxFeedLines: undefined,
     toolServiceAddr: undefined,
     storageServiceAddr: undefined,
+    clearFields: [],
   };
 }
 
@@ -129,6 +138,9 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
     }
     if (message.storageServiceAddr !== undefined) {
       writer.uint32(82).string(message.storageServiceAddr);
+    }
+    for (const v of message.clearFields) {
+      writer.uint32(90).string(v!);
     }
     return writer;
   },
@@ -220,6 +232,14 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
           message.storageServiceAddr = reader.string();
           continue;
         }
+        case 11: {
+          if (tag !== 90) {
+            break;
+          }
+
+          message.clearFields.push(reader.string());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -269,6 +289,11 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
         : isSet(object.storage_service_addr)
         ? globalThis.String(object.storage_service_addr)
         : undefined,
+      clearFields: globalThis.Array.isArray(object?.clearFields)
+        ? object.clearFields.map((e: any) => globalThis.String(e))
+        : globalThis.Array.isArray(object?.clear_fields)
+        ? object.clear_fields.map((e: any) => globalThis.String(e))
+        : [],
     };
   },
 
@@ -304,6 +329,9 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
     if (message.storageServiceAddr !== undefined) {
       obj.storageServiceAddr = message.storageServiceAddr;
     }
+    if (message.clearFields?.length) {
+      obj.clearFields = message.clearFields;
+    }
     return obj;
   },
 
@@ -322,6 +350,7 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
     message.tuiMaxFeedLines = object.tuiMaxFeedLines ?? undefined;
     message.toolServiceAddr = object.toolServiceAddr ?? undefined;
     message.storageServiceAddr = object.storageServiceAddr ?? undefined;
+    message.clearFields = object.clearFields?.map((e) => e) || [];
     return message;
   },
 };
@@ -329,8 +358,8 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
 export type SettingsServiceService = typeof SettingsServiceService;
 export const SettingsServiceService = {
   /**
-   * Current daemon configuration view: the fields the daemon knows about
-   * (startup values merged with every accepted update).
+   * Current daemon configuration view: only values successfully applied by
+   * the serialized daemon event loop. `clear_fields` is empty in snapshots.
    */
   getConfig: {
     path: "/theway.grpc.v1.SettingsService/GetConfig" as const,
@@ -372,8 +401,8 @@ export const SettingsServiceService = {
 
 export interface SettingsServiceServer extends UntypedServiceImplementation {
   /**
-   * Current daemon configuration view: the fields the daemon knows about
-   * (startup values merged with every accepted update).
+   * Current daemon configuration view: only values successfully applied by
+   * the serialized daemon event loop. `clear_fields` is empty in snapshots.
    */
   getConfig: handleUnaryCall<Empty, DaemonConfig>;
   /**
@@ -391,8 +420,8 @@ export interface SettingsServiceServer extends UntypedServiceImplementation {
 
 export interface SettingsServiceClient extends Client {
   /**
-   * Current daemon configuration view: the fields the daemon knows about
-   * (startup values merged with every accepted update).
+   * Current daemon configuration view: only values successfully applied by
+   * the serialized daemon event loop. `clear_fields` is empty in snapshots.
    */
   getConfig(request: Empty, callback: (error: ServiceError | null, response: DaemonConfig) => void): ClientUnaryCall;
   getConfig(

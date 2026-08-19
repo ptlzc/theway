@@ -66,9 +66,8 @@ pub enum WireCommand {
         dirs: Vec<String>,
     },
     /// Settings/config push (issue #72): apply a partial daemon configuration
-    /// update. The event loop applies it authoritatively (merging into the
-    /// shared config view plus the per-field appliers); the transport servers
-    /// optimistically merge the same patch into the shared view first.
+    /// update. The event loop validates and applies it before updating the
+    /// shared configuration view.
     Configure {
         config: WireDaemonConfig,
     },
@@ -80,8 +79,7 @@ pub enum WireCommand {
 ///
 /// Update semantics mirror the proto contract: a `Some` optional field
 /// replaces the daemon's current value, `None` keeps it; repeated fields apply
-/// only when non-empty (proto3/serde cannot distinguish "absent" from an empty
-/// list, so clearing goes through the dedicated surfaces, e.g. `SetSkillDirs`).
+/// only when non-empty. [`Self::clear_fields`] carries explicit clears.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct WireDaemonConfig {
     /// Model selection: provider name.
@@ -118,14 +116,59 @@ pub struct WireDaemonConfig {
     /// `LocalRuntimeStorage`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub storage_service_addr: Option<String>,
+    /// Field names to clear before applying the values above. Snapshots never
+    /// retain this patch-only field.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clear_fields: Vec<String>,
 }
 
 impl WireDaemonConfig {
+    pub const FIELDS: [&'static str; 10] = [
+        "provider",
+        "model",
+        "base_url",
+        "thinking",
+        "builtin_skills",
+        "skills_dirs",
+        "trigger_poll_secs",
+        "tui_max_feed_lines",
+        "tool_service_addr",
+        "storage_service_addr",
+    ];
+
+    pub fn clears(&self, field: &str) -> bool {
+        self.clear_fields.iter().any(|candidate| candidate == field)
+    }
+
+    pub fn unknown_clear_fields(&self) -> Vec<&str> {
+        self.clear_fields
+            .iter()
+            .map(String::as_str)
+            .filter(|field| !Self::FIELDS.contains(field))
+            .collect()
+    }
+
     /// Apply a partial update: `Some` optional fields replace the current
     /// value, non-empty repeated fields replace the current list. Returns the
     /// number of config areas touched (for diagnostics).
     pub fn merge_from(&mut self, patch: &WireDaemonConfig) -> usize {
         let mut touched = 0;
+        for field in &patch.clear_fields {
+            let cleared = match field.as_str() {
+                "provider" => self.provider.take().is_some(),
+                "model" => self.model.take().is_some(),
+                "base_url" => self.base_url.take().is_some(),
+                "thinking" => self.thinking.take().is_some(),
+                "builtin_skills" => !std::mem::take(&mut self.builtin_skills).is_empty(),
+                "skills_dirs" => !std::mem::take(&mut self.skills_dirs).is_empty(),
+                "trigger_poll_secs" => self.trigger_poll_secs.take().is_some(),
+                "tui_max_feed_lines" => self.tui_max_feed_lines.take().is_some(),
+                "tool_service_addr" => self.tool_service_addr.take().is_some(),
+                "storage_service_addr" => self.storage_service_addr.take().is_some(),
+                _ => false,
+            };
+            touched += usize::from(cleared);
+        }
         if let Some(provider) = patch.provider.clone() {
             self.provider = Some(provider);
             touched += 1;

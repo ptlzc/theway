@@ -339,6 +339,7 @@ fn daemon_config_round_trips_wire_and_proto() {
         tui_max_feed_lines: Some(8000),
         tool_service_addr: None,
         storage_service_addr: None,
+        clear_fields: vec!["tool_service_addr".into()],
     };
     let proto = daemon_config_to_proto(&config);
     assert_eq!(proto.provider.as_deref(), Some("anthropic"));
@@ -349,6 +350,7 @@ fn daemon_config_round_trips_wire_and_proto() {
     assert_eq!(proto.skills_dirs, vec!["/home/user/.agents/skills"]);
     assert_eq!(proto.trigger_poll_secs, Some(60));
     assert_eq!(proto.tui_max_feed_lines, Some(8000));
+    assert_eq!(proto.clear_fields, vec!["tool_service_addr"]);
     assert_eq!(daemon_config_from_proto(&proto), config);
 
     // Default (all-absent) config round-trips too: no field gains presence.
@@ -400,4 +402,44 @@ fn daemon_config_merge_replaces_present_fields_only() {
 
     // Empty patch touches nothing.
     assert_eq!(current.merge_from(&WireDaemonConfig::default()), 0);
+}
+
+#[test]
+fn daemon_config_merge_supports_explicit_clear_and_set_wins() {
+    use crate::wire::WireDaemonConfig;
+
+    let mut current = WireDaemonConfig {
+        thinking: Some(true),
+        skills_dirs: vec!["/old".into()],
+        tool_service_addr: Some("http://old".into()),
+        ..Default::default()
+    };
+    let patch = WireDaemonConfig {
+        thinking: Some(false),
+        clear_fields: vec![
+            "thinking".into(),
+            "skills_dirs".into(),
+            "tool_service_addr".into(),
+        ],
+        ..Default::default()
+    };
+
+    current.merge_from(&patch);
+
+    assert_eq!(current.thinking, Some(false), "set wins over clear");
+    assert!(current.skills_dirs.is_empty());
+    assert!(current.tool_service_addr.is_none());
+    assert!(current.clear_fields.is_empty(), "snapshots never retain patch intent");
+}
+
+#[test]
+fn daemon_config_reports_unknown_clear_fields() {
+    use crate::wire::WireDaemonConfig;
+
+    let config = WireDaemonConfig {
+        clear_fields: vec!["skills_dirs".into(), "typo".into()],
+        ..Default::default()
+    };
+
+    assert_eq!(config.unknown_clear_fields(), vec!["typo"]);
 }

@@ -999,7 +999,7 @@ async fn set_skill_dirs_updates_path_context_and_enqueues_command() {
         other => panic!("unexpected command: {other:?}"),
     }
 
-    // An empty list clears the extras (same optimistic + command flow).
+    // An empty list clears the extras through the dedicated command flow.
     let result = state
         .set_skill_dirs(Request::new(theway_grpc::SetSkillDirsRequest {
             dirs: Vec::new(),
@@ -1094,7 +1094,7 @@ async fn get_config_returns_the_shared_config_view() {
 }
 
 #[tokio::test]
-async fn set_config_merges_view_and_enqueues_configure_command() {
+async fn set_config_keeps_authoritative_view_and_enqueues_configure_command() {
     let seed = WireDaemonConfig {
         provider: Some("anthropic".into()),
         model: Some("claude-x".into()),
@@ -1113,13 +1113,12 @@ async fn set_config_merges_view_and_enqueues_configure_command() {
         .into_inner();
     assert!(result.accepted);
 
-    // Optimistic merge: GetConfig readers observe the patch right away, and
-    // untouched fields keep their current value.
+    // Admission does not claim that the event loop has already applied it.
     {
         let updated = state.daemon_config.read().unwrap();
         assert_eq!(updated.provider.as_deref(), Some("anthropic"));
-        assert_eq!(updated.model.as_deref(), Some("claude-y"));
-        assert_eq!(updated.tui_max_feed_lines, Some(8000));
+        assert_eq!(updated.model.as_deref(), Some("claude-x"));
+        assert_eq!(updated.tui_max_feed_lines, None);
     }
 
     // The serialized event loop receives the authoritative command.
@@ -1147,10 +1146,7 @@ async fn configure_is_an_alias_of_set_config() {
         .into_inner();
     assert!(result.accepted);
 
-    assert_eq!(
-        state.daemon_config.read().unwrap().skills_dirs,
-        vec!["/skills/a"]
-    );
+    assert!(state.daemon_config.read().unwrap().skills_dirs.is_empty());
     match command_rx.recv().await.unwrap() {
         WireCommand::Configure { config } => {
             assert_eq!(config.skills_dirs, vec!["/skills/a"])
@@ -1182,8 +1178,7 @@ async fn settings_round_trip_over_transport() {
     assert_eq!(got.provider.as_deref(), Some("anthropic"));
     assert_eq!(got.model.as_deref(), Some("claude-x"));
 
-    // SetConfig over the wire: accepted, the Configure command lands on the
-    // event loop channel, and the follow-up GetConfig reflects the merge.
+    // SetConfig over the wire is admitted and lands on the event-loop channel.
     let result = client
         .set_config(theway_grpc::DaemonConfig {
             base_url: Some("https://proxy.example.com".into()),
@@ -1204,8 +1199,8 @@ async fn settings_round_trip_over_transport() {
     let got = client.get_config(Empty {}).await.unwrap().into_inner();
     assert_eq!(got.provider.as_deref(), Some("anthropic"));
     assert_eq!(got.model.as_deref(), Some("claude-x"));
-    assert_eq!(got.base_url.as_deref(), Some("https://proxy.example.com"));
-    assert_eq!(got.thinking, Some(true));
+    assert!(got.base_url.is_none());
+    assert!(got.thinking.is_none());
 
     server.abort();
 }

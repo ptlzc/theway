@@ -49,9 +49,8 @@ pub struct HttpState {
     /// `SetSkillDirs` optimistically updates `skills_dirs` before the event
     /// loop applies the change authoritatively.
     pub path_context: Arc<RwLock<WirePathContext>>,
-    /// Shared daemon configuration view (issue #72): served by `get_config`;
-    /// `set_config` / `configure` optimistically merge the patch before the
-    /// event loop applies it authoritatively.
+    /// Shared authoritative daemon configuration view, served by
+    /// `get_config` and updated by the event loop after applying a patch.
     pub daemon_config: Arc<RwLock<WireDaemonConfig>>,
     /// File/tool operation handler (issue #75): backs the JSON-RPC tool
     /// methods (`read_file` / `write_file` / … / `skill_install`). The
@@ -506,9 +505,6 @@ pub(crate) async fn dispatch(
         }
         "set_config" | "settings.set_config" | "configure" | "settings.configure" => {
             let config = parse_daemon_config(params)?;
-            // Optimistic merge (GetConfig readers observe it immediately), then
-            // enqueue the authoritative command for the serialized event loop.
-            state.daemon_config.write().unwrap().merge_from(&config);
             let accepted = state
                 .commands
                 .send(WireCommand::Configure { config })

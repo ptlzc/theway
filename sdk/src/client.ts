@@ -559,13 +559,14 @@ function extractErrorMessage(err: unknown): string {
 
 /**
  * Complete a partial `DaemonConfig` for the wire: ts-proto models proto3
- * repeated fields as required arrays, and an empty array means "keep the
- * current value" (repeated fields apply only when non-empty).
+ * repeated fields as required arrays. Empty value arrays mean "keep" while
+ * `clearFields` carries explicit clear intent.
  */
 function fillDaemonConfig(config: Partial<DaemonConfig>): DaemonConfig {
   return {
-    builtinSkills: [],
-    skillsDirs: [],
     ...config,
+    builtinSkills: config.builtinSkills ?? [],
+    skillsDirs: config.skillsDirs ?? [],
+    clearFields: config.clearFields ?? [],
   };
 }

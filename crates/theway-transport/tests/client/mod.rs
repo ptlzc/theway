@@ -550,11 +550,9 @@ async fn client_set_config_queues_configure_command() {
         }
         other => panic!("unexpected command: {other:?}"),
     }
-    // The optimistic merge is visible on the follow-up read.
+    // GetConfig remains authoritative until the daemon event loop applies it.
     let config = client.get_config().await.unwrap();
-    assert_eq!(config.provider.as_deref(), Some("anthropic"));
-    assert_eq!(config.model.as_deref(), Some("claude-x"));
-    assert_eq!(config.tui_max_feed_lines, Some(8000));
+    assert_eq!(config, WireDaemonConfig::default());
 }
 
 #[tokio::test]
