@@ -127,51 +127,6 @@ pub fn full_breakdown(snap: &CostSnapshot) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use theway_llm_provider::UsageCost;
-
-    #[test]
-    fn accumulates_usage_and_costs() {
-        let t = CostTracker::new();
-        let u1 = Usage {
-            input: 100,
-            output: 50,
-            cache_read: 10,
-            cache_write: 5,
-            total_tokens: 165,
-            cost: UsageCost {
-                input: 0.001,
-                output: 0.0005,
-                cache_read: 0.0001,
-                cache_write: 0.00005,
-                total: 0.00165,
-            },
-        };
-        t.record(&u1);
-        t.record(&u1);
-        let s = t.snapshot();
-        assert_eq!(s.tokens.input, 200);
-        assert_eq!(s.tokens.output, 100);
-        assert_eq!(s.tokens.total_tokens, 330);
-        assert_eq!(s.turn_count, 2);
-        assert!((s.total_cost() - 0.0033).abs() < 1e-9);
-    }
-
-    #[test]
-    fn reset_clears_all_counters() {
-        let t = CostTracker::new();
-        let mut u = Usage::default();
-        u.input = 10;
-        t.record(&u);
-        assert_eq!(t.snapshot().tokens.input, 10);
-        t.reset();
-        assert_eq!(t.snapshot().tokens.input, 0);
-        assert_eq!(t.snapshot().turn_count, 0);
-    }
-}
-
-#[cfg(test)]
 mod cost_bridge_tests {
     tests_bridge_macro::tests_bridge!("agent/cost");
 }

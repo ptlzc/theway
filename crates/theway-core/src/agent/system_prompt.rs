@@ -37,32 +37,4 @@ pub fn format_skills_for_system_prompt(skills: &[Skill]) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::super::types::SkillSource;
-    use super::*;
-
-    fn mk(name: &str, desc: &str) -> Skill {
-        Skill {
-            name: name.into(),
-            description: desc.into(),
-            file_path: format!("/skills/{name}/SKILL.md"),
-            content: "body".into(),
-            disable_model_invocation: false,
-            source: SkillSource::User,
-        }
-    }
-
-    #[test]
-    fn empty_when_no_skills() {
-        assert_eq!(format_skills_for_system_prompt(&[]), "");
-    }
-
-    #[test]
-    fn renders_each_skill_one_line() {
-        let out = format_skills_for_system_prompt(&[mk("alpha", "first"), mk("beta", "second")]);
-        assert!(out.starts_with("<skills>\n"));
-        assert!(out.contains("- name: alpha\n  description: first\n"));
-        assert!(out.contains("- name: beta\n  description: second\n"));
-        assert!(out.ends_with("</skills>"));
-    }
-}
+tests_bridge_macro::tests_bridge!("agent/system_prompt");

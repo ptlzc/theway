@@ -1,12 +1,15 @@
-//! theway-core — Rust port of `@earendil-works/theway-core`. Layered on top of `theway-llm-provider`.
-//! 1:1 file mapping with the TypeScript source at `packages/agent/src/`.
+//! Runtime engine used by `theway-daemon`.
+//!
+//! This crate owns the agent loop, harness, typed sessions, compaction, lifecycle
+//! hooks, the execution seam, and multiagent orchestration. Concrete tools,
+//! persistence backends, and protocol servers live outside core and are composed
+//! by the daemon.
 
 //! Self-alias so ported modules keep their `use theway_core::...` import paths unchanged.
 extern crate self as theway_core;
 
 pub mod agent;
 pub mod executor;
-pub mod node;
 pub mod types;
 
 // Public surface — mirrors `packages/agent/src/index.ts`.

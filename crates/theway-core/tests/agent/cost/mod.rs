@@ -24,6 +24,51 @@ fn usage() -> Usage {
     }
 }
 
+#[test]
+fn record_accumulates_usage_and_costs() {
+    let tracker = CostTracker::new();
+    let value = Usage {
+        input: 100,
+        output: 50,
+        cache_read: 10,
+        cache_write: 5,
+        total_tokens: 165,
+        cost: UsageCost {
+            input: 0.001,
+            output: 0.0005,
+            cache_read: 0.0001,
+            cache_write: 0.00005,
+            total: 0.00165,
+        },
+    };
+
+    tracker.record(&value);
+    tracker.record(&value);
+    let snapshot = tracker.snapshot();
+
+    assert_eq!(snapshot.tokens.input, 200);
+    assert_eq!(snapshot.tokens.output, 100);
+    assert_eq!(snapshot.tokens.total_tokens, 330);
+    assert_eq!(snapshot.turn_count, 2);
+    assert!((snapshot.total_cost() - 0.0033).abs() < 1e-9);
+}
+
+#[test]
+fn reset_clears_all_counters() {
+    let tracker = CostTracker::new();
+    let value = Usage {
+        input: 10,
+        ..Usage::default()
+    };
+    tracker.record(&value);
+    assert_eq!(tracker.snapshot().tokens.input, 10);
+
+    tracker.reset();
+
+    assert_eq!(tracker.snapshot().tokens.input, 0);
+    assert_eq!(tracker.snapshot().turn_count, 0);
+}
+
 fn assistant_message(usage: Usage) -> AgentMessage {
     AgentMessage::Llm(PiMessage::Assistant(AssistantMessage {
         role: AssistantRole::Assistant,

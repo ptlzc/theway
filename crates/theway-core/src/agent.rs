@@ -37,9 +37,6 @@ pub mod skills;
 pub mod system_prompt;
 #[cfg(feature = "harness")]
 pub mod types;
-#[cfg(feature = "harness")]
-pub mod utils;
-
 use std::sync::Arc;
 
 use parking_lot::Mutex;

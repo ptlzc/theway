@@ -1,12 +1,67 @@
-//! Tests for `agent::skills` walker and validation helpers — split out of src
-//! (see docs/rust-test-files.md). The src file already has a small inline test
-//! module, so these tests are bridged through `skills_walk_tests`.
+//! Tests for `agent::skills` walker and validation helpers.
 
 use std::collections::HashMap;
 
 use super::super::*;
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
+
+#[test]
+fn parse_frontmatter_extracts_metadata_and_body() {
+    let raw = "---\nname: my-skill\ndescription: do things\n---\nThis is the body.";
+    let (frontmatter, body) = parse_frontmatter(raw).unwrap();
+    assert_eq!(frontmatter.name.as_deref(), Some("my-skill"));
+    assert_eq!(frontmatter.description.as_deref(), Some("do things"));
+    assert_eq!(body, "This is the body.");
+}
+
+#[test]
+fn parse_frontmatter_without_header_passes_content_through() {
+    let (frontmatter, body) = parse_frontmatter("# Heading\n\nbody").unwrap();
+    assert!(frontmatter.name.is_none());
+    assert!(body.starts_with("# Heading"));
+}
+
+#[test]
+fn validation_rejects_invalid_names_and_missing_descriptions() {
+    assert!(validate_name("my-skill", "my-skill").is_empty());
+    assert!(!validate_name("MySkill", "my-skill").is_empty());
+    assert!(!validate_name("-leading", "-leading").is_empty());
+    assert!(!validate_name("my--skill", "my--skill").is_empty());
+    assert!(!validate_description("").is_empty());
+    assert!(!validate_description("   ").is_empty());
+    assert!(validate_description("ok").is_empty());
+}
+
+#[test]
+fn format_skill_invocation_includes_location_body_and_extra_prompt() {
+    let skill = Skill {
+        name: "my-skill".into(),
+        description: "do".into(),
+        file_path: "/abs/skills/my-skill/SKILL.md".into(),
+        content: "hello".into(),
+        disable_model_invocation: false,
+        source: SkillSource::User,
+    };
+    let output = format_skill_invocation(&skill, Some("EXTRA"));
+    assert!(output.contains("<skill name=\"my-skill\""));
+    assert!(output.contains("location=\"/abs/skills/my-skill/SKILL.md\""));
+    assert!(output.ends_with("EXTRA"));
+}
+
+#[test]
+fn env_path_helpers_normalize_unix_and_windows_separators() {
+    assert_eq!(join_env_path("/a/b", "c"), "/a/b/c");
+    assert_eq!(join_env_path("/a/b/", "/c"), "/a/b/c");
+    assert_eq!(dirname_env_path("/a/b/c"), "/a/b");
+    assert_eq!(dirname_env_path("/c"), "/");
+    assert_eq!(basename_env_path("/a/b/c"), "c");
+    assert_eq!(relative_env_path("/root", "/root/a/b"), "a/b");
+    assert_eq!(relative_env_path("/root", "/root"), "");
+    assert_eq!(dirname_env_path("C:\\a\\b\\c"), "C:/a/b");
+    assert_eq!(basename_env_path("C:\\a\\b\\c"), "c");
+    assert_eq!(relative_env_path("C:\\root", "C:\\root\\a\\b"), "a/b");
+}
 
 // ──────────────────────────────────────────────────────────────────────────────────────────
 // TestExecutionEnv — in-memory filesystem seam
