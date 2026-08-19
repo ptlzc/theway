@@ -6,7 +6,7 @@
 
 `theway-tui` 负责终端客户端形态和 controller 本地资源。它只使用 `theway-transport` 的记录与服务，并用 `theway-storage` 进行 controller 本地持久化；不导入 agent 运行时或 daemon 应用 crate。
 
-客户端专用行为包括终端布局、键鼠处理、feed 渲染、本地 picker 与命令、clipboard 图像、daemon 连接默认值，以及如何通过 controller 服务暴露本地文件/进程。跨客户端运行时行为从 transport 记录开始，并由 daemon 实现。
+客户端专用行为包括终端布局、键盘处理、feed 渲染、本地 picker 与命令、clipboard 图像、daemon 连接默认值，以及如何通过 controller 服务暴露本地文件/进程。鼠标选择和文本复制由 terminal 或 tmux 负责：TUI 不启用鼠标追踪，也不把选中的 feed 文本写入 clipboard。跨客户端运行时行为从 transport 记录开始，并由 daemon 实现。
 
 ## 命令分派
 
@@ -28,7 +28,7 @@
 
 ## 应用状态与事件
 
-[`ui/mod.rs`](../src/ui/mod.rs) 负责 `App`、展示状态、overlay、selection、scroll 状态、composer 状态和最新 transport snapshot。[`ui/app/event_loop.rs`](../src/ui/app/event_loop.rs) 与同级模块拆分事件轮询、frame 应用、渲染、交互、panel、status 和 headless 输出，但不创建新的状态归属层。
+[`ui/mod.rs`](../src/ui/mod.rs) 负责 `App`、展示状态、overlay、scroll 状态、composer 状态和最新 transport snapshot。[`ui/app/event_loop.rs`](../src/ui/app/event_loop.rs) 与同级模块拆分事件轮询、frame 应用、渲染、交互、panel、status 和 headless 输出，但不创建新的状态归属层。
 
 [`ui/app/snapshot.rs`](../src/ui/app/snapshot.rs) 应用完整 snapshot 与增量 stream frame。会话标识变化会重置会话级展示 cache。Feed delta 只在预期 base 上应用；不匹配或 lag 后由完整 snapshot 恢复。
 

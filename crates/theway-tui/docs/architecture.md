@@ -6,7 +6,7 @@ English | [中文](architecture.zh.md)
 
 `theway-tui` owns the terminal client form and controller-local resources. It speaks only records and services from `theway-transport` and uses `theway-storage` for controller-local persistence. It does not import the agent runtime or daemon application crates.
 
-Client-specific behavior includes terminal layout, keyboard and mouse handling, feed rendering, local pickers and commands, clipboard images, daemon attachment defaults, and how local files/processes are exposed through the controller services. Cross-client runtime behavior starts in transport records and is implemented by the daemon.
+Client-specific behavior includes terminal layout, keyboard handling, feed rendering, local pickers and commands, clipboard images, daemon attachment defaults, and how local files/processes are exposed through the controller services. Mouse selection and text copying remain owned by the terminal or tmux: the TUI does not enable mouse tracking or write selected feed text to the clipboard. Cross-client runtime behavior starts in transport records and is implemented by the daemon.
 
 ## Command dispatch
 
@@ -28,7 +28,7 @@ Interactive startup performs these operations in order:
 
 ## Application state and events
 
-[`ui/mod.rs`](../src/ui/mod.rs) owns `App`, presentation state, overlays, selection, scroll state, composer state, and the latest transport snapshot. [`ui/app/event_loop.rs`](../src/ui/app/event_loop.rs) and its sibling modules split event polling, frame application, rendering, interaction, panels, status, and headless output without creating additional ownership layers.
+[`ui/mod.rs`](../src/ui/mod.rs) owns `App`, presentation state, overlays, scroll state, composer state, and the latest transport snapshot. [`ui/app/event_loop.rs`](../src/ui/app/event_loop.rs) and its sibling modules split event polling, frame application, rendering, interaction, panels, status, and headless output without creating additional ownership layers.
 
 [`ui/app/snapshot.rs`](../src/ui/app/snapshot.rs) applies complete snapshots and incremental stream frames. A session-id change resets session-scoped presentation caches. Feed deltas are accepted only against the expected base; a complete snapshot is the recovery path after mismatch or lag.
 

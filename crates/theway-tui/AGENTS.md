@@ -20,7 +20,7 @@ This file contains the complete crate-local modification rules for `theway-tui`.
 ## Tests and documentation
 
 - Use local tonic fixtures and fake operation traits; tests must not start provider calls or depend on a user's session directory.
-- Cover keyboard/mouse actions, snapshot lag and session changes, daemon reuse/spawn, controller services, offline commands, and width-sensitive rendering in their owning modules.
+- Cover keyboard actions, terminal enter/leave ownership, snapshot lag and session changes, daemon reuse/spawn, controller services, offline commands, and width-sensitive rendering in their owning modules.
 - Place multi-file suites under `tests/<mirrored-src-path>/` and bridge them from the owning source module.
 - Update [docs/architecture.md](docs/architecture.md) when startup sequencing, controller ownership, state application, rendering, or offline/interactive boundaries change.
 - Run `cargo test -p theway-tui`, `cargo doc -p theway-tui --no-deps --document-private-items`, and `make layering-check`.
