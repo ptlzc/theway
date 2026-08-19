@@ -17,8 +17,8 @@ theway is a three-layer agent runtime:
 
 | Crate | Package | Role |
 |-------|---------|------|
-| `crates/theway-core` | `theway-core` | Agent engine: bare `Agent` + agent loop, `AgentHarness` layer (skills, prompt templates, sessions, compaction, permission policy), session storage contracts (`SessionStorage` / `SessionRepo`) with an in-memory default, multiagent orchestration (DAG/goal graph engine, job registry, nested runner), and the `ToolExecutor` trait (`theway_core::executor`). Defines no tool bodies and no local fs/process behavior. |
-| `crates/theway-daemon` | `theway-daemon` | The single kernel (bin `thewayd`): harness assembly, executor implementations (`local` / `sandbox` features), all tool bodies (engine + local + web), trigger engine, cron scheduler, session ops, DAG persistence, skills/templates, MCP loader, LSP supervisor, hooks. Serves the gRPC / HTTP / MCP transports. |
+| `crates/theway-core` | `theway-core` | Agent engine: bare `Agent` + agent loop, `AgentHarness` layer (skills, prompt templates, sessions, compaction, permission policy), session storage contracts (`SessionStorage` / `SessionRepo`) with an in-memory default, multiagent orchestration (DAG/goal graph engine, job registry, nested runner), the transport-neutral `RuntimeObserver` port, and the `ToolExecutor` trait (`theway_core::executor`). Defines no tool bodies, exporters, or local fs/process behavior. |
+| `crates/theway-daemon` | `theway-daemon` | The single kernel (bin `thewayd`): harness assembly, executor implementations (`local` / `sandbox` features), all tool bodies (engine + local + web), trigger engine, cron scheduler, session ops, DAG persistence, skills/templates, MCP loader, LSP supervisor, hooks, and OpenTelemetry/Prometheus export. Serves the gRPC / HTTP / MCP transports. |
 | `crates/theway-transport` | `theway-transport` | Protocol layer: wire model + gRPC / HTTP/SSE / WebSocket / MCP transports, plus the shared client-contract modules (auth, bug report, commands, config, feed, history, images, mentions, triggers). |
 | `crates/theway-tui` | `theway-tui` | Terminal client (the `theway` CLI binary): ratatui REPL, feed rendering, local commands. Connects to a running daemon or spawns `thewayd`; never links the daemon kernel. |
 | `crates/theway-contract` | `theway-contract` | Shared contract leaf crate: session-scoped automation sidecar models (`triggers`) and the base-dir / cwd-hash path layout (`config`). No engine, no protocol, no runtime; depends on no workspace crate. |
@@ -60,6 +60,7 @@ programs against:
   hook. The engine machinery lives here; the model-facing tool bodies
   (`dag_*`, `subagent`, skills, memory, MCP adapter) live in the daemon's
   tool assembly.
+- **Runtime observation interface** (`theway_core::observability`): `RuntimeObserver` receives content-safe start/finish records for agent runs, turns, LLM requests, tool execution, compaction, subagent jobs, DAG runs, and DAG nodes. `AgentHarnessOptions`, `AgentJobRegistry`, and `DagEngine` accept one shared observer; the no-op implementation keeps core usable without an exporter. Product streams (`LoopEvent`, `SessionEvent`, `AgentJobEvent`, and `DagEvent`) keep their existing UI, persistence, and wire semantics.
 - **Executor interface** (`theway_core::executor`): the [`ToolExecutor`]
   trait decouples tool effects from the runtime. Trait surface (async,
   object-safe, `Send + Sync`, shareable as `Arc<dyn ToolExecutor>`):
@@ -84,6 +85,16 @@ the daemon kernel; tests and embedded consumers may provide their own.
 `thewayd` is the single kernel: one process owns the harness, sessions,
 tools, triggers, cron, and DAG runtime, and serves them over the transports.
 The TUI and any other client are consumers of this kernel, never peers.
+
+### Runtime observability
+
+`thewayd` creates one `DaemonRuntimeObserver` in `crates/theway-daemon/src/bin/thewayd.rs` and injects it into the main and resumed harnesses, `AgentJobRegistry`, and `DagEngine`. `crates/theway-daemon/src/observability.rs` uses a bounded non-blocking queue, maps core operation identities to parented OpenTelemetry spans, emits stable structured log fields, and records counters, histograms, active-operation gauges, token/activity measurements, and dropped-observation counts. Queue or exporter failures do not change runtime results.
+
+The OpenTelemetry trace and metric exporters use OTLP over HTTP/protobuf and activate when `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, or `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` is non-empty. The SDK resource uses `service.name=thewayd`, the workspace version, and a process-specific `service.instance.id`. Shutdown drains the observation queue and calls both SDK providers' `shutdown` methods within bounded timeouts.
+
+Set `THEWAY_METRICS_ADDR` to a socket address such as `127.0.0.1:9464` to expose Prometheus text format at `GET /metrics`. This listener belongs to the daemon and is independent of the selected client transport. `THEWAY_OBSERVABILITY_QUEUE_CAPACITY` sets the bounded observation queue size and defaults to `4096`; invalid or zero values use the default.
+
+Metric labels contain operation, outcome, stable error category, measurement, token direction, and the configured provider/model pair. Session, run, job, node, tool-call, trace, operation, agent, and tool identifiers are trace/log attributes only. Prompts, messages, tool arguments, tool results, generated text, and raw error strings are absent from runtime observations and exporter records; failures use `ErrorCategory` and `OperationOutcome`.
 
 ### Daemon path context
 
@@ -320,7 +331,7 @@ sandbox-only builds.
 - **Supporting surfaces**: skills loading (multi-root priority scan — see
   [Daemon path context](#daemon-path-context)), prompt-template loading
   (dual-root project ↻ user), MCP loader + LSP supervisor, lifecycle hooks
-  (`hooks`, `hook_executors`), TS extension host, OTLP exporters.
+  (`hooks`, `hook_executors`), TS extension host, and runtime observability exporters.
 
 The daemon re-exports the shared client-contract modules
 (`theway_transport::{auth, config, history, mentions}`) and the session
