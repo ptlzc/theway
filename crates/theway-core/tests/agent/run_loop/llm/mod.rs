@@ -114,6 +114,35 @@ async fn call_llm_returns_done_message_and_emits_streaming_events() {
 }
 
 #[tokio::test]
+async fn call_llm_resolves_provider_credential_into_request_options() {
+    let captured = Arc::new(Mutex::new(None));
+    let captured_key = Arc::clone(&captured);
+    let mut state = AgentState::default();
+    state.model = Some(faux_model());
+    let agent = Agent::new(AgentOptions {
+        initial_state: Some(state),
+        get_api_key: Some(Arc::new(|provider| {
+            (provider == "faux").then(|| "named-provider-secret".into())
+        })),
+        stream_fn: Some(Arc::new(move |_, _, options| {
+            *captured_key.lock().unwrap() = options.and_then(|value| value.base.api_key.clone());
+            done_stream("ok")
+        })),
+        ..Default::default()
+    });
+
+    call_llm(
+        &agent.inner,
+        &CancellationToken::new(),
+        &CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(captured.lock().unwrap().as_deref(), Some("named-provider-secret"));
+}
+
+#[tokio::test]
 async fn call_llm_errors_when_no_model_is_set() {
     // Arrange
     let mut state = AgentState::default();

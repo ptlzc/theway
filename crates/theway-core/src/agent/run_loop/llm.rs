@@ -145,6 +145,9 @@ pub(super) async fn call_llm(
             .clone()
             .unwrap_or_else(default_stream_fn);
         let mut options = SimpleStreamOptions::default();
+        if let Some(resolve) = &inner.options.get_api_key {
+            options.base.api_key = resolve(&model.provider.0);
+        }
         if let Some(sid) = &inner.options.session_id {
             options.base.session_id = Some(sid.clone());
         }

@@ -76,6 +76,8 @@ pub struct AgentHarnessOptions {
     /// Optional parent operation for the inner agent run.
     pub observation_parent: Option<OperationId>,
     pub stream_fn: Option<StreamFn>,
+    /// Optional per-provider credential resolver applied to every model call.
+    pub get_api_key: Option<GetApiKey>,
     /// Auto-compaction thresholds. Defaults to [`DEFAULT_COMPACTION_SETTINGS`].
     pub compaction: CompactionSettings,
     /// Custom compaction algorithm registry. The builtin algorithm is always available.
@@ -119,6 +121,7 @@ impl AgentHarnessOptions {
             observation_context: ObservationContext::default(),
             observation_parent: None,
             stream_fn: None,
+            get_api_key: None,
             compaction: DEFAULT_COMPACTION_SETTINGS.clone(),
             compact_algorithms: Arc::new(CompactAlgorithmRegistry::new()),
             before_tool_call: None,
@@ -256,6 +259,7 @@ impl AgentHarness {
             transform_message: Some(transform_message),
             provider_request_interceptor: Some(provider_request_interceptor),
             stream_fn: options.stream_fn.clone(),
+            get_api_key: options.get_api_key.clone(),
             before_tool_call: Some(before_tool_call),
             after_tool_call: options.after_tool_call.clone(),
             transform_tool_result: Some(transform_tool_result),
