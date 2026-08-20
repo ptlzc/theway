@@ -9,9 +9,7 @@ use theway_contract::extension::{
     ExtensionDiagnosticCode, ExtensionHookClass, ExtensionHookContract, ExtensionLifecycleEvent,
 };
 use theway_core::agent::runtime_extensions::{
-    RawRuntimeExtensionResult, RuntimeCompactionExtensionPort, RuntimeExtensionInvocation,
-    RuntimeMessageExtensionPort, RuntimeRequestExtensionPort, RuntimeRunExtensionPort,
-    RuntimeSessionExtensionPort, RuntimeToolExtensionPort,
+    RawRuntimeExtensionResult, RuntimeExtensionInvocation,
 };
 
 use super::catalog::{ExtensionPackage, PackageCatalog};
@@ -222,7 +220,18 @@ impl SessionPluginHost {
     }
 
     pub fn diagnostics(&self) -> Vec<ExtensionDiagnostic> {
-        self.diagnostics.lock().clone()
+        let mut diagnostics = self.diagnostics.lock().clone();
+        diagnostics.extend(self.engine.broker_diagnostics(&self.session_id));
+        diagnostics
+    }
+
+    pub fn audit_events(&self) -> Vec<theway_contract::extension::ExtensionAuditEvent> {
+        self.engine
+            .audit_log()
+            .events()
+            .into_iter()
+            .filter(|event| event.session_id.as_deref() == Some(self.session_id.as_str()))
+            .collect()
     }
 
     async fn load_effective_packages(&self) {
@@ -232,7 +241,17 @@ impl SessionPluginHost {
             let key = EngineInstanceKey::new(&self.session_id, &package.manifest().id);
             let registrations = match self.engine.load(key.clone(), &package).await {
                 Ok(metadata) => match dispatcher::validate_registrations(metadata) {
-                    Ok(registrations) => registrations,
+                    Ok(registrations) => {
+                        if let Err(error) = dispatcher::validate_registration_capabilities(
+                            &registrations,
+                            package.granted_permissions(),
+                        ) {
+                            self.engine.dispose(&key).await;
+                            self.record_load_fault(&package, error);
+                            continue;
+                        }
+                        registrations
+                    }
                     Err(error) => {
                         self.engine.dispose(&key).await;
                         self.record_load_fault(&package, error);
@@ -333,13 +352,21 @@ impl SessionPluginHost {
             event,
             payload,
         );
+        let cancellation = if matches!(
+            event,
+            ExtensionLifecycleEvent::SessionShutdown | ExtensionLifecycleEvent::ExtensionUnload
+        ) {
+            Arc::new(AtomicBool::new(false))
+        } else {
+            Arc::clone(&self.shutdown)
+        };
         self.engine
             .invoke_controlled(
                 key,
                 &envelope,
                 registration.registration_id,
                 self.config.deadline(registration.deadline),
-                Arc::new(AtomicBool::new(false)),
+                cancellation,
                 self.config.broker_operation_quota,
             )
             .await
@@ -487,13 +514,17 @@ impl SessionPluginHost {
         }
     }
 
-    fn has_subscription(&self, event: ExtensionLifecycleEvent, class: ExtensionHookClass) -> bool {
+    pub(super) fn has_subscription(
+        &self,
+        event: ExtensionLifecycleEvent,
+        class: ExtensionHookClass,
+    ) -> bool {
         self.subscription_counts
             .read()
             .contains_key(&(event, class))
     }
 
-    async fn invoke_runtime(
+    pub(super) async fn invoke_runtime(
         &self,
         invocation: RuntimeExtensionInvocation,
     ) -> RawRuntimeExtensionResult {
@@ -653,6 +684,8 @@ impl SessionPluginHost {
             .contract
             .validate_result(&batch)
             .map_err(|error| (ExtensionDiagnosticCode::ContractViolation, error.message))?;
+        dispatcher::validate_action_capabilities(&batch, extension.package.granted_permissions())
+            .map_err(|error| (ExtensionDiagnosticCode::PermissionDenied, error))?;
         Ok(batch)
     }
 
@@ -704,7 +737,7 @@ impl SessionPluginHost {
         .spawn(queue, first);
     }
 
-    async fn unload_after_core_shutdown(&self) {
+    pub(super) async fn unload_after_core_shutdown(&self) {
         if self.shutdown.swap(true, Ordering::AcqRel) {
             return;
         }
@@ -720,53 +753,5 @@ impl SessionPluginHost {
             self.remove_subscriptions(&extension.registrations);
             extension.phase = InstanceLifecyclePhase::Disposed;
         }
-    }
-}
-
-#[async_trait::async_trait]
-impl RuntimeSessionExtensionPort for SessionPluginHost {
-    async fn invoke_session(
-        &self,
-        invocation: RuntimeExtensionInvocation,
-    ) -> RawRuntimeExtensionResult {
-        let shutdown = invocation.event() == ExtensionLifecycleEvent::SessionShutdown;
-        let result = self.invoke_runtime(invocation).await;
-        if shutdown {
-            self.unload_after_core_shutdown().await;
-        }
-        result
-    }
-}
-
-macro_rules! impl_runtime_domain {
-    ($trait_name:ident, $method:ident) => {
-        #[async_trait::async_trait]
-        impl $trait_name for SessionPluginHost {
-            async fn $method(
-                &self,
-                invocation: RuntimeExtensionInvocation,
-            ) -> RawRuntimeExtensionResult {
-                self.invoke_runtime(invocation).await
-            }
-        }
-    };
-}
-
-impl_runtime_domain!(RuntimeRunExtensionPort, invoke_run);
-impl_runtime_domain!(RuntimeMessageExtensionPort, invoke_message);
-impl_runtime_domain!(RuntimeToolExtensionPort, invoke_tool);
-impl_runtime_domain!(RuntimeCompactionExtensionPort, invoke_compaction);
-
-#[async_trait::async_trait]
-impl RuntimeRequestExtensionPort for SessionPluginHost {
-    fn has_request_hook(&self, event: ExtensionLifecycleEvent, class: ExtensionHookClass) -> bool {
-        self.has_subscription(event, class)
-    }
-
-    async fn invoke_request(
-        &self,
-        invocation: RuntimeExtensionInvocation,
-    ) -> RawRuntimeExtensionResult {
-        self.invoke_runtime(invocation).await
     }
 }

@@ -24,6 +24,23 @@ pub(super) fn shadowed(extension_id: impl Into<String>) -> ExtensionDiagnostic {
     )
 }
 
+pub(super) fn blocked(
+    extension_id: impl Into<String>,
+    code: ExtensionDiagnosticCode,
+) -> ExtensionDiagnostic {
+    ExtensionDiagnostic::new(
+        extension_id,
+        code,
+        ExtensionDiagnosticSeverity::Warning,
+        match code {
+            ExtensionDiagnosticCode::TrustRequired => {
+                "project extension requires an explicit trust decision"
+            }
+            _ => "extension permissions are denied by trust policy",
+        },
+    )
+}
+
 pub(super) fn faulted(
     extension_id: impl Into<String>,
     session_id: impl Into<String>,

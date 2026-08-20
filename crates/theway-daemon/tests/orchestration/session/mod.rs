@@ -406,6 +406,16 @@ export default defineExtension((api) => {
     let repo = theway_storage::sqlite_repo::SqliteSessionRepo::new(repo_root.path());
     let id = create_session_with_cwd(&repo, work_dir.path().to_str().unwrap()).await;
     let (mut factory, state) = test_factory(work_dir.path().to_path_buf());
+    let mut trust = crate::ts_extensions::ExtensionTrustStore::load(&factory.base_dir);
+    trust
+        .decide_project(
+            work_dir.path(),
+            Vec::new(),
+            Vec::new(),
+            theway_contract::extension::ExtensionTrustDecision::Trusted,
+        )
+        .unwrap();
+    trust.save().unwrap();
     factory.runtime_extension_packages = crate::ts_extensions::PackageCatalog::discover(
         work_dir.path(),
         &factory.base_dir,

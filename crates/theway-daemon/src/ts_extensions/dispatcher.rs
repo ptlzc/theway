@@ -210,6 +210,48 @@ pub(super) fn validate_registrations(metadata: Value) -> Result<Vec<HookRegistra
     Ok(validated)
 }
 
+pub(super) fn validate_registration_capabilities(
+    registrations: &[HookRegistration],
+    granted: &BTreeSet<theway_contract::extension::ExtensionPermission>,
+) -> Result<(), String> {
+    for registration in registrations {
+        if matches!(
+            registration.event,
+            ExtensionLifecycleEvent::BeforeProviderRequestHeaders
+                | ExtensionLifecycleEvent::BeforeProviderRequestRaw
+        ) && !granted.contains(&theway_contract::extension::ExtensionPermission::ProviderRaw)
+        {
+            return Err(format!(
+                "hook {:?} requires the provider.raw capability",
+                registration.event
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn validate_action_capabilities(
+    batch: &theway_contract::extension::ExtensionActionBatch,
+    granted: &BTreeSet<theway_contract::extension::ExtensionPermission>,
+) -> Result<(), String> {
+    let writes_session = batch.actions.iter().any(|action| {
+        matches!(
+            action.kind,
+            ExtensionActionKind::SetState
+                | ExtensionActionKind::DeleteState
+                | ExtensionActionKind::AppendCustomEvent
+                | ExtensionActionKind::AppendModelContext
+                | ExtensionActionKind::EnqueueFollowUp
+        )
+    });
+    if writes_session
+        && !granted.contains(&theway_contract::extension::ExtensionPermission::SessionWrite)
+    {
+        return Err("extension action requires the session.write capability".into());
+    }
+    Ok(())
+}
+
 fn default_class(event: ExtensionLifecycleEvent) -> ExtensionHookClass {
     if matches!(
         event,

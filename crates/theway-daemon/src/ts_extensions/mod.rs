@@ -5,6 +5,8 @@
 //! files retain the legacy compaction-only contract and never receive ABI v2
 //! host capabilities.
 
+mod audit;
+mod broker_paths;
 mod brokers;
 mod catalog;
 mod compaction;
@@ -14,19 +16,24 @@ mod dispatcher;
 mod effects;
 mod engine;
 mod host;
+mod host_ports;
 mod legacy;
 mod observation;
 mod state;
+mod trust;
 mod ts;
 
 use std::path::Path;
 
+pub use audit::ExtensionAuditLog;
+pub use brokers::ExtensionBrokerServices;
 pub use catalog::{ExtensionPackage, PackageCatalog};
 pub use compaction::{TsCompactAlgorithm, compact_algorithm_registry};
 pub use dispatcher::RuntimeExtensionHostConfig;
 pub use engine::{EngineInstanceKey, QuickJsEngineLimits, QuickJsEnginePool};
 pub use host::{ExtensionInvocationOutput, SessionPluginHost};
 pub use legacy::TsExtension;
+pub use trust::{ExtensionTrustStore, GlobalExtensionPolicy};
 
 use legacy::LegacyExtensionRegistry;
 

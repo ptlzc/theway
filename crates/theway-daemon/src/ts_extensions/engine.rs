@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use rquickjs::loader::{BuiltinLoader, BuiltinResolver};
 use rquickjs::{CatchResultExt, Context, Function, Module, Promise, Runtime};
 use serde_json::Value;
+use theway_contract::extension::ExtensionLifecycleEvent;
 use tokio::sync::oneshot;
 
 use super::brokers;
@@ -57,6 +58,16 @@ const HOST_BOOTSTRAP_SOURCE: &str = r#"
 globalThis.__thewayHandlers = Object.create(null);
 globalThis.__thewayRegistrationSequence = 0;
 
+function __thewayBrokerCall(operation, brokerArgs = {}) {
+  const response = JSON.parse(globalThis.__thewayBroker(operation, JSON.stringify(brokerArgs)));
+  if (!response.ok) {
+    const error = new Error(response.error?.message ?? "capability broker failed");
+    error.code = response.error?.code ?? "broker_failed";
+    throw error;
+  }
+  return response.value;
+}
+
 globalThis.__thewaySetup = async function () {
   try {
     const candidate = globalThis.__thewayExtension.default;
@@ -66,7 +77,47 @@ globalThis.__thewaySetup = async function () {
     }
     const api = Object.freeze({
       abiMajor: 2,
-      capabilities: Object.freeze({ has: () => false }),
+      capabilities: Object.freeze({
+        has(permission) {
+          return __thewayBrokerCall("capabilities.has", { permission });
+        },
+      }),
+      workspace: Object.freeze({
+        async readText(path) {
+          return __thewayBrokerCall("workspace.readText", { path });
+        },
+        async writeText(path, content) {
+          return __thewayBrokerCall("workspace.writeText", { path, content });
+        },
+      }),
+      process: Object.freeze({
+        async run(argv, options = {}) {
+          return __thewayBrokerCall("process.run", {
+            argv,
+            timeoutMs: options.timeoutMs ?? null,
+          });
+        },
+      }),
+      network: Object.freeze({
+        async fetch(url, options = {}) {
+          return __thewayBrokerCall("network.fetch", {
+            url,
+            method: options.method ?? null,
+            headers: options.headers ?? {},
+            body: options.body ?? null,
+          });
+        },
+      }),
+      secrets: Object.freeze({
+        async read(name) {
+          return __thewayBrokerCall("secrets.read", { name });
+        },
+      }),
+      providerRaw: Object.freeze({
+        async read() {
+          return __thewayBrokerCall("providerRaw.read", {});
+        },
+      }),
       on(event, descriptor, handler) {
         if (typeof descriptor === "function") {
           handler = descriptor;
@@ -149,12 +200,14 @@ struct EnginePoolInner {
     workers: Vec<mpsc::Sender<EngineCommand>>,
     joins: parking_lot::Mutex<Vec<std::thread::JoinHandle<()>>>,
     limits: QuickJsEngineLimits,
+    broker_services: brokers::ExtensionBrokerServices,
 }
 
 enum EngineCommand {
     Load {
         key: EngineInstanceKey,
         source: String,
+        package: ExtensionPackage,
         response: oneshot::Sender<Result<Value, String>>,
     },
     Invoke {
@@ -192,15 +245,28 @@ impl QuickJsEnginePool {
     }
 
     pub fn with_limits(worker_count: usize, limits: QuickJsEngineLimits) -> Self {
+        Self::with_broker_services(
+            worker_count,
+            limits,
+            brokers::ExtensionBrokerServices::default(),
+        )
+    }
+
+    pub fn with_broker_services(
+        worker_count: usize,
+        limits: QuickJsEngineLimits,
+        broker_services: brokers::ExtensionBrokerServices,
+    ) -> Self {
         let worker_count = worker_count.max(1);
         let mut workers = Vec::with_capacity(worker_count);
         let mut joins = Vec::with_capacity(worker_count);
         for index in 0..worker_count {
             let (sender, receiver) = mpsc::channel();
             let worker_limits = limits;
+            let worker_brokers = broker_services.clone();
             let join = std::thread::Builder::new()
                 .name(format!("theway-js-{index}"))
-                .spawn(move || run_worker(receiver, worker_limits))
+                .spawn(move || run_worker(receiver, worker_limits, worker_brokers))
                 .expect("QuickJS engine worker must start");
             workers.push(sender);
             joins.push(join);
@@ -210,6 +276,7 @@ impl QuickJsEnginePool {
                 workers,
                 joins: parking_lot::Mutex::new(joins),
                 limits,
+                broker_services,
             }),
         }
     }
@@ -230,6 +297,7 @@ impl QuickJsEnginePool {
             EngineCommand::Load {
                 key: key.clone(),
                 source,
+                package: package.clone(),
                 response,
             },
         )?;
@@ -328,6 +396,17 @@ impl QuickJsEnginePool {
         total
     }
 
+    pub fn broker_diagnostics(
+        &self,
+        session_id: &str,
+    ) -> Vec<theway_contract::extension::ExtensionDiagnostic> {
+        self.inner.broker_services.diagnostics_for(session_id)
+    }
+
+    pub fn audit_log(&self) -> super::audit::ExtensionAuditLog {
+        self.inner.broker_services.audit_log()
+    }
+
     fn send(&self, key: &EngineInstanceKey, command: EngineCommand) -> Result<(), String> {
         let worker = stable_worker(key, self.inner.workers.len());
         self.inner.workers[worker]
@@ -361,27 +440,35 @@ fn stable_worker(key: &EngineInstanceKey, worker_count: usize) -> usize {
     hash as usize % worker_count
 }
 
-fn run_worker(receiver: mpsc::Receiver<EngineCommand>, limits: QuickJsEngineLimits) {
+fn run_worker(
+    receiver: mpsc::Receiver<EngineCommand>,
+    limits: QuickJsEngineLimits,
+    broker_services: brokers::ExtensionBrokerServices,
+) {
     let mut instances = HashMap::new();
     while let Ok(command) = receiver.recv() {
         match command {
             EngineCommand::Load {
                 key,
                 source,
+                package,
                 response,
             } => {
                 let result = match instances.entry(key) {
                     std::collections::hash_map::Entry::Occupied(_) => {
                         Err("QuickJS extension instance is already loaded".into())
                     }
-                    std::collections::hash_map::Entry::Vacant(entry) => {
-                        EngineInstance::new(entry.key(), &source, limits).map(
-                            |(instance, subscriptions)| {
-                                entry.insert(instance);
-                                subscriptions
-                            },
-                        )
-                    }
+                    std::collections::hash_map::Entry::Vacant(entry) => EngineInstance::new(
+                        entry.key(),
+                        &source,
+                        limits,
+                        &package,
+                        broker_services.clone(),
+                    )
+                    .map(|(instance, subscriptions)| {
+                        entry.insert(instance);
+                        subscriptions
+                    }),
                 };
                 let _ = response.send(result);
             }
@@ -466,7 +553,7 @@ struct EngineInstance {
     _runtime: Runtime,
     interrupt: Arc<InterruptBudget>,
     output_limit: usize,
-    broker_quota: brokers::BrokerOperationQuota,
+    broker: Arc<brokers::BrokerRuntime>,
 }
 
 impl EngineInstance {
@@ -474,6 +561,8 @@ impl EngineInstance {
         key: &EngineInstanceKey,
         source: &str,
         limits: QuickJsEngineLimits,
+        package: &ExtensionPackage,
+        broker_services: brokers::ExtensionBrokerServices,
     ) -> Result<(Self, Value), String> {
         let runtime = Runtime::new().map_err(|error| error.to_string())?;
         runtime.set_memory_limit(limits.memory_bytes);
@@ -490,11 +579,26 @@ impl EngineInstance {
             BuiltinLoader::default().with_module("theway", host_module),
         );
         let context = Context::full(&runtime).map_err(|error| error.to_string())?;
-        interrupt.begin(
-            Instant::now() + LOAD_TIMEOUT,
-            Arc::new(AtomicBool::new(false)),
+        let broker = Arc::new(brokers::BrokerRuntime::new(key, package, broker_services));
+        let load_cancellation = Arc::new(AtomicBool::new(false));
+        let load_deadline = Instant::now() + LOAD_TIMEOUT;
+        interrupt.begin(load_deadline, Arc::clone(&load_cancellation));
+        broker.begin(
+            32,
+            load_cancellation,
+            load_deadline,
+            ExtensionLifecycleEvent::ExtensionLoad,
+            Value::Null,
         );
         let evaluation = context.with(|ctx| {
+            let broker_handler = Arc::clone(&broker);
+            let broker_function = js(
+                &ctx,
+                Function::new(ctx.clone(), move |operation: String, arguments: String| {
+                    broker_handler.call(&operation, &arguments)
+                }),
+            )?;
+            js(&ctx, ctx.globals().set("__thewayBroker", broker_function))?;
             for name in brokers::FORBIDDEN_DIRECT_GLOBALS {
                 if js(&ctx, ctx.globals().contains_key(*name))? {
                     return Err(format!(
@@ -516,6 +620,7 @@ impl EngineInstance {
             let output: String = js(&ctx, promise.finish())?;
             decode_host_result(&output, limits.serialized_output_bytes)
         });
+        broker.finish();
         if let Some(reason) = interrupt.finish() {
             return Err(match reason {
                 EngineInvocationErrorKind::Timeout => {
@@ -532,7 +637,7 @@ impl EngineInstance {
                 _runtime: runtime,
                 interrupt,
                 output_limit: limits.serialized_output_bytes,
-                broker_quota: brokers::BrokerOperationQuota::new(),
+                broker,
             },
             metadata,
         ))
@@ -552,7 +657,35 @@ impl EngineInstance {
                 "extension invocation was cancelled",
             ));
         }
-        self.broker_quota.begin(broker_operation_limit);
+        let decoded_envelope: Value = serde_json::from_str(envelope).map_err(|error| {
+            EngineInvocationError::new(
+                EngineInvocationErrorKind::Runtime,
+                format!("extension envelope is invalid: {error}"),
+            )
+        })?;
+        let event = serde_json::from_value(
+            decoded_envelope
+                .get("event")
+                .cloned()
+                .unwrap_or(Value::Null),
+        )
+        .map_err(|error| {
+            EngineInvocationError::new(
+                EngineInvocationErrorKind::Runtime,
+                format!("extension event is invalid: {error}"),
+            )
+        })?;
+        let raw_payload = decoded_envelope
+            .get("payload")
+            .cloned()
+            .unwrap_or(Value::Null);
+        self.broker.begin(
+            broker_operation_limit,
+            Arc::clone(&cancellation),
+            deadline,
+            event,
+            raw_payload,
+        );
         self.interrupt.begin(deadline, cancellation);
         let result = self.context.with(|ctx| {
             let invoke: Function = js(&ctx, ctx.globals().get("__thewayInvoke"))?;
@@ -560,6 +693,7 @@ impl EngineInstance {
             let output: String = js(&ctx, promise.finish())?;
             decode_host_result(&output, self.output_limit)
         });
+        self.broker.finish();
         if let Some(reason) = self.interrupt.finish() {
             let message = match reason {
                 EngineInvocationErrorKind::Timeout => {
@@ -575,6 +709,7 @@ impl EngineInstance {
             let kind = if message.contains("serialized output limit")
                 || lower.contains("out of memory")
                 || lower.contains("allocation failed")
+                || message == "null"
             {
                 EngineInvocationErrorKind::ResourceLimit
             } else {

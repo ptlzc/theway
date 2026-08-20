@@ -1,14 +1,16 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use sha2::{Digest, Sha256};
 use theway_contract::extension::{
     ExtensionAbiMajor, ExtensionCatalogEntry, ExtensionCatalogStatus, ExtensionDiagnostic,
-    ExtensionDiagnosticCode, ExtensionManifestError, ExtensionPackageManifest, ExtensionScope,
-    ExtensionSourceLayer,
+    ExtensionDiagnosticCode, ExtensionManifestError, ExtensionPackageManifest, ExtensionPermission,
+    ExtensionScope, ExtensionSourceLayer, ExtensionTrustSubject,
 };
 
 use super::diagnostics;
+use super::trust::ExtensionTrustStore;
 use super::ts;
 
 const MANIFEST_FILE: &str = "theway-extension.json";
@@ -22,6 +24,9 @@ pub struct ExtensionPackage {
     package_dir: PathBuf,
     entry_path: PathBuf,
     entry_source: Arc<str>,
+    workspace_root: PathBuf,
+    content_sha256: String,
+    granted_permissions: BTreeSet<ExtensionPermission>,
 }
 
 impl ExtensionPackage {
@@ -39,6 +44,35 @@ impl ExtensionPackage {
 
     pub fn entry_path(&self) -> &Path {
         &self.entry_path
+    }
+
+    pub fn workspace_root(&self) -> &Path {
+        &self.workspace_root
+    }
+
+    pub fn content_sha256(&self) -> &str {
+        &self.content_sha256
+    }
+
+    pub fn granted_permissions(&self) -> &BTreeSet<ExtensionPermission> {
+        &self.granted_permissions
+    }
+
+    pub fn requested_permissions(&self) -> BTreeSet<ExtensionPermission> {
+        self.manifest
+            .permissions
+            .iter()
+            .chain(&self.manifest.optional_permissions)
+            .cloned()
+            .collect()
+    }
+
+    pub fn trust_subject(&self) -> ExtensionTrustSubject {
+        ExtensionTrustSubject::Package {
+            extension_id: self.manifest.id.clone(),
+            canonical_path: self.package_dir.to_string_lossy().into_owned(),
+            content_sha256: self.content_sha256.clone(),
+        }
     }
 
     pub(super) fn prepared_source(&self) -> Result<String, String> {
@@ -66,6 +100,12 @@ pub struct PackageCatalog {
 
 impl PackageCatalog {
     pub fn discover(cwd: &Path, base: &Path) -> Self {
+        let trust = ExtensionTrustStore::load(base);
+        Self::discover_with_trust(cwd, base, &trust)
+    }
+
+    pub fn discover_with_trust(cwd: &Path, base: &Path, trust: &ExtensionTrustStore) -> Self {
+        let workspace_root = std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
         let roots = [
             (ExtensionSourceLayer::Global, base.join("extensions")),
             (
@@ -76,10 +116,18 @@ impl PackageCatalog {
         let mut candidates = Vec::new();
         let mut entries = Vec::new();
         let mut catalog_diagnostics = Vec::new();
+        if let Some(error) = trust.load_error() {
+            catalog_diagnostics.push(diagnostics::rejected(
+                "trust-policy",
+                ExtensionDiagnosticCode::TrustRequired,
+                error,
+            ));
+        }
         for (source, root) in roots {
             discover_root(
                 source,
                 &root,
+                &workspace_root,
                 &mut candidates,
                 &mut entries,
                 &mut catalog_diagnostics,
@@ -94,7 +142,7 @@ impl PackageCatalog {
                 .push(package);
         }
 
-        let mut effective = Vec::new();
+        let mut selected = Vec::new();
         for (extension_id, mut packages) in by_id {
             packages.sort_by_key(|package| package.source);
             let winner = packages
@@ -103,12 +151,24 @@ impl PackageCatalog {
                 .unwrap_or(0);
             for (index, package) in packages.into_iter().enumerate() {
                 if index == winner {
-                    entries.push(catalog_entry(
-                        &package,
-                        ExtensionCatalogStatus::Effective,
-                        None,
-                    ));
-                    effective.push(Arc::new(package));
+                    let mut package = package;
+                    let evaluation = trust.evaluate(&package);
+                    package.granted_permissions = evaluation.granted_permissions;
+                    if let Some(code) = evaluation.blocked {
+                        entries.push(catalog_entry(
+                            &package,
+                            ExtensionCatalogStatus::Blocked,
+                            Some(code),
+                        ));
+                        catalog_diagnostics.push(diagnostics::blocked(extension_id.clone(), code));
+                    } else {
+                        entries.push(catalog_entry(
+                            &package,
+                            ExtensionCatalogStatus::Effective,
+                            None,
+                        ));
+                    }
+                    selected.push(Arc::new(package));
                 } else {
                     entries.push(catalog_entry(
                         &package,
@@ -120,7 +180,7 @@ impl PackageCatalog {
             }
         }
 
-        effective.sort_by(|left, right| {
+        selected.sort_by(|left, right| {
             right
                 .manifest
                 .priority
@@ -137,7 +197,7 @@ impl PackageCatalog {
         });
 
         Self {
-            packages: effective,
+            packages: selected,
             entries,
             diagnostics: catalog_diagnostics,
         }
@@ -155,6 +215,10 @@ impl PackageCatalog {
             })
             .cloned()
             .collect()
+    }
+
+    pub fn selected_packages(&self) -> Vec<Arc<ExtensionPackage>> {
+        self.packages.clone()
     }
 
     pub fn entries(&self) -> &[ExtensionCatalogEntry] {
@@ -193,6 +257,7 @@ impl PackageCatalog {
 fn discover_root(
     source: ExtensionSourceLayer,
     root: &Path,
+    workspace_root: &Path,
     candidates: &mut Vec<ExtensionPackage>,
     entries: &mut Vec<ExtensionCatalogEntry>,
     catalog_diagnostics: &mut Vec<ExtensionDiagnostic>,
@@ -212,7 +277,7 @@ fn discover_root(
     package_paths.sort();
 
     for package_path in package_paths {
-        match read_package(source, &canonical_root, &package_path) {
+        match read_package(source, &canonical_root, workspace_root, &package_path) {
             Ok(package) => candidates.push(package),
             Err(rejection) => {
                 let rejection = *rejection;
@@ -231,6 +296,7 @@ struct PackageRejection {
 fn read_package(
     source: ExtensionSourceLayer,
     canonical_root: &Path,
+    workspace_root: &Path,
     package_path: &Path,
 ) -> Result<ExtensionPackage, Box<PackageRejection>> {
     let directory_id = package_path
@@ -305,6 +371,10 @@ fn read_package(
             format!("package entry is not UTF-8 text: {error}"),
         )
     })?;
+    let mut content = Sha256::new();
+    content.update(manifest_source.as_bytes());
+    content.update([0]);
+    content.update(entry_source.as_bytes());
 
     Ok(ExtensionPackage {
         manifest,
@@ -312,6 +382,9 @@ fn read_package(
         package_dir: canonical_package,
         entry_path: canonical_entry,
         entry_source: Arc::from(entry_source),
+        workspace_root: workspace_root.to_path_buf(),
+        content_sha256: hex::encode(content.finalize()),
+        granted_permissions: BTreeSet::new(),
     })
 }
 
@@ -328,7 +401,7 @@ fn catalog_entry(
         scope: package.manifest.scope,
         priority: package.manifest.priority,
         status,
-        permissions: package.manifest.permissions.clone(),
+        permissions: package.requested_permissions().into_iter().collect(),
         reason_code,
     }
 }

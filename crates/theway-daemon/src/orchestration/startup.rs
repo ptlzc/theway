@@ -276,7 +276,16 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     ));
     let runtime_extension_packages = ts_extensions.package_catalog().clone();
     let runtime_extension_engine = (!runtime_extension_packages.effective_packages().is_empty())
-        .then(crate::ts_extensions::QuickJsEnginePool::default);
+        .then(|| {
+            crate::ts_extensions::QuickJsEnginePool::with_broker_services(
+                std::thread::available_parallelism()
+                    .map(usize::from)
+                    .unwrap_or(1)
+                    .min(4),
+                crate::ts_extensions::QuickJsEngineLimits::default(),
+                crate::ts_extensions::ExtensionBrokerServices::new(&paths.base, executor.clone()),
+            )
+        });
     // Runtime settings come from the in-memory StartupConfig: defaults until
     // the controller provisions values through the settings RPC.
     let config_enabled_builtins = startup.builtin_skills.clone();

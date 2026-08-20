@@ -6,15 +6,15 @@ use serde_json::{Value, json};
 use tempfile::tempdir;
 use theway_contract::extension::{
     ExtensionCatalogStatus, ExtensionDiagnosticCode, ExtensionGateDecision, ExtensionHookClass,
-    ExtensionLifecycleEvent,
+    ExtensionLifecycleEvent, ExtensionTrustDecision,
 };
 use theway_core::agent::runtime_extensions::{
     RuntimeExtensionContext, RuntimeExtensionInvocation, RuntimeMessageExtensionPort,
     RuntimeRequestExtensionPort, RuntimeToolExtensionPort,
 };
 use theway_daemon::ts_extensions::{
-    PackageCatalog, QuickJsEngineLimits, QuickJsEnginePool, RuntimeExtensionHostConfig,
-    SessionPluginHost,
+    ExtensionTrustStore, PackageCatalog, QuickJsEngineLimits, QuickJsEnginePool,
+    RuntimeExtensionHostConfig, SessionPluginHost,
 };
 
 fn project_root(project: &Path) -> PathBuf {
@@ -61,6 +61,23 @@ async fn host_for(
     engine: QuickJsEnginePool,
     config: RuntimeExtensionHostConfig,
 ) -> SessionPluginHost {
+    let requested = PackageCatalog::discover(project, base)
+        .selected_packages()
+        .into_iter()
+        .flat_map(|package| package.requested_permissions())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let mut trust = ExtensionTrustStore::load(base);
+    trust
+        .decide_project(
+            project,
+            requested.clone(),
+            requested,
+            ExtensionTrustDecision::Trusted,
+        )
+        .unwrap();
+    trust.save().unwrap();
     SessionPluginHost::start_with_config(
         PackageCatalog::discover(project, base),
         engine,
@@ -152,6 +169,12 @@ export default defineExtension((api) => {
         RuntimeExtensionHostConfig::default(),
     )
     .await;
+    assert_eq!(
+        host.active_extension_ids().await,
+        ["waterfall"],
+        "{:?}",
+        host.diagnostics()
+    );
 
     let result = RuntimeRequestExtensionPort::invoke_request(
         &host,
@@ -452,7 +475,9 @@ export default defineExtension((api) => {{
         assert!(
             host.diagnostics()
                 .iter()
-                .any(|diagnostic| diagnostic.code == expected)
+                .any(|diagnostic| diagnostic.code == expected),
+            "{id}: {:?}",
+            host.diagnostics()
         );
         host.shutdown().await;
     }

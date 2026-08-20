@@ -5,9 +5,10 @@ use serde_json::{Value, json};
 use tempfile::tempdir;
 use theway_contract::extension::{
     ExtensionCatalogStatus, ExtensionDiagnosticCode, ExtensionLifecycleEvent, ExtensionSourceLayer,
+    ExtensionTrustDecision,
 };
 use theway_daemon::ts_extensions::{
-    ExtensionRegistry, PackageCatalog, QuickJsEnginePool, SessionPluginHost,
+    ExtensionRegistry, ExtensionTrustStore, PackageCatalog, QuickJsEnginePool, SessionPluginHost,
 };
 
 const COUNTER_EXTENSION: &str = r#"
@@ -68,6 +69,24 @@ fn counter(value: &Value) -> u64 {
         .expect("counter action")
 }
 
+fn trust_project(project: &Path, base: &Path) {
+    let mut trust = ExtensionTrustStore::load(base);
+    trust
+        .decide_project(
+            project,
+            Vec::new(),
+            Vec::new(),
+            ExtensionTrustDecision::Trusted,
+        )
+        .unwrap();
+    trust.save().unwrap();
+}
+
+fn discover(project: &Path, base: &Path) -> PackageCatalog {
+    trust_project(project, base);
+    PackageCatalog::discover(project, base)
+}
+
 #[test]
 fn discovers_packages_and_orders_priority_source_then_id() {
     let project = tempdir().unwrap();
@@ -100,7 +119,7 @@ fn discovers_packages_and_orders_priority_source_then_id() {
         COUNTER_EXTENSION,
     );
 
-    let catalog = PackageCatalog::discover(project.path(), base.path());
+    let catalog = discover(project.path(), base.path());
     let ids: Vec<_> = catalog
         .effective_packages()
         .into_iter()
@@ -133,7 +152,7 @@ fn project_package_shadows_global_package_by_id() {
         COUNTER_EXTENSION,
     );
 
-    let catalog = PackageCatalog::discover(project.path(), base.path());
+    let catalog = discover(project.path(), base.path());
     let entries: Vec<_> = catalog
         .entries()
         .iter()
@@ -211,7 +230,7 @@ fn rejects_invalid_ids_manifests_abi_and_entry_escapes_before_evaluation() {
     .unwrap();
     std::fs::write(root.join("outside.js"), "throw new Error('must not run')").unwrap();
 
-    let catalog = PackageCatalog::discover(project.path(), base.path());
+    let catalog = discover(project.path(), base.path());
     assert!(catalog.effective_packages().is_empty());
     assert_eq!(
         catalog
@@ -249,7 +268,7 @@ fn rejects_symlinked_entry_that_resolves_outside_package() {
     std::fs::remove_file(package.join("entry.js")).unwrap();
     symlink(&outside, package.join("entry.js")).unwrap();
 
-    let catalog = PackageCatalog::discover(project.path(), base.path());
+    let catalog = discover(project.path(), base.path());
     assert!(catalog.effective_packages().is_empty());
     assert_eq!(
         catalog.entries()[0].status,
@@ -270,7 +289,7 @@ fn catalog_exposes_disabled_and_faulted_statuses() {
         "index.js",
         COUNTER_EXTENSION,
     );
-    let mut catalog = PackageCatalog::discover(project.path(), base.path());
+    let mut catalog = discover(project.path(), base.path());
     assert!(catalog.set_effective_status(
         "status-test",
         ExtensionCatalogStatus::Disabled,
@@ -302,7 +321,7 @@ async fn persistent_instances_retain_memory_and_isolate_concurrent_sessions() {
         "index.js",
         COUNTER_EXTENSION,
     );
-    let catalog = PackageCatalog::discover(project.path(), base.path());
+    let catalog = discover(project.path(), base.path());
     let engine = QuickJsEnginePool::new(2);
     let host_a = Arc::new(
         SessionPluginHost::start(catalog.clone(), engine.clone(), "session-a", project.path())
@@ -371,7 +390,7 @@ export default defineExtension((api) => {
         "index.ts",
         source,
     );
-    let catalog = PackageCatalog::discover(project.path(), base.path());
+    let catalog = discover(project.path(), base.path());
     let engine = QuickJsEnginePool::new(1);
     let host = SessionPluginHost::start(catalog, engine.clone(), "session", project.path()).await;
     assert_eq!(host.active_extension_ids().await, ["lifecycle"]);
@@ -414,6 +433,7 @@ export default defineExtension(() => { throw new Error("setup failed"); });"#,
     std::fs::create_dir_all(&invalid).unwrap();
     std::fs::write(invalid.join("theway-extension.json"), b"{").unwrap();
 
+    trust_project(project.path(), base.path());
     let registry = ExtensionRegistry::discover(project.path(), base.path());
     assert!(registry.names().is_empty());
     assert_eq!(
@@ -470,7 +490,7 @@ export default defineExtension((api) => {
   api.on("input", () => { throw new Error("hook failed"); });
 });"#,
     );
-    let catalog = PackageCatalog::discover(project.path(), base.path());
+    let catalog = discover(project.path(), base.path());
     let engine = QuickJsEnginePool::new(1);
     let host = SessionPluginHost::start(catalog, engine.clone(), "runtime", project.path()).await;
     assert_eq!(engine.instance_count().await, 2);
