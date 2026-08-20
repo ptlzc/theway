@@ -32,6 +32,11 @@ impl App {
             || self.latest.goal.is_some()
             || sidebar.mcp.servers > 0
             || sidebar.mcp.notification_hooks > 0
+            || !self.latest.extensions.catalog.is_empty()
+            || self.latest.extensions.reload_pending
+            || self.latest.extensions.contributions.iter().any(|contribution| {
+                matches!(contribution.kind.as_str(), "status_item" | "notification")
+            })
     }
 
     fn trigger_panel_lines(&self, width: usize, height: usize) -> Vec<Line<'static>> {
@@ -42,6 +47,68 @@ impl App {
         let cron_jobs = &sidebar.cron.jobs;
 
         let mut lines = Vec::new();
+        if !self.latest.extensions.catalog.is_empty()
+            || self.latest.extensions.reload_pending
+            || !self.latest.extensions.contributions.is_empty()
+        {
+            lines.push(panel_line("Extensions".to_string(), Color::Cyan, width));
+            let effective = self
+                .latest
+                .extensions
+                .catalog
+                .iter()
+                .filter(|entry| entry.status == "effective")
+                .count();
+            let unavailable = self
+                .latest
+                .extensions
+                .catalog
+                .len()
+                .saturating_sub(effective);
+            lines.push(panel_line(
+                format!(
+                    "active {effective} · unavailable {unavailable}{}",
+                    if self.latest.extensions.reload_pending {
+                        " · reload pending"
+                    } else {
+                        ""
+                    }
+                ),
+                if self.latest.extensions.reload_pending || unavailable > 0 {
+                    Color::Yellow
+                } else {
+                    Color::Green
+                },
+                width,
+            ));
+            for contribution in &self.latest.extensions.contributions {
+                let summary = match contribution.kind.as_str() {
+                    "status_item" => Some(format!(
+                        "{}: {}",
+                        contribution
+                            .payload
+                            .get("label")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("status"),
+                        contribution
+                            .payload
+                            .get("value")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or_default()
+                    )),
+                    "notification" => contribution
+                        .payload
+                        .get("title")
+                        .and_then(serde_json::Value::as_str)
+                        .map(|title| format!("notice: {title}")),
+                    _ => None,
+                };
+                if let Some(summary) = summary {
+                    lines.push(panel_line(summary, Color::DarkGray, width));
+                }
+            }
+            lines.push(Line::raw(""));
+        }
         lines.push(panel_line("Skills".to_string(), Color::Cyan, width));
         if skills.is_empty() {
             lines.push(panel_line("none".to_string(), Color::DarkGray, width));

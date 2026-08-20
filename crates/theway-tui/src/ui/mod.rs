@@ -332,6 +332,9 @@ pub struct App {
     /// Second-level `/status-panel` menu highlight (issue #54): `Some(i)` =
     /// open, highlighting option `SIDE_PANEL_MENU_ITEMS[i]`.
     status_panel_menu: Option<usize>,
+    /// Structured runtime-extension catalog/diagnostic popup. The data comes
+    /// only from the transport snapshot; no extension code runs in the TUI.
+    extension_view: bool,
     /// Interactive `/fork` picker (issue #55): `Some` = popup open over the
     /// current session's User feed blocks; `None` when closed/cancelled.
     fork_picker: Option<ForkPickerState>,
@@ -375,6 +378,11 @@ include!(concat!(
 include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/ui/app/render.rs"));
 
 include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/ui/app/panel.rs"));
+
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/src/ui/app/extension_view.rs"
+));
 
 include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/ui/app/status.rs"));
 include!(concat!(
@@ -615,7 +623,14 @@ const DAEMON_COMMANDS: &[&str] = &[
 /// client intercepts them (`/new` drives the session-resource RPCs,
 /// `/status-panel` opens the local panel-mode menu, `/resume` opens the
 /// session-list popup over `list_sessions`).
-const LOCAL_COMMANDS: &[&str] = &["new", "status-panel", "resume"];
+const LOCAL_COMMANDS: &[&str] = &[
+    "new",
+    "status-panel",
+    "resume",
+    "extensions",
+    "extension-reload",
+    "extension-trust",
+];
 
 #[cfg(test)]
 mod tests;

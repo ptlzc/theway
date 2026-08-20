@@ -266,6 +266,7 @@ pub(crate) mod test_daemon {
             subagents: Vec::new(),
             usage: theway_transport::wire::WireContextUsage::default(),
             tui_max_feed_lines: None,
+            extensions: theway_transport::wire::WireExtensionSnapshot::default(),
         }
     }
 

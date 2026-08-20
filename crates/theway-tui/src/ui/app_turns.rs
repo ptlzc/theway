@@ -127,6 +127,27 @@ impl App {
             "/status-panel" => {
                 self.status_panel_menu = Some(0);
             }
+            "/extensions" => match self.client.get_extensions().await {
+                Ok(extensions) => {
+                    self.latest.extensions = extensions;
+                    self.extension_view = true;
+                }
+                Err(error) => self.error_line(format!("get extensions failed: {error}")),
+            },
+            "/extension-reload" => {
+                let cancel_active = args.split_whitespace().any(|arg| arg == "--cancel");
+                match self.client.reload_extensions(cancel_active).await {
+                    Ok(result) => self.system_line(format!(
+                        "extension reload: {} (revision {})",
+                        result.status, result.revision
+                    )),
+                    Err(error) => self.error_line(format!("extension reload failed: {error}")),
+                }
+            }
+            "/extension-trust" => self.decide_extension_trust(args).await,
+            command if command.starts_with("/ext:") => {
+                self.invoke_extension_command(&command[5..], args).await;
+            }
             // Issue #55: bare `/fork` opens the interactive picker over the
             // current session's User messages. `/fork <n>` (non-empty args)
             // misses this guard and falls through to the daemon-forwarding
@@ -165,6 +186,105 @@ impl App {
                     Err(e) => self.error_line(e.to_string()),
                 }
             }
+        }
+    }
+
+    async fn invoke_extension_command(&mut self, name: &str, args: &str) {
+        if name.is_empty() {
+            self.error_line("extension command name is empty");
+            return;
+        }
+        let arguments = if args.trim().is_empty() {
+            serde_json::json!({})
+        } else {
+            match serde_json::from_str(args) {
+                Ok(arguments) => arguments,
+                Err(error) => {
+                    self.error_line(format!("extension command arguments must be JSON: {error}"));
+                    return;
+                }
+            }
+        };
+        match self
+            .client
+            .invoke_extension_command(name, arguments, true)
+            .await
+        {
+            Ok(outcome) => {
+                let mut summary = format!("extension command {name}: {}", outcome.status);
+                if let Some(code) = outcome.code {
+                    summary.push_str(&format!(" [{code}]"));
+                }
+                if let Some(message) = outcome.message {
+                    summary.push_str(&format!(" — {message}"));
+                }
+                if let Some(data) = outcome.data {
+                    summary.push_str(&format!(" — {data}"));
+                }
+                if outcome.status == "success" {
+                    self.system_line(summary);
+                } else {
+                    self.error_line(summary);
+                }
+            }
+            Err(error) => self.error_line(format!("extension command failed: {error}")),
+        }
+    }
+
+    async fn decide_extension_trust(&mut self, args: &str) {
+        let parts = args.split_whitespace().collect::<Vec<_>>();
+        let parsed = match parts.as_slice() {
+            ["project", decision, permissions @ ..] => {
+                Some(("project", None, *decision, permissions))
+            }
+            ["package", extension_id, decision, permissions @ ..] => {
+                Some(("package", Some(*extension_id), *decision, permissions))
+            }
+            _ => None,
+        };
+        let Some((subject, extension_id, decision, permission_args)) = parsed else {
+            self.error_line(
+                "usage: /extension-trust project <trusted|denied> [permissions…] | package <id> <trusted|denied> [permissions…]",
+            );
+            return;
+        };
+        if !matches!(decision, "trusted" | "denied") {
+            self.error_line("extension trust decision must be trusted or denied");
+            return;
+        }
+        let granted_permissions = if decision == "denied" {
+            Vec::new()
+        } else if permission_args.is_empty() {
+            self.latest
+                .extensions
+                .catalog
+                .iter()
+                .filter(|entry| {
+                    subject == "project" && entry.source == "project"
+                        || extension_id.is_some_and(|id| entry.extension_id == id)
+                })
+                .flat_map(|entry| entry.permissions.iter().cloned())
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect()
+        } else {
+            permission_args
+                .iter()
+                .map(|permission| (*permission).to_string())
+                .collect()
+        };
+        let request = theway_transport::wire::WireExtensionTrustRequest {
+            subject: subject.into(),
+            extension_id: extension_id.map(String::from),
+            decision: decision.into(),
+            granted_permissions,
+        };
+        match self.client.decide_extension_trust(request).await {
+            Ok(result) => self.system_line(format!(
+                "extension trust accepted; reload {} (revision {})",
+                result.reload.status, result.reload.revision
+            )),
+            Err(error) => self.error_line(format!("extension trust failed: {error}")),
         }
     }
 

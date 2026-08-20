@@ -149,7 +149,9 @@ impl App {
 
         // Input box: grok-style chrome (rounded border, ❯ prefix, info line),
         // ported from xai-grok-pager's prompt widget (issue #28).
-        let focused = self.model_picker.is_none() && self.control_plane_prompt.is_none();
+        let focused = self.model_picker.is_none()
+            && self.control_plane_prompt.is_none()
+            && !self.extension_view;
         // The info line shows the full `provider:model-id` label (issue #37).
         let model_name = self.latest.model.clone();
         let mut flags: Vec<prompt_chrome::PromptFlag<'_>> = Vec::new();
@@ -236,6 +238,7 @@ impl App {
         self.render_status_panel_menu(frame);
         self.render_fork_picker(frame);
         self.render_resume_picker(frame);
+        self.render_extension_view(frame);
     }
 
     fn render_model_picker(&self, frame: &mut ratatui::Frame) {

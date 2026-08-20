@@ -4,12 +4,20 @@ impl App {
         let initial_runtime_revision = initial.sidebar.runtime_revision;
         let mut feed = Feed::new();
         feed.replace_blocks(&initial.feed_blocks);
-        let completer = SlashCompleter::from_commands(collect_slash_commands(
+        let mut commands = collect_slash_commands(
             &config.registry,
             &initial.sidebar.skills.items,
             &initial.sidebar.commands,
             &initial.sidebar.mcp.tool_names,
-        ));
+        );
+        commands.extend(
+            initial
+                .extensions
+                .commands
+                .iter()
+                .map(|command| format!("/ext:{}", command.name)),
+        );
+        let completer = SlashCompleter::from_commands(commands);
         Self {
             client: config.client,
             connector: config.connector,
@@ -58,6 +66,7 @@ impl App {
             dag_tick: 0,
             side_panel_mode: SidePanelMode::Auto,
             status_panel_menu: None,
+            extension_view: false,
             fork_picker: None,
             resume_picker: None,
             last_status_area: None,

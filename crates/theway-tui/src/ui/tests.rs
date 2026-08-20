@@ -47,6 +47,7 @@ fn fixture_status(feed_blocks: Vec<WireFeedBlock>) -> WireStatus {
         subagents: Vec::new(),
         usage: WireContextUsage::default(),
         tui_max_feed_lines: None,
+        extensions: theway_transport::wire::WireExtensionSnapshot::default(),
     }
 }
 

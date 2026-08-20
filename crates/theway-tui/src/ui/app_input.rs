@@ -36,6 +36,14 @@ impl App {
         key: KeyEvent,
         terminal: &mut Terminal<B>,
     ) -> Result<()> {
+        if self.extension_view {
+            if key.kind != KeyEventKind::Release
+                && matches!(key.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q'))
+            {
+                self.extension_view = false;
+            }
+            return Ok(());
+        }
         // Second-level `/status-panel` menu (issue #54): modal — it consumes
         // every key until Enter applies the highlighted mode or Esc cancels.
         if self.handle_status_panel_menu_key(&key) {
@@ -540,12 +548,20 @@ impl App {
     }
 
     pub(super) fn refresh_completions(&mut self) {
-        self.completer = SlashCompleter::from_commands(collect_slash_commands(
+        let mut commands = collect_slash_commands(
             &self.registry,
             &self.latest.sidebar.skills.items,
             &self.latest.sidebar.commands,
             &self.latest.sidebar.mcp.tool_names,
-        ));
+        );
+        commands.extend(
+            self.latest
+                .extensions
+                .commands
+                .iter()
+                .map(|command| format!("/ext:{}", command.name)),
+        );
+        self.completer = SlashCompleter::from_commands(commands);
         self.completions = if self.input_is_single_line() {
             self.completer.matches(&self.input_text())
         } else {
