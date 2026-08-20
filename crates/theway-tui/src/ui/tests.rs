@@ -244,23 +244,20 @@ async fn busy_status_shows_snake_loader_with_elapsed() {
         text.contains("2 queued"),
         "queue depth missing from the busy band:\n{text}"
     );
-    // The nine-dot track occupies a stable 3×3 grid at x+1; the label and
-    // stats share its center row.
+    // Three vertical-dot glyphs pack the logical nine-dot matrix into one row.
     let status_area = app.last_status_area.unwrap();
-    assert_eq!(status_area.height, 3);
-    for row in 0..3u16 {
-        for col in 0..3u16 {
-            assert_eq!(
-                buf[(status_area.x + 1 + col, status_area.y + row)].symbol(),
-                "•",
-                "track cell ({row}, {col}) must render the snake glyph:\n{text}"
-            );
-        }
+    assert_eq!(status_area.height, 1);
+    for col in 0..3u16 {
+        assert_eq!(
+            buf[(status_area.x + 1 + col, status_area.y)].symbol(),
+            "⋮",
+            "compact track column {col} must render three vertical dots:\n{text}"
+        );
     }
     assert_eq!(
-        buf[(status_area.x + 6, status_area.y + 1)].symbol(),
+        buf[(status_area.x + 6, status_area.y)].symbol(),
         "w",
-        "working label must start beside the grid on its center row:\n{text}"
+        "working label must start beside the compact grid:\n{text}"
     );
     assert!(
         text.contains("char/s"),
@@ -274,8 +271,8 @@ async fn busy_status_shows_snake_loader_with_elapsed() {
         .expect("composer top border missing");
     assert_eq!(
         border_row,
-        label_row + 2,
-        "composer should sit directly below the three-row busy band:\n{text}"
+        label_row + 1,
+        "composer should sit directly below the compact busy band:\n{text}"
     );
     // The busy window timer arms on the false→true edge and clears on idle.
     assert!(app.busy_started.is_some());

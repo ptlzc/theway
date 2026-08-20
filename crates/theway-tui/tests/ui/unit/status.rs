@@ -146,6 +146,21 @@ fn snake_track_always_shows_all_nine_round_dots() {
     }
 }
 
+#[test]
+fn compact_snake_columns_keep_the_brightest_segment_color() {
+    for step in [0u64, 4, 8, 9, 15, 23, 100] {
+        let frame = snake_loader::snake_frame(step, 60.0);
+        let columns = snake_loader::compact_columns(&frame);
+        for (column, compact) in columns.iter().enumerate() {
+            let brightest = (0..snake_loader::GRID_HEIGHT)
+                .map(|row| frame.cells[row * snake_loader::GRID_WIDTH + column])
+                .max_by(|left, right| left.lit.total_cmp(&right.lit))
+                .unwrap();
+            assert_eq!(*compact, brightest, "step {step}, column {column}");
+        }
+    }
+}
+
 #[tokio::test]
 async fn local_display_toggles_do_not_append_operation_logs() {
     let (mut app, _rx) = test_app().await;
