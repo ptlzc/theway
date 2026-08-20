@@ -255,6 +255,12 @@ async fn busy_status_shows_braille_spinner_with_elapsed() {
         "w",
         "working label must start beside the Braille spinner:\n{text}"
     );
+    let working_cells = (0.."working".len() as u16)
+        .map(|offset| {
+            let cell = &buf[(status_area.x + 4 + offset, status_area.y)];
+            (cell.symbol().to_owned(), cell.fg, cell.bg, cell.modifier)
+        })
+        .collect::<Vec<_>>();
     assert!(
         text.contains("char/s"),
         "throughput stats must share the busy row:\n{text}"
@@ -278,6 +284,16 @@ async fn busy_status_shows_braille_spinner_with_elapsed() {
     assert_eq!(moved[(status_area.x + 1, status_area.y)].symbol(), "⠙");
     assert_ne!(moved[(status_area.x + 1, status_area.y)].fg, first_color);
     assert_eq!(moved[(status_area.x + 2, status_area.y)].symbol(), " ");
+    let moved_working_cells = (0.."working".len() as u16)
+        .map(|offset| {
+            let cell = &moved[(status_area.x + 4 + offset, status_area.y)];
+            (cell.symbol().to_owned(), cell.fg, cell.bg, cell.modifier)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        moved_working_cells, working_cells,
+        "working label must not change style between spinner frames"
+    );
     // The busy window timer arms on the false→true edge and clears on idle.
     assert!(app.busy_started.is_some());
     let mut idle = fixture_status(Vec::new());

@@ -59,7 +59,7 @@ use futures::StreamExt as _;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap};
 use theway_ratatui_textarea::{TextArea, TextAreaState};
@@ -454,25 +454,6 @@ fn feature_labels(dags: &[theway_transport::wire::WireDagRunSnapshot]) -> Vec<St
     } else {
         Vec::new()
     }
-}
-
-/// Shimmer style for the busy label (issue #37): brightness sweeps a sine
-/// wave with a ~1.4 s period, fading between the chrome gray and a
-/// near-white highlight.
-fn shimmer_style(tick: u64) -> Style {
-    const PERIOD: u64 = 14; // 1.4 s at 10 ticks/s
-    let phase = (tick % PERIOD) as f32 / PERIOD as f32;
-    let b = 0.5 + 0.5 * (phase * std::f32::consts::TAU).sin();
-    let dim = (86.0, 95.0, 137.0);
-    let bright = (203.0, 209.0, 255.0);
-    let mix = |d: f32, l: f32| (d + (l - d) * b).round() as u8;
-    Style::default()
-        .fg(Color::Rgb(
-            mix(dim.0, bright.0),
-            mix(dim.1, bright.1),
-            mix(dim.2, bright.2),
-        ))
-        .add_modifier(Modifier::BOLD)
 }
 
 /// Fork-picker rows from the current session's feed blocks (issue #55):

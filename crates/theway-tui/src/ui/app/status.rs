@@ -26,7 +26,6 @@ impl App {
         if area.height == 0 {
             return;
         }
-        let tick = self.spinner_frame as u64;
         let spinner = snake_loader::braille_frame(self.spinner.step());
         let track_x = area.x.saturating_add(1);
         if track_x < area.right() {
@@ -42,7 +41,7 @@ impl App {
         let label_x = track_x.saturating_add(3);
         if label_x < area.right() {
             let mut spans = vec![
-                Span::styled("working", shimmer_style(tick)),
+                Span::styled("working", Style::default().fg(Color::Gray)),
                 Span::styled(
                     format!(" {}", self.elapsed_label()),
                     Style::default().fg(Color::DarkGray),
