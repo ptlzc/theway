@@ -165,7 +165,8 @@ impl EventData {
             | SessionEvent::Branch { .. }
             | SessionEvent::PersistenceError { .. }
             | SessionEvent::TurnDecision { .. }
-            | SessionEvent::SkillsReloaded { .. } => None,
+            | SessionEvent::SkillsReloaded { .. }
+            | SessionEvent::ExtensionCommandOutcome { .. } => None,
         }
     }
 }

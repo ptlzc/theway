@@ -255,6 +255,9 @@ impl TurnHost {
         }
         if turn.fut.is_some() {
             self.request_abort(turn);
+            if let Some(future) = turn.fut.take() {
+                let _ = future.await;
+            }
         }
         if let Err(e) = self.switch_session(id).await {
             self.error_line(format!("switch session: {e:#}"));

@@ -365,6 +365,9 @@ impl SlashCommand<DaemonCtx> for ForkCommand {
             Ok(entries) => entries,
             Err(e) => return CommandOutcome::Error(format!("fork failed: {e}")),
         };
+        if let Err(error) = ctx.extra.harness.before_session_fork(Some(target_id)).await {
+            return CommandOutcome::Error(format!("fork cancelled: {error}"));
+        }
         match repo.fork(ctx.cwd, session, to_fork).await {
             Ok(new) => {
                 let meta = match new.get_metadata_json().await {
@@ -374,6 +377,7 @@ impl SlashCommand<DaemonCtx> for ForkCommand {
                     }
                 };
                 let new_id = meta.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+                ctx.extra.harness.session_forked(new_id).await;
                 // Issue #55: the success line is TUI-first — the full new id
                 // plus a `/session switch <short>` hint to continue there; the
                 // CLI resume hint stays on its own line. Forking never

@@ -86,11 +86,22 @@ impl TurnHost {
     }
 
     async fn switch_session(&mut self, id: String) -> Result<()> {
+        let previous = self.session.kernel.harness().clone();
+        previous
+            .before_session_switch(&id)
+            .await
+            .with_context(|| format!("extension gate rejected session {id}"))?;
         let runtime = (self.session.factory)(id.clone())
             .await
             .with_context(|| format!("build runtime for session {id}"))?;
+        previous.shutdown_runtime_extensions().await;
         self.session.id = runtime.session_id.clone();
         self.session.kernel.replace_runtime(runtime);
+        self.session
+            .kernel
+            .harness()
+            .session_switched(&self.session.id)
+            .await;
         self.automation.reload
             .set_trigger_executor(self.session.kernel.trigger_executor().clone());
         self.clear_feed();

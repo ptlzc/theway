@@ -199,6 +199,7 @@ impl SessionRuntimeBuilder {
             session_id: Some(session_id.clone()),
             ..theway_core::ObservationContext::default()
         };
+        opts.runtime_extension_cwd = self.cwd.to_string_lossy().into_owned();
         opts.system_prompt = system_prompt;
         opts.thinking_level = self.thinking;
         opts.tools = tools;
@@ -312,6 +313,7 @@ impl SessionRuntimeBuilder {
                 .await
                 .with_context(|| format!("rehydrate session {session_id}"))?;
         }
+        harness.start_runtime_extensions().await;
         Ok(SessionRuntime {
             session_id,
             harness,
