@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
+use parking_lot::RwLock;
 use serde_json::Value;
 use theway_contract::extension::{
     ExtensionDurableEntry, ExtensionDurableEntryPayload, ExtensionModelContextPlacement,
@@ -16,9 +18,9 @@ pub struct ExtensionModelContextItem {
     pub content: Value,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 pub struct ExtensionModelContextProjection {
-    items: Vec<ExtensionModelContextItem>,
+    items: Arc<RwLock<Vec<ExtensionModelContextItem>>>,
 }
 
 impl ExtensionModelContextProjection {
@@ -53,15 +55,27 @@ impl ExtensionModelContextProjection {
                 items.push(projected);
             }
         }
-        Ok(Self { items })
+        Ok(Self {
+            items: Arc::new(RwLock::new(items)),
+        })
     }
 
-    pub fn items(&self) -> &[ExtensionModelContextItem] {
-        &self.items
+    pub fn items(&self) -> Vec<ExtensionModelContextItem> {
+        self.items.read().clone()
     }
 
     pub fn into_items(self) -> Vec<ExtensionModelContextItem> {
-        self.items
+        self.items.read().clone()
+    }
+
+    /// Replace the live branch projection while retaining all shared handles.
+    pub fn replace(
+        &self,
+        entries: impl IntoIterator<Item = ExtensionDurableEntry>,
+    ) -> Result<(), ExtensionModelContextProjectionError> {
+        let rebuilt = Self::rebuild(entries)?;
+        *self.items.write() = rebuilt.items();
+        Ok(())
     }
 
     /// Add the de-duplicated model-visible projection to one normalized model
@@ -70,8 +84,8 @@ impl ExtensionModelContextProjection {
         &self,
         request: &mut crate::agent::model_request::NormalizedModelRequestDraft,
     ) {
-        let sections = self
-            .items
+        let items = self.items.read();
+        let sections = items
             .iter()
             .filter_map(|item| {
                 (item.placement == ExtensionModelContextPlacement::SystemPromptSection)
@@ -86,24 +100,23 @@ impl ExtensionModelContextProjection {
                 _ => suffix,
             });
         }
-        request
-            .messages
-            .extend(self.items.iter().filter_map(|item| {
-                if item.placement != ExtensionModelContextPlacement::Message {
-                    return None;
-                }
-                let message = serde_json::from_value::<AgentMessage>(item.content.clone()).ok()?;
-                match message {
-                    AgentMessage::Llm(message) => Some(message),
-                    AgentMessage::Custom(_) => None,
-                }
-            }));
+        request.messages.extend(items.iter().filter_map(|item| {
+            if item.placement != ExtensionModelContextPlacement::Message {
+                return None;
+            }
+            let message = serde_json::from_value::<AgentMessage>(item.content.clone()).ok()?;
+            match message {
+                AgentMessage::Llm(message) => Some(message),
+                AgentMessage::Custom(_) => None,
+            }
+        }));
     }
 
     /// Project the de-duplicated model-visible entries into one compaction-only
     /// message list. Private state and custom events never enter this list.
     pub fn compaction_messages(&self) -> Vec<AgentMessage> {
         self.items
+            .read()
             .iter()
             .map(|item| match item.placement {
                 ExtensionModelContextPlacement::Message => {
@@ -117,6 +130,14 @@ impl ExtensionModelContextProjection {
             .collect()
     }
 }
+
+impl PartialEq for ExtensionModelContextProjection {
+    fn eq(&self, other: &Self) -> bool {
+        *self.items.read() == *other.items.read()
+    }
+}
+
+impl Eq for ExtensionModelContextProjection {}
 
 fn model_context_marker(item: &ExtensionModelContextItem, placement: &str) -> AgentMessage {
     AgentMessage::Custom(CustomMessage {

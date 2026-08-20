@@ -170,6 +170,24 @@ fn model_context_projection_excludes_private_state_and_deduplicates_stable_ids()
     assert_eq!(projection.items()[1].extension_id, "other");
 }
 
+#[test]
+fn model_context_projection_replacement_updates_existing_shared_handles() {
+    let projection = ExtensionModelContextProjection::default();
+    let existing_handle = projection.clone();
+
+    projection
+        .replace(vec![durable_context(
+            "anchor",
+            "restored",
+            1,
+            "live",
+        )])
+        .unwrap();
+
+    assert_eq!(existing_handle.items().len(), 1);
+    assert_eq!(existing_handle.items()[0].content, serde_json::json!("live"));
+}
+
 #[derive(Default)]
 struct RawStore {
     entries: Mutex<Vec<StoredSessionEntry>>,
