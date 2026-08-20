@@ -42,7 +42,7 @@ pub fn generate(output_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn schema_documents() -> Result<Vec<(&'static str, Value)>, serde_json::Error> {
-    Ok(vec![
+    let mut documents = vec![
         (
             "schemas/action-batch.schema.json",
             serde_json::to_value(schema_for!(ExtensionActionBatch))?,
@@ -87,7 +87,26 @@ fn schema_documents() -> Result<Vec<(&'static str, Value)>, serde_json::Error> {
             "schemas/trust-record.schema.json",
             serde_json::to_value(schema_for!(ExtensionTrustRecord))?,
         ),
-    ])
+    ];
+    for (_, schema) in &mut documents {
+        canonicalize_json(schema);
+    }
+    Ok(documents)
+}
+
+fn canonicalize_json(value: &mut Value) {
+    match value {
+        Value::Array(values) => values.iter_mut().for_each(canonicalize_json),
+        Value::Object(object) => {
+            let mut entries = std::mem::take(object).into_iter().collect::<Vec<_>>();
+            entries.sort_by(|left, right| left.0.cmp(&right.0));
+            for (key, mut value) in entries {
+                canonicalize_json(&mut value);
+                object.insert(key, value);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
 }
 
 fn typescript(schemas: &[(&str, Value)]) -> Result<String, serde_json::Error> {
