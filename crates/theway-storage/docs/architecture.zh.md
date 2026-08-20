@@ -12,7 +12,9 @@ Daemon 和 TUI 决定何时使用本地持久化。本 crate 负责本地文件�
 
 [`sqlite_repo.rs`](../src/sqlite_repo.rs) 负责一个仓库目录。`SqliteSessionRepo` 创建 `<uuidv7>.db`、打开指定路径、列举数据库文件，并删除精确指定的会话文件。
 
-[`sqlite_storage.rs`](../src/sqlite_storage.rs) 负责单个会话数据库。`SqliteSessionStorage` 在 `meta` 表保存元数据，并按序列顺序保存追加式 `StoredSessionEntry` JSON 载荷。最新普通条目成为活动叶节点；`leaf` 条目把指针移动到其记录的目标。
+[`sqlite_storage.rs`](../src/sqlite_storage.rs) 负责单个会话数据库。`SqliteSessionStorage` 在 `meta` 表保存元数据，并按序列顺序保存追加式 `StoredSessionEntry` JSON 载荷。`append_entries` 在打开单个 SQLite 事务前序列化完整有序批次，并一起提交所有行；序列化、约束或提交失败都不会暴露批次中的任何条目。最新普通条目成为活动叶节点；`leaf` 条目把指针移动到其记录的目标。
+
+`get_extension_entries` 解析显式叶节点或持久化活动叶节点，沿父索引回溯到根，并按重放顺序仅返回目标 extension 的不透明条目。因此，分支切换、进程重启、fork 和归档导入均从会话日志重建 extension 数据，不依赖 daemon 本地缓存。
 
 打开已有会话时执行 SQLite 完整性检查并解码元数据。损坏会话返回 `SessionErrorCode::Corrupted` 且不修改文件，因为 transcript 属于用户数据。`checkpoint` 在归档导入的 staging 数据库重命名前刷出 WAL 页面。
 
@@ -35,6 +37,8 @@ DAG 快照是可重建的运行时状态。数据库无法打开或写入时会�
 ## 不变量
 
 - 会话数据库是高价值追加式记录，损坏后绝不自动重建。
+- 有序会话条目批次是全有或全无的 SQLite 事务。
+- Extension 载荷对存储保持不透明，分支选择从持久化父节点和叶节点记录推导。
 - DAG 快照数据库是可替换投影，损坏后可以重建。
 - 归档导入在暴露最终 `<uuidv7>.db` 路径之前校验全部内容。
 - 原始持久化与带类型运行时、wire 表示保持独立。

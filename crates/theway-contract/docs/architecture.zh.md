@@ -20,8 +20,8 @@
 
 - `StoredSessionEntry` 保存持久化实现所需的原始 JSON 载荷、索引标识、父节点、时间戳和条目类型。
 - `validate_session_entries` 校验条目结构，并从追加式记录序列推导活动叶节点。
-- `SessionReader` 暴露元数据与树查询。
-- `SessionStore` 在读取能力上增加条目创建、追加和叶节点移动。
+- `SessionReader` 暴露元数据与树查询，包括按所选分支过滤并以根到叶重放顺序返回 extension 条目。
+- `SessionStore` 在读取能力上增加条目创建、叶节点移动和原子有序条目批次；单条追加适配器使用同一批次契约。
 
 `theway-core::PersistentSessionStorage` 负责对带类型的 `SessionTreeEntry` 进行编解码。本 crate 不解释 prompt、模型切换、压缩记录或自定义运行时事件。
 

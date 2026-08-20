@@ -20,8 +20,8 @@ The crate owns representation and compatibility rules only. Selection policy, ex
 
 - `StoredSessionEntry` carries the raw JSON payload, indexed identity, parent, timestamp, and entry type used by persistence implementations.
 - `validate_session_entries` verifies entry structure and derives the active leaf from the append-only record sequence.
-- `SessionReader` exposes metadata and tree queries.
-- `SessionStore` extends the reader operations with entry creation, append, and leaf movement.
+- `SessionReader` exposes metadata and tree queries, including extension entries filtered to one selected branch in root-to-leaf replay order.
+- `SessionStore` extends the reader operations with entry creation, leaf movement, and atomic ordered entry batches; the single-entry adapter uses the same batch contract.
 
 `theway-core::PersistentSessionStorage` is the adapter that encodes and decodes typed `SessionTreeEntry` values. This crate does not interpret prompts, model changes, compaction records, or custom runtime events.
 

@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-`theway-storage` 为 `theway-contract` 的原始持久化接口提供本地耐久实现。它为每个会话保存一个 Turso/SQLite 数据库，管理会话发现和 sidecar 路径，导入导出 `.theway-session` 归档，并保存持久化 DAG 快照。
+`theway-storage` 为 `theway-contract` 的原始持久化接口提供本地耐久实现。它为每个会话保存一个 Turso/SQLite 数据库，以原子方式提交有序条目批次，从所选分支重放 extension 条目，管理会话发现和 sidecar 路径，导入导出 `.theway-session` 归档，并保存持久化 DAG 快照。
 
 本 crate 不解释带类型的 agent 消息或 DAG 状态转换规则。在运行时工作区 crate 中，它只依赖 `theway-contract`，不导入 `theway-core` 或 `theway-transport`。
 

@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-`theway-storage` provides the local durable implementations of the raw persistence interfaces in `theway-contract`. It stores one Turso/SQLite database per session, manages session discovery and sidecar paths, imports and exports `.theway-session` archives, and stores persisted DAG snapshots.
+`theway-storage` provides the local durable implementations of the raw persistence interfaces in `theway-contract`. It stores one Turso/SQLite database per session, commits ordered entry batches atomically, replays extension entries from selected branches, manages session discovery and sidecar paths, imports and exports `.theway-session` archives, and stores persisted DAG snapshots.
 
 The crate does not interpret typed agent messages or DAG transition rules. It depends only on `theway-contract` among the runtime workspace crates and never imports `theway-core` or `theway-transport`.
 

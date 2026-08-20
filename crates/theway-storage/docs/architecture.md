@@ -12,7 +12,9 @@ The daemon and TUI choose when local persistence is appropriate. This crate owns
 
 [`sqlite_repo.rs`](../src/sqlite_repo.rs) owns a repository directory. `SqliteSessionRepo` creates a `<uuidv7>.db`, opens a selected path, lists database files, and deletes an exact session file.
 
-[`sqlite_storage.rs`](../src/sqlite_storage.rs) owns one session database. `SqliteSessionStorage` stores metadata in the `meta` table and append-only `StoredSessionEntry` JSON payloads in sequence order. The latest ordinary entry becomes the active leaf; a `leaf` entry moves that pointer to its recorded target.
+[`sqlite_storage.rs`](../src/sqlite_storage.rs) owns one session database. `SqliteSessionStorage` stores metadata in the `meta` table and append-only `StoredSessionEntry` JSON payloads in sequence order. `append_entries` serializes a complete ordered batch before opening one SQLite transaction and commits every row together; serialization, constraint, or commit failure exposes none of the batch. The latest ordinary entry becomes the active leaf; a `leaf` entry moves that pointer to its recorded target.
+
+`get_extension_entries` resolves an explicit leaf or the persisted active leaf, follows parent indexes to the root, and returns only the requested extension's opaque entries in replay order. Branch switches, process restarts, forks, and archive imports therefore reconstruct extension data from the session log without a daemon-local cache.
 
 Opening an existing session runs SQLite integrity checks and decodes its metadata. A damaged session returns `SessionErrorCode::Corrupted` and remains untouched because the transcript is user data. `checkpoint` flushes WAL pages before archive-import staging renames a database.
 
@@ -35,6 +37,8 @@ DAG snapshots are rebuildable runtime state. A database that cannot be opened or
 ## Invariants
 
 - Session databases are high-value append-only records and are never auto-rebuilt after corruption.
+- Ordered session entry batches are all-or-nothing SQLite transactions.
+- Extension payloads remain opaque to storage and branch selection is derived from persisted parent and leaf records.
 - DAG snapshot databases are replaceable projections and may be rebuilt after corruption.
 - Archive import validates all content before exposing the final `<uuidv7>.db` path.
 - Raw persistence remains independent of typed runtime and wire representations.
