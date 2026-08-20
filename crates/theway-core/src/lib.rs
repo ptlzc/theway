@@ -65,6 +65,19 @@ pub use agent::messages;
 #[cfg(feature = "harness")]
 pub use agent::permission::{PermissionCategory, PermissionDecision, PermissionPolicy};
 #[cfg(feature = "harness")]
+pub use agent::runtime_extensions::{
+    ExtensionModelContextItem, ExtensionModelContextProjection,
+    ExtensionModelContextProjectionError, NoopRuntimeExtensionPort, NoopSessionExtensionStatePort,
+    PersistentSessionExtensionStatePort, RuntimeCompactionExtensionPort, RuntimeExtensionContext,
+    RuntimeExtensionDomain, RuntimeExtensionInvocation, RuntimeExtensionPort,
+    RuntimeExtensionResult, RuntimeExtensionScopeAllocator, RuntimeExtensionScopeKind,
+    RuntimeMessageExtensionPort, RuntimeRequestExtensionPort, RuntimeRunExtensionPort,
+    RuntimeSessionExtensionPort, RuntimeToolExtensionPort, ScopeAllocationError,
+    SessionExtensionStateError, SessionExtensionStatePort, ValidatedGateResult,
+    ValidatedObserveResult, ValidatedRegisterResult, ValidatedRuntimeExtensionResult,
+    ValidatedTransformResult,
+};
+#[cfg(feature = "harness")]
 pub use agent::session::{
     memory_repo::MemorySessionRepo,
     memory_storage::MemorySessionStorage,

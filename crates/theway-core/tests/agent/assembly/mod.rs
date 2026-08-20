@@ -11,6 +11,7 @@ use theway_llm_provider::{
     AssistantRole, ContentBlock, ImageContent, Message as PiMessage, StopReason, UserContent,
     UserContentBlock, UserMessage, UserRole,
 };
+use theway_contract::extension::{ExtensionHookClass, ExtensionLifecycleEvent};
 
 fn faux_model() -> Model {
     Model {
@@ -34,6 +35,35 @@ fn harness() -> AgentHarness {
     let storage: Arc<dyn SessionStorage> = Arc::new(MemorySessionStorage::new());
     let session = Session::new(storage);
     AgentHarness::new(AgentHarnessOptions::new(faux_model(), session))
+}
+
+#[tokio::test]
+async fn harness_defaults_to_behavior_neutral_runtime_extension_port() {
+    let harness = harness();
+    let invocation = crate::agent::runtime_extensions::RuntimeExtensionInvocation::new(
+        ExtensionLifecycleEvent::Input,
+        ExtensionHookClass::Transform,
+        crate::agent::runtime_extensions::RuntimeExtensionContext::new(
+            "session-1",
+            "/workspace",
+            1,
+        ),
+        serde_json::json!({}),
+    )
+    .unwrap();
+
+    let result = harness
+        .runtime_extensions()
+        .dispatch_request(invocation)
+        .await
+        .unwrap();
+
+    let crate::agent::runtime_extensions::ValidatedRuntimeExtensionResult::Transform(result) =
+        result
+    else {
+        panic!("expected transform result")
+    };
+    assert!(result.actions().is_empty());
 }
 
 fn user_message(text: &str) -> AgentMessage {

@@ -23,6 +23,15 @@ pub fn decode_session_entry(entry: StoredSessionEntry) -> Result<SessionTreeEntr
     })
 }
 
+fn decode_runtime_entry(
+    entry: StoredSessionEntry,
+) -> Result<Option<SessionTreeEntry>, SessionError> {
+    if entry.entry_type == "extension" {
+        return Ok(None);
+    }
+    decode_session_entry(entry).map(Some)
+}
+
 pub struct PersistentSessionStorage {
     store: Arc<dyn SessionStore>,
 }
@@ -69,8 +78,9 @@ impl SessionStorage for PersistentSessionStorage {
         self.store
             .get_entry(id)
             .await?
-            .map(decode_session_entry)
+            .map(decode_runtime_entry)
             .transpose()
+            .map(Option::flatten)
     }
 
     async fn get_entries(&self) -> Result<Vec<SessionTreeEntry>, SessionError> {
@@ -78,7 +88,8 @@ impl SessionStorage for PersistentSessionStorage {
             .get_entries()
             .await?
             .into_iter()
-            .map(decode_session_entry)
+            .map(decode_runtime_entry)
+            .filter_map(Result::transpose)
             .collect()
     }
 
@@ -90,7 +101,8 @@ impl SessionStorage for PersistentSessionStorage {
             .get_path_to_root(leaf_id)
             .await?
             .into_iter()
-            .map(decode_session_entry)
+            .map(decode_runtime_entry)
+            .filter_map(Result::transpose)
             .collect()
     }
 
@@ -99,7 +111,8 @@ impl SessionStorage for PersistentSessionStorage {
             .find_entries(entry_type)
             .await?
             .into_iter()
-            .map(decode_session_entry)
+            .map(decode_runtime_entry)
+            .filter_map(Result::transpose)
             .collect()
     }
 

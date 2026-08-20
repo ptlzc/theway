@@ -37,6 +37,7 @@ use self::catalog::build_system_prompt;
 use super::compaction::algorithm::CompactAlgorithmRegistry;
 use super::compaction::compaction::{CompactionSettings, DEFAULT_COMPACTION_SETTINGS};
 use super::cost::{CostSnapshot, CostTracker};
+use super::runtime_extensions::{NoopRuntimeExtensionPort, RuntimeExtensionPort};
 use super::types::{PromptTemplate, Skill};
 
 pub use self::events::{
@@ -91,6 +92,8 @@ pub struct AgentHarnessOptions {
     pub turn_continuation_cap: Option<u32>,
     /// Hard cap on inner agent loop iterations. `None` is unbounded.
     pub max_iterations: Option<u32>,
+    /// Engine-independent lifecycle port supplied by the embedding runtime.
+    pub runtime_extensions: Arc<dyn RuntimeExtensionPort>,
 }
 
 impl AgentHarnessOptions {
@@ -117,6 +120,7 @@ impl AgentHarnessOptions {
             on_turn_end: None,
             turn_continuation_cap: None,
             max_iterations: None,
+            runtime_extensions: Arc::new(NoopRuntimeExtensionPort),
         }
     }
 }
@@ -154,6 +158,7 @@ pub struct AgentHarness {
     on_turn_end: Option<OnTurnEndHook>,
     turn_continuation_cap: u32,
     active_hook_cancel: Mutex<Option<tokio_util::sync::CancellationToken>>,
+    runtime_extensions: Arc<dyn RuntimeExtensionPort>,
 }
 
 impl AgentHarness {
@@ -205,6 +210,7 @@ impl AgentHarness {
                 .turn_continuation_cap
                 .unwrap_or(DEFAULT_TURN_CONTINUATION_CAP),
             active_hook_cancel: Mutex::new(None),
+            runtime_extensions: options.runtime_extensions,
         }
     }
 
@@ -226,6 +232,10 @@ impl AgentHarness {
 
     pub fn session(&self) -> &Session {
         &self.session
+    }
+
+    pub fn runtime_extensions(&self) -> &Arc<dyn RuntimeExtensionPort> {
+        &self.runtime_extensions
     }
 
     pub fn abort(&self) {

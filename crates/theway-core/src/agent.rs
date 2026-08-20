@@ -27,6 +27,8 @@ pub mod cost;
 pub mod messages;
 #[cfg(feature = "harness")]
 pub mod permission;
+#[cfg(feature = "harness")]
+pub mod runtime_extensions;
 // The loop engine is part of the bare Agent (prompt()/continue_() call it) — always on.
 pub mod run_loop;
 #[cfg(feature = "harness")]

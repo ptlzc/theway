@@ -3,6 +3,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use serde_json::json;
+use theway_contract::extension::{
+    ExtensionAbiMajor, ExtensionDurableEntry, ExtensionDurableEntryPayload, ExtensionStateMutation,
+};
 use theway_contract::session::{SessionError, SessionReader, SessionStore, StoredSessionEntry};
 
 use super::*;
@@ -102,4 +105,43 @@ async fn typed_session_implements_raw_reader_without_losing_payload() {
 
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].payload["name"], "reader");
+}
+
+#[tokio::test]
+async fn persistent_adapter_keeps_private_extension_entries_out_of_typed_context() {
+    let store = Arc::new(RawStore::default());
+    let session = Session::from_store(store.clone());
+    let message_id = session
+        .append_message(crate::agent::messages::custom(
+            "user",
+            json!({"text": "hello"}),
+        ))
+        .await
+        .unwrap();
+    let extension = StoredSessionEntry::extension(
+        "extension-1".into(),
+        Some(message_id),
+        "2026-08-20T00:00:00Z".into(),
+        ExtensionDurableEntry {
+            abi_major: ExtensionAbiMajor::V2,
+            extension_id: "deepseek-anchor".into(),
+            state_schema_version: 1,
+            origin_sequence: 1,
+            entry: ExtensionDurableEntryPayload::StateMutation {
+                key: "phase".into(),
+                mutation: ExtensionStateMutation::Set {
+                    value: json!("promoted"),
+                },
+            },
+        },
+    )
+    .unwrap();
+    store.append_entry(extension).await.unwrap();
+
+    let entries = session.entries().await.unwrap();
+    let context = session.build_context().await.unwrap();
+
+    assert_eq!(entries.len(), 1);
+    assert_eq!(context.messages.len(), 1);
+    assert_eq!(store.entries.lock().len(), 2);
 }
