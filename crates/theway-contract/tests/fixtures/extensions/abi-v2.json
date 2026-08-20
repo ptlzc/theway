@@ -1,0 +1,158 @@
+{
+  "manifest": {
+    "id": "deepseek-anchor",
+    "version": "1.0.0",
+    "abi": 2,
+    "entry": "dist/index.js",
+    "priority": 100,
+    "scope": "session",
+    "stateSchema": 1,
+    "permissions": [
+      "session.write",
+      "tools.register"
+    ],
+    "optionalPermissions": [
+      "secrets.read:deepseek_api_key"
+    ]
+  },
+  "trust": {
+    "subject": {
+      "kind": "package",
+      "extensionId": "deepseek-anchor",
+      "canonicalPath": "/workspace/.theway/extensions/deepseek-anchor",
+      "contentSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "permissions": [
+      "session.write",
+      "tools.register"
+    ],
+    "decision": "trusted",
+    "decidedAt": "2026-08-20T00:00:00Z"
+  },
+  "event": {
+    "abiMajor": 2,
+    "event": "before_model_request",
+    "context": {
+      "extensionId": "deepseek-anchor",
+      "sessionId": "session-1",
+      "cwd": "/workspace",
+      "sequence": 9,
+      "scope": {
+        "runId": "run-1",
+        "turnId": "turn-1",
+        "requestId": "request-1"
+      },
+      "model": {
+        "provider": "deepseek",
+        "model": "deepseek-reasoner"
+      },
+      "hasInteractiveClient": true,
+      "cancellation": {
+        "cancelled": false,
+        "deadlineUnixMs": 1787200000000
+      }
+    },
+    "payload": {
+      "request": {
+        "tools": [
+          "bash",
+          "str_replace_editor"
+        ]
+      }
+    }
+  },
+  "hook": {
+    "event": "before_model_request",
+    "class": "transform",
+    "allowedActions": [
+      "replace_model_request",
+      "set_state"
+    ],
+    "deadline": "standard",
+    "delivery": "inline",
+    "failure": "keep_last_value"
+  },
+  "actionBatch": {
+    "abiMajor": 2,
+    "actions": [
+      {
+        "kind": "replace_model_request",
+        "payload": {
+          "tools": [
+            "bash",
+            "str_replace_editor"
+          ]
+        }
+      }
+    ]
+  },
+  "durableEntry": {
+    "abiMajor": 2,
+    "extensionId": "deepseek-anchor",
+    "stateSchemaVersion": 1,
+    "originSequence": 10,
+    "entry": {
+      "kind": "state_mutation",
+      "key": "phase",
+      "mutation": {
+        "operation": "set",
+        "value": "promoted"
+      }
+    }
+  },
+  "catalogEntry": {
+    "extensionId": "deepseek-anchor",
+    "version": "1.0.0",
+    "abiMajor": 2,
+    "source": "project",
+    "scope": "session",
+    "priority": 100,
+    "status": "effective",
+    "permissions": [
+      "session.write",
+      "tools.register"
+    ]
+  },
+  "diagnostic": {
+    "extensionId": "deepseek-anchor",
+    "code": "reload_pending",
+    "severity": "info",
+    "message": "reload will run after settlement",
+    "sessionId": "session-1",
+    "event": "run_settled",
+    "sequence": 11,
+    "details": {
+      "reason": "catalog_changed"
+    },
+    "redactedFields": [
+      "authorization"
+    ]
+  },
+  "command": {
+    "name": "anchor-status",
+    "label": "Anchor status",
+    "description": "Show the current Anchor phase",
+    "argumentSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  "commandOutcome": {
+    "status": "success",
+    "message": "promoted",
+    "data": {
+      "phase": "promoted"
+    }
+  },
+  "contribution": {
+    "contributionId": "anchor.status",
+    "extensionId": "deepseek-anchor",
+    "scope": "session",
+    "contribution": {
+      "kind": "status_item",
+      "label": "Anchor",
+      "value": "promoted",
+      "detail": "Full tool catalog is active"
+    }
+  }
+}

@@ -1,0 +1,109 @@
+{
+  "$defs": {
+    "ExtensionPermission": {
+      "oneOf": [
+        {
+          "enum": [
+            "session.write",
+            "tools.register",
+            "tools.override",
+            "commands.register",
+            "providers.register",
+            "client.contribute",
+            "workspace.read",
+            "workspace.write",
+            "process.spawn",
+            "network.connect",
+            "provider.raw"
+          ]
+        },
+        {
+          "pattern": "^secrets\\.read:[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$",
+          "type": "string"
+        }
+      ]
+    },
+    "ExtensionTrustDecision": {
+      "enum": [
+        "trusted",
+        "denied"
+      ],
+      "type": "string"
+    },
+    "ExtensionTrustSubject": {
+      "description": "Identity whose extension permissions were accepted or denied by the user.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "canonicalRoot": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "project",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "canonicalRoot"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "canonicalPath": {
+              "type": "string"
+            },
+            "contentSha256": {
+              "type": "string"
+            },
+            "extensionId": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "package",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "extensionId",
+            "canonicalPath",
+            "contentSha256"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Persistable trust decision. The exact granted permission set is part of the\nkey semantics so a later permission expansion requires a new decision.",
+  "properties": {
+    "decidedAt": {
+      "type": "string"
+    },
+    "decision": {
+      "$ref": "#/$defs/ExtensionTrustDecision"
+    },
+    "permissions": {
+      "items": {
+        "$ref": "#/$defs/ExtensionPermission"
+      },
+      "type": "array"
+    },
+    "subject": {
+      "$ref": "#/$defs/ExtensionTrustSubject"
+    }
+  },
+  "required": [
+    "subject",
+    "permissions",
+    "decision",
+    "decidedAt"
+  ],
+  "title": "ExtensionTrustRecord",
+  "type": "object"
+}

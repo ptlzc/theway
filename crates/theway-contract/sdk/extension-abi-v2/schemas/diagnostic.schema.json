@@ -1,0 +1,135 @@
+{
+  "$defs": {
+    "ExtensionDiagnosticCode": {
+      "enum": [
+        "manifest_invalid",
+        "abi_unsupported",
+        "shadowed",
+        "trust_required",
+        "permission_denied",
+        "load_failed",
+        "hook_failed",
+        "hook_timed_out",
+        "cancelled",
+        "resource_limit",
+        "circuit_opened",
+        "unloaded",
+        "reload_pending",
+        "state_migration_failed",
+        "persistence_failed",
+        "queue_overflow",
+        "contract_violation"
+      ],
+      "type": "string"
+    },
+    "ExtensionDiagnosticSeverity": {
+      "enum": [
+        "info",
+        "warning",
+        "error"
+      ],
+      "type": "string"
+    },
+    "ExtensionLifecycleEvent": {
+      "description": "Stable public lifecycle names. Internal runtime events are translated into\nthese values rather than serialized directly.",
+      "enum": [
+        "extension_load",
+        "session_start",
+        "input",
+        "before_session_switch",
+        "session_switched",
+        "before_session_fork",
+        "session_forked",
+        "before_model_selection",
+        "model_selected",
+        "before_run",
+        "run_started",
+        "turn_started",
+        "context",
+        "before_model_request",
+        "before_provider_request_headers",
+        "before_provider_request_raw",
+        "provider_response",
+        "provider_request_failed",
+        "message_start",
+        "message_update",
+        "message_end",
+        "tool_call",
+        "tool_execution_start",
+        "tool_execution_update",
+        "tool_execution_end",
+        "tool_result",
+        "turn_completed",
+        "run_ended",
+        "run_error",
+        "run_settled",
+        "before_compaction",
+        "compaction_succeeded",
+        "compaction_failed",
+        "session_shutdown",
+        "extension_unload"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Structured diagnostic. Sensitive detail values are discarded when added;\nserialization exposes only their field names in `redactedFields`.",
+  "properties": {
+    "code": {
+      "$ref": "#/$defs/ExtensionDiagnosticCode"
+    },
+    "details": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "event": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ExtensionLifecycleEvent"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "extensionId": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string"
+    },
+    "redactedFields": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "sequence": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "sessionId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "severity": {
+      "$ref": "#/$defs/ExtensionDiagnosticSeverity"
+    }
+  },
+  "required": [
+    "extensionId",
+    "code",
+    "severity",
+    "message"
+  ],
+  "title": "ExtensionDiagnostic",
+  "type": "object"
+}

@@ -1,0 +1,185 @@
+{
+  "$defs": {
+    "ExtensionClientContributionData": {
+      "description": "Declarative contribution understood independently by each client.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "notification",
+              "type": "string"
+            },
+            "level": {
+              "$ref": "#/$defs/ExtensionNoticeLevel"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "level",
+            "title",
+            "body"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "detail": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "const": "status_item",
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "label",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "command": {
+              "$ref": "#/$defs/ExtensionCommandDescriptor"
+            },
+            "kind": {
+              "const": "command",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "command"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "data": true,
+            "kind": {
+              "const": "detail_panel",
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "title",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "form_action",
+              "type": "string"
+            },
+            "schema": true,
+            "submitCommand": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "title",
+            "schema",
+            "submitCommand"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ExtensionCommandDescriptor": {
+      "additionalProperties": false,
+      "properties": {
+        "argumentSchema": true,
+        "description": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "label",
+        "description",
+        "argumentSchema"
+      ],
+      "type": "object"
+    },
+    "ExtensionNoticeLevel": {
+      "enum": [
+        "info",
+        "success",
+        "warning",
+        "error"
+      ],
+      "type": "string"
+    },
+    "ExtensionScope": {
+      "description": "Lifetime boundary for extension instances and their owned effects.",
+      "enum": [
+        "process",
+        "session",
+        "run",
+        "request"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "contribution": {
+      "$ref": "#/$defs/ExtensionClientContributionData"
+    },
+    "contributionId": {
+      "type": "string"
+    },
+    "extensionId": {
+      "type": "string"
+    },
+    "scope": {
+      "$ref": "#/$defs/ExtensionScope"
+    }
+  },
+  "required": [
+    "contributionId",
+    "extensionId",
+    "scope",
+    "contribution"
+  ],
+  "title": "ExtensionClientContribution",
+  "type": "object"
+}

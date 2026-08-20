@@ -1,0 +1,180 @@
+{
+  "$defs": {
+    "ExtensionAbiMajor": {
+      "description": "ABI major declared by an extension package.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "ExtensionDurableEntryPayload": {
+      "description": "Domain payload persisted inside an opaque extension session entry.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "state_mutation",
+              "type": "string"
+            },
+            "mutation": {
+              "$ref": "#/$defs/ExtensionStateMutation"
+            }
+          },
+          "required": [
+            "kind",
+            "key",
+            "mutation"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "customType": {
+              "type": "string"
+            },
+            "eventId": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "custom_event",
+              "type": "string"
+            },
+            "payload": true
+          },
+          "required": [
+            "kind",
+            "eventId",
+            "customType",
+            "payload"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "content": true,
+            "contextId": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "model_context",
+              "type": "string"
+            },
+            "placement": {
+              "$ref": "#/$defs/ExtensionModelContextPlacement"
+            }
+          },
+          "required": [
+            "kind",
+            "contextId",
+            "placement",
+            "content"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "fromSchemaVersion": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "state_migration",
+              "type": "string"
+            },
+            "toSchemaVersion": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "fromSchemaVersion",
+            "toSchemaVersion"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ExtensionModelContextPlacement": {
+      "enum": [
+        "system_prompt_section",
+        "message"
+      ],
+      "type": "string"
+    },
+    "ExtensionStateMutation": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "operation": {
+              "const": "set",
+              "type": "string"
+            },
+            "value": true
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "operation": {
+              "const": "delete",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Versioned extension-owned entry stored on the active session branch. The\nsurrounding session record supplies append identity, parent, and timestamp.",
+  "properties": {
+    "abiMajor": {
+      "$ref": "#/$defs/ExtensionAbiMajor"
+    },
+    "entry": {
+      "$ref": "#/$defs/ExtensionDurableEntryPayload"
+    },
+    "extensionId": {
+      "type": "string"
+    },
+    "originSequence": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "stateSchemaVersion": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "abiMajor",
+    "extensionId",
+    "stateSchemaVersion",
+    "originSequence",
+    "entry"
+  ],
+  "title": "ExtensionDurableEntry",
+  "type": "object"
+}

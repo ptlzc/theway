@@ -16,9 +16,12 @@
 //! - [`session`] — engine-independent session metadata, raw append-only entry
 //!   records, and persistence reader/store interfaces.
 //! - [`dag`] — persisted DAG snapshots and their session-scoped database path.
+//! - [`extension`] — engine-neutral runtime-extension manifests, permissions,
+//!   trust records, and ABI primitives.
 
 pub mod config;
 pub mod dag;
+pub mod extension;
 pub mod session;
 pub mod session_id;
 pub mod triggers;

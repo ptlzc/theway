@@ -1,0 +1,150 @@
+{
+  "$defs": {
+    "ExtensionAbiMajor": {
+      "description": "ABI major declared by an extension package.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "ExtensionAction": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/ExtensionActionKind"
+        },
+        "payload": true
+      },
+      "required": [
+        "kind",
+        "payload"
+      ],
+      "type": "object"
+    },
+    "ExtensionActionKind": {
+      "description": "Stable action categories. Complex payloads stay JSON-compatible at the ABI\nboundary and are decoded into domain-specific DTOs before application.",
+      "enum": [
+        "replace_input",
+        "patch_run_context",
+        "replace_context",
+        "replace_model_request",
+        "replace_provider_headers",
+        "replace_provider_payload",
+        "replace_message",
+        "replace_tool_result",
+        "set_state",
+        "delete_state",
+        "append_custom_event",
+        "append_model_context",
+        "emit_command_outcome",
+        "enqueue_follow_up",
+        "emit_diagnostic",
+        "register_effect",
+        "dispose_effect"
+      ],
+      "type": "string"
+    },
+    "ExtensionGateDecision": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "decision": {
+              "const": "abstain",
+              "type": "string"
+            }
+          },
+          "required": [
+            "decision"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "decision": {
+              "const": "allow",
+              "type": "string"
+            }
+          },
+          "required": [
+            "decision"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "decision": {
+              "const": "deny",
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "decision",
+            "code",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "decision": {
+              "const": "cancel",
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "decision",
+            "code",
+            "message"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Complete return value from one hook invocation.",
+  "properties": {
+    "abiMajor": {
+      "$ref": "#/$defs/ExtensionAbiMajor"
+    },
+    "actions": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ExtensionAction"
+      },
+      "type": "array"
+    },
+    "decision": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ExtensionGateDecision"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "abiMajor"
+  ],
+  "title": "ExtensionActionBatch",
+  "type": "object"
+}

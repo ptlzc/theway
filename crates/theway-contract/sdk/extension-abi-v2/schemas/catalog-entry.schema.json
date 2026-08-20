@@ -1,0 +1,140 @@
+{
+  "$defs": {
+    "ExtensionAbiMajor": {
+      "description": "ABI major declared by an extension package.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "ExtensionCatalogStatus": {
+      "enum": [
+        "effective",
+        "shadowed",
+        "rejected",
+        "blocked",
+        "disabled",
+        "faulted"
+      ],
+      "type": "string"
+    },
+    "ExtensionDiagnosticCode": {
+      "enum": [
+        "manifest_invalid",
+        "abi_unsupported",
+        "shadowed",
+        "trust_required",
+        "permission_denied",
+        "load_failed",
+        "hook_failed",
+        "hook_timed_out",
+        "cancelled",
+        "resource_limit",
+        "circuit_opened",
+        "unloaded",
+        "reload_pending",
+        "state_migration_failed",
+        "persistence_failed",
+        "queue_overflow",
+        "contract_violation"
+      ],
+      "type": "string"
+    },
+    "ExtensionPermission": {
+      "oneOf": [
+        {
+          "enum": [
+            "session.write",
+            "tools.register",
+            "tools.override",
+            "commands.register",
+            "providers.register",
+            "client.contribute",
+            "workspace.read",
+            "workspace.write",
+            "process.spawn",
+            "network.connect",
+            "provider.raw"
+          ]
+        },
+        {
+          "pattern": "^secrets\\.read:[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$",
+          "type": "string"
+        }
+      ]
+    },
+    "ExtensionScope": {
+      "description": "Lifetime boundary for extension instances and their owned effects.",
+      "enum": [
+        "process",
+        "session",
+        "run",
+        "request"
+      ],
+      "type": "string"
+    },
+    "ExtensionSourceLayer": {
+      "description": "Discovery layer attached by the host after reading a package manifest.",
+      "enum": [
+        "global",
+        "project"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Client-neutral catalog record. It intentionally omits executable engine\nvalues and secret-bearing provider configuration.",
+  "properties": {
+    "abiMajor": {
+      "$ref": "#/$defs/ExtensionAbiMajor"
+    },
+    "extensionId": {
+      "type": "string"
+    },
+    "permissions": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ExtensionPermission"
+      },
+      "type": "array"
+    },
+    "priority": {
+      "format": "int32",
+      "type": "integer"
+    },
+    "reasonCode": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ExtensionDiagnosticCode"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "scope": {
+      "$ref": "#/$defs/ExtensionScope"
+    },
+    "source": {
+      "$ref": "#/$defs/ExtensionSourceLayer"
+    },
+    "status": {
+      "$ref": "#/$defs/ExtensionCatalogStatus"
+    },
+    "version": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "extensionId",
+    "version",
+    "abiMajor",
+    "source",
+    "scope",
+    "priority",
+    "status"
+  ],
+  "title": "ExtensionCatalogEntry",
+  "type": "object"
+}
