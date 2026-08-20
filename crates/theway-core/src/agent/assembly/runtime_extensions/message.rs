@@ -93,7 +93,9 @@ impl HarnessRuntimeExtensions {
         if result.actions().iter().any(|action| {
             !matches!(
                 action.kind,
-                ExtensionActionKind::ReplaceMessage | ExtensionActionKind::EnqueueFollowUp
+                ExtensionActionKind::ReplaceMessage
+                    | ExtensionActionKind::EnqueueFollowUp
+                    | ExtensionActionKind::EmitDiagnostic
             )
         }) {
             return message;

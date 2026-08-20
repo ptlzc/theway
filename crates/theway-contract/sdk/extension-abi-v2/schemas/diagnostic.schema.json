@@ -18,6 +18,7 @@
         "state_migration_failed",
         "persistence_failed",
         "queue_overflow",
+        "lifecycle_status",
         "contract_violation"
       ],
       "type": "string"

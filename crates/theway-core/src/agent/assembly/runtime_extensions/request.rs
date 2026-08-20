@@ -39,7 +39,9 @@ impl HarnessRuntimeExtensions {
         if result.actions().iter().any(|action| {
             !matches!(
                 action.kind,
-                ExtensionActionKind::ReplaceModelRequest | ExtensionActionKind::EnqueueFollowUp
+                ExtensionActionKind::ReplaceModelRequest
+                    | ExtensionActionKind::EnqueueFollowUp
+                    | ExtensionActionKind::EmitDiagnostic
             )
         }) {
             return request;

@@ -224,6 +224,12 @@ impl SessionPluginHost {
                 extension.package.granted_permissions(),
             )?;
             validate_ephemeral_actions(event, registration.class, &payload, &batch)?;
+            let emitted = self.emitted_diagnostics(
+                &extension.package.manifest().id,
+                event,
+                origin_sequence,
+                &batch,
+            )?;
             self.state_runtime
                 .commit_batch(
                     &extension.package.manifest().id,
@@ -231,12 +237,38 @@ impl SessionPluginHost {
                     &mut batch,
                 )
                 .await?;
+            self.diagnostics.lock().extend(emitted);
             if merge_batch(event, registration.class, &mut aggregate, batch) {
                 break;
             }
         }
         serde_json::to_value(aggregate)
             .map_err(|error| format!("extension action batch serialization failed: {error}"))
+    }
+
+    fn emitted_diagnostics(
+        &self,
+        extension_id: &str,
+        event: ExtensionLifecycleEvent,
+        sequence: u64,
+        batch: &theway_contract::extension::ExtensionActionBatch,
+    ) -> Result<Vec<ExtensionDiagnostic>, String> {
+        batch
+            .actions
+            .iter()
+            .filter(|action| {
+                action.kind == theway_contract::extension::ExtensionActionKind::EmitDiagnostic
+            })
+            .map(|action| {
+                diagnostics::emitted(
+                    extension_id,
+                    &self.session_id,
+                    event,
+                    sequence,
+                    action.payload.clone(),
+                )
+            })
+            .collect()
     }
 
     pub(super) async fn cleanup_failed_start(
@@ -563,6 +595,14 @@ impl SessionPluginHost {
             &batch,
         )
         .map_err(|error| (ExtensionDiagnosticCode::ContractViolation, error))?;
+        let emitted = self
+            .emitted_diagnostics(
+                &extension.package.manifest().id,
+                invocation.event(),
+                invocation.context().sequence,
+                &batch,
+            )
+            .map_err(|error| (ExtensionDiagnosticCode::ContractViolation, error))?;
         self.state_runtime
             .commit_batch(
                 &extension.package.manifest().id,
@@ -571,6 +611,7 @@ impl SessionPluginHost {
             )
             .await
             .map_err(|error| (ExtensionDiagnosticCode::HookFailed, error))?;
+        self.diagnostics.lock().extend(emitted);
         Ok(batch)
     }
 

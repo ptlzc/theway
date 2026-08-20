@@ -76,6 +76,7 @@ pub enum ExtensionDiagnosticCode {
     StateMigrationFailed,
     PersistenceFailed,
     QueueOverflow,
+    LifecycleStatus,
     ContractViolation,
 }
 
