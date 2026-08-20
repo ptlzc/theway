@@ -54,6 +54,20 @@ pub(super) fn accept_transform_batch(
     Ok(false)
 }
 
+pub(super) fn validate_ephemeral_actions(
+    event: ExtensionLifecycleEvent,
+    class: ExtensionHookClass,
+    payload: &Value,
+    batch: &ExtensionActionBatch,
+) -> Result<(), String> {
+    if class != ExtensionHookClass::Transform {
+        return Ok(());
+    }
+    let mut candidate = payload.clone();
+    let mut aggregate = empty_batch();
+    accept_transform_batch(event, &mut candidate, &mut aggregate, batch.clone()).map(|_| ())
+}
+
 fn apply_primary_transform(
     event: ExtensionLifecycleEvent,
     current: &mut Value,

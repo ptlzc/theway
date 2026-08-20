@@ -6,8 +6,8 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use serde_json::{Value, json};
 use theway_contract::extension::{
-    ExtensionClientContribution, ExtensionCommandDescriptor, ExtensionCommandOutcome,
-    ExtensionLifecycleEvent,
+    ExtensionAbiMajor, ExtensionActionBatch, ExtensionClientContribution,
+    ExtensionCommandDescriptor, ExtensionCommandOutcome, ExtensionLifecycleEvent,
 };
 use theway_core::AgentTool;
 use theway_llm_provider::Provider;
@@ -19,6 +19,8 @@ use super::registered_tool::RegisteredExtensionTool;
 use super::registrations::{
     EffectRegistration, OwnedRegistration, PromptSectionRegistration, RequestPolicyRegistration,
 };
+use super::state::HostLifecycleSequence;
+use super::state_runtime::ExtensionStateRuntime;
 
 const COMMAND_DEADLINE: Duration = Duration::from_secs(30);
 
@@ -41,13 +43,58 @@ pub(super) struct AcceptedEffects {
     pub errors: Vec<String>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(super) struct RegistrationRuntime {
     effects: EffectLedger,
     provider_models: Arc<Mutex<BTreeMap<u64, Vec<(Provider, String)>>>>,
+    state_runtime: Option<ExtensionStateRuntime>,
+    sequence: Arc<HostLifecycleSequence>,
+}
+
+impl Default for RegistrationRuntime {
+    fn default() -> Self {
+        Self {
+            effects: EffectLedger::default(),
+            provider_models: Arc::new(Mutex::new(BTreeMap::new())),
+            state_runtime: None,
+            sequence: Arc::new(HostLifecycleSequence::default()),
+        }
+    }
 }
 
 impl RegistrationRuntime {
+    pub(super) fn new(
+        state_runtime: ExtensionStateRuntime,
+        sequence: Arc<HostLifecycleSequence>,
+    ) -> Self {
+        Self {
+            state_runtime: Some(state_runtime),
+            sequence,
+            ..Self::default()
+        }
+    }
+
+    pub(super) fn next_sequence(&self) -> u64 {
+        self.sequence.next()
+    }
+
+    pub(super) async fn commit_durable_actions(
+        &self,
+        owner: &EffectOwner,
+        origin_sequence: u64,
+        batch: &mut ExtensionActionBatch,
+    ) -> Result<(), String> {
+        let Some(runtime) = &self.state_runtime else {
+            if batch.actions.is_empty() {
+                return Ok(());
+            }
+            return Err("extension state persistence is unavailable".into());
+        };
+        runtime
+            .commit_batch(&owner.extension_id, origin_sequence, batch)
+            .await
+    }
+
     pub(super) fn active_count(&self) -> usize {
         self.effects.active_count()
     }
@@ -227,11 +274,12 @@ impl RegistrationRuntime {
         if !dispatcher::matches_schema(&command.command.argument_schema, &arguments) {
             return Err("extension command arguments do not match argumentSchema".into());
         }
+        let origin_sequence = self.next_sequence();
         let envelope = dispatcher::envelope(
             &record.owner.extension_id,
             &record.owner.session_id,
             cwd,
-            0,
+            origin_sequence,
             ExtensionLifecycleEvent::Input,
             json!({"arguments": arguments}),
         );
@@ -247,8 +295,16 @@ impl RegistrationRuntime {
             .await
             .map_err(|error| error.message)?;
         self.apply_disposals(&record.owner, &result.disposed_registration_ids);
-        serde_json::from_value(result.value)
-            .map_err(|error| format!("extension command outcome is invalid: {error}"))
+        let outcome = serde_json::from_value(result.value)
+            .map_err(|error| format!("extension command outcome is invalid: {error}"))?;
+        let mut batch = ExtensionActionBatch {
+            abi_major: ExtensionAbiMajor::V2,
+            decision: None,
+            actions: result.queued_durable_actions,
+        };
+        self.commit_durable_actions(&record.owner, origin_sequence, &mut batch)
+            .await?;
+        Ok(outcome)
     }
 
     pub(super) fn contributions(&self) -> Vec<ExtensionClientContribution> {

@@ -12,11 +12,11 @@ use theway_core::agent::runtime_extensions::RuntimeExtensionInvocation;
 
 use super::catalog::ExtensionPackage;
 use super::diagnostics;
-use super::dispatch_result::{accept_transform_batch, decode_batch};
+use super::dispatch_result::{accept_transform_batch, decode_batch, validate_ephemeral_actions};
 use super::dispatcher;
 use super::dispatcher::HookRegistration;
 use super::effects::EffectOwner;
-use super::engine::EngineInstanceKey;
+use super::engine::{EngineInstanceKey, EngineInvocationResult};
 use super::host::SessionPluginHost;
 use super::registration_runtime::{ExtensionCommandContext, RegisteredExtensionCommand};
 use super::registrations::{hook_effect_registration, validate_effect_registrations};
@@ -28,12 +28,13 @@ impl SessionPluginHost {
         registration: &HookRegistration,
         event: ExtensionLifecycleEvent,
         payload: Value,
-    ) -> Result<Value, String> {
+    ) -> Result<(EngineInvocationResult, u64), String> {
+        let origin_sequence = self.sequence.next();
         let envelope = dispatcher::envelope(
             &key.extension_id,
             &self.session_id,
             &self.cwd,
-            self.sequence.next(),
+            origin_sequence,
             event,
             payload,
         );
@@ -61,7 +62,7 @@ impl SessionPluginHost {
             &self.effect_owner(&key.extension_id),
             &result.disposed_registration_ids,
         );
-        Ok(result.value)
+        Ok((result, origin_sequence))
     }
 
     pub(super) fn accept_package_effects(
@@ -242,38 +243,53 @@ impl SessionPluginHost {
                 invocation,
                 current_payload.clone(),
             );
-            let result = self
-                .engine
-                .invoke_controlled_with_effects(
-                    &super::engine::EngineInstanceKey::new(
-                        &record.owner.session_id,
-                        &record.owner.extension_id,
-                    ),
-                    &envelope,
-                    record.registration.registration_id,
-                    self.config.deadline(ExtensionHookDeadline::Standard),
-                    Arc::clone(&self.shutdown),
-                    self.config.broker_operation_quota,
-                )
-                .await
-                .map_err(|error| error.message)
-                .map(|result| {
-                    self.registration_runtime
-                        .apply_disposals(&record.owner, &result.disposed_registration_ids);
-                    result.value
-                })
-                .and_then(decode_batch)
-                .and_then(|batch| {
-                    ExtensionHookContract::for_hook(
-                        ExtensionLifecycleEvent::BeforeModelRequest,
-                        ExtensionHookClass::Transform,
+            let result: Result<ExtensionActionBatch, String> = async {
+                let result = self
+                    .engine
+                    .invoke_controlled_with_effects(
+                        &super::engine::EngineInstanceKey::new(
+                            &record.owner.session_id,
+                            &record.owner.extension_id,
+                        ),
+                        &envelope,
+                        record.registration.registration_id,
+                        self.config.deadline(ExtensionHookDeadline::Standard),
+                        Arc::clone(&self.shutdown),
+                        self.config.broker_operation_quota,
                     )
-                    .map_err(|error| error.message)?
-                    .validate_result(&batch)
+                    .await
                     .map_err(|error| error.message)?;
-                    dispatcher::validate_action_capabilities(&batch, &policy.granted_permissions)?;
-                    Ok(batch)
-                });
+                self.registration_runtime
+                    .apply_disposals(&record.owner, &result.disposed_registration_ids);
+                let mut batch = decode_batch(result.value)?;
+                batch.actions.extend(result.queued_durable_actions);
+                if batch.actions.len() > self.config.max_actions {
+                    return Err("extension action count exceeds the configured limit".into());
+                }
+                ExtensionHookContract::for_hook(
+                    ExtensionLifecycleEvent::BeforeModelRequest,
+                    ExtensionHookClass::Transform,
+                )
+                .map_err(|error| error.message)?
+                .validate_result(&batch)
+                .map_err(|error| error.message)?;
+                dispatcher::validate_action_capabilities(&batch, &policy.granted_permissions)?;
+                validate_ephemeral_actions(
+                    ExtensionLifecycleEvent::BeforeModelRequest,
+                    ExtensionHookClass::Transform,
+                    current_payload,
+                    &batch,
+                )?;
+                self.state_runtime
+                    .commit_batch(
+                        &record.owner.extension_id,
+                        invocation.context().sequence,
+                        &mut batch,
+                    )
+                    .await?;
+                Ok(batch)
+            }
+            .await;
             match result {
                 Ok(batch) => {
                     let _ = accept_transform_batch(

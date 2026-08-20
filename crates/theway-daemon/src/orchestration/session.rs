@@ -142,6 +142,7 @@ impl SessionRuntimeBuilder {
         // harness state is touched.
         let target_cwd = meta.get("cwd").and_then(|v| v.as_str());
         check_work_dir_binding(&session_id, target_cwd, &self.cwd)?;
+        let extension_state_store = Arc::clone(&store);
         let session = theway_core::Session::from_store(store);
 
         // Crash-recovery parity with startup: restore this session's persisted DAG runs.
@@ -198,11 +199,17 @@ impl SessionRuntimeBuilder {
         opts.runtime_extension_cwd = self.cwd.to_string_lossy().into_owned();
         if let Some(engine) = &self.runtime_extension_engine {
             let extensions = Arc::new(
-                crate::ts_extensions::SessionPluginHost::load(
+                crate::ts_extensions::SessionPluginHost::load_with_state(
                     self.runtime_extension_packages.clone(),
                     engine.clone(),
                     session_id.clone(),
                     &self.cwd,
+                    crate::ts_extensions::RuntimeExtensionHostConfig::default(),
+                    Arc::new(
+                        theway_core::agent::runtime_extensions::PersistentSessionExtensionStatePort::new(
+                            extension_state_store,
+                        ),
+                    ),
                 )
                 .await,
             );
@@ -223,6 +230,7 @@ impl SessionRuntimeBuilder {
             opts.get_api_key = Some(Arc::new(move |provider_id| {
                 credential_host.provider_api_key(provider_id)
             }));
+            opts.runtime_extension_model_context = extensions.model_context_projection();
             opts.runtime_extensions = extensions;
         }
         let tool_names = tools

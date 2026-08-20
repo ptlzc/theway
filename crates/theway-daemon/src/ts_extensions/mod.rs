@@ -7,6 +7,7 @@
 
 mod audit;
 mod broker_paths;
+mod broker_services;
 mod brokers;
 mod catalog;
 mod compaction;
@@ -17,6 +18,7 @@ mod effects;
 mod engine;
 mod facade;
 mod host;
+mod host_loading;
 mod host_ports;
 mod legacy;
 mod observation;
@@ -25,13 +27,15 @@ mod registration_host;
 mod registration_runtime;
 mod registrations;
 mod state;
+mod state_broker;
+mod state_runtime;
 mod trust;
 mod ts;
 
 use std::path::Path;
 
 pub use audit::ExtensionAuditLog;
-pub use brokers::ExtensionBrokerServices;
+pub use broker_services::ExtensionBrokerServices;
 pub use catalog::{ExtensionPackage, PackageCatalog};
 pub use compaction::{TsCompactAlgorithm, compact_algorithm_registry};
 pub use dispatcher::RuntimeExtensionHostConfig;

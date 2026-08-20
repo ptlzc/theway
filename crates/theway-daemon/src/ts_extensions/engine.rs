@@ -6,9 +6,10 @@ use std::time::{Duration, Instant};
 use rquickjs::loader::{BuiltinLoader, BuiltinResolver};
 use rquickjs::{CatchResultExt, Context, Function, Module, Promise, Runtime};
 use serde_json::Value;
-use theway_contract::extension::ExtensionLifecycleEvent;
+use theway_contract::extension::{ExtensionAction, ExtensionDurableEntry, ExtensionLifecycleEvent};
 use tokio::sync::oneshot;
 
+use super::broker_services::ExtensionBrokerServices;
 use super::brokers;
 use super::catalog::ExtensionPackage;
 
@@ -49,6 +50,7 @@ pub struct EngineInvocationError {
 pub(super) struct EngineInvocationResult {
     pub value: Value,
     pub disposed_registration_ids: Vec<u64>,
+    pub queued_durable_actions: Vec<ExtensionAction>,
 }
 
 impl EngineInvocationError {
@@ -84,7 +86,7 @@ struct EnginePoolInner {
     workers: Vec<mpsc::Sender<EngineCommand>>,
     joins: parking_lot::Mutex<Vec<std::thread::JoinHandle<()>>>,
     limits: QuickJsEngineLimits,
-    broker_services: brokers::ExtensionBrokerServices,
+    broker_services: ExtensionBrokerServices,
 }
 
 enum EngineCommand {
@@ -129,17 +131,13 @@ impl QuickJsEnginePool {
     }
 
     pub fn with_limits(worker_count: usize, limits: QuickJsEngineLimits) -> Self {
-        Self::with_broker_services(
-            worker_count,
-            limits,
-            brokers::ExtensionBrokerServices::default(),
-        )
+        Self::with_broker_services(worker_count, limits, ExtensionBrokerServices::default())
     }
 
     pub fn with_broker_services(
         worker_count: usize,
         limits: QuickJsEngineLimits,
-        broker_services: brokers::ExtensionBrokerServices,
+        broker_services: ExtensionBrokerServices,
     ) -> Self {
         let worker_count = worker_count.max(1);
         let mut workers = Vec::with_capacity(worker_count);
@@ -320,6 +318,25 @@ impl QuickJsEnginePool {
         self.inner.broker_services.secret(name)
     }
 
+    pub(super) fn install_extension_state(
+        &self,
+        key: &EngineInstanceKey,
+        schema_version: Option<u32>,
+        entries: &[ExtensionDurableEntry],
+    ) {
+        self.inner
+            .broker_services
+            .install_state(key, schema_version, entries);
+    }
+
+    pub(super) fn apply_extension_state(
+        &self,
+        key: &EngineInstanceKey,
+        entries: &[ExtensionDurableEntry],
+    ) {
+        self.inner.broker_services.apply_state(key, entries);
+    }
+
     fn send(&self, key: &EngineInstanceKey, command: EngineCommand) -> Result<(), String> {
         let worker = stable_worker(key, self.inner.workers.len());
         self.inner.workers[worker]
@@ -356,7 +373,7 @@ fn stable_worker(key: &EngineInstanceKey, worker_count: usize) -> usize {
 fn run_worker(
     receiver: mpsc::Receiver<EngineCommand>,
     limits: QuickJsEngineLimits,
-    broker_services: brokers::ExtensionBrokerServices,
+    broker_services: ExtensionBrokerServices,
 ) {
     let mut instances = HashMap::new();
     while let Ok(command) = receiver.recv() {
@@ -469,13 +486,19 @@ struct EngineInstance {
     broker: Arc<brokers::BrokerRuntime>,
 }
 
+impl Drop for EngineInstance {
+    fn drop(&mut self) {
+        self.broker.clear_ephemeral_memory();
+    }
+}
+
 impl EngineInstance {
     fn new(
         key: &EngineInstanceKey,
         source: &str,
         limits: QuickJsEngineLimits,
         package: &ExtensionPackage,
-        broker_services: brokers::ExtensionBrokerServices,
+        broker_services: ExtensionBrokerServices,
     ) -> Result<(Self, Value), String> {
         let runtime = Runtime::new().map_err(|error| error.to_string())?;
         runtime.set_memory_limit(limits.memory_bytes);
@@ -652,9 +675,17 @@ fn decode_invocation_result(
             .unwrap_or_else(|| Value::Array(Vec::new())),
     )
     .map_err(|error| format!("extension invocation effect state is invalid: {error}"))?;
+    let queued_durable_actions = serde_json::from_value(
+        value
+            .get("queuedDurableActions")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new())),
+    )
+    .map_err(|error| format!("extension invocation durable actions are invalid: {error}"))?;
     Ok(EngineInvocationResult {
         value: result,
         disposed_registration_ids,
+        queued_durable_actions,
     })
 }
 

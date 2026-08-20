@@ -4,7 +4,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use theway_contract::extension::ExtensionLifecycleEvent;
+use theway_contract::extension::{
+    ExtensionAbiMajor, ExtensionActionBatch, ExtensionLifecycleEvent,
+};
 use theway_core::{
     AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate, PermissionClassification,
 };
@@ -103,11 +105,12 @@ impl AgentTool for RegisteredExtensionTool {
                 "extension tool arguments do not match inputSchema".into(),
             ));
         }
+        let origin_sequence = self.registrations.next_sequence();
         let envelope = dispatcher::envelope(
             &self.key.extension_id,
             &self.key.session_id,
             &self.cwd,
-            0,
+            origin_sequence,
             ExtensionLifecycleEvent::ToolExecutionStart,
             json!({"toolCallId": tool_call_id, "arguments": params}),
         );
@@ -148,8 +151,18 @@ impl AgentTool for RegisteredExtensionTool {
                 "extension tool result does not match resultSchema".into(),
             ));
         }
-        serde_json::from_value(value).map_err(|error| {
+        let tool_result = serde_json::from_value(value).map_err(|error| {
             AgentToolError::Message(format!("extension tool result is invalid: {error}"))
-        })
+        })?;
+        let mut batch = ExtensionActionBatch {
+            abi_major: ExtensionAbiMajor::V2,
+            decision: None,
+            actions: result.queued_durable_actions,
+        };
+        self.registrations
+            .commit_durable_actions(&owner, origin_sequence, &mut batch)
+            .await
+            .map_err(AgentToolError::Message)?;
+        Ok(tool_result)
     }
 }

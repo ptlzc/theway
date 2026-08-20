@@ -120,10 +120,14 @@ impl ObservationDispatch {
                             },
                             &result.disposed_registration_ids,
                         );
-                        result.value
+                        (result.value, result.queued_durable_actions)
                     })
-                    .and_then(|value| {
+                    .and_then(|(value, queued)| {
                         super::dispatch_result::decode_batch(value)
+                            .map(|mut batch| {
+                                batch.actions.extend(queued);
+                                batch
+                            })
                             .map_err(|error| (ExtensionDiagnosticCode::ContractViolation, error))
                     })
                     .and_then(|batch| self.validate(batch));

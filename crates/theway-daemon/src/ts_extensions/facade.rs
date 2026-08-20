@@ -3,6 +3,10 @@ globalThis.__thewayHandlers = Object.create(null);
 globalThis.__thewayEffects = [];
 globalThis.__thewayRegistrations = Object.create(null);
 globalThis.__thewayRegistrationSequence = 0;
+globalThis.__thewayMigrationRegistrationId = null;
+globalThis.__thewayCurrentEnvelope = null;
+globalThis.__thewayPendingDurableActions = [];
+globalThis.__thewayPendingState = new Map();
 
 function __thewayDisposedRegistrationIds() {
   return Object.values(globalThis.__thewayRegistrations)
@@ -59,6 +63,29 @@ function __thewayBrokerCall(operation, brokerArgs = {}) {
   return response.value;
 }
 
+function __thewayRequireInvocation() {
+  const envelope = globalThis.__thewayCurrentEnvelope;
+  if (envelope === null) {
+    throw new Error("durable state writes require an active lifecycle invocation");
+  }
+  return envelope;
+}
+
+function __thewayQueueDurable(kind, entry) {
+  const envelope = __thewayRequireInvocation();
+  const stateSchemaVersion = __thewayBrokerCall("state.schema", {});
+  globalThis.__thewayPendingDurableActions.push({
+    kind,
+    payload: {
+      abiMajor: 2,
+      extensionId: envelope.context.extensionId,
+      stateSchemaVersion,
+      originSequence: Math.max(1, envelope.context.sequence),
+      entry,
+    },
+  });
+}
+
 globalThis.__thewaySetup = async function () {
   try {
     const candidate = globalThis.__thewayExtension.default;
@@ -109,6 +136,84 @@ globalThis.__thewaySetup = async function () {
           return __thewayBrokerCall("providerRaw.read", {});
         },
       }),
+      state: Object.freeze({
+        get(key) {
+          if (globalThis.__thewayPendingState.has(key)) {
+            return globalThis.__thewayPendingState.get(key);
+          }
+          return __thewayBrokerCall("state.get", { key });
+        },
+        set(key, value) {
+          __thewayQueueDurable("set_state", {
+            kind: "state_mutation",
+            key,
+            mutation: { operation: "set", value },
+          });
+          globalThis.__thewayPendingState.set(key, value);
+        },
+        delete(key) {
+          __thewayQueueDurable("delete_state", {
+            kind: "state_mutation",
+            key,
+            mutation: { operation: "delete" },
+          });
+          globalThis.__thewayPendingState.set(key, null);
+        },
+      }),
+      events: Object.freeze({
+        replay(customType = null) {
+          return __thewayBrokerCall("events.replay", { customType });
+        },
+        append(eventId, type, payload) {
+          __thewayQueueDurable("append_custom_event", {
+            kind: "custom_event",
+            eventId,
+            customType: type,
+            payload,
+          });
+        },
+      }),
+      modelContext: Object.freeze({
+        append(contextId, placement, content) {
+          __thewayQueueDurable("append_model_context", {
+            kind: "model_context",
+            contextId,
+            placement,
+            content,
+          });
+        },
+      }),
+      memory: Object.freeze({
+        get(key) {
+          return __thewayBrokerCall("memory.get", { key });
+        },
+        set(key, value) {
+          return __thewayBrokerCall("memory.set", { key, value });
+        },
+        delete(key) {
+          return __thewayBrokerCall("memory.delete", { key });
+        },
+        clear() {
+          return __thewayBrokerCall("memory.clear", {});
+        },
+      }),
+      migrateState(handler) {
+        if (typeof handler !== "function") {
+          throw new TypeError("api.migrateState requires a handler");
+        }
+        if (globalThis.__thewayMigrationRegistrationId !== null) {
+          throw new Error("only one state migration handler may be registered");
+        }
+        const registration = {
+          id: globalThis.__thewayRegistrationSequence++,
+          kind: "state_migration",
+          handler,
+          disposed: false,
+        };
+        globalThis.__thewayRegistrations[registration.id] = registration;
+        globalThis.__thewayMigrationRegistrationId = registration.id;
+        return __thewayHandle(registration);
+      },
       registerTool(descriptor, handler) {
         return __thewayRegister("tool", descriptor, handler);
       },
@@ -170,6 +275,7 @@ globalThis.__thewaySetup = async function () {
             descriptor,
             sequence,
           })),
+        migrationRegistrationId: globalThis.__thewayMigrationRegistrationId,
       },
     });
   } catch (error) {
@@ -180,6 +286,9 @@ globalThis.__thewaySetup = async function () {
 globalThis.__thewayInvoke = async function (serializedEnvelope, registrationId) {
   try {
     const envelope = JSON.parse(serializedEnvelope);
+    globalThis.__thewayCurrentEnvelope = envelope;
+    globalThis.__thewayPendingDurableActions = [];
+    globalThis.__thewayPendingState = new Map();
     const registration = globalThis.__thewayRegistrations[registrationId];
     if (registration === undefined) {
       throw new Error("registration is unavailable");
@@ -195,14 +304,19 @@ globalThis.__thewayInvoke = async function (serializedEnvelope, registrationId) 
     const result = registration.event !== undefined
       ? await registration.handler(envelope, envelope.context)
       : await registration.handler(envelope.payload, envelope.context);
+    globalThis.__thewayCurrentEnvelope = null;
     return JSON.stringify({
       ok: true,
       value: {
         result: result ?? null,
         disposedRegistrationIds: __thewayDisposedRegistrationIds(),
+        queuedDurableActions: globalThis.__thewayPendingDurableActions,
       },
     });
   } catch (error) {
+    globalThis.__thewayCurrentEnvelope = null;
+    globalThis.__thewayPendingDurableActions = [];
+    globalThis.__thewayPendingState = new Map();
     return JSON.stringify({ error: String(error?.message ?? error) });
   }
 };

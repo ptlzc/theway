@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::future::Future;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -12,85 +11,15 @@ use theway_contract::extension::{
     ExtensionDiagnosticSeverity, ExtensionLifecycleEvent, ExtensionPermission,
     RUNTIME_EXTENSION_ABI_MAJOR,
 };
-use theway_core::executor::ToolExecutor;
 
-use super::audit::ExtensionAuditLog;
 use super::broker_paths::{audit_path, resolve_existing_path, resolve_write_path};
+use super::broker_services::ExtensionBrokerServices;
 use super::catalog::ExtensionPackage;
 use super::engine::EngineInstanceKey;
 
 const MAX_FILE_BYTES: usize = 1024 * 1024;
 const MAX_NETWORK_BYTES: usize = 1024 * 1024;
 const MAX_PROCESS_OUTPUT_BYTES: usize = 1024 * 1024;
-
-#[derive(Clone)]
-pub struct ExtensionBrokerServices {
-    executor: Arc<dyn ToolExecutor>,
-    secrets: Arc<parking_lot::RwLock<BTreeMap<String, String>>>,
-    audit: ExtensionAuditLog,
-    diagnostics: Arc<parking_lot::Mutex<Vec<ExtensionDiagnostic>>>,
-    runtime: Option<tokio::runtime::Handle>,
-}
-
-impl ExtensionBrokerServices {
-    pub fn new(base: &Path, executor: Arc<dyn ToolExecutor>) -> Self {
-        Self {
-            executor,
-            secrets: Arc::new(parking_lot::RwLock::new(BTreeMap::new())),
-            audit: ExtensionAuditLog::for_base(base),
-            diagnostics: Arc::new(parking_lot::Mutex::new(Vec::new())),
-            runtime: tokio::runtime::Handle::try_current().ok(),
-        }
-    }
-
-    pub fn set_secret(&self, name: impl Into<String>, value: impl Into<String>) {
-        self.secrets.write().insert(name.into(), value.into());
-    }
-
-    pub(crate) fn has_secret(&self, name: &str) -> bool {
-        self.secrets.read().contains_key(name)
-    }
-
-    pub(crate) fn secret(&self, name: &str) -> Option<String> {
-        self.secrets.read().get(name).cloned()
-    }
-
-    pub fn audit_log(&self) -> ExtensionAuditLog {
-        self.audit.clone()
-    }
-
-    pub(super) fn diagnostics_for(&self, session_id: &str) -> Vec<ExtensionDiagnostic> {
-        self.diagnostics
-            .lock()
-            .iter()
-            .filter(|diagnostic| diagnostic.session_id.as_deref() == Some(session_id))
-            .cloned()
-            .collect()
-    }
-
-    fn block_on<F, T>(&self, future: F) -> Result<T, String>
-    where
-        F: Future<Output = Result<T, String>>,
-    {
-        if let Some(runtime) = &self.runtime {
-            return runtime.block_on(future);
-        }
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|error| format!("initialize broker runtime: {error}"))?
-            .block_on(future)
-    }
-}
-
-impl Default for ExtensionBrokerServices {
-    fn default() -> Self {
-        Self::new(
-            &theway_contract::config::base_dir(),
-            crate::executor::default_executor(),
-        )
-    }
-}
 
 #[derive(Clone)]
 struct ActiveBrokerInvocation {
@@ -101,6 +30,7 @@ struct ActiveBrokerInvocation {
 }
 
 pub(super) struct BrokerRuntime {
+    key: EngineInstanceKey,
     extension_id: String,
     session_id: String,
     workspace_root: PathBuf,
@@ -117,6 +47,7 @@ impl BrokerRuntime {
         services: ExtensionBrokerServices,
     ) -> Self {
         Self {
+            key: key.clone(),
             extension_id: key.extension_id.clone(),
             session_id: key.session_id.clone(),
             workspace_root: package.workspace_root().to_path_buf(),
@@ -190,6 +121,12 @@ impl BrokerRuntime {
             "network.fetch" => self.network_fetch(parse_arguments(serialized_arguments)?, active),
             "secrets.read" => self.secret_read(parse_arguments(serialized_arguments)?),
             "providerRaw.read" => self.provider_raw(active),
+            "state.schema" | "state.get" | "events.replay" | "memory.get" | "memory.set"
+            | "memory.delete" | "memory.clear" => {
+                self.services
+                    .state
+                    .call(&self.key, operation, serialized_arguments)
+            }
             _ => Err(BrokerError::contract("unknown capability broker operation")),
         }
     }
@@ -599,12 +536,16 @@ impl BrokerRuntime {
         diagnostic.session_id = Some(self.session_id.clone());
         self.services.diagnostics.lock().push(diagnostic);
     }
+
+    pub(super) fn clear_ephemeral_memory(&self) {
+        self.services.clear_memory(&self.key);
+    }
 }
 
 #[derive(Debug)]
 pub(super) struct BrokerError {
-    code: &'static str,
-    message: &'static str,
+    pub(super) code: &'static str,
+    pub(super) message: &'static str,
 }
 
 impl BrokerError {

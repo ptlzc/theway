@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -9,13 +8,14 @@ use theway_contract::extension::{
     ExtensionDiagnosticCode, ExtensionHookClass, ExtensionHookContract, ExtensionLifecycleEvent,
 };
 use theway_core::agent::runtime_extensions::{
-    RawRuntimeExtensionResult, RuntimeExtensionInvocation,
+    ExtensionModelContextProjection, RawRuntimeExtensionResult, RuntimeExtensionInvocation,
 };
 
 use super::catalog::{ExtensionPackage, PackageCatalog};
 use super::diagnostics;
 use super::dispatch_result::{
     accept_transform_batch, decode_batch, empty_batch, failed_gate_decision, merge_batch,
+    validate_ephemeral_actions,
 };
 use super::dispatcher::{self, HookRegistration, RuntimeExtensionHostConfig};
 use super::effects::{InstanceHealth, InstanceLifecyclePhase};
@@ -23,6 +23,7 @@ use super::engine::{EngineInstanceKey, QuickJsEnginePool};
 use super::observation::{ObservationDispatch, ObservationJob, ObservationQueue, diagnostic_code};
 use super::registration_runtime::RegistrationRuntime;
 use super::state::HostLifecycleSequence;
+use super::state_runtime::ExtensionStateRuntime;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExtensionInvocationOutput {
@@ -31,13 +32,13 @@ pub struct ExtensionInvocationOutput {
 }
 
 #[derive(Clone)]
-struct ActiveExtension {
-    package: Arc<ExtensionPackage>,
-    key: EngineInstanceKey,
-    registrations: Vec<HookRegistration>,
-    phase: InstanceLifecyclePhase,
-    health: Arc<InstanceHealth>,
-    observation_queues: BTreeMap<u64, Arc<ObservationQueue>>,
+pub(super) struct ActiveExtension {
+    pub(super) package: Arc<ExtensionPackage>,
+    pub(super) key: EngineInstanceKey,
+    pub(super) registrations: Vec<HookRegistration>,
+    pub(super) phase: InstanceLifecyclePhase,
+    pub(super) health: Arc<InstanceHealth>,
+    pub(super) observation_queues: BTreeMap<u64, Arc<ObservationQueue>>,
 }
 
 /// Persistent ABI v2 package instances owned by one runtime session.
@@ -46,89 +47,18 @@ pub struct SessionPluginHost {
     pub(super) cwd: String,
     pub(super) engine: QuickJsEnginePool,
     pub(super) config: RuntimeExtensionHostConfig,
-    pub(super) sequence: HostLifecycleSequence,
-    active: tokio::sync::Mutex<Vec<ActiveExtension>>,
-    catalog: Arc<parking_lot::RwLock<PackageCatalog>>,
+    pub(super) sequence: Arc<HostLifecycleSequence>,
+    pub(super) active: tokio::sync::Mutex<Vec<ActiveExtension>>,
+    pub(super) catalog: Arc<parking_lot::RwLock<PackageCatalog>>,
     pub(super) diagnostics: Arc<parking_lot::Mutex<Vec<ExtensionDiagnostic>>>,
-    subscription_counts:
+    pub(super) subscription_counts:
         parking_lot::RwLock<BTreeMap<(ExtensionLifecycleEvent, ExtensionHookClass), usize>>,
     pub(super) shutdown: Arc<AtomicBool>,
     pub(super) registration_runtime: RegistrationRuntime,
+    pub(super) state_runtime: ExtensionStateRuntime,
 }
 
 impl SessionPluginHost {
-    /// Load every effective package independently, run extension-load and
-    /// session-start handlers, and retain successful instances.
-    pub async fn start(
-        catalog: PackageCatalog,
-        engine: QuickJsEnginePool,
-        session_id: impl Into<String>,
-        cwd: &Path,
-    ) -> Self {
-        let host = Self::load(catalog, engine, session_id, cwd).await;
-        host.start_sessions("initial").await;
-        host
-    }
-
-    pub async fn start_with_config(
-        catalog: PackageCatalog,
-        engine: QuickJsEnginePool,
-        session_id: impl Into<String>,
-        cwd: &Path,
-        config: RuntimeExtensionHostConfig,
-    ) -> Self {
-        let host = Self::load_with_config(catalog, engine, session_id, cwd, config).await;
-        host.start_sessions("initial").await;
-        host
-    }
-
-    /// Load package modules and run setup/extension-load without sending
-    /// session-start. Runtime assembly uses this form because core publishes
-    /// session-start after transcript reconstruction.
-    pub async fn load(
-        catalog: PackageCatalog,
-        engine: QuickJsEnginePool,
-        session_id: impl Into<String>,
-        cwd: &Path,
-    ) -> Self {
-        Self::load_with_config(
-            catalog,
-            engine,
-            session_id,
-            cwd,
-            RuntimeExtensionHostConfig::default(),
-        )
-        .await
-    }
-
-    pub async fn load_with_config(
-        catalog: PackageCatalog,
-        engine: QuickJsEnginePool,
-        session_id: impl Into<String>,
-        cwd: &Path,
-        config: RuntimeExtensionHostConfig,
-    ) -> Self {
-        config
-            .validate()
-            .expect("runtime extension host config must be valid");
-        let diagnostics = catalog.diagnostics().to_vec();
-        let host = Self {
-            session_id: session_id.into(),
-            cwd: cwd.to_string_lossy().into_owned(),
-            engine,
-            config,
-            sequence: HostLifecycleSequence::default(),
-            active: tokio::sync::Mutex::new(Vec::new()),
-            catalog: Arc::new(parking_lot::RwLock::new(catalog)),
-            diagnostics: Arc::new(parking_lot::Mutex::new(diagnostics)),
-            subscription_counts: parking_lot::RwLock::new(BTreeMap::new()),
-            shutdown: Arc::new(AtomicBool::new(false)),
-            registration_runtime: RegistrationRuntime::default(),
-        };
-        host.load_effective_packages().await;
-        host
-    }
-
     pub async fn invoke(
         &self,
         event: ExtensionLifecycleEvent,
@@ -223,6 +153,10 @@ impl SessionPluginHost {
         self.registration_runtime.active_count()
     }
 
+    pub fn model_context_projection(&self) -> ExtensionModelContextProjection {
+        self.state_runtime.model_context()
+    }
+
     pub fn catalog_entries(&self) -> Vec<ExtensionCatalogEntry> {
         self.catalog.read().entries().to_vec()
     }
@@ -242,117 +176,7 @@ impl SessionPluginHost {
             .collect()
     }
 
-    async fn load_effective_packages(&self) {
-        let packages = self.catalog.read().effective_packages();
-        let mut active = self.active.lock().await;
-        for package in packages {
-            let key = EngineInstanceKey::new(&self.session_id, &package.manifest().id);
-            let registrations = match self.engine.load(key.clone(), &package).await {
-                Ok(metadata) => match dispatcher::validate_registrations(metadata.clone()) {
-                    Ok(registrations) => {
-                        if let Err(error) = dispatcher::validate_registration_capabilities(
-                            &registrations,
-                            package.granted_permissions(),
-                        ) {
-                            self.engine.dispose(&key).await;
-                            self.record_load_fault(&package, error);
-                            continue;
-                        }
-                        match self.accept_package_effects(&package, &metadata, &registrations) {
-                            Ok(_) => registrations,
-                            Err(error) => {
-                                self.engine.dispose(&key).await;
-                                self.record_load_fault(&package, error);
-                                continue;
-                            }
-                        }
-                    }
-                    Err(error) => {
-                        self.engine.dispose(&key).await;
-                        self.record_load_fault(&package, error);
-                        continue;
-                    }
-                },
-                Err(error) => {
-                    self.record_load_fault(&package, error);
-                    continue;
-                }
-            };
-            let extension = ActiveExtension {
-                package,
-                key,
-                observation_queues: registrations
-                    .iter()
-                    .filter(|registration| {
-                        registration.delivery
-                            == theway_contract::extension::ExtensionDeliveryPolicy::BoundedCoalescing
-                    })
-                    .map(|registration| {
-                        (
-                            registration.registration_id,
-                            Arc::new(ObservationQueue::new(
-                                self.config.observation_queue_capacity,
-                            )),
-                        )
-                    })
-                    .collect(),
-                registrations,
-                phase: InstanceLifecyclePhase::Loaded,
-                health: Arc::new(InstanceHealth::default()),
-            };
-            if extension
-                .registrations
-                .iter()
-                .any(|registration| registration.event == ExtensionLifecycleEvent::ExtensionLoad)
-            {
-                if let Err(error) = self
-                    .invoke_extension(
-                        &extension,
-                        ExtensionLifecycleEvent::ExtensionLoad,
-                        serde_json::json!({"reason": "initial"}),
-                    )
-                    .await
-                {
-                    self.cleanup_failed_start(&extension, false).await;
-                    self.record_load_fault(&extension.package, error);
-                    continue;
-                }
-            }
-            self.add_subscriptions(&extension.registrations);
-            active.push(extension);
-        }
-    }
-
-    async fn start_sessions(&self, reason: &str) {
-        let mut active = self.active.lock().await;
-        let mut index = 0;
-        while index < active.len() {
-            if active[index]
-                .registrations
-                .iter()
-                .any(|registration| registration.event == ExtensionLifecycleEvent::SessionStart)
-            {
-                if let Err(error) = self
-                    .invoke_extension(
-                        &active[index],
-                        ExtensionLifecycleEvent::SessionStart,
-                        serde_json::json!({"reason": reason}),
-                    )
-                    .await
-                {
-                    let failed = active.remove(index);
-                    self.remove_subscriptions(&failed.registrations);
-                    self.cleanup_failed_start(&failed, true).await;
-                    self.record_load_fault(&failed.package, error);
-                    continue;
-                }
-            }
-            active[index].phase = InstanceLifecyclePhase::Started;
-            index += 1;
-        }
-    }
-
-    async fn invoke_extension(
+    pub(super) async fn invoke_extension(
         &self,
         extension: &ActiveExtension,
         event: ExtensionLifecycleEvent,
@@ -373,10 +197,11 @@ impl SessionPluginHost {
             if !registration.accepts_payload(&payload) {
                 return Err("extension event payload does not match the hook payloadSchema".into());
             }
-            let value = self
+            let (result, origin_sequence) = self
                 .invoke_registration(&extension.key, registration, event, payload.clone())
                 .await?;
-            let batch = decode_batch(value)?;
+            let mut batch = decode_batch(result.value)?;
+            batch.actions.extend(result.queued_durable_actions);
             if batch.actions.len() > self.config.max_actions {
                 return Err("extension action count exceeds the configured limit".into());
             }
@@ -384,6 +209,18 @@ impl SessionPluginHost {
                 .contract
                 .validate_result(&batch)
                 .map_err(|error| error.message)?;
+            dispatcher::validate_action_capabilities(
+                &batch,
+                extension.package.granted_permissions(),
+            )?;
+            validate_ephemeral_actions(event, registration.class, &payload, &batch)?;
+            self.state_runtime
+                .commit_batch(
+                    &extension.package.manifest().id,
+                    origin_sequence,
+                    &mut batch,
+                )
+                .await?;
             if merge_batch(event, registration.class, &mut aggregate, batch) {
                 break;
             }
@@ -392,7 +229,11 @@ impl SessionPluginHost {
             .map_err(|error| format!("extension action batch serialization failed: {error}"))
     }
 
-    async fn cleanup_failed_start(&self, extension: &ActiveExtension, session_started: bool) {
+    pub(super) async fn cleanup_failed_start(
+        &self,
+        extension: &ActiveExtension,
+        session_started: bool,
+    ) {
         if session_started {
             self.invoke_cleanup_event(
                 extension,
@@ -444,7 +285,7 @@ impl SessionPluginHost {
         }
     }
 
-    fn record_load_fault(&self, package: &ExtensionPackage, error: String) {
+    pub(super) fn record_load_fault(&self, package: &ExtensionPackage, error: String) {
         self.diagnostics.lock().push(diagnostics::faulted(
             package.manifest().id.clone(),
             self.session_id.clone(),
@@ -454,6 +295,21 @@ impl SessionPluginHost {
             &package.manifest().id,
             ExtensionCatalogStatus::Faulted,
             Some(ExtensionDiagnosticCode::LoadFailed),
+        );
+    }
+
+    pub(super) fn record_state_migration_fault(&self, package: &ExtensionPackage, error: String) {
+        self.diagnostics.lock().push(diagnostics::invocation(
+            package.manifest().id.clone(),
+            self.session_id.clone(),
+            ExtensionLifecycleEvent::ExtensionLoad,
+            ExtensionDiagnosticCode::StateMigrationFailed,
+            format!("extension state reconstruction or migration failed: {error}"),
+        ));
+        self.catalog.write().set_effective_status(
+            &package.manifest().id,
+            ExtensionCatalogStatus::Disabled,
+            Some(ExtensionDiagnosticCode::StateMigrationFailed),
         );
     }
 
@@ -479,7 +335,7 @@ impl SessionPluginHost {
         }
     }
 
-    fn add_subscriptions(&self, registrations: &[HookRegistration]) {
+    pub(super) fn add_subscriptions(&self, registrations: &[HookRegistration]) {
         let mut counts = self.subscription_counts.write();
         for registration in registrations {
             *counts
@@ -488,7 +344,7 @@ impl SessionPluginHost {
         }
     }
 
-    fn remove_subscriptions(&self, registrations: &[HookRegistration]) {
+    pub(super) fn remove_subscriptions(&self, registrations: &[HookRegistration]) {
         let mut counts = self.subscription_counts.write();
         for registration in registrations {
             let key = (registration.event, registration.class);
@@ -675,8 +531,9 @@ impl SessionPluginHost {
                 "extension result arrived after cancellation".into(),
             ));
         }
-        let batch = decode_batch(result.value)
+        let mut batch = decode_batch(result.value)
             .map_err(|error| (ExtensionDiagnosticCode::ContractViolation, error))?;
+        batch.actions.extend(result.queued_durable_actions);
         if batch.actions.len() > self.config.max_actions {
             return Err((
                 ExtensionDiagnosticCode::ResourceLimit,
@@ -689,6 +546,21 @@ impl SessionPluginHost {
             .map_err(|error| (ExtensionDiagnosticCode::ContractViolation, error.message))?;
         dispatcher::validate_action_capabilities(&batch, extension.package.granted_permissions())
             .map_err(|error| (ExtensionDiagnosticCode::PermissionDenied, error))?;
+        validate_ephemeral_actions(
+            invocation.event(),
+            registration.class,
+            &envelope.payload,
+            &batch,
+        )
+        .map_err(|error| (ExtensionDiagnosticCode::ContractViolation, error))?;
+        self.state_runtime
+            .commit_batch(
+                &extension.package.manifest().id,
+                invocation.context().sequence,
+                &mut batch,
+            )
+            .await
+            .map_err(|error| (ExtensionDiagnosticCode::HookFailed, error))?;
         Ok(batch)
     }
 

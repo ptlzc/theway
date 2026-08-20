@@ -24,6 +24,9 @@ pub struct RuntimeExtensionHostConfig {
     pub broker_operation_quota: usize,
     pub observation_queue_capacity: usize,
     pub circuit_failure_threshold: usize,
+    pub max_durable_entries: usize,
+    pub max_durable_entry_bytes: usize,
+    pub max_extension_durable_bytes: usize,
 }
 
 impl Default for RuntimeExtensionHostConfig {
@@ -36,6 +39,9 @@ impl Default for RuntimeExtensionHostConfig {
             broker_operation_quota: 32,
             observation_queue_capacity: 1,
             circuit_failure_threshold: 3,
+            max_durable_entries: 32,
+            max_durable_entry_bytes: 64 * 1024,
+            max_extension_durable_bytes: 4 * 1024 * 1024,
         }
     }
 }
@@ -60,6 +66,9 @@ impl RuntimeExtensionHostConfig {
             || self.broker_operation_quota == 0
             || self.observation_queue_capacity == 0
             || self.circuit_failure_threshold == 0
+            || self.max_durable_entries == 0
+            || self.max_durable_entry_bytes == 0
+            || self.max_extension_durable_bytes == 0
         {
             return Err("extension execution limits must be greater than zero".into());
         }
