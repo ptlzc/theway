@@ -16,6 +16,7 @@ from typing import Iterable, Iterator
 
 DEFAULT_ROOT = Path(__file__).resolve().parents[1]
 POLICY_SOURCES = (
+    "docs/extensions.md",
     "docs/i18n/README.md",
     "docs/i18n/translation-rules.md",
 )

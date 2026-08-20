@@ -1,4 +1,4 @@
 # English-first bilingual documentation record. Update both files, then run:
 #   scripts/verify-doc-i18n.py --write crates/theway-contract/README.md
-README.md: 8d2864958f560ce72762c838ed2845d5c5108acc
-README.zh.md: a63bde1145ad5ea08edafa2ffb9d997e61586b47
+README.md: 8b6dcefe03aba7b3c3270177a3f4832816e61543
+README.zh.md: 36b7c81eb2cca7a6947f9d91af15fba0d7e76b1b

@@ -1,4 +1,4 @@
 # English-first bilingual documentation record. Update both files, then run:
 #   scripts/verify-doc-i18n.py --write crates/theway-transport/README.md
-README.md: 88eea21788570afab38629f842ce783a659eaf84
-README.zh.md: 7f81b0c90b8c1b8f7554eea58a3feceba515ad2d
+README.md: 8f36259b4df79a92d313fe409ee9202dfee6195c
+README.zh.md: 11a9c6a31e8e5baa3c6f827ba52d4235ffe51022

@@ -12,6 +12,8 @@
 - 无需活动运行时协调时，离线会话命令直接打开本地 `SqliteSessionRepo`，完成导出、导入、列举和删除。
 - Headless/非交互渲染复用相同应用状态与 transport frame，不构建 agent 运行时。
 
+`/extensions` 打开由 transport 数据驱动的 catalog 与诊断视图；`/extension-trust`、`/extension-reload` 和 `/ext:<name>` 调用 daemon 协议操作。常规 hook 成功和生命周期状态保留在该视图中，不会创建合成 assistant 或 operation-log feed 条目。
+
 ## UI 组件
 
 - `theway-markdown` 渲染流式 assistant 内容、代码、数学、表格、链接与 Mermaid 图。

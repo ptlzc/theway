@@ -19,6 +19,8 @@ English | [中文](README.zh.md)
 
 The checked-in TypeScript declarations and JSON Schemas under [`sdk/extension-abi-v2`](sdk/extension-abi-v2) are generated from the Rust extension contracts. Regenerate them with `cargo run -p theway-contract --example generate_extension_artifacts -- crates/theway-contract/sdk/extension-abi-v2`; the extension contract tests regenerate into a temporary directory and reject drift.
 
+ABI v2 contracts keep lifecycle envelopes, hook classes and actions, branch-local durable entries, diagnostics, trust records, commands, and client contributions engine-neutral. Sensitive values and executable runtime objects have no field in these records.
+
 ## Documentation
 
 - [Architecture and invariants](docs/architecture.md)

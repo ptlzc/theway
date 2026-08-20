@@ -19,6 +19,8 @@
 
 [`sdk/extension-abi-v2`](sdk/extension-abi-v2) 下签入的 TypeScript 声明和 JSON Schema 由 Rust extension 契约生成。使用 `cargo run -p theway-contract --example generate_extension_artifacts -- crates/theway-contract/sdk/extension-abi-v2` 重新生成；extension 契约测试会在临时目录中重新生成并拒绝漂移。
 
+ABI v2 契约使生命周期 envelope、hook class 与 action、分支局部持久条目、诊断、信任记录、命令和客户端 contribution 保持引擎中立。这些记录没有敏感值或可执行 runtime 对象字段。
+
 ## 文档
 
 - [架构与不变量](docs/architecture.md)

@@ -12,7 +12,7 @@ Daemon 负责会话运行时组装、面向模型的工具、本地与 sandbox e
 - `DaemonPaths` 在启动时一次性解析 base、home、工作目录和额外 skill 目录。
 - `DaemonServices` 持有进程生命周期级注册表和命令输出注入。
 - `SessionRuntimeBuilder` 是初始、恢复和切换会话运行时的统一内部构建路径，也负责 session-scoped runtime extension 的启动上下文。
-- 公开模块为 executor、hook、存储适配器、工具、template、skill、trigger 和 TypeScript 扩展提供支持的扩展点。
+- 公开模块为 executor、hook、存储适配器、工具、template、skill、trigger 和 TypeScript 扩展提供支持的扩展点；扩展宿主负责 package 发现、信任、QuickJS 隔离、capability broker、可逆注册、持久状态 projection、静默点重载和客户端中立诊断。
 
 默认 `local` feature 选择 `LocalExecutor`。只启用 `sandbox` 时选择 `SandboxExecutor`，不支持的操作以 `ExecutorError::UnsupportedKind` 失败。协议服务也可以把 `ToolOps` 转发到 controller 提供的 gRPC 工具端点。
 

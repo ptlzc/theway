@@ -8,7 +8,7 @@ The crate is independent of `theway-core`, `theway-daemon`, and `theway-storage`
 
 ## Protocol entry points
 
-- `wire` defines commands, complete and incremental status snapshots, graph/job events, configuration, and operation request/result records.
+- `wire` defines commands, complete and incremental status snapshots, graph/job events, configuration, operation request/result records, and open runtime-extension catalog, diagnostic, command, contribution, trust, and reload records.
 - `transport` defines `TransportEndpoints` plus `SessionOps`, `JobOps`, `GraphOps`, `ToolOps`, and `StorageOps`.
 - `grpc`, `http`, and `ws` expose those operations over protobuf RPC, JSON-RPC, SSE, and WebSocket connections.
 - `proto`, `tools`, and `state` convert between internal wire records and generated protobuf messages.

@@ -12,6 +12,8 @@ The crate depends on `theway-transport`, `theway-storage`, and rendering widgets
 - Offline session commands open the local `SqliteSessionRepo` directly for export, import, listing, and deletion when no live runtime coordination is required.
 - Headless/non-interactive rendering reuses the same application state and transport frames without constructing an agent runtime.
 
+`/extensions` opens the transport-backed catalog and diagnostics view; `/extension-trust`, `/extension-reload`, and `/ext:<name>` call daemon protocol operations. Routine hook success and lifecycle status remain in that view and never create synthetic assistant or operation-log feed entries.
+
 ## UI building blocks
 
 - `theway-markdown` renders streaming assistant content, code, math, tables, links, and Mermaid diagrams.

@@ -8,7 +8,7 @@
 
 ## 协议入口
 
-- `wire` 定义命令、完整和增量状态 snapshot、图/job 事件、配置及操作请求/结果记录。
+- `wire` 定义命令、完整和增量状态 snapshot、图/job 事件、配置、操作请求/结果记录，以及开放的 runtime extension catalog、诊断、命令、contribution、信任和重载记录。
 - `transport` 定义 `TransportEndpoints` 以及 `SessionOps`、`JobOps`、`GraphOps`、`ToolOps`、`StorageOps`。
 - `grpc`、`http` 和 `ws` 通过 protobuf RPC、JSON-RPC、SSE 与 WebSocket 暴露这些操作。
 - `proto`、`tools` 和 `state` 在内部 wire 记录与生成的 protobuf 消息之间转换。
