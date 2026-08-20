@@ -255,6 +255,7 @@ fn sample_wire_status(feed_lines: Vec<String>) -> WireStatus {
         subagents: Vec::new(),
         usage: WireContextUsage::default(),
         tui_max_feed_lines: None,
+        extensions: theway_transport::wire::WireExtensionSnapshot::default(),
     }
 }
 

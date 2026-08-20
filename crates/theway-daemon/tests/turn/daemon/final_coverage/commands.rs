@@ -102,6 +102,94 @@ async fn handle_switch_session_aborts_in_flight_turn_and_maps_switch_error() {
     assert_eq!(host.session.id, "sess-final");
 }
 
+#[tokio::test]
+async fn extension_protocol_projection_and_command_do_not_append_feed_lines() {
+    let built = build_host(harness_with_input(Vec::new()));
+    let (mut host, _scratch, _repo) = built.into_parts();
+    let package = host
+        .runtime
+        .paths
+        .base
+        .join("extensions")
+        .join("quiet-extension");
+    std::fs::create_dir_all(&package).unwrap();
+    std::fs::write(
+        package.join("theway-extension.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "id": "quiet-extension",
+            "version": "1.0.0",
+            "abi": 2,
+            "entry": "index.js",
+            "priority": 0,
+            "scope": "session",
+            "stateSchema": 1,
+            "permissions": ["commands.register", "client.contribute"]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        package.join("index.js"),
+        r#"import { defineExtension } from "theway";
+export default defineExtension((api) => {
+  api.on("input", () => ({ abiMajor: 2, actions: [] }));
+  api.registerCommand({
+    name: "quiet-check", label: "Quiet", description: "Quiet protocol check",
+    argumentSchema: { type: "object" },
+  }, async () => ({ status: "success", message: "quiet" }));
+  api.contribute({
+    contributionId: "quiet-status", extensionId: "quiet-extension", scope: "session",
+    contribution: { kind: "status_item", label: "Quiet", value: "ready" },
+  });
+});"#,
+    )
+    .unwrap();
+    let catalog = crate::ts_extensions::PackageCatalog::discover(
+        &host.runtime.cwd,
+        &host.runtime.paths.base,
+    );
+    let extension_host = Arc::new(
+        crate::ts_extensions::SessionPluginHost::start(
+            catalog,
+            crate::ts_extensions::QuickJsEnginePool::new(1),
+            host.session.id.clone(),
+            &host.runtime.cwd,
+        )
+        .await,
+    );
+    host.session
+        .kernel
+        .set_extension_host(Some(extension_host.clone()));
+
+    let before = host.wire_snapshot().feed_blocks;
+    let snapshot = host.wire_snapshot();
+    assert_eq!(snapshot.extensions.commands[0].name, "quiet-check");
+    assert_eq!(snapshot.extensions.contributions[0].kind, "status_item");
+    let _ = extension_host
+        .invoke(
+            theway_contract::extension::ExtensionLifecycleEvent::Input,
+            serde_json::json!({}),
+        )
+        .await;
+
+    let (response, outcome) = oneshot::channel();
+    host.handle_web_command(
+        WireCommand::InvokeExtensionCommand {
+            name: "quiet-check".into(),
+            arguments: serde_json::json!({}),
+            has_interactive_client: false,
+            response,
+        },
+        &mut TurnState::default(),
+    )
+    .await;
+    assert_eq!(outcome.await.unwrap().unwrap().status, "success");
+    let after = host.wire_snapshot().feed_blocks;
+    assert_eq!(after, before, "routine hooks/status/commands stay off the feed");
+    assert!(!format!("{after:?}").contains("ai ▸"));
+    extension_host.shutdown().await;
+}
+
 // ── submit / dispatch branches ──────────────────────────────────────────────────
 
 #[tokio::test]

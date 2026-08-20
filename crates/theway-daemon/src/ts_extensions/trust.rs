@@ -258,9 +258,10 @@ impl ExtensionTrustStore {
             decided_at: chrono::Utc::now().to_rfc3339(),
         };
         record.validate().map_err(|error| error.to_string())?;
-        self.file
-            .decisions
-            .retain(|stored| stored.record.subject != record.subject);
+        self.file.decisions.retain(|stored| {
+            stored.record.subject != record.subject
+                || as_set(&stored.requested_permissions) != requested
+        });
         self.file.decisions.push(StoredTrustDecision {
             record,
             requested_permissions: requested.into_iter().collect(),

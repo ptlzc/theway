@@ -146,6 +146,7 @@ async fn host_with_extras(extras: Vec<PathBuf>) -> (TurnHost, Arc<AtomicU32>, Ve
 
     let config = DaemonConfig {
         harness,
+        extension_host: None,
         trigger_executor,
         retry: RetrySettings::default(),
         registry: Registry::new(),

@@ -108,6 +108,7 @@ async fn host_with_registry(input: Vec<InputModality>, registry: Registry) -> (T
 
     let config = DaemonConfig {
         harness,
+        extension_host: None,
         trigger_executor,
         retry: RetrySettings::default(),
         registry,

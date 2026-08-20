@@ -88,6 +88,7 @@ pub struct SessionRuntime {
     pub trigger_executor: Arc<crate::trigger_engine::execution::TriggerExecutor>,
     pub tool_names: Vec<String>,
     pub hooks_active: bool,
+    pub extension_host: Option<Arc<crate::ts_extensions::SessionPluginHost>>,
 }
 
 #[cfg(test)]
@@ -110,6 +111,7 @@ impl SessionRuntime {
             trigger_executor,
             tool_names: Vec::new(),
             hooks_active: false,
+            extension_host: None,
         }
     }
 }
@@ -377,6 +379,7 @@ impl SessionRuntimeBuilder {
             trigger_executor,
             tool_names,
             hooks_active: !loaded_hooks.runner.is_empty(),
+            extension_host: runtime_extension_host.map(|(host, _)| host),
         })
     }
 }

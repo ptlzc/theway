@@ -1,7 +1,10 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
-use theway_contract::extension::{ExtensionLifecycleEvent, ExtensionScope};
+use theway_contract::extension::{
+    ExtensionLifecycleEvent, ExtensionPermission, ExtensionScope, ExtensionSourceLayer,
+    ExtensionTrustDecision,
+};
 
 use super::ExtensionRegistry;
 use super::catalog::PackageCatalog;
@@ -16,6 +19,12 @@ pub enum ExtensionReloadDisposition {
     Unchanged,
     Pending,
     Applied { revision: u64 },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ExtensionTrustTarget {
+    Project,
+    Package(String),
 }
 
 struct ReloadCandidate {
@@ -86,6 +95,55 @@ impl SessionPluginHost {
             legacy: None,
         })
         .await
+    }
+
+    pub async fn decide_trust(
+        &self,
+        cwd: &Path,
+        base: &Path,
+        target: ExtensionTrustTarget,
+        decision: ExtensionTrustDecision,
+        granted_permissions: Vec<ExtensionPermission>,
+    ) -> Result<ExtensionReloadDisposition, String> {
+        let mut trust = super::trust::ExtensionTrustStore::load(base);
+        let selected = self.catalog.read().selected_packages();
+        match target {
+            ExtensionTrustTarget::Project => {
+                let packages = selected
+                    .iter()
+                    .filter(|package| package.source() == ExtensionSourceLayer::Project)
+                    .collect::<Vec<_>>();
+                if packages.is_empty() {
+                    return Err("no project runtime extensions are discoverable".into());
+                }
+                for package in packages {
+                    let requested = package
+                        .requested_permissions()
+                        .into_iter()
+                        .collect::<Vec<_>>();
+                    let granted = granted_permissions
+                        .iter()
+                        .filter(|permission| package.requested_permissions().contains(*permission))
+                        .cloned()
+                        .collect();
+                    trust.decide_project(cwd, requested, granted, decision)?;
+                }
+            }
+            ExtensionTrustTarget::Package(extension_id) => {
+                let package = selected
+                    .iter()
+                    .find(|package| package.manifest().id == extension_id)
+                    .ok_or_else(|| format!("unknown runtime extension {extension_id}"))?;
+                trust.decide_package(
+                    package,
+                    package.requested_permissions().into_iter().collect(),
+                    granted_permissions,
+                    decision,
+                )?;
+            }
+        }
+        trust.save()?;
+        self.reload_if_catalog_changed(cwd, base).await
     }
 
     async fn request_reload_candidate(

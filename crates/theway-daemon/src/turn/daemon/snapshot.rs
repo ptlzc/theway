@@ -101,6 +101,7 @@ impl TurnHost {
                 context_window,
             },
             tui_max_feed_lines: self.runtime.feed_history_limit,
+            extensions: self.wire_extension_snapshot(),
         }
     }
 

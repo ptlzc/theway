@@ -56,7 +56,7 @@ pub use registrations::{
     PromptSectionRegistration, ProviderModelRegistration, ProviderRegistration, ProviderWireFormat,
     RegistrationPredicate, RequestPolicyRegistration, ToolPermission, ToolRegistration,
 };
-pub use reload::ExtensionReloadDisposition;
+pub use reload::{ExtensionReloadDisposition, ExtensionTrustTarget};
 pub use trust::{ExtensionTrustStore, GlobalExtensionPolicy};
 
 use legacy::LegacyExtensionRegistry;

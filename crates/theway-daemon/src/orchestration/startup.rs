@@ -426,6 +426,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     let initial_runtime = session_runtime_builder.build_opened(store, resumed).await?;
     let harness = initial_runtime.harness.clone();
     let trigger_executor = initial_runtime.trigger_executor.clone();
+    let extension_host = initial_runtime.extension_host.clone();
     let tool_names = initial_runtime.tool_names;
     let hooks_active = initial_runtime.hooks_active;
     let _dag_persist = storage.spawn_dag_persist(dag_engine.clone(), cwd.clone());
@@ -515,6 +516,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
 
     let host = TurnHost::new(DaemonConfig {
         harness: harness.clone(),
+        extension_host,
         trigger_executor,
         retry: crate::agent_session::RetrySettings::default(),
         registry: crate::commands::Registry::with_daemon_commands()

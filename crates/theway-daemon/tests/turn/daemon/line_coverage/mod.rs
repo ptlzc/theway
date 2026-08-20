@@ -78,6 +78,7 @@ async fn host_with_input(input: Vec<InputModality>) -> (TurnHost, TempDir, TempD
 
     let config = DaemonConfig {
         harness,
+        extension_host: None,
         trigger_executor,
         retry: RetrySettings::default(),
         registry: Registry::with_daemon_commands(),

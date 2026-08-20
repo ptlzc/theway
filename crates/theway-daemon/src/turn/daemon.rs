@@ -93,6 +93,7 @@ pub(crate) struct RuntimeCapabilities {
 /// Everything the daemon needs to run one session, assembled by the `thewayd` binary.
 pub(crate) struct DaemonConfig {
     pub(crate) harness: Arc<theway_core::AgentHarness>,
+    pub(crate) extension_host: Option<Arc<crate::ts_extensions::SessionPluginHost>>,
     pub(crate) trigger_executor: Arc<crate::trigger_engine::execution::TriggerExecutor>,
     pub(crate) retry: RetrySettings,
     pub(crate) registry: Registry,
@@ -294,6 +295,11 @@ include!(concat!(
 include!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/src/turn/daemon/state.rs"
+));
+
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/src/turn/daemon/extensions.rs"
 ));
 
 #[async_trait(?Send)]

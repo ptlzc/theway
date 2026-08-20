@@ -143,6 +143,7 @@ fn build_host_with(
 
     let config = DaemonConfig {
         harness,
+        extension_host: None,
         trigger_executor,
         retry: RetrySettings::default(),
         registry,

@@ -71,6 +71,7 @@ pub struct ReplKernel {
     harness: Arc<AgentHarness>,
     trigger_executor: Arc<crate::trigger_engine::execution::TriggerExecutor>,
     retry: RetrySettings,
+    extension_host: Option<Arc<crate::ts_extensions::SessionPluginHost>>,
 }
 
 impl ReplKernel {
@@ -83,7 +84,19 @@ impl ReplKernel {
             harness,
             trigger_executor,
             retry,
+            extension_host: None,
         }
+    }
+
+    pub fn set_extension_host(
+        &mut self,
+        extension_host: Option<Arc<crate::ts_extensions::SessionPluginHost>>,
+    ) {
+        self.extension_host = extension_host;
+    }
+
+    pub fn extension_host(&self) -> Option<&Arc<crate::ts_extensions::SessionPluginHost>> {
+        self.extension_host.as_ref()
     }
 
     pub fn trigger_executor(&self) -> &Arc<crate::trigger_engine::execution::TriggerExecutor> {
@@ -101,6 +114,7 @@ impl ReplKernel {
     pub fn replace_runtime(&mut self, runtime: SessionRuntime) {
         self.harness = runtime.harness;
         self.trigger_executor = runtime.trigger_executor;
+        self.extension_host = runtime.extension_host;
     }
 
     pub fn abort(&self) {

@@ -140,6 +140,7 @@ fn daemon_config(
 
     let config = DaemonConfig {
         harness,
+        extension_host: None,
         trigger_executor,
         retry: RetrySettings::default(),
         registry: Registry::with_daemon_commands(),

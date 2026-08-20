@@ -64,9 +64,11 @@ impl TurnHost {
             clear_fields: Vec::new(),
         }));
         let tool_ops: Arc<dyn ToolOps> = Arc::new(ForwardingToolOps::new(daemon_config.clone()));
+        let mut kernel = ReplKernel::new(config.harness, config.trigger_executor, config.retry);
+        kernel.set_extension_host(config.extension_host);
         Self {
             session: SessionRuntimeState {
-                kernel: ReplKernel::new(config.harness, config.trigger_executor, config.retry),
+                kernel,
                 id: config.session_id,
                 log_path: config.log_path,
                 tool_count: config.tool_count,

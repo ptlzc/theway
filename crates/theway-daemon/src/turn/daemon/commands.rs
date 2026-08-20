@@ -24,6 +24,30 @@ impl TurnHost {
             WireCommand::SwitchSession { id } => self.handle_switch_session(id, turn).await,
             WireCommand::SetSkillDirs { dirs } => self.handle_set_skill_dirs(dirs, turn).await,
             WireCommand::Configure { config } => self.handle_configure(config, turn).await,
+            WireCommand::InvokeExtensionCommand {
+                name,
+                arguments,
+                has_interactive_client,
+                response,
+            } => {
+                let result = self
+                    .handle_extension_command(name, arguments, has_interactive_client)
+                    .await;
+                let _ = response.send(result);
+            }
+            WireCommand::ReloadExtensions {
+                cancel_active,
+                response,
+            } => {
+                let result = self
+                    .handle_extension_reload(cancel_active, turn)
+                    .await;
+                let _ = response.send(result);
+            }
+            WireCommand::DecideExtensionTrust { request, response } => {
+                let result = self.handle_extension_trust(request).await;
+                let _ = response.send(result);
+            }
         }
     }
 
