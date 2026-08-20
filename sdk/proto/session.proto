@@ -6,6 +6,7 @@ syntax = "proto3";
 package theway.grpc.v1;
 
 import "commands.proto";
+import "extensions.proto";
 import "graph_engine.proto";
 
 // Full session state (the structured form of the former WireSnapshot JSON).
@@ -39,6 +40,8 @@ message SessionState {
   uint64 feed_blocks_base = 18;
   // Appends/replacements since feed_blocks_base. Full frames leave this empty.
   repeated FeedBlockPatch feed_block_patches = 19;
+  // Runtime-extension status is additive; older clients ignore this field.
+  ExtensionSnapshot extensions = 20;
 }
 
 message FeedBlockPatch {

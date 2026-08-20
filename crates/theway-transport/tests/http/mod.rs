@@ -2,6 +2,7 @@
 //! helpers in `helpers`.
 
 mod endpoints;
+mod extensions;
 mod helpers;
 mod sessions;
 mod state;

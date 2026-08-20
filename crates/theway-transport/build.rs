@@ -1,6 +1,7 @@
-//! Compiles the seven domain proto files (transport crate root, shared with the
+//! Compiles the eight domain proto files (transport crate root, shared with the
 //! TS ts-proto side) — `commands.proto`, `session.proto`, `graph_engine.proto`,
-//! `events.proto`, `settings.proto`, `tools.proto`, `state.proto` — plus
+//! `events.proto`, `settings.proto`, `tools.proto`, `state.proto`,
+//! `extensions.proto` — plus
 //! `health.proto` (standard grpc.health.v1), into Rust via protox (pure-Rust,
 //! no system protoc) + tonic-prost-build. The protos use only local messages,
 //! so no well-known-type includes are needed.
@@ -16,6 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let settings_file = proto_dir.join("settings.proto");
     let tools_file = proto_dir.join("tools.proto");
     let state_file = proto_dir.join("state.proto");
+    let extensions_file = proto_dir.join("extensions.proto");
     let health_file = proto_dir.join("health.proto");
 
     // Watch every file in the shared proto directory: the domain files import
@@ -36,6 +38,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &settings_file,
             &tools_file,
             &state_file,
+            &extensions_file,
             &health_file,
         ],
         [&proto_dir],

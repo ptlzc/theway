@@ -9,6 +9,7 @@ impl GrpcClient {
         Ok(Self {
             session: SessionServiceClient::new(channel.clone()),
             command: CommandServiceClient::new(channel.clone()),
+            extensions: ExtensionServiceClient::new(channel.clone()),
             graph: GraphEngineServiceClient::new(channel.clone()),
             events: EventServiceClient::new(channel.clone()),
             settings: SettingsServiceClient::new(channel.clone()),
@@ -107,6 +108,90 @@ impl GrpcClient {
             .await
             .map_err(|e| anyhow::anyhow!("approve: {e}"))?;
         Ok(accepted.into_inner().accepted)
+    }
+
+    /// Current client-neutral runtime-extension catalog and diagnostics.
+    pub async fn get_extensions(&mut self) -> Result<WireExtensionSnapshot> {
+        let response = self
+            .extensions
+            .get_extensions(Empty {})
+            .await
+            .map_err(|error| anyhow::anyhow!("get_extensions: {error}"))?
+            .into_inner();
+        Ok(crate::proto::extension_snapshot_wire(Some(&response)))
+    }
+
+    /// Invoke a registered extension command without requiring a TUI.
+    pub async fn invoke_extension_command(
+        &mut self,
+        name: &str,
+        arguments: serde_json::Value,
+        has_interactive_client: bool,
+    ) -> Result<WireExtensionCommandOutcome> {
+        let response = self
+            .extensions
+            .invoke_command(InvokeExtensionCommandRequest {
+                name: name.to_string(),
+                arguments_json: arguments.to_string(),
+                has_interactive_client,
+            })
+            .await
+            .map_err(|error| anyhow::anyhow!("invoke_extension_command: {error}"))?
+            .into_inner();
+        Ok(WireExtensionCommandOutcome {
+            status: response.status,
+            code: response.code,
+            message: response.message,
+            data: response
+                .data_json
+                .map(|data| serde_json::from_str(&data))
+                .transpose()
+                .context("decode extension command data")?,
+        })
+    }
+
+    /// Re-discover runtime extensions. `pending` is applied at the next
+    /// quiescent run/tool settlement boundary.
+    pub async fn reload_extensions(
+        &mut self,
+        cancel_active: bool,
+    ) -> Result<WireExtensionReloadResult> {
+        let response = self
+            .extensions
+            .reload(ReloadExtensionsRequest { cancel_active })
+            .await
+            .map_err(|error| anyhow::anyhow!("reload_extensions: {error}"))?
+            .into_inner();
+        Ok(WireExtensionReloadResult {
+            status: response.status,
+            revision: response.revision,
+        })
+    }
+
+    /// Persist a project or exact-package trust decision and request reload.
+    pub async fn decide_extension_trust(
+        &mut self,
+        request: WireExtensionTrustRequest,
+    ) -> Result<WireExtensionTrustResult> {
+        let response = self
+            .extensions
+            .decide_trust(DecideExtensionTrustRequest {
+                subject: request.subject,
+                extension_id: request.extension_id,
+                decision: request.decision,
+                granted_permissions: request.granted_permissions,
+            })
+            .await
+            .map_err(|error| anyhow::anyhow!("decide_extension_trust: {error}"))?
+            .into_inner();
+        let reload = response.reload.context("trust response omitted reload result")?;
+        Ok(WireExtensionTrustResult {
+            accepted: response.accepted,
+            reload: WireExtensionReloadResult {
+                status: reload.status,
+                revision: reload.revision,
+            },
+        })
     }
 
     /// Switch the daemon to another session (aborts an in-flight turn).

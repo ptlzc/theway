@@ -15,6 +15,7 @@ export type { DeepPartial, Exact, MessageFns } from './generated/commands.js';
 
 export * from './generated/commands.js';
 export * from './generated/events.js';
+export * from './generated/extensions.js';
 export * from './generated/graph_engine.js';
 export * from './generated/session.js';
 export * from './generated/settings.js';

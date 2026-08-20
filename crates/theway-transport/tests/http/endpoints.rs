@@ -34,6 +34,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
         subagents: Vec::new(),
         usage: WireContextUsage::default(),
         tui_max_feed_lines: None,
+        extensions: WireExtensionSnapshot::default(),
     }));
     let router = web_router(HttpState {
         commands: command_tx,
@@ -205,6 +206,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
             subagents: Vec::new(),
             usage: WireContextUsage::default(),
             tui_max_feed_lines: None,
+            extensions: WireExtensionSnapshot::default(),
         }))
         .unwrap();
     let chunk = tokio::time::timeout(Duration::from_secs(2), stream.next())
@@ -258,6 +260,7 @@ async fn websocket_serves_snapshot_and_accepts_commands() {
         subagents: Vec::new(),
         usage: WireContextUsage::default(),
         tui_max_feed_lines: None,
+        extensions: WireExtensionSnapshot::default(),
     }));
     let router = web_router(HttpState {
         commands: command_tx,
@@ -393,6 +396,7 @@ async fn healthz_answers_ok_without_snapshot_and_root_404s() {
         subagents: Vec::new(),
         usage: WireContextUsage::default(),
         tui_max_feed_lines: None,
+        extensions: WireExtensionSnapshot::default(),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -460,6 +464,7 @@ async fn spawn_config_server(
             subagents: Vec::new(),
             usage: WireContextUsage::default(),
             tui_max_feed_lines: None,
+            extensions: WireExtensionSnapshot::default(),
         })),
         completer: SlashCompleter::from_commands(Vec::new()),
         events: broadcast::channel::<WireAgentEvent>(16).0,

@@ -19,6 +19,7 @@ import {
   type UntypedServiceImplementation,
 } from "@grpc/grpc-js";
 import { CommandResult, Empty } from "./commands.js";
+import { ExtensionSnapshot } from "./extensions.js";
 import { DagRunSnapshot, SubagentJobSnapshot } from "./graph_engine.js";
 
 export const protobufPackage = "theway.grpc.v1";
@@ -64,6 +65,8 @@ export interface SessionState {
   feedBlocksBase: string;
   /** Appends/replacements since feed_blocks_base. Full frames leave this empty. */
   feedBlockPatches: FeedBlockPatch[];
+  /** Runtime-extension status is additive; older clients ignore this field. */
+  extensions?: ExtensionSnapshot | undefined;
 }
 
 export interface FeedBlockPatch {
@@ -332,6 +335,7 @@ function createBaseSessionState(): SessionState {
     feedLinesBase: "0",
     feedBlocksBase: "0",
     feedBlockPatches: [],
+    extensions: undefined,
   };
 }
 
@@ -393,6 +397,9 @@ export const SessionState: MessageFns<SessionState> = {
     }
     for (const v of message.feedBlockPatches) {
       FeedBlockPatch.encode(v!, writer.uint32(154).fork()).join();
+    }
+    if (message.extensions !== undefined) {
+      ExtensionSnapshot.encode(message.extensions, writer.uint32(162).fork()).join();
     }
     return writer;
   },
@@ -556,6 +563,14 @@ export const SessionState: MessageFns<SessionState> = {
           message.feedBlockPatches.push(FeedBlockPatch.decode(reader, reader.uint32()));
           continue;
         }
+        case 20: {
+          if (tag !== 162) {
+            break;
+          }
+
+          message.extensions = ExtensionSnapshot.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -638,6 +653,7 @@ export const SessionState: MessageFns<SessionState> = {
         : globalThis.Array.isArray(object?.feed_block_patches)
         ? object.feed_block_patches.map((e: any) => FeedBlockPatch.fromJSON(e))
         : [],
+      extensions: isSet(object.extensions) ? ExtensionSnapshot.fromJSON(object.extensions) : undefined,
     };
   },
 
@@ -700,6 +716,9 @@ export const SessionState: MessageFns<SessionState> = {
     if (message.feedBlockPatches?.length) {
       obj.feedBlockPatches = message.feedBlockPatches.map((e) => FeedBlockPatch.toJSON(e));
     }
+    if (message.extensions !== undefined) {
+      obj.extensions = ExtensionSnapshot.toJSON(message.extensions);
+    }
     return obj;
   },
 
@@ -737,6 +756,9 @@ export const SessionState: MessageFns<SessionState> = {
     message.feedLinesBase = object.feedLinesBase ?? "0";
     message.feedBlocksBase = object.feedBlocksBase ?? "0";
     message.feedBlockPatches = object.feedBlockPatches?.map((e) => FeedBlockPatch.fromPartial(e)) || [];
+    message.extensions = (object.extensions !== undefined && object.extensions !== null)
+      ? ExtensionSnapshot.fromPartial(object.extensions)
+      : undefined;
     return message;
   },
 };

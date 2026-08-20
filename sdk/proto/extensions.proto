@@ -1,0 +1,100 @@
+// Runtime-extension domain: client-neutral status and serialized commands.
+
+syntax = "proto3";
+package theway.grpc.v1;
+
+import "commands.proto";
+
+message ExtensionSnapshot {
+  uint64 revision = 1;
+  bool reload_pending = 2;
+  repeated ExtensionCatalogEntry catalog = 3;
+  repeated ExtensionDiagnostic diagnostics = 4;
+  repeated ExtensionCommandDescriptor commands = 5;
+  repeated ExtensionContribution contributions = 6;
+}
+
+message ExtensionCatalogEntry {
+  string extension_id = 1;
+  string version = 2;
+  optional uint32 abi_major = 3;
+  string source = 4;
+  string scope = 5;
+  int32 priority = 6;
+  string status = 7;
+  repeated string permissions = 8;
+  optional string reason_code = 9;
+}
+
+message ExtensionDiagnostic {
+  string extension_id = 1;
+  string code = 2;
+  string severity = 3;
+  string message = 4;
+  optional string session_id = 5;
+  optional string event = 6;
+  optional uint64 sequence = 7;
+  // JSON object containing only public details. Sensitive detail values are
+  // absent and their names appear in redacted_fields.
+  string details_json = 8;
+  repeated string redacted_fields = 9;
+}
+
+message ExtensionCommandDescriptor {
+  string extension_id = 1;
+  string name = 2;
+  string label = 3;
+  string description = 4;
+  string argument_schema_json = 5;
+}
+
+// Open envelope: clients skip unrecognized kind values without decoding
+// payload_json. This avoids a closed enum/oneof compatibility dependency.
+message ExtensionContribution {
+  string contribution_id = 1;
+  string extension_id = 2;
+  string scope = 3;
+  string kind = 4;
+  string payload_json = 5;
+}
+
+message InvokeExtensionCommandRequest {
+  string name = 1;
+  string arguments_json = 2;
+  bool has_interactive_client = 3;
+}
+
+message ExtensionCommandOutcome {
+  string status = 1;
+  optional string code = 2;
+  optional string message = 3;
+  optional string data_json = 4;
+}
+
+message ReloadExtensionsRequest {
+  bool cancel_active = 1;
+}
+
+message ReloadExtensionsResponse {
+  string status = 1;
+  uint64 revision = 2;
+}
+
+message DecideExtensionTrustRequest {
+  string subject = 1;
+  optional string extension_id = 2;
+  string decision = 3;
+  repeated string granted_permissions = 4;
+}
+
+message DecideExtensionTrustResponse {
+  bool accepted = 1;
+  ReloadExtensionsResponse reload = 2;
+}
+
+service ExtensionService {
+  rpc GetExtensions(Empty) returns (ExtensionSnapshot);
+  rpc InvokeCommand(InvokeExtensionCommandRequest) returns (ExtensionCommandOutcome);
+  rpc Reload(ReloadExtensionsRequest) returns (ReloadExtensionsResponse);
+  rpc DecideTrust(DecideExtensionTrustRequest) returns (DecideExtensionTrustResponse);
+}

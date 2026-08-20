@@ -8,6 +8,7 @@
 //! Domain split: the `ToolService` implementation (issue #75) lives in
 //! [`tools`](crate::grpc::tools).
 
+mod extensions;
 mod storage;
 mod stream;
 mod tools;
@@ -46,6 +47,7 @@ use crate::proto::{
 use theway_grpc::DaemonConfig;
 use theway_grpc::command_service_server::{CommandService, CommandServiceServer};
 use theway_grpc::event_service_server::{EventService, EventServiceServer};
+use theway_grpc::extension_service_server::ExtensionServiceServer;
 use theway_grpc::graph_engine_service_server::{GraphEngineService, GraphEngineServiceServer};
 use theway_grpc::session_service_server::{SessionService, SessionServiceServer};
 use theway_grpc::settings_service_server::{SettingsService, SettingsServiceServer};
@@ -729,6 +731,7 @@ pub async fn run_grpc(mut app: Box<dyn TransportHost>, options: GrpcOptions) -> 
 pub fn serve_grpc(listener: TcpListener, state: GrpcState) -> tokio::task::JoinHandle<Result<()>> {
     let server = tonic::transport::Server::builder()
         .add_service(CommandServiceServer::new(state.clone()))
+        .add_service(ExtensionServiceServer::new(state.clone()))
         .add_service(SessionServiceServer::new(state.clone()))
         .add_service(SettingsServiceServer::new(state.clone()))
         .add_service(StorageServiceServer::new(state.clone()))

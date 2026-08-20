@@ -41,6 +41,7 @@ async fn spawn_state_server() -> (
             subagents: Vec::new(),
             usage: WireContextUsage::default(),
             tui_max_feed_lines: None,
+            extensions: WireExtensionSnapshot::default(),
         })),
         completer: SlashCompleter::from_commands(vec!["/help".into()]),
         events: broadcast::channel::<WireAgentEvent>(16).0,

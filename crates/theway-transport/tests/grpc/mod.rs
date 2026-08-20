@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 mod stream;
+mod extensions;
 
 #[derive(Default)]
 struct TestJobOps {
@@ -96,6 +97,7 @@ fn fixture_snapshot(feed_line: &str) -> WireStatus {
         subagents: Vec::new(),
         usage: WireContextUsage::default(),
         tui_max_feed_lines: None,
+        extensions: crate::wire::WireExtensionSnapshot::default(),
     }
 }
 

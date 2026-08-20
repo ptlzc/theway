@@ -5,6 +5,8 @@ use crate::wire::{
     ModelEntry, ProviderGroup, WireContextUsage, WireDagEvent, WireDagNodeSnapshot,
     WireDagRunSnapshot,
 };
+
+mod extensions;
 use crate::feed::{Level, TriggerPollStatus};
 use crate::wire::{
     WireCronSnapshot, WireMcpSnapshot, WireSidebarSnapshot, WireSkillsSnapshot, WireToolsSnapshot,
@@ -93,6 +95,7 @@ fn fixture_snapshot() -> WireStatus {
         subagents: Vec::new(),
         usage: WireContextUsage::default(),
         tui_max_feed_lines: None,
+        extensions: WireExtensionSnapshot::default(),
     }
 }
 

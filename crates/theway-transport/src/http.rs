@@ -28,6 +28,8 @@ use crate::wire::*;
 
 use crate::ws::ws_upgrade;
 
+mod extensions;
+
 /// Shared axum state: command queue + snapshot/event broadcasts + the
 /// completer/job operations backing `/complete` and `/ws` node-output.
 #[derive(Clone)]
@@ -139,6 +141,8 @@ async fn healthz() -> &'static str {
 //   set_skill_dirs (session.set_skill_dirs) |
 //   get_config (settings.get_config) | set_config (settings.set_config) |
 //   configure (settings.configure) |
+//   extensions.get | extensions.invoke | extensions.reload |
+//   extensions.decide_trust |
 //   read_file (tool.read_file) | write_file (tool.write_file) |
 //   edit_file (tool.edit_file) | exec_command (tool.exec_command) |
 //   list_dir (tool.list_dir) | grep (tool.grep) | find (tool.find) |
@@ -247,6 +251,9 @@ pub(crate) async fn dispatch(
     method: &str,
     params: Option<&serde_json::Value>,
 ) -> RpcResult {
+    if let Some(result) = extensions::dispatch(state, method, params).await {
+        return result;
+    }
     match method {
         "get_state" | "session.get_state" => Ok(serde_json::json!(state.latest.lock().clone())),
         "ping" => Ok(serde_json::Value::Null),

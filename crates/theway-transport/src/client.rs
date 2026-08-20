@@ -27,22 +27,25 @@ use crate::proto::health::health_client::HealthClient;
 use crate::proto::theway_grpc;
 use crate::proto::theway_grpc::command_service_client::CommandServiceClient;
 use crate::proto::theway_grpc::event_service_client::EventServiceClient;
+use crate::proto::theway_grpc::extension_service_client::ExtensionServiceClient;
 use crate::proto::theway_grpc::graph_engine_service_client::GraphEngineServiceClient;
 use crate::proto::theway_grpc::session_service_client::SessionServiceClient;
 use crate::proto::theway_grpc::settings_service_client::SettingsServiceClient;
 use crate::proto::theway_grpc::storage_service_client::StorageServiceClient;
 use crate::proto::theway_grpc::tool_service_client::ToolServiceClient;
 use crate::proto::theway_grpc::{
-    self as proto, ApproveRequest, CreateSessionRequest, DeleteSessionRequest, Empty,
-    GetNodeOutputRequest, GraphCancelRequest, GraphListRequest, GraphRetryRequest,
-    GraphSkipRequest, RenameSessionRequest, SendMessageRequest, SessionState, SetModelRequest,
-    SetSkillDirsRequest, StreamFrame, SwitchSessionRequest,
+    self as proto, ApproveRequest, CreateSessionRequest, DecideExtensionTrustRequest,
+    DeleteSessionRequest, Empty, GetNodeOutputRequest, GraphCancelRequest, GraphListRequest,
+    GraphRetryRequest, GraphSkipRequest, InvokeExtensionCommandRequest, ReloadExtensionsRequest,
+    RenameSessionRequest, SendMessageRequest, SessionState, SetModelRequest, SetSkillDirsRequest,
+    StreamFrame, SwitchSessionRequest,
 };
 use crate::wire::{
-    SessionSummary, WireDaemonConfig, WireLoadCronJobsRequest, WireLoadCronJobsResult,
-    WireLoadDagRunsRequest, WireLoadDagRunsResult, WireLoadTriggerRulesRequest,
-    WireLoadTriggerRulesResult, WirePathContext, WirePromptImage, WireSaveCronJobsRequest,
-    WireSaveCronJobsResult, WireSaveDagRunRequest, WireSaveDagRunResult,
+    SessionSummary, WireDaemonConfig, WireExtensionCommandOutcome, WireExtensionReloadResult,
+    WireExtensionSnapshot, WireExtensionTrustRequest, WireExtensionTrustResult,
+    WireLoadCronJobsRequest, WireLoadCronJobsResult, WireLoadDagRunsRequest, WireLoadDagRunsResult,
+    WireLoadTriggerRulesRequest, WireLoadTriggerRulesResult, WirePathContext, WirePromptImage,
+    WireSaveCronJobsRequest, WireSaveCronJobsResult, WireSaveDagRunRequest, WireSaveDagRunResult,
     WireSaveTriggerRulesRequest, WireSaveTriggerRulesResult, WireToolEditRequest,
     WireToolEditResult, WireToolExecFrame, WireToolExecRequest, WireToolExecResult,
     WireToolFindRequest, WireToolFindResult, WireToolGrepRequest, WireToolGrepResult,
@@ -165,6 +168,7 @@ pub fn remove_port_file_if_owner(cwd: &Path, pid: u32) {
 pub struct GrpcClient {
     session: SessionServiceClient<Channel>,
     command: CommandServiceClient<Channel>,
+    extensions: ExtensionServiceClient<Channel>,
     graph: GraphEngineServiceClient<Channel>,
     events: EventServiceClient<Channel>,
     settings: SettingsServiceClient<Channel>,

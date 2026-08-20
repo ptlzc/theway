@@ -69,6 +69,24 @@ pub enum WireCommand {
     Configure {
         config: WireDaemonConfig,
     },
+    /// Invoke one daemon-owned extension command on the serialized runtime.
+    InvokeExtensionCommand {
+        name: String,
+        arguments: serde_json::Value,
+        has_interactive_client: bool,
+        response: tokio::sync::oneshot::Sender<Result<WireExtensionCommandOutcome, String>>,
+    },
+    /// Re-discover and atomically reload runtime extensions. Active work may
+    /// leave the request pending until its quiescent settlement boundary.
+    ReloadExtensions {
+        cancel_active: bool,
+        response: tokio::sync::oneshot::Sender<Result<WireExtensionReloadResult, String>>,
+    },
+    /// Persist a project or exact-package trust decision, then reload.
+    DecideExtensionTrust {
+        request: WireExtensionTrustRequest,
+        response: tokio::sync::oneshot::Sender<Result<WireExtensionTrustResult, String>>,
+    },
 }
 
 /// Daemon configuration snapshot / partial update (issue #72) — the serde twin
@@ -436,6 +454,10 @@ pub struct WireStatus {
     /// TUI display settings resolved by the daemon from `config.toml`
     /// (`[tui] max_feed_lines`); `None` → the TUI built-in default applies.
     pub tui_max_feed_lines: Option<u64>,
+    /// Structured runtime-extension state. Routine extension activity updates
+    /// this plane without adding conversation feed blocks.
+    #[serde(default, skip_serializing_if = "WireExtensionSnapshot::is_empty")]
+    pub extensions: WireExtensionSnapshot,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -695,3 +717,7 @@ pub struct WireCronJobSnapshot {
 
 include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/wire/runtime.rs"));
 include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/wire/tools.rs"));
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/src/wire/extensions.rs"
+));

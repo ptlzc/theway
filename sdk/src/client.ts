@@ -15,6 +15,17 @@ import {
   type StreamFrame,
 } from './generated/events.js';
 import {
+  ExtensionServiceClient as ExtensionServiceClientCtor,
+  type ExtensionServiceClient as ExtensionServiceClientApi,
+  type DecideExtensionTrustRequest,
+  type DecideExtensionTrustResponse,
+  type ExtensionCommandOutcome,
+  type ExtensionSnapshot,
+  type InvokeExtensionCommandRequest,
+  type ReloadExtensionsRequest,
+  type ReloadExtensionsResponse,
+} from './generated/extensions.js';
+import {
   GraphEngineServiceClient as GraphEngineServiceClientCtor,
   type GraphEngineServiceClient as GraphEngineServiceClientApi,
   type GetNodeOutputRequest,
@@ -102,7 +113,8 @@ const TRAILING_SLASHES = /\/+$/;
 /**
  * Typed gRPC client for the `theway --grpc` loopback server
  * (theway.grpc.v1.CommandService / SessionService / SettingsService /
- * ToolService / StorageService / GraphEngineService / EventService).
+ * ExtensionService / ToolService / StorageService / GraphEngineService /
+ * EventService).
  * Generated from the domain proto files
  * and health.proto (ts-proto + @grpc/grpc-js) — no runtime proto loading.
  *
@@ -114,6 +126,7 @@ const TRAILING_SLASHES = /\/+$/;
 export class ThewayGrpcClient {
   readonly #session: SessionServiceClientApi;
   readonly #command: CommandServiceClientApi;
+  readonly #extensions: ExtensionServiceClientApi;
   readonly #graph: GraphEngineServiceClientApi;
   readonly #events: EventServiceClientApi;
   readonly #settings: SettingsServiceClientApi;
@@ -127,6 +140,7 @@ export class ThewayGrpcClient {
     const authority = baseUrl.replace(SCHEME_PREFIX, '').replace(TRAILING_SLASHES, '');
     this.#session = new SessionServiceClientCtor(authority, credentials);
     this.#command = new CommandServiceClientCtor(authority, credentials);
+    this.#extensions = new ExtensionServiceClientCtor(authority, credentials);
     this.#graph = new GraphEngineServiceClientCtor(authority, credentials);
     this.#events = new EventServiceClientCtor(authority, credentials);
     this.#settings = new SettingsServiceClientCtor(authority, credentials);
@@ -199,6 +213,44 @@ export class ThewayGrpcClient {
     if (!result.accepted) {
       throw new Error('theway grpc: Approve was not accepted by the server');
     }
+  }
+
+  // ── runtime extensions ──
+
+  /** Structured extension catalog, redacted diagnostics and contributions. */
+  getExtensions(): Promise<ExtensionSnapshot> {
+    return this.#call<Empty, ExtensionSnapshot>(
+      this.#extensions.getExtensions.bind(this.#extensions),
+      'GetExtensions',
+      {},
+    );
+  }
+
+  /** Invoke a registered extension command in either interactive or headless mode. */
+  invokeExtensionCommand(request: InvokeExtensionCommandRequest): Promise<ExtensionCommandOutcome> {
+    return this.#call<InvokeExtensionCommandRequest, ExtensionCommandOutcome>(
+      this.#extensions.invokeCommand.bind(this.#extensions),
+      'InvokeExtensionCommand',
+      request,
+    );
+  }
+
+  /** Re-discover extensions; active work may return `status=pending`. */
+  reloadExtensions(request: ReloadExtensionsRequest = { cancelActive: false }): Promise<ReloadExtensionsResponse> {
+    return this.#call<ReloadExtensionsRequest, ReloadExtensionsResponse>(
+      this.#extensions.reload.bind(this.#extensions),
+      'ReloadExtensions',
+      request,
+    );
+  }
+
+  /** Persist a project or exact-package trust decision and request reload. */
+  decideExtensionTrust(request: DecideExtensionTrustRequest): Promise<DecideExtensionTrustResponse> {
+    return this.#call<DecideExtensionTrustRequest, DecideExtensionTrustResponse>(
+      this.#extensions.decideTrust.bind(this.#extensions),
+      'DecideExtensionTrust',
+      request,
+    );
   }
 
   // ── graph control (DAG + goal runs) ──
@@ -517,6 +569,7 @@ export class ThewayGrpcClient {
     this.#closed = true;
     this.#session.close();
     this.#command.close();
+    this.#extensions.close();
     this.#graph.close();
     this.#events.close();
     this.#settings.close();
