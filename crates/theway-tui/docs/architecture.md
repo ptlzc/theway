@@ -44,7 +44,7 @@ User actions call typed `GrpcClient` methods or enqueue transport commands. The 
 
 Assistant Markdown renders directly without an `ai` role prefix. `Ctrl+O` and `Ctrl+T` change thinking visibility and tool-result expansion only in client presentation state; these local display operations do not append system rows to the feed.
 
-The status area remains one row while a turn is busy. [`ui/snake_loader.rs`](../src/ui/snake_loader.rs) keeps a logical 3×3 path and the status renderer lays its nine positions out as adjacent `·` glyphs in traversal order. Each terminal cell retains its own foreground color and brightness, so the rainbow head and fading trail remain visible instead of being merged by column. The snake bounces through the row-snake order `0,1,2,5,4,3,6,7,8`; the live character-rate meter selects one of five animation intervals from 130 ms down to 10 ms and lengthens the trail from two to five dots.
+The status area remains one row while a turn is busy. [`ui/snake_loader.rs`](../src/ui/snake_loader.rs) renders the Pi-compatible Braille sequence `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` in one fixed terminal cell. Each frame changes both the Braille mask and its true-color rainbow hue. The live character-rate meter selects one of five animation intervals from 130 ms down to 10 ms; the glyph position and surrounding status layout stay fixed when that interval changes.
 
 [`ui/app_input.rs`](../src/ui/app_input.rs) and [`ui/app_input/history.rs`](../src/ui/app_input/history.rs) own composer input, completion, history, paste, and submission. The editor state comes from `theway-ratatui-textarea`; terminal rendering helpers and link/scrollbar behavior come from `theway-pager-render`.
 
