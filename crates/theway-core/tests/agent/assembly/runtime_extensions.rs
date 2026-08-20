@@ -24,6 +24,7 @@ use crate::agent::runtime_extensions::{
 mod compaction_lifecycle;
 mod message_tool;
 mod normalized_request;
+mod provider_interceptor;
 
 #[derive(Clone, Debug)]
 struct Record {

@@ -218,6 +218,7 @@ impl AgentHarness {
                     .await
             })
         });
+        let provider_request_interceptor = runtime_extensions.provider_request_interceptor();
 
         let message_runtime = Arc::clone(&runtime_extensions);
         let transform_message: TransformMessage = Arc::new(move |message, cancel| {
@@ -253,6 +254,7 @@ impl AgentHarness {
             transform_context: Some(transform_context),
             transform_model_request: Some(transform_model_request),
             transform_message: Some(transform_message),
+            provider_request_interceptor: Some(provider_request_interceptor),
             stream_fn: options.stream_fn.clone(),
             before_tool_call: Some(before_tool_call),
             after_tool_call: options.after_tool_call.clone(),

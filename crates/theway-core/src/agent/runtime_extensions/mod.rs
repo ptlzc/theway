@@ -252,6 +252,10 @@ fn validate_domain_event(
                 | ExtensionLifecycleEvent::ModelSelected
                 | ExtensionLifecycleEvent::Context
                 | ExtensionLifecycleEvent::BeforeModelRequest
+                | ExtensionLifecycleEvent::BeforeProviderRequestHeaders
+                | ExtensionLifecycleEvent::BeforeProviderRequestRaw
+                | ExtensionLifecycleEvent::ProviderResponse
+                | ExtensionLifecycleEvent::ProviderRequestFailed
         ),
         RuntimeExtensionDomain::Message => matches!(
             event,

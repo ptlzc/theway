@@ -1,5 +1,6 @@
 mod compaction;
 mod message;
+mod provider;
 mod request;
 mod tool;
 

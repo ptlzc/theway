@@ -149,6 +149,7 @@ pub(super) async fn call_llm(
             options.base.session_id = Some(sid.clone());
         }
         options.base.abort = Some(cancel.clone());
+        options.base.request_interceptor = inner.options.provider_request_interceptor.clone();
         options.base.temperature = request.generation_options.temperature;
         options.base.max_tokens = request.generation_options.max_tokens;
         options.reasoning = request.generation_options.reasoning;
