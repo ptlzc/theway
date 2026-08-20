@@ -64,6 +64,51 @@ use self::llm::call_llm;
 use self::tools::{PreparedCall, ToolOutcome, execute_tools};
 use self::utils::{apply_turn_update, emit, finalize, snapshot_context};
 
+async fn finish_message(
+    inner: &Arc<AgentInner>,
+    message: AgentMessage,
+    cancel: &CancellationToken,
+) -> AgentMessage {
+    let original = message.clone();
+    let message = match inner.options.transform_message.clone() {
+        Some(transform) => {
+            let replacement = transform(message, cancel.clone()).await;
+            if same_message_role(&original, &replacement) {
+                replacement
+            } else {
+                original
+            }
+        }
+        None => message,
+    };
+    inner.state.lock().messages.push(message.clone());
+    emit(
+        inner,
+        LoopEvent::MessageEnd {
+            message: message.clone(),
+        },
+        cancel,
+    )
+    .await;
+    message
+}
+
+fn same_message_role(left: &AgentMessage, right: &AgentMessage) -> bool {
+    matches!(
+        (left, right),
+        (
+            AgentMessage::Llm(theway_llm_provider::Message::User(_)),
+            AgentMessage::Llm(theway_llm_provider::Message::User(_))
+        ) | (
+            AgentMessage::Llm(theway_llm_provider::Message::Assistant(_)),
+            AgentMessage::Llm(theway_llm_provider::Message::Assistant(_))
+        ) | (
+            AgentMessage::Llm(theway_llm_provider::Message::ToolResult(_)),
+            AgentMessage::Llm(theway_llm_provider::Message::ToolResult(_))
+        ) | (AgentMessage::Custom(_), AgentMessage::Custom(_))
+    )
+}
+
 pub(crate) async fn run_agent_loop(
     inner: Arc<AgentInner>,
     new_messages: Vec<AgentMessage>,
@@ -75,7 +120,6 @@ pub(crate) async fn run_agent_loop(
     emit(&inner, LoopEvent::RunStarted, &cancel).await;
 
     for msg in new_messages.into_iter() {
-        inner.state.lock().messages.push(msg.clone());
         emit(
             &inner,
             LoopEvent::MessageStart {
@@ -84,7 +128,7 @@ pub(crate) async fn run_agent_loop(
             &cancel,
         )
         .await;
-        emit(&inner, LoopEvent::MessageEnd { message: msg }, &cancel).await;
+        finish_message(&inner, msg, &cancel).await;
     }
 
     let result = drive_loop(&inner, cancel.clone()).await;
@@ -181,7 +225,6 @@ async fn drive_loop(
                     }
                     if !queued.is_empty() {
                         for msg in queued {
-                            inner.state.lock().messages.push(msg.clone());
                             emit(
                                 inner,
                                 LoopEvent::MessageStart {
@@ -190,7 +233,7 @@ async fn drive_loop(
                                 &cancel,
                             )
                             .await;
-                            emit(inner, LoopEvent::MessageEnd { message: msg }, &cancel).await;
+                            finish_message(inner, msg, &cancel).await;
                         }
                         continue;
                     }
@@ -220,29 +263,33 @@ async fn drive_loop(
                 }
             };
             *inner.turn_cancel.lock() = None;
-            let assistant_agent = AgentMessage::Llm(PiMessage::Assistant(assistant.clone()));
-            inner.state.lock().messages.push(assistant_agent.clone());
-            emit(
+            let assistant_agent = finish_message(
                 inner,
-                LoopEvent::MessageEnd {
-                    message: assistant_agent.clone(),
-                },
+                AgentMessage::Llm(PiMessage::Assistant(assistant)),
                 &cancel,
             )
             .await;
+            let AgentMessage::Llm(PiMessage::Assistant(assistant)) = &assistant_agent else {
+                unreachable!("finalized message transforms preserve assistant role")
+            };
 
-            let (tool_results, all_terminate) = execute_tools(inner, &assistant, &cancel).await;
-            for tr in &tool_results {
-                let m = AgentMessage::Llm(PiMessage::ToolResult(tr.clone()));
-                inner.state.lock().messages.push(m.clone());
+            let (tool_results, all_terminate) = execute_tools(inner, assistant, &cancel).await;
+            let mut finalized_tool_results = Vec::with_capacity(tool_results.len());
+            for tr in tool_results {
+                let m = AgentMessage::Llm(PiMessage::ToolResult(tr));
                 emit(
                     inner,
                     LoopEvent::MessageStart { message: m.clone() },
                     &cancel,
                 )
                 .await;
-                emit(inner, LoopEvent::MessageEnd { message: m }, &cancel).await;
+                let finalized = finish_message(inner, m, &cancel).await;
+                let AgentMessage::Llm(PiMessage::ToolResult(result)) = finalized else {
+                    unreachable!("finalized message transforms preserve tool-result role")
+                };
+                finalized_tool_results.push(result);
             }
+            let tool_results = finalized_tool_results;
 
             emit(
                 inner,
@@ -315,7 +362,6 @@ async fn drive_loop(
             }
             if !queued.is_empty() {
                 for msg in queued {
-                    inner.state.lock().messages.push(msg.clone());
                     emit(
                         inner,
                         LoopEvent::MessageStart {
@@ -324,7 +370,7 @@ async fn drive_loop(
                         &cancel,
                     )
                     .await;
-                    emit(inner, LoopEvent::MessageEnd { message: msg }, &cancel).await;
+                    finish_message(inner, msg, &cancel).await;
                 }
                 continue;
             }
@@ -372,8 +418,7 @@ async fn finalize_partial_turn(inner: &Arc<AgentInner>, cancel: &CancellationTok
         let has_content =
             matches!(&m, AgentMessage::Llm(PiMessage::Assistant(a)) if !a.content.is_empty());
         if has_content {
-            inner.state.lock().messages.push(m.clone());
-            emit(inner, LoopEvent::MessageEnd { message: m }, cancel).await;
+            finish_message(inner, m, cancel).await;
         }
     }
 }
@@ -397,6 +442,18 @@ async fn run_one(
         context,
         OperationDetail::ToolExecution { tool_name },
     );
+    if let PreparedCall::Run { id, name, args, .. } = &call {
+        emit(
+            &inner,
+            LoopEvent::ToolExecutionStart {
+                tool_call_id: id.clone(),
+                tool_name: name.clone(),
+                args: args.clone(),
+            },
+            &cancel,
+        )
+        .await;
+    }
     let cancel_state = cancel.clone();
     let outcome = match call {
         PreparedCall::Blocked {
@@ -410,6 +467,7 @@ async fn run_one(
             args,
             result,
             is_error: true,
+            executed: false,
         },
         PreparedCall::Run {
             id,
@@ -484,6 +542,7 @@ async fn run_one(
                         args,
                         result: r,
                         is_error: false,
+                        executed: true,
                     },
                     Err(e) => ToolOutcome {
                         id,
@@ -495,6 +554,7 @@ async fn run_one(
                             terminate: None,
                         },
                         is_error: true,
+                        executed: true,
                     },
                 }
             }
@@ -510,6 +570,7 @@ async fn run_one(
                     terminate: None,
                 },
                 is_error: true,
+                executed: true,
             },
         },
     };

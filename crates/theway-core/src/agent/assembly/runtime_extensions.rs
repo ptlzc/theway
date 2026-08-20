@@ -1,3 +1,7 @@
+mod compaction;
+mod message;
+mod tool;
+
 use std::collections::{HashSet, VecDeque};
 use std::future::Future;
 use std::sync::Arc;
@@ -14,8 +18,9 @@ use theway_contract::extension::{
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::runtime_extensions::{
-    RuntimeExtensionContext, RuntimeExtensionInvocation, RuntimeExtensionPort,
-    RuntimeExtensionScopeAllocator, RuntimeExtensionScopeKind, ValidatedRuntimeExtensionResult,
+    ExtensionModelContextProjection, RuntimeExtensionContext, RuntimeExtensionInvocation,
+    RuntimeExtensionPort, RuntimeExtensionScopeAllocator, RuntimeExtensionScopeKind,
+    ValidatedRuntimeExtensionResult,
 };
 use crate::types::AgentMessage;
 
@@ -24,6 +29,8 @@ struct ActiveScopes {
     run_id: Option<String>,
     turn_id: Option<String>,
     request_id: Option<String>,
+    message_id: Option<String>,
+    source_message_id: Option<String>,
 }
 
 const FOLLOW_UP_QUEUE_CAPACITY: usize = 32;
@@ -50,6 +57,7 @@ pub(super) struct HarnessRuntimeExtensions {
     session_started: AtomicBool,
     session_shutdown: AtomicBool,
     follow_ups: Mutex<FollowUpQueue>,
+    model_context: ExtensionModelContextProjection,
 }
 
 impl HarnessRuntimeExtensions {
@@ -59,6 +67,7 @@ impl HarnessRuntimeExtensions {
         cwd: String,
         has_interactive_client: bool,
         model: Option<ExtensionModelRef>,
+        model_context: ExtensionModelContextProjection,
     ) -> Self {
         let scopes = RuntimeExtensionScopeAllocator::new(session_id)
             .expect("runtime extension session id is normalized by harness construction");
@@ -72,11 +81,16 @@ impl HarnessRuntimeExtensions {
             session_started: AtomicBool::new(false),
             session_shutdown: AtomicBool::new(false),
             follow_ups: Mutex::new(FollowUpQueue::default()),
+            model_context,
         }
     }
 
     pub(super) fn port(&self) -> &Arc<dyn RuntimeExtensionPort> {
         &self.port
+    }
+
+    pub(super) fn compaction_context_messages(&self) -> Vec<AgentMessage> {
+        self.model_context.compaction_messages()
     }
 
     pub(super) fn set_model(&self, model: &theway_llm_provider::Model) {
@@ -98,6 +112,8 @@ impl HarnessRuntimeExtensions {
         let mut active = self.active.lock();
         active.turn_id = Some(self.allocate(RuntimeExtensionScopeKind::Turn)?);
         active.request_id = Some(self.allocate(RuntimeExtensionScopeKind::Request)?);
+        active.message_id = None;
+        active.source_message_id = None;
         Ok(())
     }
 
@@ -433,6 +449,72 @@ impl HarnessRuntimeExtensions {
                             )
                             .await;
                     }
+                    crate::types::LoopEvent::MessageStart { message } => {
+                        runtime.observe_message_start(&message, &cancel).await;
+                    }
+                    crate::types::LoopEvent::MessageUpdate {
+                        message,
+                        assistant_message_event,
+                    } => {
+                        runtime
+                            .observe_message_update(&message, &assistant_message_event, &cancel)
+                            .await;
+                    }
+                    crate::types::LoopEvent::MessageEnd { message } => {
+                        runtime.complete_message(&message);
+                    }
+                    crate::types::LoopEvent::ToolExecutionStart {
+                        tool_call_id,
+                        tool_name,
+                        args,
+                    } => {
+                        runtime
+                            .observe_tool_execution(
+                                ExtensionLifecycleEvent::ToolExecutionStart,
+                                tool_call_id,
+                                serde_json::json!({"toolName": tool_name, "args": args}),
+                                &cancel,
+                            )
+                            .await;
+                    }
+                    crate::types::LoopEvent::ToolExecutionUpdate {
+                        tool_call_id,
+                        tool_name,
+                        args,
+                        partial_result,
+                    } => {
+                        runtime
+                            .observe_tool_execution(
+                                ExtensionLifecycleEvent::ToolExecutionUpdate,
+                                tool_call_id,
+                                serde_json::json!({
+                                    "toolName": tool_name,
+                                    "args": args,
+                                    "partialResult": partial_result,
+                                }),
+                                &cancel,
+                            )
+                            .await;
+                    }
+                    crate::types::LoopEvent::ToolExecutionEnd {
+                        tool_call_id,
+                        tool_name,
+                        result,
+                        is_error,
+                    } => {
+                        runtime
+                            .observe_tool_execution(
+                                ExtensionLifecycleEvent::ToolExecutionEnd,
+                                tool_call_id,
+                                serde_json::json!({
+                                    "toolName": tool_name,
+                                    "result": result,
+                                    "isError": is_error,
+                                }),
+                                &cancel,
+                            )
+                            .await;
+                    }
                     crate::types::LoopEvent::RunEnded { .. } => {
                         cancelled.store(cancel.is_cancelled(), Ordering::Release);
                     }
@@ -450,6 +532,18 @@ impl HarnessRuntimeExtensions {
         payload: Value,
         cancelled: bool,
     ) -> Result<RuntimeExtensionInvocation, ExtensionErrorEnvelope> {
+        self.invocation_scoped(event, class, payload, cancelled, None, None)
+    }
+
+    fn invocation_scoped(
+        &self,
+        event: ExtensionLifecycleEvent,
+        class: ExtensionHookClass,
+        payload: Value,
+        cancelled: bool,
+        message_id: Option<String>,
+        tool_call_id: Option<String>,
+    ) -> Result<RuntimeExtensionInvocation, ExtensionErrorEnvelope> {
         let sequence = self.scopes.next_sequence().map_err(scope_error)?;
         let active = self.active.lock();
         let mut context =
@@ -458,8 +552,8 @@ impl HarnessRuntimeExtensions {
             run_id: active.run_id.clone(),
             turn_id: active.turn_id.clone(),
             request_id: active.request_id.clone(),
-            message_id: None,
-            tool_call_id: None,
+            message_id: message_id.or_else(|| active.message_id.clone()),
+            tool_call_id,
         };
         drop(active);
         context.model = self.model.lock().clone();

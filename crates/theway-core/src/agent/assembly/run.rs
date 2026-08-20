@@ -90,20 +90,21 @@ impl AgentHarness {
                 .map_err(|error| AgentRunError::Other(error.message))?;
             let before_run = self.runtime_extensions.before_run().await;
             if !before_run.messages.is_empty() {
-                if let Err(error) = self
-                    .session
-                    .append_messages(before_run.messages.clone())
-                    .await
-                {
+                let mut messages = Vec::with_capacity(before_run.messages.len());
+                for message in before_run.messages {
+                    messages.push(
+                        self.runtime_extensions
+                            .finalize_before_run_message(message)
+                            .await,
+                    );
+                }
+                if let Err(error) = self.session.append_messages(messages.clone()).await {
                     self.runtime_extensions.settle_run();
                     return Err(AgentRunError::Other(format!(
                         "persist before-run messages: {error}"
                     )));
                 }
-                self.agent
-                    .state()
-                    .messages
-                    .extend(before_run.messages.clone());
+                self.agent.state().messages.extend(messages);
             }
             let previous_system_prompt = before_run.system_prompt.map(|system_prompt| {
                 let mut state = self.agent.state();

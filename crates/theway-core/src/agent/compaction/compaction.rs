@@ -661,6 +661,31 @@ pub async fn compact(
     stream_fn: Option<StreamFn>,
     cancel: CancellationToken,
 ) -> Result<CompactionResult, SummarizeError> {
+    compact_with_model_context(
+        algorithm,
+        model,
+        entries,
+        &[],
+        settings,
+        custom_instructions,
+        stream_fn,
+        cancel,
+    )
+    .await
+}
+
+/// Compaction entry point with de-duplicated, model-visible extension context.
+/// The extra messages affect summarization only, never cut-point identity.
+pub async fn compact_with_model_context(
+    algorithm: &dyn CompactAlgorithm,
+    model: Model,
+    entries: &[SessionTreeEntry],
+    persistent_model_context: &[AgentMessage],
+    settings: &CompactionSettings,
+    custom_instructions: Option<String>,
+    stream_fn: Option<StreamFn>,
+    cancel: CancellationToken,
+) -> Result<CompactionResult, SummarizeError> {
     let cut = algorithm.select_cut_point(entries, settings).await;
     let entries_to_summarize = &entries[..cut.cut_index];
     let tokens_before = entries_to_summarize
@@ -679,13 +704,16 @@ pub async fn compact(
         });
     }
     // Project the entries into AgentMessage[] for the summarizer.
-    let messages: Vec<AgentMessage> = entries_to_summarize
-        .iter()
-        .filter_map(|e| match e {
-            SessionTreeEntry::Message { message, .. } => Some(message.clone()),
-            _ => None,
-        })
-        .collect();
+    let mut messages = Vec::with_capacity(
+        persistent_model_context
+            .len()
+            .saturating_add(entries_to_summarize.len()),
+    );
+    messages.extend_from_slice(persistent_model_context);
+    messages.extend(entries_to_summarize.iter().filter_map(|entry| match entry {
+        SessionTreeEntry::Message { message, .. } => Some(message.clone()),
+        _ => None,
+    }));
     let request = SummarizeRequest {
         model: &model,
         messages: &messages,

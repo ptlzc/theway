@@ -73,17 +73,6 @@ pub(super) async fn execute_tools(
             None => raw_args,
         };
 
-        emit(
-            inner,
-            LoopEvent::ToolExecutionStart {
-                tool_call_id: tool_id.clone(),
-                tool_name: tool_name.clone(),
-                args: args.clone(),
-            },
-            cancel,
-        )
-        .await;
-
         // Per-tool classification runs first (issue #110 design v0.2 Artifact A). The
         // classifier sees the prepared args and decides Allow / Prompt / Block before the
         // user-configured `before_tool_call` hook gets a chance. `Block` short-circuits
@@ -313,6 +302,7 @@ pub(super) async fn execute_tools(
                         terminate: None,
                     },
                     is_error: true,
+                    executed: true,
                 }));
             }
             out
@@ -331,6 +321,7 @@ pub(super) async fn execute_tools(
             args,
             mut result,
             mut is_error,
+            executed,
         } = outcome;
 
         if let Some(hook) = inner.options.after_tool_call.clone() {
@@ -348,35 +339,44 @@ pub(super) async fn execute_tools(
                 context: agent_context.clone(),
             };
             let patch = hook(ctx, cancel.clone()).await;
-            if let Some(content) = patch.content {
-                result.content = content;
-            }
-            if let Some(details) = patch.details {
-                result.details = details;
-            }
-            if let Some(err) = patch.is_error {
-                is_error = err;
-            }
-            if let Some(t) = patch.terminate {
-                result.terminate = Some(t);
-            }
+            apply_tool_result_patch(&mut result, &mut is_error, patch);
+        }
+
+        if executed {
+            emit(
+                inner,
+                LoopEvent::ToolExecutionEnd {
+                    tool_call_id: id.clone(),
+                    tool_name: name.clone(),
+                    result: result.clone(),
+                    is_error,
+                },
+                cancel,
+            )
+            .await;
+        }
+
+        if let Some(transform) = inner.options.transform_tool_result.clone() {
+            let ctx = AfterToolCallContext {
+                assistant_message: assistant.clone(),
+                tool_call: theway_llm_provider::ToolCall {
+                    id: id.clone(),
+                    name: name.clone(),
+                    arguments: args.as_object().cloned().unwrap_or_default(),
+                    thought_signature: None,
+                },
+                args: args.clone(),
+                result: result.clone(),
+                is_error,
+                context: agent_context.clone(),
+            };
+            let patch = transform(ctx, cancel.clone()).await;
+            apply_tool_result_patch(&mut result, &mut is_error, patch);
         }
 
         if !result.terminate.unwrap_or(false) {
             all_terminate = false;
         }
-
-        emit(
-            inner,
-            LoopEvent::ToolExecutionEnd {
-                tool_call_id: id.clone(),
-                tool_name: name.clone(),
-                result: result.clone(),
-                is_error,
-            },
-            cancel,
-        )
-        .await;
 
         results.push(ToolResultMessage {
             role: theway_llm_provider::ToolResultRole::ToolResult,
@@ -389,6 +389,25 @@ pub(super) async fn execute_tools(
         });
     }
     (results, all_terminate)
+}
+
+fn apply_tool_result_patch(
+    result: &mut AgentToolResult,
+    is_error: &mut bool,
+    patch: AfterToolCallResult,
+) {
+    if let Some(content) = patch.content {
+        result.content = content;
+    }
+    if let Some(details) = patch.details {
+        result.details = details;
+    }
+    if let Some(error) = patch.is_error {
+        *is_error = error;
+    }
+    if let Some(terminate) = patch.terminate {
+        result.terminate = Some(terminate);
+    }
 }
 
 pub(super) enum PreparedCall {
@@ -412,6 +431,7 @@ pub(super) struct ToolOutcome {
     pub(super) args: serde_json::Value,
     pub(super) result: AgentToolResult,
     pub(super) is_error: bool,
+    pub(super) executed: bool,
 }
 
 #[cfg(test)]

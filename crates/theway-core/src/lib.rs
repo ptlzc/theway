@@ -31,7 +31,7 @@ pub use types::{
     CustomMessage, GetApiKey, LoopEvent, MessageQueueProvider, OnControlPlanePromptHook,
     PermissionClassification, PrepareNextTurnContext, PrepareNextTurnHook, QueueMode,
     ShouldStopAfterTurnContext, ShouldStopHook, StreamFn, ThinkingLevel, ToolExecutionMode,
-    TransformContext, default_convert_to_llm,
+    TransformContext, TransformMessage, default_convert_to_llm,
 };
 
 #[cfg(feature = "harness")]

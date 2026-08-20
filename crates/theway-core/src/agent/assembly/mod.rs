@@ -38,7 +38,9 @@ use self::catalog::build_system_prompt;
 use super::compaction::algorithm::CompactAlgorithmRegistry;
 use super::compaction::compaction::{CompactionSettings, DEFAULT_COMPACTION_SETTINGS};
 use super::cost::{CostSnapshot, CostTracker};
-use super::runtime_extensions::{NoopRuntimeExtensionPort, RuntimeExtensionPort};
+use super::runtime_extensions::{
+    ExtensionModelContextProjection, NoopRuntimeExtensionPort, RuntimeExtensionPort,
+};
 use super::types::{PromptTemplate, Skill};
 
 pub use self::events::{
@@ -95,6 +97,8 @@ pub struct AgentHarnessOptions {
     pub max_iterations: Option<u32>,
     /// Engine-independent lifecycle port supplied by the embedding runtime.
     pub runtime_extensions: Arc<dyn RuntimeExtensionPort>,
+    /// Reconstructed, de-duplicated persistent model context for this branch.
+    pub runtime_extension_model_context: ExtensionModelContextProjection,
     /// Working directory included in runtime-extension lifecycle context.
     pub runtime_extension_cwd: String,
     /// Whether this harness is currently attached to an interactive client.
@@ -126,6 +130,7 @@ impl AgentHarnessOptions {
             turn_continuation_cap: None,
             max_iterations: None,
             runtime_extensions: Arc::new(NoopRuntimeExtensionPort),
+            runtime_extension_model_context: ExtensionModelContextProjection::default(),
             runtime_extension_cwd: ".".into(),
             runtime_extension_has_interactive_client: false,
         }
@@ -188,6 +193,7 @@ impl AgentHarness {
                 provider: options.model.provider.0.clone(),
                 model: options.model.id.clone(),
             }),
+            options.runtime_extension_model_context.clone(),
         ));
         let state = AgentState {
             model: Some(options.model),
@@ -203,12 +209,43 @@ impl AgentHarness {
             Box::pin(async move { runtime.transform_context(messages, cancel).await })
         });
 
+        let message_runtime = Arc::clone(&runtime_extensions);
+        let transform_message: TransformMessage = Arc::new(move |message, cancel| {
+            let runtime = Arc::clone(&message_runtime);
+            Box::pin(async move { runtime.transform_message(message, cancel).await })
+        });
+
+        let configured_before_tool_call = options.before_tool_call.clone();
+        let before_tool_runtime = Arc::clone(&runtime_extensions);
+        let before_tool_call: BeforeToolCallHook = Arc::new(move |context, cancel| {
+            let runtime = Arc::clone(&before_tool_runtime);
+            let configured = configured_before_tool_call.clone();
+            Box::pin(async move {
+                let extension = runtime.before_tool_call(&context, &cancel).await;
+                if extension.block {
+                    return extension;
+                }
+                match configured {
+                    Some(hook) => hook(context, cancel).await,
+                    None => extension,
+                }
+            })
+        });
+
+        let after_tool_runtime = Arc::clone(&runtime_extensions);
+        let transform_tool_result: AfterToolCallHook = Arc::new(move |context, cancel| {
+            let runtime = Arc::clone(&after_tool_runtime);
+            Box::pin(async move { runtime.transform_tool_result(&context, &cancel).await })
+        });
+
         let agent = Agent::new(AgentOptions {
             initial_state: Some(state),
             transform_context: Some(transform_context),
+            transform_message: Some(transform_message),
             stream_fn: options.stream_fn.clone(),
-            before_tool_call: options.before_tool_call.clone(),
+            before_tool_call: Some(before_tool_call),
             after_tool_call: options.after_tool_call.clone(),
+            transform_tool_result: Some(transform_tool_result),
             on_control_plane_prompt: options.on_control_plane_prompt.clone(),
             session_id,
             observer: Arc::clone(&options.observer),

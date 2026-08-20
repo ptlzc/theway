@@ -21,6 +21,9 @@ use crate::agent::runtime_extensions::{
     RuntimeSessionExtensionPort, RuntimeToolExtensionPort,
 };
 
+mod compaction_lifecycle;
+mod message_tool;
+
 #[derive(Clone, Debug)]
 struct Record {
     event: ExtensionLifecycleEvent,
@@ -304,8 +307,12 @@ async fn successful_run_lifecycle_is_ordered_and_sequences_are_monotonic() {
             ExtensionLifecycleEvent::Input,
             ExtensionLifecycleEvent::BeforeRun,
             ExtensionLifecycleEvent::RunStarted,
+            ExtensionLifecycleEvent::MessageStart,
+            ExtensionLifecycleEvent::MessageEnd,
             ExtensionLifecycleEvent::TurnStarted,
             ExtensionLifecycleEvent::Context,
+            ExtensionLifecycleEvent::MessageStart,
+            ExtensionLifecycleEvent::MessageEnd,
             ExtensionLifecycleEvent::TurnCompleted,
             ExtensionLifecycleEvent::RunEnded,
             ExtensionLifecycleEvent::RunSettled,

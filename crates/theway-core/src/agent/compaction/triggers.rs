@@ -7,7 +7,9 @@
 
 use crate::agent::AgentRunError;
 use crate::agent::assembly::SessionEvent;
-use crate::agent::compaction::compaction::{SummarizeError, compact, estimate_context_tokens};
+use crate::agent::compaction::compaction::{
+    SummarizeError, compact_with_model_context, estimate_context_tokens,
+};
 use crate::agent::messages::compaction_summary;
 use crate::agent::session::session::SessionTreeEntry;
 use crate::observability::{
@@ -22,6 +24,7 @@ impl crate::agent::assembly::AgentHarness {
         &self,
         custom_instructions: Option<String>,
     ) -> Result<bool, AgentRunError> {
+        self.start_runtime_extensions().await;
         self.do_compact(true, custom_instructions).await
     }
 
@@ -69,6 +72,8 @@ impl crate::agent::assembly::AgentHarness {
             None => return Ok(false),
         };
         let settings = self.compaction_settings.lock().clone();
+        self.before_runtime_compaction(&settings.algorithm, from_hook)
+            .await?;
         let scope = OperationScope::start(
             self.agent.runtime_observer(),
             self.agent.active_run_operation(),
@@ -97,15 +102,26 @@ impl crate::agent::assembly::AgentHarness {
                     Some(ErrorCategory::Persistence),
                     RuntimeMeasurements::default(),
                 );
+                self.runtime_compaction_failed(
+                    serde_json::json!({
+                        "algorithm": settings.algorithm,
+                        "category": "persistence",
+                        "message": e.to_string(),
+                    }),
+                    false,
+                )
+                .await;
                 return Ok(false);
             }
         };
 
         let algorithm = self.compact_algorithms.algorithm(&settings.algorithm);
-        let result = compact(
+        let persistent_model_context = self.runtime_compaction_context_messages();
+        let result = compact_with_model_context(
             algorithm.as_ref(),
             model,
             &entries,
+            &persistent_model_context,
             &settings,
             custom_instructions,
             self.stream_fn.clone(),
@@ -127,6 +143,12 @@ impl crate::agent::assembly::AgentHarness {
                         ..Default::default()
                     },
                 );
+                self.runtime_compaction_succeeded(serde_json::json!({
+                    "algorithm": settings.algorithm,
+                    "applied": false,
+                    "tokensBefore": r.tokens_before,
+                }))
+                .await;
                 return Ok(false);
             }
             Err(SummarizeError::Aborted) => {
@@ -135,6 +157,14 @@ impl crate::agent::assembly::AgentHarness {
                     Some(ErrorCategory::Cancellation),
                     RuntimeMeasurements::default(),
                 );
+                self.runtime_compaction_failed(
+                    serde_json::json!({
+                        "algorithm": settings.algorithm,
+                        "category": "cancelled",
+                    }),
+                    true,
+                )
+                .await;
                 return Ok(false);
             }
             Err(e) => {
@@ -143,6 +173,15 @@ impl crate::agent::assembly::AgentHarness {
                     Some(ErrorCategory::Provider),
                     RuntimeMeasurements::default(),
                 );
+                self.runtime_compaction_failed(
+                    serde_json::json!({
+                        "algorithm": settings.algorithm,
+                        "category": "provider",
+                        "message": e.to_string(),
+                    }),
+                    false,
+                )
+                .await;
                 return Err(AgentRunError::Other(format!("compaction failed: {e}")));
             }
         };
@@ -172,6 +211,15 @@ impl crate::agent::assembly::AgentHarness {
                     ..Default::default()
                 },
             );
+            self.runtime_compaction_failed(
+                serde_json::json!({
+                    "algorithm": settings.algorithm,
+                    "category": "persistence",
+                    "message": e.to_string(),
+                }),
+                false,
+            )
+            .await;
             return Err(AgentRunError::Other(format!(
                 "session append compaction: {e}"
             )));
@@ -229,6 +277,13 @@ impl crate::agent::assembly::AgentHarness {
                 ..Default::default()
             },
         );
+        self.runtime_compaction_succeeded(serde_json::json!({
+            "algorithm": settings.algorithm,
+            "applied": true,
+            "tokensBefore": result.tokens_before,
+            "firstKeptEntryId": first_kept_entry_id,
+        }))
+        .await;
         Ok(true)
     }
 }

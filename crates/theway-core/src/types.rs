@@ -532,6 +532,17 @@ pub type TransformContext = Arc<
         + Sync,
 >;
 
+/// Async finalized-message transform. Runs after `MessageStart` and before the
+/// message enters agent state, persistence, later context, or tool extraction.
+pub type TransformMessage = Arc<
+    dyn Fn(
+            AgentMessage,
+            CancellationToken,
+        ) -> Pin<Box<dyn std::future::Future<Output = AgentMessage> + Send>>
+        + Send
+        + Sync,
+>;
+
 /// Resolves an API key dynamically per LLM call. Useful for short-lived OAuth tokens.
 pub type GetApiKey = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
