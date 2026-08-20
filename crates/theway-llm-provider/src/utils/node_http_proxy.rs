@@ -12,7 +12,9 @@ pub fn proxy_from_env() -> Option<reqwest::Proxy> {
         .or_else(|| env::var("https_proxy").ok())
         .or_else(|| env::var("HTTP_PROXY").ok())
         .or_else(|| env::var("http_proxy").ok())?;
-    reqwest::Proxy::all(&url).ok()
+    reqwest::Proxy::all(&url)
+        .ok()
+        .map(|proxy| proxy.no_proxy(reqwest::NoProxy::from_env()))
 }
 
 /// Build a `reqwest::Client` honoring proxy env vars and theway-llm-provider defaults.
