@@ -5,6 +5,7 @@
 //! storage, transport, or UI policy.
 
 mod action;
+mod audit;
 mod contribution;
 mod diagnostic;
 mod lifecycle;
@@ -54,6 +55,7 @@ pub use action::{
     ExtensionErrorCode, ExtensionErrorEnvelope, ExtensionGateDecision, ExtensionHookClass,
     ExtensionHookContract, ExtensionHookDeadline, ExtensionHookFailurePolicy,
 };
+pub use audit::{ExtensionAuditEvent, ExtensionAuditOperation, ExtensionAuditOutcome};
 pub use contribution::{
     ExtensionClientContribution, ExtensionClientContributionData, ExtensionCommandDescriptor,
     ExtensionCommandOutcome, ExtensionContributionError, ExtensionNoticeLevel,

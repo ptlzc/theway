@@ -1,6 +1,9 @@
 #[path = "extension/action.rs"]
 mod action;
 
+#[path = "extension/audit.rs"]
+mod audit;
+
 #[path = "extension/contribution.rs"]
 mod contribution;
 

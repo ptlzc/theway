@@ -34,6 +34,20 @@ pub fn memory_dir() -> PathBuf {
     base_dir().join("memory")
 }
 
+/// Runtime-extension packages, trust policy, and redacted audit records live
+/// under one process-global directory.
+pub fn extensions_dir() -> PathBuf {
+    base_dir().join("extensions")
+}
+
+pub fn extension_trust_path() -> PathBuf {
+    extensions_dir().join("trust.json")
+}
+
+pub fn extension_audit_path() -> PathBuf {
+    extensions_dir().join("audit.jsonl")
+}
+
 /// Deterministic short hash of an absolute cwd path. Same input → same dir, so reopening from
 /// the same project always finds prior sessions.
 pub fn cwd_hash(cwd: &Path) -> String {
@@ -68,6 +82,14 @@ mod tests {
         assert_eq!(
             memory_dir(),
             PathBuf::from("/tmp/theway-contract-base/memory")
+        );
+        assert_eq!(
+            extension_trust_path(),
+            PathBuf::from("/tmp/theway-contract-base/extensions/trust.json")
+        );
+        assert_eq!(
+            extension_audit_path(),
+            PathBuf::from("/tmp/theway-contract-base/extensions/audit.jsonl")
         );
         assert_eq!(
             sessions_dir_for_cwd(Path::new("")),
