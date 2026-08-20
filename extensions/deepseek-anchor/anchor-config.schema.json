@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://theway.dev/schemas/deepseek-anchor-config.json",
+  "title": "DeepSeek Anchor extension configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "providerPredicates",
+    "modelPredicates",
+    "bootstrapPrompt",
+    "promotionCondition",
+    "personaScope",
+    "restoredContext",
+    "zeroAnchor"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "providerPredicates": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "modelPredicates": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "bootstrapPrompt": {
+      "type": "string",
+      "minLength": 1
+    },
+    "promotionCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "first_assistant",
+            "first_tool_call",
+            "assistant_or_tool_call"
+          ]
+        },
+        "textPattern": {
+          "type": "string"
+        },
+        "toolNames": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "personaScope": {
+      "enum": [
+        "bootstrap_only",
+        "session"
+      ]
+    },
+    "bootstrapTokenLimit": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "restoredContext": {
+      "type": "string",
+      "minLength": 1
+    },
+    "maxEditorOutputChars": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 16000
+    },
+    "zeroAnchor": {
+      "type": "boolean",
+      "default": true
+    }
+  }
+}

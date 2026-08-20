@@ -1,0 +1,19 @@
+{
+  "$schema": "./anchor-config.schema.json",
+  "providerPredicates": [
+    "deepseek"
+  ],
+  "modelPredicates": [
+    "deepseek-*"
+  ],
+  "bootstrapPrompt": "You are a software engineering assistant preparing a workspace. Inspect the repository with bash and str_replace_editor, then report that you are ready for the user's task.",
+  "promotionCondition": {
+    "kind": "assistant_or_tool_call",
+    "textPattern": ".+",
+    "toolNames": []
+  },
+  "personaScope": "bootstrap_only",
+  "restoredContext": "The workspace bootstrap phase completed. Continue with the user's retained conversation and the full tool catalog.",
+  "maxEditorOutputChars": 16000,
+  "zeroAnchor": true
+}

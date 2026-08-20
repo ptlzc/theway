@@ -1,0 +1,18 @@
+{
+  "id": "deepseek-anchor",
+  "version": "1.0.0",
+  "abi": 2,
+  "entry": "index.js",
+  "priority": 100,
+  "scope": "session",
+  "stateSchema": 1,
+  "permissions": [
+    "session.write",
+    "tools.register",
+    "workspace.read",
+    "workspace.write"
+  ],
+  "optionalPermissions": [
+    "tools.override"
+  ]
+}
