@@ -65,6 +65,10 @@
 
 Extension follow-up 使用独立的 32 项稳定 id 去重队列，不使用 bare Agent 的 run 内队列。Harness 只在 `run_settled` 后消费该队列，并在一个 prompt 周期达到 16 次 extension 驱动 follow-up run 后停止。Task-local 分发 guard 拒绝递归生命周期分发以及从 hook 同步启动的运行时操作。`shutdown_runtime_extensions` 取消活动 run，并等待异步 loop listener 完成后才发出 `session_shutdown`。
 
+完成态 user、assistant 与 tool-result message 在进入 agent state 或异步 session 持久化前先经过 message transform；被变换的 assistant 同时作为 tool-call 提取来源。Message observation 从 start、流式 update 到 finalization 使用同一个稳定 message id。Tool preflight 保持 assistant 源顺序，并在 extension gate 拒绝后停止；只有准入的调用才开始 execution。并行 sibling 仍并发执行，而 execution-end observation、tool-result transform 和持久化的 tool-result message 按源顺序完成。
+
+Compaction 在选择或运行 builtin 或已注册算法前调用 extension gate；provider 或 persistence 错误发布 failure，只有 compaction entry 与内存状态提交后才发布 success。`ExtensionModelContextProjection::compaction_messages` 在不改变 cut-point entry identity 的前提下，将每个去重后的 model-visible context item 恰好一次加入摘要输入；private state 与 custom event 不会被投影。
+
 ## 扩展规则
 
 - Provider 协议和模型目录放在 `theway-llm-provider`，不放入 agent 循环。
@@ -80,5 +84,7 @@ Extension follow-up 使用独立的 32 项稳定 id 去重队列，不使用 bar
 - Core 生命周期端口不发现 package 或执行 extension 代码，daemon 原始 action batch 不能绕过 core 校验。
 - 私有 extension state 不进入带类型会话消息或模型上下文投影。
 - Extension follow-up 不能在 settlement 前进入活动 run，也不能无界递归。
+- Finalized message replacement 先于持久化及下游 tool 提取；被拒绝的 tool 产生模型可见错误，但不产生 execution lifecycle event。
+- Compaction input 只包含带类型 session message 与去重后的 model-visible extension context，不包含 private extension state。
 - 取消会产生终止运行结果，并释放运行准入和控制句柄。
 - 事件载荷和操作关联保持足够确定，使 daemon 无需访问 core 私有状态即可投影 snapshot。

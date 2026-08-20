@@ -65,6 +65,10 @@ Every domain dispatcher verifies that the lifecycle event belongs to that core s
 
 Extension follow-ups use a separate 32-item, stable-id de-duplicated queue rather than the bare Agent's within-run queue. The harness consumes that queue only after `run_settled` and stops one prompt cycle after 16 extension-driven follow-up runs. A task-local dispatch guard rejects recursive lifecycle dispatch and runtime operations started synchronously from a hook. `shutdown_runtime_extensions` cancels the active run and waits for awaited loop listeners before `session_shutdown`.
 
+Finalized user, assistant, and tool-result messages pass through the message transform before entering agent state or awaited session persistence; a transformed assistant is also the source for tool-call extraction. Message observations use one stable message id from start through streaming updates and finalization. Tool preflight remains in assistant source order, stops after the extension gate denies a call, and starts only admitted executions; parallel siblings still execute concurrently, while execution-end observations, tool-result transforms, and persisted tool-result messages finalize in source order.
+
+Compaction invokes the extension gate before selecting or running either the builtin or a registered algorithm, publishes failure for provider or persistence errors, and publishes success only after the compaction entry and in-memory state commit. `ExtensionModelContextProjection::compaction_messages` contributes each de-duplicated model-visible context item once to summarization without changing cut-point entry identity; private state and custom events are not projected.
+
 ## Extension rules
 
 - Add provider protocols and model catalogs in `theway-llm-provider`, not in the agent loop.
@@ -80,5 +84,7 @@ Extension follow-ups use a separate 32-item, stable-id de-duplicated queue rathe
 - Core lifecycle ports never discover packages or evaluate extension code, and raw daemon action batches never bypass core validation.
 - Private extension state remains outside typed session messages and model-context projection.
 - Extension follow-ups cannot enter the active run before settlement or recurse without a bound.
+- Finalized message replacements precede persistence and downstream tool extraction, and denied tools produce a model-visible error without execution lifecycle events.
+- Compaction input contains only typed session messages plus de-duplicated model-visible extension context, never private extension state.
 - Cancellation produces a terminal runtime outcome and releases run admission and control handles.
 - Event payloads and operation correlation remain deterministic enough for the daemon to project snapshots without accessing private core state.
