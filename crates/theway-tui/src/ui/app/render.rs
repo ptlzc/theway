@@ -4,7 +4,7 @@ impl App {
         let input_rows = self.composer_rows(area.width);
         let chunks = Layout::vertical([
             Constraint::Min(1),
-            Constraint::Length(1), // status rule / single-row nine-dot indicator
+            Constraint::Length(1), // status rule / single-cell Braille indicator
             Constraint::Length(input_rows + 2), // input box with border
             Constraint::Length(1), // hint line
         ])
@@ -136,8 +136,8 @@ impl App {
             );
         }
 
-        // Status rule: plain ready/offline rule when idle; a single-row
-        // nine-dot rainbow snake while busy.
+        // Status rule: plain ready/offline rule when idle; a single-cell
+        // rainbow Braille spinner while busy.
         if self.busy {
             self.render_busy_status(frame, status_area);
         } else {

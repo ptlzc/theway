@@ -31,129 +31,42 @@ async fn thinking_stats_line_shows_cps_and_in_out_tokens() {
     );
 }
 
-// ── busy snake loader (issue #42) ─────────────────────────────────────────
+// ── busy Braille spinner (issue #140) ─────────────────────────────────────
 
-/// Head trajectory: the triangular wave follows the row-snake order through
-/// the 3×3 grid and reverses at both ends.
 #[test]
-fn snake_head_bounces_through_the_three_by_three_track() {
-    let expected = [0usize, 1, 2, 5, 4, 3, 6, 7, 8, 7, 6, 3, 4, 5, 2, 1];
-    for (step, &want) in expected.iter().enumerate() {
-        assert_eq!(snake_loader::head_pos(step as u64), want, "step {step}");
-    }
-    // The wave repeats every 16 steps and never leaves the track.
-    for step in 0..=64u64 {
-        let pos = snake_loader::head_pos(step);
-        assert!(pos < 9, "step {step}: head left the track ({pos})");
+fn braille_frames_match_pi_order_and_repeat_in_one_cell() {
+    let expected = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+    assert_eq!(snake_loader::BRAILLE_FRAMES, expected);
+    let cycle = expected.len() as u64;
+    for (step, glyph) in expected.into_iter().enumerate() {
+        let frame = snake_loader::braille_frame(step as u64);
+        assert_eq!(frame.glyph, glyph, "step {step}");
         assert_eq!(
-            snake_loader::head_pos(step + 16),
-            pos,
-            "step {step}: wave must repeat every 16 steps"
+            unicode_width::UnicodeWidthChar::width(frame.glyph),
+            Some(1),
+            "frame {glyph} must stay in one terminal cell"
+        );
+        assert_eq!(
+            snake_loader::braille_frame(step as u64 + cycle),
+            frame,
+            "step {step} must repeat after one ten-frame cycle"
         );
     }
 }
 
-/// Tail follow: segment `i` sits where the head was `i` steps ago, and
-/// at a reversal the tail flips to the far side of the motion direction.
 #[test]
-fn snake_tail_follows_head_history_and_flips_at_reversal() {
-    // At the final grid cell, the tail follows the preceding bottom-row dots.
-    assert_eq!(snake_loader::segment_pos(8, 0), Some(8));
-    assert_eq!(snake_loader::segment_pos(8, 1), Some(7));
-    assert_eq!(snake_loader::segment_pos(8, 2), Some(6));
-    // Step 9 reverses: head returns to 7 and the tail remains at endpoint 8.
-    assert_eq!(snake_loader::segment_pos(9, 0), Some(7));
-    assert_eq!(snake_loader::segment_pos(9, 1), Some(8));
-    // History predating the wave start is out of range: the segment has
-    // no track cell and renders dim.
-    assert_eq!(snake_loader::segment_pos(0, 0), Some(0));
-    assert_eq!(snake_loader::segment_pos(0, 1), None);
-    assert_eq!(snake_loader::segment_pos(2, 3), None);
-}
-
-/// Rainbow gradient: every step rotates the hue wheel by 15° and each
-/// trail segment adds a 40° offset, all through the shared HSV→RGB
-/// conversion.
-#[test]
-fn snake_rainbow_hues_advance_per_step_and_segment() {
-    // The head is fully lit (value 1.0), so its color follows the
-    // step*15° hue exactly.
-    for step in [0u64, 1, 3, 7] {
-        let frame = snake_loader::snake_frame(step, 0.0);
-        let pos = snake_loader::head_pos(step);
-        let (r, g, b) = super::pixel_loader::hsv_to_rgb((step as f32 * 15.0) % 360.0, 0.85, 1.0);
-        assert_eq!(frame.cells[pos].fg, Color::Rgb(r, g, b), "step {step}");
-    }
-    // Within one frame the trail steps 40° per segment: adjacent
-    // segments carry different colors.
-    let frame = snake_loader::snake_frame(16, 0.0);
-    let colors: Vec<Color> = frame
-        .cells
-        .iter()
-        .filter(|c| c.lit > 0.0)
-        .map(|c| c.fg)
-        .collect();
-    assert_eq!(colors.len(), 2, "idle trail lights head + one segment");
-    assert_ne!(colors[0], colors[1], "trail hues must differ by segment");
-    // Hue rotates with step even when the head revisits the same cell
-    // (bounce positions repeat every 16 steps, colors every 24).
-    let a = snake_loader::snake_frame(0, 0.0).cells[0].fg;
-    let b = snake_loader::snake_frame(16, 0.0).cells[0].fg;
-    assert_ne!(a, b);
-}
-
-/// Trail length: 2 segments at rest growing with throughput, capped at
-/// 5; segments whose history predates the wave start stay dim.
-#[test]
-fn snake_trail_grows_from_two_to_five_segments() {
-    assert_eq!(snake_loader::trail_len(0.0), 2.0);
-    assert_eq!(snake_loader::trail_len(1e9), 5.0);
-    // A full-cycle step has enough history to fill the complete trail.
-    let idle = snake_loader::snake_frame(16, 0.0);
-    assert_eq!(
-        idle.cells.iter().filter(|c| c.lit > 0.0).count(),
-        2,
-        "idle trail must light 2 cells"
-    );
-    let fast = snake_loader::snake_frame(16, 1e9);
-    assert_eq!(
-        fast.cells.iter().filter(|c| c.lit > 0.0).count(),
-        5,
-        "speed-cap trail must light 5 cells"
-    );
-    // History predating the wave start renders dim: only the head lit.
-    let early = snake_loader::snake_frame(0, 1e9);
-    assert_eq!(early.cells.iter().filter(|c| c.lit > 0.0).count(), 1);
-    assert_eq!(early.cells[0].lit, 1.0);
-}
-
-/// Track stability: all nine cells render every frame — lit cells carry
-/// the rainbow body and unlit ones stay as dim dots.
-#[test]
-fn snake_track_always_shows_all_nine_round_dots() {
-    for step in [0u64, 4, 8, 9, 15, 23, 100] {
-        for cps in [0.0, 500.0, 1e9] {
-            let frame = snake_loader::snake_frame(step, cps);
-            assert_eq!(frame.cells.len(), 9, "step {step}");
-            for (i, cell) in frame.cells.iter().enumerate() {
-                assert_eq!(cell.glyph, '·', "step {step} cell {i}");
-                assert_eq!(cell.bg, Color::Reset, "step {step} cell {i}");
-                if cell.lit == 0.0 {
-                    assert_eq!(cell.fg, Color::DarkGray, "step {step} cell {i}");
-                }
-            }
+fn braille_frames_follow_the_pi_rainbow_hues() {
+    let mut previous = None;
+    for step in 0..snake_loader::BRAILLE_FRAMES.len() {
+        let hue = step as f32 / snake_loader::BRAILLE_FRAMES.len() as f32 * 300.0;
+        let (r, g, b) = super::pixel_loader::hsv_to_rgb(hue, 0.95, 1.0);
+        let frame = snake_loader::braille_frame(step as u64);
+        assert_eq!(frame.fg, Color::Rgb(r, g, b), "step {step}");
+        if let Some(previous) = previous {
+            assert_ne!(frame.fg, previous, "adjacent frames need distinct hues");
         }
+        previous = Some(frame.fg);
     }
-}
-
-#[test]
-fn snake_display_order_keeps_all_nine_positions_independent() {
-    let mut seen = [false; snake_loader::TRACK_CELLS];
-    for position in snake_loader::TRACK_ORDER {
-        assert!(!seen[position], "track position {position} appears twice");
-        seen[position] = true;
-    }
-    assert!(seen.into_iter().all(std::convert::identity));
 }
 
 #[tokio::test]

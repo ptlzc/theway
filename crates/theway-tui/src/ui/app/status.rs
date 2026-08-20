@@ -20,33 +20,26 @@ impl App {
         Paragraph::new(Line::styled(text, Style::default().fg(Color::DarkGray)))
     }
 
-    /// Busy band: nine independently styled middle dots show the rainbow
-    /// snake in one terminal row, followed by the working label and stats.
+    /// Busy band: one rotating rainbow Braille glyph followed by the working
+    /// label and stats. The glyph stays in one terminal cell across frames.
     fn render_busy_status(&self, frame: &mut ratatui::Frame, area: Rect) {
         if area.height == 0 {
             return;
         }
         let tick = self.spinner_frame as u64;
-        let cps = self.cps_meter.cps();
-        let snake = snake_loader::snake_frame(self.spinner.step(), cps);
+        let spinner = snake_loader::braille_frame(self.spinner.step());
         let track_x = area.x.saturating_add(1);
-        for (slot, position) in snake_loader::TRACK_ORDER.iter().enumerate() {
-            let cell = &snake.cells[*position];
-            let x = track_x.saturating_add(slot as u16);
-            if x >= area.right() {
-                break;
-            }
-            let mut style = Style::default().fg(cell.fg).bg(cell.bg);
-            if cell.lit > 0.5 {
-                style = style.add_modifier(Modifier::BOLD);
-            }
+        if track_x < area.right() {
             frame
                 .buffer_mut()
-                .set_string(x, area.y, cell.glyph.to_string(), style);
+                .set_string(
+                    track_x,
+                    area.y,
+                    spinner.glyph.to_string(),
+                    Style::default().fg(spinner.fg),
+                );
         }
-        let label_x = track_x
-            .saturating_add(snake_loader::TRACK_CELLS as u16)
-            .saturating_add(2);
+        let label_x = track_x.saturating_add(3);
         if label_x < area.right() {
             let mut spans = vec![
                 Span::styled("working", shimmer_style(tick)),

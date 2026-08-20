@@ -224,7 +224,7 @@ async fn chrome_info_line_shows_model_with_provider() {
 }
 
 #[tokio::test]
-async fn busy_status_shows_snake_loader_with_elapsed() {
+async fn busy_status_shows_braille_spinner_with_elapsed() {
     let (mut app, _rx) = test_app().await;
     let mut status = fixture_status(Vec::new());
     status.busy = true;
@@ -244,31 +244,22 @@ async fn busy_status_shows_snake_loader_with_elapsed() {
         text.contains("2 queued"),
         "queue depth missing from the busy band:\n{text}"
     );
-    // Nine adjacent middle dots retain independent terminal-cell styles while
-    // keeping the busy band one row high.
+    // Pi's Braille spinner stays in one terminal cell while the busy band
+    // remains one row high.
     let status_area = app.last_status_area.unwrap();
     assert_eq!(status_area.height, 1);
-    for slot in 0..9u16 {
-        assert_eq!(
-            buf[(status_area.x + 1 + slot, status_area.y)].symbol(),
-            "·",
-            "track slot {slot} must render one middle dot:\n{text}"
-        );
-    }
+    assert_eq!(buf[(status_area.x + 1, status_area.y)].symbol(), "⠋");
+    assert_eq!(buf[(status_area.x + 2, status_area.y)].symbol(), " ");
     assert_eq!(
-        buf[(status_area.x + 12, status_area.y)].symbol(),
+        buf[(status_area.x + 4, status_area.y)].symbol(),
         "w",
-        "working label must start beside the nine-dot track:\n{text}"
+        "working label must start beside the Braille spinner:\n{text}"
     );
     assert!(
         text.contains("char/s"),
         "throughput stats must share the busy row:\n{text}"
     );
-    assert_ne!(
-        buf[(status_area.x + 1, status_area.y)].fg,
-        buf[(status_area.x + 2, status_area.y)].fg,
-        "the head and resting track dots must retain independent colors"
-    );
+    let first_color = buf[(status_area.x + 1, status_area.y)].fg;
     let lines: Vec<&str> = text.lines().collect();
     let label_row = lines.iter().position(|l| l.contains("working")).unwrap();
     let border_row = lines
@@ -280,21 +271,13 @@ async fn busy_status_shows_snake_loader_with_elapsed() {
         label_row + 1,
         "composer should sit directly below the compact busy band:\n{text}"
     );
-    // Advance one base-cadence step: the head moves to the next displayed dot
-    // while the previous dot remains lit as the first rainbow trail segment.
+    // Advance one base-cadence step: the mask and hue change in place.
     app.spinner.tick(130);
     terminal.draw(|f| app.render(f)).unwrap();
     let moved = terminal.backend().buffer();
-    assert_ne!(
-        moved[(status_area.x + 2, status_area.y)].fg,
-        Color::DarkGray,
-        "the snake head must move to the second independent dot"
-    );
-    assert_ne!(
-        moved[(status_area.x + 1, status_area.y)].fg,
-        Color::DarkGray,
-        "the previous head must remain visible as the rainbow tail"
-    );
+    assert_eq!(moved[(status_area.x + 1, status_area.y)].symbol(), "⠙");
+    assert_ne!(moved[(status_area.x + 1, status_area.y)].fg, first_color);
+    assert_eq!(moved[(status_area.x + 2, status_area.y)].symbol(), " ");
     // The busy window timer arms on the false→true edge and clears on idle.
     assert!(app.busy_started.is_some());
     let mut idle = fixture_status(Vec::new());
