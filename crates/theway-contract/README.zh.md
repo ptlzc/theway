@@ -13,8 +13,11 @@
 | [`session_id`](src/session_id.rs) | 校验并规范化持久化会话标识。 |
 | [`dag`](src/dag.rs) | 定义持久化 DAG 运行与节点快照及其状态文件路径。 |
 | [`triggers`](src/triggers.rs) | 定义会话级动态 trigger 与 cron sidecar 记录。 |
+| [`extension`](src/extension/mod.rs) | 定义 runtime extension ABI v2 manifest、生命周期与 action envelope、持久化条目、信任记录、诊断及客户端中立 contribution。 |
 
 `theway-core` 负责在带类型的运行时会话条目和这些原始记录之间转换。`theway-storage` 实现持久化 trait；`theway-transport` 复用或重新导出适合位于该叶子层的客户端可见数据。
+
+[`sdk/extension-abi-v2`](sdk/extension-abi-v2) 下签入的 TypeScript 声明和 JSON Schema 由 Rust extension 契约生成。使用 `cargo run -p theway-contract --example generate_extension_artifacts -- crates/theway-contract/sdk/extension-abi-v2` 重新生成；extension 契约测试会在临时目录中重新生成并拒绝漂移。
 
 ## 文档
 
