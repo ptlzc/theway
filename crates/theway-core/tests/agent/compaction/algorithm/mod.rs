@@ -34,7 +34,7 @@ fn registry_default_is_empty_and_falls_back_to_builtin() {
 
 #[test]
 fn registry_register_rejects_builtin_shadowing_and_lists_sorted_custom_names() {
-    let mut registry = CompactAlgorithmRegistry::new();
+    let registry = CompactAlgorithmRegistry::new();
 
     registry.register(Arc::new(BuiltinCompactAlgorithm));
     assert!(registry.custom_names().is_empty());
@@ -45,6 +45,21 @@ fn registry_register_rejects_builtin_shadowing_and_lists_sorted_custom_names() {
 
     let algorithm = registry.algorithm("a-algo");
     assert_eq!(algorithm.name(), "a-algo");
+}
+
+#[test]
+fn registry_atomically_replaces_custom_algorithms() {
+    let registry = CompactAlgorithmRegistry::new();
+    registry.register(Arc::new(StubAlgorithm("old")));
+
+    registry.replace_custom([
+        Arc::new(StubAlgorithm("new")) as Arc<dyn CompactAlgorithm>,
+        Arc::new(StubAlgorithm("builtin")) as Arc<dyn CompactAlgorithm>,
+    ]);
+
+    assert_eq!(registry.custom_names(), vec!["new"]);
+    assert_eq!(registry.algorithm("old").name(), "builtin");
+    assert_eq!(registry.algorithm("new").name(), "new");
 }
 
 struct StubAlgorithm(&'static str);

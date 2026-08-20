@@ -59,12 +59,14 @@ async fn compaction_gate_precedes_committed_success_observation() {
             ExtensionLifecycleEvent::CompactionSucceeded,
         ]
     );
-    assert!(session
-        .entries()
-        .await
-        .unwrap()
-        .iter()
-        .any(|entry| matches!(entry, SessionTreeEntry::Compaction { .. })));
+    assert!(
+        session
+            .entries()
+            .await
+            .unwrap()
+            .iter()
+            .any(|entry| matches!(entry, SessionTreeEntry::Compaction { .. }))
+    );
 }
 
 #[tokio::test]
@@ -94,12 +96,14 @@ async fn denied_compaction_gate_leaves_session_without_compaction_entry() {
     let error = harness.force_compact(None).await.unwrap_err();
 
     assert!(error.to_string().contains("disabled by extension"));
-    assert!(!session
-        .entries()
-        .await
-        .unwrap()
-        .iter()
-        .any(|entry| matches!(entry, SessionTreeEntry::Compaction { .. })));
+    assert!(
+        !session
+            .entries()
+            .await
+            .unwrap()
+            .iter()
+            .any(|entry| matches!(entry, SessionTreeEntry::Compaction { .. }))
+    );
     let events = port
         .events()
         .into_iter()
@@ -167,12 +171,14 @@ async fn compaction_provider_failure_publishes_failure_without_commit() {
             ExtensionLifecycleEvent::CompactionFailed,
         ]
     );
-    assert!(!session
-        .entries()
-        .await
-        .unwrap()
-        .iter()
-        .any(|entry| matches!(entry, SessionTreeEntry::Compaction { .. })));
+    assert!(
+        !session
+            .entries()
+            .await
+            .unwrap()
+            .iter()
+            .any(|entry| matches!(entry, SessionTreeEntry::Compaction { .. }))
+    );
 }
 
 struct CapturingAlgorithm {
@@ -197,7 +203,10 @@ impl CompactAlgorithm for CapturingAlgorithm {
     }
 }
 
-fn durable_entry(origin_sequence: u64, entry: ExtensionDurableEntryPayload) -> ExtensionDurableEntry {
+fn durable_entry(
+    origin_sequence: u64,
+    entry: ExtensionDurableEntryPayload,
+) -> ExtensionDurableEntry {
     ExtensionDurableEntry {
         abi_major: ExtensionAbiMajor::V2,
         extension_id: "anchor-test".into(),
@@ -246,7 +255,7 @@ async fn compaction_receives_deduplicated_model_context_but_never_private_state(
     ])
     .unwrap();
     let captured = Arc::new(Mutex::new(Vec::new()));
-    let mut registry = CompactAlgorithmRegistry::new();
+    let registry = CompactAlgorithmRegistry::new();
     registry.register(Arc::new(CapturingAlgorithm {
         messages: Arc::clone(&captured),
     }));

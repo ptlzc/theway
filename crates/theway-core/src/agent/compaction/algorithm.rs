@@ -8,7 +8,7 @@
 //!   the turn-boundary-safe `keep_recent_tokens` cut, and LLM summarization (with the
 //!   overflow-budget retry loop).
 //! - Custom algorithms implement the same trait. The TS path is host-wired: the CLI
-//!   (`crates/server/src/ts_extensions`) discovers `kind = "compaction"` extensions,
+//!   (`theway-daemon::ts_extensions`) discovers `kind = "compaction"` extensions,
 //!   adapts them to [`CompactAlgorithm`], and injects the registry via
 //!   `AgentHarnessOptions.compact_algorithms` — the core never loads extensions itself.
 //!
@@ -107,7 +107,7 @@ impl CompactAlgorithm for BuiltinCompactAlgorithm {
 /// algorithms (host-injected, e.g. TS extensions); the builtin is always available as
 /// fallback.
 pub struct CompactAlgorithmRegistry {
-    custom: HashMap<String, Arc<dyn CompactAlgorithm>>,
+    custom: parking_lot::RwLock<HashMap<String, Arc<dyn CompactAlgorithm>>>,
 }
 
 impl Default for CompactAlgorithmRegistry {
@@ -119,15 +119,28 @@ impl Default for CompactAlgorithmRegistry {
 impl CompactAlgorithmRegistry {
     pub fn new() -> Self {
         Self {
-            custom: HashMap::new(),
+            custom: parking_lot::RwLock::new(HashMap::new()),
         }
     }
 
     /// Register a custom algorithm by name. The builtin can never be shadowed.
-    pub fn register(&mut self, algorithm: Arc<dyn CompactAlgorithm>) {
+    pub fn register(&self, algorithm: Arc<dyn CompactAlgorithm>) {
         if algorithm.name() != "builtin" {
-            self.custom.insert(algorithm.name().to_string(), algorithm);
+            self.custom
+                .write()
+                .insert(algorithm.name().to_string(), algorithm);
         }
+    }
+
+    /// Atomically replace every custom algorithm while keeping the builtin fallback available.
+    pub fn replace_custom(&self, algorithms: impl IntoIterator<Item = Arc<dyn CompactAlgorithm>>) {
+        let mut replacement = HashMap::new();
+        for algorithm in algorithms {
+            if algorithm.name() != "builtin" {
+                replacement.insert(algorithm.name().to_string(), algorithm);
+            }
+        }
+        *self.custom.write() = replacement;
     }
 
     /// Resolve an algorithm name. Unknown / empty names fall back to the builtin with a
@@ -136,7 +149,7 @@ impl CompactAlgorithmRegistry {
         if name.is_empty() || name == "builtin" {
             return Arc::new(BuiltinCompactAlgorithm);
         }
-        match self.custom.get(name) {
+        match self.custom.read().get(name) {
             Some(a) => a.clone(),
             None => {
                 tracing::warn!(
@@ -150,7 +163,7 @@ impl CompactAlgorithmRegistry {
 
     /// Names of all registered custom algorithms (excluding the builtin).
     pub fn custom_names(&self) -> Vec<String> {
-        let mut names: Vec<String> = self.custom.keys().cloned().collect();
+        let mut names: Vec<String> = self.custom.read().keys().cloned().collect();
         names.sort();
         names
     }
