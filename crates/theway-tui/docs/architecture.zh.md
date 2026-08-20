@@ -44,7 +44,7 @@
 
 Assistant Markdown 直接渲染，不添加 `ai` 角色前缀。`Ctrl+O` 与 `Ctrl+T` 只修改客户端展示状态中的 thinking 可见性和工具结果展开状态；这些本地展示操作不会向 feed 追加 system 行。
 
-Turn 忙碌期间，状态区域仍保持一行。[`ui/snake_loader.rs`](../src/ui/snake_loader.rs) 保留逻辑 3×3 九点轨迹，状态渲染器把每列压进一个 `⋮` 字符，并使用该列最亮蛇身段的颜色；最终 `⋮⋮⋮` 指示器只占三个 terminal cell。彩虹蛇头及渐隐尾迹按行蛇形顺序 `0,1,2,5,4,3,6,7,8` 往返；实时字符速率计从 130 ms 到 10 ms 的五档动画间隔中选择速度，并把尾迹从两个点延长到五个点。
+Turn 忙碌期间，状态区域仍保持一行。[`ui/snake_loader.rs`](../src/ui/snake_loader.rs) 保留逻辑 3×3 路径，状态渲染器按遍历顺序把九个位置铺成相邻的 `·` 字符。每个 terminal cell 保留独立的前景色和亮度，因此彩虹蛇头及渐隐尾迹不会再因按列合并而消失。彩虹蛇按行蛇形顺序 `0,1,2,5,4,3,6,7,8` 往返；实时字符速率计从 130 ms 到 10 ms 的五档动画间隔中选择速度，并把尾迹从两个点延长到五个点。
 
 [`ui/app_input.rs`](../src/ui/app_input.rs) 与 [`ui/app_input/history.rs`](../src/ui/app_input/history.rs) 负责 composer 输入、补全、历史、粘贴和提交。编辑器状态来自 `theway-ratatui-textarea`；终端渲染辅助、链接与 scrollbar 行为来自 `theway-pager-render`。
 
