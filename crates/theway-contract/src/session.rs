@@ -4,6 +4,8 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::extension::ExtensionDurableEntry;
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionErrorCode {
@@ -149,6 +151,24 @@ impl StoredSessionEntry {
         }))
     }
 
+    pub fn extension(
+        id: String,
+        parent_id: Option<String>,
+        timestamp: String,
+        extension: ExtensionDurableEntry,
+    ) -> Result<Self, SessionError> {
+        extension
+            .validate()
+            .map_err(|error| SessionError::corrupted(error.to_string()))?;
+        Self::from_payload(serde_json::json!({
+            "type": "extension",
+            "id": id,
+            "parentId": parent_id,
+            "timestamp": timestamp,
+            "extension": extension,
+        }))
+    }
+
     pub fn leaf_target_id(&self) -> Option<Option<&str>> {
         (self.entry_type == "leaf").then(|| self.payload.get("targetId").and_then(Value::as_str))
     }
@@ -160,6 +180,22 @@ impl StoredSessionEntry {
         let target = self.payload.get("targetId")?.as_str()?;
         let label = self.payload.get("label").and_then(Value::as_str);
         Some((target, label))
+    }
+
+    pub fn extension_payload(&self) -> Result<Option<ExtensionDurableEntry>, SessionError> {
+        if self.entry_type != "extension" {
+            return Ok(None);
+        }
+        let extension =
+            self.payload.get("extension").cloned().ok_or_else(|| {
+                SessionError::corrupted("extension session entry has no envelope")
+            })?;
+        let extension: ExtensionDurableEntry = serde_json::from_value(extension)
+            .map_err(|error| SessionError::corrupted(error.to_string()))?;
+        extension
+            .validate()
+            .map_err(|error| SessionError::corrupted(error.to_string()))?;
+        Ok(Some(extension))
     }
 
     fn validate_shape(&self) -> Result<(), SessionError> {
@@ -201,6 +237,9 @@ impl StoredSessionEntry {
             "branch_summary" => {
                 require_string("fromId")?;
                 require_string("summary")?;
+            }
+            "extension" => {
+                self.extension_payload()?;
             }
             "custom" => require_string("customType")?,
             "custom_message" => {
@@ -286,11 +325,41 @@ pub trait SessionReader: Send + Sync {
     async fn find_entries(&self, entry_type: &str)
     -> Result<Vec<StoredSessionEntry>, SessionError>;
     async fn get_label(&self, id: &str) -> Result<Option<String>, SessionError>;
+
+    /// Return one extension's entries on the selected branch in root-to-leaf
+    /// replay order. `None` selects the store's current active leaf.
+    async fn get_extension_entries(
+        &self,
+        extension_id: &str,
+        leaf_id: Option<&str>,
+    ) -> Result<Vec<StoredSessionEntry>, SessionError> {
+        let selected_leaf = match leaf_id {
+            Some(id) => Some(id.to_string()),
+            None => self.get_leaf_id().await?,
+        };
+        let path = self.get_path_to_root(selected_leaf.as_deref()).await?;
+        let mut entries = Vec::new();
+        for stored in path {
+            let Some(extension) = stored.extension_payload()? else {
+                continue;
+            };
+            if extension.extension_id == extension_id {
+                entries.push(stored);
+            }
+        }
+        Ok(entries)
+    }
 }
 
 #[async_trait]
 pub trait SessionStore: SessionReader {
     async fn set_leaf_id(&self, id: Option<String>) -> Result<(), SessionError>;
     async fn create_entry_id(&self) -> Result<String, SessionError>;
-    async fn append_entry(&self, entry: StoredSessionEntry) -> Result<(), SessionError>;
+    /// Atomically append a sequence of entries in the provided order. Either
+    /// every entry becomes visible or none of them does.
+    async fn append_entries(&self, entries: Vec<StoredSessionEntry>) -> Result<(), SessionError>;
+
+    async fn append_entry(&self, entry: StoredSessionEntry) -> Result<(), SessionError> {
+        self.append_entries(vec![entry]).await
+    }
 }

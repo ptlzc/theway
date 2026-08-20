@@ -549,21 +549,34 @@ impl SessionStore for SqliteSessionStorage {
         Ok(uuidv7())
     }
 
-    async fn append_entry(&self, entry: StoredSessionEntry) -> Result<(), SessionError> {
-        let conn = self.conn().await?;
-        let payload = serde_json::to_string(&entry.payload).map_err(json_err)?;
-        conn.execute(
-            "INSERT INTO entries (id, parent_id, type, timestamp, payload) VALUES (?1, ?2, ?3, ?4, ?5)",
-            [
-                entry.id,
-                entry.parent_id.unwrap_or_default(),
-                entry.entry_type,
-                entry.timestamp,
-                payload,
-            ],
-        )
-        .await
-        .map_err(map_err)?;
+    async fn append_entries(&self, entries: Vec<StoredSessionEntry>) -> Result<(), SessionError> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+        let encoded = entries
+            .into_iter()
+            .map(|entry| {
+                let payload = serde_json::to_string(&entry.payload).map_err(json_err)?;
+                Ok((entry, payload))
+            })
+            .collect::<Result<Vec<_>, SessionError>>()?;
+        let mut conn = self.conn().await?;
+        let tx = conn.transaction().await.map_err(map_err)?;
+        for (entry, payload) in encoded {
+            tx.execute(
+                "INSERT INTO entries (id, parent_id, type, timestamp, payload) VALUES (?1, ?2, ?3, ?4, ?5)",
+                [
+                    entry.id,
+                    entry.parent_id.unwrap_or_default(),
+                    entry.entry_type,
+                    entry.timestamp,
+                    payload,
+                ],
+            )
+            .await
+            .map_err(map_err)?;
+        }
+        tx.commit().await.map_err(map_err)?;
         Ok(())
     }
 }

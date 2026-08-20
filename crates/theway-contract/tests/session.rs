@@ -1,4 +1,7 @@
 use serde_json::json;
+use theway_contract::extension::{
+    ExtensionAbiMajor, ExtensionDurableEntry, ExtensionDurableEntryPayload, ExtensionStateMutation,
+};
 use theway_contract::session::{SessionErrorCode, StoredSessionEntry, validate_session_entries};
 
 fn entry(payload: serde_json::Value) -> StoredSessionEntry {
@@ -74,4 +77,32 @@ fn validate_entries_replays_leaf_and_rejects_dangling_references() {
         validate_session_entries(&[dangling]).unwrap_err().code,
         SessionErrorCode::Corrupted
     );
+}
+
+#[test]
+fn stored_extension_entry_validates_and_decodes_the_public_envelope() {
+    let durable = ExtensionDurableEntry {
+        abi_major: ExtensionAbiMajor::V2,
+        extension_id: "deepseek-anchor".into(),
+        state_schema_version: 1,
+        origin_sequence: 3,
+        entry: ExtensionDurableEntryPayload::StateMutation {
+            key: "phase".into(),
+            mutation: ExtensionStateMutation::Set {
+                value: json!("promoted"),
+            },
+        },
+    };
+
+    let stored = StoredSessionEntry::extension(
+        "e1".into(),
+        Some("m1".into()),
+        "2026-08-20T00:00:00Z".into(),
+        durable.clone(),
+    )
+    .unwrap();
+    let decoded = stored.extension_payload().unwrap().unwrap();
+
+    assert_eq!(stored.entry_type, "extension");
+    assert_eq!(decoded, durable);
 }

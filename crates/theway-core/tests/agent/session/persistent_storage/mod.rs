@@ -3,9 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use serde_json::json;
-use theway_contract::session::{
-    SessionError, SessionReader, SessionStore, StoredSessionEntry,
-};
+use theway_contract::session::{SessionError, SessionReader, SessionStore, StoredSessionEntry};
 
 use super::*;
 
@@ -72,8 +70,8 @@ impl SessionStore for RawStore {
         Ok(format!("entry-{}", self.entries.lock().len() + 1))
     }
 
-    async fn append_entry(&self, entry: StoredSessionEntry) -> Result<(), SessionError> {
-        self.entries.lock().push(entry);
+    async fn append_entries(&self, entries: Vec<StoredSessionEntry>) -> Result<(), SessionError> {
+        self.entries.lock().extend(entries);
         Ok(())
     }
 }

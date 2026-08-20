@@ -225,9 +225,7 @@ pub async fn fork_session<R: SessionReader + ?Sized>(
         cwd.to_string_lossy().to_string(),
     )
     .await?;
-    for entry in &entries {
-        storage.append_entry(entry.clone()).await?;
-    }
+    storage.append_entries(entries).await?;
     storage.set_parent_session_path(&parent_path).await?;
     storage
         .checkpoint()

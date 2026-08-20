@@ -2,6 +2,9 @@
 
 use super::*;
 use tempfile::tempdir;
+use theway_contract::extension::{
+    ExtensionAbiMajor, ExtensionDurableEntry, ExtensionDurableEntryPayload, ExtensionStateMutation,
+};
 
 fn custom_entry(id: &str, parent_id: Option<&str>) -> StoredSessionEntry {
     StoredSessionEntry::from_payload(serde_json::json!({
@@ -12,6 +15,32 @@ fn custom_entry(id: &str, parent_id: Option<&str>) -> StoredSessionEntry {
         "customType": "test",
         "data": null,
     }))
+    .unwrap()
+}
+
+fn extension_state_entry(
+    id: &str,
+    parent_id: Option<&str>,
+    sequence: u64,
+    value: &str,
+) -> StoredSessionEntry {
+    StoredSessionEntry::extension(
+        id.into(),
+        parent_id.map(str::to_string),
+        "2026-08-20T00:00:00Z".into(),
+        ExtensionDurableEntry {
+            abi_major: ExtensionAbiMajor::V2,
+            extension_id: "deepseek-anchor".into(),
+            state_schema_version: 1,
+            origin_sequence: sequence,
+            entry: ExtensionDurableEntryPayload::StateMutation {
+                key: "phase".into(),
+                mutation: ExtensionStateMutation::Set {
+                    value: serde_json::json!(value),
+                },
+            },
+        },
+    )
     .unwrap()
 }
 
@@ -133,7 +162,6 @@ async fn resume_with_no_id_picks_most_recent_session() {
     // First, older session.
     let older = repo.create("/cwd").await.unwrap();
     let older_id = older
-
         .get_metadata_json()
         .await
         .unwrap()
@@ -146,7 +174,6 @@ async fn resume_with_no_id_picks_most_recent_session() {
 
     let newer = repo.create("/cwd").await.unwrap();
     let newer_id = newer
-
         .get_metadata_json()
         .await
         .unwrap()
@@ -158,7 +185,6 @@ async fn resume_with_no_id_picks_most_recent_session() {
 
     let picked = resume(&repo, None).await.unwrap();
     let picked_id = picked
-
         .get_metadata_json()
         .await
         .unwrap()
@@ -281,7 +307,6 @@ async fn delete_removes_endpoint_sidecar() {
     let repo = SqliteSessionRepo::new(dir.path());
     let session = repo.create("/cwd").await.unwrap();
     let id = session
-
         .get_metadata_json()
         .await
         .unwrap()
@@ -305,7 +330,6 @@ async fn delete_removes_session_sidecars() {
     let repo = SqliteSessionRepo::new(dir.path());
     let session = repo.create("/cwd").await.unwrap();
     let id = session
-
         .get_metadata_json()
         .await
         .unwrap()
@@ -368,7 +392,10 @@ fn flatten_session_tree_nests_forks_with_pi_prefixes() {
 
 #[test]
 fn flatten_session_tree_breaks_parent_cycles() {
-    let entries = vec![entry("a", Some("a"), "self-parent"), entry("b", None, "root")];
+    let entries = vec![
+        entry("a", Some("a"), "self-parent"),
+        entry("b", None, "root"),
+    ];
     let rows = flatten_session_tree(&entries);
     assert_eq!(rows[0].prefix, "", "cyclic parent must not recurse");
     assert_eq!(rows[0].depth, 0);
@@ -391,9 +418,14 @@ async fn fork_session_replays_entries_and_records_parent_lineage() {
     parent.append_entry(c1).await.unwrap();
 
     // Fork before c1: the new session must contain exactly [u1].
-    let fork = fork_session(&repo, std::path::Path::new("/cwd"), &parent, vec![u1.clone()])
-        .await
-        .unwrap();
+    let fork = fork_session(
+        &repo,
+        std::path::Path::new("/cwd"),
+        &parent,
+        vec![u1.clone()],
+    )
+    .await
+    .unwrap();
     let fork_meta = fork.get_metadata_json().await.unwrap();
     let fork_path = PathBuf::from(fork_meta["path"].as_str().unwrap());
     assert_ne!(fork_path, parent_path, "fork must be a new file");
@@ -420,4 +452,74 @@ async fn fork_session_replays_entries_and_records_parent_lineage() {
     assert_eq!(fork_entry.parent_id.as_deref(), Some(parent_id.as_str()));
     let parent_entry = listed.iter().find(|e| e.id == parent_id).unwrap();
     assert_eq!(parent_entry.parent_id, None);
+}
+
+#[tokio::test]
+async fn fork_session_projects_extension_entries_at_the_exact_branch_point() {
+    let dir = tempdir().unwrap();
+    let repo = SqliteSessionRepo::new(dir.path());
+    let parent = repo.create("/cwd").await.unwrap();
+    parent
+        .append_entries(vec![
+            custom_entry("root", None),
+            extension_state_entry("before", Some("root"), 1, "bootstrap"),
+            custom_entry("middle", Some("before")),
+            extension_state_entry("after", Some("middle"), 2, "promoted"),
+        ])
+        .await
+        .unwrap();
+
+    let before_entries = parent.get_path_to_root(Some("before")).await.unwrap();
+    let after_entries = parent.get_path_to_root(Some("after")).await.unwrap();
+    let fork_before = fork_session(&repo, std::path::Path::new("/cwd"), &parent, before_entries)
+        .await
+        .unwrap();
+    let fork_after = fork_session(&repo, std::path::Path::new("/cwd"), &parent, after_entries)
+        .await
+        .unwrap();
+
+    parent
+        .append_entry(extension_state_entry(
+            "parent-late",
+            Some("after"),
+            3,
+            "parent-only",
+        ))
+        .await
+        .unwrap();
+    fork_before
+        .append_entry(extension_state_entry(
+            "child-late",
+            Some("before"),
+            2,
+            "child-only",
+        ))
+        .await
+        .unwrap();
+
+    let parent_ids = parent
+        .get_extension_entries("deepseek-anchor", None)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|entry| entry.id)
+        .collect::<Vec<_>>();
+    let before_ids = fork_before
+        .get_extension_entries("deepseek-anchor", None)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|entry| entry.id)
+        .collect::<Vec<_>>();
+    let after_ids = fork_after
+        .get_extension_entries("deepseek-anchor", None)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|entry| entry.id)
+        .collect::<Vec<_>>();
+
+    assert_eq!(parent_ids, vec!["before", "after", "parent-late"]);
+    assert_eq!(before_ids, vec!["before", "child-late"]);
+    assert_eq!(after_ids, vec!["before", "after"]);
 }
