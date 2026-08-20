@@ -18,6 +18,7 @@
 mod catalog;
 mod events;
 mod run;
+mod runtime_extensions;
 mod session;
 
 use std::sync::Arc;
@@ -94,6 +95,10 @@ pub struct AgentHarnessOptions {
     pub max_iterations: Option<u32>,
     /// Engine-independent lifecycle port supplied by the embedding runtime.
     pub runtime_extensions: Arc<dyn RuntimeExtensionPort>,
+    /// Working directory included in runtime-extension lifecycle context.
+    pub runtime_extension_cwd: String,
+    /// Whether this harness is currently attached to an interactive client.
+    pub runtime_extension_has_interactive_client: bool,
 }
 
 impl AgentHarnessOptions {
@@ -121,6 +126,8 @@ impl AgentHarnessOptions {
             turn_continuation_cap: None,
             max_iterations: None,
             runtime_extensions: Arc::new(NoopRuntimeExtensionPort),
+            runtime_extension_cwd: ".".into(),
+            runtime_extension_has_interactive_client: false,
         }
     }
 }
@@ -158,12 +165,30 @@ pub struct AgentHarness {
     on_turn_end: Option<OnTurnEndHook>,
     turn_continuation_cap: u32,
     active_hook_cancel: Mutex<Option<tokio_util::sync::CancellationToken>>,
-    runtime_extensions: Arc<dyn RuntimeExtensionPort>,
+    runtime_extensions: Arc<runtime_extensions::HarnessRuntimeExtensions>,
 }
 
 impl AgentHarness {
     pub fn new(options: AgentHarnessOptions) -> Self {
         let session_id = options.observation_context.session_id.clone();
+        let runtime_session_id = session_id
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "local-session".into());
+        let runtime_extensions = Arc::new(runtime_extensions::HarnessRuntimeExtensions::new(
+            Arc::clone(&options.runtime_extensions),
+            runtime_session_id,
+            if options.runtime_extension_cwd.trim().is_empty() {
+                ".".into()
+            } else {
+                options.runtime_extension_cwd.clone()
+            },
+            options.runtime_extension_has_interactive_client,
+            Some(theway_contract::extension::ExtensionModelRef {
+                provider: options.model.provider.0.clone(),
+                model: options.model.id.clone(),
+            }),
+        ));
         let state = AgentState {
             model: Some(options.model),
             thinking_level: Some(options.thinking_level),
@@ -172,8 +197,15 @@ impl AgentHarness {
             ..Default::default()
         };
 
+        let transform_runtime = Arc::clone(&runtime_extensions);
+        let transform_context: TransformContext = Arc::new(move |messages, cancel| {
+            let runtime = Arc::clone(&transform_runtime);
+            Box::pin(async move { runtime.transform_context(messages, cancel).await })
+        });
+
         let agent = Agent::new(AgentOptions {
             initial_state: Some(state),
+            transform_context: Some(transform_context),
             stream_fn: options.stream_fn.clone(),
             before_tool_call: options.before_tool_call.clone(),
             after_tool_call: options.after_tool_call.clone(),
@@ -210,7 +242,7 @@ impl AgentHarness {
                 .turn_continuation_cap
                 .unwrap_or(DEFAULT_TURN_CONTINUATION_CAP),
             active_hook_cancel: Mutex::new(None),
-            runtime_extensions: options.runtime_extensions,
+            runtime_extensions,
         }
     }
 
@@ -235,7 +267,7 @@ impl AgentHarness {
     }
 
     pub fn runtime_extensions(&self) -> &Arc<dyn RuntimeExtensionPort> {
-        &self.runtime_extensions
+        self.runtime_extensions.port()
     }
 
     pub fn abort(&self) {

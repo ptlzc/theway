@@ -351,6 +351,18 @@ impl Agent {
         self.inner.active_cancel.lock().clone()
     }
 
+    /// Wait until the active run has released admission and all awaited loop
+    /// listeners have completed.
+    pub async fn wait_until_idle(&self) {
+        loop {
+            let notified = self.inner.idle.notified();
+            if !self.is_streaming() {
+                return;
+            }
+            notified.await;
+        }
+    }
+
     /// Start a new prompt. Appends a user `AgentMessage`, runs the loop, awaits completion.
     pub async fn prompt(&self, message: AgentMessage) -> Result<(), AgentRunError> {
         self.prompt_many(vec![message]).await

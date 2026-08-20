@@ -36,6 +36,7 @@ async fn harness_event_bus_delivers_session_and_branch() {
             SessionEvent::PersistenceError { .. } => "PersistenceError",
             SessionEvent::TurnDecision { .. } => "TurnEnded",
             SessionEvent::SkillsReloaded { .. } => "SkillsReloaded",
+            SessionEvent::ExtensionCommandOutcome { .. } => "ExtensionCommandOutcome",
         })
         .collect();
     assert!(

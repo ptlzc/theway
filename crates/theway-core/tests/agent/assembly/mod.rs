@@ -1,5 +1,7 @@
 //! Tests for `agent::assembly` — split out of src (see docs/rust-test-files.md).
 
+mod runtime_extensions;
+
 use std::sync::Arc;
 
 use super::*;
@@ -293,13 +295,13 @@ fn last_user_text_from_state_finds_most_recent_user_text() {
     assert_eq!(h.last_user_text_from_state().unwrap(), "second");
 }
 
-#[test]
-fn ensure_session_start_emitted_fires_once() {
+#[tokio::test]
+async fn ensure_session_start_emitted_fires_once() {
     let h = harness();
     let mut rx = h.subscribe_session_broadcast();
 
-    h.ensure_session_start_emitted();
-    h.ensure_session_start_emitted();
+    h.ensure_session_start_emitted().await;
+    h.ensure_session_start_emitted().await;
 
     let mut seen = 0;
     while let Ok(event) = rx.try_recv() {
@@ -382,8 +384,8 @@ fn harness_with_stream(stream: StreamFn) -> AgentHarness {
     AgentHarness::new(opts)
 }
 
-#[test]
-fn subscribe_harness_receives_and_unsubscribes() {
+#[tokio::test]
+async fn subscribe_harness_receives_and_unsubscribes() {
     let h = harness();
     let seen = Arc::new(std::sync::Mutex::new(0usize));
     let seen_clone = seen.clone();
@@ -393,7 +395,7 @@ fn subscribe_harness_receives_and_unsubscribes() {
         }
     }));
 
-    h.ensure_session_start_emitted();
+    h.ensure_session_start_emitted().await;
     assert_eq!(*seen.lock().unwrap(), 1);
 
     unsubscribe();

@@ -42,15 +42,36 @@ impl AgentHarness {
         let _ = self.session_broadcast_tx.send(event);
     }
 
-    pub(super) fn ensure_session_start_emitted(&self) {
-        let mut emitted = self.session_start_emitted.lock();
-        if *emitted {
+    pub(super) async fn ensure_session_start_emitted(&self) {
+        let should_emit = {
+            let mut emitted = self.session_start_emitted.lock();
+            if *emitted {
+                false
+            } else {
+                *emitted = true;
+                true
+            }
+        };
+        if !should_emit {
             return;
         }
-        *emitted = true;
         let messages_replayed = self.agent.state().messages.len();
-        drop(emitted);
+        self.runtime_extensions.ensure_session_start().await;
         self.emit_harness_event(SessionEvent::Started { messages_replayed });
+    }
+
+    /// Reconstruct the session-scoped extension runtime before it begins
+    /// serving prompts. Idempotent with the first prompt path.
+    pub async fn start_runtime_extensions(&self) {
+        self.ensure_session_start_emitted().await;
+    }
+
+    /// Cancel any active run, wait for its awaited cleanup, then publish the
+    /// extension session-shutdown lifecycle exactly once.
+    pub async fn shutdown_runtime_extensions(&self) {
+        self.abort();
+        self.agent.wait_until_idle().await;
+        self.runtime_extensions.shutdown().await;
     }
 }
 
@@ -82,6 +103,10 @@ pub enum SessionEvent {
     },
     /// The skill catalog was hot-reloaded.
     SkillsReloaded { total: usize },
+    /// An extension handled input without starting an LLM run.
+    ExtensionCommandOutcome {
+        outcome: theway_contract::extension::ExtensionCommandOutcome,
+    },
 }
 
 pub type SessionListener = Arc<dyn Fn(SessionEvent) + Send + Sync>;

@@ -204,6 +204,12 @@ pub trait SessionStorage: Send + Sync {
     async fn set_leaf_id(&self, id: Option<String>) -> Result<(), SessionError>;
     async fn create_entry_id(&self) -> Result<String, SessionError>;
     async fn append_entry(&self, entry: SessionTreeEntry) -> Result<(), SessionError>;
+    async fn append_entries(&self, entries: Vec<SessionTreeEntry>) -> Result<(), SessionError> {
+        for entry in entries {
+            self.append_entry(entry).await?;
+        }
+        Ok(())
+    }
     async fn get_entry(&self, id: &str) -> Result<Option<SessionTreeEntry>, SessionError>;
     async fn get_entries(&self) -> Result<Vec<SessionTreeEntry>, SessionError>;
     async fn get_path_to_root(
@@ -409,6 +415,30 @@ impl Session {
             message,
         })
         .await
+    }
+
+    /// Append a parent-linked message batch through the storage backend's
+    /// atomic batch primitive when one is available.
+    pub async fn append_messages(
+        &self,
+        messages: Vec<AgentMessage>,
+    ) -> Result<Vec<String>, SessionError> {
+        let mut parent = self.storage.get_leaf_id().await?;
+        let mut ids = Vec::with_capacity(messages.len());
+        let mut entries = Vec::with_capacity(messages.len());
+        for message in messages {
+            let id = self.storage.create_entry_id().await?;
+            entries.push(SessionTreeEntry::Message {
+                id: id.clone(),
+                parent_id: parent,
+                timestamp: Self::now_rfc3339(),
+                message,
+            });
+            parent = Some(id.clone());
+            ids.push(id);
+        }
+        self.storage.append_entries(entries).await?;
+        Ok(ids)
     }
 
     pub async fn append_thinking_level_change(

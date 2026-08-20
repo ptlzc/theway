@@ -74,6 +74,14 @@ impl SessionStorage for PersistentSessionStorage {
         self.store.append_entry(encode_session_entry(&entry)?).await
     }
 
+    async fn append_entries(&self, entries: Vec<SessionTreeEntry>) -> Result<(), SessionError> {
+        let entries = entries
+            .iter()
+            .map(encode_session_entry)
+            .collect::<Result<Vec<_>, _>>()?;
+        self.store.append_entries(entries).await
+    }
+
     async fn get_entry(&self, id: &str) -> Result<Option<SessionTreeEntry>, SessionError> {
         self.store
             .get_entry(id)

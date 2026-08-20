@@ -71,6 +71,15 @@ impl SessionStorage for MemorySessionStorage {
         Ok(())
     }
 
+    async fn append_entries(&self, entries: Vec<SessionTreeEntry>) -> Result<(), SessionError> {
+        let mut g = self.lock();
+        if let Some(last) = entries.last() {
+            g.leaf_id = Some(last.id().to_string());
+        }
+        g.entries.extend(entries);
+        Ok(())
+    }
+
     async fn get_entry(&self, id: &str) -> Result<Option<SessionTreeEntry>, SessionError> {
         Ok(self.lock().entries.iter().find(|e| e.id() == id).cloned())
     }

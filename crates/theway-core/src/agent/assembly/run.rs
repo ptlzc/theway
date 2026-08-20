@@ -3,8 +3,11 @@ use theway_llm_provider::{ImageContent, Message as PiMessage};
 use crate::agent::AgentRunError;
 use crate::types::AgentMessage;
 
+use super::runtime_extensions::InputTransformOutcome;
 use super::session::{finish_persisted_run, make_session_listener};
 use super::{AgentHarness, OnTurnEndContext, SessionEvent, TurnEndAction};
+
+const RUNTIME_EXTENSION_FOLLOW_UP_CHAIN_CAP: u32 = 16;
 
 impl AgentHarness {
     /// Prompt the agent with text. Runs auto-compaction first and persists results.
@@ -40,7 +43,17 @@ impl AgentHarness {
     }
 
     async fn prompt_with_message(&self, message: AgentMessage) -> Result<(), AgentRunError> {
-        self.ensure_session_start_emitted();
+        self.runtime_extensions
+            .reject_reentrant_operation()
+            .map_err(|error| AgentRunError::Other(error.message))?;
+        self.ensure_session_start_emitted().await;
+        let message = match self.runtime_extensions.transform_input(message).await {
+            InputTransformOutcome::Run(message) => message,
+            InputTransformOutcome::Handled(outcome) => {
+                self.emit_harness_event(SessionEvent::ExtensionCommandOutcome { outcome });
+                return Ok(());
+            }
+        };
         self.check_budget_cap()?;
         self.run_auto_compaction().await?;
         let last_user_prompt = extract_user_prompt_text(&message);
@@ -49,7 +62,10 @@ impl AgentHarness {
     }
 
     pub async fn continue_(&self) -> Result<(), AgentRunError> {
-        self.ensure_session_start_emitted();
+        self.runtime_extensions
+            .reject_reentrant_operation()
+            .map_err(|error| AgentRunError::Other(error.message))?;
+        self.ensure_session_start_emitted().await;
         self.check_budget_cap()?;
         self.run_auto_compaction().await?;
         let last_user_prompt = self.last_user_text_from_state();
@@ -63,13 +79,40 @@ impl AgentHarness {
         last_user_prompt: Option<String>,
     ) -> Result<(), AgentRunError> {
         let mut continuation_count = 0_u32;
+        let mut extension_follow_up_count = 0_u32;
         let mut pending_user_message = first_message;
         let mut is_first_iteration = true;
         let mut last_user_prompt = last_user_prompt;
 
         loop {
+            self.runtime_extensions
+                .begin_run()
+                .map_err(|error| AgentRunError::Other(error.message))?;
+            let before_run = self.runtime_extensions.before_run().await;
+            if !before_run.messages.is_empty() {
+                if let Err(error) = self
+                    .session
+                    .append_messages(before_run.messages.clone())
+                    .await
+                {
+                    self.runtime_extensions.settle_run();
+                    return Err(AgentRunError::Other(format!(
+                        "persist before-run messages: {error}"
+                    )));
+                }
+                self.agent
+                    .state()
+                    .messages
+                    .extend(before_run.messages.clone());
+            }
+            let previous_system_prompt = before_run.system_prompt.map(|system_prompt| {
+                let mut state = self.agent.state();
+                std::mem::replace(&mut state.system_prompt, system_prompt)
+            });
             let (listener, persist_errors) = make_session_listener(self.session.clone());
             let unsubscribe = self.agent.subscribe(listener);
+            let (extension_listener, cancelled) = self.runtime_extensions.make_loop_listener();
+            let unsubscribe_extensions = self.agent.subscribe(extension_listener);
             let result = if is_first_iteration {
                 match pending_user_message.take() {
                     Some(message) => self.agent.prompt(message).await,
@@ -81,9 +124,63 @@ impl AgentHarness {
                 );
                 self.agent.prompt(message).await
             };
+            unsubscribe_extensions();
             unsubscribe();
-            finish_persisted_run(result, persist_errors)?;
+            let result = finish_persisted_run(result, persist_errors);
+            let was_cancelled = cancelled.load(std::sync::atomic::Ordering::Acquire);
+            let outcome = if was_cancelled {
+                "cancelled"
+            } else if result.is_ok() {
+                "success"
+            } else {
+                "error"
+            };
+            self.runtime_extensions
+                .observe_run(
+                    theway_contract::extension::ExtensionLifecycleEvent::RunEnded,
+                    serde_json::json!({"outcome": outcome}),
+                    was_cancelled,
+                )
+                .await;
+            if result.is_err() {
+                self.runtime_extensions
+                    .observe_run(
+                        theway_contract::extension::ExtensionLifecycleEvent::RunError,
+                        serde_json::json!({
+                            "category": if was_cancelled { "cancelled" } else { "runtime" },
+                        }),
+                        was_cancelled,
+                    )
+                    .await;
+            }
+            self.runtime_extensions
+                .observe_run(
+                    theway_contract::extension::ExtensionLifecycleEvent::RunSettled,
+                    serde_json::json!({"outcome": outcome}),
+                    was_cancelled,
+                )
+                .await;
+            self.runtime_extensions.settle_run();
+            if let Some(previous_system_prompt) = previous_system_prompt {
+                self.agent.state().system_prompt = previous_system_prompt;
+            }
+            result?;
             is_first_iteration = false;
+
+            if let Some(message) = self.runtime_extensions.take_follow_up() {
+                if extension_follow_up_count >= RUNTIME_EXTENSION_FOLLOW_UP_CHAIN_CAP {
+                    return Err(AgentRunError::Other(format!(
+                        "runtime extension follow-up chain exceeded {} runs",
+                        RUNTIME_EXTENSION_FOLLOW_UP_CHAIN_CAP
+                    )));
+                }
+                extension_follow_up_count = extension_follow_up_count.saturating_add(1);
+                last_user_prompt = extract_user_prompt_text(&message);
+                pending_user_message = Some(message);
+                self.check_budget_cap()?;
+                self.run_auto_compaction().await?;
+                continue;
+            }
 
             let Some(hook) = self.on_turn_end.clone() else {
                 return Ok(());

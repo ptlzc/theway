@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use parking_lot::Mutex;
+use theway_contract::extension::ExtensionLifecycleEvent;
 use theway_llm_provider::Model;
 
 use crate::agent::session::session::{BranchSummaryInput, Session};
@@ -15,10 +16,18 @@ impl AgentHarness {
         &self,
         model: Model,
     ) -> Result<String, crate::agent::types::SessionError> {
+        self.runtime_extensions
+            .reject_reentrant_operation()
+            .map_err(extension_operation_error)?;
+        self.runtime_extensions
+            .before_model_selection(&model)
+            .await
+            .map_err(extension_operation_error)?;
         let provider = model.provider.0.clone();
         let model_id = model.id.clone();
         let id = self.session.append_model_change(provider, model_id).await?;
-        self.agent.state().model = Some(model);
+        self.agent.state().model = Some(model.clone());
+        self.runtime_extensions.model_selected(&model).await;
         Ok(id)
     }
 
@@ -40,15 +49,98 @@ impl AgentHarness {
         entry_id: Option<&str>,
         summary: Option<BranchSummaryInput>,
     ) -> Result<Option<String>, crate::agent::types::SessionError> {
+        self.runtime_extensions
+            .reject_reentrant_operation()
+            .map_err(extension_operation_error)?;
         let from = self.session.leaf_id().await.ok().flatten();
+        self.runtime_extensions
+            .gate_session_operation(
+                ExtensionLifecycleEvent::BeforeSessionSwitch,
+                serde_json::json!({
+                    "kind": "branch",
+                    "fromEntryId": from,
+                    "toEntryId": entry_id,
+                }),
+            )
+            .await
+            .map_err(extension_operation_error)?;
         let result = self.session.move_to(entry_id, summary).await?;
         self.rehydrate_from_session().await?;
         self.emit_harness_event(SessionEvent::Branch {
-            from_entry_id: from,
+            from_entry_id: from.clone(),
             to_entry_id: entry_id.map(str::to_string),
             summary_entry_id: result.clone(),
         });
+        self.runtime_extensions
+            .observe_session_operation(
+                ExtensionLifecycleEvent::SessionSwitched,
+                serde_json::json!({
+                    "kind": "branch",
+                    "fromEntryId": from,
+                    "toEntryId": entry_id,
+                    "summaryEntryId": result,
+                }),
+            )
+            .await;
         Ok(result)
+    }
+
+    /// Gate a daemon-owned session switch before it constructs or activates the
+    /// target runtime.
+    pub async fn before_session_switch(
+        &self,
+        target_session_id: &str,
+    ) -> Result<(), crate::agent::types::SessionError> {
+        self.runtime_extensions
+            .reject_reentrant_operation()
+            .map_err(extension_operation_error)?;
+        self.runtime_extensions
+            .gate_session_operation(
+                ExtensionLifecycleEvent::BeforeSessionSwitch,
+                serde_json::json!({
+                    "kind": "session",
+                    "targetSessionId": target_session_id,
+                }),
+            )
+            .await
+            .map_err(extension_operation_error)
+    }
+
+    pub async fn session_switched(&self, target_session_id: &str) {
+        self.runtime_extensions
+            .observe_session_operation(
+                ExtensionLifecycleEvent::SessionSwitched,
+                serde_json::json!({
+                    "kind": "session",
+                    "targetSessionId": target_session_id,
+                }),
+            )
+            .await;
+    }
+
+    pub async fn before_session_fork(
+        &self,
+        branch_entry_id: Option<&str>,
+    ) -> Result<(), crate::agent::types::SessionError> {
+        self.runtime_extensions
+            .reject_reentrant_operation()
+            .map_err(extension_operation_error)?;
+        self.runtime_extensions
+            .gate_session_operation(
+                ExtensionLifecycleEvent::BeforeSessionFork,
+                serde_json::json!({"branchEntryId": branch_entry_id}),
+            )
+            .await
+            .map_err(extension_operation_error)
+    }
+
+    pub async fn session_forked(&self, target_session_id: &str) {
+        self.runtime_extensions
+            .observe_session_operation(
+                ExtensionLifecycleEvent::SessionForked,
+                serde_json::json!({"targetSessionId": target_session_id}),
+            )
+            .await;
     }
 
     /// Replace in-memory state with the active session branch.
@@ -71,6 +163,15 @@ impl AgentHarness {
             state.thinking_level = Some(level);
         }
         Ok(context)
+    }
+}
+
+fn extension_operation_error(
+    error: theway_contract::extension::ExtensionErrorEnvelope,
+) -> crate::agent::types::SessionError {
+    crate::agent::types::SessionError {
+        code: crate::agent::types::SessionErrorCode::Aborted,
+        message: error.message,
     }
 }
 
