@@ -1,13 +1,12 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde_json::Value;
 use theway_contract::extension::{
-    ExtensionAbiMajor, ExtensionActionBatch, ExtensionActionKind, ExtensionCatalogEntry,
-    ExtensionCatalogStatus, ExtensionDiagnostic, ExtensionDiagnosticCode, ExtensionGateDecision,
-    ExtensionHookClass, ExtensionHookContract, ExtensionLifecycleEvent,
+    ExtensionActionBatch, ExtensionCatalogEntry, ExtensionCatalogStatus, ExtensionDiagnostic,
+    ExtensionDiagnosticCode, ExtensionHookClass, ExtensionHookContract, ExtensionLifecycleEvent,
 };
 use theway_core::agent::runtime_extensions::{
     RawRuntimeExtensionResult, RuntimeCompactionExtensionPort, RuntimeExtensionInvocation,
@@ -17,9 +16,13 @@ use theway_core::agent::runtime_extensions::{
 
 use super::catalog::{ExtensionPackage, PackageCatalog};
 use super::diagnostics;
-use super::dispatcher;
-use super::effects::InstanceLifecyclePhase;
+use super::dispatch_result::{
+    accept_transform_batch, decode_batch, empty_batch, failed_gate_decision, merge_batch,
+};
+use super::dispatcher::{self, HookRegistration, RuntimeExtensionHostConfig};
+use super::effects::{InstanceHealth, InstanceLifecyclePhase};
 use super::engine::{EngineInstanceKey, QuickJsEnginePool};
+use super::observation::{ObservationDispatch, ObservationJob, ObservationQueue, diagnostic_code};
 use super::state::HostLifecycleSequence;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -28,11 +31,14 @@ pub struct ExtensionInvocationOutput {
     pub value: Value,
 }
 
+#[derive(Clone)]
 struct ActiveExtension {
     package: Arc<ExtensionPackage>,
     key: EngineInstanceKey,
-    subscriptions: BTreeSet<ExtensionLifecycleEvent>,
+    registrations: Vec<HookRegistration>,
     phase: InstanceLifecyclePhase,
+    health: Arc<InstanceHealth>,
+    observation_queues: BTreeMap<u64, Arc<ObservationQueue>>,
 }
 
 /// Persistent ABI v2 package instances owned by one runtime session.
@@ -40,12 +46,14 @@ pub struct SessionPluginHost {
     session_id: String,
     cwd: String,
     engine: QuickJsEnginePool,
+    config: RuntimeExtensionHostConfig,
     sequence: HostLifecycleSequence,
     active: tokio::sync::Mutex<Vec<ActiveExtension>>,
-    catalog: parking_lot::RwLock<PackageCatalog>,
-    diagnostics: parking_lot::Mutex<Vec<ExtensionDiagnostic>>,
-    subscription_counts: parking_lot::RwLock<BTreeMap<ExtensionLifecycleEvent, usize>>,
-    shutdown: AtomicBool,
+    catalog: Arc<parking_lot::RwLock<PackageCatalog>>,
+    diagnostics: Arc<parking_lot::Mutex<Vec<ExtensionDiagnostic>>>,
+    subscription_counts:
+        parking_lot::RwLock<BTreeMap<(ExtensionLifecycleEvent, ExtensionHookClass), usize>>,
+    shutdown: Arc<AtomicBool>,
 }
 
 impl SessionPluginHost {
@@ -62,6 +70,18 @@ impl SessionPluginHost {
         host
     }
 
+    pub async fn start_with_config(
+        catalog: PackageCatalog,
+        engine: QuickJsEnginePool,
+        session_id: impl Into<String>,
+        cwd: &Path,
+        config: RuntimeExtensionHostConfig,
+    ) -> Self {
+        let host = Self::load_with_config(catalog, engine, session_id, cwd, config).await;
+        host.start_sessions("initial").await;
+        host
+    }
+
     /// Load package modules and run setup/extension-load without sending
     /// session-start. Runtime assembly uses this form because core publishes
     /// session-start after transcript reconstruction.
@@ -71,17 +91,38 @@ impl SessionPluginHost {
         session_id: impl Into<String>,
         cwd: &Path,
     ) -> Self {
+        Self::load_with_config(
+            catalog,
+            engine,
+            session_id,
+            cwd,
+            RuntimeExtensionHostConfig::default(),
+        )
+        .await
+    }
+
+    pub async fn load_with_config(
+        catalog: PackageCatalog,
+        engine: QuickJsEnginePool,
+        session_id: impl Into<String>,
+        cwd: &Path,
+        config: RuntimeExtensionHostConfig,
+    ) -> Self {
+        config
+            .validate()
+            .expect("runtime extension host config must be valid");
         let diagnostics = catalog.diagnostics().to_vec();
         let host = Self {
             session_id: session_id.into(),
             cwd: cwd.to_string_lossy().into_owned(),
             engine,
+            config,
             sequence: HostLifecycleSequence::default(),
             active: tokio::sync::Mutex::new(Vec::new()),
-            catalog: parking_lot::RwLock::new(catalog),
-            diagnostics: parking_lot::Mutex::new(diagnostics),
+            catalog: Arc::new(parking_lot::RwLock::new(catalog)),
+            diagnostics: Arc::new(parking_lot::Mutex::new(diagnostics)),
             subscription_counts: parking_lot::RwLock::new(BTreeMap::new()),
-            shutdown: AtomicBool::new(false),
+            shutdown: Arc::new(AtomicBool::new(false)),
         };
         host.load_effective_packages().await;
         host
@@ -95,19 +136,28 @@ impl SessionPluginHost {
         if self.shutdown.load(Ordering::Acquire) {
             return Vec::new();
         }
-        let mut active = self.active.lock().await;
+        let active = self.active.lock().await;
         let mut outputs = Vec::with_capacity(active.len());
         let mut index = 0;
         while index < active.len() {
-            if !active[index].subscriptions.contains(&event) {
+            if active[index].health.is_open() {
+                index += 1;
+                continue;
+            }
+            if !active[index]
+                .registrations
+                .iter()
+                .any(|registration| registration.event == event)
+            {
                 index += 1;
                 continue;
             }
             match self
-                .invoke_instance(&active[index].key, event, payload.clone())
+                .invoke_extension(&active[index], event, payload.clone())
                 .await
             {
                 Ok(value) => {
+                    active[index].health.record_success();
                     outputs.push(ExtensionInvocationOutput {
                         extension_id: active[index].package.manifest().id.clone(),
                         value,
@@ -115,9 +165,14 @@ impl SessionPluginHost {
                     index += 1;
                 }
                 Err(error) => {
-                    let failed = active.remove(index);
-                    self.remove_subscriptions(&failed.subscriptions);
-                    self.record_runtime_fault(&failed, error).await;
+                    self.record_hook_failure(
+                        &active[index],
+                        event,
+                        ExtensionDiagnosticCode::HookFailed,
+                        error,
+                    )
+                    .await;
+                    index += 1;
                 }
             }
         }
@@ -147,7 +202,7 @@ impl SessionPluginHost {
             )
             .await;
             self.engine.dispose(&extension.key).await;
-            self.remove_subscriptions(&extension.subscriptions);
+            self.remove_subscriptions(&extension.registrations);
             extension.phase = InstanceLifecyclePhase::Disposed;
         }
     }
@@ -157,6 +212,7 @@ impl SessionPluginHost {
             .lock()
             .await
             .iter()
+            .filter(|extension| !extension.health.is_open())
             .map(|extension| extension.package.manifest().id.clone())
             .collect()
     }
@@ -174,8 +230,15 @@ impl SessionPluginHost {
         let mut active = self.active.lock().await;
         for package in packages {
             let key = EngineInstanceKey::new(&self.session_id, &package.manifest().id);
-            let subscriptions = match self.engine.load(key.clone(), &package).await {
-                Ok(subscriptions) => subscriptions,
+            let registrations = match self.engine.load(key.clone(), &package).await {
+                Ok(metadata) => match dispatcher::validate_registrations(metadata) {
+                    Ok(registrations) => registrations,
+                    Err(error) => {
+                        self.engine.dispose(&key).await;
+                        self.record_load_fault(&package, error);
+                        continue;
+                    }
+                },
                 Err(error) => {
                     self.record_load_fault(&package, error);
                     continue;
@@ -184,16 +247,33 @@ impl SessionPluginHost {
             let extension = ActiveExtension {
                 package,
                 key,
-                subscriptions,
+                observation_queues: registrations
+                    .iter()
+                    .filter(|registration| {
+                        registration.delivery
+                            == theway_contract::extension::ExtensionDeliveryPolicy::BoundedCoalescing
+                    })
+                    .map(|registration| {
+                        (
+                            registration.registration_id,
+                            Arc::new(ObservationQueue::new(
+                                self.config.observation_queue_capacity,
+                            )),
+                        )
+                    })
+                    .collect(),
+                registrations,
                 phase: InstanceLifecyclePhase::Loaded,
+                health: Arc::new(InstanceHealth::default()),
             };
             if extension
-                .subscriptions
-                .contains(&ExtensionLifecycleEvent::ExtensionLoad)
+                .registrations
+                .iter()
+                .any(|registration| registration.event == ExtensionLifecycleEvent::ExtensionLoad)
             {
                 if let Err(error) = self
-                    .invoke_instance(
-                        &extension.key,
+                    .invoke_extension(
+                        &extension,
                         ExtensionLifecycleEvent::ExtensionLoad,
                         serde_json::json!({"reason": "initial"}),
                     )
@@ -204,7 +284,7 @@ impl SessionPluginHost {
                     continue;
                 }
             }
-            self.add_subscriptions(&extension.subscriptions);
+            self.add_subscriptions(&extension.registrations);
             active.push(extension);
         }
     }
@@ -214,19 +294,20 @@ impl SessionPluginHost {
         let mut index = 0;
         while index < active.len() {
             if active[index]
-                .subscriptions
-                .contains(&ExtensionLifecycleEvent::SessionStart)
+                .registrations
+                .iter()
+                .any(|registration| registration.event == ExtensionLifecycleEvent::SessionStart)
             {
                 if let Err(error) = self
-                    .invoke_instance(
-                        &active[index].key,
+                    .invoke_extension(
+                        &active[index],
                         ExtensionLifecycleEvent::SessionStart,
                         serde_json::json!({"reason": reason}),
                     )
                     .await
                 {
                     let failed = active.remove(index);
-                    self.remove_subscriptions(&failed.subscriptions);
+                    self.remove_subscriptions(&failed.registrations);
                     self.cleanup_failed_start(&failed, true).await;
                     self.record_load_fault(&failed.package, error);
                     continue;
@@ -237,9 +318,10 @@ impl SessionPluginHost {
         }
     }
 
-    async fn invoke_instance(
+    async fn invoke_registration(
         &self,
         key: &EngineInstanceKey,
+        registration: &HookRegistration,
         event: ExtensionLifecycleEvent,
         payload: Value,
     ) -> Result<Value, String> {
@@ -251,7 +333,51 @@ impl SessionPluginHost {
             event,
             payload,
         );
-        self.engine.invoke(key, &envelope).await
+        self.engine
+            .invoke_controlled(
+                key,
+                &envelope,
+                registration.registration_id,
+                self.config.deadline(registration.deadline),
+                Arc::new(AtomicBool::new(false)),
+                self.config.broker_operation_quota,
+            )
+            .await
+            .map_err(|error| error.message)
+    }
+
+    async fn invoke_extension(
+        &self,
+        extension: &ActiveExtension,
+        event: ExtensionLifecycleEvent,
+        payload: Value,
+    ) -> Result<Value, String> {
+        let mut aggregate = empty_batch();
+        for registration in extension
+            .registrations
+            .iter()
+            .filter(|registration| registration.event == event)
+        {
+            if !registration.accepts_payload(&payload) {
+                return Err("extension event payload does not match the hook payloadSchema".into());
+            }
+            let value = self
+                .invoke_registration(&extension.key, registration, event, payload.clone())
+                .await?;
+            let batch = decode_batch(value)?;
+            if batch.actions.len() > self.config.max_actions {
+                return Err("extension action count exceeds the configured limit".into());
+            }
+            registration
+                .contract
+                .validate_result(&batch)
+                .map_err(|error| error.message)?;
+            if merge_batch(event, registration.class, &mut aggregate, batch) {
+                break;
+            }
+        }
+        serde_json::to_value(aggregate)
+            .map_err(|error| format!("extension action batch serialization failed: {error}"))
     }
 
     async fn cleanup_failed_start(&self, extension: &ActiveExtension, session_started: bool) {
@@ -272,18 +398,36 @@ impl SessionPluginHost {
         self.engine.dispose(&extension.key).await;
     }
 
-    async fn record_runtime_fault(&self, extension: &ActiveExtension, error: String) {
-        self.diagnostics.lock().push(diagnostics::hook_failed(
+    async fn record_hook_failure(
+        &self,
+        extension: &ActiveExtension,
+        event: ExtensionLifecycleEvent,
+        code: ExtensionDiagnosticCode,
+        error: String,
+    ) {
+        self.diagnostics.lock().push(diagnostics::invocation(
             extension.package.manifest().id.clone(),
             self.session_id.clone(),
+            event,
+            code,
             format!("extension hook failed: {error}"),
         ));
-        self.catalog.write().set_effective_status(
-            &extension.package.manifest().id,
-            ExtensionCatalogStatus::Faulted,
-            Some(ExtensionDiagnosticCode::HookFailed),
-        );
-        self.cleanup_failed_start(extension, true).await;
+        if code != ExtensionDiagnosticCode::Cancelled
+            && extension
+                .health
+                .record_failure(self.config.circuit_failure_threshold)
+        {
+            self.catalog.write().set_effective_status(
+                &extension.package.manifest().id,
+                ExtensionCatalogStatus::Disabled,
+                Some(ExtensionDiagnosticCode::CircuitOpened),
+            );
+            self.diagnostics.lock().push(diagnostics::circuit_opened(
+                extension.package.manifest().id.clone(),
+                self.session_id.clone(),
+            ));
+            self.engine.dispose(&extension.key).await;
+        }
     }
 
     fn record_load_fault(&self, package: &ExtensionPackage, error: String) {
@@ -305,10 +449,14 @@ impl SessionPluginHost {
         event: ExtensionLifecycleEvent,
         payload: Value,
     ) {
-        if !extension.subscriptions.contains(&event) {
+        if !extension
+            .registrations
+            .iter()
+            .any(|registration| registration.event == event)
+        {
             return;
         }
-        if let Err(error) = self.invoke_instance(&extension.key, event, payload).await {
+        if let Err(error) = self.invoke_extension(extension, event, payload).await {
             self.diagnostics.lock().push(diagnostics::hook_failed(
                 extension.package.manifest().id.clone(),
                 self.session_id.clone(),
@@ -317,27 +465,32 @@ impl SessionPluginHost {
         }
     }
 
-    fn add_subscriptions(&self, subscriptions: &BTreeSet<ExtensionLifecycleEvent>) {
+    fn add_subscriptions(&self, registrations: &[HookRegistration]) {
         let mut counts = self.subscription_counts.write();
-        for event in subscriptions {
-            *counts.entry(*event).or_default() += 1;
+        for registration in registrations {
+            *counts
+                .entry((registration.event, registration.class))
+                .or_default() += 1;
         }
     }
 
-    fn remove_subscriptions(&self, subscriptions: &BTreeSet<ExtensionLifecycleEvent>) {
+    fn remove_subscriptions(&self, registrations: &[HookRegistration]) {
         let mut counts = self.subscription_counts.write();
-        for event in subscriptions {
-            if let Some(count) = counts.get_mut(event) {
+        for registration in registrations {
+            let key = (registration.event, registration.class);
+            if let Some(count) = counts.get_mut(&key) {
                 *count -= 1;
                 if *count == 0 {
-                    counts.remove(event);
+                    counts.remove(&key);
                 }
             }
         }
     }
 
-    fn has_subscription(&self, event: ExtensionLifecycleEvent) -> bool {
-        self.subscription_counts.read().contains_key(&event)
+    fn has_subscription(&self, event: ExtensionLifecycleEvent, class: ExtensionHookClass) -> bool {
+        self.subscription_counts
+            .read()
+            .contains_key(&(event, class))
     }
 
     async fn invoke_runtime(
@@ -349,54 +502,206 @@ impl SessionPluginHost {
         }
         let event = invocation.event();
         let class = invocation.class();
-        let contract = ExtensionHookContract::for_hook(event, class)?;
+        ExtensionHookContract::for_hook(event, class)?;
+        if !self.has_subscription(event, class) {
+            return Ok(empty_batch());
+        }
         let mut aggregate = empty_batch();
-        let mut active = self.active.lock().await;
-        let mut index = 0;
-        while index < active.len() {
-            if !active[index].subscriptions.contains(&event) {
-                index += 1;
+        let mut current_payload = invocation.payload().clone();
+        let active = self.active.lock().await.clone();
+        for extension in &active {
+            let registrations: Vec<_> = extension
+                .registrations
+                .iter()
+                .filter(|registration| registration.event == event && registration.class == class)
+                .cloned()
+                .collect();
+            if registrations.is_empty() {
                 continue;
             }
-            let envelope =
-                dispatcher::runtime_envelope(&active[index].package.manifest().id, &invocation);
-            let result = self
-                .engine
-                .invoke(&active[index].key, &envelope)
-                .await
-                .and_then(|value| {
-                    serde_json::from_value::<ExtensionActionBatch>(value).map_err(|error| {
-                        format!("extension returned an invalid action batch: {error}")
-                    })
-                })
-                .and_then(|batch| {
-                    contract
-                        .validate_result(&batch)
-                        .map_err(|error| error.message.clone())?;
-                    Ok(batch)
-                });
-            match result {
-                Ok(batch) => {
-                    let stop = merge_batch(event, class, &mut aggregate, batch);
-                    index += 1;
-                    if stop {
-                        break;
-                    }
+            if extension.health.is_open() {
+                if class == ExtensionHookClass::Gate {
+                    aggregate.decision = Some(failed_gate_decision());
+                    break;
                 }
-                Err(error) => {
-                    let failed = active.remove(index);
-                    self.remove_subscriptions(&failed.subscriptions);
-                    self.record_runtime_fault(&failed, error).await;
+                continue;
+            }
+            for registration in registrations {
+                if registration.delivery
+                    == theway_contract::extension::ExtensionDeliveryPolicy::BoundedCoalescing
+                {
+                    self.enqueue_observation(extension, registration, &invocation);
+                    continue;
+                }
+                let result = self
+                    .dispatch_registration(
+                        extension,
+                        &registration,
+                        &invocation,
+                        current_payload.clone(),
+                    )
+                    .await;
+                match result {
+                    Ok(batch) => {
+                        let accepted = if class == ExtensionHookClass::Transform {
+                            accept_transform_batch(
+                                event,
+                                &mut current_payload,
+                                &mut aggregate,
+                                batch,
+                            )
+                        } else {
+                            Ok(merge_batch(event, class, &mut aggregate, batch))
+                        };
+                        match accepted {
+                            Ok(stop) => {
+                                extension.health.record_success();
+                                if stop {
+                                    return Ok(aggregate);
+                                }
+                            }
+                            Err(error) => {
+                                self.record_hook_failure(
+                                    extension,
+                                    event,
+                                    ExtensionDiagnosticCode::ContractViolation,
+                                    error,
+                                )
+                                .await;
+                                if registration.failure
+                                    == theway_contract::extension::ExtensionHookFailurePolicy::Deny
+                                {
+                                    aggregate.decision = Some(failed_gate_decision());
+                                    return Ok(aggregate);
+                                }
+                            }
+                        }
+                    }
+                    Err((code, error)) => {
+                        self.record_hook_failure(extension, event, code, error)
+                            .await;
+                        if registration.failure
+                            == theway_contract::extension::ExtensionHookFailurePolicy::Deny
+                        {
+                            aggregate.decision = Some(failed_gate_decision());
+                            return Ok(aggregate);
+                        }
+                    }
                 }
             }
         }
         if event == ExtensionLifecycleEvent::SessionStart {
+            let mut active = self.active.lock().await;
             for extension in active.iter_mut() {
                 extension.phase = InstanceLifecyclePhase::Started;
             }
         }
-        drop(active);
         Ok(aggregate)
+    }
+
+    async fn dispatch_registration(
+        &self,
+        extension: &ActiveExtension,
+        registration: &HookRegistration,
+        invocation: &RuntimeExtensionInvocation,
+        payload: Value,
+    ) -> Result<ExtensionActionBatch, (ExtensionDiagnosticCode, String)> {
+        if !registration.accepts_payload(&payload) {
+            return Err((
+                ExtensionDiagnosticCode::ContractViolation,
+                "extension event payload does not match the hook payloadSchema".into(),
+            ));
+        }
+        if invocation.context().cancelled || self.shutdown.load(Ordering::Acquire) {
+            return Err((
+                ExtensionDiagnosticCode::Cancelled,
+                "extension invocation was cancelled".into(),
+            ));
+        }
+        let envelope = dispatcher::runtime_envelope_with_payload(
+            &extension.package.manifest().id,
+            invocation,
+            payload,
+        );
+        let result = self
+            .engine
+            .invoke_controlled(
+                &extension.key,
+                &envelope,
+                registration.registration_id,
+                self.config.deadline(registration.deadline),
+                Arc::clone(&self.shutdown),
+                self.config.broker_operation_quota,
+            )
+            .await
+            .map_err(|error| (diagnostic_code(error.kind), error.message))?;
+        if invocation.context().cancelled || self.shutdown.load(Ordering::Acquire) {
+            return Err((
+                ExtensionDiagnosticCode::Cancelled,
+                "extension result arrived after cancellation".into(),
+            ));
+        }
+        let batch = decode_batch(result)
+            .map_err(|error| (ExtensionDiagnosticCode::ContractViolation, error))?;
+        if batch.actions.len() > self.config.max_actions {
+            return Err((
+                ExtensionDiagnosticCode::ResourceLimit,
+                "extension action count exceeds the configured limit".into(),
+            ));
+        }
+        registration
+            .contract
+            .validate_result(&batch)
+            .map_err(|error| (ExtensionDiagnosticCode::ContractViolation, error.message))?;
+        Ok(batch)
+    }
+
+    fn enqueue_observation(
+        &self,
+        extension: &ActiveExtension,
+        registration: HookRegistration,
+        invocation: &RuntimeExtensionInvocation,
+    ) {
+        if !registration.accepts_payload(invocation.payload()) {
+            self.diagnostics.lock().push(diagnostics::invocation(
+                extension.package.manifest().id.clone(),
+                self.session_id.clone(),
+                registration.event,
+                ExtensionDiagnosticCode::ContractViolation,
+                "extension event payload does not match the hook payloadSchema",
+            ));
+            return;
+        }
+        debug_assert_eq!(
+            registration.failure,
+            theway_contract::extension::ExtensionHookFailurePolicy::Continue
+        );
+        let Some(queue) = extension
+            .observation_queues
+            .get(&registration.registration_id)
+            .cloned()
+        else {
+            return;
+        };
+        let job = ObservationJob {
+            envelope: dispatcher::runtime_envelope(&extension.package.manifest().id, invocation),
+            cancellation: Arc::clone(&self.shutdown),
+        };
+        let Some(first) = queue.enqueue(job) else {
+            return;
+        };
+        ObservationDispatch {
+            extension_id: extension.package.manifest().id.clone(),
+            session_id: self.session_id.clone(),
+            key: extension.key.clone(),
+            registration,
+            engine: self.engine.clone(),
+            config: self.config.clone(),
+            health: Arc::clone(&extension.health),
+            diagnostics: Arc::clone(&self.diagnostics),
+            catalog: Arc::clone(&self.catalog),
+        }
+        .spawn(queue, first);
     }
 
     async fn unload_after_core_shutdown(&self) {
@@ -412,79 +717,10 @@ impl SessionPluginHost {
             )
             .await;
             self.engine.dispose(&extension.key).await;
-            self.remove_subscriptions(&extension.subscriptions);
+            self.remove_subscriptions(&extension.registrations);
             extension.phase = InstanceLifecyclePhase::Disposed;
         }
     }
-}
-
-fn empty_batch() -> ExtensionActionBatch {
-    ExtensionActionBatch {
-        abi_major: ExtensionAbiMajor::V2,
-        decision: None,
-        actions: Vec::new(),
-    }
-}
-
-fn merge_batch(
-    event: ExtensionLifecycleEvent,
-    class: ExtensionHookClass,
-    aggregate: &mut ExtensionActionBatch,
-    next: ExtensionActionBatch,
-) -> bool {
-    if class == ExtensionHookClass::Transform {
-        for action in next.actions {
-            if is_primary_transform(event, action.kind) {
-                aggregate
-                    .actions
-                    .retain(|current| current.kind != action.kind);
-            }
-            aggregate.actions.push(action);
-        }
-    } else {
-        aggregate.actions.extend(next.actions);
-    }
-    if let Some(decision) = next.decision {
-        let stop = matches!(
-            decision,
-            ExtensionGateDecision::Deny { .. } | ExtensionGateDecision::Cancel { .. }
-        );
-        aggregate.decision = Some(decision);
-        stop
-    } else {
-        false
-    }
-}
-
-fn is_primary_transform(event: ExtensionLifecycleEvent, kind: ExtensionActionKind) -> bool {
-    matches!(
-        (event, kind),
-        (
-            ExtensionLifecycleEvent::Input,
-            ExtensionActionKind::ReplaceInput
-        ) | (
-            ExtensionLifecycleEvent::BeforeRun,
-            ExtensionActionKind::PatchRunContext
-        ) | (
-            ExtensionLifecycleEvent::Context,
-            ExtensionActionKind::ReplaceContext
-        ) | (
-            ExtensionLifecycleEvent::BeforeModelRequest,
-            ExtensionActionKind::ReplaceModelRequest
-        ) | (
-            ExtensionLifecycleEvent::BeforeProviderRequestHeaders,
-            ExtensionActionKind::ReplaceProviderHeaders
-        ) | (
-            ExtensionLifecycleEvent::BeforeProviderRequestRaw,
-            ExtensionActionKind::ReplaceProviderPayload
-        ) | (
-            ExtensionLifecycleEvent::MessageEnd,
-            ExtensionActionKind::ReplaceMessage
-        ) | (
-            ExtensionLifecycleEvent::ToolResult,
-            ExtensionActionKind::ReplaceToolResult
-        )
-    )
 }
 
 #[async_trait::async_trait]
@@ -523,8 +759,8 @@ impl_runtime_domain!(RuntimeCompactionExtensionPort, invoke_compaction);
 
 #[async_trait::async_trait]
 impl RuntimeRequestExtensionPort for SessionPluginHost {
-    fn has_request_hook(&self, event: ExtensionLifecycleEvent, _class: ExtensionHookClass) -> bool {
-        self.has_subscription(event)
+    fn has_request_hook(&self, event: ExtensionLifecycleEvent, class: ExtensionHookClass) -> bool {
+        self.has_subscription(event, class)
     }
 
     async fn invoke_request(

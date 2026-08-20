@@ -1,17 +1,57 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
+use std::time::{Duration, Instant};
 
 use rquickjs::loader::{BuiltinLoader, BuiltinResolver};
 use rquickjs::{CatchResultExt, Context, Function, Module, Promise, Runtime};
 use serde_json::Value;
-use theway_contract::extension::ExtensionLifecycleEvent;
 use tokio::sync::oneshot;
 
 use super::brokers;
 use super::catalog::ExtensionPackage;
 
-const DEFAULT_MEMORY_LIMIT: usize = 32 * 1024 * 1024;
-const DEFAULT_STACK_LIMIT: usize = 512 * 1024;
+const LOAD_TIMEOUT: Duration = Duration::from_secs(2);
+
+#[derive(Clone, Copy, Debug)]
+pub struct QuickJsEngineLimits {
+    pub memory_bytes: usize,
+    pub stack_bytes: usize,
+    pub serialized_output_bytes: usize,
+}
+
+impl Default for QuickJsEngineLimits {
+    fn default() -> Self {
+        Self {
+            memory_bytes: 32 * 1024 * 1024,
+            stack_bytes: 512 * 1024,
+            serialized_output_bytes: 1024 * 1024,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EngineInvocationErrorKind {
+    Timeout,
+    Cancelled,
+    ResourceLimit,
+    Runtime,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EngineInvocationError {
+    pub kind: EngineInvocationErrorKind,
+    pub message: String,
+}
+
+impl EngineInvocationError {
+    fn new(kind: EngineInvocationErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+        }
+    }
+}
 
 const HOST_BOOTSTRAP_SOURCE: &str = r#"
 globalThis.__thewayHandlers = Object.create(null);
@@ -36,6 +76,9 @@ globalThis.__thewaySetup = async function () {
           throw new TypeError("api.on requires an event name and handler");
         }
         const registration = {
+          id: globalThis.__thewayRegistrationSequence,
+          event,
+          descriptor: descriptor ?? {},
           handler,
           priority: Number.isFinite(descriptor?.priority) ? descriptor.priority : 0,
           sequence: globalThis.__thewayRegistrationSequence++,
@@ -50,27 +93,32 @@ globalThis.__thewaySetup = async function () {
     await setup(api);
     return JSON.stringify({
       ok: true,
-      value: { events: Object.keys(globalThis.__thewayHandlers) },
+      value: {
+        registrations: Object.values(globalThis.__thewayHandlers)
+          .flat()
+          .map(({ id, event, descriptor, sequence }) => ({
+            registrationId: id,
+            event,
+            descriptor,
+            sequence,
+          })),
+      },
     });
   } catch (error) {
     return JSON.stringify({ error: String(error?.message ?? error) });
   }
 };
 
-globalThis.__thewayInvoke = async function (serializedEnvelope) {
+globalThis.__thewayInvoke = async function (serializedEnvelope, registrationId) {
   try {
     const envelope = JSON.parse(serializedEnvelope);
-    const handlers = [...(globalThis.__thewayHandlers[envelope.event] ?? [])]
-      .filter((registration) => !registration.disposed)
-      .sort((left, right) => right.priority - left.priority || left.sequence - right.sequence);
-    const aggregate = { abiMajor: 2, actions: [] };
-    for (const registration of handlers) {
-      const result = await registration.handler(envelope, envelope.context);
-      if (result == null) continue;
-      if (result.decision != null) aggregate.decision = result.decision;
-      if (Array.isArray(result.actions)) aggregate.actions.push(...result.actions);
+    const registration = (globalThis.__thewayHandlers[envelope.event] ?? [])
+      .find((candidate) => candidate.id === registrationId && !candidate.disposed);
+    if (registration === undefined) {
+      throw new Error("hook registration is unavailable");
     }
-    return JSON.stringify({ ok: true, value: aggregate });
+    const result = await registration.handler(envelope, envelope.context);
+    return JSON.stringify({ ok: true, value: result ?? null });
   } catch (error) {
     return JSON.stringify({ error: String(error?.message ?? error) });
   }
@@ -100,18 +148,23 @@ pub struct QuickJsEnginePool {
 struct EnginePoolInner {
     workers: Vec<mpsc::Sender<EngineCommand>>,
     joins: parking_lot::Mutex<Vec<std::thread::JoinHandle<()>>>,
+    limits: QuickJsEngineLimits,
 }
 
 enum EngineCommand {
     Load {
         key: EngineInstanceKey,
         source: String,
-        response: oneshot::Sender<Result<BTreeSet<ExtensionLifecycleEvent>, String>>,
+        response: oneshot::Sender<Result<Value, String>>,
     },
     Invoke {
         key: EngineInstanceKey,
         envelope: String,
-        response: oneshot::Sender<Result<Value, String>>,
+        registration_id: u64,
+        deadline: Instant,
+        cancellation: Arc<AtomicBool>,
+        broker_operation_limit: usize,
+        response: oneshot::Sender<Result<Value, EngineInvocationError>>,
     },
     Dispose {
         key: EngineInstanceKey,
@@ -135,14 +188,19 @@ impl Default for QuickJsEnginePool {
 
 impl QuickJsEnginePool {
     pub fn new(worker_count: usize) -> Self {
+        Self::with_limits(worker_count, QuickJsEngineLimits::default())
+    }
+
+    pub fn with_limits(worker_count: usize, limits: QuickJsEngineLimits) -> Self {
         let worker_count = worker_count.max(1);
         let mut workers = Vec::with_capacity(worker_count);
         let mut joins = Vec::with_capacity(worker_count);
         for index in 0..worker_count {
             let (sender, receiver) = mpsc::channel();
+            let worker_limits = limits;
             let join = std::thread::Builder::new()
                 .name(format!("theway-js-{index}"))
-                .spawn(move || run_worker(receiver))
+                .spawn(move || run_worker(receiver, worker_limits))
                 .expect("QuickJS engine worker must start");
             workers.push(sender);
             joins.push(join);
@@ -151,6 +209,7 @@ impl QuickJsEnginePool {
             inner: Arc::new(EnginePoolInner {
                 workers,
                 joins: parking_lot::Mutex::new(joins),
+                limits,
             }),
         }
     }
@@ -163,7 +222,7 @@ impl QuickJsEnginePool {
         &self,
         key: EngineInstanceKey,
         package: &ExtensionPackage,
-    ) -> Result<BTreeSet<ExtensionLifecycleEvent>, String> {
+    ) -> Result<Value, String> {
         let source = package.prepared_source()?;
         let (response, receiver) = oneshot::channel();
         self.send(
@@ -183,21 +242,62 @@ impl QuickJsEnginePool {
         &self,
         key: &EngineInstanceKey,
         envelope: &T,
-    ) -> Result<Value, String> {
-        let envelope = serde_json::to_string(envelope)
-            .map_err(|error| format!("extension envelope serialization failed: {error}"))?;
+        registration_id: u64,
+    ) -> Result<Value, EngineInvocationError> {
+        self.invoke_controlled(
+            key,
+            envelope,
+            registration_id,
+            Duration::from_millis(500),
+            Arc::new(AtomicBool::new(false)),
+            32,
+        )
+        .await
+    }
+
+    pub async fn invoke_controlled<T: serde::Serialize>(
+        &self,
+        key: &EngineInstanceKey,
+        envelope: &T,
+        registration_id: u64,
+        timeout: Duration,
+        cancellation: Arc<AtomicBool>,
+        broker_operation_limit: usize,
+    ) -> Result<Value, EngineInvocationError> {
+        let envelope = serde_json::to_string(envelope).map_err(|error| {
+            EngineInvocationError::new(
+                EngineInvocationErrorKind::Runtime,
+                format!("extension envelope serialization failed: {error}"),
+            )
+        })?;
+        if envelope.len() > self.inner.limits.serialized_output_bytes {
+            return Err(EngineInvocationError::new(
+                EngineInvocationErrorKind::ResourceLimit,
+                "extension envelope exceeds the serialized input limit",
+            ));
+        }
         let (response, receiver) = oneshot::channel();
         self.send(
             key,
             EngineCommand::Invoke {
                 key: key.clone(),
                 envelope,
+                registration_id,
+                deadline: Instant::now() + timeout,
+                cancellation,
+                broker_operation_limit,
                 response,
             },
-        )?;
-        receiver
-            .await
-            .map_err(|_| "QuickJS engine worker stopped during invocation".to_string())?
+        )
+        .map_err(|message| {
+            EngineInvocationError::new(EngineInvocationErrorKind::Runtime, message)
+        })?;
+        receiver.await.map_err(|_| {
+            EngineInvocationError::new(
+                EngineInvocationErrorKind::Runtime,
+                "QuickJS engine worker stopped during invocation",
+            )
+        })?
     }
 
     pub async fn dispose(&self, key: &EngineInstanceKey) -> bool {
@@ -261,7 +361,7 @@ fn stable_worker(key: &EngineInstanceKey, worker_count: usize) -> usize {
     hash as usize % worker_count
 }
 
-fn run_worker(receiver: mpsc::Receiver<EngineCommand>) {
+fn run_worker(receiver: mpsc::Receiver<EngineCommand>, limits: QuickJsEngineLimits) {
     let mut instances = HashMap::new();
     while let Ok(command) = receiver.recv() {
         match command {
@@ -275,7 +375,7 @@ fn run_worker(receiver: mpsc::Receiver<EngineCommand>) {
                         Err("QuickJS extension instance is already loaded".into())
                     }
                     std::collections::hash_map::Entry::Vacant(entry) => {
-                        EngineInstance::new(entry.key(), &source).map(
+                        EngineInstance::new(entry.key(), &source, limits).map(
                             |(instance, subscriptions)| {
                                 entry.insert(instance);
                                 subscriptions
@@ -288,12 +388,29 @@ fn run_worker(receiver: mpsc::Receiver<EngineCommand>) {
             EngineCommand::Invoke {
                 key,
                 envelope,
+                registration_id,
+                deadline,
+                cancellation,
+                broker_operation_limit,
                 response,
             } => {
                 let result = instances
                     .get_mut(&key)
-                    .ok_or_else(|| "QuickJS extension instance is not loaded".to_string())
-                    .and_then(|instance| instance.invoke(&envelope));
+                    .ok_or_else(|| {
+                        EngineInvocationError::new(
+                            EngineInvocationErrorKind::Runtime,
+                            "QuickJS extension instance is not loaded",
+                        )
+                    })
+                    .and_then(|instance| {
+                        instance.invoke(
+                            &envelope,
+                            registration_id,
+                            deadline,
+                            cancellation,
+                            broker_operation_limit,
+                        )
+                    });
                 let _ = response.send(result);
             }
             EngineCommand::Dispose { key, response } => {
@@ -307,19 +424,63 @@ fn run_worker(receiver: mpsc::Receiver<EngineCommand>) {
     }
 }
 
+struct ActiveInterruptBudget {
+    deadline: Instant,
+    cancellation: Arc<AtomicBool>,
+}
+
+#[derive(Default)]
+struct InterruptBudget {
+    active: parking_lot::Mutex<Option<ActiveInterruptBudget>>,
+}
+
+impl InterruptBudget {
+    fn begin(&self, deadline: Instant, cancellation: Arc<AtomicBool>) {
+        *self.active.lock() = Some(ActiveInterruptBudget {
+            deadline,
+            cancellation,
+        });
+    }
+
+    fn should_interrupt(&self) -> bool {
+        self.active.lock().as_ref().is_some_and(|budget| {
+            budget.cancellation.load(Ordering::Acquire) || Instant::now() >= budget.deadline
+        })
+    }
+
+    fn finish(&self) -> Option<EngineInvocationErrorKind> {
+        self.active.lock().take().and_then(|budget| {
+            if budget.cancellation.load(Ordering::Acquire) {
+                Some(EngineInvocationErrorKind::Cancelled)
+            } else if Instant::now() >= budget.deadline {
+                Some(EngineInvocationErrorKind::Timeout)
+            } else {
+                None
+            }
+        })
+    }
+}
+
 struct EngineInstance {
     context: Context,
     _runtime: Runtime,
+    interrupt: Arc<InterruptBudget>,
+    output_limit: usize,
+    broker_quota: brokers::BrokerOperationQuota,
 }
 
 impl EngineInstance {
     fn new(
         key: &EngineInstanceKey,
         source: &str,
-    ) -> Result<(Self, BTreeSet<ExtensionLifecycleEvent>), String> {
+        limits: QuickJsEngineLimits,
+    ) -> Result<(Self, Value), String> {
         let runtime = Runtime::new().map_err(|error| error.to_string())?;
-        runtime.set_memory_limit(DEFAULT_MEMORY_LIMIT);
-        runtime.set_max_stack_size(DEFAULT_STACK_LIMIT);
+        runtime.set_memory_limit(limits.memory_bytes);
+        runtime.set_max_stack_size(limits.stack_bytes);
+        let interrupt = Arc::new(InterruptBudget::default());
+        let interrupt_handler = Arc::clone(&interrupt);
+        runtime.set_interrupt_handler(Some(Box::new(move || interrupt_handler.should_interrupt())));
         runtime
             .set_info(format!("theway:{}/{}", key.session_id, key.extension_id))
             .map_err(|error| error.to_string())?;
@@ -329,60 +490,97 @@ impl EngineInstance {
             BuiltinLoader::default().with_module("theway", host_module),
         );
         let context = Context::full(&runtime).map_err(|error| error.to_string())?;
-        context
-            .with(|ctx| {
-                for name in brokers::FORBIDDEN_DIRECT_GLOBALS {
-                    if js(&ctx, ctx.globals().contains_key(*name))? {
-                        return Err(format!(
-                            "QuickJS context unexpectedly exposes forbidden global {name}"
-                        ));
-                    }
+        interrupt.begin(
+            Instant::now() + LOAD_TIMEOUT,
+            Arc::new(AtomicBool::new(false)),
+        );
+        let evaluation = context.with(|ctx| {
+            for name in brokers::FORBIDDEN_DIRECT_GLOBALS {
+                if js(&ctx, ctx.globals().contains_key(*name))? {
+                    return Err(format!(
+                        "QuickJS context unexpectedly exposes forbidden global {name}"
+                    ));
                 }
-                let module = js(
-                    &ctx,
-                    Module::declare(ctx.clone(), "theway-extension", source),
-                )?;
-                let (module, promise) = js(&ctx, module.eval())?;
-                js(&ctx, promise.finish::<()>())?;
-                let namespace = js(&ctx, module.namespace())?;
-                js(&ctx, ctx.globals().set("__thewayExtension", namespace))?;
-                js(&ctx, ctx.eval::<(), _>(HOST_BOOTSTRAP_SOURCE))?;
-                let setup: Function = js(&ctx, ctx.globals().get("__thewaySetup"))?;
-                let promise: Promise = js(&ctx, setup.call(()))?;
-                let output: String = js(&ctx, promise.finish())?;
-                let value = decode_host_result(&output)?;
-                let events = value
-                    .get("events")
-                    .and_then(Value::as_array)
-                    .ok_or_else(|| {
-                        "extension setup did not return its subscription index".to_string()
-                    })?;
-                events
-                    .iter()
-                    .map(|event| {
-                        serde_json::from_value(event.clone()).map_err(|error| {
-                            format!("extension registered an invalid event: {error}")
-                        })
-                    })
-                    .collect::<Result<BTreeSet<_>, _>>()
-            })
-            .map(|subscriptions| {
-                (
-                    Self {
-                        context,
-                        _runtime: runtime,
-                    },
-                    subscriptions,
-                )
-            })
+            }
+            let module = js(
+                &ctx,
+                Module::declare(ctx.clone(), "theway-extension", source),
+            )?;
+            let (module, promise) = js(&ctx, module.eval())?;
+            js(&ctx, promise.finish::<()>())?;
+            let namespace = js(&ctx, module.namespace())?;
+            js(&ctx, ctx.globals().set("__thewayExtension", namespace))?;
+            js(&ctx, ctx.eval::<(), _>(HOST_BOOTSTRAP_SOURCE))?;
+            let setup: Function = js(&ctx, ctx.globals().get("__thewaySetup"))?;
+            let promise: Promise = js(&ctx, setup.call(()))?;
+            let output: String = js(&ctx, promise.finish())?;
+            decode_host_result(&output, limits.serialized_output_bytes)
+        });
+        if let Some(reason) = interrupt.finish() {
+            return Err(match reason {
+                EngineInvocationErrorKind::Timeout => {
+                    "extension setup exceeded its execution deadline".into()
+                }
+                EngineInvocationErrorKind::Cancelled => "extension setup was cancelled".into(),
+                _ => "extension setup was interrupted".into(),
+            });
+        }
+        let metadata = evaluation?;
+        Ok((
+            Self {
+                context,
+                _runtime: runtime,
+                interrupt,
+                output_limit: limits.serialized_output_bytes,
+                broker_quota: brokers::BrokerOperationQuota::new(),
+            },
+            metadata,
+        ))
     }
 
-    fn invoke(&mut self, envelope: &str) -> Result<Value, String> {
-        self.context.with(|ctx| {
+    fn invoke(
+        &mut self,
+        envelope: &str,
+        registration_id: u64,
+        deadline: Instant,
+        cancellation: Arc<AtomicBool>,
+        broker_operation_limit: usize,
+    ) -> Result<Value, EngineInvocationError> {
+        if cancellation.load(Ordering::Acquire) {
+            return Err(EngineInvocationError::new(
+                EngineInvocationErrorKind::Cancelled,
+                "extension invocation was cancelled",
+            ));
+        }
+        self.broker_quota.begin(broker_operation_limit);
+        self.interrupt.begin(deadline, cancellation);
+        let result = self.context.with(|ctx| {
             let invoke: Function = js(&ctx, ctx.globals().get("__thewayInvoke"))?;
-            let promise: Promise = js(&ctx, invoke.call((envelope,)))?;
+            let promise: Promise = js(&ctx, invoke.call((envelope, registration_id)))?;
             let output: String = js(&ctx, promise.finish())?;
-            decode_host_result(&output)
+            decode_host_result(&output, self.output_limit)
+        });
+        if let Some(reason) = self.interrupt.finish() {
+            let message = match reason {
+                EngineInvocationErrorKind::Timeout => {
+                    "extension invocation exceeded its execution deadline"
+                }
+                EngineInvocationErrorKind::Cancelled => "extension invocation was cancelled",
+                _ => "extension invocation was interrupted",
+            };
+            return Err(EngineInvocationError::new(reason, message));
+        }
+        result.map_err(|message| {
+            let lower = message.to_ascii_lowercase();
+            let kind = if message.contains("serialized output limit")
+                || lower.contains("out of memory")
+                || lower.contains("allocation failed")
+            {
+                EngineInvocationErrorKind::ResourceLimit
+            } else {
+                EngineInvocationErrorKind::Runtime
+            };
+            EngineInvocationError::new(kind, message)
         })
     }
 }
@@ -391,7 +589,10 @@ fn js<'js, T>(ctx: &rquickjs::Ctx<'js>, result: rquickjs::Result<T>) -> Result<T
     result.catch(ctx).map_err(|error| error.to_string())
 }
 
-fn decode_host_result(output: &str) -> Result<Value, String> {
+fn decode_host_result(output: &str, output_limit: usize) -> Result<Value, String> {
+    if output.len() > output_limit {
+        return Err("extension result exceeds the serialized output limit".into());
+    }
     let decoded: Value = serde_json::from_str(output)
         .map_err(|error| format!("extension host returned invalid JSON: {error}"))?;
     if let Some(error) = decoded.get("error").and_then(Value::as_str) {

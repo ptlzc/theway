@@ -9,11 +9,13 @@ mod brokers;
 mod catalog;
 mod compaction;
 mod diagnostics;
+mod dispatch_result;
 mod dispatcher;
 mod effects;
 mod engine;
 mod host;
 mod legacy;
+mod observation;
 mod state;
 mod ts;
 
@@ -21,7 +23,8 @@ use std::path::Path;
 
 pub use catalog::{ExtensionPackage, PackageCatalog};
 pub use compaction::{TsCompactAlgorithm, compact_algorithm_registry};
-pub use engine::{EngineInstanceKey, QuickJsEnginePool};
+pub use dispatcher::RuntimeExtensionHostConfig;
+pub use engine::{EngineInstanceKey, QuickJsEngineLimits, QuickJsEnginePool};
 pub use host::{ExtensionInvocationOutput, SessionPluginHost};
 pub use legacy::TsExtension;
 

@@ -453,7 +453,7 @@ export default defineExtension(() => { throw new Error("setup failed"); });"#,
 }
 
 #[tokio::test]
-async fn runtime_error_faults_only_its_owner_and_disposes_the_instance() {
+async fn repeated_runtime_errors_open_only_their_owners_circuit() {
     let project = tempdir().unwrap();
     let base = tempdir().unwrap();
     let root = project_root(project.path());
@@ -474,14 +474,16 @@ export default defineExtension((api) => {
     let engine = QuickJsEnginePool::new(1);
     let host = SessionPluginHost::start(catalog, engine.clone(), "runtime", project.path()).await;
     assert_eq!(engine.instance_count().await, 2);
-    let output = host.invoke(ExtensionLifecycleEvent::Input, json!({})).await;
-    assert_eq!(output.len(), 1);
-    assert_eq!(output[0].extension_id, "good");
+    for _ in 0..3 {
+        let output = host.invoke(ExtensionLifecycleEvent::Input, json!({})).await;
+        assert_eq!(output.len(), 1);
+        assert_eq!(output[0].extension_id, "good");
+    }
     assert_eq!(engine.instance_count().await, 1);
     assert!(host.catalog_entries().iter().any(|entry| {
         entry.extension_id == "runtime-error"
-            && entry.status == ExtensionCatalogStatus::Faulted
-            && entry.reason_code == Some(ExtensionDiagnosticCode::HookFailed)
+            && entry.status == ExtensionCatalogStatus::Disabled
+            && entry.reason_code == Some(ExtensionDiagnosticCode::CircuitOpened)
     }));
     host.shutdown().await;
 }
