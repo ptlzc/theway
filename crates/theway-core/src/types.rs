@@ -532,6 +532,22 @@ pub type TransformContext = Arc<
         + Sync,
 >;
 
+/// Async normalized-model-request transform. The loop validates the returned
+/// replacement against the immutable request snapshot before provider dispatch.
+pub type TransformModelRequest = Arc<
+    dyn Fn(
+            crate::agent::model_request::NormalizedModelRequestDraft,
+            CancellationToken,
+        ) -> Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = crate::agent::model_request::NormalizedModelRequestDraft,
+                    > + Send,
+            >,
+        > + Send
+        + Sync,
+>;
+
 /// Async finalized-message transform. Runs after `MessageStart` and before the
 /// message enters agent state, persistence, later context, or tool extraction.
 pub type TransformMessage = Arc<

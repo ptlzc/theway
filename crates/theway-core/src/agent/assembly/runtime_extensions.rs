@@ -1,5 +1,6 @@
 mod compaction;
 mod message;
+mod request;
 mod tool;
 
 use std::collections::{HashSet, VecDeque};

@@ -25,6 +25,7 @@ pub mod compaction;
 pub mod cost;
 #[cfg(feature = "harness")]
 pub mod messages;
+pub mod model_request;
 #[cfg(feature = "harness")]
 pub mod permission;
 #[cfg(feature = "harness")]
@@ -78,6 +79,7 @@ pub struct AgentOptions {
     pub initial_state: Option<AgentState>,
     pub convert_to_llm: Option<ConvertToLlm>,
     pub transform_context: Option<TransformContext>,
+    pub transform_model_request: Option<TransformModelRequest>,
     pub transform_message: Option<TransformMessage>,
     pub stream_fn: Option<StreamFn>,
     pub get_api_key: Option<GetApiKey>,
@@ -113,6 +115,7 @@ impl Default for AgentOptions {
             initial_state: None,
             convert_to_llm: None,
             transform_context: None,
+            transform_model_request: None,
             transform_message: None,
             stream_fn: None,
             get_api_key: None,

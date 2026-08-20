@@ -61,7 +61,7 @@ use crate::observability::{
 use crate::types::*;
 
 use self::llm::call_llm;
-use self::tools::{PreparedCall, ToolOutcome, execute_tools};
+use self::tools::{PreparedCall, ToolOutcome, execute_tools_with_snapshot};
 use self::utils::{apply_turn_update, emit, finalize, snapshot_context};
 
 async fn finish_message(
@@ -205,7 +205,7 @@ async fn drive_loop(
             let turn_cancel = CancellationToken::new();
             *inner.turn_cancel.lock() = Some(turn_cancel.clone());
 
-            let assistant = match call_llm(inner, &cancel, &turn_cancel).await {
+            let model_call = match call_llm(inner, &cancel, &turn_cancel).await {
                 Ok(m) => m,
                 // Turn interrupted: finalize whatever the stream produced, then either
                 // carry on with queued steering (next turn) or end the run with the
@@ -263,9 +263,10 @@ async fn drive_loop(
                 }
             };
             *inner.turn_cancel.lock() = None;
+            let request_tools = model_call.executable_tools;
             let assistant_agent = finish_message(
                 inner,
-                AgentMessage::Llm(PiMessage::Assistant(assistant)),
+                AgentMessage::Llm(PiMessage::Assistant(model_call.message)),
                 &cancel,
             )
             .await;
@@ -273,7 +274,8 @@ async fn drive_loop(
                 unreachable!("finalized message transforms preserve assistant role")
             };
 
-            let (tool_results, all_terminate) = execute_tools(inner, assistant, &cancel).await;
+            let (tool_results, all_terminate) =
+                execute_tools_with_snapshot(inner, assistant, &request_tools, &cancel).await;
             let mut finalized_tool_results = Vec::with_capacity(tool_results.len());
             for tr in tool_results {
                 let m = AgentMessage::Llm(PiMessage::ToolResult(tr));

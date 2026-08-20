@@ -209,6 +209,16 @@ impl AgentHarness {
             Box::pin(async move { runtime.transform_context(messages, cancel).await })
         });
 
+        let request_runtime = Arc::clone(&runtime_extensions);
+        let transform_model_request: TransformModelRequest = Arc::new(move |request, cancel| {
+            let runtime = Arc::clone(&request_runtime);
+            Box::pin(async move {
+                runtime
+                    .before_model_request(request, u32::MAX, cancel)
+                    .await
+            })
+        });
+
         let message_runtime = Arc::clone(&runtime_extensions);
         let transform_message: TransformMessage = Arc::new(move |message, cancel| {
             let runtime = Arc::clone(&message_runtime);
@@ -241,6 +251,7 @@ impl AgentHarness {
         let agent = Agent::new(AgentOptions {
             initial_state: Some(state),
             transform_context: Some(transform_context),
+            transform_model_request: Some(transform_model_request),
             transform_message: Some(transform_message),
             stream_fn: options.stream_fn.clone(),
             before_tool_call: Some(before_tool_call),

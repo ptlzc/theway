@@ -23,6 +23,7 @@ use crate::agent::runtime_extensions::{
 
 mod compaction_lifecycle;
 mod message_tool;
+mod normalized_request;
 
 #[derive(Clone, Debug)]
 struct Record {
@@ -311,6 +312,7 @@ async fn successful_run_lifecycle_is_ordered_and_sequences_are_monotonic() {
             ExtensionLifecycleEvent::MessageEnd,
             ExtensionLifecycleEvent::TurnStarted,
             ExtensionLifecycleEvent::Context,
+            ExtensionLifecycleEvent::BeforeModelRequest,
             ExtensionLifecycleEvent::MessageStart,
             ExtensionLifecycleEvent::MessageEnd,
             ExtensionLifecycleEvent::TurnCompleted,

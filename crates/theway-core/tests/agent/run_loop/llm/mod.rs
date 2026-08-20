@@ -12,6 +12,8 @@ use theway_llm_provider::{
 };
 use tokio_util::sync::CancellationToken;
 
+mod normalized_request;
+
 fn faux_model() -> theway_llm_provider::Model {
     theway_llm_provider::Model {
         id: "faux".into(),

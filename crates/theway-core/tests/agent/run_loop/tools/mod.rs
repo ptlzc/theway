@@ -174,7 +174,11 @@ async fn execute_tools_synthesizes_error_for_unknown_tool() {
         UserContentBlock::Text(t) => t.text.clone(),
         _ => panic!("expected text content"),
     };
-    assert!(text.contains("No tool registered named 'missing'"));
+    assert_eq!(text, "tool is not available in this model request");
+    assert_eq!(
+        results[0].details.as_ref().unwrap()["errorCode"],
+        "tool_not_in_request_catalog"
+    );
     assert!(!all_terminate);
 
     let mut seen_start = false;
@@ -190,8 +194,32 @@ async fn execute_tools_synthesizes_error_for_unknown_tool() {
             _ => {}
         }
     }
-    assert!(seen_start, "ToolExecutionStart must be emitted");
-    assert!(seen_end, "ToolExecutionEnd must be emitted");
+    assert!(!seen_start, "rejected tools do not start execution");
+    assert!(!seen_end, "rejected tools do not end nonexistent execution");
+}
+
+#[tokio::test]
+async fn request_snapshot_rejects_tool_registered_after_model_dispatch() {
+    let tool = Arc::new(MockTool::new("late_tool"));
+    let calls = Arc::clone(&tool.calls);
+    let inner = agent_with(vec![tool], default_options());
+    let assistant = assistant_with_tool_calls(vec![tool_call("call_late", "late_tool")]);
+
+    let (results, _) = execute_tools_with_snapshot(
+        &inner,
+        &assistant,
+        &[],
+        &CancellationToken::new(),
+    )
+    .await;
+
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert!(results[0].is_error);
+    assert_eq!(
+        results[0].details.as_ref().unwrap()["errorCode"],
+        "tool_not_in_request_catalog"
+    );
+    assert_eq!(inner.state.lock().tools.len(), 1);
 }
 
 #[tokio::test]

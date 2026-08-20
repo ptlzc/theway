@@ -14,6 +14,7 @@ pub mod observability;
 pub mod types;
 
 // Public surface — mirrors `packages/agent/src/index.ts`.
+pub use agent::model_request::{NormalizedGenerationOptions, NormalizedModelRequestDraft};
 pub use agent::{
     Agent, AgentOptions, AgentRunError, LOOP_EVENT_BROADCAST_CAPACITY, LoopListener,
     LoopSyncCallback,
@@ -31,7 +32,7 @@ pub use types::{
     CustomMessage, GetApiKey, LoopEvent, MessageQueueProvider, OnControlPlanePromptHook,
     PermissionClassification, PrepareNextTurnContext, PrepareNextTurnHook, QueueMode,
     ShouldStopAfterTurnContext, ShouldStopHook, StreamFn, ThinkingLevel, ToolExecutionMode,
-    TransformContext, TransformMessage, default_convert_to_llm,
+    TransformContext, TransformMessage, TransformModelRequest, default_convert_to_llm,
 };
 
 #[cfg(feature = "harness")]

@@ -16,9 +16,22 @@ use super::utils::{compute_args_hash, default_prompt_payload, emit, snapshot_con
 /// Execute every tool-call block in the assistant's content. Returns the per-call results
 /// (in assistant content order) and `all_terminate = true` when every result hints early
 /// termination.
+#[cfg(test)]
 pub(super) async fn execute_tools(
     inner: &Arc<AgentInner>,
     assistant: &PiAssistantMessage,
+    cancel: &CancellationToken,
+) -> (Vec<ToolResultMessage>, bool) {
+    let tools_snapshot = inner.state.lock().tools.clone();
+    execute_tools_with_snapshot(inner, assistant, &tools_snapshot, cancel).await
+}
+
+/// Execute against the immutable catalog accepted for the model request that
+/// produced `assistant`; later registry mutations cannot enter this lookup.
+pub(super) async fn execute_tools_with_snapshot(
+    inner: &Arc<AgentInner>,
+    assistant: &PiAssistantMessage,
+    tools_snapshot: &[Arc<dyn AgentTool>],
     cancel: &CancellationToken,
 ) -> (Vec<ToolResultMessage>, bool) {
     // Gather the tool calls + matched AgentTool implementations in assistant content order.
@@ -33,8 +46,6 @@ pub(super) async fn execute_tools(
     if tool_calls.is_empty() {
         return (Vec::new(), false);
     }
-    let tools_snapshot = inner.state.lock().tools.clone();
-
     // Decide per-call execution mode (parallel default unless any tool requests sequential).
     let mode = inner.options.tool_execution;
     let any_sequential = tool_calls.iter().any(|tc| {
@@ -61,17 +72,31 @@ pub(super) async fn execute_tools(
         let tool_name = tc.name.clone();
         let raw_args = serde_json::Value::Object(tc.arguments.clone());
 
-        // Resolve the tool BEFORE normalizing args so we can run its `prepare_arguments`
-        // compatibility shim. Unknown tools keep raw args (the dispatcher will produce a
-        // "no such tool" error result downstream).
+        // Resolve the tool from the accepted request snapshot before normalizing args so we can
+        // run its `prepare_arguments` compatibility shim. Missing names are rejected before any
+        // permission hook or execution lifecycle event.
         let tool = tools_snapshot
             .iter()
             .find(|t| t.definition().name == tool_name)
             .cloned();
-        let args = match &tool {
-            Some(t) => t.prepare_arguments(raw_args),
-            None => raw_args,
+        let Some(tool) = tool else {
+            prepared.push(PreparedCall::Blocked {
+                id: tool_id,
+                name: tool_name,
+                args: raw_args,
+                result: AgentToolResult {
+                    content: vec![UserContentBlock::text(
+                        "tool is not available in this model request",
+                    )],
+                    details: serde_json::json!({
+                        "errorCode": "tool_not_in_request_catalog",
+                    }),
+                    terminate: None,
+                },
+            });
+            continue;
         };
+        let args = tool.prepare_arguments(raw_args);
 
         // Per-tool classification runs first (issue #110 design v0.2 Artifact A). The
         // classifier sees the prepared args and decides Allow / Prompt / Block before the
@@ -79,10 +104,7 @@ pub(super) async fn execute_tools(
         // immediately (no `before_tool_call`, no prompt); `Prompt` synthesizes a default
         // `BeforeToolCallResult::prompt` that the user hook can override; `Allow` falls
         // through to the existing `before_tool_call` path with no synthesized prompt.
-        let classification = match &tool {
-            Some(t) => t.permission_classification(&args),
-            None => PermissionClassification::Allow,
-        };
+        let classification = tool.permission_classification(&args);
         if let PermissionClassification::Block { reason } = &classification {
             let result = AgentToolResult {
                 content: vec![UserContentBlock::text(reason.clone())],
@@ -268,7 +290,7 @@ pub(super) async fn execute_tools(
             id: tool_id,
             name: tool_name,
             args,
-            tool,
+            tool: Some(tool),
         });
     }
 

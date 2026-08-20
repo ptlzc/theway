@@ -9,6 +9,7 @@ use theway_llm_provider::{
 };
 use tokio_util::sync::CancellationToken;
 
+use crate::agent::model_request::{NormalizedGenerationOptions, NormalizedModelRequestDraft};
 use crate::agent::{AgentInner, AgentRunError};
 use crate::observability::{
     ErrorCategory, OperationDetail, OperationOutcome, OperationScope, RuntimeMeasurements,
@@ -17,12 +18,42 @@ use crate::types::*;
 
 use super::utils::emit;
 
+pub(super) struct ModelCallResult {
+    pub(super) message: PiAssistantMessage,
+    pub(super) executable_tools: Vec<Arc<dyn AgentTool>>,
+}
+
+impl std::fmt::Debug for ModelCallResult {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ModelCallResult")
+            .field("message", &self.message)
+            .field(
+                "executable_tools",
+                &self
+                    .executable_tools
+                    .iter()
+                    .map(|tool| tool.definition().name.as_str())
+                    .collect::<Vec<_>>(),
+            )
+            .finish()
+    }
+}
+
+impl std::ops::Deref for ModelCallResult {
+    type Target = PiAssistantMessage;
+
+    fn deref(&self) -> &Self::Target {
+        &self.message
+    }
+}
+
 pub(super) async fn call_llm(
     inner: &Arc<AgentInner>,
     cancel: &CancellationToken,
     turn_cancel: &CancellationToken,
-) -> Result<PiAssistantMessage, AgentRunError> {
-    let (system_prompt, agent_messages, tools, model) = {
+) -> Result<ModelCallResult, AgentRunError> {
+    let (system_prompt, agent_messages, tools, model, thinking_level) = {
         let g = inner.state.lock();
         let model = g.model.clone().ok_or_else(|| {
             AgentRunError::Other("Agent has no model set; assign state.model first".into())
@@ -32,6 +63,7 @@ pub(super) async fn call_llm(
             g.messages.clone(),
             g.tools.clone(),
             model,
+            g.thinking_level,
         )
     };
     let active_turn = *inner.active_turn_operation.lock();
@@ -58,20 +90,53 @@ pub(super) async fn call_llm(
         };
 
         let messages = inner.convert_to_llm(&agent_messages);
-        let pi_tools: Vec<theway_llm_provider::Tool> =
+        let visible_tools: Vec<theway_llm_provider::Tool> =
             tools.iter().map(|t| t.definition().clone()).collect();
-        let context = PiContext {
-            system_prompt: if system_prompt.is_empty() {
+        let executable_tool_names = visible_tools.iter().map(|tool| tool.name.clone()).collect();
+        let base_request = NormalizedModelRequestDraft {
+            provider: model.provider.0.clone(),
+            model: model.id.clone(),
+            system_instructions: if system_prompt.is_empty() {
                 None
             } else {
                 Some(system_prompt)
             },
             messages,
-            tools: if pi_tools.is_empty() {
-                None
-            } else {
-                Some(pi_tools)
+            visible_tools,
+            executable_tool_names,
+            generation_options: NormalizedGenerationOptions {
+                reasoning: thinking_level.and_then(|level| level.to_theway_llm_provider()),
+                ..Default::default()
             },
+        };
+
+        let transformed = if let Some(transform) = inner.options.transform_model_request.clone() {
+            transform(base_request.clone(), cancel.clone()).await
+        } else {
+            base_request.clone()
+        };
+        let request = if transformed
+            .validate_replacement(&base_request, model.max_tokens)
+            .is_ok()
+        {
+            transformed
+        } else {
+            base_request
+        };
+        let executable_tools = request
+            .executable_tool_names
+            .iter()
+            .filter_map(|name| {
+                tools
+                    .iter()
+                    .find(|tool| tool.definition().name == *name)
+                    .cloned()
+            })
+            .collect::<Vec<_>>();
+        let context = PiContext {
+            system_prompt: request.system_instructions,
+            messages: request.messages,
+            tools: (!request.visible_tools.is_empty()).then_some(request.visible_tools),
         };
 
         let stream_fn = inner
@@ -84,14 +149,10 @@ pub(super) async fn call_llm(
             options.base.session_id = Some(sid.clone());
         }
         options.base.abort = Some(cancel.clone());
-        if let Some(level) = inner
-            .state
-            .lock()
-            .thinking_level
-            .and_then(|l| l.to_theway_llm_provider())
-        {
-            options.reasoning = Some(level);
-        }
+        options.base.temperature = request.generation_options.temperature;
+        options.base.max_tokens = request.generation_options.max_tokens;
+        options.reasoning = request.generation_options.reasoning;
+        options.thinking_budgets = request.generation_options.thinking_budgets;
 
         let mut stream = stream_fn(&model, &context, Some(&options));
         let mut last_message: Option<PiAssistantMessage> = None;
@@ -156,19 +217,24 @@ pub(super) async fn call_llm(
             }
         }
         inner.state.lock().streaming_message = None;
-        last_message.ok_or_else(|| AgentRunError::Other("LLM stream produced no message".into()))
+        let message = last_message
+            .ok_or_else(|| AgentRunError::Other("LLM stream produced no message".into()))?;
+        Ok(ModelCallResult {
+            message,
+            executable_tools,
+        })
     }
     .await;
 
     let (outcome, category, measurements) = match &result {
-        Ok(message) => (
+        Ok(call) => (
             OperationOutcome::Succeeded,
             None,
             RuntimeMeasurements {
-                input_tokens: message.usage.input,
-                output_tokens: message.usage.output,
-                cache_read_tokens: message.usage.cache_read,
-                cache_write_tokens: message.usage.cache_write,
+                input_tokens: call.message.usage.input,
+                output_tokens: call.message.usage.output,
+                cache_read_tokens: call.message.usage.cache_read,
+                cache_write_tokens: call.message.usage.cache_write,
                 ..Default::default()
             },
         ),

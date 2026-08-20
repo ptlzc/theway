@@ -340,10 +340,27 @@ macro_rules! impl_noop_domain {
 
 impl_noop_domain!(RuntimeSessionExtensionPort, invoke_session);
 impl_noop_domain!(RuntimeRunExtensionPort, invoke_run);
-impl_noop_domain!(RuntimeRequestExtensionPort, invoke_request);
 impl_noop_domain!(RuntimeMessageExtensionPort, invoke_message);
 impl_noop_domain!(RuntimeToolExtensionPort, invoke_tool);
 impl_noop_domain!(RuntimeCompactionExtensionPort, invoke_compaction);
+
+#[async_trait]
+impl RuntimeRequestExtensionPort for NoopRuntimeExtensionPort {
+    fn has_request_hook(
+        &self,
+        _event: ExtensionLifecycleEvent,
+        _class: ExtensionHookClass,
+    ) -> bool {
+        false
+    }
+
+    async fn invoke_request(
+        &self,
+        _invocation: RuntimeExtensionInvocation,
+    ) -> RawRuntimeExtensionResult {
+        Ok(empty_action_batch())
+    }
+}
 
 #[cfg(test)]
 tests_bridge_macro::tests_bridge!("agent/runtime_extensions");
