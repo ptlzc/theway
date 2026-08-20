@@ -60,7 +60,8 @@ pub struct SessionRuntimeBuilder {
     pub templates: Vec<theway_core::PromptTemplate>,
     pub compact_algorithms:
         std::sync::Arc<theway_core::agent::compaction::algorithm::CompactAlgorithmRegistry>,
-    pub runtime_extension_packages: crate::ts_extensions::PackageCatalog,
+    pub legacy_compaction_host: Option<Arc<crate::ts_extensions::LegacyCompactionHost>>,
+    pub runtime_extension_packages: Arc<parking_lot::RwLock<crate::ts_extensions::PackageCatalog>>,
     pub runtime_extension_engine: Option<crate::ts_extensions::QuickJsEnginePool>,
     pub memory_dir: std::path::PathBuf,
     pub dag_engine: Arc<DagEngine>,
@@ -197,10 +198,12 @@ impl SessionRuntimeBuilder {
             ..theway_core::ObservationContext::default()
         };
         opts.runtime_extension_cwd = self.cwd.to_string_lossy().into_owned();
+        let mut runtime_extension_host = None;
         if let Some(engine) = &self.runtime_extension_engine {
+            let base_tools = tools.clone();
             let extensions = Arc::new(
-                crate::ts_extensions::SessionPluginHost::load_with_state(
-                    self.runtime_extension_packages.clone(),
+                crate::ts_extensions::SessionPluginHost::load_with_state_and_legacy(
+                    self.runtime_extension_packages.read().clone(),
                     engine.clone(),
                     session_id.clone(),
                     &self.cwd,
@@ -210,6 +213,8 @@ impl SessionRuntimeBuilder {
                             extension_state_store,
                         ),
                     ),
+                    self.legacy_compaction_host.clone(),
+                    Some(self.runtime_extension_packages.clone()),
                 )
                 .await,
             );
@@ -231,7 +236,8 @@ impl SessionRuntimeBuilder {
                 credential_host.provider_api_key(provider_id)
             }));
             opts.runtime_extension_model_context = extensions.model_context_projection();
-            opts.runtime_extensions = extensions;
+            opts.runtime_extensions = extensions.clone();
+            runtime_extension_host = Some((extensions, base_tools));
         }
         let tool_names = tools
             .iter()
@@ -259,6 +265,18 @@ impl SessionRuntimeBuilder {
         opts.on_control_plane_prompt = self.control_plane_hook.clone();
         opts.after_tool_call = self.after_tool_call.clone();
         let harness = std::sync::Arc::new(AgentHarness::new(opts));
+        if let Some((extensions, base_tools)) = &runtime_extension_host {
+            let agent = harness.agent_arc();
+            let agent = Arc::downgrade(&agent);
+            extensions.configure_reload_tool_publisher(
+                base_tools.clone(),
+                Arc::new(move |tools| {
+                    if let Some(agent) = agent.upgrade() {
+                        agent.state().tools = tools;
+                    }
+                }),
+            );
+        }
 
         // Per-session trigger executor: same wiring as the startup path (transport
         // adapters plus cron/dynamic listeners registered per harness).

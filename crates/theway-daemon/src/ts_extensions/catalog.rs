@@ -229,6 +229,29 @@ impl PackageCatalog {
         &self.diagnostics
     }
 
+    pub(super) fn fingerprint(&self) -> Vec<String> {
+        let mut fingerprint = self
+            .packages
+            .iter()
+            .map(|package| {
+                format!(
+                    "package:{:?}:{}:{}:{}",
+                    package.source,
+                    package.manifest.id,
+                    package.manifest.version,
+                    package.content_sha256
+                )
+            })
+            .collect::<Vec<_>>();
+        fingerprint.extend(self.entries.iter().map(|entry| {
+            format!(
+                "entry:{:?}:{}:{:?}:{:?}",
+                entry.source, entry.extension_id, entry.status, entry.reason_code
+            )
+        }));
+        fingerprint
+    }
+
     /// Update an effective package record when policy or the session host
     /// disables/faults it. Shadowed and rejected provenance remains intact.
     pub fn set_effective_status(

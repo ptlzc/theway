@@ -22,6 +22,22 @@ use super::registration_runtime::{ExtensionCommandContext, RegisteredExtensionCo
 use super::registrations::{hook_effect_registration, validate_effect_registrations};
 
 impl SessionPluginHost {
+    pub fn configure_reload_tool_publisher(
+        &self,
+        base_tools: Vec<Arc<dyn AgentTool>>,
+        publisher: Arc<dyn Fn(Vec<Arc<dyn AgentTool>>) + Send + Sync>,
+    ) {
+        *self.reload_base_tools.lock() = base_tools;
+        *self.reload_tool_publisher.lock() = Some(publisher);
+    }
+
+    pub(super) fn publish_reloaded_tools(&self) {
+        let Some(publisher) = self.reload_tool_publisher.lock().clone() else {
+            return;
+        };
+        publisher(self.merge_registered_tools(self.reload_base_tools.lock().clone()));
+    }
+
     pub(super) async fn invoke_registration(
         &self,
         key: &EngineInstanceKey,
@@ -58,10 +74,13 @@ impl SessionPluginHost {
             )
             .await
             .map_err(|error| error.message)?;
-        self.registration_runtime.apply_disposals(
+        let disposed = self.registration_runtime.apply_disposals(
             &self.effect_owner(&key.extension_id),
             &result.disposed_registration_ids,
         );
+        if !disposed.is_empty() {
+            self.publish_reloaded_tools();
+        }
         Ok((result, origin_sequence))
     }
 
@@ -146,9 +165,12 @@ impl SessionPluginHost {
         arguments: Value,
         context: &ExtensionCommandContext,
     ) -> Result<ExtensionCommandOutcome, String> {
-        self.registration_runtime
+        let result = self
+            .registration_runtime
             .invoke_command(&self.engine, &self.cwd, name, arguments, context)
-            .await
+            .await;
+        self.publish_reloaded_tools();
+        result
     }
 
     pub fn client_contributions(&self) -> Vec<ExtensionClientContribution> {
@@ -162,12 +184,22 @@ impl SessionPluginHost {
     }
 
     pub(super) fn dispose_extension_effects(&self, extension_id: &str) {
-        self.registration_runtime
+        let disposed = self
+            .registration_runtime
             .dispose_owner(&self.effect_owner(extension_id));
+        if !disposed.is_empty() {
+            self.publish_reloaded_tools();
+        }
     }
 
     pub(super) fn dispose_boundary_effects(&self, scope: ExtensionScope, scope_id: Option<&str>) {
-        self.registration_runtime.dispose_scope(scope, scope_id);
+        if !self
+            .registration_runtime
+            .dispose_scope(scope, scope_id)
+            .is_empty()
+        {
+            self.publish_reloaded_tools();
+        }
     }
 
     pub(super) fn has_request_registration(

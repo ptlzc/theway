@@ -37,7 +37,6 @@ macro_rules! impl_runtime_domain {
 }
 
 impl_runtime_domain!(RuntimeMessageExtensionPort, invoke_message);
-impl_runtime_domain!(RuntimeToolExtensionPort, invoke_tool);
 impl_runtime_domain!(RuntimeCompactionExtensionPort, invoke_compaction);
 
 #[async_trait::async_trait]
@@ -47,6 +46,9 @@ impl RuntimeRunExtensionPort for SessionPluginHost {
         invocation: RuntimeExtensionInvocation,
     ) -> RawRuntimeExtensionResult {
         let event = invocation.event();
+        if event == ExtensionLifecycleEvent::RunStarted {
+            self.mark_run_started().await;
+        }
         let run_id = invocation.context().scope.run_id.clone();
         let request_id = invocation.context().scope.request_id.clone();
         let result = self.invoke_runtime(invocation).await;
@@ -55,9 +57,27 @@ impl RuntimeRunExtensionPort for SessionPluginHost {
                 self.dispose_boundary_effects(ExtensionScope::Request, request_id.as_deref());
             }
             ExtensionLifecycleEvent::RunSettled => {
-                self.dispose_boundary_effects(ExtensionScope::Run, run_id.as_deref());
+                self.settle_run_reload_boundary(run_id.as_deref()).await;
             }
             _ => {}
+        }
+        result
+    }
+}
+
+#[async_trait::async_trait]
+impl RuntimeToolExtensionPort for SessionPluginHost {
+    async fn invoke_tool(
+        &self,
+        invocation: RuntimeExtensionInvocation,
+    ) -> RawRuntimeExtensionResult {
+        let event = invocation.event();
+        if event == ExtensionLifecycleEvent::ToolExecutionStart {
+            self.mark_tool_execution_started().await;
+        }
+        let result = self.invoke_runtime(invocation).await;
+        if event == ExtensionLifecycleEvent::ToolExecutionEnd {
+            self.settle_tool_reload_boundary().await;
         }
         result
     }

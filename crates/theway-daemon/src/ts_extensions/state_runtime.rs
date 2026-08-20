@@ -77,6 +77,14 @@ impl ExtensionStateRuntime {
         self.model_context.clone()
     }
 
+    pub(super) fn entries_for(&self, extension_id: &str) -> Vec<ExtensionDurableEntry> {
+        self.projections
+            .lock()
+            .get(extension_id)
+            .map(|projection| projection.entries.clone())
+            .unwrap_or_default()
+    }
+
     pub(super) async fn reconstruct(&self, package: &ExtensionPackage) -> Result<(), String> {
         let extension_id = &package.manifest().id;
         let entries = self

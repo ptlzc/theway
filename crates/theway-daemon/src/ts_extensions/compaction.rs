@@ -4,13 +4,54 @@ use theway_core::agent::compaction::algorithm::CompactAlgorithmRegistry;
 
 use super::{ExtensionRegistry, TsExtension};
 
+/// Shared compatibility boundary used by active sessions and reload discovery.
+pub struct LegacyCompactionHost {
+    registry: Arc<CompactAlgorithmRegistry>,
+    fingerprint: parking_lot::RwLock<Vec<String>>,
+}
+
+impl LegacyCompactionHost {
+    pub fn new(extensions: &ExtensionRegistry) -> Self {
+        Self {
+            registry: Arc::new(compact_algorithm_registry(extensions)),
+            fingerprint: parking_lot::RwLock::new(extensions.legacy_fingerprint()),
+        }
+    }
+
+    pub fn registry(&self) -> Arc<CompactAlgorithmRegistry> {
+        Arc::clone(&self.registry)
+    }
+
+    pub(super) fn matches(&self, extensions: &ExtensionRegistry) -> bool {
+        *self.fingerprint.read() == extensions.legacy_fingerprint()
+    }
+
+    pub(super) fn publish(&self, extensions: &ExtensionRegistry) {
+        reload_compact_algorithm_registry(&self.registry, extensions);
+        *self.fingerprint.write() = extensions.legacy_fingerprint();
+    }
+}
+
 /// Build the compatibility compaction registry from top-level legacy files.
 pub fn compact_algorithm_registry(extensions: &ExtensionRegistry) -> CompactAlgorithmRegistry {
-    let mut registry = CompactAlgorithmRegistry::new();
-    for extension in extensions.by_kind("compaction") {
-        registry.register(Arc::new(TsCompactAlgorithm::new(extension)));
-    }
+    let registry = CompactAlgorithmRegistry::new();
+    reload_compact_algorithm_registry(&registry, extensions);
     registry
+}
+
+/// Atomically rebuild the legacy compaction adapters without exposing ABI v2 host capabilities.
+pub fn reload_compact_algorithm_registry(
+    registry: &CompactAlgorithmRegistry,
+    extensions: &ExtensionRegistry,
+) {
+    let algorithms = extensions
+        .by_kind("compaction")
+        .into_iter()
+        .map(|extension| {
+            Arc::new(TsCompactAlgorithm::new(extension))
+                as Arc<dyn theway_core::agent::compaction::algorithm::CompactAlgorithm>
+        });
+    registry.replace_custom(algorithms);
 }
 
 pub struct TsCompactAlgorithm {

@@ -271,33 +271,35 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     for error in &ts_extensions.errors {
         tracing::warn!(target: "extensions", "{error}");
     }
-    let compact_algorithms = Arc::new(crate::ts_extensions::compact_algorithm_registry(
+    let legacy_compaction_host = Arc::new(crate::ts_extensions::LegacyCompactionHost::new(
         &ts_extensions,
     ));
-    let runtime_extension_packages = ts_extensions.package_catalog().clone();
-    let runtime_extension_engine = (!runtime_extension_packages.effective_packages().is_empty())
-        .then(|| {
-            let broker_services =
-                crate::ts_extensions::ExtensionBrokerServices::new(&paths.base, executor.clone());
-            for package in runtime_extension_packages.effective_packages() {
-                for permission in package.granted_permissions() {
-                    if let theway_contract::extension::ExtensionPermission::SecretsRead(name) =
-                        permission
-                        && let Ok(value) = std::env::var(name)
-                    {
-                        broker_services.set_secret(name, value);
-                    }
+    let compact_algorithms = legacy_compaction_host.registry();
+    let runtime_extension_packages = Arc::new(parking_lot::RwLock::new(
+        ts_extensions.package_catalog().clone(),
+    ));
+    let runtime_extension_engine = startup.load_local_sources.then(|| {
+        let broker_services =
+            crate::ts_extensions::ExtensionBrokerServices::new(&paths.base, executor.clone());
+        for package in runtime_extension_packages.read().effective_packages() {
+            for permission in package.granted_permissions() {
+                if let theway_contract::extension::ExtensionPermission::SecretsRead(name) =
+                    permission
+                    && let Ok(value) = std::env::var(name)
+                {
+                    broker_services.set_secret(name, value);
                 }
             }
-            crate::ts_extensions::QuickJsEnginePool::with_broker_services(
-                std::thread::available_parallelism()
-                    .map(usize::from)
-                    .unwrap_or(1)
-                    .min(4),
-                crate::ts_extensions::QuickJsEngineLimits::default(),
-                broker_services,
-            )
-        });
+        }
+        crate::ts_extensions::QuickJsEnginePool::with_broker_services(
+            std::thread::available_parallelism()
+                .map(usize::from)
+                .unwrap_or(1)
+                .min(4),
+            crate::ts_extensions::QuickJsEngineLimits::default(),
+            broker_services,
+        )
+    });
     // Runtime settings come from the in-memory StartupConfig: defaults until
     // the controller provisions values through the settings RPC.
     let config_enabled_builtins = startup.builtin_skills.clone();
@@ -402,6 +404,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         skills: combined_skills.clone(),
         templates: loaded_templates.templates.clone(),
         compact_algorithms: compact_algorithms.clone(),
+        legacy_compaction_host: Some(legacy_compaction_host),
         runtime_extension_packages,
         runtime_extension_engine,
         memory_dir: memory_dir.clone(),

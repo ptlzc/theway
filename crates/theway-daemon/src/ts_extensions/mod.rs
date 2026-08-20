@@ -26,6 +26,7 @@ mod registered_tool;
 mod registration_host;
 mod registration_runtime;
 mod registrations;
+mod reload;
 mod state;
 mod state_broker;
 mod state_runtime;
@@ -37,7 +38,10 @@ use std::path::Path;
 pub use audit::ExtensionAuditLog;
 pub use broker_services::ExtensionBrokerServices;
 pub use catalog::{ExtensionPackage, PackageCatalog};
-pub use compaction::{TsCompactAlgorithm, compact_algorithm_registry};
+pub use compaction::{
+    LegacyCompactionHost, TsCompactAlgorithm, compact_algorithm_registry,
+    reload_compact_algorithm_registry,
+};
 pub use dispatcher::RuntimeExtensionHostConfig;
 pub use effects::{
     EffectDisposeOutcome, EffectKind, EffectLedger, EffectLedgerError, EffectOwner, EffectRecord,
@@ -52,6 +56,7 @@ pub use registrations::{
     PromptSectionRegistration, ProviderModelRegistration, ProviderRegistration, ProviderWireFormat,
     RegistrationPredicate, RequestPolicyRegistration, ToolPermission, ToolRegistration,
 };
+pub use reload::ExtensionReloadDisposition;
 pub use trust::{ExtensionTrustStore, GlobalExtensionPolicy};
 
 use legacy::LegacyExtensionRegistry;
@@ -120,6 +125,10 @@ impl ExtensionRegistry {
 
     pub fn package_catalog(&self) -> &PackageCatalog {
         &self.packages
+    }
+
+    pub(super) fn legacy_fingerprint(&self) -> Vec<String> {
+        self.legacy.fingerprint()
     }
 }
 

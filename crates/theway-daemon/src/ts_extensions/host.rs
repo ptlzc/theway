@@ -7,11 +7,13 @@ use theway_contract::extension::{
     ExtensionActionBatch, ExtensionCatalogEntry, ExtensionCatalogStatus, ExtensionDiagnostic,
     ExtensionDiagnosticCode, ExtensionHookClass, ExtensionHookContract, ExtensionLifecycleEvent,
 };
+use theway_core::AgentTool;
 use theway_core::agent::runtime_extensions::{
     ExtensionModelContextProjection, RawRuntimeExtensionResult, RuntimeExtensionInvocation,
 };
 
 use super::catalog::{ExtensionPackage, PackageCatalog};
+use super::compaction::LegacyCompactionHost;
 use super::diagnostics;
 use super::dispatch_result::{
     accept_transform_batch, decode_batch, empty_batch, failed_gate_decision, merge_batch,
@@ -22,6 +24,7 @@ use super::effects::{InstanceHealth, InstanceLifecyclePhase};
 use super::engine::{EngineInstanceKey, QuickJsEnginePool};
 use super::observation::{ObservationDispatch, ObservationJob, ObservationQueue, diagnostic_code};
 use super::registration_runtime::RegistrationRuntime;
+use super::reload::HostReloadState;
 use super::state::HostLifecycleSequence;
 use super::state_runtime::ExtensionStateRuntime;
 
@@ -56,7 +59,14 @@ pub struct SessionPluginHost {
     pub(super) shutdown: Arc<AtomicBool>,
     pub(super) registration_runtime: RegistrationRuntime,
     pub(super) state_runtime: ExtensionStateRuntime,
+    pub(super) reload_state: HostReloadState,
+    pub(super) legacy_compaction: Option<Arc<LegacyCompactionHost>>,
+    pub(super) reload_catalog: Option<Arc<parking_lot::RwLock<PackageCatalog>>>,
+    pub(super) reload_base_tools: parking_lot::Mutex<Vec<Arc<dyn AgentTool>>>,
+    pub(super) reload_tool_publisher: parking_lot::Mutex<Option<ReloadToolPublisher>>,
 }
+
+pub(super) type ReloadToolPublisher = Arc<dyn Fn(Vec<Arc<dyn AgentTool>>) + Send + Sync>;
 
 impl SessionPluginHost {
     pub async fn invoke(
@@ -313,7 +323,7 @@ impl SessionPluginHost {
         );
     }
 
-    async fn invoke_cleanup_event(
+    pub(super) async fn invoke_cleanup_event(
         &self,
         extension: &ActiveExtension,
         event: ExtensionLifecycleEvent,

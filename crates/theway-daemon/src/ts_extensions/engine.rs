@@ -6,12 +6,14 @@ use std::time::{Duration, Instant};
 use rquickjs::loader::{BuiltinLoader, BuiltinResolver};
 use rquickjs::{CatchResultExt, Context, Function, Module, Promise, Runtime};
 use serde_json::Value;
-use theway_contract::extension::{ExtensionAction, ExtensionDurableEntry, ExtensionLifecycleEvent};
+use theway_contract::extension::{
+    ExtensionAction, ExtensionDurableEntry, ExtensionLifecycleEvent, ExtensionPermission,
+};
 use tokio::sync::oneshot;
 
 use super::broker_services::ExtensionBrokerServices;
 use super::brokers;
-use super::catalog::ExtensionPackage;
+use super::catalog::{ExtensionPackage, PackageCatalog};
 
 const LOAD_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -165,6 +167,26 @@ impl QuickJsEnginePool {
 
     pub fn worker_count(&self) -> usize {
         self.inner.workers.len()
+    }
+
+    pub(super) fn isolated_pool(&self) -> Self {
+        Self::with_broker_services(
+            self.worker_count(),
+            self.inner.limits,
+            self.inner.broker_services.clone(),
+        )
+    }
+
+    pub(crate) fn install_catalog_secrets(&self, catalog: &PackageCatalog) {
+        for package in catalog.effective_packages() {
+            for permission in package.granted_permissions() {
+                if let ExtensionPermission::SecretsRead(name) = permission
+                    && let Ok(value) = std::env::var(name)
+                {
+                    self.inner.broker_services.set_secret(name, value);
+                }
+            }
+        }
     }
 
     pub async fn load(

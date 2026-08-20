@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use crate::triggers;
 
-use super::{register_notification_hooks, DynNotificationHook, NotificationHookSink};
+use super::{DynNotificationHook, NotificationHookSink, register_notification_hooks};
 
 /// Recording stand-in for `Arc<TriggerExecutor>` — captures what the helper
 /// registers without touching executor internals.
@@ -101,7 +101,11 @@ fn register_notification_hooks_registered_labels_are_unique() {
 
     let labels = labels(&sink);
     let unique: HashSet<_> = labels.iter().collect();
-    assert_eq!(labels.len(), unique.len(), "no duplicate registrations: {labels:?}");
+    assert_eq!(
+        labels.len(),
+        unique.len(),
+        "no duplicate registrations: {labels:?}"
+    );
     assert_eq!(labels.len(), hooks.len() + 2);
 }
 
@@ -194,7 +198,10 @@ fn test_factory(work_dir: PathBuf) -> (SessionRuntimeBuilder, TempDir) {
         compact_algorithms: std::sync::Arc::new(
             theway_core::agent::compaction::algorithm::CompactAlgorithmRegistry::new(),
         ),
-        runtime_extension_packages: crate::ts_extensions::PackageCatalog::default(),
+        legacy_compaction_host: None,
+        runtime_extension_packages: std::sync::Arc::new(parking_lot::RwLock::new(
+            crate::ts_extensions::PackageCatalog::default(),
+        )),
         runtime_extension_engine: None,
         memory_dir: state.path().join("memory"),
         dag_engine: std::sync::Arc::new(theway_core::multiagent::graph::engine::DagEngine::new()),
@@ -280,8 +287,12 @@ fn binding_check_mismatch_error_names_both_paths() {
 #[test]
 fn binding_check_falls_back_to_string_comparison_when_canonicalize_fails() {
     // Nonexistent paths → canonicalize fails on both sides → raw comparison.
-    check_work_dir_binding("s1", Some("/no/such/dir-theway-66"), Path::new("/no/such/dir-theway-66"))
-        .unwrap();
+    check_work_dir_binding(
+        "s1",
+        Some("/no/such/dir-theway-66"),
+        Path::new("/no/such/dir-theway-66"),
+    )
+    .unwrap();
     let err = check_work_dir_binding(
         "s1",
         Some("/no/such/foreign-theway-66"),
@@ -416,10 +427,8 @@ export default defineExtension((api) => {
         )
         .unwrap();
     trust.save().unwrap();
-    factory.runtime_extension_packages = crate::ts_extensions::PackageCatalog::discover(
-        work_dir.path(),
-        &factory.base_dir,
-    );
+    *factory.runtime_extension_packages.write() =
+        crate::ts_extensions::PackageCatalog::discover(work_dir.path(), &factory.base_dir);
     let engine = crate::ts_extensions::QuickJsEnginePool::new(1);
     factory.runtime_extension_engine = Some(engine.clone());
 

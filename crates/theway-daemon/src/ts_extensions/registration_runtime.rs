@@ -410,6 +410,19 @@ impl RegistrationRuntime {
         records
     }
 
+    pub(super) fn dispose_all(&self) -> Vec<u64> {
+        let handles = self.effects.dispose_all();
+        let mut providers = self.provider_models.lock();
+        for handle in &handles {
+            if let Some(models) = providers.remove(handle) {
+                for (provider, id) in models {
+                    theway_llm_provider::unregister_custom_model(&provider, &id);
+                }
+            }
+        }
+        handles
+    }
+
     fn apply_external(&self, handle: u64) -> Result<(), String> {
         let record = self
             .effects

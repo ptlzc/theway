@@ -11,12 +11,14 @@ use theway_core::agent::runtime_extensions::{
 };
 
 use super::catalog::PackageCatalog;
+use super::compaction::LegacyCompactionHost;
 use super::dispatcher::{self, RuntimeExtensionHostConfig};
 use super::effects::{InstanceHealth, InstanceLifecyclePhase};
 use super::engine::{EngineInstanceKey, QuickJsEnginePool};
 use super::host::{ActiveExtension, SessionPluginHost};
 use super::observation::ObservationQueue;
 use super::registration_runtime::RegistrationRuntime;
+use super::reload::HostReloadState;
 use super::state::HostLifecycleSequence;
 use super::state_runtime::{ExtensionStateLimits, ExtensionStateRuntime};
 
@@ -91,6 +93,22 @@ impl SessionPluginHost {
         config: RuntimeExtensionHostConfig,
         state_port: Arc<dyn SessionExtensionStatePort>,
     ) -> Self {
+        Self::load_with_state_and_legacy(
+            catalog, engine, session_id, cwd, config, state_port, None, None,
+        )
+        .await
+    }
+
+    pub async fn load_with_state_and_legacy(
+        catalog: PackageCatalog,
+        engine: QuickJsEnginePool,
+        session_id: impl Into<String>,
+        cwd: &Path,
+        config: RuntimeExtensionHostConfig,
+        state_port: Arc<dyn SessionExtensionStatePort>,
+        legacy_compaction: Option<Arc<LegacyCompactionHost>>,
+        reload_catalog: Option<Arc<parking_lot::RwLock<PackageCatalog>>>,
+    ) -> Self {
         config
             .validate()
             .expect("runtime extension host config must be valid");
@@ -120,12 +138,17 @@ impl SessionPluginHost {
             shutdown: Arc::new(AtomicBool::new(false)),
             registration_runtime: RegistrationRuntime::new(state_runtime.clone(), sequence),
             state_runtime,
+            reload_state: HostReloadState::default(),
+            legacy_compaction,
+            reload_catalog,
+            reload_base_tools: parking_lot::Mutex::new(Vec::new()),
+            reload_tool_publisher: parking_lot::Mutex::new(None),
         };
         host.load_effective_packages().await;
         host
     }
 
-    async fn load_effective_packages(&self) {
+    pub(super) async fn load_effective_packages(&self) {
         let packages = self.catalog.read().effective_packages();
         let mut active = self.active.lock().await;
         for package in packages {
@@ -220,7 +243,7 @@ impl SessionPluginHost {
         }
     }
 
-    async fn start_sessions(&self, reason: &str) {
+    pub(super) async fn start_sessions(&self, reason: &str) {
         let mut active = self.active.lock().await;
         let mut index = 0;
         while index < active.len() {
