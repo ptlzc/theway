@@ -11,10 +11,16 @@
 //! - deployment-name map env parsing edge cases
 //! - reasoningSummary / serviceTier knobs
 
+use std::collections::BTreeMap;
+
 use async_trait::async_trait;
 use serde_json::json;
 
 use crate::api_registry::ApiProvider;
+use crate::provider_interceptor::{
+    ProviderRequestFailureStage, ProviderWireFormat, apply_headers, intercept_json_request,
+    observe_request_failure, observe_response,
+};
 use crate::providers::openai_responses::{
     build_request_body, consume_responses_sse, push_error, resolve_compat,
 };
@@ -112,6 +118,15 @@ async fn run(
     {
         Some(k) => k,
         None => {
+            observe_request_failure(
+                &options,
+                ProviderWireFormat::OpenAiResponses,
+                ProviderRequestFailureStage::Authentication,
+                "missing_api_key",
+                "AZURE_OPENAI_API_KEY is not set",
+                &[],
+            )
+            .await;
             push_error(
                 &mut sender,
                 &model,
@@ -125,6 +140,15 @@ async fn run(
     let mut body = match build_request_body(&model, &context, &options, &compat) {
         Ok(b) => b,
         Err(e) => {
+            observe_request_failure(
+                &options,
+                ProviderWireFormat::OpenAiResponses,
+                ProviderRequestFailureStage::Serialization,
+                "request_body",
+                e.to_string(),
+                &[&api_key],
+            )
+            .await;
             push_error(&mut sender, &model, format!("build request body: {e}"));
             return;
         }
@@ -135,6 +159,15 @@ async fn run(
     let client = match crate::utils::node_http_proxy::build_client(options.timeout_ms) {
         Ok(c) => c,
         Err(e) => {
+            observe_request_failure(
+                &options,
+                ProviderWireFormat::OpenAiResponses,
+                ProviderRequestFailureStage::Client,
+                "http_client",
+                e.to_string(),
+                &[&api_key],
+            )
+            .await;
             push_error(&mut sender, &model, format!("http client: {e}"));
             return;
         }
@@ -148,29 +181,42 @@ async fn run(
     let base = model.base_url.trim_end_matches('/');
     let url = format!("{base}/openai/v1/responses?api-version={api_version}");
 
-    let mut req = client
-        .post(&url)
-        .header("api-key", api_key)
-        .header("content-type", "application/json")
-        .header("accept", "text/event-stream");
-    if let Some(extra) = &options.headers {
-        for (k, v) in extra {
-            req = req.header(k.as_str(), v.as_str());
-        }
-    }
-
-    let req = req.json(&body);
+    let intercepted = intercept_json_request(
+        &options,
+        ProviderWireFormat::OpenAiResponses,
+        BTreeMap::from([
+            ("accept".into(), "text/event-stream".into()),
+            ("content-type".into(), "application/json".into()),
+        ]),
+        body,
+    )
+    .await;
+    let body = serde_json::to_vec(&intercepted.payload)
+        .expect("serde_json::Value serialization cannot fail");
+    let req = client.post(&url).header("api-key", &api_key);
+    let req = apply_headers(req, intercepted.headers);
+    let req = apply_headers(req, intercepted.sensitive_headers).body(body);
     let resp = match crate::utils::retry::send_with_retry(&options, req).await {
         Ok(r) => r,
         Err(e) => {
             if e.is_aborted() {
                 abort_utils::push_aborted(&mut sender, &model);
             } else {
+                observe_request_failure(
+                    &options,
+                    ProviderWireFormat::OpenAiResponses,
+                    ProviderRequestFailureStage::Transport,
+                    "http_transport",
+                    e.to_string(),
+                    &[&api_key],
+                )
+                .await;
                 push_error(&mut sender, &model, format!("http error: {e}"));
             }
             return;
         }
     };
+    observe_response(&options, ProviderWireFormat::OpenAiResponses, &resp).await;
     if !resp.status().is_success() {
         let status = resp.status();
         let txt = match abort_utils::response_text_or_abort(resp, options.abort.as_ref()).await {

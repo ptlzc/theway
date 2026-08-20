@@ -14,6 +14,7 @@ pub mod images;
 pub mod images_api_registry;
 pub mod models;
 pub mod models_generated;
+pub mod provider_interceptor;
 pub mod providers;
 pub mod session_resources;
 #[cfg(feature = "amazon-bedrock")]
@@ -35,6 +36,7 @@ pub use images::images;
 pub use models::{
     get_model, list_apis, list_models, register_custom_model, unregister_custom_model,
 };
+pub use provider_interceptor::*;
 pub use session_resources::cleanup_session_resources;
 pub use stream::{complete, complete_simple, stream, stream_simple};
 pub use types::*;

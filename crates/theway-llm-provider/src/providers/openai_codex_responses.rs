@@ -14,10 +14,16 @@
 //! - decode `chatgpt-account-id` from the JWT access token (currently from env/extras)
 //! - text verbosity / service tier knobs
 
+use std::collections::BTreeMap;
+
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use crate::api_registry::ApiProvider;
+use crate::provider_interceptor::{
+    ProviderRequestFailureStage, ProviderWireFormat, apply_headers, intercept_json_request,
+    observe_request_failure, observe_response,
+};
 use crate::providers::openai_responses::{
     consume_responses_sse, convert_messages, push_error, serialize_tools,
 };
@@ -108,6 +114,15 @@ async fn run(
     {
         Some(t) if !t.is_empty() => t,
         _ => {
+            observe_request_failure(
+                &options,
+                ProviderWireFormat::OpenAiResponses,
+                ProviderRequestFailureStage::Authentication,
+                "missing_auth_token",
+                "Codex auth token is missing",
+                &[],
+            )
+            .await;
             push_error(
                 &mut sender,
                 &model,
@@ -128,43 +143,61 @@ async fn run(
     let client = match crate::utils::node_http_proxy::build_client(options.timeout_ms) {
         Ok(c) => c,
         Err(e) => {
+            observe_request_failure(
+                &options,
+                ProviderWireFormat::OpenAiResponses,
+                ProviderRequestFailureStage::Client,
+                "http_client",
+                e.to_string(),
+                &[&token],
+            )
+            .await;
             push_error(&mut sender, &model, format!("http client: {e}"));
             return;
         }
     };
 
     let url = resolve_codex_url(&model.base_url);
-    let mut req = client
-        .post(&url)
-        .bearer_auth(token)
-        .header("content-type", "application/json")
-        .header("accept", "text/event-stream")
-        .header("originator", "pi")
-        .header("OpenAI-Beta", "responses=experimental");
-    if let Some(acct) = &account_id {
-        req = req.header("chatgpt-account-id", acct.as_str());
-    }
+    let mut headers = BTreeMap::from([
+        ("accept".into(), "text/event-stream".into()),
+        ("content-type".into(), "application/json".into()),
+        ("openai-beta".into(), "responses=experimental".into()),
+        ("originator".into(), "pi".into()),
+    ]);
     if let Some(sid) = &options.session_id {
-        req = req.header("session_id", sid.as_str());
+        headers.insert("session_id".into(), sid.clone());
     }
-    if let Some(extra) = &options.headers {
-        for (k, v) in extra {
-            req = req.header(k.as_str(), v.as_str());
-        }
+    let intercepted =
+        intercept_json_request(&options, ProviderWireFormat::OpenAiResponses, headers, body).await;
+    let body = serde_json::to_vec(&intercepted.payload)
+        .expect("serde_json::Value serialization cannot fail");
+    let mut req = client.post(&url).bearer_auth(&token);
+    if let Some(acct) = &account_id {
+        req = req.header("chatgpt-account-id", acct);
     }
-
-    let req = req.json(&body);
+    let req = apply_headers(req, intercepted.headers);
+    let req = apply_headers(req, intercepted.sensitive_headers).body(body);
     let resp = match crate::utils::retry::send_with_retry(&options, req).await {
         Ok(r) => r,
         Err(e) => {
             if e.is_aborted() {
                 abort_utils::push_aborted(&mut sender, &model);
             } else {
+                observe_request_failure(
+                    &options,
+                    ProviderWireFormat::OpenAiResponses,
+                    ProviderRequestFailureStage::Transport,
+                    "http_transport",
+                    e.to_string(),
+                    &[&token],
+                )
+                .await;
                 push_error(&mut sender, &model, format!("http error: {e}"));
             }
             return;
         }
     };
+    observe_response(&options, ProviderWireFormat::OpenAiResponses, &resp).await;
     if !resp.status().is_success() {
         let status = resp.status();
         let txt = match abort_utils::response_text_or_abort(resp, options.abort.as_ref()).await {

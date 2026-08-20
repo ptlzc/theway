@@ -160,6 +160,8 @@ pub struct StreamOptions {
     pub max_retries: Option<u32>,
     pub max_retry_delay_ms: Option<u64>,
     pub metadata: Option<HashMap<String, serde_json::Value>>,
+    /// Optional provider-specific JSON/HTTP interception supplied by the embedding runtime.
+    pub request_interceptor: Option<crate::provider_interceptor::ProviderRequestInterceptorHandle>,
     /// Cancellation handle. Implementers must honour this for outstanding HTTP requests *and*
     /// abort any in-flight stream consumption.
     pub abort: Option<tokio_util::sync::CancellationToken>,

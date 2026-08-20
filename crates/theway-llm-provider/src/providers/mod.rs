@@ -9,6 +9,8 @@ pub mod transform_messages;
 
 #[cfg(feature = "anthropic")]
 pub mod anthropic;
+#[cfg(feature = "anthropic")]
+mod anthropic_thinking;
 
 // Azure + Codex ride on the Responses SSE consumer, so compile this module for those features.
 #[cfg(any(

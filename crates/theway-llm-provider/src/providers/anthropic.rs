@@ -22,13 +22,19 @@
 use async_trait::async_trait;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::api_registry::ApiProvider;
+use crate::provider_interceptor::{
+    ProviderRequestFailureStage, ProviderWireFormat, apply_headers, intercept_json_request,
+    observe_request_failure, observe_response,
+};
 use crate::types::*;
 use crate::utils::abort::{self, AbortErrorOrReqwest, AbortableNext};
 use crate::utils::event_stream::{AssistantMessageEventSender, AssistantMessageEventStream};
 use crate::utils::sse::SseStream;
+
+use super::anthropic_thinking::{budget_for, default_budget_for};
 
 /// Default Anthropic API host. Used as the fallback when `Model::base_url` is empty.
 #[allow(dead_code)]
@@ -144,28 +150,7 @@ impl ApiProvider for AnthropicProvider {
     }
 }
 
-fn budget_for(b: &ThinkingBudgets, level: ThinkingLevel) -> Option<u32> {
-    match level {
-        ThinkingLevel::Minimal => b.minimal,
-        ThinkingLevel::Low => b.low,
-        ThinkingLevel::Medium => b.medium,
-        ThinkingLevel::High | ThinkingLevel::Xhigh => b.high,
-    }
-}
-
-fn default_budget_for(level: ThinkingLevel) -> u32 {
-    match level {
-        ThinkingLevel::Minimal => 1024,
-        ThinkingLevel::Low => 4096,
-        ThinkingLevel::Medium => 8192,
-        ThinkingLevel::High => 16_384,
-        ThinkingLevel::Xhigh => 32_768,
-    }
-}
-
-// ────────────────────────────────────────────────────────────────────────────────────────────
-// HTTP + SSE pipeline
-// ────────────────────────────────────────────────────────────────────────────────────────────
+// HTTP + SSE pipeline.
 
 async fn run(
     model: Model,
@@ -180,6 +165,15 @@ async fn run(
     {
         Some(k) => k,
         None => {
+            observe_request_failure(
+                &options,
+                ProviderWireFormat::AnthropicMessages,
+                ProviderRequestFailureStage::Authentication,
+                "missing_api_key",
+                "ANTHROPIC_API_KEY is not set",
+                &[],
+            )
+            .await;
             push_error(&mut sender, &model, "ANTHROPIC_API_KEY is not set".into());
             return;
         }
@@ -189,6 +183,15 @@ async fn run(
     let body = match build_request_body(&model, &context, &options, &compat) {
         Ok(b) => b,
         Err(e) => {
+            observe_request_failure(
+                &options,
+                ProviderWireFormat::AnthropicMessages,
+                ProviderRequestFailureStage::Serialization,
+                "request_body",
+                e.to_string(),
+                &[&api_key],
+            )
+            .await;
             push_error(&mut sender, &model, format!("build request body: {e}"));
             return;
         }
@@ -197,6 +200,15 @@ async fn run(
     let client = match crate::utils::node_http_proxy::build_client(options.timeout_ms) {
         Ok(c) => c,
         Err(e) => {
+            observe_request_failure(
+                &options,
+                ProviderWireFormat::AnthropicMessages,
+                ProviderRequestFailureStage::Client,
+                "http_client",
+                e.to_string(),
+                &[&api_key],
+            )
+            .await;
             push_error(&mut sender, &model, format!("http client: {e}"));
             return;
         }
@@ -208,38 +220,51 @@ async fn run(
         model.base_url.as_str()
     };
     let url = format!("{}/v1/messages", base.trim_end_matches('/'));
-    let mut req = client
-        .post(&url)
-        .header("x-api-key", api_key)
-        .header("anthropic-version", ANTHROPIC_API_VERSION)
-        .header("anthropic-beta", ANTHROPIC_BETAS.join(","))
-        .header("content-type", "application/json")
-        .header("accept", "text/event-stream");
+    let mut headers = BTreeMap::from([
+        ("accept".into(), "text/event-stream".into()),
+        ("anthropic-beta".into(), ANTHROPIC_BETAS.join(",")),
+        ("anthropic-version".into(), ANTHROPIC_API_VERSION.into()),
+        ("content-type".into(), "application/json".into()),
+    ]);
 
     if compat.send_session_affinity_headers {
         if let Some(sid) = &options.session_id {
-            req = req.header("x-session-affinity", sid.as_str());
+            headers.insert("x-session-affinity".into(), sid.clone());
         }
     }
-
-    if let Some(extra) = &options.headers {
-        for (k, v) in extra {
-            req = req.header(k.as_str(), v.as_str());
-        }
-    }
-
-    let req = req.json(&body);
+    let intercepted = intercept_json_request(
+        &options,
+        ProviderWireFormat::AnthropicMessages,
+        headers,
+        body,
+    )
+    .await;
+    let body = serde_json::to_vec(&intercepted.payload)
+        .expect("serde_json::Value serialization cannot fail");
+    let req = client.post(&url).header("x-api-key", &api_key);
+    let req = apply_headers(req, intercepted.headers);
+    let req = apply_headers(req, intercepted.sensitive_headers).body(body);
     let resp = match crate::utils::retry::send_with_retry(&options, req).await {
         Ok(r) => r,
         Err(e) => {
             if e.is_aborted() {
                 abort::push_aborted(&mut sender, &model);
             } else {
+                observe_request_failure(
+                    &options,
+                    ProviderWireFormat::AnthropicMessages,
+                    ProviderRequestFailureStage::Transport,
+                    "http_transport",
+                    e.to_string(),
+                    &[&api_key],
+                )
+                .await;
                 push_error(&mut sender, &model, format!("http error: {e}"));
             }
             return;
         }
     };
+    observe_response(&options, ProviderWireFormat::AnthropicMessages, &resp).await;
 
     if !resp.status().is_success() {
         let status = resp.status();
