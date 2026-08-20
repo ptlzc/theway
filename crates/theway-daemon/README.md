@@ -11,7 +11,7 @@ The daemon owns session runtime assembly, model-facing tools, local and sandbox 
 - `thewayd` parses process options and calls the public `run(DaemonOptions)` composition entry point.
 - `DaemonPaths` resolves the base, home, working directory, and additional skill directories once at startup.
 - `DaemonServices` owns process-lifetime registries and command output injection.
-- `SessionRuntimeBuilder` is the internal construction path for initial, resumed, and switched session runtimes.
+- `SessionRuntimeBuilder` is the internal construction path for initial, resumed, and switched session runtimes, including session-scoped runtime-extension startup context.
 - Public modules expose supported extension points for executors, hooks, storage adapters, tools, templates, skills, triggers, and TypeScript extensions.
 
 The default `local` feature selects `LocalExecutor`. A `sandbox`-only build selects `SandboxExecutor`, whose unsupported operations fail with `ExecutorError::UnsupportedKind`. The protocol server can also forward `ToolOps` to a controller-provided gRPC tool endpoint.

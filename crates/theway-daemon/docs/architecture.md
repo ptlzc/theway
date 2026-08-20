@@ -31,9 +31,12 @@ English | [中文](architecture.zh.md)
 - adapts it with `theway-core::PersistentSessionStorage`;
 - validates the persisted working-directory binding;
 - constructs `AgentHarness`, trigger execution, graph persistence, job transcripts, hooks, and notification registrations for that session;
-- optionally rehydrates typed runtime state from the active persisted branch.
+- optionally rehydrates typed runtime state from the active persisted branch;
+- supplies the persisted session id and daemon working directory to the core runtime-extension context and starts the session lifecycle after reconstruction.
 
 [`turn/kernel.rs`](../src/turn/kernel.rs) provides `ReplKernel`, which admits one active prompt/continuation, owns queued turns, and replaces the complete runtime when switching sessions. [`turn/daemon.rs`](../src/turn/daemon.rs) owns the protocol-neutral daemon state machine, command routing, snapshots, feed updates, and lifecycle event handling.
+
+Session switching invokes the current harness's extension gate before constructing a target runtime. An active turn is cancelled and driven through settlement before the old runtime sends `session_shutdown`; only then does `ReplKernel::replace_runtime` activate the reconstructed target and publish `session_switched`. The `/fork` command invokes the fork gate before `SessionRepository::fork` and publishes `session_forked` only after the new session metadata is readable. A rejected gate therefore leaves the current runtime and session repository unchanged.
 
 ## Storage ownership
 
@@ -71,6 +74,7 @@ One observer instance is injected into the primary and resumed harnesses, `Subag
 ## Invariants
 
 - Session construction has one `SessionRuntimeBuilder` path for startup and switching.
+- Session switch and fork gates run before target construction or persistence, and successful events run only after commit.
 - Process services and storage implementations are injected through owned handles and traits rather than hidden globals or concrete SQLite types.
 - A controller-backed daemon does not outlive the controller storage required to build and persist session runtimes.
 - The daemon owns runtime semantics but no client presentation state.

@@ -31,9 +31,12 @@
 - 使用 `theway-core::PersistentSessionStorage` 进行适配；
 - 校验持久化的工作目录绑定；
 - 为该会话构建 `AgentHarness`、trigger 执行、图持久化、job transcript、hook 和 notification 注册；
-- 按需从活动持久化分支恢复带类型的运行时状态。
+- 按需从活动持久化分支恢复带类型的运行时状态；
+- 向 core runtime-extension context 提供持久化 session id 与 daemon 工作目录，并在重建后启动 session 生命周期。
 
 [`turn/kernel.rs`](../src/turn/kernel.rs) 提供 `ReplKernel`，负责单个活动 prompt/continuation 的准入、排队 turn，并在切换会话时整体替换运行时。[`turn/daemon.rs`](../src/turn/daemon.rs) 负责与协议无关的 daemon 状态机、命令路由、snapshot、feed 更新和生命周期事件处理。
+
+会话切换在构建目标 runtime 前调用当前 harness 的 extension gate。活动 turn 会被取消并驱动至 settlement，旧 runtime 随后发送 `session_shutdown`；之后 `ReplKernel::replace_runtime` 才激活已重建的目标并发布 `session_switched`。`/fork` 命令在 `SessionRepository::fork` 前调用 fork gate，并且只在新会话元数据可读取后发布 `session_forked`。因此，被拒绝的 gate 不会改变当前 runtime 或会话仓库。
 
 ## 存储归属
 
@@ -71,6 +74,7 @@
 ## 不变量
 
 - 启动与切换会话只有一条 `SessionRuntimeBuilder` 构建路径。
+- Session switch 与 fork gate 在目标构建或持久化前运行，成功事件只在提交后运行。
 - 进程服务和存储实现通过 owned handle 与 trait 注入，不使用隐藏全局变量或具体 SQLite 类型。
 - 使用 controller 存储的 daemon 不会在构建与持久化会话运行时所需的 controller 存储退出后继续存活。
 - Daemon 负责运行时语义，不持有客户端展示状态。

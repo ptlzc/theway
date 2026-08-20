@@ -61,6 +61,10 @@
 
 `PersistentSessionExtensionStatePort` 将经过校验的耐久 action 转换为一个带父链的 `StoredSessionEntry` 批次，并通过 `SessionStore::append_entries` 提交；重放始终读取所选持久化分支。`ExtensionModelContextProjection` 滤除私有 state 与 custom event，保留 model-context 分支顺序，并在原位替换重复的 `(extension_id, context_id)` 值，使每个稳定条目只对模型可见一次。
 
+`AgentHarness` 将 input、run、turn、context、模型选择、branch/session、fork 和 session 边界操作映射到这些端口。Input command outcome 在 provider 分发前停止，并作为结构化 `SessionEvent::ExtensionCommandOutcome` 发出；接受的 input/context replacement 保持消息 role，并局限于其声明的 seam。`before_run` patch 在 agent 发出 `run_started` 前原子持久化其父链消息，并在该 run 结束时恢复被替换的 system prompt。Run 终止事件在等待 transcript 持久化后按 `run_ended`、可选 `run_error`、`run_settled` 顺序发出。
+
+Extension follow-up 使用独立的 32 项稳定 id 去重队列，不使用 bare Agent 的 run 内队列。Harness 只在 `run_settled` 后消费该队列，并在一个 prompt 周期达到 16 次 extension 驱动 follow-up run 后停止。Task-local 分发 guard 拒绝递归生命周期分发以及从 hook 同步启动的运行时操作。`shutdown_runtime_extensions` 取消活动 run，并等待异步 loop listener 完成后才发出 `session_shutdown`。
+
 ## 扩展规则
 
 - Provider 协议和模型目录放在 `theway-llm-provider`，不放入 agent 循环。
@@ -75,5 +79,6 @@
 - 持久化状态通过 `theway-contract` 记录跨越 crate 边界，不传递后端类型。
 - Core 生命周期端口不发现 package 或执行 extension 代码，daemon 原始 action batch 不能绕过 core 校验。
 - 私有 extension state 不进入带类型会话消息或模型上下文投影。
+- Extension follow-up 不能在 settlement 前进入活动 run，也不能无界递归。
 - 取消会产生终止运行结果，并释放运行准入和控制句柄。
 - 事件载荷和操作关联保持足够确定，使 daemon 无需访问 core 私有状态即可投影 snapshot。

@@ -61,6 +61,10 @@ Every domain dispatcher verifies that the lifecycle event belongs to that core s
 
 `PersistentSessionExtensionStatePort` converts validated durable actions to one parent-linked `StoredSessionEntry` batch and commits it through `SessionStore::append_entries`; replay always reads the selected persisted branch. `ExtensionModelContextProjection` filters private state and custom events, preserves model-context branch order, and replaces duplicate `(extension_id, context_id)` values in place so each stable item is model-visible once.
 
+`AgentHarness` maps input, run, turn, context, model-selection, branch/session, fork, and session-boundary operations to these ports. An input command outcome stops before provider dispatch and is emitted as structured `SessionEvent::ExtensionCommandOutcome`; accepted input/context replacements preserve message roles and remain local to their declared seam. A `before_run` patch atomically persists its parent-linked messages before the agent emits `run_started`, while its system-prompt replacement is restored at the end of that run. Run terminal events are emitted after awaited transcript persistence in `run_ended`, optional `run_error`, then `run_settled` order.
+
+Extension follow-ups use a separate 32-item, stable-id de-duplicated queue rather than the bare Agent's within-run queue. The harness consumes that queue only after `run_settled` and stops one prompt cycle after 16 extension-driven follow-up runs. A task-local dispatch guard rejects recursive lifecycle dispatch and runtime operations started synchronously from a hook. `shutdown_runtime_extensions` cancels the active run and waits for awaited loop listeners before `session_shutdown`.
+
 ## Extension rules
 
 - Add provider protocols and model catalogs in `theway-llm-provider`, not in the agent loop.
@@ -75,5 +79,6 @@ Every domain dispatcher verifies that the lifecycle event belongs to that core s
 - Persisted state crosses the crate boundary through `theway-contract` records, never backend types.
 - Core lifecycle ports never discover packages or evaluate extension code, and raw daemon action batches never bypass core validation.
 - Private extension state remains outside typed session messages and model-context projection.
+- Extension follow-ups cannot enter the active run before settlement or recurse without a bound.
 - Cancellation produces a terminal runtime outcome and releases run admission and control handles.
 - Event payloads and operation correlation remain deterministic enough for the daemon to project snapshots without accessing private core state.
