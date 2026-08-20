@@ -214,7 +214,8 @@ export default defineExtension((api) => {
     try { await api.workspace.readText("../secret.txt"); } catch (error) { traversal = error.code; }
     try { await api.workspace.readText("escape-link/secret.txt"); } catch (error) { symlink = error.code; }
     return { abiMajor: 2, actions: [{ kind: "emit_diagnostic", payload: {
-      inside, traversal, symlink, ambientFetch: typeof fetch,
+      code: "lifecycle_status", severity: "info", message: "workspace broker",
+      details: { inside, traversal, symlink, ambientFetch: typeof fetch },
     }}] };
   });
 });"#,
@@ -227,7 +228,7 @@ export default defineExtension((api) => {
     );
     let (host, _) = start_host(project.path(), base.path(), services).await;
     let output = host.invoke(ExtensionLifecycleEvent::Input, json!({})).await;
-    let payload = &output[0].value["actions"][0]["payload"];
+    let payload = &output[0].value["actions"][0]["payload"]["details"];
     assert_eq!(payload["inside"], "inside-value");
     assert_eq!(payload["traversal"], "path_escape");
     assert_eq!(payload["symlink"], "path_escape");
@@ -262,10 +263,12 @@ export default defineExtension((api) => {
     try { await api.workspace.readText("inside.txt"); } catch (error) { denied = error.code; }
     const secret = await api.secrets.read("demo");
     return { abiMajor: 2, actions: [{ kind: "emit_diagnostic", payload: {
-      denied,
-      secretMatches: secret.startsWith("sk-"),
-      hasSecret: api.capabilities.has("secrets.read:demo"),
-      hasNetwork: api.capabilities.has("network.connect"),
+      code: "lifecycle_status", severity: "info", message: "secret broker",
+      details: {
+        denied, secretMatches: secret.startsWith("sk-"),
+        hasSecret: api.capabilities.has("secrets.read:demo"),
+        hasNetwork: api.capabilities.has("network.connect"),
+      },
     }}] };
   });
 });"#,
@@ -283,7 +286,7 @@ export default defineExtension((api) => {
     services.set_secret("demo", secret);
     let (host, _) = start_host(project.path(), base.path(), services).await;
     let output = host.invoke(ExtensionLifecycleEvent::Input, json!({})).await;
-    let payload = &output[0].value["actions"][0]["payload"];
+    let payload = &output[0].value["actions"][0]["payload"]["details"];
     assert_eq!(payload["denied"], "permission_denied");
     assert_eq!(payload["secretMatches"], true);
     assert_eq!(payload["hasSecret"], true);
@@ -329,7 +332,8 @@ export default defineExtension((api) => {{
     const process = await api.process.run(["/bin/sh", "-c", "printf process-ok"]);
     const network = await api.network.fetch("http://{address}/token?secret=hidden");
     return {{ abiMajor: 2, actions: [{{ kind: "emit_diagnostic", payload: {{
-      stdout: process.stdout, status: network.status, body: network.body,
+      code: "lifecycle_status", severity: "info", message: "process network broker",
+      details: {{ stdout: process.stdout, status: network.status, body: network.body }},
     }} }}] }};
   }});
 }});"#
@@ -343,7 +347,7 @@ export default defineExtension((api) => {{
     );
     let (host, _) = start_host(project.path(), base.path(), services).await;
     let output = host.invoke(ExtensionLifecycleEvent::Input, json!({})).await;
-    let payload = &output[0].value["actions"][0]["payload"];
+    let payload = &output[0].value["actions"][0]["payload"]["details"];
     assert_eq!(payload["stdout"], "process-ok");
     assert_eq!(payload["status"], 200);
     assert_eq!(payload["body"], "network-ok");

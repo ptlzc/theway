@@ -78,7 +78,10 @@ fn marker_source(marker: &str) -> String {
 export default defineExtension((api) => {{
   api.on("input", () => ({{
     abiMajor: 2,
-    actions: [{{ kind: "emit_diagnostic", payload: {{ marker: "{marker}" }} }}],
+    actions: [{{ kind: "emit_diagnostic", payload: {{
+      code: "lifecycle_status", severity: "info", message: "reload marker",
+      details: {{ marker: "{marker}" }},
+    }} }}],
   }}));
 }});"#
     )
@@ -94,7 +97,10 @@ export default defineExtension((api) => {{
   }}, async () => ({{ content: [], details: {{}} }}));
   api.on("input", () => ({{
     abiMajor: 2,
-    actions: [{{ kind: "emit_diagnostic", payload: {{ marker: "{marker}" }} }}],
+    actions: [{{ kind: "emit_diagnostic", payload: {{
+      code: "lifecycle_status", severity: "info", message: "reload tool marker",
+      details: {{ marker: "{marker}" }},
+    }} }}],
   }}));
 }});"#
     )
@@ -104,7 +110,7 @@ async fn marker(host: &SessionPluginHost) -> String {
     host.invoke(ExtensionLifecycleEvent::Input, json!({}))
         .await
         .first()
-        .and_then(|output| output.value["actions"][0]["payload"]["marker"].as_str())
+        .and_then(|output| output.value["actions"][0]["payload"]["details"]["marker"].as_str())
         .unwrap()
         .to_string()
 }

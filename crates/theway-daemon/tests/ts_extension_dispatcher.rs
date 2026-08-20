@@ -220,7 +220,9 @@ export default defineExtension((api) => {
   api.on("tool_call", { priority: 0 }, () => { later++; return null; });
   api.on("input", () => ({
     abiMajor: 2,
-    actions: [{ kind: "emit_diagnostic", payload: { later } }],
+    actions: [{ kind: "emit_diagnostic", payload: {
+      code: "lifecycle_status", severity: "info", message: "gate report", details: { later },
+    } }],
   }));
 });"#,
     );
@@ -249,7 +251,10 @@ export default defineExtension((api) => {
         })
     );
     let report = host.invoke(ExtensionLifecycleEvent::Input, json!({})).await;
-    assert_eq!(report[0].value["actions"][0]["payload"]["later"], 0);
+    assert_eq!(
+        report[0].value["actions"][0]["payload"]["details"]["later"],
+        0
+    );
     host.shutdown().await;
 }
 
@@ -329,7 +334,9 @@ export default defineExtension((api) => {
   });
   api.on("input", () => ({
     abiMajor: 2,
-    actions: [{ kind: "emit_diagnostic", payload: { updates } }],
+    actions: [{ kind: "emit_diagnostic", payload: {
+      code: "lifecycle_status", severity: "info", message: "observe report", details: { updates },
+    } }],
   }));
 });"#,
     );
@@ -373,7 +380,7 @@ export default defineExtension((api) => {
     assert!(started.elapsed() < Duration::from_millis(200));
     tokio::time::sleep(Duration::from_millis(500)).await;
     let report = host.invoke(ExtensionLifecycleEvent::Input, json!({})).await;
-    let updates = report[0].value["actions"][0]["payload"]["updates"]
+    let updates = report[0].value["actions"][0]["payload"]["details"]["updates"]
         .as_u64()
         .unwrap();
     assert!((1..=2).contains(&updates));

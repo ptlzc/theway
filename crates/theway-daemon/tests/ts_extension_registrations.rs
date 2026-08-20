@@ -676,7 +676,10 @@ export default defineExtension((api) => {
     try { status.update({}); } catch (error) { updateError = error.code; }
     return {
       abiMajor: 2,
-      actions: [{ kind: "emit_diagnostic", payload: { updateError } }],
+      actions: [{ kind: "emit_diagnostic", payload: {
+        code: "lifecycle_status", severity: "info", message: "disposed handle",
+        details: { updateError },
+      } }],
     };
   });
 });"#,
@@ -685,7 +688,7 @@ export default defineExtension((api) => {
     assert_eq!(host.active_effect_count().await, 2);
     let first = host.invoke(ExtensionLifecycleEvent::Input, json!({})).await;
     assert_eq!(
-        first[0].value["actions"][0]["payload"]["updateError"],
+        first[0].value["actions"][0]["payload"]["details"]["updateError"],
         "effect_disposed"
     );
     assert_eq!(host.active_effect_count().await, 0);

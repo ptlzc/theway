@@ -17,7 +17,9 @@ let count = 0;
 export default defineExtension((api) => {
   api.on("input", () => ({
     abiMajor: 2,
-    actions: [{ kind: "emit_diagnostic", payload: { count: ++count } }],
+    actions: [{ kind: "emit_diagnostic", payload: {
+      code: "lifecycle_status", severity: "info", message: "counter", details: { count: ++count },
+    } }],
   }));
 });
 "#;
@@ -64,7 +66,7 @@ fn write_package(
 }
 
 fn counter(value: &Value) -> u64 {
-    value["actions"][0]["payload"]["count"]
+    value["actions"][0]["payload"]["details"]["count"]
         .as_u64()
         .expect("counter action")
 }
@@ -375,7 +377,10 @@ export default defineExtension((api) => {
   api.on("session_start", () => { phases.push("start"); });
   api.on("input", () => ({
     abiMajor: 2,
-    actions: [{ kind: "emit_diagnostic", payload: { phases: [...phases] } }],
+    actions: [{ kind: "emit_diagnostic", payload: {
+      code: "lifecycle_status", severity: "info", message: "phases",
+      details: { phases: [...phases] },
+    } }],
   }));
   api.on("session_shutdown", () => { phases.push("shutdown"); });
   api.on("extension_unload", () => { phases.push("unload"); });
@@ -396,7 +401,7 @@ export default defineExtension((api) => {
     assert_eq!(host.active_extension_ids().await, ["lifecycle"]);
     let output = host.invoke(ExtensionLifecycleEvent::Input, json!({})).await;
     assert_eq!(
-        output[0].value["actions"][0]["payload"]["phases"],
+        output[0].value["actions"][0]["payload"]["details"]["phases"],
         json!(["load", "start"])
     );
     host.shutdown().await;
