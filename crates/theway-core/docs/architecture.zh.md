@@ -24,9 +24,9 @@
 
 ## Harness 与会话
 
-[`agent/assembly/mod.rs`](../src/agent/assembly/mod.rs) 由模型、带类型的 `Session`、skill、prompt template、工具、hook、observer 和可选 provider 流覆盖构建 `AgentHarness`。Harness 持久化 prompt 周期状态，发出 `SessionEvent`，统计成本，通过注入闭包重载 skill，并执行配置的续轮上限。
+[`agent/assembly/mod.rs`](../src/agent/assembly/mod.rs) 由模型、带类型的 `Session`、skill、prompt template、工具、hook、observer、`RuntimeExtensionPort` 和可选 provider 流覆盖构建 `AgentHarness`。Harness 持久化 prompt 周期状态，发出 `SessionEvent`，统计成本，通过注入闭包重载 skill，并执行配置的续轮上限。`AgentHarnessOptions::new` 安装 `NoopRuntimeExtensionPort`，因此未配置 extension 的嵌入方不会进入 extension 引擎路径。
 
-[`agent/session/session.rs`](../src/agent/session/session.rs) 定义追加式 `SessionTreeEntry` 并推导活动分支。`MemorySessionStorage` 服务于隔离嵌入场景和测试。`PersistentSessionStorage` 将带类型的条目编码为 `theway-contract::StoredSessionEntry`，并把所有 I/O 委托给注入的 `SessionStore`。
+[`agent/session/session.rs`](../src/agent/session/session.rs) 定义追加式 `SessionTreeEntry` 并推导活动分支。`MemorySessionStorage` 服务于隔离嵌入场景和测试。`PersistentSessionStorage` 将带类型的条目编码为 `theway-contract::StoredSessionEntry`，把所有 I/O 委托给注入的 `SessionStore`，并从带类型 transcript 与模型上下文中滤除不透明 extension 记录。
 
 [`agent/compaction/mod.rs`](../src/agent/compaction/mod.rs) 估算上下文占用、选择切分点、生成或调用摘要器，并记录压缩元数据，不感知会话使用哪种持久化后端。
 
@@ -53,6 +53,14 @@
 
 可观测记录不是产品事件流。`LoopEvent`、`SessionEvent`、`SubagentJobEvent` 和 `DagEvent` 向持久化、工具与客户端传递运行时状态；`RuntimeObservation` 向嵌入方拥有的 exporter 传递不含内容的运行测量。
 
+## Runtime extension 端口
+
+[`agent/runtime_extensions`](../src/agent/runtime_extensions/mod.rs) 定义由 session、run、request、message、tool 与 compaction 域 trait 组成的引擎无关 `RuntimeExtensionPort`。Core 调用包含生命周期关联和 JSON 兼容载荷，但不包含已发现的 extension 标识；daemon 拥有的实现把一次调用翻译到其 session 实例。
+
+每个域 dispatcher 校验生命周期事件属于对应 core seam，并通过 `ExtensionHookContract` 校验返回的 ABI action batch。调用点只能获得类别专属的 `ValidatedRuntimeExtensionResult` variant，因此嵌入实现不能通过 input seam 应用 message 或 tool mutation。`RuntimeExtensionScopeAllocator` 在 clone 之间共享单调生命周期序列和带 session 限定的稳定标识。
+
+`PersistentSessionExtensionStatePort` 将经过校验的耐久 action 转换为一个带父链的 `StoredSessionEntry` 批次，并通过 `SessionStore::append_entries` 提交；重放始终读取所选持久化分支。`ExtensionModelContextProjection` 滤除私有 state 与 custom event，保留 model-context 分支顺序，并在原位替换重复的 `(extension_id, context_id)` 值，使每个稳定条目只对模型可见一次。
+
 ## 扩展规则
 
 - Provider 协议和模型目录放在 `theway-llm-provider`，不放入 agent 循环。
@@ -65,5 +73,7 @@
 
 - Core 与具体存储、传输、遥测和宿主执行库保持独立。
 - 持久化状态通过 `theway-contract` 记录跨越 crate 边界，不传递后端类型。
+- Core 生命周期端口不发现 package 或执行 extension 代码，daemon 原始 action batch 不能绕过 core 校验。
+- 私有 extension state 不进入带类型会话消息或模型上下文投影。
 - 取消会产生终止运行结果，并释放运行准入和控制句柄。
 - 事件载荷和操作关联保持足够确定，使 daemon 无需访问 core 私有状态即可投影 snapshot。

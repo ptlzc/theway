@@ -24,9 +24,9 @@ Tool bodies implement `AgentTool`. Host-level filesystem and process operations 
 
 ## Harness and sessions
 
-[`agent/assembly/mod.rs`](../src/agent/assembly/mod.rs) builds `AgentHarness` from a model, typed `Session`, skills, prompt templates, tools, hooks, an observer, and optional provider stream override. The harness persists prompt-cycle state, emits `SessionEvent` records, tracks cost, reloads skills through an injected closure, and enforces the configured turn-continuation cap.
+[`agent/assembly/mod.rs`](../src/agent/assembly/mod.rs) builds `AgentHarness` from a model, typed `Session`, skills, prompt templates, tools, hooks, an observer, a `RuntimeExtensionPort`, and optional provider stream override. The harness persists prompt-cycle state, emits `SessionEvent` records, tracks cost, reloads skills through an injected closure, and enforces the configured turn-continuation cap. `AgentHarnessOptions::new` installs `NoopRuntimeExtensionPort`, so an embedder that configures no extensions takes no extension-engine path.
 
-[`agent/session/session.rs`](../src/agent/session/session.rs) defines typed append-only `SessionTreeEntry` values and derives the active branch. `MemorySessionStorage` supports isolated embedders and tests. `PersistentSessionStorage` encodes typed entries into `theway-contract::StoredSessionEntry` and delegates all I/O to an injected `SessionStore`.
+[`agent/session/session.rs`](../src/agent/session/session.rs) defines typed append-only `SessionTreeEntry` values and derives the active branch. `MemorySessionStorage` supports isolated embedders and tests. `PersistentSessionStorage` encodes typed entries into `theway-contract::StoredSessionEntry`, delegates all I/O to an injected `SessionStore`, and filters opaque extension records from the typed transcript and model context.
 
 [`agent/compaction/mod.rs`](../src/agent/compaction/mod.rs) estimates context use, chooses a cut point, produces or invokes a summarizer, and records compaction metadata without knowing which persistence backend stores the session.
 
@@ -53,6 +53,14 @@ Tool bodies implement `AgentTool`. Host-level filesystem and process operations 
 
 Observation records are not product event streams. `LoopEvent`, `SessionEvent`, `SubagentJobEvent`, and `DagEvent` carry runtime state to persistence, tools, and clients; `RuntimeObservation` carries content-safe operational measurements to an embedder-owned exporter.
 
+## Runtime extension ports
+
+[`agent/runtime_extensions`](../src/agent/runtime_extensions/mod.rs) defines one engine-independent `RuntimeExtensionPort` composed from session, run, request, message, tool, and compaction domain traits. Core invocations contain lifecycle correlation and JSON-compatible payloads but no discovered extension identifiers; the daemon-owned implementation translates one invocation to its session instances.
+
+Every domain dispatcher verifies that the lifecycle event belongs to that core seam and validates the returned ABI action batch through `ExtensionHookContract`. Only class-specific `ValidatedRuntimeExtensionResult` variants reach a call site, so an embedding implementation cannot apply a message or tool mutation through an input seam. `RuntimeExtensionScopeAllocator` shares monotonic lifecycle sequences and stable session-qualified identifiers across its clones.
+
+`PersistentSessionExtensionStatePort` converts validated durable actions to one parent-linked `StoredSessionEntry` batch and commits it through `SessionStore::append_entries`; replay always reads the selected persisted branch. `ExtensionModelContextProjection` filters private state and custom events, preserves model-context branch order, and replaces duplicate `(extension_id, context_id)` values in place so each stable item is model-visible once.
+
 ## Extension rules
 
 - Add provider protocols and model catalogs in `theway-llm-provider`, not in the agent loop.
@@ -65,5 +73,7 @@ Observation records are not product event streams. `LoopEvent`, `SessionEvent`, 
 
 - Core remains independent of concrete storage, transport, telemetry, and host-execution libraries.
 - Persisted state crosses the crate boundary through `theway-contract` records, never backend types.
+- Core lifecycle ports never discover packages or evaluate extension code, and raw daemon action batches never bypass core validation.
+- Private extension state remains outside typed session messages and model-context projection.
 - Cancellation produces a terminal runtime outcome and releases run admission and control handles.
 - Event payloads and operation correlation remain deterministic enough for the daemon to project snapshots without accessing private core state.

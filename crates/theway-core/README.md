@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-`theway-core` is the reusable agent runtime composed by `theway-daemon`. It owns the single-agent loop, `AgentHarness`, typed runtime sessions, skills and prompt assembly, compaction, lifecycle and permission hooks, the `ToolExecutor` and `RuntimeObserver` interfaces, and multiagent DAG/goal orchestration.
+`theway-core` is the reusable agent runtime composed by `theway-daemon`. It owns the single-agent loop, `AgentHarness`, typed runtime sessions, skills and prompt assembly, compaction, lifecycle and permission hooks, the `RuntimeExtensionPort`, `ToolExecutor`, and `RuntimeObserver` interfaces, and multiagent DAG/goal orchestration.
 
 Core does not own concrete tools, filesystem or process implementations, persistence backends, telemetry exporters, or protocol servers. The workspace layering check permits `theway-daemon` as its only direct runtime consumer.
 
@@ -11,6 +11,7 @@ Core does not own concrete tools, filesystem or process implementations, persist
 - `Agent` and `AgentOptions` run the provider-neutral message and tool loop.
 - `AgentHarness` composes an agent with a typed `Session`, skills, compaction, cost tracking, and cross-turn hooks.
 - `PersistentSessionStorage` adapts typed session entries to the raw `SessionReader` and `SessionStore` records from `theway-contract`.
+- `RuntimeExtensionPort` splits engine-independent lifecycle dispatch into session, run, request, message, tool, and compaction domains; the default implementation is a no-op.
 - `ToolExecutor` defines filesystem and process effects supplied by an embedding runtime.
 - `RuntimeObserver` receives transport-neutral operation start and finish records.
 - `multiagent` provides nested agent runs, live subagent-job state, DAG scheduling, and goal evaluation when the `harness` feature is enabled.
