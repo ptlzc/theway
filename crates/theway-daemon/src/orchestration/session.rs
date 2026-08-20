@@ -175,12 +175,6 @@ impl SessionRuntimeBuilder {
             &self.services,
         );
         tools.extend(self.mcp_tools.iter().cloned());
-        let tool_names = tools
-            .iter()
-            .map(|tool| tool.definition().name.clone())
-            .collect::<Vec<_>>();
-        let system_prompt =
-            crate::system_prompt::compose_system_prompt(&self.cwd, &self.memory_block, &tool_names);
 
         self.dag_engine.set_launcher(Some(tools::node_launcher(
             self.dag_engine.clone(),
@@ -203,13 +197,15 @@ impl SessionRuntimeBuilder {
         };
         opts.runtime_extension_cwd = self.cwd.to_string_lossy().into_owned();
         if let Some(engine) = &self.runtime_extension_engine {
-            let extensions = crate::ts_extensions::SessionPluginHost::load(
-                self.runtime_extension_packages.clone(),
-                engine.clone(),
-                session_id.clone(),
-                &self.cwd,
-            )
-            .await;
+            let extensions = Arc::new(
+                crate::ts_extensions::SessionPluginHost::load(
+                    self.runtime_extension_packages.clone(),
+                    engine.clone(),
+                    session_id.clone(),
+                    &self.cwd,
+                )
+                .await,
+            );
             for diagnostic in extensions
                 .diagnostics()
                 .into_iter()
@@ -222,8 +218,19 @@ impl SessionRuntimeBuilder {
                     diagnostic.message
                 );
             }
-            opts.runtime_extensions = Arc::new(extensions);
+            tools = extensions.merge_registered_tools(tools);
+            let credential_host = Arc::clone(&extensions);
+            opts.get_api_key = Some(Arc::new(move |provider_id| {
+                credential_host.provider_api_key(provider_id)
+            }));
+            opts.runtime_extensions = extensions;
         }
+        let tool_names = tools
+            .iter()
+            .map(|tool| tool.definition().name.clone())
+            .collect::<Vec<_>>();
+        let system_prompt =
+            crate::system_prompt::compose_system_prompt(&self.cwd, &self.memory_block, &tool_names);
         opts.system_prompt = system_prompt;
         opts.thinking_level = self.thinking;
         opts.tools = tools;

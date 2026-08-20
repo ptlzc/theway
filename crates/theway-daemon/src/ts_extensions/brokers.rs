@@ -47,6 +47,14 @@ impl ExtensionBrokerServices {
         self.secrets.write().insert(name.into(), value.into());
     }
 
+    pub(crate) fn has_secret(&self, name: &str) -> bool {
+        self.secrets.read().contains_key(name)
+    }
+
+    pub(crate) fn secret(&self, name: &str) -> Option<String> {
+        self.secrets.read().get(name).cloned()
+    }
+
     pub fn audit_log(&self) -> ExtensionAuditLog {
         self.audit.clone()
     }

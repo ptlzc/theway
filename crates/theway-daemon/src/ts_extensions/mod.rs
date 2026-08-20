@@ -15,10 +15,15 @@ mod dispatch_result;
 mod dispatcher;
 mod effects;
 mod engine;
+mod facade;
 mod host;
 mod host_ports;
 mod legacy;
 mod observation;
+mod registered_tool;
+mod registration_host;
+mod registration_runtime;
+mod registrations;
 mod state;
 mod trust;
 mod ts;
@@ -30,9 +35,19 @@ pub use brokers::ExtensionBrokerServices;
 pub use catalog::{ExtensionPackage, PackageCatalog};
 pub use compaction::{TsCompactAlgorithm, compact_algorithm_registry};
 pub use dispatcher::RuntimeExtensionHostConfig;
+pub use effects::{
+    EffectDisposeOutcome, EffectKind, EffectLedger, EffectLedgerError, EffectOwner, EffectRecord,
+    EffectScopeBinding,
+};
 pub use engine::{EngineInstanceKey, QuickJsEngineLimits, QuickJsEnginePool};
 pub use host::{ExtensionInvocationOutput, SessionPluginHost};
 pub use legacy::TsExtension;
+pub use registration_runtime::{ExtensionCommandContext, RegisteredExtensionCommand};
+pub use registrations::{
+    CommandRegistration, EffectRegistration, HookEffectRegistration, OwnedRegistration,
+    PromptSectionRegistration, ProviderModelRegistration, ProviderRegistration, ProviderWireFormat,
+    RegistrationPredicate, RequestPolicyRegistration, ToolPermission, ToolRegistration,
+};
 pub use trust::{ExtensionTrustStore, GlobalExtensionPolicy};
 
 use legacy::LegacyExtensionRegistry;

@@ -1,4 +1,4 @@
-use theway_contract::extension::{ExtensionHookClass, ExtensionLifecycleEvent};
+use theway_contract::extension::{ExtensionHookClass, ExtensionLifecycleEvent, ExtensionScope};
 use theway_core::agent::runtime_extensions::{
     RawRuntimeExtensionResult, RuntimeCompactionExtensionPort, RuntimeExtensionInvocation,
     RuntimeMessageExtensionPort, RuntimeRequestExtensionPort, RuntimeRunExtensionPort,
@@ -36,15 +36,37 @@ macro_rules! impl_runtime_domain {
     };
 }
 
-impl_runtime_domain!(RuntimeRunExtensionPort, invoke_run);
 impl_runtime_domain!(RuntimeMessageExtensionPort, invoke_message);
 impl_runtime_domain!(RuntimeToolExtensionPort, invoke_tool);
 impl_runtime_domain!(RuntimeCompactionExtensionPort, invoke_compaction);
 
 #[async_trait::async_trait]
+impl RuntimeRunExtensionPort for SessionPluginHost {
+    async fn invoke_run(
+        &self,
+        invocation: RuntimeExtensionInvocation,
+    ) -> RawRuntimeExtensionResult {
+        let event = invocation.event();
+        let run_id = invocation.context().scope.run_id.clone();
+        let request_id = invocation.context().scope.request_id.clone();
+        let result = self.invoke_runtime(invocation).await;
+        match event {
+            ExtensionLifecycleEvent::TurnCompleted => {
+                self.dispose_boundary_effects(ExtensionScope::Request, request_id.as_deref());
+            }
+            ExtensionLifecycleEvent::RunSettled => {
+                self.dispose_boundary_effects(ExtensionScope::Run, run_id.as_deref());
+            }
+            _ => {}
+        }
+        result
+    }
+}
+
+#[async_trait::async_trait]
 impl RuntimeRequestExtensionPort for SessionPluginHost {
     fn has_request_hook(&self, event: ExtensionLifecycleEvent, class: ExtensionHookClass) -> bool {
-        self.has_subscription(event, class)
+        self.has_subscription(event, class) || self.has_request_registration(event, class)
     }
 
     async fn invoke_request(

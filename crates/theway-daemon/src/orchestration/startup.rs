@@ -277,13 +277,25 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     let runtime_extension_packages = ts_extensions.package_catalog().clone();
     let runtime_extension_engine = (!runtime_extension_packages.effective_packages().is_empty())
         .then(|| {
+            let broker_services =
+                crate::ts_extensions::ExtensionBrokerServices::new(&paths.base, executor.clone());
+            for package in runtime_extension_packages.effective_packages() {
+                for permission in package.granted_permissions() {
+                    if let theway_contract::extension::ExtensionPermission::SecretsRead(name) =
+                        permission
+                        && let Ok(value) = std::env::var(name)
+                    {
+                        broker_services.set_secret(name, value);
+                    }
+                }
+            }
             crate::ts_extensions::QuickJsEnginePool::with_broker_services(
                 std::thread::available_parallelism()
                     .map(usize::from)
                     .unwrap_or(1)
                     .min(4),
                 crate::ts_extensions::QuickJsEngineLimits::default(),
-                crate::ts_extensions::ExtensionBrokerServices::new(&paths.base, executor.clone()),
+                broker_services,
             )
         });
     // Runtime settings come from the in-memory StartupConfig: defaults until

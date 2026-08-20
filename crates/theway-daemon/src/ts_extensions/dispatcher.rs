@@ -319,7 +319,7 @@ fn validate_schema(schema: &Value) -> Result<(), String> {
     Ok(())
 }
 
-fn matches_schema(schema: &Value, value: &Value) -> bool {
+pub(super) fn matches_schema(schema: &Value, value: &Value) -> bool {
     if let Some(allowed) = schema.as_bool() {
         return allowed;
     }

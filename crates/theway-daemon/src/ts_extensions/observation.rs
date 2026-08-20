@@ -10,8 +10,9 @@ use theway_contract::extension::{
 use super::catalog::PackageCatalog;
 use super::diagnostics;
 use super::dispatcher::{HookRegistration, RuntimeExtensionHostConfig};
-use super::effects::InstanceHealth;
+use super::effects::{EffectOwner, InstanceHealth};
 use super::engine::{EngineInstanceKey, EngineInvocationErrorKind, QuickJsEnginePool};
+use super::registration_runtime::RegistrationRuntime;
 
 pub(super) struct ObservationJob {
     pub envelope: ExtensionEventEnvelope,
@@ -78,6 +79,7 @@ pub(super) struct ObservationDispatch {
     pub health: Arc<InstanceHealth>,
     pub diagnostics: Arc<parking_lot::Mutex<Vec<ExtensionDiagnostic>>>,
     pub catalog: Arc<parking_lot::RwLock<PackageCatalog>>,
+    pub registration_runtime: RegistrationRuntime,
 }
 
 impl ObservationDispatch {
@@ -100,7 +102,7 @@ impl ObservationDispatch {
                 }
                 let result = self
                     .engine
-                    .invoke_controlled(
+                    .invoke_controlled_with_effects(
                         &self.key,
                         &job.envelope,
                         self.registration.registration_id,
@@ -110,6 +112,16 @@ impl ObservationDispatch {
                     )
                     .await
                     .map_err(|error| (diagnostic_code(error.kind), error.message))
+                    .map(|result| {
+                        self.registration_runtime.apply_disposals(
+                            &EffectOwner {
+                                extension_id: self.extension_id.clone(),
+                                session_id: self.session_id.clone(),
+                            },
+                            &result.disposed_registration_ids,
+                        );
+                        result.value
+                    })
                     .and_then(|value| {
                         super::dispatch_result::decode_batch(value)
                             .map_err(|error| (ExtensionDiagnosticCode::ContractViolation, error))
@@ -139,6 +151,10 @@ impl ObservationDispatch {
                                 self.extension_id.clone(),
                                 self.session_id.clone(),
                             ));
+                            self.registration_runtime.dispose_owner(&EffectOwner {
+                                extension_id: self.extension_id.clone(),
+                                session_id: self.session_id.clone(),
+                            });
                             self.engine.dispose(&self.key).await;
                         }
                     }

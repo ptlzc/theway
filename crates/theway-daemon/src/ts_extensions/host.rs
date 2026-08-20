@@ -21,6 +21,7 @@ use super::dispatcher::{self, HookRegistration, RuntimeExtensionHostConfig};
 use super::effects::{InstanceHealth, InstanceLifecyclePhase};
 use super::engine::{EngineInstanceKey, QuickJsEnginePool};
 use super::observation::{ObservationDispatch, ObservationJob, ObservationQueue, diagnostic_code};
+use super::registration_runtime::RegistrationRuntime;
 use super::state::HostLifecycleSequence;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -41,17 +42,18 @@ struct ActiveExtension {
 
 /// Persistent ABI v2 package instances owned by one runtime session.
 pub struct SessionPluginHost {
-    session_id: String,
-    cwd: String,
-    engine: QuickJsEnginePool,
-    config: RuntimeExtensionHostConfig,
-    sequence: HostLifecycleSequence,
+    pub(super) session_id: String,
+    pub(super) cwd: String,
+    pub(super) engine: QuickJsEnginePool,
+    pub(super) config: RuntimeExtensionHostConfig,
+    pub(super) sequence: HostLifecycleSequence,
     active: tokio::sync::Mutex<Vec<ActiveExtension>>,
     catalog: Arc<parking_lot::RwLock<PackageCatalog>>,
-    diagnostics: Arc<parking_lot::Mutex<Vec<ExtensionDiagnostic>>>,
+    pub(super) diagnostics: Arc<parking_lot::Mutex<Vec<ExtensionDiagnostic>>>,
     subscription_counts:
         parking_lot::RwLock<BTreeMap<(ExtensionLifecycleEvent, ExtensionHookClass), usize>>,
-    shutdown: Arc<AtomicBool>,
+    pub(super) shutdown: Arc<AtomicBool>,
+    pub(super) registration_runtime: RegistrationRuntime,
 }
 
 impl SessionPluginHost {
@@ -121,6 +123,7 @@ impl SessionPluginHost {
             diagnostics: Arc::new(parking_lot::Mutex::new(diagnostics)),
             subscription_counts: parking_lot::RwLock::new(BTreeMap::new()),
             shutdown: Arc::new(AtomicBool::new(false)),
+            registration_runtime: RegistrationRuntime::default(),
         };
         host.load_effective_packages().await;
         host
@@ -199,6 +202,7 @@ impl SessionPluginHost {
                 serde_json::json!({"reason": "shutdown"}),
             )
             .await;
+            self.dispose_extension_effects(&extension.package.manifest().id);
             self.engine.dispose(&extension.key).await;
             self.remove_subscriptions(&extension.registrations);
             extension.phase = InstanceLifecyclePhase::Disposed;
@@ -213,6 +217,10 @@ impl SessionPluginHost {
             .filter(|extension| !extension.health.is_open())
             .map(|extension| extension.package.manifest().id.clone())
             .collect()
+    }
+
+    pub async fn active_effect_count(&self) -> usize {
+        self.registration_runtime.active_count()
     }
 
     pub fn catalog_entries(&self) -> Vec<ExtensionCatalogEntry> {
@@ -240,7 +248,7 @@ impl SessionPluginHost {
         for package in packages {
             let key = EngineInstanceKey::new(&self.session_id, &package.manifest().id);
             let registrations = match self.engine.load(key.clone(), &package).await {
-                Ok(metadata) => match dispatcher::validate_registrations(metadata) {
+                Ok(metadata) => match dispatcher::validate_registrations(metadata.clone()) {
                     Ok(registrations) => {
                         if let Err(error) = dispatcher::validate_registration_capabilities(
                             &registrations,
@@ -250,7 +258,14 @@ impl SessionPluginHost {
                             self.record_load_fault(&package, error);
                             continue;
                         }
-                        registrations
+                        match self.accept_package_effects(&package, &metadata, &registrations) {
+                            Ok(_) => registrations,
+                            Err(error) => {
+                                self.engine.dispose(&key).await;
+                                self.record_load_fault(&package, error);
+                                continue;
+                            }
+                        }
                     }
                     Err(error) => {
                         self.engine.dispose(&key).await;
@@ -337,42 +352,6 @@ impl SessionPluginHost {
         }
     }
 
-    async fn invoke_registration(
-        &self,
-        key: &EngineInstanceKey,
-        registration: &HookRegistration,
-        event: ExtensionLifecycleEvent,
-        payload: Value,
-    ) -> Result<Value, String> {
-        let envelope = dispatcher::envelope(
-            &key.extension_id,
-            &self.session_id,
-            &self.cwd,
-            self.sequence.next(),
-            event,
-            payload,
-        );
-        let cancellation = if matches!(
-            event,
-            ExtensionLifecycleEvent::SessionShutdown | ExtensionLifecycleEvent::ExtensionUnload
-        ) {
-            Arc::new(AtomicBool::new(false))
-        } else {
-            Arc::clone(&self.shutdown)
-        };
-        self.engine
-            .invoke_controlled(
-                key,
-                &envelope,
-                registration.registration_id,
-                self.config.deadline(registration.deadline),
-                cancellation,
-                self.config.broker_operation_quota,
-            )
-            .await
-            .map_err(|error| error.message)
-    }
-
     async fn invoke_extension(
         &self,
         extension: &ActiveExtension,
@@ -385,6 +364,12 @@ impl SessionPluginHost {
             .iter()
             .filter(|registration| registration.event == event)
         {
+            if !self.registration_runtime.is_registration_active(
+                &self.effect_owner(&extension.key.extension_id),
+                registration.registration_id,
+            ) {
+                continue;
+            }
             if !registration.accepts_payload(&payload) {
                 return Err("extension event payload does not match the hook payloadSchema".into());
             }
@@ -422,6 +407,7 @@ impl SessionPluginHost {
             serde_json::json!({"reason": "initialization_failed"}),
         )
         .await;
+        self.dispose_extension_effects(&extension.package.manifest().id);
         self.engine.dispose(&extension.key).await;
     }
 
@@ -453,6 +439,7 @@ impl SessionPluginHost {
                 extension.package.manifest().id.clone(),
                 self.session_id.clone(),
             ));
+            self.dispose_extension_effects(&extension.package.manifest().id);
             self.engine.dispose(&extension.key).await;
         }
     }
@@ -534,11 +521,17 @@ impl SessionPluginHost {
         let event = invocation.event();
         let class = invocation.class();
         ExtensionHookContract::for_hook(event, class)?;
-        if !self.has_subscription(event, class) {
+        if !self.has_subscription(event, class) && !self.has_request_registration(event, class) {
             return Ok(empty_batch());
         }
         let mut aggregate = empty_batch();
         let mut current_payload = invocation.payload().clone();
+        if event == ExtensionLifecycleEvent::BeforeModelRequest
+            && class == ExtensionHookClass::Transform
+        {
+            self.apply_request_registrations(&invocation, &mut current_payload, &mut aggregate)
+                .await;
+        }
         let active = self.active.lock().await.clone();
         for extension in &active {
             let registrations: Vec<_> = extension
@@ -558,6 +551,12 @@ impl SessionPluginHost {
                 continue;
             }
             for registration in registrations {
+                if !self.registration_runtime.is_registration_active(
+                    &self.effect_owner(&extension.package.manifest().id),
+                    registration.registration_id,
+                ) {
+                    continue;
+                }
                 if registration.delivery
                     == theway_contract::extension::ExtensionDeliveryPolicy::BoundedCoalescing
                 {
@@ -656,7 +655,7 @@ impl SessionPluginHost {
         );
         let result = self
             .engine
-            .invoke_controlled(
+            .invoke_controlled_with_effects(
                 &extension.key,
                 &envelope,
                 registration.registration_id,
@@ -666,13 +665,17 @@ impl SessionPluginHost {
             )
             .await
             .map_err(|error| (diagnostic_code(error.kind), error.message))?;
+        self.registration_runtime.apply_disposals(
+            &self.effect_owner(&extension.package.manifest().id),
+            &result.disposed_registration_ids,
+        );
         if invocation.context().cancelled || self.shutdown.load(Ordering::Acquire) {
             return Err((
                 ExtensionDiagnosticCode::Cancelled,
                 "extension result arrived after cancellation".into(),
             ));
         }
-        let batch = decode_batch(result)
+        let batch = decode_batch(result.value)
             .map_err(|error| (ExtensionDiagnosticCode::ContractViolation, error))?;
         if batch.actions.len() > self.config.max_actions {
             return Err((
@@ -733,6 +736,7 @@ impl SessionPluginHost {
             health: Arc::clone(&extension.health),
             diagnostics: Arc::clone(&self.diagnostics),
             catalog: Arc::clone(&self.catalog),
+            registration_runtime: self.registration_runtime.clone(),
         }
         .spawn(queue, first);
     }
@@ -749,6 +753,7 @@ impl SessionPluginHost {
                 serde_json::json!({"reason": "shutdown"}),
             )
             .await;
+            self.dispose_extension_effects(&extension.package.manifest().id);
             self.engine.dispose(&extension.key).await;
             self.remove_subscriptions(&extension.registrations);
             extension.phase = InstanceLifecyclePhase::Disposed;

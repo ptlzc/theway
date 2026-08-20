@@ -105,3 +105,18 @@ pub(super) fn circuit_opened(
     diagnostic.session_id = Some(session_id.into());
     diagnostic
 }
+
+pub(super) fn registration_rejected(
+    extension_id: impl Into<String>,
+    session_id: impl Into<String>,
+    message: impl Into<String>,
+) -> ExtensionDiagnostic {
+    let mut diagnostic = ExtensionDiagnostic::new(
+        extension_id,
+        ExtensionDiagnosticCode::ContractViolation,
+        ExtensionDiagnosticSeverity::Warning,
+        format!("extension registration rejected: {}", message.into()),
+    );
+    diagnostic.session_id = Some(session_id.into());
+    diagnostic
+}

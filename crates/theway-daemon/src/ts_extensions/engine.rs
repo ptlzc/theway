@@ -45,6 +45,12 @@ pub struct EngineInvocationError {
     pub message: String,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct EngineInvocationResult {
+    pub value: Value,
+    pub disposed_registration_ids: Vec<u64>,
+}
+
 impl EngineInvocationError {
     fn new(kind: EngineInvocationErrorKind, message: impl Into<String>) -> Self {
         Self {
@@ -53,128 +59,6 @@ impl EngineInvocationError {
         }
     }
 }
-
-const HOST_BOOTSTRAP_SOURCE: &str = r#"
-globalThis.__thewayHandlers = Object.create(null);
-globalThis.__thewayRegistrationSequence = 0;
-
-function __thewayBrokerCall(operation, brokerArgs = {}) {
-  const response = JSON.parse(globalThis.__thewayBroker(operation, JSON.stringify(brokerArgs)));
-  if (!response.ok) {
-    const error = new Error(response.error?.message ?? "capability broker failed");
-    error.code = response.error?.code ?? "broker_failed";
-    throw error;
-  }
-  return response.value;
-}
-
-globalThis.__thewaySetup = async function () {
-  try {
-    const candidate = globalThis.__thewayExtension.default;
-    const setup = typeof candidate === "function" ? candidate : candidate?.setup;
-    if (typeof setup !== "function") {
-      throw new TypeError("extension default export must be created by defineExtension");
-    }
-    const api = Object.freeze({
-      abiMajor: 2,
-      capabilities: Object.freeze({
-        has(permission) {
-          return __thewayBrokerCall("capabilities.has", { permission });
-        },
-      }),
-      workspace: Object.freeze({
-        async readText(path) {
-          return __thewayBrokerCall("workspace.readText", { path });
-        },
-        async writeText(path, content) {
-          return __thewayBrokerCall("workspace.writeText", { path, content });
-        },
-      }),
-      process: Object.freeze({
-        async run(argv, options = {}) {
-          return __thewayBrokerCall("process.run", {
-            argv,
-            timeoutMs: options.timeoutMs ?? null,
-          });
-        },
-      }),
-      network: Object.freeze({
-        async fetch(url, options = {}) {
-          return __thewayBrokerCall("network.fetch", {
-            url,
-            method: options.method ?? null,
-            headers: options.headers ?? {},
-            body: options.body ?? null,
-          });
-        },
-      }),
-      secrets: Object.freeze({
-        async read(name) {
-          return __thewayBrokerCall("secrets.read", { name });
-        },
-      }),
-      providerRaw: Object.freeze({
-        async read() {
-          return __thewayBrokerCall("providerRaw.read", {});
-        },
-      }),
-      on(event, descriptor, handler) {
-        if (typeof descriptor === "function") {
-          handler = descriptor;
-          descriptor = {};
-        }
-        if (typeof event !== "string" || event.length === 0 || typeof handler !== "function") {
-          throw new TypeError("api.on requires an event name and handler");
-        }
-        const registration = {
-          id: globalThis.__thewayRegistrationSequence,
-          event,
-          descriptor: descriptor ?? {},
-          handler,
-          priority: Number.isFinite(descriptor?.priority) ? descriptor.priority : 0,
-          sequence: globalThis.__thewayRegistrationSequence++,
-          disposed: false,
-        };
-        (globalThis.__thewayHandlers[event] ??= []).push(registration);
-        return Object.freeze({
-          dispose() { registration.disposed = true; },
-        });
-      },
-    });
-    await setup(api);
-    return JSON.stringify({
-      ok: true,
-      value: {
-        registrations: Object.values(globalThis.__thewayHandlers)
-          .flat()
-          .map(({ id, event, descriptor, sequence }) => ({
-            registrationId: id,
-            event,
-            descriptor,
-            sequence,
-          })),
-      },
-    });
-  } catch (error) {
-    return JSON.stringify({ error: String(error?.message ?? error) });
-  }
-};
-
-globalThis.__thewayInvoke = async function (serializedEnvelope, registrationId) {
-  try {
-    const envelope = JSON.parse(serializedEnvelope);
-    const registration = (globalThis.__thewayHandlers[envelope.event] ?? [])
-      .find((candidate) => candidate.id === registrationId && !candidate.disposed);
-    if (registration === undefined) {
-      throw new Error("hook registration is unavailable");
-    }
-    const result = await registration.handler(envelope, envelope.context);
-    return JSON.stringify({ ok: true, value: result ?? null });
-  } catch (error) {
-    return JSON.stringify({ error: String(error?.message ?? error) });
-  }
-};
-"#;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct EngineInstanceKey {
@@ -217,7 +101,7 @@ enum EngineCommand {
         deadline: Instant,
         cancellation: Arc<AtomicBool>,
         broker_operation_limit: usize,
-        response: oneshot::Sender<Result<Value, EngineInvocationError>>,
+        response: oneshot::Sender<Result<EngineInvocationResult, EngineInvocationError>>,
     },
     Dispose {
         key: EngineInstanceKey,
@@ -332,6 +216,27 @@ impl QuickJsEnginePool {
         cancellation: Arc<AtomicBool>,
         broker_operation_limit: usize,
     ) -> Result<Value, EngineInvocationError> {
+        self.invoke_controlled_with_effects(
+            key,
+            envelope,
+            registration_id,
+            timeout,
+            cancellation,
+            broker_operation_limit,
+        )
+        .await
+        .map(|result| result.value)
+    }
+
+    pub(super) async fn invoke_controlled_with_effects<T: serde::Serialize>(
+        &self,
+        key: &EngineInstanceKey,
+        envelope: &T,
+        registration_id: u64,
+        timeout: Duration,
+        cancellation: Arc<AtomicBool>,
+        broker_operation_limit: usize,
+    ) -> Result<EngineInvocationResult, EngineInvocationError> {
         let envelope = serde_json::to_string(envelope).map_err(|error| {
             EngineInvocationError::new(
                 EngineInvocationErrorKind::Runtime,
@@ -405,6 +310,14 @@ impl QuickJsEnginePool {
 
     pub fn audit_log(&self) -> super::audit::ExtensionAuditLog {
         self.inner.broker_services.audit_log()
+    }
+
+    pub(super) fn has_secret(&self, name: &str) -> bool {
+        self.inner.broker_services.has_secret(name)
+    }
+
+    pub(super) fn secret(&self, name: &str) -> Option<String> {
+        self.inner.broker_services.secret(name)
     }
 
     fn send(&self, key: &EngineInstanceKey, command: EngineCommand) -> Result<(), String> {
@@ -614,7 +527,10 @@ impl EngineInstance {
             js(&ctx, promise.finish::<()>())?;
             let namespace = js(&ctx, module.namespace())?;
             js(&ctx, ctx.globals().set("__thewayExtension", namespace))?;
-            js(&ctx, ctx.eval::<(), _>(HOST_BOOTSTRAP_SOURCE))?;
+            js(
+                &ctx,
+                ctx.eval::<(), _>(super::facade::HOST_BOOTSTRAP_SOURCE),
+            )?;
             let setup: Function = js(&ctx, ctx.globals().get("__thewaySetup"))?;
             let promise: Promise = js(&ctx, setup.call(()))?;
             let output: String = js(&ctx, promise.finish())?;
@@ -650,7 +566,7 @@ impl EngineInstance {
         deadline: Instant,
         cancellation: Arc<AtomicBool>,
         broker_operation_limit: usize,
-    ) -> Result<Value, EngineInvocationError> {
+    ) -> Result<EngineInvocationResult, EngineInvocationError> {
         if cancellation.load(Ordering::Acquire) {
             return Err(EngineInvocationError::new(
                 EngineInvocationErrorKind::Cancelled,
@@ -691,7 +607,7 @@ impl EngineInstance {
             let invoke: Function = js(&ctx, ctx.globals().get("__thewayInvoke"))?;
             let promise: Promise = js(&ctx, invoke.call((envelope, registration_id)))?;
             let output: String = js(&ctx, promise.finish())?;
-            decode_host_result(&output, self.output_limit)
+            decode_invocation_result(&output, self.output_limit)
         });
         self.broker.finish();
         if let Some(reason) = self.interrupt.finish() {
@@ -718,6 +634,28 @@ impl EngineInstance {
             EngineInvocationError::new(kind, message)
         })
     }
+}
+
+fn decode_invocation_result(
+    output: &str,
+    output_limit: usize,
+) -> Result<EngineInvocationResult, String> {
+    let value = decode_host_result(output, output_limit)?;
+    let result = value
+        .get("result")
+        .cloned()
+        .ok_or_else(|| "extension invocation result is missing result".to_string())?;
+    let disposed_registration_ids = serde_json::from_value(
+        value
+            .get("disposedRegistrationIds")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new())),
+    )
+    .map_err(|error| format!("extension invocation effect state is invalid: {error}"))?;
+    Ok(EngineInvocationResult {
+        value: result,
+        disposed_registration_ids,
+    })
 }
 
 fn js<'js, T>(ctx: &rquickjs::Ctx<'js>, result: rquickjs::Result<T>) -> Result<T, String> {
