@@ -6,7 +6,7 @@ use tokio_util::sync::CancellationToken;
 use crate::agent::model_request::NormalizedModelRequestDraft;
 use crate::agent::runtime_extensions::ValidatedRuntimeExtensionResult;
 
-use super::{HarnessRuntimeExtensions, parse_follow_up};
+use super::{HarnessRuntimeExtensions, is_host_consumed_action, parse_follow_up};
 
 impl HarnessRuntimeExtensions {
     pub(in crate::agent::assembly) async fn before_model_request(
@@ -39,10 +39,8 @@ impl HarnessRuntimeExtensions {
         if result.actions().iter().any(|action| {
             !matches!(
                 action.kind,
-                ExtensionActionKind::ReplaceModelRequest
-                    | ExtensionActionKind::EnqueueFollowUp
-                    | ExtensionActionKind::EmitDiagnostic
-            )
+                ExtensionActionKind::ReplaceModelRequest | ExtensionActionKind::EnqueueFollowUp
+            ) && !is_host_consumed_action(action.kind)
         }) {
             return request;
         }

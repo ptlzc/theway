@@ -181,10 +181,26 @@ async fn message_lifecycle_uses_stable_ids_and_final_transform_persists() {
             return ExtensionActionBatch {
                 abi_major: ExtensionAbiMajor::V2,
                 decision: None,
-                actions: vec![ExtensionAction {
-                    kind: ExtensionActionKind::ReplaceMessage,
-                    payload: serde_json::json!({"message": replacement}),
-                }],
+                actions: vec![
+                    ExtensionAction {
+                        kind: ExtensionActionKind::ReplaceMessage,
+                        payload: serde_json::json!({"message": replacement}),
+                    },
+                    ExtensionAction {
+                        kind: ExtensionActionKind::SetState,
+                        payload: serde_json::json!({
+                            "abiMajor": 2,
+                            "extensionId": "test-extension",
+                            "stateSchemaVersion": 1,
+                            "originSequence": 1,
+                            "entry": {
+                                "kind": "state_mutation",
+                                "key": "message-phase",
+                                "mutation": {"operation": "set", "value": "complete"},
+                            },
+                        }),
+                    },
+                ],
             };
         }
         empty_batch()

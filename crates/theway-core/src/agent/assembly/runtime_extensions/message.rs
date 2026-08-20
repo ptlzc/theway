@@ -9,7 +9,7 @@ use crate::agent::runtime_extensions::{
 use crate::types::AgentMessage;
 use theway_llm_provider::AssistantMessageEvent;
 
-use super::HarnessRuntimeExtensions;
+use super::{HarnessRuntimeExtensions, is_host_consumed_action};
 
 impl HarnessRuntimeExtensions {
     pub(crate) async fn finalize_before_run_message(&self, message: AgentMessage) -> AgentMessage {
@@ -93,10 +93,8 @@ impl HarnessRuntimeExtensions {
         if result.actions().iter().any(|action| {
             !matches!(
                 action.kind,
-                ExtensionActionKind::ReplaceMessage
-                    | ExtensionActionKind::EnqueueFollowUp
-                    | ExtensionActionKind::EmitDiagnostic
-            )
+                ExtensionActionKind::ReplaceMessage | ExtensionActionKind::EnqueueFollowUp
+            ) && !is_host_consumed_action(action.kind)
         }) {
             return message;
         }

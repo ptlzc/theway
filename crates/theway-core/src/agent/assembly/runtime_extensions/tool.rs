@@ -1,7 +1,6 @@
 use serde::Deserialize;
 use theway_contract::extension::{
-    ExtensionActionKind, ExtensionErrorEnvelope, ExtensionGateDecision, ExtensionHookClass,
-    ExtensionLifecycleEvent,
+    ExtensionActionKind, ExtensionErrorEnvelope, ExtensionHookClass, ExtensionLifecycleEvent,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -47,19 +46,10 @@ impl HarnessRuntimeExtensions {
             }
             Err(error) => return blocked_error(error),
         };
-        if !result.actions().is_empty() {
-            return blocked(
-                "contract_violation",
-                "tool gate actions require the durable action coordinator",
-            );
+        if let Err(error) = self.gate_allows(ValidatedRuntimeExtensionResult::Gate(result)) {
+            return blocked_error(error);
         }
-        match result.decision() {
-            ExtensionGateDecision::Abstain | ExtensionGateDecision::Allow => {
-                BeforeToolCallResult::default()
-            }
-            ExtensionGateDecision::Deny { code, message }
-            | ExtensionGateDecision::Cancel { code, message } => blocked(code, message),
-        }
+        BeforeToolCallResult::default()
     }
 
     pub(crate) async fn transform_tool_result(
@@ -93,7 +83,7 @@ impl HarnessRuntimeExtensions {
             !matches!(
                 action.kind,
                 ExtensionActionKind::ReplaceToolResult | ExtensionActionKind::EnqueueFollowUp
-            )
+            ) && !super::is_host_consumed_action(action.kind)
         }) {
             return AfterToolCallResult::default();
         }
@@ -171,6 +161,11 @@ fn blocked(code: &str, message: &str) -> BeforeToolCallResult {
 }
 
 fn blocked_error(error: ExtensionErrorEnvelope) -> BeforeToolCallResult {
+    if error.code == theway_contract::extension::ExtensionErrorCode::Cancelled
+        && let Some((code, message)) = error.message.split_once(": ")
+    {
+        return blocked(code, message);
+    }
     let code = serde_json::to_value(error.code)
         .ok()
         .and_then(|value| value.as_str().map(str::to_owned))

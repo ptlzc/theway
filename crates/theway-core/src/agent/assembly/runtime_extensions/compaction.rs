@@ -1,10 +1,8 @@
 use theway_contract::extension::{
-    ExtensionErrorCode, ExtensionErrorEnvelope, ExtensionGateDecision, ExtensionHookClass,
-    ExtensionLifecycleEvent,
+    ExtensionErrorEnvelope, ExtensionHookClass, ExtensionLifecycleEvent,
 };
 
 use crate::agent::AgentRunError;
-use crate::agent::runtime_extensions::ValidatedRuntimeExtensionResult;
 
 use super::HarnessRuntimeExtensions;
 
@@ -23,26 +21,7 @@ impl HarnessRuntimeExtensions {
         let result = self
             .guarded(self.port.dispatch_compaction(invocation))
             .await?;
-        let ValidatedRuntimeExtensionResult::Gate(result) = result else {
-            return Err(ExtensionErrorEnvelope::new(
-                ExtensionErrorCode::ContractViolation,
-                "before-compaction gate returned the wrong hook class",
-            ));
-        };
-        if !result.actions().is_empty() {
-            return Err(ExtensionErrorEnvelope::new(
-                ExtensionErrorCode::ContractViolation,
-                "compaction gate actions require the durable action coordinator",
-            ));
-        }
-        match result.decision() {
-            ExtensionGateDecision::Abstain | ExtensionGateDecision::Allow => Ok(()),
-            ExtensionGateDecision::Deny { message, .. }
-            | ExtensionGateDecision::Cancel { message, .. } => Err(ExtensionErrorEnvelope::new(
-                ExtensionErrorCode::Cancelled,
-                message.clone(),
-            )),
-        }
+        self.gate_allows(result)
     }
 
     async fn observe_compaction(

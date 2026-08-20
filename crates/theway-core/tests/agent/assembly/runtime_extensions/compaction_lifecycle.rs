@@ -29,6 +29,30 @@ async fn populate(harness: &AgentHarness) {
 #[tokio::test]
 async fn compaction_gate_precedes_committed_success_observation() {
     let port = Arc::new(RecordingPort::default());
+    port.respond(
+        ExtensionLifecycleEvent::BeforeCompaction,
+        ExtensionHookClass::Gate,
+        ExtensionActionBatch {
+            abi_major: ExtensionAbiMajor::V2,
+            decision: Some(ExtensionGateDecision::Allow),
+            actions: vec![ExtensionAction {
+                kind: ExtensionActionKind::SetState,
+                payload: serde_json::to_value(ExtensionDurableEntry {
+                    abi_major: ExtensionAbiMajor::V2,
+                    extension_id: "test-extension".into(),
+                    state_schema_version: 1,
+                    origin_sequence: 1,
+                    entry: ExtensionDurableEntryPayload::StateMutation {
+                        key: "compaction-approved".into(),
+                        mutation: ExtensionStateMutation::Set {
+                            value: serde_json::json!(true),
+                        },
+                    },
+                })
+                .unwrap(),
+            }],
+        },
+    );
     let session = Session::new(Arc::new(MemorySessionStorage::new()));
     let harness = harness_with_port(
         port.clone(),

@@ -232,7 +232,7 @@ export type ExtensionDiagnosticCode =
   | "manifest_invalid" | "abi_unsupported" | "shadowed" | "trust_required" | "permission_denied"
   | "load_failed" | "hook_failed" | "hook_timed_out" | "cancelled" | "resource_limit"
   | "circuit_opened" | "unloaded" | "reload_pending" | "state_migration_failed"
-  | "persistence_failed" | "queue_overflow" | "contract_violation";
+  | "persistence_failed" | "queue_overflow" | "lifecycle_status" | "contract_violation";
 export interface ExtensionCatalogEntry {
   extensionId: string;
   version: string;

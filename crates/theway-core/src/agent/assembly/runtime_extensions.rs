@@ -193,7 +193,7 @@ impl HarnessRuntimeExtensions {
                 ExtensionActionKind::ReplaceInput
                     | ExtensionActionKind::EmitCommandOutcome
                     | ExtensionActionKind::EnqueueFollowUp
-            )
+            ) && !is_host_consumed_action(action.kind)
         }) {
             return InputTransformOutcome::Run(message);
         }
@@ -263,7 +263,7 @@ impl HarnessRuntimeExtensions {
             !matches!(
                 action.kind,
                 ExtensionActionKind::ReplaceContext | ExtensionActionKind::EnqueueFollowUp
-            )
+            ) && !is_host_consumed_action(action.kind)
         }) {
             return messages;
         }
@@ -304,7 +304,7 @@ impl HarnessRuntimeExtensions {
             false,
         )?;
         let result = self.guarded(self.port.dispatch_request(invocation)).await?;
-        gate_allows(result)
+        self.gate_allows(result)
     }
 
     pub(super) async fn model_selected(&self, model: &theway_llm_provider::Model) {
@@ -330,7 +330,7 @@ impl HarnessRuntimeExtensions {
     ) -> Result<(), ExtensionErrorEnvelope> {
         let invocation = self.invocation(event, ExtensionHookClass::Gate, payload, false)?;
         let result = self.guarded(self.port.dispatch_session(invocation)).await?;
-        gate_allows(result)
+        self.gate_allows(result)
     }
 
     pub(super) async fn observe_session_operation(
@@ -377,7 +377,7 @@ impl HarnessRuntimeExtensions {
             !matches!(
                 action.kind,
                 ExtensionActionKind::PatchRunContext | ExtensionActionKind::EnqueueFollowUp
-            )
+            ) && !is_host_consumed_action(action.kind)
         }) {
             return BeforeRunPatch::default();
         }
@@ -641,20 +641,58 @@ fn same_message_role(left: &AgentMessage, right: &AgentMessage) -> bool {
     )
 }
 
-fn gate_allows(result: ValidatedRuntimeExtensionResult) -> Result<(), ExtensionErrorEnvelope> {
-    let ValidatedRuntimeExtensionResult::Gate(result) = result else {
-        return Err(ExtensionErrorEnvelope::new(
-            ExtensionErrorCode::ContractViolation,
-            "core gate dispatch returned a non-gate result",
-        ));
-    };
-    match result.decision() {
-        ExtensionGateDecision::Abstain | ExtensionGateDecision::Allow => Ok(()),
-        ExtensionGateDecision::Deny { code, message }
-        | ExtensionGateDecision::Cancel { code, message } => Err(ExtensionErrorEnvelope::new(
-            ExtensionErrorCode::Cancelled,
-            format!("{code}: {message}"),
-        )),
+fn is_host_consumed_action(kind: ExtensionActionKind) -> bool {
+    matches!(
+        kind,
+        ExtensionActionKind::SetState
+            | ExtensionActionKind::DeleteState
+            | ExtensionActionKind::AppendCustomEvent
+            | ExtensionActionKind::AppendModelContext
+            | ExtensionActionKind::EmitDiagnostic
+    )
+}
+
+impl HarnessRuntimeExtensions {
+    fn gate_allows(
+        &self,
+        result: ValidatedRuntimeExtensionResult,
+    ) -> Result<(), ExtensionErrorEnvelope> {
+        let ValidatedRuntimeExtensionResult::Gate(result) = result else {
+            return Err(ExtensionErrorEnvelope::new(
+                ExtensionErrorCode::ContractViolation,
+                "core gate dispatch returned a non-gate result",
+            ));
+        };
+        let follow_ups = result
+            .actions()
+            .iter()
+            .filter(|action| action.kind == ExtensionActionKind::EnqueueFollowUp)
+            .map(|action| parse_follow_up(&action.payload))
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| {
+                ExtensionErrorEnvelope::new(
+                    ExtensionErrorCode::InvalidPayload,
+                    "extension gate returned an invalid follow-up action",
+                )
+            })?;
+        if result.actions().iter().any(|action| {
+            action.kind != ExtensionActionKind::EnqueueFollowUp
+                && !is_host_consumed_action(action.kind)
+        }) {
+            return Err(ExtensionErrorEnvelope::new(
+                ExtensionErrorCode::InvalidAction,
+                "extension gate returned an action not consumed by the host",
+            ));
+        }
+        self.enqueue_follow_ups(follow_ups)?;
+        match result.decision() {
+            ExtensionGateDecision::Abstain | ExtensionGateDecision::Allow => Ok(()),
+            ExtensionGateDecision::Deny { code, message }
+            | ExtensionGateDecision::Cancel { code, message } => Err(ExtensionErrorEnvelope::new(
+                ExtensionErrorCode::Cancelled,
+                format!("{code}: {message}"),
+            )),
+        }
     }
 }
 
