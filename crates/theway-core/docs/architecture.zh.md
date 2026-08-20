@@ -67,6 +67,8 @@ Extension follow-up 使用独立的 32 项稳定 id 去重队列，不使用 bar
 
 完成态 user、assistant 与 tool-result message 在进入 agent state 或异步 session 持久化前先经过 message transform；被变换的 assistant 同时作为 tool-call 提取来源。Message observation 从 start、流式 update 到 finalization 使用同一个稳定 message id。Tool preflight 保持 assistant 源顺序，并在 extension gate 拒绝后停止；只有准入的调用才开始 execution。并行 sibling 仍并发执行，而 execution-end observation、tool-result transform 和持久化的 tool-result message 按源顺序完成。
 
+[`agent/model_request.rs`](../src/agent/model_request.rs) 定义 `NormalizedModelRequestDraft`；它在 context 转换后由本次请求的 system instruction、规范化 message、可见 tool definition、不可变 executable-tool name 与受支持 generation option 组装而成。`before_model_request` 在 provider 序列化前接收完整 draft；只有 provider/model 标识、tool catalog 引用与 generation 边界作为整体通过校验时，core 才接受 replacement。接受后的可执行实现随模型结果一起传递，因此 tool dispatcher 不会观察后续 registry 变更；本次请求排除的名称会被拒绝，且不产生 execution lifecycle event。`RuntimeRequestExtensionPort::has_request_hook` 使无订阅者路径跳过 extension 分发。
+
 Compaction 在选择或运行 builtin 或已注册算法前调用 extension gate；provider 或 persistence 错误发布 failure，只有 compaction entry 与内存状态提交后才发布 success。`ExtensionModelContextProjection::compaction_messages` 在不改变 cut-point entry identity 的前提下，将每个去重后的 model-visible context item 恰好一次加入摘要输入；private state 与 custom event 不会被投影。
 
 ## 扩展规则
@@ -85,6 +87,7 @@ Compaction 在选择或运行 builtin 或已注册算法前调用 extension gate
 - 私有 extension state 不进入带类型会话消息或模型上下文投影。
 - Extension follow-up 不能在 settlement 前进入活动 run，也不能无界递归。
 - Finalized message replacement 先于持久化及下游 tool 提取；被拒绝的 tool 产生模型可见错误，但不产生 execution lifecycle event。
+- Normalized request replacement 是原子且仅作用于本次请求；可见 definition 与 executable reference 描述同一个不可变 tool catalog。
 - Compaction input 只包含带类型 session message 与去重后的 model-visible extension context，不包含 private extension state。
 - 取消会产生终止运行结果，并释放运行准入和控制句柄。
 - 事件载荷和操作关联保持足够确定，使 daemon 无需访问 core 私有状态即可投影 snapshot。

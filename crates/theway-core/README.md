@@ -12,6 +12,7 @@ Core does not own concrete tools, filesystem or process implementations, persist
 - `AgentHarness` composes an agent with a typed `Session`, skills, compaction, cost tracking, and cross-turn hooks.
 - `PersistentSessionStorage` adapts typed session entries to the raw `SessionReader` and `SessionStore` records from `theway-contract`.
 - `RuntimeExtensionPort` splits engine-independent lifecycle dispatch into session, run, request, message, tool, and compaction domains; the default implementation is a no-op.
+- `NormalizedModelRequestDraft` is the provider-independent, request-local system/message/tool/generation snapshot transformed before provider serialization.
 - `ToolExecutor` defines filesystem and process effects supplied by an embedding runtime.
 - `RuntimeObserver` receives transport-neutral operation start and finish records.
 - `multiagent` provides nested agent runs, live subagent-job state, DAG scheduling, and goal evaluation when the `harness` feature is enabled.

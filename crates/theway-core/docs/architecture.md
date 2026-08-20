@@ -67,6 +67,8 @@ Extension follow-ups use a separate 32-item, stable-id de-duplicated queue rathe
 
 Finalized user, assistant, and tool-result messages pass through the message transform before entering agent state or awaited session persistence; a transformed assistant is also the source for tool-call extraction. Message observations use one stable message id from start through streaming updates and finalization. Tool preflight remains in assistant source order, stops after the extension gate denies a call, and starts only admitted executions; parallel siblings still execute concurrently, while execution-end observations, tool-result transforms, and persisted tool-result messages finalize in source order.
 
+[`agent/model_request.rs`](../src/agent/model_request.rs) defines `NormalizedModelRequestDraft`, which is assembled after context conversion from request-local system instructions, normalized messages, visible tool definitions, immutable executable-tool names, and supported generation options. `before_model_request` receives that complete draft before provider serialization; core accepts a replacement only when provider/model identity, tool catalog references, and generation bounds validate together. The accepted executable implementations travel with the model result, so tool dispatch cannot observe later registry changes and rejects any name excluded from that request without execution lifecycle events. `RuntimeRequestExtensionPort::has_request_hook` lets the no-subscriber path skip extension dispatch.
+
 Compaction invokes the extension gate before selecting or running either the builtin or a registered algorithm, publishes failure for provider or persistence errors, and publishes success only after the compaction entry and in-memory state commit. `ExtensionModelContextProjection::compaction_messages` contributes each de-duplicated model-visible context item once to summarization without changing cut-point entry identity; private state and custom events are not projected.
 
 ## Extension rules
@@ -85,6 +87,7 @@ Compaction invokes the extension gate before selecting or running either the bui
 - Private extension state remains outside typed session messages and model-context projection.
 - Extension follow-ups cannot enter the active run before settlement or recurse without a bound.
 - Finalized message replacements precede persistence and downstream tool extraction, and denied tools produce a model-visible error without execution lifecycle events.
+- A normalized request replacement is atomic and request-local; visible definitions and executable references describe the same immutable tool catalog.
 - Compaction input contains only typed session messages plus de-duplicated model-visible extension context, never private extension state.
 - Cancellation produces a terminal runtime outcome and releases run admission and control handles.
 - Event payloads and operation correlation remain deterministic enough for the daemon to project snapshots without accessing private core state.

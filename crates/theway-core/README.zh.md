@@ -12,6 +12,7 @@ Core 不负责具体工具、文件系统或进程实现、持久化后端、遥
 - `AgentHarness` 将 agent 与带类型的 `Session`、skill、压缩、成本统计和跨 turn hook 组合起来。
 - `PersistentSessionStorage` 在带类型的会话条目与 `theway-contract` 的原始 `SessionReader`、`SessionStore` 记录之间转换。
 - `RuntimeExtensionPort` 将引擎无关的生命周期分发拆分为 session、run、request、message、tool 与 compaction 域；默认实现为空操作。
+- `NormalizedModelRequestDraft` 是在 provider 序列化前接受变换、且只作用于本次请求的 provider 无关 system/message/tool/generation 快照。
 - `ToolExecutor` 定义由嵌入式运行环境提供的文件系统和进程操作。
 - `RuntimeObserver` 接收与传输无关的操作开始与结束记录。
 - 启用 `harness` feature 时，`multiagent` 提供嵌套 agent 运行、实时 subagent job 状态、DAG 调度和 goal 评估。
