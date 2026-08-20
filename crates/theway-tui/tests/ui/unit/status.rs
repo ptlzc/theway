@@ -136,7 +136,7 @@ fn snake_track_always_shows_all_nine_round_dots() {
             let frame = snake_loader::snake_frame(step, cps);
             assert_eq!(frame.cells.len(), 9, "step {step}");
             for (i, cell) in frame.cells.iter().enumerate() {
-                assert_eq!(cell.glyph, '•', "step {step} cell {i}");
+                assert_eq!(cell.glyph, '·', "step {step} cell {i}");
                 assert_eq!(cell.bg, Color::Reset, "step {step} cell {i}");
                 if cell.lit == 0.0 {
                     assert_eq!(cell.fg, Color::DarkGray, "step {step} cell {i}");
@@ -147,18 +147,13 @@ fn snake_track_always_shows_all_nine_round_dots() {
 }
 
 #[test]
-fn compact_snake_columns_keep_the_brightest_segment_color() {
-    for step in [0u64, 4, 8, 9, 15, 23, 100] {
-        let frame = snake_loader::snake_frame(step, 60.0);
-        let columns = snake_loader::compact_columns(&frame);
-        for (column, compact) in columns.iter().enumerate() {
-            let brightest = (0..snake_loader::GRID_HEIGHT)
-                .map(|row| frame.cells[row * snake_loader::GRID_WIDTH + column])
-                .max_by(|left, right| left.lit.total_cmp(&right.lit))
-                .unwrap();
-            assert_eq!(*compact, brightest, "step {step}, column {column}");
-        }
+fn snake_display_order_keeps_all_nine_positions_independent() {
+    let mut seen = [false; snake_loader::TRACK_CELLS];
+    for position in snake_loader::TRACK_ORDER {
+        assert!(!seen[position], "track position {position} appears twice");
+        seen[position] = true;
     }
+    assert!(seen.into_iter().all(std::convert::identity));
 }
 
 #[tokio::test]

@@ -1,11 +1,12 @@
-//! Three-by-three rainbow snake loader for the busy status band.
+//! Nine-dot rainbow snake loader for the busy status band.
 //!
 //! The fixed nine-dot track follows a row-snake order through a 3×3 grid:
 //! left-to-right, right-to-left, then left-to-right. The head bounces along
 //! that path and its history forms a 2-to-5-dot tail. Throughput controls
 //! both the App spinner cadence and the tail length. Each segment has its
-//! own rainbow hue. The status renderer compresses each logical column into
-//! one vertical-ellipsis glyph, so the nine-dot matrix occupies one row.
+//! own rainbow hue. The status renderer lays the nine logical positions out
+//! as adjacent middle dots in traversal order, keeping every position
+//! independently styleable while the status band remains one terminal row.
 //!
 //! This module is pure: one step in, one frame out. The DAG band's
 //! mini-spinner keeps rendering through `pixel_loader::rainbow_frame`
@@ -13,18 +14,14 @@
 
 use ratatui::style::Color;
 
-/// Grid dimensions and row-major cell count.
-pub(crate) const GRID_WIDTH: usize = 3;
-pub(crate) const GRID_HEIGHT: usize = 3;
+/// Logical row-major cell count.
 pub(crate) const TRACK_CELLS: usize = 9;
 /// Pinned row-snake traversal through the row-major grid.
 pub(crate) const TRACK_ORDER: [usize; TRACK_CELLS] = [0, 1, 2, 5, 4, 3, 6, 7, 8];
 /// One full bounce cycle: first-to-last takes 8 steps and the return takes 8.
 const BOUNCE_STEPS: u64 = 16;
-/// A compact round dot; nine of these form the stable 3×3 track.
-pub(crate) const SNAKE_GLYPH: char = '•';
-/// Three vertically packed dots; three glyphs display the logical 3×3 grid.
-pub(crate) const COMPACT_GLYPH: char = '⋮';
+/// A compact round middle dot; nine adjacent glyphs form the stable track.
+pub(crate) const SNAKE_GLYPH: char = '·';
 /// Hue advance per snake step: one full color wheel per 24 steps.
 const HUE_STEP_DEG: f32 = 15.0;
 /// Hue offset per trail segment — the rainbow trail along the snake body.
@@ -52,19 +49,7 @@ pub(crate) struct SnakeCell {
 
 /// A full loader frame: all nine track cells, some lit by the snake.
 pub(crate) struct SnakeFrame {
-    pub(crate) cells: [SnakeCell; 9],
-}
-
-/// Collapse each logical grid column into one terminal cell. The brightest
-/// snake segment in a column supplies that column's color and intensity.
-#[must_use]
-pub(crate) fn compact_columns(frame: &SnakeFrame) -> [SnakeCell; GRID_WIDTH] {
-    std::array::from_fn(|column| {
-        (0..GRID_HEIGHT)
-            .map(|row| frame.cells[row * GRID_WIDTH + column])
-            .max_by(|left, right| left.lit.total_cmp(&right.lit))
-            .expect("the three-row snake grid always has a cell per column")
-    })
+    pub(crate) cells: [SnakeCell; TRACK_CELLS],
 }
 
 /// Head grid cell for `step`: a triangular wave through [`TRACK_ORDER`].
@@ -113,7 +98,7 @@ pub(crate) fn snake_frame(step: u64, cps: f64) -> SnakeFrame {
         fg: DIM_FG,
         bg: DIM_BG,
         lit: 0.0,
-    }; 9];
+    }; TRACK_CELLS];
     for i in 0..trail as usize {
         // Segments whose history predates the wave start have no track
         // position; they stay dim (out-of-range semantics).

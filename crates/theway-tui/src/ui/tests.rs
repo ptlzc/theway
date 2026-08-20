@@ -244,24 +244,30 @@ async fn busy_status_shows_snake_loader_with_elapsed() {
         text.contains("2 queued"),
         "queue depth missing from the busy band:\n{text}"
     );
-    // Three vertical-dot glyphs pack the logical nine-dot matrix into one row.
+    // Nine adjacent middle dots retain independent terminal-cell styles while
+    // keeping the busy band one row high.
     let status_area = app.last_status_area.unwrap();
     assert_eq!(status_area.height, 1);
-    for col in 0..3u16 {
+    for slot in 0..9u16 {
         assert_eq!(
-            buf[(status_area.x + 1 + col, status_area.y)].symbol(),
-            "⋮",
-            "compact track column {col} must render three vertical dots:\n{text}"
+            buf[(status_area.x + 1 + slot, status_area.y)].symbol(),
+            "·",
+            "track slot {slot} must render one middle dot:\n{text}"
         );
     }
     assert_eq!(
-        buf[(status_area.x + 6, status_area.y)].symbol(),
+        buf[(status_area.x + 12, status_area.y)].symbol(),
         "w",
-        "working label must start beside the compact grid:\n{text}"
+        "working label must start beside the nine-dot track:\n{text}"
     );
     assert!(
         text.contains("char/s"),
         "throughput stats must share the busy row:\n{text}"
+    );
+    assert_ne!(
+        buf[(status_area.x + 1, status_area.y)].fg,
+        buf[(status_area.x + 2, status_area.y)].fg,
+        "the head and resting track dots must retain independent colors"
     );
     let lines: Vec<&str> = text.lines().collect();
     let label_row = lines.iter().position(|l| l.contains("working")).unwrap();
@@ -273,6 +279,21 @@ async fn busy_status_shows_snake_loader_with_elapsed() {
         border_row,
         label_row + 1,
         "composer should sit directly below the compact busy band:\n{text}"
+    );
+    // Advance one base-cadence step: the head moves to the next displayed dot
+    // while the previous dot remains lit as the first rainbow trail segment.
+    app.spinner.tick(130);
+    terminal.draw(|f| app.render(f)).unwrap();
+    let moved = terminal.backend().buffer();
+    assert_ne!(
+        moved[(status_area.x + 2, status_area.y)].fg,
+        Color::DarkGray,
+        "the snake head must move to the second independent dot"
+    );
+    assert_ne!(
+        moved[(status_area.x + 1, status_area.y)].fg,
+        Color::DarkGray,
+        "the previous head must remain visible as the rainbow tail"
     );
     // The busy window timer arms on the false→true edge and clears on idle.
     assert!(app.busy_started.is_some());

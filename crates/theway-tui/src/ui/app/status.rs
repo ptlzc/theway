@@ -20,8 +20,8 @@ impl App {
         Paragraph::new(Line::styled(text, Style::default().fg(Color::DarkGray)))
     }
 
-    /// Busy band: three vertical-dot glyphs compress the logical 3×3 rainbow
-    /// snake into one terminal row, followed by the working label and stats.
+    /// Busy band: nine independently styled middle dots show the rainbow
+    /// snake in one terminal row, followed by the working label and stats.
     fn render_busy_status(&self, frame: &mut ratatui::Frame, area: Rect) {
         if area.height == 0 {
             return;
@@ -30,8 +30,9 @@ impl App {
         let cps = self.cps_meter.cps();
         let snake = snake_loader::snake_frame(self.spinner.step(), cps);
         let track_x = area.x.saturating_add(1);
-        for (column, cell) in snake_loader::compact_columns(&snake).iter().enumerate() {
-            let x = track_x.saturating_add(column as u16);
+        for (slot, position) in snake_loader::TRACK_ORDER.iter().enumerate() {
+            let cell = &snake.cells[*position];
+            let x = track_x.saturating_add(slot as u16);
             if x >= area.right() {
                 break;
             }
@@ -41,9 +42,11 @@ impl App {
             }
             frame
                 .buffer_mut()
-                .set_string(x, area.y, snake_loader::COMPACT_GLYPH.to_string(), style);
+                .set_string(x, area.y, cell.glyph.to_string(), style);
         }
-        let label_x = area.x.saturating_add(6);
+        let label_x = track_x
+            .saturating_add(snake_loader::TRACK_CELLS as u16)
+            .saturating_add(2);
         if label_x < area.right() {
             let mut spans = vec![
                 Span::styled("working", shimmer_style(tick)),
