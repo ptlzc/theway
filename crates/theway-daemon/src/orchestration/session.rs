@@ -60,6 +60,8 @@ pub struct SessionRuntimeBuilder {
     pub templates: Vec<theway_core::PromptTemplate>,
     pub compact_algorithms:
         std::sync::Arc<theway_core::agent::compaction::algorithm::CompactAlgorithmRegistry>,
+    pub runtime_extension_packages: crate::ts_extensions::PackageCatalog,
+    pub runtime_extension_engine: Option<crate::ts_extensions::QuickJsEnginePool>,
     pub memory_dir: std::path::PathBuf,
     pub dag_engine: Arc<DagEngine>,
     pub subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry,
@@ -200,6 +202,28 @@ impl SessionRuntimeBuilder {
             ..theway_core::ObservationContext::default()
         };
         opts.runtime_extension_cwd = self.cwd.to_string_lossy().into_owned();
+        if let Some(engine) = &self.runtime_extension_engine {
+            let extensions = crate::ts_extensions::SessionPluginHost::load(
+                self.runtime_extension_packages.clone(),
+                engine.clone(),
+                session_id.clone(),
+                &self.cwd,
+            )
+            .await;
+            for diagnostic in extensions
+                .diagnostics()
+                .into_iter()
+                .filter(|diagnostic| diagnostic.session_id.is_some())
+            {
+                tracing::warn!(
+                    target: "extensions",
+                    extension_id = diagnostic.extension_id,
+                    "{}",
+                    diagnostic.message
+                );
+            }
+            opts.runtime_extensions = Arc::new(extensions);
+        }
         opts.system_prompt = system_prompt;
         opts.thinking_level = self.thinking;
         opts.tools = tools;

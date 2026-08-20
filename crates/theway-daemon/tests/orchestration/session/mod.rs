@@ -194,6 +194,8 @@ fn test_factory(work_dir: PathBuf) -> (SessionRuntimeBuilder, TempDir) {
         compact_algorithms: std::sync::Arc::new(
             theway_core::agent::compaction::algorithm::CompactAlgorithmRegistry::new(),
         ),
+        runtime_extension_packages: crate::ts_extensions::PackageCatalog::default(),
+        runtime_extension_engine: None,
         memory_dir: state.path().join("memory"),
         dag_engine: std::sync::Arc::new(theway_core::multiagent::graph::engine::DagEngine::new()),
         subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry::new(),
@@ -361,4 +363,62 @@ async fn build_allows_legacy_session_without_cwd_metadata() {
         .build(&repo, &id)
         .await
         .expect("legacy session without cwd metadata passes the binding check");
+}
+
+#[tokio::test]
+async fn build_starts_valid_runtime_packages_and_isolates_a_faulted_neighbor() {
+    let _serial = ENV_LOCK.lock().unwrap();
+    let home = TempDir::new().unwrap();
+    let _theway_dir = EnvGuard::set("THEWAY_DIR", home.path());
+
+    let work_dir = TempDir::new().unwrap();
+    let extension_root = work_dir.path().join(".theway").join("extensions");
+    for (id, source) in [
+        (
+            "valid-package",
+            r#"import { defineExtension } from "theway";
+export default defineExtension((api) => {
+  api.on("session_start", () => undefined);
+  api.on("session_shutdown", () => undefined);
+});"#,
+        ),
+        ("broken-package", "export default ???;"),
+    ] {
+        let package = extension_root.join(id);
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(
+            package.join("theway-extension.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "id": id,
+                "version": "1.0.0",
+                "abi": 2,
+                "entry": "index.js",
+                "priority": 0,
+                "scope": "session"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        std::fs::write(package.join("index.js"), source).unwrap();
+    }
+
+    let repo_root = TempDir::new().unwrap();
+    let repo = theway_storage::sqlite_repo::SqliteSessionRepo::new(repo_root.path());
+    let id = create_session_with_cwd(&repo, work_dir.path().to_str().unwrap()).await;
+    let (mut factory, state) = test_factory(work_dir.path().to_path_buf());
+    factory.runtime_extension_packages = crate::ts_extensions::PackageCatalog::discover(
+        work_dir.path(),
+        &factory.base_dir,
+    );
+    let engine = crate::ts_extensions::QuickJsEnginePool::new(1);
+    factory.runtime_extension_engine = Some(engine.clone());
+
+    let runtime = factory
+        .build(&repo, &id)
+        .await
+        .expect("one faulted package must not prevent session startup");
+    assert_eq!(engine.instance_count().await, 1);
+    runtime.harness.shutdown_runtime_extensions().await;
+    assert_eq!(engine.instance_count().await, 0);
+    drop(state);
 }

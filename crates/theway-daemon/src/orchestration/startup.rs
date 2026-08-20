@@ -274,6 +274,9 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     let compact_algorithms = Arc::new(crate::ts_extensions::compact_algorithm_registry(
         &ts_extensions,
     ));
+    let runtime_extension_packages = ts_extensions.package_catalog().clone();
+    let runtime_extension_engine = (!runtime_extension_packages.effective_packages().is_empty())
+        .then(crate::ts_extensions::QuickJsEnginePool::default);
     // Runtime settings come from the in-memory StartupConfig: defaults until
     // the controller provisions values through the settings RPC.
     let config_enabled_builtins = startup.builtin_skills.clone();
@@ -378,6 +381,8 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         skills: combined_skills.clone(),
         templates: loaded_templates.templates.clone(),
         compact_algorithms: compact_algorithms.clone(),
+        runtime_extension_packages,
+        runtime_extension_engine,
         memory_dir: memory_dir.clone(),
         dag_engine: dag_engine.clone(),
         subagent_registry: subagent_registry.clone(),
