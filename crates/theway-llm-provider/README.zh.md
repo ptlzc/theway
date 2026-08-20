@@ -11,6 +11,7 @@
 - `stream` 与 `stream_simple` 返回 `AssistantMessageEventStream`；`complete` 与 `complete_simple` 把同一流收集为 `AssistantMessage`。
 - `ApiProvider` 及 `register_api_provider`、`unregister_api_providers` 支持内置和运行时注册协议。
 - `Model`、`Context`、`Message`、`Tool`、`StreamOptions`、`AssistantMessage` 和 `AssistantMessageEvent` 组成与 provider 无关的请求/响应模型。
+- `ProviderRequestInterceptor` 可选地变换不含 secret 的请求 header 与 provider-format JSON，并在消费 stream 前观察脱敏后的响应元数据或请求失败。
 - `get_model`、`list_models` 和自定义模型注册暴露生成目录与运行时模型目录。
 - `images`、`get_image_model` 和 `list_image_models` 暴露独立的图像生成路径。
 

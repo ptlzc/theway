@@ -1,4 +1,4 @@
 # English-first bilingual documentation record. Update both files, then run:
 #   scripts/verify-doc-i18n.py --write crates/theway-llm-provider/README.md
-README.md: 0a0c08945f88997960b7f80e3a21e1ed0e756b70
-README.zh.md: c7f03e4f4fbaabc644dd246c9f044a029ff3f794
+README.md: ab42b1633807efbe1eba6d5dcb523e476d94ecae
+README.zh.md: b6a9056c604f8fb0c8786d7b24d835aa1d9c8470

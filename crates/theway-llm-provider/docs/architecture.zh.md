@@ -28,6 +28,8 @@ Provider 模块只在该模型与外部 wire 协议之间转换。`AgentMessage`
 
 [`providers/mod.rs`](../src/providers/mod.rs) 下每个 provider 模块负责请求 body、认证 header、端点选择、流解码、usage/stop reason 映射和协议专用工具/thinking 转换。共享 Responses、Google、prompt cache、SSE、AWS event stream、retry、overflow、validation 和 Unicode 辅助逻辑保留在 `providers/` 对应共享模块或 [`utils/mod.rs`](../src/utils/mod.rs)。
 
+[`provider_interceptor.rs`](../src/provider_interceptor.rs) 为 `open_ai_chat_completions`、`open_ai_responses` 与 `anthropic_messages` 定义可选 `ProviderRequestInterceptor` 边界。Adapter 先构建完整 provider-format JSON 与不含 secret 的 header，依次应用 header transform 和 raw-payload transform，按照活动 format 校验 replacement，随后才开始网络 I/O。认证 header 与配置的 secret header 不进入 hook payload；受保护 header 或跨 format replacement 会保留完整的先前值。任何 response body 被消费前，最终 HTTP status 与脱敏 header 已完成 observe。Authentication、serialization、client 或 transport failure 只发布一次脱敏 request-failure observation，不伪造 response metadata。
+
 [`utils/event_stream.rs`](../src/utils/event_stream.rs) 将 `AssistantMessageEventSender` 与 `AssistantMessageEventStream` 配对。Sender 发布有序事件并完成一个最终 `AssistantMessage`；stream 支持增量消费和等待终止结果。
 
 取消或 provider 失败必须以规范化 stop/error 记录终止流。Provider 网络 task 退出后不得留下仍在等待终止结果的调用方。
@@ -55,4 +57,5 @@ Provider 模块只在该模型与外部 wire 协议之间转换。`AgentMessage`
 - 工具调用 delta 保留 provider 关联，同时生成稳定规范化标识与参数文本。
 - 消息转换保留合法历史顺序，不静默发送模型不支持的内容。
 - 凭证由调用方或环境提供，不写入目录、消息、诊断或会话资源。
+- Provider interception 不包含认证值，按照活动 wire format 校验单个 raw payload，并在读取 stream byte 前观察 response metadata。
 - 未启用 feature 的 provider 及其可选依赖树不进入精简构建。

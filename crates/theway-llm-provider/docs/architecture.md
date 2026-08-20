@@ -28,6 +28,8 @@ Before a provider sends a request, [`providers/transform_messages.rs`](../src/pr
 
 Each provider module under [`providers/mod.rs`](../src/providers/mod.rs) owns request-body construction, authentication headers, endpoint selection, stream decoding, usage mapping, stop-reason mapping, and protocol-specific tool/thinking conversion. Shared Responses, Google, prompt-cache, SSE, AWS event-stream, retry, overflow, validation, and Unicode helpers stay in their corresponding shared modules under `providers/` or [`utils/mod.rs`](../src/utils/mod.rs).
 
+[`provider_interceptor.rs`](../src/provider_interceptor.rs) defines the optional `ProviderRequestInterceptor` boundary for `open_ai_chat_completions`, `open_ai_responses`, and `anthropic_messages`. An adapter builds its complete provider-format JSON and non-secret headers, applies the header transform and then the raw-payload transform, validates replacements against the active format, and only then starts network I/O. Authentication and configured secret headers bypass hook payloads; protected-header or cross-format replacements keep the complete prior value. The final HTTP status and redacted headers are observed before any response body is consumed. Authentication, serialization, client, or transport failures publish one redacted request-failure observation and do not invent response metadata.
+
 [`utils/event_stream.rs`](../src/utils/event_stream.rs) couples `AssistantMessageEventSender` with `AssistantMessageEventStream`. The sender publishes ordered events and resolves one final `AssistantMessage`; the stream supports both incremental consumption and awaiting the terminal result.
 
 Cancellation and provider failures terminate the stream with normalized stop/error records. Provider modules must not leave callers waiting for a terminal result after their network task exits.
@@ -55,4 +57,5 @@ Cancellation and provider failures terminate the stream with normalized stop/err
 - Tool-call deltas preserve provider correlation while producing stable normalized ids and argument text.
 - Message transformation preserves valid history ordering and never sends unsupported content silently.
 - Credentials remain caller- or environment-supplied and are not stored in catalogs, messages, diagnostics, or session resources.
+- Provider interception never includes authentication values, validates one raw payload against its active wire format, and observes response metadata before stream bytes.
 - Feature-disabled providers and their optional dependency trees do not compile into thin builds.

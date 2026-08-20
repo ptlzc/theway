@@ -11,6 +11,7 @@ The crate owns model and image catalogs, provider registration, environment-key 
 - `stream` and `stream_simple` return an `AssistantMessageEventStream`; `complete` and `complete_simple` collect the same stream into an `AssistantMessage`.
 - `ApiProvider` plus `register_api_provider` and `unregister_api_providers` support built-in and runtime-registered protocols.
 - `Model`, `Context`, `Message`, `Tool`, `StreamOptions`, `AssistantMessage`, and `AssistantMessageEvent` form the provider-neutral request and response model.
+- `ProviderRequestInterceptor` optionally transforms non-secret request headers and provider-format JSON, then observes redacted response metadata or request failure before stream consumption.
 - `get_model`, `list_models`, and custom-model registration expose the generated and runtime model catalog.
 - `images`, `get_image_model`, and `list_image_models` expose the separate image-generation path.
 

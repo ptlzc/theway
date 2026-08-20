@@ -69,6 +69,8 @@ Extension follow-up 使用独立的 32 项稳定 id 去重队列，不使用 bar
 
 [`agent/model_request.rs`](../src/agent/model_request.rs) 定义 `NormalizedModelRequestDraft`；它在 context 转换后由本次请求的 system instruction、规范化 message、可见 tool definition、不可变 executable-tool name 与受支持 generation option 组装而成。`before_model_request` 在 provider 序列化前接收完整 draft；只有 provider/model 标识、tool catalog 引用与 generation 边界作为整体通过校验时，core 才接受 replacement。接受后的可执行实现随模型结果一起传递，因此 tool dispatcher 不会观察后续 registry 变更；本次请求排除的名称会被拒绝，且不产生 execution lifecycle event。`RuntimeRequestExtensionPort::has_request_hook` 使无订阅者路径跳过 extension 分发。
 
+Harness 将 provider crate 的 `ProviderRequestInterceptor` 适配为 request 域 lifecycle event。Header 与 raw transform 保持分离；`provider_response` 在消费 stream 前由脱敏 HTTP metadata 产生；`provider_request_failed` 只表示没有 response 的路径；core 不会从 provider 边界收到认证 header。
+
 Compaction 在选择或运行 builtin 或已注册算法前调用 extension gate；provider 或 persistence 错误发布 failure，只有 compaction entry 与内存状态提交后才发布 success。`ExtensionModelContextProjection::compaction_messages` 在不改变 cut-point entry identity 的前提下，将每个去重后的 model-visible context item 恰好一次加入摘要输入；private state 与 custom event 不会被投影。
 
 ## 扩展规则
@@ -88,6 +90,7 @@ Compaction 在选择或运行 builtin 或已注册算法前调用 extension gate
 - Extension follow-up 不能在 settlement 前进入活动 run，也不能无界递归。
 - Finalized message replacement 先于持久化及下游 tool 提取；被拒绝的 tool 产生模型可见错误，但不产生 execution lifecycle event。
 - Normalized request replacement 是原子且仅作用于本次请求；可见 definition 与 executable reference 描述同一个不可变 tool catalog。
+- Provider header/raw transform 与 response/failure observation 只通过带显式 wire format 的脱敏 provider DTO 进入 core。
 - Compaction input 只包含带类型 session message 与去重后的 model-visible extension context，不包含 private extension state。
 - 取消会产生终止运行结果，并释放运行准入和控制句柄。
 - 事件载荷和操作关联保持足够确定，使 daemon 无需访问 core 私有状态即可投影 snapshot。
