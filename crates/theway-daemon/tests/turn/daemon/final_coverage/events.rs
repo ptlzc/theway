@@ -97,6 +97,7 @@ async fn transport_endpoints_forwarder_exits_when_registry_closes() {
 
 #[tokio::test]
 async fn run_transport_loop_polls_in_flight_turn_and_drains_commands() {
+    let _transport_loop_guard = crate::turn::daemon::TRANSPORT_LOOP_TEST_LOCK.lock().await;
     let harness = harness_with_input(Vec::new());
     let built = build_host(harness.clone());
     let (mut host, _scratch, _repo) = built.into_parts();
@@ -127,6 +128,7 @@ async fn run_transport_loop_polls_in_flight_turn_and_drains_commands() {
 
 #[tokio::test]
 async fn run_transport_loop_drains_multiple_queued_feed_updates() {
+    let _transport_loop_guard = crate::turn::daemon::TRANSPORT_LOOP_TEST_LOCK.lock().await;
     let built = build_host(harness_with_input(Vec::new()));
 
     // Queue two feed updates before the loop starts so the `recv` branch must
@@ -190,6 +192,7 @@ async fn run_transport_loop_drains_multiple_queued_feed_updates() {
 
 #[tokio::test]
 async fn run_transport_loop_starts_triggered_turn_from_main_run() {
+    let _transport_loop_guard = crate::turn::daemon::TRANSPORT_LOOP_TEST_LOCK.lock().await;
     let harness = harness_with_input(Vec::new());
     let built = build_host(harness.clone());
     built
@@ -212,6 +215,7 @@ async fn run_transport_loop_starts_triggered_turn_from_main_run() {
 
 #[tokio::test]
 async fn run_transport_loop_shows_control_plane_prompt() {
+    let _transport_loop_guard = crate::turn::daemon::TRANSPORT_LOOP_TEST_LOCK.lock().await;
     let (control_tx, control_rx) = mpsc::unbounded_channel::<PendingControlPlanePrompt>();
     let test_control_tx = control_tx.clone();
     let built = build_host_with(
@@ -277,6 +281,7 @@ async fn run_transport_loop_shows_control_plane_prompt() {
 
 #[cfg(unix)]
 async fn run_loop_and_send_signal(sig: i32) {
+    let _transport_loop_guard = crate::turn::daemon::TRANSPORT_LOOP_TEST_LOCK.lock().await;
     let harness = harness_with_pending_stream();
     let built = build_host(harness.clone());
     let (mut host, _scratch, _repo) = built.into_parts();

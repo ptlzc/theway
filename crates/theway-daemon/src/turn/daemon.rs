@@ -402,6 +402,12 @@ fn load_web_prompt_images(images: &[WirePromptImage]) -> Result<Vec<ImageContent
 // path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
 tests_bridge_macro::tests_bridge!("turn/daemon");
 
+// Signal coverage sends process-wide SIGINT/SIGTERM, so every transport-loop
+// test must run under the same lock to prevent a signal reaching a peer test.
+#[cfg(test)]
+pub(crate) static TRANSPORT_LOOP_TEST_LOCK: tokio::sync::Mutex<()> =
+    tokio::sync::Mutex::const_new(());
+
 #[cfg(test)]
 mod daemon_more_tests {
     //! Additional turn-host tests live in `tests/turn/daemon/more/` so the

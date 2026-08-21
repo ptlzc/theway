@@ -582,6 +582,7 @@ fn sync_current_session_state_writes_shared_view() {
 
 #[tokio::test]
 async fn run_transport_loop_reports_server_task_error() {
+    let _transport_loop_guard = crate::turn::daemon::TRANSPORT_LOOP_TEST_LOCK.lock().await;
     let fixture = HostFixture::new().await;
     let (mut host, _scratch, _repo) = fixture.into_parts();
     let endpoints = host.transport_endpoints();
@@ -598,6 +599,7 @@ async fn run_transport_loop_reports_server_task_error() {
 
 #[tokio::test]
 async fn run_transport_loop_reports_aborted_server_task() {
+    let _transport_loop_guard = crate::turn::daemon::TRANSPORT_LOOP_TEST_LOCK.lock().await;
     let fixture = HostFixture::new().await;
     let (mut host, _scratch, _repo) = fixture.into_parts();
     let endpoints = host.transport_endpoints();
@@ -615,6 +617,7 @@ async fn run_transport_loop_reports_aborted_server_task() {
 
 #[tokio::test]
 async fn run_transport_loop_drains_feed_updates_before_server_finishes() {
+    let _transport_loop_guard = crate::turn::daemon::TRANSPORT_LOOP_TEST_LOCK.lock().await;
     let scratch = TempDir::new().unwrap();
     let repo_dir = TempDir::new().unwrap();
     let (config, feed_tx, _main_run_tx) =

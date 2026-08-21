@@ -579,6 +579,7 @@ async fn dispatch_web_slash_runs_a_slash_command() {
 
 #[tokio::test]
 async fn run_transport_loop_publishes_snapshot_until_server_task_finishes() {
+    let _transport_loop_guard = crate::turn::daemon::TRANSPORT_LOOP_TEST_LOCK.lock().await;
     let fixture = HostFixture::new().await;
     let (mut host, _scratch, _repo) = fixture.into_parts();
     let endpoints = host.transport_endpoints();

@@ -151,6 +151,7 @@ async fn dispatch_web_slash_open_model_picker_without_active_model() {
 
 #[tokio::test]
 async fn transport_host_trait_delegates_to_turn_host() {
+    let _transport_loop_guard = crate::turn::daemon::TRANSPORT_LOOP_TEST_LOCK.lock().await;
     let built = build_host(harness_with_input(Vec::new()));
     let (mut host, _scratch, _repo) = built.into_parts();
 
