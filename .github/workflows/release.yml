@@ -12,6 +12,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_TARGET_DIR: target
 
 jobs:
   build:
@@ -35,7 +36,23 @@ jobs:
             os: macos-latest
             archive: tar.gz
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: validate release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          version="$(awk -F '"' '/^\[workspace.package\]/{found=1; next} found && /^version = /{print $2; exit}' Cargo.toml)"
+          if [ "$tag" != "v$version" ]; then
+            echo "release tag $tag does not match workspace version $version" >&2
+            exit 1
+          fi
+          echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
+          echo "RELEASE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
       - name: install rust
         uses: dtolnay/rust-toolchain@stable
@@ -59,15 +76,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
-          if [ -z "$tag" ] && [ -n "${{ github.event.inputs.tag }}" ]; then
-            tag="${{ github.event.inputs.tag }}"
-          fi
-          name="theway-${tag}-${{ matrix.target }}"
+          name="theway-${RELEASE_TAG}-${{ matrix.target }}"
           mkdir -p dist/"$name"
-          cp target/${{ matrix.target }}/release/theway dist/"$name"/
-          cp target/${{ matrix.target }}/release/theway dist/"$name"/tw
-          cp README.md LICENSE dist/"$name"/ 2>/dev/null || true
+          for binary in theway thewayd theway-probe; do
+            source="target/${{ matrix.target }}/release/$binary"
+            test -x "$source" || {
+              echo "missing release binary: $source" >&2
+              exit 1
+            }
+            cp "$source" dist/"$name"/
+          done
+          cp dist/"$name"/theway dist/"$name"/tw
+          cp README.md LICENSE dist/"$name"/
+          {
+            echo "tag=$RELEASE_TAG"
+            echo "commit=$RELEASE_COMMIT"
+            echo "target=${{ matrix.target }}"
+          } > dist/"$name"/RELEASE-METADATA
           tar -C dist -czf dist/"$name".tar.gz "$name"
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "asset=dist/${name}.tar.gz" >> "$GITHUB_OUTPUT"
@@ -77,6 +102,8 @@ jobs:
         with:
           name: ${{ steps.pkg.outputs.name }}
           path: ${{ steps.pkg.outputs.asset }}
+          if-no-files-found: error
+          retention-days: 7
 
   release:
     name: github release
@@ -85,18 +112,30 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
       - name: gather artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist
-      - name: list assets
+      - name: generate SHA-256 checksums
+        shell: bash
         run: |
-          find dist -type f -name "*.tar.gz" | sort
+          set -euo pipefail
+          mapfile -d '' assets < <(find dist -type f -name "*.tar.gz" -print0 | sort -z)
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "no release archives downloaded" >&2
+            exit 1
+          fi
+          : > dist/SHA256SUMS
+          for asset in "${assets[@]}"; do
+            checksum="$(sha256sum "$asset" | cut -d ' ' -f 1)"
+            printf '%s  %s\n' "$checksum" "$(basename "$asset")" >> dist/SHA256SUMS
+          done
+          cat dist/SHA256SUMS
       - name: publish release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/**/*.tar.gz
+          files: |
+            dist/**/*.tar.gz
+            dist/SHA256SUMS
           generate_release_notes: true
-          # Allow running on workflow_dispatch with a manual tag.
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
