@@ -114,7 +114,7 @@ fn untrusted_project_is_blocked_and_permission_expansion_requires_a_new_decision
         project.path(),
         "blocked",
         &[],
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension(() => {});"#,
     );
     trust_project(project.path(), base.path(), &[], &[]);
@@ -129,7 +129,7 @@ export default defineExtension(() => {});"#,
         project.path(),
         "blocked",
         &["workspace.read"],
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension(() => {});"#,
     );
     let expanded = PackageCatalog::discover(project.path(), base.path());
@@ -144,7 +144,7 @@ export default defineExtension(() => {});"#,
 fn exact_package_trust_is_invalidated_by_content_change_and_revoke_blocks_project() {
     let project = tempdir().unwrap();
     let base = tempdir().unwrap();
-    let first_source = r#"import { defineExtension } from "theway";
+    let first_source = r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension(() => {});"#;
     write_package(project.path(), "exact", &[], first_source);
     let blocked = PackageCatalog::discover(project.path(), base.path());
@@ -204,7 +204,7 @@ async fn workspace_broker_confines_traversal_and_symlink_targets() {
         project.path(),
         "workspace",
         &["workspace.read", "workspace.write"],
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   api.on("input", async () => {
     await api.workspace.writeText("inside.txt", "inside-value");
@@ -256,7 +256,7 @@ async fn undeclared_operation_is_diagnosed_and_named_secret_is_redacted_from_aud
         project.path(),
         "secret",
         &["secrets.read:demo"],
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   api.on("input", async () => {
     let denied = "missing";
@@ -326,7 +326,7 @@ async fn process_and_network_brokers_use_daemon_execution_and_redacted_audit() {
         "privileged",
         &["process.spawn", "network.connect"],
         &format!(
-            r#"import {{ defineExtension }} from "theway";
+            r#"import {{ defineExtension }} from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {{
   api.on("input", async () => {{
     const process = await api.process.run(["/bin/sh", "-c", "printf process-ok"]);
@@ -370,7 +370,7 @@ async fn shutdown_cancels_broker_process_and_provider_raw_requires_capability() 
         project.path(),
         "cancel-broker",
         &["process.spawn"],
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   api.on("input", async () => { await api.process.run(["/bin/sleep", "5"]); });
 });"#,
@@ -419,7 +419,7 @@ export default defineExtension((api) => {
         raw_project.path(),
         "raw-denied",
         &[],
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   api.on("before_provider_request_raw", () => null);
 });"#,
@@ -444,7 +444,7 @@ async fn provider_raw_broker_exposes_only_current_authorized_payload() {
         project.path(),
         "raw",
         &["provider.raw"],
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   api.on("before_provider_request_raw", async () => {
     const payload = await api.providerRaw.read();

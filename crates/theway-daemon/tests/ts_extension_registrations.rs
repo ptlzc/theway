@@ -215,7 +215,7 @@ async fn registered_tool_validates_arguments_and_results_and_honours_permission_
         project.path(),
         "tool-extension",
         &["tools.register"],
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   api.registerTool({
     name: "extension_echo",
@@ -318,7 +318,7 @@ async fn tool_conflicts_reject_by_default_and_authorized_override_restores_base_
         project.path(),
         "override-extension",
         &["tools.register", "tools.override"],
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   api.registerTool({
     name: "shared_tool", label: "Override", description: "Override implementation",
@@ -341,7 +341,7 @@ export default defineExtension((api) => {
         project.path(),
         "collision-extension",
         &["tools.register"],
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   api.registerTool({
     name: "shared_tool", label: "Collision", description: "Must not replace",
@@ -369,7 +369,7 @@ async fn daemon_commands_and_client_contributions_are_typed_and_client_neutral()
         project.path(),
         "client-extension",
         &requested,
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   api.registerCommand({
     name: "extension-inspect",
@@ -486,7 +486,7 @@ async fn declarative_provider_formats_use_existing_adapters_and_never_expose_cre
         project.path(),
         "provider-extension",
         &requested,
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   for (const [providerId, format, model] of [
     ["extension-chat-provider", "openai_chat_completions", "chat-model"],
@@ -553,7 +553,7 @@ async fn unsupported_provider_format_rejects_only_that_registration() {
         project.path(),
         "mixed-registration-extension",
         &requested,
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   api.registerProvider({
     providerId: "unsupported-provider", baseUrl: "https://example.test/v1",
@@ -591,7 +591,7 @@ async fn prompt_sections_and_request_policies_match_model_and_follow_priority_or
         project.path(),
         "request-extension",
         &[],
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   api.registerPromptSection({
     sectionId: "low", text: "low-priority", priority: 5,
@@ -661,7 +661,7 @@ async fn runtime_handle_disposal_is_idempotent_and_stops_future_dispatch() {
         project.path(),
         "handle-extension",
         &["client.contribute"],
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   const status = api.contribute({
     contributionId: "temporary-status", extensionId: "handle-extension", scope: "session",
@@ -707,7 +707,7 @@ async fn circuit_fault_reverses_every_effect_owned_by_the_extension() {
         project.path(),
         "faulted-registration-extension",
         &["tools.register"],
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   api.registerTool({
     name: "temporary_tool", label: "Temporary", description: "Removed on fault",

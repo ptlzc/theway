@@ -533,8 +533,8 @@ impl EngineInstance {
             .map_err(|error| error.to_string())?;
         let host_module = brokers::generated_theway_module();
         runtime.set_loader(
-            BuiltinResolver::default().with_module("theway"),
-            BuiltinLoader::default().with_module("theway", host_module),
+            BuiltinResolver::default().with_module(brokers::PLUGIN_SDK_MODULE),
+            BuiltinLoader::default().with_module(brokers::PLUGIN_SDK_MODULE, host_module),
         );
         let context = Context::full(&runtime).map_err(|error| error.to_string())?;
         let broker = Arc::new(brokers::BrokerRuntime::new(key, package, broker_services));

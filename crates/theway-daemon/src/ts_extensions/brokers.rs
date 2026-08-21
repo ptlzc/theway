@@ -669,9 +669,12 @@ impl BrokerOperationQuota {
     }
 }
 
-/// Generate the only host module available to package imports. Capability
-/// brokers are added as explicit API methods; no ambient daemon authority is
-/// copied into the JavaScript global object.
+/// Package name of the only host module available to extension imports.
+pub(super) const PLUGIN_SDK_MODULE: &str = "@theway-ai/plugin-sdk";
+
+/// Generate the plugin SDK host module. Capability brokers are added as
+/// explicit API methods; no ambient daemon authority is copied into the
+/// JavaScript global object.
 pub(super) fn generated_theway_module() -> String {
     format!(
         r#"

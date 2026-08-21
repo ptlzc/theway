@@ -107,7 +107,7 @@ async fn descriptor_validation_rejects_every_noncanonical_policy_field() {
             id,
             0,
             &format!(
-                r#"import {{ defineExtension }} from "theway";
+                r#"import {{ defineExtension }} from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {{ api.on("input", {descriptor}, () => null); }});"#
             ),
         );
@@ -141,7 +141,7 @@ async fn transform_waterfall_uses_priority_and_keeps_last_value_after_bad_patch(
         &project_root(project.path()),
         "waterfall",
         0,
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   api.on("context", { priority: 0 }, ({ payload }) => ({
     abiMajor: 2,
@@ -209,7 +209,7 @@ async fn gate_stops_at_first_deny_and_never_runs_later_handlers() {
         &project_root(project.path()),
         "gate-order",
         0,
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 let later = 0;
 export default defineExtension((api) => {
   api.on("tool_call", { priority: 20 }, () => ({
@@ -273,7 +273,7 @@ async fn gate_exception_malformed_result_and_timeout_fail_closed() {
             id,
             0,
             &format!(
-                r#"import {{ defineExtension }} from "theway";
+                r#"import {{ defineExtension }} from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {{
   api.on("tool_call", () => {{ {body}; }});
 }});"#
@@ -321,7 +321,7 @@ async fn observe_mutations_are_isolated_and_stream_updates_are_coalesced() {
         &project_root(project.path()),
         "observe",
         0,
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 let updates = 0;
 export default defineExtension((api) => {
   api.on("message_start", () => ({
@@ -435,7 +435,7 @@ async fn action_output_and_timeout_limits_preserve_transform_input() {
             id,
             0,
             &format!(
-                r#"import {{ defineExtension }} from "theway";
+                r#"import {{ defineExtension }} from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {{
   api.on("input", () => {{ {body}; }});
 }});"#
@@ -498,7 +498,7 @@ async fn success_resets_failures_before_circuit_transition() {
         &project_root(project.path()),
         "recovery",
         0,
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   api.on("input", ({ payload }) => {
     if (payload.fail) throw new Error("requested failure");
@@ -549,7 +549,7 @@ async fn shutdown_cancels_in_flight_hook_and_discards_its_result() {
         &project_root(project.path()),
         "cancel",
         0,
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   api.on("input", () => { for (;;) {} });
 });"#,

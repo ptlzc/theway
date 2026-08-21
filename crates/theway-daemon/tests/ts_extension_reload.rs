@@ -74,7 +74,7 @@ fn trust_project(project: &Path, base: &Path, requested: &[&str]) {
 
 fn marker_source(marker: &str) -> String {
     format!(
-        r#"import {{ defineExtension }} from "theway";
+        r#"import {{ defineExtension }} from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {{
   api.on("input", () => ({{
     abiMajor: 2,
@@ -89,7 +89,7 @@ export default defineExtension((api) => {{
 
 fn tool_source(marker: &str, tool: &str) -> String {
     format!(
-        r#"import {{ defineExtension }} from "theway";
+        r#"import {{ defineExtension }} from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {{
   api.registerTool({{
     name: "{tool}", label: "{tool}", description: "reload test",
@@ -396,7 +396,7 @@ async fn scoped_registrations_expire_at_request_run_and_unload_boundaries() {
         "scoped-effects",
         1,
         &["tools.register"],
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   for (const scope of ["process", "session", "run", "request"]) {
     api.registerTool({
@@ -509,7 +509,7 @@ async fn invalid_candidate_keeps_old_instances_and_rejects_partial_registration(
         "partial",
         1,
         &[],
-        "import { defineExtension } from 'theway'; export default ???;",
+        "import { defineExtension } from '@theway-ai/plugin-sdk'; export default ???;",
     );
     let error = host
         .request_reload(PackageCatalog::discover(project.path(), base.path()))
@@ -527,7 +527,7 @@ async fn invalid_candidate_keeps_old_instances_and_rejects_partial_registration(
         "partial",
         1,
         &[],
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension(() => { throw new Error("candidate setup failed"); });"#,
     );
     let setup_error = host
@@ -648,7 +648,7 @@ async fn reload_migration_failure_preserves_history_and_keeps_other_extensions()
         failed_id,
         2,
         &["session.write"],
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   api.migrateState(() => { throw new Error("reload migration failed"); });
 });"#,

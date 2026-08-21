@@ -1,4 +1,4 @@
-import { defineExtension } from "theway";
+import { defineExtension } from "@theway-ai/plugin-sdk";
 
 const CONFIG_PATH = ".theway/extensions/deepseek-anchor/anchor-config.json";
 const PROMOTION_KEY = "anchor.phase";

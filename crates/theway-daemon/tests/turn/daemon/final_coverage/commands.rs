@@ -130,7 +130,7 @@ async fn extension_protocol_projection_and_command_do_not_append_feed_lines() {
     .unwrap();
     std::fs::write(
         package.join("index.js"),
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   api.on("input", () => ({ abiMajor: 2, actions: [] }));
   api.registerCommand({

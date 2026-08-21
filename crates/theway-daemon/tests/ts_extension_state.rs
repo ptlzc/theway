@@ -214,7 +214,7 @@ async fn durable_apis_commit_once_reconstruct_across_hosts_and_keep_memory_ephem
         extension_id,
         1,
         &["session.write"],
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   api.on("before_model_request", async ({ payload }) => {
     const previous = api.state.get("phase");
@@ -299,7 +299,7 @@ async fn replay_uses_tombstones_last_write_wins_and_branch_event_order() {
         extension_id,
         1,
         &["session.write"],
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   api.on("before_model_request", ({ payload }) => ({ abiMajor: 2, actions: [{
     kind: "replace_model_request", payload: { request: { ...payload.request,
@@ -363,7 +363,7 @@ async fn fork_and_branch_switch_rebuild_from_the_selected_branch_projection() {
         extension_id,
         1,
         &["session.write"],
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   api.on("before_model_request", ({ payload }) => ({ abiMajor: 2, actions: [{
     kind: "replace_model_request", payload: { request: { ...payload.request,
@@ -511,7 +511,7 @@ async fn durable_count_entry_size_and_session_quotas_reject_whole_batches() {
         extension_id,
         1,
         &["session.write"],
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   api.on("before_model_request", ({ payload }) => {
     const mode = payload.request.model;
@@ -610,7 +610,7 @@ async fn migration_commits_before_hooks_and_failure_preserves_history() {
         extension_id,
         2,
         &["session.write"],
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   api.migrateState(({ state }) => ({ state: { phase: `${state.phase}-v2` } }));
   api.on("before_model_request", ({ payload }) => ({ abiMajor: 2, actions: [{
@@ -670,7 +670,7 @@ export default defineExtension((api) => {
         failed_id,
         2,
         &["session.write"],
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   api.migrateState(() => { throw new Error("cannot migrate"); });
 });"#,
@@ -711,7 +711,7 @@ export default defineExtension((api) => {
 }
 
 fn state_and_transform_source() -> &'static str {
-    r#"import { defineExtension } from "theway";
+    r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   api.on("before_model_request", ({ payload }) => {
     api.state.set("phase", "changed");

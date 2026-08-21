@@ -387,7 +387,7 @@ async fn build_starts_valid_runtime_packages_and_isolates_a_faulted_neighbor() {
     for (id, source) in [
         (
             "valid-package",
-            r#"import { defineExtension } from "theway";
+            r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   api.on("session_start", () => undefined);
   api.on("session_shutdown", () => undefined);

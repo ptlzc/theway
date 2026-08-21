@@ -12,11 +12,24 @@ use theway_daemon::ts_extensions::{
 };
 
 const COUNTER_EXTENSION: &str = r#"
-import { defineExtension } from "theway";
+import { defineExtension } from "@theway-ai/plugin-sdk";
 let count = 0;
 export default defineExtension((api) => {
   api.on("input", () => ({
     abiMajor: 2,
+    actions: [{ kind: "emit_diagnostic", payload: {
+      code: "lifecycle_status", severity: "info", message: "counter", details: { count: ++count },
+    } }],
+  }));
+});
+"#;
+
+const PLUGIN_SDK_COUNTER_EXTENSION: &str = r#"
+import { abiMajor, defineExtension } from "@theway-ai/plugin-sdk";
+let count = 0;
+export default defineExtension((api) => {
+  api.on("input", () => ({
+    abiMajor,
     actions: [{ kind: "emit_diagnostic", payload: {
       code: "lifecycle_status", severity: "info", message: "counter", details: { count: ++count },
     } }],
@@ -363,7 +376,7 @@ async fn lifecycle_runs_in_order_without_ambient_daemon_globals() {
     let project = tempdir().unwrap();
     let base = tempdir().unwrap();
     let source = r#"
-import { defineExtension } from "theway";
+import { defineExtension } from "@theway-ai/plugin-sdk";
 const phases = [];
 export default defineExtension((api) => {
   for (const name of [
@@ -410,6 +423,58 @@ export default defineExtension((api) => {
 }
 
 #[tokio::test]
+async fn plugin_sdk_package_name_resolves_to_the_virtual_host_module() {
+    let project = tempdir().unwrap();
+    let base = tempdir().unwrap();
+    write_package(
+        &project_root(project.path()),
+        "plugin-sdk-alias",
+        "plugin-sdk-alias",
+        0,
+        2,
+        "index.js",
+        PLUGIN_SDK_COUNTER_EXTENSION,
+    );
+    let catalog = discover(project.path(), base.path());
+    let engine = QuickJsEnginePool::new(1);
+    let host = SessionPluginHost::start(catalog, engine, "session", project.path()).await;
+
+    let output = host.invoke(ExtensionLifecycleEvent::Input, json!({})).await;
+    assert_eq!(counter(&output[0].value), 1);
+    host.shutdown().await;
+}
+
+#[tokio::test]
+async fn legacy_theway_module_specifier_is_rejected() {
+    let project = tempdir().unwrap();
+    let base = tempdir().unwrap();
+    write_package(
+        &project_root(project.path()),
+        "legacy-module",
+        "legacy-module",
+        0,
+        2,
+        "index.js",
+        r#"import { defineExtension } from "theway";
+export default defineExtension(() => {});"#,
+    );
+    let catalog = discover(project.path(), base.path());
+    let host = SessionPluginHost::start(
+        catalog,
+        QuickJsEnginePool::new(1),
+        "session",
+        project.path(),
+    )
+    .await;
+
+    assert!(host.active_extension_ids().await.is_empty());
+    assert!(host.catalog_entries().iter().any(|entry| {
+        entry.extension_id == "legacy-module" && entry.status == ExtensionCatalogStatus::Faulted
+    }));
+    host.shutdown().await;
+}
+
+#[tokio::test]
 async fn mixed_catalog_faults_bad_packages_and_keeps_valid_instances() {
     let project = tempdir().unwrap();
     let base = tempdir().unwrap();
@@ -431,7 +496,7 @@ async fn mixed_catalog_faults_bad_packages_and_keeps_valid_instances() {
         0,
         2,
         "index.js",
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension(() => { throw new Error("setup failed"); });"#,
     );
     let invalid = root.join("invalid-manifest");
@@ -490,7 +555,7 @@ async fn repeated_runtime_errors_open_only_their_owners_circuit() {
         0,
         2,
         "index.js",
-        r#"import { defineExtension } from "theway";
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   api.on("input", () => { throw new Error("hook failed"); });
 });"#,
