@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# sdk-publish — 手动发布 TS SDK 到内网 Nexus (npm-private)。
+# sdk-publish — 手动发布客户端 TS SDK 到 npm 官方公共仓库。
 #
 # 用法:
 #   scripts/sdk-publish.sh [patch|minor|major] ["#<issue>"]
@@ -8,20 +8,21 @@
 # 流程:
 #   1. crates/theway-transport/proto/ 与 sdks/client/ 必须无未提交改动
 #   2. 重新生成并校验与 HEAD 一致 (仓库无漂移; 漂移说明 proto 改了没 commit)
-#   3. npm version <bump> (不打 tag 不自动 commit, 由本脚本统一 commit)
-#   4. npm publish (registry 取 sdks/client/package.json 的 publishConfig = 内网 Nexus)
-#   5. commit 版本号 + push origin main (gitlab 镜像请手动补推)
+#   3. 验证 npm 官方仓库登录身份
+#   4. npm version <bump> (不打 tag 不自动 commit, 由本脚本统一 commit)
+#   5. npm publish --access public 到 npm 官方仓库
+#   6. commit 版本号 + push origin main (gitlab 镜像请手动补推)
 #
-# 鉴权 (二选一):
-#   - 发布机 ~/.npmrc 含 //registry.npmjs.org/... 的 _authToken (需 nx-npm-theway-ai 角色)
-#   - NEXUS_AUTH 环境变量 = base64("user:pass") (resource-broker 资源 #332 的凭证,
-#     脚本用它生成临时 userconfig, 不动 ~/.npmrc)
+# 鉴权:
+#   npm login --registry=https://registry.npmjs.org/
 # =============================================================================
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 PKG="@theway-ai/sdk"
+REGISTRY="https://registry.npmjs.org/"
+EXPECTED_NPM_USER="theway-ai"
 BUMP="${1:-minor}"
 ISSUE="${2:-}"
 
@@ -48,29 +49,33 @@ if ! git diff --quiet -- sdks/client/; then
   exit 1
 fi
 
-# 3. bump 版本 (package.json + package-lock.json, 不产生 git tag/commit)
+# 3. 验证 npm 官方仓库登录身份
+if ! NPM_USER="$(npm whoami --registry "$REGISTRY")"; then
+  echo "error: npm 官方仓库未登录; 请先运行 npm login --registry=$REGISTRY" >&2
+  exit 1
+fi
+if [ "$NPM_USER" != "$EXPECTED_NPM_USER" ]; then
+  echo "error: npm 当前用户为 $NPM_USER, 发布 $PKG 需要 $EXPECTED_NPM_USER" >&2
+  exit 1
+fi
+echo "[sdk-publish] npm user: $NPM_USER"
+
+# 4. bump 版本 (package.json + package-lock.json, 不产生 git tag/commit)
 CUR="$(node -p "require('./sdks/client/package.json').version")"
 (cd sdks/client && npm version "$BUMP" --no-git-tag-version >/dev/null)
 NEW="$(node -p "require('./sdks/client/package.json').version")"
 
-# 4. 新版本不得已存在于 registry
-if npm view "$PKG@$NEW" version >/dev/null 2>&1; then
+# 5. 新版本不得已存在于 registry
+if npm view "$PKG@$NEW" version --registry "$REGISTRY" >/dev/null 2>&1; then
   echo "error: $PKG@$NEW 已在 registry 发布过, 请选更大的 bump" >&2
   exit 1
 fi
 
-# 5. 发布到内网 Nexus (NEXUS_AUTH=base64(user:pass) 时用临时 userconfig)
+# 6. 发布到 npm 官方公共仓库
 echo "[sdk-publish] publish $PKG $CUR -> $NEW"
-if [ -n "${NEXUS_AUTH:-}" ]; then
-  TMP_NPMRC="$(mktemp)"
-  trap 'rm -f "$TMP_NPMRC"' EXIT
-  printf 'registry=https://registry.npmjs.org/repository/npm-private/\n//registry.npmjs.org/repository/npm-private/:_auth=%s\nalways-auth=true\n' "$NEXUS_AUTH" > "$TMP_NPMRC"
-  (cd sdks/client && npm publish --userconfig "$TMP_NPMRC")
-else
-  (cd sdks/client && npm publish)
-fi
+(cd sdks/client && npm publish --registry "$REGISTRY" --access public)
 
-# 6. commit 版本号并推送
+# 7. commit 版本号并推送
 git add sdks/client/package.json sdks/client/package-lock.json
 git commit -m "chore(sdk): release $PKG v$NEW $ISSUE"
 git push origin main

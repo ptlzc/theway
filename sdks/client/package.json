@@ -35,6 +35,7 @@
     "typescript": "^5.6.0"
   },
   "publishConfig": {
-    "registry": "https://registry.npmjs.org/repository/npm-private/"
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   }
 }
