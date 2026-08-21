@@ -381,6 +381,12 @@ async fn execute_honors_cwd_param() {
     // Arrange: run `pwd` inside a temp dir so the cwd param is observable.
     let dir = tempfile::tempdir().expect("tempdir");
     let cwd = dir.path().to_string_lossy().into_owned();
+    let canonical_cwd = dir
+        .path()
+        .canonicalize()
+        .expect("canonical tempdir")
+        .to_string_lossy()
+        .into_owned();
     let tool = BashTool;
 
     // Act
@@ -397,7 +403,7 @@ async fn execute_honors_cwd_param() {
     // Assert: the tool ran the command with the requested cwd.
     let text = text_of(&result);
     assert!(
-        text.contains(&format!("$ pwd\n{cwd}\n[exit 0]")),
+        text.contains(&format!("$ pwd\n{canonical_cwd}\n[exit 0]")),
         "got: {text}"
     );
 }

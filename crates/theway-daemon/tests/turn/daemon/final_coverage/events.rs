@@ -223,7 +223,7 @@ async fn run_transport_loop_shows_control_plane_prompt() {
     );
     let (mut host, _scratch, _repo) = built.into_parts();
     let endpoints = host.transport_endpoints();
-    let latest = endpoints.latest.clone();
+    let mut snapshot_rx = endpoints.snapshot_tx.subscribe();
 
     let (prompt_tx, _prompt_rx) = oneshot::channel();
     test_control_tx
@@ -240,15 +240,38 @@ async fn run_transport_loop_shows_control_plane_prompt() {
         })
         .unwrap();
 
-    let server_task = tokio::spawn(async {
-        tokio::time::sleep(Duration::from_millis(200)).await;
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+    let server_task = tokio::spawn(async move {
+        let _ = shutdown_rx.await;
         anyhow::Ok(())
     });
-    host.run_transport_loop(TransportMode::Grpc, endpoints, server_task)
-        .await
-        .unwrap();
+    let driver = tokio::spawn(async move {
+        let snapshot = loop {
+            let update = snapshot_rx.recv().await.map_err(anyhow::Error::from)?;
+            let theway_transport::wire::WireStatusUpdate::Full(snapshot) = update else {
+                continue;
+            };
+            if snapshot.control_plane_prompt.is_some() {
+                break snapshot;
+            }
+        };
+        let _ = shutdown_tx.send(());
+        Ok::<_, anyhow::Error>(snapshot)
+    });
 
-    let snapshot = latest.lock().clone();
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        host.run_transport_loop(TransportMode::Grpc, endpoints, server_task),
+    )
+    .await
+    .expect("transport loop timed out")
+    .expect("transport loop failed");
+
+    let snapshot = tokio::time::timeout(Duration::from_secs(2), driver)
+        .await
+        .expect("driver timed out")
+        .expect("driver task panicked")
+        .expect("driver failed");
     assert!(snapshot.control_plane_prompt.is_some());
 }
 
