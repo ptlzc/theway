@@ -1,14 +1,14 @@
-# 运行时扩展（ABI v2）
+# 运行时扩展
 
 [English](extensions.md) | 中文
 
 运行时扩展是在 daemon 内嵌 QuickJS 中执行、受 capability 约束的 JavaScript 或 TypeScript package。Package 通过 `@theway-ai/plugin-sdk` 注册生命周期 hook、工具、命令、provider、request policy、prompt section 和客户端中立 contribution；它没有环境式的文件系统、进程、网络、环境变量、凭据、provider、持久化、daemon 或终端访问权。
 
-本文档是 ABI v2 package 结构、生命周期 hook、action、注册、状态、信任、重载、诊断及压缩兼容格式的规范参考。插件开发 SDK 位于 `sdks/plugin`，生成的契约声明和 JSON Schema 位于 `sdks/plugin/abi-v2`。
+本文档是 package 结构、生命周期 hook、action、注册、状态、信任、重载、诊断及压缩兼容格式的规范参考。仓库只维护一个无版本插件 ABI。插件开发 SDK 位于 `sdks/plugin`，生成的契约声明和 JSON Schema 位于 `sdks/plugin/abi`。
 
 ## Package 布局与发现
 
-每个 ABI v2 扩展都是一个目录，包含严格的 `theway-extension.json` manifest 及其入口模块。项目 package 会遮蔽具有相同扩展 ID 的全局 package。
+每个扩展都是一个目录，包含严格的 `theway-extension.json` manifest 及其入口模块。项目 package 会遮蔽具有相同扩展 ID 的全局 package。Manifest 没有 ABI 版本字段；`abi` 和其他未知字段会被拒绝。
 
 ```text
 <cwd>/.theway/extensions/<extension-id>/theway-extension.json
@@ -25,7 +25,6 @@ $THEWAY_DIR/extensions/<extension-id>/index.js
 {
   "id": "workspace-policy",
   "version": "1.0.0",
-  "abi": 2,
   "entry": "index.js",
   "priority": 100,
   "scope": "session",
@@ -47,7 +46,7 @@ $THEWAY_DIR/extensions/<extension-id>/index.js
 | `permissions` | 否 | 必需 capability；拒绝其中一项会阻止 package。 |
 | `optionalPermissions` | 否 | Package 可用 `api.capabilities.has` 探测的 capability；拒绝不会阻止加载。 |
 
-未知 manifest 字段、重复 permission、必需/可选重叠、不支持的 ABI 值以及不安全入口路径都会在入口求值前拒绝 package。
+未知 manifest 字段（包括 ABI 选择字段）、重复 permission、必需/可选重叠以及不安全入口路径都会在入口求值前拒绝 package。
 
 ## 信任与 capability
 
@@ -113,7 +112,6 @@ export default defineExtension(async (api) => {
     priority: 20,
     payloadSchema: { type: "object", required: ["request"] },
   }, async ({ payload }) => ({
-    abiMajor: 2,
     actions: [{
       kind: "replace_model_request",
       payload: { request: payload.request },
@@ -128,7 +126,7 @@ Setup API 暴露 `capabilities.has`、`workspace.readText/writeText`、`process.
 
 ## Hook 执行契约
 
-每个 handler 收到包含 `abiMajor`、`event`、`context` 和 `payload` 的 `ExtensionEventEnvelope`。Context 始终包含宿主持有的 `extensionId`、`sessionId`、规范 `cwd` 和单调递增 `sequence`；适用时还包含 run、turn、request、message、tool-call scope ID，已选 provider/model，交互式客户端可用性，取消状态和 deadline。扩展不能替换宿主持有的 context 字段。
+每个 handler 收到包含 `event`、`context` 和 `payload` 的 `ExtensionEventEnvelope`。Context 始终包含宿主持有的 `extensionId`、`sessionId`、规范 `cwd` 和单调递增 `sequence`；适用时还包含 run、turn、request、message、tool-call scope ID，已选 provider/model，交互式客户端可用性，取消状态和 deadline。扩展不能替换宿主持有的 context 字段。
 
 有效 package 的 hook 按 catalog 顺序运行。同一 event 和 class 的注册按 hook priority 降序、再按注册顺序运行。Transform hook 构成串行 waterfall，后一个 hook 看到最后一个有效值。Gate hook 在首个 `deny` 或 `cancel` 处终止。Observe hook 不能通过返回 action 改变状态，其失败不会改变运行时操作。
 
@@ -262,7 +260,7 @@ Catalog 状态和诊断通过 gRPC、HTTP JSON-RPC、SSE/WebSocket snapshot、ty
 
 扩展根目录正下方的顶层 `.ts` 文件可以声明 `export const kind = "compaction"`。该兼容格式支持 `decide_compact`、`select_cut_point` 和 `summarize_prefix`；hook 缺失、返回 null、无效或失败时回退到内置压缩算法。
 
-兼容文件的每个 hook 都在全新受限 QuickJS context 中运行。它们不接收 ABI v2 setup 对象、broker、permission、状态、注册、生命周期 hook 或客户端 contribution。包含 `theway-extension.json` 的 package 目录是所有通用 runtime extension 的格式。
+兼容文件的每个 hook 都在全新受限 QuickJS context 中运行。它们不接收 package setup 对象、broker、permission、状态、注册、生命周期 hook 或客户端 contribution。包含 `theway-extension.json` 的 package 目录是所有通用 runtime extension 的格式。
 
 ## 验证
 

@@ -1,6 +1,6 @@
 # @theway-ai/plugin-sdk
 
-TypeScript authoring SDK for theway ABI v2 runtime extensions. It supplies the public host API types, checked-in JSON Schemas, and the same `defineExtension` descriptor used by the daemon's isolated QuickJS host.
+TypeScript authoring SDK for theway runtime extensions. It supplies the single public host API, checked-in JSON Schemas, and the same `defineExtension` descriptor used by the daemon's isolated QuickJS host. The host and SDK expose no ABI version selector.
 
 ## Install
 
@@ -15,7 +15,6 @@ import { defineExtension } from '@theway-ai/plugin-sdk';
 
 export default defineExtension((api) => {
   api.on('input', ({ payload }) => ({
-    abiMajor: 2,
     actions: [{
       kind: 'replace_input',
       payload: { message: payload.message },
@@ -32,14 +31,13 @@ A package manifest points to the compiled entry:
 {
   "id": "example-extension",
   "version": "1.0.0",
-  "abi": 2,
   "entry": "dist/index.js",
   "scope": "session",
   "permissions": []
 }
 ```
 
-The complete lifecycle, permission, registration, state, and reload contract is documented in [`docs/extensions.md`](../../docs/extensions.md). Raw ABI v2 declarations and JSON Schemas are shipped under [`abi-v2`](abi-v2).
+The complete lifecycle, permission, registration, state, and reload contract is documented in [`docs/extensions.md`](../../docs/extensions.md). Raw ABI declarations and JSON Schemas are shipped under [`abi`](abi).
 
 ## Validate
 

@@ -27,7 +27,7 @@ The crate owns representation and compatibility rules only. Selection policy, ex
 
 ## Runtime extension ABI records
 
-[`extension`](../src/extension/mod.rs) defines ABI major 2 data shared across runtime layers. Package manifests, permissions, trust decisions, lifecycle events, hook/action contracts, extension-owned durable entries, catalog state, redacted diagnostics, command outcomes, and declarative client contributions are serializable values with no engine handles or protocol objects.
+[`extension`](../src/extension/mod.rs) defines the single unversioned ABI shared across runtime layers. Package manifests, permissions, trust decisions, lifecycle events, hook/action contracts, extension-owned durable entries, catalog state, redacted diagnostics, command outcomes, and declarative client contributions are serializable values with no engine handles, protocol objects, or ABI selectors.
 
 The `ExtensionDurableEntry` envelope is stored inside an opaque session entry. It identifies the owning extension, state schema, originating lifecycle sequence, and one private state mutation, immutable custom event, model-context item, or migration record. Storage implementations preserve the envelope without interpreting its payload; runtime projection and policy remain outside this crate.
 
@@ -45,4 +45,4 @@ JSON Schema derives and the generator in [`generate_extension_artifacts.rs`](../
 - Serde field names, defaults, and enum encodings are persisted data rules; changes require round-trip and compatibility tests.
 - Path derivation and session-id validation remain shared functions rather than copied implementations in consuming crates.
 - The crate does not acquire behavior that needs an LLM provider, daemon service, filesystem backend, or client UI.
-- Runtime extension records contain only versioned, JSON-serializable data; script-engine values and client-specific rendering objects never enter this crate.
+- Runtime extension records contain only unversioned, JSON-serializable ABI data; script-engine values and client-specific rendering objects never enter this crate.

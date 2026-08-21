@@ -27,7 +27,7 @@
 
 ## Runtime extension ABI 记录
 
-[`extension`](../src/extension/mod.rs) 定义跨运行时层共享的 ABI major 2 数据。Package manifest、permission、信任决定、生命周期事件、hook/action 契约、extension 自有持久化条目、catalog 状态、脱敏诊断、命令结果及声明式客户端 contribution 都是可序列化值，不包含引擎句柄或协议对象。
+[`extension`](../src/extension/mod.rs) 定义跨运行时层共享的唯一无版本 ABI。Package manifest、permission、信任决定、生命周期事件、hook/action 契约、extension 自有持久化条目、catalog 状态、脱敏诊断、命令结果及声明式客户端 contribution 都是可序列化值，不包含引擎句柄、协议对象或 ABI 选择字段。
 
 `ExtensionDurableEntry` envelope 存储在不透明会话条目内，记录所属 extension、状态 schema、来源生命周期 sequence，以及一项私有状态 mutation、不可变 custom event、模型上下文条目或 migration 记录。存储实现保留 envelope 但不解释其 payload；运行时投影和策略留在本 crate 之外。
 
@@ -45,4 +45,4 @@ JSON Schema derive 与 [`generate_extension_artifacts.rs`](../examples/generate_
 - Serde 字段名、默认值和枚举编码属于持久化数据规则，变更必须有往返与兼容性测试。
 - 路径派生和会话标识校验由共享函数提供，不在消费 crate 中复制实现。
 - 本 crate 不引入需要 LLM provider、daemon 服务、文件系统后端或客户端 UI 的行为。
-- Runtime extension 记录只包含带版本、可 JSON 序列化的数据；脚本引擎值和客户端专属渲染对象不会进入本 crate。
+- Runtime extension 记录只包含无版本、可 JSON 序列化的 ABI 数据；脚本引擎值和客户端专属渲染对象不会进入本 crate。

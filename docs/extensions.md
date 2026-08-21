@@ -1,14 +1,14 @@
-# Runtime extensions (ABI v2)
+# Runtime extensions
 
 English | [中文](extensions.zh.md)
 
 Runtime extensions are capability-scoped JavaScript or TypeScript packages executed by the daemon in embedded QuickJS. A package registers lifecycle hooks, tools, commands, providers, request policies, prompt sections, and client-neutral contributions through `@theway-ai/plugin-sdk`; it has no ambient filesystem, process, network, environment, credential, provider, persistence, daemon, or terminal access.
 
-This document is the canonical reference for ABI v2 package structure, lifecycle hooks, actions, registrations, state, trust, reload, diagnostics, and the compaction compatibility format. The plugin development SDK is under `sdks/plugin`, with generated contract declarations and JSON Schemas under `sdks/plugin/abi-v2`.
+This document is the canonical reference for package structure, lifecycle hooks, actions, registrations, state, trust, reload, diagnostics, and the compaction compatibility format. The repository maintains one unversioned plugin ABI. The plugin development SDK is under `sdks/plugin`, with generated contract declarations and JSON Schemas under `sdks/plugin/abi`.
 
 ## Package layout and discovery
 
-Each ABI v2 extension is a directory containing a strict `theway-extension.json` manifest and its entry module. Project packages shadow global packages with the same extension ID.
+Each extension is a directory containing a strict `theway-extension.json` manifest and its entry module. Project packages shadow global packages with the same extension ID. The manifest has no ABI version field; `abi` and other unknown fields are rejected.
 
 ```text
 <cwd>/.theway/extensions/<extension-id>/theway-extension.json
@@ -25,7 +25,6 @@ Discovery is deterministic. A malformed, unsupported, untrusted, or faulted pack
 {
   "id": "workspace-policy",
   "version": "1.0.0",
-  "abi": 2,
   "entry": "index.js",
   "priority": 100,
   "scope": "session",
@@ -47,7 +46,7 @@ Discovery is deterministic. A malformed, unsupported, untrusted, or faulted pack
 | `permissions` | no | Required capabilities; denial blocks the package. |
 | `optionalPermissions` | no | Capabilities the package can detect with `api.capabilities.has`; denial does not block loading. |
 
-Unknown manifest fields, duplicate permissions, required/optional overlap, unsupported ABI values, and unsafe entry paths reject the package before entry evaluation.
+Unknown manifest fields (including ABI selectors), duplicate permissions, required/optional overlap, and unsafe entry paths reject the package before entry evaluation.
 
 ## Trust and capabilities
 
@@ -113,7 +112,6 @@ export default defineExtension(async (api) => {
     priority: 20,
     payloadSchema: { type: "object", required: ["request"] },
   }, async ({ payload }) => ({
-    abiMajor: 2,
     actions: [{
       kind: "replace_model_request",
       payload: { request: payload.request },
@@ -128,7 +126,7 @@ The setup API exposes `capabilities.has`, `workspace.readText/writeText`, `proce
 
 ## Hook execution contract
 
-Every handler receives an `ExtensionEventEnvelope` containing `abiMajor`, `event`, `context`, and `payload`. Context always contains host-owned `extensionId`, `sessionId`, canonical `cwd`, and monotonic `sequence`; scoped run, turn, request, message, and tool-call IDs, the selected provider/model, interactive-client availability, cancellation state, and deadline appear when applicable. Extensions cannot replace host-owned context fields.
+Every handler receives an `ExtensionEventEnvelope` containing `event`, `context`, and `payload`. Context always contains host-owned `extensionId`, `sessionId`, canonical `cwd`, and monotonic `sequence`; scoped run, turn, request, message, and tool-call IDs, the selected provider/model, interactive-client availability, cancellation state, and deadline appear when applicable. Extensions cannot replace host-owned context fields.
 
 Hooks from effective packages run in catalog order. Registrations for the same event and class run by descending hook priority and then registration sequence. Transform hooks form a serial waterfall and the next hook sees the last valid value. Gate hooks terminate at the first `deny` or `cancel`. Observe hooks cannot mutate state through returned actions and their failure never changes the runtime operation.
 
@@ -262,7 +260,7 @@ The same normalized bootstrap and promotion behavior is exercised through OpenAI
 
 Top-level `.ts` files directly under either extension root may declare `export const kind = "compaction"`. This compatibility format supports `decide_compact`, `select_cut_point`, and `summarize_prefix`, with missing, null, invalid, or failed hook results falling back to the built-in compaction algorithm.
 
-Compatibility files run each hook in a fresh restricted QuickJS context. They receive no ABI v2 setup object, brokers, permissions, state, registrations, lifecycle hooks, or client contributions. Package directories with `theway-extension.json` are the format for all general runtime extensions.
+Compatibility files run each hook in a fresh restricted QuickJS context. They receive no package setup object, brokers, permissions, state, registrations, lifecycle hooks, or client contributions. Package directories with `theway-extension.json` are the format for all general runtime extensions.
 
 ## Verification
 

@@ -13,13 +13,13 @@
 | [`session_id`](src/session_id.rs) | 校验并规范化持久化会话标识。 |
 | [`dag`](src/dag.rs) | 定义持久化 DAG 运行与节点快照及其状态文件路径。 |
 | [`triggers`](src/triggers.rs) | 定义会话级动态 trigger 与 cron sidecar 记录。 |
-| [`extension`](src/extension/mod.rs) | 定义 runtime extension ABI v2 manifest、生命周期与 action envelope、持久化条目、信任记录、诊断及客户端中立 contribution。 |
+| [`extension`](src/extension/mod.rs) | 定义唯一、无版本的 runtime extension ABI：manifest、生命周期与 action envelope、持久化条目、信任记录、诊断及客户端中立 contribution。 |
 
 `theway-core` 负责在带类型的运行时会话条目和这些原始记录之间转换。`theway-storage` 实现持久化 trait；`theway-transport` 复用或重新导出适合位于该叶子层的客户端可见数据。
 
-工作区插件开发 SDK 中签入的 TypeScript 声明和 JSON Schema 由 Rust extension 契约生成。使用 `cargo run -p theway-contract --example generate_extension_artifacts -- sdks/plugin/abi-v2` 重新生成；extension 契约测试会在临时目录中重新生成并拒绝漂移。
+工作区插件开发 SDK 中签入的 TypeScript 声明和 JSON Schema 由 Rust extension 契约生成。使用 `cargo run -p theway-contract --example generate_extension_artifacts -- sdks/plugin/abi` 重新生成；extension 契约测试会在临时目录中重新生成并拒绝漂移。
 
-ABI v2 契约使生命周期 envelope、hook class 与 action、分支局部持久条目、诊断、信任记录、命令和客户端 contribution 保持引擎中立。这些记录没有敏感值或可执行 runtime 对象字段。
+无版本 ABI 使生命周期 envelope、hook class 与 action、分支局部持久条目、诊断、信任记录、命令和客户端 contribution 保持引擎中立。这些记录没有敏感值、可执行 runtime 对象或 ABI 版本选择字段。
 
 ## 文档
 
