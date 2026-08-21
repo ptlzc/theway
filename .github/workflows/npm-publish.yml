@@ -1,0 +1,83 @@
+name: npm publish
+
+on:
+  push:
+    tags:
+      - "sdk-v*"
+      - "plugin-sdk-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: publish ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: resolve package and validate tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF_NAME" in
+            sdk-v*)
+              package_dir="sdks/client"
+              expected_version="${GITHUB_REF_NAME#sdk-v}"
+              ;;
+            plugin-sdk-v*)
+              package_dir="sdks/plugin"
+              expected_version="${GITHUB_REF_NAME#plugin-sdk-v}"
+              ;;
+            *)
+              echo "unsupported npm release tag: $GITHUB_REF_NAME" >&2
+              exit 2
+              ;;
+          esac
+
+          git fetch origin main:refs/remotes/origin/main --no-tags
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+            echo "release tag must point to a commit on origin/main" >&2
+            exit 1
+          }
+
+          actual_version="$(node -p "require('./${package_dir}/package.json').version")"
+          if [ "$actual_version" != "$expected_version" ]; then
+            echo "tag version $expected_version does not match $package_dir version $actual_version" >&2
+            exit 1
+          fi
+
+          echo "PACKAGE_DIR=$package_dir" >> "$GITHUB_ENV"
+          echo "PACKAGE_VERSION=$actual_version" >> "$GITHUB_ENV"
+
+      - name: install node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: install trusted-publishing npm client
+        run: npm install --global npm@11.5.1
+
+      - name: install dependencies
+        run: npm ci --prefix "$PACKAGE_DIR" --no-audit --no-fund
+
+      - name: build and test package
+        run: npm --prefix "$PACKAGE_DIR" run prepublishOnly
+
+      - name: reject generated drift
+        run: git diff --exit-code -- "$PACKAGE_DIR"
+
+      - name: inspect package contents
+        run: npm pack --dry-run --json
+        working-directory: ${{ env.PACKAGE_DIR }}
+
+      - name: publish to npmjs
+        run: npm publish --access public
+        working-directory: ${{ env.PACKAGE_DIR }}

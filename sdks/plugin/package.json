@@ -3,6 +3,11 @@
   "version": "0.1.1",
   "description": "TypeScript authoring SDK for theway runtime extensions.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ptlzc/theway.git",
+    "directory": "sdks/plugin"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

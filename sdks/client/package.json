@@ -3,6 +3,11 @@
   "version": "1.1.0",
   "description": "TypeScript SDK for the theway gRPC daemon (five theway.grpc.v1 domain services + grpc.health.v1). Typed client for all RPCs, generated from the domain proto files via ts-proto.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ptlzc/theway.git",
+    "directory": "sdks/client"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

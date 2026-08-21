@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # sdk-publish — 手动发布客户端 TS SDK 到 npm 官方公共仓库。
+# 常规发布使用 .github/workflows/npm-publish.yml；本脚本保留作首次发布或本地回退。
 #
 # 用法:
 #   scripts/sdk-publish.sh [patch|minor|major] ["#<issue>"]
@@ -11,7 +12,7 @@
 #   3. 验证 npm 官方仓库登录身份
 #   4. npm version <bump> (不打 tag 不自动 commit, 由本脚本统一 commit)
 #   5. npm publish --access public 到 npm 官方仓库
-#   6. commit 版本号 + push origin main (gitlab 镜像请手动补推)
+#   6. commit 版本号 + push origin main
 #
 # 鉴权:
 #   npm login --registry=https://registry.npmjs.org/
@@ -83,4 +84,3 @@ git push origin main
 echo
 echo "[sdk-publish] done: $PKG@$NEW"
 echo "  下游更新: npm install $PKG@$NEW"
-echo "  gitlab 镜像若需同步: git push gitlab main"
