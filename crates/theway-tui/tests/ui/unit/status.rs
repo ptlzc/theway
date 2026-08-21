@@ -342,23 +342,61 @@ async fn slash_popup_filters_skill_and_mcp_catalogs_by_prefix() {
 #[tokio::test]
 async fn paste_object_is_atomic_and_keeps_full_text_for_send() {
     let (mut app, _rx) = test_app().await;
-    let long = "x".repeat(25);
+    // More than 3 lines → paste object.
+    let long = ["alpha", "beta", "gamma", "delta"].join("\n");
     app.insert_paste_text(long.clone());
     assert_eq!(app.input.text(), long, "buffer keeps the full pasted text");
     assert_eq!(app.input.elements().len(), 1);
     let display = app.input.elements()[0].display.clone().unwrap();
     let chip: String = display.spans.iter().map(|s| s.content.as_ref()).collect();
-    assert_eq!(chip, "[ paste 25 chars ]");
-    // The chip renders as one visual line even though the buffer is long.
+    assert_eq!(chip, format!("[ paste {} chars ]", long.chars().count()));
+    // The chip renders as one visual line even though the buffer is multi-line.
     assert_eq!(app.input_display_lines(), 1);
     // Backspace at the object's end deletes the whole object.
     app.input.delete_backward(1);
     assert_eq!(app.input.text(), "");
     assert!(app.input.elements().is_empty());
-    // Short pastes stay plain text.
-    app.insert_paste_text("short".into());
-    assert_eq!(app.input.text(), "short");
+    // Up to 3 lines stay plain text (no object chip).
+    let short = "one\ntwo\nthree";
+    app.insert_paste_text(short.into());
+    assert_eq!(app.input.text(), short);
     assert!(app.input.elements().is_empty());
+}
+
+/// Mouse wheel scrolling: each notch moves the feed 3 lines, scrolling up
+/// detaches follow, and non-scroll mouse events are inert.
+#[tokio::test]
+async fn wheel_scrolls_feed_and_other_mouse_events_are_inert() {
+    let (mut app, _rx) = test_app().await;
+    app.scroll = 20;
+    app.follow = true;
+    let wheel_up = crossterm::event::MouseEvent {
+        kind: crossterm::event::MouseEventKind::ScrollUp,
+        column: 1,
+        row: 1,
+        modifiers: crossterm::event::KeyModifiers::NONE,
+    };
+    let wheel_down = crossterm::event::MouseEvent {
+        kind: crossterm::event::MouseEventKind::ScrollDown,
+        column: 1,
+        row: 1,
+        modifiers: crossterm::event::KeyModifiers::NONE,
+    };
+    let click = crossterm::event::MouseEvent {
+        kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        column: 1,
+        row: 1,
+        modifiers: crossterm::event::KeyModifiers::NONE,
+    };
+
+    app.handle_mouse(wheel_up);
+    assert_eq!(app.scroll, 17, "one wheel notch scrolls up 3 lines");
+    assert!(!app.follow, "scrolling up detaches follow");
+    app.handle_mouse(wheel_down);
+    app.handle_mouse(wheel_down);
+    assert_eq!(app.scroll, 23, "wheel down scrolls 3 lines per notch");
+    app.handle_mouse(click);
+    assert_eq!(app.scroll, 23, "non-scroll mouse events are inert");
 }
 
 #[test]

@@ -5,7 +5,9 @@
 //! function — no `App` state.
 
 use anyhow::Result;
-use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
+use crossterm::event::{
+    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -108,11 +110,21 @@ pub(super) fn leave_tui() -> Result<()> {
 }
 
 pub(super) fn write_enter_tui_commands(out: &mut impl std::io::Write) -> std::io::Result<()> {
-    execute!(out, EnterAlternateScreen, EnableBracketedPaste)?;
+    execute!(
+        out,
+        EnterAlternateScreen,
+        EnableBracketedPaste,
+        EnableMouseCapture
+    )?;
     out.flush()
 }
 
 pub(super) fn write_leave_tui_commands(out: &mut impl std::io::Write) -> std::io::Result<()> {
-    execute!(out, DisableBracketedPaste, LeaveAlternateScreen)?;
+    execute!(
+        out,
+        DisableMouseCapture,
+        DisableBracketedPaste,
+        LeaveAlternateScreen
+    )?;
     Ok(())
 }
