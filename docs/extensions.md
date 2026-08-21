@@ -2,9 +2,9 @@
 
 English | [中文](extensions.zh.md)
 
-Runtime extensions are capability-scoped JavaScript or TypeScript packages executed by the daemon in embedded QuickJS. A package registers lifecycle hooks, tools, commands, providers, request policies, prompt sections, and client-neutral contributions through the public `theway` module; it has no ambient filesystem, process, network, environment, credential, provider, persistence, daemon, or terminal access.
+Runtime extensions are capability-scoped JavaScript or TypeScript packages executed by the daemon in embedded QuickJS. A package registers lifecycle hooks, tools, commands, providers, request policies, prompt sections, and client-neutral contributions through `@theway-ai/plugin-sdk`; it has no ambient filesystem, process, network, environment, credential, provider, persistence, daemon, or terminal access.
 
-This document is the canonical reference for ABI v2 package structure, lifecycle hooks, actions, registrations, state, trust, reload, diagnostics, and the compaction compatibility format. The generated contract declarations and JSON Schemas are under `crates/theway-contract/sdk/extension-abi-v2`.
+This document is the canonical reference for ABI v2 package structure, lifecycle hooks, actions, registrations, state, trust, reload, diagnostics, and the compaction compatibility format. The plugin development SDK is under `sdks/plugin`, with generated contract declarations and JSON Schemas under `sdks/plugin/abi-v2`.
 
 ## Package layout and discovery
 
@@ -84,10 +84,14 @@ Direct globals including `process`, `require`, `fetch`, `XMLHttpRequest`, `WebSo
 
 ## TypeScript setup API
 
-The only importable host module is `theway`. `defineExtension` receives an async setup function once per extension instance. Setup returns registrations through handles; each handle supports idempotent `dispose()` and validated `update(descriptor)`.
+Install `@theway-ai/plugin-sdk` as a development dependency and leave its import external when compiling the extension. It is the only importable host module. `defineExtension` receives an async setup function once per extension instance. Setup returns registrations through handles; each handle supports idempotent `dispose()` and validated `update(descriptor)`.
+
+```sh
+npm install --save-dev @theway-ai/plugin-sdk
+```
 
 ```ts
-import { defineExtension } from "theway";
+import { defineExtension } from "@theway-ai/plugin-sdk";
 
 export default defineExtension(async (api) => {
   api.registerTool({

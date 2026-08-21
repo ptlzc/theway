@@ -17,7 +17,7 @@ English | [中文](README.zh.md)
 
 `theway-core` converts typed runtime session entries to these raw records. `theway-storage` implements the persistence traits, while `theway-transport` reuses or re-exports the client-visible data that belongs at this leaf.
 
-The checked-in TypeScript declarations and JSON Schemas under [`sdk/extension-abi-v2`](sdk/extension-abi-v2) are generated from the Rust extension contracts. Regenerate them with `cargo run -p theway-contract --example generate_extension_artifacts -- crates/theway-contract/sdk/extension-abi-v2`; the extension contract tests regenerate into a temporary directory and reject drift.
+The checked-in TypeScript declarations and JSON Schemas shipped by the workspace plugin development SDK are generated from the Rust extension contracts. Regenerate them with `cargo run -p theway-contract --example generate_extension_artifacts -- sdks/plugin/abi-v2`; the extension contract tests regenerate into a temporary directory and reject drift.
 
 ABI v2 contracts keep lifecycle envelopes, hook classes and actions, branch-local durable entries, diagnostics, trust records, commands, and client contributions engine-neutral. Sensitive values and executable runtime objects have no field in these records.
 

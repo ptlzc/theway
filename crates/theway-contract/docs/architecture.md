@@ -31,7 +31,7 @@ The crate owns representation and compatibility rules only. Selection policy, ex
 
 The `ExtensionDurableEntry` envelope is stored inside an opaque session entry. It identifies the owning extension, state schema, originating lifecycle sequence, and one private state mutation, immutable custom event, model-context item, or migration record. Storage implementations preserve the envelope without interpreting its payload; runtime projection and policy remain outside this crate.
 
-JSON Schema derives and the generator in [`generate_extension_artifacts.rs`](../examples/generate_extension_artifacts.rs) produce the checked-in artifacts under [`sdk/extension-abi-v2`](../sdk/extension-abi-v2). The generated TypeScript file contains the schema bundle digest, and tests compare every generated artifact with a temporary regeneration.
+JSON Schema derives and the generator in [`generate_extension_artifacts.rs`](../examples/generate_extension_artifacts.rs) produce the checked-in artifacts shipped by the workspace plugin development SDK. The generated TypeScript file contains the schema bundle digest, and tests compare every generated artifact with a temporary regeneration.
 
 ## DAG and automation records
 

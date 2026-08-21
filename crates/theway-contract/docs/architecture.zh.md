@@ -31,7 +31,7 @@
 
 `ExtensionDurableEntry` envelope 存储在不透明会话条目内，记录所属 extension、状态 schema、来源生命周期 sequence，以及一项私有状态 mutation、不可变 custom event、模型上下文条目或 migration 记录。存储实现保留 envelope 但不解释其 payload；运行时投影和策略留在本 crate 之外。
 
-JSON Schema derive 与 [`generate_extension_artifacts.rs`](../examples/generate_extension_artifacts.rs) 生成 [`sdk/extension-abi-v2`](../sdk/extension-abi-v2) 下签入的产物。生成的 TypeScript 文件包含 schema bundle 摘要，测试会将每个生成产物与临时目录中的重新生成结果比较。
+JSON Schema derive 与 [`generate_extension_artifacts.rs`](../examples/generate_extension_artifacts.rs) 生成由工作区插件开发 SDK 签入并发布的产物。生成的 TypeScript 文件包含 schema bundle 摘要，测试会将每个生成产物与临时目录中的重新生成结果比较。
 
 ## DAG 与自动化记录
 

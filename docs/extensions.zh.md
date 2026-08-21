@@ -2,9 +2,9 @@
 
 [English](extensions.md) | 中文
 
-运行时扩展是在 daemon 内嵌 QuickJS 中执行、受 capability 约束的 JavaScript 或 TypeScript package。Package 通过公开 `theway` 模块注册生命周期 hook、工具、命令、provider、request policy、prompt section 和客户端中立 contribution；它没有环境式的文件系统、进程、网络、环境变量、凭据、provider、持久化、daemon 或终端访问权。
+运行时扩展是在 daemon 内嵌 QuickJS 中执行、受 capability 约束的 JavaScript 或 TypeScript package。Package 通过 `@theway-ai/plugin-sdk` 注册生命周期 hook、工具、命令、provider、request policy、prompt section 和客户端中立 contribution；它没有环境式的文件系统、进程、网络、环境变量、凭据、provider、持久化、daemon 或终端访问权。
 
-本文档是 ABI v2 package 结构、生命周期 hook、action、注册、状态、信任、重载、诊断及压缩兼容格式的规范参考。生成的契约声明和 JSON Schema 位于 `crates/theway-contract/sdk/extension-abi-v2`。
+本文档是 ABI v2 package 结构、生命周期 hook、action、注册、状态、信任、重载、诊断及压缩兼容格式的规范参考。插件开发 SDK 位于 `sdks/plugin`，生成的契约声明和 JSON Schema 位于 `sdks/plugin/abi-v2`。
 
 ## Package 布局与发现
 
@@ -84,10 +84,14 @@ TUI 通过以下命令暴露客户端中立的协议操作：
 
 ## TypeScript setup API
 
-唯一可导入的宿主模块是 `theway`。每个扩展实例由 `defineExtension` 接收一次异步 setup 函数。Setup 通过 handle 返回注册；每个 handle 支持幂等 `dispose()` 和经过校验的 `update(descriptor)`。
+将 `@theway-ai/plugin-sdk` 安装为开发依赖，并在编译 extension 时将其 import 保持为 external；它是唯一可导入的宿主模块。每个扩展实例由 `defineExtension` 接收一次异步 setup 函数。Setup 通过 handle 返回注册；每个 handle 支持幂等 `dispose()` 和经过校验的 `update(descriptor)`。
+
+```sh
+npm install --save-dev @theway-ai/plugin-sdk
+```
 
 ```ts
-import { defineExtension } from "theway";
+import { defineExtension } from "@theway-ai/plugin-sdk";
 
 export default defineExtension(async (api) => {
   api.registerTool({
