@@ -228,10 +228,7 @@ impl Feed {
             }
             (
                 Block::ToolResult {
-                    lines,
-                    is_error,
-                    timestamp: _,
-                    ..
+                    lines, is_error, ..
                 },
                 WireFeedBlock::ToolResult {
                     lines: next_lines,
