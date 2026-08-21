@@ -138,7 +138,7 @@ fn buffer_text(buf: &Buffer) -> String {
 }
 
 #[test]
-fn terminal_lifecycle_does_not_enable_mouse_tracking() {
+fn terminal_lifecycle_enables_mouse_and_paste_capture() {
     let mut enter = Vec::new();
     super::render_utils::write_enter_tui_commands(&mut enter).unwrap();
     let mut leave = Vec::new();
@@ -146,16 +146,11 @@ fn terminal_lifecycle_does_not_enable_mouse_tracking() {
 
     assert!(enter.windows(8).any(|bytes| bytes == b"\x1b[?2004h"));
     assert!(leave.windows(8).any(|bytes| bytes == b"\x1b[?2004l"));
-    for mode in [b"\x1b[?1000".as_slice(), b"\x1b[?1002", b"\x1b[?1006"] {
-        assert!(
-            !enter.windows(mode.len()).any(|bytes| bytes == mode),
-            "TUI enter must leave mouse mode {mode:?} to the terminal"
-        );
-        assert!(
-            !leave.windows(mode.len()).any(|bytes| bytes == mode),
-            "TUI leave must not mutate terminal mouse mode {mode:?}"
-        );
-    }
+    // Mouse capture (SGR mode) is enabled on enter so the wheel can scroll
+    // (works under tmux, which forwards app mouse tracking), and disabled
+    // on leave so the terminal keeps its own mouse mode untouched.
+    assert!(enter.windows(8).any(|bytes| bytes == b"\x1b[?1006h"));
+    assert!(leave.windows(8).any(|bytes| bytes == b"\x1b[?1006l"));
 }
 
 #[tokio::test]

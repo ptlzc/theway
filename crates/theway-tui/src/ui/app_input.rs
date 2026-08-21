@@ -20,13 +20,13 @@ use super::collect_slash_commands;
 use super::prompt_chrome;
 use super::render_utils::{human_bytes, new_textarea};
 
-/// Element-kind tag for paste objects (issue #37): pastes over
-/// [`PASTE_OBJECT_MIN_CHARS`] chars are inserted as atomic elements whose
+/// Element-kind tag for paste objects (issue #4): pastes longer than
+/// [`PASTE_OBJECT_MIN_LINES`] lines are inserted as atomic elements whose
 /// display chip reads `[ paste N chars ]`.
 const PASTE_ELEMENT_KIND: theway_ratatui_textarea::ElementKind =
     theway_ratatui_textarea::ElementKind(1);
-/// Pastes longer than this many chars become paste objects.
-const PASTE_OBJECT_MIN_CHARS: usize = 20;
+/// Pastes longer than this many lines become paste objects.
+const PASTE_OBJECT_MIN_LINES: usize = 3;
 
 impl App {
     // ── event handling ──────────────────────────────────────────────────────────────────
@@ -462,13 +462,16 @@ impl App {
         }
     }
 
-    /// Insert pasted text (issue #37): pastes longer than
-    /// [`PASTE_OBJECT_MIN_CHARS`] chars become an atomic paste *object* whose
+    /// Insert pasted text (issue #4): pastes longer than
+    /// [`PASTE_OBJECT_MIN_LINES`] lines become an atomic paste *object* whose
     /// chip renders `[ paste N chars ]` — backspace / navigation treat the
     /// whole object as one unit, and submit expands it to the full text.
+    /// Shorter pastes (single lines or up to a few lines) are inserted
+    /// directly as plain text.
     pub(super) fn insert_paste_text(&mut self, text: String) {
         let chars = text.chars().count();
-        if chars > PASTE_OBJECT_MIN_CHARS {
+        let lines = text.lines().count();
+        if lines > PASTE_OBJECT_MIN_LINES {
             let display = Line::from(Span::styled(
                 format!("[ paste {chars} chars ]"),
                 Style::default().fg(prompt_chrome::ACCENT_USER),

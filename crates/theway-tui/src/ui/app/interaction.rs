@@ -16,10 +16,29 @@ impl App {
             Event::Paste(text) => {
                 self.insert_paste_text(text);
             }
+            Event::Mouse(mouse) => {
+                self.handle_mouse(mouse);
+            }
             _ => {}
         }
         Ok(())
     }
+
+    /// Mouse wheel scrolls the feed (issue #4): each notch
+    /// moves [`WHEEL_SCROLL_LINES`] lines. Scrolling up detaches follow,
+    /// scrolling down re-attaches it once the bottom is reached (clamped by
+    /// render()). Any other mouse event is inert.
+    pub(super) fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent) {
+        use crossterm::event::MouseEventKind;
+        match mouse.kind {
+            MouseEventKind::ScrollUp => self.scroll_up(Self::WHEEL_SCROLL_LINES),
+            MouseEventKind::ScrollDown => self.scroll_down(Self::WHEEL_SCROLL_LINES),
+            _ => {}
+        }
+    }
+
+    /// Wheel scroll step per notch.
+    const WHEEL_SCROLL_LINES: usize = 3;
 
     fn scroll_up(&mut self, n: usize) {
         self.follow = false;
