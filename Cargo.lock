@@ -5126,7 +5126,7 @@ dependencies = [
 
 [[package]]
 name = "tests-bridge-macro"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "textwrap"
@@ -5141,7 +5141,7 @@ dependencies = [
 
 [[package]]
 name = "theway-contract"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "chrono",
@@ -5157,7 +5157,7 @@ dependencies = [
 
 [[package]]
 name = "theway-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5187,7 +5187,7 @@ dependencies = [
 
 [[package]]
 name = "theway-daemon"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5249,7 +5249,7 @@ dependencies = [
 
 [[package]]
 name = "theway-llm-provider"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -5311,7 +5311,7 @@ dependencies = [
 
 [[package]]
 name = "theway-mcp"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5343,7 +5343,7 @@ dependencies = [
 
 [[package]]
 name = "theway-probe"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -5380,7 +5380,7 @@ dependencies = [
 
 [[package]]
 name = "theway-storage"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5403,7 +5403,7 @@ dependencies = [
 
 [[package]]
 name = "theway-transport"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5438,7 +5438,7 @@ dependencies = [
 
 [[package]]
 name = "theway-tui"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anstyle",
  "anyhow",
