@@ -34,6 +34,9 @@ jobs:
           - target: aarch64-apple-darwin
             os: macos-latest
             archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
     steps:
       - uses: actions/checkout@v6
         with:
@@ -68,25 +71,41 @@ jobs:
         run: |
           set -euo pipefail
           name="theway-${RELEASE_TAG}-${{ matrix.target }}"
+          extension=""
+          if [ "${{ matrix.target }}" = "x86_64-pc-windows-msvc" ]; then
+            extension=".exe"
+          fi
           mkdir -p dist/"$name"
           for binary in theway thewayd theway-probe; do
-            source="target/${{ matrix.target }}/release/$binary"
-            test -x "$source" || {
+            source="target/${{ matrix.target }}/release/$binary$extension"
+            test -f "$source" || {
               echo "missing release binary: $source" >&2
               exit 1
             }
             cp "$source" dist/"$name"/
           done
-          cp dist/"$name"/theway dist/"$name"/tw
+          cp dist/"$name"/theway$extension dist/"$name"/tw$extension
           cp README.md LICENSE dist/"$name"/
           {
             echo "tag=$RELEASE_TAG"
             echo "commit=$RELEASE_COMMIT"
             echo "target=${{ matrix.target }}"
           } > dist/"$name"/RELEASE-METADATA
-          tar -C dist -czf dist/"$name".tar.gz "$name"
+          case "${{ matrix.archive }}" in
+            tar.gz)
+              tar -C dist -czf dist/"$name".tar.gz "$name"
+              ;;
+            zip)
+              powershell -NoLogo -NoProfile -NonInteractive -Command \
+                "Compress-Archive -Path 'dist/$name' -DestinationPath 'dist/$name.zip' -Force"
+              ;;
+            *)
+              echo "unsupported archive format: ${{ matrix.archive }}" >&2
+              exit 1
+              ;;
+          esac
           echo "name=$name" >> "$GITHUB_OUTPUT"
-          echo "asset=dist/${name}.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "asset=dist/${name}.${{ matrix.archive }}" >> "$GITHUB_OUTPUT"
 
       - name: upload artifact
         uses: actions/upload-artifact@v4
@@ -111,7 +130,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -d '' assets < <(find dist -type f -name "*.tar.gz" -print0 | sort -z)
+          mapfile -d '' assets < <(
+            find dist -type f \( -name "*.tar.gz" -o -name "*.zip" \) -print0 | sort -z
+          )
           if [ "${#assets[@]}" -eq 0 ]; then
             echo "no release archives downloaded" >&2
             exit 1
@@ -127,6 +148,7 @@ jobs:
         with:
           files: |
             dist/**/*.tar.gz
+            dist/**/*.zip
             dist/SHA256SUMS
           generate_release_notes: true
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
