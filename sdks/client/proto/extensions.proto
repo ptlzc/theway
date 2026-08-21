@@ -17,13 +17,12 @@ message ExtensionSnapshot {
 message ExtensionCatalogEntry {
   string extension_id = 1;
   string version = 2;
-  optional uint32 abi_major = 3;
-  string source = 4;
-  string scope = 5;
-  int32 priority = 6;
-  string status = 7;
-  repeated string permissions = 8;
-  optional string reason_code = 9;
+  string source = 3;
+  string scope = 4;
+  int32 priority = 5;
+  string status = 6;
+  repeated string permissions = 7;
+  optional string reason_code = 8;
 }
 
 message ExtensionDiagnostic {

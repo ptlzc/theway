@@ -34,7 +34,6 @@ impl RequestPort {
 
 fn request_batch(actions: Vec<ExtensionAction>) -> RawRuntimeExtensionResult {
     Ok(ExtensionActionBatch {
-        abi_major: ExtensionAbiMajor::V2,
         decision: None,
         actions,
     })

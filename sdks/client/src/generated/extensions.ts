@@ -34,7 +34,6 @@ export interface ExtensionSnapshot {
 export interface ExtensionCatalogEntry {
   extensionId: string;
   version: string;
-  abiMajor?: number | undefined;
   source: string;
   scope: string;
   priority: number;
@@ -271,7 +270,6 @@ function createBaseExtensionCatalogEntry(): ExtensionCatalogEntry {
   return {
     extensionId: "",
     version: "",
-    abiMajor: undefined,
     source: "",
     scope: "",
     priority: 0,
@@ -289,26 +287,23 @@ export const ExtensionCatalogEntry: MessageFns<ExtensionCatalogEntry> = {
     if (message.version !== "") {
       writer.uint32(18).string(message.version);
     }
-    if (message.abiMajor !== undefined) {
-      writer.uint32(24).uint32(message.abiMajor);
-    }
     if (message.source !== "") {
-      writer.uint32(34).string(message.source);
+      writer.uint32(26).string(message.source);
     }
     if (message.scope !== "") {
-      writer.uint32(42).string(message.scope);
+      writer.uint32(34).string(message.scope);
     }
     if (message.priority !== 0) {
-      writer.uint32(48).int32(message.priority);
+      writer.uint32(40).int32(message.priority);
     }
     if (message.status !== "") {
-      writer.uint32(58).string(message.status);
+      writer.uint32(50).string(message.status);
     }
     for (const v of message.permissions) {
-      writer.uint32(66).string(v!);
+      writer.uint32(58).string(v!);
     }
     if (message.reasonCode !== undefined) {
-      writer.uint32(74).string(message.reasonCode);
+      writer.uint32(66).string(message.reasonCode);
     }
     return writer;
   },
@@ -337,11 +332,11 @@ export const ExtensionCatalogEntry: MessageFns<ExtensionCatalogEntry> = {
           continue;
         }
         case 3: {
-          if (tag !== 24) {
+          if (tag !== 26) {
             break;
           }
 
-          message.abiMajor = reader.uint32();
+          message.source = reader.string();
           continue;
         }
         case 4: {
@@ -349,23 +344,23 @@ export const ExtensionCatalogEntry: MessageFns<ExtensionCatalogEntry> = {
             break;
           }
 
-          message.source = reader.string();
-          continue;
-        }
-        case 5: {
-          if (tag !== 42) {
-            break;
-          }
-
           message.scope = reader.string();
           continue;
         }
-        case 6: {
-          if (tag !== 48) {
+        case 5: {
+          if (tag !== 40) {
             break;
           }
 
           message.priority = reader.int32();
+          continue;
+        }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.status = reader.string();
           continue;
         }
         case 7: {
@@ -373,19 +368,11 @@ export const ExtensionCatalogEntry: MessageFns<ExtensionCatalogEntry> = {
             break;
           }
 
-          message.status = reader.string();
+          message.permissions.push(reader.string());
           continue;
         }
         case 8: {
           if (tag !== 66) {
-            break;
-          }
-
-          message.permissions.push(reader.string());
-          continue;
-        }
-        case 9: {
-          if (tag !== 74) {
             break;
           }
 
@@ -409,11 +396,6 @@ export const ExtensionCatalogEntry: MessageFns<ExtensionCatalogEntry> = {
         ? globalThis.String(object.extension_id)
         : "",
       version: isSet(object.version) ? globalThis.String(object.version) : "",
-      abiMajor: isSet(object.abiMajor)
-        ? globalThis.Number(object.abiMajor)
-        : isSet(object.abi_major)
-        ? globalThis.Number(object.abi_major)
-        : undefined,
       source: isSet(object.source) ? globalThis.String(object.source) : "",
       scope: isSet(object.scope) ? globalThis.String(object.scope) : "",
       priority: isSet(object.priority) ? globalThis.Number(object.priority) : 0,
@@ -436,9 +418,6 @@ export const ExtensionCatalogEntry: MessageFns<ExtensionCatalogEntry> = {
     }
     if (message.version !== "") {
       obj.version = message.version;
-    }
-    if (message.abiMajor !== undefined) {
-      obj.abiMajor = Math.round(message.abiMajor);
     }
     if (message.source !== "") {
       obj.source = message.source;
@@ -468,7 +447,6 @@ export const ExtensionCatalogEntry: MessageFns<ExtensionCatalogEntry> = {
     const message = createBaseExtensionCatalogEntry();
     message.extensionId = object.extensionId ?? "";
     message.version = object.version ?? "";
-    message.abiMajor = object.abiMajor ?? undefined;
     message.source = object.source ?? "";
     message.scope = object.scope ?? "";
     message.priority = object.priority ?? 0;

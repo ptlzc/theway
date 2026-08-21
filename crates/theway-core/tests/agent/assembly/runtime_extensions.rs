@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use theway_contract::extension::{
-    ExtensionAbiMajor, ExtensionAction, ExtensionActionBatch, ExtensionActionKind,
+    ExtensionAction, ExtensionActionBatch, ExtensionActionKind,
     ExtensionGateDecision, ExtensionHookClass, ExtensionLifecycleEvent,
 };
 use theway_llm_provider::{
@@ -73,7 +73,6 @@ impl RecordingPort {
         {
             let ordinal = self.next_follow_up.fetch_add(1, Ordering::Relaxed);
             return Ok(ExtensionActionBatch {
-                abi_major: ExtensionAbiMajor::V2,
                 decision: None,
                 actions: vec![ExtensionAction {
                     kind: ExtensionActionKind::EnqueueFollowUp,
@@ -95,7 +94,6 @@ impl RecordingPort {
 
 fn empty_batch() -> ExtensionActionBatch {
     ExtensionActionBatch {
-        abi_major: ExtensionAbiMajor::V2,
         decision: None,
         actions: Vec::new(),
     }
@@ -236,7 +234,6 @@ async fn handled_extension_input_returns_outcome_without_dispatching_provider() 
         ExtensionLifecycleEvent::Input,
         ExtensionHookClass::Transform,
         ExtensionActionBatch {
-            abi_major: ExtensionAbiMajor::V2,
             decision: None,
             actions: vec![ExtensionAction {
                 kind: ExtensionActionKind::EmitCommandOutcome,
@@ -272,7 +269,6 @@ async fn input_replacement_is_the_message_used_by_the_run_and_transcript() {
         ExtensionLifecycleEvent::Input,
         ExtensionHookClass::Transform,
         ExtensionActionBatch {
-            abi_major: ExtensionAbiMajor::V2,
             decision: None,
             actions: vec![ExtensionAction {
                 kind: ExtensionActionKind::ReplaceInput,
@@ -337,7 +333,6 @@ async fn before_run_patch_persists_messages_and_limits_system_prompt_to_the_run(
         ExtensionLifecycleEvent::BeforeRun,
         ExtensionHookClass::Transform,
         ExtensionActionBatch {
-            abi_major: ExtensionAbiMajor::V2,
             decision: None,
             actions: vec![ExtensionAction {
                 kind: ExtensionActionKind::PatchRunContext,
@@ -467,7 +462,6 @@ async fn context_transform_is_request_local_and_runs_between_turn_boundaries() {
         ExtensionLifecycleEvent::Context,
         ExtensionHookClass::Transform,
         ExtensionActionBatch {
-            abi_major: ExtensionAbiMajor::V2,
             decision: None,
             actions: vec![ExtensionAction {
                 kind: ExtensionActionKind::ReplaceContext,
@@ -573,7 +567,6 @@ async fn extension_follow_up_is_deduplicated_and_starts_only_after_run_settled()
         ExtensionLifecycleEvent::Context,
         ExtensionHookClass::Transform,
         ExtensionActionBatch {
-            abi_major: ExtensionAbiMajor::V2,
             decision: None,
             actions: vec![ExtensionAction {
                 kind: ExtensionActionKind::EnqueueFollowUp,
@@ -709,7 +702,6 @@ async fn model_and_branch_gates_cancel_before_persisted_or_active_state_changes(
             event,
             ExtensionHookClass::Gate,
             ExtensionActionBatch {
-                abi_major: ExtensionAbiMajor::V2,
                 decision: Some(ExtensionGateDecision::Cancel {
                     code: "test.cancelled".into(),
                     message: "cancelled by test".into(),

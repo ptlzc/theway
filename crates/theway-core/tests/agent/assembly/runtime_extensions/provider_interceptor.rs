@@ -28,7 +28,6 @@ async fn provider_adapter_maps_separate_header_raw_and_response_lifecycle_events
         ExtensionLifecycleEvent::BeforeProviderRequestHeaders,
         ExtensionHookClass::Transform,
         ExtensionActionBatch {
-            abi_major: ExtensionAbiMajor::V2,
             decision: None,
             actions: vec![ExtensionAction {
                 kind: ExtensionActionKind::ReplaceProviderHeaders,
@@ -45,7 +44,6 @@ async fn provider_adapter_maps_separate_header_raw_and_response_lifecycle_events
         ExtensionLifecycleEvent::BeforeProviderRequestRaw,
         ExtensionHookClass::Transform,
         ExtensionActionBatch {
-            abi_major: ExtensionAbiMajor::V2,
             decision: None,
             actions: vec![ExtensionAction {
                 kind: ExtensionActionKind::ReplaceProviderPayload,

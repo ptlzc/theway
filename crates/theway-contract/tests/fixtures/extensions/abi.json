@@ -2,7 +2,6 @@
   "manifest": {
     "id": "deepseek-anchor",
     "version": "1.0.0",
-    "abi": 2,
     "entry": "dist/index.js",
     "priority": 100,
     "scope": "session",
@@ -30,7 +29,6 @@
     "decidedAt": "2026-08-20T00:00:00Z"
   },
   "event": {
-    "abiMajor": 2,
     "event": "before_model_request",
     "context": {
       "extensionId": "deepseek-anchor",
@@ -73,7 +71,6 @@
     "failure": "keep_last_value"
   },
   "actionBatch": {
-    "abiMajor": 2,
     "actions": [
       {
         "kind": "replace_model_request",
@@ -87,7 +84,6 @@
     ]
   },
   "durableEntry": {
-    "abiMajor": 2,
     "extensionId": "deepseek-anchor",
     "stateSchemaVersion": 1,
     "originSequence": 10,
@@ -103,7 +99,6 @@
   "catalogEntry": {
     "extensionId": "deepseek-anchor",
     "version": "1.0.0",
-    "abiMajor": 2,
     "source": "project",
     "scope": "session",
     "priority": 100,

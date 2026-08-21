@@ -3,9 +3,7 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{
-    ExtensionAbiMajor, ExtensionDurableEntry, ExtensionDurableEntryKind, ExtensionLifecycleEvent,
-};
+use super::{ExtensionDurableEntry, ExtensionDurableEntryKind, ExtensionLifecycleEvent};
 
 /// Semantic class assigned to every public hook.
 #[derive(
@@ -109,7 +107,6 @@ pub enum ExtensionGateDecision {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ExtensionActionBatch {
-    pub abi_major: ExtensionAbiMajor,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decision: Option<ExtensionGateDecision>,
     #[serde(default)]
@@ -200,12 +197,6 @@ impl ExtensionHookContract {
         &self,
         result: &ExtensionActionBatch,
     ) -> Result<(), ExtensionErrorEnvelope> {
-        if !result.abi_major.is_supported() {
-            return Err(ExtensionErrorEnvelope::new(
-                ExtensionErrorCode::AbiMismatch,
-                format!("unsupported extension ABI major {}", result.abi_major.0),
-            ));
-        }
         if self.class != ExtensionHookClass::Gate && result.decision.is_some() {
             return Err(ExtensionErrorEnvelope::new(
                 ExtensionErrorCode::ContractViolation,
@@ -252,7 +243,6 @@ impl ExtensionHookContract {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExtensionErrorCode {
-    AbiMismatch,
     InvalidHook,
     ContractViolation,
     InvalidAction,
@@ -273,7 +263,6 @@ pub enum ExtensionErrorCode {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ExtensionErrorEnvelope {
-    pub abi_major: ExtensionAbiMajor,
     pub code: ExtensionErrorCode,
     pub message: String,
     #[serde(default)]
@@ -285,7 +274,6 @@ pub struct ExtensionErrorEnvelope {
 impl ExtensionErrorEnvelope {
     pub fn new(code: ExtensionErrorCode, message: impl Into<String>) -> Self {
         Self {
-            abi_major: ExtensionAbiMajor::V2,
             code,
             message: message.into(),
             retryable: false,

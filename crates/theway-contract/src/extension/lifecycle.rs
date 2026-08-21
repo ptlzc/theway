@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::ExtensionAbiMajor;
-
 /// Stable public lifecycle names. Internal runtime events are translated into
 /// these values rather than serialized directly.
 #[derive(
@@ -115,7 +113,6 @@ pub struct ExtensionEventContext {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtensionEventEnvelope {
-    pub abi_major: ExtensionAbiMajor,
     pub event: ExtensionLifecycleEvent,
     pub context: ExtensionEventContext,
     pub payload: Value,

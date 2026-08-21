@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
-use super::{ExtensionAbiMajor, is_valid_extension_id};
+use super::is_valid_extension_id;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -67,12 +67,11 @@ impl ExtensionDurableEntryPayload {
     }
 }
 
-/// Versioned extension-owned entry stored on the active session branch. The
+/// Extension-owned entry stored on the active session branch. The
 /// surrounding session record supplies append identity, parent, and timestamp.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ExtensionDurableEntry {
-    pub abi_major: ExtensionAbiMajor,
     pub extension_id: String,
     pub state_schema_version: u32,
     pub origin_sequence: u64,
@@ -81,11 +80,6 @@ pub struct ExtensionDurableEntry {
 
 impl ExtensionDurableEntry {
     pub fn validate(&self) -> Result<(), ExtensionStateValidationError> {
-        if !self.abi_major.is_supported() {
-            return Err(ExtensionStateValidationError::UnsupportedAbi(
-                self.abi_major.0,
-            ));
-        }
         if !is_valid_extension_id(&self.extension_id) {
             return Err(ExtensionStateValidationError::InvalidExtensionId);
         }
@@ -147,8 +141,6 @@ impl ExtensionDurableEntry {
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum ExtensionStateValidationError {
-    #[error("extension durable entry ABI major {0} is not supported")]
-    UnsupportedAbi(u16),
     #[error("extension durable entry has an invalid extension id")]
     InvalidExtensionId,
     #[error("extension durable entry state schema must be greater than zero")]

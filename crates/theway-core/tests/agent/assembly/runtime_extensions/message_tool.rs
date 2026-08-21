@@ -179,7 +179,6 @@ async fn message_lifecycle_uses_stable_ids_and_final_transform_persists() {
             && invocation.payload()["message"]["role"] == "assistant"
         {
             return ExtensionActionBatch {
-                abi_major: ExtensionAbiMajor::V2,
                 decision: None,
                 actions: vec![
                     ExtensionAction {
@@ -189,7 +188,6 @@ async fn message_lifecycle_uses_stable_ids_and_final_transform_persists() {
                     ExtensionAction {
                         kind: ExtensionActionKind::SetState,
                         payload: serde_json::json!({
-                            "abiMajor": 2,
                             "extensionId": "test-extension",
                             "stateSchemaVersion": 1,
                             "originSequence": 1,
@@ -270,7 +268,6 @@ async fn transformed_assistant_drives_tool_extraction_and_full_tool_observation(
                 && !replaced.swap(true, Ordering::AcqRel)
             {
                 return ExtensionActionBatch {
-                    abi_major: ExtensionAbiMajor::V2,
                     decision: None,
                     actions: vec![ExtensionAction {
                         kind: ExtensionActionKind::ReplaceMessage,
@@ -352,7 +349,6 @@ async fn first_extension_gate_denial_skips_later_gate_and_execution() {
     let port = Arc::new(ScriptedPort::new(|invocation| {
         if invocation.event() == ExtensionLifecycleEvent::ToolCall {
             return ExtensionActionBatch {
-                abi_major: ExtensionAbiMajor::V2,
                 decision: Some(ExtensionGateDecision::Deny {
                     code: "policy_denied".into(),
                     message: "blocked by extension".into(),
@@ -451,7 +447,6 @@ async fn parallel_preflight_and_finalized_results_preserve_assistant_source_orde
                 .as_str()
                 .unwrap_or("unknown");
             return ExtensionActionBatch {
-                abi_major: ExtensionAbiMajor::V2,
                 decision: None,
                 actions: vec![ExtensionAction {
                     kind: ExtensionActionKind::ReplaceToolResult,

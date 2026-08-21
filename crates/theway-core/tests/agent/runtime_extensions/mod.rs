@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use theway_contract::extension::{
-    ExtensionAbiMajor, ExtensionAction, ExtensionActionBatch, ExtensionActionKind,
+    ExtensionAction, ExtensionActionBatch, ExtensionActionKind,
     ExtensionDurableEntry, ExtensionDurableEntryPayload, ExtensionErrorCode,
     ExtensionGateDecision, ExtensionHookClass, ExtensionLifecycleEvent,
     ExtensionModelContextPlacement, ExtensionStateMutation,
@@ -68,7 +68,6 @@ impl RuntimeRequestExtensionPort for InvalidRequestPort {
         _invocation: RuntimeExtensionInvocation,
     ) -> RawRuntimeExtensionResult {
         Ok(ExtensionActionBatch {
-            abi_major: ExtensionAbiMajor::V2,
             decision: None,
             actions: vec![ExtensionAction {
                 kind: ExtensionActionKind::ReplaceToolResult,
@@ -122,7 +121,6 @@ fn scope_allocator_is_shared_monotonic_and_kind_stable() {
 
 fn durable_state(extension_id: &str, sequence: u64) -> ExtensionDurableEntry {
     ExtensionDurableEntry {
-        abi_major: ExtensionAbiMajor::V2,
         extension_id: extension_id.into(),
         state_schema_version: 1,
         origin_sequence: sequence,
@@ -142,7 +140,6 @@ fn durable_context(
     content: &str,
 ) -> ExtensionDurableEntry {
     ExtensionDurableEntry {
-        abi_major: ExtensionAbiMajor::V2,
         extension_id: extension_id.into(),
         state_schema_version: 1,
         origin_sequence: sequence,

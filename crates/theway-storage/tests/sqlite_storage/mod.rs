@@ -1,7 +1,7 @@
 use super::*;
 use tempfile::tempdir;
 use theway_contract::extension::{
-    ExtensionAbiMajor, ExtensionDurableEntry, ExtensionDurableEntryPayload, ExtensionStateMutation,
+    ExtensionDurableEntry, ExtensionDurableEntryPayload, ExtensionStateMutation,
 };
 
 fn message(id: &str, parent_id: Option<&str>, role: &str, text: &str) -> StoredSessionEntry {
@@ -27,7 +27,6 @@ fn extension_entry(
         parent_id.map(str::to_string),
         "2026-08-20T00:00:00Z".into(),
         ExtensionDurableEntry {
-            abi_major: ExtensionAbiMajor::V2,
             extension_id: extension_id.into(),
             state_schema_version: 1,
             origin_sequence: sequence,
@@ -255,7 +254,6 @@ async fn extension_state_entries_preserve_tombstones_and_last_write_order() {
                 parent.clone(),
                 "2026-08-20T00:00:00Z".into(),
                 ExtensionDurableEntry {
-                    abi_major: ExtensionAbiMajor::V2,
                     extension_id: "deepseek-anchor".into(),
                     state_schema_version: 1,
                     origin_sequence: index as u64 + 1,
@@ -306,7 +304,6 @@ async fn unknown_extension_custom_entry_round_trips_as_opaque_data() {
         None,
         "2026-08-20T00:00:00Z".into(),
         ExtensionDurableEntry {
-            abi_major: ExtensionAbiMajor::V2,
             extension_id: "not-installed-here".into(),
             state_schema_version: 9,
             origin_sequence: 1,

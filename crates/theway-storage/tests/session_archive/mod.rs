@@ -3,7 +3,7 @@
 use super::*;
 use chrono::Utc;
 use theway_contract::extension::{
-    ExtensionAbiMajor, ExtensionDurableEntry, ExtensionDurableEntryPayload, ExtensionStateMutation,
+    ExtensionDurableEntry, ExtensionDurableEntryPayload, ExtensionStateMutation,
 };
 use theway_contract::session::{SessionReader, SessionStore, StoredSessionEntry};
 use theway_storage::sqlite_repo::SqliteSessionRepo;
@@ -62,7 +62,6 @@ async fn export_import_preserves_extension_entries_for_persisted_resume() {
         None,
         "2026-08-20T00:00:00Z".into(),
         ExtensionDurableEntry {
-            abi_major: ExtensionAbiMajor::V2,
             extension_id: "deepseek-anchor".into(),
             state_schema_version: 1,
             origin_sequence: 1,

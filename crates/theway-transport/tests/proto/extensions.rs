@@ -1,14 +1,13 @@
 use super::*;
 
 #[test]
-fn extension_snapshot_round_trip_keeps_open_kind_and_optional_abi() {
+fn extension_snapshot_round_trip_keeps_open_contribution_kind() {
     let snapshot = WireExtensionSnapshot {
         revision: 7,
         reload_pending: true,
         catalog: vec![crate::wire::WireExtensionCatalogEntry {
             extension_id: "future.extension".into(),
             version: "1.0.0".into(),
-            abi_major: None,
             source: "project".into(),
             scope: "session".into(),
             priority: 0,
@@ -28,7 +27,6 @@ fn extension_snapshot_round_trip_keeps_open_kind_and_optional_abi() {
     };
 
     let proto = extension_snapshot_proto(&snapshot);
-    assert!(proto.catalog[0].abi_major.is_none());
     assert_eq!(proto.contributions[0].kind, "future_hologram");
     let round_trip = extension_snapshot_wire(Some(&proto));
     assert_eq!(round_trip, snapshot);

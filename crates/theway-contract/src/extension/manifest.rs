@@ -8,35 +8,6 @@ use thiserror::Error;
 
 use super::{first_duplicate, is_valid_extension_id};
 
-/// First versioned runtime-extension ABI. The legacy compaction-only format is
-/// intentionally outside this version line.
-pub const RUNTIME_EXTENSION_ABI_MAJOR: u16 = 2;
-
-/// ABI major declared by an extension package.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    schemars::JsonSchema,
-)]
-#[serde(transparent)]
-pub struct ExtensionAbiMajor(pub u16);
-
-impl ExtensionAbiMajor {
-    pub const V2: Self = Self(RUNTIME_EXTENSION_ABI_MAJOR);
-
-    pub const fn is_supported(self) -> bool {
-        self.0 == RUNTIME_EXTENSION_ABI_MAJOR
-    }
-}
-
 /// Lifetime boundary for extension instances and their owned effects.
 #[derive(
     Clone,
@@ -210,13 +181,12 @@ impl schemars::JsonSchema for ExtensionPermission {
     }
 }
 
-/// Strict on-disk package manifest for an ABI v2 runtime extension.
+/// Strict on-disk package manifest for a runtime extension.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ExtensionPackageManifest {
     pub id: String,
     pub version: String,
-    pub abi: ExtensionAbiMajor,
     pub entry: String,
     #[serde(default)]
     pub priority: i32,
@@ -236,9 +206,6 @@ impl ExtensionPackageManifest {
         }
         semver::Version::parse(&self.version)
             .map_err(|_| ExtensionManifestError::InvalidVersion)?;
-        if !self.abi.is_supported() {
-            return Err(ExtensionManifestError::UnsupportedAbi(self.abi.0));
-        }
         if !is_safe_relative_entry(&self.entry) {
             return Err(ExtensionManifestError::InvalidEntry);
         }
@@ -274,8 +241,6 @@ pub enum ExtensionManifestError {
     InvalidId,
     #[error("extension version must be valid semantic versioning")]
     InvalidVersion,
-    #[error("extension ABI major {0} is not supported")]
-    UnsupportedAbi(u16),
     #[error("extension entry must be a non-empty relative path without parent traversal")]
     InvalidEntry,
     #[error("extension state schema must be greater than zero")]

@@ -1,13 +1,12 @@
 use serde_json::json;
 use theway_contract::extension::{
-    ExtensionAbiMajor, ExtensionCancellationContext, ExtensionEventContext, ExtensionEventEnvelope,
+    ExtensionCancellationContext, ExtensionEventContext, ExtensionEventEnvelope,
     ExtensionLifecycleEvent, ExtensionModelRef, ExtensionScopeIds,
 };
 
 #[test]
 fn lifecycle_envelope_round_trips_without_runtime_types() {
     let envelope = ExtensionEventEnvelope {
-        abi_major: ExtensionAbiMajor::V2,
         event: ExtensionLifecycleEvent::ToolExecutionStart,
         context: ExtensionEventContext {
             extension_id: "example-extension".into(),
@@ -45,7 +44,6 @@ fn lifecycle_envelope_round_trips_without_runtime_types() {
 #[test]
 fn lifecycle_context_defaults_optional_fields_without_sensitive_placeholders() {
     let decoded: ExtensionEventEnvelope = serde_json::from_value(json!({
-        "abiMajor": 2,
         "event": "session_start",
         "context": {
             "extensionId": "example-extension",

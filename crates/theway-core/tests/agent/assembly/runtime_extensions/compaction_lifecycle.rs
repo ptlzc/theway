@@ -33,12 +33,10 @@ async fn compaction_gate_precedes_committed_success_observation() {
         ExtensionLifecycleEvent::BeforeCompaction,
         ExtensionHookClass::Gate,
         ExtensionActionBatch {
-            abi_major: ExtensionAbiMajor::V2,
             decision: Some(ExtensionGateDecision::Allow),
             actions: vec![ExtensionAction {
                 kind: ExtensionActionKind::SetState,
                 payload: serde_json::to_value(ExtensionDurableEntry {
-                    abi_major: ExtensionAbiMajor::V2,
                     extension_id: "test-extension".into(),
                     state_schema_version: 1,
                     origin_sequence: 1,
@@ -100,7 +98,6 @@ async fn denied_compaction_gate_leaves_session_without_compaction_entry() {
         ExtensionLifecycleEvent::BeforeCompaction,
         ExtensionHookClass::Gate,
         ExtensionActionBatch {
-            abi_major: ExtensionAbiMajor::V2,
             decision: Some(ExtensionGateDecision::Cancel {
                 code: "compaction_disabled".into(),
                 message: "disabled by extension".into(),
@@ -232,7 +229,6 @@ fn durable_entry(
     entry: ExtensionDurableEntryPayload,
 ) -> ExtensionDurableEntry {
     ExtensionDurableEntry {
-        abi_major: ExtensionAbiMajor::V2,
         extension_id: "anchor-test".into(),
         state_schema_version: 1,
         origin_sequence,

@@ -232,7 +232,6 @@ pub fn extension_snapshot_proto(snapshot: &WireExtensionSnapshot) -> wire::Exten
             .map(|entry| wire::ExtensionCatalogEntry {
                 extension_id: entry.extension_id.clone(),
                 version: entry.version.clone(),
-                abi_major: entry.abi_major,
                 source: entry.source.clone(),
                 scope: entry.scope.clone(),
                 priority: entry.priority,
@@ -297,7 +296,6 @@ pub fn extension_snapshot_wire(
             .map(|entry| WireExtensionCatalogEntry {
                 extension_id: entry.extension_id.clone(),
                 version: entry.version.clone(),
-                abi_major: entry.abi_major,
                 source: entry.source.clone(),
                 scope: entry.scope.clone(),
                 priority: entry.priority,

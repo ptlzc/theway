@@ -35,9 +35,6 @@ impl WireExtensionSnapshot {
 pub struct WireExtensionCatalogEntry {
     pub extension_id: String,
     pub version: String,
-    /// Optional for forward/backward compatibility with pre-ABI catalogs.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub abi_major: Option<u32>,
     pub source: String,
     pub scope: String,
     pub priority: i32,

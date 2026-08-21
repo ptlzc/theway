@@ -3,7 +3,7 @@
 use super::*;
 use tempfile::tempdir;
 use theway_contract::extension::{
-    ExtensionAbiMajor, ExtensionDurableEntry, ExtensionDurableEntryPayload, ExtensionStateMutation,
+    ExtensionDurableEntry, ExtensionDurableEntryPayload, ExtensionStateMutation,
 };
 
 fn custom_entry(id: &str, parent_id: Option<&str>) -> StoredSessionEntry {
@@ -29,7 +29,6 @@ fn extension_state_entry(
         parent_id.map(str::to_string),
         "2026-08-20T00:00:00Z".into(),
         ExtensionDurableEntry {
-            abi_major: ExtensionAbiMajor::V2,
             extension_id: "deepseek-anchor".into(),
             state_schema_version: 1,
             origin_sequence: sequence,

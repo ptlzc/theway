@@ -1,6 +1,6 @@
 use serde_json::json;
 use theway_contract::extension::{
-    ExtensionAbiMajor, ExtensionDurableEntry, ExtensionDurableEntryPayload, ExtensionStateMutation,
+    ExtensionDurableEntry, ExtensionDurableEntryPayload, ExtensionStateMutation,
 };
 use theway_contract::session::{SessionErrorCode, StoredSessionEntry, validate_session_entries};
 
@@ -82,7 +82,6 @@ fn validate_entries_replays_leaf_and_rejects_dangling_references() {
 #[test]
 fn stored_extension_entry_validates_and_decodes_the_public_envelope() {
     let durable = ExtensionDurableEntry {
-        abi_major: ExtensionAbiMajor::V2,
         extension_id: "deepseek-anchor".into(),
         state_schema_version: 1,
         origin_sequence: 3,

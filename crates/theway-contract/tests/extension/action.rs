@@ -1,14 +1,13 @@
 use serde_json::json;
 use theway_contract::extension::{
-    ExtensionAbiMajor, ExtensionAction, ExtensionActionBatch, ExtensionActionKind,
-    ExtensionDeliveryPolicy, ExtensionDurableEntry, ExtensionDurableEntryPayload,
-    ExtensionErrorCode, ExtensionGateDecision, ExtensionHookClass, ExtensionHookContract,
-    ExtensionHookFailurePolicy, ExtensionLifecycleEvent, ExtensionStateMutation,
+    ExtensionAction, ExtensionActionBatch, ExtensionActionKind, ExtensionDeliveryPolicy,
+    ExtensionDurableEntry, ExtensionDurableEntryPayload, ExtensionErrorCode, ExtensionGateDecision,
+    ExtensionHookClass, ExtensionHookContract, ExtensionHookFailurePolicy, ExtensionLifecycleEvent,
+    ExtensionStateMutation,
 };
 
 fn batch(actions: Vec<ExtensionAction>) -> ExtensionActionBatch {
     ExtensionActionBatch {
-        abi_major: ExtensionAbiMajor::V2,
         decision: None,
         actions,
     }
@@ -51,7 +50,6 @@ fn hook_contract_request_transform_accepts_primary_and_durable_actions() {
         ExtensionAction {
             kind: ExtensionActionKind::SetState,
             payload: serde_json::to_value(ExtensionDurableEntry {
-                abi_major: ExtensionAbiMajor::V2,
                 extension_id: "deepseek-anchor".into(),
                 state_schema_version: 1,
                 origin_sequence: 9,
@@ -79,7 +77,6 @@ fn hook_contract_durable_action_kind_must_match_typed_entry() {
     )
     .unwrap();
     let custom_entry = ExtensionDurableEntry {
-        abi_major: ExtensionAbiMajor::V2,
         extension_id: "deepseek-anchor".into(),
         state_schema_version: 1,
         origin_sequence: 9,
@@ -129,7 +126,6 @@ fn hook_contract_gate_accepts_stable_deny_and_transform_rejects_it() {
     )
     .unwrap();
     let result = ExtensionActionBatch {
-        abi_major: ExtensionAbiMajor::V2,
         decision: Some(ExtensionGateDecision::Deny {
             code: "policy_denied".into(),
             message: "tool is blocked".into(),

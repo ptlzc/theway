@@ -1,13 +1,11 @@
 use serde_json::json;
 use theway_contract::extension::{
-    ExtensionAbiMajor, ExtensionDurableEntry, ExtensionDurableEntryKind,
-    ExtensionDurableEntryPayload, ExtensionModelContextPlacement, ExtensionStateMutation,
-    ExtensionStateValidationError,
+    ExtensionDurableEntry, ExtensionDurableEntryKind, ExtensionDurableEntryPayload,
+    ExtensionModelContextPlacement, ExtensionStateMutation, ExtensionStateValidationError,
 };
 
 fn durable(entry: ExtensionDurableEntryPayload) -> ExtensionDurableEntry {
     ExtensionDurableEntry {
-        abi_major: ExtensionAbiMajor::V2,
         extension_id: "deepseek-anchor".into(),
         state_schema_version: 2,
         origin_sequence: 7,

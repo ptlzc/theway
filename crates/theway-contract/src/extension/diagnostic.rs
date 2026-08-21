@@ -3,10 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{
-    ExtensionAbiMajor, ExtensionLifecycleEvent, ExtensionPermission, ExtensionScope,
-    ExtensionSourceLayer,
-};
+use super::{ExtensionLifecycleEvent, ExtensionPermission, ExtensionScope, ExtensionSourceLayer};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -26,7 +23,6 @@ pub enum ExtensionCatalogStatus {
 pub struct ExtensionCatalogEntry {
     pub extension_id: String,
     pub version: String,
-    pub abi_major: ExtensionAbiMajor,
     pub source: ExtensionSourceLayer,
     pub scope: ExtensionScope,
     pub priority: i32,
@@ -61,7 +57,6 @@ pub enum ExtensionDiagnosticSeverity {
 #[serde(rename_all = "snake_case")]
 pub enum ExtensionDiagnosticCode {
     ManifestInvalid,
-    AbiUnsupported,
     Shadowed,
     TrustRequired,
     PermissionDenied,

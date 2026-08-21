@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use serde_json::json;
 use theway_contract::extension::{
-    ExtensionAbiMajor, ExtensionDurableEntry, ExtensionDurableEntryPayload, ExtensionStateMutation,
+    ExtensionDurableEntry, ExtensionDurableEntryPayload, ExtensionStateMutation,
 };
 use theway_contract::session::{SessionError, SessionReader, SessionStore, StoredSessionEntry};
 
@@ -123,7 +123,6 @@ async fn persistent_adapter_keeps_private_extension_entries_out_of_typed_context
         Some(message_id),
         "2026-08-20T00:00:00Z".into(),
         ExtensionDurableEntry {
-            abi_major: ExtensionAbiMajor::V2,
             extension_id: "deepseek-anchor".into(),
             state_schema_version: 1,
             origin_sequence: 1,

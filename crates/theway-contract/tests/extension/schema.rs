@@ -15,7 +15,7 @@ use theway_contract::extension::{
 #[path = "../../examples/generate_extension_artifacts.rs"]
 mod generator;
 
-const ABI_V2_FIXTURE: &str = include_str!("../fixtures/extensions/abi-v2.json");
+const ABI_FIXTURE: &str = include_str!("../fixtures/extensions/abi.json");
 
 fn assert_round_trip<T>(fixture: &Value)
 where
@@ -30,7 +30,7 @@ where
 }
 
 #[test]
-fn abi_v2_public_envelopes_generate_json_schema() {
+fn public_envelopes_generate_json_schema() {
     let schemas = [
         ("manifest", schema_for!(ExtensionPackageManifest)),
         ("trust", schema_for!(ExtensionTrustRecord)),
@@ -62,7 +62,7 @@ fn abi_v2_public_envelopes_generate_json_schema() {
 }
 
 #[test]
-fn abi_v2_manifest_schema_matches_permission_wire_names() {
+fn manifest_schema_matches_permission_wire_names() {
     let encoded = serde_json::to_string(&schema_for!(ExtensionPackageManifest)).unwrap();
 
     assert!(encoded.contains("session.write"));
@@ -72,8 +72,8 @@ fn abi_v2_manifest_schema_matches_permission_wire_names() {
 }
 
 #[test]
-fn abi_v2_fixture_round_trips_every_public_envelope() {
-    let fixture: Value = serde_json::from_str(ABI_V2_FIXTURE).unwrap();
+fn fixture_round_trips_every_public_envelope() {
+    let fixture: Value = serde_json::from_str(ABI_FIXTURE).unwrap();
 
     assert_round_trip::<ExtensionPackageManifest>(&fixture["manifest"]);
     assert_round_trip::<ExtensionTrustRecord>(&fixture["trust"]);
@@ -89,7 +89,7 @@ fn abi_v2_fixture_round_trips_every_public_envelope() {
 }
 
 #[test]
-fn abi_v2_checked_in_schema_and_types_match_temporary_regeneration() {
+fn checked_in_schema_and_types_match_temporary_regeneration() {
     let generated = tempfile::tempdir().unwrap();
     generator::generate(generated.path()).unwrap();
     let checked_in = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -97,7 +97,7 @@ fn abi_v2_checked_in_schema_and_types_match_temporary_regeneration() {
         .join("..")
         .join("sdks")
         .join("plugin")
-        .join("abi-v2");
+        .join("abi");
 
     for relative_path in generator::ARTIFACT_PATHS {
         let expected = std::fs::read(checked_in.join(relative_path)).unwrap();

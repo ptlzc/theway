@@ -123,7 +123,6 @@ fn typescript(schemas: &[(&str, Value)]) -> Result<String, serde_json::Error> {
 
 const TYPESCRIPT_DECLARATIONS: &str = r#"
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
-export type ExtensionAbiMajor = 2;
 export type ExtensionScope = "process" | "session" | "run" | "request";
 export type ExtensionSourceLayer = "global" | "project";
 export type ExtensionPermission =
@@ -143,7 +142,6 @@ export type ExtensionPermission =
 export interface ExtensionPackageManifest {
   id: string;
   version: string;
-  abi: ExtensionAbiMajor;
   entry: string;
   priority?: number;
   scope: ExtensionScope;
@@ -195,7 +193,6 @@ export interface ExtensionEventContext {
   cancellation?: ExtensionCancellationContext;
 }
 export interface ExtensionEventEnvelope {
-  abiMajor: ExtensionAbiMajor;
   event: ExtensionLifecycleEvent;
   context: ExtensionEventContext;
   payload: JsonValue;
@@ -217,7 +214,6 @@ export type ExtensionGateDecision =
   | { decision: "deny"; code: string; message: string }
   | { decision: "cancel"; code: string; message: string };
 export interface ExtensionActionBatch {
-  abiMajor: ExtensionAbiMajor;
   decision?: ExtensionGateDecision;
   actions?: ExtensionAction[];
 }
@@ -238,7 +234,6 @@ export type ExtensionDurableEntryPayload =
   | { kind: "model_context"; contextId: string; placement: ExtensionModelContextPlacement; content: JsonValue }
   | { kind: "state_migration"; fromSchemaVersion: number; toSchemaVersion: number };
 export interface ExtensionDurableEntry {
-  abiMajor: ExtensionAbiMajor;
   extensionId: string;
   stateSchemaVersion: number;
   originSequence: number;
@@ -248,14 +243,13 @@ export interface ExtensionDurableEntry {
 export type ExtensionCatalogStatus = "effective" | "shadowed" | "rejected" | "blocked" | "disabled" | "faulted";
 export type ExtensionDiagnosticSeverity = "info" | "warning" | "error";
 export type ExtensionDiagnosticCode =
-  | "manifest_invalid" | "abi_unsupported" | "shadowed" | "trust_required" | "permission_denied"
+  | "manifest_invalid" | "shadowed" | "trust_required" | "permission_denied"
   | "load_failed" | "hook_failed" | "hook_timed_out" | "cancelled" | "resource_limit"
   | "circuit_opened" | "unloaded" | "reload_pending" | "state_migration_failed"
   | "persistence_failed" | "queue_overflow" | "lifecycle_status" | "contract_violation";
 export interface ExtensionCatalogEntry {
   extensionId: string;
   version: string;
-  abiMajor: ExtensionAbiMajor;
   source: ExtensionSourceLayer;
   scope: ExtensionScope;
   priority: number;

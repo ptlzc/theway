@@ -1,14 +1,12 @@
 use serde_json::json;
 use theway_contract::extension::{
-    ExtensionAbiMajor, ExtensionManifestError, ExtensionPackageManifest, ExtensionPermission,
-    ExtensionScope,
+    ExtensionManifestError, ExtensionPackageManifest, ExtensionPermission, ExtensionScope,
 };
 
 fn valid_manifest() -> ExtensionPackageManifest {
     serde_json::from_value(json!({
         "id": "deepseek-anchor",
         "version": "1.2.3",
-        "abi": 2,
         "entry": "dist/index.js",
         "priority": 100,
         "scope": "session",
@@ -28,7 +26,6 @@ fn package_manifest_valid_input_round_trips() {
     let decoded: ExtensionPackageManifest = serde_json::from_value(encoded).unwrap();
 
     assert_eq!(decoded, manifest);
-    assert_eq!(manifest.abi, ExtensionAbiMajor::V2);
     assert_eq!(manifest.scope, ExtensionScope::Session);
     assert_eq!(
         manifest.optional_permissions[0].secret_name(),
@@ -41,7 +38,6 @@ fn package_manifest_unknown_field_is_rejected_during_decode() {
     let decoded = serde_json::from_value::<ExtensionPackageManifest>(json!({
         "id": "example",
         "version": "1.0.0",
-        "abi": 2,
         "entry": "index.js",
         "scope": "session",
         "unexpected": true
@@ -51,7 +47,20 @@ fn package_manifest_unknown_field_is_rejected_during_decode() {
 }
 
 #[test]
-fn package_manifest_invalid_identity_version_abi_and_entry_are_rejected() {
+fn package_manifest_abi_selector_is_rejected_during_decode() {
+    let decoded = serde_json::from_value::<ExtensionPackageManifest>(json!({
+        "id": "example",
+        "version": "1.0.0",
+        "abi": 7,
+        "entry": "index.js",
+        "scope": "session"
+    }));
+
+    assert!(decoded.is_err());
+}
+
+#[test]
+fn package_manifest_invalid_identity_version_and_entry_are_rejected() {
     let mut manifest = valid_manifest();
     manifest.id = "Invalid_ID".into();
     assert_eq!(manifest.validate(), Err(ExtensionManifestError::InvalidId));
@@ -61,13 +70,6 @@ fn package_manifest_invalid_identity_version_abi_and_entry_are_rejected() {
     assert_eq!(
         manifest.validate(),
         Err(ExtensionManifestError::InvalidVersion)
-    );
-
-    let mut manifest = valid_manifest();
-    manifest.abi = ExtensionAbiMajor(3);
-    assert_eq!(
-        manifest.validate(),
-        Err(ExtensionManifestError::UnsupportedAbi(3))
     );
 
     let mut manifest = valid_manifest();
@@ -109,7 +111,6 @@ fn package_manifest_unknown_or_wildcard_permission_is_rejected_during_decode() {
         let decoded = serde_json::from_value::<ExtensionPackageManifest>(json!({
             "id": "example",
             "version": "1.0.0",
-            "abi": 2,
             "entry": "index.js",
             "scope": "session",
             "permissions": [permission]

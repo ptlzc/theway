@@ -1,8 +1,8 @@
 use serde_json::json;
 use theway_contract::extension::{
-    ExtensionAbiMajor, ExtensionCatalogEntry, ExtensionCatalogStatus, ExtensionDiagnostic,
-    ExtensionDiagnosticCode, ExtensionDiagnosticSensitivity, ExtensionDiagnosticSeverity,
-    ExtensionPermission, ExtensionScope, ExtensionSourceLayer,
+    ExtensionCatalogEntry, ExtensionCatalogStatus, ExtensionDiagnostic, ExtensionDiagnosticCode,
+    ExtensionDiagnosticSensitivity, ExtensionDiagnosticSeverity, ExtensionPermission,
+    ExtensionScope, ExtensionSourceLayer,
 };
 
 #[test]
@@ -38,7 +38,6 @@ fn catalog_entry_round_trips_without_engine_or_secret_values() {
     let entry = ExtensionCatalogEntry {
         extension_id: "deepseek-anchor".into(),
         version: "1.0.0".into(),
-        abi_major: ExtensionAbiMajor::V2,
         source: ExtensionSourceLayer::Project,
         scope: ExtensionScope::Session,
         priority: 100,

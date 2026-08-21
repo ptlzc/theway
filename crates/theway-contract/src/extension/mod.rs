@@ -18,8 +18,8 @@ pub use lifecycle::{
     ExtensionLifecycleEvent, ExtensionModelRef, ExtensionScopeIds,
 };
 pub use manifest::{
-    ExtensionAbiMajor, ExtensionManifestError, ExtensionPackageManifest, ExtensionPermission,
-    ExtensionScope, ExtensionSourceLayer, RUNTIME_EXTENSION_ABI_MAJOR,
+    ExtensionManifestError, ExtensionPackageManifest, ExtensionPermission, ExtensionScope,
+    ExtensionSourceLayer,
 };
 pub use state::{
     ExtensionDurableEntry, ExtensionDurableEntryKind, ExtensionDurableEntryPayload,

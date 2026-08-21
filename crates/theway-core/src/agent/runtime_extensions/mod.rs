@@ -17,9 +17,9 @@ mod tool;
 use async_trait::async_trait;
 use serde_json::Value;
 use theway_contract::extension::{
-    ExtensionAbiMajor, ExtensionAction, ExtensionActionBatch, ExtensionErrorCode,
-    ExtensionErrorEnvelope, ExtensionGateDecision, ExtensionHookClass, ExtensionHookContract,
-    ExtensionLifecycleEvent, ExtensionModelRef, ExtensionScopeIds,
+    ExtensionAction, ExtensionActionBatch, ExtensionErrorCode, ExtensionErrorEnvelope,
+    ExtensionGateDecision, ExtensionHookClass, ExtensionHookContract, ExtensionLifecycleEvent,
+    ExtensionModelRef, ExtensionScopeIds,
 };
 
 pub use compaction::RuntimeCompactionExtensionPort;
@@ -322,7 +322,6 @@ pub struct NoopRuntimeExtensionPort;
 
 fn empty_action_batch() -> ExtensionActionBatch {
     ExtensionActionBatch {
-        abi_major: ExtensionAbiMajor::V2,
         decision: None,
         actions: Vec::new(),
     }
