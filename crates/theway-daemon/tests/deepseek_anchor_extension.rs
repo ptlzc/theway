@@ -1,3 +1,5 @@
+#![cfg(feature = "local")]
+
 #[path = "deepseek_anchor_extension/architecture.rs"]
 mod architecture;
 #[path = "deepseek_anchor_extension/failures.rs"]
