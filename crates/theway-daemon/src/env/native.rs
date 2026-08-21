@@ -173,7 +173,8 @@ impl ExecutionEnv for NativeEnv {
             .map_err(|e| map_io_error(e, Some(path)))?;
         f.write_all(content)
             .await
-            .map_err(|e| map_io_error(e, Some(path)))
+            .map_err(|e| map_io_error(e, Some(path)))?;
+        f.flush().await.map_err(|e| map_io_error(e, Some(path)))
     }
 
     async fn file_info(&self, path: &str, _cancel: CancellationToken) -> FsResult<FileInfo> {
