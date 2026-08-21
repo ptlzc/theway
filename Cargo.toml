@@ -59,3 +59,5 @@ opt-level = 0
 [profile.release]
 lto = "thin"
 codegen-units = 1
+# Strip debug symbols from release binaries (~7 MB smaller for thewayd).
+strip = "symbols"
