@@ -1,0 +1,319 @@
+import type {
+  ExtensionAbiMajor,
+  ExtensionActionBatch,
+  ExtensionActionKind,
+  ExtensionClientContribution,
+  ExtensionCommandOutcome,
+  ExtensionDeliveryPolicy,
+  ExtensionEventContext,
+  ExtensionEventEnvelope,
+  ExtensionHookClass,
+  ExtensionHookDeadline,
+  ExtensionHookFailurePolicy,
+  ExtensionLifecycleEvent,
+  ExtensionModelContextPlacement,
+  ExtensionPermission,
+  ExtensionScope,
+  JsonValue,
+} from '../abi-v2/theway-extension.js';
+
+export type * from '../abi-v2/theway-extension.js';
+
+export const abiMajor: ExtensionAbiMajor = 2;
+
+export type MaybePromise<T> = T | Promise<T>;
+export type JsonObject = { [key: string]: JsonValue };
+export type JsonSchema = boolean | JsonObject;
+
+export type ThinkingBudgets = JsonObject & {
+  minimal?: number;
+  low?: number;
+  medium?: number;
+  high?: number;
+};
+
+export type NormalizedGenerationOptions = JsonObject & {
+  temperature?: number;
+  maxTokens?: number;
+  reasoning?: string;
+  thinkingBudgets?: ThinkingBudgets;
+};
+
+export type ModelToolDefinition = JsonObject & {
+  name: string;
+  description: string;
+  parameters: JsonSchema;
+};
+
+export type NormalizedModelRequest = JsonObject & {
+  provider: string;
+  model: string;
+  systemInstructions?: string;
+  messages: JsonValue[];
+  visibleTools: ModelToolDefinition[];
+  executableToolNames: string[];
+  generationOptions: NormalizedGenerationOptions;
+};
+
+export interface KnownLifecyclePayloads {
+  input: { message: JsonValue };
+  context: { messages: JsonValue[] };
+  before_model_request: { request: NormalizedModelRequest };
+  before_provider_request_headers: { request: JsonObject };
+  before_provider_request_raw: { request: JsonObject };
+  provider_response: { response: JsonObject };
+  provider_request_failed: { failure: JsonObject };
+  message_start: { message: JsonValue };
+  message_update: { message: JsonValue; updateKind: string };
+  message_end: { message: JsonValue };
+  tool_call: { assistantMessage: JsonValue; toolCall: JsonValue; args: JsonValue };
+  tool_execution_start: { toolName: string; args: JsonValue };
+  tool_execution_update: { toolName: string; update: JsonValue };
+  tool_execution_end: { toolName: string; result: JsonValue; isError: boolean };
+  tool_result: { toolCall: JsonValue; args: JsonValue; result: JsonValue; isError: boolean };
+}
+
+export type LifecyclePayload<E extends ExtensionLifecycleEvent> =
+  E extends keyof KnownLifecyclePayloads ? KnownLifecyclePayloads[E] : JsonObject;
+
+export type LifecycleEnvelope<E extends ExtensionLifecycleEvent = ExtensionLifecycleEvent> = Omit<
+  ExtensionEventEnvelope,
+  'event' | 'payload'
+> & {
+  event: E;
+  payload: LifecyclePayload<E>;
+};
+
+export interface HookDescriptor {
+  class?: ExtensionHookClass;
+  payloadSchema?: JsonSchema;
+  allowedActions?: ExtensionActionKind[];
+  priority?: number;
+  deadline?: ExtensionHookDeadline;
+  delivery?: ExtensionDeliveryPolicy;
+  failure?: ExtensionHookFailurePolicy;
+}
+
+export type HookResult = MaybePromise<ExtensionActionBatch | null | undefined | void>;
+export type HookHandler<E extends ExtensionLifecycleEvent> = (
+  event: LifecycleEnvelope<E>,
+  context: ExtensionEventContext,
+) => HookResult;
+
+export interface RegistrationHandle<Descriptor = JsonObject> {
+  readonly id: string;
+  dispose(): void;
+  update(descriptor: Descriptor): void;
+}
+
+export type ToolPermission = 'allow' | 'prompt' | 'block';
+
+export interface ToolRegistrationDescriptor {
+  name: string;
+  label: string;
+  description: string;
+  inputSchema: JsonSchema;
+  resultSchema?: JsonSchema;
+  permission?: ToolPermission;
+  scope?: ExtensionScope;
+  override?: boolean;
+}
+
+export interface ToolInvocation<Arguments = JsonValue> {
+  toolCallId: string;
+  arguments: Arguments;
+}
+
+export interface ToolResult {
+  content: JsonValue[];
+  details?: JsonValue;
+  terminate?: boolean;
+}
+
+export type ToolHandler<Arguments = JsonValue> = (
+  invocation: ToolInvocation<Arguments>,
+  context: ExtensionEventContext,
+) => MaybePromise<ToolResult>;
+
+export interface RegistrationPredicate {
+  providers?: string[];
+  models?: string[];
+  requiresInteractiveClient?: boolean;
+}
+
+export interface CommandRegistrationDescriptor {
+  name: string;
+  label: string;
+  description: string;
+  argumentSchema: JsonSchema;
+  availability?: RegistrationPredicate;
+  scope?: ExtensionScope;
+}
+
+export type CommandHandler<Arguments = JsonValue> = (
+  invocation: { arguments: Arguments },
+  context: ExtensionEventContext,
+) => MaybePromise<ExtensionCommandOutcome>;
+
+export type ProviderWireFormat =
+  | 'openai_chat_completions'
+  | 'openai_responses'
+  | 'anthropic_messages';
+
+export type ProviderInputModality = 'text' | 'image';
+
+export interface ProviderModelDescriptor {
+  id: string;
+  name: string;
+  reasoning?: boolean;
+  input?: ProviderInputModality[];
+  contextWindow: number;
+  maxTokens: number;
+}
+
+export interface ProviderRegistrationDescriptor {
+  providerId: string;
+  baseUrl: string;
+  format: ProviderWireFormat;
+  credentialRef?: string;
+  models: ProviderModelDescriptor[];
+  scope?: ExtensionScope;
+}
+
+export interface PromptSectionDescriptor {
+  sectionId: string;
+  text: string;
+  priority?: number;
+  predicate?: RegistrationPredicate;
+  scope?: ExtensionScope;
+}
+
+export interface RequestPolicyDescriptor {
+  policyId: string;
+  priority?: number;
+  predicate?: RegistrationPredicate;
+  scope?: ExtensionScope;
+}
+
+export type RequestPolicyHandler = (
+  payload: { request: NormalizedModelRequest },
+  context: ExtensionEventContext,
+) => HookResult;
+
+export interface CustomEvent {
+  eventId: string;
+  type: string;
+  payload: JsonValue;
+  stateSchemaVersion: number;
+  originSequence: number;
+}
+
+export interface StateMigrationInput {
+  fromSchemaVersion: number;
+  toSchemaVersion: number;
+  state: Record<string, JsonValue>;
+}
+
+export type StateMigrationHandler = (
+  input: StateMigrationInput,
+  context: ExtensionEventContext,
+) => MaybePromise<{ state: Record<string, JsonValue> }>;
+
+export interface ProcessResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}
+
+export interface NetworkRequestOptions {
+  method?: 'GET' | 'POST';
+  headers?: Record<string, string>;
+  body?: string;
+}
+
+export interface NetworkResponse {
+  status: number;
+  body: string;
+}
+
+export interface ExtensionApi {
+  readonly abiMajor: ExtensionAbiMajor;
+  readonly capabilities: {
+    has(permission: ExtensionPermission): boolean;
+  };
+  readonly workspace: {
+    readText(path: string): Promise<string>;
+    writeText(path: string, content: string): Promise<void>;
+  };
+  readonly process: {
+    run(argv: string[], options?: { timeoutMs?: number }): Promise<ProcessResult>;
+  };
+  readonly network: {
+    fetch(url: string, options?: NetworkRequestOptions): Promise<NetworkResponse>;
+  };
+  readonly secrets: {
+    read(name: string): Promise<string>;
+  };
+  readonly providerRaw: {
+    read(): Promise<JsonValue>;
+  };
+  readonly state: {
+    get(key: string): JsonValue;
+    set(key: string, value: JsonValue): void;
+    delete(key: string): void;
+  };
+  readonly events: {
+    replay(customType?: string | null): CustomEvent[];
+    append(eventId: string, type: string, payload: JsonValue): void;
+  };
+  readonly modelContext: {
+    append(contextId: string, placement: ExtensionModelContextPlacement, content: JsonValue): void;
+  };
+  readonly memory: {
+    get(key: string): JsonValue;
+    set(key: string, value: JsonValue): void;
+    delete(key: string): void;
+    clear(): void;
+  };
+  migrateState(handler: StateMigrationHandler): RegistrationHandle;
+  registerTool<Arguments = JsonValue>(
+    descriptor: ToolRegistrationDescriptor,
+    handler: ToolHandler<Arguments>,
+  ): RegistrationHandle<ToolRegistrationDescriptor>;
+  registerCommand<Arguments = JsonValue>(
+    descriptor: CommandRegistrationDescriptor,
+    handler: CommandHandler<Arguments>,
+  ): RegistrationHandle<CommandRegistrationDescriptor>;
+  registerProvider(
+    descriptor: ProviderRegistrationDescriptor,
+  ): RegistrationHandle<ProviderRegistrationDescriptor>;
+  registerPromptSection(
+    descriptor: PromptSectionDescriptor,
+  ): RegistrationHandle<PromptSectionDescriptor>;
+  registerRequestPolicy(
+    descriptor: RequestPolicyDescriptor,
+    handler: RequestPolicyHandler,
+  ): RegistrationHandle<RequestPolicyDescriptor>;
+  contribute(
+    descriptor: ExtensionClientContribution,
+  ): RegistrationHandle<ExtensionClientContribution>;
+  on<E extends ExtensionLifecycleEvent>(event: E, handler: HookHandler<E>): RegistrationHandle;
+  on<E extends ExtensionLifecycleEvent>(
+    event: E,
+    descriptor: HookDescriptor,
+    handler: HookHandler<E>,
+  ): RegistrationHandle<HookDescriptor>;
+}
+
+export type ExtensionSetup = (api: ExtensionApi) => MaybePromise<void>;
+
+export interface ExtensionDefinition {
+  readonly setup: ExtensionSetup;
+}
+
+export function defineExtension(setup: ExtensionSetup): Readonly<ExtensionDefinition> {
+  if (typeof setup !== 'function') {
+    throw new TypeError('defineExtension requires a setup function');
+  }
+  return Object.freeze({ setup });
+}

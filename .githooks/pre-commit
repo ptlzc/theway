@@ -11,13 +11,13 @@ set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
-if [ -n "$(git status --porcelain -- crates/theway-transport/proto/ sdk/proto)" ]; then
-  echo "[pre-commit] crates/theway-transport/proto/ changed — syncing sdk (mirror + regenerate)"
+if [ -n "$(git status --porcelain -- crates/theway-transport/proto/ sdks/client/proto)" ]; then
+  echo "[pre-commit] crates/theway-transport/proto/ changed — syncing client SDK (mirror + regenerate)"
   bash scripts/sdk-sync.sh
 
   # Include regenerated and newly created SDK files in the current commit.
-  git add sdk/proto sdk/src/generated
-  echo "[pre-commit] staged sdk/proto + sdk/src/generated"
+  git add sdks/client/proto sdks/client/src/generated
+  echo "[pre-commit] staged sdks/client/proto + sdks/client/src/generated"
 fi
 
 if git cat-file -e :scripts/verify-doc-i18n.py 2>/dev/null; then

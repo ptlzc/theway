@@ -93,8 +93,11 @@ fn abi_v2_checked_in_schema_and_types_match_temporary_regeneration() {
     let generated = tempfile::tempdir().unwrap();
     generator::generate(generated.path()).unwrap();
     let checked_in = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("sdk")
-        .join("extension-abi-v2");
+        .join("..")
+        .join("..")
+        .join("sdks")
+        .join("plugin")
+        .join("abi-v2");
 
     for relative_path in generator::ARTIFACT_PATHS {
         let expected = std::fs::read(checked_in.join(relative_path)).unwrap();

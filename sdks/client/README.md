@@ -65,12 +65,12 @@ client.close();
 `src/generated/` is regenerated from it. Sync and regenerate with:
 
 ```sh
-cd ..                      # repo root
+cd ../..                   # repo root
 make hooks                 # once per clone: enable the pre-commit hook
 make sdk-sync              # or: bash scripts/sdk-sync.sh
 ```
 
-The enabled pre-commit hook ([`.githooks/pre-commit`](../.githooks/pre-commit)) runs the sync automatically
+The enabled pre-commit hook ([`.githooks/pre-commit`](../../.githooks/pre-commit)) runs the sync automatically
 whenever `crates/theway-transport/proto/` changes and stages the regenerated files into the same commit, so the checked-in proto and
 generated client never drift.
 
@@ -83,10 +83,10 @@ npm run gen      # protoc (grpc-tools) + ts-proto → src/generated/
 
 ## Publishing
 
-Publishing to the Nexus registry is manual ([`scripts/sdk-publish.sh`](../scripts/sdk-publish.sh)):
+Publishing to the Nexus registry is manual ([`scripts/sdk-publish.sh`](../../scripts/sdk-publish.sh)):
 
 ```sh
-cd ..
+cd ../..
 make sdk-publish BUMP=minor ISSUE="#62"
 # 或: bash scripts/sdk-publish.sh minor "#62"
 ```

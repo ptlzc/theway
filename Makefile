@@ -101,7 +101,7 @@ i18n-test: ## test the bilingual documentation verifier
 doc-sync: i18n-test i18n-check ## verify bilingual documentation synchronization
 
 .PHONY: ci
-ci: fmt-check file-size-check layering-check doc-sync lint feature-gate test ## run the full CI pipeline locally
+ci: fmt-check file-size-check layering-check doc-sync sdks-check lint feature-gate test ## run the full CI pipeline locally
 
 # --- run / install ----------------------------------------------------------
 
@@ -131,19 +131,29 @@ clean: ## cargo clean
 outdated: ## list outdated workspace deps (requires `cargo-outdated`)
 	$(CARGO) outdated --workspace --root-deps-only
 
-# --- sdk --------------------------------------------------------------------
+# --- SDKs -------------------------------------------------------------------
 
 .PHONY: hooks
-hooks: ## enable the repo git hooks (transport proto change -> auto sdk regen)
+hooks: ## enable the repo git hooks (transport proto change -> auto client SDK regen)
 	git config core.hooksPath .githooks
 
 .PHONY: sdk-sync
-sdk-sync: ## sync crates/theway-transport/proto/ -> sdk/proto + regenerate the TS client (scripts/sdk-sync.sh)
+sdk-sync: ## sync transport proto -> sdks/client/proto + regenerate the TypeScript client
 	bash scripts/sdk-sync.sh
 
 .PHONY: sdk-publish
-sdk-publish: ## publish the TS SDK to the Nexus registry (BUMP=patch|minor|major, ISSUE="#n")
+sdk-publish: ## publish the client SDK (BUMP=patch|minor|major, ISSUE="#n")
 	bash scripts/sdk-publish.sh $(BUMP) $(ISSUE)
+
+.PHONY: plugin-sdk-check
+plugin-sdk-check: ## build, typecheck examples, and test the plugin development SDK
+	@test -d sdks/plugin/node_modules || npm --prefix sdks/plugin install --no-audit --no-fund --loglevel=error
+	npm --prefix sdks/plugin run check
+
+.PHONY: sdks-check
+sdks-check: sdk-sync ## sync/build the client SDK and check the plugin development SDK
+	npm --prefix sdks/client run build
+	$(MAKE) plugin-sdk-check
 
 # --- release helpers --------------------------------------------------------
 

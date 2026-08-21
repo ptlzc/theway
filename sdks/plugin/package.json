@@ -1,0 +1,37 @@
+{
+  "name": "@theway-ai/plugin-sdk",
+  "version": "0.1.0",
+  "description": "TypeScript authoring SDK for theway ABI v2 runtime extensions.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./schemas/*": "./abi-v2/schemas/*"
+  },
+  "files": [
+    "dist",
+    "abi-v2",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck:examples": "tsc -p examples/tsconfig.json --noEmit",
+    "test": "node --test test/*.test.mjs",
+    "check": "npm run build && npm run typecheck:examples && npm test",
+    "prepublishOnly": "npm run check"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/repository/npm-private/"
+  }
+}

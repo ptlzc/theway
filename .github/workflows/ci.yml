@@ -46,6 +46,28 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all --check
 
+  sdks:
+    name: TypeScript SDKs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            sdks/client/package-lock.json
+            sdks/plugin/package-lock.json
+      - name: install client SDK dependencies
+        run: npm ci --prefix sdks/client --no-audit --no-fund
+      - name: install plugin SDK dependencies
+        run: npm ci --prefix sdks/plugin --no-audit --no-fund
+      - name: build and test SDKs
+        run: make sdks-check
+      - name: reject generated client drift
+        run: git diff --exit-code -- sdks/client/proto sdks/client/src/generated
+
   clippy:
     name: clippy
     runs-on: ubuntu-latest
