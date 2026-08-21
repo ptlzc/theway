@@ -16,7 +16,6 @@ import { defineExtension } from "@theway-ai/plugin-sdk";
 let count = 0;
 export default defineExtension((api) => {
   api.on("input", () => ({
-    abiMajor: 2,
     actions: [{ kind: "emit_diagnostic", payload: {
       code: "lifecycle_status", severity: "info", message: "counter", details: { count: ++count },
     } }],
@@ -25,11 +24,10 @@ export default defineExtension((api) => {
 "#;
 
 const PLUGIN_SDK_COUNTER_EXTENSION: &str = r#"
-import { abiMajor, defineExtension } from "@theway-ai/plugin-sdk";
+import { defineExtension } from "@theway-ai/plugin-sdk";
 let count = 0;
 export default defineExtension((api) => {
   api.on("input", () => ({
-    abiMajor,
     actions: [{ kind: "emit_diagnostic", payload: {
       code: "lifecycle_status", severity: "info", message: "counter", details: { count: ++count },
     } }],
@@ -50,24 +48,26 @@ fn write_package(
     directory_id: &str,
     manifest_id: &str,
     priority: i32,
-    abi: u16,
+    include_abi_selector: bool,
     entry: &str,
     source: &str,
 ) -> PathBuf {
     let package = root.join(directory_id);
     std::fs::create_dir_all(&package).unwrap();
+    let mut manifest = json!({
+        "id": manifest_id,
+        "version": "1.0.0",
+        "entry": entry,
+        "priority": priority,
+        "scope": "session",
+        "permissions": [],
+    });
+    if include_abi_selector {
+        manifest["abi"] = json!(7);
+    }
     std::fs::write(
         package.join("theway-extension.json"),
-        serde_json::to_vec_pretty(&json!({
-            "id": manifest_id,
-            "version": "1.0.0",
-            "abi": abi,
-            "entry": entry,
-            "priority": priority,
-            "scope": "session",
-            "permissions": [],
-        }))
-        .unwrap(),
+        serde_json::to_vec_pretty(&manifest).unwrap(),
     )
     .unwrap();
     let entry_path = package.join(entry);
@@ -111,7 +111,7 @@ fn discovers_packages_and_orders_priority_source_then_id() {
         "high-project",
         "high-project",
         20,
-        2,
+        false,
         "index.js",
         COUNTER_EXTENSION,
     );
@@ -120,7 +120,7 @@ fn discovers_packages_and_orders_priority_source_then_id() {
         "a-global",
         "a-global",
         10,
-        2,
+        false,
         "index.js",
         COUNTER_EXTENSION,
     );
@@ -129,7 +129,7 @@ fn discovers_packages_and_orders_priority_source_then_id() {
         "b-project",
         "b-project",
         10,
-        2,
+        false,
         "index.js",
         COUNTER_EXTENSION,
     );
@@ -153,7 +153,7 @@ fn project_package_shadows_global_package_by_id() {
         "same-id",
         "same-id",
         100,
-        2,
+        false,
         "index.js",
         COUNTER_EXTENSION,
     );
@@ -162,7 +162,7 @@ fn project_package_shadows_global_package_by_id() {
         "same-id",
         "same-id",
         0,
-        2,
+        false,
         "index.js",
         COUNTER_EXTENSION,
     );
@@ -191,7 +191,7 @@ fn project_package_shadows_global_package_by_id() {
 }
 
 #[test]
-fn rejects_invalid_ids_manifests_abi_and_entry_escapes_before_evaluation() {
+fn rejects_invalid_ids_version_selectors_and_entry_escapes_before_evaluation() {
     let project = tempdir().unwrap();
     let base = tempdir().unwrap();
     let root = project_root(project.path());
@@ -200,7 +200,7 @@ fn rejects_invalid_ids_manifests_abi_and_entry_escapes_before_evaluation() {
         "Bad-Id",
         "Bad-Id",
         0,
-        2,
+        false,
         "index.js",
         "throw new Error('must not run')",
     );
@@ -209,16 +209,16 @@ fn rejects_invalid_ids_manifests_abi_and_entry_escapes_before_evaluation() {
         "mismatch",
         "different-id",
         0,
-        2,
+        false,
         "index.js",
         "throw new Error('must not run')",
     );
     write_package(
         &root,
-        "future-abi",
-        "future-abi",
+        "version-selector",
+        "version-selector",
         0,
-        99,
+        true,
         "index.js",
         "throw new Error('must not run')",
     );
@@ -227,7 +227,7 @@ fn rejects_invalid_ids_manifests_abi_and_entry_escapes_before_evaluation() {
         "escaped-entry",
         "escaped-entry",
         0,
-        2,
+        false,
         "inside.js",
         "throw new Error('must not run')",
     );
@@ -236,7 +236,6 @@ fn rejects_invalid_ids_manifests_abi_and_entry_escapes_before_evaluation() {
         serde_json::to_vec(&json!({
             "id": "escaped-entry",
             "version": "1.0.0",
-            "abi": 2,
             "entry": "../outside.js",
             "scope": "session"
         }))
@@ -256,8 +255,8 @@ fn rejects_invalid_ids_manifests_abi_and_entry_escapes_before_evaluation() {
         4
     );
     assert!(catalog.diagnostics().iter().any(|diagnostic| {
-        diagnostic.extension_id == "future-abi"
-            && diagnostic.code == ExtensionDiagnosticCode::AbiUnsupported
+        diagnostic.extension_id == "version-selector"
+            && diagnostic.code == ExtensionDiagnosticCode::ManifestInvalid
     }));
 }
 
@@ -274,7 +273,7 @@ fn rejects_symlinked_entry_that_resolves_outside_package() {
         "linked-entry",
         "linked-entry",
         0,
-        2,
+        false,
         "entry.js",
         COUNTER_EXTENSION,
     );
@@ -300,7 +299,7 @@ fn catalog_exposes_disabled_and_faulted_statuses() {
         "status-test",
         "status-test",
         0,
-        2,
+        false,
         "index.js",
         COUNTER_EXTENSION,
     );
@@ -332,7 +331,7 @@ async fn persistent_instances_retain_memory_and_isolate_concurrent_sessions() {
         "counter",
         "counter",
         0,
-        2,
+        false,
         "index.js",
         COUNTER_EXTENSION,
     );
@@ -389,7 +388,6 @@ export default defineExtension((api) => {
   api.on("extension_load", () => { phases.push("load"); });
   api.on("session_start", () => { phases.push("start"); });
   api.on("input", () => ({
-    abiMajor: 2,
     actions: [{ kind: "emit_diagnostic", payload: {
       code: "lifecycle_status", severity: "info", message: "phases",
       details: { phases: [...phases] },
@@ -404,7 +402,7 @@ export default defineExtension((api) => {
         "lifecycle",
         "lifecycle",
         0,
-        2,
+        false,
         "index.ts",
         source,
     );
@@ -431,7 +429,7 @@ async fn plugin_sdk_package_name_resolves_to_the_virtual_host_module() {
         "plugin-sdk-alias",
         "plugin-sdk-alias",
         0,
-        2,
+        false,
         "index.js",
         PLUGIN_SDK_COUNTER_EXTENSION,
     );
@@ -453,7 +451,7 @@ async fn legacy_theway_module_specifier_is_rejected() {
         "legacy-module",
         "legacy-module",
         0,
-        2,
+        false,
         "index.js",
         r#"import { defineExtension } from "theway";
 export default defineExtension(() => {});"#,
@@ -479,13 +477,21 @@ async fn mixed_catalog_faults_bad_packages_and_keeps_valid_instances() {
     let project = tempdir().unwrap();
     let base = tempdir().unwrap();
     let root = project_root(project.path());
-    write_package(&root, "good", "good", 0, 2, "index.js", COUNTER_EXTENSION);
+    write_package(
+        &root,
+        "good",
+        "good",
+        0,
+        false,
+        "index.js",
+        COUNTER_EXTENSION,
+    );
     write_package(
         &root,
         "syntax-error",
         "syntax-error",
         0,
-        2,
+        false,
         "index.js",
         "export default ???;",
     );
@@ -494,7 +500,7 @@ async fn mixed_catalog_faults_bad_packages_and_keeps_valid_instances() {
         "setup-error",
         "setup-error",
         0,
-        2,
+        false,
         "index.js",
         r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension(() => { throw new Error("setup failed"); });"#,
@@ -547,13 +553,21 @@ async fn repeated_runtime_errors_open_only_their_owners_circuit() {
     let project = tempdir().unwrap();
     let base = tempdir().unwrap();
     let root = project_root(project.path());
-    write_package(&root, "good", "good", 0, 2, "index.js", COUNTER_EXTENSION);
+    write_package(
+        &root,
+        "good",
+        "good",
+        0,
+        false,
+        "index.js",
+        COUNTER_EXTENSION,
+    );
     write_package(
         &root,
         "runtime-error",
         "runtime-error",
         0,
-        2,
+        false,
         "index.js",
         r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {

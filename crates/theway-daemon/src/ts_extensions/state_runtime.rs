@@ -5,9 +5,9 @@ use std::time::Duration;
 
 use serde_json::Value;
 use theway_contract::extension::{
-    ExtensionAbiMajor, ExtensionActionBatch, ExtensionActionKind, ExtensionDurableEntry,
-    ExtensionDurableEntryPayload, ExtensionLifecycleEvent, ExtensionModelContextPlacement,
-    ExtensionPermission, ExtensionStateMutation,
+    ExtensionActionBatch, ExtensionActionKind, ExtensionDurableEntry, ExtensionDurableEntryPayload,
+    ExtensionLifecycleEvent, ExtensionModelContextPlacement, ExtensionPermission,
+    ExtensionStateMutation,
 };
 use theway_core::agent::runtime_extensions::{
     ExtensionModelContextProjection, SessionExtensionStatePort,
@@ -255,7 +255,6 @@ impl ExtensionStateRuntime {
             ));
         }
         entries.push(ExtensionDurableEntry {
-            abi_major: ExtensionAbiMajor::V2,
             extension_id: package.manifest().id.clone(),
             state_schema_version: target_schema,
             origin_sequence,
@@ -463,7 +462,6 @@ fn state_entry(
     mutation: ExtensionStateMutation,
 ) -> ExtensionDurableEntry {
     ExtensionDurableEntry {
-        abi_major: ExtensionAbiMajor::V2,
         extension_id: extension_id.into(),
         state_schema_version: schema,
         origin_sequence,

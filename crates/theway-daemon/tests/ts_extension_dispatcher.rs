@@ -29,7 +29,6 @@ fn write_package(root: &Path, id: &str, priority: i32, source: &str) {
         serde_json::to_vec_pretty(&json!({
             "id": id,
             "version": "1.0.0",
-            "abi": 2,
             "entry": "index.js",
             "priority": priority,
             "scope": "session",
@@ -144,19 +143,16 @@ async fn transform_waterfall_uses_priority_and_keeps_last_value_after_bad_patch(
         r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
   api.on("context", { priority: 0 }, ({ payload }) => ({
-    abiMajor: 2,
     actions: [{ kind: "replace_context", payload: {
       messages: [...payload.messages, { step: "last" }],
     }}],
   }));
   api.on("context", { priority: 20 }, ({ payload }) => ({
-    abiMajor: 2,
     actions: [{ kind: "replace_context", payload: {
       messages: [...payload.messages, { step: "first" }],
     }}],
   }));
   api.on("context", { priority: 10 }, () => ({
-    abiMajor: 2,
     actions: [{ kind: "replace_context", payload: { invalid: true } }],
   }));
   api.on("context", { priority: 5 }, () => null);
@@ -213,13 +209,11 @@ async fn gate_stops_at_first_deny_and_never_runs_later_handlers() {
 let later = 0;
 export default defineExtension((api) => {
   api.on("tool_call", { priority: 20 }, () => ({
-    abiMajor: 2,
     decision: { decision: "deny", code: "policy", message: "blocked" },
     actions: [],
   }));
   api.on("tool_call", { priority: 0 }, () => { later++; return null; });
   api.on("input", () => ({
-    abiMajor: 2,
     actions: [{ kind: "emit_diagnostic", payload: {
       code: "lifecycle_status", severity: "info", message: "gate report", details: { later },
     } }],
@@ -325,7 +319,6 @@ async fn observe_mutations_are_isolated_and_stream_updates_are_coalesced() {
 let updates = 0;
 export default defineExtension((api) => {
   api.on("message_start", () => ({
-    abiMajor: 2,
     actions: [{ kind: "emit_diagnostic", payload: { forbidden: true } }],
   }));
   api.on("message_update", () => {
@@ -333,7 +326,6 @@ export default defineExtension((api) => {
     for (let index = 0; index < 8000000; index++) {}
   });
   api.on("input", () => ({
-    abiMajor: 2,
     actions: [{ kind: "emit_diagnostic", payload: {
       code: "lifecycle_status", severity: "info", message: "observe report", details: { updates },
     } }],
@@ -401,7 +393,7 @@ async fn action_output_and_timeout_limits_preserve_transform_input() {
     let cases = [
         (
             "actions",
-            r#"return { abiMajor: 2, actions: [
+            r#"return { actions: [
               { kind: "emit_diagnostic", payload: {} },
               { kind: "emit_diagnostic", payload: {} },
               { kind: "emit_diagnostic", payload: {} }
@@ -410,7 +402,7 @@ async fn action_output_and_timeout_limits_preserve_transform_input() {
         ),
         (
             "output",
-            r#"return { abiMajor: 2, actions: [
+            r#"return { actions: [
               { kind: "emit_diagnostic", payload: { text: "x".repeat(4000) } }
             ] }"#,
             ExtensionDiagnosticCode::ResourceLimit,

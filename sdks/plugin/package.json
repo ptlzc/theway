@@ -1,7 +1,7 @@
 {
   "name": "@theway-ai/plugin-sdk",
   "version": "0.1.0",
-  "description": "TypeScript authoring SDK for theway ABI v2 runtime extensions.",
+  "description": "TypeScript authoring SDK for theway runtime extensions.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -11,11 +11,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./schemas/*": "./abi-v2/schemas/*"
+    "./schemas/*": "./abi/schemas/*"
   },
   "files": [
     "dist",
-    "abi-v2",
+    "abi",
     "README.md"
   ],
   "engines": {

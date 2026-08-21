@@ -1,5 +1,4 @@
 import type {
-  ExtensionAbiMajor,
   ExtensionActionBatch,
   ExtensionActionKind,
   ExtensionClientContribution,
@@ -15,11 +14,9 @@ import type {
   ExtensionPermission,
   ExtensionScope,
   JsonValue,
-} from '../abi-v2/theway-extension.js';
+} from '../abi/theway-extension.js';
 
-export type * from '../abi-v2/theway-extension.js';
-
-export const abiMajor: ExtensionAbiMajor = 2;
+export type * from '../abi/theway-extension.js';
 
 export type MaybePromise<T> = T | Promise<T>;
 export type JsonObject = { [key: string]: JsonValue };
@@ -237,7 +234,6 @@ export interface NetworkResponse {
 }
 
 export interface ExtensionApi {
-  readonly abiMajor: ExtensionAbiMajor;
   readonly capabilities: {
     has(permission: ExtensionPermission): boolean;
   };

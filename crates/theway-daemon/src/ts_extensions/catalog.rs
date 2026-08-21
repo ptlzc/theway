@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
 use theway_contract::extension::{
-    ExtensionAbiMajor, ExtensionCatalogEntry, ExtensionCatalogStatus, ExtensionDiagnostic,
-    ExtensionDiagnosticCode, ExtensionManifestError, ExtensionPackageManifest, ExtensionPermission,
-    ExtensionScope, ExtensionSourceLayer, ExtensionTrustSubject,
+    ExtensionCatalogEntry, ExtensionCatalogStatus, ExtensionDiagnostic, ExtensionDiagnosticCode,
+    ExtensionPackageManifest, ExtensionPermission, ExtensionScope, ExtensionSourceLayer,
+    ExtensionTrustSubject,
 };
 
 use super::diagnostics;
@@ -367,13 +367,9 @@ fn read_package(
             "manifest id must match the package directory name".into(),
         ));
     }
-    manifest.validate().map_err(|error| {
-        let code = match error {
-            ExtensionManifestError::UnsupportedAbi(_) => ExtensionDiagnosticCode::AbiUnsupported,
-            _ => ExtensionDiagnosticCode::ManifestInvalid,
-        };
-        reject(code, error.to_string())
-    })?;
+    manifest
+        .validate()
+        .map_err(|error| reject(ExtensionDiagnosticCode::ManifestInvalid, error.to_string()))?;
 
     let entry_path = canonical_package.join(&manifest.entry);
     let canonical_entry = std::fs::canonicalize(&entry_path).map_err(|error| {
@@ -419,7 +415,6 @@ fn catalog_entry(
     ExtensionCatalogEntry {
         extension_id: package.manifest.id.clone(),
         version: package.manifest.version.clone(),
-        abi_major: package.manifest.abi,
         source: package.source,
         scope: package.manifest.scope,
         priority: package.manifest.priority,
@@ -437,7 +432,6 @@ fn rejected_entry(
     ExtensionCatalogEntry {
         extension_id: extension_id.to_string(),
         version: String::new(),
-        abi_major: ExtensionAbiMajor::V2,
         source,
         scope: ExtensionScope::Session,
         priority: 0,

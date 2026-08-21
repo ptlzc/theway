@@ -148,7 +148,6 @@ fn wire_extension_catalog_entry(
     WireExtensionCatalogEntry {
         extension_id: entry.extension_id,
         version: entry.version,
-        abi_major: Some(u32::from(entry.abi_major.0)),
         source: json_name(entry.source),
         scope: json_name(entry.scope),
         priority: entry.priority,

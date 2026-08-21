@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { abiMajor, defineExtension } from '../dist/index.js';
+import * as pluginSdk from '../dist/index.js';
+
+const { defineExtension } = pluginSdk;
 
 test('defineExtension creates the immutable host-compatible setup descriptor', () => {
   const setup = () => undefined;
   const extension = defineExtension(setup);
 
-  assert.equal(abiMajor, 2);
+  assert.equal('abiMajor' in pluginSdk, false);
   assert.equal(extension.setup, setup);
   assert.equal(Object.isFrozen(extension), true);
 });

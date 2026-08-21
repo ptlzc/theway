@@ -8,7 +8,7 @@ use parking_lot::Mutex;
 use serde_json::{Value, json};
 use tempfile::tempdir;
 use theway_contract::extension::{
-    ExtensionAbiMajor, ExtensionActionKind, ExtensionDiagnosticCode, ExtensionDurableEntry,
+    ExtensionActionKind, ExtensionDiagnosticCode, ExtensionDurableEntry,
     ExtensionDurableEntryPayload, ExtensionHookClass, ExtensionLifecycleEvent, ExtensionPermission,
     ExtensionStateMutation, ExtensionTrustDecision,
 };
@@ -93,7 +93,6 @@ fn write_package(project: &Path, id: &str, state_schema: u32, permissions: &[&st
         serde_json::to_vec_pretty(&json!({
             "id": id,
             "version": "1.0.0",
-            "abi": 2,
             "entry": "index.js",
             "priority": 0,
             "scope": "session",
@@ -174,7 +173,6 @@ fn state_entry(
     mutation: ExtensionStateMutation,
 ) -> ExtensionDurableEntry {
     ExtensionDurableEntry {
-        abi_major: ExtensionAbiMajor::V2,
         extension_id: extension_id.into(),
         state_schema_version: schema,
         origin_sequence: sequence,
@@ -192,7 +190,6 @@ fn event_entry(
     event_id: &str,
 ) -> ExtensionDurableEntry {
     ExtensionDurableEntry {
-        abi_major: ExtensionAbiMajor::V2,
         extension_id: extension_id.into(),
         state_schema_version: schema,
         origin_sequence: sequence,
@@ -225,7 +222,7 @@ export default defineExtension((api) => {
     api.events.append("decision-a", "decision", { order: 1 });
     api.events.append("decision-b", "decision", { order: 2 });
     api.modelContext.append("restored", "system_prompt_section", "restored context");
-    return { abiMajor: 2, actions: [{ kind: "replace_model_request", payload: {
+    return { actions: [{ kind: "replace_model_request", payload: {
       request: { ...payload.request, systemInstructions:
         `${previous ?? "none"}:${events.map(event => event.eventId).join(",")}:${memoryCount}` },
     }}] };
@@ -301,7 +298,7 @@ async fn replay_uses_tombstones_last_write_wins_and_branch_event_order() {
         &["session.write"],
         r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
-  api.on("before_model_request", ({ payload }) => ({ abiMajor: 2, actions: [{
+  api.on("before_model_request", ({ payload }) => ({ actions: [{
     kind: "replace_model_request", payload: { request: { ...payload.request,
       systemInstructions: JSON.stringify({ value: api.state.get("key"), events: api.events.replay() })
     }}
@@ -365,7 +362,7 @@ async fn fork_and_branch_switch_rebuild_from_the_selected_branch_projection() {
         &["session.write"],
         r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
-  api.on("before_model_request", ({ payload }) => ({ abiMajor: 2, actions: [{
+  api.on("before_model_request", ({ payload }) => ({ actions: [{
     kind: "replace_model_request", payload: { request: { ...payload.request,
       systemInstructions: JSON.stringify({ phase: api.state.get("phase"),
         events: api.events.replay().map(event => event.eventId) })
@@ -518,7 +515,7 @@ export default defineExtension((api) => {
     if (mode === "count") { api.state.set("a", 1); api.state.set("b", 2); }
     if (mode === "size") api.state.set("large", "x".repeat(1024));
     if (mode === "total") api.state.set("next", "value");
-    return { abiMajor: 2, actions: [{ kind: "replace_model_request", payload: {
+    return { actions: [{ kind: "replace_model_request", payload: {
       request: { ...payload.request, systemInstructions: "changed" },
     }}] };
   });
@@ -612,8 +609,8 @@ async fn migration_commits_before_hooks_and_failure_preserves_history() {
         &["session.write"],
         r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
-  api.migrateState(({ state }) => ({ state: { phase: `${state.phase}-v2` } }));
-  api.on("before_model_request", ({ payload }) => ({ abiMajor: 2, actions: [{
+  api.migrateState(({ state }) => ({ state: { phase: `${state.phase}-migrated` } }));
+  api.on("before_model_request", ({ payload }) => ({ actions: [{
     kind: "replace_model_request", payload: { request: { ...payload.request,
       systemInstructions: api.state.get("phase")
     }}
@@ -659,7 +656,7 @@ export default defineExtension((api) => {
     )
     .await
     .unwrap();
-    assert_eq!(replacement_value(&result), "old-v2");
+    assert_eq!(replacement_value(&result), "old-migrated");
     host.shutdown().await;
 
     let failed_project = tempdir().unwrap();
@@ -715,7 +712,7 @@ fn state_and_transform_source() -> &'static str {
 export default defineExtension((api) => {
   api.on("before_model_request", ({ payload }) => {
     api.state.set("phase", "changed");
-    return { abiMajor: 2, actions: [{ kind: "replace_model_request", payload: {
+    return { actions: [{ kind: "replace_model_request", payload: {
       request: { ...payload.request, systemInstructions: "changed" },
     }}] };
   });

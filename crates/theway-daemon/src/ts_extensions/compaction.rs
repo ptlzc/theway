@@ -39,7 +39,7 @@ pub fn compact_algorithm_registry(extensions: &ExtensionRegistry) -> CompactAlgo
     registry
 }
 
-/// Atomically rebuild the legacy compaction adapters without exposing ABI v2 host capabilities.
+/// Atomically rebuild the legacy compaction adapters without exposing package host capabilities.
 pub fn reload_compact_algorithm_registry(
     registry: &CompactAlgorithmRegistry,
     extensions: &ExtensionRegistry,

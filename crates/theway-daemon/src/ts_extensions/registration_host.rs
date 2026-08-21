@@ -3,9 +3,9 @@ use std::sync::atomic::AtomicBool;
 
 use serde_json::Value;
 use theway_contract::extension::{
-    ExtensionAbiMajor, ExtensionAction, ExtensionActionBatch, ExtensionActionKind,
-    ExtensionClientContribution, ExtensionCommandOutcome, ExtensionHookClass,
-    ExtensionHookContract, ExtensionHookDeadline, ExtensionLifecycleEvent, ExtensionScope,
+    ExtensionAction, ExtensionActionBatch, ExtensionActionKind, ExtensionClientContribution,
+    ExtensionCommandOutcome, ExtensionHookClass, ExtensionHookContract, ExtensionHookDeadline,
+    ExtensionLifecycleEvent, ExtensionScope,
 };
 use theway_core::AgentTool;
 use theway_core::agent::runtime_extensions::RuntimeExtensionInvocation;
@@ -252,7 +252,6 @@ impl SessionPluginHost {
                 format!("{existing}\n\n{appended}")
             });
             let batch = ExtensionActionBatch {
-                abi_major: ExtensionAbiMajor::V2,
                 decision: None,
                 actions: vec![ExtensionAction {
                     kind: ExtensionActionKind::ReplaceModelRequest,

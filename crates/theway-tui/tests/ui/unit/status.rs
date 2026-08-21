@@ -396,7 +396,6 @@ async fn runtime_extension_view_renders_redaction_without_feed_noise() {
         catalog: vec![theway_transport::wire::WireExtensionCatalogEntry {
             extension_id: "anchor".into(),
             version: "1.0.0".into(),
-            abi_major: Some(2),
             source: "project".into(),
             scope: "session".into(),
             priority: 0,

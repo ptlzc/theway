@@ -1,12 +1,5 @@
 {
   "$defs": {
-    "ExtensionAbiMajor": {
-      "description": "ABI major declared by an extension package.",
-      "format": "uint16",
-      "maximum": 65535,
-      "minimum": 0,
-      "type": "integer"
-    },
     "ExtensionPermission": {
       "oneOf": [
         {
@@ -43,11 +36,8 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Strict on-disk package manifest for an ABI v2 runtime extension.",
+  "description": "Strict on-disk package manifest for a runtime extension.",
   "properties": {
-    "abi": {
-      "$ref": "#/$defs/ExtensionAbiMajor"
-    },
     "entry": {
       "type": "string"
     },
@@ -90,7 +80,6 @@
   "required": [
     "id",
     "version",
-    "abi",
     "entry",
     "scope"
   ],

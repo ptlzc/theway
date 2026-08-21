@@ -30,7 +30,6 @@ fn write_package(project: &Path, id: &str, permissions: &[&str], source: &str) {
         serde_json::to_vec_pretty(&json!({
             "id": id,
             "version": "1.0.0",
-            "abi": 2,
             "entry": "index.js",
             "priority": 0,
             "scope": "session",
@@ -213,7 +212,7 @@ export default defineExtension((api) => {
     let symlink = "allowed";
     try { await api.workspace.readText("../secret.txt"); } catch (error) { traversal = error.code; }
     try { await api.workspace.readText("escape-link/secret.txt"); } catch (error) { symlink = error.code; }
-    return { abiMajor: 2, actions: [{ kind: "emit_diagnostic", payload: {
+    return { actions: [{ kind: "emit_diagnostic", payload: {
       code: "lifecycle_status", severity: "info", message: "workspace broker",
       details: { inside, traversal, symlink, ambientFetch: typeof fetch },
     }}] };
@@ -262,7 +261,7 @@ export default defineExtension((api) => {
     let denied = "missing";
     try { await api.workspace.readText("inside.txt"); } catch (error) { denied = error.code; }
     const secret = await api.secrets.read("demo");
-    return { abiMajor: 2, actions: [{ kind: "emit_diagnostic", payload: {
+    return { actions: [{ kind: "emit_diagnostic", payload: {
       code: "lifecycle_status", severity: "info", message: "secret broker",
       details: {
         denied, secretMatches: secret.startsWith("sk-"),
@@ -331,7 +330,7 @@ export default defineExtension((api) => {{
   api.on("input", async () => {{
     const process = await api.process.run(["/bin/sh", "-c", "printf process-ok"]);
     const network = await api.network.fetch("http://{address}/token?secret=hidden");
-    return {{ abiMajor: 2, actions: [{{ kind: "emit_diagnostic", payload: {{
+    return {{ actions: [{{ kind: "emit_diagnostic", payload: {{
       code: "lifecycle_status", severity: "info", message: "process network broker",
       details: {{ stdout: process.stdout, status: network.status, body: network.body }},
     }} }}] }};
@@ -448,7 +447,7 @@ async fn provider_raw_broker_exposes_only_current_authorized_payload() {
 export default defineExtension((api) => {
   api.on("before_provider_request_raw", async () => {
     const payload = await api.providerRaw.read();
-    return { abiMajor: 2, actions: [{ kind: "replace_provider_payload", payload: {
+    return { actions: [{ kind: "replace_provider_payload", payload: {
       request: { ...payload.request, inspected: true },
     }}] };
   });

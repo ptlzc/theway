@@ -118,7 +118,6 @@ async fn extension_protocol_projection_and_command_do_not_append_feed_lines() {
         serde_json::to_vec_pretty(&serde_json::json!({
             "id": "quiet-extension",
             "version": "1.0.0",
-            "abi": 2,
             "entry": "index.js",
             "priority": 0,
             "scope": "session",
@@ -132,7 +131,7 @@ async fn extension_protocol_projection_and_command_do_not_append_feed_lines() {
         package.join("index.js"),
         r#"import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
-  api.on("input", () => ({ abiMajor: 2, actions: [] }));
+  api.on("input", () => ({ actions: [] }));
   api.registerCommand({
     name: "quiet-check", label: "Quiet", description: "Quiet protocol check",
     argumentSchema: { type: "object" },

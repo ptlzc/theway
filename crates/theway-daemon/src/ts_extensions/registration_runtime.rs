@@ -6,8 +6,8 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use serde_json::{Value, json};
 use theway_contract::extension::{
-    ExtensionAbiMajor, ExtensionActionBatch, ExtensionClientContribution,
-    ExtensionCommandDescriptor, ExtensionCommandOutcome, ExtensionLifecycleEvent,
+    ExtensionActionBatch, ExtensionClientContribution, ExtensionCommandDescriptor,
+    ExtensionCommandOutcome, ExtensionLifecycleEvent,
 };
 use theway_core::AgentTool;
 use theway_llm_provider::Provider;
@@ -298,7 +298,6 @@ impl RegistrationRuntime {
         let outcome = serde_json::from_value(result.value)
             .map_err(|error| format!("extension command outcome is invalid: {error}"))?;
         let mut batch = ExtensionActionBatch {
-            abi_major: ExtensionAbiMajor::V2,
             decision: None,
             actions: result.queued_durable_actions,
         };

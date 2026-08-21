@@ -7,9 +7,9 @@ use parking_lot::Mutex;
 use serde_json::json;
 use tempfile::tempdir;
 use theway_contract::extension::{
-    ExtensionAbiMajor, ExtensionDiagnosticCode, ExtensionDurableEntry,
-    ExtensionDurableEntryPayload, ExtensionHookClass, ExtensionLifecycleEvent, ExtensionPermission,
-    ExtensionStateMutation, ExtensionTrustDecision,
+    ExtensionDiagnosticCode, ExtensionDurableEntry, ExtensionDurableEntryPayload,
+    ExtensionHookClass, ExtensionLifecycleEvent, ExtensionPermission, ExtensionStateMutation,
+    ExtensionTrustDecision,
 };
 use theway_core::agent::compaction::compaction::CompactionSettings;
 use theway_core::agent::runtime_extensions::{
@@ -41,7 +41,6 @@ fn write_package(
         serde_json::to_vec_pretty(&json!({
             "id": id,
             "version": "1.0.0",
-            "abi": 2,
             "entry": "index.js",
             "priority": 0,
             "scope": "session",
@@ -77,7 +76,6 @@ fn marker_source(marker: &str) -> String {
         r#"import {{ defineExtension }} from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {{
   api.on("input", () => ({{
-    abiMajor: 2,
     actions: [{{ kind: "emit_diagnostic", payload: {{
       code: "lifecycle_status", severity: "info", message: "reload marker",
       details: {{ marker: "{marker}" }},
@@ -96,7 +94,6 @@ export default defineExtension((api) => {{
     inputSchema: {{ type: "object" }},
   }}, async () => ({{ content: [], details: {{}} }}));
   api.on("input", () => ({{
-    abiMajor: 2,
     actions: [{{ kind: "emit_diagnostic", payload: {{
       code: "lifecycle_status", severity: "info", message: "reload tool marker",
       details: {{ marker: "{marker}" }},
@@ -411,7 +408,6 @@ export default defineExtension((api) => {
         serde_json::to_vec_pretty(&json!({
             "id": "scoped-effects",
             "version": "1.0.0",
-            "abi": 2,
             "entry": "index.js",
             "priority": 0,
             "scope": "process",
@@ -592,7 +588,6 @@ impl SessionExtensionStatePort for MemoryStatePort {
 
 fn state_entry(extension_id: &str) -> ExtensionDurableEntry {
     ExtensionDurableEntry {
-        abi_major: ExtensionAbiMajor::V2,
         extension_id: extension_id.into(),
         state_schema_version: 1,
         origin_sequence: 1,
@@ -677,7 +672,7 @@ fn write_legacy(project: &Path, source: &str) -> PathBuf {
 }
 
 #[tokio::test]
-async fn legacy_compaction_reload_preserves_hooks_without_v2_capabilities() {
+async fn legacy_compaction_reload_preserves_hooks_without_package_capabilities() {
     let project = tempdir().unwrap();
     let base = tempdir().unwrap();
     let path = write_legacy(

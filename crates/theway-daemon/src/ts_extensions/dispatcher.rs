@@ -4,7 +4,7 @@ use std::time::Duration;
 use serde::Deserialize;
 use serde_json::Value;
 use theway_contract::extension::{
-    ExtensionAbiMajor, ExtensionActionKind, ExtensionCancellationContext, ExtensionDeliveryPolicy,
+    ExtensionActionKind, ExtensionCancellationContext, ExtensionDeliveryPolicy,
     ExtensionEventContext, ExtensionEventEnvelope, ExtensionHookClass, ExtensionHookContract,
     ExtensionHookDeadline, ExtensionHookFailurePolicy, ExtensionLifecycleEvent, ExtensionScopeIds,
 };
@@ -396,7 +396,6 @@ pub(super) fn envelope(
     payload: Value,
 ) -> ExtensionEventEnvelope {
     ExtensionEventEnvelope {
-        abi_major: ExtensionAbiMajor::V2,
         event,
         context: ExtensionEventContext {
             extension_id: extension_id.to_string(),
@@ -426,7 +425,6 @@ pub(super) fn runtime_envelope_with_payload(
 ) -> ExtensionEventEnvelope {
     let context = invocation.context();
     ExtensionEventEnvelope {
-        abi_major: ExtensionAbiMajor::V2,
         event: invocation.event(),
         context: ExtensionEventContext {
             extension_id: extension_id.to_string(),

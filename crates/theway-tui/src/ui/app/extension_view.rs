@@ -40,10 +40,6 @@ impl App {
                     "blocked" | "disabled" => Color::Yellow,
                     _ => Color::DarkGray,
                 };
-                let abi = entry
-                    .abi_major
-                    .map(|abi| format!(" · ABI {abi}"))
-                    .unwrap_or_default();
                 let reason = entry
                     .reason_code
                     .as_deref()
@@ -51,12 +47,11 @@ impl App {
                     .unwrap_or_default();
                 lines.push(Line::styled(
                     format!(
-                        "{} {} [{} · {}{}{}]",
+                        "{} {} [{} · {}{}]",
                         entry.extension_id,
                         entry.version,
                         entry.status,
                         entry.source,
-                        abi,
                         reason
                     ),
                     Style::default().fg(color),

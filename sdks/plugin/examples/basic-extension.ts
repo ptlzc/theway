@@ -31,7 +31,6 @@ export default defineExtension(async (api) => {
   );
 
   api.on('before_model_request', { priority: 20 }, ({ payload }) => ({
-    abiMajor: 2,
     actions: [
       {
         kind: 'replace_model_request',

@@ -35,7 +35,6 @@ fn write_package(project: &Path, id: &str, permissions: &[&str], source: &str) {
         serde_json::to_vec_pretty(&json!({
             "id": id,
             "version": "1.0.0",
-            "abi": 2,
             "entry": "index.js",
             "priority": 0,
             "scope": "session",
@@ -605,7 +604,6 @@ export default defineExtension((api) => {
     policyId: "token-policy", priority: 10,
     predicate: { providers: ["openai"], models: ["target-model"] },
   }, async ({ request }) => ({
-    abiMajor: 2,
     actions: [{ kind: "replace_model_request", payload: {
       request: { ...request, generationOptions: { maxTokens: 7 } },
     }}],
@@ -675,7 +673,6 @@ export default defineExtension((api) => {
     let updateError;
     try { status.update({}); } catch (error) { updateError = error.code; }
     return {
-      abiMajor: 2,
       actions: [{ kind: "emit_diagnostic", payload: {
         code: "lifecycle_status", severity: "info", message: "disposed handle",
         details: { updateError },

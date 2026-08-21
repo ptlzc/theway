@@ -44,7 +44,7 @@ pub(super) struct ActiveExtension {
     pub(super) observation_queues: BTreeMap<u64, Arc<ObservationQueue>>,
 }
 
-/// Persistent ABI v2 package instances owned by one runtime session.
+/// Persistent extension-package instances owned by one runtime session.
 pub struct SessionPluginHost {
     pub(super) session_id: String,
     pub(super) cwd: String,

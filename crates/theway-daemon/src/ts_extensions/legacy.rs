@@ -52,7 +52,7 @@ impl TsExtension {
         )
     }
 
-    /// Run one legacy hook in a fresh context. ABI v2 capabilities are not
+    /// Run one legacy hook in a fresh context. Package capabilities are not
     /// installed on this compatibility path.
     pub fn run_hook(&self, hook: &str, arg: &Value) -> Result<Option<Value>, String> {
         ts::run_hook_js(&self.js, hook, arg)

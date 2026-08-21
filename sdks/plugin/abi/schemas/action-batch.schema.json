@@ -1,12 +1,5 @@
 {
   "$defs": {
-    "ExtensionAbiMajor": {
-      "description": "ABI major declared by an extension package.",
-      "format": "uint16",
-      "maximum": 65535,
-      "minimum": 0,
-      "type": "integer"
-    },
     "ExtensionAction": {
       "additionalProperties": false,
       "properties": {
@@ -121,9 +114,6 @@
   "additionalProperties": false,
   "description": "Complete return value from one hook invocation.",
   "properties": {
-    "abiMajor": {
-      "$ref": "#/$defs/ExtensionAbiMajor"
-    },
     "actions": {
       "default": [],
       "items": {
@@ -142,9 +132,6 @@
       ]
     }
   },
-  "required": [
-    "abiMajor"
-  ],
   "title": "ExtensionActionBatch",
   "type": "object"
 }

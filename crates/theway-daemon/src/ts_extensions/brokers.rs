@@ -9,7 +9,6 @@ use serde_json::{Value, json};
 use theway_contract::extension::{
     ExtensionAuditOperation, ExtensionAuditOutcome, ExtensionDiagnostic, ExtensionDiagnosticCode,
     ExtensionDiagnosticSeverity, ExtensionLifecycleEvent, ExtensionPermission,
-    RUNTIME_EXTENSION_ABI_MAJOR,
 };
 
 use super::broker_paths::{audit_path, resolve_existing_path, resolve_write_path};
@@ -676,18 +675,15 @@ pub(super) const PLUGIN_SDK_MODULE: &str = "@theway-ai/plugin-sdk";
 /// explicit API methods; no ambient daemon authority is copied into the
 /// JavaScript global object.
 pub(super) fn generated_theway_module() -> String {
-    format!(
-        r#"
-export const abiMajor = {abi};
-export function defineExtension(setup) {{
-  if (typeof setup !== "function") {{
+    r#"
+export function defineExtension(setup) {
+  if (typeof setup !== "function") {
     throw new TypeError("defineExtension requires a setup function");
-  }}
-  return Object.freeze({{ setup }});
-}}
-"#,
-        abi = RUNTIME_EXTENSION_ABI_MAJOR
-    )
+  }
+  return Object.freeze({ setup });
+}
+"#
+    .to_string()
 }
 
 /// Names intentionally absent from the direct package environment. Tests use

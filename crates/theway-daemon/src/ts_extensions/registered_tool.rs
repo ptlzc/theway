@@ -4,9 +4,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use theway_contract::extension::{
-    ExtensionAbiMajor, ExtensionActionBatch, ExtensionLifecycleEvent,
-};
+use theway_contract::extension::{ExtensionActionBatch, ExtensionLifecycleEvent};
 use theway_core::{
     AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate, PermissionClassification,
 };
@@ -155,7 +153,6 @@ impl AgentTool for RegisteredExtensionTool {
             AgentToolError::Message(format!("extension tool result is invalid: {error}"))
         })?;
         let mut batch = ExtensionActionBatch {
-            abi_major: ExtensionAbiMajor::V2,
             decision: None,
             actions: result.queued_durable_actions,
         };

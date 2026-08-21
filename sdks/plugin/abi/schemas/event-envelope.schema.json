@@ -1,12 +1,5 @@
 {
   "$defs": {
-    "ExtensionAbiMajor": {
-      "description": "ABI major declared by an extension package.",
-      "format": "uint16",
-      "maximum": 65535,
-      "minimum": 0,
-      "type": "integer"
-    },
     "ExtensionCancellationContext": {
       "description": "Cancellation state and host deadline exposed to a hook invocation. The\nvalue carries no cancellation handle or runtime object.",
       "properties": {
@@ -171,9 +164,6 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Engine-neutral event delivered to one extension instance.",
   "properties": {
-    "abiMajor": {
-      "$ref": "#/$defs/ExtensionAbiMajor"
-    },
     "context": {
       "$ref": "#/$defs/ExtensionEventContext"
     },
@@ -183,7 +173,6 @@
     "payload": true
   },
   "required": [
-    "abiMajor",
     "event",
     "context",
     "payload"

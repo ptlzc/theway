@@ -3,7 +3,6 @@
     "ExtensionDiagnosticCode": {
       "enum": [
         "manifest_invalid",
-        "abi_unsupported",
         "shadowed",
         "trust_required",
         "permission_denied",

@@ -1,8 +1,8 @@
 //! Daemon-owned TypeScript extension discovery and execution.
 //!
-//! ABI v2 packages live in a directory containing `theway-extension.json` and
+//! Runtime-extension packages live in a directory containing `theway-extension.json` and
 //! run as persistent, session-isolated QuickJS instances. Top-level `*.ts`
-//! files retain the legacy compaction-only contract and never receive ABI v2
+//! files retain the legacy compaction-only contract and never receive package
 //! host capabilities.
 
 mod audit;
@@ -61,12 +61,12 @@ pub use trust::{ExtensionTrustStore, GlobalExtensionPolicy};
 
 use legacy::LegacyExtensionRegistry;
 
-/// Unified discovery result for legacy compaction files and ABI v2 packages.
+/// Unified discovery result for legacy compaction files and extension packages.
 pub struct ExtensionRegistry {
     legacy: LegacyExtensionRegistry,
     packages: PackageCatalog,
     /// Human-readable startup diagnostics retained for the existing logging
-    /// boundary. Structured ABI v2 diagnostics are available from
+    /// boundary. Structured package diagnostics are available from
     /// [`Self::package_catalog`].
     pub errors: Vec<String>,
 }
@@ -86,7 +86,7 @@ impl ExtensionRegistry {
         }
     }
 
-    /// Discover both compatibility files and ABI v2 packages. The project
+    /// Discover both compatibility files and extension packages. The project
     /// root is `<cwd>/.theway/extensions`; the global root is
     /// `<base>/extensions`.
     pub fn discover(cwd: &Path, base: &Path) -> Self {

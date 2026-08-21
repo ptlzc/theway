@@ -274,10 +274,10 @@ export default defineExtension(async (api) => {
   api.on("before_model_request", async ({ payload, context }) => {
     const request = payload.request;
     if (config.zeroAnchor) {
-      return { abiMajor: 2, actions: decisionDiagnostic(api, "zero_anchor") };
+      return { actions: decisionDiagnostic(api, "zero_anchor") };
     }
     if (!matchesModel(config, context.model)) {
-      return { abiMajor: 2, actions: decisionDiagnostic(api, "inactive") };
+      return { actions: decisionDiagnostic(api, "inactive") };
     }
     if (api.state.get(PROMOTION_KEY) === "promoted") {
       const actions = decisionDiagnostic(api, "promoted");
@@ -288,7 +288,7 @@ export default defineExtension(async (api) => {
             ? config.bootstrapPrompt : `${config.bootstrapPrompt}\n\n${base}` },
         } });
       }
-      return { abiMajor: 2, actions };
+      return { actions };
     }
     const visible = request.visibleTools ?? [];
     const executable = new Set(request.executableToolNames ?? []);
@@ -302,7 +302,7 @@ export default defineExtension(async (api) => {
       ? request.generationOptions
       : { ...request.generationOptions, maxTokens: config.bootstrapTokenLimit };
     api.memory.set("bootstrap-armed", true);
-    return { abiMajor: 2, actions: [
+    return { actions: [
       { kind: "replace_model_request", payload: { request: {
         ...request,
         systemInstructions: config.bootstrapPrompt,
@@ -329,6 +329,6 @@ export default defineExtension(async (api) => {
     });
     api.modelContext.append(RESTORED_CONTEXT_ID, "system_prompt_section",
       config.restoredContext);
-    return { abiMajor: 2, actions: [diagnostic("promoted")] };
+    return { actions: [diagnostic("promoted")] };
   });
 });

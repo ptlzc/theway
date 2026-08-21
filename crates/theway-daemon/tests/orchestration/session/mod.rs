@@ -402,7 +402,6 @@ export default defineExtension((api) => {
             serde_json::to_vec(&serde_json::json!({
                 "id": id,
                 "version": "1.0.0",
-                "abi": 2,
                 "entry": "index.js",
                 "priority": 0,
                 "scope": "session"

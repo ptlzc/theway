@@ -1,12 +1,5 @@
 {
   "$defs": {
-    "ExtensionAbiMajor": {
-      "description": "ABI major declared by an extension package.",
-      "format": "uint16",
-      "maximum": 65535,
-      "minimum": 0,
-      "type": "integer"
-    },
     "ExtensionDurableEntryPayload": {
       "description": "Domain payload persisted inside an opaque extension session entry.",
       "oneOf": [
@@ -146,11 +139,8 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Versioned extension-owned entry stored on the active session branch. The\nsurrounding session record supplies append identity, parent, and timestamp.",
+  "description": "Extension-owned entry stored on the active session branch. The\nsurrounding session record supplies append identity, parent, and timestamp.",
   "properties": {
-    "abiMajor": {
-      "$ref": "#/$defs/ExtensionAbiMajor"
-    },
     "entry": {
       "$ref": "#/$defs/ExtensionDurableEntryPayload"
     },
@@ -169,7 +159,6 @@
     }
   },
   "required": [
-    "abiMajor",
     "extensionId",
     "stateSchemaVersion",
     "originSequence",

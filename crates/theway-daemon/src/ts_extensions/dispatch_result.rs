@@ -1,12 +1,11 @@
 use serde_json::Value;
 use theway_contract::extension::{
-    ExtensionAbiMajor, ExtensionAction, ExtensionActionBatch, ExtensionActionKind,
-    ExtensionGateDecision, ExtensionHookClass, ExtensionLifecycleEvent,
+    ExtensionAction, ExtensionActionBatch, ExtensionActionKind, ExtensionGateDecision,
+    ExtensionHookClass, ExtensionLifecycleEvent,
 };
 
 pub(super) fn empty_batch() -> ExtensionActionBatch {
     ExtensionActionBatch {
-        abi_major: ExtensionAbiMajor::V2,
         decision: None,
         actions: Vec::new(),
     }

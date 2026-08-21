@@ -77,7 +77,6 @@ function __thewayQueueDurable(kind, entry) {
   globalThis.__thewayPendingDurableActions.push({
     kind,
     payload: {
-      abiMajor: 2,
       extensionId: envelope.context.extensionId,
       stateSchemaVersion,
       originSequence: Math.max(1, envelope.context.sequence),
@@ -94,7 +93,6 @@ globalThis.__thewaySetup = async function () {
       throw new TypeError("extension default export must be created by defineExtension");
     }
     const api = Object.freeze({
-      abiMajor: 2,
       capabilities: Object.freeze({
         has(permission) {
           return __thewayBrokerCall("capabilities.has", { permission });
