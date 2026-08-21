@@ -65,53 +65,85 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }} --workspace
         shell: bash
 
-      - name: package
+      - name: package products
         id: pkg
         shell: bash
         run: |
           set -euo pipefail
-          name="theway-${RELEASE_TAG}-${{ matrix.target }}"
           extension=""
           if [ "${{ matrix.target }}" = "x86_64-pc-windows-msvc" ]; then
             extension=".exe"
           fi
-          mkdir -p dist/"$name"
-          for binary in theway thewayd theway-probe; do
-            source="target/${{ matrix.target }}/release/$binary$extension"
-            test -f "$source" || {
-              echo "missing release binary: $source" >&2
-              exit 1
-            }
-            cp "$source" dist/"$name"/
-          done
-          cp dist/"$name"/theway$extension dist/"$name"/tw$extension
-          cp README.md LICENSE dist/"$name"/
-          {
-            echo "tag=$RELEASE_TAG"
-            echo "commit=$RELEASE_COMMIT"
-            echo "target=${{ matrix.target }}"
-          } > dist/"$name"/RELEASE-METADATA
-          case "${{ matrix.archive }}" in
-            tar.gz)
-              tar -C dist -czf dist/"$name".tar.gz "$name"
-              ;;
-            zip)
-              powershell -NoLogo -NoProfile -NonInteractive -Command \
-                "Compress-Archive -Path 'dist/$name' -DestinationPath 'dist/$name.zip' -Force"
-              ;;
-            *)
-              echo "unsupported archive format: ${{ matrix.archive }}" >&2
-              exit 1
-              ;;
-          esac
-          echo "name=$name" >> "$GITHUB_OUTPUT"
-          echo "asset=dist/${name}.${{ matrix.archive }}" >> "$GITHUB_OUTPUT"
+          package_product() {
+            local product="$1"
+            local name="${product}-${RELEASE_TAG}-${{ matrix.target }}"
+            local -a binaries
+            case "$product" in
+              theway)
+                # The TUI discovers and spawns this sibling daemon when needed.
+                binaries=(theway thewayd)
+                ;;
+              theway-daemon)
+                binaries=(thewayd)
+                ;;
+              *)
+                echo "unsupported product: $product" >&2
+                return 1
+                ;;
+            esac
+            mkdir -p dist/"$name"
+            for binary in "${binaries[@]}"; do
+              source="target/${{ matrix.target }}/release/$binary$extension"
+              test -f "$source" || {
+                echo "missing release binary: $source" >&2
+                return 1
+              }
+              cp "$source" dist/"$name"/
+            done
+            cp README.md LICENSE dist/"$name"/
+            {
+              echo "product=$product"
+              echo "tag=$RELEASE_TAG"
+              echo "commit=$RELEASE_COMMIT"
+              echo "target=${{ matrix.target }}"
+            } > dist/"$name"/RELEASE-METADATA
+            case "${{ matrix.archive }}" in
+              tar.gz)
+                tar -C dist -czf dist/"$name".tar.gz "$name"
+                ;;
+              zip)
+                powershell -NoLogo -NoProfile -NonInteractive -Command \
+                  "Compress-Archive -Path 'dist/$name' -DestinationPath 'dist/$name.zip' -Force"
+                ;;
+              *)
+                echo "unsupported archive format: ${{ matrix.archive }}" >&2
+                return 1
+                ;;
+            esac
+          }
 
-      - name: upload artifact
+          tui_name="theway-${RELEASE_TAG}-${{ matrix.target }}"
+          daemon_name="theway-daemon-${RELEASE_TAG}-${{ matrix.target }}"
+          package_product theway
+          package_product theway-daemon
+          echo "tui_name=$tui_name" >> "$GITHUB_OUTPUT"
+          echo "tui_asset=dist/${tui_name}.${{ matrix.archive }}" >> "$GITHUB_OUTPUT"
+          echo "daemon_name=$daemon_name" >> "$GITHUB_OUTPUT"
+          echo "daemon_asset=dist/${daemon_name}.${{ matrix.archive }}" >> "$GITHUB_OUTPUT"
+
+      - name: upload theway artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.pkg.outputs.name }}
-          path: ${{ steps.pkg.outputs.asset }}
+          name: ${{ steps.pkg.outputs.tui_name }}
+          path: ${{ steps.pkg.outputs.tui_asset }}
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: upload theway-daemon artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pkg.outputs.daemon_name }}
+          path: ${{ steps.pkg.outputs.daemon_asset }}
           if-no-files-found: error
           retention-days: 7
 
