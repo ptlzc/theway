@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "tag to publish (e.g. v0.75.0)"
+        description: "tag to publish (e.g. v0.1.1)"
         required: true
 
 env:
