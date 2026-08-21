@@ -13,7 +13,7 @@ via ts-proto + `@grpc/grpc-js` — **no runtime proto loading**, no path magic.
 `SessionService`, `SettingsService`, `GraphEngineService`, and `EventService` — while
 `HealthClient` covers the standard `grpc.health.v1.Health` service.
 
-Published to the internal Nexus npm-private registry (`https://registry.npmjs.org/repository/npm-private/`).
+Published as a public package on the official npm registry (`https://registry.npmjs.org/`).
 
 ## Install
 
@@ -83,7 +83,7 @@ npm run gen      # protoc (grpc-tools) + ts-proto → src/generated/
 
 ## Publishing
 
-Publishing to the Nexus registry is manual ([`scripts/sdk-publish.sh`](../../scripts/sdk-publish.sh)):
+Publishing to the official npm registry is manual ([`scripts/sdk-publish.sh`](../../scripts/sdk-publish.sh)):
 
 ```sh
 cd ../..
@@ -91,9 +91,10 @@ make sdk-publish BUMP=minor ISSUE="#62"
 # 或: bash scripts/sdk-publish.sh minor "#62"
 ```
 
-The script verifies the tree is clean and in sync, bumps the version, runs `npm publish` against the
-registry in `publishConfig`, and commits the version bump. The publishing machine's `~/.npmrc` must hold a
-`_authToken` for `//registry.npmjs.org/repository/npm-private/`.
+The script verifies the tree is clean and in sync, checks the active npm identity against the official
+registry, bumps the version, publishes with public access, and commits the version bump. Run
+`npm login --registry=https://registry.npmjs.org/` before invoking it; the account must satisfy npm's
+two-factor authentication requirements for publishing.
 
 ## Versioning
 
