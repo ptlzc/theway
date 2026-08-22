@@ -1,11 +1,13 @@
 //! Build script: compile the four domain proto files
 //! (`commands.proto`, `session.proto`, `graph_engine.proto`, `events.proto`)
-//! plus `crates/theway-transport/proto/health.proto` for the probe's gRPC clients.
+//! plus `health.proto` from the crate-local `proto` symlink. The repository
+//! symlink targets the transport-owned definitions and Cargo flattens it when
+//! packaging the probe.
 
 use std::path::Path;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let proto_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../theway-transport/proto");
+    let proto_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("proto");
     let commands_file = proto_dir.join("commands.proto");
     let session_file = proto_dir.join("session.proto");
     let graph_engine_file = proto_dir.join("graph_engine.proto");

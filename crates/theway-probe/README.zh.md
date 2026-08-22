@@ -4,7 +4,7 @@
 
 `theway-probe` 是面向已运行 `thewayd` 的独立 gRPC 可服务性客户端。它在不链接 daemon 或 transport Rust crate 的情况下检查标准 gRPC health 端点、health watch 流、多会话创建/列举行为和会话状态获取。
 
-该二进制直接从 transport 拥有的 protobuf 定义编译 tonic 客户端，其中包括 `health.proto`，编译过程由 [`build.rs`](build.rs) 驱动。这样既保持 probe 独立，也能测试 daemon 实际暴露的同一协议。
+该二进制在 [`build.rs`](build.rs) 中通过 crate 本地的 [`proto`](proto) 符号链接使用 transport 拥有的 protobuf 定义并编译 tonic 客户端，其中包括 `health.proto`。Cargo 会在发布包中展开该符号链接，因此 probe 仍是独立的协议消费者，crates.io 源码包也保持自包含。
 
 ## 使用
 

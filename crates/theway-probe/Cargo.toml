@@ -8,6 +8,15 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
+include = [
+    "AGENTS.md",
+    "README*.md",
+    "README.i18n.yaml",
+    "build.rs",
+    "docs/**",
+    "proto/**",
+    "src/**",
+]
 
 [[bin]]
 name = "theway-probe"
