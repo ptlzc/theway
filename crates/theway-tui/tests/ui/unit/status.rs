@@ -133,6 +133,33 @@ async fn esc_while_busy_aborts_even_with_completion_popup() {
     assert!(app.completions.is_empty());
 }
 
+#[tokio::test]
+async fn bare_model_slash_opens_picker_and_switches_model() {
+    let (mut app, mut rx) = test_app().await;
+    app.dispatch_slash("/model", &mut terminal_placeholder()).await;
+    assert!(app.model_picker.is_some());
+
+    // Enter descends into anthropic; Enter again selects the first model.
+    assert!(
+        app.handle_model_picker_key(&KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()))
+            .await
+    );
+    assert!(
+        app.handle_model_picker_key(&KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()))
+            .await
+    );
+
+    let cmd = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+        .await
+        .expect("no set_model command")
+        .unwrap();
+    match cmd {
+        WireCommand::SetModel { spec } => assert_eq!(spec, "anthropic:claude-x"),
+        other => panic!("unexpected command: {other:?}"),
+    }
+    assert!(app.model_picker.is_none());
+}
+
 /// Locate the single highlighted popup row (cyan background) in a rendered
 /// buffer: its text and row. The popup is the only cyan-background surface,
 /// so a stray second highlighted row fails the scan.
