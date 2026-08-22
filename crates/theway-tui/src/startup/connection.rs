@@ -8,7 +8,8 @@ use std::time::Duration;
 use anyhow::{Context as _, Result};
 use theway_storage::sqlite_repo::SqliteSessionRepo;
 use theway_transport::client::{
-    GrpcClient, discover, probe_storage_service, spawn_daemon, spawn_daemon_quiet, wait_ready,
+    GrpcClient, discover, probe_storage_service, spawn_daemon, spawn_daemon_detached,
+    spawn_daemon_quiet, wait_ready,
 };
 use theway_transport::grpc::{
     StorageServiceState, ToolServiceState, serve_storage_service, serve_tool_service,
@@ -47,6 +48,7 @@ pub(crate) struct DaemonConnector {
     runtime_args: Vec<String>,
     storage_addr: String,
     children: Vec<Child>,
+    daemon_mode: bool,
     tool_server: tokio::task::JoinHandle<anyhow::Result<()>>,
     storage_server: tokio::task::JoinHandle<anyhow::Result<()>>,
 }
@@ -75,8 +77,10 @@ impl DaemonConnector {
         );
 
         let (mut desired_config, notes) = assemble_config(cli).await;
-        desired_config.tool_service_addr = Some(tool_addr);
-        desired_config.storage_service_addr = Some(storage_addr.clone());
+        if !cli.daemon {
+            desired_config.tool_service_addr = Some(tool_addr);
+            desired_config.storage_service_addr = Some(storage_addr.clone());
+        }
 
         let mut connector = Self {
             cwd: cwd.to_path_buf(),
@@ -85,6 +89,7 @@ impl DaemonConnector {
             desired_config,
             storage_addr,
             children: Vec::new(),
+            daemon_mode: cli.daemon,
             tool_server,
             storage_server,
         };
@@ -167,7 +172,9 @@ impl DaemonConnector {
         mut notes: Vec<String>,
         inherit_stdio: bool,
     ) -> Result<DaemonConnection> {
-        let mut child = (if inherit_stdio {
+        let mut child = (if self.daemon_mode {
+            spawn_daemon_detached(&self.cwd, &args)
+        } else if inherit_stdio {
             spawn_daemon(&self.cwd, &args)
         } else {
             spawn_daemon_quiet(&self.cwd, &args)
@@ -217,7 +224,9 @@ impl DaemonConnector {
 impl Drop for DaemonConnector {
     fn drop(&mut self) {
         // Ending the controller services makes a controller-backed daemon's
-        // storage watchdog perform a bounded, graceful shutdown.
+        // storage watchdog perform a bounded, graceful shutdown. A standalone
+        // daemon spawned with `theway --daemon` has no controller storage, so
+        // it keeps running after this client exits.
         self.tool_server.abort();
         self.storage_server.abort();
         self.reap_children();

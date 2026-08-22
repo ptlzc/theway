@@ -284,7 +284,7 @@ pub fn daemon_binary() -> Option<PathBuf> {
 /// launch args (model/session selection, approval flags, …). Inherits cwd (overridden
 /// by `--cwd`) and the environment. The caller must [`wait_ready`] for it.
 pub fn spawn_daemon(cwd: &Path, extra_args: &[String]) -> Result<Child> {
-    spawn_daemon_with_stdio(cwd, extra_args, true)
+    spawn_daemon_with_stdio(cwd, extra_args, true, false)
 }
 
 /// Spawn a daemon without inheriting stdout/stderr. Interactive clients use
@@ -292,13 +292,21 @@ pub fn spawn_daemon(cwd: &Path, extra_args: &[String]) -> Result<Child> {
 /// messages cannot corrupt the terminal frame; structured daemon logs remain
 /// available in the session log file.
 pub fn spawn_daemon_quiet(cwd: &Path, extra_args: &[String]) -> Result<Child> {
-    spawn_daemon_with_stdio(cwd, extra_args, false)
+    spawn_daemon_with_stdio(cwd, extra_args, false, false)
+}
+
+/// Spawn a daemon detached from the client's terminal/session. Used by
+/// `theway --daemon` so the daemon continues running after the TUI exits and
+/// after the terminal/console session closes.
+pub fn spawn_daemon_detached(cwd: &Path, extra_args: &[String]) -> Result<Child> {
+    spawn_daemon_with_stdio(cwd, extra_args, false, true)
 }
 
 fn spawn_daemon_with_stdio(
     cwd: &Path,
     extra_args: &[String],
     inherit_stdio: bool,
+    detached: bool,
 ) -> Result<Child> {
     let binary =
         daemon_binary().context("thewayd binary not found (sibling of theway or on PATH)")?;
@@ -307,8 +315,30 @@ fn spawn_daemon_with_stdio(
     for arg in extra_args {
         command.arg(arg);
     }
-    if !inherit_stdio {
-        command.stdout(Stdio::null()).stderr(Stdio::null());
+    if !inherit_stdio || detached {
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+    }
+    #[cfg(unix)]
+    if detached {
+        use std::os::unix::process::CommandExt;
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setsid() == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+    }
+    #[cfg(windows)]
+    if detached {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        command.creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS);
     }
     let child = command
         .spawn()

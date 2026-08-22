@@ -84,6 +84,18 @@ fn help_lists_tui_flag_and_no_transport_flags() {
 }
 
 #[test]
+fn help_lists_daemon_flag() {
+    let output = Command::new(env!("CARGO_BIN_EXE_theway"))
+        .arg("--help")
+        .output()
+        .expect("run theway --help");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("--daemon"), "{stdout}");
+    assert!(stdout.contains("standalone background daemon"), "{stdout}");
+}
+
+#[test]
 fn session_import_help_shows_subcommand_options() {
     let output = Command::new(env!("CARGO_BIN_EXE_theway"))
         .args(["session", "import", "--help"])

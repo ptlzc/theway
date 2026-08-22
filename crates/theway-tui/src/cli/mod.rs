@@ -121,6 +121,12 @@ pub(crate) struct Cli {
     #[arg(long = "always-allow")]
     pub(crate) always_allow: bool,
 
+    /// Spawn a standalone background daemon that outlives this TUI. Future
+    /// `theway` runs discover and reuse it instead of spawning an attached
+    /// daemon.
+    #[arg(long)]
+    pub(crate) daemon: bool,
+
     /// Explicitly run the terminal UI (the default on a TTY).
     #[arg(long)]
     pub(crate) tui: bool,
