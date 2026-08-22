@@ -14,9 +14,9 @@ name = "theway"
 path = "src/main.rs"
 
 [dependencies]
-theway-contract = { version = "0.1.4", path = "../theway-contract" }
-theway-storage = { version = "0.1.4", path = "../theway-storage" }
-theway-transport = { version = "0.1.4", path = "../theway-transport" }
+theway-contract = { version = "0.1.5", path = "../theway-contract" }
+theway-storage = { version = "0.1.5", path = "../theway-storage" }
+theway-transport = { version = "0.1.5", path = "../theway-transport" }
 theway-markdown = { version = "0.1.0", path = "../theway-markdown" }
 
 # Terminal UI surface (moved out of the daemon crate; the ratatui full-screen REPL,
@@ -46,7 +46,7 @@ tracing = "0.1"
 once_cell = "1"
 
 [dev-dependencies]
-tests-bridge-macro = { version = "0.1.4", path = "../tests-bridge-macro" }
+tests-bridge-macro = { version = "0.1.5", path = "../tests-bridge-macro" }
 tempfile = "3"
 parking_lot = "0.12"
 

@@ -36,8 +36,8 @@ default-providers = [
 ]
 
 [dependencies]
-theway-contract = { version = "0.1.4", path = "../theway-contract" }
-theway-llm-provider = { version = "0.1.4", path = "../theway-llm-provider", default-features = false }
+theway-contract = { version = "0.1.5", path = "../theway-contract" }
+theway-llm-provider = { version = "0.1.5", path = "../theway-llm-provider", default-features = false }
 
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 tokio-util = "0.7"
@@ -73,7 +73,7 @@ tracing = { version = "0.1", optional = true }
 sha2 = "0.10"
 
 [dev-dependencies]
-tests-bridge-macro = { version = "0.1.4", path = "../tests-bridge-macro" }
+tests-bridge-macro = { version = "0.1.5", path = "../tests-bridge-macro" }
 anyhow = "1"
 tempfile = "3"
 criterion = "0.5"
