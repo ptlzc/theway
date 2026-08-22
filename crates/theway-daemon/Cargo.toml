@@ -27,12 +27,12 @@ sandbox = []
 # Enable every wire-protocol provider so model auto-detection isn't bottlenecked by feature
 # flags. The cost is compile time, not runtime — only the registered provider for the chosen
 # model's `api` actually gets exercised.
-theway-llm-provider = { path = "../theway-llm-provider", default-features = false, features = ["all-providers"] }
-theway-contract = { path = "../theway-contract" }
-theway-core = { path = "../theway-core" }
-theway-storage = { path = "../theway-storage" }
-theway-mcp = { path = "../theway-mcp" }
-theway-transport = { path = "../theway-transport" }
+theway-llm-provider = { version = "0.1.4", path = "../theway-llm-provider", default-features = false, features = ["all-providers"] }
+theway-contract = { version = "0.1.4", path = "../theway-contract" }
+theway-core = { version = "0.1.4", path = "../theway-core" }
+theway-storage = { version = "0.1.4", path = "../theway-storage" }
+theway-mcp = { version = "0.1.4", path = "../theway-mcp" }
+theway-transport = { version = "0.1.4", path = "../theway-transport" }
 rmcp = { version = "3", features = ["server", "transport-io"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "fs", "io-util", "io-std", "net", "process", "signal"] }
 tokio-util = { version = "0.7", features = ["io"] }
@@ -102,7 +102,7 @@ fs4 = "0.13"
 libc = "0.2"
 
 [dev-dependencies]
-tests-bridge-macro = { path = "../tests-bridge-macro" }
+tests-bridge-macro = { version = "0.1.4", path = "../tests-bridge-macro" }
 tempfile = "3"
 opentelemetry_sdk = { version = "0.31", features = ["testing"] }
 qrcode = { version = "0.14", default-features = false }

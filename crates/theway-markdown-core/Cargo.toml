@@ -5,9 +5,11 @@ edition = "2024"
 rust-version = "1.85"
 license = "Apache-2.0"
 description = "Headless markdown analysis sharing Grok Build's exact pulldown-cmark config."
+repository = "https://github.com/ptlzc/theway"
+homepage = "https://github.com/ptlzc/theway"
 
 [dependencies]
 pulldown-cmark = "0.13"
 
 [dev-dependencies]
-tests-bridge-macro = { path = "../tests-bridge-macro" }
+tests-bridge-macro = { version = "0.1.4", path = "../tests-bridge-macro" }

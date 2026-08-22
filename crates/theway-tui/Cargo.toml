@@ -14,17 +14,17 @@ name = "theway"
 path = "src/main.rs"
 
 [dependencies]
-theway-contract = { path = "../theway-contract" }
-theway-storage = { path = "../theway-storage" }
-theway-transport = { path = "../theway-transport" }
-theway-markdown = { path = "../theway-markdown" }
+theway-contract = { version = "0.1.4", path = "../theway-contract" }
+theway-storage = { version = "0.1.4", path = "../theway-storage" }
+theway-transport = { version = "0.1.4", path = "../theway-transport" }
+theway-markdown = { version = "0.1.0", path = "../theway-markdown" }
 
 # Terminal UI surface (moved out of the daemon crate; the ratatui full-screen REPL,
 # web/grpc transport event loop, feed, listener and relay all live in this crate).
 crossterm = { version = "0.28", features = ["event-stream"] }
 ratatui = { version = "0.29", features = ["unstable-widget-ref"] }
-theway-ratatui-textarea = { path = "../theway-ratatui-textarea" }
-theway-pager-render = { path = "../theway-pager-render" }
+theway-ratatui-textarea = { version = "0.1.0", path = "../theway-ratatui-textarea" }
+theway-pager-render = { version = "0.1.0", path = "../theway-pager-render" }
 unicode-width = "0.2"
 anstyle = "1"
 arboard = { version = "3" }
@@ -46,7 +46,7 @@ tracing = "0.1"
 once_cell = "1"
 
 [dev-dependencies]
-tests-bridge-macro = { path = "../tests-bridge-macro" }
+tests-bridge-macro = { version = "0.1.4", path = "../tests-bridge-macro" }
 tempfile = "3"
 parking_lot = "0.12"
 

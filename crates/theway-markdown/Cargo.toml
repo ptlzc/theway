@@ -22,10 +22,10 @@ textwrap = "0.16"
 unicode-segmentation = "1.12.0"
 unicode-width = "0.2"
 url = "2"
-theway-markdown-core = { path = "../theway-markdown-core" }
+theway-markdown-core = { version = "0.1.0", path = "../theway-markdown-core" }
 
 [dev-dependencies]
-tests-bridge-macro = { path = "../tests-bridge-macro" }
+tests-bridge-macro = { version = "0.1.4", path = "../tests-bridge-macro" }
 
 # NOTE: cargo 1.91 rejects combining `[lints] workspace = true` with additional
 # lint tables (such as the `unexpected_cfgs` check-cfg declaration below), so the

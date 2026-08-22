@@ -29,7 +29,7 @@ ignore = "0.4"
 itertools = "0.14"
 pretty_assertions = "1"
 rand = "0.9"
-tests-bridge-macro = { path = "../tests-bridge-macro" }
+tests-bridge-macro = { version = "0.1.4", path = "../tests-bridge-macro" }
 
 [[example]]
 name = "textarea_demo"

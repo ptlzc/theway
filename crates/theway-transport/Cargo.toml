@@ -10,8 +10,8 @@ repository.workspace = true
 homepage.workspace = true
 
 [dependencies]
-theway-contract = { path = "../theway-contract" }
-theway-llm-provider = { path = "../theway-llm-provider" }
+theway-contract = { version = "0.1.4", path = "../theway-contract" }
+theway-llm-provider = { version = "0.1.4", path = "../theway-llm-provider" }
 
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "fs", "io-util", "io-std", "net", "process", "signal"] }
 tokio-util = { version = "0.7", features = ["io"] }
@@ -46,7 +46,7 @@ protox = "0.9"
 tonic-prost-build = "0.14"
 
 [dev-dependencies]
-tests-bridge-macro = { path = "../tests-bridge-macro" }
+tests-bridge-macro = { version = "0.1.4", path = "../tests-bridge-macro" }
 tempfile = "3"
 
 [lints]

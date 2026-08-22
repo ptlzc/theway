@@ -36,8 +36,8 @@ default-providers = [
 ]
 
 [dependencies]
-theway-contract = { path = "../theway-contract" }
-theway-llm-provider = { path = "../theway-llm-provider", default-features = false }
+theway-contract = { version = "0.1.4", path = "../theway-contract" }
+theway-llm-provider = { version = "0.1.4", path = "../theway-llm-provider", default-features = false }
 
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 tokio-util = "0.7"
@@ -57,7 +57,7 @@ uuid = { version = "1", features = ["v7", "serde"], optional = true }
 ignore = { version = "0.4", optional = true }
 regex = { version = "1", optional = true }
 # Vendored mermaid parse stage (mmdr 0.3.1) — see crates/mermaid-parser.
-mermaid-rs-parser = { path = "../mermaid-parser", optional = true }
+mermaid-rs-parser = { version = "0.1.0", path = "../mermaid-parser", optional = true }
 
 # hooks (user-configured CLI hooks) and goal (session goal stop-hook) live in the
 # engine. Hook side effects (process spawn / kill, webhook HTTP) are injected seams
@@ -73,7 +73,7 @@ tracing = { version = "0.1", optional = true }
 sha2 = "0.10"
 
 [dev-dependencies]
-tests-bridge-macro = { path = "../tests-bridge-macro" }
+tests-bridge-macro = { version = "0.1.4", path = "../tests-bridge-macro" }
 anyhow = "1"
 tempfile = "3"
 criterion = "0.5"
