@@ -28,14 +28,14 @@
 
 这是长期后台 daemon 应使用的模式。
 
-## 提议的 CLI：`theway --daemon`
+## CLI：`theway --daemon`
 
-为了让后台模式在客户端侧更明确，给 `theway` 增加 `--daemon` 参数：
+`theway` 上的 `--daemon` 参数让后台模式在客户端侧更明确：
 
 - `theway`（默认）：启动一个与 TUI 共享生命周期的附加 daemon。
 - `theway --daemon`：启动一个生命周期独立的后台 daemon。当前 TUI 连接它，之后的 TUI 运行复用它。
 
-在实现上，`theway --daemon` 启动 `thewayd` 时不携带控制器存储地址，并且应当 detach daemon 进程，使其在终端会话关闭后仍能存活。
+在实现上，`theway --daemon` 启动 `thewayd` 时不携带控制器存储地址，并 detach daemon 进程，使其在终端会话关闭后仍能存活。
 
 ## 实现说明
 
@@ -51,4 +51,4 @@
 |---|---|---|---|---|
 | 附加模式 | `theway` | controller-backed | daemon 停止 | 启动新 daemon |
 | 手动独立模式 | `thewayd --cwd ...` | 本地 | daemon 继续运行 | 复用 daemon |
-| 客户端独立模式（提议） | `theway --daemon` | 本地 | daemon 继续运行 | 复用 daemon |
+| 客户端独立模式 | `theway --daemon` | 本地 | daemon 继续运行 | 复用 daemon |

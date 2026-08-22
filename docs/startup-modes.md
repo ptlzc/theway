@@ -28,14 +28,14 @@ It keeps running after any client exits, and later `theway` runs can discover an
 
 This is the mode to use for a long-lived background daemon.
 
-## Proposed CLI: `theway --daemon`
+## CLI: `theway --daemon`
 
-To make the background mode explicit from the client, add a `--daemon` flag to `theway`:
+The `--daemon` flag on `theway` makes the background mode explicit from the client:
 
 - `theway` (default): spawn an attached daemon that shares the TUI lifecycle.
 - `theway --daemon`: spawn a standalone background daemon with an independent lifecycle. The current TUI connects to it, and future TUI runs reuse it.
 
-Under the hood, `theway --daemon` spawns `thewayd` without the controller storage address. It should also detach the daemon process so it survives terminal session close.
+Under the hood, `theway --daemon` spawns `thewayd` without the controller storage address and detaches the daemon process so it survives terminal session close.
 
 ## Implementation notes
 
@@ -51,4 +51,4 @@ Under the hood, `theway --daemon` spawns `thewayd` without the controller storag
 |---|---|---|---|---|
 | Attached | `theway` | controller-backed | daemon stops | spawns a new daemon |
 | Standalone manual | `thewayd --cwd ...` | local | daemon keeps running | reuses daemon |
-| Standalone via client (proposed) | `theway --daemon` | local | daemon keeps running | reuses daemon |
+| Standalone via client | `theway --daemon` | local | daemon keeps running | reuses daemon |
