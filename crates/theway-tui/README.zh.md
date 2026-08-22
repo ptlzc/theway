@@ -9,6 +9,7 @@
 ## 运行模式
 
 - 交互模式启动 loopback `ToolService` 和 `StorageService` 实现，发现或启动 `thewayd`，向 daemon 下发配置，消费 snapshot/event，并运行终端应用。
+- 通过 picker 或 `/model <provider:model-id>` 选择的模型会在 daemon snapshot 确认切换后写入 controller 持有的 `config.toml`。除非 `--provider` 或 `--model` 覆盖，该 provider/model 组合会作为下次启动的默认值。
 - 无需活动运行时协调时，离线会话命令直接打开本地 `SqliteSessionRepo`，完成导出、导入、列举和删除。
 - Headless/非交互渲染复用相同应用状态与 transport frame，不构建 agent 运行时。
 

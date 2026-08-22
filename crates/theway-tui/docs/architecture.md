@@ -14,6 +14,8 @@ Client-specific behavior includes terminal layout, keyboard handling, feed rende
 
 [`cli/mod.rs`](../src/cli/mod.rs) owns argument parsing and offline session command behavior. [`config_payload.rs`](../src/config_payload.rs) assembles local configuration plus CLI overrides into `WireDaemonConfig` and provisions the running daemon through the settings RPC.
 
+Bare `/model` opens the TUI picker, `/model <provider:model-id>` uses the typed model RPC, and `/model list` remains daemon-dispatched. After the daemon publishes the requested provider/model in an authoritative snapshot for the same session, [`config_payload.rs`](../src/config_payload.rs) atomically updates `[model]` in the controller-owned `config.toml` while preserving unrelated TOML content. Startup reads that pair when neither model CLI flag is present, so precedence remains CLI flags, then `config.toml`, then the daemon default.
+
 ## Controller startup
 
 Interactive startup performs these operations in order:
@@ -33,6 +35,8 @@ Interactive startup performs these operations in order:
 [`ui/mod.rs`](../src/ui/mod.rs) owns `App`, presentation state, overlays, scroll state, composer state, and the latest transport snapshot. [`ui/app/event_loop.rs`](../src/ui/app/event_loop.rs) and its sibling modules split event polling, frame application, rendering, interaction, panels, status, and headless output without creating additional ownership layers.
 
 [`ui/app/snapshot.rs`](../src/ui/app/snapshot.rs) applies complete snapshots and incremental stream frames. A session-id change resets session-scoped presentation caches. Feed deltas are accepted only against the expected base; a complete snapshot is the recovery path after mismatch or lag.
+
+An accepted model RPC records a pending controller-local persistence intent rather than writing immediately. Snapshot application consumes that intent only when the same session reports the requested model; transport admission without runtime application therefore does not change the startup default. A malformed `config.toml` is reported in the feed and left unchanged.
 
 When the event stream closes, [`ui/app/event_loop.rs`](../src/ui/app/event_loop.rs) asks `DaemonConnector` to rediscover or replace the daemon and restore `App::session_id`. The UI marks itself connected and emits `reconnected to daemon at …; state synchronized` or `daemon restarted at …; restored session …` only after the new event stream and an authoritative snapshot both succeed. A bounded client connection log reapplies those lifecycle messages after later authoritative snapshots, while failed retry attempts remain in structured debug logs instead of adding one feed row per second.
 

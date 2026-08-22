@@ -9,6 +9,7 @@ The crate depends on `theway-transport`, `theway-storage`, and rendering widgets
 ## Runtime modes
 
 - Interactive mode starts loopback `ToolService` and `StorageService` implementations, discovers or spawns `thewayd`, provisions daemon configuration, consumes snapshots/events, and runs the terminal application.
+- A model selected through the picker or `/model <provider:model-id>` is written to the controller-owned `config.toml` after a daemon snapshot confirms the switch. That pair is the next startup default unless `--provider` or `--model` overrides it.
 - Offline session commands open the local `SqliteSessionRepo` directly for export, import, listing, and deletion when no live runtime coordination is required.
 - Headless/non-interactive rendering reuses the same application state and transport frames without constructing an agent runtime.
 

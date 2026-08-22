@@ -53,6 +53,8 @@ export ANTHROPIC_API_KEY=sk-ant-...
 /login anthropic sk-ant-...
 ```
 
+In the TUI, bare `/model` opens the picker and `/model <provider:model-id>` switches directly. Once the daemon confirms the switch, the selected pair is saved under `[model]` in `~/.theway/config.toml` and becomes the next startup default; explicit `--provider` or `--model` flags still take precedence.
+
 ### Local OpenAI-compatible models
 
 Add a model definition to `~/.theway/models.json` (user-global) or `<project>/.theway/models.json` (project-local, higher precedence), then select it with `--provider` and `--model`.
@@ -112,7 +114,7 @@ Inside the REPL, slash commands control the session:
 | Command | What it does |
 |---------|--------------|
 | `/help` | Show all commands |
-| `/model [provider:model-id]` | Show or switch model |
+| `/model [provider:model-id]` | Show or switch model; a confirmed selection becomes the next startup default |
 | `/thinking` | Show or set thinking level: off, minimal, low, medium, high, xhigh |
 | `/sessions` | List sessions for the current project |
 | `/save [path]` | Export the transcript to Markdown |
@@ -206,7 +208,7 @@ Local state lives under `~/.theway` by default; set `THEWAY_DIR` to change it.
 | `~/.theway/sessions/<cwd-hash>/<uuidv7>.loop-<job-id>.md` | Loop state |
 | `~/.theway/inbox.jsonl` | Global triage inbox |
 | `~/.theway/daemon-port-<cwd-hash>` | Port + pid for the running daemon |
-| `~/.theway/config.toml` | Optional user config |
+| `~/.theway/config.toml` | Optional user config, including the persisted model default |
 
 The daemon resolves its host paths once at startup (`--cwd`, `--home`, repeatable `--skills-dir`). The only runtime-mutable part is the extra skill dirs via `SetSkillDirs`. See [docs/architecture.md](docs/architecture.md#daemon-path-context).
 

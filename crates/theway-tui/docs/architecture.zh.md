@@ -14,6 +14,8 @@
 
 [`cli/mod.rs`](../src/cli/mod.rs) 负责参数解析和离线会话命令。[`config_payload.rs`](../src/config_payload.rs) 把本地配置与 CLI 覆盖组装为 `WireDaemonConfig`，并通过 settings RPC 下发给运行中的 daemon。
 
+不带参数的 `/model` 打开 TUI picker，`/model <provider:model-id>` 使用带类型的模型 RPC，`/model list` 仍由 daemon 分派。daemon 在同一会话的权威 snapshot 中发布请求的 provider/model 后，[`config_payload.rs`](../src/config_payload.rs) 会原子更新 controller 持有的 `config.toml` 中的 `[model]`，同时保留无关 TOML 内容。启动时若两个模型 CLI flag 均未设置，就读取该组合，因此优先级仍为 CLI flag、`config.toml`、daemon 默认值。
+
 ## Controller 启动
 
 交互启动按以下顺序执行：
@@ -33,6 +35,8 @@
 [`ui/mod.rs`](../src/ui/mod.rs) 负责 `App`、展示状态、overlay、scroll 状态、composer 状态和最新 transport snapshot。[`ui/app/event_loop.rs`](../src/ui/app/event_loop.rs) 与同级模块拆分事件轮询、frame 应用、渲染、交互、panel、status 和 headless 输出，但不创建新的状态归属层。
 
 [`ui/app/snapshot.rs`](../src/ui/app/snapshot.rs) 应用完整 snapshot 与增量 stream frame。会话标识变化会重置会话级展示 cache。Feed delta 只在预期 base 上应用；不匹配或 lag 后由完整 snapshot 恢复。
+
+模型 RPC 被接受后只记录一个 controller 本地待持久化意图，不会立即写文件。只有同一会话的 snapshot 报告所请求模型时，snapshot 应用才消费该意图；因此 transport 接受但运行时未应用的请求不会改变启动默认值。若 `config.toml` 格式损坏，错误会显示在 feed 中，原文件保持不变。
 
 事件流关闭时，[`ui/app/event_loop.rs`](../src/ui/app/event_loop.rs) 请求 `DaemonConnector` 重新发现或替换 daemon，并恢复 `App::session_id`。只有新事件流和权威 snapshot 都成功后，UI 才标记为已连接并输出 `reconnected to daemon at …; state synchronized` 或 `daemon restarted at …; restored session …`。有界的客户端连接日志会在后续权威 snapshot 后重新加入这些生命周期消息；失败的重试只进入结构化 debug 日志，不会每秒向 feed 添加一行。
 
