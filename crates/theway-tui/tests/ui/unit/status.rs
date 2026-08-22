@@ -110,6 +110,29 @@ async fn slash_popup_navigates_with_arrows_and_accepts_with_enter() {
     assert_eq!(app.completion_idx, 0);
 }
 
+#[tokio::test]
+async fn esc_while_busy_aborts_even_with_completion_popup() {
+    let (mut app, mut rx) = test_app().await;
+    app.busy = true;
+    app.set_input("/");
+    assert!(!app.completions.is_empty());
+
+    let mut terminal = terminal_placeholder();
+    app.handle_event(
+        Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty())),
+        &mut terminal,
+    )
+    .await
+    .unwrap();
+
+    let cmd = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+        .await
+        .expect("no cancel command")
+        .unwrap();
+    assert!(matches!(cmd, WireCommand::Abort));
+    assert!(app.completions.is_empty());
+}
+
 /// Locate the single highlighted popup row (cyan background) in a rendered
 /// buffer: its text and row. The popup is the only cyan-background surface,
 /// so a stray second highlighted row fails the scan.

@@ -92,10 +92,13 @@ impl App {
                 }
             }
             KeyCode::Esc => {
-                if !self.completions.is_empty() {
+                // Foreground turn cancellation takes priority over the
+                // non-modal command completion popup.
+                if self.busy {
                     self.completions.clear();
-                } else if self.busy {
                     self.request_abort();
+                } else if !self.completions.is_empty() {
+                    self.completions.clear();
                 } else {
                     self.clear_input();
                 }
