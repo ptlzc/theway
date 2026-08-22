@@ -35,7 +35,7 @@ Or start the TUI, which spawns or reuses the daemon:
 ./target/release/theway --resume
 ```
 
-The daemon stays running after the TUI exits, so multiple clients can share it. Stop it with `Ctrl-C` / `SIGTERM`.
+A manually started daemon stays running after the TUI exits, so multiple clients can share it. A daemon spawned by the TUI is controller-backed and stops when the TUI exits. See [docs/startup-modes.md](docs/startup-modes.md) for the startup modes. Stop a running daemon with `Ctrl-C` / `SIGTERM`.
 
 The daemon's gRPC surface is split into four domain services — `CommandService`, `SessionService`, `GraphEngineService`, and `EventService` — plus the standard `grpc.health.v1.Health` service. `SessionService` also exposes the daemon path context: `GetPathContext` returns startup-fixed paths and current skill directories, and `SetSkillDirs` hot-reloads the skill catalog. See [docs/architecture.md](docs/architecture.md#daemon-path-context).
 
