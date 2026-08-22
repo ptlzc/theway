@@ -44,7 +44,7 @@
 
 Assistant Markdown 直接渲染，不添加 `ai` 角色前缀。`Ctrl+O` 与 `Ctrl+T` 只修改客户端展示状态中的 thinking 可见性和工具结果展开状态；这些本地展示操作不会向 feed 追加 system 行。
 
-Turn 忙碌期间，状态区域仍保持一行。[`ui/snake_loader.rs`](../src/ui/snake_loader.rs) 在一个固定 terminal cell 中渲染与 Pi 兼容的盲文序列 `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`。每一帧同时改变盲文点阵和 true-color 彩虹色相，相邻的 `working` 标签则保持固定颜色且不使用字体修饰。实时字符速率计从 130 ms 到 10 ms 的五档动画间隔中选择速度；档位变化时字符位置与周围状态布局保持不变。
+Turn 忙碌期间，状态区域仍保持一行。[`ui/snake_loader.rs`](../src/ui/snake_loader.rs) 在一个固定 terminal cell 中渲染与 Pi 兼容的盲文序列 `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`。每一帧同时改变盲文点阵和 true-color 彩虹色相，相邻的 `working` 标签则保持固定颜色且不使用字体修饰。耗时与实时字符速率/input/output 统计在 `working` 之后组成一个左对齐 cluster；队列与滚动指示跟随该 cluster，throughput 不再锚定到 terminal 右端。实时字符速率计从 130 ms 到 10 ms 的五档动画间隔中选择速度；档位变化时字符位置与周围状态布局保持不变。
 
 [`ui/app_input.rs`](../src/ui/app_input.rs) 与 [`ui/app_input/history.rs`](../src/ui/app_input/history.rs) 负责 composer 输入、补全、历史、粘贴和提交。编辑器状态来自 `theway-ratatui-textarea`；终端渲染辅助、链接与 scrollbar 行为来自 `theway-pager-render`。
 

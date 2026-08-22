@@ -20,8 +20,9 @@ impl App {
         Paragraph::new(Line::styled(text, Style::default().fg(Color::DarkGray)))
     }
 
-    /// Busy band: one rotating rainbow Braille glyph followed by the working
-    /// label and stats. The glyph stays in one terminal cell across frames.
+    /// Busy band: one rotating rainbow Braille glyph followed by one
+    /// left-aligned working/status cluster. The glyph stays in one terminal
+    /// cell across frames.
     fn render_busy_status(&self, frame: &mut ratatui::Frame, area: Rect) {
         if area.height == 0 {
             return;
@@ -47,6 +48,14 @@ impl App {
                     Style::default().fg(Color::DarkGray),
                 ),
             ];
+            let usage = &self.latest.usage;
+            let input = (usage.input_tokens > 0).then_some(usage.input_tokens);
+            let output = (usage.output_tokens > 0).then_some(usage.output_tokens);
+            let stats = stats::busy_stats_text(self.cps_meter.cps(), input, output);
+            spans.push(Span::styled(
+                format!(" · {stats}"),
+                Style::default().fg(Color::DarkGray),
+            ));
             if self.latest.queued_count > 0 {
                 spans.push(Span::styled(
                     format!(" · {} queued", self.latest.queued_count),
@@ -63,30 +72,6 @@ impl App {
             let w = area.right().saturating_sub(label_x);
             frame.buffer_mut().set_line(label_x, area.y, &line, w);
         }
-        self.render_busy_stats(frame, area);
-    }
-
-    /// Throughput stats on the right side of the busy rule:
-    /// `84 char/s · input: 57.1k · output: 1.2k` (char/s from the meter;
-    /// input/output from the recent context usage; no usage data → char/s
-    /// only).
-    fn render_busy_stats(&self, frame: &mut ratatui::Frame, area: Rect) {
-        if area.height == 0 {
-            return;
-        }
-        let usage = &self.latest.usage;
-        let input = (usage.input_tokens > 0).then_some(usage.input_tokens);
-        let output = (usage.output_tokens > 0).then_some(usage.output_tokens);
-        let text = stats::busy_stats_text(self.cps_meter.cps(), input, output);
-        let width = unicode_width::UnicodeWidthStr::width(text.as_str()) as u16;
-        let right = area.right();
-        if width == 0 || width >= right {
-            return;
-        }
-        let x = right.saturating_sub(width).saturating_sub(1);
-        frame
-            .buffer_mut()
-            .set_string(x, area.y, text, Style::default().fg(Color::DarkGray));
     }
 
     /// Elapsed time since the busy window began (`m s` after a minute).

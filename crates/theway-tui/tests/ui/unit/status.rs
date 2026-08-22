@@ -70,6 +70,55 @@ fn braille_frames_follow_the_pi_rainbow_hues() {
 }
 
 #[tokio::test]
+async fn busy_stats_follow_working_instead_of_right_aligning() {
+    let (mut app, _rx) = test_app().await;
+    let mut status = fixture_status(Vec::new());
+    status.usage = WireContextUsage {
+        input_tokens: 57_100,
+        output_tokens: 1_200,
+        ..Default::default()
+    };
+    app.apply_snapshot(status);
+    app.busy = true;
+    app.busy_started = Some(std::time::Instant::now());
+    let now = std::time::Instant::now();
+    app.cps_meter.record_at(now - Duration::from_millis(500), 0);
+    app.cps_meter.record_at(now, 500);
+
+    let backend = TestBackend::new(100, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| app.render(frame)).unwrap();
+    let text = buffer_text(terminal.backend().buffer());
+    let row = text
+        .lines()
+        .find(|line| line.contains("working"))
+        .expect("busy status row");
+    let working = row.find("working").unwrap();
+    let throughput = row.find("char/s").expect("busy throughput");
+    assert!(
+        throughput - working < 30,
+        "throughput must follow working without a flexible gap: {row}"
+    );
+    assert!(row.contains("output: 1.2k"), "output counter missing: {row}");
+    assert!(
+        row.chars().count() < 80,
+        "left cluster must not expand to the 100-column right edge: {row}"
+    );
+}
+
+#[tokio::test]
+async fn narrow_busy_status_truncates_the_left_cluster_safely() {
+    let (mut app, _rx) = test_app().await;
+    app.busy = true;
+    app.busy_started = Some(std::time::Instant::now());
+    let backend = TestBackend::new(24, 8);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| app.render(frame)).unwrap();
+    let text = buffer_text(terminal.backend().buffer());
+    assert!(text.contains("working"), "busy label missing:\n{text}");
+}
+
+#[tokio::test]
 async fn local_display_toggles_do_not_append_operation_logs() {
     let (mut app, _rx) = test_app().await;
     let before = feed_text(&app);
