@@ -43,10 +43,20 @@ The [`Makefile`](Makefile) mirrors `.github/workflows/ci.yml`; prefer it.
 - `make test` — `cargo test --workspace`.
 - `make lint` — `cargo clippy --workspace --all-targets -- -D warnings`.
 - `make fmt` / `make fmt-check` — rustfmt rewrite / CI check.
-- `make package-check` — verify the standalone `theway-probe` crates.io package builds after extraction.
+- `make package-check` — verify that the extracted `theway-probe` source package builds independently; this dry run does not authorize a crates.io upload.
 - `make doc-sync` — verify English/Chinese documentation pairs, structure, and recorded blob hashes.
 - `make ci` — the full local pipeline (format, file-size, layering, documentation synchronization, lint, feature-gate, and test checks).
 - `make run` / `make install` — run the REPL / install into `~/.cargo/bin`.
+
+## crates.io publication policy
+
+GitHub Release binaries and crates.io packages use separate explicit allowlists. A Cargo workspace member, a package that passes `cargo package` or `cargo publish --dry-run`, and a binary included in CI are not automatically approved for crates.io publication.
+
+- The release issue or release plan must list every approved crates.io `(package, version)` pair before the first upload. The default public set is `theway-tui`, `theway-daemon`, and only the library or support crates required for those registry packages to resolve and install. Any other package requires explicit user approval recorded in the release issue.
+- `theway-probe` is a repository-local gRPC serviceability and release-validation binary. Build and test it from this workspace with `make package-check` or package-specific Cargo commands; do not run `cargo publish -p theway-probe` and do not add it to the crates.io allowlist.
+- Never use `cargo publish --workspace`. Publish one approved package at a time with `cargo publish -p <package>`, in dependency order, after confirming the exact version does not already exist. Treat an upload as immutable: after an uncertain response, query crates.io before retrying.
+- A request to publish "binaries and packages together" means the approved GitHub Release binary matrix and the approved crates.io package allowlist, not every binary target or workspace member. Expanding either allowlist requires explicit user confirmation before the external write.
+- After each upload, verify the exact package version, repository metadata, and yank state through crates.io. Complete the release only after the installable end-user binaries have also been installed from the registry and their versions checked.
 
 ## Testing
 
