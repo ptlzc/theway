@@ -221,6 +221,8 @@ pub struct AppConfig {
     /// the status line before the first stream frame arrives.
     pub initial: WireStatus,
     pub cwd: PathBuf,
+    /// Controller-owned `config.toml` used for confirmed model defaults.
+    pub model_config_path: PathBuf,
     /// cwd-scoped session repo backing the local-only surfaces (`/session`
     /// export/import, --list-sessions) — same machine, shared SQLite sessions.
     pub history: HistoryStore,
@@ -247,6 +249,8 @@ pub struct App {
     completer: SlashCompleter,
     cwd: PathBuf,
     session_id: String,
+    model_config_path: PathBuf,
+    pending_model_default: Option<PendingModelDefault>,
 
     history: HistoryStore,
     history_idx: Option<usize>,
@@ -357,6 +361,12 @@ pub struct App {
     /// count. The event loop resolves this with the authoritative GetState
     /// path before accepting another delta.
     resync_pending: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PendingModelDefault {
+    selection: theway_transport::config::ModelDefault,
+    session_id: String,
 }
 
 include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/ui/app/setup.rs"));

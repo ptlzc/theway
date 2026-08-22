@@ -115,7 +115,7 @@ impl App {
                 self.follow = true;
             }
             "/help" => self.system_line(
-                "theway client · send messages to the thewayd daemon · local: /login /quit /clear /new /resume /model (picker) /session switch /status-panel · daemon: /model <provider:model-id> /goal /triggers /cron /session …",
+                "theway client · send messages to the thewayd daemon · local: /login /quit /clear /new /resume /model [provider:model-id] /session switch /status-panel · daemon: /goal /triggers /cron /session …",
             ),
             "/login" => self.login(args, terminal).await,
             "/session" if args.trim_start().starts_with("switch") => {
@@ -148,9 +148,14 @@ impl App {
             command if command.starts_with("/ext:") => {
                 self.invoke_extension_command(&command[5..], args).await;
             }
-            // Bare `/model` uses the same curated picker as Alt-M. An
-            // explicit model spec falls through to the daemon command.
+            // Bare `/model` uses the same curated picker as Alt-M. A concrete
+            // model spec uses the typed RPC so the confirmed snapshot can
+            // persist it as the next startup default. Listing remains a
+            // daemon command.
             "/model" if args.is_empty() => self.open_model_picker(),
+            "/model" if commands::parse_model_spec(args).is_some() => {
+                self.set_model_from_spec(args).await;
+            }
             // Issue #55: bare `/fork` opens the interactive picker over the
             // current session's User messages. `/fork <n>` (non-empty args)
             // misses this guard and falls through to the daemon-forwarding

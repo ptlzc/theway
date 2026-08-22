@@ -93,6 +93,7 @@ impl App {
         }
         self.panel_status = PanelStatus::from_sidebar(&self.latest.sidebar);
         self.model_catalog = self.latest.model_catalog.clone();
+        self.persist_confirmed_model_default();
         self.control_plane_prompt = self.latest.control_plane_prompt.clone();
         self.latest_goal = self.latest.goal.clone();
         self.latest_trigger_poll = self.latest.latest_trigger_poll.clone();
@@ -100,6 +101,53 @@ impl App {
         // `follow` is deliberately NOT forced here. A scrolled-up view stays
         // pinned while the stream appends; follow is only re-enabled by an
         // explicit user action or by scrolling back to the bottom.
+    }
+
+    /// A successful SetModel RPC only means the daemon accepted the command.
+    /// Persist after a snapshot confirms the requested pair in the same
+    /// session, so a failed runtime application never becomes a startup
+    /// default.
+    fn persist_confirmed_model_default(&mut self) {
+        let Some(pending) = self.pending_model_default.as_ref() else {
+            return;
+        };
+        if pending.session_id != self.latest.session_id {
+            self.pending_model_default = None;
+            return;
+        }
+        let expected = format!(
+            "{}:{}",
+            pending.selection.provider, pending.selection.model
+        );
+        if self.latest.model != expected {
+            return;
+        }
+
+        let pending = self
+            .pending_model_default
+            .take()
+            .expect("pending model default was checked above");
+        match crate::config_payload::persist_model_default(
+            &self.model_config_path,
+            &pending.selection,
+        ) {
+            Ok(()) => {
+                if let Some(hint) = theway_transport::auth::model_credential_hint(
+                    &pending.selection.provider,
+                ) {
+                    self.system_line(format!(
+                        "selected {expected} and saved it as the startup default, but login is required: {hint}"
+                    ));
+                } else {
+                    self.system_line(format!(
+                        "switched to {expected}; saved as the startup default"
+                    ));
+                }
+            }
+            Err(error) => self.error_line(format!(
+                "switched to {expected}, but could not save the startup default: {error}"
+            )),
+        }
     }
 
     /// Apply one stream frame. Snapshots carry full non-feed state plus either

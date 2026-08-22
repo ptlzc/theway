@@ -23,6 +23,8 @@ impl App {
             connector: config.connector,
             session_id: initial.session_id.clone(),
             cwd: config.cwd,
+            model_config_path: config.model_config_path,
+            pending_model_default: None,
             registry: config.registry,
             completer,
             history: config.history,

@@ -431,15 +431,16 @@ impl App {
         let id = id.to_string();
         match self.client.set_model(&format!("{provider}:{id}")).await {
             Ok(true) => {
-                if let Some(hint) = theway_transport::auth::model_credential_hint(&provider) {
-                    self.system_line(format!(
-                        "selected {provider}:{id}, but login is required: {hint}"
-                    ));
-                } else {
-                    self.system_line(format!("switched to {provider}:{id}"));
-                }
-                // The daemon republishes with the new catalog; the picker's
-                // next open reads it from the snapshot.
+                self.pending_model_default = Some(super::PendingModelDefault {
+                    selection: theway_transport::config::ModelDefault {
+                        provider: provider.clone(),
+                        model: id.clone(),
+                    },
+                    session_id: self.session_id.clone(),
+                });
+                self.system_line(format!("switching to {provider}:{id}…"));
+                // The daemon republishes the authoritative model. Snapshot
+                // handling persists the default only after that confirmation.
             }
             Ok(false) => self.error_line("daemon rejected the model change"),
             Err(e) => self.error_line(format!("set_model failed: {e}")),

@@ -3,9 +3,9 @@
 //! Since issue #73 the daemon no longer reads local config files at startup —
 //! the TUI/CLI is the controller that owns local configuration. This module
 //! assembles the full daemon config payload ([`WireDaemonConfig`]) from the
-//! CLI flags plus the local `<base>/config.toml`, and pushes it to a
-//! connected daemon through the settings RPC (`SettingsService.Configure`,
-//! issue #72):
+//! CLI flags plus the local `<base>/config.toml`, persists model selections
+//! confirmed by daemon snapshots, and pushes configuration to a connected
+//! daemon through the settings RPC (`SettingsService.Configure`, issue #72):
 //!
 //! - **Spawn**: the startup-critical fields ride the daemon launch args
 //!   (`daemon_launch_args`), and the assembled payload is reconciled through
@@ -27,6 +27,9 @@ use theway_transport::config;
 use theway_transport::wire::WireDaemonConfig;
 
 use crate::cli::Cli;
+
+mod model_default;
+pub(crate) use model_default::persist_model_default;
 
 /// Outcome of one provisioning push.
 #[derive(Debug, Default)]
@@ -51,6 +54,13 @@ pub(crate) fn config_base_dir(home: Option<&Path>) -> PathBuf {
     )
 }
 
+/// Controller-owned configuration file resolved with the same precedence as
+/// [`assemble_config`]. Keeping this path in `App` makes model-default writes
+/// honor both `$THEWAY_DIR` and the startup `--home` flag.
+pub(crate) fn config_path(home: Option<&Path>) -> PathBuf {
+    config_base_dir(home).join("config.toml")
+}
+
 /// Pure base-dir resolution (testable without env access).
 fn resolve_config_base_dir(
     home: Option<&Path>,
@@ -72,7 +82,7 @@ fn resolve_config_base_dir(
 /// flags win. Returns the payload plus human-readable diagnostics for
 /// malformed file values (soft fail-closed, same as the pre-#73 readers).
 pub(crate) async fn assemble_config(cli: &Cli) -> (WireDaemonConfig, Vec<String>) {
-    let path = config_base_dir(cli.home.as_deref()).join("config.toml");
+    let path = config_path(cli.home.as_deref());
     let text = match tokio::fs::read_to_string(&path).await {
         Ok(text) => Some(text),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,

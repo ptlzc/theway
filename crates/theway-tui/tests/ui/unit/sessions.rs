@@ -250,19 +250,6 @@ async fn slash_quit_sets_quit_and_clear_empties_feed() {
 }
 
 #[tokio::test]
-async fn nonlocal_slash_forwards_to_daemon() {
-    let (mut app, mut rx) = test_app().await;
-    app.dispatch_slash("/model anthropic:claude-x", &mut terminal_placeholder())
-        .await;
-    match rx.recv().await.unwrap() {
-        WireCommand::Submit { text, .. } => {
-            assert_eq!(text, "/model anthropic:claude-x")
-        }
-        other => panic!("unexpected command: {other:?}"),
-    }
-}
-
-#[tokio::test]
 async fn ctrl_c_while_busy_sends_cancel() {
     let (mut app, mut rx) = test_app().await;
     app.busy = true;
@@ -296,34 +283,6 @@ async fn control_plane_prompt_key_approves_via_rpc() {
         WireCommand::ResolveControlPlane { approve } => assert!(approve),
         other => panic!("unexpected command: {other:?}"),
     }
-}
-
-#[tokio::test]
-async fn model_picker_alt_m_selects_and_sends_set_model() {
-    let (mut app, mut rx) = test_app().await;
-    app.open_model_picker();
-    assert!(app.model_picker.is_some());
-
-    // Enter descends into anthropic; Enter again selects the first model.
-    assert!(
-        app.handle_model_picker_key(&KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()))
-            .await
-    );
-    assert!(
-        app.handle_model_picker_key(&KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()))
-            .await
-    );
-    let cmd = tokio::time::timeout(Duration::from_secs(2), rx.recv())
-        .await
-        .expect("no set_model command")
-        .unwrap();
-    match cmd {
-        WireCommand::SetModel { spec } => {
-            assert_eq!(spec, "anthropic:claude-x")
-        }
-        other => panic!("unexpected command: {other:?}"),
-    }
-    assert!(app.model_picker.is_none());
 }
 
 #[tokio::test]

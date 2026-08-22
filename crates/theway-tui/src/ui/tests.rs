@@ -111,6 +111,7 @@ async fn test_app_with_sessions(
         connector: None,
         initial,
         cwd: std::path::PathBuf::from("/tmp/theway"),
+        model_config_path: std::path::PathBuf::from("/nonexistent-theway-config/config.toml"),
         history: HistoryStore::load_from(std::path::Path::new("/nonexistent-theway-history")),
         registry: crate::local_commands::local_registry(),
         pending_images: vec![],
@@ -310,6 +311,10 @@ include!(concat!(
 include!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/tests/ui/unit/sessions.rs"
+));
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/ui/unit/model.rs"
 ));
 include!(concat!(
     env!("CARGO_MANIFEST_DIR"),

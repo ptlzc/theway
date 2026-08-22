@@ -200,6 +200,7 @@ pub(crate) async fn run_repl(
         connector: Some(connector),
         initial,
         cwd: cwd.clone(),
+        model_config_path: crate::config_payload::config_path(cli.home.as_deref()),
         history: theway_transport::history::HistoryStore::load(),
         registry: crate::local_commands::local_registry(),
         pending_images: cli.image.clone(),

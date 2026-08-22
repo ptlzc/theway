@@ -4984,6 +4984,7 @@ dependencies = [
  "theway-transport",
  "tokio",
  "toml",
+ "toml_edit",
  "tracing",
  "unicode-width 0.2.0",
 ]
