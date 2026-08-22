@@ -43,6 +43,7 @@ The [`Makefile`](Makefile) mirrors `.github/workflows/ci.yml`; prefer it.
 - `make test` — `cargo test --workspace`.
 - `make lint` — `cargo clippy --workspace --all-targets -- -D warnings`.
 - `make fmt` / `make fmt-check` — rustfmt rewrite / CI check.
+- `make package-check` — verify the standalone `theway-probe` crates.io package builds after extraction.
 - `make doc-sync` — verify English/Chinese documentation pairs, structure, and recorded blob hashes.
 - `make ci` — the full local pipeline (format, file-size, layering, documentation synchronization, lint, feature-gate, and test checks).
 - `make run` / `make install` — run the REPL / install into `~/.cargo/bin`.

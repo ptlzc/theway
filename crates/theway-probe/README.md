@@ -4,7 +4,7 @@ English | [中文](README.zh.md)
 
 `theway-probe` is a standalone gRPC serviceability client for an already-running `thewayd`. It checks the standard gRPC health endpoint, the health watch stream, multi-session create/list behavior, and session-state retrieval without linking the daemon or transport crates.
 
-The binary compiles its tonic client directly from the transport-owned protobuf definitions, including `health.proto`, in [`build.rs`](build.rs). This keeps the probe independent while testing the same protocol exposed by the daemon.
+The binary compiles its tonic client in [`build.rs`](build.rs) from the transport-owned protobuf definitions exposed through the crate-local [`proto`](proto) symlink, including `health.proto`. Cargo flattens that symlink into published packages, so the probe stays an independent protocol consumer and its crates.io source remains self-contained.
 
 ## Usage
 

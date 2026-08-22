@@ -4,7 +4,7 @@ English | [中文](architecture.zh.md)
 
 ## Build-time protocol ownership
 
-[`build.rs`](../build.rs) reads the protobuf sources owned by `theway-transport`, including `commands.proto` and `health.proto`, compiles the command, session, graph, event, and health definitions with `protox`, and generates tonic clients with `tonic-prost-build`. The probe deliberately has no Rust dependency on `theway-transport`; it verifies the external gRPC service as an independent consumer.
+[`build.rs`](../build.rs) reads the protobuf sources owned by `theway-transport` through the crate-local [`proto`](../proto) symlink, including `commands.proto` and `health.proto`, compiles the command, session, graph, event, and health definitions with `protox`, and generates tonic clients with `tonic-prost-build`. Cargo flattens the symlink target into the published package, so registry builds retain the same sources without adding a Rust dependency on `theway-transport`; the probe verifies the external gRPC service as an independent consumer.
 
 Any protobuf change that affects the imported services must leave this build script able to compile the complete import graph. The transport crate remains the only source of proto definitions.
 
