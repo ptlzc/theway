@@ -89,6 +89,10 @@ file-size-check: ## enforce the 800-line limit for all theway-* Rust files
 layering-check: ## enforce workspace crate dependency boundaries
 	scripts/check-workspace-layering.py
 
+.PHONY: package-check
+package-check: ## verify the probe's standalone crates.io package builds
+	$(CARGO) publish --registry crates-io -p theway-probe --dry-run --allow-dirty
+
 .PHONY: i18n-check
 i18n-check: ## verify English/Chinese documentation pairs and recorded hashes
 	scripts/verify-doc-i18n.py
@@ -101,7 +105,7 @@ i18n-test: ## test the bilingual documentation verifier
 doc-sync: i18n-test i18n-check ## verify bilingual documentation synchronization
 
 .PHONY: ci
-ci: fmt-check file-size-check layering-check doc-sync sdks-check lint feature-gate test ## run the full CI pipeline locally
+ci: fmt-check file-size-check layering-check package-check doc-sync sdks-check lint feature-gate test ## run the full CI pipeline locally
 
 # --- run / install ----------------------------------------------------------
 

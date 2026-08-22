@@ -28,6 +28,15 @@ jobs:
       - uses: actions/checkout@v4
       - run: scripts/check-rust-file-size.sh
 
+  package:
+    name: crates.io package verification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install rust
+        uses: dtolnay/rust-toolchain@stable
+      - run: make package-check
+
   documentation:
     name: Bilingual documentation synchronization
     runs-on: ubuntu-latest
