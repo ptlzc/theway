@@ -30,6 +30,36 @@ const STORAGE_PROBE_TIMEOUT: Duration = Duration::from_millis(800);
 const SPAWN_TIMEOUT: Duration = Duration::from_secs(20);
 const SESSION_RESTORE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Which daemon spawn variant the connector should use.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DaemonSpawnKind {
+    Inherit,
+    Quiet,
+    Detached,
+}
+
+fn daemon_spawn_kind(daemon_mode: bool, inherit_stdio: bool) -> DaemonSpawnKind {
+    if daemon_mode {
+        DaemonSpawnKind::Detached
+    } else if inherit_stdio {
+        DaemonSpawnKind::Inherit
+    } else {
+        DaemonSpawnKind::Quiet
+    }
+}
+
+fn apply_controller_endpoints(
+    desired: &mut WireDaemonConfig,
+    daemon_mode: bool,
+    tool_addr: String,
+    storage_addr: String,
+) {
+    if !daemon_mode {
+        desired.tool_service_addr = Some(tool_addr);
+        desired.storage_service_addr = Some(storage_addr);
+    }
+}
+
 /// One fully checked daemon connection. `reused` is true only when an
 /// already-running daemon had a live runtime-storage path.
 pub(crate) struct DaemonConnection {
@@ -77,10 +107,12 @@ impl DaemonConnector {
         );
 
         let (mut desired_config, notes) = assemble_config(cli).await;
-        if !cli.daemon {
-            desired_config.tool_service_addr = Some(tool_addr);
-            desired_config.storage_service_addr = Some(storage_addr.clone());
-        }
+        apply_controller_endpoints(
+            &mut desired_config,
+            cli.daemon,
+            tool_addr,
+            storage_addr.clone(),
+        );
 
         let mut connector = Self {
             cwd: cwd.to_path_buf(),
@@ -172,13 +204,11 @@ impl DaemonConnector {
         mut notes: Vec<String>,
         inherit_stdio: bool,
     ) -> Result<DaemonConnection> {
-        let mut child = (if self.daemon_mode {
-            spawn_daemon_detached(&self.cwd, &args)
-        } else if inherit_stdio {
-            spawn_daemon(&self.cwd, &args)
-        } else {
-            spawn_daemon_quiet(&self.cwd, &args)
-        })
+        let mut child = match daemon_spawn_kind(self.daemon_mode, inherit_stdio) {
+            DaemonSpawnKind::Inherit => spawn_daemon(&self.cwd, &args),
+            DaemonSpawnKind::Quiet => spawn_daemon_quiet(&self.cwd, &args),
+            DaemonSpawnKind::Detached => spawn_daemon_detached(&self.cwd, &args),
+        }
         .with_context(|| format!("spawn thewayd in {}", self.cwd.display()))?;
         let pid = child.id();
         let addr = match wait_ready(SPAWN_TIMEOUT, &self.cwd, pid).await {
@@ -277,8 +307,48 @@ async fn restore_session(
 
 #[cfg(test)]
 mod tests {
-    use super::config_for_existing_controller;
+    use super::{
+        DaemonSpawnKind, apply_controller_endpoints, config_for_existing_controller,
+        daemon_spawn_kind,
+    };
     use theway_transport::wire::WireDaemonConfig;
+
+    #[test]
+    fn daemon_spawn_kind_covers_all_modes() {
+        assert_eq!(daemon_spawn_kind(false, true), DaemonSpawnKind::Inherit);
+        assert_eq!(daemon_spawn_kind(false, false), DaemonSpawnKind::Quiet);
+        assert_eq!(daemon_spawn_kind(true, true), DaemonSpawnKind::Detached);
+        assert_eq!(daemon_spawn_kind(true, false), DaemonSpawnKind::Detached);
+    }
+
+    #[test]
+    fn apply_controller_endpoints_attaches_in_default_mode() {
+        let mut desired = WireDaemonConfig::default();
+        apply_controller_endpoints(
+            &mut desired,
+            false,
+            "127.0.0.1:1001".into(),
+            "127.0.0.1:1002".into(),
+        );
+        assert_eq!(desired.tool_service_addr.as_deref(), Some("127.0.0.1:1001"));
+        assert_eq!(
+            desired.storage_service_addr.as_deref(),
+            Some("127.0.0.1:1002")
+        );
+    }
+
+    #[test]
+    fn apply_controller_endpoints_skips_controller_services_in_daemon_mode() {
+        let mut desired = WireDaemonConfig::default();
+        apply_controller_endpoints(
+            &mut desired,
+            true,
+            "127.0.0.1:1001".into(),
+            "127.0.0.1:1002".into(),
+        );
+        assert_eq!(desired.tool_service_addr, None);
+        assert_eq!(desired.storage_service_addr, None);
+    }
 
     #[test]
     fn foreign_controller_endpoints_are_preserved_on_attach() {

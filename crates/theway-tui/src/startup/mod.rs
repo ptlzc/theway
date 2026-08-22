@@ -373,6 +373,7 @@ mod tests {
         let args = daemon_launch_args(&plain, &WireDaemonConfig::default());
         assert!(!args.iter().any(|a| a == "--home"));
         assert!(!args.iter().any(|a| a == "--skills-dir"));
+        assert!(!args.iter().any(|a| a == "--storage-service-addr"));
 
         // Set: `--home` becomes one pair; every `--skills-dir` occurrence
         // becomes its own pair, preserving CLI order.
