@@ -184,8 +184,10 @@ impl App {
             }
         };
         let features = feature_labels(&self.latest.dags);
+        let working_dir = self.cwd.to_string_lossy();
         let chrome = prompt_chrome::PromptChrome {
             focused,
+            working_dir: Some(working_dir.as_ref()),
             model_name: &model_name,
             flags: &flags,
             features: &features,

@@ -550,3 +550,13 @@ async fn composer_rows_caps_very_long_input_at_max() {
     app.set_input(&"x".repeat(2000));
     assert_eq!(app.composer_rows(60), super::MAX_INPUT_ROWS as u16);
 }
+
+#[tokio::test]
+async fn composer_info_line_shows_current_working_directory() {
+    let (mut app, _rx) = test_app().await;
+    let backend = TestBackend::new(80, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| app.render(frame)).unwrap();
+    let text = buffer_text(terminal.backend().buffer());
+    assert!(text.contains("/tmp/theway"), "composer cwd missing:\n{text}");
+}

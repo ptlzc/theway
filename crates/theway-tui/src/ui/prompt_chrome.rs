@@ -17,6 +17,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use theway_pager_render::tool_paths::shorten_path;
 use unicode_width::UnicodeWidthStr;
 
 use super::theme::ComposerStyle;
@@ -58,6 +59,8 @@ pub struct PromptFlag<'a> {
 pub struct PromptChrome<'a> {
     /// Focused: picker/control-plane prompt closed. Toggles border + prefix color.
     pub focused: bool,
+    /// Selected client working directory shown left on the info line.
+    pub working_dir: Option<&'a str>,
     /// Model label shown left on the info line (e.g. `grok-3`).
     pub model_name: &'a str,
     /// Flags appended after the model name, joined by " · ".
@@ -86,6 +89,7 @@ impl Default for PromptChrome<'_> {
     fn default() -> Self {
         Self {
             focused: true,
+            working_dir: None,
             model_name: "",
             flags: &[],
             multiline: false,
@@ -288,7 +292,7 @@ fn render_info_line(buf: &mut Buffer, area: Rect, c: &PromptChrome, style: &Comp
     }
 
     let left_line = Line::from(left_spans);
-    if !right_spans.is_empty() {
+    let metadata_x = if !right_spans.is_empty() {
         right_spans.push(Span::styled(" ", Style::default().bg(bg)));
         let right_line = Line::from(right_spans);
         let right_w = right_line.width() as u16;
@@ -298,10 +302,30 @@ fn render_info_line(buf: &mut Buffer, area: Rect, c: &PromptChrome, style: &Comp
         set_line_safe(buf, x, area.y, &left_line, left_w);
         let rx = area.x + area.width.saturating_sub(right_w);
         set_line_safe(buf, rx, area.y, &right_line, right_w);
+        x
     } else {
         let text_w = (left_line.width() as u16).min(area.width);
         let x = area.x + area.width.saturating_sub(text_w);
         set_line_safe(buf, x, area.y, &left_line, text_w);
+        x
+    };
+
+    // The working directory occupies only the otherwise-unused cells to the
+    // left of the existing metadata cluster. Preserve one divider cell as a
+    // gap and shorten by display width so model/flags/usage never move.
+    if let Some(path) = c.working_dir.map(str::trim).filter(|path| !path.is_empty()) {
+        let path_w = metadata_x
+            .saturating_sub(area.x.saturating_add(1))
+            .saturating_sub(2);
+        if path_w > 0 {
+            let label = shorten_path(path, path_w as usize);
+            let path_line = Line::from(vec![
+                Span::styled(" ", Style::default().bg(bg)),
+                Span::styled(label, caption_style(style, c.focused)),
+                Span::styled(" ", Style::default().bg(bg)),
+            ]);
+            set_line_safe(buf, area.x, area.y, &path_line, path_w + 2);
+        }
     }
 }
 
@@ -394,6 +418,43 @@ mod tests {
             .collect();
         assert!(row.contains("grok-3"), "info row: {row}");
         assert!(row.contains("2 queued"), "info row: {row}");
+    }
+
+    #[test]
+    fn info_line_shows_working_directory_with_model_and_usage() {
+        let area = Rect::new(0, 0, 72, 4);
+        let c = PromptChrome {
+            working_dir: Some("/root/workspace/theway"),
+            model_name: "grok-3",
+            usage: Some("12% ctx"),
+            ..Default::default()
+        };
+        let buf = render(area, &c);
+        let row: String = (2..70)
+            .filter_map(|x| buf.cell((x, 3)).map(|c| c.symbol()))
+            .collect();
+        assert!(row.contains("/root/workspace/theway"), "info row: {row}");
+        assert!(row.contains("grok-3"), "info row: {row}");
+        assert!(row.contains("12% ctx"), "info row: {row}");
+    }
+
+    #[test]
+    fn info_line_shortens_working_directory_before_metadata() {
+        let area = Rect::new(0, 0, 40, 4);
+        let c = PromptChrome {
+            working_dir: Some("/very/long/workspace/theway"),
+            model_name: "grok-3",
+            usage: Some("12% ctx"),
+            ..Default::default()
+        };
+        let buf = render(area, &c);
+        let row: String = (2..38)
+            .filter_map(|x| buf.cell((x, 3)).map(|c| c.symbol()))
+            .collect();
+        assert!(row.contains("theway"), "shortened path missing tail: {row}");
+        assert!(row.contains("grok-3"), "info row: {row}");
+        assert!(row.contains("12% ctx"), "info row: {row}");
+        assert_eq!(cell_str(&buf, 39, 3), "╯");
     }
 
     #[test]

@@ -48,6 +48,8 @@ Turn 忙碌期间，状态区域仍保持一行。[`ui/snake_loader.rs`](../src/
 
 [`ui/app_input.rs`](../src/ui/app_input.rs) 与 [`ui/app_input/history.rs`](../src/ui/app_input/history.rs) 负责 composer 输入、补全、历史、粘贴和提交。编辑器状态来自 `theway-ratatui-textarea`；终端渲染辅助、链接与 scrollbar 行为来自 `theway-pager-render`。
 
+Composer 底部信息行在左侧渲染启动时选定的 `App::cwd`，在右侧渲染 model、队列和 context usage 元数据。[`ui/prompt_chrome.rs`](../src/ui/prompt_chrome.rs) 按显示宽度缩短较长的工作目录标签，不改变 controller 路径解析，也不添加 daemon 状态。
+
 [`theme.rs`](../src/theme.rs) 是终端外观归属。颜色、间距、前缀、加载指示与 panel 布局不进入 daemon snapshot 或 core event。
 
 ## 离线持久化

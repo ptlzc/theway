@@ -48,6 +48,8 @@ The status area remains one row while a turn is busy. [`ui/snake_loader.rs`](../
 
 [`ui/app_input.rs`](../src/ui/app_input.rs) and [`ui/app_input/history.rs`](../src/ui/app_input/history.rs) own composer input, completion, history, paste, and submission. The editor state comes from `theway-ratatui-textarea`; terminal rendering helpers and link/scrollbar behavior come from `theway-pager-render`.
 
+The composer bottom information line renders the startup-selected `App::cwd` on the left and model, queue, and context-usage metadata on the right. [`ui/prompt_chrome.rs`](../src/ui/prompt_chrome.rs) shortens long working-directory labels by display width without changing controller path resolution or adding daemon state.
+
 [`theme.rs`](../src/theme.rs) is the terminal appearance owner. Color, spacing, prefixes, loading indicators, and panel layout do not enter daemon snapshots or core events.
 
 ## Offline persistence
