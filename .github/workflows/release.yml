@@ -24,14 +24,19 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
+            archive: tar.gz
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
+            archive: tar.gz
           - target: x86_64-apple-darwin
             os: macos-latest
+            archive: tar.gz
           - target: aarch64-apple-darwin
             os: macos-latest
+            archive: tar.gz
           - target: x86_64-pc-windows-msvc
             os: windows-latest
+            archive: zip
     steps:
       - uses: actions/checkout@v6
         with:
@@ -49,6 +54,7 @@ jobs:
             exit 1
           fi
           echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
+          echo "RELEASE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
       - name: install rust
         uses: dtolnay/rust-toolchain@stable
@@ -56,10 +62,10 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: build
-        run: cargo build --release --target ${{ matrix.target }} --workspace
+        run: cargo build --profile dist --target ${{ matrix.target }} --workspace
         shell: bash
 
-      - name: collect binaries
+      - name: collect binaries and package products
         id: pkg
         shell: bash
         run: |
@@ -70,14 +76,71 @@ jobs:
           fi
           mkdir -p dist
           for binary in theway thewayd; do
-            source="target/${{ matrix.target }}/release/$binary$extension"
+            source="target/${{ matrix.target }}/dist/$binary$extension"
             test -f "$source" || {
-              echo "missing release binary: $source" >&2
+              echo "missing dist binary: $source" >&2
               exit 1
             }
             cp "$source" "dist/${binary}-${RELEASE_TAG}-${{ matrix.target }}${extension}"
           done
           chmod +x dist/*
+
+          package_root="release-packages"
+          test ! -e "$package_root" || {
+            echo "package root already exists: $package_root" >&2
+            exit 1
+          }
+          mkdir -p "$package_root"
+
+          package_product() {
+            local product="$1"
+            local name="${product}-${RELEASE_TAG}-${{ matrix.target }}"
+            local package_dir="$package_root/$name"
+            local -a binaries
+            case "$product" in
+              theway)
+                binaries=(theway thewayd)
+                ;;
+              theway-daemon)
+                binaries=(thewayd)
+                ;;
+              *)
+                echo "unsupported product: $product" >&2
+                return 1
+                ;;
+            esac
+            test ! -e "$package_dir" || {
+              echo "package directory already exists: $package_dir" >&2
+              return 1
+            }
+            mkdir -p "$package_dir"
+            for binary in "${binaries[@]}"; do
+              cp "target/${{ matrix.target }}/dist/$binary$extension" "$package_dir/"
+            done
+            cp README.md LICENSE "$package_dir/"
+            {
+              echo "product=$product"
+              echo "tag=$RELEASE_TAG"
+              echo "commit=$RELEASE_COMMIT"
+              echo "target=${{ matrix.target }}"
+            } > "$package_dir/RELEASE-METADATA"
+            case "${{ matrix.archive }}" in
+              tar.gz)
+                tar -C "$package_root" -czf "dist/$name.tar.gz" "$name"
+                ;;
+              zip)
+                powershell -NoLogo -NoProfile -NonInteractive -Command \
+                  "Compress-Archive -Path '$package_dir' -DestinationPath 'dist/$name.zip' -Force"
+                ;;
+              *)
+                echo "unsupported archive format: ${{ matrix.archive }}" >&2
+                return 1
+                ;;
+            esac
+          }
+
+          package_product theway
+          package_product theway-daemon
           echo "artifact_name=binaries-${RELEASE_TAG}-${{ matrix.target }}" >> "$GITHUB_OUTPUT"
 
       - name: upload binaries artifact
@@ -123,4 +186,10 @@ jobs:
           generate_release_notes: true
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           body: |
-            Raw binaries per platform — download the `theway` and `thewayd` files for your target and place them side by side in the same directory (the TUI spawns the sibling `thewayd` daemon). Verify downloads against `SHA256SUMS`.
+            Raw binaries per platform — download the `theway` and `thewayd` files for your target and place them side by side in the same directory (the TUI spawns the sibling `thewayd` daemon).
+
+            Convenience archives:
+            - `theway-<tag>-<target>.tar.gz` (Unix) / `.zip` (Windows) contains `theway`, `thewayd`, release metadata, and project notices.
+            - `theway-daemon-<tag>-<target>.tar.gz` (Unix) / `.zip` (Windows) contains `thewayd`, release metadata, and project notices for daemon-only installs.
+
+            Verify downloads against `SHA256SUMS`.
