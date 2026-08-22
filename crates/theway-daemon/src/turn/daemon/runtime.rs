@@ -246,10 +246,6 @@ impl TurnHost {
         publish_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         publish_tick.reset();
 
-        #[cfg(unix)]
-        let mut sigterm =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).ok();
-
         loop {
             tokio::select! {
                 biased;
@@ -297,7 +293,7 @@ impl TurnHost {
                     }
                     break;
                 }
-                _ = async { sigterm.as_mut().unwrap().recv().await }, if sigterm.is_some() => {
+                _ = sigterm_received() => {
                     self.system_line(format!("[{label}] received SIGTERM, shutting down"));
                     if turn.fut.is_some() {
                         self.request_abort(&mut turn);
@@ -317,4 +313,18 @@ impl TurnHost {
         }
         Ok(())
     }
+}
+
+/// Resolves when the process receives `SIGTERM` (unix only). On other
+/// platforms, and when the handler cannot be registered, it never resolves,
+/// so the transport-loop select arm awaiting it stays inert there.
+async fn sigterm_received() {
+    #[cfg(unix)]
+    if let Ok(mut terminate) =
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+    {
+        terminate.recv().await;
+        return;
+    }
+    std::future::pending::<()>().await;
 }

@@ -88,6 +88,11 @@ sha2 = "0.10"
 hex = "0.4"
 directories = "5"
 
+# Cross-process file lock for the edit tool's read→modify→write cycle (issue #17).
+# Already in the dependency tree via tantivy, so this adds no new packages. fs4 maps
+# to LockFileEx on Windows, so the lock semantics hold on every release target.
+fs4 = "0.13"
+
 [target.'cfg(unix)'.dependencies]
 # Unix-only: process-group teardown (`setsid` + `killpg`) for `bash` tool and shell
 # hooks. Direct SIGKILL on the shell PID leaks descendants like `(sleep 60) & wait`;
@@ -95,10 +100,6 @@ directories = "5"
 # timeout/cancel. Same pattern as `NativeEnv::exec` (PR #40), the bash tool (PR #41),
 # and shell hooks (PR #58).
 libc = "0.2"
-
-# Cross-process file lock for the edit tool's read→modify→write cycle (issue #17).
-# Already in the dependency tree via tantivy, so this adds no new packages.
-fs4 = "0.13"
 
 [dev-dependencies]
 tests-bridge-macro = { path = "../tests-bridge-macro" }
