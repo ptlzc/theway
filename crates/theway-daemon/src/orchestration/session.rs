@@ -16,7 +16,7 @@ use theway_core::{AgentHarness, AgentHarnessOptions, ThinkingLevel};
 use theway_transport::feed::FeedUpdate;
 use theway_transport::inbox;
 
-/// Cwd-scoped repository and persistence inputs for one runtime build.
+/// Cwd-scoped inputs for one runtime build.
 #[derive(Clone)]
 pub struct SessionExecutionContext {
     /// Canonical cwd for path-sensitive runtime assembly.
@@ -25,6 +25,12 @@ pub struct SessionExecutionContext {
     pub repo: Arc<dyn SessionRepository>,
     /// Persistence backend used to restore this context's DAG runs.
     pub storage: Arc<dyn RuntimeStorage>,
+    /// Resolved daemon paths scoped to `cwd`; shared base/home/extra skill state.
+    pub paths: crate::DaemonPaths,
+    /// Execution environment this context's harness tools dispatch through.
+    pub executor: Arc<dyn theway_core::executor::ToolExecutor>,
+    /// Effective model for this context.
+    pub model: theway_llm_provider::Model,
 }
 
 impl SessionExecutionContext {
@@ -32,8 +38,19 @@ impl SessionExecutionContext {
         cwd: std::path::PathBuf,
         repo: Arc<dyn SessionRepository>,
         storage: Arc<dyn RuntimeStorage>,
+        paths: crate::DaemonPaths,
+        executor: Arc<dyn theway_core::executor::ToolExecutor>,
+        model: theway_llm_provider::Model,
     ) -> Self {
-        Self { cwd, repo, storage }
+        let paths = paths.with_work_dir(cwd.clone());
+        Self {
+            cwd,
+            repo,
+            storage,
+            paths,
+            executor,
+            model,
+        }
     }
 }
 
@@ -44,8 +61,9 @@ impl SessionExecutionContext {
 ///
 /// The builder retains process-owned state shared by Arc (DAG engine, subagent registry,
 /// feed/main-run channels, trigger registries, MCP tools + push hooks) plus immutable
-/// startup ingredients (model, skills, templates, system prompt, hook closures).
-/// Per-session and cwd-scoped inputs arrive through [`SessionExecutionContext`].
+/// startup ingredients (skills, templates, system prompt, hook closures).
+/// Per-session and cwd-scoped inputs — including paths, executor, and effective model —
+/// arrive through [`SessionExecutionContext`].
 /// Per-session pieces are rebuilt on every `build`:
 ///
 /// * the tool set — `dag_*` / `task` stamped with the target session, skill family wired
@@ -61,13 +79,6 @@ impl SessionExecutionContext {
 /// startup model — a `/model` change made before switching is not carried over (the
 /// rehydrated transcript restores the session's own last recorded model when it has one).
 pub struct SessionRuntimeBuilder {
-    /// Theway base dir (issue #66: `DaemonPaths::base`), resolved at the CLI
-    /// boundary; wired into the rebuilt session's skill-family tools.
-    pub base_dir: std::path::PathBuf,
-    /// Execution environment the rebuilt harness's tools dispatch through
-    /// (sdk-split-local-sandbox node 8); process-level, shared by every session build.
-    pub executor: Arc<dyn theway_core::executor::ToolExecutor>,
-    pub model: theway_llm_provider::Model,
     pub thinking: ThinkingLevel,
     pub stream_fn: theway_core::StreamFn,
     pub memory_block: String,
@@ -181,32 +192,32 @@ impl SessionRuntimeBuilder {
             std::sync::Arc::new(once_cell::sync::OnceCell::new());
         let mut tools = tools::session_tool_set(
             &self.memory_dir,
-            &self.base_dir,
+            &ctx.paths.base,
             &self.dag_engine,
             &self.subagent_registry,
-            &self.model,
+            &ctx.model,
             Some(&self.stream_fn),
             &skill_harness_cell,
             &session_id,
-            self.executor.clone(),
+            ctx.executor.clone(),
             &self.services,
         );
         tools.extend(self.mcp_tools.iter().cloned());
 
         self.dag_engine.set_launcher(Some(tools::node_launcher(
             self.dag_engine.clone(),
-            self.model.clone(),
+            ctx.model.clone(),
             Some(self.stream_fn.clone()),
             ctx.cwd.clone(),
             self.subagent_registry.clone(),
             self.memory_dir.clone(),
-            self.base_dir.clone(),
+            ctx.paths.base.clone(),
             skill_harness_cell.clone(),
-            self.executor.clone(),
+            ctx.executor.clone(),
         )));
 
         let goal_harness_cell: Arc<OnceLock<Arc<AgentHarness>>> = Arc::new(OnceLock::new());
-        let mut opts = AgentHarnessOptions::new(self.model.clone(), session);
+        let mut opts = AgentHarnessOptions::new(ctx.model.clone(), session);
         opts.observer = self.subagent_registry.observer();
         opts.observation_context = theway_core::ObservationContext {
             session_id: Some(session_id.clone()),

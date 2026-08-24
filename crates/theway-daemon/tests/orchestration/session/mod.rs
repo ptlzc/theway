@@ -181,12 +181,6 @@ fn test_factory() -> (SessionRuntimeBuilder, Arc<dyn RuntimeStorage>, TempDir) {
 
     let storage: Arc<dyn RuntimeStorage> = crate::runtime_storage::local_runtime_storage();
     let factory = SessionRuntimeBuilder {
-        base_dir: state.path().join("base"),
-        // Composition-root seam: picks the local executor for `local` builds
-        // and the sandbox stub for `sandbox`-only builds, so this suite
-        // compiles under both feature sets (issue #64).
-        executor: crate::executor::default_executor(),
-        model: faux_model(),
         thinking: theway_core::ThinkingLevel::Off,
         stream_fn: faux_stream(),
         memory_block: "test memory".into(),
@@ -219,14 +213,30 @@ fn test_factory() -> (SessionRuntimeBuilder, Arc<dyn RuntimeStorage>, TempDir) {
     (factory, storage, state)
 }
 
-/// Build a cwd-scoped execution context around a standalone test repository.
+/// Build a cwd-scoped context around a standalone test repository.
 fn session_context(
     work_dir: &Path,
     repo: theway_storage::sqlite_repo::SqliteSessionRepo,
     storage: Arc<dyn RuntimeStorage>,
+    base_dir: &Path,
 ) -> SessionExecutionContext {
     let repo: Arc<dyn SessionRepository> = Arc::new(repo);
-    SessionExecutionContext::new(work_dir.to_path_buf(), repo, storage)
+    let paths = crate::DaemonPaths {
+        base: base_dir.to_path_buf(),
+        home: base_dir.to_path_buf(),
+        work_dir: base_dir.to_path_buf(),
+        extra_skill_dirs: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
+    };
+    let context = SessionExecutionContext::new(
+        work_dir.to_path_buf(),
+        repo,
+        storage,
+        paths,
+        crate::executor::executor_for_cwd(work_dir.to_path_buf()),
+        faux_model(),
+    );
+    assert_eq!(context.paths.work_dir, work_dir.canonicalize().unwrap());
+    context
 }
 
 /// Create a session in `repo` with the given recorded `cwd` metadata and
@@ -259,7 +269,7 @@ async fn build_uses_explicit_context_cwd() {
     let id = create_session_with_cwd(&repo, recorded_dir.path().to_str().unwrap()).await;
 
     let (factory, storage, _state) = test_factory();
-    let ctx = session_context(work_dir.path(), repo, storage);
+    let ctx = session_context(work_dir.path(), repo, storage, &_state.path().join("base"));
     let runtime = factory
         .build(&ctx, &id)
         .await
@@ -294,8 +304,13 @@ async fn build_one_builder_serves_two_cwd_contexts() {
     let id_b = create_session_with_cwd(&repo_b, work_b.path().to_str().unwrap()).await;
 
     let (factory, storage, _state) = test_factory();
-    let ctx_a = session_context(work_a.path(), repo_a, storage.clone());
-    let ctx_b = session_context(work_b.path(), repo_b, storage);
+    let ctx_a = session_context(
+        work_a.path(),
+        repo_a,
+        storage.clone(),
+        &_state.path().join("base"),
+    );
+    let ctx_b = session_context(work_b.path(), repo_b, storage, &_state.path().join("base"));
 
     let runtime_a = factory
         .build(&ctx_a, &id_a)
@@ -332,7 +347,7 @@ async fn build_uses_context_repo_validation() {
     let _existing_id =
         create_session_with_cwd(&repo, work_dir.path().to_str().unwrap()).await;
     let (factory, storage, _state) = test_factory();
-    let ctx = session_context(work_dir.path(), repo, storage);
+    let ctx = session_context(work_dir.path(), repo, storage, &_state.path().join("base"));
 
     let err = match factory.build(&ctx, "missing-session-id").await {
         Ok(_) => panic!("missing id must fail through context repo validation"),
@@ -355,7 +370,7 @@ async fn build_allows_legacy_session_without_cwd_metadata() {
     let id = create_session_with_cwd(&repo, "").await;
 
     let (factory, storage, _state) = test_factory();
-    let ctx = session_context(work_dir.path(), repo, storage);
+    let ctx = session_context(work_dir.path(), repo, storage, &_state.path().join("base"));
     factory
         .build(&ctx, &id)
         .await
@@ -402,7 +417,8 @@ export default defineExtension((api) => {
     let repo = theway_storage::sqlite_repo::SqliteSessionRepo::new(repo_root.path());
     let id = create_session_with_cwd(&repo, work_dir.path().to_str().unwrap()).await;
     let (mut factory, storage, state) = test_factory();
-    let mut trust = crate::ts_extensions::ExtensionTrustStore::load(&factory.base_dir);
+    let base_dir = state.path().join("base");
+    let mut trust = crate::ts_extensions::ExtensionTrustStore::load(&base_dir);
     trust
         .decide_project(
             work_dir.path(),
@@ -413,11 +429,11 @@ export default defineExtension((api) => {
         .unwrap();
     trust.save().unwrap();
     *factory.runtime_extension_packages.write() =
-        crate::ts_extensions::PackageCatalog::discover(work_dir.path(), &factory.base_dir);
+        crate::ts_extensions::PackageCatalog::discover(work_dir.path(), &base_dir);
     let engine = crate::ts_extensions::QuickJsEnginePool::new(1);
     factory.runtime_extension_engine = Some(engine.clone());
 
-    let ctx = session_context(work_dir.path(), repo, storage);
+    let ctx = session_context(work_dir.path(), repo, storage, &state.path().join("base"));
     let runtime = factory
         .build(&ctx, &id)
         .await

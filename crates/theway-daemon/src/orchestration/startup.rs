@@ -127,7 +127,6 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         None => local_runtime_storage(),
     };
     let repo = storage.session_repository(&cwd).await?;
-    let session_context = SessionExecutionContext::new(cwd.clone(), repo.clone(), storage.clone());
 
     // Issue #73: config-file-free startup. The daemon no longer reads
     // `config.toml` at startup — every setting lives in the in-memory
@@ -214,7 +213,15 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     // by feature — the local filesystem/process executor for `local` builds, the
     // sandbox stub for `sandbox`-only builds.
     let executor: Arc<dyn theway_core::executor::ToolExecutor> =
-        crate::executor::default_executor();
+        crate::executor::executor_for_cwd(cwd.clone());
+    let session_context = SessionExecutionContext::new(
+        cwd.clone(),
+        repo.clone(),
+        storage.clone(),
+        paths.clone(),
+        executor.clone(),
+        model.clone(),
+    );
     // TODO(#73): MCP servers are still read from local `mcp.toml` files;
     // once the settings RPC provisions them, this local read goes away. The
     // `load_local_sources` seam skips the scan entirely for a fully
@@ -394,9 +401,6 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     let (main_run_tx, main_run_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
 
     let session_runtime_builder = Arc::new(SessionRuntimeBuilder {
-        base_dir: paths.base.clone(),
-        executor: executor.clone(),
-        model: model.clone(),
         thinking,
         stream_fn: stream_fn.clone(),
         memory_block,
