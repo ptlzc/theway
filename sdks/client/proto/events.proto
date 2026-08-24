@@ -16,6 +16,7 @@ message StreamFrame {
 }
 
 message StreamEvent {
+  string session_id = 7;
   oneof kind {
     SubagentStarted subagent_started = 1;
     SubagentOutput subagent_output = 2;

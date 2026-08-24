@@ -19,10 +19,12 @@ pub enum SubagentJobEvent {
         source: String,
         run_id: Option<String>,
         node_id: Option<String>,
+        session_id: Option<String>,
     },
     Output {
         id: String,
         chunk: String,
+        session_id: Option<String>,
     },
     Metrics {
         id: String,
@@ -33,6 +35,7 @@ pub enum SubagentJobEvent {
         tokens_out: u64,
         tools_called: u64,
         turn: u32,
+        session_id: Option<String>,
     },
     Completed {
         id: String,
@@ -42,6 +45,7 @@ pub enum SubagentJobEvent {
         tokens_in: u64,
         tokens_out: u64,
         tools_called: u64,
+        session_id: Option<String>,
     },
 }
 

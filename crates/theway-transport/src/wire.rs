@@ -338,10 +338,12 @@ pub enum WireAgentEvent {
         source: String,
         run_id: Option<String>,
         node_id: Option<String>,
+        session_id: String,
     },
     Output {
         id: String,
         chunk: String,
+        session_id: String,
     },
     Metrics {
         id: String,
@@ -352,6 +354,7 @@ pub enum WireAgentEvent {
         tokens_out: u64,
         tools_called: u64,
         turn: u32,
+        session_id: String,
     },
     Completed {
         id: String,
@@ -361,6 +364,7 @@ pub enum WireAgentEvent {
         tokens_in: u64,
         tokens_out: u64,
         tools_called: u64,
+        session_id: String,
     },
 }
 

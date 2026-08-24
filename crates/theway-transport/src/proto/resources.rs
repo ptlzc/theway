@@ -145,6 +145,7 @@ pub fn stream_event_wire(event: &WireAgentEvent) -> wire::StreamEvent {
             source,
             run_id,
             node_id,
+            ..
         } => Kind::SubagentStarted(wire::SubagentStarted {
             id: id.clone(),
             agent: agent.clone(),
@@ -152,7 +153,7 @@ pub fn stream_event_wire(event: &WireAgentEvent) -> wire::StreamEvent {
             run_id: run_id.clone(),
             node_id: node_id.clone(),
         }),
-        WireAgentEvent::Output { id, chunk } => Kind::SubagentOutput(wire::SubagentOutput {
+        WireAgentEvent::Output { id, chunk, .. } => Kind::SubagentOutput(wire::SubagentOutput {
             id: id.clone(),
             chunk: chunk.clone(),
         }),
@@ -165,6 +166,7 @@ pub fn stream_event_wire(event: &WireAgentEvent) -> wire::StreamEvent {
             tokens_out,
             tools_called,
             turn,
+            ..
         } => Kind::SubagentMetrics(wire::SubagentMetrics {
             id: id.clone(),
             tps: tps.unwrap_or(0.0),
@@ -183,6 +185,7 @@ pub fn stream_event_wire(event: &WireAgentEvent) -> wire::StreamEvent {
             tokens_in,
             tokens_out,
             tools_called,
+            ..
         } => Kind::SubagentCompleted(wire::SubagentCompleted {
             id: id.clone(),
             status: status.clone(),
@@ -194,7 +197,16 @@ pub fn stream_event_wire(event: &WireAgentEvent) -> wire::StreamEvent {
             tools_called: *tools_called,
         }),
     };
-    wire::StreamEvent { kind: Some(kind) }
+    let session_id = match event {
+        WireAgentEvent::Started { session_id, .. }
+        | WireAgentEvent::Output { session_id, .. }
+        | WireAgentEvent::Metrics { session_id, .. }
+        | WireAgentEvent::Completed { session_id, .. } => session_id.clone(),
+    };
+    wire::StreamEvent {
+        session_id,
+        kind: Some(kind),
+    }
 }
 
 /// Convert a DAG engine event-plane message (node_status / run_status) into
@@ -207,7 +219,7 @@ pub fn dag_event_wire(event: &WireDagEvent) -> wire::StreamEvent {
             node_id,
             status,
             error,
-            .. // `session_id` has no wire field yet (proto change pending).
+            ..
         } => Kind::NodeStatus(wire::NodeStatus {
             run_id: run_id.clone(),
             node_id: node_id.clone(),
@@ -218,14 +230,21 @@ pub fn dag_event_wire(event: &WireDagEvent) -> wire::StreamEvent {
             run_id,
             status,
             error,
-            .. // `session_id` has no wire field yet (proto change pending).
+            ..
         } => Kind::RunStatus(wire::RunStatus {
             run_id: run_id.clone(),
             status: status.clone(),
             error: error.clone(),
         }),
     };
-    wire::StreamEvent { kind: Some(kind) }
+    let session_id = match event {
+        WireDagEvent::NodeStatus { session_id, .. }
+        | WireDagEvent::RunStatus { session_id, .. } => session_id.clone(),
+    };
+    wire::StreamEvent {
+        session_id,
+        kind: Some(kind),
+    }
 }
 
 fn subagent_wire(job: &crate::wire::WireAgentJobSnapshot) -> wire::SubagentJobSnapshot {

@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::wire::{
-    ModelEntry, ProviderGroup, WireContextUsage, WireDagEvent, WireDagNodeSnapshot,
+    ModelEntry, ProviderGroup, WireAgentEvent, WireContextUsage, WireDagEvent, WireDagNodeSnapshot,
     WireDagRunSnapshot,
 };
 
@@ -317,10 +317,11 @@ fn goal_run_round_trips_kind_and_dag_event_wire() {
 
     let event = dag_event_wire(&WireDagEvent::RunStatus {
         run_id: id.clone(),
-        session_id: String::new(),
+        session_id: "sess-1".into(),
         status: "running".into(),
         error: None,
     });
+    assert_eq!(event.session_id, "sess-1");
     match event.kind {
         Some(wire::stream_event::Kind::RunStatus(run)) => {
             assert_eq!(run.run_id, id);
@@ -331,11 +332,12 @@ fn goal_run_round_trips_kind_and_dag_event_wire() {
     }
     let event = dag_event_wire(&WireDagEvent::NodeStatus {
         run_id: id.clone(),
-        session_id: String::new(),
+        session_id: "sess-1".into(),
         node_id: "main".into(),
         status: "running".into(),
         error: Some("not yet".into()),
     });
+    assert_eq!(event.session_id, "sess-1");
     match event.kind {
         Some(wire::stream_event::Kind::NodeStatus(node)) => {
             assert_eq!(node.run_id, id);
@@ -344,6 +346,51 @@ fn goal_run_round_trips_kind_and_dag_event_wire() {
             assert_eq!(node.error.as_deref(), Some("not yet"));
         }
         other => panic!("expected NodeStatus, got {other:?}"),
+    }
+}
+
+#[test]
+fn stream_event_wire_carries_session_ownership() {
+    let events = [
+        WireAgentEvent::Started {
+            id: "job-1".into(),
+            agent: "researcher".into(),
+            source: "dag".into(),
+            run_id: Some("run-1".into()),
+            node_id: Some("node-1".into()),
+            session_id: "sess-1".into(),
+        },
+        WireAgentEvent::Output {
+            id: "job-1".into(),
+            chunk: "hi".into(),
+            session_id: "sess-1".into(),
+        },
+        WireAgentEvent::Metrics {
+            id: "job-1".into(),
+            tps: Some(12.5),
+            cps: None,
+            chars: 100,
+            tokens_in: 20,
+            tokens_out: 30,
+            tools_called: 2,
+            turn: 1,
+            session_id: "sess-1".into(),
+        },
+        WireAgentEvent::Completed {
+            id: "job-1".into(),
+            status: "succeeded".into(),
+            error: None,
+            chars: 100,
+            tokens_in: 20,
+            tokens_out: 30,
+            tools_called: 2,
+            session_id: "sess-1".into(),
+        },
+    ];
+
+    for event in events {
+        let wire_event = stream_event_wire(&event);
+        assert_eq!(wire_event.session_id, "sess-1");
     }
 }
 

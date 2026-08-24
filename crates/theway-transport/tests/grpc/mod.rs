@@ -548,13 +548,14 @@ async fn stream_events_merges_snapshot_and_event_payloads() {
         .send(WireAgentEvent::Output {
             id: "job-1".into(),
             chunk: "hi".into(),
+            session_id: "sess-1".into(),
         })
         .unwrap();
     state
         .dag_events
         .send(WireDagEvent::RunStatus {
             run_id: "goal-1".into(),
-            session_id: String::new(),
+            session_id: "sess-1".into(),
             status: "running".into(),
             error: None,
         })
@@ -569,17 +570,20 @@ async fn stream_events_merges_snapshot_and_event_payloads() {
         let frame = item.unwrap();
         match frame.payload {
             Some(theway_grpc::stream_frame::Payload::Snapshot(_)) => kinds.push("snapshot"),
-            Some(theway_grpc::stream_frame::Payload::Event(event)) => match event.kind {
-                Some(theway_grpc::stream_event::Kind::SubagentOutput(o)) => {
-                    assert_eq!(o.chunk, "hi");
-                    kinds.push("subagent");
+            Some(theway_grpc::stream_frame::Payload::Event(event)) => {
+                assert_eq!(event.session_id, "sess-1");
+                match event.kind {
+                    Some(theway_grpc::stream_event::Kind::SubagentOutput(o)) => {
+                        assert_eq!(o.chunk, "hi");
+                        kinds.push("subagent");
+                    }
+                    Some(theway_grpc::stream_event::Kind::RunStatus(run)) => {
+                        assert_eq!(run.run_id, "goal-1");
+                        assert_eq!(run.status, "running");
+                        kinds.push("dag");
+                    }
+                    other => panic!("unexpected event: {other:?}"),
                 }
-                Some(theway_grpc::stream_event::Kind::RunStatus(run)) => {
-                    assert_eq!(run.run_id, "goal-1");
-                    assert_eq!(run.status, "running");
-                    kinds.push("dag");
-                }
-                other => panic!("unexpected event: {other:?}"),
             },
             None => panic!("empty frame"),
         }
@@ -602,7 +606,7 @@ async fn stream_events_forwards_dag_node_status_frames() {
         .dag_events
         .send(WireDagEvent::NodeStatus {
             run_id: "goal-1".into(),
-            session_id: String::new(),
+            session_id: "sess-1".into(),
             node_id: "main".into(),
             status: "failed".into(),
             error: Some("condition broken".into()),
@@ -614,15 +618,18 @@ async fn stream_events_forwards_dag_node_status_frames() {
         .expect("stream ended");
     let frame = item.unwrap();
     match frame.payload {
-        Some(theway_grpc::stream_frame::Payload::Event(event)) => match event.kind {
-            Some(theway_grpc::stream_event::Kind::NodeStatus(node)) => {
-                assert_eq!(node.run_id, "goal-1");
-                assert_eq!(node.node_id, "main");
-                assert_eq!(node.status, "failed");
-                assert_eq!(node.error.as_deref(), Some("condition broken"));
+        Some(theway_grpc::stream_frame::Payload::Event(event)) => {
+            assert_eq!(event.session_id, "sess-1");
+            match event.kind {
+                Some(theway_grpc::stream_event::Kind::NodeStatus(node)) => {
+                    assert_eq!(node.run_id, "goal-1");
+                    assert_eq!(node.node_id, "main");
+                    assert_eq!(node.status, "failed");
+                    assert_eq!(node.error.as_deref(), Some("condition broken"));
+                }
+                other => panic!("expected NodeStatus, got {other:?}"),
             }
-            other => panic!("expected NodeStatus, got {other:?}"),
-        },
+        }
         other => panic!("expected event payload, got {other:?}"),
     }
 }

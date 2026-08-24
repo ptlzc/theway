@@ -262,6 +262,7 @@ impl SubagentJobRegistry {
             source: init.source,
             run_id: init.run_id,
             node_id: init.node_id,
+            session_id: init.session_id,
         });
         id
     }
@@ -339,6 +340,15 @@ impl SubagentJobRegistry {
         inner.jobs.iter().find(|j| j.id == id).cloned()
     }
 
+    pub(crate) fn session_id(&self, id: &str) -> Option<String> {
+        self.inner
+            .lock()
+            .jobs
+            .iter()
+            .find(|j| j.id == id)
+            .and_then(|job| job.session_id.clone())
+    }
+
     /// Find the most recent job registered for a DAG node. Retries register a
     /// fresh job per attempt, so the newest one is the live/relevant record.
     /// `dag_inspect kind=transcript` resolves the engine node to its registry
@@ -377,6 +387,7 @@ impl SubagentJobRegistry {
                 tokens_in: job.input_tokens,
                 tokens_out: job.output_tokens,
                 tools_called: job.tools_called,
+                session_id: job.session_id.clone(),
             });
             if let Some(scope) = self.operations.lock().remove(id) {
                 let timed_out = error.as_deref().is_some_and(|message| {

@@ -87,11 +87,18 @@ fn subscribe_returns_receiver() {
         source: "subagent".into(),
         run_id: None,
         node_id: None,
-        session_id: None,
+        session_id: Some("sess-1".into()),
     });
     let event = rx.try_recv().expect("started event");
     match event {
-        SubagentJobEvent::Started { id: started_id, .. } => assert_eq!(started_id, id),
+        SubagentJobEvent::Started {
+            id: started_id,
+            session_id,
+            ..
+        } => {
+            assert_eq!(started_id, id);
+            assert_eq!(session_id.as_deref(), Some("sess-1"));
+        }
         other => panic!("expected Started event, got {other:?}"),
     }
 }

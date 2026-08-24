@@ -4,14 +4,46 @@ use super::*;
 
 #[test]
 fn event_json_matches_wire_shape() {
+    let event = WireAgentEvent::Started {
+        id: "job-1".into(),
+        agent: "researcher".into(),
+        source: "dag".into(),
+        run_id: Some("run-1".into()),
+        node_id: Some("node-1".into()),
+        session_id: "sess-1".into(),
+    };
+    let value = event_json(&event);
+    assert_eq!(value["event"], "subagent_started");
+    assert_eq!(value["id"], "job-1");
+    assert_eq!(value["agent"], "researcher");
+    assert_eq!(value["session_id"], "sess-1");
+
     let event = WireAgentEvent::Output {
         id: "job-1".into(),
         chunk: "hi".into(),
+        session_id: "sess-1".into(),
     };
     let value = event_json(&event);
     assert_eq!(value["event"], "subagent_output");
     assert_eq!(value["id"], "job-1");
     assert_eq!(value["chunk"], "hi");
+    assert_eq!(value["session_id"], "sess-1");
+
+    let event = WireAgentEvent::Metrics {
+        id: "job-1".into(),
+        tps: Some(12.5),
+        cps: None,
+        chars: 100,
+        tokens_in: 20,
+        tokens_out: 30,
+        tools_called: 2,
+        turn: 1,
+        session_id: "sess-1".into(),
+    };
+    let value = event_json(&event);
+    assert_eq!(value["event"], "subagent_metrics");
+    assert_eq!(value["id"], "job-1");
+    assert_eq!(value["session_id"], "sess-1");
 
     let event = WireAgentEvent::Completed {
         id: "job-1".into(),
@@ -21,12 +53,14 @@ fn event_json_matches_wire_shape() {
         tokens_in: 5,
         tokens_out: 3,
         tools_called: 2,
+        session_id: "sess-1".into(),
     };
     let value = event_json(&event);
     assert_eq!(value["event"], "subagent_completed");
     assert_eq!(value["status"], "succeeded");
     assert!(value["error"].is_null());
     assert_eq!(value["tools_called"], 2);
+    assert_eq!(value["session_id"], "sess-1");
 }
 
 #[test]
@@ -52,6 +86,7 @@ fn dag_event_json_matches_wire_shape() {
     });
     assert_eq!(value["event"], "node_status");
     assert_eq!(value["node_id"], "main");
+    assert_eq!(value["session_id"], "sess-1");
     assert_eq!(value["status"], "failed");
     assert_eq!(value["error"], "condition broken");
 }

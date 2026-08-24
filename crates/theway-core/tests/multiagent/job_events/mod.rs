@@ -44,10 +44,12 @@ fn agent_job_event_variants_carry_their_fields() {
         source: "dag".into(),
         run_id: Some("run-1".into()),
         node_id: Some("node-1".into()),
+        session_id: Some("sess-1".into()),
     };
     let output = SubagentJobEvent::Output {
         id: "job-1".into(),
         chunk: "partial output".into(),
+        session_id: Some("sess-1".into()),
     };
     let metrics = SubagentJobEvent::Metrics {
         id: "job-1".into(),
@@ -58,6 +60,7 @@ fn agent_job_event_variants_carry_their_fields() {
         tokens_out: 30,
         tools_called: 2,
         turn: 1,
+        session_id: Some("sess-1".into()),
     };
     let completed = SubagentJobEvent::Completed {
         id: "job-1".into(),
@@ -67,6 +70,7 @@ fn agent_job_event_variants_carry_their_fields() {
         tokens_in: 20,
         tokens_out: 30,
         tools_called: 2,
+        session_id: Some("sess-1".into()),
     };
 
     // Act
@@ -80,19 +84,26 @@ fn agent_job_event_variants_carry_their_fields() {
             source,
             run_id,
             node_id,
+            session_id,
         } => {
             assert_eq!(id, "job-1");
             assert_eq!(agent, "researcher");
             assert_eq!(source, "dag");
             assert_eq!(run_id.as_deref(), Some("run-1"));
             assert_eq!(node_id.as_deref(), Some("node-1"));
+            assert_eq!(session_id.as_deref(), Some("sess-1"));
         }
         other => panic!("expected Started event, got {other:?}"),
     }
     match &events[1] {
-        SubagentJobEvent::Output { id, chunk } => {
+        SubagentJobEvent::Output {
+            id,
+            chunk,
+            session_id,
+        } => {
             assert_eq!(id, "job-1");
             assert_eq!(chunk, "partial output");
+            assert_eq!(session_id.as_deref(), Some("sess-1"));
         }
         other => panic!("expected Output event, got {other:?}"),
     }
@@ -106,6 +117,7 @@ fn agent_job_event_variants_carry_their_fields() {
             tokens_out,
             tools_called,
             turn,
+            session_id,
         } => {
             assert_eq!(id, "job-1");
             assert_eq!(*tps, Some(12.5));
@@ -115,6 +127,7 @@ fn agent_job_event_variants_carry_their_fields() {
             assert_eq!(*tokens_out, 30);
             assert_eq!(*tools_called, 2);
             assert_eq!(*turn, 1);
+            assert_eq!(session_id.as_deref(), Some("sess-1"));
         }
         other => panic!("expected Metrics event, got {other:?}"),
     }
@@ -127,6 +140,7 @@ fn agent_job_event_variants_carry_their_fields() {
             tokens_in,
             tokens_out,
             tools_called,
+            session_id,
         } => {
             assert_eq!(id, "job-1");
             assert_eq!(*status, SubagentJobStatus::Succeeded);
@@ -135,6 +149,7 @@ fn agent_job_event_variants_carry_their_fields() {
             assert_eq!(*tokens_in, 20);
             assert_eq!(*tokens_out, 30);
             assert_eq!(*tools_called, 2);
+            assert_eq!(session_id.as_deref(), Some("sess-1"));
         }
         other => panic!("expected Completed event, got {other:?}"),
     }
@@ -149,6 +164,7 @@ fn agent_job_events_are_clone_and_debug() {
         source: "dag".into(),
         run_id: None,
         node_id: None,
+        session_id: Some("sess-1".into()),
     };
 
     // Act

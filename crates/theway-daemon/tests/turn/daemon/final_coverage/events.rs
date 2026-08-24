@@ -20,7 +20,14 @@ async fn transport_endpoints_forwards_registry_events() {
         .expect("forwarded event timed out")
         .expect("registry closed before forwarding");
     match event {
-        WireAgentEvent::Started { id: event_id, .. } => assert_eq!(event_id, id),
+        WireAgentEvent::Started {
+            id: event_id,
+            session_id,
+            ..
+        } => {
+            assert_eq!(event_id, id);
+            assert_eq!(session_id, host.session.id.clone());
+        }
         other => panic!("expected Started event, got {other:?}"),
     }
 }
@@ -44,10 +51,12 @@ async fn transport_endpoints_projects_dag_events() {
     match event {
         WireDagEvent::RunStatus {
             run_id: event_id,
+            session_id,
             status,
             ..
         } => {
             assert_eq!(event_id, run_id);
+            assert_eq!(session_id, host.session.id.clone());
             assert_eq!(status, "running");
         }
         other => panic!("expected RunStatus event, got {other:?}"),
