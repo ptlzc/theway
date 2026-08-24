@@ -606,14 +606,14 @@ async fn build_one_builder_serves_two_cwd_contexts() {
     assert!(
         prompt_a.contains(&format!(
             "Current working directory: {}",
-            work_a.path().display()
+            work_a.path().canonicalize().unwrap().display()
         )),
         "runtime A must use work_a: {prompt_a}"
     );
     assert!(
         prompt_b.contains(&format!(
             "Current working directory: {}",
-            work_b.path().display()
+            work_b.path().canonicalize().unwrap().display()
         )),
         "runtime B must use work_b: {prompt_b}"
     );
