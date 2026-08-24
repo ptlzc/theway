@@ -63,14 +63,32 @@ pub struct LspClient {
 
 #[allow(dead_code)]
 impl LspClient {
-    /// Spawn the server, wire stdio, and start the read pump. Caller must then call
-    /// [`Self::initialize`] before any other method.
+    /// Spawn the server in the process cwd. Legacy compatibility; prefer
+    /// [`Self::spawn_in`] when an owning session cwd is available.
     pub async fn spawn(cmd: &str, args: &[&str]) -> Result<Self> {
-        let mut child = Command::new(cmd)
+        Self::spawn_impl(cmd, args, None).await
+    }
+
+    /// Spawn the server in an explicit working directory.
+    pub async fn spawn_in(
+        cmd: &str,
+        args: &[&str],
+        cwd: impl AsRef<std::path::Path>,
+    ) -> Result<Self> {
+        Self::spawn_impl(cmd, args, Some(cwd.as_ref())).await
+    }
+
+    async fn spawn_impl(cmd: &str, args: &[&str], cwd: Option<&std::path::Path>) -> Result<Self> {
+        let mut command = Command::new(cmd);
+        command
             .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::piped());
+        if let Some(cwd) = cwd {
+            command.current_dir(cwd);
+        }
+        let mut child = command
             .spawn()
             .with_context(|| format!("spawn LSP server {cmd}"))?;
         let stdin = child

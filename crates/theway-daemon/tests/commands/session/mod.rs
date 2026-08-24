@@ -159,7 +159,11 @@ async fn share_command_uses_gh_shim_and_prints_url() {
     let _theway_dir = EnvGuard::set("THEWAY_DIR", base.path());
 
     let gh = base.path().join("gh-shim");
-    std::fs::write(&gh, "#!/bin/sh\necho https://gist.example/abc\n").unwrap();
+    std::fs::write(
+        &gh,
+        "#!/bin/sh\npwd > gh-shim.pwd\necho https://gist.example/abc\n",
+    )
+    .unwrap();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -174,6 +178,12 @@ async fn share_command_uses_gh_shim_and_prints_url() {
 
     let outcome = ShareCommand.run(&[], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Handled), "{outcome:?}");
+    let pwd_file = tmp.path().join("gh-shim.pwd");
+    let recorded = std::fs::read_to_string(&pwd_file).unwrap();
+    assert_eq!(
+        std::path::PathBuf::from(recorded.trim()),
+        tmp.path().canonicalize().unwrap()
+    );
 }
 
 #[tokio::test]

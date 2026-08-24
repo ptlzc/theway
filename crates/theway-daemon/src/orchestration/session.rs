@@ -562,6 +562,7 @@ impl SessionRuntimeBuilder {
         register_notification_hooks(
             &trigger_executor,
             &mcp_notification_hooks,
+            &ctx.cwd,
             &self.services.cron,
             &self.services.dynamic_triggers,
         );
@@ -655,6 +656,7 @@ impl NotificationHookSink for std::sync::Arc<crate::trigger_engine::execution::T
 fn register_notification_hooks(
     sink: &(impl NotificationHookSink + ?Sized),
     mcp_notification_hooks: &[Arc<triggers::McpNotificationHook>],
+    cwd: &std::path::Path,
     cron_registry: &triggers::cron::CronRegistry,
     dynamic_trigger_registry: &triggers::dynamic::DynamicTriggerRegistry,
 ) {
@@ -664,8 +666,9 @@ fn register_notification_hooks(
     sink.register(Arc::new(triggers::CronNotificationHook::new(
         cron_registry.clone(),
     )));
-    sink.register(Arc::new(triggers::DynamicTriggerCheckHook::new(
+    sink.register(Arc::new(triggers::DynamicTriggerCheckHook::new_for_cwd(
         dynamic_trigger_registry.clone(),
+        cwd,
     )));
 }
 

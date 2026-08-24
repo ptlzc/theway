@@ -10,6 +10,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashSet;
+use std::path::Path;
 use std::sync::Arc;
 
 use crate::triggers;
@@ -53,6 +54,7 @@ fn register_notification_hooks_two_mcp_servers_registers_each_hook_exactly_once(
     register_notification_hooks(
         &sink,
         &[mcp_a.clone(), mcp_b.clone()],
+        Path::new("/tmp/project"),
         &triggers::cron::CronRegistry::new(),
         &triggers::dynamic::DynamicTriggerRegistry::new(),
     );
@@ -77,6 +79,7 @@ fn register_notification_hooks_no_mcp_servers_registers_cron_and_dynamic_only() 
     register_notification_hooks(
         &sink,
         &[],
+        Path::new("/tmp/project"),
         &triggers::cron::CronRegistry::new(),
         &triggers::dynamic::DynamicTriggerRegistry::new(),
     );
@@ -92,6 +95,7 @@ fn register_notification_hooks_registered_labels_are_unique() {
     register_notification_hooks(
         &sink,
         &hooks,
+        Path::new("/tmp/project"),
         &triggers::cron::CronRegistry::new(),
         &triggers::dynamic::DynamicTriggerRegistry::new(),
     );
@@ -392,8 +396,6 @@ command = "echo hi"
 // ─────────────────────────────────────────────────────────────────────────────────────────
 // execution context
 // ─────────────────────────────────────────────────────────────────────────────────────────
-
-use std::path::Path;
 
 use tempfile::TempDir;
 

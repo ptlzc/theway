@@ -247,7 +247,10 @@ async fn attach_diagnostics_appends_lsp_diagnostics_for_edit_tools() {
     std::fs::write(
         &lsp_script,
         r#"
-import json, sys
+import json, os, sys
+
+with open("fake_lsp_cwd.txt", "w", encoding="utf-8") as cwd_file:
+    cwd_file.write(os.getcwd())
 
 def read_message():
     headers = {}
@@ -326,6 +329,11 @@ while True:
     assert!(
         summary.contains("[error] 1:2: fake diagnostic"),
         "{summary}"
+    );
+    let recorded_cwd = std::fs::read_to_string(dir.path().join("fake_lsp_cwd.txt")).unwrap();
+    assert_eq!(
+        std::path::PathBuf::from(recorded_cwd.trim()),
+        dir.path().canonicalize().unwrap()
     );
 }
 

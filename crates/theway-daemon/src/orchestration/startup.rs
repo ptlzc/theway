@@ -114,12 +114,20 @@ where
     }
 }
 
+fn canonical_work_dir(path: &std::path::Path) -> Result<std::path::PathBuf> {
+    let canonical = path
+        .canonicalize()
+        .with_context(|| format!("cd into {}", path.display()))?;
+    if !canonical.is_dir() {
+        anyhow::bail!("work directory is not a directory: {}", canonical.display());
+    }
+    Ok(canonical)
+}
+
 pub async fn run(options: DaemonOptions) -> Result<()> {
     let mode = options.transport;
     let paths = options.paths;
-    std::env::set_current_dir(&paths.work_dir)
-        .with_context(|| format!("cd into {}", paths.work_dir.display()))?;
-    let cwd = std::env::current_dir().context("getting cwd")?;
+    let cwd = canonical_work_dir(&paths.work_dir)?;
     // Issue #80: all persistent runtime state goes through the RuntimeStorage
     // seam. The default LocalRuntimeStorage keeps current local behavior; a
     // controller-backed storage can replace it without changing the kernel.

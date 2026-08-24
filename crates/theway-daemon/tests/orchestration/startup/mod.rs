@@ -3,7 +3,7 @@
 use crate::test_env::{ENV_LOCK, EnvGuard};
 use tempfile::TempDir;
 
-use super::{monitor_controller_storage, resolve_startup_model};
+use super::{canonical_work_dir, monitor_controller_storage, resolve_startup_model};
 
 #[tokio::test]
 async fn controller_backing_keeps_user_custom_models_available() {
@@ -70,4 +70,44 @@ async fn controller_storage_monitor_exits_after_consecutive_dead_probes() {
     )
     .await
     .unwrap();
+}
+
+#[test]
+fn canonical_work_dir_canonicalizes_existing_directory() {
+    let temp = TempDir::new().unwrap();
+
+    let canonical = canonical_work_dir(temp.path()).unwrap();
+
+    assert_eq!(canonical, temp.path().canonicalize().unwrap());
+}
+
+#[test]
+fn canonical_work_dir_rejects_missing_directory() {
+    let temp = TempDir::new().unwrap();
+    let missing = temp.path().join("missing");
+
+    let err = canonical_work_dir(&missing).unwrap_err();
+
+    assert!(format!("{err:#}").contains("cd into"), "{err:#}");
+}
+
+#[test]
+fn canonical_work_dir_rejects_non_directory_path() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("file");
+    std::fs::write(&file, "not a directory").unwrap();
+
+    let err = canonical_work_dir(&file).unwrap_err();
+
+    assert!(format!("{err:#}").contains("not a directory"), "{err:#}");
+}
+
+#[test]
+fn canonical_work_dir_does_not_change_process_cwd() {
+    let before = std::env::current_dir().unwrap();
+    let temp = TempDir::new().unwrap();
+
+    canonical_work_dir(temp.path()).unwrap();
+
+    assert_eq!(std::env::current_dir().unwrap(), before);
 }

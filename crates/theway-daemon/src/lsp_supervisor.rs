@@ -41,6 +41,7 @@ pub struct LanguageConfig {
 }
 
 pub struct LspSupervisor {
+    cwd: PathBuf,
     cwd_uri: String,
     by_ext: HashMap<String, LanguageConfig>,
     clients: Mutex<HashMap<String, Arc<OnceCell<Arc<LspClient>>>>>,
@@ -65,6 +66,7 @@ impl LspSupervisor {
             }
         }
         Self {
+            cwd: cwd.to_path_buf(),
             cwd_uri,
             by_ext,
             clients: Mutex::new(HashMap::new()),
@@ -127,11 +129,12 @@ impl LspSupervisor {
             command: lang.command.clone(),
             args: lang.args.clone(),
         };
+        let cwd = self.cwd.clone();
         let cwd_uri = self.cwd_uri.clone();
         let result: Result<Arc<LspClient>> = cell
             .get_or_try_init(|| async move {
                 let args: Vec<&str> = lang_clone.args.iter().map(|s| s.as_str()).collect();
-                let client = LspClient::spawn(&lang_clone.command, &args).await?;
+                let client = LspClient::spawn_in(&lang_clone.command, &args, &cwd).await?;
                 client.initialize(&cwd_uri).await?;
                 Ok::<Arc<LspClient>, anyhow::Error>(Arc::new(client))
             })

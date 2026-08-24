@@ -3,6 +3,7 @@
 //! (including the MCP direct-inject wrapper), the fire-once listener, and prompt
 //! rendering.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::trigger_engine::event::{TriggerEvent, TriggerListener};
@@ -29,21 +30,44 @@ use super::{DynamicTriggerRegistry, DynamicTriggerRule};
 pub struct DynamicTriggerCheckHook {
     registry: DynamicTriggerRegistry,
     interval: Duration,
+    cwd: PathBuf,
     status: Arc<Mutex<NotificationHookStatus>>,
 }
 
 impl DynamicTriggerCheckHook {
+    #[allow(dead_code)]
     pub fn new(registry: DynamicTriggerRegistry) -> Self {
-        let interval = Duration::from_secs(registry.poll_interval_secs());
-        Self::with_interval(registry, interval)
+        Self::new_for_cwd(
+            registry,
+            std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        )
     }
 
+    #[allow(dead_code)]
     pub fn with_interval(registry: DynamicTriggerRegistry, interval: Duration) -> Self {
+        Self::with_interval_for_cwd(
+            registry,
+            interval,
+            std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        )
+    }
+
+    pub fn new_for_cwd(registry: DynamicTriggerRegistry, cwd: impl Into<PathBuf>) -> Self {
+        let interval = Duration::from_secs(registry.poll_interval_secs());
+        Self::with_interval_for_cwd(registry, interval, cwd)
+    }
+
+    pub fn with_interval_for_cwd(
+        registry: DynamicTriggerRegistry,
+        interval: Duration,
+        cwd: impl Into<PathBuf>,
+    ) -> Self {
         let mut status = NotificationHookStatus::pending();
         status.subscription_labels = vec!["dynamic trigger periodic check".into()];
         Self {
             registry,
             interval,
+            cwd: cwd.into(),
             status: Arc::new(Mutex::new(status)),
         }
     }
@@ -51,9 +75,7 @@ impl DynamicTriggerCheckHook {
     fn build_trigger(&self, rule_count: usize) -> Trigger {
         let now_utc = Utc::now();
         let now_local = Local::now();
-        let current_dir = std::env::current_dir()
-            .ok()
-            .map(|path| path.display().to_string());
+        let cwd = self.cwd.display().to_string();
         // RFC 0 §3.2.2 / RFC 1 §4.2.3: when `payload_visibility = Local`, consumers see
         // only `payload_summary`. Folding the context fields into the summary instead of
         // putting them in `payload` keeps the envelope internally consistent — the
@@ -65,7 +87,7 @@ impl DynamicTriggerCheckHook {
             now_local.format("%Y-%m-%d %H:%M:%S %Z"),
             now_utc.to_rfc3339(),
             rule_count,
-            current_dir.as_deref().unwrap_or("<unknown>"),
+            cwd,
         );
         Trigger {
             source: TriggerSource::Local {

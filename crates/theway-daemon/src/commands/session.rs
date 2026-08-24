@@ -439,6 +439,7 @@ impl SlashCommand<DaemonCtx> for ShareCommand {
         }
 
         let mut cmd = tokio::process::Command::new(gh_bin());
+        cmd.current_dir(ctx.cwd);
         cmd.arg("gist").arg("create");
         if public {
             cmd.arg("--public");
