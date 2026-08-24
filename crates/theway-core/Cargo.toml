@@ -59,11 +59,9 @@ regex = { version = "1", optional = true }
 # Vendored mermaid parse stage (mmdr 0.3.1) — see crates/mermaid-parser.
 mermaid-rs-parser = { version = "0.1.0", path = "../mermaid-parser", optional = true }
 
-# hooks (user-configured CLI hooks) and goal (session goal stop-hook) live in the
-# engine. Hook side effects (process spawn / kill, webhook HTTP) are injected seams
-# — the implementations live in theway-daemon, so core no longer needs reqwest or
-# libc here. The remaining deps serve the agent runtime itself: toml parses hook
-# rules, anyhow is the hook runner's error type, directories resolves hook cwd paths.
+# Core is interface + agent runtime only; user-configured hooks and ~/.theway state
+# live in theway-daemon. once_cell serves the built-in compaction algorithm, tracing
+# emits runtime diagnostics.
 once_cell = { version = "1", optional = true }
 tracing = { version = "0.1", optional = true }
 # Stable content hash for trigger_promotion audit. Used only to fingerprint promotion
@@ -74,7 +72,6 @@ sha2 = "0.10"
 
 [dev-dependencies]
 tests-bridge-macro = { version = "0.1.5", path = "../tests-bridge-macro" }
-anyhow = "1"
 tempfile = "3"
 criterion = "0.5"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }

@@ -2,14 +2,14 @@
 
 English | [中文](README.zh.md)
 
-`theway-core` is the reusable agent runtime composed by `theway-daemon`. It owns the single-agent loop, `AgentHarness`, typed runtime sessions, skills and prompt assembly, compaction, lifecycle and permission hooks, the `RuntimeExtensionPort`, `ToolExecutor`, and `RuntimeObserver` interfaces, and multiagent DAG/goal orchestration.
+`theway-core` is the reusable agent runtime composed by `theway-daemon`. It owns the single-agent loop, `AgentHarness`, typed runtime sessions, skills and prompt assembly, compaction, lifecycle-hook interfaces, permission hooks, the `RuntimeExtensionPort`, `ToolExecutor`, and `RuntimeObserver` interfaces, and multiagent DAG/goal orchestration.
 
 Core does not own concrete tools, filesystem or process implementations, persistence backends, telemetry exporters, or protocol servers. The workspace layering check permits `theway-daemon` as its only direct runtime consumer.
 
 ## Public entry points
 
 - `Agent` and `AgentOptions` run the provider-neutral message and tool loop.
-- `AgentHarness` composes an agent with a typed `Session`, skills, compaction, cost tracking, and cross-turn hooks.
+- `AgentHarness` composes an agent with a typed `Session`, skills, compaction, cost tracking, and the cross-turn lifecycle hook interfaces.
 - `PersistentSessionStorage` adapts typed session entries to the raw `SessionReader` and `SessionStore` records from `theway-contract`.
 - `RuntimeExtensionPort` splits engine-independent lifecycle dispatch into session, run, request, message, tool, and compaction domains; core consumes normalized replacements and follow-ups after the embedding host has validated and committed durable actions, and the default implementation is a no-op.
 - `NormalizedModelRequestDraft` is the provider-independent, request-local system/message/tool/generation snapshot transformed before provider serialization.
@@ -19,7 +19,7 @@ Core does not own concrete tools, filesystem or process implementations, persist
 
 ## Features
 
-The default build enables `harness` and `default-providers`. `harness` includes sessions, skills, compaction, permissions, hooks, and multiagent orchestration; `default-providers` enables the Anthropic and faux provider implementations in `theway-llm-provider`.
+The default build enables `harness` and `default-providers`. `harness` includes sessions, skills, compaction, permissions, lifecycle-hook interfaces, and multiagent orchestration; `default-providers` enables the Anthropic and faux provider implementations in `theway-llm-provider`.
 
 ```bash
 # Bare Agent loop

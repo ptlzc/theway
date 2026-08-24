@@ -4675,7 +4675,6 @@ dependencies = [
 name = "theway-core"
 version = "0.1.6"
 dependencies = [
- "anyhow",
  "async-trait",
  "chrono",
  "criterion",

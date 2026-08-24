@@ -7,10 +7,9 @@
 //! daemon's single `setsid` + `killpg` process-group primitive
 //! ([`crate::tools::exec::process_group`]) shared by the `bash` tool, the
 //! `exec_shell` family and `NativeEnv::exec` — so hook commands inherit the
-//! identical timeout/cancel semantics instead of carrying a private copy. The webhook
-//! sender mirrors the previous inline core implementation (reqwest POST +
-//! timeout + cancel race + status check), keeping the daemon's reqwest as the
-//! only HTTP client in the kernel.
+//! identical timeout/cancel semantics instead of carrying a private copy. The
+//! webhook sender implements the reqwest POST + timeout + cancel race + status
+//! check, keeping the daemon's reqwest as the only HTTP client in the kernel.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -24,7 +23,7 @@ use crate::tools::exec::{KillReason, run_with_kill_on_timeout_or_cancel};
 
 /// Executors wired into every `hooks::load` assembly point in the daemon
 /// (`thewayd` and the session factory). Always inject both; hook rules whose
-/// side effect has no injected executor are skipped by core.
+/// side effect has no injected executor are skipped by the hook runner.
 pub fn daemon_executors() -> HookExecutors {
     HookExecutors {
         command: Some(command_executor()),
@@ -38,9 +37,9 @@ fn command_executor() -> HookCommandExecutor {
     })
 }
 
-/// Core's command seam, implemented on top of the shared kill primitive.
-/// Error messages match the hook error contract the previous inline core
-/// implementation produced, so on_failure rendering stays identical.
+/// The hook runtime's command seam, implemented on top of the shared kill
+/// primitive. Error messages match the daemon hook error contract, so
+/// `on_failure` rendering stays identical.
 async fn run_hook_command(
     command: String,
     cwd: PathBuf,

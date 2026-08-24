@@ -1,4 +1,4 @@
 # English-first bilingual documentation record. Update both files, then run:
 #   scripts/verify-doc-i18n.py --write crates/theway-core/README.md
-README.md: 028f2e539ea190bc09f74c32630ecc087a22f43f
-README.zh.md: 04f3acc4fae42fb49d82e0bfa92c2c8ff48afcea
+README.md: cc5596604229e9e5e27bc8cf7608b89b88493d9c
+README.zh.md: f81b5c313e6ef2d480dc913326b974029e2fe8a3

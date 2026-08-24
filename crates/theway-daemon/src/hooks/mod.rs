@@ -31,7 +31,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-#[cfg(test)] // Only used by the bridged unit tests (`tests/agent/hooks`) via `use super::*`.
+#[cfg(test)] // Only used by the bridged unit tests (`tests/hooks`) via `use super::*`.
 use theway_core::AgentMessage;
 use theway_core::{LoopEvent, LoopListener, SessionEvent, SessionListener, ThinkingLevel};
 use tokio_util::sync::CancellationToken;
@@ -48,11 +48,11 @@ pub struct LoadedHooks {
     pub diagnostics: Vec<String>,
 }
 
-/// Command-execution seam for hook rules. Core defines only this injection point —
-/// the implementation (spawn `sh -c` with the given env, whole-process-tree kill on
-/// timeout/cancel) lives in theway-daemon, which routes it through the single
-/// `setsid`/`killpg` primitive shared by the bash tool, the exec_shell family and
-/// native env. Returns captured stdout/stderr on success.
+/// Command-execution seam for hook rules. The daemon owns the implementation
+/// (spawn `sh -c` with the given env, whole-process-tree kill on timeout/cancel)
+/// in [`crate::hook_executors`], routing it through the single `setsid`/`killpg`
+/// primitive shared by the bash tool, the exec_shell family and native env.
+/// Returns captured stdout/stderr on success.
 pub type HookCommandExecutor = Arc<
     dyn Fn(
             String,                   // command
@@ -65,18 +65,17 @@ pub type HookCommandExecutor = Arc<
         + Sync,
 >;
 
-/// Captured output of a successful hook command run, returned to core for debug
-/// logging (mirrors the previous inline implementation's `tracing::debug!` of
-/// stdout/stderr on success).
+/// Captured output of a successful hook command run, returned to the runner for
+/// debug logging.
 #[derive(Debug, Default)]
 pub struct HookCommandOutput {
     pub stdout: String,
     pub stderr: String,
 }
 
-/// Webhook-send seam for hook rules. Core assembles the payload and headers; the
-/// HTTP delivery implementation (POST + timeout + cancel race + status check) lives
-/// in theway-daemon.
+/// Webhook-send seam for hook rules. The runner assembles the payload and headers;
+/// the HTTP delivery implementation (POST + timeout + cancel race + status check)
+/// lives in [`crate::hook_executors`].
 pub type HookWebhookSender = Arc<
     dyn Fn(
             String,                   // url
@@ -91,7 +90,7 @@ pub type HookWebhookSender = Arc<
 
 /// Side-effect executors injected when constructing [`HookRunner`] (via [`load`]).
 /// `None` = not injected: rules of that kind are skipped at runtime and a diagnostic
-/// is recorded at load time — core on its own performs no OS side effects.
+/// is recorded at load time.
 #[derive(Default, Clone)]
 pub struct HookExecutors {
     pub command: Option<HookCommandExecutor>,
