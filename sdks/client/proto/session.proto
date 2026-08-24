@@ -278,6 +278,39 @@ message SetSkillDirsRequest {
   repeated string dirs = 1;
 }
 
+// Session activation (issue #26): explicit client key and optional runtime.
+// Runtime is a singular message so its presence remains observable.
+message SessionRuntimeContext {
+  string work_dir = 1;
+  optional string provider = 2;
+  optional string model = 3;
+  optional string base_url = 4;
+  optional bool thinking = 5;
+}
+
+message ActivateSessionRequest {
+  optional string session_id = 1;
+  string client_key = 2;
+  optional string name = 3;
+  SessionRuntimeContext runtime = 4;
+}
+
+message ActivateSessionResponse {
+  SessionSummary session = 1;
+  bool created = 2;
+}
+
+message SetCredentialRequest {
+  string session_id = 1;
+  string provider = 2;
+  bytes secret = 3;
+}
+
+message ClearCredentialRequest {
+  string session_id = 1;
+  optional string provider = 2;
+}
+
 service SessionService {
   // Full structured state (binary protobuf).
   rpc GetState(Empty) returns (SessionState);
@@ -296,4 +329,9 @@ service SessionService {
   // into the event loop, which applies it authoritatively (hot-reload).
   // `accepted` = the command was queued.
   rpc SetSkillDirs(SetSkillDirsRequest) returns (CommandResult);
+  // Session activation and credentials (issue #26): activate/resume a session
+  // and manage provider credentials without echoing secrets.
+  rpc ActivateSession(ActivateSessionRequest) returns (ActivateSessionResponse);
+  rpc SetCredential(SetCredentialRequest) returns (CommandResult);
+  rpc ClearCredential(ClearCredentialRequest) returns (CommandResult);
 }

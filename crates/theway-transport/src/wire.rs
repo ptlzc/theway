@@ -725,3 +725,7 @@ include!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/src/wire/extensions.rs"
 ));
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/src/wire/session_api.rs"
+));

@@ -314,6 +314,41 @@ export interface SetSkillDirsRequest {
   dirs: string[];
 }
 
+/**
+ * Session activation (issue #26): explicit client key and optional runtime.
+ * Runtime is a singular message so its presence remains observable.
+ */
+export interface SessionRuntimeContext {
+  workDir: string;
+  provider?: string | undefined;
+  model?: string | undefined;
+  baseUrl?: string | undefined;
+  thinking?: boolean | undefined;
+}
+
+export interface ActivateSessionRequest {
+  sessionId?: string | undefined;
+  clientKey: string;
+  name?: string | undefined;
+  runtime?: SessionRuntimeContext | undefined;
+}
+
+export interface ActivateSessionResponse {
+  session?: SessionSummary | undefined;
+  created: boolean;
+}
+
+export interface SetCredentialRequest {
+  sessionId: string;
+  provider: string;
+  secret: Uint8Array;
+}
+
+export interface ClearCredentialRequest {
+  sessionId: string;
+  provider?: string | undefined;
+}
+
 function createBaseSessionState(): SessionState {
   return {
     sessionId: "",
@@ -4356,6 +4391,510 @@ export const SetSkillDirsRequest: MessageFns<SetSkillDirsRequest> = {
   },
 };
 
+function createBaseSessionRuntimeContext(): SessionRuntimeContext {
+  return { workDir: "", provider: undefined, model: undefined, baseUrl: undefined, thinking: undefined };
+}
+
+export const SessionRuntimeContext: MessageFns<SessionRuntimeContext> = {
+  encode(message: SessionRuntimeContext, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.workDir !== "") {
+      writer.uint32(10).string(message.workDir);
+    }
+    if (message.provider !== undefined) {
+      writer.uint32(18).string(message.provider);
+    }
+    if (message.model !== undefined) {
+      writer.uint32(26).string(message.model);
+    }
+    if (message.baseUrl !== undefined) {
+      writer.uint32(34).string(message.baseUrl);
+    }
+    if (message.thinking !== undefined) {
+      writer.uint32(40).bool(message.thinking);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SessionRuntimeContext {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSessionRuntimeContext();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.workDir = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.provider = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.model = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.baseUrl = reader.string();
+          continue;
+        }
+        case 5: {
+          if (tag !== 40) {
+            break;
+          }
+
+          message.thinking = reader.bool();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SessionRuntimeContext {
+    return {
+      workDir: isSet(object.workDir)
+        ? globalThis.String(object.workDir)
+        : isSet(object.work_dir)
+        ? globalThis.String(object.work_dir)
+        : "",
+      provider: isSet(object.provider) ? globalThis.String(object.provider) : undefined,
+      model: isSet(object.model) ? globalThis.String(object.model) : undefined,
+      baseUrl: isSet(object.baseUrl)
+        ? globalThis.String(object.baseUrl)
+        : isSet(object.base_url)
+        ? globalThis.String(object.base_url)
+        : undefined,
+      thinking: isSet(object.thinking) ? globalThis.Boolean(object.thinking) : undefined,
+    };
+  },
+
+  toJSON(message: SessionRuntimeContext): unknown {
+    const obj: any = {};
+    if (message.workDir !== "") {
+      obj.workDir = message.workDir;
+    }
+    if (message.provider !== undefined) {
+      obj.provider = message.provider;
+    }
+    if (message.model !== undefined) {
+      obj.model = message.model;
+    }
+    if (message.baseUrl !== undefined) {
+      obj.baseUrl = message.baseUrl;
+    }
+    if (message.thinking !== undefined) {
+      obj.thinking = message.thinking;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SessionRuntimeContext>, I>>(base?: I): SessionRuntimeContext {
+    return SessionRuntimeContext.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<SessionRuntimeContext>, I>>(object: I): SessionRuntimeContext {
+    const message = createBaseSessionRuntimeContext();
+    message.workDir = object.workDir ?? "";
+    message.provider = object.provider ?? undefined;
+    message.model = object.model ?? undefined;
+    message.baseUrl = object.baseUrl ?? undefined;
+    message.thinking = object.thinking ?? undefined;
+    return message;
+  },
+};
+
+function createBaseActivateSessionRequest(): ActivateSessionRequest {
+  return { sessionId: undefined, clientKey: "", name: undefined, runtime: undefined };
+}
+
+export const ActivateSessionRequest: MessageFns<ActivateSessionRequest> = {
+  encode(message: ActivateSessionRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sessionId !== undefined) {
+      writer.uint32(10).string(message.sessionId);
+    }
+    if (message.clientKey !== "") {
+      writer.uint32(18).string(message.clientKey);
+    }
+    if (message.name !== undefined) {
+      writer.uint32(26).string(message.name);
+    }
+    if (message.runtime !== undefined) {
+      SessionRuntimeContext.encode(message.runtime, writer.uint32(34).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ActivateSessionRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseActivateSessionRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.clientKey = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.runtime = SessionRuntimeContext.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ActivateSessionRequest {
+    return {
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : undefined,
+      clientKey: isSet(object.clientKey)
+        ? globalThis.String(object.clientKey)
+        : isSet(object.client_key)
+        ? globalThis.String(object.client_key)
+        : "",
+      name: isSet(object.name) ? globalThis.String(object.name) : undefined,
+      runtime: isSet(object.runtime) ? SessionRuntimeContext.fromJSON(object.runtime) : undefined,
+    };
+  },
+
+  toJSON(message: ActivateSessionRequest): unknown {
+    const obj: any = {};
+    if (message.sessionId !== undefined) {
+      obj.sessionId = message.sessionId;
+    }
+    if (message.clientKey !== "") {
+      obj.clientKey = message.clientKey;
+    }
+    if (message.name !== undefined) {
+      obj.name = message.name;
+    }
+    if (message.runtime !== undefined) {
+      obj.runtime = SessionRuntimeContext.toJSON(message.runtime);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ActivateSessionRequest>, I>>(base?: I): ActivateSessionRequest {
+    return ActivateSessionRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ActivateSessionRequest>, I>>(object: I): ActivateSessionRequest {
+    const message = createBaseActivateSessionRequest();
+    message.sessionId = object.sessionId ?? undefined;
+    message.clientKey = object.clientKey ?? "";
+    message.name = object.name ?? undefined;
+    message.runtime = (object.runtime !== undefined && object.runtime !== null)
+      ? SessionRuntimeContext.fromPartial(object.runtime)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseActivateSessionResponse(): ActivateSessionResponse {
+  return { session: undefined, created: false };
+}
+
+export const ActivateSessionResponse: MessageFns<ActivateSessionResponse> = {
+  encode(message: ActivateSessionResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.session !== undefined) {
+      SessionSummary.encode(message.session, writer.uint32(10).fork()).join();
+    }
+    if (message.created !== false) {
+      writer.uint32(16).bool(message.created);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ActivateSessionResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseActivateSessionResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.session = SessionSummary.decode(reader, reader.uint32());
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.created = reader.bool();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ActivateSessionResponse {
+    return {
+      session: isSet(object.session) ? SessionSummary.fromJSON(object.session) : undefined,
+      created: isSet(object.created) ? globalThis.Boolean(object.created) : false,
+    };
+  },
+
+  toJSON(message: ActivateSessionResponse): unknown {
+    const obj: any = {};
+    if (message.session !== undefined) {
+      obj.session = SessionSummary.toJSON(message.session);
+    }
+    if (message.created !== false) {
+      obj.created = message.created;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ActivateSessionResponse>, I>>(base?: I): ActivateSessionResponse {
+    return ActivateSessionResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ActivateSessionResponse>, I>>(object: I): ActivateSessionResponse {
+    const message = createBaseActivateSessionResponse();
+    message.session = (object.session !== undefined && object.session !== null)
+      ? SessionSummary.fromPartial(object.session)
+      : undefined;
+    message.created = object.created ?? false;
+    return message;
+  },
+};
+
+function createBaseSetCredentialRequest(): SetCredentialRequest {
+  return { sessionId: "", provider: "", secret: new Uint8Array(0) };
+}
+
+export const SetCredentialRequest: MessageFns<SetCredentialRequest> = {
+  encode(message: SetCredentialRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sessionId !== "") {
+      writer.uint32(10).string(message.sessionId);
+    }
+    if (message.provider !== "") {
+      writer.uint32(18).string(message.provider);
+    }
+    if (message.secret.length !== 0) {
+      writer.uint32(26).bytes(message.secret);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SetCredentialRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSetCredentialRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.provider = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.secret = reader.bytes();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SetCredentialRequest {
+    return {
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : "",
+      provider: isSet(object.provider) ? globalThis.String(object.provider) : "",
+      secret: isSet(object.secret) ? bytesFromBase64(object.secret) : new Uint8Array(0),
+    };
+  },
+
+  toJSON(message: SetCredentialRequest): unknown {
+    const obj: any = {};
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
+    }
+    if (message.provider !== "") {
+      obj.provider = message.provider;
+    }
+    if (message.secret.length !== 0) {
+      obj.secret = base64FromBytes(message.secret);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SetCredentialRequest>, I>>(base?: I): SetCredentialRequest {
+    return SetCredentialRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<SetCredentialRequest>, I>>(object: I): SetCredentialRequest {
+    const message = createBaseSetCredentialRequest();
+    message.sessionId = object.sessionId ?? "";
+    message.provider = object.provider ?? "";
+    message.secret = object.secret ?? new Uint8Array(0);
+    return message;
+  },
+};
+
+function createBaseClearCredentialRequest(): ClearCredentialRequest {
+  return { sessionId: "", provider: undefined };
+}
+
+export const ClearCredentialRequest: MessageFns<ClearCredentialRequest> = {
+  encode(message: ClearCredentialRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sessionId !== "") {
+      writer.uint32(10).string(message.sessionId);
+    }
+    if (message.provider !== undefined) {
+      writer.uint32(18).string(message.provider);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ClearCredentialRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseClearCredentialRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.provider = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ClearCredentialRequest {
+    return {
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : "",
+      provider: isSet(object.provider) ? globalThis.String(object.provider) : undefined,
+    };
+  },
+
+  toJSON(message: ClearCredentialRequest): unknown {
+    const obj: any = {};
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
+    }
+    if (message.provider !== undefined) {
+      obj.provider = message.provider;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ClearCredentialRequest>, I>>(base?: I): ClearCredentialRequest {
+    return ClearCredentialRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ClearCredentialRequest>, I>>(object: I): ClearCredentialRequest {
+    const message = createBaseClearCredentialRequest();
+    message.sessionId = object.sessionId ?? "";
+    message.provider = object.provider ?? undefined;
+    return message;
+  },
+};
+
 export type SessionServiceService = typeof SessionServiceService;
 export const SessionServiceService = {
   /** Full structured state (binary protobuf). */
@@ -4448,6 +4987,40 @@ export const SessionServiceService = {
     responseSerialize: (value: CommandResult): Buffer => Buffer.from(CommandResult.encode(value).finish()),
     responseDeserialize: (value: Buffer): CommandResult => CommandResult.decode(value),
   },
+  /**
+   * Session activation and credentials (issue #26): activate/resume a session
+   * and manage provider credentials without echoing secrets.
+   */
+  activateSession: {
+    path: "/theway.grpc.v1.SessionService/ActivateSession" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: ActivateSessionRequest): Buffer =>
+      Buffer.from(ActivateSessionRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): ActivateSessionRequest => ActivateSessionRequest.decode(value),
+    responseSerialize: (value: ActivateSessionResponse): Buffer =>
+      Buffer.from(ActivateSessionResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): ActivateSessionResponse => ActivateSessionResponse.decode(value),
+  },
+  setCredential: {
+    path: "/theway.grpc.v1.SessionService/SetCredential" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: SetCredentialRequest): Buffer => Buffer.from(SetCredentialRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): SetCredentialRequest => SetCredentialRequest.decode(value),
+    responseSerialize: (value: CommandResult): Buffer => Buffer.from(CommandResult.encode(value).finish()),
+    responseDeserialize: (value: Buffer): CommandResult => CommandResult.decode(value),
+  },
+  clearCredential: {
+    path: "/theway.grpc.v1.SessionService/ClearCredential" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: ClearCredentialRequest): Buffer =>
+      Buffer.from(ClearCredentialRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): ClearCredentialRequest => ClearCredentialRequest.decode(value),
+    responseSerialize: (value: CommandResult): Buffer => Buffer.from(CommandResult.encode(value).finish()),
+    responseDeserialize: (value: Buffer): CommandResult => CommandResult.decode(value),
+  },
 } as const;
 
 export interface SessionServiceServer extends UntypedServiceImplementation {
@@ -4474,6 +5047,13 @@ export interface SessionServiceServer extends UntypedServiceImplementation {
    * `accepted` = the command was queued.
    */
   setSkillDirs: handleUnaryCall<SetSkillDirsRequest, CommandResult>;
+  /**
+   * Session activation and credentials (issue #26): activate/resume a session
+   * and manage provider credentials without echoing secrets.
+   */
+  activateSession: handleUnaryCall<ActivateSessionRequest, ActivateSessionResponse>;
+  setCredential: handleUnaryCall<SetCredentialRequest, CommandResult>;
+  clearCredential: handleUnaryCall<ClearCredentialRequest, CommandResult>;
 }
 
 export interface SessionServiceClient extends Client {
@@ -4609,6 +5189,55 @@ export interface SessionServiceClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: CommandResult) => void,
   ): ClientUnaryCall;
+  /**
+   * Session activation and credentials (issue #26): activate/resume a session
+   * and manage provider credentials without echoing secrets.
+   */
+  activateSession(
+    request: ActivateSessionRequest,
+    callback: (error: ServiceError | null, response: ActivateSessionResponse) => void,
+  ): ClientUnaryCall;
+  activateSession(
+    request: ActivateSessionRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: ActivateSessionResponse) => void,
+  ): ClientUnaryCall;
+  activateSession(
+    request: ActivateSessionRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: ActivateSessionResponse) => void,
+  ): ClientUnaryCall;
+  setCredential(
+    request: SetCredentialRequest,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  setCredential(
+    request: SetCredentialRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  setCredential(
+    request: SetCredentialRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  clearCredential(
+    request: ClearCredentialRequest,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  clearCredential(
+    request: ClearCredentialRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  clearCredential(
+    request: ClearCredentialRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
 }
 
 export const SessionServiceClient = makeGenericClientConstructor(
@@ -4619,6 +5248,31 @@ export const SessionServiceClient = makeGenericClientConstructor(
   service: typeof SessionServiceService;
   serviceName: string;
 };
+
+function bytesFromBase64(b64: string): Uint8Array {
+  if ((globalThis as any).Buffer) {
+    return Uint8Array.from((globalThis as any).Buffer.from(b64, "base64"));
+  } else {
+    const bin = globalThis.atob(b64);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; ++i) {
+      arr[i] = bin.charCodeAt(i);
+    }
+    return arr;
+  }
+}
+
+function base64FromBytes(arr: Uint8Array): string {
+  if ((globalThis as any).Buffer) {
+    return (globalThis as any).Buffer.from(arr).toString("base64");
+  } else {
+    const bin: string[] = [];
+    arr.forEach((byte) => {
+      bin.push(globalThis.String.fromCharCode(byte));
+    });
+    return globalThis.btoa(bin.join(""));
+  }
+}
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;
 

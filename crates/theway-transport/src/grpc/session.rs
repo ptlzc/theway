@@ -183,4 +183,25 @@ impl SessionService for GrpcState {
             .map_err(|_| Status::unavailable("event loop command channel closed"))?;
         Ok(Response::new(CommandResult { accepted: true }))
     }
+
+    async fn activate_session(
+        &self,
+        _request: Request<theway_grpc::ActivateSessionRequest>,
+    ) -> Result<Response<theway_grpc::ActivateSessionResponse>, Status> {
+        Err(Status::unimplemented("ActivateSession is not implemented"))
+    }
+
+    async fn set_credential(
+        &self,
+        _request: Request<theway_grpc::SetCredentialRequest>,
+    ) -> Result<Response<CommandResult>, Status> {
+        Err(Status::unimplemented("SetCredential is not implemented"))
+    }
+
+    async fn clear_credential(
+        &self,
+        _request: Request<theway_grpc::ClearCredentialRequest>,
+    ) -> Result<Response<CommandResult>, Status> {
+        Err(Status::unimplemented("ClearCredential is not implemented"))
+    }
 }

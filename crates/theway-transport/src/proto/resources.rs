@@ -15,6 +15,75 @@ pub fn session_summary_wire(summary: &crate::wire::SessionSummary) -> wire::Sess
     }
 }
 
+pub fn session_runtime_context_to_proto(
+    ctx: &crate::wire::WireSessionRuntimeContext,
+) -> wire::SessionRuntimeContext {
+    wire::SessionRuntimeContext {
+        work_dir: ctx.work_dir.clone(),
+        provider: ctx.provider.clone(),
+        model: ctx.model.clone(),
+        base_url: ctx.base_url.clone(),
+        thinking: ctx.thinking,
+    }
+}
+
+pub fn session_runtime_context_from_proto(
+    ctx: &wire::SessionRuntimeContext,
+) -> crate::wire::WireSessionRuntimeContext {
+    crate::wire::WireSessionRuntimeContext {
+        work_dir: ctx.work_dir.clone(),
+        provider: ctx.provider.clone(),
+        model: ctx.model.clone(),
+        base_url: ctx.base_url.clone(),
+        thinking: ctx.thinking,
+    }
+}
+
+pub fn activate_session_request_from_proto(
+    request: &wire::ActivateSessionRequest,
+) -> Result<crate::wire::WireActivateSessionRequest, crate::wire::WireRpcError> {
+    let runtime = request.runtime.as_ref().ok_or(crate::wire::WireRpcError {
+        code: "missing_runtime".into(),
+        message: "ActivateSessionRequest.runtime is required".into(),
+    })?;
+    Ok(crate::wire::WireActivateSessionRequest {
+        session_id: request.session_id.clone(),
+        client_key: request.client_key.clone(),
+        name: request.name.clone(),
+        runtime: Some(session_runtime_context_from_proto(runtime)),
+    })
+}
+
+pub fn activate_session_response_to_proto(
+    response: &crate::wire::WireActivateSessionResponse,
+) -> wire::ActivateSessionResponse {
+    wire::ActivateSessionResponse {
+        session: response.session.as_ref().map(session_summary_wire),
+        created: response.created,
+    }
+}
+
+/// Set-credential requests carry secrets; the returned wire type is
+/// non-Clone/non-Debug/non-serializable.
+pub fn set_credential_request_from_proto(
+    request: &wire::SetCredentialRequest,
+) -> crate::wire::WireSetCredentialRequest {
+    crate::wire::WireSetCredentialRequest {
+        session_id: request.session_id.clone(),
+        provider: request.provider.clone(),
+        secret: request.secret.clone(),
+    }
+}
+
+pub fn clear_credential_request_from_proto(
+    request: &wire::ClearCredentialRequest,
+) -> crate::wire::WireClearCredentialRequest {
+    crate::wire::WireClearCredentialRequest {
+        session_id: request.session_id.clone(),
+        provider: request.provider.clone(),
+    }
+}
+
 /// Convert the daemon path context (issue #68) into the structured wire model.
 pub fn wire_path_context_to_proto(ctx: &WirePathContext) -> wire::PathContext {
     wire::PathContext {

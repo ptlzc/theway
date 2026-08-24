@@ -7,6 +7,7 @@ use crate::wire::{
 };
 
 mod extensions;
+mod session_activation;
 use crate::feed::{Level, TriggerPollStatus};
 use crate::wire::{
     WireCronSnapshot, WireMcpSnapshot, WireSidebarSnapshot, WireSkillsSnapshot, WireToolsSnapshot,
