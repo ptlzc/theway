@@ -40,7 +40,7 @@ impl TurnHost {
         state.session_id = self.session.id.clone();
         state.busy = self.session.busy;
         state.model = current_model_label(self.session.kernel.harness());
-        state.cwd = self.runtime.cwd.display().to_string();
+        state.cwd = self.session.cwd.display().to_string();
     }
 
     fn current_model_accepts_images(&self) -> bool {
@@ -96,6 +96,7 @@ impl TurnHost {
             .with_context(|| format!("build runtime for session {id}"))?;
         previous.shutdown_runtime_extensions().await;
         self.session.id = runtime.session_id.clone();
+        self.session.cwd = runtime.cwd.clone();
         self.session.kernel.replace_runtime(runtime);
         self.session
             .kernel

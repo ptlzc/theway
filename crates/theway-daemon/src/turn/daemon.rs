@@ -131,6 +131,7 @@ pub(crate) struct DaemonConfig {
 struct SessionRuntimeState {
     kernel: ReplKernel,
     id: String,
+    cwd: PathBuf,
     log_path: Option<PathBuf>,
     tool_count: usize,
     factory: SessionFactory,

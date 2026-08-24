@@ -8,6 +8,8 @@ use parking_lot::Mutex;
 use theway_contract::session::SessionBinding;
 use zeroize::Zeroizing;
 
+use crate::orchestration::SessionExecutionContext;
+
 pub(crate) struct SecretBytes(Zeroizing<Vec<u8>>);
 
 impl SecretBytes {
@@ -64,6 +66,7 @@ struct Entry {
 #[derive(Clone, Default)]
 pub(crate) struct SessionExecutionRegistry {
     inner: Arc<Mutex<HashMap<String, Entry>>>,
+    contexts: Arc<Mutex<HashMap<String, Arc<SessionExecutionContext>>>>,
 }
 
 impl SessionExecutionRegistry {
@@ -144,7 +147,28 @@ impl SessionExecutionRegistry {
     }
 
     pub(crate) fn remove(&self, session_id: &str) -> bool {
-        self.inner.lock().remove(session_id).is_some()
+        let binding_removed = self.inner.lock().remove(session_id).is_some();
+        let context_removed = self.contexts.lock().remove(session_id).is_some();
+        binding_removed || context_removed
+    }
+
+    pub(crate) fn set_context(
+        &self,
+        session_id: impl Into<String>,
+        context: Arc<SessionExecutionContext>,
+    ) {
+        self.contexts.lock().insert(session_id.into(), context);
+    }
+
+    pub(crate) fn get_context(&self, session_id: &str) -> Option<Arc<SessionExecutionContext>> {
+        self.contexts.lock().get(session_id).cloned()
+    }
+
+    pub(crate) fn cwd_for(&self, session_id: &str) -> Option<PathBuf> {
+        self.contexts
+            .lock()
+            .get(session_id)
+            .map(|context| context.cwd.clone())
     }
 
     pub(crate) fn set_credential(

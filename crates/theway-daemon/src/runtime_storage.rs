@@ -32,6 +32,7 @@ use tokio::task::JoinHandle;
 
 use crate::dag_persist::{self, DagPersistHandle};
 use crate::job_transcripts::{DiskTranscriptStore, MemoryTranscriptStore};
+use crate::session_execution::SessionExecutionRegistry;
 use crate::triggers::cron::{read_jobs_file, write_jobs_file};
 use crate::triggers::dynamic::{read_rules_file, write_rules_file};
 
@@ -52,6 +53,18 @@ pub trait RuntimeStorage: Send + Sync {
 
     /// Spawn a DAG persistence sink for the engine.
     fn spawn_dag_persist(&self, engine: Arc<DagEngine>, cwd: PathBuf) -> Arc<dyn DagPersistSink>;
+
+    /// Spawn DAG persistence with per-session routing. The default preserves
+    /// legacy/global behavior; local storage routes stores by registered cwd.
+    #[allow(private_interfaces)]
+    fn spawn_dag_persist_for_sessions(
+        &self,
+        engine: Arc<DagEngine>,
+        cwd: PathBuf,
+        _sessions: SessionExecutionRegistry,
+    ) -> Arc<dyn DagPersistSink> {
+        self.spawn_dag_persist(engine, cwd)
+    }
 
     /// Load dynamic trigger rules for a session through the storage seam.
     async fn load_dynamic_triggers(
@@ -303,6 +316,16 @@ impl RuntimeStorage for LocalRuntimeStorage {
 
     fn spawn_dag_persist(&self, engine: Arc<DagEngine>, cwd: PathBuf) -> Arc<dyn DagPersistSink> {
         DagPersistHandle::spawn(engine, cwd)
+    }
+
+    #[allow(private_interfaces)]
+    fn spawn_dag_persist_for_sessions(
+        &self,
+        engine: Arc<DagEngine>,
+        cwd: PathBuf,
+        sessions: SessionExecutionRegistry,
+    ) -> Arc<dyn DagPersistSink> {
+        DagPersistHandle::spawn_with_sessions(engine, cwd, sessions)
     }
 
     async fn load_dynamic_triggers(

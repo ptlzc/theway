@@ -1,6 +1,7 @@
 //! Tests for `dag_persist` — split out of src (see docs/rust-test-files.md).
 
 use super::*;
+use std::sync::Arc;
 use theway_core::multiagent::graph::engine::NodeLauncher;
 use theway_core::multiagent::graph::types::{DagNodeDef, DagRunDef};
 
@@ -39,10 +40,49 @@ fn handle_without_task(engine: Arc<DagEngine>, cwd: std::path::PathBuf) -> DagPe
     DagPersistHandle {
         engine,
         cwd,
+        sessions: SessionExecutionRegistry::new(),
         stores: Mutex::new(HashMap::new()),
         dirty: Arc::new(Notify::new()),
         task: Mutex::new(None),
     }
+}
+
+async fn test_context(
+    cwd: &std::path::Path,
+    session_id: &str,
+    base: &std::path::Path,
+) -> Arc<crate::orchestration::SessionExecutionContext> {
+    let paths = crate::DaemonPaths {
+        base: base.to_path_buf(),
+        home: base.to_path_buf(),
+        work_dir: cwd.to_path_buf(),
+        extra_skill_dirs: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
+    };
+    let storage = crate::runtime_storage::local_runtime_storage();
+    let repo = Arc::new(theway_storage::sqlite_repo::SqliteSessionRepo::new(
+        base.join("repo"),
+    ));
+    let resources = crate::orchestration::session::SessionProjectResources::load(
+        &paths,
+        &[],
+        &[],
+        false,
+    )
+    .await
+    .unwrap();
+    let hooks = crate::orchestration::SessionHookResources::load(&paths, false).await;
+    Arc::new(crate::orchestration::SessionExecutionContext::new(
+        session_id.to_string(),
+        cwd.to_path_buf(),
+        repo,
+        storage,
+        paths,
+        crate::executor::executor_for_cwd(cwd.to_path_buf()),
+        crate::model::credential_less_default(),
+        resources,
+        crate::orchestration::SessionMcpResources::default(),
+        hooks,
+    ))
 }
 
 #[tokio::test]
@@ -58,6 +98,75 @@ async fn store_for_reuses_stores_by_session_id() {
 
     // Assert: repeated session id reuses the open store; None gets its own.
     assert_eq!(handle.stores.lock().len(), 2);
+}
+
+#[tokio::test]
+async fn store_for_routes_to_registered_session_cwd_and_falls_back() {
+    let startup = tempfile::tempdir().unwrap();
+    let session_a = tempfile::tempdir().unwrap();
+    let session_b = tempfile::tempdir().unwrap();
+    let base = tempfile::tempdir().unwrap();
+    let sessions = SessionExecutionRegistry::new();
+    sessions.set_context(
+        "sess-a".to_string(),
+        test_context(session_a.path(), "sess-a", base.path()).await,
+    );
+    sessions.set_context(
+        "sess-b".to_string(),
+        test_context(session_b.path(), "sess-b", base.path()).await,
+    );
+    let handle = DagPersistHandle {
+        engine: Arc::new(DagEngine::new()),
+        cwd: startup.path().to_path_buf(),
+        sessions,
+        stores: Mutex::new(HashMap::new()),
+        dirty: Arc::new(Notify::new()),
+        task: Mutex::new(None),
+    };
+
+    handle.store_for(Some("sess-a")).await.unwrap();
+    handle.store_for(Some("sess-b")).await.unwrap();
+    handle.store_for(Some("sess-c")).await.unwrap();
+
+    assert!(session_a
+        .path()
+        .join(".pi/graph-engineering-state-sess-a.db")
+        .exists());
+    assert!(session_b
+        .path()
+        .join(".pi/graph-engineering-state-sess-b.db")
+        .exists());
+    assert!(startup
+        .path()
+        .join(".pi/graph-engineering-state-sess-c.db")
+        .exists());
+    assert!(!startup
+        .path()
+        .join(".pi/graph-engineering-state-sess-a.db")
+        .exists());
+    assert_eq!(handle.stores.lock().len(), 3);
+}
+
+#[tokio::test]
+async fn session_registry_manages_context_independent_of_bindings() {
+    let work = tempfile::tempdir().unwrap();
+    let base = tempfile::tempdir().unwrap();
+    let ctx = test_context(work.path(), "s1", base.path()).await;
+    let registry = SessionExecutionRegistry::new();
+
+    assert!(registry.get_context("s1").is_none());
+    assert!(registry.cwd_for("s1").is_none());
+    assert!(registry.get("s1").is_none());
+    registry.set_context("s1", ctx.clone());
+    assert!(Arc::ptr_eq(&registry.get_context("s1").unwrap(), &ctx));
+    assert_eq!(
+        registry.cwd_for("s1").unwrap(),
+        work.path().canonicalize().unwrap()
+    );
+    assert!(registry.get("s1").is_none());
+    assert!(registry.remove("s1"));
+    assert!(registry.get_context("s1").is_none());
+    assert!(!registry.remove("s1"));
 }
 
 #[tokio::test]

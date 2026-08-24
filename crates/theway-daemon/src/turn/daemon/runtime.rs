@@ -70,6 +70,7 @@ impl TurnHost {
             session: SessionRuntimeState {
                 kernel,
                 id: config.session_id,
+                cwd: config.cwd.clone(),
                 log_path: config.log_path,
                 tool_count: config.tool_count,
                 factory: config.session_factory,
@@ -189,7 +190,10 @@ impl TurnHost {
             events: event_tx,
             dag_events: dag_event_tx,
             completer: self.runtime.completer.clone(),
-            job_ops: Arc::new(CoreJobOps::new(self.automation.subagents.clone())),
+            job_ops: Arc::new(CoreJobOps::new(
+                self.automation.subagents.clone(),
+                self.automation.dag.clone(),
+            )),
             graph_ops: Arc::new(CoreGraphOps::new(self.automation.dag.clone())),
             session_ops: Arc::new(crate::session_ops::AppSessionOps::new(
                 self.session.repository.clone(),

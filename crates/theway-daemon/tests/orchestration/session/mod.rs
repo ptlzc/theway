@@ -475,6 +475,7 @@ async fn session_context(
         .unwrap();
     let hooks = SessionHookResources::load(&paths, true).await;
     let context = SessionExecutionContext::new(
+        "test-context",
         work_dir.to_path_buf(),
         repo,
         storage,
@@ -506,7 +507,7 @@ async fn create_session_with_cwd(
 }
 
 #[tokio::test]
-async fn build_uses_explicit_context_cwd() {
+async fn build_uses_explicit_context_cwd_and_registers_session_ownership() {
     // hooks::load inside build reads THEWAY_DIR — isolate it.
     let _serial = ENV_LOCK.lock().unwrap();
     let home = TempDir::new().unwrap();
@@ -520,6 +521,12 @@ async fn build_uses_explicit_context_cwd() {
 
     let (factory, storage, _state) = test_factory();
     let ctx = session_context(work_dir.path(), repo, storage, &_state.path().join("base")).await;
+    ctx.transcript_store.save(&theway_core::multiagent::jobs::JobTranscript {
+        job_id: "job-1",
+        run_id: Some("run-1"),
+        node_id: Some("node-1"),
+        messages: &[serde_json::json!({ "text": "persisted" })],
+    });
     let runtime = factory
         .build(&ctx, &id)
         .await
@@ -536,6 +543,16 @@ async fn build_uses_explicit_context_cwd() {
         !prompt.contains(&recorded_dir.path().display().to_string()),
         "stored metadata must not override the explicit context cwd: {prompt}"
     );
+    let registered = factory.services.session_execution.get_context(&id).unwrap();
+    let messages = factory
+        .subagent_registry
+        .node_messages_for_session(Some(&id), "run-1", "node-1")
+        .unwrap();
+    assert_eq!(runtime.session_id, id);
+    assert_eq!(registered.session_id, id);
+    assert_eq!(registered.cwd, work_dir.path().canonicalize().unwrap());
+    assert_eq!(messages[0]["text"], "persisted");
+    assert!(format!("{:?}", factory.dag_engine).contains("launcher: false"));
 }
 
 #[tokio::test]

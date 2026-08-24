@@ -264,6 +264,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     let hook_resources =
         SessionHookResources::load(&session_paths, startup.load_local_sources).await;
     let session_context = SessionExecutionContext::new(
+        session_id.clone(),
         cwd.clone(),
         repo.clone(),
         storage.clone(),
@@ -328,15 +329,26 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     let extension_host = initial_runtime.extension_host.clone();
     let tool_names = initial_runtime.tool_names;
     let hooks_active = initial_runtime.hooks_active;
-    let _dag_persist = storage.spawn_dag_persist(dag_engine.clone(), cwd.clone());
+    let _dag_persist = storage.spawn_dag_persist_for_sessions(
+        dag_engine.clone(),
+        cwd.clone(),
+        services.session_execution.clone(),
+    );
 
     let session_factory: session_ops::SessionFactory = {
         let plan = session_runtime_builder;
-        let ctx = session_context.clone();
+        let startup_ctx = session_context.clone();
         Arc::new(move |id: String| {
             let plan = plan.clone();
-            let ctx = ctx.clone();
-            Box::pin(async move { plan.build(&ctx, &id).await })
+            let startup_ctx = startup_ctx.clone();
+            Box::pin(async move {
+                let ctx = plan
+                    .services
+                    .session_execution
+                    .get_context(&id)
+                    .unwrap_or_else(|| Arc::new(startup_ctx.clone()));
+                plan.build(&ctx, &id).await
+            })
         })
     };
 

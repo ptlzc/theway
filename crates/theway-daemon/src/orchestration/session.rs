@@ -12,6 +12,7 @@ use anyhow::{Context, Result};
 use theway_contract::session::SessionStore;
 use theway_core::multiagent::goal;
 use theway_core::multiagent::graph::engine::DagEngine;
+use theway_core::multiagent::jobs::JobTranscriptStore;
 use theway_core::{AgentHarness, AgentHarnessOptions, ThinkingLevel};
 use theway_transport::feed::FeedUpdate;
 use theway_transport::inbox;
@@ -239,8 +240,12 @@ impl SessionHookResources {
 /// Cwd-scoped inputs for one runtime build.
 #[derive(Clone)]
 pub struct SessionExecutionContext {
+    /// Exact session id this context is bound to.
+    pub session_id: String,
     /// Canonical cwd for path-sensitive runtime assembly.
     pub cwd: std::path::PathBuf,
+    /// Transcript store derived from this context's cwd.
+    pub transcript_store: Arc<dyn JobTranscriptStore>,
     /// Session repository scoped to `cwd`.
     pub repo: Arc<dyn SessionRepository>,
     /// Persistence backend used to restore this context's DAG runs.
@@ -262,6 +267,7 @@ pub struct SessionExecutionContext {
 
 impl SessionExecutionContext {
     pub fn new(
+        session_id: impl Into<String>,
         cwd: std::path::PathBuf,
         repo: Arc<dyn SessionRepository>,
         storage: Arc<dyn RuntimeStorage>,
@@ -272,6 +278,8 @@ impl SessionExecutionContext {
         mcp: SessionMcpResources,
         hooks: SessionHookResources,
     ) -> Self {
+        let session_id = session_id.into();
+        let transcript_store = storage.job_transcript_store(&cwd);
         let paths = paths.with_work_dir(cwd.clone());
         let extension_resources = SessionExtensionResources::new(
             &cwd,
@@ -280,7 +288,9 @@ impl SessionExecutionContext {
             resources.load_local_sources,
         );
         Self {
+            session_id,
             cwd,
+            transcript_store,
             repo,
             storage,
             paths,
@@ -333,6 +343,7 @@ pub struct SessionRuntimeBuilder {
 /// Session-scoped services that must be replaced as one unit.
 pub struct SessionRuntime {
     pub session_id: String,
+    pub cwd: std::path::PathBuf,
     pub harness: Arc<AgentHarness>,
     pub trigger_executor: Arc<crate::trigger_engine::execution::TriggerExecutor>,
     pub tool_names: Vec<String>,
@@ -343,6 +354,7 @@ pub struct SessionRuntime {
 #[cfg(test)]
 impl SessionRuntime {
     pub(crate) fn for_test(session_id: impl Into<String>, harness: Arc<AgentHarness>) -> Self {
+        let session_id = session_id.into();
         let trigger_executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
             harness.agent_arc(),
             harness.session().clone(),
@@ -355,7 +367,8 @@ impl SessionRuntime {
             None,
         ));
         Self {
-            session_id: session_id.into(),
+            session_id: session_id.clone(),
+            cwd: std::env::temp_dir().join("theway-test").join(session_id),
             harness,
             trigger_executor,
             tool_names: Vec::new(),
@@ -395,6 +408,34 @@ impl SessionRuntimeBuilder {
         let extension_state_store = Arc::clone(&store);
         let session = theway_core::Session::from_store(store);
 
+        // Own the exact session context before restore so recovered runs immediately
+        // use the matching launcher and transcript store.
+        let mut owned_ctx = ctx.clone();
+        owned_ctx.session_id = session_id.clone();
+        let ctx = Arc::new(owned_ctx);
+        self.services
+            .session_execution
+            .set_context(session_id.clone(), Arc::clone(&ctx));
+        self.subagent_registry
+            .set_session_transcript_store(Some(session_id.clone()), ctx.transcript_store.clone());
+
+        let skill_harness_cell: crate::tools::skill::SkillHarnessCell =
+            std::sync::Arc::new(once_cell::sync::OnceCell::new());
+        self.dag_engine.set_session_launcher(
+            Some(session_id.clone()),
+            tools::node_launcher(
+                self.dag_engine.clone(),
+                ctx.model.clone(),
+                Some(self.stream_fn.clone()),
+                ctx.cwd.clone(),
+                self.subagent_registry.clone(),
+                ctx.resources.memory_dir.clone(),
+                ctx.paths.base.clone(),
+                skill_harness_cell.clone(),
+                ctx.executor.clone(),
+            ),
+        );
+
         // Crash-recovery parity with startup: restore this session's persisted DAG runs.
         // `restore` skips ids already live in the engine, so switching back and forth is
         // idempotent.
@@ -411,8 +452,6 @@ impl SessionRuntimeBuilder {
 
         // Fresh per-session tool set (dag_* / task stamped with the target session; the
         // skill family gets a brand-new harness cell filled right after construction).
-        let skill_harness_cell: crate::tools::skill::SkillHarnessCell =
-            std::sync::Arc::new(once_cell::sync::OnceCell::new());
         let mut tools = tools::session_tool_set_for_cwd(
             &ctx.resources.memory_dir,
             &ctx.paths.base,
@@ -427,18 +466,6 @@ impl SessionRuntimeBuilder {
             ctx.cwd.clone(),
         );
         tools.extend(ctx.mcp.tools.iter().cloned());
-
-        self.dag_engine.set_launcher(Some(tools::node_launcher(
-            self.dag_engine.clone(),
-            ctx.model.clone(),
-            Some(self.stream_fn.clone()),
-            ctx.cwd.clone(),
-            self.subagent_registry.clone(),
-            ctx.resources.memory_dir.clone(),
-            ctx.paths.base.clone(),
-            skill_harness_cell.clone(),
-            ctx.executor.clone(),
-        )));
 
         let goal_harness_cell: Arc<OnceLock<Arc<AgentHarness>>> = Arc::new(OnceLock::new());
         let mut opts = AgentHarnessOptions::new(ctx.model.clone(), session);
@@ -625,6 +652,7 @@ impl SessionRuntimeBuilder {
         harness.start_runtime_extensions().await;
         Ok(SessionRuntime {
             session_id,
+            cwd: ctx.cwd.clone(),
             harness,
             trigger_executor,
             tool_names,

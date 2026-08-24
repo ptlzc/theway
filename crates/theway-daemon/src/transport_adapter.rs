@@ -22,17 +22,25 @@ use theway_transport::wire::{
 #[derive(Clone)]
 pub struct CoreJobOps {
     registry: SubagentJobRegistry,
+    engine: Arc<DagEngine>,
 }
 
 impl CoreJobOps {
-    pub fn new(registry: SubagentJobRegistry) -> Self {
-        Self { registry }
+    pub fn new(registry: SubagentJobRegistry, engine: Arc<DagEngine>) -> Self {
+        Self { registry, engine }
     }
 }
 
 impl JobOps for CoreJobOps {
     fn node_output(&self, run_id: &str, node_id: &str) -> WireNodeOutput {
-        let messages = self.registry.node_messages(run_id, node_id);
+        let session_id = self.engine.get_run(run_id).and_then(|run| run.session_id);
+        let messages = match session_id.as_deref() {
+            Some(session_id) => {
+                self.registry
+                    .node_messages_for_session(Some(session_id), run_id, node_id)
+            }
+            None => self.registry.node_messages(run_id, node_id),
+        };
         let job = self.registry.find_node(run_id, node_id);
         WireNodeOutput {
             output: job.as_ref().map(|job| job.output.clone()),
@@ -342,11 +350,37 @@ mod tests {
             job.messages_truncated = true;
         });
 
-        let output = CoreJobOps::new(registry).node_output("run-1", "node-1");
+        let output =
+            CoreJobOps::new(registry, Arc::new(DagEngine::new())).node_output("run-1", "node-1");
 
         assert_eq!(output.output.as_deref(), Some("result"));
         assert_eq!(output.messages.unwrap().len(), 1);
         assert!(output.messages_truncated);
+    }
+
+    #[test]
+    fn job_ops_uses_runs_exact_session_when_run_node_ids_collide() {
+        let engine = Arc::new(DagEngine::new());
+        let run_id = engine.plan_goal("shared", Some("session-a".into()));
+        let registry = SubagentJobRegistry::new();
+        for (session_id, text) in [("session-a", "from-a"), ("session-b", "from-b")] {
+            let id = registry.register(SubagentJobInit {
+                agent: "explorer".into(),
+                source: "dag".into(),
+                run_id: Some(run_id.clone()),
+                node_id: Some("node-1".into()),
+                session_id: Some(session_id.into()),
+            });
+            registry.update(&id, |job| {
+                job.messages.push(serde_json::json!({ "text": text }));
+            });
+        }
+
+        let output = CoreJobOps::new(registry, engine).node_output(&run_id, "node-1");
+
+        let messages = output.messages.unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["text"], "from-a");
     }
 
     #[test]
