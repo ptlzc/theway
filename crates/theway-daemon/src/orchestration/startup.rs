@@ -260,46 +260,6 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         project_resources,
         mcp_resources,
     );
-    // TODO(#86): TS extensions are still discovered from local
-    // `.theway/extensions` dirs. When controller provisioning is active
-    // (`load_local_sources == false`), start with an empty registry instead.
-    let ts_extensions = if startup.load_local_sources {
-        crate::ts_extensions::ExtensionRegistry::discover(&cwd, &paths.base)
-    } else {
-        crate::ts_extensions::ExtensionRegistry::new()
-    };
-    for error in &ts_extensions.errors {
-        tracing::warn!(target: "extensions", "{error}");
-    }
-    let legacy_compaction_host = Arc::new(crate::ts_extensions::LegacyCompactionHost::new(
-        &ts_extensions,
-    ));
-    let compact_algorithms = legacy_compaction_host.registry();
-    let runtime_extension_packages = Arc::new(parking_lot::RwLock::new(
-        ts_extensions.package_catalog().clone(),
-    ));
-    let runtime_extension_engine = startup.load_local_sources.then(|| {
-        let broker_services =
-            crate::ts_extensions::ExtensionBrokerServices::new(&paths.base, executor.clone());
-        for package in runtime_extension_packages.read().effective_packages() {
-            for permission in package.granted_permissions() {
-                if let theway_contract::extension::ExtensionPermission::SecretsRead(name) =
-                    permission
-                    && let Ok(value) = std::env::var(name)
-                {
-                    broker_services.set_secret(name, value);
-                }
-            }
-        }
-        crate::ts_extensions::QuickJsEnginePool::with_broker_services(
-            std::thread::available_parallelism()
-                .map(usize::from)
-                .unwrap_or(1)
-                .min(4),
-            crate::ts_extensions::QuickJsEngineLimits::default(),
-            broker_services,
-        )
-    });
     // Runtime settings come from the in-memory StartupConfig: defaults until
     // the controller provisions values through the settings RPC.
     dynamic_trigger_registry.set_poll_interval_secs(startup.trigger_poll_secs);
@@ -336,10 +296,6 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     let session_runtime_builder = Arc::new(SessionRuntimeBuilder {
         thinking,
         stream_fn: stream_fn.clone(),
-        compact_algorithms: compact_algorithms.clone(),
-        legacy_compaction_host: Some(legacy_compaction_host),
-        runtime_extension_packages,
-        runtime_extension_engine,
         dag_engine: dag_engine.clone(),
         subagent_registry: subagent_registry.clone(),
         services: services.clone(),

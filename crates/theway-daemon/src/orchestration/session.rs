@@ -120,6 +120,77 @@ pub struct SessionMcpResources {
     pub notification_hook_count: usize,
 }
 
+/// Session-owned TS extension host resources loaded once per owning context.
+/// Cloned contexts share the same Arc-backed catalog, legacy compaction host,
+/// compact registry, and QuickJS engine pool; separately constructed contexts
+/// discover and build independent resources.
+#[derive(Clone)]
+pub struct SessionExtensionResources {
+    pub compact_algorithms:
+        std::sync::Arc<theway_core::agent::compaction::algorithm::CompactAlgorithmRegistry>,
+    pub legacy_compaction_host: Option<std::sync::Arc<crate::ts_extensions::LegacyCompactionHost>>,
+    pub runtime_extension_packages:
+        std::sync::Arc<parking_lot::RwLock<crate::ts_extensions::PackageCatalog>>,
+    pub runtime_extension_engine: Option<std::sync::Arc<crate::ts_extensions::QuickJsEnginePool>>,
+}
+
+impl SessionExtensionResources {
+    /// Discover local sources and construct the broker, engine pool, legacy
+    /// compaction host, and compact registry for one session context.
+    pub fn new(
+        cwd: &std::path::Path,
+        base: &std::path::Path,
+        executor: std::sync::Arc<dyn theway_core::executor::ToolExecutor>,
+        load_local_sources: bool,
+    ) -> Self {
+        let ts_extensions = if load_local_sources {
+            crate::ts_extensions::ExtensionRegistry::discover(cwd, base)
+        } else {
+            crate::ts_extensions::ExtensionRegistry::new()
+        };
+        for error in &ts_extensions.errors {
+            tracing::warn!(target: "extensions", "{error}");
+        }
+        let legacy_compaction_host = std::sync::Arc::new(
+            crate::ts_extensions::LegacyCompactionHost::new(&ts_extensions),
+        );
+        let compact_algorithms = legacy_compaction_host.registry();
+        let runtime_extension_packages = std::sync::Arc::new(parking_lot::RwLock::new(
+            ts_extensions.package_catalog().clone(),
+        ));
+        let runtime_extension_engine = load_local_sources.then(|| {
+            let broker_services =
+                crate::ts_extensions::ExtensionBrokerServices::new(base, executor);
+            for package in runtime_extension_packages.read().effective_packages() {
+                for permission in package.granted_permissions() {
+                    if let theway_contract::extension::ExtensionPermission::SecretsRead(name) =
+                        permission
+                        && let Ok(value) = std::env::var(name)
+                    {
+                        broker_services.set_secret(name, value);
+                    }
+                }
+            }
+            std::sync::Arc::new(
+                crate::ts_extensions::QuickJsEnginePool::with_broker_services(
+                    std::thread::available_parallelism()
+                        .map(usize::from)
+                        .unwrap_or(1)
+                        .min(4),
+                    crate::ts_extensions::QuickJsEngineLimits::default(),
+                    broker_services,
+                ),
+            )
+        });
+        Self {
+            compact_algorithms,
+            legacy_compaction_host: Some(legacy_compaction_host),
+            runtime_extension_packages,
+            runtime_extension_engine,
+        }
+    }
+}
+
 /// Cwd-scoped inputs for one runtime build.
 #[derive(Clone)]
 pub struct SessionExecutionContext {
@@ -138,6 +209,8 @@ pub struct SessionExecutionContext {
     pub resources: SessionProjectResources,
     /// Session-owned MCP tools, one-shot hook pool, inject sets, and capability metadata.
     pub mcp: SessionMcpResources,
+    /// Session-owned TS extension catalog, legacy host, compact registry, and engine.
+    pub extension_resources: SessionExtensionResources,
 }
 
 impl SessionExecutionContext {
@@ -152,6 +225,12 @@ impl SessionExecutionContext {
         mcp: SessionMcpResources,
     ) -> Self {
         let paths = paths.with_work_dir(cwd.clone());
+        let extension_resources = SessionExtensionResources::new(
+            &cwd,
+            &paths.base,
+            executor.clone(),
+            resources.load_local_sources,
+        );
         Self {
             cwd,
             repo,
@@ -161,6 +240,7 @@ impl SessionExecutionContext {
             model,
             resources,
             mcp,
+            extension_resources,
         }
     }
 }
@@ -190,11 +270,6 @@ impl SessionExecutionContext {
 pub struct SessionRuntimeBuilder {
     pub thinking: ThinkingLevel,
     pub stream_fn: theway_core::StreamFn,
-    pub compact_algorithms:
-        std::sync::Arc<theway_core::agent::compaction::algorithm::CompactAlgorithmRegistry>,
-    pub legacy_compaction_host: Option<Arc<crate::ts_extensions::LegacyCompactionHost>>,
-    pub runtime_extension_packages: Arc<parking_lot::RwLock<crate::ts_extensions::PackageCatalog>>,
-    pub runtime_extension_engine: Option<crate::ts_extensions::QuickJsEnginePool>,
     pub dag_engine: Arc<DagEngine>,
     pub subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry,
     pub services: DaemonServices,
@@ -324,12 +399,12 @@ impl SessionRuntimeBuilder {
         };
         opts.runtime_extension_cwd = ctx.cwd.to_string_lossy().into_owned();
         let mut runtime_extension_host = None;
-        if let Some(engine) = &self.runtime_extension_engine {
+        if let Some(engine) = &ctx.extension_resources.runtime_extension_engine {
             let base_tools = tools.clone();
             let extensions = Arc::new(
                 crate::ts_extensions::SessionPluginHost::load_with_state_and_legacy(
-                    self.runtime_extension_packages.read().clone(),
-                    engine.clone(),
+                    ctx.extension_resources.runtime_extension_packages.read().clone(),
+                    engine.as_ref().clone(),
                     session_id.clone(),
                     &ctx.cwd,
                     crate::ts_extensions::RuntimeExtensionHostConfig::default(),
@@ -338,8 +413,8 @@ impl SessionRuntimeBuilder {
                             extension_state_store,
                         ),
                     ),
-                    self.legacy_compaction_host.clone(),
-                    Some(self.runtime_extension_packages.clone()),
+                    ctx.extension_resources.legacy_compaction_host.clone(),
+                    Some(ctx.extension_resources.runtime_extension_packages.clone()),
                 )
                 .await,
             );
@@ -378,7 +453,7 @@ impl SessionRuntimeBuilder {
         opts.tools = tools;
         opts.skills = ctx.resources.skills.clone();
         opts.prompt_templates = ctx.resources.templates.clone();
-        opts.compact_algorithms = self.compact_algorithms.clone();
+        opts.compact_algorithms = ctx.extension_resources.compact_algorithms.clone();
         opts.stream_fn = Some(self.stream_fn.clone());
         opts.reload_skills_fn = Some(ctx.resources.reload_skills_fn.clone());
         opts.on_turn_end = Some(goal::stop_hook(

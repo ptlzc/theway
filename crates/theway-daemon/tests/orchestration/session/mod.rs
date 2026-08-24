@@ -129,6 +129,123 @@ fn session_mcp_resources_clones_share_one_shot_hook_pool() {
     );
 }
 
+#[test]
+fn session_extension_resources_clones_share_arc_backed_state() {
+    let work_dir = TempDir::new().unwrap();
+    let base_dir = TempDir::new().unwrap();
+    let resources = SessionExtensionResources::new(
+        work_dir.path(),
+        base_dir.path(),
+        crate::executor::executor_for_cwd(work_dir.path().to_path_buf()),
+        true,
+    );
+    let clone = resources.clone();
+
+    assert!(Arc::ptr_eq(
+        &resources.compact_algorithms,
+        &clone.compact_algorithms
+    ));
+    assert!(Arc::ptr_eq(
+        resources.legacy_compaction_host.as_ref().unwrap(),
+        clone.legacy_compaction_host.as_ref().unwrap()
+    ));
+    assert!(Arc::ptr_eq(
+        &resources.runtime_extension_packages,
+        &clone.runtime_extension_packages
+    ));
+    assert!(Arc::ptr_eq(
+        resources.runtime_extension_engine.as_ref().unwrap(),
+        clone.runtime_extension_engine.as_ref().unwrap()
+    ));
+}
+
+#[test]
+fn session_extension_resources_separate_contexts_are_independent() {
+    let work_a = TempDir::new().unwrap();
+    let base_a = TempDir::new().unwrap();
+    let work_b = TempDir::new().unwrap();
+    let base_b = TempDir::new().unwrap();
+    let a = SessionExtensionResources::new(
+        work_a.path(),
+        base_a.path(),
+        crate::executor::executor_for_cwd(work_a.path().to_path_buf()),
+        true,
+    );
+    let b = SessionExtensionResources::new(
+        work_b.path(),
+        base_b.path(),
+        crate::executor::executor_for_cwd(work_b.path().to_path_buf()),
+        true,
+    );
+
+    assert!(!Arc::ptr_eq(&a.compact_algorithms, &b.compact_algorithms));
+    assert!(!Arc::ptr_eq(
+        a.legacy_compaction_host.as_ref().unwrap(),
+        b.legacy_compaction_host.as_ref().unwrap()
+    ));
+    assert!(!Arc::ptr_eq(
+        &a.runtime_extension_packages,
+        &b.runtime_extension_packages
+    ));
+    assert!(!Arc::ptr_eq(
+        a.runtime_extension_engine.as_ref().unwrap(),
+        b.runtime_extension_engine.as_ref().unwrap()
+    ));
+}
+
+#[test]
+fn session_extension_resources_install_env_secret_before_engine_use() {
+    let _serial = ENV_LOCK.lock().unwrap();
+    let work_dir = TempDir::new().unwrap();
+    let base_dir = TempDir::new().unwrap();
+    let secret_name = "THEWAY_SESSION_EXTENSION_TEST_SECRET";
+    let _secret = EnvGuard::set(secret_name, "preserved");
+
+    let extension_root = work_dir.path().join(".theway").join("extensions").join("secret-package");
+    std::fs::create_dir_all(&extension_root).unwrap();
+    std::fs::write(
+        extension_root.join("theway-extension.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "id": "secret-package",
+            "version": "1.0.0",
+            "entry": "index.js",
+            "priority": 0,
+            "scope": "session",
+            "permissions": [format!("secrets.read:{secret_name}")]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        extension_root.join("index.js"),
+        "export default defineExtension((api) => api);",
+    )
+    .unwrap();
+
+    let requested = vec![theway_contract::extension::ExtensionPermission::SecretsRead(
+        secret_name.to_string(),
+    )];
+    let mut trust = crate::ts_extensions::ExtensionTrustStore::load(base_dir.path());
+    trust
+        .decide_project(
+            work_dir.path(),
+            requested.clone(),
+            requested,
+            theway_contract::extension::ExtensionTrustDecision::Trusted,
+        )
+        .unwrap();
+    trust.save().unwrap();
+
+    let resources = SessionExtensionResources::new(
+        work_dir.path(),
+        base_dir.path(),
+        crate::executor::executor_for_cwd(work_dir.path().to_path_buf()),
+        true,
+    );
+    let engine = resources.runtime_extension_engine.unwrap();
+    assert!(engine.has_secret(secret_name));
+}
+
 // ─────────────────────────────────────────────────────────────────────────────────────────
 // execution context
 // ─────────────────────────────────────────────────────────────────────────────────────────
@@ -137,7 +254,10 @@ use std::path::Path;
 
 use tempfile::TempDir;
 
-use super::{SessionExecutionContext, SessionMcpResources, SessionProjectResources, SessionRuntimeBuilder};
+use super::{
+    SessionExecutionContext, SessionExtensionResources, SessionMcpResources,
+    SessionProjectResources, SessionRuntimeBuilder,
+};
 use crate::runtime_storage::{RuntimeStorage, SessionRepository};
 use crate::test_env::{ENV_LOCK, EnvGuard};
 
@@ -177,14 +297,6 @@ fn test_factory() -> (SessionRuntimeBuilder, Arc<dyn RuntimeStorage>, TempDir) {
     let factory = SessionRuntimeBuilder {
         thinking: theway_core::ThinkingLevel::Off,
         stream_fn: faux_stream(),
-        compact_algorithms: std::sync::Arc::new(
-            theway_core::agent::compaction::algorithm::CompactAlgorithmRegistry::new(),
-        ),
-        legacy_compaction_host: None,
-        runtime_extension_packages: std::sync::Arc::new(parking_lot::RwLock::new(
-            crate::ts_extensions::PackageCatalog::default(),
-        )),
-        runtime_extension_engine: None,
         dag_engine: std::sync::Arc::new(theway_core::multiagent::graph::engine::DagEngine::new()),
         subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry::new(),
         services: crate::orchestration::DaemonServices::new(),
@@ -489,7 +601,7 @@ export default defineExtension((api) => {
     let repo_root = TempDir::new().unwrap();
     let repo = theway_storage::sqlite_repo::SqliteSessionRepo::new(repo_root.path());
     let id = create_session_with_cwd(&repo, work_dir.path().to_str().unwrap()).await;
-    let (mut factory, storage, state) = test_factory();
+    let (factory, storage, state) = test_factory();
     let base_dir = state.path().join("base");
     let mut trust = crate::ts_extensions::ExtensionTrustStore::load(&base_dir);
     trust
@@ -501,12 +613,13 @@ export default defineExtension((api) => {
         )
         .unwrap();
     trust.save().unwrap();
-    *factory.runtime_extension_packages.write() =
-        crate::ts_extensions::PackageCatalog::discover(work_dir.path(), &base_dir);
-    let engine = crate::ts_extensions::QuickJsEnginePool::new(1);
-    factory.runtime_extension_engine = Some(engine.clone());
 
-    let ctx = session_context(work_dir.path(), repo, storage, &state.path().join("base")).await;
+    let ctx = session_context(work_dir.path(), repo, storage, &base_dir).await;
+    let engine = ctx
+        .extension_resources
+        .runtime_extension_engine
+        .clone()
+        .expect("local sources must construct a QuickJS engine pool");
     let runtime = factory
         .build(&ctx, &id)
         .await
