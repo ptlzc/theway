@@ -108,6 +108,38 @@ fn launcher_panic_is_caught_and_fails_node() {
 }
 
 #[test]
+fn background_dag_uses_original_session_launcher_after_global_switch() {
+    let engine = DagEngine::new();
+    let session_launcher = Arc::new(FakeLauncher::new());
+    let first_global = Arc::new(FakeLauncher::new());
+    let second_global = Arc::new(FakeLauncher::new());
+    engine.set_launcher(Some(first_global.clone()));
+    engine.set_session_launcher(Some("sess".to_string()), session_launcher.clone());
+
+    let run = engine
+        .plan(run_def("s", None, None), None, Some("sess".to_string()))
+        .unwrap();
+    assert_eq!(run.status, DagStatus::Running);
+    assert_eq!(session_launcher.calls.lock().unwrap().len(), 1);
+    assert!(first_global.calls.lock().unwrap().is_empty());
+
+    engine.set_launcher(Some(second_global.clone()));
+    let run2 = engine
+        .plan(run_def("s2", None, None), None, Some("sess".to_string()))
+        .unwrap();
+    assert_eq!(run2.status, DagStatus::Running);
+    assert_eq!(session_launcher.calls.lock().unwrap().len(), 2);
+    assert!(second_global.calls.lock().unwrap().is_empty());
+
+    // The global switch still applies to session-less runs.
+    let plain = engine
+        .plan(run_def("plain", None, None), None, None)
+        .unwrap();
+    let global_calls = second_global.calls.lock().unwrap().clone();
+    assert_eq!(global_calls, vec![(plain.id.clone(), "a".to_string())]);
+}
+
+#[test]
 fn on_node_completed_no_result_error_uses_fallback() {
     let (engine, _launcher) = engine_with_launcher();
     let run = engine.plan(run_def("t", None, None), None, None).unwrap();

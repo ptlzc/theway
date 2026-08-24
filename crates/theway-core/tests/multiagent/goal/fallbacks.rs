@@ -7,7 +7,7 @@ use crate::agent::assembly::{AgentHarness, AgentHarnessOptions};
 use crate::agent::session::memory_storage::MemorySessionStorage;
 use crate::agent::session::session::{Session, SessionStorage};
 use crate::multiagent::graph::engine::DagEngine;
-use crate::multiagent::graph::types::DagStatus;
+use crate::multiagent::graph::types::{DagStatus, RunKind};
 use crate::multiagent::jobs::SubagentJobRegistry;
 use crate::multiagent::types::AgentRunParams;
 use theway_llm_provider::{Message as PiMessage, UserContent, UserMessage, UserRole};
@@ -45,6 +45,39 @@ fn user_msg(text: &str) -> AgentMessage {
         content: UserContent::Text(text.into()),
         timestamp: 0,
     }))
+}
+
+#[tokio::test]
+async fn ensure_goal_run_creates_one_goal_run_per_session() {
+    let engine = DagEngine::new();
+    let first = harness();
+    let second = harness();
+    let first_id = ensure_goal_run(&engine, &first, "first goal").await.unwrap();
+    let first_again = ensure_goal_run(&engine, &first, "updated first goal").await.unwrap();
+    assert_eq!(first_again, first_id);
+
+    let second_id = ensure_goal_run(&engine, &second, "second goal").await.unwrap();
+    assert_ne!(first_id, second_id);
+
+    let first_session = session_id_from_harness(&first).await.unwrap();
+    let second_session = session_id_from_harness(&second).await.unwrap();
+    let runs = engine.list_runs();
+    assert_eq!(runs.len(), 2);
+    assert_eq!(
+        runs.iter()
+            .filter(|r| r.session_id.as_deref() == Some(first_session.as_str()))
+            .count(),
+        1
+    );
+    assert_eq!(
+        runs.iter()
+            .filter(|r| r.session_id.as_deref() == Some(second_session.as_str()))
+            .count(),
+        1
+    );
+    assert!(runs
+        .iter()
+        .all(|r| r.kind == RunKind::Goal && r.status == DagStatus::Running));
 }
 
 #[test]

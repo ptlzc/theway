@@ -258,10 +258,6 @@ pub fn stop_hook(
     })
 }
 
-/// The engine run id for this session's goal (one `plan_goal` per session).
-/// `Some` from the first activation on; `None` only if planning was skipped.
-static GOAL_RUN: OnceLock<Option<String>> = OnceLock::new();
-
 /// Session id from the harness storage metadata (mirrors main.rs's startup
 /// read); `None` if the metadata is unavailable.
 async fn session_id_from_harness(harness: &Arc<AgentHarness>) -> Option<String> {
@@ -272,33 +268,22 @@ async fn session_id_from_harness(harness: &Arc<AgentHarness>) -> Option<String> 
         .map(str::to_string)
 }
 
-/// Register the goal run in the engine on first activation (status turns
-/// Pursuing). One run per session — the engine self-loop keeps ticking until
-/// the goal terminates. If the registered run is missing (engine restore
-/// dropped it / test reset), re-plan instead, reusing a live goal run of this
-/// session when one exists.
+/// Reuse the live goal run owned by this session, or create one when absent.
 async fn ensure_goal_run(
     dag_engine: &DagEngine,
     harness: &Arc<AgentHarness>,
     condition: &str,
 ) -> Option<String> {
     let session_id = session_id_from_harness(harness).await;
-    let run = GOAL_RUN.get_or_init(|| Some(dag_engine.plan_goal(condition, session_id.clone())));
-    match run {
-        Some(run_id) if dag_engine.get_run(run_id).is_some() => Some(run_id.clone()),
-        Some(_) => {
-            let existing = dag_engine.list_runs().into_iter().find(|run| {
-                run.kind == RunKind::Goal
-                    && run.status == DagStatus::Running
-                    && run.session_id == session_id
-            });
-            Some(existing.map_or_else(
-                || dag_engine.plan_goal(condition, session_id.clone()),
-                |run| run.id,
-            ))
-        }
-        None => None,
-    }
+    let existing = dag_engine.list_runs().into_iter().find(|run| {
+        run.kind == RunKind::Goal
+            && run.status == DagStatus::Running
+            && run.session_id == session_id
+    });
+    Some(existing.map_or_else(
+        || dag_engine.plan_goal(condition, session_id.clone()),
+        |run| run.id,
+    ))
 }
 
 /// One loop iteration for a goal run (call after the goal state was persisted).

@@ -167,6 +167,9 @@ struct Inner {
     /// Host-provided transcript persistence. `None` = transcripts stay in
     /// memory only (the default).
     transcript_store: Option<Arc<dyn JobTranscriptStore>>,
+    /// Exact job-session stores precede the global compatibility store;
+    /// `None` owns session-less jobs.
+    session_transcript_stores: HashMap<Option<String>, Arc<dyn JobTranscriptStore>>,
 }
 
 /// Thread-safe registry (cheap clone via `Arc`).
@@ -219,6 +222,19 @@ impl SubagentJobRegistry {
     /// (transcripts stay in memory only, the default).
     pub fn set_transcript_store(&self, store: Option<Arc<dyn JobTranscriptStore>>) {
         self.inner.lock().transcript_store = store;
+    }
+
+    /// Install a transcript store owned by one exact session id; persistence
+    /// falls back to the global store only when no exact store exists.
+    pub fn set_session_transcript_store(
+        &self,
+        session_id: Option<String>,
+        store: Arc<dyn JobTranscriptStore>,
+    ) {
+        self.inner
+            .lock()
+            .session_transcript_stores
+            .insert(session_id, store);
     }
 
     /// Register a running job and return its stable id.
@@ -445,6 +461,31 @@ impl SubagentJobRegistry {
         store.load_node(run_id, node_id)
     }
 
+    /// Session-aware DAG node transcript lookup. Prefers an in-memory job,
+    /// then the exact session transcript store, then the global host store.
+    pub fn node_messages_for_session(
+        &self,
+        session_id: Option<&str>,
+        run_id: &str,
+        node_id: &str,
+    ) -> Option<Vec<serde_json::Value>> {
+        let inner = self.inner.lock();
+        if let Some(job) = inner.jobs.iter().rev().find(|job| {
+            job.run_id.as_deref() == Some(run_id)
+                && job.node_id.as_deref() == Some(node_id)
+                && job.session_id.as_deref() == session_id
+                && !job.messages.is_empty()
+        }) {
+            return Some(job.messages.clone());
+        }
+        let store = inner
+            .session_transcript_stores
+            .get(&session_id.map(str::to_string))
+            .cloned()
+            .or_else(|| inner.transcript_store.clone())?;
+        store.load_node(run_id, node_id)
+    }
+
     /// Look up a task-tool job's transcript (in-memory, then host store).
     pub fn job_messages(&self, job_id: &str) -> Option<Vec<serde_json::Value>> {
         if let Some(job) = self.job(job_id) {
@@ -457,11 +498,20 @@ impl SubagentJobRegistry {
     }
 
     /// Hand the finished job's transcript to the host store (best-effort).
+    /// The exact session store wins over the global store.
     fn persist_messages(&self, job: &SubagentJob) {
         if job.messages.is_empty() {
             return;
         }
-        let Some(store) = self.inner.lock().transcript_store.clone() else {
+        let store = {
+            let inner = self.inner.lock();
+            inner
+                .session_transcript_stores
+                .get(&job.session_id)
+                .cloned()
+                .or_else(|| inner.transcript_store.clone())
+        };
+        let Some(store) = store else {
             return;
         };
         store.save(&JobTranscript {

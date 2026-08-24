@@ -51,6 +51,32 @@ fn restore_hydrates_and_reschedules() {
 }
 
 #[test]
+fn restored_runs_dispatch_through_session_launcher_registered_before_restore() {
+    let engine = DagEngine::new();
+    let session_launcher = Arc::new(FakeLauncher::new());
+    engine.set_session_launcher(Some("sess".to_string()), session_launcher.clone());
+    let p = PersistedRun {
+        id: "dag-7".to_string(),
+        name: "resumed".to_string(),
+        max_concurrency: 1,
+        fail_fast: false,
+        direction: Direction::Td,
+        created_at: 100,
+        session_id: Some("sess".to_string()),
+        kind: RunKind::Dag,
+        nodes: vec![persisted_node("a", NodeStatus::Running, &[])],
+    };
+
+    let restored = engine.restore(vec![p]);
+
+    assert_eq!(restored, vec!["dag-7".to_string()]);
+    assert_eq!(
+        session_launcher.launched(),
+        vec![("dag-7".to_string(), "a".to_string())]
+    );
+}
+
+#[test]
 fn restore_aligns_dag_counter() {
     let (engine, _launcher) = engine_with_launcher();
     let p = PersistedRun {
