@@ -8,13 +8,13 @@ use crate::runtime_storage::{RuntimeStorage, local_runtime_storage, remote_runti
 use crate::startup_config::StartupConfig;
 use crate::stream_auth::stream_fn_with_auth_store;
 use crate::turn::daemon::{DaemonConfig, RuntimeCapabilities, TurnHost};
-use crate::{agent_specs, runtime_capabilities, session_ops, triggers};
+use crate::{agent_specs, runtime_capabilities, session_ops};
 use anyhow::{Context, Result};
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::{PermissionPolicy, ThinkingLevel};
 
 use super::session::SessionProjectResources;
-use super::{DaemonServices, SessionExecutionContext, SessionRuntimeBuilder};
+use super::{DaemonServices, SessionExecutionContext, SessionMcpResources, SessionRuntimeBuilder};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DaemonTransport {
@@ -213,31 +213,36 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     // sandbox stub for `sandbox`-only builds.
     let executor: Arc<dyn theway_core::executor::ToolExecutor> =
         crate::executor::executor_for_cwd(cwd.clone());
+    let session_paths = paths.with_work_dir(cwd.clone());
     // TODO(#73): MCP servers are still read from local `mcp.toml` files;
     // once the settings RPC provisions them, this local read goes away. The
     // `load_local_sources` seam skips the scan entirely for a fully
     // controller-provisioned daemon.
     let mcp = if startup.load_local_sources {
-        crate::mcp_loader::load_all(&cwd).await
+        crate::mcp_loader::load_all(&session_paths).await
     } else {
         crate::mcp_loader::LoadedMcp::empty()
     };
     for diagnostic in &mcp.diagnostics {
         tracing::warn!(target: "mcp", "{diagnostic}");
     }
-    let mcp_tool_count = mcp.tools.len();
     let mcp_tool_names = mcp
         .tools
         .iter()
         .map(|t| t.definition().name.clone())
         .collect::<Vec<_>>();
     let mcp_server_names = mcp.server_names.clone();
-    let mcp_notification_hooks = mcp.notification_hooks;
-    let mcp_notification_hook_count = mcp_notification_hooks.len();
-    let mcp_inject_summary_servers = mcp.inject_summary_servers;
-    let mcp_inject_and_run_servers = mcp.inject_and_run_servers;
-    let mcp_tools_for_factory = mcp.tools;
-    let session_paths = paths.with_work_dir(cwd.clone());
+    let mcp_notification_hook_count = mcp.notification_hooks.len();
+    let mcp_resources = SessionMcpResources {
+        tools: mcp.tools,
+        notification_hooks: Arc::new(parking_lot::Mutex::new(mcp.notification_hooks)),
+        inject_summary_servers: mcp.inject_summary_servers,
+        inject_and_run_servers: mcp.inject_and_run_servers,
+        server_count: mcp.client_count,
+        server_names: mcp_server_names,
+        tool_names: mcp_tool_names,
+        notification_hook_count: mcp_notification_hook_count,
+    };
     let project_resources = SessionProjectResources::load(
         &session_paths,
         &options.builtin_skills,
@@ -253,6 +258,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         executor.clone(),
         model.clone(),
         project_resources,
+        mcp_resources,
     );
     // TODO(#86): TS extensions are still discovered from local
     // `.theway/extensions` dirs. When controller provisioning is active
@@ -309,14 +315,6 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         let (hook, rx) = crate::control_plane_prompt::interactive_hook();
         (Some(hook), Some(rx))
     };
-    let before_trigger_action = triggers::cron_action_hook(
-        cron_registry.clone(),
-        triggers::direct_inject_action_hook(
-            mcp_inject_summary_servers,
-            mcp_inject_and_run_servers,
-            triggers::before_trigger_action_hook(dynamic_trigger_registry.clone()),
-        ),
-    );
     // TODO(#73): LSP servers are still read from local `lsp.toml` files;
     // once the settings RPC provisions them, this local read goes away. The
     // `load_local_sources` seam starts an empty supervisor instead.
@@ -344,11 +342,8 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         runtime_extension_engine,
         dag_engine: dag_engine.clone(),
         subagent_registry: subagent_registry.clone(),
-        mcp_tools: mcp_tools_for_factory,
-        mcp_notification_hooks: parking_lot::Mutex::new(mcp_notification_hooks),
         services: services.clone(),
         before_tool_call: Some(before_tool_call.clone()),
-        before_trigger_action,
         control_plane_hook,
         after_tool_call,
         feed_tx: feed_tx.clone(),
@@ -376,12 +371,12 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     };
 
     let capabilities = RuntimeCapabilities {
-        mcp_servers: mcp.client_count,
-        mcp_tools: mcp_tool_count,
-        mcp_server_names,
-        mcp_tool_names,
+        mcp_servers: session_context.mcp.server_count,
+        mcp_tools: session_context.mcp.tool_names.len(),
+        mcp_server_names: session_context.mcp.server_names.clone(),
+        mcp_tool_names: session_context.mcp.tool_names.clone(),
         tool_names: tool_names.clone(),
-        mcp_notification_hooks: mcp_notification_hook_count,
+        mcp_notification_hooks: session_context.mcp.notification_hook_count,
         hook_points: runtime_capabilities::active_hook_registrations(lsp_lang_count, hooks_active),
         trigger_features: runtime_capabilities::active_trigger_features(),
     };

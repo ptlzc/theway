@@ -105,6 +105,21 @@ impl SessionProjectResources {
     }
 }
 
+/// Session-owned MCP state loaded from the owning context's config paths.
+#[derive(Clone, Default)]
+pub struct SessionMcpResources {
+    pub tools: Vec<Arc<dyn theway_core::AgentTool>>,
+    /// One-shot pool: the first build from a context takes and registers these hooks.
+    /// Cloned contexts share the same pool; separately constructed contexts do not.
+    pub notification_hooks: Arc<parking_lot::Mutex<Vec<Arc<triggers::McpNotificationHook>>>>,
+    pub inject_summary_servers: std::collections::HashSet<String>,
+    pub inject_and_run_servers: std::collections::HashSet<String>,
+    pub server_count: usize,
+    pub server_names: Vec<String>,
+    pub tool_names: Vec<String>,
+    pub notification_hook_count: usize,
+}
+
 /// Cwd-scoped inputs for one runtime build.
 #[derive(Clone)]
 pub struct SessionExecutionContext {
@@ -121,6 +136,8 @@ pub struct SessionExecutionContext {
     /// Effective model for this context.
     pub model: theway_llm_provider::Model,
     pub resources: SessionProjectResources,
+    /// Session-owned MCP tools, one-shot hook pool, inject sets, and capability metadata.
+    pub mcp: SessionMcpResources,
 }
 
 impl SessionExecutionContext {
@@ -132,6 +149,7 @@ impl SessionExecutionContext {
         executor: Arc<dyn theway_core::executor::ToolExecutor>,
         model: theway_llm_provider::Model,
         resources: SessionProjectResources,
+        mcp: SessionMcpResources,
     ) -> Self {
         let paths = paths.with_work_dir(cwd.clone());
         Self {
@@ -142,6 +160,7 @@ impl SessionExecutionContext {
             executor,
             model,
             resources,
+            mcp,
         }
     }
 }
@@ -152,8 +171,8 @@ impl SessionExecutionContext {
 /// and consumed by `TurnHost::switch_session` on the serialized event loop.
 ///
 /// The builder retains process-owned state shared by Arc (DAG engine, subagent registry,
-/// feed/main-run channels, trigger registries, MCP tools + push hooks). Per-session and
-/// cwd-scoped inputs arrive through [`SessionExecutionContext`].
+/// feed/main-run channels, trigger registries). Per-session and cwd-scoped inputs arrive
+/// through [`SessionExecutionContext`], including MCP tools, hooks, and inject sets.
 /// Per-session pieces are rebuilt on every `build`:
 ///
 /// * the tool set — `dag_*` / `task` stamped with the target session, skill family wired
@@ -178,12 +197,8 @@ pub struct SessionRuntimeBuilder {
     pub runtime_extension_engine: Option<crate::ts_extensions::QuickJsEnginePool>,
     pub dag_engine: Arc<DagEngine>,
     pub subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry,
-    pub mcp_tools: Vec<Arc<dyn theway_core::AgentTool>>,
-    /// MCP notification receivers are process-scoped and may be attached only once.
-    pub mcp_notification_hooks: parking_lot::Mutex<Vec<Arc<triggers::McpNotificationHook>>>,
     pub services: DaemonServices,
     pub before_tool_call: Option<theway_core::BeforeToolCallHook>,
-    pub before_trigger_action: crate::trigger_engine::execution::BeforeTriggerActionHook,
     pub control_plane_hook: Option<theway_core::OnControlPlanePromptHook>,
     pub after_tool_call: Option<theway_core::AfterToolCallHook>,
     pub feed_tx: tokio::sync::mpsc::UnboundedSender<FeedUpdate>,
@@ -286,7 +301,7 @@ impl SessionRuntimeBuilder {
             ctx.executor.clone(),
             &self.services,
         );
-        tools.extend(self.mcp_tools.iter().cloned());
+        tools.extend(ctx.mcp.tools.iter().cloned());
 
         self.dag_engine.set_launcher(Some(tools::node_launcher(
             self.dag_engine.clone(),
@@ -392,7 +407,17 @@ impl SessionRuntimeBuilder {
         }
 
         // Per-session trigger executor: same wiring as the startup path (transport
-        // adapters plus cron/dynamic listeners registered per harness).
+        // adapters plus cron/dynamic listeners registered per harness). Direct-inject
+        // behavior comes from this context's MCP inject sets; cron/dynamic hooks remain
+        // process-owned and are wrapped fresh for each executor.
+        let before_trigger_action = triggers::cron_action_hook(
+            self.services.cron.clone(),
+            triggers::direct_inject_action_hook(
+                ctx.mcp.inject_summary_servers.clone(),
+                ctx.mcp.inject_and_run_servers.clone(),
+                triggers::before_trigger_action_hook(self.services.dynamic_triggers.clone()),
+            ),
+        );
         let trigger_executor =
             std::sync::Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
                 harness.agent_arc(),
@@ -400,15 +425,15 @@ impl SessionRuntimeBuilder {
                 crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
                 None,
                 None,
-                Some(self.before_trigger_action.clone()),
+                Some(before_trigger_action),
                 Some(self.stream_fn.clone()),
                 self.before_tool_call.clone(),
                 self.after_tool_call.clone(),
             ));
-        // Notification hooks: MCP push sources are Arc'd clones of the process-level
-        // set; cron / dynamic-trigger hooks are constructed fresh per executor.
-        // Registered exactly once per executor — see `register_notification_hooks`.
-        let mcp_notification_hooks = std::mem::take(&mut *self.mcp_notification_hooks.lock());
+        // Notification hooks: MCP push sources are one-shot per owning context; cron /
+        // dynamic-trigger hooks are constructed fresh per executor. Registered exactly
+        // once per executor — see `register_notification_hooks`.
+        let mcp_notification_hooks = std::mem::take(&mut *ctx.mcp.notification_hooks.lock());
         register_notification_hooks(
             &trigger_executor,
             &mcp_notification_hooks,

@@ -1,6 +1,7 @@
 //! Stdio transport. Spawns a subprocess, talks JSON-RPC over its stdin/stdout, and drains
 //! stderr to keep the child's pipe buffer from filling up.
 
+use std::path::Path;
 use std::process::Stdio;
 
 use async_trait::async_trait;
@@ -20,13 +21,33 @@ pub struct StdioTransport {
 
 impl StdioTransport {
     /// Spawn `cmd` with `args` and connect stdio. Returns once the child is launched (the
-    /// initialize handshake is the caller's responsibility).
+    /// initialize handshake is the caller's responsibility). The child inherits this
+    /// process's current directory.
     pub async fn spawn(cmd: &str, args: &[&str]) -> Result<Self, McpError> {
-        let mut child = Command::new(cmd)
+        Self::spawn_impl(cmd, args, None).await
+    }
+
+    /// Spawn `cmd` with `args` in an explicit `cwd` and connect stdio. Returns once the
+    /// child is launched (the initialize handshake is the caller's responsibility).
+    pub async fn spawn_in(
+        cmd: &str,
+        args: &[&str],
+        cwd: impl AsRef<Path>,
+    ) -> Result<Self, McpError> {
+        Self::spawn_impl(cmd, args, Some(cwd.as_ref())).await
+    }
+
+    async fn spawn_impl(cmd: &str, args: &[&str], cwd: Option<&Path>) -> Result<Self, McpError> {
+        let mut command = Command::new(cmd);
+        command
             .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::piped());
+        if let Some(cwd) = cwd {
+            command.current_dir(cwd);
+        }
+        let mut child = command
             .spawn()
             .map_err(|e| McpError::Transport(format!("spawn {cmd}: {e}")))?;
 

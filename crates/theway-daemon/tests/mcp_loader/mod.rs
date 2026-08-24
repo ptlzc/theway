@@ -2,10 +2,25 @@
 
 use super::*;
 
+use std::path::Path;
+use std::sync::{Arc, RwLock};
+
 use theway_transport::auth::AuthStore;
 
 mod load_all;
 mod streamable_http;
+
+fn test_paths() -> (tempfile::TempDir, tempfile::TempDir, crate::DaemonPaths) {
+    let work = tempfile::tempdir().unwrap();
+    let base = tempfile::tempdir().unwrap();
+    let paths = crate::DaemonPaths {
+        base: base.path().to_path_buf(),
+        home: base.path().to_path_buf(),
+        work_dir: work.path().to_path_buf(),
+        extra_skill_dirs: Arc::new(RwLock::new(Vec::new())),
+    };
+    (work, base, paths)
+}
 
 fn stdio_server(name: &str) -> ServerConfig {
     ServerConfig {
@@ -24,15 +39,15 @@ fn stdio_server(name: &str) -> ServerConfig {
     }
 }
 
-async fn stdio_err(server: &ServerConfig) -> String {
-    match connect_stdio(server).await {
+async fn stdio_err(server: &ServerConfig, cwd: &Path) -> String {
+    match connect_stdio(server, cwd).await {
         Ok(_) => panic!("stdio server should fail"),
         Err(err) => err.to_string(),
     }
 }
 
-async fn streamable_http_err(server: &ServerConfig) -> String {
-    match connect_streamable_http(server).await {
+async fn streamable_http_err(server: &ServerConfig, auth_path: &Path) -> String {
+    match connect_streamable_http(server, auth_path).await {
         Ok(_) => panic!("streamable_http server should fail"),
         Err(err) => err.to_string(),
     }
@@ -61,7 +76,9 @@ fn http_server(endpoint: &str) -> ServerConfig {
 #[tokio::test]
 async fn client_count_reflects_successful_connections_not_attempts() {
     let configs = vec![stdio_server("broken-a"), stdio_server("broken-b")];
-    let (tools, hooks, diagnostics, client_count, server_names) = connect_all(&configs).await;
+    let (_work, _base, paths) = test_paths();
+    let (tools, hooks, diagnostics, client_count, server_names) =
+        connect_all(&configs, &paths.work_dir, &paths.base.join("auth.json")).await;
     assert_eq!(client_count, 0, "no server should be reported as connected");
     assert!(server_names.is_empty());
     assert!(tools.is_empty(), "no tools should load from failed servers");
@@ -88,7 +105,9 @@ async fn client_count_reflects_successful_connections_not_attempts() {
 /// the helper doesn't crash on the empty path.
 #[tokio::test]
 async fn empty_configs_reports_zero() {
-    let (tools, hooks, diagnostics, client_count, server_names) = connect_all(&[]).await;
+    let (_work, _base, paths) = test_paths();
+    let (tools, hooks, diagnostics, client_count, server_names) =
+        connect_all(&[], &paths.work_dir, &paths.base.join("auth.json")).await;
     assert!(tools.is_empty());
     assert!(hooks.is_empty());
     assert!(diagnostics.is_empty());
@@ -133,7 +152,8 @@ async fn streamable_http_rejects_command_args() {
     let mut server = http_server("https://mcp.example.com/mcp");
     server.command = Some("node".into());
     server.args = vec!["server.js".into()];
-    let err = match connect_streamable_http(&server).await {
+    let (_work, _base, paths) = test_paths();
+    let err = match connect_streamable_http(&server, &paths.base.join("auth.json")).await {
         Ok(_) => panic!("streamable_http with command/args should fail"),
         Err(err) => err,
     };
@@ -252,7 +272,8 @@ async fn connect_stdio_rejects_endpoint_or_auth() {
         token_keychain_ref: Some("some-ref".into()),
     });
 
-    let err = stdio_err(&server).await;
+    let (_work, _base, paths) = test_paths();
+    let err = stdio_err(&server, &paths.work_dir).await;
 
     assert!(err.contains("must not set endpoint or auth"), "{err}");
 }
@@ -262,7 +283,8 @@ async fn connect_stdio_requires_command() {
     let mut server = stdio_server("no-command");
     server.command = None;
 
-    let err = stdio_err(&server).await;
+    let (_work, _base, paths) = test_paths();
+    let err = stdio_err(&server, &paths.work_dir).await;
 
     assert!(err.contains("missing command"), "{err}");
 }
@@ -272,7 +294,8 @@ async fn connect_streamable_http_requires_endpoint() {
     let mut server = http_server("");
     server.endpoint = None;
 
-    let err = streamable_http_err(&server).await;
+    let (_work, _base, paths) = test_paths();
+    let err = streamable_http_err(&server, &paths.base.join("auth.json")).await;
 
     assert!(err.contains("missing endpoint"), "{err}");
 }
@@ -282,7 +305,8 @@ async fn connect_streamable_http_rejects_zero_request_timeout() {
     let mut server = http_server("https://mcp.example.com/mcp");
     server.request_timeout_ms = Some(0);
 
-    let err = streamable_http_err(&server).await;
+    let (_work, _base, paths) = test_paths();
+    let err = streamable_http_err(&server, &paths.base.join("auth.json")).await;
 
     assert!(err.contains("request_timeout_ms must be positive"), "{err}");
 }
@@ -292,7 +316,8 @@ async fn connect_streamable_http_rejects_zero_sse_idle_timeout() {
     let mut server = http_server("https://mcp.example.com/mcp");
     server.sse_idle_timeout_ms = Some(0);
 
-    let err = streamable_http_err(&server).await;
+    let (_work, _base, paths) = test_paths();
+    let err = streamable_http_err(&server, &paths.base.join("auth.json")).await;
 
     assert!(err.contains("sse_idle_timeout_ms must be positive"), "{err}");
 }
@@ -302,7 +327,8 @@ async fn connect_streamable_http_rejects_zero_body_cap() {
     let mut server = http_server("https://mcp.example.com/mcp");
     server.body_cap_bytes = Some(0);
 
-    let err = streamable_http_err(&server).await;
+    let (_work, _base, paths) = test_paths();
+    let err = streamable_http_err(&server, &paths.base.join("auth.json")).await;
 
     assert!(err.contains("body_cap_bytes must be positive"), "{err}");
 }
@@ -316,7 +342,8 @@ async fn connect_streamable_http_rejects_zero_reconnect_delays() {
         max_attempts: None,
     });
 
-    let err = streamable_http_err(&server).await;
+    let (_work, _base, paths) = test_paths();
+    let err = streamable_http_err(&server, &paths.base.join("auth.json")).await;
     assert!(err.contains("reconnect delays must be positive"), "{err}");
 
     server.reconnect = Some(ReconnectConfig {
@@ -325,7 +352,8 @@ async fn connect_streamable_http_rejects_zero_reconnect_delays() {
         max_attempts: None,
     });
 
-    let err = streamable_http_err(&server).await;
+    let (_work, _base, paths) = test_paths();
+    let err = streamable_http_err(&server, &paths.base.join("auth.json")).await;
     assert!(err.contains("reconnect delays must be positive"), "{err}");
 }
 
@@ -412,8 +440,10 @@ async fn connect_all_returns_tools_and_hook_for_fake_stdio_server() {
     let mut fake = stdio_server("fake-success");
     fake.command = Some(script.to_string_lossy().to_string());
     let configs = vec![fake, stdio_server("broken-after-fake")];
+    let (_work, _base, paths) = test_paths();
 
-    let (tools, hooks, diagnostics, client_count, server_names) = connect_all(&configs).await;
+    let (tools, hooks, diagnostics, client_count, server_names) =
+        connect_all(&configs, &paths.work_dir, &paths.base.join("auth.json")).await;
 
     assert_eq!(client_count, 1);
     assert_eq!(server_names, vec!["fake-success".to_string()]);

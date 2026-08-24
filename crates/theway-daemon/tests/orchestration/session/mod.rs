@@ -106,6 +106,29 @@ fn register_notification_hooks_registered_labels_are_unique() {
     assert_eq!(labels.len(), hooks.len() + 2);
 }
 
+#[test]
+fn session_mcp_resources_clones_share_one_shot_hook_pool() {
+    let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let hook = Arc::new(triggers::McpNotificationHook::new("shared", rx));
+
+    let a = SessionMcpResources::default();
+    let b = a.clone();
+    a.notification_hooks.lock().push(hook);
+
+    let taken = std::mem::take(&mut *b.notification_hooks.lock());
+    assert_eq!(taken.len(), 1, "clones share the same one-shot hook pool");
+    assert!(
+        a.notification_hooks.lock().is_empty(),
+        "taking from a clone drains the shared pool"
+    );
+
+    let c = SessionMcpResources::default();
+    assert!(
+        !Arc::ptr_eq(&a.notification_hooks, &c.notification_hooks),
+        "separately constructed resources have separate pools"
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────────────────
 // execution context
 // ─────────────────────────────────────────────────────────────────────────────────────────
@@ -114,7 +137,7 @@ use std::path::Path;
 
 use tempfile::TempDir;
 
-use super::{SessionExecutionContext, SessionProjectResources, SessionRuntimeBuilder};
+use super::{SessionExecutionContext, SessionMcpResources, SessionProjectResources, SessionRuntimeBuilder};
 use crate::runtime_storage::{RuntimeStorage, SessionRepository};
 use crate::test_env::{ENV_LOCK, EnvGuard};
 
@@ -150,23 +173,6 @@ fn test_factory() -> (SessionRuntimeBuilder, Arc<dyn RuntimeStorage>, TempDir) {
     let (feed_tx, _feed_rx) = tokio::sync::mpsc::unbounded_channel();
     let (main_run_tx, _main_run_rx) = tokio::sync::mpsc::unbounded_channel();
 
-    let before_trigger_action: crate::trigger_engine::execution::BeforeTriggerActionHook =
-        std::sync::Arc::new(
-            |ctx: crate::trigger_engine::execution::BeforeTriggerActionContext,
-             _cancel: tokio_util::sync::CancellationToken| {
-                Box::pin(async move {
-                    crate::trigger_engine::execution::TriggerAction::default_for(&ctx.trigger)
-                })
-                    as std::pin::Pin<
-                        Box<
-                            dyn std::future::Future<
-                                    Output = crate::trigger_engine::execution::TriggerAction,
-                                > + Send,
-                        >,
-                    >
-            },
-        );
-
     let storage: Arc<dyn RuntimeStorage> = crate::runtime_storage::local_runtime_storage();
     let factory = SessionRuntimeBuilder {
         thinking: theway_core::ThinkingLevel::Off,
@@ -181,11 +187,8 @@ fn test_factory() -> (SessionRuntimeBuilder, Arc<dyn RuntimeStorage>, TempDir) {
         runtime_extension_engine: None,
         dag_engine: std::sync::Arc::new(theway_core::multiagent::graph::engine::DagEngine::new()),
         subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry::new(),
-        mcp_tools: Vec::new(),
-        mcp_notification_hooks: parking_lot::Mutex::new(Vec::new()),
         services: crate::orchestration::DaemonServices::new(),
         before_tool_call: None,
-        before_trigger_action,
         control_plane_hook: None,
         after_tool_call: None,
         feed_tx,
@@ -221,6 +224,7 @@ async fn session_context(
         crate::executor::executor_for_cwd(work_dir.to_path_buf()),
         faux_model(),
         resources,
+        SessionMcpResources::default(),
     );
     assert_eq!(context.paths.work_dir, work_dir.canonicalize().unwrap());
     context

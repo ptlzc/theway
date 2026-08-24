@@ -26,7 +26,7 @@
 
 [`transport.rs`](../src/transport.rs) 定义面向换行帧的 `send_line`、`recv_line` 和 `close`。Framing 位于 `McpClient` 下方，JSON-RPC 关联位于其上方。
 
-[`stdio.rs`](../src/stdio.rs) 启动 stdin/stdout 管道子进程，每行写入一个 JSON 文档、逐行读取 stdout，并在 close 时终止子进程。
+[`stdio.rs`](../src/stdio.rs) 启动 stdin/stdout 管道子进程，每行写入一个 JSON 文档、逐行读取 stdout，并在 close 时终止子进程。`spawn` 继承当前目录；`spawn_in` 接受显式子进程工作目录。
 
 [`http.rs`](../src/http.rs) 实现 Streamable HTTP。出站 JSON-RPC 消息 POST 到配置端点；响应 body 可以是直接 JSON 或 SSE 流。SSE parser 忽略 heartbeat，并把 data 字段作为 JSON 行转发。Body 上限、请求超时、SSE 空闲超时、重连退避、last-event-id 处理和取消共同限制网络资源。`HttpMcpAuth` 的 `Debug` 实现会遮蔽 bearer token。
 

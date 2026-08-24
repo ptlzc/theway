@@ -26,7 +26,7 @@ The client read loop classifies each received JSON line as a response or notific
 
 [`transport.rs`](../src/transport.rs) defines newline-oriented `send_line`, `recv_line`, and `close` operations. Framing remains below `McpClient`, while JSON-RPC correlation remains above it.
 
-[`stdio.rs`](../src/stdio.rs) spawns a child with piped stdin and stdout, writes one JSON document per line, reads stdout lines, and terminates the subprocess on close.
+[`stdio.rs`](../src/stdio.rs) spawns a child with piped stdin and stdout, writes one JSON document per line, reads stdout lines, and terminates the subprocess on close. `spawn` inherits the current directory; `spawn_in` accepts an explicit child working directory.
 
 [`http.rs`](../src/http.rs) implements Streamable HTTP. Outbound JSON-RPC messages are POSTed to the configured endpoint. Response bodies may contain JSON directly or an SSE stream; the SSE parser ignores heartbeat events and forwards data fields as JSON lines. Body caps, request timeout, SSE idle timeout, reconnect backoff, last-event-id handling, and cancellation bound network resource use. The `Debug` implementation for `HttpMcpAuth` redacts bearer tokens.
 

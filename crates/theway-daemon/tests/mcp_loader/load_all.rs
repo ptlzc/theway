@@ -3,8 +3,6 @@
 
 use super::*;
 
-use crate::test_env::{ENV_LOCK, EnvGuard};
-
 #[test]
 fn loaded_mcp_empty_returns_empty_fields() {
     // Arrange & Act
@@ -23,13 +21,10 @@ fn loaded_mcp_empty_returns_empty_fields() {
 #[tokio::test]
 async fn load_all_merges_project_overrides_user_and_collects_inject_sets() {
     // Arrange
-    let _env_lock = ENV_LOCK.lock().unwrap();
-    let theway_dir = tempfile::tempdir().unwrap();
-    let cwd = tempfile::tempdir().unwrap();
-    let _theway_dir_guard = EnvGuard::set("THEWAY_DIR", theway_dir.path());
+    let (cwd, base, paths) = test_paths();
 
     std::fs::write(
-        theway_dir.path().join("mcp.toml"),
+        base.path().join("mcp.toml"),
         r#"
 [[server]]
 name = "shared"
@@ -66,7 +61,7 @@ inject_and_run = true
     .unwrap();
 
     // Act
-    let loaded = load_all(cwd.path()).await;
+    let loaded = load_all(&paths).await;
 
     // Assert
     assert_eq!(loaded.client_count, 0, "no broken server should connect");

@@ -57,7 +57,7 @@
 
 [`hooks/mod.rs`](../src/hooks/mod.rs)、[`hook_executors.rs`](../src/hook_executors.rs)、[`trigger_engine/mod.rs`](../src/trigger_engine/mod.rs) 和 [`triggers/mod.rs`](../src/triggers/mod.rs) 负责进程/webhook 操作、动态 trigger 轮询与提升、cron 执行和 notification 投递。持久化 sidecar 记录来自 `theway-contract`，调度与投递策略留在本 crate。
 
-[`mcp_loader.rs`](../src/mcp_loader.rs) 使用 `theway-mcp` 发现外部 MCP 工具与 notification。[`mcp_server.rs`](../src/mcp_server.rs) 将 daemon 暴露为 MCP server。[`lsp_supervisor.rs`](../src/lsp_supervisor.rs) 负责 language server 进程生命周期。
+[`mcp_loader.rs`](../src/mcp_loader.rs) 使用 `theway-mcp` 从 `paths.base/mcp.toml` 和 `paths.work_dir/.theway/mcp.toml` 发现外部 MCP 工具与 notification；stdio server 在 `paths.work_dir` 启动，HTTP auth 读取 `paths.base/auth.json`。MCP 工具、hook、inject set 和能力元数据由 `SessionExecutionContext` 持有。[`mcp_server.rs`](../src/mcp_server.rs) 将 daemon 暴露为 MCP server。[`lsp_supervisor.rs`](../src/lsp_supervisor.rs) 负责 language server 进程生命周期。
 
 ## 协议适配
 
