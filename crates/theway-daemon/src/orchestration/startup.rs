@@ -14,7 +14,7 @@ use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::{PermissionPolicy, ThinkingLevel};
 use theway_transport::config;
 
-use super::{DaemonServices, SessionRuntimeBuilder};
+use super::{DaemonServices, SessionExecutionContext, SessionRuntimeBuilder};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DaemonTransport {
@@ -127,6 +127,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         None => local_runtime_storage(),
     };
     let repo = storage.session_repository(&cwd).await?;
+    let session_context = SessionExecutionContext::new(cwd.clone(), repo.clone(), storage.clone());
 
     // Issue #73: config-file-free startup. The daemon no longer reads
     // `config.toml` at startup — every setting lives in the in-memory
@@ -393,8 +394,6 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     let (main_run_tx, main_run_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
 
     let session_runtime_builder = Arc::new(SessionRuntimeBuilder {
-        cwd: cwd.clone(),
-        storage: storage.clone(),
         base_dir: paths.base.clone(),
         executor: executor.clone(),
         model: model.clone(),
@@ -423,7 +422,9 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         debug: options.debug,
         load_local_sources: startup.load_local_sources,
     });
-    let initial_runtime = session_runtime_builder.build_opened(store, resumed).await?;
+    let initial_runtime = session_runtime_builder
+        .build_opened(&session_context, store, resumed)
+        .await?;
     let harness = initial_runtime.harness.clone();
     let trigger_executor = initial_runtime.trigger_executor.clone();
     let extension_host = initial_runtime.extension_host.clone();
@@ -433,11 +434,11 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
 
     let session_factory: session_ops::SessionFactory = {
         let plan = session_runtime_builder;
-        let repo = repo.clone();
+        let ctx = session_context.clone();
         Arc::new(move |id: String| {
             let plan = plan.clone();
-            let repo = repo.clone();
-            Box::pin(async move { plan.build(repo.as_ref(), &id).await })
+            let ctx = ctx.clone();
+            Box::pin(async move { plan.build(&ctx, &id).await })
         })
     };
 

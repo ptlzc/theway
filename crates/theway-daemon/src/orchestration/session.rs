@@ -16,15 +16,37 @@ use theway_core::{AgentHarness, AgentHarnessOptions, ThinkingLevel};
 use theway_transport::feed::FeedUpdate;
 use theway_transport::inbox;
 
+/// Cwd-scoped repository and persistence inputs for one runtime build.
+#[derive(Clone)]
+pub struct SessionExecutionContext {
+    /// Canonical cwd for path-sensitive runtime assembly.
+    pub cwd: std::path::PathBuf,
+    /// Session repository scoped to `cwd`.
+    pub repo: Arc<dyn SessionRepository>,
+    /// Persistence backend used to restore this context's DAG runs.
+    pub storage: Arc<dyn RuntimeStorage>,
+}
+
+impl SessionExecutionContext {
+    pub fn new(
+        cwd: std::path::PathBuf,
+        repo: Arc<dyn SessionRepository>,
+        storage: Arc<dyn RuntimeStorage>,
+    ) -> Self {
+        Self { cwd, repo, storage }
+    }
+}
+
 /// session-resource-model: rebuilds a fully-wired [`AgentHarness`] for any session id —
 /// the in-process version of the CLI `--resume-id` path. Constructed once at thewayd
 /// startup (harness assembly); wrapped into [`crate::session_ops::SessionFactory`]
 /// and consumed by `TurnHost::switch_session` on the serialized event loop.
 ///
-/// Every field is either process-level state shared by Arc (DAG engine, subagent registry,
-/// feed/main-run channels, trigger registries, MCP tools + push hooks) or an immutable
-/// ingredient captured from the startup build (model, skills, templates, system prompt,
-/// hook closures). Per-session pieces are rebuilt on every `build`:
+/// The builder retains process-owned state shared by Arc (DAG engine, subagent registry,
+/// feed/main-run channels, trigger registries, MCP tools + push hooks) plus immutable
+/// startup ingredients (model, skills, templates, system prompt, hook closures).
+/// Per-session and cwd-scoped inputs arrive through [`SessionExecutionContext`].
+/// Per-session pieces are rebuilt on every `build`:
 ///
 /// * the tool set — `dag_*` / `task` stamped with the target session, skill family wired
 ///   to a fresh harness cell;
@@ -39,13 +61,6 @@ use theway_transport::inbox;
 /// startup model — a `/model` change made before switching is not carried over (the
 /// rehydrated transcript restores the session's own last recorded model when it has one).
 pub struct SessionRuntimeBuilder {
-    /// This daemon's work_dir. Explicit session↔work_dir binding (issue #66
-    /// node 3): [`Self::build`] refuses to open a session whose recorded `cwd`
-    /// metadata points at a different directory, so a session always runs
-    /// under the daemon that serves its work_dir.
-    pub cwd: std::path::PathBuf,
-    /// Runtime state externalization seam (issue #80).
-    pub storage: Arc<dyn RuntimeStorage>,
     /// Theway base dir (issue #66: `DaemonPaths::base`), resolved at the CLI
     /// boundary; wired into the rebuilt session's skill-family tools.
     pub base_dir: std::path::PathBuf,
@@ -117,19 +132,22 @@ impl SessionRuntime {
 }
 
 impl SessionRuntimeBuilder {
-    /// Build (and rehydrate) a harness for `id` (full session id or unique prefix).
-    pub async fn build(&self, repo: &dyn SessionRepository, id: &str) -> Result<SessionRuntime> {
-        let store = repo
+    /// Build (and rehydrate) a harness for `id` (full session id or unique prefix)
+    /// using the cwd-scoped repository in `ctx`.
+    pub async fn build(&self, ctx: &SessionExecutionContext, id: &str) -> Result<SessionRuntime> {
+        let store = ctx
+            .repo
             .resume(Some(id))
             .await
             .with_context(|| format!("open session {id}"))?;
-        self.build_opened(store, true).await
+        self.build_opened(ctx, store, true).await
     }
 
     /// Assemble the complete session runtime from an already-opened persistent store.
     /// Daemon startup and in-process session switching both enter through this method.
     pub async fn build_opened(
         &self,
+        ctx: &SessionExecutionContext,
         store: Arc<dyn SessionStore>,
         rehydrate: bool,
     ) -> Result<SessionRuntime> {
@@ -140,11 +158,6 @@ impl SessionRuntimeBuilder {
             .unwrap_or("?")
             .to_string();
 
-        // Explicit work_dir binding (issue #66 node 3): the target session must be
-        // bound to this daemon's work_dir; a foreign session is refused before any
-        // harness state is touched.
-        let target_cwd = meta.get("cwd").and_then(|v| v.as_str());
-        check_work_dir_binding(&session_id, target_cwd, &self.cwd)?;
         let extension_state_store = Arc::clone(&store);
         let session = theway_core::Session::from_store(store);
 
@@ -153,7 +166,7 @@ impl SessionRuntimeBuilder {
         // idempotent.
         let restored = self
             .dag_engine
-            .restore(self.storage.load_dag_runs(&self.cwd, &session_id).await?);
+            .restore(ctx.storage.load_dag_runs(&ctx.cwd, &session_id).await?);
         if !restored.is_empty() {
             tracing::info!(
                 "session {session_id}: restored {} in-flight DAG run(s): {}",
@@ -184,7 +197,7 @@ impl SessionRuntimeBuilder {
             self.dag_engine.clone(),
             self.model.clone(),
             Some(self.stream_fn.clone()),
-            self.cwd.clone(),
+            ctx.cwd.clone(),
             self.subagent_registry.clone(),
             self.memory_dir.clone(),
             self.base_dir.clone(),
@@ -199,7 +212,7 @@ impl SessionRuntimeBuilder {
             session_id: Some(session_id.clone()),
             ..theway_core::ObservationContext::default()
         };
-        opts.runtime_extension_cwd = self.cwd.to_string_lossy().into_owned();
+        opts.runtime_extension_cwd = ctx.cwd.to_string_lossy().into_owned();
         let mut runtime_extension_host = None;
         if let Some(engine) = &self.runtime_extension_engine {
             let base_tools = tools.clone();
@@ -208,7 +221,7 @@ impl SessionRuntimeBuilder {
                     self.runtime_extension_packages.read().clone(),
                     engine.clone(),
                     session_id.clone(),
-                    &self.cwd,
+                    &ctx.cwd,
                     crate::ts_extensions::RuntimeExtensionHostConfig::default(),
                     Arc::new(
                         theway_core::agent::runtime_extensions::PersistentSessionExtensionStatePort::new(
@@ -246,7 +259,7 @@ impl SessionRuntimeBuilder {
             .map(|tool| tool.definition().name.clone())
             .collect::<Vec<_>>();
         let system_prompt =
-            crate::system_prompt::compose_system_prompt(&self.cwd, &self.memory_block, &tool_names);
+            crate::system_prompt::compose_system_prompt(&ctx.cwd, &self.memory_block, &tool_names);
         opts.system_prompt = system_prompt;
         opts.thinking_level = self.thinking;
         opts.tools = tools;
@@ -340,7 +353,7 @@ impl SessionRuntimeBuilder {
             (state.model.clone(), state.thinking_level)
         };
         let loaded_hooks = hooks::load_with(
-            &self.cwd,
+            &ctx.cwd,
             session_id.clone(),
             hook_model.as_ref(),
             hook_thinking,
@@ -382,44 +395,6 @@ impl SessionRuntimeBuilder {
             extension_host: runtime_extension_host.map(|(host, _)| host),
         })
     }
-}
-
-/// Enforce the explicit session↔work_dir binding on switch (issue #66 node 3).
-///
-/// `target_cwd` is the target session's recorded `cwd` metadata — the work_dir
-/// captured when the session was created. It must match `daemon_cwd`, this
-/// daemon's work_dir. Both sides are canonicalized before comparing (symlinks,
-/// `.` / `..` segments, trailing slashes all normalize away); when either
-/// canonicalize fails (e.g. one side no longer exists on disk) the raw path
-/// strings are compared instead.
-///
-/// A missing or empty `target_cwd` means a pre-binding legacy session: that
-/// passes through (debug-traced) so historical sessions are never locked out.
-fn check_work_dir_binding(
-    session_id: &str,
-    target_cwd: Option<&str>,
-    daemon_cwd: &std::path::Path,
-) -> Result<()> {
-    let Some(target) = target_cwd.map(str::trim).filter(|c| !c.is_empty()) else {
-        tracing::debug!(
-            "session {session_id}: no work_dir (cwd) metadata — legacy session, switch allowed"
-        );
-        return Ok(());
-    };
-    let target_path = std::path::Path::new(target);
-    let matched = match (target_path.canonicalize(), daemon_cwd.canonicalize()) {
-        (Ok(target), Ok(daemon)) => target == daemon,
-        // canonicalize failed on at least one side — fall back to comparing
-        // the original paths.
-        _ => target_path == daemon_cwd,
-    };
-    if matched {
-        return Ok(());
-    }
-    anyhow::bail!(
-        "session {session_id} belongs to work_dir {target}; this daemon serves {} — start theway from that directory",
-        daemon_cwd.display()
-    );
 }
 
 /// Assembly target for notification hooks. The only production impl is the

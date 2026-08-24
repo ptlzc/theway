@@ -6,10 +6,7 @@
 //! A recording fake stands in for the per-session `TriggerExecutor`, whose internal
 //! hook list is private and would otherwise require a full harness to observe.
 //!
-//! Also covers the explicit session↔work_dir binding on switch (issue #66 node 3):
-//! [`super::check_work_dir_binding`] semantics (canonicalized comparison, string
-//! fallback, legacy pass-through) and the full [`super::SessionRuntimeBuilder::build`]
-//! outcomes for same / different / missing work_dir metadata.
+//! Also covers explicit execution contexts and cwd-scoped repository validation.
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -110,14 +107,15 @@ fn register_notification_hooks_registered_labels_are_unique() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────
-// work_dir binding (issue #66 node 3)
+// execution context
 // ─────────────────────────────────────────────────────────────────────────────────────────
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use tempfile::TempDir;
 
-use super::{SessionRuntimeBuilder, check_work_dir_binding};
+use super::{SessionExecutionContext, SessionRuntimeBuilder};
+use crate::runtime_storage::{RuntimeStorage, SessionRepository};
 use crate::test_env::{ENV_LOCK, EnvGuard};
 
 /// Faux model — the build tests never prompt, so the stream is never invoked.
@@ -146,9 +144,9 @@ fn faux_stream() -> theway_core::StreamFn {
     })
 }
 
-/// Minimal fully-wired factory rooted at `work_dir`. The `TempDir` it returns
-/// owns the `base_dir` / `memory_dir` paths and must outlive the factory.
-fn test_factory(work_dir: PathBuf) -> (SessionRuntimeBuilder, TempDir) {
+/// Minimal fully-wired process-only builder. The `TempDir` it returns owns the
+/// `base_dir` / `memory_dir` paths and must outlive the factory.
+fn test_factory() -> (SessionRuntimeBuilder, Arc<dyn RuntimeStorage>, TempDir) {
     let state = TempDir::new().unwrap();
     let (feed_tx, _feed_rx) = tokio::sync::mpsc::unbounded_channel();
     let (main_run_tx, _main_run_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -181,9 +179,8 @@ fn test_factory(work_dir: PathBuf) -> (SessionRuntimeBuilder, TempDir) {
             },
         );
 
+    let storage: Arc<dyn RuntimeStorage> = crate::runtime_storage::local_runtime_storage();
     let factory = SessionRuntimeBuilder {
-        cwd: work_dir,
-        storage: crate::runtime_storage::local_runtime_storage(),
         base_dir: state.path().join("base"),
         // Composition-root seam: picks the local executor for `local` builds
         // and the sandbox stub for `sandbox`-only builds, so this suite
@@ -219,7 +216,17 @@ fn test_factory(work_dir: PathBuf) -> (SessionRuntimeBuilder, TempDir) {
         debug: false,
         load_local_sources: true,
     };
-    (factory, state)
+    (factory, storage, state)
+}
+
+/// Build a cwd-scoped execution context around a standalone test repository.
+fn session_context(
+    work_dir: &Path,
+    repo: theway_storage::sqlite_repo::SqliteSessionRepo,
+    storage: Arc<dyn RuntimeStorage>,
+) -> SessionExecutionContext {
+    let repo: Arc<dyn SessionRepository> = Arc::new(repo);
+    SessionExecutionContext::new(work_dir.to_path_buf(), repo, storage)
 }
 
 /// Create a session in `repo` with the given recorded `cwd` metadata and
@@ -238,123 +245,101 @@ async fn create_session_with_cwd(
         .to_string()
 }
 
-#[test]
-fn binding_check_passes_missing_or_empty_target_cwd() {
-    check_work_dir_binding("s1", None, Path::new("/x")).unwrap();
-    check_work_dir_binding("s1", Some(""), Path::new("/x")).unwrap();
-    check_work_dir_binding("s1", Some("   "), Path::new("/x")).unwrap();
-}
-
-#[test]
-fn binding_check_canonicalizes_both_sides() {
-    let dir = TempDir::new().unwrap();
-    // Same directory through un-normalized segments.
-    let aliased = dir.path().join("sub").join("..");
-    std::fs::create_dir(dir.path().join("sub")).unwrap();
-    check_work_dir_binding("s1", Some(aliased.to_str().unwrap()), dir.path()).unwrap();
-
-    // Symlink alias resolves to the same directory.
-    let real = dir.path().join("real");
-    std::fs::create_dir(&real).unwrap();
-    let link = dir.path().join("link");
-    std::os::unix::fs::symlink(&real, &link).unwrap();
-    check_work_dir_binding("s2", Some(link.to_str().unwrap()), &real).unwrap();
-}
-
-#[test]
-fn binding_check_mismatch_error_names_both_paths() {
-    let daemon_dir = TempDir::new().unwrap();
-    let foreign_dir = TempDir::new().unwrap();
-    let err = check_work_dir_binding(
-        "s-42",
-        Some(foreign_dir.path().to_str().unwrap()),
-        daemon_dir.path(),
-    )
-    .unwrap_err();
-    let msg = err.to_string();
-    assert!(msg.contains("session s-42 belongs to work_dir"), "{msg}");
-    assert!(
-        msg.contains(foreign_dir.path().to_str().unwrap()),
-        "must name the session's work_dir: {msg}"
-    );
-    assert!(
-        msg.contains(daemon_dir.path().to_str().unwrap()),
-        "must name the daemon's work_dir: {msg}"
-    );
-    assert!(msg.contains("start theway from that directory"), "{msg}");
-}
-
-#[test]
-fn binding_check_falls_back_to_string_comparison_when_canonicalize_fails() {
-    // Nonexistent paths → canonicalize fails on both sides → raw comparison.
-    check_work_dir_binding(
-        "s1",
-        Some("/no/such/dir-theway-66"),
-        Path::new("/no/such/dir-theway-66"),
-    )
-    .unwrap();
-    let err = check_work_dir_binding(
-        "s1",
-        Some("/no/such/foreign-theway-66"),
-        Path::new("/no/such/daemon-theway-66"),
-    )
-    .unwrap_err();
-    let msg = err.to_string();
-    assert!(msg.contains("/no/such/foreign-theway-66"), "{msg}");
-    assert!(msg.contains("/no/such/daemon-theway-66"), "{msg}");
-}
-
 #[tokio::test]
-async fn build_same_work_dir_session_succeeds() {
+async fn build_uses_explicit_context_cwd() {
     // hooks::load inside build reads THEWAY_DIR — isolate it.
     let _serial = ENV_LOCK.lock().unwrap();
     let home = TempDir::new().unwrap();
     let _theway_dir = EnvGuard::set("THEWAY_DIR", home.path());
 
     let work_dir = TempDir::new().unwrap();
+    let recorded_dir = TempDir::new().unwrap();
     let repo_root = TempDir::new().unwrap();
     let repo = theway_storage::sqlite_repo::SqliteSessionRepo::new(repo_root.path());
-    let id = create_session_with_cwd(&repo, work_dir.path().to_str().unwrap()).await;
+    let id = create_session_with_cwd(&repo, recorded_dir.path().to_str().unwrap()).await;
 
-    let (factory, _state) = test_factory(work_dir.path().to_path_buf());
+    let (factory, storage, _state) = test_factory();
+    let ctx = session_context(work_dir.path(), repo, storage);
     let runtime = factory
-        .build(&repo, &id)
+        .build(&ctx, &id)
         .await
-        .expect("session bound to this daemon's work_dir builds");
+        .expect("session in the context's work_dir builds");
+    let prompt = runtime.harness.system_prompt();
     assert!(
-        runtime
-            .harness
-            .session()
-            .storage()
-            .get_metadata_json()
-            .await
-            .is_ok()
+        prompt.contains(&format!(
+            "Current working directory: {}",
+            work_dir.path().display()
+        )),
+        "runtime must use the explicit context cwd: {prompt}"
+    );
+    assert!(
+        !prompt.contains(&recorded_dir.path().display().to_string()),
+        "stored metadata must not override the explicit context cwd: {prompt}"
     );
 }
 
 #[tokio::test]
-async fn build_refuses_session_from_different_work_dir_and_names_both_paths() {
+async fn build_one_builder_serves_two_cwd_contexts() {
+    let _serial = ENV_LOCK.lock().unwrap();
+    let home = TempDir::new().unwrap();
+    let _theway_dir = EnvGuard::set("THEWAY_DIR", home.path());
+
+    let work_a = TempDir::new().unwrap();
+    let work_b = TempDir::new().unwrap();
+    let repo_root_a = TempDir::new().unwrap();
+    let repo_root_b = TempDir::new().unwrap();
+    let repo_a = theway_storage::sqlite_repo::SqliteSessionRepo::new(repo_root_a.path());
+    let repo_b = theway_storage::sqlite_repo::SqliteSessionRepo::new(repo_root_b.path());
+    let id_a = create_session_with_cwd(&repo_a, work_a.path().to_str().unwrap()).await;
+    let id_b = create_session_with_cwd(&repo_b, work_b.path().to_str().unwrap()).await;
+
+    let (factory, storage, _state) = test_factory();
+    let ctx_a = session_context(work_a.path(), repo_a, storage.clone());
+    let ctx_b = session_context(work_b.path(), repo_b, storage);
+
+    let runtime_a = factory
+        .build(&ctx_a, &id_a)
+        .await
+        .expect("first cwd context builds");
+    let runtime_b = factory
+        .build(&ctx_b, &id_b)
+        .await
+        .expect("second cwd context builds");
+
+    let prompt_a = runtime_a.harness.system_prompt();
+    let prompt_b = runtime_b.harness.system_prompt();
+    assert!(
+        prompt_a.contains(&format!(
+            "Current working directory: {}",
+            work_a.path().display()
+        )),
+        "runtime A must use work_a: {prompt_a}"
+    );
+    assert!(
+        prompt_b.contains(&format!(
+            "Current working directory: {}",
+            work_b.path().display()
+        )),
+        "runtime B must use work_b: {prompt_b}"
+    );
+}
+
+#[tokio::test]
+async fn build_uses_context_repo_validation() {
     let work_dir = TempDir::new().unwrap();
-    let foreign_dir = TempDir::new().unwrap();
     let repo_root = TempDir::new().unwrap();
     let repo = theway_storage::sqlite_repo::SqliteSessionRepo::new(repo_root.path());
-    let id = create_session_with_cwd(&repo, foreign_dir.path().to_str().unwrap()).await;
+    let _existing_id =
+        create_session_with_cwd(&repo, work_dir.path().to_str().unwrap()).await;
+    let (factory, storage, _state) = test_factory();
+    let ctx = session_context(work_dir.path(), repo, storage);
 
-    let (factory, _state) = test_factory(work_dir.path().to_path_buf());
-    let err = match factory.build(&repo, &id).await {
-        Ok(_) => panic!("foreign work_dir session must be refused"),
+    let err = match factory.build(&ctx, "missing-session-id").await {
+        Ok(_) => panic!("missing id must fail through context repo validation"),
         Err(e) => e,
     };
     let msg = format!("{err:#}");
-    assert!(msg.contains("belongs to work_dir"), "{msg}");
-    assert!(
-        msg.contains(foreign_dir.path().to_str().unwrap()),
-        "must name the session's work_dir: {msg}"
-    );
-    assert!(
-        msg.contains(work_dir.path().to_str().unwrap()),
-        "must name the daemon's work_dir: {msg}"
-    );
+    assert!(msg.contains("no session matches id missing-session-id"), "{msg}");
 }
 
 #[tokio::test]
@@ -369,11 +354,12 @@ async fn build_allows_legacy_session_without_cwd_metadata() {
     let repo = theway_storage::sqlite_repo::SqliteSessionRepo::new(repo_root.path());
     let id = create_session_with_cwd(&repo, "").await;
 
-    let (factory, _state) = test_factory(work_dir.path().to_path_buf());
+    let (factory, storage, _state) = test_factory();
+    let ctx = session_context(work_dir.path(), repo, storage);
     factory
-        .build(&repo, &id)
+        .build(&ctx, &id)
         .await
-        .expect("legacy session without cwd metadata passes the binding check");
+        .expect("legacy session without cwd metadata builds");
 }
 
 #[tokio::test]
@@ -415,7 +401,7 @@ export default defineExtension((api) => {
     let repo_root = TempDir::new().unwrap();
     let repo = theway_storage::sqlite_repo::SqliteSessionRepo::new(repo_root.path());
     let id = create_session_with_cwd(&repo, work_dir.path().to_str().unwrap()).await;
-    let (mut factory, state) = test_factory(work_dir.path().to_path_buf());
+    let (mut factory, storage, state) = test_factory();
     let mut trust = crate::ts_extensions::ExtensionTrustStore::load(&factory.base_dir);
     trust
         .decide_project(
@@ -431,8 +417,9 @@ export default defineExtension((api) => {
     let engine = crate::ts_extensions::QuickJsEnginePool::new(1);
     factory.runtime_extension_engine = Some(engine.clone());
 
+    let ctx = session_context(work_dir.path(), repo, storage);
     let runtime = factory
-        .build(&repo, &id)
+        .build(&ctx, &id)
         .await
         .expect("one faulted package must not prevent session startup");
     assert_eq!(engine.instance_count().await, 1);
