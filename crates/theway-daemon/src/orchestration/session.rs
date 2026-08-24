@@ -16,6 +16,95 @@ use theway_core::{AgentHarness, AgentHarnessOptions, ThinkingLevel};
 use theway_transport::feed::FeedUpdate;
 use theway_transport::inbox;
 
+#[derive(Clone)]
+pub struct SessionProjectResources {
+    pub memory_block: String,
+    pub skills: Vec<theway_core::Skill>,
+    pub templates: Vec<theway_core::PromptTemplate>,
+    pub memory_dir: std::path::PathBuf,
+    pub reload_skills_fn: theway_core::ReloadSkillsFn,
+    pub load_local_sources: bool,
+}
+
+impl SessionProjectResources {
+    pub async fn load(
+        paths: &crate::DaemonPaths,
+        cli_builtin_skills: &[String],
+        config_builtin_skills: &[String],
+        load_local_sources: bool,
+    ) -> Result<Self> {
+        // Memory is process-global under the resolved daemon base, not cwd-local.
+        let memory_dir = paths.base.join("memory");
+        let memory_block = crate::tools::memory::load_memory_block(&memory_dir).await;
+        let loaded_skills = if load_local_sources {
+            crate::skills::load_all(paths).await
+        } else {
+            crate::skills::LoadedSkills {
+                skills: Vec::new(),
+                diagnostics: Vec::new(),
+            }
+        };
+        let loaded_templates = if load_local_sources {
+            crate::templates::load_all(&paths.work_dir).await
+        } else {
+            crate::templates::LoadedTemplates {
+                templates: Vec::new(),
+                diagnostics: Vec::new(),
+            }
+        };
+        let resolved_builtins =
+            crate::builtin_skills::resolve_builtins(cli_builtin_skills, config_builtin_skills)?;
+        let mut skills = crate::builtin_skills::merge_with_user_project(
+            resolved_builtins.skills.clone(),
+            &loaded_skills.skills,
+        );
+        let state = if load_local_sources {
+            crate::skill_overrides::load(&paths.base).await
+        } else {
+            crate::skill_overrides::SkillOverrides::default()
+        };
+        crate::skill_overrides::apply(&state, &mut skills);
+        let reload_skills_fn: theway_core::ReloadSkillsFn = {
+            let paths = paths.clone();
+            let builtins = resolved_builtins.skills.clone();
+            std::sync::Arc::new(move || {
+                let paths = paths.clone();
+                let builtins = builtins.clone();
+                Box::pin(async move {
+                    let loaded = if load_local_sources {
+                        crate::skills::load_all(&paths).await
+                    } else {
+                        crate::skills::LoadedSkills {
+                            skills: Vec::new(),
+                            diagnostics: Vec::new(),
+                        }
+                    };
+                    let mut merged =
+                        crate::builtin_skills::merge_with_user_project(builtins, &loaded.skills);
+                    let state = if load_local_sources {
+                        crate::skill_overrides::load(&paths.base).await
+                    } else {
+                        crate::skill_overrides::SkillOverrides::default()
+                    };
+                    crate::skill_overrides::apply(&state, &mut merged);
+                    theway_core::LoadSkillsOutput {
+                        skills: merged,
+                        diagnostics: loaded.diagnostics,
+                    }
+                })
+            })
+        };
+        Ok(Self {
+            memory_block,
+            skills,
+            templates: loaded_templates.templates,
+            memory_dir,
+            reload_skills_fn,
+            load_local_sources,
+        })
+    }
+}
+
 /// Cwd-scoped inputs for one runtime build.
 #[derive(Clone)]
 pub struct SessionExecutionContext {
@@ -31,6 +120,7 @@ pub struct SessionExecutionContext {
     pub executor: Arc<dyn theway_core::executor::ToolExecutor>,
     /// Effective model for this context.
     pub model: theway_llm_provider::Model,
+    pub resources: SessionProjectResources,
 }
 
 impl SessionExecutionContext {
@@ -41,6 +131,7 @@ impl SessionExecutionContext {
         paths: crate::DaemonPaths,
         executor: Arc<dyn theway_core::executor::ToolExecutor>,
         model: theway_llm_provider::Model,
+        resources: SessionProjectResources,
     ) -> Self {
         let paths = paths.with_work_dir(cwd.clone());
         Self {
@@ -50,6 +141,7 @@ impl SessionExecutionContext {
             paths,
             executor,
             model,
+            resources,
         }
     }
 }
@@ -60,10 +152,8 @@ impl SessionExecutionContext {
 /// and consumed by `TurnHost::switch_session` on the serialized event loop.
 ///
 /// The builder retains process-owned state shared by Arc (DAG engine, subagent registry,
-/// feed/main-run channels, trigger registries, MCP tools + push hooks) plus immutable
-/// startup ingredients (skills, templates, system prompt, hook closures).
-/// Per-session and cwd-scoped inputs — including paths, executor, and effective model —
-/// arrive through [`SessionExecutionContext`].
+/// feed/main-run channels, trigger registries, MCP tools + push hooks). Per-session and
+/// cwd-scoped inputs arrive through [`SessionExecutionContext`].
 /// Per-session pieces are rebuilt on every `build`:
 ///
 /// * the tool set — `dag_*` / `task` stamped with the target session, skill family wired
@@ -81,22 +171,17 @@ impl SessionExecutionContext {
 pub struct SessionRuntimeBuilder {
     pub thinking: ThinkingLevel,
     pub stream_fn: theway_core::StreamFn,
-    pub memory_block: String,
-    pub skills: Vec<theway_core::Skill>,
-    pub templates: Vec<theway_core::PromptTemplate>,
     pub compact_algorithms:
         std::sync::Arc<theway_core::agent::compaction::algorithm::CompactAlgorithmRegistry>,
     pub legacy_compaction_host: Option<Arc<crate::ts_extensions::LegacyCompactionHost>>,
     pub runtime_extension_packages: Arc<parking_lot::RwLock<crate::ts_extensions::PackageCatalog>>,
     pub runtime_extension_engine: Option<crate::ts_extensions::QuickJsEnginePool>,
-    pub memory_dir: std::path::PathBuf,
     pub dag_engine: Arc<DagEngine>,
     pub subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry,
     pub mcp_tools: Vec<Arc<dyn theway_core::AgentTool>>,
     /// MCP notification receivers are process-scoped and may be attached only once.
     pub mcp_notification_hooks: parking_lot::Mutex<Vec<Arc<triggers::McpNotificationHook>>>,
     pub services: DaemonServices,
-    pub reload_skills_fn: theway_core::ReloadSkillsFn,
     pub before_tool_call: Option<theway_core::BeforeToolCallHook>,
     pub before_trigger_action: crate::trigger_engine::execution::BeforeTriggerActionHook,
     pub control_plane_hook: Option<theway_core::OnControlPlanePromptHook>,
@@ -104,7 +189,6 @@ pub struct SessionRuntimeBuilder {
     pub feed_tx: tokio::sync::mpsc::UnboundedSender<FeedUpdate>,
     pub main_run_tx: tokio::sync::mpsc::UnboundedSender<String>,
     pub debug: bool,
-    pub load_local_sources: bool,
 }
 
 /// Session-scoped services that must be replaced as one unit.
@@ -191,7 +275,7 @@ impl SessionRuntimeBuilder {
         let skill_harness_cell: crate::tools::skill::SkillHarnessCell =
             std::sync::Arc::new(once_cell::sync::OnceCell::new());
         let mut tools = tools::session_tool_set(
-            &self.memory_dir,
+            &ctx.resources.memory_dir,
             &ctx.paths.base,
             &self.dag_engine,
             &self.subagent_registry,
@@ -210,7 +294,7 @@ impl SessionRuntimeBuilder {
             Some(self.stream_fn.clone()),
             ctx.cwd.clone(),
             self.subagent_registry.clone(),
-            self.memory_dir.clone(),
+            ctx.resources.memory_dir.clone(),
             ctx.paths.base.clone(),
             skill_harness_cell.clone(),
             ctx.executor.clone(),
@@ -269,16 +353,19 @@ impl SessionRuntimeBuilder {
             .iter()
             .map(|tool| tool.definition().name.clone())
             .collect::<Vec<_>>();
-        let system_prompt =
-            crate::system_prompt::compose_system_prompt(&ctx.cwd, &self.memory_block, &tool_names);
+        let system_prompt = crate::system_prompt::compose_system_prompt(
+            &ctx.cwd,
+            &ctx.resources.memory_block,
+            &tool_names,
+        );
         opts.system_prompt = system_prompt;
         opts.thinking_level = self.thinking;
         opts.tools = tools;
-        opts.skills = self.skills.clone();
-        opts.prompt_templates = self.templates.clone();
+        opts.skills = ctx.resources.skills.clone();
+        opts.prompt_templates = ctx.resources.templates.clone();
         opts.compact_algorithms = self.compact_algorithms.clone();
         opts.stream_fn = Some(self.stream_fn.clone());
-        opts.reload_skills_fn = Some(self.reload_skills_fn.clone());
+        opts.reload_skills_fn = Some(ctx.resources.reload_skills_fn.clone());
         opts.on_turn_end = Some(goal::stop_hook(
             goal_harness_cell.clone(),
             self.dag_engine.clone(),
@@ -369,7 +456,7 @@ impl SessionRuntimeBuilder {
             hook_model.as_ref(),
             hook_thinking,
             daemon_executors(),
-            self.load_local_sources,
+            ctx.resources.load_local_sources,
         )
         .await;
         for diag in &loaded_hooks.diagnostics {

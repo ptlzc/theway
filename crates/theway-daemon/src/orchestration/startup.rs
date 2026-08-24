@@ -8,12 +8,12 @@ use crate::runtime_storage::{RuntimeStorage, local_runtime_storage, remote_runti
 use crate::startup_config::StartupConfig;
 use crate::stream_auth::stream_fn_with_auth_store;
 use crate::turn::daemon::{DaemonConfig, RuntimeCapabilities, TurnHost};
-use crate::{agent_specs, runtime_capabilities, session_ops, skills, templates, triggers};
+use crate::{agent_specs, runtime_capabilities, session_ops, triggers};
 use anyhow::{Context, Result};
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::{PermissionPolicy, ThinkingLevel};
-use theway_transport::config;
 
+use super::session::SessionProjectResources;
 use super::{DaemonServices, SessionExecutionContext, SessionRuntimeBuilder};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -203,7 +203,6 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     {
         tracing::warn!("cron: {err}");
     }
-    let memory_dir = config::memory_dir();
     let dag_engine = Arc::new(DagEngine::with_observer(runtime_observer.clone()));
     let subagent_registry =
         theway_core::multiagent::jobs::SubagentJobRegistry::with_observer(runtime_observer.clone());
@@ -214,14 +213,6 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     // sandbox stub for `sandbox`-only builds.
     let executor: Arc<dyn theway_core::executor::ToolExecutor> =
         crate::executor::executor_for_cwd(cwd.clone());
-    let session_context = SessionExecutionContext::new(
-        cwd.clone(),
-        repo.clone(),
-        storage.clone(),
-        paths.clone(),
-        executor.clone(),
-        model.clone(),
-    );
     // TODO(#73): MCP servers are still read from local `mcp.toml` files;
     // once the settings RPC provisions them, this local read goes away. The
     // `load_local_sources` seam skips the scan entirely for a fully
@@ -246,28 +237,23 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     let mcp_inject_summary_servers = mcp.inject_summary_servers;
     let mcp_inject_and_run_servers = mcp.inject_and_run_servers;
     let mcp_tools_for_factory = mcp.tools;
-    let memory_block = crate::tools::memory::load_memory_block(&memory_dir).await;
-
-    // TODO(#73): skills and templates are still discovered from local
-    // project/user directories; controller provisioning of both lands in a
-    // later phase. Runtime updates already flow through the settings RPC
-    // (`SetSkillDirs` + the harness reload closure).
-    let loaded_skills = if startup.load_local_sources {
-        skills::load_all(&paths).await
-    } else {
-        skills::LoadedSkills {
-            skills: Vec::new(),
-            diagnostics: Vec::new(),
-        }
-    };
-    let loaded_templates = if startup.load_local_sources {
-        templates::load_all(&cwd).await
-    } else {
-        templates::LoadedTemplates {
-            templates: Vec::new(),
-            diagnostics: Vec::new(),
-        }
-    };
+    let session_paths = paths.with_work_dir(cwd.clone());
+    let project_resources = SessionProjectResources::load(
+        &session_paths,
+        &options.builtin_skills,
+        &startup.builtin_skills,
+        startup.load_local_sources,
+    )
+    .await?;
+    let session_context = SessionExecutionContext::new(
+        cwd.clone(),
+        repo.clone(),
+        storage.clone(),
+        paths.clone(),
+        executor.clone(),
+        model.clone(),
+        project_resources,
+    );
     // TODO(#86): TS extensions are still discovered from local
     // `.theway/extensions` dirs. When controller provisioning is active
     // (`load_local_sources == false`), start with an empty registry instead.
@@ -310,63 +296,12 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     });
     // Runtime settings come from the in-memory StartupConfig: defaults until
     // the controller provisions values through the settings RPC.
-    let config_enabled_builtins = startup.builtin_skills.clone();
     dynamic_trigger_registry.set_poll_interval_secs(startup.trigger_poll_secs);
     // TODO(#73): `WireDaemonConfig` has no thinking-summary fields yet, so
     // `startup.thinking_summary` stays `None` until the settings proto grows
     // them; the feed-history cap uses the compatibility wire field
     // `tui_max_feed_lines`.
     let thinking_summary_cfg = startup.thinking_summary.clone();
-    let resolved_builtins =
-        crate::builtin_skills::resolve_builtins(&options.builtin_skills, &config_enabled_builtins)?;
-    let mut combined_skills = crate::builtin_skills::merge_with_user_project(
-        resolved_builtins.skills.clone(),
-        &loaded_skills.skills,
-    );
-    {
-        // TODO(#73/#86): skill overrides still read from a local file; move to
-        // the settings RPC once skill state is controller-provisioned. The
-        // controller-provisioned daemon skips the file and starts with an
-        // empty overlay.
-        let state = if startup.load_local_sources {
-            crate::skill_overrides::load(&paths.base).await
-        } else {
-            crate::skill_overrides::SkillOverrides::default()
-        };
-        crate::skill_overrides::apply(&state, &mut combined_skills);
-    }
-
-    let reload_skills_fn: theway_core::ReloadSkillsFn = {
-        let paths = paths.clone();
-        let builtins = resolved_builtins.skills.clone();
-        let load_local_sources = startup.load_local_sources;
-        Arc::new(move || {
-            let paths = paths.clone();
-            let builtins = builtins.clone();
-            Box::pin(async move {
-                let loaded = if load_local_sources {
-                    skills::load_all(&paths).await
-                } else {
-                    skills::LoadedSkills {
-                        skills: Vec::new(),
-                        diagnostics: Vec::new(),
-                    }
-                };
-                let mut merged =
-                    crate::builtin_skills::merge_with_user_project(builtins, &loaded.skills);
-                let state = if load_local_sources {
-                    crate::skill_overrides::load(&paths.base).await
-                } else {
-                    crate::skill_overrides::SkillOverrides::default()
-                };
-                crate::skill_overrides::apply(&state, &mut merged);
-                theway_core::LoadSkillsOutput {
-                    skills: merged,
-                    diagnostics: loaded.diagnostics,
-                }
-            })
-        })
-    };
     let before_tool_call = PermissionPolicy::default_for_coding_agent().as_before_tool_call();
     let (control_plane_hook, control_plane_prompt_rx) = if options.approve_control_plane {
         (Some(crate::control_plane_prompt::allow_hook()), None)
@@ -403,20 +338,15 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     let session_runtime_builder = Arc::new(SessionRuntimeBuilder {
         thinking,
         stream_fn: stream_fn.clone(),
-        memory_block,
-        skills: combined_skills.clone(),
-        templates: loaded_templates.templates.clone(),
         compact_algorithms: compact_algorithms.clone(),
         legacy_compaction_host: Some(legacy_compaction_host),
         runtime_extension_packages,
         runtime_extension_engine,
-        memory_dir: memory_dir.clone(),
         dag_engine: dag_engine.clone(),
         subagent_registry: subagent_registry.clone(),
         mcp_tools: mcp_tools_for_factory,
         mcp_notification_hooks: parking_lot::Mutex::new(mcp_notification_hooks),
         services: services.clone(),
-        reload_skills_fn,
         before_tool_call: Some(before_tool_call.clone()),
         before_trigger_action,
         control_plane_hook,
@@ -424,7 +354,6 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         feed_tx: feed_tx.clone(),
         main_run_tx: main_run_tx.clone(),
         debug: options.debug,
-        load_local_sources: startup.load_local_sources,
     });
     let initial_runtime = session_runtime_builder
         .build_opened(&session_context, store, resumed)
