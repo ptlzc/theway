@@ -4761,6 +4761,7 @@ dependencies = [
  "tree-sitter-rust",
  "tree-sitter-typescript",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

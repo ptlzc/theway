@@ -92,6 +92,7 @@ directories = "5"
 # Already in the dependency tree via tantivy, so this adds no new packages. fs4 maps
 # to LockFileEx on Windows, so the lock semantics hold on every release target.
 fs4 = "0.13"
+zeroize = "1"
 
 [target.'cfg(unix)'.dependencies]
 # Unix-only: process-group teardown (`setsid` + `killpg`) for `bash` tool and shell

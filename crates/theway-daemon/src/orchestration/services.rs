@@ -1,6 +1,7 @@
 //! Process-scoped daemon services and their explicit ownership.
 
 use crate::commands::CommandOutput;
+use crate::session_execution::SessionExecutionRegistry;
 use crate::tools::assembly::reload::ReloadRuntimeSlot;
 use crate::triggers::cron::CronRegistry;
 use crate::triggers::dynamic::DynamicTriggerRegistry;
@@ -12,6 +13,8 @@ pub struct DaemonServices {
     pub(crate) dynamic_triggers: DynamicTriggerRegistry,
     pub(crate) cron: CronRegistry,
     pub(crate) reload: ReloadRuntimeSlot,
+    #[allow(dead_code)]
+    pub(crate) session_execution: SessionExecutionRegistry,
 }
 
 impl Default for DaemonServices {
@@ -31,6 +34,7 @@ impl Default for DaemonServices {
             dynamic_triggers,
             cron,
             reload: ReloadRuntimeSlot::default(),
+            session_execution: SessionExecutionRegistry::default(),
         }
     }
 }
