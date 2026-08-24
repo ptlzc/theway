@@ -151,7 +151,7 @@ async fn store_for_routes_to_registered_session_cwd_and_falls_back() {
 async fn session_registry_manages_context_independent_of_bindings() {
     let work = tempfile::tempdir().unwrap();
     let base = tempfile::tempdir().unwrap();
-    let ctx = test_context(work.path(), "s1", base.path()).await;
+    let ctx = test_context(&work.path().join("."), "s1", base.path()).await;
     let registry = SessionExecutionRegistry::new();
 
     assert!(registry.get_context("s1").is_none());

@@ -279,6 +279,7 @@ impl SessionExecutionContext {
         hooks: SessionHookResources,
     ) -> Self {
         let session_id = session_id.into();
+        let cwd = cwd.canonicalize().unwrap_or(cwd);
         let transcript_store = storage.job_transcript_store(&cwd);
         let paths = paths.with_work_dir(cwd.clone());
         let extension_resources = SessionExtensionResources::new(
