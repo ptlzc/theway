@@ -17,6 +17,9 @@ use theway_core::{AgentHarness, AgentHarnessOptions, ThinkingLevel};
 use theway_transport::feed::FeedUpdate;
 use theway_transport::inbox;
 
+mod activation_build;
+pub(crate) use activation_build::load_persisted_dag_runs;
+
 #[derive(Clone)]
 pub struct SessionProjectResources {
     pub memory_block: String,
@@ -478,6 +481,19 @@ impl SessionRuntimeBuilder {
         store: Arc<dyn SessionStore>,
         rehydrate: bool,
     ) -> Result<SessionRuntime> {
+        let (ctx, session_id, store) = self.opened_context(ctx, store).await?;
+        let restored = load_persisted_dag_runs(&ctx, &session_id).await?;
+        let skill_harness_cell = self.install_execution_context(ctx.clone(), restored);
+        self.assemble_opened(ctx, store, session_id, rehydrate, skill_harness_cell)
+            .await
+    }
+
+    /// Resolve the opened store's exact session id and own the context.
+    async fn opened_context(
+        &self,
+        ctx: &SessionExecutionContext,
+        store: Arc<dyn SessionStore>,
+    ) -> Result<(Arc<SessionExecutionContext>, String, Arc<dyn SessionStore>)> {
         let meta = store.get_metadata_json().await?;
         let session_id = meta
             .get("id")
@@ -485,50 +501,24 @@ impl SessionRuntimeBuilder {
             .unwrap_or("?")
             .to_string();
 
-        let extension_state_store = Arc::clone(&store);
-        let session = theway_core::Session::from_store(store);
-
         // Own the exact session context before restore so recovered runs immediately
         // use the matching launcher and transcript store.
         let mut owned_ctx = ctx.clone();
         owned_ctx.session_id = session_id.clone();
-        let ctx = Arc::new(owned_ctx);
-        self.services
-            .session_execution
-            .set_context(session_id.clone(), Arc::clone(&ctx));
-        self.subagent_registry
-            .set_session_transcript_store(Some(session_id.clone()), ctx.transcript_store.clone());
+        Ok((Arc::new(owned_ctx), session_id, store))
+    }
 
-        let skill_harness_cell: crate::tools::skill::SkillHarnessCell =
-            std::sync::Arc::new(once_cell::sync::OnceCell::new());
-        self.dag_engine.set_session_launcher(
-            Some(session_id.clone()),
-            tools::node_launcher(
-                self.dag_engine.clone(),
-                ctx.model.clone(),
-                Some(self.stream_fn.clone()),
-                ctx.cwd.clone(),
-                self.subagent_registry.clone(),
-                ctx.resources.memory_dir.clone(),
-                ctx.paths.base.clone(),
-                skill_harness_cell.clone(),
-                ctx.executor.clone(),
-            ),
-        );
-
-        // Crash-recovery parity with startup: restore this session's persisted DAG runs.
-        // `restore` skips ids already live in the engine, so switching back and forth is
-        // idempotent.
-        let restored = self
-            .dag_engine
-            .restore(ctx.storage.load_dag_runs(&ctx.cwd, &session_id).await?);
-        if !restored.is_empty() {
-            tracing::info!(
-                "session {session_id}: restored {} in-flight DAG run(s): {}",
-                restored.len(),
-                restored.join(", ")
-            );
-        }
+    /// Shared non-installing assembly body.
+    async fn assemble_opened(
+        &self,
+        ctx: Arc<SessionExecutionContext>,
+        store: Arc<dyn SessionStore>,
+        session_id: String,
+        rehydrate: bool,
+        skill_harness_cell: crate::tools::skill::SkillHarnessCell,
+    ) -> Result<SessionRuntime> {
+        let extension_state_store = Arc::clone(&store);
+        let session = theway_core::Session::from_store(store);
 
         // Fresh per-session tool set (dag_* / task stamped with the target session; the
         // skill family gets a brand-new harness cell filled right after construction).
