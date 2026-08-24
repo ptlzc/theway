@@ -42,12 +42,14 @@ async fn call(tool: &Arc<dyn AgentTool>, params: Value) -> String {
 async fn cwd_scoped_tool_sets_isolate_direct_os_tools() {
     let a = tempfile::tempdir().unwrap();
     let b = tempfile::tempdir().unwrap();
-    let ca = a.path().canonicalize().unwrap().to_string_lossy().into_owned();
-    let cb = b.path().canonicalize().unwrap().to_string_lossy().into_owned();
-    std::fs::write(a.path().join("a.rs"), "alpha\n").unwrap();
-    std::fs::write(b.path().join("b.rs"), "beta\n").unwrap();
-    let ta = local_tools_for_cwd(local_exec(), a.path().to_path_buf());
-    let tb = local_tools_for_cwd(local_exec(), b.path().to_path_buf());
+    let a_path = a.path().canonicalize().unwrap();
+    let b_path = b.path().canonicalize().unwrap();
+    let ca = a_path.to_string_lossy().into_owned();
+    let cb = b_path.to_string_lossy().into_owned();
+    std::fs::write(a_path.join("a.rs"), "alpha\n").unwrap();
+    std::fs::write(b_path.join("b.rs"), "beta\n").unwrap();
+    let ta = local_tools_for_cwd(local_exec(), a_path.clone());
+    let tb = local_tools_for_cwd(local_exec(), b_path.clone());
 
     for (set, mine, other) in [(&ta, &ca, &cb), (&tb, &cb, &ca)] {
         let bash = call(tool(set, "bash"), json!({ "command": "pwd" })).await;
