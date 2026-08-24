@@ -93,6 +93,56 @@ fn runner_is_empty_and_len_reflect_rule_count() {
     assert_eq!(one.len(), 1);
 }
 
+#[test]
+fn runner_for_session_rebinds_identity_and_preserves_rules_paths_executors() {
+    // Arrange
+    let mut hook_rule = rule(HookEvent::ToolEnd);
+    hook_rule.command = Some("echo hi".into());
+    hook_rule.webhook = Some("http://127.0.0.1:9/hook".into());
+    let command_slot = Arc::new(Mutex::new(None));
+    let webhook_slot = Arc::new(Mutex::new(None));
+    let mut original = runner(vec![hook_rule]);
+    original.work_dir = std::path::PathBuf::from("/explicit/project");
+    original.base = std::path::PathBuf::from("/explicit/base");
+    original.home = std::path::PathBuf::from("/explicit/home");
+    original.command_executor = Some(capture_command_executor(command_slot));
+    original.webhook_sender = Some(capture_webhook_sender(webhook_slot));
+
+    // Act
+    let rebound = original.for_session(
+        "session-2",
+        Some(&model()),
+        Some(ThinkingLevel::High),
+    );
+
+    // Assert
+    assert_eq!(rebound.session_id, "session-2");
+    assert_eq!(rebound.model_provider, "test-provider");
+    assert_eq!(rebound.model_id, "model-1");
+    assert_eq!(rebound.thinking_level, "high");
+    assert_eq!(rebound.rules.len(), 1);
+    assert_eq!(rebound.rules[0].command.as_deref(), Some("echo hi"));
+    assert_eq!(rebound.rules[0].webhook.as_deref(), Some("http://127.0.0.1:9/hook"));
+    assert_eq!(rebound.work_dir, std::path::PathBuf::from("/explicit/project"));
+    assert_eq!(rebound.base, std::path::PathBuf::from("/explicit/base"));
+    assert_eq!(rebound.home, std::path::PathBuf::from("/explicit/home"));
+    assert!(Arc::ptr_eq(
+        original.command_executor.as_ref().unwrap(),
+        rebound.command_executor.as_ref().unwrap()
+    ));
+    assert!(Arc::ptr_eq(
+        original.webhook_sender.as_ref().unwrap(),
+        rebound.webhook_sender.as_ref().unwrap()
+    ));
+
+    // Blank model and thinking fall back to the same off/empty defaults as load.
+    let defaults = original.for_session("session-3", None, None);
+    assert_eq!(defaults.session_id, "session-3");
+    assert_eq!(defaults.model_provider, "");
+    assert_eq!(defaults.model_id, "");
+    assert_eq!(defaults.thinking_level, "off");
+}
+
 #[tokio::test]
 async fn read_file_missing_returns_none_without_diagnostics() {
     // Arrange

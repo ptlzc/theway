@@ -379,6 +379,34 @@ fn push_rules(
 }
 
 impl HookRunner {
+    /// Clone the loaded rules, explicit paths, and executors into a session-bound runner.
+    /// Missing model/thinking values use the same blank/off defaults as [`load_with`].
+    pub fn for_session(
+        &self,
+        session_id: impl Into<String>,
+        model: Option<&theway_llm_provider::Model>,
+        thinking_level: Option<ThinkingLevel>,
+    ) -> Self {
+        let (model_provider, model_id) = model
+            .map(|m| (m.provider.0.clone(), m.id.clone()))
+            .unwrap_or_else(|| ("".into(), "".into()));
+        let thinking_level = thinking_level
+            .map(|t| t.as_str().to_string())
+            .unwrap_or_else(|| "off".into());
+        Self {
+            rules: self.rules.clone(),
+            session_id: session_id.into(),
+            work_dir: self.work_dir.clone(),
+            base: self.base.clone(),
+            home: self.home.clone(),
+            model_provider,
+            model_id,
+            thinking_level,
+            command_executor: self.command_executor.clone(),
+            webhook_sender: self.webhook_sender.clone(),
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.rules.is_empty()
     }

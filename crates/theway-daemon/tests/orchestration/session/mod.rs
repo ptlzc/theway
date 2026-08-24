@@ -246,6 +246,149 @@ fn session_extension_resources_install_env_secret_before_engine_use() {
     assert!(engine.has_secret(secret_name));
 }
 
+#[tokio::test]
+async fn session_hook_resources_clones_share_loaded_state() {
+    let base = TempDir::new().unwrap();
+    std::fs::write(
+        base.path().join("hooks.toml"),
+        r#"
+[[hook]]
+event = "turn_end"
+command = "echo hi"
+"#,
+    )
+    .unwrap();
+    let paths = crate::DaemonPaths {
+        base: base.path().to_path_buf(),
+        home: base.path().to_path_buf(),
+        work_dir: base.path().to_path_buf(),
+        extra_skill_dirs: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
+    };
+    let resources = SessionHookResources::load(&paths, true).await;
+    let clone = resources.clone();
+
+    assert!(
+        Arc::ptr_eq(&resources.loaded, &clone.loaded),
+        "cloned hook resources share the same loaded Arc"
+    );
+    let a = resources.loaded_hooks("session-a", None, None).runner;
+    let b = clone.loaded_hooks("session-b", None, None).runner;
+    assert_eq!(a.len(), 1);
+    assert_eq!(b.len(), 1);
+}
+
+#[tokio::test]
+async fn session_hook_resources_separate_contexts_are_independent() {
+    let base_a = TempDir::new().unwrap();
+    std::fs::write(
+        base_a.path().join("hooks.toml"),
+        r#"
+[[hook]]
+event = "turn_start"
+command = "echo a1"
+
+[[hook]]
+event = "turn_end"
+command = "echo a2"
+"#,
+    )
+    .unwrap();
+    let base_b = TempDir::new().unwrap();
+    std::fs::write(
+        base_b.path().join("hooks.toml"),
+        r#"
+[[hook]]
+event = "turn_end"
+command = "echo b"
+"#,
+    )
+    .unwrap();
+    let paths_a = crate::DaemonPaths {
+        base: base_a.path().to_path_buf(),
+        home: base_a.path().to_path_buf(),
+        work_dir: base_a.path().to_path_buf(),
+        extra_skill_dirs: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
+    };
+    let paths_b = crate::DaemonPaths {
+        base: base_b.path().to_path_buf(),
+        home: base_b.path().to_path_buf(),
+        work_dir: base_b.path().to_path_buf(),
+        extra_skill_dirs: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
+    };
+    let a = SessionHookResources::load(&paths_a, true).await;
+    let b = SessionHookResources::load(&paths_b, true).await;
+
+    assert!(
+        !Arc::ptr_eq(&a.loaded, &b.loaded),
+        "separately loaded hook resources are independent"
+    );
+    assert_eq!(a.loaded_hooks("session-a", None, None).runner.len(), 2);
+    assert_eq!(b.loaded_hooks("session-b", None, None).runner.len(), 1);
+}
+
+#[tokio::test]
+async fn build_uses_context_hook_resources_for_hooks_active() {
+    let _serial = ENV_LOCK.lock().unwrap();
+    let home = TempDir::new().unwrap();
+    let _theway_dir = EnvGuard::set("THEWAY_DIR", home.path());
+
+    let work_dir = TempDir::new().unwrap();
+    let base_with_hooks = TempDir::new().unwrap();
+    std::fs::write(
+        base_with_hooks.path().join("hooks.toml"),
+        r#"
+[[hook]]
+event = "turn_end"
+command = "echo hi"
+"#,
+    )
+    .unwrap();
+    let base_empty = TempDir::new().unwrap();
+
+    let repo_root_with = TempDir::new().unwrap();
+    let repo_with = theway_storage::sqlite_repo::SqliteSessionRepo::new(repo_root_with.path());
+    let id_with =
+        create_session_with_cwd(&repo_with, work_dir.path().to_str().unwrap()).await;
+    let repo_root_empty = TempDir::new().unwrap();
+    let repo_empty =
+        theway_storage::sqlite_repo::SqliteSessionRepo::new(repo_root_empty.path());
+    let id_empty =
+        create_session_with_cwd(&repo_empty, work_dir.path().to_str().unwrap()).await;
+
+    let (factory, storage, _state) = test_factory();
+    let ctx_with_hooks = session_context(
+        work_dir.path(),
+        repo_with,
+        storage.clone(),
+        base_with_hooks.path(),
+    )
+    .await;
+    let runtime_with_hooks = factory
+        .build(&ctx_with_hooks, &id_with)
+        .await
+        .expect("context with hook rules builds");
+    assert!(
+        runtime_with_hooks.hooks_active,
+        "hook rules loaded by the owning context must activate hooks"
+    );
+
+    let ctx_empty = session_context(
+        work_dir.path(),
+        repo_empty,
+        storage,
+        base_empty.path(),
+    )
+    .await;
+    let runtime_empty = factory
+        .build(&ctx_empty, &id_empty)
+        .await
+        .expect("context without hook rules builds");
+    assert!(
+        !runtime_empty.hooks_active,
+        "empty hook resources must leave hooks inactive"
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────────────────
 // execution context
 // ─────────────────────────────────────────────────────────────────────────────────────────
@@ -255,8 +398,8 @@ use std::path::Path;
 use tempfile::TempDir;
 
 use super::{
-    SessionExecutionContext, SessionExtensionResources, SessionMcpResources,
-    SessionProjectResources, SessionRuntimeBuilder,
+    SessionExecutionContext, SessionExtensionResources, SessionHookResources,
+    SessionMcpResources, SessionProjectResources, SessionRuntimeBuilder,
 };
 use crate::runtime_storage::{RuntimeStorage, SessionRepository};
 use crate::test_env::{ENV_LOCK, EnvGuard};
@@ -328,6 +471,7 @@ async fn session_context(
     let resources = SessionProjectResources::load(&paths, &[], &[], true)
         .await
         .unwrap();
+    let hooks = SessionHookResources::load(&paths, true).await;
     let context = SessionExecutionContext::new(
         work_dir.to_path_buf(),
         repo,
@@ -337,6 +481,7 @@ async fn session_context(
         faux_model(),
         resources,
         SessionMcpResources::default(),
+        hooks,
     );
     assert_eq!(context.paths.work_dir, work_dir.canonicalize().unwrap());
     context

@@ -14,7 +14,10 @@ use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::{PermissionPolicy, ThinkingLevel};
 
 use super::session::SessionProjectResources;
-use super::{DaemonServices, SessionExecutionContext, SessionMcpResources, SessionRuntimeBuilder};
+use super::{
+    DaemonServices, SessionExecutionContext, SessionHookResources, SessionMcpResources,
+    SessionRuntimeBuilder,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DaemonTransport {
@@ -250,6 +253,8 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         startup.load_local_sources,
     )
     .await?;
+    let hook_resources =
+        SessionHookResources::load(&session_paths, startup.load_local_sources).await;
     let session_context = SessionExecutionContext::new(
         cwd.clone(),
         repo.clone(),
@@ -259,6 +264,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         model.clone(),
         project_resources,
         mcp_resources,
+        hook_resources,
     );
     // Runtime settings come from the in-memory StartupConfig: defaults until
     // the controller provisions values through the settings RPC.

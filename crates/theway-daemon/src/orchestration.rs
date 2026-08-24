@@ -9,6 +9,7 @@ mod startup;
 
 pub use services::DaemonServices;
 pub use session::{
-    SessionExecutionContext, SessionMcpResources, SessionRuntime, SessionRuntimeBuilder,
+    SessionExecutionContext, SessionHookResources, SessionMcpResources, SessionRuntime,
+    SessionRuntimeBuilder,
 };
 pub use startup::{DaemonOptions, DaemonTransport, SessionSelection, run};

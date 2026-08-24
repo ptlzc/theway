@@ -191,6 +191,51 @@ impl SessionExtensionResources {
     }
 }
 
+/// Hook rules and executors loaded once for an owning session context.
+/// Clones share loaded state; separately constructed contexts remain isolated.
+#[derive(Clone)]
+pub struct SessionHookResources {
+    loaded: Arc<hooks::LoadedHooks>,
+}
+
+impl SessionHookResources {
+    /// Load `hooks.toml` for this context and emit its diagnostics once.
+    pub async fn load(paths: &crate::DaemonPaths, read_local_files: bool) -> Self {
+        let loaded = hooks::load_with(
+            paths,
+            "",
+            None::<&theway_llm_provider::Model>,
+            None::<ThinkingLevel>,
+            daemon_executors(),
+            read_local_files,
+        )
+        .await;
+        for diag in &loaded.diagnostics {
+            tracing::warn!(target: "hooks", "hooks loader: {diag}");
+        }
+        Self {
+            loaded: Arc::new(loaded),
+        }
+    }
+
+    /// Clone the owning resources into a freshly rebound session runner.
+    pub fn loaded_hooks(
+        &self,
+        session_id: impl Into<String>,
+        model: Option<&theway_llm_provider::Model>,
+        thinking_level: Option<ThinkingLevel>,
+    ) -> hooks::LoadedHooks {
+        hooks::LoadedHooks {
+            runner: Arc::new(
+                self.loaded
+                    .runner
+                    .for_session(session_id, model, thinking_level),
+            ),
+            diagnostics: self.loaded.diagnostics.clone(),
+        }
+    }
+}
+
 /// Cwd-scoped inputs for one runtime build.
 #[derive(Clone)]
 pub struct SessionExecutionContext {
@@ -209,6 +254,8 @@ pub struct SessionExecutionContext {
     pub resources: SessionProjectResources,
     /// Session-owned MCP tools, one-shot hook pool, inject sets, and capability metadata.
     pub mcp: SessionMcpResources,
+    /// Session-owned hook loader state, loaded once per owning context.
+    pub hooks: SessionHookResources,
     /// Session-owned TS extension catalog, legacy host, compact registry, and engine.
     pub extension_resources: SessionExtensionResources,
 }
@@ -223,6 +270,7 @@ impl SessionExecutionContext {
         model: theway_llm_provider::Model,
         resources: SessionProjectResources,
         mcp: SessionMcpResources,
+        hooks: SessionHookResources,
     ) -> Self {
         let paths = paths.with_work_dir(cwd.clone());
         let extension_resources = SessionExtensionResources::new(
@@ -240,6 +288,7 @@ impl SessionExecutionContext {
             model,
             resources,
             mcp,
+            hooks,
             extension_resources,
         }
     }
@@ -542,26 +591,14 @@ impl SessionRuntimeBuilder {
             self.services.cron.clone(),
             inbox::default_inbox_path(),
         ));
-        // CLI hooks are session-scoped (they embed the session id) — reload per switch.
-        // TODO(#73): this still re-reads local `hooks.toml` files on every session
-        // switch; once the startup `load_local_sources` seam is controller-driven,
-        // route it through `hooks::load_with` with the same setting.
+        // Rules and executors belong to the context; only session/model/thinking are rebound.
         let (hook_model, hook_thinking) = {
             let state = harness.agent().state();
             (state.model.clone(), state.thinking_level)
         };
-        let loaded_hooks = hooks::load_with(
-            &ctx.paths,
-            session_id.clone(),
-            hook_model.as_ref(),
-            hook_thinking,
-            daemon_executors(),
-            ctx.resources.load_local_sources,
-        )
-        .await;
-        for diag in &loaded_hooks.diagnostics {
-            tracing::warn!("session {session_id}: hooks loader: {diag}");
-        }
+        let loaded_hooks =
+            ctx.hooks
+                .loaded_hooks(session_id.clone(), hook_model.as_ref(), hook_thinking);
         let _ = harness.agent().subscribe(loaded_hooks.runner.listener());
         let _ = harness.subscribe_harness(loaded_hooks.runner.harness_listener());
         let main_run_tx = self.main_run_tx.clone();
