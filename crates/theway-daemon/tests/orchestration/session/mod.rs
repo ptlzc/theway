@@ -793,3 +793,5 @@ export default defineExtension((api) => {
     assert_eq!(engine.instance_count().await, 0);
     drop(state);
 }
+mod runtime_tool_isolation;
+mod runtime_transcript_isolation;

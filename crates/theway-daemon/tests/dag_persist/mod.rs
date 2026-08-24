@@ -260,6 +260,73 @@ async fn spawn_wires_sink_and_flush_persists_running_runs_grouped_by_session() {
 }
 
 #[tokio::test]
+async fn flush_persists_two_cwd_owned_runs_only_under_owning_cwd() {
+    let startup = tempfile::tempdir().unwrap();
+    let session_a = tempfile::tempdir().unwrap();
+    let session_b = tempfile::tempdir().unwrap();
+    let base = tempfile::tempdir().unwrap();
+    let engine = Arc::new(DagEngine::new());
+    engine.set_launcher(Some(Arc::new(NoopLauncher)));
+    let sessions = SessionExecutionRegistry::new();
+    sessions.set_context(
+        "sess-a".to_string(),
+        test_context(session_a.path(), "sess-a", base.path()).await,
+    );
+    sessions.set_context(
+        "sess-b".to_string(),
+        test_context(session_b.path(), "sess-b", base.path()).await,
+    );
+    engine
+        .plan(run_def("run-a"), None, Some("sess-a".into()))
+        .unwrap();
+    engine
+        .plan(run_def("run-b"), None, Some("sess-b".into()))
+        .unwrap();
+
+    let handle = DagPersistHandle::spawn_with_sessions(
+        engine.clone(),
+        startup.path().to_path_buf(),
+        sessions,
+    );
+    handle.flush().await;
+
+    let cwd_a = session_a.path().canonicalize().unwrap();
+    let cwd_b = session_b.path().canonicalize().unwrap();
+    let runs_a = load_session_runs(&cwd_a, "sess-a").await;
+    let runs_b = load_session_runs(&cwd_b, "sess-b").await;
+    assert_eq!(runs_a.len(), 1);
+    assert_eq!(runs_a[0].name, "run-a");
+    assert_eq!(runs_a[0].session_id.as_deref(), Some("sess-a"));
+    assert_eq!(runs_b.len(), 1);
+    assert_eq!(runs_b[0].name, "run-b");
+    assert_eq!(runs_b[0].session_id.as_deref(), Some("sess-b"));
+    assert!(cwd_a
+        .join(".pi/graph-engineering-state-sess-a.db")
+        .exists());
+    assert!(cwd_b
+        .join(".pi/graph-engineering-state-sess-b.db")
+        .exists());
+    assert!(!cwd_a
+        .join(".pi/graph-engineering-state-sess-b.db")
+        .exists());
+    assert!(!cwd_b
+        .join(".pi/graph-engineering-state-sess-a.db")
+        .exists());
+    assert!(!startup
+        .path()
+        .join(".pi/graph-engineering-state-sess-a.db")
+        .exists());
+    assert!(!startup
+        .path()
+        .join(".pi/graph-engineering-state-sess-b.db")
+        .exists());
+
+    if let Some(task) = handle.task.lock().take() {
+        task.abort();
+    }
+}
+
+#[tokio::test]
 async fn flush_removes_terminal_runs_from_the_session_snapshot() {
     let dir = tempfile::tempdir().unwrap();
     let cwd = dir.path().to_path_buf();
