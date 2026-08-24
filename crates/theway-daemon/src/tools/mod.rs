@@ -113,11 +113,9 @@ impl CwdScopedTool {
 
     fn scope_args(&self, mut args: Value) -> Value {
         match self.inner.definition().name.as_str() {
-            "bash" | "exec" | "ls" | "grep" | "find" => {
-                if args.get("cwd").is_none() {
-                    if let Some(obj) = args.as_object_mut() {
-                        obj.insert("cwd".into(), self.cwd.to_string_lossy().into_owned().into());
-                    }
+            "bash" | "exec" | "ls" | "grep" | "find" if args.get("cwd").is_none() => {
+                if let Some(obj) = args.as_object_mut() {
+                    obj.insert("cwd".into(), self.cwd.to_string_lossy().into_owned().into());
                 }
             }
             _ => {}
