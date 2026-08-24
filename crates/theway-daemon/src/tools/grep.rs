@@ -52,7 +52,18 @@ impl AgentTool for GrepTool {
             .get("pattern")
             .and_then(|v| v.as_str())
             .ok_or_else(|| AgentToolError::from("missing `pattern`"))?;
-        let path = params.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+        let cwd = params.get("cwd").and_then(|v| v.as_str()).unwrap_or(".");
+        let raw_path = params.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+        let path = if std::path::Path::new(raw_path).is_absolute() {
+            raw_path.to_string()
+        } else if raw_path == "." {
+            cwd.to_string()
+        } else {
+            std::path::Path::new(cwd)
+                .join(raw_path)
+                .to_string_lossy()
+                .into_owned()
+        };
         let glob = params.get("glob").and_then(|v| v.as_str());
         let case_insensitive = params
             .get("case_insensitive")
@@ -341,7 +352,8 @@ static DEFINITION: Lazy<Tool> = Lazy::new(|| Tool {
         "type": "object",
         "properties": {
             "pattern": { "type": "string", "description": "Regex pattern" },
-            "path": { "type": "string", "description": "Directory to search (default: current)" },
+            "path": { "type": "string", "description": "Directory to search (default: current; relative paths resolve against cwd)" },
+            "cwd": { "type": "string", "description": "Working directory for resolving a relative/default path (optional; defaults to the session cwd)" },
             "glob": { "type": "string", "description": "Optional filename glob (e.g. *.rs)" },
             "output_mode": { "type": "string", "description": "'content' (default), 'files_with_matches', or 'count'" },
             "case_insensitive": { "type": "boolean", "description": "Case-insensitive match" },

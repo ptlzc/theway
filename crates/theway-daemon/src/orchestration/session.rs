@@ -413,7 +413,7 @@ impl SessionRuntimeBuilder {
         // skill family gets a brand-new harness cell filled right after construction).
         let skill_harness_cell: crate::tools::skill::SkillHarnessCell =
             std::sync::Arc::new(once_cell::sync::OnceCell::new());
-        let mut tools = tools::session_tool_set(
+        let mut tools = tools::session_tool_set_for_cwd(
             &ctx.resources.memory_dir,
             &ctx.paths.base,
             &self.dag_engine,
@@ -424,6 +424,7 @@ impl SessionRuntimeBuilder {
             &session_id,
             ctx.executor.clone(),
             &self.services,
+            ctx.cwd.clone(),
         );
         tools.extend(ctx.mcp.tools.iter().cloned());
 

@@ -477,9 +477,12 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
                 }
             }
             supervise_controller_storage(options.storage_service_addr.as_deref(), async {
-                crate::mcp_server::run_mcp_server(crate::tools::local_tools(executor.clone()))
-                    .await
-                    .map_err(|e| anyhow::anyhow!("mcp server: {e}"))
+                crate::mcp_server::run_mcp_server(crate::tools::local_tools_for_cwd(
+                    executor.clone(),
+                    cwd.clone(),
+                ))
+                .await
+                .map_err(|e| anyhow::anyhow!("mcp server: {e}"))
             })
             .await
         }

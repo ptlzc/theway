@@ -104,17 +104,17 @@ async fn default_executor_reports_sandbox_kind() {
 
 #[test]
 fn local_tools_omits_every_direct_os_tool() {
-    let names = names(&tools::local_tools(sandbox_exec()));
+    let local_names = names(&tools::local_tools(sandbox_exec()));
 
     for tool in DIRECT_OS_LOCAL_TOOLS {
         assert!(
-            !names.contains(*tool),
-            "sandbox-only build must not register direct-OS tool `{tool}`; got {names:?}"
+            !local_names.contains(*tool),
+            "sandbox-only build must not register direct-OS tool `{tool}`; got {local_names:?}"
         );
     }
     // Belt and braces against a silently emptied set: the documented remainder is exact.
     assert_eq!(
-        names,
+        local_names,
         HashSet::from_iter(
             EXECUTOR_BACKED_TOOLS
                 .iter()
@@ -122,6 +122,15 @@ fn local_tools_omits_every_direct_os_tool() {
                 .map(|s| s.to_string())
         ),
         "sandbox-only local_tools must be exactly the executor-backed + network-only set"
+    );
+
+    let cwd_names = names(&tools::local_tools_for_cwd(
+        sandbox_exec(),
+        std::path::PathBuf::from("/tmp/cwd"),
+    ));
+    assert_eq!(
+        local_names, cwd_names,
+        "cwd-scoped local_tools must omit the same direct-OS tools"
     );
 }
 
@@ -167,7 +176,7 @@ fn session_tool_set_assembly_is_fail_closed() {
     let dag_engine = Arc::new(DagEngine::new());
     let registry = SubagentJobRegistry::new();
     let model = faux_model();
-    let tools = tools::session_tool_set(
+    let tools = tools::session_tool_set_for_cwd(
         std::path::Path::new("/nonexistent-memory-dir"),
         std::path::Path::new("/nonexistent-theway-base"),
         &dag_engine,
@@ -178,6 +187,7 @@ fn session_tool_set_assembly_is_fail_closed() {
         "session-sandbox-gate",
         sandbox_exec(),
         &DaemonServices::new(),
+        std::path::PathBuf::from("/tmp/session-cwd"),
     );
     let names = names(&tools);
 
@@ -219,11 +229,12 @@ fn session_tool_set_assembly_is_fail_closed() {
 
 #[test]
 fn subagent_tool_sets_omit_direct_os_tools_for_every_spec() {
-    let resolver = tools::subagent_tool_sets(
+    let resolver = tools::subagent_tool_sets_for_cwd(
         std::path::Path::new("/nonexistent-memory-dir").to_path_buf(),
         std::path::Path::new("/nonexistent-theway-base").to_path_buf(),
         harness_cell(),
         sandbox_exec(),
+        std::path::PathBuf::from("/tmp/subagent-cwd"),
     );
     for spec in theway_daemon::agent_specs::spec_names() {
         let set = resolver(&spec);

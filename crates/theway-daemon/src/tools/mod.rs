@@ -24,12 +24,18 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use theway_core::AgentTool;
+use async_trait::async_trait;
+use serde_json::Value;
 use theway_core::executor::ToolExecutor;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::node_launcher;
 use theway_core::multiagent::jobs::SubagentJobRegistry;
 use theway_core::multiagent::types::ToolSetResolver;
+use theway_core::{
+    AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate, PermissionClassification,
+};
+use theway_llm_provider::Tool;
+use tokio_util::sync::CancellationToken;
 
 use crate::tools::skill::SkillHarnessCell;
 
@@ -94,6 +100,73 @@ pub const LOCAL_ONLY_TOOL_NAMES: &[&str] = &[
     "find",
 ];
 
+/// Scopes a direct-OS tool to an owning cwd unless the caller supplies one.
+pub struct CwdScopedTool {
+    inner: Arc<dyn AgentTool>,
+    cwd: PathBuf,
+}
+
+impl CwdScopedTool {
+    pub fn new(inner: Arc<dyn AgentTool>, cwd: PathBuf) -> Self {
+        Self { inner, cwd }
+    }
+
+    fn scope_args(&self, mut args: Value) -> Value {
+        match self.inner.definition().name.as_str() {
+            "bash" | "exec" | "ls" | "grep" | "find" => {
+                if args.get("cwd").is_none() {
+                    if let Some(obj) = args.as_object_mut() {
+                        obj.insert("cwd".into(), self.cwd.to_string_lossy().into_owned().into());
+                    }
+                }
+            }
+            _ => {}
+        }
+        args
+    }
+}
+
+#[async_trait]
+impl AgentTool for CwdScopedTool {
+    fn definition(&self) -> &Tool {
+        self.inner.definition()
+    }
+
+    fn label(&self) -> &str {
+        self.inner.label()
+    }
+
+    fn execution_mode(&self) -> Option<theway_core::ToolExecutionMode> {
+        self.inner.execution_mode()
+    }
+
+    fn prepare_arguments(&self, args: Value) -> Value {
+        self.inner.prepare_arguments(self.scope_args(args))
+    }
+
+    fn permission_classification(&self, prepared_args: &Value) -> PermissionClassification {
+        self.inner.permission_classification(prepared_args)
+    }
+
+    async fn execute(
+        &self,
+        tool_call_id: &str,
+        params: Value,
+        cancel: CancellationToken,
+        on_update: Option<AgentToolUpdate>,
+    ) -> Result<AgentToolResult, AgentToolError> {
+        self.inner
+            .execute(tool_call_id, self.scope_args(params), cancel, on_update)
+            .await
+    }
+}
+
+/// Compatibility wrapper that uses the process cwd as the owning cwd.
+#[cfg(feature = "local")]
+pub fn local_tools(executor: Arc<dyn ToolExecutor>) -> Vec<Arc<dyn AgentTool>> {
+    local_tools_for_cwd(executor, std::env::current_dir().unwrap_or_default())
+}
+
 /// Local-execution tool set (the app-layer half of the session tool set): shell / fs /
 /// git / grep / web — everything that depends on the execution environment. No engine
 /// tools here (DAG / subagent / skills / memory come from the kernel's own assembly,
@@ -116,19 +189,25 @@ pub const LOCAL_ONLY_TOOL_NAMES: &[&str] = &[
 /// answers with an explicit `UnsupportedKind` error. `web_fetch` / `web_search` stay
 /// too: they are pure network requests with no host FS/process side effects.
 #[cfg(feature = "local")]
-pub fn local_tools(executor: Arc<dyn ToolExecutor>) -> Vec<Arc<dyn AgentTool>> {
+pub fn local_tools_for_cwd(
+    executor: Arc<dyn ToolExecutor>,
+    cwd: PathBuf,
+) -> Vec<Arc<dyn AgentTool>> {
     vec![
         Arc::new(read::ReadTool::new(executor.clone())),
         Arc::new(write::WriteTool::new(executor.clone())),
         Arc::new(edit::EditTool::new(executor.clone())),
-        Arc::new(bash::BashTool),
-        Arc::new(exec_shell::ExecTool),
+        Arc::new(CwdScopedTool::new(Arc::new(bash::BashTool), cwd.clone())),
+        Arc::new(CwdScopedTool::new(
+            Arc::new(exec_shell::ExecTool),
+            cwd.clone(),
+        )),
         Arc::new(exec_shell::GetOutputTool),
         Arc::new(exec_shell::KillShellTool),
         Arc::new(exec_shell::WriteToProcessTool),
-        Arc::new(ls::LsTool),
-        Arc::new(grep::GrepTool),
-        Arc::new(find::FindTool),
+        Arc::new(CwdScopedTool::new(Arc::new(ls::LsTool), cwd.clone())),
+        Arc::new(CwdScopedTool::new(Arc::new(grep::GrepTool), cwd.clone())),
+        Arc::new(CwdScopedTool::new(Arc::new(find::FindTool), cwd)),
         Arc::new(outline::OutlineTool::new(executor.clone())),
         Arc::new(git::GitTool::new(executor)),
         Arc::new(web_fetch::WebFetchTool),
@@ -142,6 +221,14 @@ pub fn local_tools(executor: Arc<dyn ToolExecutor>) -> Vec<Arc<dyn AgentTool>> {
 /// is never silent.
 #[cfg(all(not(feature = "local"), feature = "sandbox"))]
 pub fn local_tools(executor: Arc<dyn ToolExecutor>) -> Vec<Arc<dyn AgentTool>> {
+    local_tools_for_cwd(executor, std::env::current_dir().unwrap_or_default())
+}
+
+#[cfg(all(not(feature = "local"), feature = "sandbox"))]
+pub fn local_tools_for_cwd(
+    executor: Arc<dyn ToolExecutor>,
+    _cwd: PathBuf,
+) -> Vec<Arc<dyn AgentTool>> {
     tracing::warn!(
         omitted = ?LOCAL_ONLY_TOOL_NAMES,
         "sandbox-only build: local-only tools bypass the ToolExecutor seam and touch \
@@ -215,13 +302,30 @@ pub fn subagent_tool_sets(
     skill_harness_cell: SkillHarnessCell,
     executor: Arc<dyn ToolExecutor>,
 ) -> ToolSetResolver {
+    subagent_tool_sets_for_cwd(
+        memory_dir,
+        base_dir,
+        skill_harness_cell,
+        executor,
+        std::env::current_dir().unwrap_or_default(),
+    )
+}
+
+pub fn subagent_tool_sets_for_cwd(
+    memory_dir: PathBuf,
+    base_dir: PathBuf,
+    skill_harness_cell: SkillHarnessCell,
+    executor: Arc<dyn ToolExecutor>,
+    cwd: PathBuf,
+) -> ToolSetResolver {
     assembly::subagent_tools(
         &memory_dir,
         &base_dir,
         &skill_harness_cell,
-        // The kernel-side local-tools factory closes over the daemon's executor, so every
-        // subagent / DAG-node tool set dispatches through the same execution environment.
-        Arc::new(move || local_tools(executor.clone())),
+        // The kernel-side local-tools factory closes over the daemon's executor and cwd,
+        // so every subagent / DAG-node tool set dispatches through the same execution
+        // environment and path-scoped direct-OS tools.
+        Arc::new(move || local_tools_for_cwd(executor.clone(), cwd.clone())),
     )
 }
 
@@ -243,9 +347,9 @@ pub fn node_launcher(
         engine,
         model,
         stream_fn,
-        cwd,
+        cwd.clone(),
         registry,
-        subagent_tool_sets(memory_dir, base_dir, skill_harness_cell, executor),
+        subagent_tool_sets_for_cwd(memory_dir, base_dir, skill_harness_cell, executor, cwd),
         crate::agent_specs::launch_resolver(),
     )
 }
@@ -269,7 +373,35 @@ pub fn session_tool_set(
     executor: Arc<dyn ToolExecutor>,
     services: &crate::DaemonServices,
 ) -> Vec<Arc<dyn AgentTool>> {
-    let mut tools = local_tools(executor.clone());
+    session_tool_set_for_cwd(
+        memory_dir,
+        base_dir,
+        dag_engine,
+        subagent_registry,
+        model,
+        stream_fn,
+        skill_harness_cell,
+        session_id,
+        executor,
+        services,
+        std::env::current_dir().unwrap_or_default(),
+    )
+}
+
+pub fn session_tool_set_for_cwd(
+    memory_dir: &std::path::Path,
+    base_dir: &std::path::Path,
+    dag_engine: &Arc<DagEngine>,
+    subagent_registry: &SubagentJobRegistry,
+    model: &theway_llm_provider::Model,
+    stream_fn: Option<&theway_core::StreamFn>,
+    skill_harness_cell: &SkillHarnessCell,
+    session_id: &str,
+    executor: Arc<dyn ToolExecutor>,
+    services: &crate::DaemonServices,
+    cwd: PathBuf,
+) -> Vec<Arc<dyn AgentTool>> {
+    let mut tools = local_tools_for_cwd(executor.clone(), cwd.clone());
     // Engine-owned tools (DAG / subagent / skills / memory), assembled kernel-side with the
     // same subagent tool-set resolver the DAG node launcher uses.
     tools.extend(assembly::engine_tools(
@@ -277,11 +409,12 @@ pub fn session_tool_set(
         base_dir,
         dag_engine,
         subagent_registry,
-        subagent_tool_sets(
+        subagent_tool_sets_for_cwd(
             memory_dir.to_path_buf(),
             base_dir.to_path_buf(),
             skill_harness_cell.clone(),
             executor,
+            cwd,
         ),
         crate::agent_specs::launch_resolver(),
         crate::agent_specs::spec_names(),

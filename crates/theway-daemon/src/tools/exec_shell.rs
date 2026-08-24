@@ -255,6 +255,13 @@ pub struct BackgroundShell {
 /// Spawn `command` in a background shell and register it. Returns immediately with the
 /// shell's id; the process keeps running across agent turns.
 pub async fn run_in_background(command: &str) -> Result<BackgroundShell, AgentToolError> {
+    run_in_background_with_cwd(command, None).await
+}
+
+pub async fn run_in_background_with_cwd(
+    command: &str,
+    cwd: Option<&std::path::Path>,
+) -> Result<BackgroundShell, AgentToolError> {
     let mut cmd = tokio::process::Command::new(shell_program());
     cmd.arg(shell_flag())
         .arg(command)
@@ -262,6 +269,9 @@ pub async fn run_in_background(command: &str) -> Result<BackgroundShell, AgentTo
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    if let Some(dir) = cwd {
+        cmd.current_dir(dir);
+    }
 
     // Shared daemon primitive (openspec `layering`): the child becomes session /
     // process-group leader on Unix so `kill_shell`'s group kill reaches the whole tree.
@@ -504,9 +514,11 @@ impl AgentTool for ExecTool {
             .get("run_in_background")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+        let cwd = params.get("cwd").and_then(|v| v.as_str()).map(String::from);
 
         if background {
-            let bg = run_in_background(command).await?;
+            let bg = run_in_background_with_cwd(command, cwd.as_deref().map(std::path::Path::new))
+                .await?;
             let text = format!("background shell started: {} (pid {})", bg.id, bg.pid);
             return Ok(AgentToolResult {
                 content: vec![UserContentBlock::text(text)],
@@ -528,7 +540,7 @@ impl AgentTool for ExecTool {
         let outcome = super::exec::run_with_kill_on_timeout_or_cancel(
             command,
             timeout_secs.map(Duration::from_secs),
-            None,
+            cwd.as_deref().map(std::path::Path::new),
             None,
             &cancel,
         )
@@ -718,6 +730,7 @@ static EXEC_DEFINITION: Lazy<Tool> = Lazy::new(|| {
         "properties": {
             "command": { "type": "string", "description": "Shell command to execute" },
             "run_in_background": { "type": "boolean", "description": "If true, run in background and return shell_id" },
+            "cwd": { "type": "string", "description": "Working directory to run the command in (absolute path). Optional; defaults to the session cwd" },
             "timeout": { "type": "integer", "description": "Timeout in seconds (foreground only)" },
         },
         "required": ["command"],

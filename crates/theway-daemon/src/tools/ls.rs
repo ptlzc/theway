@@ -34,14 +34,25 @@ impl AgentTool for LsTool {
         _cancel: CancellationToken,
         _on_update: Option<AgentToolUpdate>,
     ) -> Result<AgentToolResult, AgentToolError> {
-        let path = params.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+        let cwd = params.get("cwd").and_then(|v| v.as_str()).unwrap_or(".");
+        let raw_path = params.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+        let path = if std::path::Path::new(raw_path).is_absolute() {
+            raw_path.to_string()
+        } else if raw_path == "." {
+            cwd.to_string()
+        } else {
+            std::path::Path::new(cwd)
+                .join(raw_path)
+                .to_string_lossy()
+                .into_owned()
+        };
         let limit = params
             .get("limit")
             .and_then(|v| v.as_u64())
             .map(|n| n as usize)
             .unwrap_or(DEFAULT_LIMIT);
 
-        let mut rd = tokio::fs::read_dir(path)
+        let mut rd = tokio::fs::read_dir(&path)
             .await
             .map_err(|e| AgentToolError::from(format!("ls {path}: {e}")))?;
         let mut entries: Vec<(String, bool, u64)> = Vec::new();
@@ -96,7 +107,8 @@ static DEFINITION: Lazy<Tool> = Lazy::new(|| Tool {
     parameters: json!({
         "type": "object",
         "properties": {
-            "path": { "type": "string", "description": "Directory to list (default: current directory)" },
+            "path": { "type": "string", "description": "Directory to list (default: current directory; relative paths resolve against cwd)" },
+            "cwd": { "type": "string", "description": "Working directory for resolving a relative/default path (optional; defaults to the session cwd)" },
             "limit": { "type": "integer", "description": "Max entries (default 500)" },
         },
     }),

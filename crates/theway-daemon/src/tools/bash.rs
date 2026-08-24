@@ -79,7 +79,11 @@ impl AgentTool for BashTool {
         let cwd = params.get("cwd").and_then(|v| v.as_str()).map(String::from);
 
         if run_in_background {
-            let bg = crate::tools::exec_shell::run_in_background(command).await?;
+            let bg = crate::tools::exec_shell::run_in_background_with_cwd(
+                command,
+                cwd.as_deref().map(std::path::Path::new),
+            )
+            .await?;
             let text = format!("background shell started: {} (pid {})", bg.id, bg.pid);
             return Ok(AgentToolResult {
                 content: vec![UserContentBlock::text(text)],
