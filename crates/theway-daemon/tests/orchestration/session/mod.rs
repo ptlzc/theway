@@ -535,7 +535,7 @@ async fn build_uses_explicit_context_cwd_and_registers_session_ownership() {
     assert!(
         prompt.contains(&format!(
             "Current working directory: {}",
-            work_dir.path().display()
+            work_dir.path().canonicalize().unwrap().display()
         )),
         "runtime must use the explicit context cwd: {prompt}"
     );
