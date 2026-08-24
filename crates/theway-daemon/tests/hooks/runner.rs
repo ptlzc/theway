@@ -36,6 +36,15 @@ fn model() -> theway_llm_provider::Model {
     }
 }
 
+fn daemon_paths(base: &std::path::Path, work: &std::path::Path) -> crate::DaemonPaths {
+    crate::DaemonPaths {
+        base: base.to_path_buf(),
+        home: base.to_path_buf(),
+        work_dir: work.to_path_buf(),
+        extra_skill_dirs: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
+    }
+}
+
 fn tool_end_event(tool_name: &str) -> LoopEvent {
     LoopEvent::ToolExecutionEnd {
         tool_call_id: "call-1".into(),
@@ -203,13 +212,14 @@ headers = { X-Test = "v" }
 async fn load_with_read_local_files_false_returns_empty_runner_with_model_fields() {
     // Arrange
     let _env_lock = ENV_LOCK.lock().unwrap();
-    let theway_dir = tempfile::tempdir().unwrap();
+    let poisoned = tempfile::tempdir().unwrap();
+    let _theway_dir_guard = EnvGuard::set("THEWAY_DIR", poisoned.path());
+    let base = tempfile::tempdir().unwrap();
     let cwd = tempfile::tempdir().unwrap();
-    let _theway_dir_guard = EnvGuard::set("THEWAY_DIR", theway_dir.path());
 
     // Act
     let loaded = load_with(
-        cwd.path(),
+        &daemon_paths(base.path(), cwd.path()),
         "session-1",
         Some(&model()),
         Some(ThinkingLevel::High),
@@ -231,10 +241,20 @@ async fn load_with_read_local_files_false_returns_empty_runner_with_model_fields
 async fn load_with_project_hooks_ignored_when_not_allowed() {
     // Arrange
     let _env_lock = ENV_LOCK.lock().unwrap();
-    let theway_dir = tempfile::tempdir().unwrap();
-    let cwd = tempfile::tempdir().unwrap();
-    let _theway_dir_guard = EnvGuard::set("THEWAY_DIR", theway_dir.path());
+    let poisoned = tempfile::tempdir().unwrap();
+    let _theway_dir_guard = EnvGuard::set("THEWAY_DIR", poisoned.path());
+    std::fs::write(
+        poisoned.path().join("hooks.toml"),
+        r#"
+[[hook]]
+event = "turn_end"
+command = "echo poisoned"
+"#,
+    )
+    .unwrap();
     let _allow_guard = EnvGuard::remove("THEWAY_ALLOW_PROJECT_HOOKS");
+    let base = tempfile::tempdir().unwrap();
+    let cwd = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(cwd.path().join(".theway")).unwrap();
     std::fs::write(
         cwd.path().join(".theway").join("hooks.toml"),
@@ -248,7 +268,7 @@ command = "echo hi"
 
     // Act
     let loaded = load_with(
-        cwd.path(),
+        &daemon_paths(base.path(), cwd.path()),
         "session-1",
         None::<&theway_llm_provider::Model>,
         None::<ThinkingLevel>,
@@ -271,10 +291,20 @@ command = "echo hi"
 async fn load_with_env_var_allows_project_hooks() {
     // Arrange
     let _env_lock = ENV_LOCK.lock().unwrap();
-    let theway_dir = tempfile::tempdir().unwrap();
-    let cwd = tempfile::tempdir().unwrap();
-    let _theway_dir_guard = EnvGuard::set("THEWAY_DIR", theway_dir.path());
+    let poisoned = tempfile::tempdir().unwrap();
+    let _theway_dir_guard = EnvGuard::set("THEWAY_DIR", poisoned.path());
+    std::fs::write(
+        poisoned.path().join("hooks.toml"),
+        r#"
+[[hook]]
+event = "turn_end"
+command = "echo poisoned"
+"#,
+    )
+    .unwrap();
     let _allow_guard = EnvGuard::set("THEWAY_ALLOW_PROJECT_HOOKS", "1");
+    let base = tempfile::tempdir().unwrap();
+    let cwd = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(cwd.path().join(".theway")).unwrap();
     std::fs::write(
         cwd.path().join(".theway").join("hooks.toml"),
@@ -288,7 +318,7 @@ command = "echo hi"
 
     // Act
     let loaded = load_with(
-        cwd.path(),
+        &daemon_paths(base.path(), cwd.path()),
         "session-1",
         None::<&theway_llm_provider::Model>,
         None::<ThinkingLevel>,
@@ -566,23 +596,27 @@ async fn tool_filter_allows_matching_tool() {
 
 #[test]
 fn cwd_for_returns_project_theway_harness_and_home() {
-    // Arrange
+    // Arrange: runner fields are explicit; env cannot redirect them.
     let _env_lock = ENV_LOCK.lock().unwrap();
-    let theway_dir = tempfile::tempdir().unwrap();
-    let _theway_dir_guard = EnvGuard::set("THEWAY_DIR", theway_dir.path());
-    let r = runner(vec![]);
+    let poisoned = tempfile::tempdir().unwrap();
+    let _theway_dir_guard = EnvGuard::set("THEWAY_DIR", poisoned.path());
+    let _home_guard = EnvGuard::set("HOME", poisoned.path());
+    let mut r = runner(vec![]);
+    r.work_dir = std::path::PathBuf::from("/explicit/project");
+    r.base = std::path::PathBuf::from("/explicit/base");
+    r.home = std::path::PathBuf::from("/explicit/home");
 
     let mut project_rule = rule(HookEvent::ToolEnd);
     project_rule.cwd = HookCwd::Project;
-    assert_eq!(r.cwd_for(&project_rule), r.cwd);
+    assert_eq!(r.cwd_for(&project_rule), r.work_dir);
 
     let mut theway_rule = rule(HookEvent::ToolEnd);
     theway_rule.cwd = HookCwd::ThewayHarness;
-    assert_eq!(r.cwd_for(&theway_rule), theway_dir.path());
+    assert_eq!(r.cwd_for(&theway_rule), r.base);
 
     let mut home_rule = rule(HookEvent::ToolEnd);
     home_rule.cwd = HookCwd::Home;
-    assert!(r.cwd_for(&home_rule).is_absolute());
+    assert_eq!(r.cwd_for(&home_rule), r.home);
 }
 
 #[test]

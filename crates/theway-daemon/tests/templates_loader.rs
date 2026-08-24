@@ -1,13 +1,14 @@
 //! Integration test for the CLI prompt-template loader (`theway_daemon::templates::load_all`).
-//! Verifies the dual-root overlay (`$THEWAY_DIR/templates/` user root, `<cwd>/.theway/
-//! templates/` project root, project winning on name collision), frontmatter parsing,
-//! diagnostics for broken files, and that loaded templates interpolate via
-//! `PromptTemplate::interpolate`.
+//! Verifies the dual-root overlay (`DaemonPaths.base/templates/` user root,
+//! `DaemonPaths.work_dir/.theway/templates/` project root, project winning on name
+//! collision), frontmatter parsing, diagnostics for broken files, and that loaded
+//! templates interpolate via `PromptTemplate::interpolate`.
 
 use std::path::Path;
 use std::sync::Mutex;
 
 use tempfile::TempDir;
+use theway_daemon::DaemonPaths;
 use theway_daemon::templates::{LoadedTemplates, load_all};
 
 static THEWAY_DIR_ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -40,15 +41,31 @@ fn write(root: &Path, name: &str, frontmatter_desc: &str, body: &str) {
     std::fs::write(root.join(format!("{name}.md")), content).unwrap();
 }
 
+fn paths(base: &Path, work: &Path) -> DaemonPaths {
+    DaemonPaths {
+        base: base.to_path_buf(),
+        home: base.to_path_buf(),
+        work_dir: work.to_path_buf(),
+        extra_skill_dirs: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
+    }
+}
+
 #[tokio::test]
 async fn loads_templates_from_dual_roots_with_project_winning() {
     let _guard = THEWAY_DIR_ENV_LOCK.lock().unwrap();
-    let home = TempDir::new().unwrap();
-    let cwd = TempDir::new().unwrap();
-    let _env = EnvGuard::set("THEWAY_DIR", home.path());
-
+    let poisoned = TempDir::new().unwrap();
+    let _env = EnvGuard::set("THEWAY_DIR", poisoned.path());
     write(
-        &home.path().join("templates"),
+        &poisoned.path().join("templates"),
+        "poisoned",
+        "poison",
+        "Must not load",
+    );
+
+    let base = TempDir::new().unwrap();
+    let cwd = TempDir::new().unwrap();
+    write(
+        &base.path().join("templates"),
         "shared",
         "user",
         "User body {{var}}",
@@ -60,7 +77,7 @@ async fn loads_templates_from_dual_roots_with_project_winning() {
         "Project body {{var}}",
     );
     write(
-        &home.path().join("templates"),
+        &base.path().join("templates"),
         "only-user",
         "user-only",
         "Only user",
@@ -69,12 +86,16 @@ async fn loads_templates_from_dual_roots_with_project_winning() {
     let LoadedTemplates {
         templates,
         diagnostics,
-    } = load_all(cwd.path()).await;
+    } = load_all(&paths(base.path(), cwd.path())).await;
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
     let names: Vec<&str> = templates.iter().map(|t| t.name.as_str()).collect();
     assert!(names.contains(&"shared"));
     assert!(names.contains(&"only-user"));
+    assert!(
+        !names.contains(&"poisoned"),
+        "explicit paths must win: {names:?}"
+    );
 
     let shared = templates.iter().find(|t| t.name == "shared").unwrap();
     assert_eq!(shared.description.as_deref(), Some("project"));
@@ -89,11 +110,12 @@ async fn loads_templates_from_dual_roots_with_project_winning() {
 #[tokio::test]
 async fn frontmatter_name_overrides_file_stem() {
     let _guard = THEWAY_DIR_ENV_LOCK.lock().unwrap();
-    let home = TempDir::new().unwrap();
+    let poisoned = TempDir::new().unwrap();
+    let _env = EnvGuard::set("THEWAY_DIR", poisoned.path());
+    let base = TempDir::new().unwrap();
     let cwd = TempDir::new().unwrap();
-    let _env = EnvGuard::set("THEWAY_DIR", home.path());
 
-    let templates_dir = home.path().join("templates");
+    let templates_dir = base.path().join("templates");
     std::fs::create_dir_all(&templates_dir).unwrap();
     // File stem is `myname.md`, frontmatter names it `greet`.
     std::fs::write(
@@ -105,7 +127,7 @@ async fn frontmatter_name_overrides_file_stem() {
     let LoadedTemplates {
         templates,
         diagnostics,
-    } = load_all(cwd.path()).await;
+    } = load_all(&paths(base.path(), cwd.path())).await;
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     assert_eq!(templates.len(), 1);
     assert_eq!(templates[0].name, "greet");
@@ -115,14 +137,15 @@ async fn frontmatter_name_overrides_file_stem() {
 #[tokio::test]
 async fn missing_dirs_produce_no_diagnostics() {
     let _guard = THEWAY_DIR_ENV_LOCK.lock().unwrap();
+    let poisoned = TempDir::new().unwrap();
+    let _env = EnvGuard::set("THEWAY_DIR", poisoned.path());
+    let base = TempDir::new().unwrap();
     let cwd = TempDir::new().unwrap();
-    let home = TempDir::new().unwrap();
-    let _env = EnvGuard::set("THEWAY_DIR", home.path());
 
     let LoadedTemplates {
         templates,
         diagnostics,
-    } = load_all(cwd.path()).await;
+    } = load_all(&paths(base.path(), cwd.path())).await;
     assert!(templates.is_empty());
     assert!(diagnostics.is_empty(), "{:#?}", diagnostics);
 }
@@ -130,11 +153,12 @@ async fn missing_dirs_produce_no_diagnostics() {
 #[tokio::test]
 async fn broken_frontmatter_reports_parse_diagnostic() {
     let _guard = THEWAY_DIR_ENV_LOCK.lock().unwrap();
+    let poisoned = TempDir::new().unwrap();
+    let _env = EnvGuard::set("THEWAY_DIR", poisoned.path());
+    let base = TempDir::new().unwrap();
     let cwd = TempDir::new().unwrap();
-    let home = TempDir::new().unwrap();
-    let _env = EnvGuard::set("THEWAY_DIR", home.path());
 
-    let templates_dir = home.path().join("templates");
+    let templates_dir = base.path().join("templates");
     std::fs::create_dir_all(&templates_dir).unwrap();
     std::fs::write(
         templates_dir.join("broken.md"),
@@ -145,7 +169,7 @@ async fn broken_frontmatter_reports_parse_diagnostic() {
     let LoadedTemplates {
         templates,
         diagnostics,
-    } = load_all(cwd.path()).await;
+    } = load_all(&paths(base.path(), cwd.path())).await;
     assert!(templates.is_empty());
     assert!(
         diagnostics

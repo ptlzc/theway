@@ -1,5 +1,5 @@
 //! End-to-end test for user-configured webhook hooks. This drives a real AgentHarness,
-//! loads hooks from a THEWAY_DIR-scoped hooks.toml, subscribes the hook listener, and
+//! loads hooks from a DaemonPaths-scoped hooks.toml, subscribes the hook listener, and
 //! verifies that the agent's turn_end event is delivered as an HTTP POST.
 
 use std::sync::{Arc, Mutex};
@@ -18,6 +18,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 // The daemon owns the hook runtime; the e2e drives its pub API.
+use theway_daemon::DaemonPaths;
 use theway_daemon::hook_executors::daemon_executors;
 use theway_daemon::hooks;
 
@@ -95,6 +96,15 @@ fn faux_stream(text: &'static str) -> StreamFn {
     })
 }
 
+fn daemon_paths(base: &TempDir, work: &TempDir) -> DaemonPaths {
+    DaemonPaths {
+        base: base.path().to_path_buf(),
+        home: base.path().to_path_buf(),
+        work_dir: work.path().to_path_buf(),
+        extra_skill_dirs: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
+    }
+}
+
 async fn capture_one_request() -> (String, tokio::task::JoinHandle<String>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -148,9 +158,10 @@ fn content_length(headers: &str) -> Option<usize> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn user_webhook_hook_receives_turn_end_from_agent_harness() {
     let _env_lock = ENV_LOCK.lock().unwrap();
+    let poisoned = TempDir::new().unwrap();
+    let _theway_dir_guard = EnvGuard::set("THEWAY_DIR", poisoned.path());
     let theway_dir = TempDir::new().unwrap();
     let cwd = TempDir::new().unwrap();
-    let _theway_dir_guard = EnvGuard::set("THEWAY_DIR", theway_dir.path());
     let (webhook_url, request) = capture_one_request().await;
 
     let hooks_toml = format!(
@@ -168,7 +179,7 @@ X-Theway-Harness-Test = "webhook-e2e"
 
     let model = faux_model();
     let loaded = hooks::load(
-        cwd.path(),
+        &daemon_paths(&theway_dir, &cwd),
         "session-webhook-e2e",
         Some(&model),
         Some(ThinkingLevel::Off),
@@ -221,9 +232,10 @@ X-Theway-Harness-Test = "webhook-e2e"
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn compaction_webhook_receives_manual_force_compact_from_harness_bus() {
     let _env_lock = ENV_LOCK.lock().unwrap();
+    let poisoned = TempDir::new().unwrap();
+    let _theway_dir_guard = EnvGuard::set("THEWAY_DIR", poisoned.path());
     let theway_dir = TempDir::new().unwrap();
     let cwd = TempDir::new().unwrap();
-    let _theway_dir_guard = EnvGuard::set("THEWAY_DIR", theway_dir.path());
     let (webhook_url, request) = capture_one_request().await;
 
     let hooks_toml = format!(
@@ -238,7 +250,7 @@ timeout_ms = 3000
 
     let model = faux_model();
     let loaded = hooks::load(
-        cwd.path(),
+        &daemon_paths(&theway_dir, &cwd),
         "session-manual-compaction-e2e",
         Some(&model),
         Some(ThinkingLevel::Off),
@@ -281,9 +293,10 @@ timeout_ms = 3000
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn compaction_webhook_receives_auto_compaction_from_harness_bus() {
     let _env_lock = ENV_LOCK.lock().unwrap();
+    let poisoned = TempDir::new().unwrap();
+    let _theway_dir_guard = EnvGuard::set("THEWAY_DIR", poisoned.path());
     let theway_dir = TempDir::new().unwrap();
     let cwd = TempDir::new().unwrap();
-    let _theway_dir_guard = EnvGuard::set("THEWAY_DIR", theway_dir.path());
     let (webhook_url, request) = capture_one_request().await;
 
     let hooks_toml = format!(
@@ -298,7 +311,7 @@ timeout_ms = 3000
 
     let model = faux_model();
     let loaded = hooks::load(
-        cwd.path(),
+        &daemon_paths(&theway_dir, &cwd),
         "session-auto-compaction-e2e",
         Some(&model),
         Some(ThinkingLevel::Off),

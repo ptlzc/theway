@@ -19,7 +19,6 @@ use tokio::sync::OnceCell;
 use tokio_util::sync::CancellationToken;
 
 use crate::lsp::{Diagnostic, LspClient};
-use theway_transport::client::base_dir;
 
 const DIAG_WAIT_MS: u64 = 800;
 
@@ -73,13 +72,13 @@ impl LspSupervisor {
         }
     }
 
-    /// Load `<cwd>/.theway/lsp.toml` and `~/.theway/lsp.toml`; project entries overlay the user
-    /// entries by language id.
-    pub async fn load(cwd: &Path) -> Self {
+    /// Load `paths.work_dir/.theway/lsp.toml` and `paths.base/lsp.toml`;
+    /// project entries overlay the user entries by language id.
+    pub async fn load(paths: &crate::DaemonPaths) -> Self {
         let mut combined = LspConfig::default();
         for path in [
-            base_dir().join("lsp.toml"),
-            cwd.join(".theway").join("lsp.toml"),
+            paths.base.join("lsp.toml"),
+            paths.work_dir.join(".theway").join("lsp.toml"),
         ] {
             if !path.exists() {
                 continue;
@@ -100,7 +99,7 @@ impl LspSupervisor {
                 }
             }
         }
-        Self::from_config(cwd, combined)
+        Self::from_config(&paths.work_dir, combined)
     }
 
     pub fn is_empty(&self) -> bool {

@@ -37,7 +37,6 @@ use theway_core::{LoopEvent, LoopListener, SessionEvent, SessionListener, Thinki
 use tokio_util::sync::CancellationToken;
 
 use event::{EventData, HookEvent};
-use theway_contract::config::base_dir;
 use utils::{env_for, write_payload_file};
 
 const DEFAULT_TIMEOUT_MS: u64 = 5_000;
@@ -103,7 +102,9 @@ impl std::fmt::Debug for HookRunner {
         f.debug_struct("HookRunner")
             .field("rules", &self.rules)
             .field("session_id", &self.session_id)
-            .field("cwd", &self.cwd)
+            .field("work_dir", &self.work_dir)
+            .field("base", &self.base)
+            .field("home", &self.home)
             .field("model_provider", &self.model_provider)
             .field("model_id", &self.model_id)
             .field("thinking_level", &self.thinking_level)
@@ -122,7 +123,9 @@ impl std::fmt::Debug for HookRunner {
 pub struct HookRunner {
     rules: Vec<HookRule>,
     session_id: String,
-    cwd: PathBuf,
+    work_dir: PathBuf,
+    base: PathBuf,
+    home: PathBuf,
     model_provider: String,
     model_id: String,
     thinking_level: String,
@@ -211,13 +214,13 @@ pub struct HookPayload {
 }
 
 pub async fn load(
-    cwd: &Path,
+    paths: &crate::DaemonPaths,
     session_id: impl Into<String>,
     model: Option<&theway_llm_provider::Model>,
     thinking_level: Option<ThinkingLevel>,
     executors: HookExecutors,
 ) -> LoadedHooks {
-    load_with(cwd, session_id, model, thinking_level, executors, true).await
+    load_with(paths, session_id, model, thinking_level, executors, true).await
 }
 
 /// Same as [`load`] with an explicit local-file seam (issue #73):
@@ -226,7 +229,7 @@ pub async fn load(
 /// provisions hooks through the settings RPC instead of local files.
 /// TODO(#73): wire the controller-provisioned rules through here.
 pub async fn load_with(
-    cwd: &Path,
+    paths: &crate::DaemonPaths,
     session_id: impl Into<String>,
     model: Option<&theway_llm_provider::Model>,
     thinking_level: Option<ThinkingLevel>,
@@ -241,8 +244,8 @@ pub async fn load_with(
         .map(|t| t.as_str().to_string())
         .unwrap_or_else(|| "off".into());
 
-    let user_path = base_dir().join("hooks.toml");
-    let project_path = cwd.join(".theway").join("hooks.toml");
+    let user_path = paths.base.join("hooks.toml");
+    let project_path = paths.work_dir.join(".theway").join("hooks.toml");
     let mut diagnostics = Vec::new();
     let mut rules = Vec::new();
 
@@ -294,7 +297,9 @@ pub async fn load_with(
         runner: Arc::new(HookRunner {
             rules,
             session_id,
-            cwd: cwd.to_path_buf(),
+            work_dir: paths.work_dir.to_path_buf(),
+            base: paths.base.to_path_buf(),
+            home: paths.home.to_path_buf(),
             model_provider,
             model_id,
             thinking_level,
@@ -444,7 +449,7 @@ impl HookRunner {
         HookPayload {
             event: data.event.as_str().to_string(),
             session_id: self.session_id.clone(),
-            cwd: self.cwd.display().to_string(),
+            cwd: self.work_dir.display().to_string(),
             model_provider: self.model_provider.clone(),
             model_id: self.model_id.clone(),
             thinking_level: self.thinking_level.clone(),
@@ -527,11 +532,9 @@ impl HookRunner {
 
     fn cwd_for(&self, rule: &HookRule) -> PathBuf {
         match rule.cwd {
-            HookCwd::Project => self.cwd.clone(),
-            HookCwd::ThewayHarness => base_dir(),
-            HookCwd::Home => directories::BaseDirs::new()
-                .map(|d| d.home_dir().to_path_buf())
-                .unwrap_or_else(|| self.cwd.clone()),
+            HookCwd::Project => self.work_dir.clone(),
+            HookCwd::ThewayHarness => self.base.clone(),
+            HookCwd::Home => self.home.clone(),
         }
     }
 }

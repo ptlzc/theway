@@ -45,7 +45,7 @@ impl SessionProjectResources {
             }
         };
         let loaded_templates = if load_local_sources {
-            crate::templates::load_all(&paths.work_dir).await
+            crate::templates::load_all(paths).await
         } else {
             crate::templates::LoadedTemplates {
                 templates: Vec::new(),
@@ -551,7 +551,7 @@ impl SessionRuntimeBuilder {
             (state.model.clone(), state.thinking_level)
         };
         let loaded_hooks = hooks::load_with(
-            &ctx.cwd,
+            &ctx.paths,
             session_id.clone(),
             hook_model.as_ref(),
             hook_thinking,

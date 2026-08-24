@@ -59,6 +59,8 @@ A daemon configured with controller storage is valid only while that storage ser
 
 [`mcp_loader.rs`](../src/mcp_loader.rs) uses `theway-mcp` to discover external MCP tools and notifications from `paths.base/mcp.toml` and `paths.work_dir/.theway/mcp.toml`; stdio servers start in `paths.work_dir`, and HTTP auth reads `paths.base/auth.json`. MCP tools, hooks, inject sets, and capability metadata are owned by the `SessionExecutionContext`; TS extension catalog, legacy compaction host, compact registry, and engine pool are likewise session-scoped on the context. [`mcp_server.rs`](../src/mcp_server.rs) exposes the daemon as an MCP server. [`lsp_supervisor.rs`](../src/lsp_supervisor.rs) owns language-server process lifecycle.
 
+Templates, LSP config, and hooks are also discovered from `paths.base` and `paths.work_dir/.theway` via [`templates.rs`](../src/templates.rs), [`lsp_supervisor.rs`](../src/lsp_supervisor.rs), and [`hooks/mod.rs`](../src/hooks/mod.rs); hook runner cwd modes use the same explicit `work_dir`, `base`, and `home` values.
+
 ## Protocol adaptation
 
 [`transport_adapter.rs`](../src/transport_adapter.rs) converts core DAG runs, nodes, job state, and events into transport-owned wire snapshots and implements `GraphOps` and `JobOps`. The transport crate receives `TransportEndpoints` and `TransportHost`; it does not access `AgentHarness` or daemon-private state.

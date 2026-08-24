@@ -59,6 +59,8 @@
 
 [`mcp_loader.rs`](../src/mcp_loader.rs) 使用 `theway-mcp` 从 `paths.base/mcp.toml` 和 `paths.work_dir/.theway/mcp.toml` 发现外部 MCP 工具与 notification；stdio server 在 `paths.work_dir` 启动，HTTP auth 读取 `paths.base/auth.json`。MCP 工具、hook、inject set 和能力元数据由 `SessionExecutionContext` 持有；TS 扩展目录、legacy compaction host、compact registry 和 engine pool 也同样按会话挂在 context 上。[`mcp_server.rs`](../src/mcp_server.rs) 将 daemon 暴露为 MCP server。[`lsp_supervisor.rs`](../src/lsp_supervisor.rs) 负责 language server 进程生命周期。
 
+模板、LSP 配置和 hook 也通过 [`templates.rs`](../src/templates.rs)、[`lsp_supervisor.rs`](../src/lsp_supervisor.rs) 和 [`hooks/mod.rs`](../src/hooks/mod.rs) 从 `paths.base` 与 `paths.work_dir/.theway` 发现；hook runner 的 cwd 模式使用同样的显式 `work_dir`、`base` 和 `home` 值。
+
 ## 协议适配
 
 [`transport_adapter.rs`](../src/transport_adapter.rs) 把 core DAG 运行、节点、job 状态和事件转换为 transport 拥有的 wire snapshot，并实现 `GraphOps`、`JobOps`。Transport crate 接收 `TransportEndpoints` 和 `TransportHost`，不访问 `AgentHarness` 或 daemon 私有状态。

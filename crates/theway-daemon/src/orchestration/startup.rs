@@ -279,7 +279,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     // once the settings RPC provisions them, this local read goes away. The
     // `load_local_sources` seam starts an empty supervisor instead.
     let lsp_supervisor = Arc::new(if startup.load_local_sources {
-        crate::lsp_supervisor::LspSupervisor::load(&cwd).await
+        crate::lsp_supervisor::LspSupervisor::load(&session_context.paths).await
     } else {
         crate::lsp_supervisor::LspSupervisor::from_config(&cwd, Default::default())
     });
