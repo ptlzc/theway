@@ -1,9 +1,10 @@
 use super::*;
+use std::sync::Arc;
 use tempfile::tempdir;
 use theway_contract::extension::{
     ExtensionDurableEntry, ExtensionDurableEntryPayload, ExtensionStateMutation,
 };
-use theway_contract::session::{SessionBinding, SessionRuntimeContext};
+use theway_contract::session::{SessionBinding, SessionRuntimeContext, SessionStore};
 
 fn message(id: &str, parent_id: Option<&str>, role: &str, text: &str) -> StoredSessionEntry {
     StoredSessionEntry::from_payload(serde_json::json!({
@@ -390,6 +391,28 @@ async fn set_binding_none_clears_persisted_row() {
     drop(storage);
 
     let reopened = SqliteSessionStorage::open(&path).await.unwrap();
+    reopened.set_binding(None).await.unwrap();
+    drop(reopened);
+
+    let cleared = SqliteSessionStorage::open(&path).await.unwrap();
+    assert_eq!(cleared.metadata().binding, None);
+}
+
+#[tokio::test]
+async fn session_store_trait_set_binding_persists_and_clears() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("s.db");
+    let storage: Arc<dyn SessionStore> = Arc::new(
+        SqliteSessionStorage::create(&path, "/cwd").await.unwrap(),
+    );
+
+    let expected = binding();
+    storage.set_binding(Some(expected.clone())).await.unwrap();
+    drop(storage);
+
+    let reopened = SqliteSessionStorage::open(&path).await.unwrap();
+    assert_eq!(reopened.metadata().binding.as_ref(), Some(&expected));
+    let reopened: Arc<dyn SessionStore> = Arc::new(reopened);
     reopened.set_binding(None).await.unwrap();
     drop(reopened);
 

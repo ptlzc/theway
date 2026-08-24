@@ -558,6 +558,10 @@ impl SessionReader for SqliteSessionStorage {
 
 #[async_trait]
 impl SessionStore for SqliteSessionStorage {
+    async fn set_binding(&self, binding: Option<SessionBinding>) -> Result<(), SessionError> {
+        SqliteSessionStorage::set_binding(self, binding).await
+    }
+
     async fn set_leaf_id(&self, id: Option<String>) -> Result<(), SessionError> {
         let entry = StoredSessionEntry::leaf(
             uuidv7(),

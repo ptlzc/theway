@@ -79,6 +79,7 @@ async fn test_context(
         paths,
         crate::executor::executor_for_cwd(cwd.to_path_buf()),
         crate::model::credential_less_default(),
+        theway_core::ThinkingLevel::Off,
         resources,
         crate::orchestration::SessionMcpResources::default(),
         hooks,

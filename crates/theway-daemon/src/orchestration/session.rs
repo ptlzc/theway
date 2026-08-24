@@ -121,6 +121,32 @@ pub struct SessionMcpResources {
     pub notification_hook_count: usize,
 }
 
+impl SessionMcpResources {
+    /// Convert an MCP load result into session resources, emitting its
+    /// diagnostics once and deriving tool/server capability metadata.
+    pub fn from_loaded(loaded: crate::mcp_loader::LoadedMcp) -> Self {
+        for diagnostic in &loaded.diagnostics {
+            tracing::warn!(target: "mcp", "{diagnostic}");
+        }
+        let tool_names = loaded
+            .tools
+            .iter()
+            .map(|tool| tool.definition().name.clone())
+            .collect::<Vec<_>>();
+        let notification_hook_count = loaded.notification_hooks.len();
+        Self {
+            tools: loaded.tools,
+            notification_hooks: Arc::new(parking_lot::Mutex::new(loaded.notification_hooks)),
+            inject_summary_servers: loaded.inject_summary_servers,
+            inject_and_run_servers: loaded.inject_and_run_servers,
+            server_count: loaded.client_count,
+            server_names: loaded.server_names,
+            tool_names,
+            notification_hook_count,
+        }
+    }
+}
+
 /// Session-owned TS extension host resources loaded once per owning context.
 /// Cloned contexts share the same Arc-backed catalog, legacy compaction host,
 /// compact registry, and QuickJS engine pool; separately constructed contexts
@@ -256,6 +282,8 @@ pub struct SessionExecutionContext {
     pub executor: Arc<dyn theway_core::executor::ToolExecutor>,
     /// Effective model for this context.
     pub model: theway_llm_provider::Model,
+    /// Effective thinking level for this context's harness builds.
+    pub thinking: theway_core::ThinkingLevel,
     pub resources: SessionProjectResources,
     /// Session-owned MCP tools, one-shot hook pool, inject sets, and capability metadata.
     pub mcp: SessionMcpResources,
@@ -274,6 +302,7 @@ impl SessionExecutionContext {
         paths: crate::DaemonPaths,
         executor: Arc<dyn theway_core::executor::ToolExecutor>,
         model: theway_llm_provider::Model,
+        thinking: theway_core::ThinkingLevel,
         resources: SessionProjectResources,
         mcp: SessionMcpResources,
         hooks: SessionHookResources,
@@ -297,11 +326,60 @@ impl SessionExecutionContext {
             paths,
             executor,
             model,
+            thinking,
             resources,
             mcp,
             hooks,
             extension_resources,
         }
+    }
+
+    /// Build a session execution context for an arbitrary canonical work dir.
+    /// Does not mutate the process cwd or persist anything.
+    #[allow(dead_code)] // Used by session-context tests and future embedders.
+    pub async fn build_for_work_dir(
+        session_id: impl Into<String>,
+        requested_work_dir: std::path::PathBuf,
+        repo: Arc<dyn SessionRepository>,
+        storage: Arc<dyn RuntimeStorage>,
+        base_paths: crate::DaemonPaths,
+        model: theway_llm_provider::Model,
+        thinking: theway_core::ThinkingLevel,
+        cli_builtin_skills: &[String],
+        config_builtin_skills: &[String],
+        load_local_sources: bool,
+    ) -> Result<Self> {
+        let cwd = requested_work_dir
+            .canonicalize()
+            .with_context(|| format!("canonicalize work dir {}", requested_work_dir.display()))?;
+        let paths = base_paths.with_work_dir(cwd.clone());
+        let executor = crate::executor::executor_for_cwd(cwd.clone());
+        let loaded_mcp = if load_local_sources {
+            crate::mcp_loader::load_all(&paths).await
+        } else {
+            crate::mcp_loader::LoadedMcp::empty()
+        };
+        let resources = SessionProjectResources::load(
+            &paths,
+            cli_builtin_skills,
+            config_builtin_skills,
+            load_local_sources,
+        )
+        .await?;
+        let hooks = SessionHookResources::load(&paths, load_local_sources).await;
+        Ok(SessionExecutionContext::new(
+            session_id,
+            cwd,
+            repo,
+            storage,
+            base_paths,
+            executor,
+            model,
+            thinking,
+            resources,
+            SessionMcpResources::from_loaded(loaded_mcp),
+            hooks,
+        ))
     }
 }
 
@@ -328,6 +406,7 @@ impl SessionExecutionContext {
 /// startup model — a `/model` change made before switching is not carried over (the
 /// rehydrated transcript restores the session's own last recorded model when it has one).
 pub struct SessionRuntimeBuilder {
+    #[allow(dead_code)] // Kept for compatibility while build_opened uses ctx.thinking.
     pub thinking: ThinkingLevel,
     pub stream_fn: theway_core::StreamFn,
     pub dag_engine: Arc<DagEngine>,
@@ -527,7 +606,7 @@ impl SessionRuntimeBuilder {
             &tool_names,
         );
         opts.system_prompt = system_prompt;
-        opts.thinking_level = self.thinking;
+        opts.thinking_level = ctx.thinking;
         opts.tools = tools;
         opts.skills = ctx.resources.skills.clone();
         opts.prompt_templates = ctx.resources.templates.clone();

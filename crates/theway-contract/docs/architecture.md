@@ -22,6 +22,7 @@ The crate owns representation and compatibility rules only. Selection policy, ex
 - `validate_session_entries` verifies entry structure and derives the active leaf from the append-only record sequence.
 - `SessionReader` exposes metadata and tree queries, including extension entries filtered to one selected branch in root-to-leaf replay order.
 - `SessionStore` extends the reader operations with entry creation, leaf movement, and atomic ordered entry batches; the single-entry adapter uses the same batch contract.
+- `SessionStore::set_binding` persists or clears the non-secret client binding. The default fails closed with `StorageFailure` and the stable message `session store does not support binding updates`; storage backends override it when they support binding updates.
 
 `theway-core::PersistentSessionStorage` is the adapter that encodes and decodes typed `SessionTreeEntry` values. This crate does not interpret prompts, model changes, compaction records, or custom runtime events.
 

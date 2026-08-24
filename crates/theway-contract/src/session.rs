@@ -386,6 +386,15 @@ pub trait SessionStore: SessionReader {
     /// every entry becomes visible or none of them does.
     async fn append_entries(&self, entries: Vec<StoredSessionEntry>) -> Result<(), SessionError>;
 
+    /// Persist or clear a non-secret client binding. Backends that cannot
+    /// support binding updates must fail closed instead of silently succeeding.
+    async fn set_binding(&self, _binding: Option<SessionBinding>) -> Result<(), SessionError> {
+        Err(SessionError::new(
+            SessionErrorCode::StorageFailure,
+            "session store does not support binding updates",
+        ))
+    }
+
     async fn append_entry(&self, entry: StoredSessionEntry) -> Result<(), SessionError> {
         self.append_entries(vec![entry]).await
     }

@@ -234,26 +234,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     } else {
         crate::mcp_loader::LoadedMcp::empty()
     };
-    for diagnostic in &mcp.diagnostics {
-        tracing::warn!(target: "mcp", "{diagnostic}");
-    }
-    let mcp_tool_names = mcp
-        .tools
-        .iter()
-        .map(|t| t.definition().name.clone())
-        .collect::<Vec<_>>();
-    let mcp_server_names = mcp.server_names.clone();
-    let mcp_notification_hook_count = mcp.notification_hooks.len();
-    let mcp_resources = SessionMcpResources {
-        tools: mcp.tools,
-        notification_hooks: Arc::new(parking_lot::Mutex::new(mcp.notification_hooks)),
-        inject_summary_servers: mcp.inject_summary_servers,
-        inject_and_run_servers: mcp.inject_and_run_servers,
-        server_count: mcp.client_count,
-        server_names: mcp_server_names,
-        tool_names: mcp_tool_names,
-        notification_hook_count: mcp_notification_hook_count,
-    };
+    let mcp_resources = SessionMcpResources::from_loaded(mcp);
     let project_resources = SessionProjectResources::load(
         &session_paths,
         &options.builtin_skills,
@@ -271,6 +252,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         paths.clone(),
         executor.clone(),
         model.clone(),
+        thinking,
         project_resources,
         mcp_resources,
         hook_resources,

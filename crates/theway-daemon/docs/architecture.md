@@ -34,6 +34,8 @@ English | [中文](architecture.zh.md)
 - optionally rehydrates typed runtime state from the active persisted branch;
 - supplies the persisted session id and daemon working directory to the core runtime-extension context and starts the session lifecycle after reconstruction.
 
+`SessionExecutionContext` owns the canonical cwd, thinking level, project resources, MCP resources, hook resources, and extension resources for each session. `SessionExecutionContext::build_for_work_dir` canonicalizes an arbitrary requested work directory, derives cwd-scoped paths, and constructs the executor/resources/hooks/extension host without changing the process cwd. `SessionRuntimeBuilder::build_opened` uses the context's thinking level for the harness.
+
 [`turn/kernel.rs`](../src/turn/kernel.rs) provides `ReplKernel`, which admits one active prompt/continuation, owns queued turns, and replaces the complete runtime when switching sessions. [`turn/daemon.rs`](../src/turn/daemon.rs) owns the protocol-neutral daemon state machine, command routing, snapshots, feed updates, and lifecycle event handling.
 
 Session switching invokes the current harness's extension gate before constructing a target runtime. An active turn is cancelled and driven through settlement before the old runtime sends `session_shutdown`; only then does `ReplKernel::replace_runtime` activate the reconstructed target and publish `session_switched`. The `/fork` command invokes the fork gate before `SessionRepository::fork` and publishes `session_forked` only after the new session metadata is readable. A rejected gate therefore leaves the current runtime and session repository unchanged.

@@ -34,6 +34,8 @@
 - 按需从活动持久化分支恢复带类型的运行时状态；
 - 向 core runtime-extension context 提供持久化 session id 与 daemon 工作目录，并在重建后启动 session 生命周期。
 
+`SessionExecutionContext` 为每个会话持有规范 cwd、thinking 级别、项目资源、MCP 资源、hook 资源和 extension 资源。`SessionExecutionContext::build_for_work_dir` 将任意请求的工作目录规范化，派生 cwd 作用域路径，并构造 executor/资源/hook/extension host，且不改变进程 cwd。`SessionRuntimeBuilder::build_opened` 使用 context 的 thinking 级别构建 harness。
+
 [`turn/kernel.rs`](../src/turn/kernel.rs) 提供 `ReplKernel`，负责单个活动 prompt/continuation 的准入、排队 turn，并在切换会话时整体替换运行时。[`turn/daemon.rs`](../src/turn/daemon.rs) 负责与协议无关的 daemon 状态机、命令路由、snapshot、feed 更新和生命周期事件处理。
 
 会话切换在构建目标 runtime 前调用当前 harness 的 extension gate。活动 turn 会被取消并驱动至 settlement，旧 runtime 随后发送 `session_shutdown`；之后 `ReplKernel::replace_runtime` 才激活已重建的目标并发布 `session_switched`。`/fork` 命令在 `SessionRepository::fork` 前调用 fork gate，并且只在新会话元数据可读取后发布 `session_forked`。因此，被拒绝的 gate 不会改变当前 runtime 或会话仓库。
