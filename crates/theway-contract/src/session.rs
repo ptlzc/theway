@@ -44,6 +44,31 @@ pub struct SessionMetadata {
     pub created_at: String,
 }
 
+/// Persisted session runtime values; credentials must not be added here.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionRuntimeContext {
+    #[serde(rename = "workDir")]
+    pub work_dir: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "baseUrl")]
+    pub base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<bool>,
+}
+
+/// Persisted client identity and its non-secret runtime context.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionBinding {
+    #[serde(rename = "clientKey")]
+    pub client_key: String,
+    pub runtime: SessionRuntimeContext,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JsonlSessionMetadata {
     #[serde(flatten)]
@@ -62,6 +87,8 @@ pub struct JsonlSessionMetadata {
         rename = "importedFrom"
     )]
     pub imported_from: Option<SessionImportOrigin>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding: Option<SessionBinding>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
