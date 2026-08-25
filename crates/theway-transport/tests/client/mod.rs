@@ -166,20 +166,33 @@ async fn client_interrupt_mode_maps_to_interrupt_flag() {
 
 #[tokio::test]
 async fn client_cancel_set_model_approve_switch_session_round_trip() {
-    let (mut client, mut command_rx, _snapshot_tx) = client_and_server().await;
+    let (client, mut command_rx, _snapshot_tx) = client_and_server().await;
+    let client = Arc::new(tokio::sync::Mutex::new(client));
 
-    assert!(client.cancel().await.unwrap());
+    {
+        let mut client = client.lock().await;
+        assert!(client.cancel().await.unwrap());
+    }
     assert!(matches!(
         command_rx.recv().await.unwrap(),
         crate::wire::WireCommand::Abort
     ));
 
-    assert!(client.set_model("anthropic:claude-x").await.unwrap());
+    let rpc_client = client.clone();
+    let rpc = tokio::spawn(async move {
+        let mut client = rpc_client.lock().await;
+        client.set_model("anthropic:claude-x").await.unwrap()
+    });
     match command_rx.recv().await.unwrap() {
-        crate::wire::WireCommand::SetModel { spec } => assert_eq!(spec, "anthropic:claude-x"),
+        crate::wire::WireCommand::SetModel { spec, response } => {
+            assert_eq!(spec, "anthropic:claude-x");
+            let _ = response.send(true);
+        }
         other => panic!("unexpected command: {other:?}"),
     }
+    assert!(rpc.await.unwrap());
 
+    let mut client = client.lock().await;
     assert!(client.approve(true).await.unwrap());
     match command_rx.recv().await.unwrap() {
         crate::wire::WireCommand::ResolveControlPlane { approve } => assert!(approve),

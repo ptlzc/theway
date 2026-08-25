@@ -337,7 +337,16 @@ pub(crate) async fn dispatch(
                 .as_str()
                 .unwrap_or_default()
                 .to_string();
-            let accepted = state.commands.send(WireCommand::SetModel { spec }).is_ok();
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            let accepted = state
+                .commands
+                .send(WireCommand::SetModel { spec, response: tx })
+                .is_ok();
+            let accepted = if accepted {
+                rx.await.unwrap_or(false)
+            } else {
+                false
+            };
             Ok(serde_json::json!({ "accepted": accepted }))
         }
         "complete" => {

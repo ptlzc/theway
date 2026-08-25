@@ -48,19 +48,66 @@ impl TurnHost {
     }
 
     async fn set_model_from_spec(&mut self, spec: &str) -> bool {
-        let Some((provider, id)) = commands::parse_model_spec(spec) else {
+        if let Some((provider, id)) = commands::parse_model_spec(spec) {
+            let provider_obj = theway_llm_provider::Provider::from(provider);
+            if let Some(model) = theway_llm_provider::get_model(&provider_obj, id) {
+                return self.apply_model(model).await;
+            }
+            // A slash-separated string may be either `provider/model` or a bare
+            // model id that itself contains `/` (e.g. Cloudflare model ids).
+            // Only fail here when the first component names a real provider or
+            // the spec uses `:`; otherwise fall through to bare-id resolution.
+            let looks_like_provider_spec = spec.contains(':')
+                || theway_llm_provider::list_models()
+                    .iter()
+                    .any(|model| model.provider.0 == provider);
+            if looks_like_provider_spec {
+                self.error_line(format!("unknown model: {provider}:{id}"));
+                return false;
+            }
+        }
+
+        // Bare model ids are accepted when they resolve unambiguously against the
+        // registered model catalog, using the daemon's base URL to disambiguate.
+        let id = spec.trim();
+        let base_url = self
+            .runtime
+            .config
+            .read()
+            .unwrap()
+            .base_url
+            .clone()
+            .unwrap_or_default();
+        let candidates: Vec<_> = if base_url.is_empty() {
+            theway_llm_provider::list_models()
+                .into_iter()
+                .filter(|model| model.id == id)
+                .collect()
+        } else {
+            let exact: Vec<_> = theway_llm_provider::list_models()
+                .into_iter()
+                .filter(|model| model.id == id && model.base_url == base_url)
+                .collect();
+            if exact.is_empty() {
+                theway_llm_provider::list_models()
+                    .into_iter()
+                    .filter(|model| model.id == id && model.base_url.is_empty())
+                    .collect()
+            } else {
+                exact
+            }
+        };
+        if candidates.len() == 1 {
+            return self.apply_model(candidates.into_iter().next().unwrap()).await;
+        }
+        if candidates.len() > 1 {
+            self.error_line(format!(
+                "ambiguous model id: {id}; use provider:model to disambiguate"
+            ));
+        } else {
             self.error_line(format!("invalid model spec: {spec}"));
-            return false;
-        };
-        let (provider, id) = (provider.to_string(), id.to_string());
-        let Some(model) = theway_llm_provider::get_model(
-            &theway_llm_provider::Provider::from(provider.as_str()),
-            &id,
-        ) else {
-            self.error_line(format!("unknown model: {provider}:{id}"));
-            return false;
-        };
-        self.apply_model(model).await
+        }
+        false
     }
 
     async fn apply_model(&mut self, model: theway_llm_provider::Model) -> bool {

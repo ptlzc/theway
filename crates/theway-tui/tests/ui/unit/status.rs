@@ -203,7 +203,7 @@ async fn bare_model_slash_opens_picker_and_switches_model() {
         .expect("no set_model command")
         .unwrap();
     match cmd {
-        WireCommand::SetModel { spec } => assert_eq!(spec, "anthropic:claude-x"),
+        WireCommand::SetModel { spec, .. } => assert_eq!(spec, "anthropic:claude-x"),
         other => panic!("unexpected command: {other:?}"),
     }
     assert!(app.model_picker.is_none());

@@ -34,7 +34,8 @@ pub use env_api_keys::get_env_api_key;
 pub use image_models::{get_image_model, list_image_models};
 pub use images::images;
 pub use models::{
-    get_model, list_apis, list_models, register_custom_model, unregister_custom_model,
+    get_model, list_apis, list_custom_models, list_models, register_custom_model,
+    unregister_custom_model,
 };
 pub use provider_interceptor::*;
 pub use session_resources::cleanup_session_resources;

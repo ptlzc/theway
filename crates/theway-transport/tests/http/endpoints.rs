@@ -153,19 +153,27 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
         other => panic!("unexpected command: {other:?}"),
     }
 
-    let accepted = rpc_call(
-        &client,
-        &base,
-        7,
-        "set_model",
-        Some(json!({ "model": "anthropic:claude-haiku-4-5" })),
-    )
-    .await;
-    assert_eq!(accepted["accepted"], true);
+    let client_for_rpc = client.clone();
+    let base_for_rpc = base.clone();
+    let rpc = tokio::spawn(async move {
+        rpc_call(
+            &client_for_rpc,
+            &base_for_rpc,
+            7,
+            "set_model",
+            Some(json!({ "model": "anthropic:claude-haiku-4-5" })),
+        )
+        .await
+    });
     match command_rx.recv().await.unwrap() {
-        WireCommand::SetModel { spec } => assert_eq!(spec, "anthropic:claude-haiku-4-5"),
+        WireCommand::SetModel { spec, response } => {
+            assert_eq!(spec, "anthropic:claude-haiku-4-5");
+            let _ = response.send(true);
+        }
         other => panic!("unexpected command: {other:?}"),
     }
+    let accepted = rpc.await.unwrap();
+    assert_eq!(accepted["accepted"], true);
 
     let completions = rpc_call(
         &client,

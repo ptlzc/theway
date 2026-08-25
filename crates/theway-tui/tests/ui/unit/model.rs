@@ -4,7 +4,7 @@ async fn model_spec_uses_typed_switch_while_model_list_forwards_to_daemon() {
     app.dispatch_slash("/model anthropic:claude-x", &mut terminal_placeholder())
         .await;
     match rx.recv().await.unwrap() {
-        WireCommand::SetModel { spec } => assert_eq!(spec, "anthropic:claude-x"),
+        WireCommand::SetModel { spec, .. } => assert_eq!(spec, "anthropic:claude-x"),
         other => panic!("unexpected command: {other:?}"),
     }
 
@@ -38,7 +38,7 @@ async fn model_picker_confirmed_snapshot_persists_startup_default() {
         .expect("no set_model command")
         .unwrap();
     match cmd {
-        WireCommand::SetModel { spec } => assert_eq!(spec, "anthropic:claude-x"),
+        WireCommand::SetModel { spec, .. } => assert_eq!(spec, "anthropic:claude-x"),
         other => panic!("unexpected command: {other:?}"),
     }
     assert!(app.model_picker.is_none());

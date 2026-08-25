@@ -18,8 +18,9 @@ impl TurnHost {
                 };
                 self.resolve_control_plane_prompt(decision);
             }
-            WireCommand::SetModel { spec } => {
-                self.set_model_from_spec(&spec).await;
+            WireCommand::SetModel { spec, response } => {
+                let ok = self.set_model_from_spec(&spec).await;
+                let _ = response.send(ok);
             }
             WireCommand::SwitchSession { id } => self.handle_switch_session(id, turn).await,
             WireCommand::SetSkillDirs { dirs } => self.handle_set_skill_dirs(dirs, turn).await,

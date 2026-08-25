@@ -199,6 +199,7 @@ async fn lagged_snapshot_stream_emits_latest_full_state() {
 #[tokio::test]
 async fn commands_queue_with_accepted_semantics() {
     let (state, mut command_rx) = grpc_state();
+    let state = Arc::new(state);
 
     let result = state
         .send_message(Request::new(SendMessageRequest {
@@ -239,18 +240,25 @@ async fn commands_queue_with_accepted_semantics() {
         WireCommand::Abort
     ));
 
-    let result = state
-        .set_model(Request::new(SetModelRequest {
-            spec: "anthropic:claude-haiku-4-5".into(),
-        }))
-        .await
-        .unwrap()
-        .into_inner();
-    assert!(result.accepted);
+    let rpc_state = state.clone();
+    let rpc = tokio::spawn(async move {
+        rpc_state
+            .set_model(Request::new(SetModelRequest {
+                spec: "anthropic:claude-haiku-4-5".into(),
+            }))
+            .await
+            .unwrap()
+            .into_inner()
+    });
     match command_rx.recv().await.unwrap() {
-        WireCommand::SetModel { spec } => assert_eq!(spec, "anthropic:claude-haiku-4-5"),
+        WireCommand::SetModel { spec, response } => {
+            assert_eq!(spec, "anthropic:claude-haiku-4-5");
+            let _ = response.send(true);
+        }
         other => panic!("unexpected command: {other:?}"),
     }
+    let result = rpc.await.unwrap();
+    assert!(result.accepted);
 
     let result = state
         .approve(Request::new(ApproveRequest { approve: true }))

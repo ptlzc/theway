@@ -8,6 +8,7 @@ use theway_llm_provider::{
     AssistantMessageEvent, Context as AiContext, DoneReason, Message, Tool, UserContent,
     UserMessage, UserRole,
 };
+use theway_transport::auth::{AuthStore, ProviderCredential};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -182,6 +183,58 @@ fn loads_and_registers_custom_model() {
     theway_llm_provider::unregister_custom_model(
         &theway_llm_provider::Provider::from("local-test-register"),
         "deepseek-v4-flash",
+    );
+}
+
+#[test]
+fn auto_detect_prefers_models_json_and_auth_json_provider_over_builtin_default() {
+    let _lock = env_lock().lock().unwrap();
+    let base = TempDir::new().unwrap();
+    let _theway_dir = EnvGuard::set("THEWAY_DIR", base.path());
+    let _cleanup: Vec<_> = [
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "DS4_API_KEY",
+        "OPENROUTER_API_KEY",
+        "GROQ_API_KEY",
+        "MISTRAL_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+    ]
+    .iter()
+    .map(|name| EnvGuard::remove(name))
+    .collect();
+
+    let provider = "local-pref";
+    let id = "preferred-model";
+    let path = base.path().join("models.json");
+    std::fs::write(
+        &path,
+        model_json(
+            provider,
+            id,
+            "openai-responses",
+            "http://127.0.0.1:9/v1",
+        ),
+    )
+    .unwrap();
+    let mut store = AuthStore::default();
+    store.set(
+        provider,
+        ProviderCredential::ApiKey {
+            value: "local-key".into(),
+        },
+    );
+    store.save().unwrap();
+
+    load_all_from_paths(&[path]).unwrap();
+
+    let model = crate::model::auto_detect_model(None, None).unwrap();
+    assert_eq!(model.provider.0, provider);
+    assert_eq!(model.id, id);
+    theway_llm_provider::unregister_custom_model(
+        &theway_llm_provider::Provider::from(provider),
+        id,
     );
 }
 

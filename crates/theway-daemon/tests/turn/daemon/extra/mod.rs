@@ -351,9 +351,11 @@ async fn handle_web_command_routes_set_model_invalid_spec() {
     let host = fixture.host();
     let original = current_model_label(host.session.kernel.harness());
 
+    let (response, _rx) = tokio::sync::oneshot::channel();
     host.handle_web_command(
         WireCommand::SetModel {
             spec: "no-colon".into(),
+            response,
         },
         &mut TurnState::default(),
     )
@@ -433,6 +435,32 @@ async fn set_model_from_spec_switches_to_supported_catalog_model() {
     host.set_model_from_spec(&spec).await;
 
     assert_eq!(current_model_label(host.session.kernel.harness()), spec);
+}
+
+#[tokio::test]
+async fn set_model_from_spec_resolves_unique_bare_id_with_base_url() {
+    let mut fixture = HostFixture::new().await;
+    let host = fixture.host();
+    let model = theway_llm_provider::list_models()
+        .into_iter()
+        .find(|model| {
+            SUPPORTED_APIS.contains(&model.api.0.as_str())
+                && !model.base_url.is_empty()
+                && theway_llm_provider::list_models()
+                    .iter()
+                    .filter(|candidate| candidate.id == model.id)
+                    .count()
+                    == 1
+        })
+        .expect("a supported unique catalog model should exist");
+    host.runtime.config.write().unwrap().base_url = Some(model.base_url.clone());
+
+    host.set_model_from_spec(&model.id).await;
+
+    assert_eq!(
+        current_model_label(host.session.kernel.harness()),
+        format!("{}:{}", model.provider.0, model.id)
+    );
 }
 
 #[tokio::test]

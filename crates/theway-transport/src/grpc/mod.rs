@@ -157,12 +157,19 @@ impl CommandService for GrpcState {
         &self,
         request: Request<SetModelRequest>,
     ) -> Result<Response<CommandResult>, Status> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
         let accepted = self
             .commands
             .send(WireCommand::SetModel {
                 spec: request.into_inner().spec,
+                response: tx,
             })
             .is_ok();
+        let accepted = if accepted {
+            rx.await.unwrap_or(false)
+        } else {
+            false
+        };
         Ok(Response::new(CommandResult { accepted }))
     }
 

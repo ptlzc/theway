@@ -34,6 +34,15 @@ pub fn auto_detect_model(
     }
     // Detect by env, with the auth.json store as fallback (issue #13).
     let store = theway_transport::auth::AuthStore::load().unwrap_or_default();
+    // Prefer models explicitly configured in `models.json` (or registered local defaults)
+    // over the built-in candidate list, as long as their provider has a credential.
+    let local_models = theway_llm_provider::list_custom_models();
+    if let Some(model) = local_models
+        .iter()
+        .find(|model| store.resolve_for_provider(&model.provider.0).is_some())
+    {
+        return Ok(model.clone());
+    }
     for (env, provider, model_id) in CANDIDATES {
         let env_set = std::env::var(env)
             .ok()

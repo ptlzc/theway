@@ -49,6 +49,7 @@ pub enum WireCommand {
     },
     SetModel {
         spec: String,
+        response: tokio::sync::oneshot::Sender<bool>,
     },
     /// session-resource-model: switch the runtime to another session (resume semantics).
     /// `CreateSession`'s "make current" path also flows through this command — creating the
