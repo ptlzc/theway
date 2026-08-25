@@ -40,6 +40,7 @@ async fn spawn_state_server() -> (
             dags: Vec::new(),
             subagents: Vec::new(),
             usage: WireContextUsage::default(),
+            session_usage: WireContextUsage::default(),
             tui_max_feed_lines: None,
             extensions: WireExtensionSnapshot::default(),
         })),

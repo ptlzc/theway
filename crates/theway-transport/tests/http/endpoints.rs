@@ -33,6 +33,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
         dags: Vec::new(),
         subagents: Vec::new(),
         usage: WireContextUsage::default(),
+        session_usage: WireContextUsage::default(),
         tui_max_feed_lines: None,
         extensions: WireExtensionSnapshot::default(),
     }));
@@ -213,6 +214,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
             dags: Vec::new(),
             subagents: Vec::new(),
             usage: WireContextUsage::default(),
+            session_usage: WireContextUsage::default(),
             tui_max_feed_lines: None,
             extensions: WireExtensionSnapshot::default(),
         }))
@@ -269,6 +271,7 @@ async fn websocket_serves_snapshot_and_accepts_commands() {
         dags: Vec::new(),
         subagents: Vec::new(),
         usage: WireContextUsage::default(),
+        session_usage: WireContextUsage::default(),
         tui_max_feed_lines: None,
         extensions: WireExtensionSnapshot::default(),
     }));
@@ -464,6 +467,7 @@ async fn healthz_answers_ok_without_snapshot_and_root_404s() {
         dags: Vec::new(),
         subagents: Vec::new(),
         usage: WireContextUsage::default(),
+        session_usage: WireContextUsage::default(),
         tui_max_feed_lines: None,
         extensions: WireExtensionSnapshot::default(),
     });
@@ -532,6 +536,7 @@ async fn spawn_config_server(
             dags: Vec::new(),
             subagents: Vec::new(),
             usage: WireContextUsage::default(),
+            session_usage: WireContextUsage::default(),
             tui_max_feed_lines: None,
             extensions: WireExtensionSnapshot::default(),
         })),

@@ -48,10 +48,20 @@ impl App {
                     Style::default().fg(Color::DarkGray),
                 ),
             ];
-            let usage = &self.latest.usage;
-            let input = (usage.input_tokens > 0).then_some(usage.input_tokens);
-            let output = (usage.output_tokens > 0).then_some(usage.output_tokens);
-            let stats = stats::busy_stats_text(self.cps_meter.cps(), input, output);
+            let session_usage = &self.latest.session_usage;
+            let stats = if session_usage.input_tokens > 0 {
+                stats::busy_stats_text_with_session(
+                    self.cps_meter.cps(),
+                    session_usage.input_tokens,
+                    session_usage.cache_read_tokens,
+                    session_usage.output_tokens,
+                )
+            } else {
+                let usage = &self.latest.usage;
+                let input = (usage.input_tokens > 0).then_some(usage.input_tokens);
+                let output = (usage.output_tokens > 0).then_some(usage.output_tokens);
+                stats::busy_stats_text(self.cps_meter.cps(), input, output)
+            };
             spans.push(Span::styled(
                 format!(" · {stats}"),
                 Style::default().fg(Color::DarkGray),

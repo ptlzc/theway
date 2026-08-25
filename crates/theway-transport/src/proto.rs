@@ -217,6 +217,14 @@ fn session_state_with_feed(
             total_tokens: snapshot.usage.total_tokens,
             context_window: snapshot.usage.context_window.min(u32::MAX as u64) as u32,
         }),
+        session_context_usage: Some(wire::ContextUsage {
+            input_tokens: snapshot.session_usage.input_tokens,
+            output_tokens: snapshot.session_usage.output_tokens,
+            cache_read_tokens: snapshot.session_usage.cache_read_tokens,
+            cache_write_tokens: snapshot.session_usage.cache_write_tokens,
+            total_tokens: snapshot.session_usage.total_tokens,
+            context_window: snapshot.session_usage.context_window.min(u32::MAX as u64) as u32,
+        }),
         tui_max_feed_lines: snapshot.tui_max_feed_lines.map(|n| n as u32),
         extensions: Some(extension_snapshot_proto(&snapshot.extensions)),
     }
@@ -422,6 +430,18 @@ pub fn wire_status(state: &wire::SessionState) -> WireStatus {
         subagents: state.subagents.iter().map(wire_subagent_job).collect(),
         usage: state
             .context_usage
+            .as_ref()
+            .map(|usage| crate::wire::WireContextUsage {
+                input_tokens: usage.input_tokens,
+                output_tokens: usage.output_tokens,
+                cache_read_tokens: usage.cache_read_tokens,
+                cache_write_tokens: usage.cache_write_tokens,
+                total_tokens: usage.total_tokens,
+                context_window: u64::from(usage.context_window),
+            })
+            .unwrap_or_default(),
+        session_usage: state
+            .session_context_usage
             .as_ref()
             .map(|usage| crate::wire::WireContextUsage {
                 input_tokens: usage.input_tokens,

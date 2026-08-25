@@ -132,6 +132,19 @@ impl TurnHost {
     ) {
         turn.fut = None;
         self.session.busy = false;
+        if !turn.aborted
+            && let Some(usage) =
+                last_turn_usage(&self.session.kernel.harness().agent().state().messages)
+        {
+            let cumulative = &mut self.session.cumulative_usage;
+            cumulative.input_tokens = cumulative.input_tokens.saturating_add(usage.input);
+            cumulative.output_tokens = cumulative.output_tokens.saturating_add(usage.output);
+            cumulative.cache_read_tokens =
+                cumulative.cache_read_tokens.saturating_add(usage.cache_read);
+            cumulative.cache_write_tokens =
+                cumulative.cache_write_tokens.saturating_add(usage.cache_write);
+            cumulative.total_tokens = cumulative.total_tokens.saturating_add(usage.total_tokens);
+        }
         if turn.aborted {
             self.system_line("[aborted]");
         } else {

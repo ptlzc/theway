@@ -9,6 +9,7 @@ use crate::wire::{
 mod coverage;
 mod extensions;
 mod session_activation;
+mod session_cumulative_usage;
 use crate::feed::{Level, TriggerPollStatus};
 use crate::wire::{
     WireCronSnapshot, WireMcpSnapshot, WireSidebarSnapshot, WireSkillsSnapshot, WireToolsSnapshot,
@@ -96,6 +97,7 @@ fn fixture_snapshot() -> WireStatus {
         dags: Vec::new(),
         subagents: Vec::new(),
         usage: WireContextUsage::default(),
+        session_usage: WireContextUsage::default(),
         tui_max_feed_lines: None,
         extensions: WireExtensionSnapshot::default(),
     }

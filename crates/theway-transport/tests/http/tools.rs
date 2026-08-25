@@ -37,6 +37,7 @@ async fn spawn_tools_server() -> (String, std::sync::Arc<FakeToolOps>, tokio::ta
             dags: Vec::new(),
             subagents: Vec::new(),
             usage: WireContextUsage::default(),
+            session_usage: WireContextUsage::default(),
             tui_max_feed_lines: None,
             extensions: WireExtensionSnapshot::default(),
         })),

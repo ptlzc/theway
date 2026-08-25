@@ -139,6 +139,7 @@ struct SessionRuntimeState {
     shared_state: Arc<Mutex<CurrentSessionState>>,
     busy: bool,
     queue: VecDeque<QueuedTurn>,
+    cumulative_usage: WireContextUsage,
 }
 
 struct AutomationRuntime {

@@ -609,3 +609,43 @@ async fn composer_info_line_shows_current_working_directory() {
     let text = buffer_text(terminal.backend().buffer());
     assert!(text.contains("/tmp/theway"), "composer cwd missing:\n{text}");
 }
+
+// ── session-cumulative KV cache metrics (busy band) ──────────────────────
+
+#[tokio::test]
+async fn busy_stats_line_shows_session_cache_metrics_from_session_usage() {
+    let (mut app, _rx) = test_app().await;
+    let mut status = fixture_status(Vec::new());
+    status.busy = true;
+    status.session_usage = WireContextUsage {
+        input_tokens: 1_200,
+        output_tokens: 340,
+        cache_read_tokens: 800,
+        cache_write_tokens: 50,
+        total_tokens: 1_540,
+        context_window: 200_000,
+    };
+    app.apply_snapshot(status);
+    app.busy = true;
+    app.busy_started = Some(std::time::Instant::now());
+
+    let backend = TestBackend::new(100, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| app.render(frame)).unwrap();
+    let text = buffer_text(terminal.backend().buffer());
+    let row = text
+        .lines()
+        .find(|line| line.contains("working"))
+        .expect("busy status row");
+
+    // Total input, cached tokens, non-cached input, output, and hit rate.
+    assert!(row.contains("input: 1.2k"), "total input missing: {row}");
+    assert!(row.contains("cached: 800"), "cached tokens missing: {row}");
+    assert!(row.contains("new: 400"), "non-cached input missing: {row}");
+    assert!(row.contains("output: 340"), "output missing: {row}");
+    assert!(row.contains("hit: 66.7%"), "cache hit rate missing: {row}");
+
+    // The session-cumulative stats line is a token/cache display, not a cost
+    // display: monetary values must never appear.
+    assert!(!row.contains('$'), "monetary values must not appear: {row}");
+}

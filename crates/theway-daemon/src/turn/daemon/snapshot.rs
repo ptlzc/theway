@@ -100,6 +100,7 @@ impl TurnHost {
                 total_tokens: usage.total_tokens,
                 context_window,
             },
+            session_usage: self.session.cumulative_usage.clone(),
             tui_max_feed_lines: self.runtime.feed_history_limit,
             extensions: self.wire_extension_snapshot(),
         }

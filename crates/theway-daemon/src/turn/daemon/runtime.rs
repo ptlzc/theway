@@ -78,6 +78,7 @@ impl TurnHost {
                 shared_state: config.current_session_state,
                 busy: false,
                 queue: VecDeque::new(),
+                cumulative_usage: WireContextUsage::default(),
             },
             automation: AutomationRuntime {
                 services: config.services,

@@ -42,6 +42,9 @@ message SessionState {
   repeated FeedBlockPatch feed_block_patches = 19;
   // Runtime-extension status is additive; older clients ignore this field.
   ExtensionSnapshot extensions = 20;
+  // Session-cumulative token usage: total input, cached input, non-cached
+  // input, output, and cache write totals for the current session.
+  ContextUsage session_context_usage = 21;
 }
 
 message FeedBlockPatch {

@@ -468,6 +468,10 @@ pub struct WireStatus {
     /// the daemon for the TUI prompt chrome (context-usage indicator).
     #[serde(default)]
     pub usage: WireContextUsage,
+    /// Session-cumulative token usage: total input, cached input, non-cached
+    /// input, output, and cache write totals for the current session.
+    #[serde(default)]
+    pub session_usage: WireContextUsage,
     /// TUI display settings resolved by the daemon from `config.toml`
     /// (`[tui] max_feed_lines`); `None` → the TUI built-in default applies.
     pub tui_max_feed_lines: Option<u64>,

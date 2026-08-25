@@ -66,7 +66,14 @@ export interface SessionState {
   /** Appends/replacements since feed_blocks_base. Full frames leave this empty. */
   feedBlockPatches: FeedBlockPatch[];
   /** Runtime-extension status is additive; older clients ignore this field. */
-  extensions?: ExtensionSnapshot | undefined;
+  extensions?:
+    | ExtensionSnapshot
+    | undefined;
+  /**
+   * Session-cumulative token usage: total input, cached input, non-cached
+   * input, output, and cache write totals for the current session.
+   */
+  sessionContextUsage?: ContextUsage | undefined;
 }
 
 export interface FeedBlockPatch {
@@ -371,6 +378,7 @@ function createBaseSessionState(): SessionState {
     feedBlocksBase: "0",
     feedBlockPatches: [],
     extensions: undefined,
+    sessionContextUsage: undefined,
   };
 }
 
@@ -435,6 +443,9 @@ export const SessionState: MessageFns<SessionState> = {
     }
     if (message.extensions !== undefined) {
       ExtensionSnapshot.encode(message.extensions, writer.uint32(162).fork()).join();
+    }
+    if (message.sessionContextUsage !== undefined) {
+      ContextUsage.encode(message.sessionContextUsage, writer.uint32(170).fork()).join();
     }
     return writer;
   },
@@ -606,6 +617,14 @@ export const SessionState: MessageFns<SessionState> = {
           message.extensions = ExtensionSnapshot.decode(reader, reader.uint32());
           continue;
         }
+        case 21: {
+          if (tag !== 170) {
+            break;
+          }
+
+          message.sessionContextUsage = ContextUsage.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -689,6 +708,11 @@ export const SessionState: MessageFns<SessionState> = {
         ? object.feed_block_patches.map((e: any) => FeedBlockPatch.fromJSON(e))
         : [],
       extensions: isSet(object.extensions) ? ExtensionSnapshot.fromJSON(object.extensions) : undefined,
+      sessionContextUsage: isSet(object.sessionContextUsage)
+        ? ContextUsage.fromJSON(object.sessionContextUsage)
+        : isSet(object.session_context_usage)
+        ? ContextUsage.fromJSON(object.session_context_usage)
+        : undefined,
     };
   },
 
@@ -754,6 +778,9 @@ export const SessionState: MessageFns<SessionState> = {
     if (message.extensions !== undefined) {
       obj.extensions = ExtensionSnapshot.toJSON(message.extensions);
     }
+    if (message.sessionContextUsage !== undefined) {
+      obj.sessionContextUsage = ContextUsage.toJSON(message.sessionContextUsage);
+    }
     return obj;
   },
 
@@ -793,6 +820,9 @@ export const SessionState: MessageFns<SessionState> = {
     message.feedBlockPatches = object.feedBlockPatches?.map((e) => FeedBlockPatch.fromPartial(e)) || [];
     message.extensions = (object.extensions !== undefined && object.extensions !== null)
       ? ExtensionSnapshot.fromPartial(object.extensions)
+      : undefined;
+    message.sessionContextUsage = (object.sessionContextUsage !== undefined && object.sessionContextUsage !== null)
+      ? ContextUsage.fromPartial(object.sessionContextUsage)
       : undefined;
     return message;
   },

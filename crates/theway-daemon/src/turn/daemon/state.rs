@@ -156,6 +156,7 @@ impl TurnHost {
         self.system_line(format!("switched to session {}", self.session.id));
         self.session.busy = false;
         self.session.queue.clear();
+        self.session.cumulative_usage = WireContextUsage::default();
         self.projection.control_plane_prompt = None;
         self.refresh_goal_state().await;
         self.sync_current_session_state();
@@ -203,6 +204,7 @@ impl TurnHost {
         self.system_line(format!("activated session {}", self.session.id));
         self.session.busy = false;
         self.session.queue.clear();
+        self.session.cumulative_usage = WireContextUsage::default();
         self.projection.control_plane_prompt = None;
         turn.aborted = false;
         turn.prefix = "";

@@ -46,6 +46,7 @@ fn fixture_status(feed_blocks: Vec<WireFeedBlock>) -> WireStatus {
         dags: Vec::new(),
         subagents: Vec::new(),
         usage: WireContextUsage::default(),
+        session_usage: WireContextUsage::default(),
         tui_max_feed_lines: None,
         extensions: theway_transport::wire::WireExtensionSnapshot::default(),
     }
@@ -302,6 +303,11 @@ async fn busy_status_shows_braille_spinner_with_elapsed() {
 include!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/tests/ui/unit/status.rs"
+));
+
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/ui/unit/stats.rs"
 ));
 include!(concat!(
     env!("CARGO_MANIFEST_DIR"),
