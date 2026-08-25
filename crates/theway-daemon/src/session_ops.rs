@@ -123,10 +123,8 @@ impl SessionOps for AppSessionOps {
     }
 
     async fn create(&self) -> Result<String> {
-        // work_dir inheritance (issue #66 node 3): `state.cwd` IS this daemon's
-        // work_dir, so a new session is bound to it — the value recorded in the
-        // session's `cwd` metadata is exactly what `SessionRuntimeBuilder::build`
-        // validates against on switch.
+        // New sessions record the daemon work_dir so activation can resolve the
+        // matching execution context.
         let cwd = {
             let state = self.current.lock();
             if state.cwd.is_empty() {

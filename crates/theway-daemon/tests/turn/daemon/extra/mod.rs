@@ -316,11 +316,22 @@ async fn handle_switch_session_switches_to_known_session_file() {
     // `theway_storage::session::find_path_by_id`.
     std::fs::write(fixture._repo.path().join("sess-two.db"), b"").unwrap();
 
+    let process_cwd = std::env::current_dir().unwrap();
     let host = fixture.host();
     host.handle_switch_session("sess-two".into(), &mut TurnState::default())
         .await;
 
     assert_eq!(host.session.id, "sess-two");
+    assert_eq!(
+        host.session.cwd,
+        std::env::temp_dir().join("theway-test").join("sess-two")
+    );
+    {
+        let state = host.session.shared_state.lock();
+        assert_eq!(state.session_id, "sess-two");
+        assert_eq!(state.cwd, host.session.cwd.display().to_string());
+    }
+    assert_eq!(std::env::current_dir().unwrap(), process_cwd);
     assert!(!host.session.busy);
     assert!(host.session.queue.is_empty());
 }
@@ -566,7 +577,8 @@ fn sync_current_session_state_writes_shared_view() {
         let host = fixture.host();
         host.session.id = "custom-session".into();
         host.session.busy = true;
-        host.runtime.cwd = PathBuf::from("/tmp/theway-work");
+        host.session.cwd = PathBuf::from("/tmp/theway-work");
+        host.runtime.cwd = PathBuf::from("/tmp/not-used");
 
         host.sync_current_session_state();
 

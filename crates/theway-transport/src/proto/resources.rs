@@ -15,6 +15,75 @@ pub fn session_summary_wire(summary: &crate::wire::SessionSummary) -> wire::Sess
     }
 }
 
+pub fn session_runtime_context_to_proto(
+    ctx: &crate::wire::WireSessionRuntimeContext,
+) -> wire::SessionRuntimeContext {
+    wire::SessionRuntimeContext {
+        work_dir: ctx.work_dir.clone(),
+        provider: ctx.provider.clone(),
+        model: ctx.model.clone(),
+        base_url: ctx.base_url.clone(),
+        thinking: ctx.thinking,
+    }
+}
+
+pub fn session_runtime_context_from_proto(
+    ctx: &wire::SessionRuntimeContext,
+) -> crate::wire::WireSessionRuntimeContext {
+    crate::wire::WireSessionRuntimeContext {
+        work_dir: ctx.work_dir.clone(),
+        provider: ctx.provider.clone(),
+        model: ctx.model.clone(),
+        base_url: ctx.base_url.clone(),
+        thinking: ctx.thinking,
+    }
+}
+
+pub fn activate_session_request_from_proto(
+    request: &wire::ActivateSessionRequest,
+) -> Result<crate::wire::WireActivateSessionRequest, crate::wire::WireRpcError> {
+    let runtime = request.runtime.as_ref().ok_or(crate::wire::WireRpcError {
+        code: "missing_runtime".into(),
+        message: "ActivateSessionRequest.runtime is required".into(),
+    })?;
+    Ok(crate::wire::WireActivateSessionRequest {
+        session_id: request.session_id.clone(),
+        client_key: request.client_key.clone(),
+        name: request.name.clone(),
+        runtime: Some(session_runtime_context_from_proto(runtime)),
+    })
+}
+
+pub fn activate_session_response_to_proto(
+    response: &crate::wire::WireActivateSessionResponse,
+) -> wire::ActivateSessionResponse {
+    wire::ActivateSessionResponse {
+        session: response.session.as_ref().map(session_summary_wire),
+        created: response.created,
+    }
+}
+
+/// Set-credential requests carry secrets; the returned wire type is
+/// non-Clone/non-Debug/non-serializable.
+pub fn set_credential_request_from_proto(
+    request: &wire::SetCredentialRequest,
+) -> crate::wire::WireSetCredentialRequest {
+    crate::wire::WireSetCredentialRequest {
+        session_id: request.session_id.clone(),
+        provider: request.provider.clone(),
+        secret: request.secret.clone(),
+    }
+}
+
+pub fn clear_credential_request_from_proto(
+    request: &wire::ClearCredentialRequest,
+) -> crate::wire::WireClearCredentialRequest {
+    crate::wire::WireClearCredentialRequest {
+        session_id: request.session_id.clone(),
+        provider: request.provider.clone(),
+    }
+}
+
 /// Convert the daemon path context (issue #68) into the structured wire model.
 pub fn wire_path_context_to_proto(ctx: &WirePathContext) -> wire::PathContext {
     wire::PathContext {
@@ -145,6 +214,7 @@ pub fn stream_event_wire(event: &WireAgentEvent) -> wire::StreamEvent {
             source,
             run_id,
             node_id,
+            ..
         } => Kind::SubagentStarted(wire::SubagentStarted {
             id: id.clone(),
             agent: agent.clone(),
@@ -152,7 +222,7 @@ pub fn stream_event_wire(event: &WireAgentEvent) -> wire::StreamEvent {
             run_id: run_id.clone(),
             node_id: node_id.clone(),
         }),
-        WireAgentEvent::Output { id, chunk } => Kind::SubagentOutput(wire::SubagentOutput {
+        WireAgentEvent::Output { id, chunk, .. } => Kind::SubagentOutput(wire::SubagentOutput {
             id: id.clone(),
             chunk: chunk.clone(),
         }),
@@ -165,6 +235,7 @@ pub fn stream_event_wire(event: &WireAgentEvent) -> wire::StreamEvent {
             tokens_out,
             tools_called,
             turn,
+            ..
         } => Kind::SubagentMetrics(wire::SubagentMetrics {
             id: id.clone(),
             tps: tps.unwrap_or(0.0),
@@ -183,6 +254,7 @@ pub fn stream_event_wire(event: &WireAgentEvent) -> wire::StreamEvent {
             tokens_in,
             tokens_out,
             tools_called,
+            ..
         } => Kind::SubagentCompleted(wire::SubagentCompleted {
             id: id.clone(),
             status: status.clone(),
@@ -194,7 +266,16 @@ pub fn stream_event_wire(event: &WireAgentEvent) -> wire::StreamEvent {
             tools_called: *tools_called,
         }),
     };
-    wire::StreamEvent { kind: Some(kind) }
+    let session_id = match event {
+        WireAgentEvent::Started { session_id, .. }
+        | WireAgentEvent::Output { session_id, .. }
+        | WireAgentEvent::Metrics { session_id, .. }
+        | WireAgentEvent::Completed { session_id, .. } => session_id.clone(),
+    };
+    wire::StreamEvent {
+        session_id,
+        kind: Some(kind),
+    }
 }
 
 /// Convert a DAG engine event-plane message (node_status / run_status) into
@@ -207,7 +288,7 @@ pub fn dag_event_wire(event: &WireDagEvent) -> wire::StreamEvent {
             node_id,
             status,
             error,
-            .. // `session_id` has no wire field yet (proto change pending).
+            ..
         } => Kind::NodeStatus(wire::NodeStatus {
             run_id: run_id.clone(),
             node_id: node_id.clone(),
@@ -218,14 +299,21 @@ pub fn dag_event_wire(event: &WireDagEvent) -> wire::StreamEvent {
             run_id,
             status,
             error,
-            .. // `session_id` has no wire field yet (proto change pending).
+            ..
         } => Kind::RunStatus(wire::RunStatus {
             run_id: run_id.clone(),
             status: status.clone(),
             error: error.clone(),
         }),
     };
-    wire::StreamEvent { kind: Some(kind) }
+    let session_id = match event {
+        WireDagEvent::NodeStatus { session_id, .. }
+        | WireDagEvent::RunStatus { session_id, .. } => session_id.clone(),
+    };
+    wire::StreamEvent {
+        session_id,
+        kind: Some(kind),
+    }
 }
 
 fn subagent_wire(job: &crate::wire::WireAgentJobSnapshot) -> wire::SubagentJobSnapshot {

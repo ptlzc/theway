@@ -35,6 +35,7 @@ export interface StreamFrame {
 }
 
 export interface StreamEvent {
+  sessionId: string;
   kind?:
     | { $case: "subagentStarted"; subagentStarted: SubagentStarted }
     | { $case: "subagentOutput"; subagentOutput: SubagentOutput }
@@ -187,11 +188,14 @@ export const StreamFrame: MessageFns<StreamFrame> = {
 };
 
 function createBaseStreamEvent(): StreamEvent {
-  return { kind: undefined };
+  return { sessionId: "", kind: undefined };
 }
 
 export const StreamEvent: MessageFns<StreamEvent> = {
   encode(message: StreamEvent, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sessionId !== "") {
+      writer.uint32(58).string(message.sessionId);
+    }
     switch (message.kind?.$case) {
       case "subagentStarted":
         SubagentStarted.encode(message.kind.subagentStarted, writer.uint32(10).fork()).join();
@@ -222,6 +226,14 @@ export const StreamEvent: MessageFns<StreamEvent> = {
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
+        case 7: {
+          if (tag !== 58) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
         case 1: {
           if (tag !== 10) {
             break;
@@ -284,6 +296,11 @@ export const StreamEvent: MessageFns<StreamEvent> = {
 
   fromJSON(object: any): StreamEvent {
     return {
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : "",
       kind: isSet(object.subagentStarted)
         ? { $case: "subagentStarted", subagentStarted: SubagentStarted.fromJSON(object.subagentStarted) }
         : isSet(object.subagent_started)
@@ -314,6 +331,9 @@ export const StreamEvent: MessageFns<StreamEvent> = {
 
   toJSON(message: StreamEvent): unknown {
     const obj: any = {};
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
+    }
     if (message.kind?.$case === "subagentStarted") {
       obj.subagentStarted = SubagentStarted.toJSON(message.kind.subagentStarted);
     } else if (message.kind?.$case === "subagentOutput") {
@@ -335,6 +355,7 @@ export const StreamEvent: MessageFns<StreamEvent> = {
   },
   fromPartial<I extends Exact<DeepPartial<StreamEvent>, I>>(object: I): StreamEvent {
     const message = createBaseStreamEvent();
+    message.sessionId = object.sessionId ?? "";
     switch (object.kind?.$case) {
       case "subagentStarted": {
         if (object.kind?.subagentStarted !== undefined && object.kind?.subagentStarted !== null) {

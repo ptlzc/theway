@@ -1,6 +1,7 @@
-//! MCP server configuration loader. Reads `~/.theway/mcp.toml` (and `<cwd>/.theway/mcp.toml`),
-//! spawns each configured stdio server, runs the initialize+tools/list handshake, and
-//! returns the resulting AgentTool list ready to append to the session tool set.
+//! MCP server configuration loader. Reads `paths.base/mcp.toml` (and
+//! `paths.work_dir/.theway/mcp.toml`), spawns each configured stdio server in
+//! `paths.work_dir`, runs the initialize+tools/list handshake, and returns the
+//! resulting AgentTool list ready to append to the session tool set.
 //!
 //! Failure is non-fatal at the load level: a server that fails to start emits a startup
 //! diagnostic and is skipped. The agent runs without it.
@@ -19,7 +20,6 @@ use theway_mcp::{
 use crate::triggers::McpNotificationHook;
 use theway_daemon::tools::mcp_adapter::McpAgentTool;
 use theway_transport::auth::AuthStore;
-use theway_transport::client::base_dir;
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct McpConfig {
@@ -116,10 +116,10 @@ impl LoadedMcp {
 
 /// Load and connect every MCP server from the project + user configs. Project entries with
 /// the same `name` as a user entry override.
-pub async fn load_all(cwd: &Path) -> LoadedMcp {
+pub async fn load_all(paths: &theway_daemon::DaemonPaths) -> LoadedMcp {
     let mut diagnostics = Vec::new();
-    let project_path = cwd.join(".theway").join("mcp.toml");
-    let user_path = base_dir().join("mcp.toml");
+    let project_path = paths.work_dir.join(".theway").join("mcp.toml");
+    let user_path = paths.base.join("mcp.toml");
 
     let mut configs: Vec<ServerConfig> = Vec::new();
     for (path, label) in [(&user_path, "user"), (&project_path, "project")] {
@@ -145,7 +145,7 @@ pub async fn load_all(cwd: &Path) -> LoadedMcp {
         .collect();
 
     let (tools, notification_hooks, connect_diagnostics, client_count, server_names) =
-        connect_all(&configs).await;
+        connect_all(&configs, &paths.work_dir, &paths.base.join("auth.json")).await;
     diagnostics.extend(connect_diagnostics);
     LoadedMcp {
         tools,
@@ -168,6 +168,8 @@ pub async fn load_all(cwd: &Path) -> LoadedMcp {
 /// 2 of 3 servers failed to start. See code-review item #9 (2026-05-22).
 async fn connect_all(
     configs: &[ServerConfig],
+    cwd: &Path,
+    auth_path: &Path,
 ) -> (
     Vec<Arc<dyn AgentTool>>,
     Vec<Arc<McpNotificationHook>>,
@@ -181,7 +183,7 @@ async fn connect_all(
     let mut client_count = 0usize;
     let mut server_names = Vec::new();
     for s in configs.iter() {
-        match connect_one(s).await {
+        match connect_one(s, cwd, auth_path).await {
             Ok((server_tools, hook)) => {
                 tools.extend(server_tools);
                 notification_hooks.push(hook);
@@ -229,10 +231,12 @@ async fn read_config(path: &Path, diagnostics: &mut Vec<String>, label: &str) ->
 
 async fn connect_one(
     s: &ServerConfig,
+    cwd: &Path,
+    auth_path: &Path,
 ) -> Result<(Vec<Arc<dyn AgentTool>>, Arc<McpNotificationHook>)> {
     let client = match s.kind {
-        ServerKind::Stdio => connect_stdio(s).await?,
-        ServerKind::StreamableHttp => connect_streamable_http(s).await?,
+        ServerKind::Stdio => connect_stdio(s, cwd).await?,
+        ServerKind::StreamableHttp => connect_streamable_http(s, auth_path).await?,
     };
     client.initialize("theway").await?;
     // Take the server-push notification receiver before any other consumer can claim it.
@@ -255,7 +259,7 @@ async fn connect_one(
     Ok((out, hook))
 }
 
-async fn connect_stdio(s: &ServerConfig) -> Result<Arc<McpClient>> {
+async fn connect_stdio(s: &ServerConfig, cwd: &Path) -> Result<Arc<McpClient>> {
     if s.endpoint.is_some() || s.auth.is_some() {
         anyhow::bail!(
             "stdio MCP server '{}' must not set endpoint or auth; remove streamable_http fields",
@@ -267,12 +271,12 @@ async fn connect_stdio(s: &ServerConfig) -> Result<Arc<McpClient>> {
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("stdio MCP server '{}' missing command", s.name))?;
     let args: Vec<&str> = s.args.iter().map(String::as_str).collect();
-    let transport = StdioTransport::spawn(command, &args).await?;
+    let transport = StdioTransport::spawn_in(command, &args, cwd).await?;
     let client = Arc::new(McpClient::new(Arc::new(transport)));
     Ok(client)
 }
 
-async fn connect_streamable_http(s: &ServerConfig) -> Result<Arc<McpClient>> {
+async fn connect_streamable_http(s: &ServerConfig, auth_path: &Path) -> Result<Arc<McpClient>> {
     if s.command.is_some() || !s.args.is_empty() {
         anyhow::bail!(
             "streamable_http MCP server '{}' must set endpoint, not command/args",
@@ -285,7 +289,7 @@ async fn connect_streamable_http(s: &ServerConfig) -> Result<Arc<McpClient>> {
         .ok_or_else(|| anyhow::anyhow!("streamable_http MCP server '{}' missing endpoint", s.name))?
         .clone();
     let mut opts = HttpMcpTransportOptions::new(endpoint);
-    opts.auth = resolve_http_auth(s.auth.as_ref())?;
+    opts.auth = resolve_http_auth(s.auth.as_ref(), auth_path)?;
     if let Some(ms) = s.request_timeout_ms {
         if ms == 0 {
             anyhow::bail!(
@@ -330,12 +334,12 @@ async fn connect_streamable_http(s: &ServerConfig) -> Result<Arc<McpClient>> {
     Ok(Arc::new(McpClient::new(Arc::new(transport))))
 }
 
-fn resolve_http_auth(auth: Option<&HttpAuthConfig>) -> Result<HttpMcpAuth> {
+fn resolve_http_auth(auth: Option<&HttpAuthConfig>, auth_path: &Path) -> Result<HttpMcpAuth> {
     let Some(auth_cfg) = auth else {
         return Ok(HttpMcpAuth::None);
     };
     let recovery = http_auth_recovery(auth_cfg);
-    let store = AuthStore::load()
+    let store = AuthStore::load_from(auth_path)
         .map_err(|e| anyhow::anyhow!("failed to load local credential store: {e}; {recovery}"))?;
     resolve_http_auth_from_store(Some(auth_cfg), &store)
 }

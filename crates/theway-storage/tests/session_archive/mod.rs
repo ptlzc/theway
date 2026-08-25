@@ -5,7 +5,9 @@ use chrono::Utc;
 use theway_contract::extension::{
     ExtensionDurableEntry, ExtensionDurableEntryPayload, ExtensionStateMutation,
 };
-use theway_contract::session::{SessionReader, SessionStore, StoredSessionEntry};
+use theway_contract::session::{
+    SessionBinding, SessionReader, SessionRuntimeContext, SessionStore, StoredSessionEntry,
+};
 use theway_storage::sqlite_repo::SqliteSessionRepo;
 
 trait RawSessionTestExt: SessionStore {
@@ -93,6 +95,43 @@ async fn export_import_preserves_extension_entries_for_persisted_resume() {
 
     assert_eq!(replay.len(), 1);
     assert_eq!(replay[0].payload, expected_payload);
+}
+
+#[tokio::test]
+async fn export_import_does_not_copy_client_binding() {
+    let temp = tempfile::tempdir().unwrap();
+    let source_cwd = temp.path().join("source");
+    let dest_cwd = temp.path().join("dest");
+    tokio::fs::create_dir_all(&source_cwd).await.unwrap();
+    tokio::fs::create_dir_all(&dest_cwd).await.unwrap();
+    let source_repo = SqliteSessionRepo::new(temp.path().join("source-sessions"));
+    let source = source_repo
+        .create(source_cwd.to_string_lossy().to_string())
+        .await
+        .unwrap();
+    source
+        .set_binding(Some(SessionBinding {
+            client_key: "client-1".into(),
+            runtime: SessionRuntimeContext {
+                work_dir: source_cwd.to_string_lossy().into_owned(),
+                provider: Some("provider".into()),
+                model: Some("model".into()),
+                base_url: None,
+                thinking: Some(false),
+            },
+        }))
+        .await
+        .unwrap();
+
+    let archive = temp.path().join("bound.theway-session");
+    export_session(&source, &archive, false).await.unwrap();
+    let dest_repo = SqliteSessionRepo::new(temp.path().join("dest-sessions"));
+    let imported = import_session(&dest_repo, &archive, &dest_cwd, ActivateTriggers::Off)
+        .await
+        .unwrap();
+
+    let imported_session = dest_repo.open(&imported.session_path).await.unwrap();
+    assert_eq!(imported_session.metadata().binding, None);
 }
 
 #[tokio::test]

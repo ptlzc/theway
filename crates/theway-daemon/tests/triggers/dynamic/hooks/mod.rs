@@ -112,6 +112,20 @@ fn check_hook_metadata_and_default_status() {
 }
 
 #[test]
+fn build_trigger_uses_owned_cwd_in_summary() {
+    let cwd = tempfile::tempdir().unwrap();
+    let registry = DynamicTriggerRegistry::new();
+    let hook = DynamicTriggerCheckHook::new_for_cwd(registry, cwd.path());
+
+    let summary = hook.build_trigger(2).payload_summary.unwrap();
+
+    assert!(
+        summary.contains(&format!("cwd: {}", cwd.path().display())),
+        "{summary}"
+    );
+}
+
+#[test]
 fn build_trigger_emits_local_dynamic_envelope_with_summary() {
     let registry = DynamicTriggerRegistry::new();
     let hook = DynamicTriggerCheckHook::with_interval(registry, Duration::from_secs(60));

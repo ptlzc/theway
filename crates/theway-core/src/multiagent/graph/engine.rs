@@ -61,6 +61,9 @@ pub(super) struct EngineInner {
     /// Independent id sequence for goal runs (goal-N, self-loop semantics).
     pub(super) goal_counter: u64,
     pub(super) launcher: Option<Arc<dyn NodeLauncher>>,
+    /// Session-scoped launcher overrides. Exact match on `DagRun.session_id`
+    /// wins over the global launcher (session-less runs may use the `None` key).
+    pub(super) session_launchers: HashMap<Option<String>, Arc<dyn NodeLauncher>>,
     /// Event-plane broadcast (node_status / run_status). `None` = detached.
     pub(super) events: Option<tokio::sync::broadcast::Sender<DagEvent>>,
     /// Abort tokens for in-flight nodes, keyed by (run_id, node_id).
@@ -108,6 +111,7 @@ impl DagEngine {
                 dag_counter: 0,
                 goal_counter: 0,
                 launcher: None,
+                session_launchers: HashMap::new(),
                 events: None,
                 jobs: HashMap::new(),
                 waiters: HashMap::new(),
@@ -122,6 +126,19 @@ impl DagEngine {
     /// Override the node launcher (tests inject a fake one).
     pub fn set_launcher(&self, launcher: Option<Arc<dyn NodeLauncher>>) {
         self.inner.lock().launcher = launcher;
+    }
+
+    /// Register the launcher owned by one session; exact matches precede the
+    /// global compatibility launcher. `None` owns session-less runs.
+    pub fn set_session_launcher(
+        &self,
+        session_id: Option<String>,
+        launcher: Arc<dyn NodeLauncher>,
+    ) {
+        self.inner
+            .lock()
+            .session_launchers
+            .insert(session_id, launcher);
     }
 
     /// Wire the event-plane broadcast (transport setup calls this once);
@@ -659,6 +676,7 @@ impl DagEngine {
             inner.goal_counter = 0;
             inner.events = None;
             inner.launcher = None;
+            inner.session_launchers.clear();
         }
         let run_scopes: Vec<_> = self
             .run_operations

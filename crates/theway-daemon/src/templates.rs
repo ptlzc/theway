@@ -1,12 +1,11 @@
 //! Prompt-template discovery for the CLI. Same dual-root precedence as the skills loader:
-//! `<cwd>/.theway/templates/` overrides `~/.theway/templates/` on a name collision.
+//! `paths.work_dir/.theway/templates/` overrides `paths.base/templates/` on a name collision.
 //!
 //! The loader half (`load_templates` + frontmatter parsing) lives here rather than in
 //! `theway-core`: file-based template discovery is a CLI concern — the core agent runtime
 //! only consumes already-loaded `PromptTemplate` values (interpolation happens on the
 //! type itself via `PromptTemplate::interpolate`).
 
-use std::path::Path;
 #[cfg(feature = "local")]
 use std::path::PathBuf;
 
@@ -20,8 +19,6 @@ use tokio_util::sync::CancellationToken;
 
 #[cfg(feature = "local")]
 use crate::env::native::NativeEnv;
-#[cfg(feature = "local")]
-use theway_transport::client::base_dir;
 
 pub struct LoadedTemplates {
     pub templates: Vec<PromptTemplate>,
@@ -32,10 +29,10 @@ pub struct LoadedTemplates {
 /// filesystem via [`NativeEnv`], which is a `local`-feature capability
 /// (daemon-kernel-layers).
 #[cfg(feature = "local")]
-pub async fn load_all(cwd: &Path) -> LoadedTemplates {
-    let project: PathBuf = cwd.join(".theway").join("templates");
-    let user: PathBuf = base_dir().join("templates");
-    let env = NativeEnv::new(cwd.to_string_lossy().to_string());
+pub async fn load_all(paths: &crate::DaemonPaths) -> LoadedTemplates {
+    let project: PathBuf = paths.work_dir.join(".theway").join("templates");
+    let user: PathBuf = paths.base.join("templates");
+    let env = NativeEnv::new(paths.work_dir.to_string_lossy().to_string());
     let cancel = CancellationToken::new();
 
     let mut combined: Vec<PromptTemplate> = Vec::new();
@@ -70,7 +67,7 @@ pub async fn load_all(cwd: &Path) -> LoadedTemplates {
 /// The once-per-startup semantics are guaranteed by the callers (the
 /// composition root loads templates once), not by this stub.
 #[cfg(not(feature = "local"))]
-pub async fn load_all(_cwd: &Path) -> LoadedTemplates {
+pub async fn load_all(_paths: &crate::DaemonPaths) -> LoadedTemplates {
     tracing::warn!(
         "template discovery unavailable in sandbox build — loading no templates (the sandbox \
          feature has no local filesystem access)"

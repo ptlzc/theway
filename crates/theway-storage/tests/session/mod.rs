@@ -5,6 +5,7 @@ use tempfile::tempdir;
 use theway_contract::extension::{
     ExtensionDurableEntry, ExtensionDurableEntryPayload, ExtensionStateMutation,
 };
+use theway_contract::session::{SessionBinding, SessionRuntimeContext};
 
 fn custom_entry(id: &str, parent_id: Option<&str>) -> StoredSessionEntry {
     StoredSessionEntry::from_payload(serde_json::json!({
@@ -451,6 +452,46 @@ async fn fork_session_replays_entries_and_records_parent_lineage() {
     assert_eq!(fork_entry.parent_id.as_deref(), Some(parent_id.as_str()));
     let parent_entry = listed.iter().find(|e| e.id == parent_id).unwrap();
     assert_eq!(parent_entry.parent_id, None);
+}
+
+#[tokio::test]
+async fn fork_session_does_not_copy_parent_client_binding() {
+    let dir = tempdir().unwrap();
+    let repo = SqliteSessionRepo::new(dir.path());
+    let parent = repo.create("/cwd").await.unwrap();
+    parent
+        .set_binding(Some(SessionBinding {
+            client_key: "parent-client".into(),
+            runtime: SessionRuntimeContext {
+                work_dir: "/cwd".into(),
+                provider: Some("provider".into()),
+                model: Some("model".into()),
+                base_url: None,
+                thinking: None,
+            },
+        }))
+        .await
+        .unwrap();
+    let parent_meta = parent.get_metadata_json().await.unwrap();
+    let parent_path = PathBuf::from(parent_meta["path"].as_str().unwrap());
+    let entry = custom_entry("u1", None);
+    parent.append_entry(entry.clone()).await.unwrap();
+
+    let fork = fork_session(
+        &repo,
+        std::path::Path::new("/cwd"),
+        &parent,
+        vec![entry.clone()],
+    )
+    .await
+    .unwrap();
+
+    assert_ne!(
+        fork.metadata().path,
+        parent_path.to_string_lossy(),
+        "fork must be a new file"
+    );
+    assert_eq!(fork.metadata().binding, None);
 }
 
 #[tokio::test]

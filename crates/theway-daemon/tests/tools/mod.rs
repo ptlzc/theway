@@ -4,6 +4,8 @@
 #[cfg(feature = "local")]
 use super::*;
 #[cfg(feature = "local")]
+mod cwd;
+#[cfg(feature = "local")]
 use once_cell::sync::OnceCell as SyncOnceCell;
 #[cfg(feature = "local")]
 use theway_llm_provider::{Api, Model, ModelCost, Provider};

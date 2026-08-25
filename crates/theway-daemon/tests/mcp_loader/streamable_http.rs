@@ -3,7 +3,6 @@
 
 use super::*;
 
-use crate::test_env::{ENV_LOCK, EnvGuard};
 use theway_mcp::HttpMcpAuth;
 use theway_transport::auth::{AuthStore, ProviderCredential};
 
@@ -27,7 +26,8 @@ async fn connect_streamable_http_success_applies_all_options() {
     });
 
     // Act
-    let client = connect_streamable_http(&server)
+    let (_work, _base, paths) = test_paths();
+    let client = connect_streamable_http(&server, &paths.base.join("auth.json"))
         .await
         .expect("connect_streamable_http should assemble a client without network I/O");
 
@@ -46,7 +46,8 @@ async fn connect_streamable_http_success_applies_reconnect_defaults() {
     });
 
     // Act
-    let client = connect_streamable_http(&server)
+    let (_work, _base, paths) = test_paths();
+    let client = connect_streamable_http(&server, &paths.base.join("auth.json"))
         .await
         .expect("connect_streamable_http should assemble a client without network I/O");
 
@@ -61,7 +62,8 @@ async fn connect_one_streamable_http_missing_endpoint_returns_err() {
     server.endpoint = None;
 
     // Act
-    let err = match connect_one(&server).await {
+    let (_work, _base, paths) = test_paths();
+    let err = match connect_one(&server, &paths.work_dir, &paths.base.join("auth.json")).await {
         Ok(_) => panic!("streamable_http without endpoint should fail"),
         Err(err) => err,
     };
@@ -73,7 +75,8 @@ async fn connect_one_streamable_http_missing_endpoint_returns_err() {
 #[test]
 fn resolve_http_auth_none_returns_none() {
     // Arrange & Act
-    let auth = resolve_http_auth(None).unwrap();
+    let (_work, _base, paths) = test_paths();
+    let auth = resolve_http_auth(None, &paths.base.join("auth.json")).unwrap();
 
     // Assert
     assert!(matches!(auth, HttpMcpAuth::None));
@@ -82,9 +85,8 @@ fn resolve_http_auth_none_returns_none() {
 #[test]
 fn resolve_http_auth_loads_bearer_from_auth_store() {
     // Arrange
-    let _env_lock = ENV_LOCK.lock().unwrap();
-    let theway_dir = tempfile::tempdir().unwrap();
-    let _theway_dir_guard = EnvGuard::set("THEWAY_DIR", theway_dir.path());
+    let (_work, base, _paths) = test_paths();
+    let auth_path = base.path().join("auth.json");
     let mut store = AuthStore::default();
     store.set(
         "mcp-example:default",
@@ -92,13 +94,16 @@ fn resolve_http_auth_loads_bearer_from_auth_store() {
             value: "secret-token".into(),
         },
     );
-    store.save_to(&theway_dir.path().join("auth.json")).unwrap();
+    store.save_to(&auth_path).unwrap();
 
     // Act
-    let auth = resolve_http_auth(Some(&HttpAuthConfig {
-        kind: "bearer".into(),
-        token_keychain_ref: Some("mcp-example:default".into()),
-    }))
+    let auth = resolve_http_auth(
+        Some(&HttpAuthConfig {
+            kind: "bearer".into(),
+            token_keychain_ref: Some("mcp-example:default".into()),
+        }),
+        &auth_path,
+    )
     .unwrap();
 
     // Assert
@@ -111,16 +116,18 @@ fn resolve_http_auth_loads_bearer_from_auth_store() {
 #[test]
 fn resolve_http_auth_reports_store_load_failure_with_recovery_hint() {
     // Arrange
-    let _env_lock = ENV_LOCK.lock().unwrap();
-    let theway_dir = tempfile::tempdir().unwrap();
-    let _theway_dir_guard = EnvGuard::set("THEWAY_DIR", theway_dir.path());
-    std::fs::write(theway_dir.path().join("auth.json"), "{ not valid json").unwrap();
+    let (_work, base, _paths) = test_paths();
+    let auth_path = base.path().join("auth.json");
+    std::fs::write(&auth_path, "{ not valid json").unwrap();
 
     // Act
-    let err = resolve_http_auth(Some(&HttpAuthConfig {
-        kind: "bearer".into(),
-        token_keychain_ref: Some("mcp-example:default".into()),
-    }))
+    let err = resolve_http_auth(
+        Some(&HttpAuthConfig {
+            kind: "bearer".into(),
+            token_keychain_ref: Some("mcp-example:default".into()),
+        }),
+        &auth_path,
+    )
     .unwrap_err()
     .to_string();
 

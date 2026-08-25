@@ -69,12 +69,18 @@ impl DagEngine {
             node.job_id = Some(format!("job-{}-{}", run_id, node_id));
             let token = CancellationToken::new();
             emit_state(run);
+            let session_id = run.session_id.clone();
             // MutexGuard does not split field borrows: touch `jobs` only
             // after the `run` borrow has ended (NLL).
             inner
                 .jobs
                 .insert((run_id.to_string(), node_id.to_string()), token.clone());
-            (inner.launcher.clone(), token)
+            let launcher = inner
+                .session_launchers
+                .get(&session_id)
+                .cloned()
+                .or_else(|| inner.launcher.clone());
+            (launcher, token)
         };
         self.begin_node_observation(run_id, node_id);
         match launcher {

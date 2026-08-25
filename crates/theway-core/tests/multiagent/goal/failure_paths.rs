@@ -136,8 +136,6 @@ fn agent_message_text_handles_image_only_and_empty_tool_result() {
 
 #[tokio::test]
 async fn ensure_goal_run_falls_back_to_existing_running_goal_run() {
-    // Force GOAL_RUN to point at a run id the current engine does not have.
-    let _ = GOAL_RUN.get_or_init(|| Some("goal-linecov-missing".into()));
     let h = harness();
     let session_id = session_id_from_harness(&h).await.unwrap();
     let engine = DagEngine::new();

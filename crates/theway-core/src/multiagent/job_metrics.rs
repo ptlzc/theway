@@ -32,9 +32,11 @@ pub fn metrics_listener(
                 job.chars = job.chars.saturating_add(delta.chars().count() as u64);
                 append_output(job, &delta);
             });
+            let session_id = registry.session_id(&job_id);
             registry.emit(SubagentJobEvent::Output {
                 id: job_id.clone(),
                 chunk: delta,
+                session_id,
             });
         }
         LoopEvent::MessageEnd { message } => {
@@ -66,6 +68,7 @@ pub fn metrics_listener(
                     tokens_out: job.output_tokens,
                     tools_called: job.tools_called,
                     turn: job.turn,
+                    session_id: job.session_id.clone(),
                 });
             }
         }

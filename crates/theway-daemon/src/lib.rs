@@ -51,6 +51,10 @@ mod turn;
 // Bridged unit tests preserve their original crate-relative auth paths.
 #[cfg(test)]
 pub(crate) use theway_transport::auth;
+#[allow(dead_code)]
+mod session_activation;
+#[allow(dead_code)] // Session assembly consumes this after context construction is introduced.
+mod session_execution;
 mod session_ops;
 pub mod skills;
 mod startup_config;

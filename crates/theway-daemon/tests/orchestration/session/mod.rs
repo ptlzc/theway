@@ -6,13 +6,11 @@
 //! A recording fake stands in for the per-session `TriggerExecutor`, whose internal
 //! hook list is private and would otherwise require a full harness to observe.
 //!
-//! Also covers the explicit session↔work_dir binding on switch (issue #66 node 3):
-//! [`super::check_work_dir_binding`] semantics (canonicalized comparison, string
-//! fallback, legacy pass-through) and the full [`super::SessionRuntimeBuilder::build`]
-//! outcomes for same / different / missing work_dir metadata.
+//! Also covers explicit execution contexts and cwd-scoped repository validation.
 
 use std::cell::RefCell;
 use std::collections::HashSet;
+use std::path::Path;
 use std::sync::Arc;
 
 use crate::triggers;
@@ -56,6 +54,7 @@ fn register_notification_hooks_two_mcp_servers_registers_each_hook_exactly_once(
     register_notification_hooks(
         &sink,
         &[mcp_a.clone(), mcp_b.clone()],
+        Path::new("/tmp/project"),
         &triggers::cron::CronRegistry::new(),
         &triggers::dynamic::DynamicTriggerRegistry::new(),
     );
@@ -80,6 +79,7 @@ fn register_notification_hooks_no_mcp_servers_registers_cron_and_dynamic_only() 
     register_notification_hooks(
         &sink,
         &[],
+        Path::new("/tmp/project"),
         &triggers::cron::CronRegistry::new(),
         &triggers::dynamic::DynamicTriggerRegistry::new(),
     );
@@ -95,6 +95,7 @@ fn register_notification_hooks_registered_labels_are_unique() {
     register_notification_hooks(
         &sink,
         &hooks,
+        Path::new("/tmp/project"),
         &triggers::cron::CronRegistry::new(),
         &triggers::dynamic::DynamicTriggerRegistry::new(),
     );
@@ -109,15 +110,300 @@ fn register_notification_hooks_registered_labels_are_unique() {
     assert_eq!(labels.len(), hooks.len() + 2);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────────────────
-// work_dir binding (issue #66 node 3)
-// ─────────────────────────────────────────────────────────────────────────────────────────
+#[test]
+fn session_mcp_resources_clones_share_one_shot_hook_pool() {
+    let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let hook = Arc::new(triggers::McpNotificationHook::new("shared", rx));
 
-use std::path::{Path, PathBuf};
+    let a = SessionMcpResources::default();
+    let b = a.clone();
+    a.notification_hooks.lock().push(hook);
+
+    let taken = std::mem::take(&mut *b.notification_hooks.lock());
+    assert_eq!(taken.len(), 1, "clones share the same one-shot hook pool");
+    assert!(
+        a.notification_hooks.lock().is_empty(),
+        "taking from a clone drains the shared pool"
+    );
+
+    let c = SessionMcpResources::default();
+    assert!(
+        !Arc::ptr_eq(&a.notification_hooks, &c.notification_hooks),
+        "separately constructed resources have separate pools"
+    );
+}
+
+#[test]
+fn session_extension_resources_clones_share_arc_backed_state() {
+    let work_dir = TempDir::new().unwrap();
+    let base_dir = TempDir::new().unwrap();
+    let resources = SessionExtensionResources::new(
+        work_dir.path(),
+        base_dir.path(),
+        crate::executor::executor_for_cwd(work_dir.path().to_path_buf()),
+        true,
+    );
+    let clone = resources.clone();
+
+    assert!(Arc::ptr_eq(
+        &resources.compact_algorithms,
+        &clone.compact_algorithms
+    ));
+    assert!(Arc::ptr_eq(
+        resources.legacy_compaction_host.as_ref().unwrap(),
+        clone.legacy_compaction_host.as_ref().unwrap()
+    ));
+    assert!(Arc::ptr_eq(
+        &resources.runtime_extension_packages,
+        &clone.runtime_extension_packages
+    ));
+    assert!(Arc::ptr_eq(
+        resources.runtime_extension_engine.as_ref().unwrap(),
+        clone.runtime_extension_engine.as_ref().unwrap()
+    ));
+}
+
+#[test]
+fn session_extension_resources_separate_contexts_are_independent() {
+    let work_a = TempDir::new().unwrap();
+    let base_a = TempDir::new().unwrap();
+    let work_b = TempDir::new().unwrap();
+    let base_b = TempDir::new().unwrap();
+    let a = SessionExtensionResources::new(
+        work_a.path(),
+        base_a.path(),
+        crate::executor::executor_for_cwd(work_a.path().to_path_buf()),
+        true,
+    );
+    let b = SessionExtensionResources::new(
+        work_b.path(),
+        base_b.path(),
+        crate::executor::executor_for_cwd(work_b.path().to_path_buf()),
+        true,
+    );
+
+    assert!(!Arc::ptr_eq(&a.compact_algorithms, &b.compact_algorithms));
+    assert!(!Arc::ptr_eq(
+        a.legacy_compaction_host.as_ref().unwrap(),
+        b.legacy_compaction_host.as_ref().unwrap()
+    ));
+    assert!(!Arc::ptr_eq(
+        &a.runtime_extension_packages,
+        &b.runtime_extension_packages
+    ));
+    assert!(!Arc::ptr_eq(
+        a.runtime_extension_engine.as_ref().unwrap(),
+        b.runtime_extension_engine.as_ref().unwrap()
+    ));
+}
+
+#[test]
+fn session_extension_resources_install_env_secret_before_engine_use() {
+    let _serial = ENV_LOCK.lock().unwrap();
+    let work_dir = TempDir::new().unwrap();
+    let base_dir = TempDir::new().unwrap();
+    let secret_name = "THEWAY_SESSION_EXTENSION_TEST_SECRET";
+    let _secret = EnvGuard::set(secret_name, "preserved");
+
+    let extension_root = work_dir.path().join(".theway").join("extensions").join("secret-package");
+    std::fs::create_dir_all(&extension_root).unwrap();
+    std::fs::write(
+        extension_root.join("theway-extension.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "id": "secret-package",
+            "version": "1.0.0",
+            "entry": "index.js",
+            "priority": 0,
+            "scope": "session",
+            "permissions": [format!("secrets.read:{secret_name}")]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        extension_root.join("index.js"),
+        "export default defineExtension((api) => api);",
+    )
+    .unwrap();
+
+    let requested = vec![theway_contract::extension::ExtensionPermission::SecretsRead(
+        secret_name.to_string(),
+    )];
+    let mut trust = crate::ts_extensions::ExtensionTrustStore::load(base_dir.path());
+    trust
+        .decide_project(
+            work_dir.path(),
+            requested.clone(),
+            requested,
+            theway_contract::extension::ExtensionTrustDecision::Trusted,
+        )
+        .unwrap();
+    trust.save().unwrap();
+
+    let resources = SessionExtensionResources::new(
+        work_dir.path(),
+        base_dir.path(),
+        crate::executor::executor_for_cwd(work_dir.path().to_path_buf()),
+        true,
+    );
+    let engine = resources.runtime_extension_engine.unwrap();
+    assert!(engine.has_secret(secret_name));
+}
+
+#[tokio::test]
+async fn session_hook_resources_clones_share_loaded_state() {
+    let base = TempDir::new().unwrap();
+    std::fs::write(
+        base.path().join("hooks.toml"),
+        r#"
+[[hook]]
+event = "turn_end"
+command = "echo hi"
+"#,
+    )
+    .unwrap();
+    let paths = crate::DaemonPaths {
+        base: base.path().to_path_buf(),
+        home: base.path().to_path_buf(),
+        work_dir: base.path().to_path_buf(),
+        extra_skill_dirs: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
+    };
+    let resources = SessionHookResources::load(&paths, true).await;
+    let clone = resources.clone();
+
+    assert!(
+        Arc::ptr_eq(&resources.loaded, &clone.loaded),
+        "cloned hook resources share the same loaded Arc"
+    );
+    let a = resources.loaded_hooks("session-a", None, None).runner;
+    let b = clone.loaded_hooks("session-b", None, None).runner;
+    assert_eq!(a.len(), 1);
+    assert_eq!(b.len(), 1);
+}
+
+#[tokio::test]
+async fn session_hook_resources_separate_contexts_are_independent() {
+    let base_a = TempDir::new().unwrap();
+    std::fs::write(
+        base_a.path().join("hooks.toml"),
+        r#"
+[[hook]]
+event = "turn_start"
+command = "echo a1"
+
+[[hook]]
+event = "turn_end"
+command = "echo a2"
+"#,
+    )
+    .unwrap();
+    let base_b = TempDir::new().unwrap();
+    std::fs::write(
+        base_b.path().join("hooks.toml"),
+        r#"
+[[hook]]
+event = "turn_end"
+command = "echo b"
+"#,
+    )
+    .unwrap();
+    let paths_a = crate::DaemonPaths {
+        base: base_a.path().to_path_buf(),
+        home: base_a.path().to_path_buf(),
+        work_dir: base_a.path().to_path_buf(),
+        extra_skill_dirs: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
+    };
+    let paths_b = crate::DaemonPaths {
+        base: base_b.path().to_path_buf(),
+        home: base_b.path().to_path_buf(),
+        work_dir: base_b.path().to_path_buf(),
+        extra_skill_dirs: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
+    };
+    let a = SessionHookResources::load(&paths_a, true).await;
+    let b = SessionHookResources::load(&paths_b, true).await;
+
+    assert!(
+        !Arc::ptr_eq(&a.loaded, &b.loaded),
+        "separately loaded hook resources are independent"
+    );
+    assert_eq!(a.loaded_hooks("session-a", None, None).runner.len(), 2);
+    assert_eq!(b.loaded_hooks("session-b", None, None).runner.len(), 1);
+}
+
+#[tokio::test]
+async fn build_uses_context_hook_resources_for_hooks_active() {
+    let _serial = ENV_LOCK.lock().unwrap();
+    let home = TempDir::new().unwrap();
+    let _theway_dir = EnvGuard::set("THEWAY_DIR", home.path());
+
+    let work_dir = TempDir::new().unwrap();
+    let base_with_hooks = TempDir::new().unwrap();
+    std::fs::write(
+        base_with_hooks.path().join("hooks.toml"),
+        r#"
+[[hook]]
+event = "turn_end"
+command = "echo hi"
+"#,
+    )
+    .unwrap();
+    let base_empty = TempDir::new().unwrap();
+
+    let repo_root_with = TempDir::new().unwrap();
+    let repo_with = theway_storage::sqlite_repo::SqliteSessionRepo::new(repo_root_with.path());
+    let id_with =
+        create_session_with_cwd(&repo_with, work_dir.path().to_str().unwrap()).await;
+    let repo_root_empty = TempDir::new().unwrap();
+    let repo_empty =
+        theway_storage::sqlite_repo::SqliteSessionRepo::new(repo_root_empty.path());
+    let id_empty =
+        create_session_with_cwd(&repo_empty, work_dir.path().to_str().unwrap()).await;
+
+    let (factory, storage, _state) = test_factory();
+    let ctx_with_hooks = session_context(
+        work_dir.path(),
+        repo_with,
+        storage.clone(),
+        base_with_hooks.path(),
+    )
+    .await;
+    let runtime_with_hooks = factory
+        .build(&ctx_with_hooks, &id_with)
+        .await
+        .expect("context with hook rules builds");
+    assert!(
+        runtime_with_hooks.hooks_active,
+        "hook rules loaded by the owning context must activate hooks"
+    );
+
+    let ctx_empty = session_context(
+        work_dir.path(),
+        repo_empty,
+        storage,
+        base_empty.path(),
+    )
+    .await;
+    let runtime_empty = factory
+        .build(&ctx_empty, &id_empty)
+        .await
+        .expect("context without hook rules builds");
+    assert!(
+        !runtime_empty.hooks_active,
+        "empty hook resources must leave hooks inactive"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────
+// execution context
+// ─────────────────────────────────────────────────────────────────────────────────────────
 
 use tempfile::TempDir;
 
-use super::{SessionRuntimeBuilder, check_work_dir_binding};
+use super::{
+    SessionExecutionContext, SessionExtensionResources, SessionHookResources,
+    SessionMcpResources, SessionProjectResources, SessionRuntimeBuilder,
+};
+use crate::runtime_storage::{RuntimeStorage, SessionRepository};
 use crate::test_env::{ENV_LOCK, EnvGuard};
 
 /// Faux model — the build tests never prompt, so the stream is never invoked.
@@ -146,80 +432,63 @@ fn faux_stream() -> theway_core::StreamFn {
     })
 }
 
-/// Minimal fully-wired factory rooted at `work_dir`. The `TempDir` it returns
-/// owns the `base_dir` / `memory_dir` paths and must outlive the factory.
-fn test_factory(work_dir: PathBuf) -> (SessionRuntimeBuilder, TempDir) {
+/// Minimal fully-wired process-only builder plus storage and context path owner.
+fn test_factory() -> (SessionRuntimeBuilder, Arc<dyn RuntimeStorage>, TempDir) {
     let state = TempDir::new().unwrap();
     let (feed_tx, _feed_rx) = tokio::sync::mpsc::unbounded_channel();
     let (main_run_tx, _main_run_rx) = tokio::sync::mpsc::unbounded_channel();
 
-    let reload_skills_fn: theway_core::ReloadSkillsFn = std::sync::Arc::new(|| {
-        Box::pin(async {
-            theway_core::LoadSkillsOutput {
-                skills: Vec::new(),
-                diagnostics: Vec::new(),
-            }
-        })
-            as std::pin::Pin<
-                Box<dyn std::future::Future<Output = theway_core::LoadSkillsOutput> + Send>,
-            >
-    });
-    let before_trigger_action: crate::trigger_engine::execution::BeforeTriggerActionHook =
-        std::sync::Arc::new(
-            |ctx: crate::trigger_engine::execution::BeforeTriggerActionContext,
-             _cancel: tokio_util::sync::CancellationToken| {
-                Box::pin(async move {
-                    crate::trigger_engine::execution::TriggerAction::default_for(&ctx.trigger)
-                })
-                    as std::pin::Pin<
-                        Box<
-                            dyn std::future::Future<
-                                    Output = crate::trigger_engine::execution::TriggerAction,
-                                > + Send,
-                        >,
-                    >
-            },
-        );
-
+    let storage: Arc<dyn RuntimeStorage> = crate::runtime_storage::local_runtime_storage();
     let factory = SessionRuntimeBuilder {
-        cwd: work_dir,
-        storage: crate::runtime_storage::local_runtime_storage(),
-        base_dir: state.path().join("base"),
-        // Composition-root seam: picks the local executor for `local` builds
-        // and the sandbox stub for `sandbox`-only builds, so this suite
-        // compiles under both feature sets (issue #64).
-        executor: crate::executor::default_executor(),
-        model: faux_model(),
         thinking: theway_core::ThinkingLevel::Off,
         stream_fn: faux_stream(),
-        memory_block: "test memory".into(),
-        skills: Vec::new(),
-        templates: Vec::new(),
-        compact_algorithms: std::sync::Arc::new(
-            theway_core::agent::compaction::algorithm::CompactAlgorithmRegistry::new(),
-        ),
-        legacy_compaction_host: None,
-        runtime_extension_packages: std::sync::Arc::new(parking_lot::RwLock::new(
-            crate::ts_extensions::PackageCatalog::default(),
-        )),
-        runtime_extension_engine: None,
-        memory_dir: state.path().join("memory"),
         dag_engine: std::sync::Arc::new(theway_core::multiagent::graph::engine::DagEngine::new()),
         subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry::new(),
-        mcp_tools: Vec::new(),
-        mcp_notification_hooks: parking_lot::Mutex::new(Vec::new()),
         services: crate::orchestration::DaemonServices::new(),
-        reload_skills_fn,
         before_tool_call: None,
-        before_trigger_action,
         control_plane_hook: None,
         after_tool_call: None,
         feed_tx,
         main_run_tx,
         debug: false,
-        load_local_sources: true,
     };
-    (factory, state)
+    (factory, storage, state)
+}
+
+/// Build a cwd-scoped context around a standalone test repository.
+async fn session_context(
+    work_dir: &Path,
+    repo: theway_storage::sqlite_repo::SqliteSessionRepo,
+    storage: Arc<dyn RuntimeStorage>,
+    base_dir: &Path,
+) -> SessionExecutionContext {
+    let repo: Arc<dyn SessionRepository> = Arc::new(repo);
+    let paths = crate::DaemonPaths {
+        base: base_dir.to_path_buf(),
+        home: base_dir.to_path_buf(),
+        work_dir: base_dir.to_path_buf(),
+        extra_skill_dirs: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
+    };
+    let paths = paths.with_work_dir(work_dir);
+    let resources = SessionProjectResources::load(&paths, &[], &[], true)
+        .await
+        .unwrap();
+    let hooks = SessionHookResources::load(&paths, true).await;
+    let context = SessionExecutionContext::new(
+        "test-context",
+        work_dir.to_path_buf(),
+        repo,
+        storage,
+        paths,
+        crate::executor::executor_for_cwd(work_dir.to_path_buf()),
+        faux_model(),
+        theway_core::ThinkingLevel::Off,
+        resources,
+        SessionMcpResources::default(),
+        hooks,
+    );
+    assert_eq!(context.paths.work_dir, work_dir.canonicalize().unwrap());
+    context
 }
 
 /// Create a session in `repo` with the given recorded `cwd` metadata and
@@ -238,75 +507,186 @@ async fn create_session_with_cwd(
         .to_string()
 }
 
-#[test]
-fn binding_check_passes_missing_or_empty_target_cwd() {
-    check_work_dir_binding("s1", None, Path::new("/x")).unwrap();
-    check_work_dir_binding("s1", Some(""), Path::new("/x")).unwrap();
-    check_work_dir_binding("s1", Some("   "), Path::new("/x")).unwrap();
-}
+#[tokio::test]
+async fn build_uses_explicit_context_cwd_and_registers_session_ownership() {
+    // hooks::load inside build reads THEWAY_DIR — isolate it.
+    let _serial = ENV_LOCK.lock().unwrap();
+    let home = TempDir::new().unwrap();
+    let _theway_dir = EnvGuard::set("THEWAY_DIR", home.path());
 
-#[test]
-fn binding_check_canonicalizes_both_sides() {
-    let dir = TempDir::new().unwrap();
-    // Same directory through un-normalized segments.
-    let aliased = dir.path().join("sub").join("..");
-    std::fs::create_dir(dir.path().join("sub")).unwrap();
-    check_work_dir_binding("s1", Some(aliased.to_str().unwrap()), dir.path()).unwrap();
+    let work_dir = TempDir::new().unwrap();
+    let recorded_dir = TempDir::new().unwrap();
+    let repo_root = TempDir::new().unwrap();
+    let repo = theway_storage::sqlite_repo::SqliteSessionRepo::new(repo_root.path());
+    let id = create_session_with_cwd(&repo, recorded_dir.path().to_str().unwrap()).await;
 
-    // Symlink alias resolves to the same directory.
-    let real = dir.path().join("real");
-    std::fs::create_dir(&real).unwrap();
-    let link = dir.path().join("link");
-    std::os::unix::fs::symlink(&real, &link).unwrap();
-    check_work_dir_binding("s2", Some(link.to_str().unwrap()), &real).unwrap();
-}
-
-#[test]
-fn binding_check_mismatch_error_names_both_paths() {
-    let daemon_dir = TempDir::new().unwrap();
-    let foreign_dir = TempDir::new().unwrap();
-    let err = check_work_dir_binding(
-        "s-42",
-        Some(foreign_dir.path().to_str().unwrap()),
-        daemon_dir.path(),
-    )
-    .unwrap_err();
-    let msg = err.to_string();
-    assert!(msg.contains("session s-42 belongs to work_dir"), "{msg}");
+    let (factory, storage, _state) = test_factory();
+    let ctx = session_context(work_dir.path(), repo, storage, &_state.path().join("base")).await;
+    ctx.transcript_store.save(&theway_core::multiagent::jobs::JobTranscript {
+        job_id: "job-1",
+        run_id: Some("run-1"),
+        node_id: Some("node-1"),
+        messages: &[serde_json::json!({ "text": "persisted" })],
+    });
+    let runtime = factory
+        .build(&ctx, &id)
+        .await
+        .expect("session in the context's work_dir builds");
+    let prompt = runtime.harness.system_prompt();
     assert!(
-        msg.contains(foreign_dir.path().to_str().unwrap()),
-        "must name the session's work_dir: {msg}"
+        prompt.contains(&format!(
+            "Current working directory: {}",
+            work_dir.path().canonicalize().unwrap().display()
+        )),
+        "runtime must use the explicit context cwd: {prompt}"
     );
     assert!(
-        msg.contains(daemon_dir.path().to_str().unwrap()),
-        "must name the daemon's work_dir: {msg}"
+        !prompt.contains(&recorded_dir.path().display().to_string()),
+        "stored metadata must not override the explicit context cwd: {prompt}"
     );
-    assert!(msg.contains("start theway from that directory"), "{msg}");
-}
-
-#[test]
-fn binding_check_falls_back_to_string_comparison_when_canonicalize_fails() {
-    // Nonexistent paths → canonicalize fails on both sides → raw comparison.
-    check_work_dir_binding(
-        "s1",
-        Some("/no/such/dir-theway-66"),
-        Path::new("/no/such/dir-theway-66"),
-    )
-    .unwrap();
-    let err = check_work_dir_binding(
-        "s1",
-        Some("/no/such/foreign-theway-66"),
-        Path::new("/no/such/daemon-theway-66"),
-    )
-    .unwrap_err();
-    let msg = err.to_string();
-    assert!(msg.contains("/no/such/foreign-theway-66"), "{msg}");
-    assert!(msg.contains("/no/such/daemon-theway-66"), "{msg}");
+    let registered = factory.services.session_execution.get_context(&id).unwrap();
+    let messages = factory
+        .subagent_registry
+        .node_messages_for_session(Some(&id), "run-1", "node-1")
+        .unwrap();
+    assert_eq!(runtime.session_id, id);
+    assert_eq!(registered.session_id, id);
+    assert_eq!(registered.cwd, work_dir.path().canonicalize().unwrap());
+    assert_eq!(messages[0]["text"], "persisted");
+    assert!(format!("{:?}", factory.dag_engine).contains("launcher: false"));
 }
 
 #[tokio::test]
-async fn build_same_work_dir_session_succeeds() {
-    // hooks::load inside build reads THEWAY_DIR — isolate it.
+async fn build_one_builder_serves_two_cwd_contexts() {
+    let _serial = ENV_LOCK.lock().unwrap();
+    let home = TempDir::new().unwrap();
+    let _theway_dir = EnvGuard::set("THEWAY_DIR", home.path());
+
+    let work_a = TempDir::new().unwrap();
+    let work_b = TempDir::new().unwrap();
+    let base_a = TempDir::new().unwrap();
+    let base_b = TempDir::new().unwrap();
+    for (base, memory) in [
+        (&base_a, "memory alpha"),
+        (&base_b, "memory beta"),
+    ] {
+        write_memory(base.path(), memory);
+    }
+    #[cfg(feature = "local")]
+    for (work, skill, template) in [
+        (&work_a, "alpha-skill", "Template A"),
+        (&work_b, "beta-skill", "Template B"),
+    ] {
+        let root = work.path().join(".theway");
+        write_skill(&root, skill);
+        write_template(&root, "review", template);
+    }
+
+    let repo_root_a = TempDir::new().unwrap();
+    let repo_root_b = TempDir::new().unwrap();
+    let repo_a = theway_storage::sqlite_repo::SqliteSessionRepo::new(repo_root_a.path());
+    let repo_b = theway_storage::sqlite_repo::SqliteSessionRepo::new(repo_root_b.path());
+    let id_a = create_session_with_cwd(&repo_a, work_a.path().to_str().unwrap()).await;
+    let id_b = create_session_with_cwd(&repo_b, work_b.path().to_str().unwrap()).await;
+
+    let (factory, storage, _state) = test_factory();
+    let ctx_a = session_context(work_a.path(), repo_a, storage.clone(), base_a.path()).await;
+    let ctx_b = session_context(work_b.path(), repo_b, storage, base_b.path()).await;
+
+    let runtime_a = factory
+        .build(&ctx_a, &id_a)
+        .await
+        .expect("first cwd context builds");
+    let runtime_b = factory
+        .build(&ctx_b, &id_b)
+        .await
+        .expect("second cwd context builds");
+
+    let prompt_a = runtime_a.harness.system_prompt();
+    let prompt_b = runtime_b.harness.system_prompt();
+    assert!(
+        prompt_a.contains(&format!(
+            "Current working directory: {}",
+            work_a.path().canonicalize().unwrap().display()
+        )),
+        "runtime A must use work_a: {prompt_a}"
+    );
+    assert!(
+        prompt_b.contains(&format!(
+            "Current working directory: {}",
+            work_b.path().canonicalize().unwrap().display()
+        )),
+        "runtime B must use work_b: {prompt_b}"
+    );
+
+    #[cfg(feature = "local")]
+    {
+        assert!(has_skill(&runtime_a, "alpha-skill"));
+        assert!(!has_skill(&runtime_a, "beta-skill"));
+        assert!(has_skill(&runtime_b, "beta-skill"));
+        assert!(!has_skill(&runtime_b, "alpha-skill"));
+        assert_eq!(template_body(&runtime_a, "review"), "Template A");
+        assert_eq!(template_body(&runtime_b, "review"), "Template B");
+
+        write_skill(&work_a.path().join(".theway"), "reloaded-skill");
+        runtime_a.harness.reload_skills_from_disk().await.unwrap();
+        assert!(has_skill(&runtime_a, "reloaded-skill"));
+        assert!(!has_skill(&runtime_b, "reloaded-skill"));
+    }
+
+    assert!(prompt_a.contains("memory alpha"));
+    assert!(!prompt_a.contains("memory beta"));
+    assert!(prompt_b.contains("memory beta"));
+    assert!(!prompt_b.contains("memory alpha"));
+}
+
+#[cfg(feature = "local")]
+fn write_skill(root: &Path, name: &str) {
+    let dir = root.join("skills").join(name);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("SKILL.md"),
+        format!("---\nname: {name}\ndescription: {name}\n---\n{name}\n"),
+    )
+    .unwrap();
+}
+
+#[cfg(feature = "local")]
+fn write_template(root: &Path, name: &str, body: &str) {
+    let dir = root.join("templates");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join(format!("{name}.md")),
+        format!("---\nname: {name}\n---\n{body}"),
+    )
+    .unwrap();
+}
+
+fn write_memory(base: &Path, body: &str) {
+    let dir = base.join("memory");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("memory.md"), body).unwrap();
+}
+
+#[cfg(feature = "local")]
+fn has_skill(runtime: &super::SessionRuntime, name: &str) -> bool {
+    runtime.harness.skills().iter().any(|s| s.name == name)
+}
+
+#[cfg(feature = "local")]
+fn template_body(runtime: &super::SessionRuntime, name: &str) -> String {
+    runtime
+        .harness
+        .templates()
+        .iter()
+        .find(|t| t.name == name)
+        .unwrap()
+        .content
+        .clone()
+}
+
+#[tokio::test]
+async fn build_uses_context_repo_validation() {
     let _serial = ENV_LOCK.lock().unwrap();
     let home = TempDir::new().unwrap();
     let _theway_dir = EnvGuard::set("THEWAY_DIR", home.path());
@@ -314,47 +694,17 @@ async fn build_same_work_dir_session_succeeds() {
     let work_dir = TempDir::new().unwrap();
     let repo_root = TempDir::new().unwrap();
     let repo = theway_storage::sqlite_repo::SqliteSessionRepo::new(repo_root.path());
-    let id = create_session_with_cwd(&repo, work_dir.path().to_str().unwrap()).await;
+    let _existing_id =
+        create_session_with_cwd(&repo, work_dir.path().to_str().unwrap()).await;
+    let (factory, storage, _state) = test_factory();
+    let ctx = session_context(work_dir.path(), repo, storage, &_state.path().join("base")).await;
 
-    let (factory, _state) = test_factory(work_dir.path().to_path_buf());
-    let runtime = factory
-        .build(&repo, &id)
-        .await
-        .expect("session bound to this daemon's work_dir builds");
-    assert!(
-        runtime
-            .harness
-            .session()
-            .storage()
-            .get_metadata_json()
-            .await
-            .is_ok()
-    );
-}
-
-#[tokio::test]
-async fn build_refuses_session_from_different_work_dir_and_names_both_paths() {
-    let work_dir = TempDir::new().unwrap();
-    let foreign_dir = TempDir::new().unwrap();
-    let repo_root = TempDir::new().unwrap();
-    let repo = theway_storage::sqlite_repo::SqliteSessionRepo::new(repo_root.path());
-    let id = create_session_with_cwd(&repo, foreign_dir.path().to_str().unwrap()).await;
-
-    let (factory, _state) = test_factory(work_dir.path().to_path_buf());
-    let err = match factory.build(&repo, &id).await {
-        Ok(_) => panic!("foreign work_dir session must be refused"),
+    let err = match factory.build(&ctx, "missing-session-id").await {
+        Ok(_) => panic!("missing id must fail through context repo validation"),
         Err(e) => e,
     };
     let msg = format!("{err:#}");
-    assert!(msg.contains("belongs to work_dir"), "{msg}");
-    assert!(
-        msg.contains(foreign_dir.path().to_str().unwrap()),
-        "must name the session's work_dir: {msg}"
-    );
-    assert!(
-        msg.contains(work_dir.path().to_str().unwrap()),
-        "must name the daemon's work_dir: {msg}"
-    );
+    assert!(msg.contains("no session matches id missing-session-id"), "{msg}");
 }
 
 #[tokio::test]
@@ -369,11 +719,12 @@ async fn build_allows_legacy_session_without_cwd_metadata() {
     let repo = theway_storage::sqlite_repo::SqliteSessionRepo::new(repo_root.path());
     let id = create_session_with_cwd(&repo, "").await;
 
-    let (factory, _state) = test_factory(work_dir.path().to_path_buf());
+    let (factory, storage, _state) = test_factory();
+    let ctx = session_context(work_dir.path(), repo, storage, &_state.path().join("base")).await;
     factory
-        .build(&repo, &id)
+        .build(&ctx, &id)
         .await
-        .expect("legacy session without cwd metadata passes the binding check");
+        .expect("legacy session without cwd metadata builds");
 }
 
 #[tokio::test]
@@ -415,8 +766,9 @@ export default defineExtension((api) => {
     let repo_root = TempDir::new().unwrap();
     let repo = theway_storage::sqlite_repo::SqliteSessionRepo::new(repo_root.path());
     let id = create_session_with_cwd(&repo, work_dir.path().to_str().unwrap()).await;
-    let (mut factory, state) = test_factory(work_dir.path().to_path_buf());
-    let mut trust = crate::ts_extensions::ExtensionTrustStore::load(&factory.base_dir);
+    let (factory, storage, state) = test_factory();
+    let base_dir = state.path().join("base");
+    let mut trust = crate::ts_extensions::ExtensionTrustStore::load(&base_dir);
     trust
         .decide_project(
             work_dir.path(),
@@ -426,13 +778,15 @@ export default defineExtension((api) => {
         )
         .unwrap();
     trust.save().unwrap();
-    *factory.runtime_extension_packages.write() =
-        crate::ts_extensions::PackageCatalog::discover(work_dir.path(), &factory.base_dir);
-    let engine = crate::ts_extensions::QuickJsEnginePool::new(1);
-    factory.runtime_extension_engine = Some(engine.clone());
 
+    let ctx = session_context(work_dir.path(), repo, storage, &base_dir).await;
+    let engine = ctx
+        .extension_resources
+        .runtime_extension_engine
+        .clone()
+        .expect("local sources must construct a QuickJS engine pool");
     let runtime = factory
-        .build(&repo, &id)
+        .build(&ctx, &id)
         .await
         .expect("one faulted package must not prevent session startup");
     assert_eq!(engine.instance_count().await, 1);
@@ -440,3 +794,6 @@ export default defineExtension((api) => {
     assert_eq!(engine.instance_count().await, 0);
     drop(state);
 }
+mod context_build;
+mod runtime_tool_isolation;
+mod runtime_transcript_isolation;

@@ -19,7 +19,6 @@ use tokio::sync::OnceCell;
 use tokio_util::sync::CancellationToken;
 
 use crate::lsp::{Diagnostic, LspClient};
-use theway_transport::client::base_dir;
 
 const DIAG_WAIT_MS: u64 = 800;
 
@@ -42,6 +41,7 @@ pub struct LanguageConfig {
 }
 
 pub struct LspSupervisor {
+    cwd: PathBuf,
     cwd_uri: String,
     by_ext: HashMap<String, LanguageConfig>,
     clients: Mutex<HashMap<String, Arc<OnceCell<Arc<LspClient>>>>>,
@@ -66,6 +66,7 @@ impl LspSupervisor {
             }
         }
         Self {
+            cwd: cwd.to_path_buf(),
             cwd_uri,
             by_ext,
             clients: Mutex::new(HashMap::new()),
@@ -73,13 +74,13 @@ impl LspSupervisor {
         }
     }
 
-    /// Load `<cwd>/.theway/lsp.toml` and `~/.theway/lsp.toml`; project entries overlay the user
-    /// entries by language id.
-    pub async fn load(cwd: &Path) -> Self {
+    /// Load `paths.work_dir/.theway/lsp.toml` and `paths.base/lsp.toml`;
+    /// project entries overlay the user entries by language id.
+    pub async fn load(paths: &crate::DaemonPaths) -> Self {
         let mut combined = LspConfig::default();
         for path in [
-            base_dir().join("lsp.toml"),
-            cwd.join(".theway").join("lsp.toml"),
+            paths.base.join("lsp.toml"),
+            paths.work_dir.join(".theway").join("lsp.toml"),
         ] {
             if !path.exists() {
                 continue;
@@ -100,7 +101,7 @@ impl LspSupervisor {
                 }
             }
         }
-        Self::from_config(cwd, combined)
+        Self::from_config(&paths.work_dir, combined)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -128,11 +129,12 @@ impl LspSupervisor {
             command: lang.command.clone(),
             args: lang.args.clone(),
         };
+        let cwd = self.cwd.clone();
         let cwd_uri = self.cwd_uri.clone();
         let result: Result<Arc<LspClient>> = cell
             .get_or_try_init(|| async move {
                 let args: Vec<&str> = lang_clone.args.iter().map(|s| s.as_str()).collect();
-                let client = LspClient::spawn(&lang_clone.command, &args).await?;
+                let client = LspClient::spawn_in(&lang_clone.command, &args, &cwd).await?;
                 client.initialize(&cwd_uri).await?;
                 Ok::<Arc<LspClient>, anyhow::Error>(Arc::new(client))
             })

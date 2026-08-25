@@ -22,17 +22,25 @@ use theway_transport::wire::{
 #[derive(Clone)]
 pub struct CoreJobOps {
     registry: SubagentJobRegistry,
+    engine: Arc<DagEngine>,
 }
 
 impl CoreJobOps {
-    pub fn new(registry: SubagentJobRegistry) -> Self {
-        Self { registry }
+    pub fn new(registry: SubagentJobRegistry, engine: Arc<DagEngine>) -> Self {
+        Self { registry, engine }
     }
 }
 
 impl JobOps for CoreJobOps {
     fn node_output(&self, run_id: &str, node_id: &str) -> WireNodeOutput {
-        let messages = self.registry.node_messages(run_id, node_id);
+        let session_id = self.engine.get_run(run_id).and_then(|run| run.session_id);
+        let messages = match session_id.as_deref() {
+            Some(session_id) => {
+                self.registry
+                    .node_messages_for_session(Some(session_id), run_id, node_id)
+            }
+            None => self.registry.node_messages(run_id, node_id),
+        };
         let job = self.registry.find_node(run_id, node_id);
         WireNodeOutput {
             output: job.as_ref().map(|job| job.output.clone()),
@@ -210,14 +218,24 @@ pub fn agent_event(event: SubagentJobEvent) -> WireAgentEvent {
             source,
             run_id,
             node_id,
+            session_id,
         } => WireAgentEvent::Started {
             id,
             agent,
             source,
             run_id,
             node_id,
+            session_id: session_id.unwrap_or_default(),
         },
-        SubagentJobEvent::Output { id, chunk } => WireAgentEvent::Output { id, chunk },
+        SubagentJobEvent::Output {
+            id,
+            chunk,
+            session_id,
+        } => WireAgentEvent::Output {
+            id,
+            chunk,
+            session_id: session_id.unwrap_or_default(),
+        },
         SubagentJobEvent::Metrics {
             id,
             tps,
@@ -227,6 +245,7 @@ pub fn agent_event(event: SubagentJobEvent) -> WireAgentEvent {
             tokens_out,
             tools_called,
             turn,
+            session_id,
         } => WireAgentEvent::Metrics {
             id,
             tps,
@@ -236,6 +255,7 @@ pub fn agent_event(event: SubagentJobEvent) -> WireAgentEvent {
             tokens_out,
             tools_called,
             turn,
+            session_id: session_id.unwrap_or_default(),
         },
         SubagentJobEvent::Completed {
             id,
@@ -245,6 +265,7 @@ pub fn agent_event(event: SubagentJobEvent) -> WireAgentEvent {
             tokens_in,
             tokens_out,
             tools_called,
+            session_id,
         } => WireAgentEvent::Completed {
             id,
             status: status.as_str().to_string(),
@@ -253,6 +274,7 @@ pub fn agent_event(event: SubagentJobEvent) -> WireAgentEvent {
             tokens_in,
             tokens_out,
             tools_called,
+            session_id: session_id.unwrap_or_default(),
         },
     }
 }
@@ -328,11 +350,131 @@ mod tests {
             job.messages_truncated = true;
         });
 
-        let output = CoreJobOps::new(registry).node_output("run-1", "node-1");
+        let output =
+            CoreJobOps::new(registry, Arc::new(DagEngine::new())).node_output("run-1", "node-1");
 
         assert_eq!(output.output.as_deref(), Some("result"));
         assert_eq!(output.messages.unwrap().len(), 1);
         assert!(output.messages_truncated);
+    }
+
+    #[test]
+    fn job_ops_uses_runs_exact_session_when_run_node_ids_collide() {
+        let engine = Arc::new(DagEngine::new());
+        let run_id = engine.plan_goal("shared", Some("session-a".into()));
+        let registry = SubagentJobRegistry::new();
+        for (session_id, text) in [("session-a", "from-a"), ("session-b", "from-b")] {
+            let id = registry.register(SubagentJobInit {
+                agent: "explorer".into(),
+                source: "dag".into(),
+                run_id: Some(run_id.clone()),
+                node_id: Some("node-1".into()),
+                session_id: Some(session_id.into()),
+            });
+            registry.update(&id, |job| {
+                job.messages.push(serde_json::json!({ "text": text }));
+            });
+        }
+
+        let output = CoreJobOps::new(registry, engine).node_output(&run_id, "node-1");
+
+        let messages = output.messages.unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["text"], "from-a");
+    }
+
+    #[test]
+    fn agent_event_maps_session_ownership() {
+        let events = [
+            SubagentJobEvent::Started {
+                id: "job-1".into(),
+                agent: "researcher".into(),
+                source: "dag".into(),
+                run_id: Some("run-1".into()),
+                node_id: Some("node-1".into()),
+                session_id: Some("sess-1".into()),
+            },
+            SubagentJobEvent::Output {
+                id: "job-1".into(),
+                chunk: "hi".into(),
+                session_id: Some("sess-1".into()),
+            },
+            SubagentJobEvent::Metrics {
+                id: "job-1".into(),
+                tps: None,
+                cps: None,
+                chars: 0,
+                tokens_in: 0,
+                tokens_out: 0,
+                tools_called: 0,
+                turn: 0,
+                session_id: Some("sess-1".into()),
+            },
+            SubagentJobEvent::Completed {
+                id: "job-1".into(),
+                status: SubagentJobStatus::Succeeded,
+                error: None,
+                chars: 0,
+                tokens_in: 0,
+                tokens_out: 0,
+                tools_called: 0,
+                session_id: Some("sess-1".into()),
+            },
+        ];
+
+        for event in events {
+            match agent_event(event) {
+                WireAgentEvent::Started { session_id, .. }
+                | WireAgentEvent::Output { session_id, .. }
+                | WireAgentEvent::Metrics { session_id, .. }
+                | WireAgentEvent::Completed { session_id, .. } => {
+                    assert_eq!(session_id, "sess-1");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn agent_event_normalizes_missing_session_to_empty_string() {
+        let event = SubagentJobEvent::Started {
+            id: "job-1".into(),
+            agent: "researcher".into(),
+            source: "subagent".into(),
+            run_id: None,
+            node_id: None,
+            session_id: None,
+        };
+
+        match agent_event(event) {
+            WireAgentEvent::Started { session_id, .. } => assert_eq!(session_id, ""),
+            other => panic!("expected Started event, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dag_event_maps_session_ownership() {
+        let run = DagEvent::RunStatus {
+            run_id: "goal-1".into(),
+            session_id: "sess-1".into(),
+            status: DagStatus::Running,
+            error: None,
+        };
+        match dag_event(run) {
+            WireDagEvent::RunStatus { session_id, .. } => assert_eq!(session_id, "sess-1"),
+            other => panic!("expected RunStatus event, got {other:?}"),
+        }
+
+        let node = DagEvent::NodeStatus {
+            run_id: "goal-1".into(),
+            session_id: "sess-1".into(),
+            node_id: "main".into(),
+            status: NodeStatus::Running,
+            error: None,
+        };
+        match dag_event(node) {
+            WireDagEvent::NodeStatus { session_id, .. } => assert_eq!(session_id, "sess-1"),
+            other => panic!("expected NodeStatus event, got {other:?}"),
+        }
     }
 
     #[test]

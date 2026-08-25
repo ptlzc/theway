@@ -12,19 +12,389 @@ use anyhow::{Context, Result};
 use theway_contract::session::SessionStore;
 use theway_core::multiagent::goal;
 use theway_core::multiagent::graph::engine::DagEngine;
+use theway_core::multiagent::jobs::JobTranscriptStore;
 use theway_core::{AgentHarness, AgentHarnessOptions, ThinkingLevel};
 use theway_transport::feed::FeedUpdate;
 use theway_transport::inbox;
+
+mod activation_build;
+pub(crate) use activation_build::load_persisted_dag_runs;
+
+#[derive(Clone)]
+pub struct SessionProjectResources {
+    pub memory_block: String,
+    pub skills: Vec<theway_core::Skill>,
+    pub templates: Vec<theway_core::PromptTemplate>,
+    pub memory_dir: std::path::PathBuf,
+    pub reload_skills_fn: theway_core::ReloadSkillsFn,
+    pub load_local_sources: bool,
+}
+
+impl SessionProjectResources {
+    pub async fn load(
+        paths: &crate::DaemonPaths,
+        cli_builtin_skills: &[String],
+        config_builtin_skills: &[String],
+        load_local_sources: bool,
+    ) -> Result<Self> {
+        // Memory is process-global under the resolved daemon base, not cwd-local.
+        let memory_dir = paths.base.join("memory");
+        let memory_block = crate::tools::memory::load_memory_block(&memory_dir).await;
+        let loaded_skills = if load_local_sources {
+            crate::skills::load_all(paths).await
+        } else {
+            crate::skills::LoadedSkills {
+                skills: Vec::new(),
+                diagnostics: Vec::new(),
+            }
+        };
+        let loaded_templates = if load_local_sources {
+            crate::templates::load_all(paths).await
+        } else {
+            crate::templates::LoadedTemplates {
+                templates: Vec::new(),
+                diagnostics: Vec::new(),
+            }
+        };
+        let resolved_builtins =
+            crate::builtin_skills::resolve_builtins(cli_builtin_skills, config_builtin_skills)?;
+        let mut skills = crate::builtin_skills::merge_with_user_project(
+            resolved_builtins.skills.clone(),
+            &loaded_skills.skills,
+        );
+        let state = if load_local_sources {
+            crate::skill_overrides::load(&paths.base).await
+        } else {
+            crate::skill_overrides::SkillOverrides::default()
+        };
+        crate::skill_overrides::apply(&state, &mut skills);
+        let reload_skills_fn: theway_core::ReloadSkillsFn = {
+            let paths = paths.clone();
+            let builtins = resolved_builtins.skills.clone();
+            std::sync::Arc::new(move || {
+                let paths = paths.clone();
+                let builtins = builtins.clone();
+                Box::pin(async move {
+                    let loaded = if load_local_sources {
+                        crate::skills::load_all(&paths).await
+                    } else {
+                        crate::skills::LoadedSkills {
+                            skills: Vec::new(),
+                            diagnostics: Vec::new(),
+                        }
+                    };
+                    let mut merged =
+                        crate::builtin_skills::merge_with_user_project(builtins, &loaded.skills);
+                    let state = if load_local_sources {
+                        crate::skill_overrides::load(&paths.base).await
+                    } else {
+                        crate::skill_overrides::SkillOverrides::default()
+                    };
+                    crate::skill_overrides::apply(&state, &mut merged);
+                    theway_core::LoadSkillsOutput {
+                        skills: merged,
+                        diagnostics: loaded.diagnostics,
+                    }
+                })
+            })
+        };
+        Ok(Self {
+            memory_block,
+            skills,
+            templates: loaded_templates.templates,
+            memory_dir,
+            reload_skills_fn,
+            load_local_sources,
+        })
+    }
+}
+
+/// Session-owned MCP state loaded from the owning context's config paths.
+#[derive(Clone, Default)]
+pub struct SessionMcpResources {
+    pub tools: Vec<Arc<dyn theway_core::AgentTool>>,
+    /// One-shot pool: the first build from a context takes and registers these hooks.
+    /// Cloned contexts share the same pool; separately constructed contexts do not.
+    pub notification_hooks: Arc<parking_lot::Mutex<Vec<Arc<triggers::McpNotificationHook>>>>,
+    pub inject_summary_servers: std::collections::HashSet<String>,
+    pub inject_and_run_servers: std::collections::HashSet<String>,
+    pub server_count: usize,
+    pub server_names: Vec<String>,
+    pub tool_names: Vec<String>,
+    pub notification_hook_count: usize,
+}
+
+impl SessionMcpResources {
+    /// Convert an MCP load result into session resources, emitting its
+    /// diagnostics once and deriving tool/server capability metadata.
+    pub fn from_loaded(loaded: crate::mcp_loader::LoadedMcp) -> Self {
+        for diagnostic in &loaded.diagnostics {
+            tracing::warn!(target: "mcp", "{diagnostic}");
+        }
+        let tool_names = loaded
+            .tools
+            .iter()
+            .map(|tool| tool.definition().name.clone())
+            .collect::<Vec<_>>();
+        let notification_hook_count = loaded.notification_hooks.len();
+        Self {
+            tools: loaded.tools,
+            notification_hooks: Arc::new(parking_lot::Mutex::new(loaded.notification_hooks)),
+            inject_summary_servers: loaded.inject_summary_servers,
+            inject_and_run_servers: loaded.inject_and_run_servers,
+            server_count: loaded.client_count,
+            server_names: loaded.server_names,
+            tool_names,
+            notification_hook_count,
+        }
+    }
+}
+
+/// Session-owned TS extension host resources loaded once per owning context.
+/// Cloned contexts share the same Arc-backed catalog, legacy compaction host,
+/// compact registry, and QuickJS engine pool; separately constructed contexts
+/// discover and build independent resources.
+#[derive(Clone)]
+pub struct SessionExtensionResources {
+    pub compact_algorithms:
+        std::sync::Arc<theway_core::agent::compaction::algorithm::CompactAlgorithmRegistry>,
+    pub legacy_compaction_host: Option<std::sync::Arc<crate::ts_extensions::LegacyCompactionHost>>,
+    pub runtime_extension_packages:
+        std::sync::Arc<parking_lot::RwLock<crate::ts_extensions::PackageCatalog>>,
+    pub runtime_extension_engine: Option<std::sync::Arc<crate::ts_extensions::QuickJsEnginePool>>,
+}
+
+impl SessionExtensionResources {
+    /// Discover local sources and construct the broker, engine pool, legacy
+    /// compaction host, and compact registry for one session context.
+    pub fn new(
+        cwd: &std::path::Path,
+        base: &std::path::Path,
+        executor: std::sync::Arc<dyn theway_core::executor::ToolExecutor>,
+        load_local_sources: bool,
+    ) -> Self {
+        let ts_extensions = if load_local_sources {
+            crate::ts_extensions::ExtensionRegistry::discover(cwd, base)
+        } else {
+            crate::ts_extensions::ExtensionRegistry::new()
+        };
+        for error in &ts_extensions.errors {
+            tracing::warn!(target: "extensions", "{error}");
+        }
+        let legacy_compaction_host = std::sync::Arc::new(
+            crate::ts_extensions::LegacyCompactionHost::new(&ts_extensions),
+        );
+        let compact_algorithms = legacy_compaction_host.registry();
+        let runtime_extension_packages = std::sync::Arc::new(parking_lot::RwLock::new(
+            ts_extensions.package_catalog().clone(),
+        ));
+        let runtime_extension_engine = load_local_sources.then(|| {
+            let broker_services =
+                crate::ts_extensions::ExtensionBrokerServices::new(base, executor);
+            for package in runtime_extension_packages.read().effective_packages() {
+                for permission in package.granted_permissions() {
+                    if let theway_contract::extension::ExtensionPermission::SecretsRead(name) =
+                        permission
+                        && let Ok(value) = std::env::var(name)
+                    {
+                        broker_services.set_secret(name, value);
+                    }
+                }
+            }
+            std::sync::Arc::new(
+                crate::ts_extensions::QuickJsEnginePool::with_broker_services(
+                    std::thread::available_parallelism()
+                        .map(usize::from)
+                        .unwrap_or(1)
+                        .min(4),
+                    crate::ts_extensions::QuickJsEngineLimits::default(),
+                    broker_services,
+                ),
+            )
+        });
+        Self {
+            compact_algorithms,
+            legacy_compaction_host: Some(legacy_compaction_host),
+            runtime_extension_packages,
+            runtime_extension_engine,
+        }
+    }
+}
+
+/// Hook rules and executors loaded once for an owning session context.
+/// Clones share loaded state; separately constructed contexts remain isolated.
+#[derive(Clone)]
+pub struct SessionHookResources {
+    loaded: Arc<hooks::LoadedHooks>,
+}
+
+impl SessionHookResources {
+    /// Load `hooks.toml` for this context and emit its diagnostics once.
+    pub async fn load(paths: &crate::DaemonPaths, read_local_files: bool) -> Self {
+        let loaded = hooks::load_with(
+            paths,
+            "",
+            None::<&theway_llm_provider::Model>,
+            None::<ThinkingLevel>,
+            daemon_executors(),
+            read_local_files,
+        )
+        .await;
+        for diag in &loaded.diagnostics {
+            tracing::warn!(target: "hooks", "hooks loader: {diag}");
+        }
+        Self {
+            loaded: Arc::new(loaded),
+        }
+    }
+
+    /// Clone the owning resources into a freshly rebound session runner.
+    pub fn loaded_hooks(
+        &self,
+        session_id: impl Into<String>,
+        model: Option<&theway_llm_provider::Model>,
+        thinking_level: Option<ThinkingLevel>,
+    ) -> hooks::LoadedHooks {
+        hooks::LoadedHooks {
+            runner: Arc::new(
+                self.loaded
+                    .runner
+                    .for_session(session_id, model, thinking_level),
+            ),
+            diagnostics: self.loaded.diagnostics.clone(),
+        }
+    }
+}
+
+/// Cwd-scoped inputs for one runtime build.
+#[derive(Clone)]
+pub struct SessionExecutionContext {
+    /// Exact session id this context is bound to.
+    pub session_id: String,
+    /// Canonical cwd for path-sensitive runtime assembly.
+    pub cwd: std::path::PathBuf,
+    /// Transcript store derived from this context's cwd.
+    pub transcript_store: Arc<dyn JobTranscriptStore>,
+    /// Session repository scoped to `cwd`.
+    pub repo: Arc<dyn SessionRepository>,
+    /// Persistence backend used to restore this context's DAG runs.
+    pub storage: Arc<dyn RuntimeStorage>,
+    /// Resolved daemon paths scoped to `cwd`; shared base/home/extra skill state.
+    pub paths: crate::DaemonPaths,
+    /// Execution environment this context's harness tools dispatch through.
+    pub executor: Arc<dyn theway_core::executor::ToolExecutor>,
+    /// Effective model for this context.
+    pub model: theway_llm_provider::Model,
+    /// Effective thinking level for this context's harness builds.
+    pub thinking: theway_core::ThinkingLevel,
+    pub resources: SessionProjectResources,
+    /// Session-owned MCP tools, one-shot hook pool, inject sets, and capability metadata.
+    pub mcp: SessionMcpResources,
+    /// Session-owned hook loader state, loaded once per owning context.
+    pub hooks: SessionHookResources,
+    /// Session-owned TS extension catalog, legacy host, compact registry, and engine.
+    pub extension_resources: SessionExtensionResources,
+}
+
+impl SessionExecutionContext {
+    pub fn new(
+        session_id: impl Into<String>,
+        cwd: std::path::PathBuf,
+        repo: Arc<dyn SessionRepository>,
+        storage: Arc<dyn RuntimeStorage>,
+        paths: crate::DaemonPaths,
+        executor: Arc<dyn theway_core::executor::ToolExecutor>,
+        model: theway_llm_provider::Model,
+        thinking: theway_core::ThinkingLevel,
+        resources: SessionProjectResources,
+        mcp: SessionMcpResources,
+        hooks: SessionHookResources,
+    ) -> Self {
+        let session_id = session_id.into();
+        let cwd = cwd.canonicalize().unwrap_or(cwd);
+        let transcript_store = storage.job_transcript_store(&cwd);
+        let paths = paths.with_work_dir(cwd.clone());
+        let extension_resources = SessionExtensionResources::new(
+            &cwd,
+            &paths.base,
+            executor.clone(),
+            resources.load_local_sources,
+        );
+        Self {
+            session_id,
+            cwd,
+            transcript_store,
+            repo,
+            storage,
+            paths,
+            executor,
+            model,
+            thinking,
+            resources,
+            mcp,
+            hooks,
+            extension_resources,
+        }
+    }
+
+    /// Build a session execution context for an arbitrary canonical work dir.
+    /// Does not mutate the process cwd or persist anything.
+    #[allow(dead_code)] // Used by session-context tests and future embedders.
+    pub async fn build_for_work_dir(
+        session_id: impl Into<String>,
+        requested_work_dir: std::path::PathBuf,
+        repo: Arc<dyn SessionRepository>,
+        storage: Arc<dyn RuntimeStorage>,
+        base_paths: crate::DaemonPaths,
+        model: theway_llm_provider::Model,
+        thinking: theway_core::ThinkingLevel,
+        cli_builtin_skills: &[String],
+        config_builtin_skills: &[String],
+        load_local_sources: bool,
+    ) -> Result<Self> {
+        let cwd = requested_work_dir
+            .canonicalize()
+            .with_context(|| format!("canonicalize work dir {}", requested_work_dir.display()))?;
+        let paths = base_paths.with_work_dir(cwd.clone());
+        let executor = crate::executor::executor_for_cwd(cwd.clone());
+        let loaded_mcp = if load_local_sources {
+            crate::mcp_loader::load_all(&paths).await
+        } else {
+            crate::mcp_loader::LoadedMcp::empty()
+        };
+        let resources = SessionProjectResources::load(
+            &paths,
+            cli_builtin_skills,
+            config_builtin_skills,
+            load_local_sources,
+        )
+        .await?;
+        let hooks = SessionHookResources::load(&paths, load_local_sources).await;
+        Ok(SessionExecutionContext::new(
+            session_id,
+            cwd,
+            repo,
+            storage,
+            base_paths,
+            executor,
+            model,
+            thinking,
+            resources,
+            SessionMcpResources::from_loaded(loaded_mcp),
+            hooks,
+        ))
+    }
+}
 
 /// session-resource-model: rebuilds a fully-wired [`AgentHarness`] for any session id —
 /// the in-process version of the CLI `--resume-id` path. Constructed once at thewayd
 /// startup (harness assembly); wrapped into [`crate::session_ops::SessionFactory`]
 /// and consumed by `TurnHost::switch_session` on the serialized event loop.
 ///
-/// Every field is either process-level state shared by Arc (DAG engine, subagent registry,
-/// feed/main-run channels, trigger registries, MCP tools + push hooks) or an immutable
-/// ingredient captured from the startup build (model, skills, templates, system prompt,
-/// hook closures). Per-session pieces are rebuilt on every `build`:
+/// The builder retains process-owned state shared by Arc (DAG engine, subagent registry,
+/// feed/main-run channels, trigger registries). Per-session and cwd-scoped inputs arrive
+/// through [`SessionExecutionContext`], including MCP tools, hooks, and inject sets.
+/// Per-session pieces are rebuilt on every `build`:
 ///
 /// * the tool set — `dag_*` / `task` stamped with the target session, skill family wired
 ///   to a fresh harness cell;
@@ -39,51 +409,24 @@ use theway_transport::inbox;
 /// startup model — a `/model` change made before switching is not carried over (the
 /// rehydrated transcript restores the session's own last recorded model when it has one).
 pub struct SessionRuntimeBuilder {
-    /// This daemon's work_dir. Explicit session↔work_dir binding (issue #66
-    /// node 3): [`Self::build`] refuses to open a session whose recorded `cwd`
-    /// metadata points at a different directory, so a session always runs
-    /// under the daemon that serves its work_dir.
-    pub cwd: std::path::PathBuf,
-    /// Runtime state externalization seam (issue #80).
-    pub storage: Arc<dyn RuntimeStorage>,
-    /// Theway base dir (issue #66: `DaemonPaths::base`), resolved at the CLI
-    /// boundary; wired into the rebuilt session's skill-family tools.
-    pub base_dir: std::path::PathBuf,
-    /// Execution environment the rebuilt harness's tools dispatch through
-    /// (sdk-split-local-sandbox node 8); process-level, shared by every session build.
-    pub executor: Arc<dyn theway_core::executor::ToolExecutor>,
-    pub model: theway_llm_provider::Model,
+    #[allow(dead_code)] // Kept for compatibility while build_opened uses ctx.thinking.
     pub thinking: ThinkingLevel,
     pub stream_fn: theway_core::StreamFn,
-    pub memory_block: String,
-    pub skills: Vec<theway_core::Skill>,
-    pub templates: Vec<theway_core::PromptTemplate>,
-    pub compact_algorithms:
-        std::sync::Arc<theway_core::agent::compaction::algorithm::CompactAlgorithmRegistry>,
-    pub legacy_compaction_host: Option<Arc<crate::ts_extensions::LegacyCompactionHost>>,
-    pub runtime_extension_packages: Arc<parking_lot::RwLock<crate::ts_extensions::PackageCatalog>>,
-    pub runtime_extension_engine: Option<crate::ts_extensions::QuickJsEnginePool>,
-    pub memory_dir: std::path::PathBuf,
     pub dag_engine: Arc<DagEngine>,
     pub subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry,
-    pub mcp_tools: Vec<Arc<dyn theway_core::AgentTool>>,
-    /// MCP notification receivers are process-scoped and may be attached only once.
-    pub mcp_notification_hooks: parking_lot::Mutex<Vec<Arc<triggers::McpNotificationHook>>>,
     pub services: DaemonServices,
-    pub reload_skills_fn: theway_core::ReloadSkillsFn,
     pub before_tool_call: Option<theway_core::BeforeToolCallHook>,
-    pub before_trigger_action: crate::trigger_engine::execution::BeforeTriggerActionHook,
     pub control_plane_hook: Option<theway_core::OnControlPlanePromptHook>,
     pub after_tool_call: Option<theway_core::AfterToolCallHook>,
     pub feed_tx: tokio::sync::mpsc::UnboundedSender<FeedUpdate>,
     pub main_run_tx: tokio::sync::mpsc::UnboundedSender<String>,
     pub debug: bool,
-    pub load_local_sources: bool,
 }
 
 /// Session-scoped services that must be replaced as one unit.
 pub struct SessionRuntime {
     pub session_id: String,
+    pub cwd: std::path::PathBuf,
     pub harness: Arc<AgentHarness>,
     pub trigger_executor: Arc<crate::trigger_engine::execution::TriggerExecutor>,
     pub tool_names: Vec<String>,
@@ -94,6 +437,7 @@ pub struct SessionRuntime {
 #[cfg(test)]
 impl SessionRuntime {
     pub(crate) fn for_test(session_id: impl Into<String>, harness: Arc<AgentHarness>) -> Self {
+        let session_id = session_id.into();
         let trigger_executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
             harness.agent_arc(),
             harness.session().clone(),
@@ -106,7 +450,8 @@ impl SessionRuntime {
             None,
         ));
         Self {
-            session_id: session_id.into(),
+            session_id: session_id.clone(),
+            cwd: std::env::temp_dir().join("theway-test").join(session_id),
             harness,
             trigger_executor,
             tool_names: Vec::new(),
@@ -117,22 +462,38 @@ impl SessionRuntime {
 }
 
 impl SessionRuntimeBuilder {
-    /// Build (and rehydrate) a harness for `id` (full session id or unique prefix).
-    pub async fn build(&self, repo: &dyn SessionRepository, id: &str) -> Result<SessionRuntime> {
-        let store = repo
+    /// Build (and rehydrate) a harness for `id` (full session id or unique prefix)
+    /// using the cwd-scoped repository in `ctx`.
+    pub async fn build(&self, ctx: &SessionExecutionContext, id: &str) -> Result<SessionRuntime> {
+        let store = ctx
+            .repo
             .resume(Some(id))
             .await
             .with_context(|| format!("open session {id}"))?;
-        self.build_opened(store, true).await
+        self.build_opened(ctx, store, true).await
     }
 
     /// Assemble the complete session runtime from an already-opened persistent store.
     /// Daemon startup and in-process session switching both enter through this method.
     pub async fn build_opened(
         &self,
+        ctx: &SessionExecutionContext,
         store: Arc<dyn SessionStore>,
         rehydrate: bool,
     ) -> Result<SessionRuntime> {
+        let (ctx, session_id, store) = self.opened_context(ctx, store).await?;
+        let restored = load_persisted_dag_runs(&ctx, &session_id).await?;
+        let skill_harness_cell = self.install_execution_context(ctx.clone(), restored);
+        self.assemble_opened(ctx, store, session_id, rehydrate, skill_harness_cell)
+            .await
+    }
+
+    /// Resolve the opened store's exact session id and own the context.
+    async fn opened_context(
+        &self,
+        ctx: &SessionExecutionContext,
+        store: Arc<dyn SessionStore>,
+    ) -> Result<(Arc<SessionExecutionContext>, String, Arc<dyn SessionStore>)> {
         let meta = store.get_metadata_json().await?;
         let session_id = meta
             .get("id")
@@ -140,83 +501,67 @@ impl SessionRuntimeBuilder {
             .unwrap_or("?")
             .to_string();
 
-        // Explicit work_dir binding (issue #66 node 3): the target session must be
-        // bound to this daemon's work_dir; a foreign session is refused before any
-        // harness state is touched.
-        let target_cwd = meta.get("cwd").and_then(|v| v.as_str());
-        check_work_dir_binding(&session_id, target_cwd, &self.cwd)?;
+        // Own the exact session context before restore so recovered runs immediately
+        // use the matching launcher and transcript store.
+        let mut owned_ctx = ctx.clone();
+        owned_ctx.session_id = session_id.clone();
+        Ok((Arc::new(owned_ctx), session_id, store))
+    }
+
+    /// Shared non-installing assembly body.
+    async fn assemble_opened(
+        &self,
+        ctx: Arc<SessionExecutionContext>,
+        store: Arc<dyn SessionStore>,
+        session_id: String,
+        rehydrate: bool,
+        skill_harness_cell: crate::tools::skill::SkillHarnessCell,
+    ) -> Result<SessionRuntime> {
         let extension_state_store = Arc::clone(&store);
         let session = theway_core::Session::from_store(store);
 
-        // Crash-recovery parity with startup: restore this session's persisted DAG runs.
-        // `restore` skips ids already live in the engine, so switching back and forth is
-        // idempotent.
-        let restored = self
-            .dag_engine
-            .restore(self.storage.load_dag_runs(&self.cwd, &session_id).await?);
-        if !restored.is_empty() {
-            tracing::info!(
-                "session {session_id}: restored {} in-flight DAG run(s): {}",
-                restored.len(),
-                restored.join(", ")
-            );
-        }
-
         // Fresh per-session tool set (dag_* / task stamped with the target session; the
         // skill family gets a brand-new harness cell filled right after construction).
-        let skill_harness_cell: crate::tools::skill::SkillHarnessCell =
-            std::sync::Arc::new(once_cell::sync::OnceCell::new());
-        let mut tools = tools::session_tool_set(
-            &self.memory_dir,
-            &self.base_dir,
+        let mut tools = tools::session_tool_set_for_cwd(
+            &ctx.resources.memory_dir,
+            &ctx.paths.base,
             &self.dag_engine,
             &self.subagent_registry,
-            &self.model,
+            &ctx.model,
             Some(&self.stream_fn),
             &skill_harness_cell,
             &session_id,
-            self.executor.clone(),
+            ctx.executor.clone(),
             &self.services,
+            ctx.cwd.clone(),
         );
-        tools.extend(self.mcp_tools.iter().cloned());
-
-        self.dag_engine.set_launcher(Some(tools::node_launcher(
-            self.dag_engine.clone(),
-            self.model.clone(),
-            Some(self.stream_fn.clone()),
-            self.cwd.clone(),
-            self.subagent_registry.clone(),
-            self.memory_dir.clone(),
-            self.base_dir.clone(),
-            skill_harness_cell.clone(),
-            self.executor.clone(),
-        )));
+        tools.extend(ctx.mcp.tools.iter().cloned());
 
         let goal_harness_cell: Arc<OnceLock<Arc<AgentHarness>>> = Arc::new(OnceLock::new());
-        let mut opts = AgentHarnessOptions::new(self.model.clone(), session);
+        let mut opts = AgentHarnessOptions::new(ctx.model.clone(), session);
         opts.observer = self.subagent_registry.observer();
         opts.observation_context = theway_core::ObservationContext {
             session_id: Some(session_id.clone()),
             ..theway_core::ObservationContext::default()
         };
-        opts.runtime_extension_cwd = self.cwd.to_string_lossy().into_owned();
+        opts.runtime_extension_cwd = ctx.cwd.to_string_lossy().into_owned();
         let mut runtime_extension_host = None;
-        if let Some(engine) = &self.runtime_extension_engine {
+        if let Some(engine) = &ctx.extension_resources.runtime_extension_engine {
             let base_tools = tools.clone();
             let extensions = Arc::new(
                 crate::ts_extensions::SessionPluginHost::load_with_state_and_legacy(
-                    self.runtime_extension_packages.read().clone(),
-                    engine.clone(),
+                    ctx.extension_resources.runtime_extension_packages.read().clone(),
+                    engine.as_ref().clone(),
                     session_id.clone(),
-                    &self.cwd,
+                    &ctx.cwd,
                     crate::ts_extensions::RuntimeExtensionHostConfig::default(),
                     Arc::new(
                         theway_core::agent::runtime_extensions::PersistentSessionExtensionStatePort::new(
                             extension_state_store,
                         ),
                     ),
-                    self.legacy_compaction_host.clone(),
-                    Some(self.runtime_extension_packages.clone()),
+                    ctx.extension_resources.legacy_compaction_host.clone(),
+                    Some(ctx.extension_resources.runtime_extension_packages.clone()),
                 )
                 .await,
             );
@@ -245,16 +590,19 @@ impl SessionRuntimeBuilder {
             .iter()
             .map(|tool| tool.definition().name.clone())
             .collect::<Vec<_>>();
-        let system_prompt =
-            crate::system_prompt::compose_system_prompt(&self.cwd, &self.memory_block, &tool_names);
+        let system_prompt = crate::system_prompt::compose_system_prompt(
+            &ctx.cwd,
+            &ctx.resources.memory_block,
+            &tool_names,
+        );
         opts.system_prompt = system_prompt;
-        opts.thinking_level = self.thinking;
+        opts.thinking_level = ctx.thinking;
         opts.tools = tools;
-        opts.skills = self.skills.clone();
-        opts.prompt_templates = self.templates.clone();
-        opts.compact_algorithms = self.compact_algorithms.clone();
+        opts.skills = ctx.resources.skills.clone();
+        opts.prompt_templates = ctx.resources.templates.clone();
+        opts.compact_algorithms = ctx.extension_resources.compact_algorithms.clone();
         opts.stream_fn = Some(self.stream_fn.clone());
-        opts.reload_skills_fn = Some(self.reload_skills_fn.clone());
+        opts.reload_skills_fn = Some(ctx.resources.reload_skills_fn.clone());
         opts.on_turn_end = Some(goal::stop_hook(
             goal_harness_cell.clone(),
             self.dag_engine.clone(),
@@ -281,7 +629,17 @@ impl SessionRuntimeBuilder {
         }
 
         // Per-session trigger executor: same wiring as the startup path (transport
-        // adapters plus cron/dynamic listeners registered per harness).
+        // adapters plus cron/dynamic listeners registered per harness). Direct-inject
+        // behavior comes from this context's MCP inject sets; cron/dynamic hooks remain
+        // process-owned and are wrapped fresh for each executor.
+        let before_trigger_action = triggers::cron_action_hook(
+            self.services.cron.clone(),
+            triggers::direct_inject_action_hook(
+                ctx.mcp.inject_summary_servers.clone(),
+                ctx.mcp.inject_and_run_servers.clone(),
+                triggers::before_trigger_action_hook(self.services.dynamic_triggers.clone()),
+            ),
+        );
         let trigger_executor =
             std::sync::Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
                 harness.agent_arc(),
@@ -289,18 +647,19 @@ impl SessionRuntimeBuilder {
                 crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
                 None,
                 None,
-                Some(self.before_trigger_action.clone()),
+                Some(before_trigger_action),
                 Some(self.stream_fn.clone()),
                 self.before_tool_call.clone(),
                 self.after_tool_call.clone(),
             ));
-        // Notification hooks: MCP push sources are Arc'd clones of the process-level
-        // set; cron / dynamic-trigger hooks are constructed fresh per executor.
-        // Registered exactly once per executor — see `register_notification_hooks`.
-        let mcp_notification_hooks = std::mem::take(&mut *self.mcp_notification_hooks.lock());
+        // Notification hooks: MCP push sources are one-shot per owning context; cron /
+        // dynamic-trigger hooks are constructed fresh per executor. Registered exactly
+        // once per executor — see `register_notification_hooks`.
+        let mcp_notification_hooks = std::mem::take(&mut *ctx.mcp.notification_hooks.lock());
         register_notification_hooks(
             &trigger_executor,
             &mcp_notification_hooks,
+            &ctx.cwd,
             &self.services.cron,
             &self.services.dynamic_triggers,
         );
@@ -331,26 +690,14 @@ impl SessionRuntimeBuilder {
             self.services.cron.clone(),
             inbox::default_inbox_path(),
         ));
-        // CLI hooks are session-scoped (they embed the session id) — reload per switch.
-        // TODO(#73): this still re-reads local `hooks.toml` files on every session
-        // switch; once the startup `load_local_sources` seam is controller-driven,
-        // route it through `hooks::load_with` with the same setting.
+        // Rules and executors belong to the context; only session/model/thinking are rebound.
         let (hook_model, hook_thinking) = {
             let state = harness.agent().state();
             (state.model.clone(), state.thinking_level)
         };
-        let loaded_hooks = hooks::load_with(
-            &self.cwd,
-            session_id.clone(),
-            hook_model.as_ref(),
-            hook_thinking,
-            daemon_executors(),
-            self.load_local_sources,
-        )
-        .await;
-        for diag in &loaded_hooks.diagnostics {
-            tracing::warn!("session {session_id}: hooks loader: {diag}");
-        }
+        let loaded_hooks =
+            ctx.hooks
+                .loaded_hooks(session_id.clone(), hook_model.as_ref(), hook_thinking);
         let _ = harness.agent().subscribe(loaded_hooks.runner.listener());
         let _ = harness.subscribe_harness(loaded_hooks.runner.harness_listener());
         let main_run_tx = self.main_run_tx.clone();
@@ -375,6 +722,7 @@ impl SessionRuntimeBuilder {
         harness.start_runtime_extensions().await;
         Ok(SessionRuntime {
             session_id,
+            cwd: ctx.cwd.clone(),
             harness,
             trigger_executor,
             tool_names,
@@ -382,44 +730,6 @@ impl SessionRuntimeBuilder {
             extension_host: runtime_extension_host.map(|(host, _)| host),
         })
     }
-}
-
-/// Enforce the explicit session↔work_dir binding on switch (issue #66 node 3).
-///
-/// `target_cwd` is the target session's recorded `cwd` metadata — the work_dir
-/// captured when the session was created. It must match `daemon_cwd`, this
-/// daemon's work_dir. Both sides are canonicalized before comparing (symlinks,
-/// `.` / `..` segments, trailing slashes all normalize away); when either
-/// canonicalize fails (e.g. one side no longer exists on disk) the raw path
-/// strings are compared instead.
-///
-/// A missing or empty `target_cwd` means a pre-binding legacy session: that
-/// passes through (debug-traced) so historical sessions are never locked out.
-fn check_work_dir_binding(
-    session_id: &str,
-    target_cwd: Option<&str>,
-    daemon_cwd: &std::path::Path,
-) -> Result<()> {
-    let Some(target) = target_cwd.map(str::trim).filter(|c| !c.is_empty()) else {
-        tracing::debug!(
-            "session {session_id}: no work_dir (cwd) metadata — legacy session, switch allowed"
-        );
-        return Ok(());
-    };
-    let target_path = std::path::Path::new(target);
-    let matched = match (target_path.canonicalize(), daemon_cwd.canonicalize()) {
-        (Ok(target), Ok(daemon)) => target == daemon,
-        // canonicalize failed on at least one side — fall back to comparing
-        // the original paths.
-        _ => target_path == daemon_cwd,
-    };
-    if matched {
-        return Ok(());
-    }
-    anyhow::bail!(
-        "session {session_id} belongs to work_dir {target}; this daemon serves {} — start theway from that directory",
-        daemon_cwd.display()
-    );
 }
 
 /// Assembly target for notification hooks. The only production impl is the
@@ -444,6 +754,7 @@ impl NotificationHookSink for std::sync::Arc<crate::trigger_engine::execution::T
 fn register_notification_hooks(
     sink: &(impl NotificationHookSink + ?Sized),
     mcp_notification_hooks: &[Arc<triggers::McpNotificationHook>],
+    cwd: &std::path::Path,
     cron_registry: &triggers::cron::CronRegistry,
     dynamic_trigger_registry: &triggers::dynamic::DynamicTriggerRegistry,
 ) {
@@ -453,8 +764,9 @@ fn register_notification_hooks(
     sink.register(Arc::new(triggers::CronNotificationHook::new(
         cron_registry.clone(),
     )));
-    sink.register(Arc::new(triggers::DynamicTriggerCheckHook::new(
+    sink.register(Arc::new(triggers::DynamicTriggerCheckHook::new_for_cwd(
         dynamic_trigger_registry.clone(),
+        cwd,
     )));
 }
 

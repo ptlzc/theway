@@ -1,8 +1,10 @@
 use super::*;
+use std::sync::Arc;
 use tempfile::tempdir;
 use theway_contract::extension::{
     ExtensionDurableEntry, ExtensionDurableEntryPayload, ExtensionStateMutation,
 };
+use theway_contract::session::{SessionBinding, SessionRuntimeContext, SessionStore};
 
 fn message(id: &str, parent_id: Option<&str>, role: &str, text: &str) -> StoredSessionEntry {
     StoredSessionEntry::from_payload(serde_json::json!({
@@ -350,6 +352,104 @@ async fn path_to_root_follows_persisted_parent_indexes() {
             .map(|entry| entry.id.as_str())
             .collect::<Vec<_>>(),
         vec!["a", "b"]
+    );
+}
+
+fn binding() -> SessionBinding {
+    SessionBinding {
+        client_key: "client-1".into(),
+        runtime: SessionRuntimeContext {
+            work_dir: "/work".into(),
+            provider: Some("provider".into()),
+            model: Some("model".into()),
+            base_url: Some("https://example.com".into()),
+            thinking: Some(true),
+        },
+    }
+}
+
+#[tokio::test]
+async fn set_binding_persists_across_drop_and_open() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("s.db");
+    let storage = SqliteSessionStorage::create(&path, "/cwd").await.unwrap();
+    let binding = binding();
+
+    storage.set_binding(Some(binding.clone())).await.unwrap();
+    drop(storage);
+
+    let reopened = SqliteSessionStorage::open(&path).await.unwrap();
+    assert_eq!(reopened.metadata().binding.as_ref(), Some(&binding));
+}
+
+#[tokio::test]
+async fn set_binding_none_clears_persisted_row() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("s.db");
+    let storage = SqliteSessionStorage::create(&path, "/cwd").await.unwrap();
+    storage.set_binding(Some(binding())).await.unwrap();
+    drop(storage);
+
+    let reopened = SqliteSessionStorage::open(&path).await.unwrap();
+    reopened.set_binding(None).await.unwrap();
+    drop(reopened);
+
+    let cleared = SqliteSessionStorage::open(&path).await.unwrap();
+    assert_eq!(cleared.metadata().binding, None);
+}
+
+#[tokio::test]
+async fn session_store_trait_set_binding_persists_and_clears() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("s.db");
+    let storage: Arc<dyn SessionStore> = Arc::new(
+        SqliteSessionStorage::create(&path, "/cwd").await.unwrap(),
+    );
+
+    let expected = binding();
+    storage.set_binding(Some(expected.clone())).await.unwrap();
+    drop(storage);
+
+    let reopened = SqliteSessionStorage::open(&path).await.unwrap();
+    assert_eq!(reopened.metadata().binding.as_ref(), Some(&expected));
+    let reopened: Arc<dyn SessionStore> = Arc::new(reopened);
+    reopened.set_binding(None).await.unwrap();
+    drop(reopened);
+
+    let cleared = SqliteSessionStorage::open(&path).await.unwrap();
+    assert_eq!(cleared.metadata().binding, None);
+}
+
+#[tokio::test]
+async fn created_session_starts_unbound() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("s.db");
+    let storage = SqliteSessionStorage::create(&path, "/cwd").await.unwrap();
+
+    assert_eq!(storage.metadata().binding, None);
+}
+
+#[tokio::test]
+async fn binding_metadata_never_persists_sentinel_secret() {
+    let sentinel = "SENTINEL_SECRET_2b3f";
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("s.db");
+    let storage = SqliteSessionStorage::create(&path, "/cwd").await.unwrap();
+    let mut bound = binding();
+    bound.runtime.provider = Some("safe-provider".into());
+
+    storage.set_binding(Some(bound)).await.unwrap();
+    let metadata_text = serde_json::to_string(&*storage.metadata()).unwrap();
+    assert!(!metadata_text.contains(sentinel));
+
+    storage.checkpoint().await.unwrap();
+    drop(storage);
+    let db_bytes = tokio::fs::read(&path).await.unwrap();
+    assert!(
+        !db_bytes
+            .windows(sentinel.len())
+            .any(|window| window == sentinel.as_bytes()),
+        "raw session db must not contain sentinel secret"
     );
 }
 

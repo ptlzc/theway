@@ -84,6 +84,18 @@ impl DaemonPaths {
         self.base.join("skills")
     }
 
+    /// Derive a cwd-scoped view while sharing mutable extra skill directories.
+    pub fn with_work_dir(&self, work_dir: impl Into<PathBuf>) -> Self {
+        let work_dir = work_dir.into();
+        let work_dir = work_dir.canonicalize().unwrap_or(work_dir);
+        Self {
+            base: self.base.clone(),
+            home: self.home.clone(),
+            work_dir,
+            extra_skill_dirs: self.extra_skill_dirs.clone(),
+        }
+    }
+
     /// Replace the extra skill directories at runtime (issue #68: applied by
     /// the serialized event loop when a `SetSkillDirs` command lands). The
     /// change is visible through every `Clone` of this struct.
@@ -210,6 +222,35 @@ mod tests {
         // Clearing is a legitimate update too (empty list → no extras).
         paths.set_extra_skill_dirs(Vec::new());
         assert!(paths.current_extra_skill_dirs().is_empty());
+    }
+
+    #[test]
+    fn with_work_dir_preserves_shared_base_home_and_extra_skill_dirs() {
+        let _serial = ENV_LOCK.lock().unwrap();
+        let _theway = EnvGuard::remove("THEWAY_DIR");
+        let _home_env = EnvGuard::set("HOME", "/env-home");
+
+        let paths = DaemonPaths::from_cli(
+            None,
+            Some(PathBuf::from("/flag-home")),
+            vec![PathBuf::from("/shared/skills")],
+        );
+        let other = tempfile::tempdir().unwrap();
+        let derived = paths.with_work_dir(other.path());
+
+        assert_eq!(derived.base, paths.base);
+        assert_eq!(derived.home, paths.home);
+        assert_eq!(derived.work_dir, canonical(other.path()));
+        assert!(Arc::ptr_eq(
+            &derived.extra_skill_dirs,
+            &paths.extra_skill_dirs
+        ));
+
+        paths.set_extra_skill_dirs(vec![PathBuf::from("/updated/skills")]);
+        assert_eq!(
+            derived.current_extra_skill_dirs(),
+            vec![PathBuf::from("/updated/skills")]
+        );
     }
 
     #[test]

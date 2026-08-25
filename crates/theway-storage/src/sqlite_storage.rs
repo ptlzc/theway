@@ -21,8 +21,8 @@ use serde_json::Value;
 use turso::{Builder, Connection, Database};
 
 use theway_contract::session::{
-    JsonlSessionMetadata, SessionError, SessionErrorCode, SessionImportOrigin, SessionMetadata,
-    SessionReader, SessionStore, StoredSessionEntry,
+    JsonlSessionMetadata, SessionBinding, SessionError, SessionErrorCode, SessionImportOrigin,
+    SessionMetadata, SessionReader, SessionStore, StoredSessionEntry,
 };
 
 fn uuidv7() -> String {
@@ -121,6 +121,7 @@ impl SqliteSessionStorage {
             path: path.to_string_lossy().to_string(),
             parent_session_path: None,
             imported_from: None,
+            binding: None,
         };
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await.map_err(io_err)?;
@@ -234,6 +235,28 @@ impl SqliteSessionStorage {
         )
         .await
         .map_err(map_err)?;
+        Ok(())
+    }
+
+    /// Persist or clear a non-secret client binding.
+    pub async fn set_binding(&self, binding: Option<SessionBinding>) -> Result<(), SessionError> {
+        let conn = self.conn().await?;
+        match &binding {
+            Some(binding) => {
+                conn.execute(
+                    "INSERT OR REPLACE INTO meta (key, value) VALUES ('binding', ?1)",
+                    [serde_json::to_string(&binding).map_err(json_err)?],
+                )
+                .await
+                .map_err(map_err)?;
+            }
+            None => {
+                conn.execute("DELETE FROM meta WHERE key = 'binding'", ())
+                    .await
+                    .map_err(map_err)?;
+            }
+        }
+        self.metadata.lock().binding = binding;
         Ok(())
     }
 
@@ -535,6 +558,10 @@ impl SessionReader for SqliteSessionStorage {
 
 #[async_trait]
 impl SessionStore for SqliteSessionStorage {
+    async fn set_binding(&self, binding: Option<SessionBinding>) -> Result<(), SessionError> {
+        SqliteSessionStorage::set_binding(self, binding).await
+    }
+
     async fn set_leaf_id(&self, id: Option<String>) -> Result<(), SessionError> {
         let entry = StoredSessionEntry::leaf(
             uuidv7(),

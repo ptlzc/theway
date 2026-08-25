@@ -34,6 +34,8 @@ English | [中文](architecture.zh.md)
 - optionally rehydrates typed runtime state from the active persisted branch;
 - supplies the persisted session id and daemon working directory to the core runtime-extension context and starts the session lifecycle after reconstruction.
 
+`SessionExecutionContext` owns the canonical cwd, thinking level, project resources, MCP resources, hook resources, and extension resources for each session. `SessionExecutionContext::build_for_work_dir` canonicalizes an arbitrary requested work directory, derives cwd-scoped paths, and constructs the executor/resources/hooks/extension host without changing the process cwd. `SessionRuntimeBuilder::build_opened` uses the context's thinking level for the harness.
+
 [`turn/kernel.rs`](../src/turn/kernel.rs) provides `ReplKernel`, which admits one active prompt/continuation, owns queued turns, and replaces the complete runtime when switching sessions. [`turn/daemon.rs`](../src/turn/daemon.rs) owns the protocol-neutral daemon state machine, command routing, snapshots, feed updates, and lifecycle event handling.
 
 Session switching invokes the current harness's extension gate before constructing a target runtime. An active turn is cancelled and driven through settlement before the old runtime sends `session_shutdown`; only then does `ReplKernel::replace_runtime` activate the reconstructed target and publish `session_switched`. The `/fork` command invokes the fork gate before `SessionRepository::fork` and publishes `session_forked` only after the new session metadata is readable. A rejected gate therefore leaves the current runtime and session repository unchanged.
@@ -57,7 +59,9 @@ A daemon configured with controller storage is valid only while that storage ser
 
 [`hooks/mod.rs`](../src/hooks/mod.rs), [`hook_executors.rs`](../src/hook_executors.rs), [`trigger_engine/mod.rs`](../src/trigger_engine/mod.rs), and [`triggers/mod.rs`](../src/triggers/mod.rs) own process/webhook effects, dynamic trigger polling and promotion, cron execution, and notification delivery. Persisted sidecar records come from `theway-contract`; scheduling and delivery policy remains here.
 
-[`mcp_loader.rs`](../src/mcp_loader.rs) uses `theway-mcp` to discover external MCP tools and notifications. [`mcp_server.rs`](../src/mcp_server.rs) exposes the daemon as an MCP server. [`lsp_supervisor.rs`](../src/lsp_supervisor.rs) owns language-server process lifecycle.
+[`mcp_loader.rs`](../src/mcp_loader.rs) uses `theway-mcp` to discover external MCP tools and notifications from `paths.base/mcp.toml` and `paths.work_dir/.theway/mcp.toml`; stdio servers start in `paths.work_dir`, and HTTP auth reads `paths.base/auth.json`. MCP tools, hooks, inject sets, and capability metadata are owned by the `SessionExecutionContext`; TS extension catalog, legacy compaction host, compact registry, and engine pool are likewise session-scoped on the context. [`mcp_server.rs`](../src/mcp_server.rs) exposes the daemon as an MCP server. [`lsp_supervisor.rs`](../src/lsp_supervisor.rs) owns language-server process lifecycle.
+
+Templates, LSP config, and hooks are also discovered from `paths.base` and `paths.work_dir/.theway` via [`templates.rs`](../src/templates.rs), [`lsp_supervisor.rs`](../src/lsp_supervisor.rs), and [`hooks/mod.rs`](../src/hooks/mod.rs); hook runner cwd modes use the same explicit `work_dir`, `base`, and `home` values.
 
 ## Protocol adaptation
 

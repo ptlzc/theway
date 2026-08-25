@@ -160,6 +160,7 @@ pub(crate) fn event_json(event: &WireAgentEvent) -> Value {
             source,
             run_id,
             node_id,
+            session_id,
         } => json!({
             "event": "subagent_started",
             "id": id,
@@ -167,11 +168,17 @@ pub(crate) fn event_json(event: &WireAgentEvent) -> Value {
             "source": source,
             "run_id": run_id,
             "node_id": node_id,
+            "session_id": session_id,
         }),
-        WireAgentEvent::Output { id, chunk } => json!({
+        WireAgentEvent::Output {
+            id,
+            chunk,
+            session_id,
+        } => json!({
             "event": "subagent_output",
             "id": id,
             "chunk": chunk,
+            "session_id": session_id,
         }),
         WireAgentEvent::Metrics {
             id,
@@ -182,6 +189,7 @@ pub(crate) fn event_json(event: &WireAgentEvent) -> Value {
             tokens_out,
             tools_called,
             turn,
+            session_id,
         } => json!({
             "event": "subagent_metrics",
             "id": id,
@@ -192,6 +200,7 @@ pub(crate) fn event_json(event: &WireAgentEvent) -> Value {
             "tokens_out": tokens_out,
             "tools_called": tools_called,
             "turn": turn,
+            "session_id": session_id,
         }),
         WireAgentEvent::Completed {
             id,
@@ -201,6 +210,7 @@ pub(crate) fn event_json(event: &WireAgentEvent) -> Value {
             tokens_in,
             tokens_out,
             tools_called,
+            session_id,
         } => json!({
             "event": "subagent_completed",
             "id": id,
@@ -210,6 +220,7 @@ pub(crate) fn event_json(event: &WireAgentEvent) -> Value {
             "tokens_in": tokens_in,
             "tokens_out": tokens_out,
             "tools_called": tools_called,
+            "session_id": session_id,
         }),
     }
 }

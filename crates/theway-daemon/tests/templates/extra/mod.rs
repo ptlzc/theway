@@ -260,12 +260,20 @@ async fn load_templates_skips_md_named_directories() {
 
 #[tokio::test]
 async fn load_all_user_templates_load_and_project_templates_override() {
-    // Arrange: user-global base dir has `shared.md` and `user-only.md`;
-    // project `.theway/templates` has its own `shared.md`.
+    // Arrange: explicit `DaemonPaths` base has `shared.md` and `user-only.md`;
+    // project `.theway/templates` has its own `shared.md`. The environment is
+    // pointed at a poisoned base to prove the explicit paths win.
     let _env_lock = ENV_LOCK.lock().unwrap();
-    let user_base = tempfile::tempdir().unwrap();
-    let _theway_dir = EnvGuard::set("THEWAY_DIR", user_base.path());
+    let poisoned_base = tempfile::tempdir().unwrap();
+    let _theway_dir = EnvGuard::set("THEWAY_DIR", poisoned_base.path());
+    std::fs::create_dir_all(poisoned_base.path().join("templates")).unwrap();
+    std::fs::write(
+        poisoned_base.path().join("templates/poisoned.md"),
+        "---\nname: poisoned\n---\npoisoned body",
+    )
+    .unwrap();
 
+    let user_base = tempfile::tempdir().unwrap();
     let cwd = tempfile::tempdir().unwrap();
     let user_templates = user_base.path().join("templates");
     let project_templates = cwd.path().join(".theway").join("templates");
@@ -286,12 +294,18 @@ async fn load_all_user_templates_load_and_project_templates_override() {
         "---\nname: shared\ndescription: project\n---\nproject body",
     )
     .unwrap();
+    let paths = crate::DaemonPaths {
+        base: user_base.path().to_path_buf(),
+        home: user_base.path().to_path_buf(),
+        work_dir: cwd.path().to_path_buf(),
+        extra_skill_dirs: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
+    };
 
     // Act
     let LoadedTemplates {
         templates,
         diagnostics,
-    } = load_all(cwd.path()).await;
+    } = load_all(&paths).await;
 
     // Assert
     assert!(diagnostics.is_empty(), "{:?}", diagnostics);
@@ -302,6 +316,10 @@ async fn load_all_user_templates_load_and_project_templates_override() {
     assert_eq!(shared.description.as_deref(), Some("project"));
     assert_eq!(shared.content, "project body");
     assert!(templates.iter().any(|t| t.name == "user-only"));
+    assert!(
+        !templates.iter().any(|t| t.name == "poisoned"),
+        "explicit DaemonPaths must win over THEWAY_DIR: {templates:?}"
+    );
 }
 
 

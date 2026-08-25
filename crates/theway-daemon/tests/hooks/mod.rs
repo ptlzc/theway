@@ -30,7 +30,9 @@ fn runner(rules: Vec<HookRule>) -> HookRunner {
     HookRunner {
         rules,
         session_id: "session-1".into(),
-        cwd: std::env::current_dir().unwrap(),
+        work_dir: std::env::current_dir().unwrap(),
+        base: std::path::PathBuf::from("/theway-base"),
+        home: std::path::PathBuf::from("/home/user"),
         model_provider: "faux".into(),
         model_id: "model".into(),
         thinking_level: "off".into(),
@@ -271,8 +273,14 @@ webhook = "http://127.0.0.1:9/hook"
     )
     .unwrap();
 
+    let paths = crate::DaemonPaths {
+        base: theway_dir.path().to_path_buf(),
+        home: theway_dir.path().to_path_buf(),
+        work_dir: cwd.path().to_path_buf(),
+        extra_skill_dirs: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
+    };
     let loaded = load(
-        cwd.path(),
+        &paths,
         "session-no-executors",
         None::<&theway_llm_provider::Model>,
         None::<ThinkingLevel>,

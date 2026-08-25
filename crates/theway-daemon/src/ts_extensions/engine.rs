@@ -332,7 +332,7 @@ impl QuickJsEnginePool {
         self.inner.broker_services.audit_log()
     }
 
-    pub(super) fn has_secret(&self, name: &str) -> bool {
+    pub(crate) fn has_secret(&self, name: &str) -> bool {
         self.inner.broker_services.has_secret(name)
     }
 

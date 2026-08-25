@@ -31,6 +31,8 @@ use theway_storage::sqlite_dag::SqliteDagStore;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
+use crate::session_execution::SessionExecutionRegistry;
+
 /// Debounce window: state changes within this window coalesce into one write.
 const DEBOUNCE: Duration = Duration::from_millis(500);
 
@@ -38,8 +40,9 @@ const DEBOUNCE: Duration = Duration::from_millis(500);
 pub struct DagPersistHandle {
     engine: Arc<DagEngine>,
     cwd: PathBuf,
-    /// Per-session stores (opened lazily, kept for the process lifetime).
-    stores: Mutex<HashMap<Option<String>, SqliteDagStore>>,
+    sessions: SessionExecutionRegistry,
+    /// Per-owning-cwd/session stores (opened lazily, kept for the process lifetime).
+    stores: Mutex<HashMap<(PathBuf, Option<String>), SqliteDagStore>>,
     /// Dirty signal from the engine.
     dirty: Arc<Notify>,
     /// Background write task.
@@ -52,10 +55,20 @@ impl DagPersistHandle {
     /// the JoinHandle detaches the task — the flush path is the caller's
     /// shutdown responsibility regardless).
     pub fn spawn(engine: Arc<DagEngine>, cwd: PathBuf) -> Arc<Self> {
+        Self::spawn_with_sessions(engine, cwd, SessionExecutionRegistry::new())
+    }
+
+    /// Create the handle with per-session cwd routing for registered contexts.
+    pub fn spawn_with_sessions(
+        engine: Arc<DagEngine>,
+        cwd: PathBuf,
+        sessions: SessionExecutionRegistry,
+    ) -> Arc<Self> {
         let dirty = Arc::new(Notify::new());
         let handle = Arc::new(Self {
             engine,
             cwd,
+            sessions,
             stores: Mutex::new(HashMap::new()),
             dirty: dirty.clone(),
             task: Mutex::new(None),
@@ -106,13 +119,21 @@ impl DagPersistHandle {
         Ok(())
     }
 
-    /// Open (or reuse) the store for a session id.
+    /// Open (or reuse) the store for a session id, using the registered
+    /// context's cwd when one exists and the startup cwd otherwise.
     async fn store_for(&self, session_id: Option<&str>) -> Result<SqliteDagStore, String> {
-        let key = session_id.map(str::to_string);
+        let owning_cwd = match session_id {
+            Some(session_id) => self
+                .sessions
+                .cwd_for(session_id)
+                .unwrap_or_else(|| self.cwd.clone()),
+            None => self.cwd.clone(),
+        };
+        let key = (owning_cwd.clone(), session_id.map(str::to_string));
         if let Some(store) = self.stores.lock().get(&key) {
             return Ok(store.clone());
         }
-        let path = state_path_for_project(&self.cwd.join(".pi"), session_id);
+        let path = state_path_for_project(&owning_cwd.join(".pi"), session_id);
         let store = SqliteDagStore::open(path).await?;
         self.stores.lock().insert(key, store.clone());
         Ok(store)

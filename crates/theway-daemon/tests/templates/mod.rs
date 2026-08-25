@@ -19,6 +19,15 @@ fn write_template(root: &std::path::Path, name: &str, content: &str) {
     std::fs::write(root.join(name), content).unwrap();
 }
 
+fn daemon_paths(base: &std::path::Path, work: &std::path::Path) -> crate::DaemonPaths {
+    crate::DaemonPaths {
+        base: base.to_path_buf(),
+        home: base.to_path_buf(),
+        work_dir: work.to_path_buf(),
+        extra_skill_dirs: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
+    }
+}
+
 #[test]
 fn parse_frontmatter_without_frontmatter_returns_defaults_and_normalized_body() {
     let raw = "just a body\r\nwith windows line endings";
@@ -143,6 +152,7 @@ async fn load_templates_uses_file_stem_when_frontmatter_has_no_name() {
 
 #[tokio::test]
 async fn load_all_loads_project_templates_from_cwd() {
+    let base = TempDir::new().unwrap();
     let cwd = TempDir::new().unwrap();
     let project_root = cwd.path().join(".theway").join("templates");
     write_template(
@@ -154,7 +164,7 @@ async fn load_all_loads_project_templates_from_cwd() {
     let LoadedTemplates {
         templates,
         diagnostics: _,
-    } = load_all(cwd.path()).await;
+    } = load_all(&daemon_paths(base.path(), cwd.path())).await;
 
     assert!(
         templates.iter().any(|t| t.name == "project-only"),

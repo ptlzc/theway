@@ -77,14 +77,15 @@ fn from_config_maps_extensions_and_language_count_is_unique_by_id() {
 
 #[tokio::test]
 async fn load_overlays_project_config_over_user_config_by_language_id() {
-    // Arrange
+    // Arrange: explicit paths win over a poisoned THEWAY_DIR.
     let _env_lock = crate::test_env::ENV_LOCK.lock().unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let _theway_dir = crate::test_env::EnvGuard::set("THEWAY_DIR", dir.path());
-    let cwd = dir.path().join("project");
-    std::fs::create_dir_all(cwd.join(".theway")).unwrap();
+    let poisoned = tempfile::tempdir().unwrap();
+    let _theway_dir = crate::test_env::EnvGuard::set("THEWAY_DIR", poisoned.path());
+    let base = tempfile::tempdir().unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(cwd.path().join(".theway")).unwrap();
     std::fs::write(
-        dir.path().join("lsp.toml"),
+        base.path().join("lsp.toml"),
         r#"
 [[language]]
 id = "rust"
@@ -99,7 +100,7 @@ command = "user-pyright"
     )
     .unwrap();
     std::fs::write(
-        cwd.join(".theway").join("lsp.toml"),
+        cwd.path().join(".theway").join("lsp.toml"),
         r#"
 [[language]]
 id = "rust"
@@ -114,11 +115,28 @@ command = "gopls"
 "#,
     )
     .unwrap();
+    std::fs::write(
+        poisoned.path().join("lsp.toml"),
+        r#"
+[[language]]
+id = "python"
+extensions = ["py"]
+command = "poisoned-pyright"
+"#,
+    )
+    .unwrap();
+    let paths = crate::DaemonPaths {
+        base: base.path().to_path_buf(),
+        home: base.path().to_path_buf(),
+        work_dir: cwd.path().to_path_buf(),
+        extra_skill_dirs: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
+    };
 
     // Act
-    let sup = LspSupervisor::load(&cwd).await;
+    let sup = LspSupervisor::load(&paths).await;
 
     // Assert
+    assert_eq!(sup.cwd_uri, format!("file://{}", cwd.path().display()));
     assert_eq!(
         sup.by_ext.get("rs").unwrap().command,
         "project-rust-analyzer"
@@ -229,7 +247,10 @@ async fn attach_diagnostics_appends_lsp_diagnostics_for_edit_tools() {
     std::fs::write(
         &lsp_script,
         r#"
-import json, sys
+import json, os, sys
+
+with open("fake_lsp_cwd.txt", "w", encoding="utf-8") as cwd_file:
+    cwd_file.write(os.getcwd())
 
 def read_message():
     headers = {}
@@ -308,6 +329,11 @@ while True:
     assert!(
         summary.contains("[error] 1:2: fake diagnostic"),
         "{summary}"
+    );
+    let recorded_cwd = std::fs::read_to_string(dir.path().join("fake_lsp_cwd.txt")).unwrap();
+    assert_eq!(
+        std::path::PathBuf::from(recorded_cwd.trim()),
+        dir.path().canonicalize().unwrap()
     );
 }
 
