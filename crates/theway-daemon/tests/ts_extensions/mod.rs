@@ -223,3 +223,21 @@ fn run_hook_returns_none_for_missing_hook() {
 
     assert_eq!(out, None);
 }
+
+
+mod broker_paths;
+mod broker_services;
+mod brokers;
+mod catalog;
+mod diagnostics;
+mod dispatcher;
+mod dispatch_result;
+mod effects;
+mod observation;
+mod registered_tool;
+mod registrations;
+mod registration_runtime;
+mod state_broker;
+mod state_runtime;
+mod trust;
+mod host_ports;

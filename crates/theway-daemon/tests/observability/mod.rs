@@ -135,7 +135,10 @@ fn official_sdk_spans_share_trace_and_parent_identity() {
         .iter()
         .find(|span| span.name == "agent.turn")
         .expect("turn span");
-    assert_eq!(child.span_context.trace_id(), parent.span_context.trace_id());
+    assert_eq!(
+        child.span_context.trace_id(),
+        parent.span_context.trace_id()
+    );
     assert_eq!(child.parent_span_id, parent.span_context.span_id());
     provider.shutdown().unwrap();
 }
@@ -198,12 +201,10 @@ async fn prometheus_endpoint_has_bounded_labels_and_exact_measurements() {
         .text()
         .await
         .unwrap();
-    let completed = text
-        .lines()
-        .find(|line| {
-            line.starts_with("theway_runtime_operations_total{")
-                && line.contains("operation=\"llm.request\"")
-        });
+    let completed = text.lines().find(|line| {
+        line.starts_with("theway_runtime_operations_total{")
+            && line.contains("operation=\"llm.request\"")
+    });
     assert!(completed.is_some_and(|line| {
         line.contains("operation=\"llm.request\"")
             && line.contains("outcome=\"succeeded\"")
@@ -211,12 +212,10 @@ async fn prometheus_endpoint_has_bounded_labels_and_exact_measurements() {
             && line.ends_with(" 1")
     }));
     let input = text.lines().find(|line| {
-        line.starts_with("theway_runtime_tokens_total{")
-            && line.contains("direction=\"input\"")
+        line.starts_with("theway_runtime_tokens_total{") && line.contains("direction=\"input\"")
     });
     let output = text.lines().find(|line| {
-        line.starts_with("theway_runtime_tokens_total{")
-            && line.contains("direction=\"output\"")
+        line.starts_with("theway_runtime_tokens_total{") && line.contains("direction=\"output\"")
     });
     assert!(input.is_some_and(|line| line.ends_with(" 11")));
     assert!(output.is_some_and(|line| line.ends_with(" 7")));
@@ -224,4 +223,500 @@ async fn prometheus_endpoint_has_bounded_labels_and_exact_measurements() {
         assert!(!text.contains(secret));
     }
     handle.shutdown().await;
+}
+
+#[test]
+fn metric_context_from_detail_extracts_llm_and_compaction_fields() {
+    let llm = MetricContext::from_detail(&OperationDetail::LlmRequest {
+        provider: "provider-a".into(),
+        model: "model-a".into(),
+    });
+    assert_eq!(llm.provider.as_deref(), Some("provider-a"));
+    assert_eq!(llm.model.as_deref(), Some("model-a"));
+
+    let compaction = MetricContext::from_detail(&OperationDetail::Compaction {
+        algorithm: "map".into(),
+        provider: "provider-b".into(),
+        model: "model-b".into(),
+    });
+    assert_eq!(compaction.provider.as_deref(), Some("provider-b"));
+    assert_eq!(compaction.model.as_deref(), Some("model-b"));
+
+    let other = MetricContext::from_detail(&OperationDetail::ToolExecution {
+        tool_name: "bash".into(),
+    });
+    assert!(other.provider.is_none());
+    assert!(other.model.is_none());
+}
+
+#[test]
+fn runtime_metrics_records_finish_without_started_entry() {
+    let metrics = metrics();
+    let scope = OperationScope::start(
+        theway_core::noop_runtime_observer(),
+        None,
+        ObservationContext::default(),
+        OperationDetail::AgentRun,
+    );
+    let id = scope.id();
+    std::mem::forget(scope);
+    let finish = OperationFinished {
+        id,
+        kind: OperationKind::AgentRun,
+        context: ObservationContext::default(),
+        outcome: OperationOutcome::Failed,
+        error_category: Some(ErrorCategory::Tool),
+        duration: Duration::from_millis(5),
+        measurements: RuntimeMeasurements::default(),
+    };
+    metrics.record_finish(&finish, None);
+
+    let families = metrics.prometheus.registry.gather();
+    let operations = families
+        .iter()
+        .find(|family| family.name() == "theway_runtime_operations_total")
+        .expect("operations metric");
+    let metric = operations
+        .get_metric()
+        .iter()
+        .find(|metric| {
+            metric
+                .get_label()
+                .iter()
+                .any(|label| label.name() == "operation" && label.value() == "agent.run")
+                && metric
+                    .get_label()
+                    .iter()
+                    .any(|label| label.name() == "outcome" && label.value() == "failed")
+                && metric
+                    .get_label()
+                    .iter()
+                    .any(|label| label.name() == "error_category" && label.value() == "tool")
+        })
+        .expect("failed tool operation metric");
+    assert_eq!(metric.get_counter().value(), 1.0);
+}
+
+#[test]
+fn worker_loop_records_all_operation_kinds_and_token_measurements() {
+    let metrics = metrics();
+    let stopped = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = mpsc::sync_channel(64);
+    let worker_stopped = stopped.clone();
+    let worker_metrics = metrics.clone();
+    let worker = std::thread::spawn(move || {
+        worker_loop(rx, None, worker_metrics, worker_stopped);
+    });
+    let observer: Arc<dyn RuntimeObserver> = Arc::new(DaemonRuntimeObserver {
+        tx,
+        stopped: stopped.clone(),
+        dropped: AtomicU64::new(0),
+        metrics: metrics.clone(),
+    });
+
+    let details = [
+        OperationDetail::AgentRun,
+        OperationDetail::Turn { index: 0 },
+        OperationDetail::LlmRequest {
+            provider: "provider-a".into(),
+            model: "model-a".into(),
+        },
+        OperationDetail::ToolExecution {
+            tool_name: "bash".into(),
+        },
+        OperationDetail::Compaction {
+            algorithm: "map".into(),
+            provider: "provider-a".into(),
+            model: "model-a".into(),
+        },
+        OperationDetail::SubagentJob {
+            agent: "helper".into(),
+            source: "test".into(),
+        },
+        OperationDetail::DagRun,
+        OperationDetail::DagNode,
+    ];
+    for detail in details {
+        let measurements = match detail.kind() {
+            OperationKind::LlmRequest | OperationKind::Compaction => RuntimeMeasurements {
+                input_tokens: 1,
+                output_tokens: 2,
+                cache_read_tokens: 3,
+                cache_write_tokens: 4,
+                characters: 5,
+                turns: 6,
+                tool_calls: 7,
+            },
+            _ => RuntimeMeasurements {
+                characters: 5,
+                turns: 6,
+                tool_calls: 7,
+                ..RuntimeMeasurements::default()
+            },
+        };
+        OperationScope::start(
+            observer.clone(),
+            None,
+            ObservationContext::default(),
+            detail,
+        )
+        .finish(OperationOutcome::Succeeded, None, measurements);
+    }
+    stopped.store(true, Ordering::Release);
+    worker.join().unwrap();
+
+    let families = metrics.prometheus.registry.gather();
+    let operations = families
+        .iter()
+        .find(|family| family.name() == "theway_runtime_operations_total")
+        .expect("operations metric");
+    for expected in [
+        "agent.run",
+        "agent.turn",
+        "llm.request",
+        "tool.execute",
+        "session.compaction",
+        "multiagent.job",
+        "dag.run",
+        "dag.node",
+    ] {
+        assert!(
+            operations.get_metric().iter().any(|metric| {
+                metric
+                    .get_label()
+                    .iter()
+                    .any(|label| label.name() == "operation" && label.value() == expected)
+            }),
+            "missing operation metric {expected}: {operations:?}"
+        );
+    }
+
+    let tokens = families
+        .iter()
+        .find(|family| family.name() == "theway_runtime_tokens_total")
+        .expect("tokens metric");
+    assert!(
+        tokens.get_metric().iter().any(|metric| {
+            metric
+                .get_label()
+                .iter()
+                .any(|label| label.name() == "direction" && label.value() == "input")
+                && metric
+                    .get_label()
+                    .iter()
+                    .any(|label| label.name() == "provider" && label.value() == "provider-a")
+        }),
+        "missing LLM token metric: {tokens:?}"
+    );
+}
+
+#[test]
+fn worker_loop_records_abandoned_active_operations() {
+    let metrics = metrics();
+    let stopped = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = mpsc::sync_channel(16);
+    let worker_stopped = stopped.clone();
+    let worker_metrics = metrics.clone();
+    let worker = std::thread::spawn(move || {
+        worker_loop(rx, None, worker_metrics, worker_stopped);
+    });
+    let observer: Arc<dyn RuntimeObserver> = Arc::new(DaemonRuntimeObserver {
+        tx,
+        stopped: stopped.clone(),
+        dropped: AtomicU64::new(0),
+        metrics: metrics.clone(),
+    });
+    let active = OperationScope::start(
+        observer,
+        None,
+        ObservationContext::default(),
+        OperationDetail::Turn { index: 0 },
+    );
+    std::mem::forget(active);
+
+    stopped.store(true, Ordering::Release);
+    worker.join().unwrap();
+
+    let families = metrics.prometheus.registry.gather();
+    let operations = families
+        .iter()
+        .find(|family| family.name() == "theway_runtime_operations_total")
+        .expect("operations metric");
+    assert!(
+        operations.get_metric().iter().any(|metric| {
+            metric
+                .get_label()
+                .iter()
+                .any(|label| label.name() == "operation" && label.value() == "agent.turn")
+                && metric
+                    .get_label()
+                    .iter()
+                    .any(|label| label.name() == "outcome" && label.value() == "abandoned")
+                && metric
+                    .get_label()
+                    .iter()
+                    .any(|label| label.name() == "error_category" && label.value() == "runtime")
+        }),
+        "missing abandoned metric: {operations:?}"
+    );
+}
+
+#[test]
+fn runtime_metrics_records_otel_paths_through_worker() {
+    use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
+
+    let exporter = InMemoryMetricExporter::default();
+    let provider = SdkMeterProvider::builder()
+        .with_reader(PeriodicReader::builder(exporter).build())
+        .build();
+    let meter = provider.meter("theway-observability-otel-test");
+    let metrics = Arc::new(RuntimeMetrics {
+        prometheus: PrometheusMetrics::new(),
+        otel: Some(OtelMetrics::new(&meter)),
+    });
+    let stopped = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = mpsc::sync_channel(16);
+    let worker_stopped = stopped.clone();
+    let worker_metrics = metrics.clone();
+    let worker = std::thread::spawn(move || {
+        worker_loop(rx, None, worker_metrics, worker_stopped);
+    });
+    let observer: Arc<dyn RuntimeObserver> = Arc::new(DaemonRuntimeObserver {
+        tx,
+        stopped: stopped.clone(),
+        dropped: AtomicU64::new(0),
+        metrics: metrics.clone(),
+    });
+
+    OperationScope::start(
+        observer.clone(),
+        None,
+        ObservationContext::default(),
+        OperationDetail::LlmRequest {
+            provider: "provider-otel".into(),
+            model: "model-otel".into(),
+        },
+    )
+    .finish(
+        OperationOutcome::Succeeded,
+        None,
+        RuntimeMeasurements {
+            input_tokens: 1,
+            output_tokens: 2,
+            cache_read_tokens: 3,
+            cache_write_tokens: 4,
+            characters: 5,
+            turns: 6,
+            tool_calls: 7,
+        },
+    );
+    let abandoned = OperationScope::start(
+        observer,
+        None,
+        ObservationContext::default(),
+        OperationDetail::AgentRun,
+    );
+    std::mem::forget(abandoned);
+
+    stopped.store(true, Ordering::Release);
+    worker.join().unwrap();
+    provider.shutdown().unwrap();
+}
+
+#[test]
+fn telemetry_config_from_env_detects_otlp_metrics_addr_and_queue_capacity() {
+    let _guard = crate::test_env::ENV_LOCK.lock().unwrap();
+    let _endpoint = crate::test_env::EnvGuard::set("OTEL_EXPORTER_OTLP_ENDPOINT", "");
+    let _traces = crate::test_env::EnvGuard::set(
+        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+        "http://127.0.0.1:4317",
+    );
+    let _metrics = crate::test_env::EnvGuard::set("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "");
+    let _addr = crate::test_env::EnvGuard::set("THEWAY_METRICS_ADDR", "127.0.0.1:9876");
+    let _queue = crate::test_env::EnvGuard::set("THEWAY_OBSERVABILITY_QUEUE_CAPACITY", "123");
+
+    let config = TelemetryConfig::from_env();
+
+    assert!(config.otlp_enabled);
+    assert_eq!(config.metrics_addr, Some("127.0.0.1:9876".parse().unwrap()));
+    assert_eq!(config.queue_capacity, 123);
+}
+
+#[test]
+fn telemetry_config_from_env_ignores_invalid_values() {
+    let _guard = crate::test_env::ENV_LOCK.lock().unwrap();
+    let _endpoint = crate::test_env::EnvGuard::set("OTEL_EXPORTER_OTLP_ENDPOINT", "");
+    let _traces = crate::test_env::EnvGuard::set("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "");
+    let _metrics = crate::test_env::EnvGuard::set("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "");
+    let _addr = crate::test_env::EnvGuard::set("THEWAY_METRICS_ADDR", "not-an-address");
+    let _queue = crate::test_env::EnvGuard::set("THEWAY_OBSERVABILITY_QUEUE_CAPACITY", "0");
+
+    let config = TelemetryConfig::from_env();
+
+    assert!(!config.otlp_enabled);
+    assert_eq!(config.metrics_addr, None);
+    assert_eq!(config.queue_capacity, DEFAULT_QUEUE_CAPACITY);
+}
+
+#[test]
+fn worker_loop_trace_attributes_cover_all_details_and_error_status() {
+    use opentelemetry::trace::Status;
+    use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider};
+
+    let exporter = InMemorySpanExporter::default();
+    let provider = SdkTracerProvider::builder()
+        .with_simple_exporter(exporter.clone())
+        .build();
+    let tracer = provider.tracer("theway-observability-trace-attributes-test");
+    let metrics = metrics();
+    let stopped = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = mpsc::sync_channel(64);
+    let worker_stopped = stopped.clone();
+    let worker_metrics = metrics.clone();
+    let worker = std::thread::spawn(move || {
+        worker_loop(rx, Some(tracer), worker_metrics, worker_stopped);
+    });
+    let observer: Arc<dyn RuntimeObserver> = Arc::new(DaemonRuntimeObserver {
+        tx,
+        stopped: stopped.clone(),
+        dropped: AtomicU64::new(0),
+        metrics: metrics.clone(),
+    });
+    let context = ObservationContext {
+        session_id: Some("session-a".into()),
+        run_id: Some("run-a".into()),
+        turn_id: Some(1),
+        job_id: Some("job-a".into()),
+        node_id: Some("node-a".into()),
+    };
+
+    let cases = [
+        (
+            OperationDetail::Turn { index: 2 },
+            OperationOutcome::Succeeded,
+            None,
+            RuntimeMeasurements::default(),
+        ),
+        (
+            OperationDetail::LlmRequest {
+                provider: "provider-a".into(),
+                model: "model-a".into(),
+            },
+            OperationOutcome::Failed,
+            Some(ErrorCategory::Provider),
+            RuntimeMeasurements {
+                input_tokens: 10,
+                output_tokens: 20,
+                ..RuntimeMeasurements::default()
+            },
+        ),
+        (
+            OperationDetail::ToolExecution {
+                tool_name: "bash".into(),
+            },
+            OperationOutcome::TimedOut,
+            Some(ErrorCategory::Timeout),
+            RuntimeMeasurements {
+                tool_calls: 1,
+                ..RuntimeMeasurements::default()
+            },
+        ),
+        (
+            OperationDetail::Compaction {
+                algorithm: "map".into(),
+                provider: "provider-b".into(),
+                model: "model-b".into(),
+            },
+            OperationOutcome::Cancelled,
+            Some(ErrorCategory::Cancellation),
+            RuntimeMeasurements {
+                cache_read_tokens: 7,
+                ..RuntimeMeasurements::default()
+            },
+        ),
+        (
+            OperationDetail::SubagentJob {
+                agent: "helper".into(),
+                source: "test".into(),
+            },
+            OperationOutcome::Succeeded,
+            None,
+            RuntimeMeasurements::default(),
+        ),
+        (
+            OperationDetail::DagRun,
+            OperationOutcome::Succeeded,
+            None,
+            RuntimeMeasurements::default(),
+        ),
+        (
+            OperationDetail::DagNode,
+            OperationOutcome::Failed,
+            Some(ErrorCategory::Runtime),
+            RuntimeMeasurements::default(),
+        ),
+    ];
+    for (detail, outcome, category, measurements) in cases {
+        OperationScope::start(observer.clone(), None, context.clone(), detail).finish(
+            outcome,
+            category,
+            measurements,
+        );
+    }
+    stopped.store(true, Ordering::Release);
+    worker.join().unwrap();
+
+    let spans = exporter.get_finished_spans().unwrap();
+    let llm = spans
+        .iter()
+        .find(|span| span.name == "llm.request")
+        .expect("llm.request span");
+    assert!(llm.attributes.iter().any(|attribute| {
+        attribute.key.as_str() == "gen_ai.provider.name" && attribute.value.as_str() == "provider-a"
+    }));
+    assert!(llm.attributes.iter().any(|attribute| {
+        attribute.key.as_str() == "theway.session.id" && attribute.value.as_str() == "session-a"
+    }));
+    assert!(llm.attributes.iter().any(|attribute| {
+        attribute.key.as_str() == "theway.turn.id" && attribute.value.as_str() == "1"
+    }));
+    assert_eq!(llm.status, Status::error("failed"));
+
+    let tool = spans
+        .iter()
+        .find(|span| span.name == "tool.execute")
+        .expect("tool.execute span");
+    assert!(tool.attributes.iter().any(|attribute| {
+        attribute.key.as_str() == "theway.tool.name" && attribute.value.as_str() == "bash"
+    }));
+    assert!(tool.attributes.iter().any(|attribute| {
+        attribute.key.as_str() == "error.type" && attribute.value.as_str() == "timeout"
+    }));
+    assert_eq!(tool.status, Status::error("timed_out"));
+
+    let compaction = spans
+        .iter()
+        .find(|span| span.name == "session.compaction")
+        .expect("session.compaction span");
+    assert!(compaction.attributes.iter().any(|attribute| {
+        attribute.key.as_str() == "theway.compaction.algorithm" && attribute.value.as_str() == "map"
+    }));
+    assert!(compaction.attributes.iter().any(|attribute| {
+        attribute.key.as_str() == "gen_ai.request.model" && attribute.value.as_str() == "model-b"
+    }));
+
+    let subagent = spans
+        .iter()
+        .find(|span| span.name == "multiagent.job")
+        .expect("multiagent.job span");
+    assert!(subagent.attributes.iter().any(|attribute| {
+        attribute.key.as_str() == "theway.agent.name" && attribute.value.as_str() == "helper"
+    }));
+    assert!(subagent.attributes.iter().any(|attribute| {
+        attribute.key.as_str() == "theway.agent.source" && attribute.value.as_str() == "test"
+    }));
+
+    assert!(spans.iter().any(|span| span.name == "dag.run"));
+    assert!(spans.iter().any(|span| span.name == "dag.node"));
+    provider.shutdown().unwrap();
 }

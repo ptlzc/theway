@@ -1,6 +1,12 @@
 //! Tests for `ws` — split out of src (see docs/rust-test-files.md).
 
 use super::*;
+use crate::transport::SlashCompleter;
+use crate::wire::{
+    WireCommand, WireContextUsage, WireDaemonConfig, WireExtensionSnapshot, WirePathContext,
+    WireStatus,
+};
+use axum::extract::ws::Message;
 
 #[test]
 fn event_json_matches_wire_shape() {
@@ -117,4 +123,69 @@ fn client_frames_parse_jsonrpc_requests() {
     )
     .unwrap();
     assert_eq!(v["method"], "get_node_output");
+}
+
+fn ws_http_state() -> (crate::http::HttpState, tokio::sync::mpsc::UnboundedReceiver<WireCommand>) {
+    let (commands, command_rx) = tokio::sync::mpsc::unbounded_channel();
+    let state = crate::http::HttpState {
+        commands,
+        snapshots: tokio::sync::broadcast::channel(16).0,
+        latest: std::sync::Arc::new(parking_lot::Mutex::new(WireStatus {
+            session_id: "sess-1".into(),
+            model: "m".into(),
+            model_catalog: Vec::new(),
+            cwd: "/tmp".into(),
+            busy: false,
+            queued_count: 0,
+            latest_trigger_poll: None,
+            goal: None,
+            control_plane_prompt: None,
+            sidebar: crate::testing::empty_sidebar_snapshot(),
+            feed_blocks: Vec::new(),
+            feed_blocks_base: 0,
+            feed_block_patches: Vec::new(),
+            feed_lines: Vec::new(),
+            feed_lines_base: 0,
+            dags: Vec::new(),
+            subagents: Vec::new(),
+            usage: WireContextUsage::default(),
+            tui_max_feed_lines: None,
+            extensions: WireExtensionSnapshot::default(),
+        })),
+        completer: SlashCompleter::from_commands(Vec::new()),
+        events: tokio::sync::broadcast::channel(16).0,
+        dag_events: tokio::sync::broadcast::channel(16).0,
+        job_ops: std::sync::Arc::new(crate::UnavailableJobOps),
+        session_ops: std::sync::Arc::new(crate::testing::FakeSessionOps::new()),
+        path_context: std::sync::Arc::new(std::sync::RwLock::new(WirePathContext::default())),
+        daemon_config: std::sync::Arc::new(std::sync::RwLock::new(WireDaemonConfig::default())),
+        tool_ops: std::sync::Arc::new(crate::testing::FakeToolOps::new()),
+        storage_ops: std::sync::Arc::new(crate::testing::FakeStorageOps::new()),
+    };
+    (state, command_rx)
+}
+
+#[tokio::test]
+async fn handle_client_frame_ignores_malformed_and_notifications() {
+    let (state, _rx) = ws_http_state();
+    assert!(handle_client_frame("not-json", &state).await.is_none());
+    assert!(handle_client_frame(r#"{"jsonrpc":"2.0","method":"ping"}"#, &state).await.is_none());
+}
+
+#[tokio::test]
+async fn handle_client_frame_replies_with_rpc_errors() {
+    let (state, _rx) = ws_http_state();
+    let reply = handle_client_frame(
+        r#"{"jsonrpc":"2.0","id":1,"method":"no_such_method","params":{}}"#,
+        &state,
+    )
+    .await
+    .expect("reply");
+    match reply {
+        Message::Text(text) => {
+            let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(value["error"]["code"], -32601);
+        }
+        other => panic!("expected text reply, got {other:?}"),
+    }
 }

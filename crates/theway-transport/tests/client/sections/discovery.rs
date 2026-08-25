@@ -128,7 +128,10 @@ async fn storage_probe_requires_a_live_storage_health_endpoint() {
 // ── port-file discovery ───────────────────────────────────────────
 
 /// THEWAY_DIR is process-global; all port-file tests serialize on this lock.
-static THEWAY_DIR_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+///
+/// This aliases the auth module's environment lock so every test that mutates
+/// `THEWAY_DIR`/provider env vars is serialized across the whole crate.
+use crate::auth::ENV_LOCK as THEWAY_DIR_LOCK;
 
 fn with_theway_dir(dir: &std::path::Path) {
     // SAFETY: tests are single-threaded per test and serialized on
@@ -236,6 +239,66 @@ fn remove_port_file_removes_only_the_owners_entry() {
         read_port_file(&cwd).unwrap(),
         Some(PortEntry { port: 43001, pid: Some(424242) })
     );
+    drop(dir);
+    clear_theway_dir();
+}
+
+#[test]
+fn wait_ready_times_out_when_no_port_file_is_published() {
+    let _guard = THEWAY_DIR_LOCK.lock().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    with_theway_dir(dir.path());
+    let cwd = std::env::temp_dir();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let err = runtime
+        .block_on(wait_ready(Duration::from_millis(250), &cwd, 999_999))
+        .unwrap_err();
+    assert!(err.to_string().contains("did not publish"), "{err}");
+    drop(dir);
+    clear_theway_dir();
+}
+
+#[test]
+fn wait_ready_times_out_when_port_file_exists_but_daemon_is_not_serving() {
+    let _guard = THEWAY_DIR_LOCK.lock().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    with_theway_dir(dir.path());
+    let cwd = std::env::temp_dir();
+
+    // Reserve a port and release it so the address is definitely dead.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+    std::fs::write(port_file_path(&cwd), format!("{port} {}", std::process::id())).unwrap();
+
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let err = runtime
+        .block_on(wait_ready(Duration::from_millis(400), &cwd, std::process::id()))
+        .unwrap_err();
+    assert!(err.to_string().contains("did not become ready"), "{err}");
+    drop(dir);
+    clear_theway_dir();
+}
+
+#[test]
+fn daemon_binary_is_available_or_test_is_skipped() {
+    // Exercising the lookup is enough; do not hard-require a binary in every
+    // developer environment.
+    let _ = daemon_binary();
+}
+
+#[test]
+fn spawn_daemon_quiet_starts_when_binary_is_available() {
+    let _guard = THEWAY_DIR_LOCK.lock().unwrap();
+    let Some(_binary) = daemon_binary() else {
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    with_theway_dir(dir.path());
+    let cwd = std::env::temp_dir();
+    let mut child = spawn_daemon_quiet(&cwd, &[]).unwrap();
+    let _ = child.kill();
+    let _ = child.wait();
     drop(dir);
     clear_theway_dir();
 }

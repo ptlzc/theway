@@ -24,6 +24,7 @@ use theway_llm_provider::{
     ContentBlock, DoneReason, ModelCost, StopReason, Usage,
 };
 
+pub mod coverage;
 pub mod delivery;
 pub mod handle_trigger;
 pub mod helpers;

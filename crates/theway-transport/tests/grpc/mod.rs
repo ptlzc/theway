@@ -11,6 +11,7 @@ use std::time::Duration;
 
 mod stream;
 mod extensions;
+mod storage;
 
 #[derive(Default)]
 struct TestJobOps {
@@ -761,6 +762,7 @@ async fn health_service_serves_serving_over_transport() {
     server.abort();
 }
 
+include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/grpc/sections/graph.rs"));
 include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/grpc/sections/sessions.rs"));
 include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/grpc/sections/paths.rs"));
 include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/grpc/sections/config.rs"));

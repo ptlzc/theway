@@ -94,3 +94,66 @@ async fn client_state_storage_round_trips_dag_trigger_cron() {
     assert_eq!(loaded.jobs.len(), 1);
     assert_eq!(loaded.jobs[0].id, "cron-1");
 }
+
+// ── session-resource methods mirrored on StorageService ─────────────
+
+#[tokio::test]
+async fn client_state_list_sessions_returns_summaries_and_current() {
+    let (mut client, _command_rx, _snapshot_tx) = client_and_server().await;
+
+    let (sessions, current) = client.state_list_sessions().await.unwrap();
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].session_id, "sess-1");
+    assert_eq!(current, "sess-1");
+}
+
+#[tokio::test]
+async fn client_state_create_session_round_trips_and_queues_switch() {
+    let (mut client, mut command_rx, _snapshot_tx) = client_and_server().await;
+
+    let created = client.state_create_session(Some("new one".into())).await.unwrap();
+    assert_eq!(created.name, "new one");
+    assert!(created.session_id.starts_with("sess-new-"));
+
+    // The full gRPC StorageService also queues SwitchSession for the new id.
+    match command_rx.recv().await.unwrap() {
+        crate::wire::WireCommand::SwitchSession { id } => {
+            assert_eq!(id, created.session_id)
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn client_state_rename_session_returns_accepted() {
+    let (mut client, _command_rx, _snapshot_tx) = client_and_server().await;
+    assert!(client.state_rename_session("sess-1", "renamed").await.unwrap());
+
+    let (sessions, _current) = client.state_list_sessions().await.unwrap();
+    assert_eq!(sessions[0].name, "renamed");
+}
+
+#[tokio::test]
+async fn client_state_delete_session_removes_and_returns_running_ids_on_refusal() {
+    let (mut state, _command_rx) = grpc_state();
+    let session_ops = Arc::new(FakeSessionOps::new());
+    session_ops.add_session("sess-keep");
+    session_ops.add_session("sess-run");
+    session_ops.set_running("sess-run", &["run-1"]);
+    state.session_ops = session_ops;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let _server = serve_grpc(listener, state);
+    let mut client = GrpcClient::connect(&addr.to_string()).await.unwrap();
+
+    // Running session: delete is refused through the RPC error path.
+    let err = client.state_delete_session("sess-run").await.unwrap_err();
+    assert!(err.to_string().contains("still has running graphs"), "{err}");
+
+    // Non-running session: delete succeeds with an empty vec.
+    let removed = client.state_delete_session("sess-keep").await.unwrap();
+    assert!(removed.is_empty());
+    let (sessions, _current) = client.state_list_sessions().await.unwrap();
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].session_id, "sess-run");
+}

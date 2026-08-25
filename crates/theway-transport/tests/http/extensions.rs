@@ -97,3 +97,116 @@ async fn web_headless_extension_diagnostics_and_command_need_no_tui() {
     assert_eq!(outcome["message"], "headless");
     responder.await.unwrap();
 }
+
+#[tokio::test]
+async fn web_extensions_reload_and_trust_round_trip() {
+    let (state, mut command_rx) = extension_http_state();
+    let responder = tokio::spawn(async move {
+        match command_rx.recv().await.unwrap() {
+            WireCommand::ReloadExtensions {
+                cancel_active,
+                response,
+            } => {
+                assert!(cancel_active);
+                response
+                    .send(Ok(crate::wire::WireExtensionReloadResult {
+                        status: "pending".into(),
+                        revision: 7,
+                    }))
+                    .unwrap();
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+        match command_rx.recv().await.unwrap() {
+            WireCommand::DecideExtensionTrust { request, response } => {
+                assert_eq!(request.decision, "trusted");
+                response
+                    .send(Ok(crate::wire::WireExtensionTrustResult {
+                        accepted: true,
+                        reload: crate::wire::WireExtensionReloadResult {
+                            status: "applied".into(),
+                            revision: 8,
+                        },
+                    }))
+                    .unwrap();
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    });
+
+    let reload = dispatch(
+        &state,
+        "extensions.reload",
+        Some(&serde_json::json!({ "cancelActive": true })),
+    )
+    .await
+    .unwrap();
+    assert_eq!(reload["revision"], 7);
+
+    let trust = dispatch(
+        &state,
+        "extensions.decide_trust",
+        Some(&serde_json::json!({
+            "subject": "pkg",
+            "extensionId": "ext",
+            "decision": "trusted",
+            "grantedPermissions": ["read"]
+        })),
+    )
+    .await
+    .unwrap();
+    assert_eq!(trust["accepted"], true);
+    responder.await.unwrap();
+}
+
+#[tokio::test]
+async fn web_extensions_errors_map_to_rpc_codes() {
+    let (state, command_rx) = extension_http_state();
+    drop(command_rx);
+
+    let err = dispatch(
+        &state,
+        "extensions.invoke",
+        Some(&serde_json::json!({ "name": "x" })),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err.0, -32003);
+
+    let err = dispatch(&state, "extensions.reload", None).await.unwrap_err();
+    assert_eq!(err.0, -32003);
+
+    let err = dispatch(
+        &state,
+        "extensions.decide_trust",
+        Some(&serde_json::json!({ "subject": "x", "extensionId": "y", "decision": "trust" })),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err.0, -32003);
+
+    let err = dispatch(
+        &state,
+        "extensions.decide_trust",
+        Some(&serde_json::json!({})),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err.0, -32602);
+}
+
+#[tokio::test]
+async fn web_extensions_reload_maps_event_loop_error() {
+    let (state, mut command_rx) = extension_http_state();
+    let responder = tokio::spawn(async move {
+        match command_rx.recv().await.unwrap() {
+            WireCommand::ReloadExtensions { response, .. } => {
+                response.send(Err("reload failed".into())).unwrap();
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    });
+    let err = dispatch(&state, "extensions.reload", None).await.unwrap_err();
+    assert_eq!(err.0, -32009);
+    responder.await.unwrap();
+}

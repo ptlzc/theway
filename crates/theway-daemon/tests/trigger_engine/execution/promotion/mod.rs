@@ -5,7 +5,13 @@ use super::*;
 use crate::trigger_engine::types::{
     CredentialScope, PayloadVisibility, ReplacementPolicy, SourceKind, TriggerAuthority,
 };
-use theway_core::{AgentOptions, MemorySessionStorage, SessionTreeEntry};
+use async_trait::async_trait;
+use theway_core::{
+    AgentOptions, MemorySessionStorage, SessionError, SessionErrorCode, SessionStorage,
+    SessionTreeEntry,
+};
+
+mod failures;
 
 fn trigger_with_source(source: TriggerSource) -> Trigger {
     Trigger {
@@ -53,10 +59,7 @@ fn build_template_context_maps_mcp_local_and_agent_delegate_sources() {
     let ctx = build_template_context("trace-ctx", &trigger, true, &Some("sum".into()), 2);
     assert_eq!(ctx.get("trace_id").unwrap(), "trace-ctx");
     assert_eq!(ctx.get("trigger.source.kind").unwrap(), "mcp");
-    assert_eq!(
-        ctx.get("trigger.source.server_name").unwrap(),
-        "github"
-    );
+    assert_eq!(ctx.get("trigger.source.server_name").unwrap(), "github");
     assert_eq!(
         ctx.get("trigger.source.method").unwrap(),
         "notifications/pr.merged"
@@ -64,7 +67,10 @@ fn build_template_context_maps_mcp_local_and_agent_delegate_sources() {
     assert_eq!(ctx.get("trigger.source.subkind"), None);
     assert_eq!(ctx.get("trigger.source_label").unwrap(), "MCP github");
     assert_eq!(ctx.get("trigger.event_label").unwrap(), "test event");
-    assert_eq!(ctx.get("trigger.payload_summary").unwrap(), "payload summary");
+    assert_eq!(
+        ctx.get("trigger.payload_summary").unwrap(),
+        "payload summary"
+    );
     assert!(!ctx.get("trigger.received_at").unwrap().is_empty());
     assert_eq!(ctx.get("trigger.idempotency_key").unwrap(), "idem-1");
     assert_eq!(
@@ -186,8 +192,7 @@ fn ensure_trigger_prefix_only_idempotent_for_current_trace_id() {
     assert!(!injected);
 
     // A stale/different trace prefix is not trusted.
-    let (body, injected) =
-        ensure_trigger_prefix("[Trigger trace-evil] hello".into(), "trace-1");
+    let (body, injected) = ensure_trigger_prefix("[Trigger trace-evil] hello".into(), "trace-1");
     assert_eq!(body, "[Trigger trace-1] [Trigger trace-evil] hello");
     assert!(injected);
 }
@@ -205,20 +210,22 @@ fn compute_sub_agent_outcome_error_without_assistant_text() {
 }
 
 fn assistant_message(text: &str) -> AgentMessage {
-    AgentMessage::Llm(PiMessage::Assistant(theway_llm_provider::AssistantMessage {
-        role: theway_llm_provider::AssistantRole::Assistant,
-        content: vec![theway_llm_provider::ContentBlock::text(text)],
-        api: theway_llm_provider::Api::from("faux"),
-        provider: theway_llm_provider::Provider::from("faux"),
-        model: "faux".into(),
-        response_model: None,
-        response_id: None,
-        diagnostics: None,
-        usage: theway_llm_provider::Usage::default(),
-        stop_reason: theway_llm_provider::StopReason::Stop,
-        error_message: None,
-        timestamp: 0,
-    }))
+    AgentMessage::Llm(PiMessage::Assistant(
+        theway_llm_provider::AssistantMessage {
+            role: theway_llm_provider::AssistantRole::Assistant,
+            content: vec![theway_llm_provider::ContentBlock::text(text)],
+            api: theway_llm_provider::Api::from("faux"),
+            provider: theway_llm_provider::Provider::from("faux"),
+            model: "faux".into(),
+            response_model: None,
+            response_id: None,
+            diagnostics: None,
+            usage: theway_llm_provider::Usage::default(),
+            stop_reason: theway_llm_provider::StopReason::Stop,
+            error_message: None,
+            timestamp: 0,
+        },
+    ))
 }
 
 #[test]
@@ -231,23 +238,25 @@ fn last_assistant_text_joins_text_blocks_and_returns_none_when_absent() {
     assert_eq!(last_assistant_text(&state), None);
 
     let mut state = AgentState::default();
-    let msg = AgentMessage::Llm(PiMessage::Assistant(theway_llm_provider::AssistantMessage {
-        role: theway_llm_provider::AssistantRole::Assistant,
-        content: vec![
-            theway_llm_provider::ContentBlock::text("hello"),
-            theway_llm_provider::ContentBlock::text("world"),
-        ],
-        api: theway_llm_provider::Api::from("faux"),
-        provider: theway_llm_provider::Provider::from("faux"),
-        model: "faux".into(),
-        response_model: None,
-        response_id: None,
-        diagnostics: None,
-        usage: theway_llm_provider::Usage::default(),
-        stop_reason: theway_llm_provider::StopReason::Stop,
-        error_message: None,
-        timestamp: 0,
-    }));
+    let msg = AgentMessage::Llm(PiMessage::Assistant(
+        theway_llm_provider::AssistantMessage {
+            role: theway_llm_provider::AssistantRole::Assistant,
+            content: vec![
+                theway_llm_provider::ContentBlock::text("hello"),
+                theway_llm_provider::ContentBlock::text("world"),
+            ],
+            api: theway_llm_provider::Api::from("faux"),
+            provider: theway_llm_provider::Provider::from("faux"),
+            model: "faux".into(),
+            response_model: None,
+            response_id: None,
+            diagnostics: None,
+            usage: theway_llm_provider::Usage::default(),
+            stop_reason: theway_llm_provider::StopReason::Stop,
+            error_message: None,
+            timestamp: 0,
+        },
+    ));
     state.messages.push(msg);
     assert_eq!(last_assistant_text(&state).as_deref(), Some("hello\nworld"));
 }
@@ -263,7 +272,8 @@ fn listener_vec(
 
 #[tokio::test]
 async fn apply_promotion_none_is_a_noop() {
-    let session = Session::new(Arc::new(MemorySessionStorage::new()) as Arc<dyn theway_core::SessionStorage>);
+    let session =
+        Session::new(Arc::new(MemorySessionStorage::new()) as Arc<dyn theway_core::SessionStorage>);
     let parent_agent = Arc::new(Agent::new(AgentOptions::default()));
     let events = Arc::new(std::sync::Mutex::new(Vec::<TriggerEvent>::new()));
     let listeners = listener_vec(&events);
@@ -306,7 +316,8 @@ async fn apply_promotion_none_is_a_noop() {
 async fn apply_promotion_when_result_details_match_inserts_promoted_message() {
     use crate::trigger_engine::execution::types::PromotionCondition;
 
-    let session = Session::new(Arc::new(MemorySessionStorage::new()) as Arc<dyn theway_core::SessionStorage>);
+    let session =
+        Session::new(Arc::new(MemorySessionStorage::new()) as Arc<dyn theway_core::SessionStorage>);
     let parent_agent = Arc::new(Agent::new(AgentOptions::default()));
     let events = Arc::new(std::sync::Mutex::new(Vec::<TriggerEvent>::new()));
     let listeners = listener_vec(&events);
@@ -378,7 +389,8 @@ async fn apply_promotion_when_result_details_match_inserts_promoted_message() {
 
 #[tokio::test]
 async fn apply_promotion_render_error_emits_persistence_error_and_no_message() {
-    let session = Session::new(Arc::new(MemorySessionStorage::new()) as Arc<dyn theway_core::SessionStorage>);
+    let session =
+        Session::new(Arc::new(MemorySessionStorage::new()) as Arc<dyn theway_core::SessionStorage>);
     let parent_agent = Arc::new(Agent::new(AgentOptions::default()));
     let events = Arc::new(std::sync::Mutex::new(Vec::<TriggerEvent>::new()));
     let listeners = listener_vec(&events);

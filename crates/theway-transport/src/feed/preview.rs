@@ -123,3 +123,82 @@ pub fn truncate_chars(s: &str, max_chars: usize) -> String {
     out.push('…');
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use theway_llm_provider::UserContentBlock;
+
+    #[test]
+    fn preview_handles_non_objects_strings_and_extra_keys() {
+        assert_eq!(preview(&json!(null)), "");
+        assert_eq!(preview(&json!([1, 2])), "");
+        assert_eq!(
+            preview(&json!({ "cmd": "run\nnow", "x": 1 })),
+            "(cmd=\"run\\nnow\", x=1)"
+        );
+        let many = preview(&json!({
+            "a": "1",
+            "b": "2",
+            "c": "3",
+            "d": "4",
+        }));
+        assert!(many.contains('…'), "{many}");
+    }
+
+    #[test]
+    fn compact_tool_output_lines_handles_empty_error_and_line_truncation() {
+        assert!(compact_tool_output_lines(Vec::new(), false).is_empty());
+
+        let long_line = "x".repeat(201);
+        let lines = compact_tool_output_lines(vec![long_line.clone()], false);
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(lines[0].ends_with('…'));
+        assert!(lines[1].contains("truncated"));
+
+        let many = (0..100).map(|i| format!("line {i}")).collect::<Vec<_>>();
+        let compacted = compact_tool_output_lines(many, false);
+        assert!(compacted.len() < 100);
+        assert!(compacted.iter().any(|l| l.contains("lines for display")));
+    }
+
+    #[test]
+    fn compact_tool_content_blocks_extracts_only_text() {
+        let blocks = vec![
+            UserContentBlock::Text(theway_llm_provider::TextContent {
+                text: "first\nsecond".into(),
+                text_signature: None,
+            }),
+            UserContentBlock::Image(theway_llm_provider::ImageContent {
+                data: "aGVsbG8=".into(),
+                mime_type: "image/png".into(),
+            }),
+            UserContentBlock::Text(theway_llm_provider::TextContent {
+                text: "third".into(),
+                text_signature: None,
+            }),
+        ];
+        let out = compact_tool_content_blocks(&blocks, false);
+        assert!(out.iter().any(|l| l.contains("first")));
+        assert!(out.iter().any(|l| l.contains("third")));
+        assert!(!out.iter().any(|l| l.contains("bash")));
+    }
+
+    #[test]
+    fn truncation_marker_variants_are_covered() {
+        assert!(truncation_marker(0, 0).contains("truncated for display"));
+        assert!(truncation_marker(12, 0).contains("12 bytes"));
+        assert!(truncation_marker(0, 3).contains("3 lines"));
+        assert!(truncation_marker(12, 3).contains("12 bytes / 3 lines"));
+    }
+
+    #[test]
+    fn truncate_chars_preserves_short_and_appends_ellipsis_for_long() {
+        assert_eq!(truncate_chars("hello", 10), "hello");
+        let s = "héllo wörld";
+        let out = truncate_chars(s, 5);
+        assert!(out.ends_with('…'));
+        assert_eq!(out.chars().count(), 6);
+    }
+}

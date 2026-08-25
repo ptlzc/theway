@@ -123,3 +123,6 @@ impl ServerHandler for ToolDispatcher {
         }
     }
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("mcp_server");

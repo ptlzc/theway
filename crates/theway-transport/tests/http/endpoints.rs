@@ -248,6 +248,8 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
 async fn websocket_serves_snapshot_and_accepts_commands() {
     let (command_tx, mut command_rx) = mpsc::unbounded_channel::<WireCommand>();
     let (snapshot_tx, _) = broadcast::channel::<WireStatusUpdate>(16);
+    let (event_tx, _) = broadcast::channel::<WireAgentEvent>(16);
+    let (dag_event_tx, _) = broadcast::channel::<WireDagEvent>(16);
     let latest = Arc::new(Mutex::new(WireStatus {
         session_id: "sess-1".into(),
         model: "provider:model".into(),
@@ -275,8 +277,8 @@ async fn websocket_serves_snapshot_and_accepts_commands() {
         snapshots: snapshot_tx.clone(),
         latest: latest.clone(),
         completer: SlashCompleter::from_commands(vec!["/help".into(), "/model".into(), "/goal".into()]),
-        events: broadcast::channel::<WireAgentEvent>(16).0,
-        dag_events: broadcast::channel::<WireDagEvent>(16).0,
+        events: event_tx.clone(),
+        dag_events: dag_event_tx.clone(),
         job_ops: Arc::new(crate::UnavailableJobOps),
         session_ops: Arc::new(FakeSessionOps::new()),
         path_context: std::sync::Arc::new(std::sync::RwLock::new(
@@ -375,6 +377,65 @@ async fn websocket_serves_snapshot_and_accepts_commands() {
         other => panic!("expected text frame, got {other:?}"),
     };
     assert!(text.contains(r#""result":null"#), "{text}");
+
+    // Full snapshot and event/dag frames stream over the same socket.
+    latest.lock().feed_lines = vec!["ready".into(), "ws-full".into()];
+    snapshot_tx
+        .send(WireStatusUpdate::full(latest.lock().clone()))
+        .unwrap();
+    let frame = tokio::time::timeout(Duration::from_secs(2), ws.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let text = match frame {
+        tokio_tungstenite::tungstenite::Message::Text(t) => t.to_string(),
+        other => panic!("expected text frame, got {other:?}"),
+    };
+    assert!(text.contains("ws-full"), "{text}");
+
+    event_tx
+        .send(WireAgentEvent::Output {
+            id: "job-1".into(),
+            chunk: "event-chunk".into(),
+            session_id: "sess-1".into(),
+        })
+        .unwrap();
+    let frame = tokio::time::timeout(Duration::from_secs(2), ws.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let text = match frame {
+        tokio_tungstenite::tungstenite::Message::Text(t) => t.to_string(),
+        other => panic!("expected text frame, got {other:?}"),
+    };
+    assert!(text.contains("event-chunk"), "{text}");
+
+    dag_event_tx
+        .send(WireDagEvent::NodeStatus {
+            run_id: "run-1".into(),
+            session_id: "sess-1".into(),
+            node_id: "n1".into(),
+            status: "running".into(),
+            error: None,
+        })
+        .unwrap();
+    let frame = tokio::time::timeout(Duration::from_secs(2), ws.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let text = match frame {
+        tokio_tungstenite::tungstenite::Message::Text(t) => t.to_string(),
+        other => panic!("expected text frame, got {other:?}"),
+    };
+    assert!(text.contains("node_status"), "{text}");
+
+    // Binary frames are ignored by the protocol loop.
+    ws.send(tokio_tungstenite::tungstenite::Message::Binary(vec![1, 2, 3].into()))
+        .await
+        .unwrap();
 
     ws.close(None).await.unwrap();
     server.abort();

@@ -1,11 +1,11 @@
 //! Tests for `client` — split out of src (see docs/rust-test-files.md).
 
 use super::*;
-use crate::wire::WireContextUsage;
-use crate::grpc::{serve_grpc, GrpcState};
+use crate::feed::WireFeedBlock;
+use crate::grpc::{GrpcState, serve_grpc};
 use crate::proto::{session_state, wire_status};
 use crate::testing::{FakeSessionOps, FakeStorageOps, FakeToolOps, empty_sidebar_snapshot};
-use crate::feed::WireFeedBlock;
+use crate::wire::WireContextUsage;
 use crate::wire::{
     ModelEntry, ProviderGroup, WireDaemonConfig, WirePathContext, WireStatus, WireStatusUpdate,
 };
@@ -81,8 +81,7 @@ fn grpc_state() -> (GrpcState, mpsc::UnboundedReceiver<crate::wire::WireCommand>
 /// Spawn an in-process gRPC server on a random port and connect a client to it.
 /// Returns the client, the event-loop command channel, and the snapshot sender
 /// (fixture publishes on demand — there is no running event loop in tests).
-async fn client_and_server(
-) -> (
+async fn client_and_server() -> (
     GrpcClient,
     mpsc::UnboundedReceiver<crate::wire::WireCommand>,
     broadcast::Sender<WireStatusUpdate>,
@@ -203,23 +202,57 @@ async fn client_cancel_set_model_approve_switch_session_round_trip() {
 #[tokio::test]
 async fn client_switch_session_queues_command_and_rebinds() {
     let (mut client, mut command_rx, _snapshot_tx) = client_and_server().await;
-    client
-        .switch_session("sess-1")
-        .await
-        .unwrap();
+    client.switch_session("sess-1").await.unwrap();
     match command_rx.recv().await.unwrap() {
         crate::wire::WireCommand::SwitchSession { id } => assert_eq!(id, "sess-1"),
         other => panic!("unexpected command: {other:?}"),
     }
 }
 
-include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/client/sections/discovery.rs"));
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/client/sections/discovery.rs"
+));
 
-include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/client/sections/wire_config.rs"));
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/client/sections/wire_config.rs"
+));
 
-include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/client/sections/tools.rs"));
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/client/sections/tools.rs"
+));
 
-include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/client/sections/storage.rs"));
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/client/sections/storage.rs"
+));
+
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/client/sections/graph.rs"
+));
+
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/client/sections/commands.rs"
+));
+
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/client/sections/wire.rs"
+));
+
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/client/sections/wire_runtime.rs"
+));
+
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/client/sections/transport.rs"
+));
 
 include!(concat!(
     env!("CARGO_MANIFEST_DIR"),

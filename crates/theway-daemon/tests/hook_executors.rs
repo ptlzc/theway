@@ -145,3 +145,157 @@ async fn hook_command_cancellation_kills_descendant_process() {
     );
     assert_no_survivors(marker).await;
 }
+
+/// Spawn a one-shot HTTP server that captures the request text and responds with
+/// `status` + `body`.
+async fn spawn_http_responder(
+    status: &'static str,
+    body: &'static str,
+) -> (
+    String,
+    tokio::sync::oneshot::Receiver<String>,
+    tokio::task::JoinHandle<()>,
+) {
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let handle = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buf = [0_u8; 4096];
+        let n = socket.read(&mut buf).await.unwrap_or(0);
+        let _ = tx.send(String::from_utf8_lossy(&buf[..n]).to_string());
+        let body = body.as_bytes();
+        let head = format!(
+            "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        );
+        let _ = socket.write_all(head.as_bytes()).await;
+        let _ = socket.write_all(body).await;
+        let _ = socket.shutdown().await;
+    });
+    (addr.to_string(), rx, handle)
+}
+
+/// The webhook executor posts the payload, sends custom headers, and accepts a
+/// successful response.
+#[tokio::test]
+async fn hook_webhook_posts_payload_headers_and_succeeds() {
+    let executors = daemon_executors();
+    let send = executors.webhook.expect("webhook executor injected");
+    let (addr, rx, handle) = spawn_http_responder("204 No Content", "").await;
+    let mut headers = BTreeMap::new();
+    headers.insert("X-Test-Header".into(), "hook-header-value".into());
+
+    send(
+        format!("http://{addr}/hook"),
+        r#"{"ok":true}"#.into(),
+        headers,
+        Duration::from_secs(5),
+        CancellationToken::new(),
+    )
+    .await
+    .expect("webhook should succeed");
+
+    let request = rx.await.expect("server captured request");
+    assert!(request.starts_with("POST /hook HTTP/1.1"), "{request}");
+    assert!(
+        request
+            .to_ascii_lowercase()
+            .contains("content-type: application/json"),
+        "{request}"
+    );
+    assert!(
+        request
+            .to_ascii_lowercase()
+            .contains("x-test-header: hook-header-value"),
+        "{request}"
+    );
+    assert!(
+        request.to_ascii_lowercase().contains("user-agent: theway/"),
+        "{request}"
+    );
+    handle.await.unwrap();
+}
+
+/// Non-2xx webhook responses are errors that include the status and a bounded body.
+#[tokio::test]
+async fn hook_webhook_non_success_status_is_error() {
+    let executors = daemon_executors();
+    let send = executors.webhook.expect("webhook executor injected");
+    let (addr, _rx, handle) =
+        spawn_http_responder("500 Internal Server Error", "boom details").await;
+
+    let err = send(
+        format!("http://{addr}/hook"),
+        "{}".into(),
+        BTreeMap::new(),
+        Duration::from_secs(5),
+        CancellationToken::new(),
+    )
+    .await
+    .expect_err("non-success must be an error");
+    let msg = err.to_string();
+    assert!(msg.contains("webhook status 500"), "{msg}");
+    assert!(msg.contains("boom details"), "{msg}");
+    handle.await.unwrap();
+}
+
+/// Cancellation mid-webhook aborts the request and surfaces the hook error contract.
+#[tokio::test]
+async fn hook_webhook_cancellation_is_error() {
+    use tokio::net::TcpListener;
+
+    let executors = daemon_executors();
+    let send = executors.webhook.expect("webhook executor injected");
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buf = [0_u8; 4096];
+        let _ = socket.read(&mut buf).await;
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        drop(socket);
+    });
+    let cancel = CancellationToken::new();
+    let cancel_clone = cancel.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        cancel_clone.cancel();
+    });
+
+    let err = send(
+        format!("http://{addr}/hook"),
+        "{}".into(),
+        BTreeMap::new(),
+        Duration::from_secs(30),
+        cancel,
+    )
+    .await
+    .expect_err("cancelled webhook must be an error");
+    assert!(err.to_string().contains("cancelled"), "{err}");
+    handle.abort();
+}
+
+/// A command killed by a signal (no normal exit code) uses the explicit
+/// "failed to produce an exit code" hook error contract.
+#[tokio::test]
+async fn hook_command_missing_exit_code_is_error() {
+    let executors = daemon_executors();
+    let exec = executors.command.expect("command executor injected");
+    let err = exec(
+        "kill -9 $$".into(),
+        std::env::current_dir().unwrap(),
+        BTreeMap::new(),
+        Duration::from_secs(5),
+        CancellationToken::new(),
+    )
+    .await
+    .expect_err("signal-killed command must be an error");
+    assert!(
+        err.to_string().contains("failed to produce an exit code"),
+        "{err}"
+    );
+}

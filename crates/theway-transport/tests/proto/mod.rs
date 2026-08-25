@@ -6,6 +6,7 @@ use crate::wire::{
     WireDagRunSnapshot,
 };
 
+mod coverage;
 mod extensions;
 mod session_activation;
 use crate::feed::{Level, TriggerPollStatus};

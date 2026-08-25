@@ -355,3 +355,320 @@ async fn goal_evaluator_false_returns_continuation_and_audits_reason() {
         "goal hook must persist updated goal state: {entries:#?}"
     );
 }
+
+#[tokio::test]
+async fn dispatch_goal_pause_and_resume_round_trip() {
+    let _guard = COMMAND_OUTPUT_LOCK.lock().unwrap();
+    let capture = OutputCapture::install();
+    let storage = Arc::new(MemorySessionStorage::new());
+    let session = Session::new(storage as Arc<dyn SessionStorage>);
+    let harness = Arc::new(AgentHarness::new(AgentHarnessOptions::new(
+        faux_model(),
+        session,
+    )));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
+    goal::set(&harness, "ship it".into()).await.unwrap();
+
+    let registry = commands::Registry::with_builtins();
+    let cwd = std::env::current_dir().unwrap();
+    let ctx = commands::CommandCtx {
+        harness: &harness,
+        trigger_executor: &executor,
+        session_id: "test",
+        log_path: None,
+        tool_count: 0,
+        cwd: &cwd,
+    };
+
+    let outcome = commands::dispatch("/goal pause", &registry, &ctx).await;
+    assert!(matches!(outcome, commands::CommandOutcome::Handled));
+    let state = goal::current(&harness).await.expect("paused goal exists");
+    assert_eq!(state.status, goal::GoalStatus::Paused);
+    assert!(capture.text().contains("goal paused: ship it"));
+
+    let outcome = commands::dispatch("/goal resume", &registry, &ctx).await;
+    assert!(matches!(outcome, commands::CommandOutcome::Handled));
+    let state = goal::current(&harness).await.expect("resumed goal exists");
+    assert_eq!(state.status, goal::GoalStatus::Pursuing);
+    assert!(capture.text().contains("goal resumed: ship it"));
+}
+
+#[tokio::test]
+async fn dispatch_goal_status_prints_paused_goal() {
+    let _guard = COMMAND_OUTPUT_LOCK.lock().unwrap();
+    let capture = OutputCapture::install();
+    let storage = Arc::new(MemorySessionStorage::new());
+    let session = Session::new(storage as Arc<dyn SessionStorage>);
+    let harness = Arc::new(AgentHarness::new(AgentHarnessOptions::new(
+        faux_model(),
+        session,
+    )));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
+    goal::set(&harness, "paused condition".into())
+        .await
+        .unwrap();
+    goal::pause(&harness).await.unwrap();
+
+    let registry = commands::Registry::with_builtins();
+    let cwd = std::env::current_dir().unwrap();
+    let ctx = commands::CommandCtx {
+        harness: &harness,
+        trigger_executor: &executor,
+        session_id: "test",
+        log_path: None,
+        tool_count: 0,
+        cwd: &cwd,
+    };
+
+    let outcome = commands::dispatch("/goal", &registry, &ctx).await;
+    assert!(matches!(outcome, commands::CommandOutcome::Handled));
+    let output = capture.text();
+    assert!(output.contains("goal: paused condition"), "{output}");
+    assert!(output.contains("status: paused"), "{output}");
+}
+
+#[tokio::test]
+async fn dispatch_goal_start_empty_prompt_is_error() {
+    let _guard = COMMAND_OUTPUT_LOCK.lock().unwrap();
+    let _capture = OutputCapture::install();
+    let storage = Arc::new(MemorySessionStorage::new());
+    let session = Session::new(storage as Arc<dyn SessionStorage>);
+    let harness = Arc::new(AgentHarness::new(AgentHarnessOptions::new(
+        faux_model(),
+        session,
+    )));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
+    goal::set(&harness, "active".into()).await.unwrap();
+
+    let registry = commands::Registry::with_builtins();
+    let cwd = std::env::current_dir().unwrap();
+    let ctx = commands::CommandCtx {
+        harness: &harness,
+        trigger_executor: &executor,
+        session_id: "test",
+        log_path: None,
+        tool_count: 0,
+        cwd: &cwd,
+    };
+
+    let outcome = commands::dispatch("/goal start", &registry, &ctx).await;
+    match outcome {
+        commands::CommandOutcome::Error(message) => {
+            assert!(message.contains("usage: /goal-start <prompt>"), "{message}");
+        }
+        other => panic!("expected Error, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn dispatch_goal_empty_condition_is_error() {
+    let _guard = COMMAND_OUTPUT_LOCK.lock().unwrap();
+    let _capture = OutputCapture::install();
+    let storage = Arc::new(MemorySessionStorage::new());
+    let session = Session::new(storage as Arc<dyn SessionStorage>);
+    let harness = Arc::new(AgentHarness::new(AgentHarnessOptions::new(
+        faux_model(),
+        session,
+    )));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
+
+    let registry = commands::Registry::with_builtins();
+    let cwd = std::env::current_dir().unwrap();
+    let ctx = commands::CommandCtx {
+        harness: &harness,
+        trigger_executor: &executor,
+        session_id: "test",
+        log_path: None,
+        tool_count: 0,
+        cwd: &cwd,
+    };
+
+    let outcome = commands::dispatch("/goal \"   \"", &registry, &ctx).await;
+    match outcome {
+        commands::CommandOutcome::Error(message) => {
+            assert!(message.contains("usage: /goal <condition>"), "{message}");
+        }
+        other => panic!("expected Error, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn dispatch_goal_resume_without_paused_goal_errors() {
+    let _guard = COMMAND_OUTPUT_LOCK.lock().unwrap();
+    let _capture = OutputCapture::install();
+    let storage = Arc::new(MemorySessionStorage::new());
+    let session = Session::new(storage as Arc<dyn SessionStorage>);
+    let harness = Arc::new(AgentHarness::new(AgentHarnessOptions::new(
+        faux_model(),
+        session,
+    )));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
+    goal::set(&harness, "not paused".into()).await.unwrap();
+
+    let registry = commands::Registry::with_builtins();
+    let cwd = std::env::current_dir().unwrap();
+    let ctx = commands::CommandCtx {
+        harness: &harness,
+        trigger_executor: &executor,
+        session_id: "test",
+        log_path: None,
+        tool_count: 0,
+        cwd: &cwd,
+    };
+
+    let outcome = commands::dispatch("/goal resume", &registry, &ctx).await;
+    match outcome {
+        commands::CommandOutcome::Error(message) => {
+            assert!(message.contains("goal is not paused"), "{message}");
+        }
+        other => panic!("expected Error, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn dispatch_goal_clear_without_goal_still_succeeds() {
+    let _guard = COMMAND_OUTPUT_LOCK.lock().unwrap();
+    let capture = OutputCapture::install();
+    let storage = Arc::new(MemorySessionStorage::new());
+    let session = Session::new(storage as Arc<dyn SessionStorage>);
+    let harness = Arc::new(AgentHarness::new(AgentHarnessOptions::new(
+        faux_model(),
+        session,
+    )));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
+
+    let registry = commands::Registry::with_builtins();
+    let cwd = std::env::current_dir().unwrap();
+    let ctx = commands::CommandCtx {
+        harness: &harness,
+        trigger_executor: &executor,
+        session_id: "test",
+        log_path: None,
+        tool_count: 0,
+        cwd: &cwd,
+    };
+
+    let outcome = commands::dispatch("/goal clear", &registry, &ctx).await;
+    assert!(matches!(outcome, commands::CommandOutcome::Handled));
+    assert!(
+        capture.text().contains("goal cleared"),
+        "{}",
+        capture.text()
+    );
+}
+
+#[tokio::test]
+async fn dispatch_goal_status_prints_achieved_goal_with_reason() {
+    let _guard = COMMAND_OUTPUT_LOCK.lock().unwrap();
+    let capture = OutputCapture::install();
+    let storage = Arc::new(MemorySessionStorage::new());
+    let session = Session::new(storage as Arc<dyn SessionStorage>);
+    let harness = Arc::new(AgentHarness::new(AgentHarnessOptions::new(
+        faux_model(),
+        session.clone(),
+    )));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
+    let achieved = goal::GoalState {
+        condition: "done".into(),
+        status: goal::GoalStatus::Achieved,
+        iterations: 3,
+        last_reason: Some("all tests pass".into()),
+        updated_at: "now".into(),
+    };
+    session
+        .append_custom(goal::CUSTOM_TYPE, Some(serde_json::json!(achieved)))
+        .await
+        .unwrap();
+
+    let registry = commands::Registry::with_builtins();
+    let cwd = std::env::current_dir().unwrap();
+    let ctx = commands::CommandCtx {
+        harness: &harness,
+        trigger_executor: &executor,
+        session_id: "test",
+        log_path: None,
+        tool_count: 0,
+        cwd: &cwd,
+    };
+
+    let outcome = commands::dispatch("/goal", &registry, &ctx).await;
+    assert!(matches!(outcome, commands::CommandOutcome::Handled));
+    let output = capture.text();
+    assert!(output.contains("goal: done"), "{output}");
+    assert!(output.contains("status: achieved"), "{output}");
+    assert!(output.contains("iterations: 3"), "{output}");
+    assert!(
+        output.contains("last evaluator reason: all tests pass"),
+        "{output}"
+    );
+}

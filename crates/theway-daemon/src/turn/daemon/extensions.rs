@@ -82,7 +82,10 @@ impl TurnHost {
         let disposition = host
             .reload_if_catalog_changed(&self.runtime.cwd, &self.runtime.paths.base)
             .await?;
-        Ok(wire_extension_reload_result(disposition, host.reload_revision()))
+        Ok(wire_extension_reload_result(
+            disposition,
+            host.reload_revision(),
+        ))
     }
 
     async fn handle_extension_trust(
@@ -115,9 +118,7 @@ impl TurnHost {
         let permissions = request
             .granted_permissions
             .iter()
-            .map(|permission| {
-                theway_contract::extension::ExtensionPermission::from_str(permission)
-            })
+            .map(|permission| theway_contract::extension::ExtensionPermission::from_str(permission))
             .collect::<Result<Vec<_>, _>>()?;
         let disposition = host
             .decide_trust(
@@ -230,9 +231,7 @@ fn wire_extension_reload_result(
         crate::ts_extensions::ExtensionReloadDisposition::Unchanged => {
             ("unchanged", current_revision)
         }
-        crate::ts_extensions::ExtensionReloadDisposition::Pending => {
-            ("pending", current_revision)
-        }
+        crate::ts_extensions::ExtensionReloadDisposition::Pending => ("pending", current_revision),
         crate::ts_extensions::ExtensionReloadDisposition::Applied { revision } => {
             ("applied", revision)
         }
@@ -241,4 +240,12 @@ fn wire_extension_reload_result(
         status: status.into(),
         revision,
     }
+}
+
+#[cfg(test)]
+pub(crate) mod extensions {
+    //! Extension wire-helper and method tests live in `tests/turn/daemon/extensions/`
+    //! (mirror of src), pulled in by path so they keep unit-test semantics
+    //! (private access). See docs/rust-test-files.md.
+    tests_bridge_macro::tests_bridge!("turn/daemon/extensions");
 }

@@ -332,4 +332,133 @@ mod tests {
         assert_eq!(cache.last_rebuilt, 1);
         assert_eq!(cache.rows().len(), 1);
     }
+    fn assistant(text: &str) -> WireFeedBlock {
+        WireFeedBlock::Assistant {
+            text: text.into(),
+            timestamp: None,
+        }
+    }
+
+    fn thinking(text: &str) -> WireFeedBlock {
+        WireFeedBlock::Thinking {
+            text: text.into(),
+            timestamp: Some("t".into()),
+        }
+    }
+
+    fn tool(name: &str, args: &str) -> WireFeedBlock {
+        WireFeedBlock::Tool {
+            name: name.into(),
+            args: args.into(),
+            timestamp: None,
+        }
+    }
+
+    fn tool_result(lines: &[&str], is_error: bool) -> WireFeedBlock {
+        WireFeedBlock::ToolResult {
+            lines: lines.iter().map(|s| s.to_string()).collect(),
+            is_error,
+            timestamp: None,
+        }
+    }
+
+    fn plain(text: &str) -> WireFeedBlock {
+        WireFeedBlock::Plain {
+            text: text.into(),
+            level: crate::feed::Level::System,
+            timestamp: None,
+        }
+    }
+
+    #[test]
+    fn block_fingerprints_cover_all_variants_and_distinguish_fields() {
+        let user = feed_with(&[user("hi")]);
+        let assistant = feed_with(&[assistant("hi")]);
+        let thinking = feed_with(&[thinking("hi")]);
+        let tool_feed = feed_with(&[tool("read", "x")]);
+        let ok_result = feed_with(&[tool_result(&["ok"], false)]);
+        let err_result = feed_with(&[tool_result(&["bad"], true)]);
+        let plain = feed_with(&[plain("hi")]);
+
+        let fp = |f: &Feed| block_fingerprint(&f.blocks()[0]);
+        assert_ne!(fp(&user), fp(&assistant));
+        assert_ne!(fp(&assistant), fp(&thinking));
+        assert_ne!(fp(&thinking), fp(&tool_feed));
+        assert_ne!(fp(&tool_feed), fp(&ok_result));
+        assert_ne!(fp(&ok_result), fp(&err_result));
+        assert_ne!(fp(&err_result), fp(&plain));
+
+        let tool2 = feed_with(&[tool("read", "y")]);
+        assert_ne!(fp(&tool_feed), fp(&tool2));
+        let ok_result2 = feed_with(&[tool_result(&["ok", "more"], false)]);
+        assert_ne!(fp(&ok_result), fp(&ok_result2));
+        let plain2 = feed_with(&[WireFeedBlock::Plain {
+            text: "hi".into(),
+            level: crate::feed::Level::Error,
+            timestamp: None,
+        }]);
+        assert_ne!(fp(&plain), fp(&plain2));
+    }
+
+    #[test]
+    fn update_renders_every_block_kind() {
+        let feed = feed_with(&[
+            user("hello"),
+            assistant("world"),
+            thinking("think"),
+            tool("bash", " ls"),
+            tool_result(&["one", "two"], true),
+            plain("note"),
+        ]);
+        let mut cache = PlainLinesCache::new(80);
+        cache.update(&feed, 80);
+        let rows = cache.rows();
+        assert!(rows.iter().any(|r| r.contains("you ▸ hello")), "{rows:?}");
+        assert!(rows.iter().any(|r| r.contains("ai ▸ world")), "{rows:?}");
+        assert!(
+            rows.iter().any(|r| r.contains("[thinking] think")),
+            "{rows:?}"
+        );
+        assert!(rows.iter().any(|r| r.contains("⚙ bash ls")), "{rows:?}");
+        assert!(rows.iter().any(|r| r.contains("    one")), "{rows:?}");
+        assert!(rows.iter().any(|r| r.contains("    two")), "{rows:?}");
+        assert!(rows.iter().any(|r| r.contains("note")), "{rows:?}");
+    }
+
+    #[test]
+    fn update_from_dirty_supports_append_dirty_and_width_change() {
+        let feed = feed_with(&[user("one"), assistant("two")]);
+        let mut cache = PlainLinesCache::new(80);
+        cache.update(&feed, 80);
+
+        let changed = feed_with(&[user("one"), assistant("CHANGED")]);
+        cache.update_from_dirty(&changed, 80, Some(1));
+        assert_eq!(cache.last_rebuilt, 1);
+        assert!(cache.rows().iter().any(|r| r.contains("CHANGED")));
+
+        // dirty = None means "append at end"; with same length it rebuilds none.
+        cache.update_from_dirty(&changed, 80, None);
+        assert_eq!(cache.last_rebuilt, 0);
+
+        let appended = feed_with(&[user("one"), assistant("two"), plain("three")]);
+        cache.update_from_dirty(&appended, 80, None);
+        assert_eq!(cache.last_rebuilt, 1);
+        assert!(cache.rows().iter().any(|r| r.contains("three")));
+
+        // width change forces a full rebuild even with dirty Some.
+        cache.update_from_dirty(&appended, 40, Some(0));
+        assert_eq!(cache.last_rebuilt, 3);
+        assert!(cache.rows().iter().any(|r| r.contains("two")));
+    }
+
+    #[test]
+    fn update_from_dirty_truncates_to_current_length() {
+        let feed = feed_with(&[user("one"), assistant("two")]);
+        let mut cache = PlainLinesCache::new(80);
+        cache.update(&feed, 80);
+        let shorter = feed_with(&[user("one")]);
+        cache.update_from_dirty(&shorter, 80, None);
+        assert_eq!(cache.last_rebuilt, 0);
+        assert_eq!(cache.rows().iter().filter(|r| r.contains("two")).count(), 0);
+    }
 }

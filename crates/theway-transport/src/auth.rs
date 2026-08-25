@@ -18,8 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::client::base_dir;
 
-#[cfg(test)]
-pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 pub fn auth_path() -> PathBuf {
     base_dir().join("auth.json")
@@ -306,6 +305,27 @@ mod tests {
     }
 
     #[test]
+    fn needs_refresh_oauth_without_expiry_returns_false() {
+        let cred = ProviderCredential::Oauth {
+            access_token: "x".into(),
+            refresh_token: None,
+            expires_at: None,
+            scopes: vec![],
+        };
+        assert!(!cred.needs_refresh(0));
+    }
+
+    #[test]
+    fn model_credential_hint_unknown_provider_uses_generic_env_hint() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        let _way = EnvGuard::set("THEWAY_DIR", dir.path());
+        let hint = model_credential_hint("totally-unknown-provider").unwrap();
+        assert!(hint.contains("set the provider API key env var"), "{hint}");
+        assert!(hint.contains("/login totally-unknown-provider"), "{hint}");
+    }
+
+    #[test]
     fn missing_file_loads_empty_store() {
         let dir = TempDir::new().unwrap();
         let store = AuthStore::load_from(&dir.path().join("nope.json")).unwrap();
@@ -340,5 +360,138 @@ mod tests {
         store.save_to(&path).unwrap();
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600, "got {:o}", mode);
+    }
+    #[test]
+    fn auth_path_and_login_guidance_are_contract_stable() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        let _way = EnvGuard::set("THEWAY_DIR", dir.path());
+        assert_eq!(auth_path(), dir.path().join("auth.json"));
+        assert_eq!(
+            login_requires_tty_message("anthropic", None),
+            "/login requires an interactive terminal so the API key is not echoed; run theway in a TTY and use `/login anthropic`"
+        );
+        assert_eq!(
+            login_requires_tty_message("anthropic", Some("theway /login anthropic")),
+            "/login requires an interactive terminal so the API key is not echoed; run theway in a TTY and use `theway /login anthropic`"
+        );
+    }
+
+    #[test]
+    fn empty_file_loads_default_and_bad_json_is_an_error() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+        std::fs::write(&path, "   \n").unwrap();
+        assert!(AuthStore::load_from(&path).unwrap().providers.is_empty());
+
+        std::fs::write(&path, "not-json").unwrap();
+        assert!(AuthStore::load_from(&path).is_err());
+    }
+
+    #[test]
+    fn default_version_and_store_mutations_round_trip() {
+        assert_eq!(default_version(), 1);
+        let mut store = AuthStore::default();
+        assert!(store.get("p").is_none());
+        store.set("p", ProviderCredential::ApiKey { value: "v".into() });
+        assert_eq!(
+            store
+                .get("p")
+                .map(|c| match c {
+                    ProviderCredential::ApiKey { value } => value.clone(),
+                    _ => String::new(),
+                })
+                .as_deref(),
+            Some("v")
+        );
+        let removed = store.remove("p");
+        assert!(matches!(removed, Some(ProviderCredential::ApiKey { value }) if value == "v"));
+        assert!(store.get("p").is_none());
+    }
+
+    #[test]
+    fn resolve_for_provider_falls_back_to_stored_api_key_and_oauth() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let _openai = EnvGuard::remove("OPENAI_API_KEY");
+        let mut store = AuthStore::default();
+        store.set(
+            "openai",
+            ProviderCredential::ApiKey {
+                value: "stored".into(),
+            },
+        );
+        assert_eq!(
+            store.resolve_for_provider("openai").as_deref(),
+            Some("stored")
+        );
+
+        let mut store = AuthStore::default();
+        store.set(
+            "openai",
+            ProviderCredential::Oauth {
+                access_token: "oauth-token".into(),
+                refresh_token: None,
+                expires_at: None,
+                scopes: vec![],
+            },
+        );
+        assert_eq!(
+            store.resolve_for_provider("openai").as_deref(),
+            Some("oauth-token")
+        );
+    }
+
+    #[test]
+    fn model_credential_hint_respects_env_store_and_missing() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        let _way = EnvGuard::set("THEWAY_DIR", dir.path());
+        let _openai = EnvGuard::remove("OPENAI_API_KEY");
+
+        assert!(
+            model_credential_hint("openai")
+                .unwrap()
+                .contains("OPENAI_API_KEY"),
+            "missing hint should mention env var"
+        );
+
+        let _env = EnvGuard::set("OPENAI_API_KEY", "sk-env");
+        assert!(model_credential_hint("openai").is_none());
+
+        drop(_env);
+        let mut store = AuthStore::default();
+        store.set(
+            "openai",
+            ProviderCredential::ApiKey {
+                value: "sk-store".into(),
+            },
+        );
+        store.save_to(&dir.path().join("auth.json")).unwrap();
+        eprintln!(
+            "auth_path={:?} loaded={:?} hint={:?}",
+            auth_path(),
+            AuthStore::load().map(|s| s.get("openai").cloned()),
+            model_credential_hint("openai")
+        );
+        assert!(model_credential_hint("openai").is_none());
+    }
+
+    #[test]
+    fn save_api_key_uses_configured_auth_path_and_reports_errors() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        let _way = EnvGuard::set("THEWAY_DIR", dir.path());
+        let path = save_api_key("openai", "sk-saved").unwrap();
+        assert_eq!(path, dir.path().join("auth.json"));
+        let loaded = AuthStore::load().unwrap();
+        assert_eq!(
+            loaded.resolve_for_provider("openai").as_deref(),
+            Some("sk-saved")
+        );
+
+        let file = dir.path().join("blocked");
+        std::fs::write(&file, "x").unwrap();
+        let _bad_way = EnvGuard::set("THEWAY_DIR", &file);
+        assert!(save_api_key("openai", "sk-fail").is_err());
     }
 }

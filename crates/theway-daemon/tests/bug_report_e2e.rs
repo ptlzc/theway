@@ -123,3 +123,97 @@ async fn bug_report_redacts_secrets_from_seeded_log() {
     assert!(body.contains("[REDACTED:aws_access_key]"));
     assert!(body.contains("[REDACTED:bearer_token]"));
 }
+
+fn empty_session() -> Session {
+    let storage = Arc::new(MemorySessionStorage::new());
+    Session::new(storage as Arc<dyn SessionStorage>)
+}
+
+#[test]
+fn default_dest_points_into_bug_reports_directory() {
+    let dest = bug_report::default_dest();
+    assert_eq!(
+        dest.parent().and_then(|p| p.file_name()).unwrap().to_str(),
+        Some("bug-reports")
+    );
+    assert!(dest.extension().is_some_and(|ext| ext == "txt"));
+    assert!(
+        dest.file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("20")
+    );
+}
+
+#[tokio::test]
+async fn build_without_log_writes_disabled_log_line_and_creates_dirs() {
+    let session = empty_session();
+    let dir = TempDir::new().unwrap();
+    let dest = dir.path().join("nested").join("report.txt");
+    let diag = bug_report::DiagInputs {
+        session_id: "no-log".into(),
+        model: None,
+        thinking: "off".into(),
+        tool_count: 0,
+        skill_count: 0,
+        cost_summary: "n/a".into(),
+        log_path: None,
+    };
+
+    let written = bug_report::build(diag, &session, &dest).await.unwrap();
+    assert_eq!(written, dest);
+    let body = std::fs::read_to_string(&dest).unwrap();
+    assert!(body.contains("model         (none)"), "{body}");
+    assert!(body.contains("log_path      (disabled)"), "{body}");
+    assert!(!body.contains("---- log tail"), "{body}");
+    assert!(body.contains("---- transcript ----"), "{body}");
+}
+
+#[tokio::test]
+async fn build_reports_unreadable_log_without_failing() {
+    let session = empty_session();
+    let dir = TempDir::new().unwrap();
+    let dest = dir.path().join("report.txt");
+    let diag = bug_report::DiagInputs {
+        session_id: "missing-log".into(),
+        model: Some("faux:faux".into()),
+        thinking: "off".into(),
+        tool_count: 0,
+        skill_count: 0,
+        cost_summary: "n/a".into(),
+        log_path: Some(dir.path().join("does-not-exist.log")),
+    };
+
+    bug_report::build(diag, &session, &dest).await.unwrap();
+    let body = std::fs::read_to_string(&dest).unwrap();
+    assert!(body.contains("(cannot read log:"), "{body}");
+    assert!(body.contains("---- log tail"), "{body}");
+}
+
+#[tokio::test]
+async fn build_tails_long_log_to_200_lines() {
+    let session = empty_session();
+    let dir = TempDir::new().unwrap();
+    let log = dir.path().join("long.log");
+    let mut content = String::new();
+    for i in 1..=250 {
+        content.push_str(&format!("line {i:03}\n"));
+    }
+    std::fs::write(&log, content).unwrap();
+    let dest = dir.path().join("report.txt");
+    let diag = bug_report::DiagInputs {
+        session_id: "tail".into(),
+        model: None,
+        thinking: "off".into(),
+        tool_count: 0,
+        skill_count: 0,
+        cost_summary: "n/a".into(),
+        log_path: Some(log),
+    };
+
+    bug_report::build(diag, &session, &dest).await.unwrap();
+    let body = std::fs::read_to_string(&dest).unwrap();
+    assert!(body.contains("line 250"), "{body}");
+    assert!(body.contains("line 051"), "{body}");
+    assert!(!body.contains("line 001\n"), "{body}");
+}

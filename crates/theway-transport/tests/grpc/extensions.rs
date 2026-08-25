@@ -125,3 +125,173 @@ async fn headless_extension_service_forwards_reload_and_trust() {
     assert_eq!(trust.reload.unwrap().revision, 3);
     responder.await.unwrap();
 }
+
+#[tokio::test]
+async fn extension_service_rejects_bad_arguments_json() {
+    let (state, _command_rx) = grpc_state();
+    let err = state
+        .invoke_command(Request::new(InvokeExtensionCommandRequest {
+            name: "x".into(),
+            arguments_json: "not-json".into(),
+            has_interactive_client: false,
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::InvalidArgument);
+}
+
+#[tokio::test]
+async fn extension_service_maps_closed_channels_and_failed_replies() {
+    let (state, command_rx) = grpc_state();
+    drop(command_rx);
+
+    let err = state
+        .invoke_command(Request::new(InvokeExtensionCommandRequest {
+            name: "x".into(),
+            arguments_json: "{}".into(),
+            has_interactive_client: false,
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::Unavailable);
+
+    let err = state
+        .reload(Request::new(ReloadExtensionsRequest {
+            cancel_active: false,
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::Unavailable);
+
+    let err = state
+        .decide_trust(Request::new(DecideExtensionTrustRequest {
+            subject: "pkg".into(),
+            extension_id: None,
+            decision: "trust".into(),
+            granted_permissions: vec![],
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::Unavailable);
+}
+
+#[tokio::test]
+async fn extension_service_maps_failed_preconditions() {
+    let (state, mut command_rx) = grpc_state();
+    let responder = tokio::spawn(async move {
+        match command_rx.recv().await.unwrap() {
+            WireCommand::InvokeExtensionCommand { response, .. } => {
+                response.send(Err("invoke failed".into())).unwrap();
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    });
+    let err = state
+        .invoke_command(Request::new(InvokeExtensionCommandRequest {
+            name: "x".into(),
+            arguments_json: "{}".into(),
+            has_interactive_client: false,
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+    responder.await.unwrap();
+
+    let (state, mut command_rx) = grpc_state();
+    let responder = tokio::spawn(async move {
+        match command_rx.recv().await.unwrap() {
+            WireCommand::ReloadExtensions { response, .. } => {
+                response.send(Err("reload failed".into())).unwrap();
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    });
+    let err = state
+        .reload(Request::new(ReloadExtensionsRequest {
+            cancel_active: false,
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+    responder.await.unwrap();
+
+    let (state, mut command_rx) = grpc_state();
+    let responder = tokio::spawn(async move {
+        match command_rx.recv().await.unwrap() {
+            WireCommand::DecideExtensionTrust { response, .. } => {
+                response.send(Err("trust failed".into())).unwrap();
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    });
+    let err = state
+        .decide_trust(Request::new(DecideExtensionTrustRequest {
+            subject: "pkg".into(),
+            extension_id: None,
+            decision: "trust".into(),
+            granted_permissions: vec![],
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+    responder.await.unwrap();
+}
+
+#[tokio::test]
+async fn extension_service_maps_dropped_replies() {
+    let (state, mut command_rx) = grpc_state();
+    let responder = tokio::spawn(async move {
+        match command_rx.recv().await.unwrap() {
+            WireCommand::InvokeExtensionCommand { response, .. } => drop(response),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    });
+    let err = state
+        .invoke_command(Request::new(InvokeExtensionCommandRequest {
+            name: "x".into(),
+            arguments_json: "{}".into(),
+            has_interactive_client: false,
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::Unavailable);
+    responder.await.unwrap();
+}
+
+#[tokio::test]
+async fn extension_service_maps_dropped_reload_and_trust_replies() {
+    let (state, mut command_rx) = grpc_state();
+    let responder = tokio::spawn(async move {
+        match command_rx.recv().await.unwrap() {
+            WireCommand::ReloadExtensions { response, .. } => drop(response),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    });
+    let err = state
+        .reload(Request::new(ReloadExtensionsRequest {
+            cancel_active: false,
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::Unavailable);
+    responder.await.unwrap();
+
+    let (state, mut command_rx) = grpc_state();
+    let responder = tokio::spawn(async move {
+        match command_rx.recv().await.unwrap() {
+            WireCommand::DecideExtensionTrust { response, .. } => drop(response),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    });
+    let err = state
+        .decide_trust(Request::new(DecideExtensionTrustRequest {
+            subject: "pkg".into(),
+            extension_id: None,
+            decision: "trust".into(),
+            granted_permissions: vec![],
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::Unavailable);
+    responder.await.unwrap();
+}
