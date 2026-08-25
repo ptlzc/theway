@@ -25,6 +25,7 @@ use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::types::DagStatus;
 
 use crate::runtime_storage::SessionRepository;
+use crate::session_execution::SessionExecutionRegistry;
 use theway_transport::transport::SessionOps;
 use theway_transport::wire::SessionSummary;
 
@@ -69,6 +70,7 @@ pub struct AppSessionOps {
     repo: Arc<dyn SessionRepository>,
     dag_engine: Arc<DagEngine>,
     current: Arc<Mutex<CurrentSessionState>>,
+    session_execution: SessionExecutionRegistry,
 }
 
 impl AppSessionOps {
@@ -76,11 +78,13 @@ impl AppSessionOps {
         repo: Arc<dyn SessionRepository>,
         dag_engine: Arc<DagEngine>,
         current: Arc<Mutex<CurrentSessionState>>,
+        session_execution: SessionExecutionRegistry,
     ) -> Self {
         Self {
             repo,
             dag_engine,
             current,
+            session_execution,
         }
     }
 }
@@ -185,6 +189,9 @@ impl SessionOps for AppSessionOps {
         }
 
         self.repo.delete(id).await?;
+        // Credentials are memory-only and session-scoped; deleting the session
+        // must also drop its zeroizing secrets and execution context.
+        self.session_execution.remove(&session_id);
         Ok(Vec::new())
     }
 }
@@ -207,7 +214,12 @@ mod tests {
             model: "faux:current".into(),
             cwd: "/cwd".into(),
         }));
-        let ops = AppSessionOps::new(repo, engine.clone(), current.clone());
+        let ops = AppSessionOps::new(
+            repo,
+            engine.clone(),
+            current.clone(),
+            SessionExecutionRegistry::new(),
+        );
         (ops, current)
     }
 
@@ -279,14 +291,36 @@ mod tests {
     #[tokio::test]
     async fn delete_removes_session_when_no_active_graphs() {
         let dir = tempdir().unwrap();
+        let work = dir.path().join("work");
+        std::fs::create_dir_all(&work).unwrap();
         let repo = Arc::new(SqliteSessionRepo::new(dir.path()));
-        let session = repo.create("/cwd").await.unwrap();
+        let session = repo.create(work.display().to_string()).await.unwrap();
         let id = session_id_of(&session).await;
 
         let (ops, _current) = ops(repo.clone(), &id);
+        ops.session_execution
+            .set(
+                id.clone(),
+                theway_contract::session::SessionBinding {
+                    client_key: "client-1".into(),
+                    runtime: theway_contract::session::SessionRuntimeContext {
+                        work_dir: work.display().to_string(),
+                        provider: None,
+                        model: None,
+                        base_url: None,
+                        thinking: None,
+                    },
+                },
+            )
+            .unwrap();
+        ops.session_execution
+            .set_credential(&id, "faux", b"sentinel".to_vec())
+            .unwrap();
         let active = ops.delete(&id).await.unwrap();
         assert!(active.is_empty(), "no graphs → delete succeeds");
         assert!(ops.list().await.unwrap().is_empty());
+        assert!(ops.session_execution.get_credential(&id, "faux").is_none());
+        assert!(ops.session_execution.get(&id).is_none());
     }
 
     #[tokio::test]
@@ -305,7 +339,12 @@ mod tests {
             model: String::new(),
             cwd: "/cwd".into(),
         }));
-        let ops = AppSessionOps::new(repo.clone(), engine.clone(), current);
+        let ops = AppSessionOps::new(
+            repo.clone(),
+            engine.clone(),
+            current,
+            SessionExecutionRegistry::new(),
+        );
 
         let active = ops.delete(&id).await.unwrap();
         assert_eq!(

@@ -38,6 +38,18 @@ pub struct WireSetCredentialRequest {
     pub secret: Vec<u8>,
 }
 
+impl std::fmt::Debug for WireSetCredentialRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Secrets never appear in debug output; the request is intentionally
+        // not Clone/Serialize so it cannot cross a serialization boundary.
+        f.debug_struct("WireSetCredentialRequest")
+            .field("session_id", &self.session_id)
+            .field("provider", &self.provider)
+            .field("secret", &"<redacted>")
+            .finish()
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct WireClearCredentialRequest {
     pub session_id: String,

@@ -10,7 +10,7 @@ This direction lets any server or client use the protocol without linking `Agent
 
 ## Wire model and endpoint API
 
-[`wire.rs`](../src/wire.rs) is the serde representation shared by the server event loop and JSON transports. `WireCommand` carries mutations into the serialized runtime loop. `WireStatus` is the authoritative client snapshot, while `WireStatusUpdate` can carry a complete snapshot or a feed delta that applies only when its base indexes match the receiving snapshot.
+[`wire.rs`](../src/wire.rs) is the serde representation shared by the server event loop and JSON transports. `WireCommand` carries mutations into the serialized runtime loop, including the atomic `ActivateSession` command and write-only `SetCredential` / `ClearCredential` commands so they are ordered with turns. `WireStatus` is the authoritative client snapshot, while `WireStatusUpdate` can carry a complete snapshot or a feed delta that applies only when its base indexes match the receiving snapshot.
 
 [`transport.rs`](../src/transport.rs) defines the server-facing API:
 
@@ -24,7 +24,7 @@ This direction lets any server or client use the protocol without linking `Agent
 
 The protobuf files, including [`commands.proto`](../proto/commands.proto), [`events.proto`](../proto/events.proto), and [`state.proto`](../proto/state.proto), are the source of truth for services and messages. [`build.rs`](../build.rs) compiles every proto file with `protox` and `tonic-prost-build`, so no system `protoc` is required.
 
-[`grpc/mod.rs`](../src/grpc/mod.rs) maps command, session, settings, graph, event, tool, storage, and health services to `TransportEndpoints`. Mutating operations that must serialize with turns enqueue a `WireCommand`; read/control traits execute through their endpoint object. Event subscriptions receive current state and then incremental frames, with lag recovery from the authoritative latest snapshot.
+[`grpc/mod.rs`](../src/grpc/mod.rs) maps command, session, settings, graph, event, tool, storage, and health services to `TransportEndpoints`. Mutating operations that must serialize with turns enqueue a `WireCommand`; read/control traits execute through their endpoint object. The session service exposes `ActivateSession`, `SetCredential`, and `ClearCredential`; credential secrets are write-only and never appear in responses, snapshots, or events. Event subscriptions receive current state and then incremental frames, with lag recovery from the authoritative latest snapshot.
 
 [`proto.rs`](../src/proto.rs), [`tools.rs`](../src/tools.rs), and [`state.rs`](../src/state.rs) own protobuf conversion for session state, tool operations, and runtime storage records. A proto change must update these conversions and the generated TypeScript SDK through `make sdk-sync`.
 

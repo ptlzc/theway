@@ -190,3 +190,30 @@ fn clear_credentials_removes_all_provider_secrets() {
     assert!(registry.get_credential("s1", "provider-b").is_none());
     assert!(registry.get("s1").is_some(), "clearing credentials keeps binding");
 }
+
+#[test]
+fn clear_all_credentials_zeroizes_every_registered_session() {
+    let (_dir, registry) = registered_registry();
+    registry
+        .set_credential("s1", "provider-a", b"alpha".to_vec())
+        .unwrap();
+    registry
+        .set_credential("s1", "provider-b", b"beta".to_vec())
+        .unwrap();
+    let (dir2, work2) = registered_work_dir();
+    let _ = dir2;
+    registry
+        .set("s2", binding(&work2, "client-2"))
+        .unwrap();
+    registry
+        .set_credential("s2", "provider-a", b"gamma".to_vec())
+        .unwrap();
+
+    registry.clear_all_credentials();
+
+    assert!(registry.get_credential("s1", "provider-a").is_none());
+    assert!(registry.get_credential("s1", "provider-b").is_none());
+    assert!(registry.get_credential("s2", "provider-a").is_none());
+    assert!(registry.get("s1").is_some());
+    assert!(registry.get("s2").is_some());
+}

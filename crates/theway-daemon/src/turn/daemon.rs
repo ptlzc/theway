@@ -173,6 +173,10 @@ struct RuntimeConfiguration {
     /// Client feed-history preference exposed through the legacy wire field
     /// `tui_max_feed_lines`.
     feed_history_limit: Option<u64>,
+    /// Optional publish handles used by activation to emit a coherent snapshot
+    /// before replying to the client.
+    latest: Option<Arc<Mutex<WireStatus>>>,
+    snapshot_tx: Option<broadcast::Sender<WireStatusUpdate>>,
 }
 
 struct FeedProjectionState {

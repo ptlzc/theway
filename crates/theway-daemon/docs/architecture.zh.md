@@ -38,6 +38,8 @@
 
 [`turn/kernel.rs`](../src/turn/kernel.rs) 提供 `ReplKernel`，负责单个活动 prompt/continuation 的准入、排队 turn，并在切换会话时整体替换运行时。[`turn/daemon.rs`](../src/turn/daemon.rs) 负责与协议无关的 daemon 状态机、命令路由、snapshot、feed 更新和生命周期事件处理。
 
+会话激活是新客户端的串行化原子创建/恢复边界。`SessionActivator` 校验 client key 与精确的规范工作目录，在任何进程状态变更前构建完整会话 runtime，然后在回复前于事件循环上提交绑定并替换活动 harness。通过 `SetCredential` / `ClearCredential` 安装的凭据存放在按 session/provider 键控的零化 `SessionExecutionRegistry` 中；它们从不持久化，删除会话时清除，并在 daemon 关闭时零化。
+
 会话切换在构建目标 runtime 前调用当前 harness 的 extension gate。活动 turn 会被取消并驱动至 settlement，旧 runtime 随后发送 `session_shutdown`；之后 `ReplKernel::replace_runtime` 才激活已重建的目标并发布 `session_switched`。`/fork` 命令在 `SessionRepository::fork` 前调用 fork gate，并且只在新会话元数据可读取后发布 `session_forked`。因此，被拒绝的 gate 不会改变当前 runtime 或会话仓库。
 
 ## 存储归属

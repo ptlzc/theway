@@ -20,6 +20,10 @@ impl SecretBytes {
     pub(crate) fn into_zeroizing(self) -> Zeroizing<Vec<u8>> {
         self.0
     }
+
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -214,6 +218,13 @@ impl SessionExecutionRegistry {
         }
         entry.credentials.clear();
         true
+    }
+
+    pub(crate) fn clear_all_credentials(&self) {
+        let mut inner = self.inner.lock();
+        for entry in inner.values_mut() {
+            entry.credentials.clear();
+        }
     }
 }
 

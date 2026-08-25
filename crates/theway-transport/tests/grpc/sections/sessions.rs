@@ -241,3 +241,152 @@ async fn graph_list_filters_runs_by_session() {
         .into_inner();
     assert!(response.runs.is_empty());
 }
+
+// ── activate session ───────────────────────────────────────────────────────────
+
+fn activate_request(work_dir: &str) -> theway_grpc::ActivateSessionRequest {
+    theway_grpc::ActivateSessionRequest {
+        session_id: None,
+        client_key: "client-1".into(),
+        name: Some("activated".into()),
+        runtime: Some(theway_grpc::SessionRuntimeContext {
+            work_dir: work_dir.into(),
+            provider: Some("faux".into()),
+            model: Some("faux".into()),
+            base_url: None,
+            thinking: Some(false),
+        }),
+    }
+}
+
+fn activated_summary() -> crate::wire::SessionSummary {
+    crate::wire::SessionSummary {
+        session_id: "sess-activated".into(),
+        name: "activated".into(),
+        cwd: "/tmp/theway".into(),
+        model: "faux:faux".into(),
+        created_at: "2026-08-01T00:00:00Z".into(),
+        last_activity_at: 0,
+        graph_count: 0,
+        active_graph_count: 0,
+        busy: false,
+        preview: None,
+    }
+}
+
+#[tokio::test]
+async fn grpc_activate_session_queues_one_shot_and_updates_only_after_success() {
+    let (state, mut command_rx) = grpc_state();
+    let server = tokio::spawn(async move {
+        match command_rx.recv().await.unwrap() {
+            WireCommand::ActivateSession { request, response } => {
+                assert_eq!(request.client_key, "client-1");
+                assert_eq!(
+                    request.runtime.as_ref().unwrap().work_dir,
+                    "/tmp/theway"
+                );
+                response
+                    .send(Ok(crate::wire::WireActivateSessionResponse {
+                        session: Some(activated_summary()),
+                        created: true,
+                    }))
+                    .unwrap();
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    });
+
+    let response = state
+        .activate_session(Request::new(activate_request("/tmp/theway")))
+        .await
+        .unwrap()
+        .into_inner();
+    server.await.unwrap();
+
+    assert!(response.created);
+    let session = response.session.unwrap();
+    assert_eq!(session.session_id, "sess-activated");
+    assert_eq!(session.name, "activated");
+    assert_eq!(*state.session_id.read().unwrap(), "sess-activated");
+    let latest = state.latest.lock();
+    assert_eq!(latest.session_id, "sess-activated");
+    assert_eq!(latest.cwd, "/tmp/theway");
+    assert_eq!(latest.model, "faux:faux");
+    assert!(!latest.busy);
+}
+
+#[tokio::test]
+async fn grpc_activate_session_missing_runtime_maps_invalid_argument() {
+    let (state, _command_rx) = grpc_state();
+    let original = state.session_id.read().unwrap().clone();
+    let err = state
+        .activate_session(Request::new(theway_grpc::ActivateSessionRequest {
+            session_id: None,
+            client_key: "client-1".into(),
+            name: None,
+            runtime: None,
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    assert_eq!(*state.session_id.read().unwrap(), original);
+}
+
+#[tokio::test]
+async fn grpc_set_credential_queues_write_only_secret_and_returns_accepted() {
+    let (state, mut command_rx) = grpc_state();
+    let sentinel = b"sentinel-secret".to_vec();
+    let server = tokio::spawn(async move {
+        match command_rx.recv().await.unwrap() {
+            WireCommand::SetCredential { request, response } => {
+                assert_eq!(request.session_id, "sess-1");
+                assert_eq!(request.provider, "anthropic");
+                assert_eq!(request.secret, sentinel);
+                response.send(Ok(())).unwrap();
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    });
+
+    let result = state
+        .set_credential(Request::new(theway_grpc::SetCredentialRequest {
+            session_id: "sess-1".into(),
+            provider: "anthropic".into(),
+            secret: b"sentinel-secret".to_vec(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    server.await.unwrap();
+    assert!(result.accepted);
+}
+
+#[tokio::test]
+async fn grpc_clear_credential_queues_clear_all_and_maps_rpc_error() {
+    let (state, mut command_rx) = grpc_state();
+    let server = tokio::spawn(async move {
+        match command_rx.recv().await.unwrap() {
+            WireCommand::ClearCredential { request, response } => {
+                assert_eq!(request.session_id, "sess-1");
+                assert!(request.provider.is_none());
+                response.send(Err(crate::wire::WireRpcError {
+                    code: "not_found".into(),
+                    message: "session sess-1 is not registered; activate it first".into(),
+                }))
+                .unwrap();
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    });
+
+    let err = state
+        .clear_credential(Request::new(theway_grpc::ClearCredentialRequest {
+            session_id: "sess-1".into(),
+            provider: None,
+        }))
+        .await
+        .unwrap_err();
+    server.await.unwrap();
+    assert_eq!(err.code(), tonic::Code::NotFound);
+    assert!(err.message().contains("activate it first"));
+}

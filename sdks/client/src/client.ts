@@ -47,6 +47,9 @@ import {
 import {
   SessionServiceClient as SessionServiceClientCtor,
   type SessionServiceClient as SessionServiceClientApi,
+  type ActivateSessionRequest,
+  type ActivateSessionResponse,
+  type ClearCredentialRequest,
   type CreateSessionRequest,
   type CreateSessionResponse,
   type DeleteSessionRequest,
@@ -54,6 +57,7 @@ import {
   type ListSessionsResponse,
   type RenameSessionRequest,
   type SessionState,
+  type SetCredentialRequest,
   type SwitchSessionRequest,
 } from './generated/session.js';
 import {
@@ -366,6 +370,53 @@ export class ThewayGrpcClient {
   deleteSession(sessionId: string): Promise<DeleteSessionResponse> {
     const request: DeleteSessionRequest = { sessionId };
     return this.#call<DeleteSessionRequest, DeleteSessionResponse>(this.#session.deleteSession.bind(this.#session), 'DeleteSession', request);
+  }
+
+  // ── session activation and credentials (issue #26) ──
+
+  /**
+   * `ActivateSession` — atomically create or resume a client-bound session.
+   * The server applies the runtime before replying, so a successful response
+   * means the daemon is ready to operate in `runtime.workDir`.
+   */
+  activateSession(request: ActivateSessionRequest): Promise<ActivateSessionResponse> {
+    return this.#call<ActivateSessionRequest, ActivateSessionResponse>(this.#session.activateSession.bind(this.#session), 'ActivateSession', request);
+  }
+
+  /**
+   * `SetCredential` — install a memory-only provider secret for a session.
+   * Secrets are never persisted and never appear in responses or events.
+   */
+  async setCredential(sessionId: string, provider: string, secret: Uint8Array | string): Promise<void> {
+    const request: SetCredentialRequest = {
+      sessionId,
+      provider,
+      secret: typeof secret === 'string' ? new TextEncoder().encode(secret) : secret,
+    };
+    const result = await this.#call<SetCredentialRequest, CommandResult>(
+      this.#session.setCredential.bind(this.#session),
+      'SetCredential',
+      request,
+    );
+    if (!result.accepted) {
+      throw new Error('theway grpc: SetCredential was not accepted by the server');
+    }
+  }
+
+  /**
+   * `ClearCredential` — remove a session credential. With no provider, clears
+   * every provider secret held for the session.
+   */
+  async clearCredential(sessionId: string, provider?: string): Promise<void> {
+    const request: ClearCredentialRequest = { sessionId, provider };
+    const result = await this.#call<ClearCredentialRequest, CommandResult>(
+      this.#session.clearCredential.bind(this.#session),
+      'ClearCredential',
+      request,
+    );
+    if (!result.accepted) {
+      throw new Error('theway grpc: ClearCredential was not accepted by the server');
+    }
   }
 
   // ── settings / config ──
