@@ -26,7 +26,7 @@ members = [
 # ports (`theway-markdown`, `theway-markdown-core`, `theway-pager-render`,
 # `theway-ratatui-textarea`, Apache-2.0).
 [workspace.package]
-version = "0.1.7"
+version = "0.1.8"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
