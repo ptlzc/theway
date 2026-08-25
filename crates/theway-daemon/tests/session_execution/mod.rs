@@ -56,6 +56,33 @@ fn set_rejects_non_directory_work_dir() {
 }
 
 #[test]
+fn set_rejects_empty_client_key() {
+    let (_dir, work) = registered_work_dir();
+    let registry = SessionExecutionRegistry::new();
+
+    let err = registry
+        .set("s1", binding(&work, "   "))
+        .unwrap_err();
+
+    assert!(matches!(err, RegistryError::EmptyClientKey));
+}
+
+#[test]
+fn set_allows_same_session_same_client_and_work_dir_rebind() {
+    let (_dir, work) = registered_work_dir();
+    let registry = SessionExecutionRegistry::new();
+
+    registry
+        .set("s1", binding(&work, "client-1"))
+        .unwrap();
+    registry
+        .set("s1", binding(&work, "client-1"))
+        .unwrap();
+
+    assert!(registry.get("s1").is_some());
+}
+
+#[test]
 fn get_returns_canonicalized_existing_work_dir() {
     let (_dir, work) = registered_work_dir();
     let registry = SessionExecutionRegistry::new();

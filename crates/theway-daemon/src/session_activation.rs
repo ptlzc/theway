@@ -447,3 +447,6 @@ fn resolve_thinking(
         },
     }
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("session_activation");

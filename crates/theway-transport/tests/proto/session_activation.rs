@@ -157,6 +157,40 @@ fn clear_credential_preserves_optional_provider_clear_all_semantics() {
     assert_eq!(request.provider.as_deref(), Some(""));
 }
 
+#[test]
+fn set_credential_request_debug_redacts_secret() {
+    let request = crate::wire::WireSetCredentialRequest {
+        session_id: "sess-1".into(),
+        provider: "anthropic".into(),
+        secret: b"super-secret-sentinel".to_vec(),
+    };
+
+    let debug = format!("{request:?}");
+
+    assert!(
+        !debug.contains("super-secret-sentinel"),
+        "secret leaked into Debug output: {debug}"
+    );
+    assert!(debug.contains("sess-1"));
+    assert!(debug.contains("anthropic"));
+    assert!(debug.contains("<redacted>"));
+}
+
+#[test]
+fn set_credential_request_from_proto_keeps_metadata_and_secret() {
+    let proto = wire::SetCredentialRequest {
+        session_id: "sess-9".into(),
+        provider: "openai".into(),
+        secret: b"opaque".to_vec(),
+    };
+
+    let request = set_credential_request_from_proto(&proto);
+
+    assert_eq!(request.session_id, "sess-9");
+    assert_eq!(request.provider, "openai");
+    assert_eq!(request.secret, b"opaque");
+}
+
 #[derive(Clone, PartialEq, ::prost::Message)]
 struct LegacyStreamEvent {
     #[prost(oneof = "legacy_stream_event::Kind", tags = "1")]

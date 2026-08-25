@@ -266,3 +266,125 @@ async fn handle_web_command_activate_session_enforces_exact_binding() {
     assert_eq!(err.code, "failed_precondition");
     assert!(err.message.contains("different client key"));
 }
+
+#[tokio::test]
+async fn handle_web_command_activate_session_requires_runtime() {
+    let _serial = crate::test_env::ENV_LOCK.lock().unwrap();
+    let mut fixture = HostFixture::new_with_activator().await;
+    let host = fixture.host();
+
+    let (tx, rx) = oneshot::channel();
+    host.handle_web_command(
+        WireCommand::ActivateSession {
+            request: WireActivateSessionRequest {
+                session_id: None,
+                client_key: "client-runtime".into(),
+                name: None,
+                runtime: None,
+            },
+            response: tx,
+        },
+        &mut TurnState::default(),
+    )
+    .await;
+
+    let err = rx.await.unwrap().unwrap_err();
+    assert_eq!(err.code, "invalid_argument");
+    assert!(err.message.contains("runtime is required"));
+}
+
+#[tokio::test]
+async fn handle_web_command_activate_session_rejects_client_key_bound_to_another_session() {
+    let _serial = crate::test_env::ENV_LOCK.lock().unwrap();
+    let mut fixture = HostFixture::new_with_activator().await;
+    let work = fixture._scratch.path().join("work").canonicalize().unwrap();
+    let model = theway_llm_provider::list_models()
+        .into_iter()
+        .find(|m| SUPPORTED_APIS.contains(&m.api.0.as_str()))
+        .expect("a supported model should exist in the catalog");
+
+    // Create an unbound session that will be the explicit target later.
+    let storage = crate::runtime_storage::local_runtime_storage();
+    let repo = storage.session_repository(&work).await.unwrap();
+    let unbound = repo.create(&work).await.unwrap();
+    let unbound_id = unbound
+        .get_metadata_json()
+        .await
+        .unwrap()
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap()
+        .to_string();
+
+    let host = fixture.host();
+    let (tx, rx) = oneshot::channel();
+    host.handle_web_command(
+        WireCommand::ActivateSession {
+            request: activation_request("client-conflict", &work, Some(&model.provider.0), Some(&model.id)),
+            response: tx,
+        },
+        &mut TurnState::default(),
+    )
+    .await;
+    let bound = rx.await.unwrap().unwrap();
+    let bound_id = bound.session.unwrap().session_id;
+    assert_ne!(unbound_id, bound_id);
+
+    let (tx, rx) = oneshot::channel();
+    host.handle_web_command(
+        WireCommand::ActivateSession {
+            request: WireActivateSessionRequest {
+                session_id: Some(unbound_id),
+                client_key: "client-conflict".into(),
+                name: None,
+                runtime: Some(WireSessionRuntimeContext {
+                    work_dir: work.display().to_string(),
+                    provider: Some(model.provider.0.clone()),
+                    model: Some(model.id.clone()),
+                    base_url: None,
+                    thinking: Some(false),
+                }),
+            },
+            response: tx,
+        },
+        &mut TurnState::default(),
+    )
+    .await;
+
+    let err = rx.await.unwrap().unwrap_err();
+    assert_eq!(err.code, "failed_precondition");
+    assert!(err.message.contains("already bound to another session"));
+}
+
+#[tokio::test]
+async fn handle_web_command_activate_session_returns_not_found_for_unknown_session() {
+    let _serial = crate::test_env::ENV_LOCK.lock().unwrap();
+    let mut fixture = HostFixture::new_with_activator().await;
+    let work = fixture._scratch.path().join("work").canonicalize().unwrap();
+    let host = fixture.host();
+
+    let (tx, rx) = oneshot::channel();
+    host.handle_web_command(
+        WireCommand::ActivateSession {
+            request: WireActivateSessionRequest {
+                session_id: Some("no-such-session".into()),
+                client_key: "client-missing".into(),
+                name: None,
+                runtime: Some(WireSessionRuntimeContext {
+                    work_dir: work.display().to_string(),
+                    provider: None,
+                    model: None,
+                    base_url: None,
+                    thinking: None,
+                }),
+            },
+            response: tx,
+        },
+        &mut TurnState::default(),
+    )
+    .await;
+
+    let err = rx.await.unwrap().unwrap_err();
+    assert_eq!(err.code, "not_found");
+    assert!(err.message.contains("no session matches"));
+}

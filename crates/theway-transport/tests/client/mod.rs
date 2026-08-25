@@ -207,3 +207,8 @@ include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/client/sections/wire_config
 include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/client/sections/tools.rs"));
 
 include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/client/sections/storage.rs"));
+
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/client/sections/session_activation.rs"
+));
