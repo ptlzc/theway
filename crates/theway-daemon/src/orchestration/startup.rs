@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::runtime_storage::{RuntimeStorage, local_runtime_storage, remote_runtime_storage};
+use crate::session_activation::SessionActivator;
 use crate::startup_config::StartupConfig;
 use crate::stream_auth::stream_fn_with_auth_store;
 use crate::turn::daemon::{DaemonConfig, RuntimeCapabilities, TurnHost};
@@ -303,6 +304,19 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         main_run_tx: main_run_tx.clone(),
         debug: options.debug,
     });
+    services
+        .session_activator
+        .set(Arc::new(SessionActivator::new(
+            &session_runtime_builder,
+            storage.clone(),
+            paths.clone(),
+            model.clone(),
+            thinking,
+            options.builtin_skills.clone(),
+            startup.builtin_skills.clone(),
+            startup.load_local_sources,
+        )))
+        .map_err(|_| anyhow::anyhow!("session activator already installed"))?;
     let initial_runtime = session_runtime_builder
         .build_opened(&session_context, store, resumed)
         .await?;

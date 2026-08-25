@@ -6,14 +6,15 @@ use crate::{
     runtime_storage::{RuntimeStorage, SessionRepository},
 };
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use theway_contract::session::{
     JsonlSessionMetadata, SessionBinding, SessionRuntimeContext, SessionStore,
 };
 use theway_llm_provider::{Model, Provider, get_model};
 use theway_transport::wire::{WireActivateSessionRequest, WireRpcError};
 pub(crate) struct SessionActivator {
-    builder: Arc<SessionRuntimeBuilder>,
+    // Weak keeps the daemon slot from owning the builder; the SessionFactory owns the strong Arc.
+    builder: Weak<SessionRuntimeBuilder>,
     storage: Arc<dyn RuntimeStorage>,
     paths: crate::DaemonPaths,
     startup_model: Model,
@@ -29,7 +30,7 @@ pub(crate) struct SessionActivation {
 }
 impl SessionActivator {
     pub(crate) fn new(
-        builder: Arc<SessionRuntimeBuilder>,
+        builder: &Arc<SessionRuntimeBuilder>,
         storage: Arc<dyn RuntimeStorage>,
         paths: crate::DaemonPaths,
         startup_model: Model,
@@ -39,7 +40,7 @@ impl SessionActivator {
         load_local_sources: bool,
     ) -> Self {
         Self {
-            builder,
+            builder: Arc::downgrade(builder),
             storage,
             paths,
             startup_model,
@@ -53,6 +54,10 @@ impl SessionActivator {
         &self,
         request: &WireActivateSessionRequest,
     ) -> Result<SessionActivation, WireRpcError> {
+        let builder = self
+            .builder
+            .upgrade()
+            .ok_or_else(|| rpc("internal", "session runtime builder unavailable"))?;
         let runtime = request.runtime.as_ref().ok_or_else(|| {
             rpc(
                 "invalid_argument",
@@ -171,8 +176,7 @@ impl SessionActivator {
 
         // Detached construction and DAG loading happen before any process or
         // binding mutation.
-        let built_runtime = self
-            .builder
+        let built_runtime = builder
             .build_opened_detached(&ctx, store.clone(), !created)
             .await
             .map_err(|error| rpc("internal", format!("build session runtime: {error}")))?;
@@ -199,8 +203,7 @@ impl SessionActivator {
             .set_binding(Some(next_binding.clone()))
             .await
             .map_err(|error| rpc("internal", format!("persist session binding: {error}")))?;
-        if let Err(_registry_error) = self
-            .builder
+        if let Err(_registry_error) = builder
             .services
             .session_execution
             .set(session_id.clone(), next_binding)
@@ -218,7 +221,7 @@ impl SessionActivator {
             return Err(rpc("failed_precondition", "session binding conflict"));
         }
         let ctx = Arc::new(ctx);
-        let skill_harness_cell = self.builder.install_execution_context(ctx, restored);
+        let skill_harness_cell = builder.install_execution_context(ctx, restored);
         // The cell returned by install is fresh, so this cannot fail.
         let _ = skill_harness_cell.set(built_runtime.harness.clone());
 

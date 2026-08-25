@@ -1,6 +1,9 @@
 //! Process-scoped daemon services and their explicit ownership.
 
+use std::sync::{Arc, OnceLock};
+
 use crate::commands::CommandOutput;
+use crate::session_activation::SessionActivator;
 use crate::session_execution::SessionExecutionRegistry;
 use crate::tools::assembly::reload::ReloadRuntimeSlot;
 use crate::triggers::cron::CronRegistry;
@@ -15,6 +18,7 @@ pub struct DaemonServices {
     pub(crate) reload: ReloadRuntimeSlot,
     #[allow(dead_code)]
     pub(crate) session_execution: SessionExecutionRegistry,
+    pub(crate) session_activator: Arc<OnceLock<Arc<SessionActivator>>>,
 }
 
 impl Default for DaemonServices {
@@ -35,6 +39,7 @@ impl Default for DaemonServices {
             cron,
             reload: ReloadRuntimeSlot::default(),
             session_execution: SessionExecutionRegistry::default(),
+            session_activator: Arc::new(OnceLock::new()),
         }
     }
 }
