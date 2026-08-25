@@ -34,7 +34,7 @@ use crate::host::TransportHost;
 use crate::transport::{GraphOps, JobOps, SessionOps, ToolOps, TransportMode};
 use crate::wire::{
     WireAgentEvent, WireCommand, WireDaemonConfig, WireDagEvent, WireGraphKind, WirePathContext,
-    WirePromptImage, WireStatus, WireStatusUpdate,
+    WirePromptImage, WireRpcError, WireStatus, WireStatusUpdate,
 };
 
 use crate::proto::health::health_check_response::ServingStatus;
@@ -42,8 +42,10 @@ use crate::proto::health::health_server::{Health, HealthServer};
 use crate::proto::health::{HealthCheckRequest, HealthCheckResponse};
 use crate::proto::theway_grpc;
 use crate::proto::{
-    dag_event_wire, dag_run_wire, incremental_session_state, resolve_session_id, session_state,
-    session_summary_wire, stream_event_wire,
+    activate_session_request_from_proto, activate_session_response_to_proto,
+    clear_credential_request_from_proto, dag_event_wire, dag_run_wire, incremental_session_state,
+    resolve_session_id, session_state, session_summary_wire, set_credential_request_from_proto,
+    stream_event_wire,
 };
 use theway_grpc::DaemonConfig;
 use theway_grpc::command_service_server::{CommandService, CommandServiceServer};
@@ -223,6 +225,17 @@ impl GrpcState {
             .map_err(|_| Status::unavailable("event loop command channel closed"))?;
         Ok(true)
     }
+}
+
+fn rpc_status(error: WireRpcError) -> Status {
+    let code = match error.code.as_str() {
+        "missing_runtime" | "invalid_argument" => tonic::Code::InvalidArgument,
+        "not_found" => tonic::Code::NotFound,
+        "failed_precondition" => tonic::Code::FailedPrecondition,
+        "unavailable" => tonic::Code::Unavailable,
+        _ => tonic::Code::Internal,
+    };
+    Status::new(code, error.message)
 }
 
 #[tonic::async_trait]

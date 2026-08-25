@@ -115,6 +115,55 @@ impl TurnHost {
         Ok(())
     }
 
+    async fn apply_activation(&mut self, activation: crate::session_activation::SessionActivation, turn: &mut TurnState) {
+        if turn.fut.is_some() {
+            self.request_abort(turn);
+            if let Some(future) = turn.fut.take() {
+                let _ = future.await;
+            }
+        }
+        let previous = self.session.kernel.harness().clone();
+        previous.shutdown_runtime_extensions().await;
+        let crate::session_activation::SessionActivation {
+            session_id,
+            runtime,
+            repository,
+            context,
+            ..
+        } = activation;
+        let cwd = runtime.cwd.clone();
+        let tool_count = runtime.tool_names.len();
+        self.session.id = session_id;
+        self.session.cwd = cwd.clone();
+        self.session.tool_count = tool_count;
+        self.session.repository = repository;
+        self.session.kernel.replace_runtime(runtime);
+        self.runtime.cwd = cwd;
+        self.runtime.paths = context.paths.clone();
+        self.runtime.registry.set_file_commands(crate::file_commands::scan_file_commands(
+            &self.runtime.cwd,
+            &self.runtime.paths.home,
+        ));
+        self.runtime.completer = SlashCompleter::from_commands(slash_commands(&self.runtime.registry));
+        self.session
+            .kernel
+            .harness()
+            .session_switched(&self.session.id)
+            .await;
+        self.automation.reload
+            .set_trigger_executor(self.session.kernel.trigger_executor().clone());
+        self.clear_feed();
+        self.system_line(format!("activated session {}", self.session.id));
+        self.session.busy = false;
+        self.session.queue.clear();
+        self.projection.control_plane_prompt = None;
+        turn.aborted = false;
+        turn.prefix = "";
+        self.refresh_goal_state().await;
+        self.sync_current_session_state();
+        self.publish_current_snapshot().await;
+    }
+
     fn show_control_plane_prompt(&mut self, prompt: PendingControlPlanePrompt) {
         self.projection.control_plane_prompt = Some(prompt);
         if let Some(prompt) = &self.projection.control_plane_prompt {

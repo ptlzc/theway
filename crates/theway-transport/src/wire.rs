@@ -87,6 +87,18 @@ pub enum WireCommand {
         request: WireExtensionTrustRequest,
         response: tokio::sync::oneshot::Sender<Result<WireExtensionTrustResult, String>>,
     },
+    ActivateSession {
+        request: WireActivateSessionRequest,
+        response: tokio::sync::oneshot::Sender<Result<WireActivateSessionResponse, WireRpcError>>,
+    },
+    SetCredential {
+        request: WireSetCredentialRequest,
+        response: tokio::sync::oneshot::Sender<Result<(), WireRpcError>>,
+    },
+    ClearCredential {
+        request: WireClearCredentialRequest,
+        response: tokio::sync::oneshot::Sender<Result<(), WireRpcError>>,
+    },
 }
 
 /// Daemon configuration snapshot / partial update (issue #72) — the serde twin

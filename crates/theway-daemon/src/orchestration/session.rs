@@ -545,6 +545,13 @@ impl SessionRuntimeBuilder {
             ..theway_core::ObservationContext::default()
         };
         opts.runtime_extension_cwd = ctx.cwd.to_string_lossy().into_owned();
+        let session_credentials = self.services.session_execution.clone();
+        let session_id_for_credentials = session_id.clone();
+        let session_credential_resolver: theway_core::GetApiKey = Arc::new(move |provider_id| {
+            session_credentials
+                .get_credential(&session_id_for_credentials, provider_id)
+                .map(|secret| String::from_utf8_lossy(secret.as_bytes()).into_owned())
+        });
         let mut runtime_extension_host = None;
         if let Some(engine) = &ctx.extension_resources.runtime_extension_engine {
             let base_tools = tools.clone();
@@ -578,13 +585,19 @@ impl SessionRuntimeBuilder {
                 );
             }
             tools = extensions.merge_registered_tools(tools);
+            let session_credential_resolver = session_credential_resolver.clone();
             let credential_host = Arc::clone(&extensions);
             opts.get_api_key = Some(Arc::new(move |provider_id| {
+                if let Some(secret) = session_credential_resolver(provider_id) {
+                    return Some(secret);
+                }
                 credential_host.provider_api_key(provider_id)
             }));
             opts.runtime_extension_model_context = extensions.model_context_projection();
             opts.runtime_extensions = extensions.clone();
             runtime_extension_host = Some((extensions, base_tools));
+        } else {
+            opts.get_api_key = Some(session_credential_resolver);
         }
         let tool_names = tools
             .iter()

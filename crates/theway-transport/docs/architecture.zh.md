@@ -10,7 +10,7 @@
 
 ## Wire 模型与端点 API
 
-[`wire.rs`](../src/wire.rs) 是服务端事件循环与 JSON 传输共享的 serde 表示。`WireCommand` 把变更送入串行运行时循环。`WireStatus` 是客户端权威 snapshot；`WireStatusUpdate` 可携带完整 snapshot，或仅在 base index 与接收方 snapshot 匹配时应用的 feed delta。
+[`wire.rs`](../src/wire.rs) 是服务端事件循环与 JSON 传输共享的 serde 表示。`WireCommand` 把变更送入串行运行时循环，包括原子 `ActivateSession` 命令和只写 `SetCredential` / `ClearCredential` 命令，使其与 turn 保持有序。`WireStatus` 是客户端权威 snapshot；`WireStatusUpdate` 可携带完整 snapshot，或仅在 base index 与接收方 snapshot 匹配时应用的 feed delta。
 
 [`transport.rs`](../src/transport.rs) 定义面向服务端的 API：
 
@@ -24,7 +24,7 @@
 
 [`commands.proto`](../proto/commands.proto)、[`events.proto`](../proto/events.proto)、[`state.proto`](../proto/state.proto) 等 protobuf 文件是服务与消息的事实来源。[`build.rs`](../build.rs) 使用 `protox` 和 `tonic-prost-build` 编译全部 proto，因此不要求系统安装 `protoc`。
 
-[`grpc/mod.rs`](../src/grpc/mod.rs) 把 command、session、settings、graph、event、tool、storage 和 health 服务映射到 `TransportEndpoints`。必须与 turn 串行的变更操作入队 `WireCommand`；读取/控制 trait 通过各自 endpoint object 执行。事件订阅先收到当前状态，再接收增量 frame；发生 lag 时从最新权威 snapshot 恢复。
+[`grpc/mod.rs`](../src/grpc/mod.rs) 把 command、session、settings、graph、event、tool、storage 和 health 服务映射到 `TransportEndpoints`。必须与 turn 串行的变更操作入队 `WireCommand`；读取/控制 trait 通过各自 endpoint object 执行。Session 服务暴露 `ActivateSession`、`SetCredential` 和 `ClearCredential`；凭据 secret 只写，不会出现在响应、snapshot 或事件中。事件订阅先收到当前状态，再接收增量 frame；发生 lag 时从最新权威 snapshot 恢复。
 
 [`proto.rs`](../src/proto.rs)、[`tools.rs`](../src/tools.rs) 和 [`state.rs`](../src/state.rs) 负责会话状态、工具操作和运行时存储记录的 protobuf 转换。Proto 变化必须同步更新这些转换，并通过 `make sdk-sync` 更新生成的 TypeScript SDK。
 

@@ -186,22 +186,76 @@ impl SessionService for GrpcState {
 
     async fn activate_session(
         &self,
-        _request: Request<theway_grpc::ActivateSessionRequest>,
+        request: Request<theway_grpc::ActivateSessionRequest>,
     ) -> Result<Response<theway_grpc::ActivateSessionResponse>, Status> {
-        Err(Status::unimplemented("ActivateSession is not implemented"))
+        let request =
+            activate_session_request_from_proto(&request.into_inner()).map_err(rpc_status)?;
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        self.commands
+            .send(WireCommand::ActivateSession {
+                request,
+                response: response_tx,
+            })
+            .map_err(|_| Status::unavailable("event loop command channel closed"))?;
+        let response = match response_rx.await {
+            Ok(Ok(response)) => response,
+            Ok(Err(error)) => return Err(rpc_status(error)),
+            Err(_) => {
+                return Err(Status::unavailable(
+                    "event loop closed before activation reply",
+                ));
+            }
+        };
+        if let Some(summary) = &response.session {
+            *self.session_id.write().unwrap() = summary.session_id.clone();
+            let mut latest = self.latest.lock();
+            latest.session_id = summary.session_id.clone();
+            latest.cwd = summary.cwd.clone();
+            latest.model = summary.model.clone();
+            latest.busy = false;
+        }
+        Ok(Response::new(activate_session_response_to_proto(&response)))
     }
 
     async fn set_credential(
         &self,
-        _request: Request<theway_grpc::SetCredentialRequest>,
+        request: Request<theway_grpc::SetCredentialRequest>,
     ) -> Result<Response<CommandResult>, Status> {
-        Err(Status::unimplemented("SetCredential is not implemented"))
+        let request = set_credential_request_from_proto(&request.into_inner());
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        self.commands
+            .send(WireCommand::SetCredential {
+                request,
+                response: response_tx,
+            })
+            .map_err(|_| Status::unavailable("event loop command channel closed"))?;
+        match response_rx.await {
+            Ok(Ok(())) => Ok(Response::new(CommandResult { accepted: true })),
+            Ok(Err(error)) => Err(rpc_status(error)),
+            Err(_) => Err(Status::unavailable(
+                "event loop closed before credential reply",
+            )),
+        }
     }
 
     async fn clear_credential(
         &self,
-        _request: Request<theway_grpc::ClearCredentialRequest>,
+        request: Request<theway_grpc::ClearCredentialRequest>,
     ) -> Result<Response<CommandResult>, Status> {
-        Err(Status::unimplemented("ClearCredential is not implemented"))
+        let request = clear_credential_request_from_proto(&request.into_inner());
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        self.commands
+            .send(WireCommand::ClearCredential {
+                request,
+                response: response_tx,
+            })
+            .map_err(|_| Status::unavailable("event loop command channel closed"))?;
+        match response_rx.await {
+            Ok(Ok(())) => Ok(Response::new(CommandResult { accepted: true })),
+            Ok(Err(error)) => Err(rpc_status(error)),
+            Err(_) => Err(Status::unavailable(
+                "event loop closed before credential reply",
+            )),
+        }
     }
 }

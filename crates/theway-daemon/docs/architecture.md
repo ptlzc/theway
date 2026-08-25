@@ -38,6 +38,8 @@ English | [中文](architecture.zh.md)
 
 [`turn/kernel.rs`](../src/turn/kernel.rs) provides `ReplKernel`, which admits one active prompt/continuation, owns queued turns, and replaces the complete runtime when switching sessions. [`turn/daemon.rs`](../src/turn/daemon.rs) owns the protocol-neutral daemon state machine, command routing, snapshots, feed updates, and lifecycle event handling.
 
+Session activation is the serialized atomic create-or-resume boundary for new clients. `SessionActivator` validates the client key and exact canonical work directory, builds the complete session runtime before mutating any process state, then commits the binding and replaces the active harness on the event loop before replying. Credentials installed through `SetCredential` / `ClearCredential` live in a zeroizing `SessionExecutionRegistry` keyed by session/provider; they are never persisted, are cleared when a session is deleted, and are zeroized during daemon shutdown.
+
 Session switching invokes the current harness's extension gate before constructing a target runtime. An active turn is cancelled and driven through settlement before the old runtime sends `session_shutdown`; only then does `ReplKernel::replace_runtime` activate the reconstructed target and publish `session_switched`. The `/fork` command invokes the fork gate before `SessionRepository::fork` and publishes `session_forked` only after the new session metadata is readable. A rejected gate therefore leaves the current runtime and session repository unchanged.
 
 ## Storage ownership

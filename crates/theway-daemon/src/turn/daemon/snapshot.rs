@@ -283,5 +283,15 @@ impl TurnHost {
         }
     }
 
+    async fn publish_current_snapshot(&mut self) {
+        let Some(latest) = self.runtime.latest.clone() else {
+            return;
+        };
+        let Some(snapshot_tx) = self.runtime.snapshot_tx.clone() else {
+            return;
+        };
+        self.publish_snapshot(&latest, &snapshot_tx, true).await;
+    }
+
     // ── turn lifecycle ────────────────────────────────────────────────────────────────
 }

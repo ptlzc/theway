@@ -95,6 +95,8 @@ impl TurnHost {
                 tool_ops,
                 model_catalog: model_catalog(),
                 feed_history_limit: config.startup.tui_max_feed_lines,
+                latest: None,
+                snapshot_tx: None,
             },
             projection: FeedProjectionState {
                 feed: Feed::new(),
@@ -199,6 +201,7 @@ impl TurnHost {
                 self.session.repository.clone(),
                 self.automation.dag.clone(),
                 self.session.shared_state.clone(),
+                self.automation.services.session_execution.clone(),
             )),
             // Issue #68: the transport servers serve `GetPathContext` from
             // this handle and apply the `SetSkillDirs` optimistic update
@@ -230,6 +233,8 @@ impl TurnHost {
     ) -> Result<()> {
         let label = mode.label();
         let mut command_rx = endpoints.command_rx;
+        self.runtime.latest = Some(endpoints.latest.clone());
+        self.runtime.snapshot_tx = Some(endpoints.snapshot_tx.clone());
         let latest = endpoints.latest;
         let snapshot_tx = endpoints.snapshot_tx;
 
@@ -315,6 +320,9 @@ impl TurnHost {
                 }
             }
         }
+        // Daemon shutdown: zeroize every memory-only provider credential before
+        // the process exits.
+        self.automation.services.session_execution.clear_all_credentials();
         Ok(())
     }
 }

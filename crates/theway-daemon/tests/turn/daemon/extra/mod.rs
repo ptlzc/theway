@@ -27,7 +27,10 @@ use super::super::{
 use crate::agent_session::RetrySettings;
 use crate::commands::Registry;
 use crate::control_plane_prompt::PendingControlPlanePrompt;
+use crate::orchestration::SessionRuntimeBuilder;
 use crate::paths::DaemonPaths;
+use crate::runtime_storage::local_runtime_storage;
+use crate::session_activation::SessionActivator;
 use crate::session_ops::{CurrentSessionState, SessionFactory};
 use crate::trigger_engine::execution::TriggerExecutor;
 use crate::trigger_engine::runtime::TriggerRuntimeConfig;
@@ -36,9 +39,16 @@ use crate::turn::kernel::{TurnFut, TurnState};
 use crate::triggers;
 use theway_storage::sqlite_repo::SqliteSessionRepo;
 use theway_transport::TransportMode;
-use theway_transport::wire::WireCommand;
+use theway_contract::session::{SessionBinding, SessionRuntimeContext};
+use theway_transport::wire::{
+    WireActivateSessionRequest, WireClearCredentialRequest, WireCommand, WireSessionRuntimeContext,
+    WireSetCredentialRequest,
+};
 
+mod acceptance;
+mod activation;
 mod configuration;
+mod credentials;
 
 fn faux_model() -> theway_llm_provider::Model {
     theway_llm_provider::Model {
@@ -56,6 +66,13 @@ fn faux_model() -> theway_llm_provider::Model {
         headers: None,
         compat: None,
     }
+}
+
+fn faux_stream() -> theway_core::StreamFn {
+    std::sync::Arc::new(|_, _, _| {
+        let (stream, _sender) = theway_llm_provider::AssistantMessageEventStream::new();
+        stream
+    })
 }
 
 fn test_harness() -> Arc<AgentHarness> {
@@ -190,6 +207,20 @@ impl HostFixture {
         Self::new_with_factory(bailing_session_factory()).await
     }
 
+    async fn new_with_activator() -> Self {
+        let scratch = TempDir::new().unwrap();
+        std::fs::create_dir_all(scratch.path().join("work")).unwrap();
+        let repo_dir = TempDir::new().unwrap();
+        let (mut config, _feed_tx, main_run_tx) =
+            daemon_config(&scratch, &repo_dir, bailing_session_factory(), "sess-extra");
+        install_activator(&mut config, main_run_tx);
+        Self {
+            host: TurnHost::new(config),
+            _scratch: scratch,
+            _repo: repo_dir,
+        }
+    }
+
     fn host(&mut self) -> &mut TurnHost {
         &mut self.host
     }
@@ -197,6 +228,57 @@ impl HostFixture {
     fn into_parts(self) -> (TurnHost, TempDir, TempDir) {
         (self.host, self._scratch, self._repo)
     }
+}
+
+fn activation_request(
+    client_key: &str,
+    work_dir: &std::path::Path,
+    provider: Option<&str>,
+    model: Option<&str>,
+) -> WireActivateSessionRequest {
+    WireActivateSessionRequest {
+        session_id: None,
+        client_key: client_key.into(),
+        name: Some("activated".into()),
+        runtime: Some(WireSessionRuntimeContext {
+            work_dir: work_dir.display().to_string(),
+            provider: provider.map(String::from),
+            model: model.map(String::from),
+            base_url: None,
+            thinking: Some(false),
+        }),
+    }
+}
+
+fn install_activator(config: &mut DaemonConfig, main_run_tx: mpsc::UnboundedSender<String>) {
+    let builder = Box::leak(Box::new(Arc::new(SessionRuntimeBuilder {
+        thinking: theway_core::ThinkingLevel::High,
+        stream_fn: faux_stream(),
+        dag_engine: config.dag_engine.clone(),
+        subagent_registry: config.subagent_registry.clone(),
+        services: config.services.clone(),
+        before_tool_call: None,
+        control_plane_hook: None,
+        after_tool_call: None,
+        feed_tx: config.feed_tx.clone(),
+        main_run_tx,
+        debug: false,
+    })));
+    let activator = SessionActivator::new(
+        builder,
+        local_runtime_storage(),
+        config.paths.clone(),
+        faux_model(),
+        theway_core::ThinkingLevel::High,
+        Vec::new(),
+        Vec::new(),
+        false,
+    );
+    assert!(config
+        .services
+        .session_activator
+        .set(Arc::new(activator))
+        .is_ok());
 }
 
 fn sample_turn_with_future() -> TurnState {

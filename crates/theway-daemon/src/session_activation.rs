@@ -10,8 +10,9 @@ use std::sync::{Arc, Weak};
 use theway_contract::session::{
     JsonlSessionMetadata, SessionBinding, SessionRuntimeContext, SessionStore,
 };
+use theway_core::multiagent::graph::types::DagStatus;
 use theway_llm_provider::{Model, Provider, get_model};
-use theway_transport::wire::{WireActivateSessionRequest, WireRpcError};
+use theway_transport::wire::{SessionSummary, WireActivateSessionRequest, WireRpcError};
 pub(crate) struct SessionActivator {
     // Weak keeps the daemon slot from owning the builder; the SessionFactory owns the strong Arc.
     builder: Weak<SessionRuntimeBuilder>,
@@ -27,6 +28,9 @@ pub(crate) struct SessionActivation {
     pub session_id: String,
     pub created: bool,
     pub runtime: SessionRuntime,
+    pub repository: Arc<dyn SessionRepository>,
+    pub context: Arc<SessionExecutionContext>,
+    pub summary: SessionSummary,
 }
 impl SessionActivator {
     pub(crate) fn new(
@@ -53,6 +57,7 @@ impl SessionActivator {
     pub(crate) async fn activate(
         &self,
         request: &WireActivateSessionRequest,
+        current_harness: &Arc<theway_core::AgentHarness>,
     ) -> Result<SessionActivation, WireRpcError> {
         let builder = self
             .builder
@@ -139,6 +144,15 @@ impl SessionActivator {
             },
         };
         let session_id = session_id_of(&store).await?;
+        current_harness
+            .before_session_switch(&session_id)
+            .await
+            .map_err(|error| {
+                rpc(
+                    "failed_precondition",
+                    format!("extension gate rejected session {session_id}: {error}"),
+                )
+            })?;
         let persisted = previous_binding
             .as_ref()
             .map(|binding| binding.runtime.clone())
@@ -188,6 +202,21 @@ impl SessionActivator {
         let restored = load_persisted_dag_runs(&ctx, &session_id)
             .await
             .map_err(|error| rpc("internal", format!("load persisted DAG runs: {error}")))?;
+        if created
+            && let Some(name) = request.name.as_deref()
+            && !name.trim().is_empty()
+        {
+            theway_storage::session::append_session_name(store.as_ref(), name.trim())
+                .await
+                .map_err(|error| rpc("internal", format!("persist session name: {error}")))?;
+        }
+        let record = repo
+            .list()
+            .await
+            .map_err(|error| rpc("internal", format!("list sessions for summary: {error}")))?
+            .into_iter()
+            .find(|record| record.id == session_id)
+            .ok_or_else(|| rpc("internal", "activated session missing from repository list"))?;
         let next_runtime = SessionRuntimeContext {
             work_dir: cwd.to_string_lossy().into_owned(),
             provider: provider.or(persisted.provider.clone()),
@@ -221,14 +250,38 @@ impl SessionActivator {
             return Err(rpc("failed_precondition", "session binding conflict"));
         }
         let ctx = Arc::new(ctx);
+        let context = ctx.clone();
         let skill_harness_cell = builder.install_execution_context(ctx, restored);
         // The cell returned by install is fresh, so this cannot fail.
         let _ = skill_harness_cell.set(built_runtime.harness.clone());
+        let runs = builder.dag_engine.list_runs();
+        let session_runs = runs
+            .iter()
+            .filter(|run| run.session_id.as_deref() == Some(session_id.as_str()));
+        let graph_count = session_runs.clone().count() as u32;
+        let active_graph_count = session_runs
+            .filter(|run| run.status == DagStatus::Running)
+            .count() as u32;
+        let summary = SessionSummary {
+            session_id: session_id.clone(),
+            name: record.name.unwrap_or_default(),
+            cwd: record.cwd,
+            model: format!("{}:{}", effective_model.provider.0, effective_model.id),
+            created_at: record.created_at,
+            last_activity_at: record.last_activity_at,
+            graph_count,
+            active_graph_count,
+            busy: false,
+            preview: record.preview,
+        };
 
         Ok(SessionActivation {
             session_id,
             created,
             runtime: built_runtime,
+            repository: repo,
+            context,
+            summary,
         })
     }
 }

@@ -284,6 +284,60 @@ impl GrpcClient {
         Ok(response.into_inner().running_run_ids)
     }
 
+    // ── session activation and credentials (issue #26) ────────────────
+
+    /// Activate or resume a client-bound session atomically. The daemon applies
+    /// the requested runtime before replying.
+    pub async fn activate_session(
+        &mut self,
+        request: proto::ActivateSessionRequest,
+    ) -> Result<proto::ActivateSessionResponse> {
+        let response = self
+            .session
+            .activate_session(request)
+            .await
+            .map_err(|e| anyhow::anyhow!("activate_session: {e}"))?;
+        Ok(response.into_inner())
+    }
+
+    /// Install a memory-only provider credential for a session. Secrets are
+    /// never persisted or echoed.
+    pub async fn set_credential(
+        &mut self,
+        session_id: &str,
+        provider: &str,
+        secret: Vec<u8>,
+    ) -> Result<bool> {
+        let accepted = self
+            .session
+            .set_credential(proto::SetCredentialRequest {
+                session_id: session_id.to_string(),
+                provider: provider.to_string(),
+                secret,
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("set_credential: {e}"))?;
+        Ok(accepted.into_inner().accepted)
+    }
+
+    /// Clear one provider credential, or all credentials for the session when
+    /// `provider` is `None`.
+    pub async fn clear_credential(
+        &mut self,
+        session_id: &str,
+        provider: Option<&str>,
+    ) -> Result<bool> {
+        let accepted = self
+            .session
+            .clear_credential(proto::ClearCredentialRequest {
+                session_id: session_id.to_string(),
+                provider: provider.map(String::from),
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("clear_credential: {e}"))?;
+        Ok(accepted.into_inner().accepted)
+    }
+
     // ── path context (issue #68) ───────────────────────────────────────
 
     /// Daemon path context: home / base / work_dir plus the current skill
