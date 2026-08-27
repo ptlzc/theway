@@ -32,6 +32,10 @@ struct Cli {
     /// Extra skill directory to load skills from. Repeatable.
     #[arg(long = "skills-dir")]
     skills_dir: Vec<std::path::PathBuf>,
+    /// Explicit base data directory (config/models/sessions/logs/skills).
+    /// Takes precedence over `$THEWAY_DIR`; defaults to `<home>/.theway`.
+    #[arg(long = "theway-dir")]
+    theway_dir: Option<std::path::PathBuf>,
     /// Provider id (anthropic, openai, openrouter, …). When unset, auto-detected from env.
     #[arg(long)]
     provider: Option<String>,

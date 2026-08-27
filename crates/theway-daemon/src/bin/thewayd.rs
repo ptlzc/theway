@@ -19,7 +19,12 @@ async fn main() -> Result<()> {
     } else {
         DaemonTransport::Grpc
     };
-    let paths = theway_daemon::DaemonPaths::from_cli(cli.cwd, cli.home, cli.skills_dir);
+    let paths = theway_daemon::DaemonPaths::from_cli_with_base(
+        cli.cwd,
+        cli.home,
+        cli.skills_dir,
+        cli.theway_dir,
+    );
     let thinking = cli.thinking.parse().map_err(anyhow::Error::msg)?;
     let session = match (cli.resume_id, cli.continue_) {
         (Some(id), _) => SessionSelection::Id(id),

@@ -47,7 +47,8 @@ impl DaemonPaths {
     /// place in the daemon that reads `THEWAY_DIR` / `HOME`.
     ///
     /// Precedence:
-    /// - `base`: `$THEWAY_DIR` overrides the `<home>/.theway` derivation.
+    /// - `base`: `--theway-dir` overrides `$THEWAY_DIR`, which overrides the
+    ///   `<home>/.theway` derivation.
     /// - `home`: the explicit flag overrides `$HOME`.
     /// - `work_dir`: the explicit flag overrides the process cwd; the result
     ///   is canonicalized best-effort (a failed canonicalize — e.g. the dir
@@ -58,13 +59,23 @@ impl DaemonPaths {
         home: Option<PathBuf>,
         extra_skill_dirs: Vec<PathBuf>,
     ) -> Self {
+        Self::from_cli_with_base(cwd, home, extra_skill_dirs, None)
+    }
+
+    /// [`from_cli`] with an explicit base dir (`thewayd --theway-dir`).
+    pub fn from_cli_with_base(
+        cwd: Option<PathBuf>,
+        home: Option<PathBuf>,
+        extra_skill_dirs: Vec<PathBuf>,
+        theway_dir: Option<PathBuf>,
+    ) -> Self {
         let home = home.unwrap_or_else(|| {
             std::env::var_os("HOME")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from("."))
         });
-        let base = std::env::var_os("THEWAY_DIR")
-            .map(PathBuf::from)
+        let base = theway_dir
+            .or_else(|| std::env::var_os("THEWAY_DIR").map(PathBuf::from))
             .unwrap_or_else(|| home.join(".theway"));
         let work_dir = match cwd {
             Some(dir) => dir,
@@ -145,6 +156,52 @@ mod tests {
 
         let paths = DaemonPaths::from_cli(None, Some(PathBuf::from("/flag-home")), Vec::new());
         assert_eq!(paths.home, PathBuf::from("/flag-home"));
+        assert_eq!(paths.base, PathBuf::from("/flag-home/.theway"));
+    }
+
+    #[test]
+    fn theway_dir_flag_overrides_env_and_home() {
+        let _serial = ENV_LOCK.lock().unwrap();
+        let _theway = EnvGuard::set("THEWAY_DIR", "/env/theway");
+        let _home_env = EnvGuard::set("HOME", "/env-home");
+
+        let paths = DaemonPaths::from_cli_with_base(
+            None,
+            Some(PathBuf::from("/flag-home")),
+            Vec::new(),
+            Some(PathBuf::from("/custom/theway")),
+        );
+        assert_eq!(paths.base, PathBuf::from("/custom/theway"));
+        assert_eq!(paths.skills_root(), PathBuf::from("/custom/theway/skills"));
+    }
+
+    #[test]
+    fn from_cli_with_base_keeps_env_precedence_without_flag() {
+        let _serial = ENV_LOCK.lock().unwrap();
+        let _theway = EnvGuard::set("THEWAY_DIR", "/env/theway");
+        let _home_env = EnvGuard::set("HOME", "/env-home");
+
+        let paths = DaemonPaths::from_cli_with_base(
+            None,
+            Some(PathBuf::from("/flag-home")),
+            Vec::new(),
+            None,
+        );
+        assert_eq!(paths.base, PathBuf::from("/env/theway"));
+    }
+
+    #[test]
+    fn from_cli_with_base_defaults_to_home_theway() {
+        let _serial = ENV_LOCK.lock().unwrap();
+        let _theway = EnvGuard::remove("THEWAY_DIR");
+        let _home_env = EnvGuard::set("HOME", "/env-home");
+
+        let paths = DaemonPaths::from_cli_with_base(
+            None,
+            Some(PathBuf::from("/flag-home")),
+            Vec::new(),
+            None,
+        );
         assert_eq!(paths.base, PathBuf::from("/flag-home/.theway"));
     }
 
