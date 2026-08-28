@@ -21,7 +21,24 @@ impl App {
         self.session_id = id.clone();
         self.latest.session_id = id.clone();
         self.system_line(format!("selected session {id}"));
+        self.refresh_session_snapshot().await;
         Ok(())
+    }
+
+    /// Refresh the nested session snapshot for the currently selected session.
+    /// The TUI uses it to render session lineage and collapsed graph nodes;
+    /// failures are non-fatal (the legacy `WireStatus` view remains usable).
+    pub(super) async fn refresh_session_snapshot(&mut self) {
+        match self.client.get_snapshot_for_session(&self.session_id).await {
+            Ok(snapshot) => {
+                self.session_snapshot = Some(
+                    theway_transport::proto::wire_session_snapshot_from_proto(&snapshot),
+                );
+            }
+            Err(_) => {
+                self.session_snapshot = None;
+            }
+        }
     }
 
     /// Issue #46: create + select the deferred fresh session. Called right

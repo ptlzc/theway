@@ -1,5 +1,6 @@
 impl App {
     pub async fn run(mut self) -> Result<()> {
+        self.refresh_session_snapshot().await;
         if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
             return self.run_headless().await;
         }

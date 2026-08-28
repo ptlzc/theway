@@ -1,7 +1,5 @@
 // ── graph client methods ─────────────────────────────────────────────
 
-use std::sync::Mutex;
-
 use crate::wire::{WireDagRunSnapshot, WireNodeOutput};
 
 #[derive(Default)]
@@ -135,7 +133,12 @@ async fn client_graph_cancel_retry_skip_round_trip() {
     let reset_all = client.graph_retry("sess-1", "run-1", None).await.unwrap();
     assert_eq!(reset_all, vec!["all"]);
 
-    assert!(client.graph_skip("sess-1", "run-1", "node-1").await.unwrap());
+    assert!(
+        client
+            .graph_skip("sess-1", "run-1", "node-1")
+            .await
+            .unwrap()
+    );
     let skipped = graph.skipped.lock().unwrap();
     assert_eq!(skipped[0], ("run-1".to_string(), "node-1".to_string()));
 }

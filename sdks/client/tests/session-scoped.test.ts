@@ -7,8 +7,13 @@ import { CommandServiceService, CommandResult } from '../src/generated/commands.
 import { EventServiceService, StreamFrame } from '../src/generated/events.js';
 import { GraphEngineServiceService } from '../src/generated/graph_engine.js';
 import {
+  CollapseSessionResponse,
   CreateSessionResponse,
+  GetSessionGraphNodeResponse,
+  ListSessionGraphNodeMessagesResponse,
+  SessionGraphNodeStreamFrame,
   SessionServiceService,
+  SessionSnapshot,
   SessionState,
   UpdateSessionMetadataRequest,
 } from '../src/generated/session.js';
@@ -58,6 +63,104 @@ async function startServer(): Promise<{
       getState(call: any, callback: any) {
         requests.push({ method: 'GetState', request: call.request });
         callback(null, SessionState.create({ sessionId: call.request.sessionId }));
+      },
+      getSnapshot(call: any, callback: any) {
+        requests.push({ method: 'GetSnapshot', request: call.request });
+        callback(
+          null,
+          SessionSnapshot.create({
+            sessionId: call.request.sessionId,
+            info: { id: call.request.sessionId, name: 'main', cwd: '/tmp/theway' },
+            runtime: { model: { provider: 'provider', model: 'model' } },
+            feed: { blocks: [], lines: ['hello'] },
+            graphState: { dags: [], subagents: [], nodes: [] },
+            lineage: { childSessionIds: [], ancestorSessionIds: [] },
+          }),
+        );
+      },
+      getHistory(call: any, callback: any) {
+        requests.push({ method: 'GetHistory', request: call.request });
+        callback(
+          null,
+          SessionSnapshot.create({
+            sessionId: call.request.sessionId,
+            feed: { blocks: [], lines: ['history'] },
+          }),
+        );
+      },
+      collapseSession(call: any, callback: any) {
+        requests.push({ method: 'CollapseSession', request: call.request });
+        callback(
+          null,
+          CollapseSessionResponse.create({
+            sessionId: call.request.sessionId,
+            node: {
+              id: 'node-collapsed',
+              sessionId: 'sess-new',
+              type: 2,
+              title: 'Archived',
+              summary: 'Summary',
+              childNodeIds: [],
+              messageCount: 7,
+            },
+            collapsed: {
+              nodeId: 'node-collapsed',
+              sessionId: call.request.sessionId,
+              title: 'Archived',
+              summary: 'Summary',
+              messageCount: 7,
+              collapsedIntoSessionId: 'sess-new',
+              collapsedIntoNodeId: 'node-collapsed',
+              originalSessionIds: [call.request.sessionId],
+            },
+          }),
+        );
+      },
+      getSessionGraphNode(call: any, callback: any) {
+        requests.push({ method: 'GetSessionGraphNode', request: call.request });
+        callback(
+          null,
+          GetSessionGraphNodeResponse.create({
+            node: {
+              id: call.request.nodeId,
+              sessionId: call.request.sessionId,
+              type: 1,
+              title: 'Live',
+              summary: '',
+              childNodeIds: [],
+              messageCount: 0,
+            },
+          }),
+        );
+      },
+      listSessionGraphNodeMessages(call: any, callback: any) {
+        requests.push({ method: 'ListSessionGraphNodeMessages', request: call.request });
+        callback(
+          null,
+          ListSessionGraphNodeMessagesResponse.create({
+            blocks: [],
+          }),
+        );
+      },
+      streamSessionGraphNode(call: any) {
+        requests.push({ method: 'StreamSessionGraphNode', request: call.request });
+        call.write(
+          SessionGraphNodeStreamFrame.create({
+            payload: {
+              $case: 'node',
+              node: {
+                id: call.request.nodeId,
+                sessionId: call.request.sessionId,
+                type: 1,
+                title: 'Live',
+                summary: '',
+                childNodeIds: [],
+                messageCount: 0,
+              },
+            },
+          }),
+        );
+        call.end();
       },
       createSession(call: any, callback: any) {
         requests.push({ method: 'CreateSession', request: call.request });
@@ -362,6 +465,133 @@ test('openEventStream(sessionId) sends the explicit session id', async () => {
     assert.deepEqual(seen, ['sess-10']);
     assert.equal(requests[0]?.method, 'StreamEvents');
     assert.equal((requests[0]?.request as { sessionId?: string }).sessionId, 'sess-10');
+    client.close();
+  } finally {
+    await close();
+  }
+});
+
+test('getSnapshot(sessionId) returns the nested session snapshot', async () => {
+  const { port, requests, close } = await startServer();
+  try {
+    const client = new ThewayGrpcClient(`http://127.0.0.1:${port}`);
+    const snapshot = await client.getSnapshot('sess-snap');
+    assert.equal(snapshot.sessionId, 'sess-snap');
+    assert.equal(snapshot.info?.id, 'sess-snap');
+    assert.equal(snapshot.runtime?.model?.provider, 'provider');
+    assert.equal(snapshot.feed?.lines[0], 'hello');
+    assert.equal(requests[0]?.method, 'GetSnapshot');
+    assert.equal((requests[0]?.request as { sessionId: string }).sessionId, 'sess-snap');
+    client.close();
+  } finally {
+    await close();
+  }
+});
+
+test('getHistory(sessionId) returns the snapshot-shaped transcript', async () => {
+  const { port, requests, close } = await startServer();
+  try {
+    const client = new ThewayGrpcClient(`http://127.0.0.1:${port}`);
+    const snapshot = await client.getHistory('sess-hist');
+    assert.equal(snapshot.sessionId, 'sess-hist');
+    assert.equal(snapshot.feed?.lines[0], 'history');
+    assert.equal(requests[0]?.method, 'GetHistory');
+    assert.equal((requests[0]?.request as { sessionId: string }).sessionId, 'sess-hist');
+    client.close();
+  } finally {
+    await close();
+  }
+});
+
+test('collapseSession(request) sends the collapse request and returns the response', async () => {
+  const { port, requests, close } = await startServer();
+  try {
+    const client = new ThewayGrpcClient(`http://127.0.0.1:${port}`);
+    const response = await client.collapseSession({
+      sessionId: 'sess-old',
+      intoSessionId: 'sess-new',
+      title: 'Archived',
+      summary: 'Summary',
+    });
+    assert.equal(response.sessionId, 'sess-old');
+    assert.equal(response.node?.id, 'node-collapsed');
+    assert.equal(response.collapsed?.collapsedIntoSessionId, 'sess-new');
+    assert.equal(requests[0]?.method, 'CollapseSession');
+    const request = requests[0]?.request as {
+      sessionId: string;
+      intoSessionId?: string;
+      title?: string;
+      summary?: string;
+    };
+    assert.equal(request.sessionId, 'sess-old');
+    assert.equal(request.intoSessionId, 'sess-new');
+    assert.equal(request.title, 'Archived');
+    client.close();
+  } finally {
+    await close();
+  }
+});
+
+test('getSessionGraphNode(sessionId, nodeId) returns the node', async () => {
+  const { port, requests, close } = await startServer();
+  try {
+    const client = new ThewayGrpcClient(`http://127.0.0.1:${port}`);
+    const node = await client.getSessionGraphNode('sess-new', 'node-1');
+    assert.equal(node.id, 'node-1');
+    assert.equal(node.sessionId, 'sess-new');
+    assert.equal(requests[0]?.method, 'GetSessionGraphNode');
+    const request = requests[0]?.request as { sessionId: string; nodeId: string };
+    assert.equal(request.sessionId, 'sess-new');
+    assert.equal(request.nodeId, 'node-1');
+    client.close();
+  } finally {
+    await close();
+  }
+});
+
+test('listSessionGraphNodeMessages(sessionId, nodeId, offset, limit) sends pagination', async () => {
+  const { port, requests, close } = await startServer();
+  try {
+    const client = new ThewayGrpcClient(`http://127.0.0.1:${port}`);
+    const response = await client.listSessionGraphNodeMessages('sess-new', 'node-1', 10, 25);
+    assert.deepEqual(response.blocks, []);
+    assert.equal(requests[0]?.method, 'ListSessionGraphNodeMessages');
+    const request = requests[0]?.request as {
+      sessionId: string;
+      nodeId: string;
+      offset: number;
+      limit: number;
+    };
+    assert.equal(request.sessionId, 'sess-new');
+    assert.equal(request.nodeId, 'node-1');
+    assert.equal(request.offset, 10);
+    assert.equal(request.limit, 25);
+    client.close();
+  } finally {
+    await close();
+  }
+});
+
+test('streamSessionGraphNode(sessionId, nodeId) yields session graph frames', async () => {
+  const { port, requests, close } = await startServer();
+  try {
+    const client = new ThewayGrpcClient(`http://127.0.0.1:${port}`);
+    const seen: Array<{ id?: string }> = [];
+    await new Promise<void>((resolve, reject) => {
+      const stream = client.streamSessionGraphNode('sess-new', 'node-1');
+      stream.on('data', (frame: SessionGraphNodeStreamFrame) => {
+        if (frame.payload?.$case === 'node') {
+          seen.push({ id: frame.payload.node.id });
+        }
+      });
+      stream.on('end', () => resolve());
+      stream.on('error', reject);
+    });
+    assert.deepEqual(seen, [{ id: 'node-1' }]);
+    assert.equal(requests[0]?.method, 'StreamSessionGraphNode');
+    const request = requests[0]?.request as { sessionId: string; nodeId: string };
+    assert.equal(request.sessionId, 'sess-new');
+    assert.equal(request.nodeId, 'node-1');
     client.close();
   } finally {
     await close();

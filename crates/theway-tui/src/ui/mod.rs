@@ -74,7 +74,7 @@ use theway_transport::mentions;
 use theway_transport::proto::theway_grpc::stream_frame;
 use theway_transport::proto::{theway_grpc, wire_status};
 use theway_transport::transport::SlashCompleter;
-use theway_transport::wire::WireStatus;
+use theway_transport::wire::{WireSessionSnapshot, WireStatus};
 
 use crate::startup::DaemonConnector;
 
@@ -255,6 +255,10 @@ pub struct App {
     /// Latest snapshot cache: updated from the initial `get_state` and every
     /// stream snapshot frame; everything renderable reads from here.
     latest: WireStatus,
+    /// Latest nested session snapshot (session-snapshot-collapse). Refreshed
+    /// when the client selects a session; carries lineage and graph nodes that
+    /// the legacy `WireStatus` does not.
+    session_snapshot: Option<WireSessionSnapshot>,
 
     registry: Registry,
     completer: SlashCompleter,
@@ -640,6 +644,7 @@ const DAEMON_COMMANDS: &[&str] = &[
     "template",
     "save",
     "compact",
+    "collapse",
     "undo",
     "bug-report",
     "name",

@@ -295,6 +295,11 @@ include!(concat!(
 
 include!(concat!(
     env!("CARGO_MANIFEST_DIR"),
+    "/tests/client/sections/session_snapshot_collapse.rs"
+));
+
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
     "/tests/client/sections/graph.rs"
 ));
 

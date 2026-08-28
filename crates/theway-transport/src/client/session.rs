@@ -49,10 +49,7 @@ impl GrpcClient {
     }
 
     /// Full nested session snapshot for an explicit session.
-    pub async fn get_snapshot_for_session(
-        &mut self,
-        session_id: &str,
-    ) -> Result<SessionSnapshot> {
+    pub async fn get_snapshot_for_session(&mut self, session_id: &str) -> Result<SessionSnapshot> {
         let snapshot = self
             .session
             .get_snapshot(SessionStateRequest {
@@ -89,61 +86,6 @@ impl GrpcClient {
             .map_err(|e| anyhow::anyhow!("collapse_session: {e}"))?
             .into_inner();
         Ok(response)
-    }
-
-    /// Fetch one session graph node.
-    pub async fn get_session_graph_node(
-        &mut self,
-        session_id: &str,
-        node_id: &str,
-    ) -> Result<proto::SessionGraphNode> {
-        let response = self
-            .session
-            .get_session_graph_node(GetSessionGraphNodeRequest {
-                session_id: session_id.to_string(),
-                node_id: node_id.to_string(),
-            })
-            .await
-            .map_err(|e| anyhow::anyhow!("get_session_graph_node: {e}"))?
-            .into_inner();
-        Ok(response.node.expect("get_session_graph_node returned no node"))
-    }
-
-    /// List messages attached to a session graph node.
-    pub async fn list_session_graph_node_messages(
-        &mut self,
-        session_id: &str,
-        node_id: &str,
-    ) -> Result<Vec<proto::FeedBlock>> {
-        let response = self
-            .session
-            .list_session_graph_node_messages(ListSessionGraphNodeMessagesRequest {
-                session_id: session_id.to_string(),
-                node_id: node_id.to_string(),
-                offset: 0,
-                limit: 0,
-            })
-            .await
-            .map_err(|e| anyhow::anyhow!("list_session_graph_node_messages: {e}"))?
-            .into_inner();
-        Ok(response.blocks)
-    }
-
-    /// Open a streaming session-graph-node frame stream.
-    pub async fn stream_session_graph_node(
-        &mut self,
-        session_id: &str,
-        node_id: &str,
-    ) -> Result<Streaming<proto::SessionGraphNodeStreamFrame>> {
-        let response = self
-            .session
-            .stream_session_graph_node(StreamSessionGraphNodeRequest {
-                session_id: session_id.to_string(),
-                node_id: node_id.to_string(),
-            })
-            .await
-            .map_err(|e| anyhow::anyhow!("stream_session_graph_node: {e}"))?;
-        Ok(response.into_inner())
     }
 
     /// Open the snapshot/event frame stream for all sessions.
@@ -360,7 +302,9 @@ impl GrpcClient {
             .await
             .map_err(|error| anyhow::anyhow!("decide_extension_trust: {error}"))?
             .into_inner();
-        let reload = response.reload.context("trust response omitted reload result")?;
+        let reload = response
+            .reload
+            .context("trust response omitted reload result")?;
         Ok(WireExtensionTrustResult {
             accepted: response.accepted,
             reload: WireExtensionReloadResult {

@@ -34,8 +34,20 @@ impl App {
             || sidebar.mcp.notification_hooks > 0
             || !self.latest.extensions.catalog.is_empty()
             || self.latest.extensions.reload_pending
-            || self.latest.extensions.contributions.iter().any(|contribution| {
-                matches!(contribution.kind.as_str(), "status_item" | "notification")
+            || self
+                .latest
+                .extensions
+                .contributions
+                .iter()
+                .any(|contribution| {
+                    matches!(contribution.kind.as_str(), "status_item" | "notification")
+                })
+            || self.session_snapshot.as_ref().is_some_and(|snapshot| {
+                !snapshot.lineage.ancestor_session_ids.is_empty()
+                    || !snapshot.lineage.child_session_ids.is_empty()
+                    || snapshot.lineage.collapsed_from_session_id.is_some()
+                    || snapshot.lineage.collapsed_into_session_id.is_some()
+                    || !snapshot.graph_state.nodes.is_empty()
             })
     }
 
@@ -110,6 +122,90 @@ impl App {
             }
             lines.push(Line::raw(""));
         }
+        if let Some(snapshot) = &self.session_snapshot {
+            lines.push(panel_line("Session".to_string(), s.section, width));
+            lines.push(panel_line(
+                format!(
+                    "{} · {}",
+                    snapshot.info.id,
+                    if snapshot.info.name.is_empty() {
+                        "unnamed"
+                    } else {
+                        snapshot.info.name.as_str()
+                    }
+                ),
+                s.badge,
+                width,
+            ));
+            let lineage = &snapshot.lineage;
+            if let Some(parent) = lineage.parent_session_id.as_deref() {
+                lines.push(panel_line(format!("parent {parent}"), s.muted, width));
+            }
+            if let Some(root) = lineage.root_session_id.as_deref() {
+                lines.push(panel_line(format!("root {root}"), s.muted, width));
+            }
+            if !lineage.ancestor_session_ids.is_empty() {
+                lines.push(panel_line(
+                    format!("ancestors {}", lineage.ancestor_session_ids.join(", ")),
+                    s.muted,
+                    width,
+                ));
+            }
+            if !lineage.child_session_ids.is_empty() {
+                lines.push(panel_line(
+                    format!("children {}", lineage.child_session_ids.join(", ")),
+                    s.muted,
+                    width,
+                ));
+            }
+            if let Some(collapsed_from) = lineage.collapsed_from_session_id.as_deref() {
+                lines.push(panel_line(
+                    format!("collapsed from {collapsed_from}"),
+                    s.warn,
+                    width,
+                ));
+            }
+            if let Some(collapsed_into) = lineage.collapsed_into_session_id.as_deref() {
+                lines.push(panel_line(
+                    format!("collapsed into {collapsed_into}"),
+                    s.warn,
+                    width,
+                ));
+            }
+            if !snapshot.graph_state.nodes.is_empty() {
+                lines.push(panel_line(
+                    format!("nodes {}", snapshot.graph_state.nodes.len()),
+                    s.badge,
+                    width,
+                ));
+                for node in snapshot.graph_state.nodes.iter() {
+                    let kind = match node.node_type {
+                        theway_transport::wire::WireSessionGraphNodeType::Collapsed => "collapsed",
+                        theway_transport::wire::WireSessionGraphNodeType::Session => "session",
+                        theway_transport::wire::WireSessionGraphNodeType::Unspecified => "node",
+                    };
+                    lines.push(panel_line(
+                        format!(
+                            "  {kind} {} {} ({} msgs)",
+                            node.id, node.title, node.message_count
+                        ),
+                        if node.node_type
+                            == theway_transport::wire::WireSessionGraphNodeType::Collapsed
+                        {
+                            s.warn
+                        } else {
+                            s.muted
+                        },
+                        width,
+                    ));
+                }
+            }
+            if let Some(active) = snapshot.graph_state.active_node_id.as_deref() {
+                lines.push(panel_line(format!("active {active}"), s.badge, width));
+            }
+            lines.push(Line::raw(""));
+        }
+
         lines.push(panel_line("Skills".to_string(), s.section, width));
         if skills.is_empty() {
             lines.push(panel_line("none".to_string(), s.muted, width));
@@ -118,11 +214,7 @@ impl App {
             let enabled = skills.len().saturating_sub(disabled);
             lines.push(panel_line(
                 format!("enabled {enabled} · disabled {disabled}"),
-                if disabled == 0 {
-                    s.badge
-                } else {
-                    s.warn
-                },
+                if disabled == 0 { s.badge } else { s.warn },
                 width,
             ));
             let source_count =
@@ -146,11 +238,7 @@ impl App {
         } else {
             for rule in rules.iter().take(TRIGGER_PANEL_RULE_LIMIT) {
                 let state_flag = if rule.enabled { "enabled" } else { "disabled" };
-                let color = if rule.enabled {
-                    s.badge
-                } else {
-                    s.muted
-                };
+                let color = if rule.enabled { s.badge } else { s.muted };
                 lines.push(panel_line(
                     format!(
                         "{id} [{state_flag}, {mode}]",
@@ -257,20 +345,12 @@ impl App {
             let disabled = cron_jobs.len().saturating_sub(enabled);
             lines.push(panel_line(
                 format!("enabled {enabled} · disabled {disabled}"),
-                if disabled == 0 {
-                    s.badge
-                } else {
-                    s.warn
-                },
+                if disabled == 0 { s.badge } else { s.warn },
                 width,
             ));
             for job in cron_jobs.iter().take(TRIGGER_PANEL_RULE_LIMIT) {
                 let state_flag = if job.enabled { "enabled" } else { "disabled" };
-                let color = if job.enabled {
-                    s.badge
-                } else {
-                    s.muted
-                };
+                let color = if job.enabled { s.badge } else { s.muted };
                 lines.push(panel_line(
                     format!(
                         "{id} [{state_flag}] {schedule}",
