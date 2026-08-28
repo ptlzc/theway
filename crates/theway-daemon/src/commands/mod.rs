@@ -141,7 +141,10 @@ use misc::{
     WebConnectCommand, WebDisconnectCommand,
 };
 use model::{CostCommand, ModelCommand, ThinkingCommand};
-use session::{ForkCommand, NameCommand, SaveCommand, SessionCommand, ShareCommand, UndoCommand};
+use session::{
+    CollapseCommand, ForkCommand, NameCommand, SaveCommand, SessionCommand, ShareCommand,
+    UndoCommand,
+};
 use skill_cmd::SkillCommand;
 use skills::SkillsCommand;
 use triggers::{CronCommand, InboxCommand, NewTriggerCommand, TriggersCommand};
@@ -283,6 +286,7 @@ impl Registry {
         r.register(Arc::new(BugReportCommand));
         r.register(Arc::new(NameCommand));
         r.register(Arc::new(ForkCommand));
+        r.register(Arc::new(CollapseCommand));
         r.register(Arc::new(SessionCommand));
         r.register(Arc::new(WebConnectCommand));
         r.register(Arc::new(WebDisconnectCommand));

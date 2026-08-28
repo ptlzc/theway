@@ -77,6 +77,9 @@ oxc_parser = "0.75.1"
 oxc_semantic = "0.75.1"
 oxc_span = "0.75.1"
 oxc_transformer = "0.75.1"
+# oxc-browserslist 2.3.x switched `Version` to u16 while oxc_transformer 0.75/0.76
+# still constructs u32 literals; pin the compatible 2.0.x line.
+oxc-browserslist = "=2.0.13"
 
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }

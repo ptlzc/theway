@@ -212,6 +212,8 @@ impl TurnHost {
             })
             .abort_handle()
         };
+        let session_graph_path =
+            theway_contract::config::sessions_dir_for_cwd(&self.session.cwd).join("session_graph.db");
         TransportEndpoints {
             command_tx,
             command_rx,
@@ -226,11 +228,13 @@ impl TurnHost {
                 self.automation.dag.clone(),
             )),
             graph_ops: Arc::new(CoreGraphOps::new(self.automation.dag.clone())),
-            session_ops: Arc::new(crate::session_ops::AppSessionOps::new(
+            session_ops: Arc::new(crate::session_ops::AppSessionOps::with_session_graph(
                 self.session.repository.clone(),
                 self.automation.dag.clone(),
                 self.session.cwd.display().to_string(),
                 self.automation.services.session_execution.clone(),
+                self.automation.subagents.clone(),
+                session_graph_path,
             )),
             // Issue #68: the transport servers serve `GetPathContext` from
             // this handle and apply the `SetSkillDirs` optimistic update

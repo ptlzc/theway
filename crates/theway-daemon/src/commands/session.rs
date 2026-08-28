@@ -402,6 +402,74 @@ fn fork_success_line(new_id: &str) -> String {
     )
 }
 
+/// `/collapse` — collapse the current session into a session-graph node and
+/// create a fresh child session with compact context.
+pub struct CollapseCommand;
+
+#[async_trait]
+impl SlashCommand<DaemonCtx> for CollapseCommand {
+    fn name(&self) -> &'static str {
+        "collapse"
+    }
+    fn description(&self) -> &'static str {
+        "collapse the current session into a session-graph node and create a fresh child"
+    }
+    fn usage(&self) -> &'static str {
+        "[name] [--adopt]"
+    }
+    async fn run(&self, argv: &[String], ctx: &CommandCtx<'_, DaemonCtx>) -> CommandOutcome {
+        let mut adopt = false;
+        let mut name = None;
+        for arg in argv {
+            if arg == "--adopt" {
+                adopt = true;
+            } else if name.is_none() {
+                name = Some(arg.clone());
+            } else {
+                return CommandOutcome::Error("usage: /collapse [name] [--adopt]".to_string());
+            }
+        }
+
+        let repo = match ctx.extra.storage.session_repository(ctx.cwd).await {
+            Ok(repo) => repo,
+            Err(e) => return CommandOutcome::Error(format!("open session repo: {e}")),
+        };
+        let response = match theway_daemon::session_ops::collapse_session_for_command(
+            repo,
+            ctx.cwd,
+            ctx.session_id,
+            name,
+            adopt,
+        )
+        .await
+        {
+            Ok(response) => response,
+            Err(e) => return CommandOutcome::Error(format!("collapse failed: {e}")),
+        };
+        let child_id = response
+            .collapsed
+            .as_ref()
+            .and_then(|c| c.collapsed_into_session_id.clone())
+            .unwrap_or_default();
+        let node_id = response
+            .node
+            .as_ref()
+            .map(|n| n.id.clone())
+            .unwrap_or_default();
+        cprintln!(
+            "collapsed {} into node {} (child session {})",
+            ctx.session_id,
+            node_id,
+            child_id
+        );
+        if adopt {
+            cprintln!("--adopt: ownership migration requested");
+        }
+        cprintln!("resume with: theway --resume-id {}", child_id);
+        CommandOutcome::Handled
+    }
+}
+
 fn yes_no(value: bool) -> &'static str {
     if value { "yes" } else { "no" }
 }

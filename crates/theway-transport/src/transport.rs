@@ -28,12 +28,13 @@ use parking_lot::Mutex;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::wire::{
-    SessionSummary, ToolError, WireAgentEvent, WireCommand, WireDaemonConfig, WireDagEvent,
-    WireDagRunSnapshot, WireGraphCheckpoint, WireLoadCronJobsRequest, WireLoadCronJobsResult,
-    WireLoadDagRunsRequest, WireLoadDagRunsResult, WireLoadTriggerRulesRequest,
-    WireLoadTriggerRulesResult, WireNodeOutput, WirePathContext, WireSaveCronJobsRequest,
-    WireSaveCronJobsResult, WireSaveDagRunRequest, WireSaveDagRunResult,
-    WireSaveTriggerRulesRequest, WireSaveTriggerRulesResult, WireStatus, WireStatusUpdate,
+    SessionSummary, ToolError, WireAgentEvent, WireCollapseSessionRequest,
+    WireCollapseSessionResponse, WireCommand, WireDaemonConfig, WireDagEvent, WireDagRunSnapshot,
+    WireGraphCheckpoint, WireLoadCronJobsRequest, WireLoadCronJobsResult, WireLoadDagRunsRequest,
+    WireLoadDagRunsResult, WireLoadTriggerRulesRequest, WireLoadTriggerRulesResult, WireNodeOutput,
+    WirePathContext, WireSaveCronJobsRequest, WireSaveCronJobsResult, WireSaveDagRunRequest,
+    WireSaveDagRunResult, WireSaveTriggerRulesRequest, WireSaveTriggerRulesResult,
+    WireSessionGraphNode, WireSessionLineage, WireSessionSnapshot, WireStatus, WireStatusUpdate,
     WireToolEditRequest, WireToolEditResult, WireToolExecFrame, WireToolExecRequest,
     WireToolFindRequest, WireToolFindResult, WireToolGrepRequest, WireToolGrepResult,
     WireToolListDirRequest, WireToolListDirResult, WireToolMemoryForgetRequest,
@@ -145,6 +146,52 @@ pub trait SessionOps: Send + Sync {
     /// what is still running". `Ok(empty)` means the session was deleted. Error semantics
     /// (mapping the refusal onto an RPC/HTTP error) are the caller's job.
     async fn delete(&self, id: &str) -> Result<Vec<String>>;
+
+    /// Collapse a session into a session-graph node (session-snapshot-collapse).
+    async fn collapse_session(
+        &self,
+        _request: &WireCollapseSessionRequest,
+    ) -> Result<WireCollapseSessionResponse> {
+        anyhow::bail!("collapse_session is not implemented by this SessionOps")
+    }
+
+    /// Fetch one session graph node by id.
+    async fn get_session_graph_node(
+        &self,
+        _session_id: &str,
+        _node_id: &str,
+    ) -> Result<Option<WireSessionGraphNode>> {
+        anyhow::bail!("get_session_graph_node is not implemented by this SessionOps")
+    }
+
+    /// List session graph nodes owned by/related to a session.
+    async fn list_session_graph_nodes(
+        &self,
+        _session_id: &str,
+    ) -> Result<Vec<WireSessionGraphNode>> {
+        anyhow::bail!("list_session_graph_nodes is not implemented by this SessionOps")
+    }
+
+    /// Resolve session lineage from metadata and the Turso session graph.
+    async fn session_lineage(&self, _session_id: &str) -> Result<WireSessionLineage> {
+        anyhow::bail!("session_lineage is not implemented by this SessionOps")
+    }
+
+    /// List transcript blocks attached to a session graph node.
+    async fn list_session_graph_node_messages(
+        &self,
+        _session_id: &str,
+        _node_id: &str,
+        _offset: u32,
+        _limit: u32,
+    ) -> Result<Vec<crate::feed::WireFeedBlock>> {
+        anyhow::bail!("list_session_graph_node_messages is not implemented by this SessionOps")
+    }
+
+    /// Build a full nested session snapshot for `session_id`.
+    async fn session_snapshot(&self, _session_id: &str) -> Result<WireSessionSnapshot> {
+        anyhow::bail!("session_snapshot is not implemented by this SessionOps")
+    }
 }
 
 /// Exec-command frame stream returned by [`ToolOps::exec_command`]: zero or

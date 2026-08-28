@@ -56,7 +56,7 @@ pub(crate) use theway_transport::auth;
 mod session_activation;
 #[allow(dead_code)] // Session assembly consumes this after context construction is introduced.
 mod session_execution;
-mod session_ops;
+pub mod session_ops;
 pub mod skills;
 mod startup_config;
 mod stream_auth;

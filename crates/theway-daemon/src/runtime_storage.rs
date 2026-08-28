@@ -162,6 +162,27 @@ pub trait SessionRepository: Send + Sync {
     async fn create_with_id(&self, cwd: &Path, _id: Option<&str>) -> Result<Arc<dyn SessionStore>> {
         self.create(cwd).await
     }
+    /// Create a collapsed child session with compact entries and collapse
+    /// metadata. The default delegates to a normal create for remote adapters
+    /// that do not implement collapse-aware session creation yet.
+    async fn create_collapsed_child(
+        &self,
+        cwd: &Path,
+        parent: &dyn SessionStore,
+        entries: Vec<StoredSessionEntry>,
+        collapse_node_id: String,
+    ) -> Result<Arc<dyn SessionStore>> {
+        let child = self.create(cwd).await?;
+        child.append_entries(entries).await?;
+        child
+            .set_collapse_node_id(Some(collapse_node_id.clone()))
+            .await?;
+        parent
+            .set_collapse_node_id(Some(collapse_node_id.clone()))
+            .await?;
+        parent.set_collapsed(true).await?;
+        Ok(child)
+    }
     async fn resume(&self, explicit_id: Option<&str>) -> Result<Arc<dyn SessionStore>>;
     async fn contains(&self, id: &str) -> Result<bool>;
     async fn open(&self, id: &str) -> Result<Option<Arc<dyn SessionStore>>>;
@@ -199,6 +220,25 @@ impl SessionRepository for SqliteSessionRepo {
                 path,
                 cwd.to_string_lossy().to_string(),
                 Some(id.to_string()),
+            )
+            .await?,
+        ))
+    }
+
+    async fn create_collapsed_child(
+        &self,
+        cwd: &Path,
+        parent: &dyn SessionStore,
+        entries: Vec<StoredSessionEntry>,
+        collapse_node_id: String,
+    ) -> Result<Arc<dyn SessionStore>> {
+        Ok(Arc::new(
+            theway_storage::session::create_collapsed_child(
+                self,
+                cwd,
+                parent,
+                entries,
+                collapse_node_id,
             )
             .await?,
         ))
