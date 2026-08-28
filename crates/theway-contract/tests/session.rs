@@ -93,6 +93,8 @@ fn jsonl_metadata_without_binding() -> JsonlSessionMetadata {
         parent_session_path: None,
         imported_from: None,
         binding: None,
+        collapse_node_id: None,
+        collapsed: None,
     }
 }
 
@@ -165,6 +167,104 @@ fn binding_debug_output_contains_no_secret_material() {
             "binding debug output must not contain {key:?}"
         );
     }
+}
+
+#[test]
+fn session_graph_state_custom_entry_accepts_data_with_dags_and_subagents() {
+    let stored = StoredSessionEntry::from_payload(json!({
+        "type": "custom",
+        "id": "graph-1",
+        "parentId": null,
+        "timestamp": "2026-08-24T00:00:00Z",
+        "customType": "session_graph_state",
+        "data": {
+            "updatedAt": "2026-08-24T00:00:00Z",
+            "dags": [],
+            "subagents": []
+        }
+    }))
+    .unwrap();
+
+    assert_eq!(stored.entry_type, "custom");
+    assert_eq!(stored.payload["customType"], "session_graph_state");
+    assert!(stored.payload["data"]["dags"].is_array());
+    assert!(stored.payload["data"]["subagents"].is_array());
+}
+
+#[test]
+fn session_graph_state_custom_entry_rejects_missing_or_malformed_data() {
+    let missing_data = StoredSessionEntry::from_payload(json!({
+        "type": "custom",
+        "id": "graph-bad-1",
+        "parentId": null,
+        "timestamp": "2026-08-24T00:00:00Z",
+        "customType": "session_graph_state"
+    }))
+    .unwrap_err();
+    let bad_dags = StoredSessionEntry::from_payload(json!({
+        "type": "custom",
+        "id": "graph-bad-2",
+        "parentId": null,
+        "timestamp": "2026-08-24T00:00:00Z",
+        "customType": "session_graph_state",
+        "data": {
+            "dags": "not-an-array",
+            "subagents": []
+        }
+    }))
+    .unwrap_err();
+    let bad_subagents = StoredSessionEntry::from_payload(json!({
+        "type": "custom",
+        "id": "graph-bad-3",
+        "parentId": null,
+        "timestamp": "2026-08-24T00:00:00Z",
+        "customType": "session_graph_state",
+        "data": {
+            "dags": [],
+            "subagents": null
+        }
+    }))
+    .unwrap_err();
+
+    for error in [missing_data, bad_dags, bad_subagents] {
+        assert_eq!(error.code, SessionErrorCode::Corrupted);
+    }
+}
+
+#[test]
+fn collapse_entry_validates_required_fields() {
+    let stored = StoredSessionEntry::from_payload(json!({
+        "type": "collapse",
+        "id": "collapse-1",
+        "parentId": null,
+        "timestamp": "2026-08-24T00:00:00Z",
+        "sourceSessionId": "session-a",
+        "childSessionId": "session-b",
+        "compactText": "compact summary",
+        "rawTextRef": "session-a#collapse-1",
+        "collapsedAt": "2026-08-24T00:00:00Z"
+    }))
+    .unwrap();
+
+    assert_eq!(stored.entry_type, "collapse");
+    assert_eq!(stored.payload["childSessionId"], "session-b");
+}
+
+#[test]
+fn collapse_entry_rejects_missing_required_fields() {
+    let missing = StoredSessionEntry::from_payload(json!({
+        "type": "collapse",
+        "id": "collapse-bad",
+        "parentId": null,
+        "timestamp": "2026-08-24T00:00:00Z",
+        "sourceSessionId": "session-a",
+        "childSessionId": "session-b",
+        "compactText": "compact summary",
+        "rawTextRef": "session-a#collapse-1"
+    }))
+    .unwrap_err();
+
+    assert_eq!(missing.code, SessionErrorCode::Corrupted);
 }
 
 #[test]

@@ -178,7 +178,10 @@ async fn branch_switch_and_reopen_reconstruct_extension_entries_from_the_log() {
         .await
         .unwrap();
     assert_eq!(
-        right.iter().map(|entry| entry.id.as_str()).collect::<Vec<_>>(),
+        right
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>(),
         vec!["right-1"]
     );
 
@@ -191,7 +194,9 @@ async fn branch_switch_and_reopen_reconstruct_extension_entries_from_the_log() {
         .await
         .unwrap();
     assert_eq!(
-        left.iter().map(|entry| entry.id.as_str()).collect::<Vec<_>>(),
+        left.iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>(),
         vec!["left-1", "left-2"]
     );
 
@@ -402,9 +407,8 @@ async fn set_binding_none_clears_persisted_row() {
 async fn session_store_trait_set_binding_persists_and_clears() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("s.db");
-    let storage: Arc<dyn SessionStore> = Arc::new(
-        SqliteSessionStorage::create(&path, "/cwd").await.unwrap(),
-    );
+    let storage: Arc<dyn SessionStore> =
+        Arc::new(SqliteSessionStorage::create(&path, "/cwd").await.unwrap());
 
     let expected = binding();
     storage.set_binding(Some(expected.clone())).await.unwrap();
@@ -483,11 +487,10 @@ async fn create_lazy_writes_nothing_until_first_real_write() {
     let dir = tempdir().unwrap();
     let path = dir.path().join(format!("{}.db", uuidv7()));
 
-    let storage = SqliteSessionStorage::create_lazy(&path, "/cwd").await.unwrap();
-    assert!(
-        !path.exists(),
-        "lazy create must not write the db file"
-    );
+    let storage = SqliteSessionStorage::create_lazy(&path, "/cwd")
+        .await
+        .unwrap();
+    assert!(!path.exists(), "lazy create must not write the db file");
     let id = storage.metadata().base.id.clone();
     assert_eq!(id.len(), 36);
     assert_eq!(storage.metadata().cwd, "/cwd");
@@ -522,7 +525,9 @@ async fn create_lazy_writes_nothing_until_first_real_write() {
 async fn create_lazy_metadata_mutations_materialize_and_persist() {
     let dir = tempdir().unwrap();
     let path = dir.path().join(format!("{}.db", uuidv7()));
-    let storage = SqliteSessionStorage::create_lazy(&path, "/cwd").await.unwrap();
+    let storage = SqliteSessionStorage::create_lazy(&path, "/cwd")
+        .await
+        .unwrap();
     let id = storage.metadata().base.id.clone();
 
     // A metadata mutation is a real write: it materializes AND persists the
@@ -534,7 +539,79 @@ async fn create_lazy_metadata_mutations_materialize_and_persist() {
 
     let reopened = SqliteSessionStorage::open(&path).await.unwrap();
     assert_eq!(reopened.metadata().base.id, id);
-    assert_eq!(reopened.metadata().binding.as_ref().unwrap().runtime.provider, Some("lazy-provider".into()));
+    assert_eq!(
+        reopened
+            .metadata()
+            .binding
+            .as_ref()
+            .unwrap()
+            .runtime
+            .provider,
+        Some("lazy-provider".into())
+    );
+}
+
+#[tokio::test]
+async fn collapse_metadata_persists_across_drop_and_open() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("s.db");
+    let storage = SqliteSessionStorage::create(&path, "/cwd").await.unwrap();
+
+    storage
+        .set_collapse_node_id(Some("node-1".into()))
+        .await
+        .unwrap();
+    storage.set_collapsed(true).await.unwrap();
+    drop(storage);
+
+    let reopened = SqliteSessionStorage::open(&path).await.unwrap();
+    assert_eq!(
+        reopened.metadata().collapse_node_id.as_deref(),
+        Some("node-1")
+    );
+    assert_eq!(reopened.metadata().collapsed, Some(true));
+}
+
+#[tokio::test]
+async fn collapse_metadata_can_be_cleared() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("s.db");
+    let storage = SqliteSessionStorage::create(&path, "/cwd").await.unwrap();
+    storage
+        .set_collapse_node_id(Some("node-1".into()))
+        .await
+        .unwrap();
+    storage.set_collapsed(true).await.unwrap();
+
+    storage.set_collapse_node_id(None).await.unwrap();
+    storage.set_collapsed(false).await.unwrap();
+    drop(storage);
+
+    let reopened = SqliteSessionStorage::open(&path).await.unwrap();
+    assert_eq!(reopened.metadata().collapse_node_id, None);
+    assert_eq!(reopened.metadata().collapsed, Some(false));
+}
+
+#[tokio::test]
+async fn collapse_metadata_via_session_store_trait() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("s.db");
+    let storage: std::sync::Arc<dyn SessionStore> =
+        std::sync::Arc::new(SqliteSessionStorage::create(&path, "/cwd").await.unwrap());
+
+    storage
+        .set_collapse_node_id(Some("node-trait".into()))
+        .await
+        .unwrap();
+    storage.set_collapsed(true).await.unwrap();
+    drop(storage);
+
+    let reopened = SqliteSessionStorage::open(&path).await.unwrap();
+    assert_eq!(
+        reopened.metadata().collapse_node_id.as_deref(),
+        Some("node-trait")
+    );
+    assert_eq!(reopened.metadata().collapsed, Some(true));
 }
 
 #[tokio::test]
@@ -554,12 +631,21 @@ async fn create_lazy_respects_existing_path_and_repo_listing() {
     let repo = crate::sqlite_repo::SqliteSessionRepo::new(dir.path());
     let lazy = repo.create_lazy("/cwd").await.unwrap();
     let lazy_id = lazy.metadata().base.id.clone();
-    assert_eq!(repo.list().await.unwrap().len(), 1, "only the eager file lists");
-    lazy.append_entry(message("m1", None, "user", "hi")).await.unwrap();
+    assert_eq!(
+        repo.list().await.unwrap().len(),
+        1,
+        "only the eager file lists"
+    );
+    lazy.append_entry(message("m1", None, "user", "hi"))
+        .await
+        .unwrap();
     let listed = repo.list().await.unwrap();
     assert_eq!(listed.len(), 2, "materialized session now lists");
     assert!(
-        listed.iter().any(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()) == Some(lazy_id.clone())),
+        listed
+            .iter()
+            .any(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned())
+                == Some(lazy_id.clone())),
         "materialized file keeps the pre-minted id as its stem"
     );
 }

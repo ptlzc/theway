@@ -163,6 +163,8 @@ impl SqliteSessionStorage {
             parent_session_path: None,
             imported_from: None,
             binding: None,
+            collapse_node_id: None,
+            collapsed: None,
         }
     }
 
@@ -315,6 +317,78 @@ impl SqliteSessionStorage {
                     .map_err(map_err)?;
             }
         }
+        Ok(())
+    }
+
+    /// Current session-graph collapse node id, if any.
+    pub fn collapse_node_id(&self) -> Option<String> {
+        self.metadata().collapse_node_id.clone()
+    }
+
+    /// Current collapsed flag, if recorded.
+    pub fn collapsed(&self) -> Option<bool> {
+        self.metadata().collapsed
+    }
+
+    /// Whether this session is marked collapsed (`collapsed != false`).
+    pub fn is_collapsed(&self) -> bool {
+        self.metadata().collapsed.unwrap_or(false)
+    }
+
+    /// Record the session-graph collapse node id on this session. Persists to
+    /// the `meta` table; `None` clears the field.
+    pub async fn set_collapse_node_id(&self, id: Option<String>) -> Result<(), SessionError> {
+        {
+            let mut m = self.metadata.lock();
+            m.collapse_node_id = id.clone();
+        }
+        let conn = self.conn().await?;
+        match id {
+            Some(id) => {
+                conn.execute(
+                    "INSERT OR REPLACE INTO meta (key, value) VALUES ('collapseNodeId', ?1)",
+                    [serde_json::to_string(&id).map_err(json_err)?],
+                )
+                .await
+                .map_err(map_err)?;
+            }
+            None => {
+                conn.execute("DELETE FROM meta WHERE key = 'collapseNodeId'", ())
+                    .await
+                    .map_err(map_err)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Clear the collapsed flag from the `meta` table.
+    pub async fn clear_collapsed(&self) -> Result<(), SessionError> {
+        {
+            let mut m = self.metadata.lock();
+            m.collapsed = None;
+        }
+        let conn = self.conn().await?;
+        conn.execute("DELETE FROM meta WHERE key = 'collapsed'", ())
+            .await
+            .map_err(map_err)?;
+        Ok(())
+    }
+
+    /// Record whether this session has been collapsed. Persists to the `meta`
+    /// table. `false` is stored explicitly so callers can distinguish a
+    /// cleared/collapsed state from a session that never opted in.
+    pub async fn set_collapsed(&self, collapsed: bool) -> Result<(), SessionError> {
+        {
+            let mut m = self.metadata.lock();
+            m.collapsed = Some(collapsed);
+        }
+        let conn = self.conn().await?;
+        conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('collapsed', ?1)",
+            [serde_json::to_string(&collapsed).map_err(json_err)?],
+        )
+        .await
+        .map_err(map_err)?;
         Ok(())
     }
 
@@ -646,6 +720,14 @@ impl SessionReader for SqliteSessionStorage {
 impl SessionStore for SqliteSessionStorage {
     async fn set_binding(&self, binding: Option<SessionBinding>) -> Result<(), SessionError> {
         SqliteSessionStorage::set_binding(self, binding).await
+    }
+
+    async fn set_collapse_node_id(&self, id: Option<String>) -> Result<(), SessionError> {
+        SqliteSessionStorage::set_collapse_node_id(self, id).await
+    }
+
+    async fn set_collapsed(&self, collapsed: bool) -> Result<(), SessionError> {
+        SqliteSessionStorage::set_collapsed(self, collapsed).await
     }
 
     async fn set_leaf_id(&self, id: Option<String>) -> Result<(), SessionError> {
