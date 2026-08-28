@@ -316,23 +316,24 @@ async fn slash_new_creates_and_selects_session() {
     );
 }
 
-/// Issue #52 failure path: when `create_session` errors, `/new` reports it as
-/// an error line (the daemon never sees a forward).
+/// Session creation is now client-side and no longer requires the daemon
+/// switch command channel; `/new` creates and selects the session directly.
 #[tokio::test]
-async fn slash_new_create_failure_shows_error_line() {
+async fn slash_new_create_succeeds_without_switch_channel() {
     let (mut app, rx) = test_app().await;
-    // Dropping the command receiver closes the event-loop channel: the gRPC
-    // create handler fails and `create_session` errors before any selection happens.
+    // Dropping the command receiver closes the old switch-command channel;
+    // creation still succeeds because it no longer depends on that channel.
     drop(rx);
 
     app.dispatch_slash("/new", &mut terminal_placeholder())
         .await;
 
-    // Assert: the create failure surfaces on the error line.
+    // Assert: the new session is selected client-side and noted in the feed.
+    assert_eq!(app.session_id, "sess-new-1");
     let text = feed_text(&app);
     assert!(
-        text.contains("error: create session failed"),
-        "feed must show the create failure, got: {text}"
+        text.contains("new session sess-new-1"),
+        "feed must note the new session id, got: {text}"
     );
 }
 
