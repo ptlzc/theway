@@ -433,7 +433,11 @@ impl App {
         };
         let provider = provider.to_string();
         let id = id.to_string();
-        match self.client.set_model(&format!("{provider}:{id}")).await {
+        match self
+            .client
+            .set_model_for_session(&self.session_id, &format!("{provider}:{id}"))
+            .await
+        {
             Ok(true) => {
                 self.pending_model_default = Some(super::PendingModelDefault {
                     selection: theway_transport::config::ModelDefault {
@@ -457,7 +461,11 @@ impl App {
             return;
         }
         let level = level.to_string();
-        match self.client.set_thinking(&level).await {
+        match self
+            .client
+            .set_thinking_for_session(&self.session_id, &level)
+            .await
+        {
             Ok(true) => {
                 self.pending_thinking_default = Some(super::PendingThinkingDefault {
                     level: level.clone(),

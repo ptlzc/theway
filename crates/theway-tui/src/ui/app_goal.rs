@@ -32,9 +32,10 @@ impl App {
             prompt.tool_name
         ));
         let client = self.client.clone();
+        let session_id = self.session_id.clone();
         tokio::spawn(async move {
             let mut client = client;
-            if let Err(e) = client.approve(approve).await {
+            if let Err(e) = client.approve_for_session(&session_id, approve).await {
                 eprintln!("approve: {e}");
             }
         });

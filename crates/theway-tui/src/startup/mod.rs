@@ -124,7 +124,9 @@ fn fresh_attach_wanted(reused: bool, cli: &Cli) -> bool {
 /// The client uses this id explicitly for subsequent RPCs; there is no
 /// daemon-side session switch.
 async fn attach_fresh_session(client: &mut GrpcClient) -> Result<String> {
-    let summary = client.create_session(None).await?;
+    let summary = client
+        .create_session_with_metadata(None, None, Default::default())
+        .await?;
     Ok(summary.session_id)
 }
 

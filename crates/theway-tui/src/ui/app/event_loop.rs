@@ -23,7 +23,11 @@ impl App {
         let mut tick = tokio::time::interval(Duration::from_millis(SPINNER_TICK_MS));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut reconnect = tokio::time::interval(Duration::from_secs(1));
-        let mut stream = match self.client.stream_events().await {
+        let mut stream = match self
+            .client
+            .stream_events_for_session(Some(&self.session_id))
+            .await
+        {
             Ok(stream) => Some(stream),
             Err(e) => {
                 self.connected = false;
@@ -52,7 +56,7 @@ impl App {
                             self.apply_frame(frame);
                             if self.resync_pending {
                                 self.resync_pending = false;
-                                match self.client.get_state().await {
+                                match self.client.get_state_for_session(&self.session_id).await {
                                     Ok(state) => self.apply_snapshot(wire_status(&state)),
                                     Err(e) => self.error_line(format!("get_state: {e}")),
                                 }
@@ -90,32 +94,34 @@ impl App {
                                 // A recovery is announced only after both the
                                 // event stream and an authoritative snapshot
                                 // succeed on the candidate connection.
-                                match candidate.stream_events().await {
-                                    Ok(candidate_stream) => match candidate.get_state().await {
-                                        Ok(state) => {
-                                            let addr = candidate.addr().to_string();
-                                            self.client = candidate;
-                                            self.apply_snapshot(wire_status(&state));
-                                            self.connected = true;
-                                            if reused {
-                                                self.connection_line(format!(
-                                                    "reconnected to daemon at {addr}; state synchronized"
-                                                ));
-                                            } else {
-                                                self.connection_line(format!(
-                                                    "daemon restarted at {addr}; restored session {}",
-                                                    self.session_id
-                                                ));
+                                match candidate.stream_events_for_session(Some(&session_id)).await {
+                                    Ok(candidate_stream) => {
+                                        match candidate.get_state_for_session(&session_id).await {
+                                            Ok(state) => {
+                                                let addr = candidate.addr().to_string();
+                                                self.client = candidate;
+                                                self.apply_snapshot(wire_status(&state));
+                                                self.connected = true;
+                                                if reused {
+                                                    self.connection_line(format!(
+                                                        "reconnected to daemon at {addr}; state synchronized"
+                                                    ));
+                                                } else {
+                                                    self.connection_line(format!(
+                                                        "daemon restarted at {addr}; restored session {}",
+                                                        self.session_id
+                                                    ));
+                                                }
+                                                for note in notes {
+                                                    self.connection_line(note);
+                                                }
+                                                stream = Some(candidate_stream);
                                             }
-                                            for note in notes {
-                                                self.connection_line(note);
-                                            }
-                                            stream = Some(candidate_stream);
+                                            Err(error) => tracing::debug!(
+                                                "daemon recovery snapshot failed: {error}"
+                                            ),
                                         }
-                                        Err(error) => tracing::debug!(
-                                            "daemon recovery snapshot failed: {error}"
-                                        ),
-                                    },
+                                    }
                                     Err(error) => tracing::debug!(
                                         "daemon recovery stream failed: {error}"
                                     ),

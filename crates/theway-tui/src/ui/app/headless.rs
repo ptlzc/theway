@@ -15,7 +15,10 @@ impl App {
 
         // A background printer drains stream snapshots to stdout, printing only
         // rows the headless view has not emitted yet.
-        let mut stream = self.client.stream_events().await?;
+        let mut stream = self
+            .client
+            .stream_events_for_session(Some(&self.session_id))
+            .await?;
         let mut printed: usize = 0;
         let printer = tokio::spawn(async move {
             while let Some(frame) = stream.next().await {
@@ -86,7 +89,11 @@ impl App {
             }
             let (expanded, _) = mentions::expand(input, &self.cwd).await;
             let prompt = commands::attach_skill_prompt(expanded, None);
-            match self.client.send_message(prompt, vec![], false).await {
+            match self
+                .client
+                .send_message_to_session(Some(&self.session_id), prompt, vec![], false)
+                .await
+            {
                 Ok(true) => {}
                 Ok(false) => println!("error: daemon rejected the message"),
                 Err(e) => println!("error: {e}"),

@@ -91,7 +91,11 @@ impl App {
                 name: None,
             })
             .collect();
-        match self.client.send_message(prompt_text, images, false).await {
+        match self
+            .client
+            .send_message_to_session(Some(&self.session_id), prompt_text, images, false)
+            .await
+        {
             Ok(true) => {}
             Ok(false) => self.error_line("daemon rejected the message"),
             Err(e) => self.error_line(e.to_string()),
@@ -168,7 +172,11 @@ impl App {
             // startup `--resume` terminal picker (`resume_picker.rs`) is a
             // different mechanism and stays untouched.
             "/resume" => self.open_resume_picker().await,
-            "/new" => match self.client.create_session(None).await {
+            "/new" => match self
+                .client
+                .create_session_with_metadata(None, None, Default::default())
+                .await
+            {
                 Ok(summary) => {
                     let id = summary.session_id;
                     // `select_session` updates the client-side session id and
@@ -186,7 +194,7 @@ impl App {
                 // (model/goal/triggers/cron/skills/…) and publishes the result.
                 match self
                     .client
-                    .send_message(trimmed.to_string(), vec![], false)
+                    .send_message_to_session(Some(&self.session_id), trimmed.to_string(), vec![], false)
                     .await
                 {
                     Ok(true) => {}
@@ -407,9 +415,10 @@ impl App {
         if self.busy {
             self.system_line("aborting current turn…");
             let client = self.client.clone();
+            let session_id = self.session_id.clone();
             tokio::spawn(async move {
                 let mut client = client;
-                if let Err(e) = client.cancel().await {
+                if let Err(e) = client.cancel_session(&session_id).await {
                     eprintln!("cancel: {e}");
                 }
             });

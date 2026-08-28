@@ -189,7 +189,7 @@ impl DaemonConnector {
         if outcome.pushed {
             tracing::info!("provisioned daemon config at {addr} via settings RPC");
         }
-        let state = client.get_state().await?;
+        let state = client.get_state_for_session("").await?;
         Ok(Some(DaemonConnection {
             client,
             status: wire_status(&state),
@@ -230,7 +230,7 @@ impl DaemonConnector {
             tracing::info!("provisioned daemon config at {addr} via settings RPC");
         }
         notes.extend(outcome.notes);
-        let state = client.get_state().await?;
+        let state = client.get_state_for_session("").await?;
         Ok(DaemonConnection {
             client,
             status: wire_status(&state),
