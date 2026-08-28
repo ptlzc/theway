@@ -9,7 +9,7 @@ use ratatui::text::{Line, Span};
 
 use theway_transport::feed::{Block, Level, display_prefix, wrap_str};
 
-use crate::ui::theme::{BlockAlign, BlockTheme, Theme};
+use crate::ui::theme::{BlockAlign, BlockBorder, BlockTheme, Theme};
 
 /// Grok tokyonight palette values (xai-grok-pager-render theme/tokyonight.rs).
 const ACCENT_USER: Color = Color::Rgb(122, 162, 247); // BLUE — user `❯` prefix
@@ -584,6 +584,7 @@ pub(crate) fn render_block(
                 }
             }
             apply_block_layout(&mut rows, width, bg, &theme.thinking);
+            apply_block_frame(&mut rows, width, &theme.thinking);
             out.extend(rows);
         }
         Block::Tool { name, args, .. } => {
@@ -600,6 +601,7 @@ pub(crate) fn render_block(
             truncate_line(&mut line, content_w);
             let mut rows = vec![line];
             apply_block_layout(&mut rows, width, bg, &theme.tool);
+            apply_block_frame(&mut rows, width, &theme.tool);
             out.extend(rows);
         }
         Block::ToolResult {
@@ -623,6 +625,7 @@ pub(crate) fn render_block(
                 push_tool_result_preview(&mut rows, lines, *is_error, content_w, theme);
             }
             apply_block_layout(&mut rows, width, bg, &theme.tool);
+            apply_block_frame(&mut rows, width, &theme.tool);
             out.extend(rows);
         }
         Block::Plain {
@@ -698,6 +701,51 @@ fn apply_block_layout(
         }
         line.spans = spans;
     }
+}
+
+/// Apply the block frame (issue #31): `margin_top` blank rows, a top border
+/// line, the content, a bottom border line, then `margin_bottom` blank rows.
+/// Margins accumulate with `[feed] gap` (emitted separately by
+/// `push_feed_gap`); borders draw inside the margins. A no-op when every
+/// frame knob is at its default, so default rendering stays byte-identical.
+fn apply_block_frame(rows: &mut Vec<Line<'static>>, width: usize, layout: &BlockTheme) {
+    if layout.margin_top == 0
+        && layout.margin_bottom == 0
+        && layout.border_top == BlockBorder::None
+        && layout.border_bottom == BlockBorder::None
+    {
+        return;
+    }
+    let mut framed: Vec<Line<'static>> = Vec::with_capacity(rows.len() + 4);
+    for _ in 0..layout.margin_top {
+        framed.push(Line::raw(""));
+    }
+    if let Some(glyph) = border_glyph(layout.border_top) {
+        framed.push(border_line(width, glyph, layout.border_style));
+    }
+    framed.extend(std::mem::take(rows));
+    if let Some(glyph) = border_glyph(layout.border_bottom) {
+        framed.push(border_line(width, glyph, layout.border_style));
+    }
+    for _ in 0..layout.margin_bottom {
+        framed.push(Line::raw(""));
+    }
+    *rows = framed;
+}
+
+fn border_glyph(border: BlockBorder) -> Option<char> {
+    match border {
+        BlockBorder::None => None,
+        BlockBorder::Thin => Some('─'),
+        BlockBorder::Thick => Some('━'),
+    }
+}
+
+fn border_line(width: usize, glyph: char, style: Color) -> Line<'static> {
+    Line::from(Span::styled(
+        glyph.to_string().repeat(width.max(1)),
+        Style::default().fg(style),
+    ))
 }
 
 include!(concat!(

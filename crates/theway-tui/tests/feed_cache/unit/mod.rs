@@ -241,3 +241,44 @@
         assert_eq!(rows[3], "─".repeat(40), "new block got its separator");
         assert_eq!(rows[4].trim_end(), "\u{276f} third");
     }
+
+    // ── v2 block frame (#31): margins/borders through the cache ──────────
+
+    #[test]
+    fn block_frame_survives_incremental_splices() {
+        let feed = feed_with(&[
+            user("hello"),
+            WireFeedBlock::Tool {
+                name: "bash".into(),
+                args: " ls".into(),
+                timestamp: None,
+            },
+        ]);
+        let mut cache = FeedRenderCache::new();
+        let mut opts = FeedRenderOptions::default();
+        opts.theme.tool.margin_top = 1;
+        opts.theme.tool.border_top = crate::ui::theme::BlockBorder::Thin;
+        cache.update(&feed, 40, &opts, 1000);
+        let text = flat(cache.lines());
+        let rows: Vec<&str> = text.split('\n').collect();
+        // user, feed gap, tool margin, tool border, tool content.
+        assert_eq!(rows[2], "", "margin");
+        assert_eq!(rows[3], "─".repeat(40), "border");
+
+        // Appending keeps the frozen frame intact.
+        let feed = feed_with(&[
+            user("hello"),
+            WireFeedBlock::Tool {
+                name: "bash".into(),
+                args: " ls".into(),
+                timestamp: None,
+            },
+            user("third"),
+        ]);
+        cache.update(&feed, 40, &opts, 1000);
+        assert_eq!(cache.last_rebuilt, 1);
+        let text = flat(cache.lines());
+        let rows: Vec<&str> = text.split('\n').collect();
+        assert_eq!(rows[3], "─".repeat(40), "frozen border intact");
+        assert!(rows[6].trim_end().ends_with("third"), "{rows:?}");
+    }

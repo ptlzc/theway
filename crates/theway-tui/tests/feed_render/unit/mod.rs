@@ -687,3 +687,77 @@
         let sep_line = &lines[1];
         assert_eq!(sep_line.spans[0].style.fg, Some(ratatui::style::Color::Rgb(0x56, 0x5F, 0x89)));
     }
+
+    // ── v2 block frame (#31): margins + borders ──────────────────────────
+
+    fn tool_block() -> Feed {
+        feed_with(&[WireFeedBlock::Tool {
+            name: "bash".into(),
+            args: " ls".into(),
+            timestamp: None,
+        }])
+    }
+
+    #[test]
+    fn block_margins_add_blank_rows_around_content() {
+        let feed = tool_block();
+        let mut opts = FeedRenderOptions::default();
+        opts.theme.tool.margin_top = 1;
+        opts.theme.tool.margin_bottom = 2;
+        let text = flat(&super::lines(&feed, 30, &opts));
+        // split (not lines): lines() drops trailing empty rows.
+        let rows: Vec<&str> = text.split('\n').collect();
+        assert_eq!(rows[0], "", "margin_top blank row");
+        assert!(rows[1].contains("bash"), "content row");
+        assert_eq!(rows[2], "", "margin_bottom row 1");
+        assert_eq!(rows[3], "", "margin_bottom row 2");
+    }
+
+    #[test]
+    fn block_borders_render_thin_and_thick_lines() {
+        let feed = tool_block();
+        let mut opts = FeedRenderOptions::default();
+        opts.theme.tool.margin_top = 1;
+        opts.theme.tool.border_top = crate::ui::theme::BlockBorder::Thin;
+        opts.theme.tool.border_bottom = crate::ui::theme::BlockBorder::Thick;
+        opts.theme.tool.border_style = ratatui::style::Color::Rgb(1, 2, 3);
+        let lines = super::lines(&feed, 30, &opts);
+        let text = flat(&lines);
+        let rows: Vec<&str> = text.lines().collect();
+        // Order: margin, border-top, content, border-bottom.
+        assert_eq!(rows[0], "", "margin row");
+        assert_eq!(rows[1], "─".repeat(30), "thin top border");
+        assert!(rows[2].contains("bash"), "content");
+        assert_eq!(rows[3], "━".repeat(30), "thick bottom border");
+        // Border lines carry border_style.
+        assert_eq!(
+            lines[1].spans[0].style.fg,
+            Some(ratatui::style::Color::Rgb(1, 2, 3))
+        );
+    }
+
+    #[test]
+    fn block_frame_composes_with_feed_gap() {
+        let feed = feed_with(&[
+            WireFeedBlock::User {
+                text: "hello".into(),
+                timestamp: None,
+            },
+            WireFeedBlock::Tool {
+                name: "bash".into(),
+                args: " ls".into(),
+                timestamp: None,
+            },
+        ]);
+        let mut opts = FeedRenderOptions::default();
+        opts.theme.tool.margin_top = 1;
+        opts.theme.tool.border_top = crate::ui::theme::BlockBorder::Thin;
+        let text = flat(&super::lines(&feed, 30, &opts));
+        let rows: Vec<&str> = text.lines().collect();
+        // User row, [feed] gap (1 blank), then the tool frame: margin, border, content.
+        assert!(rows[0].contains("hello"));
+        assert_eq!(rows[1], "", "feed gap");
+        assert_eq!(rows[2], "", "tool margin_top");
+        assert_eq!(rows[3], "─".repeat(30), "tool border_top");
+        assert!(rows[4].contains("bash"));
+    }
