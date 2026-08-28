@@ -129,8 +129,10 @@ separator_style = "p:muted"
 
 - `gap = 0` disables inter-block blank lines entirely (single-turn feeds get
   denser).
-- `separator` renders a full-width styled line instead of a blank row when
-  non-empty; `gap` still applies above it.
+- `separator` renders a full-width styled line **below** the gap rows when
+  non-empty (so the total spacing is `gap` blank lines + one separator row;
+  with `gap = 0` the separator alone separates blocks). Empty string /
+  absent = pure blank lines.
 - Both flow through the feed render cache as part of `FeedRenderOptions`'s
   theme fingerprint, so changing them invalidates the cache naturally.
 
