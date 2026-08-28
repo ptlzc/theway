@@ -237,6 +237,16 @@ message SessionSummary {
   uint32 active_graph_count = 8;
   bool busy = 9;
   optional string preview = 10;
+  map<string, string> metadata = 11;
+}
+
+message SessionStateRequest {
+  string session_id = 1;
+}
+
+message UpdateSessionMetadataRequest {
+  string session_id = 1;
+  map<string, string> metadata = 2;
 }
 
 message ListSessionsResponse {

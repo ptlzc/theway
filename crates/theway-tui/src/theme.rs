@@ -244,10 +244,14 @@ pub struct SidebarStyle {
     pub bg: Option<Color>,
     /// Border + plain row color.
     pub fg: Color,
-    /// Section headings and panel title.
+    /// Block title (" Automation ").
     pub heading: Color,
-    /// Positive/badge emphasis.
+    /// Section headings (Extensions / Skills / Triggers / …).
+    pub section: Color,
+    /// Positive/badge emphasis (enabled, achieved).
     pub badge: Color,
+    /// Warning emphasis (disabled counts, reload pending).
+    pub warn: Color,
     /// Dim/summary text.
     pub muted: Color,
 }
@@ -258,7 +262,9 @@ impl Default for SidebarStyle {
             bg: None,
             fg: Color::DarkGray,
             heading: Color::Magenta,
+            section: Color::Cyan,
             badge: Color::Green,
+            warn: Color::Yellow,
             muted: Color::DarkGray,
         }
     }
@@ -270,7 +276,7 @@ impl Default for SidebarStyle {
 pub struct DagBandStyle {
     /// Band background; `None` = terminal default.
     pub bg: Option<Color>,
-    /// Plain text color.
+    /// Plain text color (unknown states, tail labels).
     pub fg: Color,
     /// Succeeded/ok state.
     pub ok: Color,
@@ -280,8 +286,10 @@ pub struct DagBandStyle {
     pub cancelled: Color,
     /// Running state.
     pub running: Color,
-    /// Pending/ready state.
+    /// Ready-to-run state.
     pub pending: Color,
+    /// Skipped state.
+    pub skipped: Color,
     /// Separators and edges.
     pub edge: Color,
     /// Run header title.
@@ -297,7 +305,8 @@ impl Default for DagBandStyle {
             failed: Color::Red,
             cancelled: Color::DarkGray,
             running: Color::Cyan,
-            pending: Color::DarkGray,
+            pending: Color::Yellow,
+            skipped: Color::Gray,
             edge: Color::DarkGray,
             title: Color::Gray,
         }
@@ -452,7 +461,9 @@ impl Theme {
                     &mut [
                         ("fg", &mut theme.sidebar.fg),
                         ("heading", &mut theme.sidebar.heading),
+                        ("section", &mut theme.sidebar.section),
                         ("badge", &mut theme.sidebar.badge),
+                        ("warn", &mut theme.sidebar.warn),
                         ("muted", &mut theme.sidebar.muted),
                     ],
                     &mut [("bg", &mut theme.sidebar.bg)],
@@ -468,6 +479,7 @@ impl Theme {
                         ("cancelled", &mut theme.dag_band.cancelled),
                         ("running", &mut theme.dag_band.running),
                         ("pending", &mut theme.dag_band.pending),
+                        ("skipped", &mut theme.dag_band.skipped),
                         ("edge", &mut theme.dag_band.edge),
                         ("title", &mut theme.dag_band.title),
                     ],
@@ -1253,10 +1265,13 @@ fn default_block_and_component_tables_match_hardcoded() {
     assert_eq!(d.picker.title, Color::Yellow);
     assert_eq!(d.sidebar.fg, Color::DarkGray);
     assert_eq!(d.sidebar.heading, Color::Magenta);
+    assert_eq!(d.sidebar.section, Color::Cyan);
     assert_eq!(d.dag_band.ok, Color::Green);
     assert_eq!(d.dag_band.failed, Color::Red);
     assert_eq!(d.dag_band.cancelled, Color::DarkGray);
     assert_eq!(d.dag_band.running, Color::Cyan);
+    assert_eq!(d.dag_band.pending, Color::Yellow);
+    assert_eq!(d.dag_band.skipped, Color::Gray);
     assert_eq!(d.dag_band.title, Color::Gray);
 }
 

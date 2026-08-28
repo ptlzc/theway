@@ -42,17 +42,19 @@ const HEADER_INDENT: u16 = 1;
 const NODE_INDENT: u16 = 3;
 
 /// State glyph, color, and modifier for a node status string (design §8.2
-/// table). Unknown statuses render as pending.
+/// table). Unknown statuses render as pending. Colors come from the
+/// `[dag_band]` theme table (issue #31); defaults equal the pre-theme
+/// hardcoded values.
 #[must_use]
-pub fn node_style(status: &str) -> (char, Color, Modifier) {
+pub fn node_style(status: &str, band: &crate::ui::theme::DagBandStyle) -> (char, Color, Modifier) {
     match status {
-        "ready" => ('▸', Color::Yellow, Modifier::empty()),
-        "running" => ('▶', Color::Cyan, Modifier::empty()),
-        "succeeded" => ('✓', Color::Green, Modifier::empty()),
-        "failed" => ('✗', Color::Red, Modifier::empty()),
-        "cancelled" => ('×', Color::DarkGray, Modifier::CROSSED_OUT),
-        "skipped" => ('↷', Color::Gray, Modifier::empty()),
-        _ => ('·', Color::DarkGray, Modifier::empty()),
+        "ready" => ('▸', band.pending, Modifier::empty()),
+        "running" => ('▶', band.running, Modifier::empty()),
+        "succeeded" => ('✓', band.ok, Modifier::empty()),
+        "failed" => ('✗', band.failed, Modifier::empty()),
+        "cancelled" => ('×', band.cancelled, Modifier::CROSSED_OUT),
+        "skipped" => ('↷', band.skipped, Modifier::empty()),
+        _ => ('·', band.fg, Modifier::empty()),
     }
 }
 
@@ -141,7 +143,13 @@ pub fn mini_spinner(tick: u64, cps: f64) -> Span<'static> {
 /// mini spinner renders only while any node is running; the name truncates
 /// to fit `width` (display cells).
 #[must_use]
-pub fn run_header_line(run: &WireDagRunSnapshot, cps: f64, tick: u64, width: u16) -> Line<'static> {
+pub fn run_header_line(
+    run: &WireDagRunSnapshot,
+    cps: f64,
+    tick: u64,
+    width: u16,
+    band: &crate::ui::theme::DagBandStyle,
+) -> Line<'static> {
     let any_running = run.nodes.iter().any(|node| node.status == "running");
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut prefix_w = 0usize;
@@ -162,25 +170,28 @@ pub fn run_header_line(run: &WireDagRunSnapshot, cps: f64, tick: u64, width: u16
         Style::default().add_modifier(Modifier::BOLD),
     ));
     if !run.name.is_empty() && name_budget > 0 {
-        spans.push(Span::styled(SEPARATOR, separator_style()));
+        spans.push(Span::styled(SEPARATOR, separator_style(band)));
         spans.push(Span::styled(
             truncate_to_width(&run.name, name_budget),
-            Style::default().fg(Color::Gray),
+            Style::default().fg(band.title),
         ));
     }
-    spans.push(Span::styled(tail, Style::default().fg(Color::DarkGray)));
+    spans.push(Span::styled(tail, Style::default().fg(band.fg)));
     Line::from(spans)
 }
 
-fn separator_style() -> Style {
-    Style::default().fg(Color::DarkGray)
+fn separator_style(band: &crate::ui::theme::DagBandStyle) -> Style {
+    Style::default().fg(band.edge)
 }
 
 /// One node's spans + display width: state glyph + id in the state color
 /// (cancelled also strikes through); failed/cancelled nodes append the dim
 /// error summary.
-fn node_entry(node: &WireDagNodeSnapshot) -> (Vec<Span<'static>>, usize) {
-    let (glyph, color, modifier) = node_style(&node.status);
+fn node_entry(
+    node: &WireDagNodeSnapshot,
+    band: &crate::ui::theme::DagBandStyle,
+) -> (Vec<Span<'static>>, usize) {
+    let (glyph, color, modifier) = node_style(&node.status, band);
     let mut spans = vec![Span::styled(
         format!("{glyph} {}", node.id),
         Style::default().fg(color).add_modifier(modifier),
@@ -194,7 +205,7 @@ fn node_entry(node: &WireDagNodeSnapshot) -> (Vec<Span<'static>>, usize) {
         width += 1 + UnicodeWidthStr::width(summary.as_str());
         spans.push(Span::styled(
             format!(" {summary}"),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(band.fg),
         ));
     }
     (spans, width)
@@ -203,12 +214,16 @@ fn node_entry(node: &WireDagNodeSnapshot) -> (Vec<Span<'static>>, usize) {
 /// Wrap the run's node entries into rows of at most `width` display cells,
 /// ` · `-separated within a row, capped at [`MAX_NODE_ROWS`] rows (overflow
 /// entries drop).
-fn node_rows(run: &WireDagRunSnapshot, width: usize) -> Vec<Vec<Span<'static>>> {
+fn node_rows(
+    run: &WireDagRunSnapshot,
+    width: usize,
+    band: &crate::ui::theme::DagBandStyle,
+) -> Vec<Vec<Span<'static>>> {
     let sep_w = UnicodeWidthStr::width(SEPARATOR);
     let mut rows: Vec<Vec<Span<'static>>> = Vec::new();
     let mut cur: Vec<Span<'static>> = Vec::new();
     let mut cur_w = 0usize;
-    for (spans, w) in run.nodes.iter().map(node_entry) {
+    for (spans, w) in run.nodes.iter().map(|node| node_entry(node, band)) {
         if !cur.is_empty() && cur_w + sep_w + w > width {
             rows.push(std::mem::take(&mut cur));
             cur_w = 0;
@@ -217,7 +232,7 @@ fn node_rows(run: &WireDagRunSnapshot, width: usize) -> Vec<Vec<Span<'static>>> 
             }
         }
         if !cur.is_empty() {
-            cur.push(Span::styled(SEPARATOR, separator_style()));
+            cur.push(Span::styled(SEPARATOR, separator_style(band)));
             cur_w += sep_w;
         }
         cur_w += w;
@@ -270,7 +285,7 @@ pub fn synthesize_mermaid(run: &WireDagRunSnapshot) -> String {
     };
     let mut src = format!("graph {direction}\n");
     for node in &run.nodes {
-        let glyph = node_style(&node.status).0;
+        let glyph = node_style(&node.status, &crate::ui::theme::DagBandStyle::default()).0;
         src.push_str(&format!(
             "  {}[\"{glyph} {}\"]\n",
             mermaid_id(&node.id),
@@ -290,12 +305,12 @@ pub fn synthesize_mermaid(run: &WireDagRunSnapshot) -> String {
 }
 
 /// Border/edge styles for the per-run diagram, in the band palette.
-fn diagram_styles() -> MermaidStyles {
+fn diagram_styles(band: &crate::ui::theme::DagBandStyle) -> MermaidStyles {
     MermaidStyles {
-        border: separator_style(),
-        edge: separator_style(),
-        edge_label: Style::default().fg(Color::DarkGray),
-        title: Style::default().fg(Color::Gray),
+        border: separator_style(band),
+        edge: separator_style(band),
+        edge_label: Style::default().fg(band.edge),
+        title: Style::default().fg(band.title),
         ..MermaidStyles::default()
     }
 }
@@ -316,12 +331,13 @@ fn run_diagram(
     run: &WireDagRunSnapshot,
     width: u16,
     height_budget: u16,
+    band: &crate::ui::theme::DagBandStyle,
 ) -> Option<Vec<Line<'static>>> {
     if !run.nodes.iter().any(|node| !node.depends_on.is_empty()) {
         return None;
     }
     let src = synthesize_mermaid(run);
-    let art = render_mermaid_art(&src, &diagram_styles(), Some(usize::from(width)))?;
+    let art = render_mermaid_art(&src, &diagram_styles(band), Some(usize::from(width)))?;
     if art.fallback {
         return None;
     }
@@ -347,10 +363,20 @@ pub fn band_rows(dags: &[WireDagRunSnapshot], width: u16) -> u16 {
     let mut rows: u16 = 0;
     for run in &dags[..shown] {
         rows += 1;
-        match run_diagram(run, text_width, u16::MAX) {
+        match run_diagram(
+            run,
+            text_width,
+            u16::MAX,
+            &crate::ui::theme::DagBandStyle::default(),
+        ) {
             Some(diagram) => rows += diagram.len() as u16,
             None => {
-                rows += node_rows(run, usize::from(text_width)).len() as u16;
+                rows += node_rows(
+                    run,
+                    usize::from(text_width),
+                    &crate::ui::theme::DagBandStyle::default(),
+                )
+                .len() as u16;
             }
         }
     }
@@ -397,6 +423,7 @@ pub fn render_dag_band(
     dags: &[WireDagRunSnapshot],
     meters: &HashMap<String, CpsMeter>,
     tick: u64,
+    band: &crate::ui::theme::DagBandStyle,
 ) {
     if dags.is_empty() || area.width == 0 || area.height == 0 {
         return;
@@ -408,11 +435,11 @@ pub fn render_dag_band(
         }
         let cps = meters.get(&run.id).map(CpsMeter::cps).unwrap_or(0.0);
         let width = area.width.saturating_sub(HEADER_INDENT);
-        let header = run_header_line(run, cps, tick, width);
+        let header = run_header_line(run, cps, tick, width, band);
         buf.set_line(area.x + HEADER_INDENT, y, &header, width);
         y += 1;
         let text_width = area.width.saturating_sub(NODE_INDENT);
-        match run_diagram(run, text_width, area.bottom().saturating_sub(y)) {
+        match run_diagram(run, text_width, area.bottom().saturating_sub(y), band) {
             Some(diagram) => {
                 for line in diagram {
                     if y >= area.bottom() {
@@ -423,7 +450,7 @@ pub fn render_dag_band(
                 }
             }
             None => {
-                for row in node_rows(run, usize::from(text_width)) {
+                for row in node_rows(run, usize::from(text_width), band) {
                     if y >= area.bottom() {
                         break;
                     }
@@ -442,7 +469,7 @@ pub fn render_dag_band(
     if dags.len() > MAX_RUNS && y < area.bottom() {
         let more = Line::styled(
             format!("… {} more", dags.len() - MAX_RUNS),
-            separator_style(),
+            separator_style(band),
         );
         buf.set_line(
             area.x + HEADER_INDENT,

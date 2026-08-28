@@ -7,8 +7,8 @@ impl App {
                 .borders(Borders::LEFT)
                 .padding(Padding::left(1))
                 .title(" Automation ")
-                .border_style(Style::default().fg(Color::DarkGray))
-                .title_style(Style::default().fg(Color::Magenta)),
+                .border_style(Style::default().fg(self.theme.sidebar.fg))
+                .title_style(Style::default().fg(self.theme.sidebar.heading)),
         );
         frame.render_widget(panel, area);
     }
@@ -41,6 +41,7 @@ impl App {
 
     fn trigger_panel_lines(&self, width: usize, height: usize) -> Vec<Line<'static>> {
         let width = width.max(1);
+        let s = self.theme.sidebar;
         let sidebar = &self.latest.sidebar;
         let skills = &sidebar.skills.items;
         let rules = &sidebar.triggers.rules;
@@ -51,7 +52,7 @@ impl App {
             || self.latest.extensions.reload_pending
             || !self.latest.extensions.contributions.is_empty()
         {
-            lines.push(panel_line("Extensions".to_string(), Color::Cyan, width));
+            lines.push(panel_line("Extensions".to_string(), s.section, width));
             let effective = self
                 .latest
                 .extensions
@@ -75,9 +76,9 @@ impl App {
                     }
                 ),
                 if self.latest.extensions.reload_pending || unavailable > 0 {
-                    Color::Yellow
+                    s.warn
                 } else {
-                    Color::Green
+                    s.badge
                 },
                 width,
             ));
@@ -104,23 +105,23 @@ impl App {
                     _ => None,
                 };
                 if let Some(summary) = summary {
-                    lines.push(panel_line(summary, Color::DarkGray, width));
+                    lines.push(panel_line(summary, s.muted, width));
                 }
             }
             lines.push(Line::raw(""));
         }
-        lines.push(panel_line("Skills".to_string(), Color::Cyan, width));
+        lines.push(panel_line("Skills".to_string(), s.section, width));
         if skills.is_empty() {
-            lines.push(panel_line("none".to_string(), Color::DarkGray, width));
+            lines.push(panel_line("none".to_string(), s.muted, width));
         } else {
             let disabled = skills.iter().filter(|skill| !skill.enabled).count();
             let enabled = skills.len().saturating_sub(disabled);
             lines.push(panel_line(
                 format!("enabled {enabled} · disabled {disabled}"),
                 if disabled == 0 {
-                    Color::Green
+                    s.badge
                 } else {
-                    Color::Yellow
+                    s.warn
                 },
                 width,
             ));
@@ -133,22 +134,22 @@ impl App {
                     source_count("user"),
                     source_count("project")
                 ),
-                Color::DarkGray,
+                s.muted,
                 width,
             ));
         }
 
         lines.push(Line::raw(""));
-        lines.push(panel_line("Triggers".to_string(), Color::Cyan, width));
+        lines.push(panel_line("Triggers".to_string(), s.section, width));
         if rules.is_empty() {
-            lines.push(panel_line("none".to_string(), Color::DarkGray, width));
+            lines.push(panel_line("none".to_string(), s.muted, width));
         } else {
             for rule in rules.iter().take(TRIGGER_PANEL_RULE_LIMIT) {
                 let state_flag = if rule.enabled { "enabled" } else { "disabled" };
                 let color = if rule.enabled {
-                    Color::Green
+                    s.badge
                 } else {
-                    Color::DarkGray
+                    s.muted
                 };
                 lines.push(panel_line(
                     format!(
@@ -161,19 +162,19 @@ impl App {
                 ));
                 lines.push(panel_line(
                     format!("  when {}", panel_rule_preview(&rule.condition, width)),
-                    Color::DarkGray,
+                    s.muted,
                     width,
                 ));
                 lines.push(panel_line(
                     format!("  do   {}", panel_rule_preview(&rule.action, width)),
-                    Color::DarkGray,
+                    s.muted,
                     width,
                 ));
             }
             if rules.len() > TRIGGER_PANEL_RULE_LIMIT {
                 lines.push(panel_line(
                     format!("… {} more", rules.len() - TRIGGER_PANEL_RULE_LIMIT),
-                    Color::DarkGray,
+                    s.muted,
                     width,
                 ));
             }
@@ -181,10 +182,10 @@ impl App {
 
         if let Some(status) = &self.latest.latest_trigger_poll {
             lines.push(Line::raw(""));
-            lines.push(panel_line("Polling".to_string(), Color::Cyan, width));
+            lines.push(panel_line("Polling".to_string(), s.section, width));
             lines.push(panel_line(
                 format!("{} · no match", status.checked_at),
-                Color::Yellow,
+                s.warn,
                 width,
             ));
             lines.push(panel_line(
@@ -193,47 +194,47 @@ impl App {
                     panel_rule_preview(&status.source_label, width),
                     panel_rule_preview(&status.event_label, width)
                 ),
-                Color::DarkGray,
+                s.muted,
                 width,
             ));
             lines.push(panel_line(
                 format!("trace {}", panel_rule_preview(&status.trace_id, width)),
-                Color::DarkGray,
+                s.muted,
                 width,
             ));
             lines.push(panel_line(
                 format!("  {}", panel_rule_preview(&status.summary, width)),
-                Color::DarkGray,
+                s.muted,
                 width,
             ));
         }
 
         if let Some(goal) = &self.latest.goal {
             lines.push(Line::raw(""));
-            lines.push(panel_line("Goal".to_string(), Color::Cyan, width));
+            lines.push(panel_line("Goal".to_string(), s.section, width));
             let color = match goal.status.as_str() {
-                "pursuing" => Color::Yellow,
-                "achieved" => Color::Green,
-                "paused" | "budget_limited" | "cleared" => Color::DarkGray,
-                _ => Color::DarkGray,
+                "pursuing" => s.warn,
+                "achieved" => s.badge,
+                "paused" | "budget_limited" | "cleared" => s.muted,
+                _ => s.muted,
             };
             lines.push(panel_line(goal.status.clone(), color, width));
             lines.push(panel_line(
                 panel_rule_preview(&goal.condition, width),
-                Color::DarkGray,
+                s.muted,
                 width,
             ));
             if goal.iterations > 0 {
                 lines.push(panel_line(
                     format!("checks {}", goal.iterations),
-                    Color::DarkGray,
+                    s.muted,
                     width,
                 ));
             }
             if let Some(reason) = goal.last_reason.as_deref() {
                 lines.push(panel_line(
                     format!("  {}", panel_rule_preview(reason, width)),
-                    Color::DarkGray,
+                    s.muted,
                     width,
                 ));
             }
@@ -243,32 +244,32 @@ impl App {
         if sidebar.inbox_new > 0 {
             lines.push(panel_line(
                 format!("Inbox  {} new — /inbox", sidebar.inbox_new),
-                Color::Yellow,
+                s.warn,
                 width,
             ));
             lines.push(panel_line(String::new(), Color::Reset, width));
         }
-        lines.push(panel_line("Cron (session)".to_string(), Color::Cyan, width));
+        lines.push(panel_line("Cron (session)".to_string(), s.section, width));
         if cron_jobs.is_empty() {
-            lines.push(panel_line("none".to_string(), Color::DarkGray, width));
+            lines.push(panel_line("none".to_string(), s.muted, width));
         } else {
             let enabled = cron_jobs.iter().filter(|job| job.enabled).count();
             let disabled = cron_jobs.len().saturating_sub(enabled);
             lines.push(panel_line(
                 format!("enabled {enabled} · disabled {disabled}"),
                 if disabled == 0 {
-                    Color::Green
+                    s.badge
                 } else {
-                    Color::Yellow
+                    s.warn
                 },
                 width,
             ));
             for job in cron_jobs.iter().take(TRIGGER_PANEL_RULE_LIMIT) {
                 let state_flag = if job.enabled { "enabled" } else { "disabled" };
                 let color = if job.enabled {
-                    Color::Green
+                    s.badge
                 } else {
-                    Color::DarkGray
+                    s.muted
                 };
                 lines.push(panel_line(
                     format!(
@@ -281,13 +282,13 @@ impl App {
                 ));
                 lines.push(panel_line(
                     format!("  do {}", panel_rule_preview(&job.action, width)),
-                    Color::DarkGray,
+                    s.muted,
                     width,
                 ));
                 if job.skipped_overlap_count > 0 {
                     lines.push(panel_line(
                         format!("  skipped overlaps {}", job.skipped_overlap_count),
-                        Color::Yellow,
+                        s.warn,
                         width,
                     ));
                 }
@@ -295,7 +296,7 @@ impl App {
             if cron_jobs.len() > TRIGGER_PANEL_RULE_LIMIT {
                 lines.push(panel_line(
                     format!("… {} more", cron_jobs.len() - TRIGGER_PANEL_RULE_LIMIT),
-                    Color::DarkGray,
+                    s.muted,
                     width,
                 ));
             }
@@ -311,16 +312,16 @@ impl App {
         }
 
         lines.push(Line::raw(""));
-        lines.push(panel_line("MCP".to_string(), Color::Cyan, width));
+        lines.push(panel_line("MCP".to_string(), s.section, width));
         if self.panel_status.mcp_servers == 0 {
-            lines.push(panel_line("none".to_string(), Color::DarkGray, width));
+            lines.push(panel_line("none".to_string(), s.muted, width));
         } else {
             lines.push(panel_line(
                 format!(
                     "servers {} · tools {}",
                     self.panel_status.mcp_servers, self.panel_status.mcp_tools
                 ),
-                Color::Green,
+                s.badge,
                 width,
             ));
             lines.push(panel_line(
@@ -328,28 +329,28 @@ impl App {
                     "notification hooks {}",
                     self.panel_status.mcp_notification_hooks
                 ),
-                Color::DarkGray,
+                s.muted,
                 width,
             ));
         }
 
         lines.push(Line::raw(""));
-        lines.push(panel_line("Hooks".to_string(), Color::Cyan, width));
+        lines.push(panel_line("Hooks".to_string(), s.section, width));
         if self.panel_status.hook_points.is_empty() {
-            lines.push(panel_line("none".to_string(), Color::DarkGray, width));
+            lines.push(panel_line("none".to_string(), s.muted, width));
         } else {
             for point in &self.panel_status.hook_points {
-                lines.push(panel_line(format!("· {point}"), Color::DarkGray, width));
+                lines.push(panel_line(format!("· {point}"), s.muted, width));
             }
         }
 
         lines.push(Line::raw(""));
-        lines.push(panel_line("Runtime".to_string(), Color::Cyan, width));
+        lines.push(panel_line("Runtime".to_string(), s.section, width));
         if self.panel_status.trigger_features.is_empty() {
-            lines.push(panel_line("none".to_string(), Color::DarkGray, width));
+            lines.push(panel_line("none".to_string(), s.muted, width));
         } else {
             for feature in &self.panel_status.trigger_features {
-                lines.push(panel_line(format!("• {feature}"), Color::DarkGray, width));
+                lines.push(panel_line(format!("• {feature}"), s.muted, width));
             }
         }
         lines

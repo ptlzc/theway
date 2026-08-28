@@ -279,6 +279,26 @@ export interface SessionSummary {
   activeGraphCount: number;
   busy: boolean;
   preview?: string | undefined;
+  metadata: { [key: string]: string };
+}
+
+export interface SessionSummary_MetadataEntry {
+  key: string;
+  value: string;
+}
+
+export interface SessionStateRequest {
+  sessionId: string;
+}
+
+export interface UpdateSessionMetadataRequest {
+  sessionId: string;
+  metadata: { [key: string]: string };
+}
+
+export interface UpdateSessionMetadataRequest_MetadataEntry {
+  key: string;
+  value: string;
 }
 
 export interface ListSessionsResponse {
@@ -3580,6 +3600,7 @@ function createBaseSessionSummary(): SessionSummary {
     activeGraphCount: 0,
     busy: false,
     preview: undefined,
+    metadata: {},
   };
 }
 
@@ -3615,6 +3636,9 @@ export const SessionSummary: MessageFns<SessionSummary> = {
     if (message.preview !== undefined) {
       writer.uint32(82).string(message.preview);
     }
+    globalThis.Object.entries(message.metadata).forEach(([key, value]: [string, string]) => {
+      SessionSummary_MetadataEntry.encode({ key: key as any, value }, writer.uint32(90).fork()).join();
+    });
     return writer;
   },
 
@@ -3705,6 +3729,17 @@ export const SessionSummary: MessageFns<SessionSummary> = {
           message.preview = reader.string();
           continue;
         }
+        case 11: {
+          if (tag !== 90) {
+            break;
+          }
+
+          const entry11 = SessionSummary_MetadataEntry.decode(reader, reader.uint32());
+          if (entry11.value !== undefined) {
+            message.metadata[entry11.key] = entry11.value;
+          }
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -3746,6 +3781,15 @@ export const SessionSummary: MessageFns<SessionSummary> = {
         : 0,
       busy: isSet(object.busy) ? globalThis.Boolean(object.busy) : false,
       preview: isSet(object.preview) ? globalThis.String(object.preview) : undefined,
+      metadata: isObject(object.metadata)
+        ? (globalThis.Object.entries(object.metadata) as [string, any][]).reduce(
+          (acc: { [key: string]: string }, [key, value]: [string, any]) => {
+            acc[key] = globalThis.String(value);
+            return acc;
+          },
+          {},
+        )
+        : {},
     };
   },
 
@@ -3781,6 +3825,15 @@ export const SessionSummary: MessageFns<SessionSummary> = {
     if (message.preview !== undefined) {
       obj.preview = message.preview;
     }
+    if (message.metadata) {
+      const entries = globalThis.Object.entries(message.metadata) as [string, string][];
+      if (entries.length > 0) {
+        obj.metadata = {};
+        entries.forEach(([k, v]) => {
+          obj.metadata[k] = v;
+        });
+      }
+    }
     return obj;
   },
 
@@ -3799,6 +3852,340 @@ export const SessionSummary: MessageFns<SessionSummary> = {
     message.activeGraphCount = object.activeGraphCount ?? 0;
     message.busy = object.busy ?? false;
     message.preview = object.preview ?? undefined;
+    message.metadata = (globalThis.Object.entries(object.metadata ?? {}) as [string, string][]).reduce(
+      (acc: { [key: string]: string }, [key, value]: [string, string]) => {
+        if (value !== undefined) {
+          acc[key] = globalThis.String(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    return message;
+  },
+};
+
+function createBaseSessionSummary_MetadataEntry(): SessionSummary_MetadataEntry {
+  return { key: "", value: "" };
+}
+
+export const SessionSummary_MetadataEntry: MessageFns<SessionSummary_MetadataEntry> = {
+  encode(message: SessionSummary_MetadataEntry, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.key !== "") {
+      writer.uint32(10).string(message.key);
+    }
+    if (message.value !== "") {
+      writer.uint32(18).string(message.value);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SessionSummary_MetadataEntry {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSessionSummary_MetadataEntry();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.key = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.value = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SessionSummary_MetadataEntry {
+    return {
+      key: isSet(object.key) ? globalThis.String(object.key) : "",
+      value: isSet(object.value) ? globalThis.String(object.value) : "",
+    };
+  },
+
+  toJSON(message: SessionSummary_MetadataEntry): unknown {
+    const obj: any = {};
+    if (message.key !== "") {
+      obj.key = message.key;
+    }
+    if (message.value !== "") {
+      obj.value = message.value;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SessionSummary_MetadataEntry>, I>>(base?: I): SessionSummary_MetadataEntry {
+    return SessionSummary_MetadataEntry.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<SessionSummary_MetadataEntry>, I>>(object: I): SessionSummary_MetadataEntry {
+    const message = createBaseSessionSummary_MetadataEntry();
+    message.key = object.key ?? "";
+    message.value = object.value ?? "";
+    return message;
+  },
+};
+
+function createBaseSessionStateRequest(): SessionStateRequest {
+  return { sessionId: "" };
+}
+
+export const SessionStateRequest: MessageFns<SessionStateRequest> = {
+  encode(message: SessionStateRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sessionId !== "") {
+      writer.uint32(10).string(message.sessionId);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SessionStateRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSessionStateRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SessionStateRequest {
+    return {
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : "",
+    };
+  },
+
+  toJSON(message: SessionStateRequest): unknown {
+    const obj: any = {};
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SessionStateRequest>, I>>(base?: I): SessionStateRequest {
+    return SessionStateRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<SessionStateRequest>, I>>(object: I): SessionStateRequest {
+    const message = createBaseSessionStateRequest();
+    message.sessionId = object.sessionId ?? "";
+    return message;
+  },
+};
+
+function createBaseUpdateSessionMetadataRequest(): UpdateSessionMetadataRequest {
+  return { sessionId: "", metadata: {} };
+}
+
+export const UpdateSessionMetadataRequest: MessageFns<UpdateSessionMetadataRequest> = {
+  encode(message: UpdateSessionMetadataRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sessionId !== "") {
+      writer.uint32(10).string(message.sessionId);
+    }
+    globalThis.Object.entries(message.metadata).forEach(([key, value]: [string, string]) => {
+      UpdateSessionMetadataRequest_MetadataEntry.encode({ key: key as any, value }, writer.uint32(18).fork()).join();
+    });
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): UpdateSessionMetadataRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseUpdateSessionMetadataRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          const entry2 = UpdateSessionMetadataRequest_MetadataEntry.decode(reader, reader.uint32());
+          if (entry2.value !== undefined) {
+            message.metadata[entry2.key] = entry2.value;
+          }
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): UpdateSessionMetadataRequest {
+    return {
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : "",
+      metadata: isObject(object.metadata)
+        ? (globalThis.Object.entries(object.metadata) as [string, any][]).reduce(
+          (acc: { [key: string]: string }, [key, value]: [string, any]) => {
+            acc[key] = globalThis.String(value);
+            return acc;
+          },
+          {},
+        )
+        : {},
+    };
+  },
+
+  toJSON(message: UpdateSessionMetadataRequest): unknown {
+    const obj: any = {};
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
+    }
+    if (message.metadata) {
+      const entries = globalThis.Object.entries(message.metadata) as [string, string][];
+      if (entries.length > 0) {
+        obj.metadata = {};
+        entries.forEach(([k, v]) => {
+          obj.metadata[k] = v;
+        });
+      }
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<UpdateSessionMetadataRequest>, I>>(base?: I): UpdateSessionMetadataRequest {
+    return UpdateSessionMetadataRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<UpdateSessionMetadataRequest>, I>>(object: I): UpdateSessionMetadataRequest {
+    const message = createBaseUpdateSessionMetadataRequest();
+    message.sessionId = object.sessionId ?? "";
+    message.metadata = (globalThis.Object.entries(object.metadata ?? {}) as [string, string][]).reduce(
+      (acc: { [key: string]: string }, [key, value]: [string, string]) => {
+        if (value !== undefined) {
+          acc[key] = globalThis.String(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    return message;
+  },
+};
+
+function createBaseUpdateSessionMetadataRequest_MetadataEntry(): UpdateSessionMetadataRequest_MetadataEntry {
+  return { key: "", value: "" };
+}
+
+export const UpdateSessionMetadataRequest_MetadataEntry: MessageFns<UpdateSessionMetadataRequest_MetadataEntry> = {
+  encode(message: UpdateSessionMetadataRequest_MetadataEntry, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.key !== "") {
+      writer.uint32(10).string(message.key);
+    }
+    if (message.value !== "") {
+      writer.uint32(18).string(message.value);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): UpdateSessionMetadataRequest_MetadataEntry {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseUpdateSessionMetadataRequest_MetadataEntry();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.key = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.value = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): UpdateSessionMetadataRequest_MetadataEntry {
+    return {
+      key: isSet(object.key) ? globalThis.String(object.key) : "",
+      value: isSet(object.value) ? globalThis.String(object.value) : "",
+    };
+  },
+
+  toJSON(message: UpdateSessionMetadataRequest_MetadataEntry): unknown {
+    const obj: any = {};
+    if (message.key !== "") {
+      obj.key = message.key;
+    }
+    if (message.value !== "") {
+      obj.value = message.value;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<UpdateSessionMetadataRequest_MetadataEntry>, I>>(
+    base?: I,
+  ): UpdateSessionMetadataRequest_MetadataEntry {
+    return UpdateSessionMetadataRequest_MetadataEntry.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<UpdateSessionMetadataRequest_MetadataEntry>, I>>(
+    object: I,
+  ): UpdateSessionMetadataRequest_MetadataEntry {
+    const message = createBaseUpdateSessionMetadataRequest_MetadataEntry();
+    message.key = object.key ?? "";
+    message.value = object.value ?? "";
     return message;
   },
 };
@@ -5344,6 +5731,10 @@ export type DeepPartial<T> = T extends Builtin ? T
 type KeysOfUnion<T> = T extends T ? keyof T : never;
 export type Exact<P, I extends P> = P extends Builtin ? P
   : P & { [K in keyof P]: Exact<P[K], I[K]> } & { [K in Exclude<keyof I, KeysOfUnion<P>>]: never };
+
+function isObject(value: any): boolean {
+  return typeof value === "object" && value !== null;
+}
 
 function isSet(value: any): boolean {
   return value !== null && value !== undefined;

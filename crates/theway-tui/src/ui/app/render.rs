@@ -133,6 +133,7 @@ impl App {
                 &self.latest.dags,
                 &self.dag_meters,
                 self.dag_tick,
+                &self.theme.dag_band,
             );
         }
 

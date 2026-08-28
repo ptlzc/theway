@@ -17,7 +17,7 @@ impl App {
         if width > used {
             text.push_str(&"─".repeat(width - used));
         }
-        Paragraph::new(Line::styled(text, Style::default().fg(Color::DarkGray)))
+        Paragraph::new(Line::styled(text, Style::default().fg(self.theme.statusbar.fg)))
     }
 
     /// Busy band: one rotating rainbow Braille glyph followed by one
@@ -41,11 +41,12 @@ impl App {
         }
         let label_x = track_x.saturating_add(3);
         if label_x < area.right() {
+            let band = self.theme.statusbar;
             let mut spans = vec![
-                Span::styled("working", Style::default().fg(Color::Gray)),
+                Span::styled("working", Style::default().fg(band.busy)),
                 Span::styled(
                     format!(" {}", self.elapsed_label()),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(band.fg),
                 ),
             ];
             let session_usage = &self.latest.session_usage;
@@ -64,18 +65,18 @@ impl App {
             };
             spans.push(Span::styled(
                 format!(" · {stats}"),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(band.fg),
             ));
             if self.latest.queued_count > 0 {
                 spans.push(Span::styled(
                     format!(" · {} queued", self.latest.queued_count),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(band.fg),
                 ));
             }
             if !self.follow {
                 spans.push(Span::styled(
                     " · ↑scrolled",
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(band.fg),
                 ));
             }
             let line = Line::from(spans);
