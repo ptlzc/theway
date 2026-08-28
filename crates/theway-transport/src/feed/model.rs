@@ -85,8 +85,24 @@ pub fn wrap_str(text: &str, width: usize) -> Vec<String> {
 }
 
 pub fn should_separate(previous: Option<&Block>, current: &Block, has_output: bool) -> bool {
+    should_separate_with(previous, current, has_output, false)
+}
+
+/// `should_separate` with a `separate_all` override: when set, EVERY adjacent
+/// block pair gets a gap (tool→tool, assistant→tool, tool→assistant, …), not
+/// just the user-message boundaries. The TUI themes this via `[feed]
+/// separate_all`; the daemon's plain-text projection can opt in per cache.
+pub fn should_separate_with(
+    previous: Option<&Block>,
+    current: &Block,
+    has_output: bool,
+    separate_all: bool,
+) -> bool {
     if !has_output {
         return false;
+    }
+    if separate_all {
+        return true;
     }
     matches!(
         (previous, current),

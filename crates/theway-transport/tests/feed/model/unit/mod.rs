@@ -52,6 +52,65 @@
     }
 
     #[test]
+    fn should_separate_only_gaps_user_boundaries_by_default() {
+        let user = Block::User {
+            text: "hi".into(),
+            timestamp: None,
+        };
+        let assistant = Block::Assistant {
+            text: "yo".into(),
+            timestamp: None,
+        };
+        let tool = Block::Tool {
+            name: "bash".into(),
+            args: "".into(),
+            timestamp: None,
+        };
+        let result = Block::ToolResult {
+            tool_call_id: "t".into(),
+            lines: vec!["out".into()],
+            is_error: false,
+            timestamp: None,
+        };
+        assert!(should_separate(None, &user, true));
+        assert!(should_separate(Some(&assistant), &user, true));
+        assert!(should_separate(Some(&user), &assistant, true));
+        assert!(should_separate(Some(&user), &tool, true));
+        // Non-user boundaries are flush by default.
+        assert!(!should_separate(Some(&assistant), &tool, true));
+        assert!(!should_separate(Some(&tool), &tool, true));
+        assert!(!should_separate(Some(&tool), &result, true));
+        assert!(!should_separate(Some(&result), &assistant, true));
+        // No output yet → never a gap.
+        assert!(!should_separate(None, &user, false));
+    }
+
+    #[test]
+    fn should_separate_with_separate_all_gaps_every_pair() {
+        let user = Block::User {
+            text: "hi".into(),
+            timestamp: None,
+        };
+        let assistant = Block::Assistant {
+            text: "yo".into(),
+            timestamp: None,
+        };
+        let tool = Block::Tool {
+            name: "bash".into(),
+            args: "".into(),
+            timestamp: None,
+        };
+        assert!(should_separate_with(None, &user, true, true));
+        assert!(should_separate_with(Some(&assistant), &tool, true, true));
+        assert!(should_separate_with(Some(&tool), &tool, true, true));
+        assert!(should_separate_with(Some(&tool), &assistant, true, true));
+        // Still never before the first row.
+        assert!(!should_separate_with(None, &user, false, true));
+        // And the default path is unchanged.
+        assert!(!should_separate_with(Some(&tool), &assistant, true, false));
+    }
+
+    #[test]
     fn wrap_breaks_on_word_boundaries_and_preserves_indent() {
         let rows = wrap_str("    aaaa bbbb cccc", 10);
         assert_eq!(rows[0], "    aaaa");

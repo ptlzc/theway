@@ -14,7 +14,7 @@ pub mod wire;
 pub use model::{
     Feed, TOOL_OUTPUT_ERROR_HEAD_LINES, TOOL_OUTPUT_ERROR_MAX_LINE_CHARS,
     TOOL_OUTPUT_ERROR_TAIL_LINES, TOOL_OUTPUT_HEAD_LINES, TOOL_OUTPUT_MAX_LINE_CHARS,
-    TOOL_OUTPUT_TAIL_LINES, display_prefix, should_separate, wrap_str,
+    TOOL_OUTPUT_TAIL_LINES, display_prefix, should_separate, should_separate_with, wrap_str,
 };
 pub use plain_cache::{PlainLinesCache, block_fingerprint, trim_feed_to_lines};
 pub use preview::{

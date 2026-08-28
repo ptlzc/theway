@@ -126,6 +126,9 @@ pub struct FeedTheme {
     pub separator: Option<char>,
     /// Color of the separator line.
     pub separator_style: Color,
+    /// When set, EVERY adjacent block pair gets a gap (tool→tool,
+    /// assistant→tool, …), not just the user-message boundaries.
+    pub separate_all: bool,
 }
 
 impl Default for FeedTheme {
@@ -134,6 +137,7 @@ impl Default for FeedTheme {
             gap: 1,
             separator: None,
             separator_style: GRAY_DIM,
+            separate_all: false,
         }
     }
 }
@@ -940,6 +944,12 @@ fn apply_feed_section(
                     "feed.gap: invalid gap {value:?} — keeping the current value"
                 )),
             },
+            "separate_all" => match value.as_bool() {
+                Some(flag) => feed.separate_all = flag,
+                None => warn(&format!(
+                    "feed.separate_all: invalid value {value:?} — keeping the current value"
+                )),
+            },
             _ => {
                 let Some(value) = as_str(&format!("feed.{key}"), value) else {
                     continue;
@@ -1107,6 +1117,31 @@ bg = "#262728"
         assert_eq!(theme.user.bg, d.user.bg);
         assert_eq!(theme.composer.border_unfocused, d.composer.border_unfocused);
         assert_eq!(theme.feed, d.feed);
+    }
+
+    #[test]
+    fn parse_feed_section_applies_gap_separator_and_separate_all() {
+        let theme = Theme::parse(
+            r##"
+[feed]
+gap = 3
+separator = "─"
+separate_all = true
+"##,
+        );
+        assert_eq!(theme.feed.gap, 3);
+        assert_eq!(theme.feed.separator, Some('─'));
+        assert!(theme.feed.separate_all);
+
+        // Defaults when unset.
+        let theme = Theme::parse("");
+        assert_eq!(theme.feed.gap, 1);
+        assert_eq!(theme.feed.separator, None);
+        assert!(!theme.feed.separate_all);
+
+        // Invalid values keep the current value.
+        let theme = Theme::parse("[feed]\nseparate_all = \"yes\"\n");
+        assert!(!theme.feed.separate_all);
     }
 
     #[test]

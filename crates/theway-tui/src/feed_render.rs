@@ -509,7 +509,12 @@ pub fn lines(
     let mut out: Vec<Line<'static>> = Vec::new();
     let mut previous: Option<&Block> = None;
     for block in feed.blocks() {
-        if theway_transport::feed::should_separate(previous, block, !out.is_empty()) {
+        if theway_transport::feed::should_separate_with(
+            previous,
+            block,
+            !out.is_empty(),
+            opts.theme.feed.separate_all,
+        ) {
             push_feed_gap(&mut out, width, &opts.theme.feed);
         }
         out.extend(render_block(block, width, opts));

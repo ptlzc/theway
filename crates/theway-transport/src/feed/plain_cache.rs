@@ -11,7 +11,7 @@
 //! prefix match costing one fingerprint scan and zero re-renders.
 
 use super::model::{Feed, push_plain_paragraphs};
-use super::{Block, Level, should_separate};
+use super::{Block, Level};
 
 /// Content fingerprint of one feed block (fnv-1a over kind + fields). Two
 /// blocks with identical fingerprints render identically for the same width,
@@ -89,6 +89,9 @@ pub struct PlainLinesCache {
     block_starts: Vec<usize>,
     fingerprints: Vec<u64>,
     width: usize,
+    /// When set, every adjacent block pair gets a separator row (not just
+    /// user-message boundaries).
+    separate_all: bool,
     /// Blocks re-rendered by the last `update` (0 = everything was cached).
     pub last_rebuilt: usize,
     /// Absolute row where the last rebuild began. Replacing the authoritative
@@ -103,9 +106,18 @@ impl PlainLinesCache {
             block_starts: Vec::new(),
             fingerprints: Vec::new(),
             width: width.max(1),
+            separate_all: false,
             last_rebuilt: 0,
             last_rebuilt_from_row: 0,
         }
+    }
+
+    /// Opt into separating every adjacent block pair (not just user-message
+    /// boundaries) — mirrors the TUI's `[feed] separate_all` theme flag for
+    /// the daemon's plain-text projection.
+    pub fn with_separate_all(mut self, separate_all: bool) -> Self {
+        self.separate_all = separate_all;
+        self
     }
 
     /// Cached rows (absolute row space; `feed_lines_base` = the count of rows
@@ -185,7 +197,12 @@ impl PlainLinesCache {
         let mut previous = first_dirty.checked_sub(1).map(|index| &blocks[index]);
         for block in blocks.iter().skip(first_dirty) {
             self.block_starts.push(self.rows.len());
-            if should_separate(previous, block, !self.rows.is_empty()) {
+            if super::should_separate_with(
+                previous,
+                block,
+                !self.rows.is_empty(),
+                self.separate_all,
+            ) {
                 self.rows.push(String::new());
             }
             match block {
@@ -498,5 +515,27 @@ mod tests {
         cache.update_from_dirty(&shorter, 80, None);
         assert_eq!(cache.last_rebuilt, 0);
         assert_eq!(cache.rows().iter().filter(|r| r.contains("two")).count(), 0);
+    }
+
+    #[test]
+    fn separate_all_gaps_every_block_pair() {
+        let feed = feed_with(&[user("one"), assistant("two"), plain("three")]);
+        let mut cache = PlainLinesCache::new(80);
+        cache.update(&feed, 80);
+        // Default: user→assistant gap, assistant→plain flush.
+        let rows = cache.rows().to_vec();
+        assert!(rows[1].is_empty(), "{rows:?}");
+        assert!(
+            !rows[3].is_empty(),
+            "flush between assistant and plain: {rows:?}"
+        );
+
+        // separate_all: every adjacent pair gets a blank row.
+        let mut cache = PlainLinesCache::new(80).with_separate_all(true);
+        cache.update(&feed, 80);
+        let rows = cache.rows();
+        let blanks = rows.iter().filter(|r| r.is_empty()).count();
+        assert_eq!(blanks, 2, "{rows:?}");
+        assert!(rows[3].is_empty(), "{rows:?}");
     }
 }

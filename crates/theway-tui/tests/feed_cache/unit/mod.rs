@@ -242,6 +242,96 @@
         assert_eq!(rows[4].trim_end(), "\u{276f} third");
     }
 
+    #[test]
+    fn feed_separate_all_gaps_every_block_pair() {
+        let feed = feed_with(&[
+            user("hello"),
+            assistant("world"),
+            WireFeedBlock::Tool {
+                name: "bash".into(),
+                args: " ls".into(),
+                timestamp: None,
+            },
+            user("third"),
+        ]);
+        let mut cache = FeedRenderCache::new();
+        let opts = FeedRenderOptions::default();
+        cache.update(&feed, 40, &opts, 1000);
+        // Default rhythm: only user boundaries get a gap (user→assistant,
+        // tool→user); assistant→tool stays flush.
+        let text = flat(cache.lines());
+        let rows: Vec<&str> = text.lines().collect();
+        assert_eq!(rows[0].trim_end(), "\u{276f} hello");
+        assert_eq!(rows[1], "", "user→assistant gap");
+        assert_eq!(rows[2], "world");
+        assert!(rows[3].contains("bash"), "assistant→tool flush: {rows:?}");
+        assert_eq!(rows[4], "", "tool→user gap");
+        assert_eq!(rows[5].trim_end(), "\u{276f} third");
+
+        // separate_all: every adjacent pair gets a gap.
+        let mut opts = FeedRenderOptions::default();
+        opts.theme.feed.separate_all = true;
+        cache.update(&feed, 40, &opts, 1000);
+        assert_eq!(cache.last_rebuilt, 4, "theme change → full rebuild");
+        let text = flat(cache.lines());
+        let rows: Vec<&str> = text.lines().collect();
+        assert_eq!(rows[0].trim_end(), "\u{276f} hello");
+        assert_eq!(rows[1], "", "user→assistant gap");
+        assert_eq!(rows[2], "world");
+        assert_eq!(rows[3], "", "assistant→tool gap");
+        assert!(rows[4].contains("bash"), "{rows:?}");
+        assert_eq!(rows[5], "", "tool→user gap");
+        assert_eq!(rows[6].trim_end(), "\u{276f} third");
+
+        // Appending still separates the new tail under separate_all.
+        let feed = feed_with(&[
+            user("hello"),
+            assistant("world"),
+            WireFeedBlock::Tool {
+                name: "bash".into(),
+                args: " ls".into(),
+                timestamp: None,
+            },
+            user("third"),
+            assistant("done"),
+        ]);
+        cache.update(&feed, 40, &opts, 1000);
+        assert_eq!(cache.last_rebuilt, 1);
+        let text = flat(cache.lines());
+        let rows: Vec<&str> = text.lines().collect();
+        assert_eq!(rows[6].trim_end(), "\u{276f} third");
+        assert_eq!(rows[7], "", "user→assistant gap on append");
+        assert_eq!(rows[8], "done");
+    }
+
+    #[test]
+    fn streaming_append_gaps_user_boundary_by_default() {
+        // Regression: an appended assistant block after a user block takes the
+        // streaming path; its leading gap must be pushed on the first frame.
+        let feed = feed_with(&[user("hello"), assistant("wor")]);
+        let mut cache = FeedRenderCache::new();
+        let opts = FeedRenderOptions::default();
+        cache.update(&feed, 40, &opts, 1000);
+        // Streaming continues the last block.
+        let feed = feed_with(&[user("hello"), assistant("world")]);
+        cache.update(&feed, 40, &opts, 1000);
+        let text = flat(cache.lines());
+        let rows: Vec<&str> = text.lines().collect();
+        assert_eq!(rows[0].trim_end(), "\u{276f} hello");
+        assert_eq!(rows[1], "", "user→assistant gap under streaming append");
+        assert_eq!(rows[2], "world");
+
+        // A brand-new assistant block after a user block also gets the gap.
+        // Layout: ❯hello / "" / world / "" / ❯third / "" / x
+        let feed = feed_with(&[user("hello"), assistant("world"), user("third"), assistant("x")]);
+        cache.update(&feed, 40, &opts, 1000);
+        let text = flat(cache.lines());
+        let rows: Vec<&str> = text.lines().collect();
+        assert_eq!(rows[4].trim_end(), "\u{276f} third");
+        assert_eq!(rows[5], "", "new streaming block got its gap");
+        assert_eq!(rows[6], "x");
+    }
+
     // ── v2 block frame (#31): margins/borders through the cache ──────────
 
     #[test]
@@ -282,3 +372,4 @@
         assert_eq!(rows[3], "─".repeat(40), "frozen border intact");
         assert!(rows[6].trim_end().ends_with("third"), "{rows:?}");
     }
+

@@ -17,7 +17,7 @@
 
 use ratatui::text::Line;
 
-use theway_transport::feed::{Block, Feed, block_fingerprint, should_separate};
+use theway_transport::feed::{Block, Feed, block_fingerprint, should_separate_with};
 
 use crate::feed_render::{self, FeedRenderOptions, ThinkingMode};
 
@@ -173,7 +173,8 @@ impl FeedRenderCache {
                 && let Some(entry) = entry
                 && text.len().saturating_sub(entry.rebase_source_len) < REBASE_BYTES
             {
-                self.stream_block(first_dirty, cut, entry, block, text, width);
+                let previous = first_dirty.checked_sub(1).map(|index| &blocks[index]);
+                self.stream_block(first_dirty, cut, entry, block, previous, text, width);
                 return;
             }
         }
@@ -188,7 +189,12 @@ impl FeedRenderCache {
         let mut previous = first_dirty.checked_sub(1).map(|index| &blocks[index]);
         for block in blocks.iter().skip(first_dirty) {
             let range_start = self.lines.len();
-            if should_separate(previous, block, !self.lines.is_empty()) {
+            if should_separate_with(
+                previous,
+                block,
+                !self.lines.is_empty(),
+                opts.theme.feed.separate_all,
+            ) {
                 feed_render::push_feed_gap(&mut self.lines, width, &opts.theme.feed);
             }
             self.lines
@@ -216,12 +222,27 @@ impl FeedRenderCache {
     fn stream_block(
         &mut self,
         block_index: usize,
-        cut: usize,
+        mut cut: usize,
         mut entry: StreamingEntry,
         block: &Block,
+        previous: Option<&Block>,
         text: &str,
         width: usize,
     ) {
+        // First streaming frame of this block (fresh entry): the caller's
+        // `cut` is either the pre-gap line count (brand-new block, one-shot
+        // semantics) or the block range start (one-shot → streaming switch,
+        // where the range already contains its leading gap). Either way,
+        // truncate back to `cut` and re-push the gap so the splice keeps the
+        // frozen prefix + gap and only re-renders the block body.
+        let first_stream_frame = entry.source.is_empty();
+        if first_stream_frame
+            && should_separate_with(previous, block, cut > 0, self.opts.theme.feed.separate_all)
+        {
+            self.lines.truncate(cut);
+            feed_render::push_feed_gap(&mut self.lines, width, &self.opts.theme.feed);
+            cut = self.lines.len();
+        }
         let delta = &text[entry.source.len()..];
         entry.source.push_str(delta);
         match &mut entry.state {
