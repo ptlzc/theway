@@ -51,6 +51,52 @@ impl TurnHost {
         }
     }
 
+    /// Route a message to a non-active session's own queue. The active session
+    /// keeps its existing fast path in [`Self::submit_web_text`]; this method
+    /// ensures a runtime exists for `session_id` and enqueues without requiring
+    /// a SwitchSession first.
+    async fn submit_web_text_for_session(
+        &mut self,
+        session_id: &str,
+        text: String,
+        images: Vec<WirePromptImage>,
+        interrupt: bool,
+    ) {
+        let trimmed = text.trim().to_string();
+        if trimmed.is_empty() && images.is_empty() {
+            return;
+        }
+        let loaded_images = match load_web_prompt_images(&images) {
+            Ok(images) => images,
+            Err(e) => {
+                self.error_line(format!("pasted image: {e}"));
+                return;
+            }
+        };
+        if self.ensure_session_runtime(session_id).await.is_err() {
+            self.error_line(format!("send_message: no session runtime for {session_id}"));
+            return;
+        }
+        let Some(session) = self.sessions.get_mut(session_id) else {
+            return;
+        };
+        if !loaded_images.is_empty() && !session.kernel.current_model_accepts_images() {
+            return;
+        }
+        let display = prompt_display(&trimmed, loaded_images.len());
+        let prompt_text = commands::attach_skill_prompt(trimmed, None);
+        if interrupt {
+            session.queue.clear();
+        }
+        session
+            .queue
+            .push_back(QueuedTurn::UserPrompt {
+                display,
+                prompt: prompt_text,
+                images: loaded_images,
+            });
+    }
+
     async fn dispatch_web_slash(&mut self, input: &str, turn: &mut TurnState) {
         let outcome = {
             let ctx = CommandCtx {

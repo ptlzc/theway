@@ -72,6 +72,7 @@ pub struct AppSessionOps {
     dag_engine: Arc<DagEngine>,
     current: Arc<Mutex<CurrentSessionState>>,
     session_execution: SessionExecutionRegistry,
+    metadata: Arc<Mutex<HashMap<String, HashMap<String, String>>>>,
 }
 
 impl AppSessionOps {
@@ -86,6 +87,7 @@ impl AppSessionOps {
             dag_engine,
             current,
             session_execution,
+            metadata: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -107,6 +109,12 @@ impl SessionOps for AppSessionOps {
                 .count() as u32;
 
             let is_current = current.session_id == record.id;
+            let metadata = self
+                .metadata
+                .lock()
+                .get(&record.id)
+                .cloned()
+                .unwrap_or_default();
             summaries.push(SessionSummary {
                 session_id: record.id,
                 name: record.name.unwrap_or_default(),
@@ -122,7 +130,7 @@ impl SessionOps for AppSessionOps {
                 active_graph_count,
                 busy: is_current && current.busy,
                 preview: record.preview,
-                metadata: HashMap::new(),
+                metadata,
             });
         }
         Ok(summaries)
@@ -131,7 +139,7 @@ impl SessionOps for AppSessionOps {
     async fn create(
         &self,
         session_id: Option<&str>,
-        _metadata: &HashMap<String, String>,
+        metadata: &HashMap<String, String>,
     ) -> Result<String> {
         // New sessions record the daemon work_dir so activation can resolve the
         // matching execution context.
@@ -148,14 +156,18 @@ impl SessionOps for AppSessionOps {
             .create_with_id(std::path::Path::new(&cwd), session_id)
             .await?;
         let meta = session.get_metadata_json().await?;
-        Ok(meta
+        let id = meta
             .get("id")
             .and_then(|v| v.as_str())
             .unwrap_or_default()
-            .to_string())
+            .to_string();
+        if !metadata.is_empty() {
+            self.metadata.lock().insert(id.clone(), metadata.clone());
+        }
+        Ok(id)
     }
 
-    async fn update_metadata(&self, id: &str, _metadata: &HashMap<String, String>) -> Result<()> {
+    async fn update_metadata(&self, id: &str, metadata: &HashMap<String, String>) -> Result<()> {
         let session = self
             .repo
             .open(id)
@@ -164,6 +176,9 @@ impl SessionOps for AppSessionOps {
         // Metadata persistence is part of the SessionRegistry work; validate
         // that the session exists so the RPC surfaces a NotFound early.
         let _ = session;
+        let mut all = self.metadata.lock();
+        let entry = all.entry(id.to_string()).or_default();
+        entry.extend(metadata.iter().map(|(k, v)| (k.clone(), v.clone())));
         Ok(())
     }
 
@@ -213,6 +228,7 @@ impl SessionOps for AppSessionOps {
         // Credentials are memory-only and session-scoped; deleting the session
         // must also drop its zeroizing secrets and execution context.
         self.session_execution.remove(&session_id);
+        self.metadata.lock().remove(&session_id);
         Ok(Vec::new())
     }
 }
@@ -380,5 +396,100 @@ mod tests {
         let active = ops.delete(&id).await.unwrap();
         assert!(active.is_empty(), "aborted run must not block delete");
         assert!(ops.list().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn create_with_custom_id_and_metadata_round_trips_through_list() {
+        let dir = tempdir().unwrap();
+        let repo = Arc::new(SqliteSessionRepo::new(dir.path()));
+        let (ops, _current) = ops(repo, "current");
+
+        let mut metadata = HashMap::new();
+        metadata.insert("tenant".to_string(), "acme".to_string());
+        metadata.insert("source".to_string(), "workmate".to_string());
+
+        let id = ops
+            .create(Some("custom-session"), &metadata)
+            .await
+            .unwrap();
+        assert_eq!(id, "custom-session");
+
+        let summaries = ops.list().await.unwrap();
+        let summary = summaries
+            .iter()
+            .find(|s| s.session_id == "custom-session")
+            .expect("custom session must be listed");
+        assert_eq!(
+            summary.metadata.get("tenant").map(String::as_str),
+            Some("acme")
+        );
+        assert_eq!(
+            summary.metadata.get("source").map(String::as_str),
+            Some("workmate")
+        );
+    }
+
+    #[tokio::test]
+    async fn create_with_duplicate_custom_id_returns_already_exists() {
+        let dir = tempdir().unwrap();
+        let repo = Arc::new(SqliteSessionRepo::new(dir.path()));
+        let (ops, _current) = ops(repo, "current");
+
+        ops.create(Some("dup"), &HashMap::new()).await.unwrap();
+        let err = ops
+            .create(Some("dup"), &HashMap::new())
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.to_lowercase().contains("already exists") || err.contains("exists"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_metadata_merges_and_appears_in_list() {
+        let dir = tempdir().unwrap();
+        let repo = Arc::new(SqliteSessionRepo::new(dir.path()));
+        let (ops, _current) = ops(repo, "current");
+
+        let mut initial = HashMap::new();
+        initial.insert("tenant".to_string(), "acme".to_string());
+        let id = ops.create(Some("meta-session"), &initial).await.unwrap();
+
+        let mut update = HashMap::new();
+        update.insert("env".to_string(), "prod".to_string());
+        update.insert("tenant".to_string(), "globex".to_string());
+        ops.update_metadata(&id, &update).await.unwrap();
+
+        let summary = ops
+            .list()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|s| s.session_id == id)
+            .unwrap();
+        assert_eq!(
+            summary.metadata.get("tenant").map(String::as_str),
+            Some("globex")
+        );
+        assert_eq!(
+            summary.metadata.get("env").map(String::as_str),
+            Some("prod")
+        );
+    }
+
+    #[tokio::test]
+    async fn update_metadata_unknown_session_returns_not_found() {
+        let dir = tempdir().unwrap();
+        let repo = Arc::new(SqliteSessionRepo::new(dir.path()));
+        let (ops, _current) = ops(repo, "current");
+
+        let err = ops
+            .update_metadata("missing", &HashMap::new())
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("no session matches"), "{err}");
     }
 }

@@ -1,4 +1,72 @@
 impl TurnHost {
+    /// Ensure a session runtime exists for `id`, building it through the active
+    /// session's factory when needed. Parked runtimes are stored in the registry;
+    /// the active session is always present.
+    async fn ensure_session_runtime(&mut self, id: &str) -> Result<(), String> {
+        if id == self.session.id || self.sessions.contains(id) {
+            return Ok(());
+        }
+        let runtime = (self.session.factory)(id.to_string())
+            .await
+            .map_err(|e| format!("build runtime for session {id}: {e:#}"))?;
+        let state = SessionRuntimeState::from_runtime(
+            runtime,
+            self.session.factory.clone(),
+            self.session.repository.clone(),
+            self.session.shared_state.clone(),
+            self.session.retry.clone(),
+            self.session.log_path.clone(),
+        );
+        self.sessions.insert(state);
+        Ok(())
+    }
+
+    async fn set_model_for_session(&mut self, session_id: &str, spec: &str) -> bool {
+        if session_id == self.session.id {
+            return self.set_model_from_spec(spec).await;
+        }
+        if self.ensure_session_runtime(session_id).await.is_err() {
+            return false;
+        }
+        let Some(incoming) = self.sessions.remove(session_id) else {
+            return false;
+        };
+        let old = std::mem::replace(&mut self.session, incoming);
+        let ok = self.set_model_from_spec(spec).await;
+        let restored = std::mem::replace(&mut self.session, old);
+        self.sessions.insert(restored);
+        ok
+    }
+
+    async fn set_thinking_for_session(&mut self, session_id: &str, level: &str) -> bool {
+        if session_id == self.session.id {
+            return self.set_thinking_level(level).await;
+        }
+        if self.ensure_session_runtime(session_id).await.is_err() {
+            return false;
+        }
+        let Some(incoming) = self.sessions.remove(session_id) else {
+            return false;
+        };
+        let old = std::mem::replace(&mut self.session, incoming);
+        let ok = self.set_thinking_level(level).await;
+        let restored = std::mem::replace(&mut self.session, old);
+        self.sessions.insert(restored);
+        ok
+    }
+
+    fn cancel_session(&mut self, session_id: &str) {
+        if session_id == self.session.id {
+            // Active cancellation needs the event-loop turn; handled by caller
+            // through `request_abort(turn)`.
+            return;
+        }
+        if let Some(session) = self.sessions.get_mut(session_id) {
+            session.kernel.abort();
+            session.queue.clear();
+        }
+    }
+
     fn apply_feed_update(&mut self, update: FeedUpdate) -> bool {
         let metadata_dirty = matches!(
             &update,
@@ -163,18 +231,33 @@ impl TurnHost {
     }
 
     async fn switch_session(&mut self, id: String) -> Result<()> {
-        let previous = self.session.kernel.harness().clone();
-        previous
-            .before_session_switch(&id)
-            .await
-            .with_context(|| format!("extension gate rejected session {id}"))?;
-        let runtime = (self.session.factory)(id.clone())
-            .await
-            .with_context(|| format!("build runtime for session {id}"))?;
-        previous.shutdown_runtime_extensions().await;
-        self.session.id = runtime.session_id.clone();
-        self.session.cwd = runtime.cwd.clone();
-        self.session.kernel.replace_runtime(runtime);
+        // Fast path: a live runtime is already parked in the registry. Swap it
+        // into the active slot and park the previous active session without
+        // rebuilding (preserves per-session queues and state).
+        if let Some(incoming) = self.sessions.remove(&id) {
+            let old = std::mem::replace(&mut self.session, incoming);
+            self.sessions.insert(old);
+        } else {
+            let previous = self.session.kernel.harness().clone();
+            previous
+                .before_session_switch(&id)
+                .await
+                .with_context(|| format!("extension gate rejected session {id}"))?;
+            let runtime = (self.session.factory)(id.clone())
+                .await
+                .with_context(|| format!("build runtime for session {id}"))?;
+            previous.shutdown_runtime_extensions().await;
+            let new_state = SessionRuntimeState::from_runtime(
+                runtime,
+                self.session.factory.clone(),
+                self.session.repository.clone(),
+                self.session.shared_state.clone(),
+                self.session.retry.clone(),
+                self.session.log_path.clone(),
+            );
+            let old = std::mem::replace(&mut self.session, new_state);
+            self.sessions.insert(old);
+        }
         self.session
             .kernel
             .harness()
@@ -203,19 +286,22 @@ impl TurnHost {
         let previous = self.session.kernel.harness().clone();
         previous.shutdown_runtime_extensions().await;
         let crate::session_activation::SessionActivation {
-            session_id,
             runtime,
             repository,
             context,
             ..
         } = activation;
         let cwd = runtime.cwd.clone();
-        let tool_count = runtime.tool_names.len();
-        self.session.id = session_id;
-        self.session.cwd = cwd.clone();
-        self.session.tool_count = tool_count;
-        self.session.repository = repository;
-        self.session.kernel.replace_runtime(runtime);
+        let new_state = SessionRuntimeState::from_runtime(
+            runtime,
+            self.session.factory.clone(),
+            repository,
+            self.session.shared_state.clone(),
+            self.session.retry.clone(),
+            self.session.log_path.clone(),
+        );
+        let old = std::mem::replace(&mut self.session, new_state);
+        self.sessions.insert(old);
         self.runtime.cwd = cwd;
         self.runtime.paths = context.paths.clone();
         self.runtime.registry.set_file_commands(crate::file_commands::scan_file_commands(

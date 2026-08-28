@@ -451,7 +451,8 @@ async fn handle_web_command_routes_abort_and_control_plane_resolve() {
     let host = fixture.host();
 
     let mut turn = sample_turn_with_future();
-    host.handle_web_command(WireCommand::Abort, &mut turn).await;
+    host.handle_web_command(WireCommand::Abort { session_id: "sess-more".into() }, &mut turn)
+        .await;
     assert!(turn.aborted);
 
     let (decision_tx, decision_rx) = oneshot::channel();
@@ -467,7 +468,10 @@ async fn handle_web_command_routes_abort_and_control_plane_resolve() {
         responder: decision_tx,
     });
     host.handle_web_command(
-        WireCommand::ResolveControlPlane { approve: false },
+        WireCommand::ResolveControlPlane {
+            session_id: "sess-more".into(),
+            approve: false,
+        },
         &mut turn,
     )
     .await;
