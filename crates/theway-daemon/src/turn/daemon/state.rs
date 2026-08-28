@@ -66,6 +66,7 @@ impl TurnHost {
         }
         if let Some(session) = self.sessions.get_mut(session_id) {
             session.kernel.abort();
+            session.aborted = true;
             session.queue.clear();
         }
     }
@@ -269,12 +270,18 @@ impl TurnHost {
     }
 
     fn show_control_plane_prompt(&mut self, prompt: PendingControlPlanePrompt) {
-        self.projection.control_plane_prompt = Some(prompt);
-        if let Some(prompt) = &self.projection.control_plane_prompt {
-            self.system_line(format!(
-                "approval required: {} ({})",
-                prompt.request.label, prompt.request.tool_name
-            ));
+        let session_id = prompt.session_id.clone();
+        let label = prompt.request.label.clone();
+        let tool_name = prompt.request.tool_name.clone();
+        if session_id == self.session.id {
+            self.projection.control_plane_prompt = Some(prompt);
+            self.system_line(format!("approval required: {label} ({tool_name})"));
+        } else if let Some(session) = self.sessions.get_mut(&session_id) {
+            session.projection.control_plane_prompt = Some(prompt);
+            session.projection.feed.push_plain_untimed(
+                format!("approval required: {label} ({tool_name})"),
+                Level::System,
+            );
         }
     }
 
@@ -289,11 +296,22 @@ impl TurnHost {
         session_id: &str,
         decision: theway_core::ControlPlanePromptDecision,
     ) {
-        let Some(prompt) = self.projection.control_plane_prompt.take() else {
+        let prompt = if session_id == self.session.id {
+            self.projection.control_plane_prompt.take()
+        } else {
+            self.sessions
+                .get_mut(session_id)
+                .and_then(|session| session.projection.control_plane_prompt.take())
+        };
+        let Some(prompt) = prompt else {
             return;
         };
         if prompt.session_id != session_id {
-            self.projection.control_plane_prompt = Some(prompt);
+            if session_id == self.session.id {
+                self.projection.control_plane_prompt = Some(prompt);
+            } else if let Some(session) = self.sessions.get_mut(session_id) {
+                session.projection.control_plane_prompt = Some(prompt);
+            }
             return;
         }
         let outcome = match decision {
@@ -301,10 +319,15 @@ impl TurnHost {
             theway_core::ControlPlanePromptDecision::Deny { .. } => "denied",
             theway_core::ControlPlanePromptDecision::Timeout => "timed out",
         };
-        self.system_line(format!(
-            "permission {outcome}: {}",
-            prompt.request.tool_name
-        ));
+        let line = format!("permission {outcome}: {}", prompt.request.tool_name);
+        if session_id == self.session.id {
+            self.system_line(line);
+        } else if let Some(session) = self.sessions.get_mut(session_id) {
+            session
+                .projection
+                .feed
+                .push_plain_untimed(line, Level::System);
+        }
         prompt.resolve(decision);
     }
 }

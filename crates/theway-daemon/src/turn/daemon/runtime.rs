@@ -317,7 +317,7 @@ impl TurnHost {
                         Some(rx) => rx.recv().await,
                         None => None,
                     }
-                }, if self.projection.control_plane_prompt.is_none() && control_plane_prompt_rx.is_some() => {
+                }, if control_plane_prompt_rx.is_some() => {
                     self.show_control_plane_prompt(prompt);
                     dirty = true;
                     metadata_dirty = true;
