@@ -144,10 +144,16 @@ async fn run_transport_loop_drains_multiple_queued_feed_updates() {
     // Queue two feed updates before the loop starts so the `recv` branch must
     // drain the second one with `try_recv`.
     built.feed_tx
-        .send(FeedUpdate::TriggerPollStatus(poll_status("trace-first")))
+        .send((
+            "sess-final".to_string(),
+            FeedUpdate::TriggerPollStatus(poll_status("trace-first")),
+        ))
         .unwrap();
     built.feed_tx
-        .send(FeedUpdate::TriggerPollStatus(poll_status("trace-second")))
+        .send((
+            "sess-final".to_string(),
+            FeedUpdate::TriggerPollStatus(poll_status("trace-second")),
+        ))
         .unwrap();
 
     let (mut host, _scratch, _repo) = built.into_parts();

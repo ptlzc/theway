@@ -7,14 +7,18 @@ impl SessionService for GrpcState {
         request: Request<theway_grpc::SessionStateRequest>,
     ) -> Result<Response<SessionState>, Status> {
         let request = request.into_inner();
-        let latest = self.latest.lock();
-        if !request.session_id.is_empty() && latest.session_id != request.session_id {
+        if request.session_id.is_empty() {
+            let latest = self.latest.lock();
+            return Ok(Response::new(session_state(&latest)));
+        }
+        let session_states = self.session_states.lock();
+        let Some(state) = session_states.get(&request.session_id) else {
             return Err(Status::not_found(format!(
                 "session {} is not available",
                 request.session_id
             )));
-        }
-        Ok(Response::new(session_state(&latest)))
+        };
+        Ok(Response::new(session_state(state)))
     }
 
     // ── session resources (session-resource-model; backed by SessionOps) ──

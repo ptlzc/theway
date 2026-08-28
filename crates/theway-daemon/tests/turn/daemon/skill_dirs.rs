@@ -130,7 +130,7 @@ async fn host_with_extras(extras: Vec<PathBuf>) -> (TurnHost, Arc<AtomicU32>, Ve
     let paths = daemon_paths(&home, &base, &work_dir, extras);
 
     let repo_dir = TempDir::new().unwrap();
-    let (feed_tx, feed_rx) = mpsc::unbounded_channel::<FeedUpdate>();
+    let (feed_tx, feed_rx) = mpsc::unbounded_channel::<(String, FeedUpdate)>();
     let (_main_run_tx, main_run_rx) = mpsc::unbounded_channel::<String>();
     let session_factory: SessionFactory = Arc::new(
         |_id: String| -> std::pin::Pin<

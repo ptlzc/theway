@@ -98,7 +98,7 @@ fn daemon_config(
     session_id: &str,
 ) -> (
     DaemonConfig,
-    mpsc::UnboundedSender<FeedUpdate>,
+    mpsc::UnboundedSender<(String, FeedUpdate)>,
     mpsc::UnboundedSender<String>,
 ) {
     let harness = test_harness();
@@ -114,7 +114,7 @@ fn daemon_config(
         extra_skill_dirs: Arc::new(std::sync::RwLock::new(Vec::new())),
     };
 
-    let (feed_tx, feed_rx) = mpsc::unbounded_channel::<FeedUpdate>();
+    let (feed_tx, feed_rx) = mpsc::unbounded_channel::<(String, FeedUpdate)>();
     let (main_run_tx, main_run_rx) = mpsc::unbounded_channel::<String>();
 
     let config = DaemonConfig {

@@ -192,16 +192,20 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     let telemetry = crate::observability::TelemetryHandle::init().await;
     let runtime_observer = telemetry.observer();
     let (feed_tx, feed_rx) =
-        tokio::sync::mpsc::unbounded_channel::<theway_transport::feed::FeedUpdate>();
+        tokio::sync::mpsc::unbounded_channel::<(String, theway_transport::feed::FeedUpdate)>();
 
     let stream_fn = stream_fn_with_auth_store();
     let command_output = {
         let tx = feed_tx.clone();
+        let session_id = session_id.clone();
         crate::commands::CommandOutput::new(move |line| {
-            let _ = tx.send(theway_transport::feed::FeedUpdate::Plain {
-                text: line,
-                level: theway_transport::feed::Level::Output,
-            });
+            let _ = tx.send((
+                session_id.clone(),
+                theway_transport::feed::FeedUpdate::Plain {
+                    text: line,
+                    level: theway_transport::feed::Level::Output,
+                },
+            ));
         })
     };
     let services = DaemonServices::new().with_command_output(command_output);

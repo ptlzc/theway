@@ -15,6 +15,7 @@ pub(crate) fn test_router(latest: WireStatus) -> Router {
         commands: command_tx,
         snapshots: snapshot_tx,
         latest: Arc::new(Mutex::new(latest)),
+        session_states: Arc::new(Mutex::new(std::collections::HashMap::new())),
         completer: SlashCompleter::from_commands(vec!["/help".into(), "/model".into(), "/goal".into()]),
         events: broadcast::channel::<crate::wire::WireAgentEvent>(16).0,
         dag_events: broadcast::channel::<crate::wire::WireDagEvent>(16).0,

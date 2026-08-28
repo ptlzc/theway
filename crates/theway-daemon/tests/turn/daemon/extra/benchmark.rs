@@ -9,10 +9,11 @@ use std::time::Instant;
 async fn synthetic_10k_snapshot_publication_costs_scale_with_delta() {
     let mut fixture = HostFixture::new().await;
     let host = fixture.host();
+    let session_id = host.session.id.clone();
     for index in 0..5_000 {
         host.system_line(format!("history-{index}"));
     }
-    host.apply_feed_update(FeedUpdate::ThinkingDelta("seed".into()));
+    host.apply_feed_update(&session_id, FeedUpdate::ThinkingDelta("seed".into()));
     let thinking_index = 5_000;
     for index in 5_001..10_000 {
         host.system_line(format!("history-{index}"));
@@ -32,22 +33,25 @@ async fn synthetic_10k_snapshot_publication_costs_scale_with_delta() {
     }
     let no_change = started.elapsed() / NO_CHANGE_SAMPLES;
 
-    host.apply_feed_update(FeedUpdate::TextDelta("x".into()));
+    host.apply_feed_update(&session_id, FeedUpdate::TextDelta("x".into()));
     assert!(host.wire_update().apply_to(&mut authoritative));
     const STREAMING_SAMPLES: u32 = 500;
     let started = Instant::now();
     for _ in 0..STREAMING_SAMPLES {
-        host.apply_feed_update(FeedUpdate::TextDelta("x".into()));
+        host.apply_feed_update(&session_id, FeedUpdate::TextDelta("x".into()));
         let update = host.wire_update();
         assert_eq!(update.feed_delta().unwrap().feed_block_patches.len(), 1);
         assert!(update.apply_to(&mut authoritative));
     }
     let streaming = started.elapsed() / STREAMING_SAMPLES;
 
-    host.apply_feed_update(FeedUpdate::ThinkingSummary {
-        block_index: thinking_index,
-        summary: "public summary".into(),
-    });
+    host.apply_feed_update(
+        &session_id,
+        FeedUpdate::ThinkingSummary {
+            block_index: thinking_index,
+            summary: "public summary".into(),
+        },
+    );
     let started = Instant::now();
     let backfill = host.wire_update();
     assert_eq!(backfill.feed_delta().unwrap().feed_block_patches.len(), 1);

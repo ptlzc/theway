@@ -132,6 +132,7 @@ fn grpc_state_with_ops() -> (
             commands: command_tx,
             snapshots: snapshot_tx,
             latest,
+        session_states: Arc::new(Mutex::new(std::collections::HashMap::new())),
             events: event_tx,
             dag_events: dag_event_tx,
             job_ops: Arc::new(TestJobOps::default()),
@@ -163,6 +164,38 @@ async fn get_state_returns_structured_session_state() {
     assert_eq!(state.session_id, "sess-1");
     assert_eq!(state.cwd, "/tmp/theway");
     assert_eq!(state.feed_lines, vec!["ready"]);
+}
+
+#[tokio::test]
+async fn get_state_returns_registered_session_snapshot() {
+    let (state, _command_rx) = grpc_state();
+    let mut other = fixture_snapshot("other-ready");
+    other.session_id = "other-session".into();
+    other.cwd = "/other/cwd".into();
+    other.feed_lines = vec!["other feed".into()];
+    state
+        .session_states
+        .lock()
+        .insert("other-session".into(), other);
+
+    let response = state
+        .get_state(Request::new(theway_grpc::SessionStateRequest {
+            session_id: "other-session".into(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(response.session_id, "other-session");
+    assert_eq!(response.cwd, "/other/cwd");
+    assert_eq!(response.feed_lines, vec!["other feed"]);
+
+    let err = state
+        .get_state(Request::new(theway_grpc::SessionStateRequest {
+            session_id: "missing".into(),
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::NotFound);
 }
 
 fn plain_block(text: &str) -> crate::feed::WireFeedBlock {

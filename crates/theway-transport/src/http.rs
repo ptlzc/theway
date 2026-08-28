@@ -6,6 +6,7 @@
 //! [`crate::wire`]; the channels/state bridging the two sides come from
 //! [`crate::transport::TransportEndpoints`].
 
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, RwLock};
@@ -37,6 +38,8 @@ pub struct HttpState {
     pub commands: mpsc::UnboundedSender<WireCommand>,
     pub snapshots: broadcast::Sender<WireStatusUpdate>,
     pub latest: Arc<Mutex<WireStatus>>,
+    /// Per-session authoritative snapshots, keyed by `session_id`.
+    pub session_states: Arc<Mutex<HashMap<String, WireStatus>>>,
     pub completer: SlashCompleter,
     pub events: broadcast::Sender<WireAgentEvent>,
     /// DAG engine event plane (node_status / run_status), shared with /ws.
@@ -75,6 +78,7 @@ pub async fn run_web(mut app: Box<dyn TransportHost>, options: WebOptions) -> Re
         commands: endpoints.command_tx.clone(),
         snapshots: endpoints.snapshot_tx.clone(),
         latest: endpoints.latest.clone(),
+        session_states: endpoints.session_states.clone(),
         completer: endpoints.completer.clone(),
         events: endpoints.events.clone(),
         dag_events: endpoints.dag_events.clone(),
@@ -255,7 +259,19 @@ pub(crate) async fn dispatch(
         return result;
     }
     match method {
-        "get_state" | "session.get_state" => Ok(serde_json::json!(state.latest.lock().clone())),
+        "get_state" | "session.get_state" => {
+            let session_id = params
+                .and_then(|p| p.get("session_id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            if session_id.is_empty() {
+                Ok(serde_json::json!(state.latest.lock().clone()))
+            } else if let Some(snapshot) = state.session_states.lock().get(session_id) {
+                Ok(serde_json::json!(snapshot))
+            } else {
+                Err((-32004, format!("session {session_id} is not available")))
+            }
+        }
         "ping" => Ok(serde_json::Value::Null),
         "get_node_output" | "graph.get_node_output" => {
             let run_id = param(params, "run_id")?

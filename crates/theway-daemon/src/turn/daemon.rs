@@ -16,6 +16,8 @@ use std::time::Duration;
 use anyhow::{Context as _, Result, bail};
 use async_trait::async_trait;
 use base64::Engine as _;
+use futures::stream::FuturesUnordered;
+use futures::StreamExt as _;
 use parking_lot::Mutex;
 use tokio::sync::{broadcast, mpsc};
 
@@ -24,7 +26,7 @@ use theway_core::SkillSource;
 use theway_core::multiagent::graph::types::DagEvent;
 
 use super::feed::{self, Feed, FeedUpdate, Level, TriggerPollStatus};
-use super::kernel::{QueuedTurn, ReplKernel, TurnState, poll_turn};
+use super::kernel::{QueuedTurn, ReplKernel, TurnFut, TurnState, poll_turn};
 use crate::agent_session::RetrySettings;
 use crate::bug_report;
 use crate::commands::{self, CommandCtx, CommandOutcome, Registry};
@@ -104,10 +106,10 @@ pub(crate) struct DaemonConfig {
     pub(crate) session_id: String,
     pub(crate) log_path: Option<PathBuf>,
     pub(crate) tool_count: usize,
-    pub(crate) feed_rx: mpsc::UnboundedReceiver<FeedUpdate>,
+    pub(crate) feed_rx: mpsc::UnboundedReceiver<(String, FeedUpdate)>,
     /// Loopback sender for feed updates produced inside the host (thinking
     /// summarizer backfill); pairs with `feed_rx`.
-    pub(crate) feed_tx: mpsc::UnboundedSender<FeedUpdate>,
+    pub(crate) feed_tx: mpsc::UnboundedSender<(String, FeedUpdate)>,
     pub(crate) main_run_rx: mpsc::UnboundedReceiver<String>,
     pub(crate) control_plane_prompt_rx: Option<mpsc::UnboundedReceiver<PendingControlPlanePrompt>>,
     pub(crate) dag_engine: Arc<theway_core::multiagent::graph::engine::DagEngine>,
@@ -139,6 +141,13 @@ struct SessionRuntimeState {
     busy: bool,
     queue: VecDeque<QueuedTurn>,
     cumulative_usage: WireContextUsage,
+    /// Per-session transcript projection used while this session is parked.
+    /// The active session's projection lives on `TurnHost::projection` for
+    /// compatibility with the existing transport snapshot path.
+    projection: FeedProjectionState,
+    /// True when a parked session's in-flight turn has been aborted; the
+    /// scheduler suppresses its terminal output until the future completes.
+    aborted: bool,
 }
 
 /// Per-session runtime registry.
@@ -158,6 +167,7 @@ impl SessionRuntimeState {
         repository: Arc<dyn SessionRepository>,
         retry: crate::agent_session::RetrySettings,
         log_path: Option<PathBuf>,
+        projection: FeedProjectionState,
     ) -> Self {
         let mut kernel = ReplKernel::new(runtime.harness, runtime.trigger_executor, retry.clone());
         kernel.set_extension_host(runtime.extension_host);
@@ -176,6 +186,8 @@ impl SessionRuntimeState {
             busy: false,
             queue: VecDeque::new(),
             cumulative_usage: WireContextUsage::default(),
+            projection,
+            aborted: false,
         }
     }
 }
@@ -237,6 +249,8 @@ impl SessionRuntimeState {
             busy: false,
             queue: VecDeque::new(),
             cumulative_usage: WireContextUsage::default(),
+            projection: FeedProjectionState::new(RuntimeCapabilities::default(), None),
+            aborted: false,
         }
     }
 }
@@ -312,6 +326,8 @@ struct RuntimeConfiguration {
     /// before replying to the client.
     latest: Option<Arc<Mutex<WireStatus>>>,
     snapshot_tx: Option<broadcast::Sender<WireStatusUpdate>>,
+    /// Per-session authoritative snapshots shared with transport servers.
+    session_states: Option<Arc<Mutex<HashMap<String, WireStatus>>>>,
 }
 
 struct FeedProjectionState {
@@ -331,11 +347,31 @@ struct FeedProjectionState {
     capabilities: RuntimeCapabilities,
 }
 
+impl FeedProjectionState {
+    fn new(
+        capabilities: RuntimeCapabilities,
+        thinking_summary: Option<super::thinking_summary::ThinkingSummarySettings>,
+    ) -> Self {
+        Self {
+            feed: Feed::new(),
+            plain_lines_cache: theway_transport::feed::PlainLinesCache::new(100),
+            block_versions: Vec::new(),
+            dirty_blocks: BTreeSet::new(),
+            latest_trigger_poll: None,
+            latest_goal: None,
+            thinking_summary,
+            thinking_burst: super::thinking_summary::ThinkingBurst::default(),
+            control_plane_prompt: None,
+            capabilities,
+        }
+    }
+}
+
 struct RuntimeEventInputs {
-    feed_rx: Option<mpsc::UnboundedReceiver<FeedUpdate>>,
+    feed_rx: Option<mpsc::UnboundedReceiver<(String, FeedUpdate)>>,
     /// Loopback sender for feed updates produced inside the host (thinking
     /// summarizer backfill); pairs with `feed_rx`.
-    feed_tx: mpsc::UnboundedSender<FeedUpdate>,
+    feed_tx: mpsc::UnboundedSender<(String, FeedUpdate)>,
     main_run_rx: Option<mpsc::UnboundedReceiver<String>>,
     control_plane_prompt_rx: Option<mpsc::UnboundedReceiver<PendingControlPlanePrompt>>,
 }

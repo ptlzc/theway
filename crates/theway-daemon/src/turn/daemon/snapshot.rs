@@ -1,5 +1,4 @@
 impl TurnHost {
-    #[cfg(test)]
     fn wire_snapshot_for_session(&mut self, id: &str) -> Option<WireStatus> {
         if id == self.session.id {
             return Some(self.wire_snapshot());
@@ -296,16 +295,46 @@ impl TurnHost {
         if metadata_dirty {
             let snapshot = self.wire_snapshot();
             *latest.lock() = snapshot.clone();
+            if let Some(session_states) = &self.runtime.session_states {
+                session_states
+                    .lock()
+                    .insert(snapshot.session_id.clone(), snapshot.clone());
+            }
             let _ = snapshots.send(WireStatusUpdate::full(snapshot));
             return;
         }
         let update = self.wire_update();
         if update.apply_to(&mut latest.lock()) {
+            if let Some(session_states) = &self.runtime.session_states {
+                let session_id = self.session.id.clone();
+                if let Some(existing) = session_states.lock().get_mut(&session_id) {
+                    let _ = update.apply_to(existing);
+                }
+            }
             let _ = snapshots.send(update);
         } else {
             let snapshot = self.wire_snapshot();
             *latest.lock() = snapshot.clone();
+            if let Some(session_states) = &self.runtime.session_states {
+                session_states
+                    .lock()
+                    .insert(snapshot.session_id.clone(), snapshot.clone());
+            }
             let _ = snapshots.send(WireStatusUpdate::full(snapshot));
+        }
+    }
+
+    fn publish_parked_snapshots(&mut self, snapshots: &broadcast::Sender<WireStatusUpdate>) {
+        let ids: Vec<String> = self.sessions.sessions.keys().cloned().collect();
+        for id in ids {
+            if let Some(snapshot) = self.wire_snapshot_for_session(&id) {
+                if let Some(session_states) = &self.runtime.session_states {
+                    session_states
+                        .lock()
+                        .insert(id.clone(), snapshot.clone());
+                }
+                let _ = snapshots.send(WireStatusUpdate::full(snapshot));
+            }
         }
     }
 

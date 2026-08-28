@@ -45,6 +45,7 @@ async fn spawn_state_server() -> (
             tui_max_feed_lines: None,
             extensions: WireExtensionSnapshot::default(),
         })),
+        session_states: Arc::new(Mutex::new(std::collections::HashMap::new())),
         completer: SlashCompleter::from_commands(vec!["/help".into()]),
         events: broadcast::channel::<WireAgentEvent>(16).0,
         dag_events: broadcast::channel::<WireDagEvent>(16).0,

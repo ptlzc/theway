@@ -50,6 +50,7 @@ async fn http_serve_web_healthz_smoke() {
         commands: command_tx,
         snapshots: broadcast::channel(16).0,
         latest: Arc::new(parking_lot::Mutex::new(status())),
+        session_states: Arc::new(Mutex::new(std::collections::HashMap::new())),
         completer: SlashCompleter::from_commands(Vec::new()),
         events: broadcast::channel::<WireAgentEvent>(16).0,
         dag_events: broadcast::channel::<WireDagEvent>(16).0,

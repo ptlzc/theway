@@ -44,10 +44,11 @@ pub struct ThinkingBurst {
 /// possibly spawning a summarizer task. Backfill updates are sent back over
 /// `feed_tx` so the host loop publishes a fresh snapshot.
 pub fn apply(
+    session_id: &str,
     feed: &mut Feed,
     burst: &mut ThinkingBurst,
     settings: Option<&ThinkingSummarySettings>,
-    feed_tx: &mpsc::UnboundedSender<FeedUpdate>,
+    feed_tx: &mpsc::UnboundedSender<(String, FeedUpdate)>,
     update: FeedUpdate,
 ) {
     match update {
@@ -72,14 +73,18 @@ pub fn apply(
                 burst.in_flight += 1;
                 let summarizer = settings.summarizer.clone();
                 let feed_tx = feed_tx.clone();
+                let session_id = session_id.to_string();
                 tokio::spawn(async move {
                     let summary = summarizer(text)
                         .await
                         .unwrap_or_else(|_| "(thinking summary unavailable)".to_string());
-                    let _ = feed_tx.send(FeedUpdate::ThinkingSummary {
-                        block_index: index,
-                        summary,
-                    });
+                    let _ = feed_tx.send((
+                        session_id,
+                        FeedUpdate::ThinkingSummary {
+                            block_index: index,
+                            summary,
+                        },
+                    ));
                 });
             }
         }

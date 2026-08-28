@@ -47,6 +47,7 @@ fn extension_http_state() -> (HttpState, mpsc::UnboundedReceiver<WireCommand>) {
             commands,
             snapshots: broadcast::channel(16).0,
             latest: Arc::new(Mutex::new(latest)),
+        session_states: Arc::new(Mutex::new(std::collections::HashMap::new())),
             completer: SlashCompleter::from_commands(Vec::new()),
             events: broadcast::channel(16).0,
             dag_events: broadcast::channel(16).0,

@@ -32,6 +32,7 @@ fn thinking_delta_opens_burst_and_appends_feed() {
 
     // Act
     apply(
+        "sess-think",
         &mut feed,
         &mut burst,
         None,
@@ -57,6 +58,7 @@ fn thinking_summary_decrements_in_flight_and_backfills_feed() {
 
     // Act
     apply(
+        "sess-think",
         &mut feed,
         &mut burst,
         None,
@@ -81,6 +83,7 @@ async fn closing_update_spawns_summary_and_sends_backfill() {
     let cfg = settings(1, ok_summarizer("sum"));
 
     apply(
+        "sess-think",
         &mut feed,
         &mut burst,
         Some(&cfg),
@@ -90,6 +93,7 @@ async fn closing_update_spawns_summary_and_sends_backfill() {
 
     // Act
     apply(
+        "sess-think",
         &mut feed,
         &mut burst,
         Some(&cfg),
@@ -101,10 +105,11 @@ async fn closing_update_spawns_summary_and_sends_backfill() {
     assert!(!burst.open, "non-thinking update closes the burst");
     assert_eq!(burst.in_flight, 1, "a summarizer task is in flight");
 
-    let msg = tokio::time::timeout(Duration::from_millis(500), feed_rx.recv())
+    let (session_id, msg) = tokio::time::timeout(Duration::from_millis(500), feed_rx.recv())
         .await
         .expect("summary must arrive within timeout")
         .expect("feed channel must stay open");
+    assert_eq!(session_id, "sess-think");
     match msg {
         FeedUpdate::ThinkingSummary {
             block_index,
@@ -125,6 +130,7 @@ async fn closing_update_without_settings_does_not_spawn() {
     let (feed_tx, mut feed_rx) = mpsc::unbounded_channel();
 
     apply(
+        "sess-think",
         &mut feed,
         &mut burst,
         None,
@@ -134,6 +140,7 @@ async fn closing_update_without_settings_does_not_spawn() {
 
     // Act
     apply(
+        "sess-think",
         &mut feed,
         &mut burst,
         None,
@@ -156,6 +163,7 @@ async fn short_burst_does_not_spawn() {
     let cfg = settings(100, ok_summarizer("sum"));
 
     apply(
+        "sess-think",
         &mut feed,
         &mut burst,
         Some(&cfg),
@@ -165,6 +173,7 @@ async fn short_burst_does_not_spawn() {
 
     // Act
     apply(
+        "sess-think",
         &mut feed,
         &mut burst,
         Some(&cfg),
@@ -187,6 +196,7 @@ async fn summarizer_error_sends_fallback_text() {
     let cfg = settings(1, err_summarizer());
 
     apply(
+        "sess-think",
         &mut feed,
         &mut burst,
         Some(&cfg),
@@ -196,6 +206,7 @@ async fn summarizer_error_sends_fallback_text() {
 
     // Act
     apply(
+        "sess-think",
         &mut feed,
         &mut burst,
         Some(&cfg),
@@ -204,7 +215,7 @@ async fn summarizer_error_sends_fallback_text() {
     );
 
     // Assert
-    let msg = tokio::time::timeout(Duration::from_millis(500), feed_rx.recv())
+    let (_, msg) = tokio::time::timeout(Duration::from_millis(500), feed_rx.recv())
         .await
         .expect("fallback summary must arrive within timeout")
         .expect("feed channel must stay open");
@@ -225,6 +236,7 @@ async fn max_in_flight_skips_spawn_until_slot_frees() {
     let cfg = settings(1, ok_summarizer("sum"));
 
     apply(
+        "sess-think",
         &mut feed,
         &mut burst,
         Some(&cfg),
@@ -235,6 +247,7 @@ async fn max_in_flight_skips_spawn_until_slot_frees() {
 
     // Act
     apply(
+        "sess-think",
         &mut feed,
         &mut burst,
         Some(&cfg),

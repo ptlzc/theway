@@ -3,6 +3,7 @@
 //! switch before targeting another session.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use tempfile::TempDir;
 use theway_core::{
@@ -10,11 +11,12 @@ use theway_core::{
 };
 use theway_llm_provider::ModelCost;
 use tokio::sync::{mpsc, oneshot};
+use theway_transport::TransportMode;
 use theway_transport::wire::WireCommand;
 
 use super::super::{
-    DaemonConfig, RuntimeCapabilities, SUPPORTED_APIS, SessionRegistry, SessionRuntimeState,
-    TurnHost, current_model_label,
+    DaemonConfig, FeedProjectionState, RuntimeCapabilities, SUPPORTED_APIS, SessionRegistry,
+    SessionRuntimeState, TurnHost, current_model_label,
 };
 use crate::agent_session::RetrySettings;
 use crate::commands::Registry;
@@ -101,7 +103,7 @@ impl HostFixture {
             work_dir: work_dir.clone(),
             extra_skill_dirs: Arc::new(std::sync::RwLock::new(Vec::new())),
         };
-        let (feed_tx, feed_rx) = mpsc::unbounded_channel::<FeedUpdate>();
+        let (feed_tx, feed_rx) = mpsc::unbounded_channel::<(String, FeedUpdate)>();
         let (_main_run_tx, main_run_rx) = mpsc::unbounded_channel::<String>();
         let config = DaemonConfig {
             harness,
@@ -200,6 +202,73 @@ async fn send_message_routes_to_parked_session_queue() {
 
     assert_eq!(host.sessions.get("other").unwrap().queue.len(), 1);
     assert!(host.session.queue.is_empty());
+}
+
+#[tokio::test]
+async fn run_transport_loop_runs_active_and_parked_sessions_concurrently() {
+    let _transport_loop_guard = crate::turn::daemon::TRANSPORT_LOOP_TEST_LOCK.lock().await;
+    let mut fixture = HostFixture::new();
+    let harness = test_harness();
+    let runtime = crate::orchestration::SessionRuntime::for_test("other", harness);
+    let state = SessionRuntimeState::from_runtime(
+        runtime,
+        fixture.host().session.factory.clone(),
+        fixture.host().session.repository.clone(),
+        RetrySettings::default(),
+        None,
+        FeedProjectionState::new(
+            fixture.host().projection.capabilities.clone(),
+            fixture.host().projection.thinking_summary.clone(),
+        ),
+    );
+    fixture.host().sessions.insert(state);
+    let endpoints = fixture.host().transport_endpoints();
+    let session_states = endpoints.session_states.clone();
+
+    endpoints
+        .command_tx
+        .send(WireCommand::Submit {
+            session_id: "sess-active".into(),
+            text: "hello active".into(),
+            images: Vec::new(),
+            interrupt: false,
+        })
+        .unwrap();
+    endpoints
+        .command_tx
+        .send(WireCommand::Submit {
+            session_id: "other".into(),
+            text: "hello other".into(),
+            images: Vec::new(),
+            interrupt: false,
+        })
+        .unwrap();
+
+    let server_task = tokio::spawn(async {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        anyhow::Ok(())
+    });
+
+    let HostFixture {
+        host,
+        _scratch,
+        _repo,
+    } = fixture;
+    host.run_transport_loop(TransportMode::Grpc, endpoints, server_task)
+        .await
+        .unwrap();
+
+    let states = session_states.lock();
+    let active = states
+        .get("sess-active")
+        .expect("active session snapshot should be published");
+    assert!(!active.busy, "active session should finish before loop exit");
+    assert_eq!(active.queued_count, 0, "active queue should drain");
+    let other = states
+        .get("other")
+        .expect("parked session snapshot should be published");
+    assert!(!other.busy, "parked session should finish before loop exit");
+    assert_eq!(other.queued_count, 0, "parked queue should drain");
 }
 
 #[tokio::test]

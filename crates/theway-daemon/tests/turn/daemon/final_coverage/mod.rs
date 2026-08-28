@@ -103,7 +103,7 @@ struct BuiltHost {
     host: TurnHost,
     _scratch: TempDir,
     _repo: TempDir,
-    feed_tx: mpsc::UnboundedSender<FeedUpdate>,
+    feed_tx: mpsc::UnboundedSender<(String, FeedUpdate)>,
     main_run_tx: mpsc::UnboundedSender<String>,
 }
 
@@ -137,7 +137,7 @@ fn build_host_with(
     };
 
     let repo_dir = TempDir::new().unwrap();
-    let (feed_tx, feed_rx) = mpsc::unbounded_channel::<FeedUpdate>();
+    let (feed_tx, feed_rx) = mpsc::unbounded_channel::<(String, FeedUpdate)>();
     let (main_run_tx, main_run_rx) = mpsc::unbounded_channel::<String>();
     let control_plane_prompt_rx = control_plane_prompt.map(|(_, rx)| rx);
 

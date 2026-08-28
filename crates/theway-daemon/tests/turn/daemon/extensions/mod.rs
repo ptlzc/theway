@@ -87,7 +87,7 @@ fn build_host() -> (TurnHost, TempDir, TempDir) {
     };
 
     let repo_dir = TempDir::new().unwrap();
-    let (feed_tx, feed_rx) = tokio::sync::mpsc::unbounded_channel::<FeedUpdate>();
+    let (feed_tx, feed_rx) = tokio::sync::mpsc::unbounded_channel::<(String, FeedUpdate)>();
     let (_main_run_tx, main_run_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let session_factory: SessionFactory = Arc::new(
         |_id: String| -> std::pin::Pin<

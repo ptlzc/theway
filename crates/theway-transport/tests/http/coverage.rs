@@ -42,6 +42,7 @@ fn state_with(commands: mpsc::UnboundedSender<WireCommand>) -> HttpState {
         commands,
         snapshots: broadcast::channel(16).0,
         latest: Arc::new(Mutex::new(status("sess-1"))),
+        session_states: Arc::new(Mutex::new(std::collections::HashMap::new())),
         completer: SlashCompleter::from_commands(vec!["/help".into()]),
         events: broadcast::channel::<WireAgentEvent>(16).0,
         dag_events: broadcast::channel::<WireDagEvent>(16).0,
@@ -122,17 +123,21 @@ async fn dispatch_get_node_output_handles_text_messages_and_missing_job() {
 }
 
 #[tokio::test]
-async fn dispatch_send_message_rejects_non_current_and_set_model_channel_closed() {
-    let (command_tx, command_rx) = mpsc::unbounded_channel::<WireCommand>();
+async fn dispatch_send_message_accepts_explicit_session_and_set_model_channel_closed() {
+    let (command_tx, mut command_rx) = mpsc::unbounded_channel::<WireCommand>();
     let state = state_with(command_tx);
-    let err = dispatch(
+    let result = dispatch(
         &state,
         "send_message",
         Some(&json!({ "text": "hi", "session_id": "other" })),
     )
     .await
-    .unwrap_err();
-    assert_eq!(err.0, -32001);
+    .unwrap();
+    assert_eq!(result["accepted"], true);
+    match command_rx.try_recv().unwrap() {
+        WireCommand::Submit { session_id, .. } => assert_eq!(session_id, "other"),
+        other => panic!("unexpected command: {other:?}"),
+    }
 
     drop(command_rx);
     let result = dispatch(&state, "set_model", Some(&json!({ "model": "m" })))
@@ -300,6 +305,7 @@ async fn run_web_driver_binds_and_aborts_server_task() {
         command_rx,
         snapshot_tx: snapshot_tx.clone(),
         latest: state.latest.clone(),
+        session_states: Arc::new(Mutex::new(std::collections::HashMap::new())),
         events: event_tx.clone(),
         dag_events: dag_event_tx.clone(),
         completer: SlashCompleter::from_commands(Vec::new()),

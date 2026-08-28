@@ -488,6 +488,9 @@ pub struct TransportEndpoints {
     pub snapshot_tx: broadcast::Sender<WireStatusUpdate>,
     /// Latest snapshot (served by `GET /state` / `GetState`).
     pub latest: Arc<Mutex<WireStatus>>,
+    /// Per-session authoritative snapshots, keyed by `session_id`. Served by
+    /// `GetState` / HTTP `get_state` for any registered session.
+    pub session_states: Arc<Mutex<HashMap<String, WireStatus>>>,
     /// Event plane (graph mode): subagent started/output/metrics/completed.
     pub events: broadcast::Sender<WireAgentEvent>,
     /// Event plane (graph mode): DAG engine node_status / run_status.

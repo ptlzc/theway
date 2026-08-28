@@ -117,7 +117,7 @@ fn daemon_config(
     session_id: &str,
 ) -> (
     DaemonConfig,
-    mpsc::UnboundedSender<FeedUpdate>,
+    mpsc::UnboundedSender<(String, FeedUpdate)>,
     mpsc::UnboundedSender<String>,
 ) {
     let harness = test_harness();
@@ -133,7 +133,7 @@ fn daemon_config(
         extra_skill_dirs: Arc::new(std::sync::RwLock::new(Vec::new())),
     };
 
-    let (feed_tx, feed_rx) = mpsc::unbounded_channel::<FeedUpdate>();
+    let (feed_tx, feed_rx) = mpsc::unbounded_channel::<(String, FeedUpdate)>();
     let (main_run_tx, main_run_rx) = mpsc::unbounded_channel::<String>();
 
     let config = DaemonConfig {
@@ -482,10 +482,11 @@ async fn wire_update_emits_only_the_dirty_line_suffix_and_append_patch() {
 async fn wire_snapshot_emits_streaming_replacement_patch() {
     let mut fixture = HostFixture::new().await;
     let host = fixture.host();
+    let session_id = host.session.id.clone();
 
-    host.apply_feed_update(FeedUpdate::TextDelta("hello".into()));
+    host.apply_feed_update(&session_id, FeedUpdate::TextDelta("hello".into()));
     host.wire_update();
-    host.apply_feed_update(FeedUpdate::TextDelta(" world".into()));
+    host.apply_feed_update(&session_id, FeedUpdate::TextDelta(" world".into()));
     let snapshot = host.wire_update();
     let snapshot = snapshot.feed_delta().unwrap();
 
@@ -503,13 +504,17 @@ async fn wire_snapshot_emits_streaming_replacement_patch() {
 async fn wire_snapshot_emits_thinking_summary_replacement_patch() {
     let mut fixture = HostFixture::new().await;
     let host = fixture.host();
+    let session_id = host.session.id.clone();
 
-    host.apply_feed_update(FeedUpdate::ThinkingDelta("private reasoning".into()));
+    host.apply_feed_update(&session_id, FeedUpdate::ThinkingDelta("private reasoning".into()));
     host.wire_update();
-    host.apply_feed_update(FeedUpdate::ThinkingSummary {
-        block_index: 0,
-        summary: "summary".into(),
-    });
+    host.apply_feed_update(
+        &session_id,
+        FeedUpdate::ThinkingSummary {
+            block_index: 0,
+            summary: "summary".into(),
+        },
+    );
     let snapshot = host.wire_update();
     let snapshot = snapshot.feed_delta().unwrap();
 
@@ -554,8 +559,9 @@ fn apply_feed_update_records_trigger_poll_status() {
         let mut fixture = HostFixture::new().await;
         let host = fixture.host();
         let status = poll_status();
+        let session_id = host.session.id.clone();
 
-        host.apply_feed_update(FeedUpdate::TriggerPollStatus(status));
+        host.apply_feed_update(&session_id, FeedUpdate::TriggerPollStatus(status));
 
         assert_eq!(
             host.projection.latest_trigger_poll.as_ref().unwrap().trace_id,
@@ -631,7 +637,7 @@ async fn run_transport_loop_drains_feed_updates_before_server_finishes() {
             bail!("startup snapshot already has a trigger poll status");
         }
         feed_tx_driver
-            .send(FeedUpdate::TriggerPollStatus(poll_status()))
+            .send(("sess-loop".to_string(), FeedUpdate::TriggerPollStatus(poll_status())))
             .map_err(|_| anyhow::anyhow!("feed receiver closed"))?;
         let poll_snapshot = loop {
             let snapshot = snapshot_rx.recv().await.map_err(anyhow::Error::from)?;

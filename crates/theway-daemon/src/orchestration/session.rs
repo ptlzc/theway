@@ -422,7 +422,7 @@ pub struct SessionRuntimeBuilder {
     pub control_plane_prompt_tx:
         Option<tokio::sync::mpsc::UnboundedSender<crate::control_plane_prompt::PendingControlPlanePrompt>>,
     pub after_tool_call: Option<theway_core::AfterToolCallHook>,
-    pub feed_tx: tokio::sync::mpsc::UnboundedSender<FeedUpdate>,
+    pub feed_tx: tokio::sync::mpsc::UnboundedSender<(String, FeedUpdate)>,
     pub main_run_tx: tokio::sync::mpsc::UnboundedSender<String>,
     pub debug: bool,
 }
@@ -695,14 +695,17 @@ impl SessionRuntimeBuilder {
         // channel closure ends it with the harness lifetime.
         let _agent_broadcast = crate::turn::listener::spawn_agent_broadcast_listener(
             harness.agent().subscribe_broadcast(),
+            session_id.clone(),
             self.feed_tx.clone(),
         );
         let _harness_broadcast = crate::turn::listener::spawn_harness_broadcast_listener(
             harness.subscribe_session_broadcast(),
+            session_id.clone(),
             self.feed_tx.clone(),
             self.debug,
         );
         let _ = trigger_executor.subscribe(crate::turn::listener::trigger_listener(
+            session_id.clone(),
             self.feed_tx.clone(),
             self.debug,
         ));

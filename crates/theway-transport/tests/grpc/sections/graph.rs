@@ -289,6 +289,7 @@ async fn run_grpc_driver_binds_and_aborts_server_task() {
         command_rx,
         snapshot_tx: state.snapshots.clone(),
         latest: state.latest.clone(),
+        session_states: Arc::new(Mutex::new(std::collections::HashMap::new())),
         events: state.events.clone(),
         dag_events: state.dag_events.clone(),
         completer: SlashCompleter::from_commands(Vec::new()),

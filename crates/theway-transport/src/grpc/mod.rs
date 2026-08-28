@@ -81,6 +81,8 @@ pub struct GrpcState {
     pub commands: mpsc::UnboundedSender<WireCommand>,
     pub snapshots: broadcast::Sender<WireStatusUpdate>,
     pub latest: Arc<Mutex<WireStatus>>,
+    /// Per-session authoritative snapshots, keyed by `session_id`.
+    pub session_states: Arc<Mutex<std::collections::HashMap<String, WireStatus>>>,
     /// Event plane (graph mode): subagent started/output/metrics/completed.
     pub events: broadcast::Sender<WireAgentEvent>,
     /// Event plane (graph mode): DAG engine node_status / run_status.
@@ -663,6 +665,7 @@ pub async fn run_grpc(mut app: Box<dyn TransportHost>, options: GrpcOptions) -> 
         commands: endpoints.command_tx.clone(),
         snapshots: endpoints.snapshot_tx.clone(),
         latest: endpoints.latest.clone(),
+        session_states: endpoints.session_states.clone(),
         events: endpoints.events.clone(),
         dag_events: endpoints.dag_events.clone(),
         job_ops: endpoints.job_ops.clone(),

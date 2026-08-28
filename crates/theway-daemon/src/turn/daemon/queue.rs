@@ -62,6 +62,81 @@ impl TurnHost {
         true
     }
 
+    /// Start queued turns for every parked session that is not already busy.
+    fn start_parked_turns(&mut self, unordered: &mut FuturesUnordered<(String, TurnFut)>) {
+        let ids: Vec<String> = self
+            .sessions
+            .sessions
+            .iter()
+            .filter(|(_, session)| !session.busy && !session.queue.is_empty())
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in ids {
+            self.start_parked_turn(&id, unordered);
+        }
+    }
+
+    /// Pop one queued job from a parked session and push its future into the
+    /// shared per-session turn scheduler.
+    fn start_parked_turn(
+        &mut self,
+        session_id: &str,
+        unordered: &mut FuturesUnordered<(String, TurnFut)>,
+    ) -> bool {
+        let Some(session) = self.sessions.get_mut(session_id) else {
+            return false;
+        };
+        if session.busy {
+            return false;
+        }
+        let Some(job) = session.queue.pop_front() else {
+            return false;
+        };
+        let remaining = session.queue.len();
+        session.projection.feed.push_plain_untimed(
+            if remaining == 0 {
+                "running queued message".to_string()
+            } else {
+                format!("running queued message ({remaining} still queued)")
+            },
+            Level::System,
+        );
+        let fut = match job {
+            QueuedTurn::UserPrompt {
+                display,
+                prompt,
+                images,
+            } => {
+                session.projection.feed.push_user(display);
+                session.kernel.user_prompt_turn(prompt, images)
+            }
+            QueuedTurn::AgentPrompt {
+                display,
+                prompt,
+                error_context,
+            } => {
+                session.projection.feed.push_user(display);
+                session.kernel.prompt_turn(prompt)
+            }
+            QueuedTurn::PromptTemplate {
+                display,
+                name,
+                vars,
+            } => {
+                session.projection.feed.push_user(display);
+                session.kernel.template_turn(name, vars)
+            }
+            QueuedTurn::Compaction { display, custom } => {
+                session.projection.feed.push_user(display);
+                session.kernel.compaction_turn(custom)
+            }
+        };
+        session.busy = true;
+        session.aborted = false;
+        unordered.push((session_id.to_string(), fut));
+        true
+    }
+
     fn start_prompt_turn(
         &mut self,
         prompt: String,
@@ -162,6 +237,48 @@ impl TurnHost {
         turn.prefix = "";
         self.refresh_goal_state().await;
         self.start_next_queued_turn(turn);
+    }
+
+    async fn finish_parked_turn(
+        &mut self,
+        session_id: &str,
+        result: Result<Option<String>, theway_core::AgentRunError>,
+        unordered: &mut FuturesUnordered<(String, TurnFut)>,
+    ) {
+        let Some(session) = self.sessions.get_mut(session_id) else {
+            return;
+        };
+        session.busy = false;
+        let aborted = session.aborted;
+        session.aborted = false;
+        if !aborted
+            && let Some(usage) =
+                last_turn_usage(&session.kernel.harness().agent().state().messages)
+        {
+            let cumulative = &mut session.cumulative_usage;
+            cumulative.input_tokens = cumulative.input_tokens.saturating_add(usage.input);
+            cumulative.output_tokens = cumulative.output_tokens.saturating_add(usage.output);
+            cumulative.cache_read_tokens =
+                cumulative.cache_read_tokens.saturating_add(usage.cache_read);
+            cumulative.cache_write_tokens =
+                cumulative.cache_write_tokens.saturating_add(usage.cache_write);
+            cumulative.total_tokens = cumulative.total_tokens.saturating_add(usage.total_tokens);
+        }
+        if aborted {
+            session.projection.feed.push_plain_untimed("[aborted]", Level::System);
+        } else {
+            match result {
+                Ok(Some(message)) => {
+                    session.projection.feed.push_plain_untimed(message, Level::Output)
+                }
+                Ok(None) => {}
+                Err(e) => session.projection.feed.push_plain_untimed(
+                    user_facing_run_error(&e.to_string()),
+                    Level::Error,
+                ),
+            }
+        }
+        self.start_parked_turn(session_id, unordered);
     }
 
     // ── state helpers ──────────────────────────────────────────────────────────────────

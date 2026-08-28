@@ -51,6 +51,7 @@ async fn spawn_sessions_server(
         commands: command_tx,
         snapshots: snapshot_tx,
         latest: Arc::new(Mutex::new(wire_status(current))),
+        session_states: Arc::new(Mutex::new(std::collections::HashMap::new())),
         completer: SlashCompleter::from_commands(vec!["/help".into(), "/model".into(), "/goal".into()]),
         events: broadcast::channel::<WireAgentEvent>(16).0,
         dag_events: broadcast::channel::<WireDagEvent>(16).0,

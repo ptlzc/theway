@@ -315,8 +315,9 @@ async fn start_next_queued_turn_handles_all_job_variants() {
 async fn apply_feed_update_routes_non_trigger_updates() {
     let built = build_host(harness_with_input(Vec::new()));
     let (mut host, _scratch, _repo) = built.into_parts();
+    let session_id = host.session.id.clone();
 
-    host.apply_feed_update(FeedUpdate::TextDelta("hi".into()));
+    host.apply_feed_update(&session_id, FeedUpdate::TextDelta("hi".into()));
 
     // The non-trigger path feeds the console feed rather than the trigger
     // poll slot.

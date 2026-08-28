@@ -154,6 +154,7 @@ fn ws_http_state() -> (crate::http::HttpState, tokio::sync::mpsc::UnboundedRecei
             tui_max_feed_lines: None,
             extensions: WireExtensionSnapshot::default(),
         })),
+        session_states: Arc::new(Mutex::new(std::collections::HashMap::new())),
         completer: SlashCompleter::from_commands(Vec::new()),
         events: tokio::sync::broadcast::channel(16).0,
         dag_events: tokio::sync::broadcast::channel(16).0,

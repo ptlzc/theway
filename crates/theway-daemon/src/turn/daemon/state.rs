@@ -15,6 +15,10 @@ impl TurnHost {
             self.session.repository.clone(),
             self.session.retry.clone(),
             self.session.log_path.clone(),
+            FeedProjectionState::new(
+                self.projection.capabilities.clone(),
+                self.projection.thinking_summary.clone(),
+            ),
         );
         self.sessions.insert(state);
         Ok(())
@@ -66,36 +70,24 @@ impl TurnHost {
         }
     }
 
-    fn apply_feed_update(&mut self, update: FeedUpdate) -> bool {
-        let metadata_dirty = matches!(
-            &update,
-            FeedUpdate::TriggerPollStatus(_) | FeedUpdate::SkillsReloaded { .. }
-        );
-        let before_len = self.projection.feed.blocks().len();
-        let targeted = match &update {
-            FeedUpdate::ThinkingSummary { block_index, .. } => Some(*block_index),
-            FeedUpdate::TextDelta(_) | FeedUpdate::ThinkingDelta(_) => before_len.checked_sub(1),
-            FeedUpdate::ToolProgress { tool_call_id, .. }
-            | FeedUpdate::ToolEnd { tool_call_id, .. } => self.projection.feed.tool_result_index(tool_call_id),
-            _ => None,
-        };
-        match update {
-            FeedUpdate::TriggerPollStatus(status) => {
-                self.projection.latest_trigger_poll = Some(status);
-            }
-            FeedUpdate::SkillsReloaded { .. } => {}
-            update => super::thinking_summary::apply(
-                &mut self.projection.feed,
-                &mut self.projection.thinking_burst,
-                self.projection.thinking_summary.as_ref(),
+    fn apply_feed_update(&mut self, session_id: &str, update: FeedUpdate) -> bool {
+        if session_id == self.session.id {
+            apply_feed_update_to_projection(
                 &self.inputs.feed_tx,
+                session_id,
+                &mut self.projection,
                 update,
-            ),
+            )
+        } else if let Some(session) = self.sessions.get_mut(session_id) {
+            apply_feed_update_to_projection(
+                &self.inputs.feed_tx,
+                session_id,
+                &mut session.projection,
+                update,
+            )
+        } else {
+            false
         }
-        if let Some(index) = targeted {
-            self.projection.dirty_blocks.insert(index);
-        }
-        metadata_dirty
     }
 
     async fn refresh_goal_state(&mut self) {
@@ -243,6 +235,10 @@ impl TurnHost {
             repository,
             self.session.retry.clone(),
             self.session.log_path.clone(),
+            FeedProjectionState::new(
+                self.projection.capabilities.clone(),
+                self.projection.thinking_summary.clone(),
+            ),
         );
         let old = std::mem::replace(&mut self.session, new_state);
         self.sessions.insert(old);
@@ -310,4 +306,42 @@ impl TurnHost {
         ));
         prompt.resolve(decision);
     }
+}
+
+fn apply_feed_update_to_projection(
+    feed_tx: &mpsc::UnboundedSender<(String, FeedUpdate)>,
+    session_id: &str,
+    projection: &mut FeedProjectionState,
+    update: FeedUpdate,
+) -> bool {
+    let metadata_dirty = matches!(
+        &update,
+        FeedUpdate::TriggerPollStatus(_) | FeedUpdate::SkillsReloaded { .. }
+    );
+    let before_len = projection.feed.blocks().len();
+    let targeted = match &update {
+        FeedUpdate::ThinkingSummary { block_index, .. } => Some(*block_index),
+        FeedUpdate::TextDelta(_) | FeedUpdate::ThinkingDelta(_) => before_len.checked_sub(1),
+        FeedUpdate::ToolProgress { tool_call_id, .. }
+        | FeedUpdate::ToolEnd { tool_call_id, .. } => projection.feed.tool_result_index(tool_call_id),
+        _ => None,
+    };
+    match update {
+        FeedUpdate::TriggerPollStatus(status) => {
+            projection.latest_trigger_poll = Some(status);
+        }
+        FeedUpdate::SkillsReloaded { .. } => {}
+        update => super::thinking_summary::apply(
+            session_id,
+            &mut projection.feed,
+            &mut projection.thinking_burst,
+            projection.thinking_summary.as_ref(),
+            feed_tx,
+            update,
+        ),
+    }
+    if let Some(index) = targeted {
+        projection.dirty_blocks.insert(index);
+    }
+    metadata_dirty
 }

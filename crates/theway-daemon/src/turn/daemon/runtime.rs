@@ -70,6 +70,18 @@ impl TurnHost {
         let tool_ops: Arc<dyn ToolOps> = Arc::new(ForwardingToolOps::new(daemon_config.clone()));
         let mut kernel = ReplKernel::new(config.harness, config.trigger_executor, config.retry.clone());
         kernel.set_extension_host(config.extension_host);
+        let projection = FeedProjectionState {
+            feed: Feed::new(),
+            plain_lines_cache: theway_transport::feed::PlainLinesCache::new(100),
+            block_versions: Vec::new(),
+            dirty_blocks: BTreeSet::new(),
+            latest_trigger_poll: None,
+            latest_goal: None,
+            thinking_summary: config.thinking_summary,
+            thinking_burst: super::thinking_summary::ThinkingBurst::default(),
+            control_plane_prompt: None,
+            capabilities: config.capabilities,
+        };
         Self {
             session: SessionRuntimeState {
                 kernel,
@@ -83,6 +95,11 @@ impl TurnHost {
                 busy: false,
                 queue: VecDeque::new(),
                 cumulative_usage: WireContextUsage::default(),
+                projection: FeedProjectionState::new(
+                    projection.capabilities.clone(),
+                    projection.thinking_summary.clone(),
+                ),
+                aborted: false,
             },
             sessions: SessionRegistry::new(),
             automation: AutomationRuntime {
@@ -103,19 +120,9 @@ impl TurnHost {
                 feed_history_limit: config.startup.tui_max_feed_lines,
                 latest: None,
                 snapshot_tx: None,
+                session_states: None,
             },
-            projection: FeedProjectionState {
-                feed: Feed::new(),
-                plain_lines_cache: theway_transport::feed::PlainLinesCache::new(100),
-                block_versions: Vec::new(),
-                dirty_blocks: BTreeSet::new(),
-                latest_trigger_poll: None,
-                latest_goal: None,
-                thinking_summary: config.thinking_summary,
-                thinking_burst: super::thinking_summary::ThinkingBurst::default(),
-                control_plane_prompt: None,
-                capabilities: config.capabilities,
-            },
+            projection,
             inputs: RuntimeEventInputs {
                 feed_rx: Some(config.feed_rx),
                 feed_tx: config.feed_tx,
@@ -142,7 +149,13 @@ impl TurnHost {
     pub(crate) fn transport_endpoints(&mut self) -> TransportEndpoints {
         let (command_tx, command_rx) = mpsc::unbounded_channel::<WireCommand>();
         let (snapshot_tx, _) = broadcast::channel::<WireStatusUpdate>(128);
-        let latest = Arc::new(Mutex::new(self.wire_snapshot()));
+        let initial_snapshot = self.wire_snapshot();
+        let latest = Arc::new(Mutex::new(initial_snapshot.clone()));
+        let session_states = Arc::new(Mutex::new(HashMap::from([(
+            initial_snapshot.session_id.clone(),
+            initial_snapshot,
+        )])));
+        self.runtime.session_states = Some(session_states.clone());
         let (event_tx, _) = broadcast::channel::<WireAgentEvent>(256);
         let (dag_event_tx, _) = broadcast::channel::<WireDagEvent>(256);
         let (core_dag_event_tx, _) = broadcast::channel::<DagEvent>(256);
@@ -195,6 +208,7 @@ impl TurnHost {
             command_rx,
             snapshot_tx,
             latest,
+            session_states,
             events: event_tx,
             dag_events: dag_event_tx,
             completer: self.runtime.completer.clone(),
@@ -248,6 +262,7 @@ impl TurnHost {
         let mut main_run_rx = self.inputs.main_run_rx.take().expect("main_run_rx taken once");
         let mut control_plane_prompt_rx = self.inputs.control_plane_prompt_rx.take();
         let mut turn = TurnState::default();
+        let mut parked_turns: FuturesUnordered<(String, TurnFut)> = FuturesUnordered::new();
         self.refresh_goal_state().await;
         self.publish_snapshot(&latest, &snapshot_tx, true).await;
 
@@ -269,16 +284,23 @@ impl TurnHost {
                     dirty = true;
                     metadata_dirty = true;
                 }
-                Some(command) = command_rx.recv() => {
-                    self.handle_web_command(command, &mut turn).await;
+                Some((session_id, result)) = parked_turns.next(), if !parked_turns.is_empty() => {
+                    self.finish_parked_turn(&session_id, result, &mut parked_turns).await;
                     dirty = true;
                     metadata_dirty = true;
                 }
-                Some(update) = feed_rx.recv() => {
-                    metadata_dirty |= self.apply_feed_update(update);
-                    while let Ok(update) = feed_rx.try_recv() {
-                        metadata_dirty |= self.apply_feed_update(update);
+                Some(command) = command_rx.recv() => {
+                    self.handle_web_command(command, &mut turn).await;
+                    self.start_parked_turns(&mut parked_turns);
+                    dirty = true;
+                    metadata_dirty = true;
+                }
+                Some((session_id, update)) = feed_rx.recv() => {
+                    metadata_dirty |= self.apply_feed_update(&session_id, update);
+                    while let Ok((session_id, update)) = feed_rx.try_recv() {
+                        metadata_dirty |= self.apply_feed_update(&session_id, update);
                     }
+                    self.start_parked_turns(&mut parked_turns);
                     dirty = true;
                 }
                 Some(trace_id) = main_run_rx.recv(), if turn.fut.is_none() => {
@@ -299,6 +321,7 @@ impl TurnHost {
                 _ = publish_tick.tick(), if dirty => {
                     dirty = false;
                     self.publish_snapshot(&latest, &snapshot_tx, metadata_dirty).await;
+                    self.publish_parked_snapshots(&snapshot_tx);
                     metadata_dirty = false;
                 }
                 _ = tokio::signal::ctrl_c() => {

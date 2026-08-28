@@ -76,8 +76,8 @@ fn trigger_start(trace_id: &str, source_label: &str, event_label: &str) -> Trigg
 #[tokio::test]
 async fn spawn_agent_broadcast_listener_forwards_run_and_tool_events() {
     let (event_tx, event_rx) = broadcast::channel::<LoopEvent>(16);
-    let (feed_tx, mut feed_rx) = mpsc::unbounded_channel::<FeedUpdate>();
-    let handle = spawn_agent_broadcast_listener(event_rx, feed_tx);
+    let (feed_tx, mut feed_rx) = mpsc::unbounded_channel::<(String, FeedUpdate)>();
+    let handle = spawn_agent_broadcast_listener(event_rx, "sess-listener".to_string(), feed_tx);
 
     event_tx.send(LoopEvent::RunStarted).unwrap();
     event_tx
@@ -91,11 +91,12 @@ async fn spawn_agent_broadcast_listener_forwards_run_and_tool_events() {
         })
         .unwrap();
 
-    let first = feed_rx.recv().await.unwrap();
+    let (session_id, first) = feed_rx.recv().await.unwrap();
+    assert_eq!(session_id, "sess-listener");
     assert!(matches!(first, FeedUpdate::TurnStart));
-    let second = feed_rx.recv().await.unwrap();
+    let (_, second) = feed_rx.recv().await.unwrap();
     assert!(matches!(second, FeedUpdate::TurnEnd));
-    let third = feed_rx.recv().await.unwrap();
+    let (_, third) = feed_rx.recv().await.unwrap();
     let FeedUpdate::ToolStart { name, args } = third else {
         panic!("expected tool start update");
     };
@@ -114,14 +115,14 @@ async fn spawn_agent_broadcast_listener_survives_lag() {
     // Small broadcast channel + sends before the current-thread runtime has
     // polled the spawned listener → deterministic `Lagged` path.
     let (event_tx, event_rx) = broadcast::channel::<LoopEvent>(1);
-    let (feed_tx, mut feed_rx) = mpsc::unbounded_channel::<FeedUpdate>();
-    let handle = spawn_agent_broadcast_listener(event_rx, feed_tx);
+    let (feed_tx, mut feed_rx) = mpsc::unbounded_channel::<(String, FeedUpdate)>();
+    let handle = spawn_agent_broadcast_listener(event_rx, "sess-listener".to_string(), feed_tx);
 
     for _ in 0..10 {
         let _ = event_tx.send(LoopEvent::RunStarted);
     }
 
-    let update = tokio::time::timeout(Duration::from_secs(1), feed_rx.recv())
+    let (_, update) = tokio::time::timeout(Duration::from_secs(1), feed_rx.recv())
         .await
         .expect("listener should recover from lag and forward the newest event")
         .expect("feed channel closed");
@@ -137,14 +138,19 @@ async fn spawn_agent_broadcast_listener_survives_lag() {
 #[tokio::test]
 async fn spawn_harness_broadcast_listener_forwards_skills_reload_events() {
     let (event_tx, event_rx) = broadcast::channel::<SessionEvent>(16);
-    let (feed_tx, mut feed_rx) = mpsc::unbounded_channel::<FeedUpdate>();
-    let handle = spawn_harness_broadcast_listener(event_rx, feed_tx, false);
+    let (feed_tx, mut feed_rx) = mpsc::unbounded_channel::<(String, FeedUpdate)>();
+    let handle = spawn_harness_broadcast_listener(
+        event_rx,
+        "sess-listener".to_string(),
+        feed_tx,
+        false,
+    );
 
     event_tx
         .send(SessionEvent::SkillsReloaded { total: 4 })
         .unwrap();
 
-    let update = feed_rx.recv().await.unwrap();
+    let (_, update) = feed_rx.recv().await.unwrap();
     assert!(matches!(update, FeedUpdate::SkillsReloaded { total: 4 }));
 
     drop(event_tx);
@@ -158,11 +164,11 @@ async fn spawn_harness_broadcast_listener_forwards_skills_reload_events() {
 
 #[test]
 fn harness_listener_closure_sends_mapped_session_events() {
-    let (feed_tx, mut feed_rx) = mpsc::unbounded_channel::<FeedUpdate>();
-    let listener = harness_listener(feed_tx, false);
+    let (feed_tx, mut feed_rx) = mpsc::unbounded_channel::<(String, FeedUpdate)>();
+    let listener = harness_listener("sess-listener".to_string(), feed_tx, false);
 
     listener(SessionEvent::SkillsReloaded { total: 2 });
-    let update = feed_rx.try_recv().unwrap();
+    let (_, update) = feed_rx.try_recv().unwrap();
     assert!(matches!(update, FeedUpdate::SkillsReloaded { total: 2 }));
 
     // Unknown events stay quiet.
@@ -174,14 +180,14 @@ fn harness_listener_closure_sends_mapped_session_events() {
 
 #[test]
 fn trigger_listener_closure_sends_mapped_trigger_events() {
-    let (feed_tx, mut feed_rx) = mpsc::unbounded_channel::<FeedUpdate>();
-    let listener = trigger_listener(feed_tx, false);
+    let (feed_tx, mut feed_rx) = mpsc::unbounded_channel::<(String, FeedUpdate)>();
+    let listener = trigger_listener("sess-listener".to_string(), feed_tx, false);
 
     listener(TriggerEvent::TriggerFailed {
         trace_id: "trace-failed".into(),
         reason: "boom".into(),
     });
-    let update = feed_rx.try_recv().unwrap();
+    let (_, update) = feed_rx.try_recv().unwrap();
     let FeedUpdate::Plain { text, level } = update else {
         panic!("expected plain update");
     };

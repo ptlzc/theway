@@ -24,14 +24,15 @@ use super::feed::{
 /// and forwards them through the daemon feed channel.
 pub fn spawn_agent_broadcast_listener(
     mut rx: broadcast::Receiver<LoopEvent>,
-    tx: UnboundedSender<FeedUpdate>,
+    session_id: String,
+    tx: UnboundedSender<(String, FeedUpdate)>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         loop {
             match rx.recv().await {
                 Ok(event) => {
                     for update in map_agent_event(&event) {
-                        let _ = tx.send(update);
+                        let _ = tx.send((session_id.clone(), update));
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
@@ -50,7 +51,8 @@ pub fn spawn_agent_broadcast_listener(
 /// old synchronous `harness_listener` + `harness.subscribe_harness()` pattern.
 pub fn spawn_harness_broadcast_listener(
     mut rx: broadcast::Receiver<SessionEvent>,
-    tx: UnboundedSender<FeedUpdate>,
+    session_id: String,
+    tx: UnboundedSender<(String, FeedUpdate)>,
     debug: bool,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
@@ -58,7 +60,7 @@ pub fn spawn_harness_broadcast_listener(
             match rx.recv().await {
                 Ok(event) => {
                     if let Some(update) = map_harness_event(&event, debug) {
-                        let _ = tx.send(update);
+                        let _ = tx.send((session_id.clone(), update));
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
@@ -135,10 +137,14 @@ fn tool_start_display(tool_name: &str, args: &serde_json::Value) -> (String, Str
 
 /// Build a harness listener used by the event-mapping unit tests.
 #[cfg(test)]
-pub fn harness_listener(tx: UnboundedSender<FeedUpdate>, debug: bool) -> SessionListener {
+pub fn harness_listener(
+    session_id: String,
+    tx: UnboundedSender<(String, FeedUpdate)>,
+    debug: bool,
+) -> SessionListener {
     Arc::new(move |event| {
         if let Some(update) = map_harness_event(&event, debug) {
-            let _ = tx.send(update);
+            let _ = tx.send((session_id.clone(), update));
         }
     })
 }
@@ -185,11 +191,15 @@ fn map_harness_event(event: &SessionEvent, debug: bool) -> Option<FeedUpdate> {
 
 /// Build the trigger-engine listener. Maps trigger lifecycle events into feed updates,
 /// for the daemon-owned trigger pipeline.
-pub fn trigger_listener(tx: UnboundedSender<FeedUpdate>, debug: bool) -> TriggerListener {
+pub fn trigger_listener(
+    session_id: String,
+    tx: UnboundedSender<(String, FeedUpdate)>,
+    debug: bool,
+) -> TriggerListener {
     let quiet: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
     Arc::new(move |event| {
         if let Some(update) = map_trigger_event(&event, &quiet, debug) {
-            let _ = tx.send(update);
+            let _ = tx.send((session_id.clone(), update));
         }
     })
 }
