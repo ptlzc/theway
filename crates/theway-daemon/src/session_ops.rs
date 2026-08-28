@@ -25,7 +25,7 @@ use theway_core::multiagent::graph::types::DagStatus;
 use crate::runtime_storage::SessionRepository;
 use crate::session_execution::SessionExecutionRegistry;
 use theway_transport::transport::SessionOps;
-use theway_transport::wire::SessionSummary;
+use theway_transport::wire::{SessionSummary, epoch_millis_to_rfc3339};
 
 /// Builds a fresh, fully-wired [`crate::orchestration::SessionRuntime`] for the session identified by
 /// the given id (resume semantics: full id or unique prefix, same as CLI `--resume-id`).
@@ -146,6 +146,7 @@ impl SessionOps for AppSessionOps {
                 model: record.model,
                 created_at: record.created_at,
                 last_activity_at: record.last_activity_at,
+                last_activity_at_rfc3339: epoch_millis_to_rfc3339(record.last_activity_at),
                 graph_count,
                 active_graph_count,
                 busy: false,

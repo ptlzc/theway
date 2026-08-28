@@ -7,7 +7,7 @@
 //! headless clients see the full history immediately after resume, using the
 //! same block kinds and display compaction as the live listeners.
 
-use chrono::{Local, TimeZone};
+use chrono::{TimeZone, Utc};
 use theway_llm_provider::{ContentBlock, Message, UserContent, UserContentBlock};
 
 use super::WireFeedBlock;
@@ -15,15 +15,14 @@ use super::model::Feed;
 use super::preview::{compact_tool_content_blocks, preview};
 
 /// Format a stored message timestamp (epoch millis) like the live feed's
-/// `current_time_label` ("%Y-%m-%d %H:%M", local time). `None` for timestamps
-/// chrono cannot represent (far outside its supported range).
+/// `current_time_label` (RFC3339 / ISO-8601 with offset, UTC). `None` for
+/// timestamps chrono cannot represent (far outside its supported range).
 fn timestamp_label(timestamp_millis: i64) -> Option<String> {
     let secs = timestamp_millis.div_euclid(1000);
     let nanos = timestamp_millis.rem_euclid(1000) as u32 * 1_000_000;
-    Local
-        .timestamp_opt(secs, nanos)
+    Utc.timestamp_opt(secs, nanos)
         .earliest()
-        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+        .map(|dt| dt.to_rfc3339())
 }
 
 /// Replay stored messages into `feed` as finished blocks (user/assistant/
@@ -173,8 +172,7 @@ mod tests {
                     1_700_000_100_000,
                 ),
                 &tool_result(&["file.txt", "dir/"], false, 1_700_000_200_000),
-            ]
-            .into_iter(),
+            ],
         );
         let blocks = feed.blocks();
         assert_eq!(blocks.len(), 5);
@@ -208,23 +206,15 @@ mod tests {
     #[test]
     fn replay_messages_timestamps_match_feed_format() {
         let mut feed = Feed::new();
-        // 2023-11-14 22:13 UTC — rendered in local time, so just assert the
-        // shape "%Y-%m-%d %H:%M" (length + digits/dash/colon/space).
-        replay_messages(&mut feed, [&user("hi", 1_700_000_000_000)].into_iter());
+        // 2023-11-14 22:13 UTC — feed timestamps are RFC3339 / ISO-8601 with
+        // offset, so assert the `YYYY-MM-DDTHH:MM:SS+00:00` shape.
+        replay_messages(&mut feed, [&user("hi", 1_700_000_000_000)]);
         let Block::User { timestamp, .. } = &feed.blocks()[0] else {
             panic!("not a user block");
         };
         let ts = timestamp.as_deref().expect("timestamp present");
-        assert_eq!(ts.len(), 16, "{ts}");
-        assert!(
-            ts.chars().enumerate().all(|(i, c)| match i {
-                4 | 7 => c == '-',
-                10 => c == ' ',
-                13 => c == ':',
-                _ => c.is_ascii_digit(),
-            }),
-            "{ts}"
-        );
+        assert!(ts.starts_with("2023-11-14T22:13:20"), "{ts}");
+        assert!(ts.ends_with("+00:00") || ts.ends_with('Z'), "{ts}");
     }
 
     #[test]
@@ -254,8 +244,7 @@ mod tests {
                     })],
                     1_700_000_100_000,
                 ),
-            ]
-            .into_iter(),
+            ],
         );
         assert_eq!(feed.blocks().len(), 2);
         let Block::User { text, .. } = &feed.blocks()[0] else {
@@ -274,10 +263,7 @@ mod tests {
         let lines: Vec<String> = (0..1000).map(|i| format!("line {i}")).collect();
         let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
         let mut feed = Feed::new();
-        replay_messages(
-            &mut feed,
-            [&tool_result(&refs, true, 1_700_000_000_000)].into_iter(),
-        );
+        replay_messages(&mut feed, [&tool_result(&refs, true, 1_700_000_000_000)]);
         let Block::ToolResult {
             lines, is_error, ..
         } = &feed.blocks()[0]

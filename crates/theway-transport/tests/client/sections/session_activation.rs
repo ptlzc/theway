@@ -25,6 +25,7 @@ fn client_activated_summary() -> crate::wire::SessionSummary {
         model: "faux:faux".into(),
         created_at: "2026-08-01T00:00:00Z".into(),
         last_activity_at: 0,
+        last_activity_at_rfc3339: None,
         graph_count: 0,
         active_graph_count: 0,
         busy: false,

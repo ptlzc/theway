@@ -12,7 +12,9 @@ use theway_contract::session::{
 };
 use theway_core::multiagent::graph::types::DagStatus;
 use theway_llm_provider::{Model, Provider, get_model};
-use theway_transport::wire::{SessionSummary, WireActivateSessionRequest, WireRpcError};
+use theway_transport::wire::{
+    SessionSummary, WireActivateSessionRequest, WireRpcError, epoch_millis_to_rfc3339,
+};
 pub(crate) struct SessionActivator {
     // Weak keeps the daemon slot from owning the builder; the SessionFactory owns the strong Arc.
     builder: Weak<SessionRuntimeBuilder>,
@@ -269,6 +271,7 @@ impl SessionActivator {
             model: format!("{}:{}", effective_model.provider.0, effective_model.id),
             created_at: record.created_at,
             last_activity_at: record.last_activity_at,
+            last_activity_at_rfc3339: epoch_millis_to_rfc3339(record.last_activity_at),
             graph_count,
             active_graph_count,
             busy: false,

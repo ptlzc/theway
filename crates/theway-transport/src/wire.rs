@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 
+use chrono::{TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 
 /// One model entry in the picker group.
@@ -282,13 +283,25 @@ pub struct SessionSummary {
     pub cwd: String,
     pub model: String,
     pub created_at: String,
+    /// Deprecated epoch milliseconds; prefer `last_activity_at_rfc3339`.
     pub last_activity_at: i64,
+    /// RFC3339 / ISO-8601 with offset (UTC), null when absent.
+    pub last_activity_at_rfc3339: Option<String>,
     pub graph_count: u32,
     pub active_graph_count: u32,
     pub busy: bool,
     pub preview: Option<String>,
     #[serde(default)]
     pub metadata: HashMap<String, String>,
+}
+
+/// Convert epoch milliseconds to an RFC3339 / ISO-8601 UTC string.
+pub fn epoch_millis_to_rfc3339(millis: i64) -> Option<String> {
+    let secs = millis.div_euclid(1000);
+    let nanos = millis.rem_euclid(1000) as u32 * 1_000_000;
+    Utc.timestamp_opt(secs, nanos)
+        .earliest()
+        .map(|dt| dt.to_rfc3339())
 }
 
 /// graph mode: one DAG run (mirrors `crates/theway-transport/proto/graph_engine.proto` DagRunSnapshot; task text is

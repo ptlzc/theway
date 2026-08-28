@@ -123,13 +123,12 @@ pub fn display_prefix(timestamp: Option<&str>, label: &str) -> String {
 }
 
 pub(crate) fn current_time_label() -> Option<String> {
-    Some(chrono::Local::now().format("%Y-%m-%d %H:%M").to_string())
+    Some(chrono::Utc::now().to_rfc3339())
 }
 
 #[cfg(test)]
 fn format_timestamp_label(timestamp: DateTime<Utc>, _now: DateTime<Local>) -> String {
-    let local = timestamp.with_timezone(&Local);
-    local.format("%Y-%m-%d %H:%M").to_string()
+    timestamp.to_rfc3339()
 }
 
 pub struct Feed {

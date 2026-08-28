@@ -5,9 +5,10 @@
     }
 
     fn assert_full_timestamp_prefix(row: &str, rendered: &str) {
+        // RFC3339 / ISO-8601 with offset: `YYYY-MM-DDTHH:MM:SS+00:00` (or `Z`).
         assert_eq!(row.chars().nth(4), Some('-'), "{rendered}");
         assert_eq!(row.chars().nth(7), Some('-'), "{rendered}");
-        assert_eq!(row.chars().nth(10), Some(' '), "{rendered}");
+        assert_eq!(row.chars().nth(10), Some('T'), "{rendered}");
         assert_eq!(row.chars().nth(13), Some(':'), "{rendered}");
     }
 
@@ -193,21 +194,23 @@
 
     #[test]
     fn timestamp_label_includes_full_date_and_time() {
-        let today = Local
+        let now = Local::now();
+        let same_day = Utc
             .with_ymd_and_hms(2026, 5, 27, 14, 37, 0)
             .single()
             .unwrap();
-        let same_day = today.with_timezone(&Utc);
-        let previous_day = Local
+        let previous_day = Utc
             .with_ymd_and_hms(2026, 5, 26, 23, 59, 0)
             .single()
-            .unwrap()
-            .with_timezone(&Utc);
+            .unwrap();
 
-        assert_eq!(format_timestamp_label(same_day, today), "2026-05-27 14:37");
         assert_eq!(
-            format_timestamp_label(previous_day, today),
-            "2026-05-26 23:59"
+            format_timestamp_label(same_day, now),
+            "2026-05-27T14:37:00+00:00"
+        );
+        assert_eq!(
+            format_timestamp_label(previous_day, now),
+            "2026-05-26T23:59:00+00:00"
         );
     }
 

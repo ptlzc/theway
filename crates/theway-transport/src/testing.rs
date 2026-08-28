@@ -77,6 +77,7 @@ fn summary(id: &str) -> SessionSummary {
         model: "provider:model".to_string(),
         created_at: String::new(),
         last_activity_at: 0,
+        last_activity_at_rfc3339: None,
         graph_count: 0,
         active_graph_count: 0,
         busy: false,

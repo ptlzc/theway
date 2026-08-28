@@ -22,7 +22,7 @@ use theway_transport::wire::{
     WireLoadDagRunsResult, WireLoadTriggerRulesRequest, WireLoadTriggerRulesResult,
     WireSaveCronJobsRequest, WireSaveCronJobsResult, WireSaveDagRunRequest, WireSaveDagRunResult,
     WireSaveTriggerRulesRequest, WireSaveTriggerRulesResult, WireStoredCronJob, WireStoredDagRun,
-    WireStoredTriggerRule,
+    WireStoredTriggerRule, epoch_millis_to_rfc3339,
 };
 
 /// Local `SessionOps` used by the controller-side `StorageService` server.
@@ -76,6 +76,7 @@ impl SessionOps for ControllerSessionOps {
                 model,
                 created_at,
                 last_activity_at,
+                last_activity_at_rfc3339: epoch_millis_to_rfc3339(last_activity_at),
                 graph_count: 0,
                 active_graph_count: 0,
                 busy: false,

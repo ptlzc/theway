@@ -108,10 +108,10 @@ async fn model_snapshot_malformed_config_keeps_bytes_and_reports_error() {
     app.apply_snapshot(confirmed);
 
     assert_eq!(std::fs::read(config_path).unwrap(), malformed);
+    let text = feed_text(&app);
     assert!(
-        feed_text(&app).contains("could not save the startup default"),
-        "{}",
-        feed_text(&app)
+        text.replace('\n', " ").contains("could not save the startup default"),
+        "{text}"
     );
 }
 

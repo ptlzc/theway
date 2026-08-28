@@ -115,6 +115,7 @@
             model: "provider:model".to_string(),
             created_at: "2026-01-01T00:00:00Z".to_string(),
             last_activity_at: 0,
+            last_activity_at_rfc3339: None,
             graph_count: 0,
             active_graph_count: 0,
             busy: false,

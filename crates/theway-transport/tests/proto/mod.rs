@@ -243,6 +243,7 @@ fn session_summary_converts_to_wire_shape() {
         model: "provider:model".into(),
         created_at: "2026-08-01T00:00:00Z".into(),
         last_activity_at: 1234,
+        last_activity_at_rfc3339: Some("2026-08-01T00:00:01.234+00:00".into()),
         graph_count: 3,
         active_graph_count: 1,
         busy: true,
@@ -256,6 +257,10 @@ fn session_summary_converts_to_wire_shape() {
     assert_eq!(w.model, "provider:model");
     assert_eq!(w.created_at, "2026-08-01T00:00:00Z");
     assert_eq!(w.last_activity_at, 1234);
+    assert_eq!(
+        w.last_activity_at_rfc3339.as_deref(),
+        Some("2026-08-01T00:00:01.234+00:00")
+    );
     assert_eq!(w.graph_count, 3);
     assert_eq!(w.active_graph_count, 1);
     assert!(w.busy);
