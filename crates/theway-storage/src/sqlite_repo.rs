@@ -34,6 +34,18 @@ impl SqliteSessionRepo {
         SqliteSessionStorage::create(file, cwd).await
     }
 
+    /// Mint a new session WITHOUT writing the database file yet (issue #46):
+    /// the id/header live in memory and the file is materialized on the first
+    /// real write. The daemon uses this for its startup "new session" slot so
+    /// an idle TUI leaves no empty conversation behind.
+    pub async fn create_lazy(
+        &self,
+        cwd: impl Into<String>,
+    ) -> Result<SqliteSessionStorage, SessionError> {
+        let file = self.root.join(format!("{}.db", uuid::Uuid::now_v7()));
+        SqliteSessionStorage::create_lazy(file, cwd).await
+    }
+
     /// Open an existing session database. Path may be absolute or relative to
     /// `root`.
     pub async fn open(&self, path: impl AsRef<Path>) -> Result<SqliteSessionStorage, SessionError> {

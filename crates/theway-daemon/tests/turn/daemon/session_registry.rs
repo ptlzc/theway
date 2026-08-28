@@ -427,3 +427,133 @@ async fn wire_snapshot_for_parked_session_returns_that_session() {
     assert!(snapshot.busy);
     assert_eq!(snapshot.queued_count, 1);
 }
+
+// ── issue #47: SessionDeleted (empty-conversation reaping) ──────────────
+
+/// Session factory that builds a real `for_test` runtime for any id (the
+/// fixture's default factory bails).
+fn real_factory() -> SessionFactory {
+    Arc::new(
+        |id: String| -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = anyhow::Result<crate::orchestration::SessionRuntime>,
+                    > + Send,
+            >,
+        > {
+            let harness = test_harness();
+            Box::pin(async move {
+                Ok(crate::orchestration::SessionRuntime::for_test(id, harness))
+            })
+        },
+    )
+}
+
+/// Replace the fixture's active runtime with a real one for `id` backed by
+/// the same repository, wired with [`real_factory`].
+fn set_active(fixture: &mut HostFixture, id: &str) {
+    let runtime = crate::orchestration::SessionRuntime::for_test(id, test_harness());
+    fixture.host().session = SessionRuntimeState::from_runtime(
+        runtime,
+        real_factory(),
+        fixture.host().session.repository.clone(),
+        RetrySettings::default(),
+        None,
+        FeedProjectionState::new(
+            fixture.host().projection.capabilities.clone(),
+            fixture.host().projection.thinking_summary.clone(),
+        ),
+    );
+}
+
+/// Issue #47: deleting the ACTIVE session swaps the runtime to the most
+/// recent remaining session, so later attaches never land on a deleted id.
+#[tokio::test]
+async fn session_deleted_swaps_active_to_most_recent_remaining() {
+    let mut fixture = HostFixture::new();
+    let cwd = fixture.host().session.cwd.clone();
+    std::fs::create_dir_all(&cwd).unwrap();
+    let repo = fixture.host().session.repository.clone();
+    repo.create_with_id(&cwd, Some("s1")).await.unwrap();
+    repo.create_with_id(&cwd, Some("s2")).await.unwrap();
+    set_active(&mut fixture, "s1");
+
+    fixture
+        .host()
+        .handle_web_command(
+            WireCommand::SessionDeleted { id: "s1".into() },
+            &mut TurnState::default(),
+        )
+        .await;
+
+    assert_eq!(
+        fixture.host().session.id, "s2",
+        "active session must fall back to the most recent remaining session"
+    );
+    assert!(
+        fixture.host().sessions.contains("s1"),
+        "the deleted runtime is parked, not kept active"
+    );
+}
+
+/// Issue #47: deleting a PARKED session only drops its runtime; the active
+/// session is untouched.
+#[tokio::test]
+async fn session_deleted_drops_parked_runtime_only() {
+    let mut fixture = HostFixture::new();
+    fixture
+        .host()
+        .sessions
+        .insert(SessionRuntimeState::for_test("parked"));
+    assert!(fixture.host().sessions.contains("parked"));
+
+    fixture
+        .host()
+        .handle_web_command(
+            WireCommand::SessionDeleted { id: "parked".into() },
+            &mut TurnState::default(),
+        )
+        .await;
+
+    assert!(
+        !fixture.host().sessions.contains("parked"),
+        "parked runtime must be dropped"
+    );
+    assert_eq!(
+        fixture.host().session.id, "sess-active",
+        "active session untouched"
+    );
+}
+
+/// Issue #47: when the deleted active session was the ONLY one, no
+/// placeholder session is persisted — the runtime stays (unreachable: its id
+/// is gone from the repo) and the next client attach creates a fresh one.
+#[tokio::test]
+async fn session_deleted_with_no_remaining_creates_no_placeholder() {
+    let mut fixture = HostFixture::new();
+    set_active(&mut fixture, "solo");
+
+    fixture
+        .host()
+        .handle_web_command(
+            WireCommand::SessionDeleted { id: "solo".into() },
+            &mut TurnState::default(),
+        )
+        .await;
+
+    assert_eq!(
+        fixture.host().session.id, "solo",
+        "runtime kept as an unreachable zombie"
+    );
+    assert!(
+        fixture
+            .host()
+            .session
+            .repository
+            .list()
+            .await
+            .unwrap()
+            .is_empty(),
+        "no placeholder session may be persisted"
+    );
+}

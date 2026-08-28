@@ -475,3 +475,91 @@ async fn get_label_applies_updates_in_append_order() {
 
     assert_eq!(label.as_deref(), Some("second"));
 }
+
+// ── lazy creation (issue #46) ──────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn create_lazy_writes_nothing_until_first_real_write() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join(format!("{}.db", uuidv7()));
+
+    let storage = SqliteSessionStorage::create_lazy(&path, "/cwd").await.unwrap();
+    assert!(
+        !path.exists(),
+        "lazy create must not write the db file"
+    );
+    let id = storage.metadata().base.id.clone();
+    assert_eq!(id.len(), 36);
+    assert_eq!(storage.metadata().cwd, "/cwd");
+
+    // Reads on an unmaterialized session return empty state and still write
+    // nothing to disk.
+    assert!(storage.get_leaf_id().await.unwrap().is_none());
+    assert!(storage.get_entries().await.unwrap().is_empty());
+    assert!(storage.find_entries("custom").await.unwrap().is_empty());
+    assert!(storage.get_entry("nope").await.unwrap().is_none());
+    assert!(storage.get_path_to_root(None).await.unwrap().is_empty());
+    assert!(storage.get_label("m1").await.unwrap().is_none());
+    assert!(!path.exists(), "reads must never materialize the file");
+
+    // First real write materializes the file with the pre-minted id.
+    storage
+        .append_entry(message("m1", None, "user", "hi"))
+        .await
+        .unwrap();
+    assert!(path.exists(), "first write must materialize the file");
+
+    // A fresh open sees the same id and the appended entry (the header was
+    // persisted at materialization time).
+    let reopened = SqliteSessionStorage::open(&path).await.unwrap();
+    assert_eq!(reopened.metadata().base.id, id);
+    let entries = reopened.get_entries().await.unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].id, "m1");
+}
+
+#[tokio::test]
+async fn create_lazy_metadata_mutations_materialize_and_persist() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join(format!("{}.db", uuidv7()));
+    let storage = SqliteSessionStorage::create_lazy(&path, "/cwd").await.unwrap();
+    let id = storage.metadata().base.id.clone();
+
+    // A metadata mutation is a real write: it materializes AND persists the
+    // header (binding included) into the fresh file.
+    let mut bound = binding();
+    bound.runtime.provider = Some("lazy-provider".into());
+    storage.set_binding(Some(bound.clone())).await.unwrap();
+    assert!(path.exists());
+
+    let reopened = SqliteSessionStorage::open(&path).await.unwrap();
+    assert_eq!(reopened.metadata().base.id, id);
+    assert_eq!(reopened.metadata().binding.as_ref().unwrap().runtime.provider, Some("lazy-provider".into()));
+}
+
+#[tokio::test]
+async fn create_lazy_respects_existing_path_and_repo_listing() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("occupied.db");
+    SqliteSessionStorage::create(&path, "/cwd").await.unwrap();
+
+    // Creating lazily over an existing file fails like eager create.
+    let err = match SqliteSessionStorage::create_lazy(&path, "/other").await {
+        Ok(_) => panic!("lazy create over an existing file must fail"),
+        Err(e) => e,
+    };
+    assert!(matches!(err.code, SessionErrorCode::AlreadyExists));
+
+    // A lazy session does not appear in the repo listing until materialized.
+    let repo = crate::sqlite_repo::SqliteSessionRepo::new(dir.path());
+    let lazy = repo.create_lazy("/cwd").await.unwrap();
+    let lazy_id = lazy.metadata().base.id.clone();
+    assert_eq!(repo.list().await.unwrap().len(), 1, "only the eager file lists");
+    lazy.append_entry(message("m1", None, "user", "hi")).await.unwrap();
+    let listed = repo.list().await.unwrap();
+    assert_eq!(listed.len(), 2, "materialized session now lists");
+    assert!(
+        listed.iter().any(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()) == Some(lazy_id.clone())),
+        "materialized file keeps the pre-minted id as its stem"
+    );
+}

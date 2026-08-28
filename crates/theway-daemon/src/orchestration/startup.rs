@@ -178,7 +178,13 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     };
 
     let (store, resumed) = match &options.session {
-        SessionSelection::New => (repo.create(&cwd).await?, false),
+        // Issue #46: a default new session is minted lazily — the db file is
+        // only written on the first real write (first message / model change
+        // / metadata op). Starting the daemon (or an idle TUI that spawns it)
+        // must not leave an empty conversation behind. Explicit selections
+        // (`--resume` / `--resume-id` / `--continue`) and explicit creates
+        // (`/new`, import, controller `create_session`) stay eager.
+        SessionSelection::New => (repo.create_lazy(&cwd).await?, false),
         SessionSelection::Latest => (repo.resume(None).await?, true),
         SessionSelection::Id(id) => (repo.resume(Some(id)).await?, true),
     };

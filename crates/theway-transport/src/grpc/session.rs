@@ -152,6 +152,12 @@ impl SessionService for GrpcState {
             *self.session_id.write().unwrap() = fallback.clone();
             self.latest.lock().session_id = fallback.clone();
         }
+        // Tell the event loop to drop the deleted session's runtime (and swap
+        // the active runtime when the deleted session was current), so later
+        // attaches never land on a deleted session id.
+        let _ = self
+            .commands
+            .send(WireCommand::SessionDeleted { id: full_id });
         Ok(Response::new(DeleteSessionResponse {
             running_run_ids: Vec::new(),
         }))

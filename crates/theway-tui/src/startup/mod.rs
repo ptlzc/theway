@@ -10,7 +10,6 @@ use anyhow::Result;
 use theway_contract::session::SessionReader;
 use theway_storage::session;
 use theway_storage::sqlite_repo::SqliteSessionRepo;
-use theway_transport::client::GrpcClient;
 use theway_transport::wire::WireDaemonConfig;
 
 use crate::cli::Cli;
@@ -115,19 +114,43 @@ fn daemon_runtime_args(cli: &Cli, config: &WireDaemonConfig) -> Vec<String> {
 /// `--resume-id`, or `--continue`. A self-spawned daemon already has a
 /// fresh session, so `reused = false` never attaches fresh; the daemon is
 /// untouched either way (fresh attach is TUI client semantics).
+///
+/// Issue #46: the actual `create_session` is deferred until the first
+/// submitted message (`App::ensure_fresh_session`) — the flag only arms the
+/// client.
 fn fresh_attach_wanted(reused: bool, cli: &Cli) -> bool {
     reused && cli.resume.is_none() && cli.resume_id.is_none() && !cli.continue_
 }
 
-/// Create a new session after attaching to a reused daemon —
-/// the same path `/new` drives (issue #56). Returns the new session id.
-/// The client uses this id explicitly for subsequent RPCs; there is no
-/// daemon-side session switch.
-async fn attach_fresh_session(client: &mut GrpcClient) -> Result<String> {
-    let summary = client
-        .create_session_with_metadata(None, None, Default::default())
-        .await?;
-    Ok(summary.session_id)
+/// Issue #47: `--continue` onto a reused daemon whose current session no
+/// longer exists in the repo (a previous idle run reaped its empty startup
+/// session and no session remained) must attach fresh instead of landing on
+/// the deleted id — messages there would be silently lost.
+fn continue_needs_fresh_attach(
+    reused: bool,
+    cli: &Cli,
+    initial_session_id: &str,
+    exists_in_repo: bool,
+) -> bool {
+    reused && cli.continue_ && !initial_session_id.is_empty() && !exists_in_repo
+}
+
+/// Issue #47: session id the SPAWNED daemon created at startup
+/// (`SessionSelection::New`) — the TUI reaps it on exit when no message ever
+/// reached it, so an idle TUI leaves no empty conversation behind. Explicit
+/// selections never make the daemon create a session (`--continue` and
+/// resume launch args); the reused-daemon path defers creation to the first
+/// message (issue #46) and yields `None` here.
+fn spawn_auto_session(reused: bool, cli: &Cli, initial_session_id: &str) -> Option<String> {
+    if !reused
+        && !cli.continue_
+        && cli.effective_resume_id().is_none()
+        && !initial_session_id.is_empty()
+    {
+        Some(initial_session_id.to_string())
+    } else {
+        None
+    }
 }
 
 pub(crate) async fn run_repl(
@@ -175,28 +198,38 @@ pub(crate) async fn run_repl(
     // RPC; `config_notes` carries assembly diagnostics and attach-time
     // mismatch reports for the feed.
     let (connector, connection) = DaemonConnector::start(&cli, &cwd, repo.clone()).await?;
-    let mut client = connection.client;
-    let mut initial = connection.status;
+    let client = connection.client;
+    let initial = connection.status;
     let reused = connection.reused;
     let config_notes = connection.notes;
 
     // Issue #56: re-entering the TUI with a live daemon defaults to a NEW
     // session (daemon untouched — fresh attach is TUI client semantics).
     // Explicit `--resume`/`--resume-id`/`--continue` selections skip this.
-    // Mirrors the /new path: create + switch. The switch queues on the
-    // daemon's event loop, so the first snapshots may still show the old
-    // session; the new one appears on the next snapshot (apply_snapshot's
-    // session-id path).
-    let fresh_session_id = if fresh_attach_wanted(reused, &cli) {
-        let id = attach_fresh_session(&mut client).await?;
-        // Patch the cached snapshot's session id so the banner names the
-        // new session before the first republish lands (the feed still
-        // holds the old session's blocks until then).
-        initial.session_id = id.clone();
-        Some(id)
-    } else {
-        None
+    // Issue #46: the create is DEFERRED until the first submitted message —
+    // an idle TUI must not leave an empty conversation behind. Until then the
+    // client shows the daemon's current session; `App::ensure_fresh_session`
+    // creates + selects the fresh session right before the first send.
+    //
+    // Issue #47: a reused daemon may hold a DELETED session as its active
+    // runtime (a previous idle run reaped its empty startup session and no
+    // session remained). `--continue` would otherwise attach to the deleted
+    // id and silently lose messages — treat it like a fresh attach instead.
+    let continue_target_gone = {
+        let exists = session::find_path_by_id(&repo, &initial.session_id)
+            .await?
+            .is_some();
+        continue_needs_fresh_attach(reused, &cli, &initial.session_id, exists)
     };
+    let fresh_attach = fresh_attach_wanted(reused, &cli) || continue_target_gone;
+
+    // Issue #47: a SPAWNED daemon creates its startup session eagerly
+    // (SessionSelection::New — the runtime needs a session). The TUI reaps
+    // that session on exit when no message ever reached it, so an idle TUI
+    // leaves no empty conversation behind. Explicit selections never make the
+    // daemon create a session (`--continue`/resume launch args), and the
+    // reused-daemon path already defers creation to the first message (#46).
+    let auto_session = spawn_auto_session(reused, &cli, &initial.session_id);
 
     let session_id = if session_id.is_empty() {
         initial.session_id.clone()
@@ -215,6 +248,8 @@ pub(crate) async fn run_repl(
         registry: crate::local_commands::local_registry(),
         pending_images: cli.image.clone(),
         color_level: theway_markdown::get_color_level(),
+        fresh_attach,
+        auto_session,
     });
     app.banner();
     app.system_line(format!(
@@ -227,8 +262,10 @@ pub(crate) async fn run_repl(
     for note in config_notes {
         app.system_line(note);
     }
-    if let Some(id) = fresh_session_id {
-        app.system_line(format!("new session {id}"));
+    if fresh_attach {
+        app.system_line(
+            "attached to a running daemon; a fresh session will be created on your first message",
+        );
     }
     app.run().await
 }
@@ -343,7 +380,6 @@ pub(crate) mod test_daemon {
 
 #[cfg(test)]
 mod tests {
-    use super::test_daemon::test_daemon_client;
     use super::*;
     use clap::Parser as _;
 
@@ -373,6 +409,52 @@ mod tests {
                 "explicit selection must suppress fresh attach: {args:?}"
             );
         }
+    }
+
+    /// Issue #47: `--continue` onto a reused daemon attaches fresh only when
+    /// the daemon's current session no longer exists in the repo (reaped by
+    /// an idle previous run). An existing target keeps the resume semantics.
+    #[test]
+    fn continue_target_gone_triggers_fresh_attach_only_for_missing_session() {
+        let plain = Cli::parse_from(["theway", "--continue"]);
+        assert!(!continue_needs_fresh_attach(true, &plain, "sess-1", true));
+        assert!(continue_needs_fresh_attach(true, &plain, "sess-1", false));
+        // An empty snapshot id never triggers (nothing to resolve).
+        assert!(!continue_needs_fresh_attach(true, &plain, "", false));
+        // The spawn path never fresh-attaches; `--continue` resumes server-side.
+        assert!(!continue_needs_fresh_attach(false, &plain, "sess-1", false));
+    }
+
+    /// Issue #47: the SPAWNED daemon's startup session is the reaping target
+    /// only with no explicit selection; `--continue`/resume launch args make
+    /// the daemon resume instead of create, and reused daemons defer creation
+    /// to the first message (issue #46).
+    #[test]
+    fn spawn_auto_session_only_for_plain_spawn() {
+        let plain = Cli::parse_from(["theway"]);
+        assert_eq!(
+            spawn_auto_session(false, &plain, "sess-new").as_deref(),
+            Some("sess-new")
+        );
+        assert_eq!(spawn_auto_session(false, &plain, ""), None);
+
+        for args in [
+            vec!["theway", "--continue"],
+            vec!["theway", "--resume-id", "sess-abc"],
+            vec!["theway", "--resume", "sess-abc"],
+        ] {
+            let cli = Cli::parse_from(args.clone());
+            assert_eq!(
+                spawn_auto_session(false, &cli, "sess-new"),
+                None,
+                "explicit selection must not create a startup session: {args:?}"
+            );
+        }
+
+        // Reused daemon: nothing was created at startup — the fresh attach is
+        // deferred to the first message.
+        let cli = Cli::parse_from(["theway"]);
+        assert_eq!(spawn_auto_session(true, &cli, "sess-old"), None);
     }
 
     /// Issue #66: `--home` (when set) and each repeatable `--skills-dir`
@@ -554,26 +636,5 @@ poll_interval_secs = 45
                 "45",
             ]
         );
-    }
-
-    /// Issue #56 reused path: `attach_fresh_session` runs the `/new` path —
-    /// `create_session(None)` — and returns the new session id. No session
-    /// switch command is sent.
-    #[tokio::test]
-    async fn attach_fresh_session_creates_and_returns_id() {
-        let (mut client, _rx, _session_ops) = test_daemon_client().await;
-
-        // Act
-        let id = attach_fresh_session(&mut client).await.unwrap();
-
-        // Assert: FakeSessionOps ids come from a counter — the first create
-        // yields `sess-new-1`.
-        assert_eq!(id, "sess-new-1");
-
-        // Assert: the new session is registered.
-        let (sessions, _current) = client.list_sessions().await.unwrap();
-        assert_eq!(sessions.len(), 2);
-        assert_eq!(sessions[0].session_id, "sess-1");
-        assert_eq!(sessions[1].session_id, "sess-new-1");
     }
 }

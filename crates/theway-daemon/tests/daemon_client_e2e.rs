@@ -245,6 +245,10 @@ async fn grpc_surface_has_health_check() {
     unsafe { std::env::remove_var("THEWAY_DIR") };
 }
 
+/// Issue #46: a freshly spawned daemon mints its "new session" lazily — the
+/// db file is only written on the first real write. `list_sessions` therefore
+/// does NOT list the current session until the first message materializes it;
+/// an idle daemon leaves no empty conversation behind.
 #[tokio::test]
 async fn list_sessions_marks_current_after_spawn() {
     let _guard = DAEMON_E2E_LOCK.lock().unwrap();
@@ -254,12 +258,37 @@ async fn list_sessions_marks_current_after_spawn() {
 
     let (_daemon, addr) = spawn_daemon(dir.path()).await;
     let mut client = GrpcClient::connect(&addr).await.unwrap();
+
     let (sessions, current) = client.list_sessions().await.unwrap();
     assert!(!current.is_empty(), "daemon has a current session");
     assert!(
-        sessions.iter().any(|s| s.session_id == current),
-        "current session listed: {sessions:?}"
+        !sessions.iter().any(|s| s.session_id == current),
+        "unmaterialized fresh session must not be listed yet: {sessions:?}"
     );
+
+    // First message materializes the session; it now lists under the same id.
+    // The daemon processes the command asynchronously, so poll until the
+    // turn's persistence lands (the user message is appended before the LLM
+    // call, which fails credential-less — the file appears regardless).
+    let accepted = client
+        .send_message("hello".into(), vec![], false)
+        .await
+        .unwrap();
+    assert!(accepted, "send_message accepted");
+    let mut materialized = false;
+    for _ in 0..50 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let (sessions, current_after) = client.list_sessions().await.unwrap();
+        assert_eq!(
+            current_after, current,
+            "session id stable across materialization"
+        );
+        if sessions.iter().any(|s| s.session_id == current) {
+            materialized = true;
+            break;
+        }
+    }
+    assert!(materialized, "materialized session listed after first message");
 
     unsafe { std::env::remove_var("THEWAY_DIR") };
 }

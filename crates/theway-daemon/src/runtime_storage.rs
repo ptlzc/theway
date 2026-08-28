@@ -152,6 +152,13 @@ pub struct SessionImport {
 #[async_trait]
 pub trait SessionRepository: Send + Sync {
     async fn create(&self, cwd: &Path) -> Result<Arc<dyn SessionStore>>;
+    /// Mint a session WITHOUT writing the db file (issue #46); the file is
+    /// materialized on the first real write so an idle TUI leaves no empty
+    /// conversation behind. Defaults to eager [`Self::create`] so
+    /// remote/controller-backed repositories keep their current behavior.
+    async fn create_lazy(&self, cwd: &Path) -> Result<Arc<dyn SessionStore>> {
+        self.create(cwd).await
+    }
     async fn create_with_id(&self, cwd: &Path, _id: Option<&str>) -> Result<Arc<dyn SessionStore>> {
         self.create(cwd).await
     }
@@ -173,6 +180,12 @@ pub trait SessionRepository: Send + Sync {
 impl SessionRepository for SqliteSessionRepo {
     async fn create(&self, cwd: &Path) -> Result<Arc<dyn SessionStore>> {
         Ok(Arc::new(theway_storage::session::create(self, cwd).await?))
+    }
+
+    async fn create_lazy(&self, cwd: &Path) -> Result<Arc<dyn SessionStore>> {
+        Ok(Arc::new(
+            theway_storage::session::create_lazy(self, cwd).await?,
+        ))
     }
 
     async fn create_with_id(&self, cwd: &Path, id: Option<&str>) -> Result<Arc<dyn SessionStore>> {

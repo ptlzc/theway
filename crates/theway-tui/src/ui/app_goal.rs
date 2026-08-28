@@ -14,10 +14,60 @@ impl App {
     /// subsequent RPCs use explicit session ids, and the daemon publishes
     /// per-session state when the client subscribes to that session.
     pub(crate) async fn select_session(&mut self, id: String) -> Result<()> {
+        // An explicit selection supersedes any pending deferred fresh attach
+        // (issue #46): the user picked a real session, so nothing is created
+        // on the next message.
+        self.pending_fresh_attach = false;
         self.session_id = id.clone();
         self.latest.session_id = id.clone();
         self.system_line(format!("selected session {id}"));
         Ok(())
+    }
+
+    /// Issue #46: create + select the deferred fresh session. Called right
+    /// before the first submitted message reaches the daemon (reused-daemon
+    /// fresh attach, issue #56) — the session file is only created when the
+    /// TUI actually sends something, so an idle TUI leaves no empty
+    /// conversation behind. Idempotent: no-op once the flag is cleared.
+    pub(crate) async fn ensure_fresh_session(&mut self) -> Result<()> {
+        if !self.pending_fresh_attach {
+            return Ok(());
+        }
+        // Clear BEFORE select_session (which also clears it); the message
+        // right after this call must not re-trigger creation.
+        self.pending_fresh_attach = false;
+        let summary = self
+            .client
+            .create_session_with_metadata(None, None, Default::default())
+            .await?;
+        let id = summary.session_id;
+        self.select_session(id.clone()).await?;
+        self.system_line(format!("new session {id}"));
+        Ok(())
+    }
+
+    /// Issue #47: on exit, delete the session the SPAWNED daemon created at
+    /// startup when no message ever reached it — an idle TUI must not leave
+    /// an empty conversation behind. Best-effort: the daemon may already be
+    /// gone, or the session may be protected (running graphs).
+    pub(crate) async fn reap_empty_auto_session(&mut self) {
+        let Some(id) = self.auto_session.clone() else {
+            return;
+        };
+        if self.messaged_sessions.contains(&id) {
+            return;
+        }
+        match self.client.delete_session(&id).await {
+            Ok(running) if running.is_empty() => {
+                tracing::debug!("reaped empty startup session {id}");
+            }
+            Ok(running) => {
+                tracing::debug!("startup session {id} kept: active graphs {running:?}");
+            }
+            Err(error) => {
+                tracing::debug!("startup session {id} reap skipped: {error}");
+            }
+        }
     }
 
     /// Resolve the pending daemon control-plane prompt through the `approve`

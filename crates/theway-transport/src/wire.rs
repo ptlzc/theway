@@ -108,6 +108,14 @@ pub enum WireCommand {
         request: WireClearCredentialRequest,
         response: tokio::sync::oneshot::Sender<Result<(), WireRpcError>>,
     },
+    /// A session was deleted through a transport RPC after the repo delete
+    /// already succeeded. The event loop drops the deleted session's runtime
+    /// (parked), or — when it was the ACTIVE session — swaps the active
+    /// runtime to the most recent remaining session so later attaches never
+    /// land on a deleted session.
+    SessionDeleted {
+        id: String,
+    },
 }
 
 /// Daemon configuration snapshot / partial update (issue #72) — the serde twin

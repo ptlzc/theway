@@ -22,6 +22,7 @@ impl App {
             client: config.client,
             connector: config.connector,
             session_id: initial.session_id.clone(),
+            pending_fresh_attach: config.fresh_attach,
             cwd: config.cwd,
             model_config_path: config.model_config_path,
             pending_model_default: None,
@@ -79,6 +80,8 @@ impl App {
             quit: false,
             connected: true,
             resync_pending: false,
+            auto_session: config.auto_session,
+            messaged_sessions: std::collections::HashSet::new(),
         }
     }
 

@@ -584,6 +584,11 @@ pub(crate) async fn dispatch(
                     .unwrap_or_default();
                 state.latest.lock().session_id = fallback.clone();
             }
+            // The event loop drops the deleted session's runtime (and swaps
+            // the active runtime when the deleted session was current).
+            let _ = state
+                .commands
+                .send(WireCommand::SessionDeleted { id: target });
             Ok(serde_json::json!({ "deleted": true }))
         }
         "get_path_context" | "session.get_path_context" => {

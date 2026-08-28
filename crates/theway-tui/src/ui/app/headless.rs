@@ -89,6 +89,7 @@ impl App {
             }
             let (expanded, _) = mentions::expand(input, &self.cwd).await;
             let prompt = commands::attach_skill_prompt(expanded, None);
+            self.messaged_sessions.insert(self.session_id.clone());
             match self
                 .client
                 .send_message_to_session(Some(&self.session_id), prompt, vec![], false)
@@ -100,6 +101,9 @@ impl App {
             }
         }
         printer.abort();
+        // Issue #47: an idle run (no input lines) must not leave the daemon's
+        // startup session behind as an empty conversation.
+        self.reap_empty_auto_session().await;
         Ok(())
     }
 }

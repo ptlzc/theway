@@ -9,6 +9,9 @@ impl App {
         let result = self.event_loop(&mut terminal).await;
         leave_tui().ok();
         terminal.show_cursor().ok();
+        // Issue #47: an idle TUI must not leave the daemon's startup session
+        // behind as an empty conversation.
+        self.reap_empty_auto_session().await;
         result
     }
 

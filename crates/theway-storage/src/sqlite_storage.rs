@@ -105,6 +105,47 @@ impl SqliteSessionStorage {
                 message: format!("{} already exists", path.display()),
             });
         }
+        let metadata = Self::fresh_metadata(&path, cwd.into(), id);
+        let db = materialize_db(&path, &metadata).await?;
+        Ok(Self {
+            path,
+            db: tokio::sync::Mutex::new(Some(db)),
+            metadata: parking_lot::Mutex::new(metadata),
+        })
+    }
+
+    /// Mint a fresh session **without writing the database file**. The session
+    /// id is derived up front (file stem, same as [`Self::create`]) and the
+    /// header lives in memory; the file is materialized on the first real
+    /// write (first append / metadata mutation). Read-only access before that
+    /// returns empty state without creating the file.
+    ///
+    /// The daemon uses this for its startup "new session" slot (issue #46): an
+    /// idle TUI that never sends a message must leave no empty conversation
+    /// behind. The id stays stable across materialization, so snapshots,
+    /// feed keying and `--resume-id` all keep working from the first frame.
+    pub async fn create_lazy(
+        path: impl Into<PathBuf>,
+        cwd: impl Into<String>,
+    ) -> Result<Self, SessionError> {
+        let path = path.into();
+        if path.exists() {
+            return Err(SessionError {
+                code: SessionErrorCode::AlreadyExists,
+                message: format!("{} already exists", path.display()),
+            });
+        }
+        let metadata = Self::fresh_metadata(&path, cwd.into(), None);
+        Ok(Self {
+            path,
+            db: tokio::sync::Mutex::new(None),
+            metadata: parking_lot::Mutex::new(metadata),
+        })
+    }
+
+    /// Compute the header for a fresh session (id derived from the file stem
+    /// unless supplied) without touching the filesystem.
+    fn fresh_metadata(path: &Path, cwd: String, id: Option<String>) -> JsonlSessionMetadata {
         let id = id.unwrap_or_else(|| {
             path.file_stem()
                 .and_then(|s| s.to_str())
@@ -112,30 +153,17 @@ impl SqliteSessionStorage {
                 .map(str::to_string)
                 .unwrap_or_else(uuidv7)
         });
-        let metadata = JsonlSessionMetadata {
+        JsonlSessionMetadata {
             base: SessionMetadata {
                 id,
                 created_at: chrono::Utc::now().to_rfc3339(),
             },
-            cwd: cwd.into(),
+            cwd,
             path: path.to_string_lossy().to_string(),
             parent_session_path: None,
             imported_from: None,
             binding: None,
-        };
-        if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent).await.map_err(io_err)?;
         }
-        let db = open_db(&path).await?;
-        let conn = db.connect().map_err(map_err)?;
-        conn.execute_batch(SCHEMA).await.map_err(map_err)?;
-        // Persist the header into `meta`.
-        write_meta(&db, &metadata).await?;
-        Ok(Self {
-            path,
-            db: tokio::sync::Mutex::new(Some(db)),
-            metadata: parking_lot::Mutex::new(metadata),
-        })
     }
 
     /// Open an existing session database. Parses the header from `meta` to
@@ -290,10 +318,17 @@ impl SqliteSessionStorage {
         Ok(())
     }
 
+    /// Open (creating when needed) the database — the WRITE path. A lazy
+    /// session (issue #46) is materialized here on its first real write:
+    /// directory + schema + header are written, then the handle is opened.
     async fn db(&self) -> Result<Database, SessionError> {
         let mut guard = self.db.lock().await;
         if guard.is_none() {
-            *guard = Some(open_db(&self.path).await?);
+            if !self.path.exists() {
+                *guard = Some(materialize_db(&self.path, &self.metadata.lock()).await?);
+            } else {
+                *guard = Some(open_db(&self.path).await?);
+            }
         }
         Ok(guard.as_ref().expect("just opened").clone())
     }
@@ -302,10 +337,32 @@ impl SqliteSessionStorage {
         self.db().await?.connect().map_err(map_err)
     }
 
+    /// Read-only database access. `Ok(None)` when the session has not been
+    /// materialized yet (no file on disk) — reads NEVER create the file, so a
+    /// lazy session stays off disk until the first real write.
+    async fn conn_if_exists(&self) -> Result<Option<Connection>, SessionError> {
+        if !self.path.exists() {
+            return Ok(None);
+        }
+        let mut guard = self.db.lock().await;
+        if guard.is_none() {
+            *guard = Some(open_db(&self.path).await?);
+        }
+        Ok(Some(
+            guard
+                .as_ref()
+                .expect("just opened")
+                .connect()
+                .map_err(map_err)?,
+        ))
+    }
+
     /// Replay the append-only log to derive the current leaf: a `Leaf` entry
     /// moves the pointer explicitly; any other entry becomes the new leaf.
     async fn current_leaf(&self) -> Result<Option<String>, SessionError> {
-        let conn = self.conn().await?;
+        let Some(conn) = self.conn_if_exists().await? else {
+            return Ok(None);
+        };
         let mut rows = conn
             .query(
                 "SELECT type, payload FROM entries ORDER BY seq DESC LIMIT 1",
@@ -357,6 +414,25 @@ async fn open_db(path: &Path) -> Result<Database, SessionError> {
             code: SessionErrorCode::Corrupted,
             message: e.to_string(),
         })
+}
+
+/// Write a fresh session database at `path`: parent directory, schema, and the
+/// header row. Returns the opened handle. The lazy-session write path calls
+/// this when a session minted by [`SqliteSessionStorage::create_lazy`] gets its
+/// first real write; eager `create` calls it immediately.
+async fn materialize_db(
+    path: &Path,
+    metadata: &JsonlSessionMetadata,
+) -> Result<Database, SessionError> {
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent).await.map_err(io_err)?;
+    }
+    let db = open_db(path).await?;
+    let conn = db.connect().map_err(map_err)?;
+    conn.execute_batch(SCHEMA).await.map_err(map_err)?;
+    // Persist the header into `meta`.
+    write_meta(&db, metadata).await?;
+    Ok(db)
 }
 
 /// Run `PRAGMA quick_check` (cheap page-level integrity scan) and report
@@ -435,7 +511,9 @@ impl SessionReader for SqliteSessionStorage {
     }
 
     async fn get_entry(&self, id: &str) -> Result<Option<StoredSessionEntry>, SessionError> {
-        let conn = self.conn().await?;
+        let Some(conn) = self.conn_if_exists().await? else {
+            return Ok(None);
+        };
         let mut rows = conn
             .query("SELECT payload FROM entries WHERE id = ?1", [id])
             .await
@@ -449,7 +527,9 @@ impl SessionReader for SqliteSessionStorage {
     }
 
     async fn get_entries(&self) -> Result<Vec<StoredSessionEntry>, SessionError> {
-        let conn = self.conn().await?;
+        let Some(conn) = self.conn_if_exists().await? else {
+            return Ok(Vec::new());
+        };
         let mut rows = conn
             .query("SELECT payload FROM entries ORDER BY seq", ())
             .await
@@ -470,7 +550,9 @@ impl SessionReader for SqliteSessionStorage {
         let Some(start) = leaf_id else {
             return Ok(Vec::new());
         };
-        let conn = self.conn().await?;
+        let Some(conn) = self.conn_if_exists().await? else {
+            return Ok(Vec::new());
+        };
         let mut chain: Vec<StoredSessionEntry> = Vec::new();
         let mut current = Some(start.to_string());
         let mut seen = std::collections::HashSet::new();
@@ -513,7 +595,9 @@ impl SessionReader for SqliteSessionStorage {
         &self,
         entry_type: &str,
     ) -> Result<Vec<StoredSessionEntry>, SessionError> {
-        let conn = self.conn().await?;
+        let Some(conn) = self.conn_if_exists().await? else {
+            return Ok(Vec::new());
+        };
         let mut rows = conn
             .query(
                 "SELECT payload FROM entries WHERE type = ?1 ORDER BY seq",
@@ -533,7 +617,9 @@ impl SessionReader for SqliteSessionStorage {
     async fn get_label(&self, id: &str) -> Result<Option<String>, SessionError> {
         // Walk Label entries in append order; latest non-None pointing at `id`
         // wins (same semantics as memory_storage).
-        let conn = self.conn().await?;
+        let Some(conn) = self.conn_if_exists().await? else {
+            return Ok(None);
+        };
         let mut rows = conn
             .query(
                 "SELECT payload FROM entries WHERE type = 'label' ORDER BY seq",

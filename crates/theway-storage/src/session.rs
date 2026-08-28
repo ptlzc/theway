@@ -90,6 +90,15 @@ pub async fn create(
     Ok(repo.create(cwd.to_string_lossy().to_string()).await?)
 }
 
+/// Mint a brand-new session WITHOUT writing the database file (issue #46);
+/// the file is materialized on the first real write.
+pub async fn create_lazy(
+    repo: &SqliteSessionRepo,
+    cwd: &std::path::Path,
+) -> Result<SqliteSessionStorage> {
+    Ok(repo.create_lazy(cwd.to_string_lossy().to_string()).await?)
+}
+
 /// Resume the most recent session for this cwd, or a specific one by id when supplied.
 pub async fn resume(
     repo: &SqliteSessionRepo,

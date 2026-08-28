@@ -233,6 +233,17 @@ pub struct AppConfig {
     pub pending_images: Vec<PathBuf>,
     /// Terminal color capability resolved by the startup boundary.
     pub color_level: theway_markdown::ColorLevel,
+    /// Issue #46: when true, the fresh session for a reused-daemon attach
+    /// (issue #56) is NOT created at startup — the App creates + selects it
+    /// right before the first submitted message, so an idle TUI leaves no
+    /// empty conversation behind.
+    pub fresh_attach: bool,
+    /// Issue #47: session id the SPAWNED daemon created at startup
+    /// (`SessionSelection::New`). The App deletes it on exit when no message
+    /// ever reached it, so an idle TUI leaves no empty conversation behind.
+    /// `None` for reused-daemon attaches (deferred, issue #46) and explicit
+    /// selections (`--resume`/`--resume-id`/`--continue`).
+    pub auto_session: Option<String>,
 }
 
 /// Client-side App state: a snapshot cache plus local UI concerns (input,
@@ -249,6 +260,11 @@ pub struct App {
     completer: SlashCompleter,
     cwd: PathBuf,
     session_id: String,
+    /// Issue #46: set at startup for a reused-daemon fresh attach; cleared by
+    /// the first submitted message (which creates + selects the fresh session)
+    /// or by any explicit session selection (`/new`, `/resume`, `/session
+    /// switch`).
+    pending_fresh_attach: bool,
     model_config_path: PathBuf,
     pending_model_default: Option<PendingModelDefault>,
     pending_thinking_default: Option<PendingThinkingDefault>,
@@ -347,6 +363,12 @@ pub struct App {
     /// the daemon's session list; `None` when closed/cancelled. The startup
     /// `--resume` terminal picker (`resume_picker.rs`) is separate.
     resume_picker: Option<ResumePickerState>,
+    /// Issue #47: session id the SPAWNED daemon created at startup; deleted
+    /// on exit when no message ever reached it (empty-conversation reaping).
+    auto_session: Option<String>,
+    /// Session ids that received at least one submitted message during this
+    /// run (issue #47) — a session in this set is never reaped.
+    messaged_sessions: std::collections::HashSet<String>,
     /// Last rendered layout rects retained for rendering diagnostics and
     /// unit assertions.
     last_status_area: Option<Rect>,

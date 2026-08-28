@@ -91,6 +91,14 @@ impl App {
                 name: None,
             })
             .collect();
+        // Issue #46: a reused-daemon fresh attach creates its session lazily —
+        // right here, before the first message actually goes out.
+        if let Err(e) = self.ensure_fresh_session().await {
+            self.error_line(format!("new session failed: {e}"));
+            return Ok(());
+        }
+        // Issue #47: this session received a message — never reap it on exit.
+        self.messaged_sessions.insert(self.session_id.clone());
         match self
             .client
             .send_message_to_session(Some(&self.session_id), prompt_text, images, false)
@@ -192,6 +200,13 @@ impl App {
             _ => {
                 // Forward to the daemon: it dispatches the full slash registry
                 // (model/goal/triggers/cron/skills/…) and publishes the result.
+                // Issue #46: a pending deferred fresh attach (reused daemon)
+                // creates its session here, before the first forwarded command
+                // reaches the daemon.
+                if let Err(e) = self.ensure_fresh_session().await {
+                    self.error_line(format!("new session failed: {e}"));
+                    return;
+                }
                 match self
                     .client
                     .send_message_to_session(Some(&self.session_id), trimmed.to_string(), vec![], false)
