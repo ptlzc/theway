@@ -236,28 +236,33 @@ export interface FeedBlock {
 
 export interface UserBlock {
   text: string;
+  /** RFC3339 / ISO-8601 with offset (UTC), null when absent. */
   timestamp?: string | undefined;
 }
 
 export interface AssistantBlock {
   text: string;
+  /** RFC3339 / ISO-8601 with offset (UTC), null when absent. */
   timestamp?: string | undefined;
 }
 
 export interface ThinkingBlock {
   text: string;
+  /** RFC3339 / ISO-8601 with offset (UTC), null when absent. */
   timestamp?: string | undefined;
 }
 
 export interface ToolBlock {
   name: string;
   args: string;
+  /** RFC3339 / ISO-8601 with offset (UTC), null when absent. */
   timestamp?: string | undefined;
 }
 
 export interface ToolResultBlock {
   lines: string[];
   isError: boolean;
+  /** RFC3339 / ISO-8601 with offset (UTC), null when absent. */
   timestamp?: string | undefined;
 }
 
@@ -265,6 +270,7 @@ export interface PlainBlock {
   text: string;
   /** "output" | "system" | "error" | "note" (serde snake_case variant names) */
   level: string;
+  /** RFC3339 / ISO-8601 with offset (UTC), null when absent. */
   timestamp?: string | undefined;
 }
 
@@ -273,13 +279,17 @@ export interface SessionSummary {
   name: string;
   cwd: string;
   model: string;
+  /** RFC3339 / ISO-8601 with offset (UTC). */
   createdAt: string;
+  /** Deprecated epoch milliseconds; use last_activity_at_rfc3339. */
   lastActivityAt: string;
   graphCount: number;
   activeGraphCount: number;
   busy: boolean;
   preview?: string | undefined;
   metadata: { [key: string]: string };
+  /** RFC3339 / ISO-8601 with offset (UTC), null when absent. */
+  lastActivityAtRfc3339?: string | undefined;
 }
 
 export interface SessionSummary_MetadataEntry {
@@ -3604,6 +3614,7 @@ function createBaseSessionSummary(): SessionSummary {
     busy: false,
     preview: undefined,
     metadata: {},
+    lastActivityAtRfc3339: undefined,
   };
 }
 
@@ -3642,6 +3653,9 @@ export const SessionSummary: MessageFns<SessionSummary> = {
     globalThis.Object.entries(message.metadata).forEach(([key, value]: [string, string]) => {
       SessionSummary_MetadataEntry.encode({ key: key as any, value }, writer.uint32(90).fork()).join();
     });
+    if (message.lastActivityAtRfc3339 !== undefined) {
+      writer.uint32(98).string(message.lastActivityAtRfc3339);
+    }
     return writer;
   },
 
@@ -3743,6 +3757,14 @@ export const SessionSummary: MessageFns<SessionSummary> = {
           }
           continue;
         }
+        case 12: {
+          if (tag !== 98) {
+            break;
+          }
+
+          message.lastActivityAtRfc3339 = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -3793,6 +3815,11 @@ export const SessionSummary: MessageFns<SessionSummary> = {
           {},
         )
         : {},
+      lastActivityAtRfc3339: isSet(object.lastActivityAtRfc3339)
+        ? globalThis.String(object.lastActivityAtRfc3339)
+        : isSet(object.last_activity_at_rfc3339)
+        ? globalThis.String(object.last_activity_at_rfc3339)
+        : undefined,
     };
   },
 
@@ -3837,6 +3864,9 @@ export const SessionSummary: MessageFns<SessionSummary> = {
         });
       }
     }
+    if (message.lastActivityAtRfc3339 !== undefined) {
+      obj.lastActivityAtRfc3339 = message.lastActivityAtRfc3339;
+    }
     return obj;
   },
 
@@ -3864,6 +3894,7 @@ export const SessionSummary: MessageFns<SessionSummary> = {
       },
       {},
     );
+    message.lastActivityAtRfc3339 = object.lastActivityAtRfc3339 ?? undefined;
     return message;
   },
 };

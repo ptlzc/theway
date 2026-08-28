@@ -51,9 +51,6 @@ pub(crate) const RESULT_SUMMARY_STYLE: Style = Style::new().fg(Color::DarkGray);
 fn user_body_style(theme: &Theme) -> Style {
     Style::new().fg(theme.user_text)
 }
-fn band_style(theme: &Theme) -> Style {
-    Style::new().bg(theme.user_bg)
-}
 fn tool_name_style(theme: &Theme) -> Style {
     Style::new()
         .fg(theme.tool_title)

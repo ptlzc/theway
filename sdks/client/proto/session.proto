@@ -195,35 +195,35 @@ message FeedBlock {
 
 message UserBlock {
   string text = 1;
-  optional string timestamp = 2;
+  optional string timestamp = 2; // RFC3339 / ISO-8601 with offset (UTC), null when absent.
 }
 
 message AssistantBlock {
   string text = 1;
-  optional string timestamp = 2;
+  optional string timestamp = 2; // RFC3339 / ISO-8601 with offset (UTC), null when absent.
 }
 
 message ThinkingBlock {
   string text = 1;
-  optional string timestamp = 2;
+  optional string timestamp = 2; // RFC3339 / ISO-8601 with offset (UTC), null when absent.
 }
 
 message ToolBlock {
   string name = 1;
   string args = 2;
-  optional string timestamp = 3;
+  optional string timestamp = 3; // RFC3339 / ISO-8601 with offset (UTC), null when absent.
 }
 
 message ToolResultBlock {
   repeated string lines = 1;
   bool is_error = 2;
-  optional string timestamp = 3;
+  optional string timestamp = 3; // RFC3339 / ISO-8601 with offset (UTC), null when absent.
 }
 
 message PlainBlock {
   string text = 1;
   string level = 2; // "output" | "system" | "error" | "note" (serde snake_case variant names)
-  optional string timestamp = 3;
+  optional string timestamp = 3; // RFC3339 / ISO-8601 with offset (UTC), null when absent.
 }
 
 message SessionSummary {
@@ -231,13 +231,14 @@ message SessionSummary {
   string name = 2;
   string cwd = 3;
   string model = 4;
-  string created_at = 5;
-  int64 last_activity_at = 6;
+  string created_at = 5; // RFC3339 / ISO-8601 with offset (UTC).
+  int64 last_activity_at = 6; // Deprecated epoch milliseconds; use last_activity_at_rfc3339.
   uint32 graph_count = 7;
   uint32 active_graph_count = 8;
   bool busy = 9;
   optional string preview = 10;
   map<string, string> metadata = 11;
+  optional string last_activity_at_rfc3339 = 12; // RFC3339 / ISO-8601 with offset (UTC), null when absent.
 }
 
 message SessionStateRequest {

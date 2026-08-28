@@ -60,6 +60,28 @@
     }
 
     #[test]
+    fn user_block_band_bg_overridable_per_block() {
+        let feed = feed_with(&[WireFeedBlock::User {
+            text: "hello".into(),
+            timestamp: None,
+        }]);
+        let mut opts = FeedRenderOptions::default();
+        let custom = Color::Rgb(36, 40, 59);
+        opts.theme.user.bg = Some(custom);
+        let lines = super::lines(&feed, 30, &opts);
+        let spans = &lines[0].spans;
+        assert_eq!(spans[0].content, "\u{276f} ");
+        assert_eq!(spans[1].content, "hello");
+        // The trailing band span takes the per-block bg, not the role color.
+        assert_eq!(spans[2].style.bg, Some(custom));
+
+        // Without the per-block override the role color wins.
+        let opts = FeedRenderOptions::default();
+        let lines = super::lines(&feed, 30, &opts);
+        assert_eq!(lines[0].spans[2].style.bg, Some(BG_HIGHLIGHT));
+    }
+
+    #[test]
     fn thinking_modes_full_peek_hidden() {
         let blocks = vec![
             WireFeedBlock::User {

@@ -34,9 +34,11 @@ fn set_line_safe(buf: &mut ratatui::buffer::Buffer, x: u16, y: u16, line: &Line<
 }
 
 /// User rows, grok style: `❯ ` accent prefix + primary-colored body on a
-/// full-width elevated band (the band color is the `user_bg` theme role);
-/// continuation lines keep a 2-col indent.
+/// full-width elevated band (the band color is the `user_bg` theme role,
+/// overridable per-block via `[blocks.user] bg`); continuation lines keep a
+/// 2-col indent.
 fn push_user_block(out: &mut Vec<Line<'static>>, text: &str, width: usize, theme: &Theme) {
+    let band_bg = theme.user.bg.unwrap_or(theme.user_bg);
     for (i, para) in text.split('\n').enumerate() {
         let owned;
         let (prefix, body) = if i == 0 {
@@ -65,7 +67,10 @@ fn push_user_block(out: &mut Vec<Line<'static>>, text: &str, width: usize, theme
             } + unicode_width::UnicodeWidthStr::width(row.as_str());
             let pad = width.saturating_sub(row_width);
             if pad > 0 {
-                spans.push(Span::styled(" ".repeat(pad), band_style(theme)));
+                spans.push(Span::styled(
+                    " ".repeat(pad),
+                    Style::new().bg(band_bg),
+                ));
             }
             out.push(Line::from(spans));
         }
