@@ -419,8 +419,9 @@ pub struct SessionRuntimeBuilder {
     pub control_plane_hook: Option<theway_core::OnControlPlanePromptHook>,
     /// When set, the builder creates a per-session interactive control-plane
     /// hook that tags every prompt with that session's id.
-    pub control_plane_prompt_tx:
-        Option<tokio::sync::mpsc::UnboundedSender<crate::control_plane_prompt::PendingControlPlanePrompt>>,
+    pub control_plane_prompt_tx: Option<
+        tokio::sync::mpsc::UnboundedSender<crate::control_plane_prompt::PendingControlPlanePrompt>,
+    >,
     pub after_tool_call: Option<theway_core::AfterToolCallHook>,
     pub feed_tx: tokio::sync::mpsc::UnboundedSender<(String, FeedUpdate)>,
     pub main_run_tx: tokio::sync::mpsc::UnboundedSender<String>,

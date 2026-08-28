@@ -75,11 +75,18 @@ impl AppSessionOps {
 }
 
 /// Read the latest `session_metadata` custom entry from a session transcript.
-async fn read_session_metadata(session: &(impl SessionReader + ?Sized)) -> Result<HashMap<String, String>> {
+async fn read_session_metadata(
+    session: &(impl SessionReader + ?Sized),
+) -> Result<HashMap<String, String>> {
     let entries = session.find_entries("custom").await?;
     let mut metadata = HashMap::new();
     for entry in entries {
-        if entry.payload.get("customType").and_then(serde_json::Value::as_str) != Some("session_metadata") {
+        if entry
+            .payload
+            .get("customType")
+            .and_then(serde_json::Value::as_str)
+            != Some("session_metadata")
+        {
             continue;
         }
         if let Some(map) = entry

@@ -16,8 +16,8 @@ use std::time::Duration;
 use anyhow::{Context as _, Result, bail};
 use async_trait::async_trait;
 use base64::Engine as _;
-use futures::stream::FuturesUnordered;
 use futures::StreamExt as _;
+use futures::stream::FuturesUnordered;
 use parking_lot::Mutex;
 use tokio::sync::{broadcast, mpsc};
 

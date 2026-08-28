@@ -64,7 +64,7 @@ fn grpc_state() -> (GrpcState, mpsc::UnboundedReceiver<crate::wire::WireCommand>
             commands: command_tx,
             snapshots: snapshot_tx,
             latest,
-        session_states: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            session_states: Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new())),
             events: event_tx,
             dag_events: dag_event_tx,
             job_ops: Arc::new(crate::UnavailableJobOps),

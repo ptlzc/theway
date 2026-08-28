@@ -86,6 +86,7 @@ async fn test_app_with_sessions(
         commands: command_tx,
         snapshots: snapshot_tx,
         latest,
+        session_states: Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new())),
         events: event_tx,
         dag_events: dag_event_tx,
         job_ops: Arc::new(theway_transport::UnavailableJobOps),
