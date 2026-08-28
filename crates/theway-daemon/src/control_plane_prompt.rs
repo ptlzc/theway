@@ -18,6 +18,7 @@ impl PendingControlPlanePrompt {
     }
 }
 
+#[allow(dead_code)]
 pub fn interactive_hook() -> (
     OnControlPlanePromptHook,
     mpsc::UnboundedReceiver<PendingControlPlanePrompt>,

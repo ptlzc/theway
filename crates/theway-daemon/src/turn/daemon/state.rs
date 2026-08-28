@@ -278,6 +278,7 @@ impl TurnHost {
         }
     }
 
+    #[allow(dead_code)]
     fn resolve_control_plane_prompt(&mut self, decision: theway_core::ControlPlanePromptDecision) {
         let session_id = self.session.id.clone();
         self.resolve_control_plane_prompt_for_session(&session_id, decision);
