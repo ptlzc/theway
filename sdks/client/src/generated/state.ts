@@ -26,6 +26,7 @@ import {
   DeleteSessionResponse,
   ListSessionsResponse,
   RenameSessionRequest,
+  UpdateSessionMetadataRequest,
 } from "./session.js";
 
 export const protobufPackage = "theway.grpc.v1";
@@ -1584,6 +1585,16 @@ export const StorageServiceService = {
       Buffer.from(DeleteSessionResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): DeleteSessionResponse => DeleteSessionResponse.decode(value),
   },
+  updateSessionMetadata: {
+    path: "/theway.grpc.v1.StorageService/UpdateSessionMetadata" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: UpdateSessionMetadataRequest): Buffer =>
+      Buffer.from(UpdateSessionMetadataRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): UpdateSessionMetadataRequest => UpdateSessionMetadataRequest.decode(value),
+    responseSerialize: (value: CommandResult): Buffer => Buffer.from(CommandResult.encode(value).finish()),
+    responseDeserialize: (value: Buffer): CommandResult => CommandResult.decode(value),
+  },
   /** DAG run persistence. */
   saveDagRun: {
     path: "/theway.grpc.v1.StorageService/SaveDagRun" as const,
@@ -1655,6 +1666,7 @@ export interface StorageServiceServer extends UntypedServiceImplementation {
   createSession: handleUnaryCall<CreateSessionRequest, CreateSessionResponse>;
   renameSession: handleUnaryCall<RenameSessionRequest, CommandResult>;
   deleteSession: handleUnaryCall<DeleteSessionRequest, DeleteSessionResponse>;
+  updateSessionMetadata: handleUnaryCall<UpdateSessionMetadataRequest, CommandResult>;
   /** DAG run persistence. */
   saveDagRun: handleUnaryCall<SaveDagRunRequest, SaveDagRunResponse>;
   loadDagRuns: handleUnaryCall<LoadDagRunsRequest, LoadDagRunsResponse>;
@@ -1727,6 +1739,21 @@ export interface StorageServiceClient extends Client {
     metadata: Metadata,
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: DeleteSessionResponse) => void,
+  ): ClientUnaryCall;
+  updateSessionMetadata(
+    request: UpdateSessionMetadataRequest,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  updateSessionMetadata(
+    request: UpdateSessionMetadataRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  updateSessionMetadata(
+    request: UpdateSessionMetadataRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
   ): ClientUnaryCall;
   /** DAG run persistence. */
   saveDagRun(

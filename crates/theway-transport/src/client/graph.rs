@@ -1,8 +1,9 @@
 impl GrpcClient {
-    pub async fn graph_cancel(&mut self, run_id: &str) -> Result<bool> {
+    pub async fn graph_cancel(&mut self, session_id: &str, run_id: &str) -> Result<bool> {
         let accepted = self
             .graph
             .graph_cancel(GraphCancelRequest {
+                session_id: session_id.to_string(),
                 run_id: run_id.to_string(),
             })
             .await
@@ -12,12 +13,14 @@ impl GrpcClient {
 
     pub async fn graph_retry(
         &mut self,
+        session_id: &str,
         run_id: &str,
         node_id: Option<&str>,
     ) -> Result<Vec<String>> {
         let response = self
             .graph
             .graph_retry(GraphRetryRequest {
+                session_id: session_id.to_string(),
                 run_id: run_id.to_string(),
                 node_id: node_id.map(str::to_string),
             })
@@ -26,16 +29,94 @@ impl GrpcClient {
         Ok(response.into_inner().reset_node_ids)
     }
 
-    pub async fn graph_skip(&mut self, run_id: &str, node_id: &str) -> Result<bool> {
+    pub async fn graph_skip(
+        &mut self,
+        session_id: &str,
+        run_id: &str,
+        node_id: &str,
+    ) -> Result<bool> {
         let skipped = self
             .graph
             .graph_skip(GraphSkipRequest {
+                session_id: session_id.to_string(),
                 run_id: run_id.to_string(),
                 node_id: node_id.to_string(),
             })
             .await
             .map_err(|e| anyhow::anyhow!("graph_skip: {e}"))?;
         Ok(skipped.into_inner().skipped)
+    }
+
+    pub async fn graph_node_interrupt(
+        &mut self,
+        session_id: &str,
+        run_id: &str,
+        node_id: &str,
+    ) -> Result<bool> {
+        let accepted = self
+            .graph
+            .graph_node_interrupt(GraphNodeInterruptRequest {
+                session_id: session_id.to_string(),
+                run_id: run_id.to_string(),
+                node_id: node_id.to_string(),
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("graph_node_interrupt: {e}"))?;
+        Ok(accepted.into_inner().accepted)
+    }
+
+    pub async fn graph_node_steer(
+        &mut self,
+        session_id: &str,
+        run_id: &str,
+        node_id: &str,
+        text: String,
+    ) -> Result<bool> {
+        let accepted = self
+            .graph
+            .graph_node_steer(GraphNodeSteerRequest {
+                session_id: session_id.to_string(),
+                run_id: run_id.to_string(),
+                node_id: node_id.to_string(),
+                text,
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("graph_node_steer: {e}"))?;
+        Ok(accepted.into_inner().accepted)
+    }
+
+    /// Export graph checkpoints for a session.
+    pub async fn graph_checkpoint(
+        &mut self,
+        session_id: Option<&str>,
+        run_id: Option<&str>,
+    ) -> Result<proto::GraphCheckpointResponse> {
+        let response = self
+            .graph
+            .graph_checkpoint(GraphCheckpointRequest {
+                session_id: session_id.map(str::to_string),
+                run_id: run_id.map(str::to_string),
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("graph_checkpoint: {e}"))?;
+        Ok(response.into_inner())
+    }
+
+    /// Restore a graph run from a checkpoint snapshot.
+    pub async fn graph_restore(
+        &mut self,
+        session_id: &str,
+        snapshot: String,
+    ) -> Result<proto::GraphRestoreResponse> {
+        let response = self
+            .graph
+            .graph_restore(GraphRestoreRequest {
+                session_id: session_id.to_string(),
+                snapshot,
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("graph_restore: {e}"))?;
+        Ok(response.into_inner())
     }
 
     /// One session's graph runs (DagRunSnapshot shape).
@@ -53,6 +134,7 @@ impl GrpcClient {
     /// A DAG node's full output text from an offset.
     pub async fn get_node_output(
         &mut self,
+        session_id: &str,
         run_id: &str,
         node_id: &str,
         offset: u64,
@@ -60,6 +142,7 @@ impl GrpcClient {
         let response = self
             .graph
             .get_node_output(GetNodeOutputRequest {
+                session_id: session_id.to_string(),
                 run_id: run_id.to_string(),
                 node_id: node_id.to_string(),
                 offset,

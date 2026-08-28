@@ -81,6 +81,7 @@ fn summary(id: &str) -> SessionSummary {
         active_graph_count: 0,
         busy: false,
         preview: None,
+        metadata: HashMap::new(),
     }
 }
 
@@ -90,12 +91,37 @@ impl crate::transport::SessionOps for FakeSessionOps {
         Ok(self.inner.lock().unwrap().sessions.clone())
     }
 
-    async fn create(&self) -> Result<String> {
+    async fn create(
+        &self,
+        session_id: Option<&str>,
+        metadata: &HashMap<String, String>,
+    ) -> Result<String> {
         let mut inner = self.inner.lock().unwrap();
-        inner.counter += 1;
-        let id = format!("sess-new-{}", inner.counter);
-        inner.sessions.push(summary(&id));
+        let id = match session_id.map(str::trim).filter(|id| !id.is_empty()) {
+            Some(id) => {
+                if inner.sessions.iter().any(|s| s.session_id == id) {
+                    anyhow::bail!("session id already exists: {id}");
+                }
+                id.to_string()
+            }
+            None => {
+                inner.counter += 1;
+                format!("sess-new-{}", inner.counter)
+            }
+        };
+        let mut summary = summary(&id);
+        summary.metadata = metadata.clone();
+        inner.sessions.push(summary);
         Ok(id)
+    }
+
+    async fn update_metadata(&self, id: &str, metadata: &HashMap<String, String>) -> Result<()> {
+        let mut inner = self.inner.lock().unwrap();
+        let Some(session) = inner.sessions.iter_mut().find(|s| s.session_id == id) else {
+            anyhow::bail!("no session matches id {id}");
+        };
+        session.metadata = metadata.clone();
+        Ok(())
     }
 
     async fn rename(&self, id: &str, name: &str) -> Result<()> {

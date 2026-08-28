@@ -237,6 +237,16 @@ message SessionSummary {
   uint32 active_graph_count = 8;
   bool busy = 9;
   optional string preview = 10;
+  map<string, string> metadata = 11;
+}
+
+message SessionStateRequest {
+  string session_id = 1;
+}
+
+message UpdateSessionMetadataRequest {
+  string session_id = 1;
+  map<string, string> metadata = 2;
 }
 
 message ListSessionsResponse {
@@ -246,6 +256,8 @@ message ListSessionsResponse {
 
 message CreateSessionRequest {
   optional string name = 1;
+  optional string session_id = 2;
+  map<string, string> metadata = 3;
 }
 
 message CreateSessionResponse {
@@ -319,7 +331,7 @@ message ClearCredentialRequest {
 
 service SessionService {
   // Full structured state (binary protobuf).
-  rpc GetState(Empty) returns (SessionState);
+  rpc GetState(SessionStateRequest) returns (SessionState);
   // Session resources: list (with current marker) / create / switch / rename /
   // delete. DeleteSession reports the offending run ids when refused because
   // the session still has running graphs.
@@ -328,6 +340,8 @@ service SessionService {
   rpc SwitchSession(SwitchSessionRequest) returns (CommandResult);
   rpc RenameSession(RenameSessionRequest) returns (CommandResult);
   rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse);
+  // Update arbitrary session metadata KV (opaque to thewayd).
+  rpc UpdateSessionMetadata(UpdateSessionMetadataRequest) returns (CommandResult);
   // Daemon path context (issue #68): home/base/work_dir plus the current
   // skill search directories.
   rpc GetPathContext(Empty) returns (PathContext);

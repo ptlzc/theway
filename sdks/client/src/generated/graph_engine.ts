@@ -154,6 +154,7 @@ export interface GetNodeOutputRequest {
   runId: string;
   nodeId: string;
   offset: string;
+  sessionId: string;
 }
 
 export interface GetNodeOutputResponse {
@@ -180,12 +181,14 @@ export interface GetNodeOutputResponse {
 
 export interface GraphCancelRequest {
   runId: string;
+  sessionId: string;
 }
 
 export interface GraphRetryRequest {
   runId: string;
   /** omitted = all failed/cancelled nodes */
   nodeId?: string | undefined;
+  sessionId: string;
 }
 
 export interface GraphRetryResponse {
@@ -195,18 +198,21 @@ export interface GraphRetryResponse {
 export interface GraphSkipRequest {
   runId: string;
   nodeId: string;
+  sessionId: string;
 }
 
 /** Turn-level control for a running DAG node's subagent. */
 export interface GraphNodeInterruptRequest {
   runId: string;
   nodeId: string;
+  sessionId: string;
 }
 
 export interface GraphNodeSteerRequest {
   runId: string;
   nodeId: string;
   text: string;
+  sessionId: string;
 }
 
 export interface GraphSkipResponse {
@@ -1410,7 +1416,7 @@ export const SubagentJobSnapshot: MessageFns<SubagentJobSnapshot> = {
 };
 
 function createBaseGetNodeOutputRequest(): GetNodeOutputRequest {
-  return { runId: "", nodeId: "", offset: "0" };
+  return { runId: "", nodeId: "", offset: "0", sessionId: "" };
 }
 
 export const GetNodeOutputRequest: MessageFns<GetNodeOutputRequest> = {
@@ -1423,6 +1429,9 @@ export const GetNodeOutputRequest: MessageFns<GetNodeOutputRequest> = {
     }
     if (message.offset !== "0") {
       writer.uint32(24).uint64(message.offset);
+    }
+    if (message.sessionId !== "") {
+      writer.uint32(34).string(message.sessionId);
     }
     return writer;
   },
@@ -1458,6 +1467,14 @@ export const GetNodeOutputRequest: MessageFns<GetNodeOutputRequest> = {
           message.offset = reader.uint64().toString();
           continue;
         }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1480,6 +1497,11 @@ export const GetNodeOutputRequest: MessageFns<GetNodeOutputRequest> = {
         ? globalThis.String(object.node_id)
         : "",
       offset: isSet(object.offset) ? globalThis.String(object.offset) : "0",
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : "",
     };
   },
 
@@ -1494,6 +1516,9 @@ export const GetNodeOutputRequest: MessageFns<GetNodeOutputRequest> = {
     if (message.offset !== "0") {
       obj.offset = message.offset;
     }
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
+    }
     return obj;
   },
 
@@ -1505,6 +1530,7 @@ export const GetNodeOutputRequest: MessageFns<GetNodeOutputRequest> = {
     message.runId = object.runId ?? "";
     message.nodeId = object.nodeId ?? "";
     message.offset = object.offset ?? "0";
+    message.sessionId = object.sessionId ?? "";
     return message;
   },
 };
@@ -1658,13 +1684,16 @@ export const GetNodeOutputResponse: MessageFns<GetNodeOutputResponse> = {
 };
 
 function createBaseGraphCancelRequest(): GraphCancelRequest {
-  return { runId: "" };
+  return { runId: "", sessionId: "" };
 }
 
 export const GraphCancelRequest: MessageFns<GraphCancelRequest> = {
   encode(message: GraphCancelRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.runId !== "") {
       writer.uint32(10).string(message.runId);
+    }
+    if (message.sessionId !== "") {
+      writer.uint32(18).string(message.sessionId);
     }
     return writer;
   },
@@ -1684,6 +1713,14 @@ export const GraphCancelRequest: MessageFns<GraphCancelRequest> = {
           message.runId = reader.string();
           continue;
         }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1700,6 +1737,11 @@ export const GraphCancelRequest: MessageFns<GraphCancelRequest> = {
         : isSet(object.run_id)
         ? globalThis.String(object.run_id)
         : "",
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : "",
     };
   },
 
@@ -1707,6 +1749,9 @@ export const GraphCancelRequest: MessageFns<GraphCancelRequest> = {
     const obj: any = {};
     if (message.runId !== "") {
       obj.runId = message.runId;
+    }
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
     }
     return obj;
   },
@@ -1717,12 +1762,13 @@ export const GraphCancelRequest: MessageFns<GraphCancelRequest> = {
   fromPartial<I extends Exact<DeepPartial<GraphCancelRequest>, I>>(object: I): GraphCancelRequest {
     const message = createBaseGraphCancelRequest();
     message.runId = object.runId ?? "";
+    message.sessionId = object.sessionId ?? "";
     return message;
   },
 };
 
 function createBaseGraphRetryRequest(): GraphRetryRequest {
-  return { runId: "", nodeId: undefined };
+  return { runId: "", nodeId: undefined, sessionId: "" };
 }
 
 export const GraphRetryRequest: MessageFns<GraphRetryRequest> = {
@@ -1732,6 +1778,9 @@ export const GraphRetryRequest: MessageFns<GraphRetryRequest> = {
     }
     if (message.nodeId !== undefined) {
       writer.uint32(18).string(message.nodeId);
+    }
+    if (message.sessionId !== "") {
+      writer.uint32(26).string(message.sessionId);
     }
     return writer;
   },
@@ -1759,6 +1808,14 @@ export const GraphRetryRequest: MessageFns<GraphRetryRequest> = {
           message.nodeId = reader.string();
           continue;
         }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1780,6 +1837,11 @@ export const GraphRetryRequest: MessageFns<GraphRetryRequest> = {
         : isSet(object.node_id)
         ? globalThis.String(object.node_id)
         : undefined,
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : "",
     };
   },
 
@@ -1791,6 +1853,9 @@ export const GraphRetryRequest: MessageFns<GraphRetryRequest> = {
     if (message.nodeId !== undefined) {
       obj.nodeId = message.nodeId;
     }
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
+    }
     return obj;
   },
 
@@ -1801,6 +1866,7 @@ export const GraphRetryRequest: MessageFns<GraphRetryRequest> = {
     const message = createBaseGraphRetryRequest();
     message.runId = object.runId ?? "";
     message.nodeId = object.nodeId ?? undefined;
+    message.sessionId = object.sessionId ?? "";
     return message;
   },
 };
@@ -1870,7 +1936,7 @@ export const GraphRetryResponse: MessageFns<GraphRetryResponse> = {
 };
 
 function createBaseGraphSkipRequest(): GraphSkipRequest {
-  return { runId: "", nodeId: "" };
+  return { runId: "", nodeId: "", sessionId: "" };
 }
 
 export const GraphSkipRequest: MessageFns<GraphSkipRequest> = {
@@ -1880,6 +1946,9 @@ export const GraphSkipRequest: MessageFns<GraphSkipRequest> = {
     }
     if (message.nodeId !== "") {
       writer.uint32(18).string(message.nodeId);
+    }
+    if (message.sessionId !== "") {
+      writer.uint32(26).string(message.sessionId);
     }
     return writer;
   },
@@ -1907,6 +1976,14 @@ export const GraphSkipRequest: MessageFns<GraphSkipRequest> = {
           message.nodeId = reader.string();
           continue;
         }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1928,6 +2005,11 @@ export const GraphSkipRequest: MessageFns<GraphSkipRequest> = {
         : isSet(object.node_id)
         ? globalThis.String(object.node_id)
         : "",
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : "",
     };
   },
 
@@ -1939,6 +2021,9 @@ export const GraphSkipRequest: MessageFns<GraphSkipRequest> = {
     if (message.nodeId !== "") {
       obj.nodeId = message.nodeId;
     }
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
+    }
     return obj;
   },
 
@@ -1949,12 +2034,13 @@ export const GraphSkipRequest: MessageFns<GraphSkipRequest> = {
     const message = createBaseGraphSkipRequest();
     message.runId = object.runId ?? "";
     message.nodeId = object.nodeId ?? "";
+    message.sessionId = object.sessionId ?? "";
     return message;
   },
 };
 
 function createBaseGraphNodeInterruptRequest(): GraphNodeInterruptRequest {
-  return { runId: "", nodeId: "" };
+  return { runId: "", nodeId: "", sessionId: "" };
 }
 
 export const GraphNodeInterruptRequest: MessageFns<GraphNodeInterruptRequest> = {
@@ -1964,6 +2050,9 @@ export const GraphNodeInterruptRequest: MessageFns<GraphNodeInterruptRequest> = 
     }
     if (message.nodeId !== "") {
       writer.uint32(18).string(message.nodeId);
+    }
+    if (message.sessionId !== "") {
+      writer.uint32(26).string(message.sessionId);
     }
     return writer;
   },
@@ -1991,6 +2080,14 @@ export const GraphNodeInterruptRequest: MessageFns<GraphNodeInterruptRequest> = 
           message.nodeId = reader.string();
           continue;
         }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -2012,6 +2109,11 @@ export const GraphNodeInterruptRequest: MessageFns<GraphNodeInterruptRequest> = 
         : isSet(object.node_id)
         ? globalThis.String(object.node_id)
         : "",
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : "",
     };
   },
 
@@ -2023,6 +2125,9 @@ export const GraphNodeInterruptRequest: MessageFns<GraphNodeInterruptRequest> = 
     if (message.nodeId !== "") {
       obj.nodeId = message.nodeId;
     }
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
+    }
     return obj;
   },
 
@@ -2033,12 +2138,13 @@ export const GraphNodeInterruptRequest: MessageFns<GraphNodeInterruptRequest> = 
     const message = createBaseGraphNodeInterruptRequest();
     message.runId = object.runId ?? "";
     message.nodeId = object.nodeId ?? "";
+    message.sessionId = object.sessionId ?? "";
     return message;
   },
 };
 
 function createBaseGraphNodeSteerRequest(): GraphNodeSteerRequest {
-  return { runId: "", nodeId: "", text: "" };
+  return { runId: "", nodeId: "", text: "", sessionId: "" };
 }
 
 export const GraphNodeSteerRequest: MessageFns<GraphNodeSteerRequest> = {
@@ -2051,6 +2157,9 @@ export const GraphNodeSteerRequest: MessageFns<GraphNodeSteerRequest> = {
     }
     if (message.text !== "") {
       writer.uint32(26).string(message.text);
+    }
+    if (message.sessionId !== "") {
+      writer.uint32(34).string(message.sessionId);
     }
     return writer;
   },
@@ -2086,6 +2195,14 @@ export const GraphNodeSteerRequest: MessageFns<GraphNodeSteerRequest> = {
           message.text = reader.string();
           continue;
         }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -2108,6 +2225,11 @@ export const GraphNodeSteerRequest: MessageFns<GraphNodeSteerRequest> = {
         ? globalThis.String(object.node_id)
         : "",
       text: isSet(object.text) ? globalThis.String(object.text) : "",
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : "",
     };
   },
 
@@ -2122,6 +2244,9 @@ export const GraphNodeSteerRequest: MessageFns<GraphNodeSteerRequest> = {
     if (message.text !== "") {
       obj.text = message.text;
     }
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
+    }
     return obj;
   },
 
@@ -2133,6 +2258,7 @@ export const GraphNodeSteerRequest: MessageFns<GraphNodeSteerRequest> = {
     message.runId = object.runId ?? "";
     message.nodeId = object.nodeId ?? "";
     message.text = object.text ?? "";
+    message.sessionId = object.sessionId ?? "";
     return message;
   },
 };

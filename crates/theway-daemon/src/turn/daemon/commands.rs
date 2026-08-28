@@ -2,13 +2,17 @@ impl TurnHost {
     async fn handle_web_command(&mut self, command: WireCommand, turn: &mut TurnState) {
         match command {
             WireCommand::Submit {
+                session_id: _,
                 text,
                 images,
                 interrupt,
             } => self.submit_web_text(text, images, interrupt, turn).await,
             WireCommand::TriggerRuleNow { id } => self.trigger_web_rule_now(id, turn),
-            WireCommand::Abort => self.request_abort(turn),
-            WireCommand::ResolveControlPlane { approve } => {
+            WireCommand::Abort { session_id: _ } => self.request_abort(turn),
+            WireCommand::ResolveControlPlane {
+                session_id: _,
+                approve,
+            } => {
                 let decision = if approve {
                     theway_core::ControlPlanePromptDecision::Allow
                 } else {
@@ -18,11 +22,19 @@ impl TurnHost {
                 };
                 self.resolve_control_plane_prompt(decision);
             }
-            WireCommand::SetModel { spec, response } => {
+            WireCommand::SetModel {
+                session_id: _,
+                spec,
+                response,
+            } => {
                 let ok = self.set_model_from_spec(&spec).await;
                 let _ = response.send(ok);
             }
-            WireCommand::SetThinking { level, response } => {
+            WireCommand::SetThinking {
+                session_id: _,
+                level,
+                response,
+            } => {
                 let ok = self.set_thinking_level(&level).await;
                 let _ = response.send(ok);
             }

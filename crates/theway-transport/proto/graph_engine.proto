@@ -77,6 +77,7 @@ message GetNodeOutputRequest {
   string run_id = 1;
   string node_id = 2;
   uint64 offset = 3;
+  string session_id = 4;
 }
 
 message GetNodeOutputResponse {
@@ -99,11 +100,13 @@ enum GraphKind {
 
 message GraphCancelRequest {
   string run_id = 1;
+  string session_id = 2;
 }
 
 message GraphRetryRequest {
   string run_id = 1;
   optional string node_id = 2; // omitted = all failed/cancelled nodes
+  string session_id = 3;
 }
 
 message GraphRetryResponse {
@@ -113,18 +116,21 @@ message GraphRetryResponse {
 message GraphSkipRequest {
   string run_id = 1;
   string node_id = 2;
+  string session_id = 3;
 }
 
 // Turn-level control for a running DAG node's subagent.
 message GraphNodeInterruptRequest {
   string run_id = 1;
   string node_id = 2;
+  string session_id = 3;
 }
 
 message GraphNodeSteerRequest {
   string run_id = 1;
   string node_id = 2;
   string text = 3;
+  string session_id = 4;
 }
 
 message GraphSkipResponse {

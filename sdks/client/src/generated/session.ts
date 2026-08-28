@@ -308,6 +308,13 @@ export interface ListSessionsResponse {
 
 export interface CreateSessionRequest {
   name?: string | undefined;
+  sessionId?: string | undefined;
+  metadata: { [key: string]: string };
+}
+
+export interface CreateSessionRequest_MetadataEntry {
+  key: string;
+  value: string;
 }
 
 export interface CreateSessionResponse {
@@ -4273,7 +4280,7 @@ export const ListSessionsResponse: MessageFns<ListSessionsResponse> = {
 };
 
 function createBaseCreateSessionRequest(): CreateSessionRequest {
-  return { name: undefined };
+  return { name: undefined, sessionId: undefined, metadata: {} };
 }
 
 export const CreateSessionRequest: MessageFns<CreateSessionRequest> = {
@@ -4281,6 +4288,12 @@ export const CreateSessionRequest: MessageFns<CreateSessionRequest> = {
     if (message.name !== undefined) {
       writer.uint32(10).string(message.name);
     }
+    if (message.sessionId !== undefined) {
+      writer.uint32(18).string(message.sessionId);
+    }
+    globalThis.Object.entries(message.metadata).forEach(([key, value]: [string, string]) => {
+      CreateSessionRequest_MetadataEntry.encode({ key: key as any, value }, writer.uint32(26).fork()).join();
+    });
     return writer;
   },
 
@@ -4299,6 +4312,25 @@ export const CreateSessionRequest: MessageFns<CreateSessionRequest> = {
           message.name = reader.string();
           continue;
         }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          const entry3 = CreateSessionRequest_MetadataEntry.decode(reader, reader.uint32());
+          if (entry3.value !== undefined) {
+            message.metadata[entry3.key] = entry3.value;
+          }
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -4309,13 +4341,41 @@ export const CreateSessionRequest: MessageFns<CreateSessionRequest> = {
   },
 
   fromJSON(object: any): CreateSessionRequest {
-    return { name: isSet(object.name) ? globalThis.String(object.name) : undefined };
+    return {
+      name: isSet(object.name) ? globalThis.String(object.name) : undefined,
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : undefined,
+      metadata: isObject(object.metadata)
+        ? (globalThis.Object.entries(object.metadata) as [string, any][]).reduce(
+          (acc: { [key: string]: string }, [key, value]: [string, any]) => {
+            acc[key] = globalThis.String(value);
+            return acc;
+          },
+          {},
+        )
+        : {},
+    };
   },
 
   toJSON(message: CreateSessionRequest): unknown {
     const obj: any = {};
     if (message.name !== undefined) {
       obj.name = message.name;
+    }
+    if (message.sessionId !== undefined) {
+      obj.sessionId = message.sessionId;
+    }
+    if (message.metadata) {
+      const entries = globalThis.Object.entries(message.metadata) as [string, string][];
+      if (entries.length > 0) {
+        obj.metadata = {};
+        entries.forEach(([k, v]) => {
+          obj.metadata[k] = v;
+        });
+      }
     }
     return obj;
   },
@@ -4326,6 +4386,96 @@ export const CreateSessionRequest: MessageFns<CreateSessionRequest> = {
   fromPartial<I extends Exact<DeepPartial<CreateSessionRequest>, I>>(object: I): CreateSessionRequest {
     const message = createBaseCreateSessionRequest();
     message.name = object.name ?? undefined;
+    message.sessionId = object.sessionId ?? undefined;
+    message.metadata = (globalThis.Object.entries(object.metadata ?? {}) as [string, string][]).reduce(
+      (acc: { [key: string]: string }, [key, value]: [string, string]) => {
+        if (value !== undefined) {
+          acc[key] = globalThis.String(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    return message;
+  },
+};
+
+function createBaseCreateSessionRequest_MetadataEntry(): CreateSessionRequest_MetadataEntry {
+  return { key: "", value: "" };
+}
+
+export const CreateSessionRequest_MetadataEntry: MessageFns<CreateSessionRequest_MetadataEntry> = {
+  encode(message: CreateSessionRequest_MetadataEntry, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.key !== "") {
+      writer.uint32(10).string(message.key);
+    }
+    if (message.value !== "") {
+      writer.uint32(18).string(message.value);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CreateSessionRequest_MetadataEntry {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCreateSessionRequest_MetadataEntry();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.key = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.value = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CreateSessionRequest_MetadataEntry {
+    return {
+      key: isSet(object.key) ? globalThis.String(object.key) : "",
+      value: isSet(object.value) ? globalThis.String(object.value) : "",
+    };
+  },
+
+  toJSON(message: CreateSessionRequest_MetadataEntry): unknown {
+    const obj: any = {};
+    if (message.key !== "") {
+      obj.key = message.key;
+    }
+    if (message.value !== "") {
+      obj.value = message.value;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<CreateSessionRequest_MetadataEntry>, I>>(
+    base?: I,
+  ): CreateSessionRequest_MetadataEntry {
+    return CreateSessionRequest_MetadataEntry.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<CreateSessionRequest_MetadataEntry>, I>>(
+    object: I,
+  ): CreateSessionRequest_MetadataEntry {
+    const message = createBaseCreateSessionRequest_MetadataEntry();
+    message.key = object.key ?? "";
+    message.value = object.value ?? "";
     return message;
   },
 };
@@ -5347,8 +5497,8 @@ export const SessionServiceService = {
     path: "/theway.grpc.v1.SessionService/GetState" as const,
     requestStream: false as const,
     responseStream: false as const,
-    requestSerialize: (value: Empty): Buffer => Buffer.from(Empty.encode(value).finish()),
-    requestDeserialize: (value: Buffer): Empty => Empty.decode(value),
+    requestSerialize: (value: SessionStateRequest): Buffer => Buffer.from(SessionStateRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): SessionStateRequest => SessionStateRequest.decode(value),
     responseSerialize: (value: SessionState): Buffer => Buffer.from(SessionState.encode(value).finish()),
     responseDeserialize: (value: Buffer): SessionState => SessionState.decode(value),
   },
@@ -5404,6 +5554,17 @@ export const SessionServiceService = {
     responseSerialize: (value: DeleteSessionResponse): Buffer =>
       Buffer.from(DeleteSessionResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): DeleteSessionResponse => DeleteSessionResponse.decode(value),
+  },
+  /** Update arbitrary session metadata KV (opaque to thewayd). */
+  updateSessionMetadata: {
+    path: "/theway.grpc.v1.SessionService/UpdateSessionMetadata" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: UpdateSessionMetadataRequest): Buffer =>
+      Buffer.from(UpdateSessionMetadataRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): UpdateSessionMetadataRequest => UpdateSessionMetadataRequest.decode(value),
+    responseSerialize: (value: CommandResult): Buffer => Buffer.from(CommandResult.encode(value).finish()),
+    responseDeserialize: (value: Buffer): CommandResult => CommandResult.decode(value),
   },
   /**
    * Daemon path context (issue #68): home/base/work_dir plus the current
@@ -5470,7 +5631,7 @@ export const SessionServiceService = {
 
 export interface SessionServiceServer extends UntypedServiceImplementation {
   /** Full structured state (binary protobuf). */
-  getState: handleUnaryCall<Empty, SessionState>;
+  getState: handleUnaryCall<SessionStateRequest, SessionState>;
   /**
    * Session resources: list (with current marker) / create / switch / rename /
    * delete. DeleteSession reports the offending run ids when refused because
@@ -5481,6 +5642,8 @@ export interface SessionServiceServer extends UntypedServiceImplementation {
   switchSession: handleUnaryCall<SwitchSessionRequest, CommandResult>;
   renameSession: handleUnaryCall<RenameSessionRequest, CommandResult>;
   deleteSession: handleUnaryCall<DeleteSessionRequest, DeleteSessionResponse>;
+  /** Update arbitrary session metadata KV (opaque to thewayd). */
+  updateSessionMetadata: handleUnaryCall<UpdateSessionMetadataRequest, CommandResult>;
   /**
    * Daemon path context (issue #68): home/base/work_dir plus the current
    * skill search directories.
@@ -5503,14 +5666,17 @@ export interface SessionServiceServer extends UntypedServiceImplementation {
 
 export interface SessionServiceClient extends Client {
   /** Full structured state (binary protobuf). */
-  getState(request: Empty, callback: (error: ServiceError | null, response: SessionState) => void): ClientUnaryCall;
   getState(
-    request: Empty,
+    request: SessionStateRequest,
+    callback: (error: ServiceError | null, response: SessionState) => void,
+  ): ClientUnaryCall;
+  getState(
+    request: SessionStateRequest,
     metadata: Metadata,
     callback: (error: ServiceError | null, response: SessionState) => void,
   ): ClientUnaryCall;
   getState(
-    request: Empty,
+    request: SessionStateRequest,
     metadata: Metadata,
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: SessionState) => void,
@@ -5594,6 +5760,22 @@ export interface SessionServiceClient extends Client {
     metadata: Metadata,
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: DeleteSessionResponse) => void,
+  ): ClientUnaryCall;
+  /** Update arbitrary session metadata KV (opaque to thewayd). */
+  updateSessionMetadata(
+    request: UpdateSessionMetadataRequest,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  updateSessionMetadata(
+    request: UpdateSessionMetadataRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  updateSessionMetadata(
+    request: UpdateSessionMetadataRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
   ): ClientUnaryCall;
   /**
    * Daemon path context (issue #68): home/base/work_dir plus the current

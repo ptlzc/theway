@@ -2,8 +2,18 @@ use super::*;
 
 #[tonic::async_trait]
 impl SessionService for GrpcState {
-    async fn get_state(&self, _request: Request<Empty>) -> Result<Response<SessionState>, Status> {
+    async fn get_state(
+        &self,
+        request: Request<theway_grpc::SessionStateRequest>,
+    ) -> Result<Response<SessionState>, Status> {
+        let request = request.into_inner();
         let latest = self.latest.lock();
+        if !request.session_id.is_empty() && latest.session_id != request.session_id {
+            return Err(Status::not_found(format!(
+                "session {} is not available",
+                request.session_id
+            )));
+        }
         Ok(Response::new(session_state(&latest)))
     }
 
@@ -32,9 +42,15 @@ impl SessionService for GrpcState {
         let request = request.into_inner();
         let new_id = self
             .session_ops
-            .create()
+            .create(request.session_id.as_deref(), &request.metadata)
             .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(|e| {
+                if e.to_string().contains("already exists") {
+                    Status::already_exists(e.to_string())
+                } else {
+                    Status::internal(e.to_string())
+                }
+            })?;
         if let Some(name) = request.name.as_deref()
             && !name.trim().is_empty()
         {
@@ -96,6 +112,24 @@ impl SessionService for GrpcState {
         let request = request.into_inner();
         self.session_ops
             .rename(&request.session_id, &request.name)
+            .await
+            .map_err(|e| {
+                if e.to_string().contains("no session matches") {
+                    Status::not_found(e.to_string())
+                } else {
+                    Status::invalid_argument(e.to_string())
+                }
+            })?;
+        Ok(Response::new(CommandResult { accepted: true }))
+    }
+
+    async fn update_session_metadata(
+        &self,
+        request: Request<theway_grpc::UpdateSessionMetadataRequest>,
+    ) -> Result<Response<CommandResult>, Status> {
+        let request = request.into_inner();
+        self.session_ops
+            .update_metadata(&request.session_id, &request.metadata)
             .await
             .map_err(|e| {
                 if e.to_string().contains("no session matches") {

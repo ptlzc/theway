@@ -308,24 +308,25 @@ pub(crate) async fn dispatch(
                 .and_then(|p| p.get("images"))
                 .and_then(|v| serde_json::from_value::<Vec<WirePromptImage>>(v.clone()).ok())
                 .unwrap_or_default();
+            let current = state.latest.lock().session_id.clone();
             let session_id = params
                 .and_then(|p| p.get("session_id"))
                 .and_then(|v| v.as_str())
-                .map(String::from);
-            if let Some(target) = session_id.as_deref() {
-                let current = state.latest.lock().session_id.clone();
-                if target != current {
-                    return Err((
-                        -32001,
-                        format!(
-                            "session {target} is not the active session ({current}); switch first"
-                        ),
-                    ));
-                }
+                .filter(|id| !id.is_empty())
+                .map(String::from)
+                .unwrap_or_else(|| current.clone());
+            if session_id != current {
+                return Err((
+                    -32001,
+                    format!(
+                        "session {session_id} is not the active session ({current}); switch first"
+                    ),
+                ));
             }
             let accepted = state
                 .commands
                 .send(WireCommand::Submit {
+                    session_id,
                     text,
                     images,
                     interrupt: false,
@@ -338,10 +339,20 @@ pub(crate) async fn dispatch(
                 .as_str()
                 .unwrap_or_default()
                 .to_string();
+            let session_id = params
+                .and_then(|p| p.get("session_id"))
+                .and_then(|v| v.as_str())
+                .filter(|id| !id.is_empty())
+                .map(String::from)
+                .unwrap_or_else(|| state.latest.lock().session_id.clone());
             let (tx, rx) = tokio::sync::oneshot::channel();
             let accepted = state
                 .commands
-                .send(WireCommand::SetModel { spec, response: tx })
+                .send(WireCommand::SetModel {
+                    session_id,
+                    spec,
+                    response: tx,
+                })
                 .is_ok();
             let accepted = if accepted {
                 rx.await.unwrap_or(false)
@@ -355,10 +366,17 @@ pub(crate) async fn dispatch(
                 .as_str()
                 .unwrap_or_default()
                 .to_string();
+            let session_id = params
+                .and_then(|p| p.get("session_id"))
+                .and_then(|v| v.as_str())
+                .filter(|id| !id.is_empty())
+                .map(String::from)
+                .unwrap_or_else(|| state.latest.lock().session_id.clone());
             let (tx, rx) = tokio::sync::oneshot::channel();
             let accepted = state
                 .commands
                 .send(WireCommand::SetThinking {
+                    session_id,
                     level,
                     response: tx,
                 })
@@ -378,7 +396,16 @@ pub(crate) async fn dispatch(
             Ok(serde_json::json!({ "completions": state.completer.matches(&text) }))
         }
         "abort" | "command.cancel" => {
-            let accepted = state.commands.send(WireCommand::Abort).is_ok();
+            let session_id = params
+                .and_then(|p| p.get("session_id"))
+                .and_then(|v| v.as_str())
+                .filter(|id| !id.is_empty())
+                .map(String::from)
+                .unwrap_or_else(|| state.latest.lock().session_id.clone());
+            let accepted = state
+                .commands
+                .send(WireCommand::Abort { session_id })
+                .is_ok();
             Ok(serde_json::json!({ "accepted": accepted }))
         }
         "trigger_immediate" => {
@@ -394,9 +421,18 @@ pub(crate) async fn dispatch(
         }
         "control_plane_resolve" | "command.approve" => {
             let approve = param(params, "approve")?.as_bool().unwrap_or(false);
+            let session_id = params
+                .and_then(|p| p.get("session_id"))
+                .and_then(|v| v.as_str())
+                .filter(|id| !id.is_empty())
+                .map(String::from)
+                .unwrap_or_else(|| state.latest.lock().session_id.clone());
             let accepted = state
                 .commands
-                .send(WireCommand::ResolveControlPlane { approve })
+                .send(WireCommand::ResolveControlPlane {
+                    session_id,
+                    approve,
+                })
                 .is_ok();
             Ok(serde_json::json!({ "accepted": accepted }))
         }
@@ -416,11 +452,25 @@ pub(crate) async fn dispatch(
                 .and_then(|p| p.get("name"))
                 .and_then(|v| v.as_str())
                 .map(String::from);
+            let session_id = params
+                .and_then(|p| p.get("session_id"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let metadata = params
+                .and_then(|p| p.get("metadata"))
+                .and_then(|v| serde_json::from_value::<std::collections::HashMap<String, String>>(v.clone()).ok())
+                .unwrap_or_default();
             let new_id = state
                 .session_ops
-                .create()
+                .create(session_id.as_deref(), &metadata)
                 .await
-                .map_err(|e| (-32000, e.to_string()))?;
+                .map_err(|e| {
+                    if e.to_string().contains("already exists") {
+                        (-32005, e.to_string())
+                    } else {
+                        (-32000, e.to_string())
+                    }
+                })?;
             if let Some(name) = name.as_deref()
                 && !name.trim().is_empty()
                 && let Err(e) = state.session_ops.rename(&new_id, name).await
@@ -437,8 +487,8 @@ pub(crate) async fn dispatch(
                 .map_err(|e| (-32000, e.to_string()))?
                 .into_iter()
                 .find(|s| s.session_id == new_id)
-                .map(|s| serde_json::json!({ "session_id": s.session_id, "name": s.name }))
-                .unwrap_or_else(|| serde_json::json!({ "session_id": new_id }));
+                .map(|s| serde_json::json!({ "session_id": s.session_id, "name": s.name, "metadata": s.metadata }))
+                .unwrap_or_else(|| serde_json::json!({ "session_id": new_id, "metadata": metadata }));
             Ok(summary)
         }
         "switch_session" | "session.switch" => {
@@ -481,6 +531,28 @@ pub(crate) async fn dispatch(
                 .rename(&target, &name)
                 .await
                 .map_err(|e| (-32602, e.to_string()))?;
+            Ok(serde_json::json!({ "accepted": true }))
+        }
+        "update_session_metadata" | "session.update_metadata" | "state.update_metadata" | "storage.update_metadata" => {
+            let id = param(params, "id")?
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            let metadata = params
+                .and_then(|p| p.get("metadata"))
+                .and_then(|v| serde_json::from_value::<std::collections::HashMap<String, String>>(v.clone()).ok())
+                .unwrap_or_default();
+            state
+                .session_ops
+                .update_metadata(&id, &metadata)
+                .await
+                .map_err(|e| {
+                    if e.to_string().contains("no session matches") {
+                        (-32004, e.to_string())
+                    } else {
+                        (-32602, e.to_string())
+                    }
+                })?;
             Ok(serde_json::json!({ "accepted": true }))
         }
         "delete_session" | "session.delete" | "state.delete_session" | "storage.delete_session" => {

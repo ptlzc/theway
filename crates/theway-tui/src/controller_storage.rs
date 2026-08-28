@@ -4,6 +4,7 @@
 //! transport `SessionOps` / `StorageOps` seams so a daemon can use the same
 //! controller storage over RPC.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -79,23 +80,47 @@ impl SessionOps for ControllerSessionOps {
                 active_graph_count: 0,
                 busy: false,
                 preview,
+                metadata: HashMap::new(),
             });
         }
         Ok(summaries)
     }
 
-    async fn create(&self) -> Result<String> {
-        let session = self
-            .repo
-            .create(self.cwd.to_string_lossy())
-            .await
-            .map_err(repo_err)?;
+    async fn create(
+        &self,
+        session_id: Option<&str>,
+        _metadata: &HashMap<String, String>,
+    ) -> Result<String> {
+        let session = match session_id.map(str::trim).filter(|id| !id.is_empty()) {
+            Some(id) => {
+                let path = self.repo.root().join(format!("{id}.db"));
+                theway_storage::sqlite_storage::SqliteSessionStorage::create_with_id(
+                    path,
+                    self.cwd.to_string_lossy().to_string(),
+                    Some(id.to_string()),
+                )
+                .await
+                .map_err(repo_err)?
+            }
+            None => self
+                .repo
+                .create(self.cwd.to_string_lossy())
+                .await
+                .map_err(repo_err)?,
+        };
         let meta = session.get_metadata_json().await.map_err(repo_err)?;
         Ok(meta
             .get("id")
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string())
+    }
+
+    async fn update_metadata(&self, id: &str, _metadata: &HashMap<String, String>) -> Result<()> {
+        session::find_path_by_id(&self.repo, id)
+            .await?
+            .with_context(|| format!("no session matches id {id}"))?;
+        Ok(())
     }
 
     async fn rename(&self, id: &str, name: &str) -> Result<()> {

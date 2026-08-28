@@ -13,45 +13,55 @@ impl GrpcClient {
         let sessions = response
             .sessions
             .iter()
-            .map(|s| SessionSummary {
-                session_id: s.session_id.clone(),
-                name: s.name.clone(),
-                cwd: s.cwd.clone(),
-                model: s.model.clone(),
-                created_at: s.created_at.clone(),
-                last_activity_at: s.last_activity_at,
-                graph_count: s.graph_count,
-                active_graph_count: s.active_graph_count,
-                busy: s.busy,
-                preview: s.preview.clone(),
-            })
+            .map(crate::proto::session_summary_from_proto)
             .collect();
         Ok((sessions, response.current_session_id))
     }
 
     /// Create a session through the `StorageService` RPC.
     pub async fn state_create_session(&mut self, name: Option<String>) -> Result<SessionSummary> {
+        self.state_create_session_with_metadata(None, name, std::collections::HashMap::new())
+            .await
+    }
+
+    /// Create a session with custom id and metadata through `StorageService`.
+    pub async fn state_create_session_with_metadata(
+        &mut self,
+        session_id: Option<&str>,
+        name: Option<String>,
+        metadata: std::collections::HashMap<String, String>,
+    ) -> Result<SessionSummary> {
         let response = self
             .storage
-            .create_session(CreateSessionRequest { name })
+            .create_session(CreateSessionRequest {
+                name,
+                session_id: session_id.map(str::to_string),
+                metadata,
+            })
             .await
             .map_err(|e| anyhow::anyhow!("state_create_session: {e}"))?
             .into_inner();
         let session = response
             .session
             .context("state_create_session returned no session summary")?;
-        Ok(SessionSummary {
-            session_id: session.session_id,
-            name: session.name,
-            cwd: session.cwd,
-            model: session.model,
-            created_at: session.created_at,
-            last_activity_at: session.last_activity_at,
-            graph_count: session.graph_count,
-            active_graph_count: session.active_graph_count,
-            busy: session.busy,
-            preview: session.preview,
-        })
+        Ok(crate::proto::session_summary_from_proto(&session))
+    }
+
+    /// Update metadata through the `StorageService` RPC.
+    pub async fn state_update_session_metadata(
+        &mut self,
+        session_id: &str,
+        metadata: std::collections::HashMap<String, String>,
+    ) -> Result<bool> {
+        let accepted = self
+            .storage
+            .update_session_metadata(crate::proto::theway_grpc::UpdateSessionMetadataRequest {
+                session_id: session_id.to_string(),
+                metadata,
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("state_update_session_metadata: {e}"))?;
+        Ok(accepted.into_inner().accepted)
     }
 
     /// Rename a session through the `StorageService` RPC.

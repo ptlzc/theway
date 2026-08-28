@@ -75,7 +75,13 @@ message RunStatus {
   optional string error = 3;
 }
 
+message StreamEventsRequest {
+  // Omitted = all sessions; set = only events for this session.
+  optional string session_id = 1;
+}
+
 service EventService {
   // Snapshot/event stream (P0: snapshot frames; P2+: event increments).
-  rpc StreamEvents(Empty) returns (stream StreamFrame);
+  // An optional session_id filters the stream to one session.
+  rpc StreamEvents(StreamEventsRequest) returns (stream StreamFrame);
 }

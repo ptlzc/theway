@@ -114,6 +114,7 @@ service StorageService {
   rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
   rpc RenameSession(RenameSessionRequest) returns (CommandResult);
   rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse);
+  rpc UpdateSessionMetadata(UpdateSessionMetadataRequest) returns (CommandResult);
 
   // DAG run persistence.
   rpc SaveDagRun(SaveDagRunRequest) returns (SaveDagRunResponse);

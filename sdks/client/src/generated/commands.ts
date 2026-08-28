@@ -76,9 +76,8 @@ export interface SendMessageRequest {
   /** QUEUE (default): queue after the current turn; INTERRUPT: stop the current turn and run now */
   mode: MessageMode;
   /**
-   * Target session. Omitted = the process-current session. Only the current
-   * session can receive messages (single live agent loop); targeting another
-   * session fails with FAILED_PRECONDITION — SwitchSession first.
+   * Target session. Omitted = the process-current session for compatibility;
+   * clients should pass an explicit session_id when operating concurrently.
    */
   sessionId?: string | undefined;
 }
@@ -90,14 +89,21 @@ export interface Image {
 
 export interface SetModelRequest {
   spec: string;
+  sessionId: string;
 }
 
 export interface SetThinkingRequest {
   level: string;
+  sessionId: string;
+}
+
+export interface CancelRequest {
+  sessionId: string;
 }
 
 export interface ApproveRequest {
   approve: boolean;
+  sessionId: string;
 }
 
 function createBaseCommandResult(): CommandResult {
@@ -390,13 +396,16 @@ export const Image: MessageFns<Image> = {
 };
 
 function createBaseSetModelRequest(): SetModelRequest {
-  return { spec: "" };
+  return { spec: "", sessionId: "" };
 }
 
 export const SetModelRequest: MessageFns<SetModelRequest> = {
   encode(message: SetModelRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.spec !== "") {
       writer.uint32(10).string(message.spec);
+    }
+    if (message.sessionId !== "") {
+      writer.uint32(18).string(message.sessionId);
     }
     return writer;
   },
@@ -416,6 +425,14 @@ export const SetModelRequest: MessageFns<SetModelRequest> = {
           message.spec = reader.string();
           continue;
         }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -426,13 +443,23 @@ export const SetModelRequest: MessageFns<SetModelRequest> = {
   },
 
   fromJSON(object: any): SetModelRequest {
-    return { spec: isSet(object.spec) ? globalThis.String(object.spec) : "" };
+    return {
+      spec: isSet(object.spec) ? globalThis.String(object.spec) : "",
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : "",
+    };
   },
 
   toJSON(message: SetModelRequest): unknown {
     const obj: any = {};
     if (message.spec !== "") {
       obj.spec = message.spec;
+    }
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
     }
     return obj;
   },
@@ -443,18 +470,22 @@ export const SetModelRequest: MessageFns<SetModelRequest> = {
   fromPartial<I extends Exact<DeepPartial<SetModelRequest>, I>>(object: I): SetModelRequest {
     const message = createBaseSetModelRequest();
     message.spec = object.spec ?? "";
+    message.sessionId = object.sessionId ?? "";
     return message;
   },
 };
 
 function createBaseSetThinkingRequest(): SetThinkingRequest {
-  return { level: "" };
+  return { level: "", sessionId: "" };
 }
 
 export const SetThinkingRequest: MessageFns<SetThinkingRequest> = {
   encode(message: SetThinkingRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.level !== "") {
       writer.uint32(10).string(message.level);
+    }
+    if (message.sessionId !== "") {
+      writer.uint32(18).string(message.sessionId);
     }
     return writer;
   },
@@ -474,6 +505,14 @@ export const SetThinkingRequest: MessageFns<SetThinkingRequest> = {
           message.level = reader.string();
           continue;
         }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -484,13 +523,23 @@ export const SetThinkingRequest: MessageFns<SetThinkingRequest> = {
   },
 
   fromJSON(object: any): SetThinkingRequest {
-    return { level: isSet(object.level) ? globalThis.String(object.level) : "" };
+    return {
+      level: isSet(object.level) ? globalThis.String(object.level) : "",
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : "",
+    };
   },
 
   toJSON(message: SetThinkingRequest): unknown {
     const obj: any = {};
     if (message.level !== "") {
       obj.level = message.level;
+    }
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
     }
     return obj;
   },
@@ -501,18 +550,86 @@ export const SetThinkingRequest: MessageFns<SetThinkingRequest> = {
   fromPartial<I extends Exact<DeepPartial<SetThinkingRequest>, I>>(object: I): SetThinkingRequest {
     const message = createBaseSetThinkingRequest();
     message.level = object.level ?? "";
+    message.sessionId = object.sessionId ?? "";
+    return message;
+  },
+};
+
+function createBaseCancelRequest(): CancelRequest {
+  return { sessionId: "" };
+}
+
+export const CancelRequest: MessageFns<CancelRequest> = {
+  encode(message: CancelRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sessionId !== "") {
+      writer.uint32(10).string(message.sessionId);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CancelRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCancelRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CancelRequest {
+    return {
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : "",
+    };
+  },
+
+  toJSON(message: CancelRequest): unknown {
+    const obj: any = {};
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<CancelRequest>, I>>(base?: I): CancelRequest {
+    return CancelRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<CancelRequest>, I>>(object: I): CancelRequest {
+    const message = createBaseCancelRequest();
+    message.sessionId = object.sessionId ?? "";
     return message;
   },
 };
 
 function createBaseApproveRequest(): ApproveRequest {
-  return { approve: false };
+  return { approve: false, sessionId: "" };
 }
 
 export const ApproveRequest: MessageFns<ApproveRequest> = {
   encode(message: ApproveRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.approve !== false) {
       writer.uint32(8).bool(message.approve);
+    }
+    if (message.sessionId !== "") {
+      writer.uint32(18).string(message.sessionId);
     }
     return writer;
   },
@@ -532,6 +649,14 @@ export const ApproveRequest: MessageFns<ApproveRequest> = {
           message.approve = reader.bool();
           continue;
         }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -542,13 +667,23 @@ export const ApproveRequest: MessageFns<ApproveRequest> = {
   },
 
   fromJSON(object: any): ApproveRequest {
-    return { approve: isSet(object.approve) ? globalThis.Boolean(object.approve) : false };
+    return {
+      approve: isSet(object.approve) ? globalThis.Boolean(object.approve) : false,
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : "",
+    };
   },
 
   toJSON(message: ApproveRequest): unknown {
     const obj: any = {};
     if (message.approve !== false) {
       obj.approve = message.approve;
+    }
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
     }
     return obj;
   },
@@ -559,6 +694,7 @@ export const ApproveRequest: MessageFns<ApproveRequest> = {
   fromPartial<I extends Exact<DeepPartial<ApproveRequest>, I>>(object: I): ApproveRequest {
     const message = createBaseApproveRequest();
     message.approve = object.approve ?? false;
+    message.sessionId = object.sessionId ?? "";
     return message;
   },
 };
@@ -605,8 +741,8 @@ export const CommandServiceService = {
     path: "/theway.grpc.v1.CommandService/Cancel" as const,
     requestStream: false as const,
     responseStream: false as const,
-    requestSerialize: (value: Empty): Buffer => Buffer.from(Empty.encode(value).finish()),
-    requestDeserialize: (value: Buffer): Empty => Empty.decode(value),
+    requestSerialize: (value: CancelRequest): Buffer => Buffer.from(CancelRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): CancelRequest => CancelRequest.decode(value),
     responseSerialize: (value: CommandResult): Buffer => Buffer.from(CommandResult.encode(value).finish()),
     responseDeserialize: (value: Buffer): CommandResult => CommandResult.decode(value),
   },
@@ -635,7 +771,7 @@ export interface CommandServiceServer extends UntypedServiceImplementation {
    */
   setThinking: handleUnaryCall<SetThinkingRequest, CommandResult>;
   /** Stop the in-flight turn (same as local Ctrl-C). Does not cancel DAG runs. */
-  cancel: handleUnaryCall<Empty, CommandResult>;
+  cancel: handleUnaryCall<CancelRequest, CommandResult>;
   /** Resolve a pending control-plane approval request (approve / reject). */
   approve: handleUnaryCall<ApproveRequest, CommandResult>;
 }
@@ -695,14 +831,17 @@ export interface CommandServiceClient extends Client {
     callback: (error: ServiceError | null, response: CommandResult) => void,
   ): ClientUnaryCall;
   /** Stop the in-flight turn (same as local Ctrl-C). Does not cancel DAG runs. */
-  cancel(request: Empty, callback: (error: ServiceError | null, response: CommandResult) => void): ClientUnaryCall;
   cancel(
-    request: Empty,
+    request: CancelRequest,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  cancel(
+    request: CancelRequest,
     metadata: Metadata,
     callback: (error: ServiceError | null, response: CommandResult) => void,
   ): ClientUnaryCall;
   cancel(
-    request: Empty,
+    request: CancelRequest,
     metadata: Metadata,
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: CommandResult) => void,

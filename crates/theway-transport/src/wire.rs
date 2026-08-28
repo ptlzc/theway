@@ -5,6 +5,8 @@
 //! [`crate::host::TransportHost`] surface. The proto codecs that map these models onto
 //! the generated gRPC types live in `transport::proto` as well.
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 /// One model entry in the picker group.
@@ -34,6 +36,7 @@ pub struct WebOptions {
 #[derive(Debug)]
 pub enum WireCommand {
     Submit {
+        session_id: String,
         text: String,
         images: Vec<WirePromptImage>,
         /// true = stop the current turn and run this message now (INTERRUPT);
@@ -43,17 +46,22 @@ pub enum WireCommand {
     TriggerRuleNow {
         id: String,
     },
-    Abort,
+    Abort {
+        session_id: String,
+    },
     ResolveControlPlane {
+        session_id: String,
         approve: bool,
     },
     SetModel {
+        session_id: String,
         spec: String,
         response: tokio::sync::oneshot::Sender<bool>,
     },
     /// Set the active thinking level (mirrors the `/thinking` slash command;
     /// typed RPC so the client can confirm via snapshot before persisting).
     SetThinking {
+        session_id: String,
         level: String,
         response: tokio::sync::oneshot::Sender<bool>,
     },
@@ -286,6 +294,8 @@ pub struct SessionSummary {
     pub active_graph_count: u32,
     pub busy: bool,
     pub preview: Option<String>,
+    #[serde(default)]
+    pub metadata: HashMap<String, String>,
 }
 
 /// graph mode: one DAG run (mirrors `crates/theway-transport/proto/graph_engine.proto` DagRunSnapshot; task text is

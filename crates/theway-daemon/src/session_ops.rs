@@ -16,6 +16,7 @@
 //! [`theway_transport::TransportEndpoints`]) and never touches the session repo
 //! directly, keeping the "transport programs only against the kernel's public surface" boundary.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, bail};
@@ -121,12 +122,17 @@ impl SessionOps for AppSessionOps {
                 active_graph_count,
                 busy: is_current && current.busy,
                 preview: record.preview,
+                metadata: HashMap::new(),
             });
         }
         Ok(summaries)
     }
 
-    async fn create(&self) -> Result<String> {
+    async fn create(
+        &self,
+        session_id: Option<&str>,
+        _metadata: &HashMap<String, String>,
+    ) -> Result<String> {
         // New sessions record the daemon work_dir so activation can resolve the
         // matching execution context.
         let cwd = {
@@ -137,13 +143,28 @@ impl SessionOps for AppSessionOps {
                 state.cwd.clone()
             }
         };
-        let session = self.repo.create(std::path::Path::new(&cwd)).await?;
+        let session = self
+            .repo
+            .create_with_id(std::path::Path::new(&cwd), session_id)
+            .await?;
         let meta = session.get_metadata_json().await?;
         Ok(meta
             .get("id")
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string())
+    }
+
+    async fn update_metadata(&self, id: &str, _metadata: &HashMap<String, String>) -> Result<()> {
+        let session = self
+            .repo
+            .open(id)
+            .await?
+            .with_context(|| format!("no session matches id {id}"))?;
+        // Metadata persistence is part of the SessionRegistry work; validate
+        // that the session exists so the RPC surfaces a NotFound early.
+        let _ = session;
+        Ok(())
     }
 
     async fn rename(&self, id: &str, name: &str) -> Result<()> {
@@ -259,7 +280,7 @@ mod tests {
         let first_id = session_id_of(&first).await;
 
         let (ops, _current) = ops(repo.clone(), &first_id);
-        let new_id = ops.create().await.unwrap();
+        let new_id = ops.create(None, &HashMap::new()).await.unwrap();
         assert_ne!(new_id, first_id);
         let summaries = ops.list().await.unwrap();
         assert_eq!(summaries.len(), 2);

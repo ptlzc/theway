@@ -57,14 +57,14 @@ use theway_grpc::settings_service_server::{SettingsService, SettingsServiceServe
 use theway_grpc::storage_service_server::StorageServiceServer;
 use theway_grpc::tool_service_server::ToolServiceServer;
 use theway_grpc::{
-    ApproveRequest, CommandResult, CreateSessionRequest, CreateSessionResponse,
+    ApproveRequest, CancelRequest, CommandResult, CreateSessionRequest, CreateSessionResponse,
     DeleteSessionRequest, DeleteSessionResponse, Empty, GetNodeOutputRequest,
     GetNodeOutputResponse, GraphCancelRequest, GraphCheckpointRequest, GraphCheckpointResponse,
     GraphKind, GraphListRequest, GraphListResponse, GraphNodeInterruptRequest,
     GraphNodeSteerRequest, GraphRestoreRequest, GraphRestoreResponse, GraphRetryRequest,
     GraphRetryResponse, GraphSkipRequest, GraphSkipResponse, ListSessionsResponse, MessageMode,
     RenameSessionRequest, SendMessageRequest, SessionState, SetModelRequest, SetThinkingRequest,
-    StreamFrame, SwitchSessionRequest,
+    StreamEventsRequest, StreamFrame, SwitchSessionRequest,
 };
 
 #[derive(Clone)]
@@ -123,21 +123,25 @@ impl CommandService for GrpcState {
         request: Request<SendMessageRequest>,
     ) -> Result<Response<CommandResult>, Status> {
         let request = request.into_inner();
+        let current = self.session_id.read().unwrap().clone();
+        let session_id = request
+            .session_id
+            .clone()
+            .filter(|id| !id.is_empty())
+            .unwrap_or_else(|| current.clone());
         // Explicit session targeting: only the current (live) session can receive
         // messages — the process runs a single agent loop. Other sessions must be
         // switched to first (connection-level binding is client-side state).
-        if let Some(target) = request.session_id.as_deref() {
-            let current = self.session_id.read().unwrap().clone();
-            if target != current {
-                return Err(Status::failed_precondition(format!(
-                    "session {target} is not the active session ({current}); SwitchSession first"
-                )));
-            }
+        if session_id != current {
+            return Err(Status::failed_precondition(format!(
+                "session {session_id} is not the active session ({current}); SwitchSession first"
+            )));
         }
         let interrupt = request.mode() == MessageMode::Interrupt;
         let accepted = self
             .commands
             .send(WireCommand::Submit {
+                session_id,
                 text: request.text,
                 images: request
                     .images
@@ -157,11 +161,18 @@ impl CommandService for GrpcState {
         &self,
         request: Request<SetModelRequest>,
     ) -> Result<Response<CommandResult>, Status> {
+        let request = request.into_inner();
+        let session_id = if request.session_id.is_empty() {
+            self.session_id.read().unwrap().clone()
+        } else {
+            request.session_id
+        };
         let (tx, rx) = tokio::sync::oneshot::channel();
         let accepted = self
             .commands
             .send(WireCommand::SetModel {
-                spec: request.into_inner().spec,
+                session_id,
+                spec: request.spec,
                 response: tx,
             })
             .is_ok();
@@ -177,11 +188,18 @@ impl CommandService for GrpcState {
         &self,
         request: Request<SetThinkingRequest>,
     ) -> Result<Response<CommandResult>, Status> {
+        let request = request.into_inner();
+        let session_id = if request.session_id.is_empty() {
+            self.session_id.read().unwrap().clone()
+        } else {
+            request.session_id
+        };
         let (tx, rx) = tokio::sync::oneshot::channel();
         let accepted = self
             .commands
             .send(WireCommand::SetThinking {
-                level: request.into_inner().level,
+                session_id,
+                level: request.level,
                 response: tx,
             })
             .is_ok();
@@ -193,8 +211,17 @@ impl CommandService for GrpcState {
         Ok(Response::new(CommandResult { accepted }))
     }
 
-    async fn cancel(&self, _request: Request<Empty>) -> Result<Response<CommandResult>, Status> {
-        let accepted = self.commands.send(WireCommand::Abort).is_ok();
+    async fn cancel(&self, request: Request<CancelRequest>) -> Result<Response<CommandResult>, Status> {
+        let request = request.into_inner();
+        let session_id = if request.session_id.is_empty() {
+            self.session_id.read().unwrap().clone()
+        } else {
+            request.session_id
+        };
+        let accepted = self
+            .commands
+            .send(WireCommand::Abort { session_id })
+            .is_ok();
         Ok(Response::new(CommandResult { accepted }))
     }
 
@@ -202,10 +229,17 @@ impl CommandService for GrpcState {
         &self,
         request: Request<ApproveRequest>,
     ) -> Result<Response<CommandResult>, Status> {
+        let request = request.into_inner();
+        let session_id = if request.session_id.is_empty() {
+            self.session_id.read().unwrap().clone()
+        } else {
+            request.session_id
+        };
         let accepted = self
             .commands
             .send(WireCommand::ResolveControlPlane {
-                approve: request.into_inner().approve,
+                session_id,
+                approve: request.approve,
             })
             .is_ok();
         Ok(Response::new(CommandResult { accepted }))
@@ -316,7 +350,9 @@ impl GraphEngineService for GrpcState {
         &self,
         request: Request<GraphCancelRequest>,
     ) -> Result<Response<CommandResult>, Status> {
-        let run_id = request.into_inner().run_id;
+        let request = request.into_inner();
+        let _session_id = request.session_id;
+        let run_id = request.run_id;
         self.graph_ops
             .cancel_run(&run_id, Some("cancelled via rpc"));
         Ok(Response::new(CommandResult { accepted: true }))
@@ -327,6 +363,7 @@ impl GraphEngineService for GrpcState {
         request: Request<GraphRetryRequest>,
     ) -> Result<Response<GraphRetryResponse>, Status> {
         let request = request.into_inner();
+        let _session_id = request.session_id;
         let node_ids = request.node_id.as_deref().map(|id| vec![id.to_string()]);
         let reset = self.graph_ops.retry(&request.run_id, node_ids.as_deref());
         Ok(Response::new(GraphRetryResponse {
@@ -339,6 +376,7 @@ impl GraphEngineService for GrpcState {
         request: Request<GraphSkipRequest>,
     ) -> Result<Response<GraphSkipResponse>, Status> {
         let request = request.into_inner();
+        let _session_id = request.session_id;
         let skipped = self.graph_ops.skip(&request.run_id, &request.node_id);
         Ok(Response::new(GraphSkipResponse { skipped }))
     }
@@ -348,6 +386,7 @@ impl GraphEngineService for GrpcState {
         request: Request<GraphNodeInterruptRequest>,
     ) -> Result<Response<CommandResult>, Status> {
         let request = request.into_inner();
+        let _session_id = request.session_id;
         let accepted = self
             .job_ops
             .interrupt_node(&request.run_id, &request.node_id);
@@ -359,6 +398,7 @@ impl GraphEngineService for GrpcState {
         request: Request<GraphNodeSteerRequest>,
     ) -> Result<Response<CommandResult>, Status> {
         let request = request.into_inner();
+        let _session_id = request.session_id;
         let accepted = self
             .job_ops
             .steer_node(&request.run_id, &request.node_id, request.text);
@@ -438,19 +478,34 @@ impl EventService for GrpcState {
     type StreamEventsStream = Pin<Box<dyn Stream<Item = Result<StreamFrame, Status>> + Send>>;
     async fn stream_events(
         &self,
-        _request: Request<Empty>,
+        request: Request<StreamEventsRequest>,
     ) -> Result<Response<Self::StreamEventsStream>, Status> {
+        let filter = request
+            .into_inner()
+            .session_id
+            .filter(|id| !id.is_empty());
         // Merge snapshot publications with the event plane. Routine daemon
         // publications contain only transcript deltas; `latest` remains the
         // authoritative source for first frames and resynchronization.
         let snapshot_cursor = Arc::new(Mutex::new(StreamCursor::default()));
         let snapshot_latest = self.latest.clone();
+        let snapshot_filter = filter.clone();
         let snapshots = BroadcastStream::new(self.snapshots.subscribe()).filter_map(move |item| {
             let cursor = snapshot_cursor.clone();
             let latest = snapshot_latest.clone();
+            let filter = snapshot_filter.clone();
             async move {
                 match item {
                     Ok(update) => {
+                        if let Some(session_id) = filter.as_deref() {
+                            let matches = match &update {
+                                WireStatusUpdate::Full(status) => status.session_id == session_id,
+                                WireStatusUpdate::Delta(_) => latest.lock().session_id == session_id,
+                            };
+                            if !matches {
+                                return None;
+                            }
+                        }
                         let latest = latest.lock();
                         let mut cursor = cursor.lock();
                         Some(Ok(StreamFrame {
@@ -463,6 +518,11 @@ impl EventService for GrpcState {
                     // immediately; its cursors restart from that full frame.
                     Err(BroadcastStreamRecvError::Lagged(_)) => {
                         let snapshot = latest.lock();
+                        if let Some(session_id) = filter.as_deref()
+                            && snapshot.session_id != session_id
+                        {
+                            return None;
+                        }
                         let mut cursor = cursor.lock();
                         cursor.resync_pending = true;
                         Some(Ok(StreamFrame {
@@ -474,25 +534,57 @@ impl EventService for GrpcState {
                 }
             }
         });
-        let events = BroadcastStream::new(self.events.subscribe()).filter_map(|item| async move {
-            match item {
-                Ok(event) => Some(Ok(StreamFrame {
-                    payload: Some(theway_grpc::stream_frame::Payload::Event(
-                        stream_event_wire(&event),
-                    )),
-                })),
-                Err(BroadcastStreamRecvError::Lagged(_)) => None,
+        let event_filter = filter.clone();
+        let events = BroadcastStream::new(self.events.subscribe()).filter_map(move |item| {
+            let filter = event_filter.clone();
+            async move {
+                match item {
+                    Ok(event) => {
+                        if let Some(session_id) = filter.as_deref() {
+                            let event_session = match &event {
+                                WireAgentEvent::Started { session_id, .. }
+                                | WireAgentEvent::Output { session_id, .. }
+                                | WireAgentEvent::Metrics { session_id, .. }
+                                | WireAgentEvent::Completed { session_id, .. } => session_id,
+                            };
+                            if event_session != session_id {
+                                return None;
+                            }
+                        }
+                        Some(Ok(StreamFrame {
+                            payload: Some(theway_grpc::stream_frame::Payload::Event(
+                                stream_event_wire(&event),
+                            )),
+                        }))
+                    }
+                    Err(BroadcastStreamRecvError::Lagged(_)) => None,
+                }
             }
         });
+        let dag_filter = filter.clone();
         let dag_events =
-            BroadcastStream::new(self.dag_events.subscribe()).filter_map(|item| async move {
-                match item {
-                    Ok(event) => Some(Ok(StreamFrame {
-                        payload: Some(theway_grpc::stream_frame::Payload::Event(dag_event_wire(
-                            &event,
-                        ))),
-                    })),
-                    Err(BroadcastStreamRecvError::Lagged(_)) => None,
+            BroadcastStream::new(self.dag_events.subscribe()).filter_map(move |item| {
+                let filter = dag_filter.clone();
+                async move {
+                    match item {
+                        Ok(event) => {
+                            if let Some(session_id) = filter.as_deref() {
+                                let event_session = match &event {
+                                    WireDagEvent::NodeStatus { session_id, .. }
+                                    | WireDagEvent::RunStatus { session_id, .. } => session_id,
+                                };
+                                if event_session != session_id {
+                                    return None;
+                                }
+                            }
+                            Some(Ok(StreamFrame {
+                                payload: Some(theway_grpc::stream_frame::Payload::Event(
+                                    dag_event_wire(&event),
+                                )),
+                            }))
+                        }
+                        Err(BroadcastStreamRecvError::Lagged(_)) => None,
+                    }
                 }
             });
         // Three sources: snapshot broadcast (low-frequency full state) + subagent

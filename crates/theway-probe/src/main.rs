@@ -30,7 +30,9 @@ use health::HealthCheckRequest;
 use health::health_client::HealthClient;
 use theway_grpc::command_service_client::CommandServiceClient;
 use theway_grpc::session_service_client::SessionServiceClient;
-use theway_grpc::{CreateSessionRequest, Empty, ListSessionsResponse, SendMessageRequest};
+use theway_grpc::{
+    CreateSessionRequest, Empty, ListSessionsResponse, SendMessageRequest, SessionStateRequest,
+};
 
 #[derive(Parser, Debug)]
 #[command(name = "theway-probe")]
@@ -254,6 +256,8 @@ async fn run_multi_session(addr: &str) -> Result<(usize, usize)> {
     let create_a = session_client
         .create_session(Request::new(CreateSessionRequest {
             name: Some("probe-session-a".to_string()),
+            session_id: None,
+            metadata: Default::default(),
         }))
         .await?
         .into_inner();
@@ -267,6 +271,8 @@ async fn run_multi_session(addr: &str) -> Result<(usize, usize)> {
     let create_b = session_client
         .create_session(Request::new(CreateSessionRequest {
             name: Some("probe-session-b".to_string()),
+            session_id: None,
+            metadata: Default::default(),
         }))
         .await?
         .into_inner();
@@ -402,6 +408,10 @@ async fn test_get_state(addr: &str) -> TestResult {
 
 async fn run_get_state(addr: &str) -> Result<theway_grpc::SessionState> {
     let mut client = SessionServiceClient::connect(addr.to_string()).await?;
-    let resp = client.get_state(Request::new(Empty {})).await?;
+    let resp = client
+        .get_state(Request::new(SessionStateRequest {
+            session_id: String::new(),
+        }))
+        .await?;
     Ok(resp.into_inner())
 }
