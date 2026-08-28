@@ -151,4 +151,78 @@ impl GrpcClient {
             .map_err(|e| anyhow::anyhow!("get_node_output: {e}"))?;
         Ok(response.into_inner())
     }
+
+    // ── session graph nodes (session-snapshot-collapse) ───────────────
+
+    /// Fetch one session graph node.
+    pub async fn get_session_graph_node(
+        &mut self,
+        session_id: &str,
+        node_id: &str,
+    ) -> Result<proto::SessionGraphNode> {
+        let response = self
+            .session
+            .get_session_graph_node(GetSessionGraphNodeRequest {
+                session_id: session_id.to_string(),
+                node_id: node_id.to_string(),
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("get_session_graph_node: {e}"))?
+            .into_inner();
+        Ok(response
+            .node
+            .expect("get_session_graph_node returned no node"))
+    }
+
+    /// List all messages attached to a session graph node (first page).
+    ///
+    /// The daemon treats `offset=0, limit=0` as "server default page" so this
+    /// convenience call remains useful for small transcripts.
+    pub async fn list_session_graph_node_messages(
+        &mut self,
+        session_id: &str,
+        node_id: &str,
+    ) -> Result<Vec<proto::FeedBlock>> {
+        self.list_session_graph_node_messages_page(session_id, node_id, 0, 0)
+            .await
+    }
+
+    /// List a page of messages attached to a session graph node.
+    pub async fn list_session_graph_node_messages_page(
+        &mut self,
+        session_id: &str,
+        node_id: &str,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<proto::FeedBlock>> {
+        let response = self
+            .session
+            .list_session_graph_node_messages(ListSessionGraphNodeMessagesRequest {
+                session_id: session_id.to_string(),
+                node_id: node_id.to_string(),
+                offset,
+                limit,
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("list_session_graph_node_messages: {e}"))?
+            .into_inner();
+        Ok(response.blocks)
+    }
+
+    /// Open a streaming session-graph-node frame stream.
+    pub async fn stream_session_graph_node(
+        &mut self,
+        session_id: &str,
+        node_id: &str,
+    ) -> Result<Streaming<proto::SessionGraphNodeStreamFrame>> {
+        let response = self
+            .session
+            .stream_session_graph_node(StreamSessionGraphNodeRequest {
+                session_id: session_id.to_string(),
+                node_id: node_id.to_string(),
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("stream_session_graph_node: {e}"))?;
+        Ok(response.into_inner())
+    }
 }

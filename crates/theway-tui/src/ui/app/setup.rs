@@ -44,6 +44,7 @@ impl App {
             latest_goal: initial.goal.clone(),
             latest_trigger_poll: initial.latest_trigger_poll.clone(),
             latest: initial,
+            session_snapshot: None,
             input: new_textarea(),
             input_state: TextAreaState::default(),
             completions: Vec::new(),

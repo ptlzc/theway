@@ -46,6 +46,7 @@ import {
   type GraphRetryResponse,
   type GraphSkipRequest,
   type GraphSkipResponse,
+  type SessionGraphNode,
 } from './generated/graph_engine.js';
 import {
   SessionServiceClient as SessionServiceClientCtor,
@@ -53,15 +54,23 @@ import {
   type ActivateSessionRequest,
   type ActivateSessionResponse,
   type ClearCredentialRequest,
+  type CollapseSessionRequest,
+  type CollapseSessionResponse,
   type CreateSessionRequest,
   type CreateSessionResponse,
   type DeleteSessionRequest,
   type DeleteSessionResponse,
+  type GetSessionGraphNodeRequest,
+  type GetSessionGraphNodeResponse,
+  type ListSessionGraphNodeMessagesRequest,
+  type ListSessionGraphNodeMessagesResponse,
   type ListSessionsResponse,
   type RenameSessionRequest,
+  type SessionSnapshot,
   type SessionState,
   type SessionStateRequest,
   type SetCredentialRequest,
+  type StreamSessionGraphNodeRequest,
   type UpdateSessionMetadataRequest,
 } from './generated/session.js';
 import {
@@ -170,6 +179,66 @@ export class ThewayGrpcClient {
   getState(sessionId = ''): Promise<SessionState> {
     const request: SessionStateRequest = { sessionId };
     return this.#call<SessionStateRequest, SessionState>(this.#session.getState.bind(this.#session), 'GetState', request);
+  }
+
+  // ── session snapshot / history / collapse ──
+
+  /** `GetSnapshot` — the full nested session snapshot. Pass a session id or omit for the daemon's current session. */
+  getSnapshot(sessionId = ''): Promise<SessionSnapshot> {
+    const request: SessionStateRequest = { sessionId };
+    return this.#call<SessionStateRequest, SessionSnapshot>(this.#session.getSnapshot.bind(this.#session), 'GetSnapshot', request);
+  }
+
+  /** `GetHistory` — snapshot-shaped session transcript for an explicit session. */
+  getHistory(sessionId = ''): Promise<SessionSnapshot> {
+    const request: SessionStateRequest = { sessionId };
+    return this.#call<SessionStateRequest, SessionSnapshot>(this.#session.getHistory.bind(this.#session), 'GetHistory', request);
+  }
+
+  /** `CollapseSession` — collapse a session into a session graph node. */
+  collapseSession(request: CollapseSessionRequest): Promise<CollapseSessionResponse> {
+    return this.#call<CollapseSessionRequest, CollapseSessionResponse>(
+      this.#session.collapseSession.bind(this.#session),
+      'CollapseSession',
+      request,
+    );
+  }
+
+  // ── session graph nodes ──
+
+  /** `GetSessionGraphNode` — fetch one session graph node. */
+  async getSessionGraphNode(sessionId: string, nodeId: string): Promise<SessionGraphNode> {
+    const request: GetSessionGraphNodeRequest = { sessionId, nodeId };
+    const response = await this.#call<GetSessionGraphNodeRequest, GetSessionGraphNodeResponse>(
+      this.#session.getSessionGraphNode.bind(this.#session),
+      'GetSessionGraphNode',
+      request,
+    );
+    if (!response.node) {
+      throw new Error('theway grpc: GetSessionGraphNode returned no node');
+    }
+    return response.node;
+  }
+
+  /** `ListSessionGraphNodeMessages` — list messages attached to a session graph node. */
+  listSessionGraphNodeMessages(
+    sessionId: string,
+    nodeId: string,
+    offset = 0,
+    limit = 0,
+  ): Promise<ListSessionGraphNodeMessagesResponse> {
+    const request: ListSessionGraphNodeMessagesRequest = { sessionId, nodeId, offset, limit };
+    return this.#call<ListSessionGraphNodeMessagesRequest, ListSessionGraphNodeMessagesResponse>(
+      this.#session.listSessionGraphNodeMessages.bind(this.#session),
+      'ListSessionGraphNodeMessages',
+      request,
+    );
+  }
+
+  /** `StreamSessionGraphNode` — open a streaming session graph node frame stream. */
+  streamSessionGraphNode(sessionId: string, nodeId: string) {
+    const request: StreamSessionGraphNodeRequest = { sessionId, nodeId };
+    return this.#session.streamSessionGraphNode(request);
   }
 
   /** `GetNodeOutput` — a DAG node's output fragment from an offset. */
