@@ -34,6 +34,8 @@ async fn storage_only_service_sessions_and_persistence_round_trip() {
     let created = state
         .create_session(Request::new(CreateSessionRequest {
             name: Some("brand new".into()),
+            session_id: None,
+            metadata: std::collections::HashMap::new(),
         }))
         .await
         .unwrap()
@@ -116,6 +118,8 @@ async fn grpc_state_storage_session_methods_are_covered() {
 
     let created = StorageService::create_session(&state, Request::new(CreateSessionRequest {
             name: Some("created".into()),
+            session_id: None,
+            metadata: std::collections::HashMap::new(),
         }))
         .await
         .unwrap()
@@ -185,6 +189,8 @@ async fn storage_only_service_round_trip_over_transport() {
     let created = client
         .create_session(CreateSessionRequest {
             name: Some("wire".into()),
+            session_id: None,
+            metadata: std::collections::HashMap::new(),
         })
         .await
         .unwrap()
@@ -348,8 +354,19 @@ impl crate::transport::SessionOps for FailingSessionOps {
     async fn list(&self) -> anyhow::Result<Vec<crate::wire::SessionSummary>> {
         anyhow::bail!("list failed")
     }
-    async fn create(&self) -> anyhow::Result<String> {
+    async fn create(
+        &self,
+        _session_id: Option<&str>,
+        _metadata: &std::collections::HashMap<String, String>,
+    ) -> anyhow::Result<String> {
         anyhow::bail!("create failed")
+    }
+    async fn update_metadata(
+        &self,
+        _id: &str,
+        _metadata: &std::collections::HashMap<String, String>,
+    ) -> anyhow::Result<()> {
+        anyhow::bail!("update metadata failed")
     }
     async fn rename(&self, _id: &str, _name: &str) -> anyhow::Result<()> {
         anyhow::bail!("rename failed")
@@ -372,6 +389,8 @@ async fn storage_only_service_maps_session_failures() {
     let err = state
         .create_session(Request::new(CreateSessionRequest {
             name: None,
+            session_id: None,
+            metadata: std::collections::HashMap::new(),
         }))
         .await
         .unwrap_err();
@@ -406,8 +425,10 @@ async fn grpc_state_storage_maps_session_failures() {
     assert_eq!(err.code(), tonic::Code::Internal);
 
     let err = StorageService::create_session(&state, Request::new(CreateSessionRequest {
-        name: None,
-    }))
+            name: None,
+            session_id: None,
+            metadata: std::collections::HashMap::new(),
+        }))
     .await
     .unwrap_err();
     assert_eq!(err.code(), tonic::Code::Internal);
@@ -444,11 +465,22 @@ impl crate::transport::SessionOps for FlakySessionOps {
         }
         self.inner.list().await
     }
-    async fn create(&self) -> anyhow::Result<String> {
+    async fn create(
+        &self,
+        session_id: Option<&str>,
+        metadata: &std::collections::HashMap<String, String>,
+    ) -> anyhow::Result<String> {
         if self.fail_create {
             anyhow::bail!("create failed")
         }
-        self.inner.create().await
+        self.inner.create(session_id, metadata).await
+    }
+    async fn update_metadata(
+        &self,
+        id: &str,
+        metadata: &std::collections::HashMap<String, String>,
+    ) -> anyhow::Result<()> {
+        self.inner.update_metadata(id, metadata).await
     }
     async fn rename(&self, id: &str, name: &str) -> anyhow::Result<()> {
         if self.fail_rename {
@@ -474,7 +506,11 @@ async fn storage_only_service_scripted_session_failures() {
         Arc::new(FakeStorageOps::new()),
     );
     let err = state
-        .create_session(Request::new(CreateSessionRequest { name: Some("x".into()) }))
+        .create_session(Request::new(CreateSessionRequest {
+            name: Some("x".into()),
+            session_id: None,
+            metadata: std::collections::HashMap::new(),
+        }))
         .await
         .unwrap_err();
     assert_eq!(err.code(), tonic::Code::InvalidArgument);
@@ -484,7 +520,11 @@ async fn storage_only_service_scripted_session_failures() {
         Arc::new(FakeStorageOps::new()),
     );
     let err = state
-        .create_session(Request::new(CreateSessionRequest { name: None }))
+        .create_session(Request::new(CreateSessionRequest {
+            name: None,
+            session_id: None,
+            metadata: std::collections::HashMap::new(),
+        }))
         .await
         .unwrap_err();
     assert_eq!(err.code(), tonic::Code::Internal);
@@ -506,7 +546,11 @@ async fn grpc_state_storage_scripted_session_failures() {
     let inner = Arc::new(FakeSessionOps::new());
     inner.add_session("test-session");
     state.session_ops = Arc::new(FlakySessionOps { inner: inner.clone(), fail_list: false, fail_create: false, fail_rename: true, fail_delete: false });
-    let err = StorageService::create_session(&state, Request::new(CreateSessionRequest { name: Some("x".into()) }))
+    let err = StorageService::create_session(&state, Request::new(CreateSessionRequest {
+            name: Some("x".into()),
+            session_id: None,
+            metadata: std::collections::HashMap::new(),
+        }))
         .await
         .unwrap_err();
     assert_eq!(err.code(), tonic::Code::InvalidArgument);
@@ -515,7 +559,11 @@ async fn grpc_state_storage_scripted_session_failures() {
     let inner = Arc::new(FakeSessionOps::new());
     inner.add_session("test-session");
     state.session_ops = Arc::new(FlakySessionOps { inner: inner.clone(), fail_list: true, fail_create: false, fail_rename: false, fail_delete: false });
-    let err = StorageService::create_session(&state, Request::new(CreateSessionRequest { name: None }))
+    let err = StorageService::create_session(&state, Request::new(CreateSessionRequest {
+            name: None,
+            session_id: None,
+            metadata: std::collections::HashMap::new(),
+        }))
         .await
         .unwrap_err();
     assert_eq!(err.code(), tonic::Code::Internal);

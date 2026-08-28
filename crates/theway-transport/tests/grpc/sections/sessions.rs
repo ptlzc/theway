@@ -26,6 +26,8 @@ async fn create_session_returns_summary_and_queues_switch() {
     let response = state
         .create_session(Request::new(CreateSessionRequest {
             name: Some("brand new".into()),
+            session_id: None,
+            metadata: std::collections::HashMap::new(),
         }))
         .await
         .unwrap()
@@ -62,7 +64,9 @@ async fn switch_session_rebinds_current_and_get_state_reflects_it() {
     }
     assert_eq!(*state.session_id.read().unwrap(), "target-session");
     let state_snapshot = state
-        .get_state(Request::new(Empty {}))
+        .get_state(Request::new(theway_grpc::SessionStateRequest {
+            session_id: String::new(),
+        }))
         .await
         .unwrap()
         .into_inner();
@@ -271,6 +275,7 @@ fn activated_summary() -> crate::wire::SessionSummary {
         active_graph_count: 0,
         busy: false,
         preview: None,
+        metadata: std::collections::HashMap::new(),
     }
 }
 
@@ -705,4 +710,54 @@ async fn grpc_set_credential_debug_redacts_secret_while_routing() {
         .into_inner();
     server.await.unwrap();
     assert!(result.accepted);
+}
+
+#[tokio::test]
+async fn interactive_rpcs_reject_unknown_session() {
+    let (state, _rx, _ops, _tools) = grpc_state_with_ops();
+
+    let err = state
+        .cancel(Request::new(CancelRequest {
+            session_id: "no-such-session".into(),
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::NotFound);
+
+    let err = state
+        .approve(Request::new(ApproveRequest {
+            session_id: "no-such-session".into(),
+            approve: true,
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::NotFound);
+
+    let result = tokio::time::timeout(
+        Duration::from_secs(1),
+        state.set_model(Request::new(SetModelRequest {
+            spec: "anthropic:claude-haiku-4-5".into(),
+            session_id: "no-such-session".into(),
+        })),
+    )
+    .await;
+    match result {
+        Ok(Err(status)) => assert_eq!(status.code(), tonic::Code::NotFound),
+        Ok(Ok(_)) => panic!("set_model should reject unknown session"),
+        Err(_) => panic!("set_model hung; session_id was not validated"),
+    }
+
+    let result = tokio::time::timeout(
+        Duration::from_secs(1),
+        state.set_thinking(Request::new(SetThinkingRequest {
+            level: "high".into(),
+            session_id: "no-such-session".into(),
+        })),
+    )
+    .await;
+    match result {
+        Ok(Err(status)) => assert_eq!(status.code(), tonic::Code::NotFound),
+        Ok(Ok(_)) => panic!("set_thinking should reject unknown session"),
+        Err(_) => panic!("set_thinking hung; session_id was not validated"),
+    }
 }

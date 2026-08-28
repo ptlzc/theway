@@ -18,7 +18,10 @@ async fn handle_web_command_resolve_control_plane_approve_forwards_allow() {
     });
 
     host.handle_web_command(
-        WireCommand::ResolveControlPlane { approve: true },
+        WireCommand::ResolveControlPlane {
+            session_id: String::new(),
+            approve: true,
+        },
         &mut TurnState::default(),
     )
     .await;

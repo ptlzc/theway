@@ -2,17 +2,42 @@ impl TurnHost {
     async fn handle_web_command(&mut self, command: WireCommand, turn: &mut TurnState) {
         match command {
             WireCommand::Submit {
-                session_id: _,
+                session_id,
                 text,
                 images,
                 interrupt,
-            } => self.submit_web_text(text, images, interrupt, turn).await,
+            } => {
+                if !session_id.is_empty() && session_id != self.session.id {
+                    self.error_line(format!(
+                        "submit ignored: session {session_id} is not the active session {}",
+                        self.session.id
+                    ));
+                    return;
+                }
+                self.submit_web_text(text, images, interrupt, turn).await;
+            }
             WireCommand::TriggerRuleNow { id } => self.trigger_web_rule_now(id, turn),
-            WireCommand::Abort { session_id: _ } => self.request_abort(turn),
+            WireCommand::Abort { session_id } => {
+                if !session_id.is_empty() && session_id != self.session.id {
+                    self.error_line(format!(
+                        "abort ignored: session {session_id} is not the active session {}",
+                        self.session.id
+                    ));
+                    return;
+                }
+                self.request_abort(turn);
+            }
             WireCommand::ResolveControlPlane {
-                session_id: _,
+                session_id,
                 approve,
             } => {
+                if !session_id.is_empty() && session_id != self.session.id {
+                    self.error_line(format!(
+                        "approve ignored: session {session_id} is not the active session {}",
+                        self.session.id
+                    ));
+                    return;
+                }
                 let decision = if approve {
                     theway_core::ControlPlanePromptDecision::Allow
                 } else {
@@ -23,18 +48,26 @@ impl TurnHost {
                 self.resolve_control_plane_prompt(decision);
             }
             WireCommand::SetModel {
-                session_id: _,
+                session_id,
                 spec,
                 response,
             } => {
+                if !session_id.is_empty() && session_id != self.session.id {
+                    let _ = response.send(false);
+                    return;
+                }
                 let ok = self.set_model_from_spec(&spec).await;
                 let _ = response.send(ok);
             }
             WireCommand::SetThinking {
-                session_id: _,
+                session_id,
                 level,
                 response,
             } => {
+                if !session_id.is_empty() && session_id != self.session.id {
+                    let _ = response.send(false);
+                    return;
+                }
                 let ok = self.set_thinking_level(&level).await;
                 let _ = response.send(ok);
             }
