@@ -128,8 +128,20 @@ impl SessionOps for FakeSessionOps {
         Ok(vec![])
     }
 
-    async fn create(&self) -> anyhow::Result<String> {
+    async fn create(
+        &self,
+        _session_id: Option<&str>,
+        _metadata: &std::collections::HashMap<String, String>,
+    ) -> anyhow::Result<String> {
         Ok("sess-new".to_string())
+    }
+
+    async fn update_metadata(
+        &self,
+        _id: &str,
+        _metadata: &std::collections::HashMap<String, String>,
+    ) -> anyhow::Result<()> {
+        Ok(())
     }
 
     async fn rename(&self, _id: &str, _name: &str) -> anyhow::Result<()> {

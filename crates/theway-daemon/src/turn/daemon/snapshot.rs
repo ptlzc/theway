@@ -1,4 +1,20 @@
 impl TurnHost {
+    #[cfg(test)]
+    fn wire_snapshot_for_session(&mut self, id: &str) -> Option<WireStatus> {
+        if id == self.session.id {
+            return Some(self.wire_snapshot());
+        }
+        let incoming = self.sessions.remove(id)?;
+        let old_session = std::mem::replace(&mut self.session, incoming);
+        let old_cwd = self.runtime.cwd.clone();
+        self.runtime.cwd = self.session.cwd.clone();
+        let snapshot = self.wire_snapshot();
+        self.runtime.cwd = old_cwd;
+        let restored = std::mem::replace(&mut self.session, old_session);
+        self.sessions.insert(restored);
+        Some(snapshot)
+    }
+
     fn wire_snapshot(&mut self) -> WireStatus {
         use theway_transport::feed::block_fingerprint;
 

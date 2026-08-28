@@ -68,7 +68,7 @@ impl TurnHost {
             clear_fields: Vec::new(),
         }));
         let tool_ops: Arc<dyn ToolOps> = Arc::new(ForwardingToolOps::new(daemon_config.clone()));
-        let mut kernel = ReplKernel::new(config.harness, config.trigger_executor, config.retry);
+        let mut kernel = ReplKernel::new(config.harness, config.trigger_executor, config.retry.clone());
         kernel.set_extension_host(config.extension_host);
         Self {
             session: SessionRuntimeState {
@@ -77,6 +77,7 @@ impl TurnHost {
                 cwd: config.cwd.clone(),
                 log_path: config.log_path,
                 tool_count: config.tool_count,
+                retry: config.retry.clone(),
                 factory: config.session_factory,
                 repository: config.session_repo,
                 shared_state: config.current_session_state,
@@ -84,6 +85,7 @@ impl TurnHost {
                 queue: VecDeque::new(),
                 cumulative_usage: WireContextUsage::default(),
             },
+            sessions: SessionRegistry::new(),
             automation: AutomationRuntime {
                 services: config.services,
                 reload: reload_runtime,

@@ -313,6 +313,7 @@ async fn handle_web_command_routes_submit_to_start_turn() {
 
     host.handle_web_command(
         WireCommand::Submit {
+            session_id: "sess-extra".into(),
             text: "hello".into(),
             images: Vec::new(),
             interrupt: false,
@@ -355,6 +356,7 @@ async fn handle_web_command_routes_set_model_invalid_spec() {
     let (response, _rx) = tokio::sync::oneshot::channel();
     host.handle_web_command(
         WireCommand::SetModel {
+            session_id: "sess-extra".into(),
             spec: "no-colon".into(),
             response,
         },
@@ -373,6 +375,7 @@ async fn handle_web_command_routes_set_thinking() {
     let (response, response_rx) = tokio::sync::oneshot::channel();
     host.handle_web_command(
         WireCommand::SetThinking {
+            session_id: "sess-extra".into(),
             level: "high".into(),
             response,
         },
@@ -394,6 +397,7 @@ async fn handle_web_command_routes_set_thinking() {
     let (response, response_rx) = tokio::sync::oneshot::channel();
     host.handle_web_command(
         WireCommand::SetThinking {
+            session_id: "sess-extra".into(),
             level: "bogus".into(),
             response,
         },
