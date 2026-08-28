@@ -169,6 +169,19 @@ test('prompt(sessionId) sends the explicit session id', async () => {
   }
 });
 
+test('prompt(sessionId, text) sends the explicit session id', async () => {
+  const { port, requests, close } = await startServer();
+  try {
+    const client = new ThewayGrpcClient(`http://127.0.0.1:${port}`);
+    await client.prompt('sess-2b', 'hello');
+    assert.equal(requests[0]?.method, 'SendMessage');
+    assert.equal((requests[0]?.request as { sessionId?: string }).sessionId, 'sess-2b');
+    client.close();
+  } finally {
+    await close();
+  }
+});
+
 test('setModel(sessionId) sends the explicit session id', async () => {
   const { port, requests, close } = await startServer();
   try {
@@ -184,6 +197,21 @@ test('setModel(sessionId) sends the explicit session id', async () => {
   }
 });
 
+test('setModel(sessionId, spec) sends the explicit session id', async () => {
+  const { port, requests, close } = await startServer();
+  try {
+    const client = new ThewayGrpcClient(`http://127.0.0.1:${port}`);
+    await client.setModel('sess-3b', 'anthropic:claude-sonnet-4-5');
+    assert.equal(requests[0]?.method, 'SetModel');
+    const request = requests[0]?.request as { sessionId: string; spec: string };
+    assert.equal(request.sessionId, 'sess-3b');
+    assert.equal(request.spec, 'anthropic:claude-sonnet-4-5');
+    client.close();
+  } finally {
+    await close();
+  }
+});
+
 test('setThinking(sessionId) sends the explicit session id', async () => {
   const { port, requests, close } = await startServer();
   try {
@@ -192,6 +220,21 @@ test('setThinking(sessionId) sends the explicit session id', async () => {
     assert.equal(requests[0]?.method, 'SetThinking');
     const request = requests[0]?.request as { sessionId: string; level: string };
     assert.equal(request.sessionId, 'sess-4');
+    assert.equal(request.level, 'high');
+    client.close();
+  } finally {
+    await close();
+  }
+});
+
+test('setThinking(sessionId, level) sends the explicit session id', async () => {
+  const { port, requests, close } = await startServer();
+  try {
+    const client = new ThewayGrpcClient(`http://127.0.0.1:${port}`);
+    await client.setThinking('sess-4b', 'high');
+    assert.equal(requests[0]?.method, 'SetThinking');
+    const request = requests[0]?.request as { sessionId: string; level: string };
+    assert.equal(request.sessionId, 'sess-4b');
     assert.equal(request.level, 'high');
     client.close();
   } finally {
@@ -227,6 +270,21 @@ test('resolveControlPlane(sessionId) sends the explicit session id', async () =>
   }
 });
 
+test('resolveControlPlane(sessionId, approve) sends the explicit session id', async () => {
+  const { port, requests, close } = await startServer();
+  try {
+    const client = new ThewayGrpcClient(`http://127.0.0.1:${port}`);
+    await client.resolveControlPlane('sess-6b', true);
+    assert.equal(requests[0]?.method, 'Approve');
+    const request = requests[0]?.request as { sessionId: string; approve: boolean };
+    assert.equal(request.sessionId, 'sess-6b');
+    assert.equal(request.approve, true);
+    client.close();
+  } finally {
+    await close();
+  }
+});
+
 test('graphCancel(sessionId, runId) sends the explicit session id', async () => {
   const { port, requests, close } = await startServer();
   try {
@@ -253,6 +311,23 @@ test('createSession(sessionId, metadata) sends the explicit session id and metad
     const request = requests[0]?.request as { sessionId?: string; metadata: Record<string, string> };
     assert.equal(request.sessionId, 'sess-8');
     assert.deepEqual(request.metadata, { tenant: 'acme', region: 'us' });
+    client.close();
+  } finally {
+    await close();
+  }
+});
+
+test('createSession(sessionId, metadata) sends the explicit session id and metadata', async () => {
+  const { port, requests, close } = await startServer();
+  try {
+    const client = new ThewayGrpcClient(`http://127.0.0.1:${port}`);
+    const created = await client.createSession('sess-8b', { tenant: 'acme' });
+    assert.equal(created.session?.sessionId, 'sess-8b');
+    assert.deepEqual(created.session?.metadata, { tenant: 'acme' });
+    assert.equal(requests[0]?.method, 'CreateSession');
+    const request = requests[0]?.request as { sessionId?: string; metadata: Record<string, string> };
+    assert.equal(request.sessionId, 'sess-8b');
+    assert.deepEqual(request.metadata, { tenant: 'acme' });
     client.close();
   } finally {
     await close();
