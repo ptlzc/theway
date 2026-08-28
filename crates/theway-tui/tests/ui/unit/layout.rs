@@ -60,6 +60,8 @@ fn resolve_side_panel_width_applies_mode_gate_and_clamps() {
 #[tokio::test]
 async fn side_panel_render_follows_mode_auto_hidden_shown() {
     let (mut app, _rx) = test_app().await;
+    // Panel width math is margin-independent; flush the default left margin.
+    app.theme.screen.margin_left = 0;
     let backend = TestBackend::new(120, 20);
     let mut terminal = Terminal::new(backend).unwrap();
 

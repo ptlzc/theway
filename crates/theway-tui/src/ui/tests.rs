@@ -276,6 +276,54 @@ async fn screen_margin_insets_everything_from_the_terminal_edges() {
 }
 
 #[tokio::test]
+async fn default_left_margin_shifts_ui_two_columns() {
+    let (mut app, _rx) = test_app().await;
+    app.feed.push_user("hello world");
+    // No theme overrides: the built-in default left margin applies.
+    let backend = TestBackend::new(50, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    let buf = terminal.backend().buffer();
+
+    // The first feed row starts at column 2, not column 0.
+    let user_row = (0..12)
+        .map(|y| {
+            (0..50)
+                .map(|x| buf[(x, y)].symbol().to_string())
+                .collect::<String>()
+        })
+        .position(|line| line.contains("❯ hello world"))
+        .expect("user line must render");
+    let row: String = (0..50)
+        .map(|x| buf[(x, user_row as u16)].symbol().to_string())
+        .collect();
+    assert!(
+        row.starts_with("  "),
+        "feed must start at the default left margin (2), got: {row:?}"
+    );
+    assert!(!row.starts_with("   "), "margin must be 2, got: {row:?}");
+
+    // The composer top divider also starts at column 2.
+    let divider: String = (0..12)
+        .map(|y| {
+            (0..50)
+                .map(|x| buf[(x, y)].symbol().to_string())
+                .collect::<String>()
+        })
+        .find(|line| line.contains('╭'))
+        .expect("top divider must render");
+    assert!(
+        divider.trim_start().starts_with('╭'),
+        "divider must sit at the left margin, got: {divider:?}"
+    );
+    assert_eq!(
+        divider.find('╭'),
+        Some(2),
+        "divider must start at column 2, got: {divider:?}"
+    );
+}
+
+#[tokio::test]
 async fn status_line_shows_daemon_offline_when_disconnected() {
     let (mut app, _rx) = test_app().await;
     app.connected = false;

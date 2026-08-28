@@ -183,15 +183,27 @@ impl Default for ComposerStyle {
 }
 
 /// Screen-level viewport inset (`[screen]`): how far the whole UI sits from
-/// the terminal edges. All sides default to `0` (flush — the pre-theme
-/// behavior). `margin = N` sets all four sides; per-side
-/// `margin_top/right/bottom/left` keys override individual sides.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// the terminal edges. `margin = N` sets all four sides; per-side
+/// `margin_top/right/bottom/left` keys override individual sides. The
+/// default left margin is 2 columns (the UI sits off the terminal's left
+/// edge); the other sides stay flush.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ScreenStyle {
     pub margin_top: u16,
     pub margin_right: u16,
     pub margin_bottom: u16,
     pub margin_left: u16,
+}
+
+impl Default for ScreenStyle {
+    fn default() -> Self {
+        Self {
+            margin_top: 0,
+            margin_right: 0,
+            margin_bottom: 0,
+            margin_left: 2,
+        }
+    }
 }
 
 impl ScreenStyle {
@@ -1258,7 +1270,7 @@ separate_all = true
     // ── v2: feed rhythm (#30) ────────────────────────────────────────────
 
     #[test]
-    fn screen_margin_defaults_to_flush() {
+    fn screen_margin_defaults_to_left_2() {
         let theme = Theme::default();
         assert_eq!(
             theme.screen,
@@ -1266,12 +1278,12 @@ separate_all = true
                 margin_top: 0,
                 margin_right: 0,
                 margin_bottom: 0,
-                margin_left: 0,
+                margin_left: 2,
             }
         );
-        // Flush inset is a no-op on the viewport.
+        // The default left inset shifts the viewport by 2 columns.
         let rect = Rect::new(0, 0, 80, 24);
-        assert_eq!(theme.screen.inset(rect), rect);
+        assert_eq!(theme.screen.inset(rect), Rect::new(2, 0, 78, 24));
     }
 
     #[test]

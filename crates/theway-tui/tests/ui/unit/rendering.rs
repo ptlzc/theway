@@ -79,6 +79,9 @@ async fn chrome_top_divider_shows_feature_labels() {
 #[tokio::test]
 async fn chrome_top_divider_blank_without_features() {
     let (mut app, _rx) = test_app().await;
+    // Divider shape is margin-independent; flush the default left margin
+    // so the row starts at column 0.
+    app.theme.screen.margin_left = 0;
     let backend = TestBackend::new(60, 12);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|f| app.render(f)).unwrap();
