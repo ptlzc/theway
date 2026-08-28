@@ -115,6 +115,27 @@ accent = "#34548A"
 terminal does not answer, the last explicit `theme` wins. `theme = "auto"` is
 an alias for `follow_system = true`.
 
+## Screen viewport
+
+`[screen]` insets the **entire** UI from the terminal edges — feed, status
+band, input box, side panel, pickers and overlays all render inside the
+margin, so the layout never hugs the terminal border:
+
+```toml
+[screen]
+margin = 2             # uniform inset on all four sides (default 0)
+margin_left = 3        # per-side overrides; e.g. extra left breathing room
+margin_top = 0
+```
+
+- `margin = N` sets all four sides; `margin_top` / `margin_right` /
+  `margin_bottom` / `margin_left` override individual sides (applied after
+  the uniform value).
+- Margins larger than the terminal collapse the viewport to zero instead of
+  underflowing (saturating).
+- The default is all-zero (flush), so existing themes and the no-theme
+  rendering are byte-identical to before.
+
 ## Feed layout (phase 1 — delivers the feed gap)
 
 The vertical rhythm the v1 interface cannot express. `should_separate` keeps

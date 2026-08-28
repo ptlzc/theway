@@ -1,6 +1,6 @@
 impl App {
     fn render(&mut self, frame: &mut ratatui::Frame) {
-        let area = frame.area();
+        let area = self.theme.screen.inset(frame.area());
         let input_rows = self.composer_rows(area.width);
         let chunks = Layout::vertical([
             Constraint::Min(1),
@@ -260,7 +260,7 @@ impl App {
         let Some(picker) = self.model_picker.as_ref() else {
             return;
         };
-        let area = frame.area();
+        let area = self.theme.screen.inset(frame.area());
         let width = area.width.clamp(40, 64);
         let height = area.height.clamp(8, 18);
         let rect = centered_rect(area, width, height);
@@ -299,7 +299,7 @@ impl App {
         let Some(prompt) = self.control_plane_prompt.as_ref() else {
             return;
         };
-        let area = frame.area();
+        let area = self.theme.screen.inset(frame.area());
         let width = area.width.clamp(40, 78);
         let height = area.height.clamp(8, 14);
         let rect = centered_rect(area, width, height);
@@ -354,7 +354,7 @@ impl App {
         let Some(selected) = self.status_panel_menu else {
             return;
         };
-        let area = frame.area();
+        let area = self.theme.screen.inset(frame.area());
         let width = area.width.clamp(20, 34);
         let height = SIDE_PANEL_MENU_ITEMS.len() as u16 + 3; // items + hint + borders
         let rect = centered_rect(area, width, height);
@@ -396,7 +396,7 @@ impl App {
         if picker.entries.is_empty() {
             return;
         }
-        let area = frame.area();
+        let area = self.theme.screen.inset(frame.area());
         let width = area.width.clamp(24, 80);
         let scroll = picker.scroll.min(picker.entries.len().saturating_sub(1));
         let shown = (picker.entries.len() - scroll).min(FORK_POPUP_MAX);
@@ -444,7 +444,7 @@ impl App {
         if picker.entries.is_empty() {
             return;
         }
-        let area = frame.area();
+        let area = self.theme.screen.inset(frame.area());
         let width = area.width.clamp(24, 90);
         let scroll = picker.scroll.min(picker.entries.len().saturating_sub(1));
         let shown = (picker.entries.len() - scroll).min(RESUME_POPUP_MAX);

@@ -25,6 +25,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use ratatui::layout::Rect;
 use ratatui::style::Color;
 use toml::Table as TomlTable;
 
@@ -173,6 +174,35 @@ impl Default for ComposerStyle {
             placeholder: GRAY,
             hint: Color::DarkGray,
             cursor: TEXT_PRIMARY,
+        }
+    }
+}
+
+/// Screen-level viewport inset (`[screen]`): how far the whole UI sits from
+/// the terminal edges. All sides default to `0` (flush — the pre-theme
+/// behavior). `margin = N` sets all four sides; per-side
+/// `margin_top/right/bottom/left` keys override individual sides.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ScreenStyle {
+    pub margin_top: u16,
+    pub margin_right: u16,
+    pub margin_bottom: u16,
+    pub margin_left: u16,
+}
+
+impl ScreenStyle {
+    /// Inset `rect` by the four margins. Saturating: a margin larger than the
+    /// terminal collapses the area to zero rather than underflowing.
+    pub fn inset(self, rect: Rect) -> Rect {
+        Rect {
+            x: rect.x + self.margin_left,
+            y: rect.y + self.margin_top,
+            width: rect
+                .width
+                .saturating_sub(self.margin_left + self.margin_right),
+            height: rect
+                .height
+                .saturating_sub(self.margin_top + self.margin_bottom),
         }
     }
 }
@@ -336,6 +366,10 @@ pub struct Theme {
     pub tool_error_bg: Option<Color>,
     pub thinking_text: Color,
     pub thinking_bg: Option<Color>,
+    // ── screen viewport ────────────────────────────────────────────────────
+    /// `[screen]` viewport inset: keeps the whole UI clear of the terminal
+    /// edges (left/right breathing room especially).
+    pub screen: ScreenStyle,
     // ── block layout (#49) ─────────────────────────────────────────────────
     /// `[blocks.user]` section. Parsed for theme completeness; the v1
     /// renderer applies block layout to tool/thinking blocks only.
@@ -373,6 +407,7 @@ impl Default for Theme {
             tool_error_bg: TOOL_ERROR_BG_DEFAULT,
             thinking_text: THINKING_TEXT_DEFAULT,
             thinking_bg: THINKING_BG_DEFAULT,
+            screen: ScreenStyle::default(),
             user: BlockTheme::default(),
             assistant: BlockTheme::default(),
             tool: BlockTheme::default(),
@@ -426,6 +461,7 @@ impl Theme {
             match section.as_str() {
                 "palette" => {}
                 "colors" => apply_color_section(&mut theme, section_table, &palette),
+                "screen" => apply_screen_section(&mut theme.screen, section_table),
                 "composer" => apply_composer_section(&mut theme.composer, section_table, &palette),
                 "blocks" => apply_blocks_section(&mut theme, section_table, &palette),
                 "feed" => apply_feed_section(&mut theme.feed, section_table, &palette),
@@ -846,6 +882,51 @@ fn apply_blocks_section(
     }
 }
 
+/// `[screen]` viewport inset: `margin` (uniform, all four sides) plus
+/// per-side `margin_top/right/bottom/left` overrides.
+fn apply_screen_section(screen: &mut ScreenStyle, section: &TomlTable) {
+    for (key, value) in section {
+        match key.as_str() {
+            "margin" => match as_u16(value) {
+                Some(margin) => {
+                    screen.margin_top = margin;
+                    screen.margin_right = margin;
+                    screen.margin_bottom = margin;
+                    screen.margin_left = margin;
+                }
+                None => warn(&format!(
+                    "screen.margin: invalid margin {value:?} — keeping the current value"
+                )),
+            },
+            "margin_top" => match as_u16(value) {
+                Some(margin) => screen.margin_top = margin,
+                None => warn(&format!(
+                    "screen.margin_top: invalid margin {value:?} — keeping the current value"
+                )),
+            },
+            "margin_right" => match as_u16(value) {
+                Some(margin) => screen.margin_right = margin,
+                None => warn(&format!(
+                    "screen.margin_right: invalid margin {value:?} — keeping the current value"
+                )),
+            },
+            "margin_bottom" => match as_u16(value) {
+                Some(margin) => screen.margin_bottom = margin,
+                None => warn(&format!(
+                    "screen.margin_bottom: invalid margin {value:?} — keeping the current value"
+                )),
+            },
+            "margin_left" => match as_u16(value) {
+                Some(margin) => screen.margin_left = margin,
+                None => warn(&format!(
+                    "screen.margin_left: invalid margin {value:?} — keeping the current value"
+                )),
+            },
+            unknown => warn(&format!("screen.{unknown}: unknown key — ignored")),
+        }
+    }
+}
+
 fn apply_feed_section(
     feed: &mut FeedTheme,
     section: &TomlTable,
@@ -1140,6 +1221,69 @@ bg = "#262728"
     }
 
     // ── v2: feed rhythm (#30) ────────────────────────────────────────────
+
+    #[test]
+    fn screen_margin_defaults_to_flush() {
+        let theme = Theme::default();
+        assert_eq!(
+            theme.screen,
+            ScreenStyle {
+                margin_top: 0,
+                margin_right: 0,
+                margin_bottom: 0,
+                margin_left: 0,
+            }
+        );
+        // Flush inset is a no-op on the viewport.
+        let rect = Rect::new(0, 0, 80, 24);
+        assert_eq!(theme.screen.inset(rect), rect);
+    }
+
+    #[test]
+    fn screen_margin_parses_uniform_and_per_side() {
+        let theme = Theme::parse("[screen]\nmargin = 2\n");
+        assert_eq!(
+            theme.screen,
+            ScreenStyle {
+                margin_top: 2,
+                margin_right: 2,
+                margin_bottom: 2,
+                margin_left: 2,
+            }
+        );
+
+        // Per-side keys override the uniform margin.
+        let theme = Theme::parse("[screen]\nmargin = 2\nmargin_left = 4\nmargin_top = 0\n");
+        assert_eq!(
+            theme.screen,
+            ScreenStyle {
+                margin_top: 0,
+                margin_right: 2,
+                margin_bottom: 2,
+                margin_left: 4,
+            }
+        );
+
+        // Invalid / unknown values keep defaults and warn.
+        let theme = Theme::parse("[screen]\nmargin = -1\nmargin_left = \"wide\"\nfoo = 1\n");
+        assert_eq!(theme.screen, ScreenStyle::default());
+    }
+
+    #[test]
+    fn screen_margin_inset_is_saturating() {
+        let screen = ScreenStyle {
+            margin_top: 3,
+            margin_right: 100,
+            margin_bottom: 3,
+            margin_left: 4,
+        };
+        // Width collapses to zero rather than underflowing.
+        let rect = screen.inset(Rect::new(0, 0, 80, 24));
+        assert_eq!(rect.x, 4);
+        assert_eq!(rect.y, 3);
+        assert_eq!(rect.width, 0);
+        assert_eq!(rect.height, 18);
+    }
 
     #[test]
     fn feed_gap_parses_and_defaults() {

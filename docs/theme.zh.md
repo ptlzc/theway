@@ -92,6 +92,23 @@ accent = "#34548A"
 
 `follow_system = true` 通过终端背景查询（OSC11）解析；终端不回答时，最后显式的 `theme` 生效。`theme = "auto"` 是 `follow_system = true` 的别名。
 
+## 屏幕视口
+
+`[screen]` 把**整个** UI 从终端边缘内缩——feed、状态栏、输入框、侧栏、
+picker 与浮层都渲染在 margin 之内，布局不再贴着终端边框：
+
+```toml
+[screen]
+margin = 2             # 四边统一内缩（默认 0）
+margin_left = 3        # 单边覆盖；例如左侧多留呼吸空间
+margin_top = 0
+```
+
+- `margin = N` 同时设置四边；`margin_top` / `margin_right` /
+  `margin_bottom` / `margin_left` 单独覆盖某一边（在统一值之后应用）。
+- margin 大于终端尺寸时视口收缩为零而非下溢（饱和计算）。
+- 默认全为 0（紧贴），因此现有主题与无主题渲染与之前逐字节一致。
+
 ## Feed 布局（第一阶段——交付 feed 间隔）
 
 v1 接口无法表达的垂直节奏。`should_separate` 继续决定间隔*放哪里*；主题决定*放多少*。

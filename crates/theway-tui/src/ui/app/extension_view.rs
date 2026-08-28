@@ -3,7 +3,7 @@ impl App {
         if !self.extension_view {
             return;
         }
-        let area = frame.area();
+        let area = self.theme.screen.inset(frame.area());
         let width = area.width.clamp(42, 92);
         let height = area.height.clamp(10, 28);
         let rect = centered_rect(area, width, height);

@@ -110,7 +110,7 @@ impl App {
             .min(self.completions.len().saturating_sub(1));
         let shown = (self.completions.len() - scroll).min(COMPLETION_POPUP_MAX);
         let height = shown as u16 + 2; // borders
-        let area = frame.area();
+        let area = self.theme.screen.inset(frame.area());
         let y = status_area.y.saturating_sub(height).max(area.y);
         let width = area.width.clamp(10, 60);
         let rect = Rect {

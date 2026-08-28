@@ -229,6 +229,50 @@ async fn renders_feed_above_pinned_input_box() {
 }
 
 #[tokio::test]
+async fn screen_margin_insets_everything_from_the_terminal_edges() {
+    let (mut app, _rx) = test_app().await;
+    app.feed.push_user("hello world");
+    // Left-biased margin: the UI hugging the terminal's left edge is the
+    // complaint this feature addresses.
+    app.theme.screen.margin_top = 1;
+    app.theme.screen.margin_left = 3;
+    app.theme.screen.margin_right = 2;
+
+    let backend = TestBackend::new(50, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    let buf = terminal.backend().buffer();
+
+    // Top margin: the first terminal row stays blank.
+    let row0: String = (0..50).map(|x| buf[(x, 0)].symbol().to_string()).collect();
+    assert_eq!(row0.trim(), "", "top margin row must be blank: {row0:?}");
+
+    // Left margin: the feed's first line starts at column 3, not column 0.
+    let row1: String = (0..50).map(|x| buf[(x, 1)].symbol().to_string()).collect();
+    assert!(
+        row1.starts_with("   "),
+        "feed must start at the left margin, got: {row1:?}"
+    );
+
+    // The user prompt is indented by the same left margin.
+    let prompt_row = (0..12)
+        .map(|y| {
+            (0..50)
+                .map(|x| buf[(x, y)].symbol().to_string())
+                .collect::<String>()
+        })
+        .position(|line| line.contains("❯ hello world"))
+        .expect("user line must render");
+    let prompt_line: String = (0..50)
+        .map(|x| buf[(x, prompt_row as u16)].symbol().to_string())
+        .collect();
+    assert!(
+        prompt_line.starts_with("   ❯"),
+        "user prompt must sit at the left margin, got: {prompt_line:?}"
+    );
+}
+
+#[tokio::test]
 async fn status_line_shows_daemon_offline_when_disconnected() {
     let (mut app, _rx) = test_app().await;
     app.connected = false;
