@@ -194,7 +194,10 @@ impl CommandService for GrpcState {
         Ok(Response::new(CommandResult { accepted }))
     }
 
-    async fn cancel(&self, request: Request<CancelRequest>) -> Result<Response<CommandResult>, Status> {
+    async fn cancel(
+        &self,
+        request: Request<CancelRequest>,
+    ) -> Result<Response<CommandResult>, Status> {
         let request = request.into_inner();
         let session_id = self.resolve_session_id(&request.session_id).await?;
         let accepted = self
@@ -490,10 +493,7 @@ impl EventService for GrpcState {
         &self,
         request: Request<StreamEventsRequest>,
     ) -> Result<Response<Self::StreamEventsStream>, Status> {
-        let filter = request
-            .into_inner()
-            .session_id
-            .filter(|id| !id.is_empty());
+        let filter = request.into_inner().session_id.filter(|id| !id.is_empty());
         // Merge snapshot publications with the event plane. Routine daemon
         // publications contain only transcript deltas; `latest` remains the
         // authoritative source for first frames and resynchronization.
@@ -510,7 +510,9 @@ impl EventService for GrpcState {
                         if let Some(session_id) = filter.as_deref() {
                             let matches = match &update {
                                 WireStatusUpdate::Full(status) => status.session_id == session_id,
-                                WireStatusUpdate::Delta(_) => latest.lock().session_id == session_id,
+                                WireStatusUpdate::Delta(_) => {
+                                    latest.lock().session_id == session_id
+                                }
                             };
                             if !matches {
                                 return None;

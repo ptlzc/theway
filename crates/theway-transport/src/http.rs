@@ -449,7 +449,10 @@ pub(crate) async fn dispatch(
                 .map(String::from);
             let metadata = params
                 .and_then(|p| p.get("metadata"))
-                .and_then(|v| serde_json::from_value::<std::collections::HashMap<String, String>>(v.clone()).ok())
+                .and_then(|v| {
+                    serde_json::from_value::<std::collections::HashMap<String, String>>(v.clone())
+                        .ok()
+                })
                 .unwrap_or_default();
             let new_id = state
                 .session_ops
@@ -502,14 +505,20 @@ pub(crate) async fn dispatch(
                 .map_err(|e| (-32602, e.to_string()))?;
             Ok(serde_json::json!({ "accepted": true }))
         }
-        "update_session_metadata" | "session.update_metadata" | "state.update_metadata" | "storage.update_metadata" => {
+        "update_session_metadata"
+        | "session.update_metadata"
+        | "state.update_metadata"
+        | "storage.update_metadata" => {
             let id = param(params, "id")?
                 .as_str()
                 .unwrap_or_default()
                 .to_string();
             let metadata = params
                 .and_then(|p| p.get("metadata"))
-                .and_then(|v| serde_json::from_value::<std::collections::HashMap<String, String>>(v.clone()).ok())
+                .and_then(|v| {
+                    serde_json::from_value::<std::collections::HashMap<String, String>>(v.clone())
+                        .ok()
+                })
                 .unwrap_or_default();
             state
                 .session_ops

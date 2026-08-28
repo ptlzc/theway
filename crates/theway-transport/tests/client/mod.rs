@@ -263,9 +263,7 @@ async fn client_send_message_to_explicit_session_queues_submit_without_switch() 
         .unwrap();
     match command_rx.recv().await.unwrap() {
         crate::wire::WireCommand::Submit {
-            session_id,
-            text,
-            ..
+            session_id, text, ..
         } => {
             assert_eq!(session_id, "sess-other");
             assert_eq!(text, "hello other");

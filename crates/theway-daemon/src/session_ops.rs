@@ -216,10 +216,7 @@ mod tests {
     use theway_contract::session::SessionReader;
     use theway_storage::sqlite_repo::SqliteSessionRepo;
 
-    fn ops(
-        repo: Arc<dyn SessionRepository>,
-        _current_id: &str,
-    ) -> AppSessionOps {
+    fn ops(repo: Arc<dyn SessionRepository>, _current_id: &str) -> AppSessionOps {
         let engine = Arc::new(DagEngine::new());
         AppSessionOps::new(repo, engine, "/cwd".into(), SessionExecutionRegistry::new())
     }
@@ -365,10 +362,7 @@ mod tests {
         metadata.insert("tenant".to_string(), "acme".to_string());
         metadata.insert("source".to_string(), "workmate".to_string());
 
-        let id = ops
-            .create(Some("custom-session"), &metadata)
-            .await
-            .unwrap();
+        let id = ops.create(Some("custom-session"), &metadata).await.unwrap();
         assert_eq!(id, "custom-session");
 
         let summaries = ops.list().await.unwrap();

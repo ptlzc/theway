@@ -34,13 +34,13 @@ use crate::proto::theway_grpc::settings_service_client::SettingsServiceClient;
 use crate::proto::theway_grpc::storage_service_client::StorageServiceClient;
 use crate::proto::theway_grpc::tool_service_client::ToolServiceClient;
 use crate::proto::theway_grpc::{
-    self as proto, ApproveRequest, CancelRequest, CreateSessionRequest, DecideExtensionTrustRequest,
-    DeleteSessionRequest, Empty, GetNodeOutputRequest, GraphCancelRequest, GraphCheckpointRequest,
-    GraphListRequest, GraphNodeInterruptRequest, GraphNodeSteerRequest, GraphRestoreRequest,
-    GraphRetryRequest, GraphSkipRequest, InvokeExtensionCommandRequest, ReloadExtensionsRequest,
-    RenameSessionRequest, SendMessageRequest, SessionState, SessionStateRequest, SetModelRequest,
-    SetSkillDirsRequest, SetThinkingRequest, StreamEventsRequest, StreamFrame,
-    UpdateSessionMetadataRequest,
+    self as proto, ApproveRequest, CancelRequest, CreateSessionRequest,
+    DecideExtensionTrustRequest, DeleteSessionRequest, Empty, GetNodeOutputRequest,
+    GraphCancelRequest, GraphCheckpointRequest, GraphListRequest, GraphNodeInterruptRequest,
+    GraphNodeSteerRequest, GraphRestoreRequest, GraphRetryRequest, GraphSkipRequest,
+    InvokeExtensionCommandRequest, ReloadExtensionsRequest, RenameSessionRequest,
+    SendMessageRequest, SessionState, SessionStateRequest, SetModelRequest, SetSkillDirsRequest,
+    SetThinkingRequest, StreamEventsRequest, StreamFrame, UpdateSessionMetadataRequest,
 };
 use crate::wire::{
     SessionSummary, WireDaemonConfig, WireExtensionCommandOutcome, WireExtensionReloadResult,

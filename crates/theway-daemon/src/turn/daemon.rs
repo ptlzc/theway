@@ -184,7 +184,8 @@ impl SessionRuntimeState {
 impl SessionRuntimeState {
     fn for_test(id: &str) -> Self {
         let storage = std::sync::Arc::new(theway_core::MemorySessionStorage::new());
-        let session = theway_core::Session::new(storage as std::sync::Arc<dyn theway_core::SessionStorage>);
+        let session =
+            theway_core::Session::new(storage as std::sync::Arc<dyn theway_core::SessionStorage>);
         let model = theway_llm_provider::Model {
             id: "faux".into(),
             name: "Faux".into(),
@@ -203,8 +204,8 @@ impl SessionRuntimeState {
         let harness = std::sync::Arc::new(theway_core::AgentHarness::new(
             theway_core::AgentHarnessOptions::new(model, session),
         ));
-        let trigger_executor = std::sync::Arc::new(
-            crate::trigger_engine::execution::TriggerExecutor::new(
+        let trigger_executor =
+            std::sync::Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
                 harness.agent_arc(),
                 harness.session().clone(),
                 crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
@@ -214,16 +215,14 @@ impl SessionRuntimeState {
                 None,
                 None,
                 None,
-            ),
-        );
+            ));
         let factory: SessionFactory = std::sync::Arc::new(|_| {
             Box::pin(async { anyhow::bail!("session factory unused in for_test") })
         });
-        let repository: std::sync::Arc<dyn SessionRepository> = std::sync::Arc::new(
-            theway_storage::sqlite_repo::SqliteSessionRepo::new(
+        let repository: std::sync::Arc<dyn SessionRepository> =
+            std::sync::Arc::new(theway_storage::sqlite_repo::SqliteSessionRepo::new(
                 std::env::temp_dir().join("theway-test-session-registry"),
-            ),
-        );
+            ));
         let mut kernel = ReplKernel::new(harness, trigger_executor, RetrySettings::default());
         kernel.set_extension_host(None);
         Self {

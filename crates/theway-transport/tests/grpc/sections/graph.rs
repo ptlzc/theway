@@ -67,7 +67,6 @@ async fn graph_cancel_retry_skip_interrupt_steer_are_plumbed() {
         .graph_cancel(Request::new(theway_grpc::GraphCancelRequest {
             session_id: "sess-1".into(),
             run_id: "run-1".into(),
-            session_id: "sess-1".into(),
         }))
         .await
         .unwrap()
@@ -79,7 +78,6 @@ async fn graph_cancel_retry_skip_interrupt_steer_are_plumbed() {
             session_id: "sess-1".into(),
             run_id: "run-1".into(),
             node_id: Some("n1".into()),
-            session_id: "sess-1".into(),
         }))
         .await
         .unwrap()
@@ -91,7 +89,6 @@ async fn graph_cancel_retry_skip_interrupt_steer_are_plumbed() {
             session_id: "sess-1".into(),
             run_id: "run-1".into(),
             node_id: None,
-            session_id: "sess-1".into(),
         }))
         .await
         .unwrap()
@@ -103,7 +100,6 @@ async fn graph_cancel_retry_skip_interrupt_steer_are_plumbed() {
             session_id: "sess-1".into(),
             run_id: "run-1".into(),
             node_id: "skip-me".into(),
-            session_id: "sess-1".into(),
         }))
         .await
         .unwrap()
@@ -115,7 +111,6 @@ async fn graph_cancel_retry_skip_interrupt_steer_are_plumbed() {
             session_id: "sess-1".into(),
             run_id: "run-1".into(),
             node_id: "n1".into(),
-            session_id: "sess-1".into(),
         }))
         .await
         .unwrap()
@@ -128,7 +123,6 @@ async fn graph_cancel_retry_skip_interrupt_steer_are_plumbed() {
             run_id: "run-1".into(),
             node_id: "n1".into(),
             text: "go".into(),
-            session_id: "sess-1".into(),
         }))
         .await
         .unwrap()

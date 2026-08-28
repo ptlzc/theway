@@ -152,11 +152,7 @@ pub struct SessionImport {
 #[async_trait]
 pub trait SessionRepository: Send + Sync {
     async fn create(&self, cwd: &Path) -> Result<Arc<dyn SessionStore>>;
-    async fn create_with_id(
-        &self,
-        cwd: &Path,
-        _id: Option<&str>,
-    ) -> Result<Arc<dyn SessionStore>> {
+    async fn create_with_id(&self, cwd: &Path, _id: Option<&str>) -> Result<Arc<dyn SessionStore>> {
         self.create(cwd).await
     }
     async fn resume(&self, explicit_id: Option<&str>) -> Result<Arc<dyn SessionStore>>;

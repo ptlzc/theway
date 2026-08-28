@@ -120,7 +120,6 @@ async fn run_transport_loop_polls_in_flight_turn_and_drains_commands() {
             text: "hello".into(),
             images: Vec::new(),
             interrupt: false,
-            session_id: String::new(),
         })
         .unwrap();
     let server_task = tokio::spawn(async {
@@ -305,7 +304,6 @@ async fn run_loop_and_send_signal(sig: i32) {
             text: "hold the turn open".into(),
             images: Vec::new(),
             interrupt: false,
-            session_id: String::new(),
         })
         .unwrap();
 

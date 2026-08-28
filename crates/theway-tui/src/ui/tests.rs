@@ -149,7 +149,9 @@ fn drain_commands(
                     let _ = response.send(true);
                     format!("SetModel({spec})")
                 }
-                WireCommand::SetThinking { level, response, .. } => {
+                WireCommand::SetThinking {
+                    level, response, ..
+                } => {
                     let _ = response.send(true);
                     format!("SetThinking({level})")
                 }

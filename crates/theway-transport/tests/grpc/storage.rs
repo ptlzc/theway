@@ -34,9 +34,7 @@ async fn storage_only_service_sessions_and_persistence_round_trip() {
     let created = state
         .create_session(Request::new(CreateSessionRequest {
             session_id: None,
-            metadata: Default::default(),
             name: Some("brand new".into()),
-            session_id: None,
             metadata: std::collections::HashMap::new(),
         }))
         .await
@@ -119,12 +117,10 @@ async fn grpc_state_storage_session_methods_are_covered() {
     assert_eq!(list.sessions.len(), 2);
 
     let created = StorageService::create_session(&state, Request::new(CreateSessionRequest {
-            session_id: None,
-            metadata: Default::default(),
-            name: Some("created".into()),
-            session_id: None,
-            metadata: std::collections::HashMap::new(),
-        }))
+        session_id: None,
+        name: Some("created".into()),
+        metadata: std::collections::HashMap::new(),
+    }))
         .await
         .unwrap()
         .into_inner();
@@ -185,9 +181,7 @@ async fn storage_only_service_round_trip_over_transport() {
     let created = client
         .create_session(CreateSessionRequest {
             session_id: None,
-            metadata: Default::default(),
             name: Some("wire".into()),
-            session_id: None,
             metadata: std::collections::HashMap::new(),
         })
         .await
@@ -387,9 +381,7 @@ async fn storage_only_service_maps_session_failures() {
     let err = state
         .create_session(Request::new(CreateSessionRequest {
             session_id: None,
-            metadata: Default::default(),
             name: None,
-            session_id: None,
             metadata: std::collections::HashMap::new(),
         }))
         .await
