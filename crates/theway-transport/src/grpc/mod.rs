@@ -162,11 +162,7 @@ impl CommandService for GrpcState {
         request: Request<SetModelRequest>,
     ) -> Result<Response<CommandResult>, Status> {
         let request = request.into_inner();
-        let session_id = if request.session_id.is_empty() {
-            self.session_id.read().unwrap().clone()
-        } else {
-            request.session_id
-        };
+        let session_id = self.resolve_session_id(&request.session_id).await?;
         let (tx, rx) = tokio::sync::oneshot::channel();
         let accepted = self
             .commands
@@ -189,11 +185,7 @@ impl CommandService for GrpcState {
         request: Request<SetThinkingRequest>,
     ) -> Result<Response<CommandResult>, Status> {
         let request = request.into_inner();
-        let session_id = if request.session_id.is_empty() {
-            self.session_id.read().unwrap().clone()
-        } else {
-            request.session_id
-        };
+        let session_id = self.resolve_session_id(&request.session_id).await?;
         let (tx, rx) = tokio::sync::oneshot::channel();
         let accepted = self
             .commands
@@ -213,11 +205,7 @@ impl CommandService for GrpcState {
 
     async fn cancel(&self, request: Request<CancelRequest>) -> Result<Response<CommandResult>, Status> {
         let request = request.into_inner();
-        let session_id = if request.session_id.is_empty() {
-            self.session_id.read().unwrap().clone()
-        } else {
-            request.session_id
-        };
+        let session_id = self.resolve_session_id(&request.session_id).await?;
         let accepted = self
             .commands
             .send(WireCommand::Abort { session_id })
@@ -230,11 +218,7 @@ impl CommandService for GrpcState {
         request: Request<ApproveRequest>,
     ) -> Result<Response<CommandResult>, Status> {
         let request = request.into_inner();
-        let session_id = if request.session_id.is_empty() {
-            self.session_id.read().unwrap().clone()
-        } else {
-            request.session_id
-        };
+        let session_id = self.resolve_session_id(&request.session_id).await?;
         let accepted = self
             .commands
             .send(WireCommand::ResolveControlPlane {
@@ -285,6 +269,41 @@ impl GrpcState {
             .send(WireCommand::Configure { config })
             .map_err(|_| Status::unavailable("event loop command channel closed"))?;
         Ok(true)
+    }
+
+    async fn resolve_session_id(&self, requested: &str) -> Result<String, Status> {
+        let requested = requested.trim().to_string();
+        if requested.is_empty() {
+            return Ok(self.session_id.read().unwrap().clone());
+        }
+        let sessions = self
+            .session_ops
+            .list()
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+        if sessions.iter().any(|s| s.session_id == requested) {
+            Ok(requested)
+        } else {
+            Err(Status::not_found(format!(
+                "session {requested} is not available"
+            )))
+        }
+    }
+
+    fn ensure_graph_run_in_session(&self, session_id: &str, run_id: &str) -> Result<(), Status> {
+        let session_id = if session_id.trim().is_empty() {
+            self.session_id.read().unwrap().clone()
+        } else {
+            session_id.to_string()
+        };
+        let runs = self.graph_ops.list(&session_id);
+        if runs.iter().any(|run| run.id == run_id) {
+            Ok(())
+        } else {
+            Err(Status::not_found(format!(
+                "run {run_id} not found in session {session_id}"
+            )))
+        }
     }
 }
 
@@ -351,7 +370,7 @@ impl GraphEngineService for GrpcState {
         request: Request<GraphCancelRequest>,
     ) -> Result<Response<CommandResult>, Status> {
         let request = request.into_inner();
-        let _session_id = request.session_id;
+        self.ensure_graph_run_in_session(&request.session_id, &request.run_id)?;
         let run_id = request.run_id;
         self.graph_ops
             .cancel_run(&run_id, Some("cancelled via rpc"));
@@ -363,7 +382,7 @@ impl GraphEngineService for GrpcState {
         request: Request<GraphRetryRequest>,
     ) -> Result<Response<GraphRetryResponse>, Status> {
         let request = request.into_inner();
-        let _session_id = request.session_id;
+        self.ensure_graph_run_in_session(&request.session_id, &request.run_id)?;
         let node_ids = request.node_id.as_deref().map(|id| vec![id.to_string()]);
         let reset = self.graph_ops.retry(&request.run_id, node_ids.as_deref());
         Ok(Response::new(GraphRetryResponse {
@@ -376,7 +395,7 @@ impl GraphEngineService for GrpcState {
         request: Request<GraphSkipRequest>,
     ) -> Result<Response<GraphSkipResponse>, Status> {
         let request = request.into_inner();
-        let _session_id = request.session_id;
+        self.ensure_graph_run_in_session(&request.session_id, &request.run_id)?;
         let skipped = self.graph_ops.skip(&request.run_id, &request.node_id);
         Ok(Response::new(GraphSkipResponse { skipped }))
     }
@@ -386,7 +405,7 @@ impl GraphEngineService for GrpcState {
         request: Request<GraphNodeInterruptRequest>,
     ) -> Result<Response<CommandResult>, Status> {
         let request = request.into_inner();
-        let _session_id = request.session_id;
+        self.ensure_graph_run_in_session(&request.session_id, &request.run_id)?;
         let accepted = self
             .job_ops
             .interrupt_node(&request.run_id, &request.node_id);
@@ -398,7 +417,7 @@ impl GraphEngineService for GrpcState {
         request: Request<GraphNodeSteerRequest>,
     ) -> Result<Response<CommandResult>, Status> {
         let request = request.into_inner();
-        let _session_id = request.session_id;
+        self.ensure_graph_run_in_session(&request.session_id, &request.run_id)?;
         let accepted = self
             .job_ops
             .steer_node(&request.run_id, &request.node_id, request.text);

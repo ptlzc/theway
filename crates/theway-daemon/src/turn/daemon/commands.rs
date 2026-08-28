@@ -7,7 +7,7 @@ impl TurnHost {
                 images,
                 interrupt,
             } => {
-                if session_id == self.session.id {
+                if session_id.is_empty() || session_id == self.session.id {
                     self.submit_web_text(text, images, interrupt, turn).await;
                 } else {
                     self.submit_web_text_for_session(&session_id, text, images, interrupt)
@@ -16,8 +16,13 @@ impl TurnHost {
             }
             WireCommand::TriggerRuleNow { id } => self.trigger_web_rule_now(id, turn),
             WireCommand::Abort { session_id } => {
-                if session_id == self.session.id {
+                if session_id.is_empty() || session_id == self.session.id {
                     self.request_abort(turn);
+                } else if !self.sessions.contains(&session_id) {
+                    self.error_line(format!(
+                        "abort ignored: session {session_id} is not an active or registered session {}",
+                        self.session.id
+                    ));
                 } else {
                     self.cancel_session(&session_id);
                 }
@@ -26,10 +31,11 @@ impl TurnHost {
                 session_id,
                 approve,
             } => {
-                if session_id != self.session.id {
-                    // Non-active sessions do not currently have a separate
-                    // control-plane prompt projection; routing is a no-op until
-                    // per-session event streams land.
+                if !session_id.is_empty() && session_id != self.session.id {
+                    self.error_line(format!(
+                        "approve ignored: session {session_id} is not the active session {}",
+                        self.session.id
+                    ));
                     return;
                 }
                 let decision = if approve {
@@ -46,7 +52,11 @@ impl TurnHost {
                 spec,
                 response,
             } => {
-                let ok = self.set_model_for_session(&session_id, &spec).await;
+                let ok = if session_id.is_empty() || session_id == self.session.id {
+                    self.set_model_from_spec(&spec).await
+                } else {
+                    self.set_model_for_session(&session_id, &spec).await
+                };
                 let _ = response.send(ok);
             }
             WireCommand::SetThinking {
@@ -54,7 +64,11 @@ impl TurnHost {
                 level,
                 response,
             } => {
-                let ok = self.set_thinking_for_session(&session_id, &level).await;
+                let ok = if session_id.is_empty() || session_id == self.session.id {
+                    self.set_thinking_level(&level).await
+                } else {
+                    self.set_thinking_for_session(&session_id, &level).await
+                };
                 let _ = response.send(ok);
             }
             WireCommand::SwitchSession { id } => self.handle_switch_session(id, turn).await,

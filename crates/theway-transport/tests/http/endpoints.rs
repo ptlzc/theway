@@ -82,6 +82,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
     assert_eq!(accepted["accepted"], true);
     match command_rx.recv().await.unwrap() {
         WireCommand::Submit {
+            session_id: _,
             text,
             images,
             interrupt: _,
@@ -109,6 +110,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
     assert_eq!(accepted["accepted"], true);
     match command_rx.recv().await.unwrap() {
         WireCommand::Submit {
+            session_id: _,
             text,
             images,
             interrupt: _,
@@ -123,7 +125,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
     let accepted = rpc_call(&client, &base, 4, "abort", None).await;
     assert_eq!(accepted["accepted"], true);
     match command_rx.recv().await.unwrap() {
-        WireCommand::Abort => {}
+        WireCommand::Abort { session_id: _ } => {}
         other => panic!("unexpected command: {other:?}"),
     }
 
@@ -151,7 +153,10 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
     .await;
     assert_eq!(accepted["accepted"], true);
     match command_rx.recv().await.unwrap() {
-        WireCommand::ResolveControlPlane { approve } => assert!(approve),
+        WireCommand::ResolveControlPlane {
+            session_id: _,
+            approve,
+        } => assert!(approve),
         other => panic!("unexpected command: {other:?}"),
     }
 
@@ -168,7 +173,11 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
         .await
     });
     match command_rx.recv().await.unwrap() {
-        WireCommand::SetModel { spec, response } => {
+        WireCommand::SetModel {
+            session_id: _,
+            spec,
+            response,
+        } => {
             assert_eq!(spec, "anthropic:claude-haiku-4-5");
             let _ = response.send(true);
         }

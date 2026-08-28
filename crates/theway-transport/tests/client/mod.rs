@@ -139,10 +139,12 @@ async fn client_send_message_queues_submit_command() {
     assert!(accepted);
     match command_rx.recv().await.unwrap() {
         crate::wire::WireCommand::Submit {
+            session_id,
             text,
             images,
             interrupt,
         } => {
+            assert_eq!(session_id, "sess-1");
             assert_eq!(text, "hello daemon");
             assert_eq!(images.len(), 1);
             assert_eq!(images[0].name.as_deref(), Some("clip.png"));
@@ -176,7 +178,7 @@ async fn client_cancel_set_model_approve_switch_session_round_trip() {
     }
     assert!(matches!(
         command_rx.recv().await.unwrap(),
-        crate::wire::WireCommand::Abort
+        crate::wire::WireCommand::Abort { session_id: _ }
     ));
 
     let rpc_client = client.clone();
@@ -185,7 +187,11 @@ async fn client_cancel_set_model_approve_switch_session_round_trip() {
         client.set_model("anthropic:claude-x").await.unwrap()
     });
     match command_rx.recv().await.unwrap() {
-        crate::wire::WireCommand::SetModel { spec, response } => {
+        crate::wire::WireCommand::SetModel {
+            session_id: _,
+            spec,
+            response,
+        } => {
             assert_eq!(spec, "anthropic:claude-x");
             let _ = response.send(true);
         }
@@ -196,7 +202,10 @@ async fn client_cancel_set_model_approve_switch_session_round_trip() {
     let mut client = client.lock().await;
     assert!(client.approve(true).await.unwrap());
     match command_rx.recv().await.unwrap() {
-        crate::wire::WireCommand::ResolveControlPlane { approve } => assert!(approve),
+        crate::wire::WireCommand::ResolveControlPlane {
+            session_id: _,
+            approve,
+        } => assert!(approve),
         other => panic!("unexpected command: {other:?}"),
     }
 }
@@ -212,7 +221,11 @@ async fn client_set_thinking_round_trips_the_level() {
         client.set_thinking("xhigh").await.unwrap()
     });
     match command_rx.recv().await.unwrap() {
-        crate::wire::WireCommand::SetThinking { level, response } => {
+        crate::wire::WireCommand::SetThinking {
+            session_id: _,
+            level,
+            response,
+        } => {
             assert_eq!(level, "xhigh");
             let _ = response.send(true);
         }
@@ -227,7 +240,11 @@ async fn client_set_thinking_round_trips_the_level() {
         client.set_thinking("bogus").await.unwrap()
     });
     match command_rx.recv().await.unwrap() {
-        crate::wire::WireCommand::SetThinking { level, response } => {
+        crate::wire::WireCommand::SetThinking {
+            session_id: _,
+            level,
+            response,
+        } => {
             assert_eq!(level, "bogus");
             let _ = response.send(false);
         }

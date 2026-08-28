@@ -13,6 +13,7 @@ fn fixture_summary() -> crate::wire::SessionSummary {
         active_graph_count: 1,
         busy: false,
         preview: Some("last prompt".into()),
+        metadata: std::collections::HashMap::new(),
     }
 }
 
