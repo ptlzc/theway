@@ -37,6 +37,7 @@ use theway_core::{
 use theway_llm_provider::Tool;
 use tokio_util::sync::CancellationToken;
 
+use crate::runtime_storage::SessionRepository;
 use crate::tools::skill::SkillHarnessCell;
 
 // ── tool bodies (harness-runtime + app-layer) ───────────────────────────────
@@ -55,6 +56,7 @@ pub mod install_skill;
 pub mod mcp_adapter;
 pub mod memory;
 pub mod remove_skill;
+pub mod session_graph;
 pub mod set_skill_state;
 pub mod skill;
 pub mod skill_builder;
@@ -370,6 +372,7 @@ pub fn session_tool_set(
     session_id: &str,
     executor: Arc<dyn ToolExecutor>,
     services: &crate::DaemonServices,
+    repo: Arc<dyn SessionRepository>,
 ) -> Vec<Arc<dyn AgentTool>> {
     session_tool_set_for_cwd(
         memory_dir,
@@ -382,6 +385,7 @@ pub fn session_tool_set(
         session_id,
         executor,
         services,
+        repo,
         std::env::current_dir().unwrap_or_default(),
     )
 }
@@ -397,6 +401,7 @@ pub fn session_tool_set_for_cwd(
     session_id: &str,
     executor: Arc<dyn ToolExecutor>,
     services: &crate::DaemonServices,
+    repo: Arc<dyn SessionRepository>,
     cwd: PathBuf,
 ) -> Vec<Arc<dyn AgentTool>> {
     let mut tools = local_tools_for_cwd(executor.clone(), cwd.clone());
@@ -412,7 +417,7 @@ pub fn session_tool_set_for_cwd(
             base_dir.to_path_buf(),
             skill_harness_cell.clone(),
             executor,
-            cwd,
+            cwd.clone(),
         ),
         crate::agent_specs::launch_resolver(),
         crate::agent_specs::spec_names(),
@@ -421,6 +426,14 @@ pub fn session_tool_set_for_cwd(
         skill_harness_cell,
         session_id,
         services.reload.clone(),
+    ));
+    // Session graph tools (main-agent only): list/read/status/wait/attach against
+    // the Turso-backed session graph.
+    let graph_path = theway_contract::config::sessions_dir_for_cwd(&cwd).join("session_graph.db");
+    tools.extend(session_graph::SessionGraphTools::new(
+        repo.clone(),
+        graph_path,
+        cwd.clone(),
     ));
     // Trigger/cron family: harness-adjacent but implemented in this crate.
     tools.push(new_cron_job_tool(

@@ -104,6 +104,7 @@ fn session_command_metadata_is_stable() {
     assert_eq!(NameCommand.name(), "name");
     assert_eq!(SessionCommand.name(), "session");
     assert_eq!(ForkCommand.name(), "fork");
+    assert_eq!(CollapseCommand.name(), "collapse");
     assert_eq!(ShareCommand.name(), "share");
 }
 

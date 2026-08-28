@@ -75,6 +75,9 @@ fn session_tool_set_assembles_local_engine_and_trigger_families() {
     let cell = empty_skill_cell();
     let session_id = "session-test";
 
+    let repo: Arc<dyn SessionRepository> = Arc::new(
+        theway_storage::sqlite_repo::SqliteSessionRepo::new(dir.path().join("sessions")),
+    );
     let tools = session_tool_set(
         dir.path(),
         dir.path(),
@@ -86,6 +89,7 @@ fn session_tool_set_assembles_local_engine_and_trigger_families() {
         session_id,
         local_exec(),
         &crate::orchestration::DaemonServices::new(),
+        repo,
     );
 
     let names = names(&tools);

@@ -26,6 +26,23 @@ impl SessionService for GrpcState {
         request: Request<theway_grpc::SessionStateRequest>,
     ) -> Result<Response<theway_grpc::SessionSnapshot>, Status> {
         let request = request.into_inner();
+        let session_id = if request.session_id.is_empty() {
+            self.session_id.read().unwrap().clone()
+        } else {
+            request.session_id.clone()
+        };
+        if let Ok(snapshot) = self
+            .session_ops
+            .session_snapshot(&session_id)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))
+        {
+            return Ok(Response::new(crate::proto::wire_session_snapshot(
+                &snapshot,
+            )));
+        }
+        // Fallback to the legacy WireStatus projection for fakes and older
+        // in-memory session stores that do not implement the collapse seam.
         if request.session_id.is_empty() {
             let latest = self.latest.lock();
             return Ok(Response::new(crate::proto::session_snapshot_wire(&latest)));
@@ -49,28 +66,55 @@ impl SessionService for GrpcState {
 
     async fn collapse_session(
         &self,
-        _request: Request<theway_grpc::CollapseSessionRequest>,
+        request: Request<theway_grpc::CollapseSessionRequest>,
     ) -> Result<Response<theway_grpc::CollapseSessionResponse>, Status> {
-        Err(Status::unimplemented(
-            "session collapse is not wired in this transport build",
+        let request = request.into_inner();
+        let wire_request = crate::proto::collapse_session_request_from_proto(&request);
+        let response = self
+            .session_ops
+            .collapse_session(&wire_request)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+        Ok(Response::new(
+            crate::proto::collapse_session_response_to_proto(&response),
         ))
     }
 
     async fn get_session_graph_node(
         &self,
-        _request: Request<theway_grpc::GetSessionGraphNodeRequest>,
+        request: Request<theway_grpc::GetSessionGraphNodeRequest>,
     ) -> Result<Response<theway_grpc::GetSessionGraphNodeResponse>, Status> {
-        Err(Status::unimplemented(
-            "session graph nodes are not wired in this transport build",
-        ))
+        let request = request.into_inner();
+        let node = self
+            .session_ops
+            .get_session_graph_node(&request.session_id, &request.node_id)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| {
+                Status::not_found(format!("session graph node {} not found", request.node_id))
+            })?;
+        Ok(Response::new(theway_grpc::GetSessionGraphNodeResponse {
+            node: Some(crate::proto::session_graph_node_wire(&node)),
+        }))
     }
 
     async fn list_session_graph_node_messages(
         &self,
-        _request: Request<theway_grpc::ListSessionGraphNodeMessagesRequest>,
+        request: Request<theway_grpc::ListSessionGraphNodeMessagesRequest>,
     ) -> Result<Response<theway_grpc::ListSessionGraphNodeMessagesResponse>, Status> {
-        Err(Status::unimplemented(
-            "session graph node messages are not wired in this transport build",
+        let request = request.into_inner();
+        let blocks = self
+            .session_ops
+            .list_session_graph_node_messages(
+                &request.session_id,
+                &request.node_id,
+                request.offset,
+                request.limit,
+            )
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+        Ok(Response::new(
+            crate::proto::list_session_graph_node_messages_response_to_proto(&blocks),
         ))
     }
 
@@ -83,11 +127,36 @@ impl SessionService for GrpcState {
 
     async fn stream_session_graph_node(
         &self,
-        _request: Request<theway_grpc::StreamSessionGraphNodeRequest>,
+        request: Request<theway_grpc::StreamSessionGraphNodeRequest>,
     ) -> Result<Response<Self::StreamSessionGraphNodeStream>, Status> {
-        Err(Status::unimplemented(
-            "session graph node streaming is not wired in this transport build",
-        ))
+        let request = request.into_inner();
+        let node = self
+            .session_ops
+            .get_session_graph_node(&request.session_id, &request.node_id)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| {
+                Status::not_found(format!("session graph node {} not found", request.node_id))
+            })?;
+        let blocks = self
+            .session_ops
+            .list_session_graph_node_messages(&request.session_id, &request.node_id, 0, 0)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let mut frames = vec![Ok(theway_grpc::SessionGraphNodeStreamFrame {
+            payload: Some(theway_grpc::session_graph_node_stream_frame::Payload::Node(
+                crate::proto::session_graph_node_wire(&node),
+            )),
+        })];
+        let proto_blocks =
+            crate::proto::list_session_graph_node_messages_response_to_proto(&blocks).blocks;
+        frames.extend(proto_blocks.into_iter().map(|block| {
+            Ok(theway_grpc::SessionGraphNodeStreamFrame {
+                payload: Some(theway_grpc::session_graph_node_stream_frame::Payload::Block(block)),
+            })
+        }));
+        let stream = futures::stream::iter(frames);
+        Ok(Response::new(Box::pin(stream)))
     }
 
     // ── session resources (session-resource-model; backed by SessionOps) ──

@@ -538,6 +538,7 @@ impl SessionRuntimeBuilder {
             &session_id,
             ctx.executor.clone(),
             &self.services,
+            ctx.repo.clone(),
             ctx.cwd.clone(),
         );
         tools.extend(ctx.mcp.tools.iter().cloned());
