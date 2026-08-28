@@ -25,6 +25,7 @@ impl App {
             cwd: config.cwd,
             model_config_path: config.model_config_path,
             pending_model_default: None,
+            pending_thinking_default: None,
             registry: config.registry,
             completer,
             history: config.history,

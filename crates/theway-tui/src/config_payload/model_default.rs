@@ -42,6 +42,38 @@ pub(crate) fn persist_model_default(path: &Path, default: &ModelDefault) -> Resu
         .with_context(|| format!("write {}", path.display()))
 }
 
+/// Persist a thinking level into the `[model]` table of the controller-owned
+/// `config.toml` (`thinking = "level"`), without disturbing unrelated
+/// sections, comments, or the provider/model pair. Same atomic-rename
+/// semantics as [`persist_model_default`].
+pub(crate) fn persist_thinking_default(path: &Path, level: &str) -> Result<()> {
+    if level.trim().is_empty() {
+        bail!("thinking level must not be empty");
+    }
+
+    let original = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => {
+            return Err(error).with_context(|| format!("read {}", path.display()));
+        }
+    };
+    let mut document = original
+        .parse::<DocumentMut>()
+        .with_context(|| format!("parse {}", path.display()))?;
+    let model = document
+        .as_table_mut()
+        .entry("model")
+        .or_insert(Item::Table(Table::new()));
+    let model = model
+        .as_table_like_mut()
+        .with_context(|| format!("`model` in {} must be a table", path.display()))?;
+    model.insert("thinking", value(level));
+
+    atomic_write(path, document.to_string().as_bytes())
+        .with_context(|| format!("write {}", path.display()))
+}
+
 fn atomic_write(path: &Path, content: &[u8]) -> std::io::Result<()> {
     let parent = path
         .parent()

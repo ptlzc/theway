@@ -51,6 +51,12 @@ pub enum WireCommand {
         spec: String,
         response: tokio::sync::oneshot::Sender<bool>,
     },
+    /// Set the active thinking level (mirrors the `/thinking` slash command;
+    /// typed RPC so the client can confirm via snapshot before persisting).
+    SetThinking {
+        level: String,
+        response: tokio::sync::oneshot::Sender<bool>,
+    },
     /// session-resource-model: switch the runtime to another session (resume semantics).
     /// `CreateSession`'s "make current" path also flows through this command — creating the
     /// session is a sync `SessionOps` call, becoming current goes through the serialized
@@ -123,6 +129,11 @@ pub struct WireDaemonConfig {
     /// Extended-thinking toggle.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking: Option<bool>,
+    /// Full thinking level ("off" | "minimal" | "low" | "medium" | "high" |
+    /// "xhigh") — the persisted last-choice default. Finer-grained than the
+    /// legacy `thinking` toggle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_level: Option<String>,
     /// Enabled builtin skill names.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub builtin_skills: Vec<String>,
@@ -152,11 +163,12 @@ pub struct WireDaemonConfig {
 }
 
 impl WireDaemonConfig {
-    pub const FIELDS: [&'static str; 10] = [
+    pub const FIELDS: [&'static str; 11] = [
         "provider",
         "model",
         "base_url",
         "thinking",
+        "thinking_level",
         "builtin_skills",
         "skills_dirs",
         "trigger_poll_secs",
@@ -188,6 +200,7 @@ impl WireDaemonConfig {
                 "model" => self.model.take().is_some(),
                 "base_url" => self.base_url.take().is_some(),
                 "thinking" => self.thinking.take().is_some(),
+                "thinking_level" => self.thinking_level.take().is_some(),
                 "builtin_skills" => !std::mem::take(&mut self.builtin_skills).is_empty(),
                 "skills_dirs" => !std::mem::take(&mut self.skills_dirs).is_empty(),
                 "trigger_poll_secs" => self.trigger_poll_secs.take().is_some(),
@@ -212,6 +225,10 @@ impl WireDaemonConfig {
         }
         if let Some(thinking) = patch.thinking {
             self.thinking = Some(thinking);
+            touched += 1;
+        }
+        if let Some(level) = patch.thinking_level.clone() {
+            self.thinking_level = Some(level);
             touched += 1;
         }
         if !patch.builtin_skills.is_empty() {
@@ -440,6 +457,10 @@ pub struct WireContextUsage {
 pub struct WireStatus {
     pub session_id: String,
     pub model: String,
+    /// Active thinking level ("off" | "minimal" | "low" | "medium" | "high" |
+    /// "xhigh"); empty when the daemon reports none.
+    #[serde(default)]
+    pub thinking_level: String,
     pub model_catalog: Vec<ProviderGroup>,
     pub cwd: String,
     pub busy: bool,

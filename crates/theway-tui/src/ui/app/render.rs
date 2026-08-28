@@ -155,6 +155,18 @@ impl App {
         // The info line shows the full `provider:model-id` label (issue #37).
         let model_name = self.latest.model.clone();
         let mut flags: Vec<prompt_chrome::PromptFlag<'_>> = Vec::new();
+        // Active thinking level flag (the persisted last-pick default): only
+        // renders when reasoning is enabled — "off" stays invisible.
+        let thinking_flag: Option<String> =
+            (!self.latest.thinking_level.is_empty() && self.latest.thinking_level != "off")
+                .then(|| format!("think {}", self.latest.thinking_level));
+        if let Some(ref level) = thinking_flag {
+            flags.push(prompt_chrome::PromptFlag {
+                text: level,
+                color: prompt_chrome::GRAY,
+                bold: false,
+            });
+        }
         // Busy state renders in the pixel-loader status band above the box
         // (issue #37), not as an info-line flag.
         let queued_flag: Option<String> =

@@ -113,6 +113,7 @@ pub fn daemon_config_to_proto(config: &crate::wire::WireDaemonConfig) -> wire::D
         model: config.model.clone(),
         base_url: config.base_url.clone(),
         thinking: config.thinking,
+        thinking_level: config.thinking_level.clone(),
         builtin_skills: config.builtin_skills.clone(),
         skills_dirs: config.skills_dirs.clone(),
         trigger_poll_secs: config
@@ -135,6 +136,7 @@ pub fn daemon_config_from_proto(config: &wire::DaemonConfig) -> crate::wire::Wir
         model: config.model.clone(),
         base_url: config.base_url.clone(),
         thinking: config.thinking,
+        thinking_level: config.thinking_level.clone(),
         builtin_skills: config.builtin_skills.clone(),
         skills_dirs: config.skills_dirs.clone(),
         trigger_poll_secs: config.trigger_poll_secs.map(u64::from),

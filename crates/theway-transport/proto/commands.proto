@@ -41,6 +41,10 @@ message SetModelRequest {
   string spec = 1;
 }
 
+message SetThinkingRequest {
+  string level = 1;
+}
+
 message ApproveRequest {
   bool approve = 1;
 }
@@ -50,6 +54,9 @@ service CommandService {
   // mode=INTERRUPT stops the current turn and runs the message immediately.
   rpc SendMessage(SendMessageRequest) returns (CommandResult);
   rpc SetModel(SetModelRequest) returns (CommandResult);
+  // Set the active thinking level ("off" | "minimal" | "low" | "medium" |
+  // "high" | "xhigh"). Same runtime effect as the `/thinking` slash command.
+  rpc SetThinking(SetThinkingRequest) returns (CommandResult);
   // Stop the in-flight turn (same as local Ctrl-C). Does not cancel DAG runs.
   rpc Cancel(Empty) returns (CommandResult);
   // Resolve a pending control-plane approval request (approve / reject).

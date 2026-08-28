@@ -12,6 +12,7 @@ fn wire_status(session_id: &str) -> WireStatus {
     WireStatus {
         session_id: session_id.into(),
         model: "provider:model".into(),
+        thinking_level: "off".into(),
         model_catalog: Vec::new(),
         cwd: "/tmp/theway".into(),
         busy: false,

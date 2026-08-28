@@ -184,28 +184,22 @@ async fn esc_while_busy_aborts_even_with_completion_popup() {
 
 #[tokio::test]
 async fn bare_model_slash_opens_picker_and_switches_model() {
-    let (mut app, mut rx) = test_app().await;
+    let (mut app, rx) = test_app().await;
+    let (_drain, seen) = drain_commands(rx);
     app.dispatch_slash("/model", &mut terminal_placeholder()).await;
     assert!(app.model_picker.is_some());
 
-    // Enter descends into anthropic; Enter again selects the first model.
-    assert!(
-        app.handle_model_picker_key(&KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()))
-            .await
-    );
-    assert!(
-        app.handle_model_picker_key(&KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()))
-            .await
-    );
+    // Enter descends into anthropic; Enter again into thinking intensity;
+    // Enter a third time selects the first model at the first thinking level.
+    let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::empty());
+    assert!(app.handle_model_picker_key(&enter).await);
+    assert!(app.handle_model_picker_key(&enter).await);
+    assert!(app.handle_model_picker_key(&enter).await);
 
-    let cmd = tokio::time::timeout(Duration::from_secs(2), rx.recv())
-        .await
-        .expect("no set_model command")
-        .unwrap();
-    match cmd {
-        WireCommand::SetModel { spec, .. } => assert_eq!(spec, "anthropic:claude-x"),
-        other => panic!("unexpected command: {other:?}"),
-    }
+    assert_eq!(
+        seen.lock().unwrap().as_slice(),
+        ["SetModel(anthropic:claude-x)", "SetThinking(off)"]
+    );
     assert!(app.model_picker.is_none());
 }
 

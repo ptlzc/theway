@@ -251,6 +251,7 @@ pub struct App {
     session_id: String,
     model_config_path: PathBuf,
     pending_model_default: Option<PendingModelDefault>,
+    pending_thinking_default: Option<PendingThinkingDefault>,
 
     history: HistoryStore,
     history_idx: Option<usize>,
@@ -366,6 +367,15 @@ pub struct App {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct PendingModelDefault {
     selection: theway_transport::config::ModelDefault,
+    session_id: String,
+}
+
+/// A successful SetThinking RPC waiting for snapshot confirmation before it
+/// is persisted as the startup thinking default (mirrors
+/// [`PendingModelDefault`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PendingThinkingDefault {
+    level: String,
     session_id: String,
 }
 

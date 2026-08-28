@@ -45,6 +45,9 @@ message SessionState {
   // Session-cumulative token usage: total input, cached input, non-cached
   // input, output, and cache write totals for the current session.
   ContextUsage session_context_usage = 21;
+  // Active thinking level ("off" | "minimal" | "low" | "medium" | "high" |
+  // "xhigh"); empty for older daemons.
+  string thinking_level = 22;
 }
 
 message FeedBlockPatch {

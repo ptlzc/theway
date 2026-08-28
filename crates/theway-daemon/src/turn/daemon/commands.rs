@@ -22,6 +22,10 @@ impl TurnHost {
                 let ok = self.set_model_from_spec(&spec).await;
                 let _ = response.send(ok);
             }
+            WireCommand::SetThinking { level, response } => {
+                let ok = self.set_thinking_level(&level).await;
+                let _ = response.send(ok);
+            }
             WireCommand::SwitchSession { id } => self.handle_switch_session(id, turn).await,
             WireCommand::SetSkillDirs { dirs } => self.handle_set_skill_dirs(dirs, turn).await,
             WireCommand::Configure { config } => self.handle_configure(config, turn).await,
@@ -236,6 +240,34 @@ impl TurnHost {
                 Ok(_) if config.thinking.is_none() => applied.clear_fields.push("thinking".into()),
                 Ok(_) => applied.thinking = Some(enabled),
                 Err(err) => self.error_line(format!("configure thinking: {err}")),
+            }
+        }
+
+        // Full thinking level (persisted last-choice default): applies the
+        // exact level, finer-grained than the legacy `thinking` toggle.
+        if config.thinking_level.is_some() || config.clears("thinking_level") {
+            let requested = config.thinking_level.as_deref();
+            let level = match requested {
+                Some(raw) => match raw.parse::<theway_core::ThinkingLevel>() {
+                    Ok(level) => Some(level),
+                    Err(err) => {
+                        self.error_line(format!(
+                            "configure thinking_level: invalid level {raw:?}: {err}"
+                        ));
+                        None
+                    }
+                },
+                // Clearing the level falls back to the runtime default (off).
+                None => Some(theway_core::ThinkingLevel::Off),
+            };
+            if let Some(level) = level {
+                match self.session.kernel.harness().set_thinking_level(level).await {
+                    Ok(_) if requested.is_none() => {
+                        applied.clear_fields.push("thinking_level".into())
+                    }
+                    Ok(_) => applied.thinking_level = config.thinking_level.clone(),
+                    Err(err) => self.error_line(format!("configure thinking_level: {err}")),
+                }
             }
         }
 

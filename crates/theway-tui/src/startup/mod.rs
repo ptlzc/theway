@@ -26,8 +26,9 @@ pub(crate) use connection::DaemonConnector;
 /// interval) are emitted from the assembled config payload, not the raw CLI
 /// struct — the payload carries the CLI values PLUS the local `config.toml`
 /// values (the daemon no longer reads that file itself since #73).
-/// `--base-url` / `--thinking` stay CLI-driven: they are CLI-only settings
-/// and the thinking flag needs the full level string.
+/// `--base-url` stays CLI-driven; `--thinking` comes from the CLI flag when
+/// given, otherwise from the persisted `[model] thinking` level in the
+/// assembled config payload (the user's last pick).
 fn daemon_launch_args(cli: &Cli, config: &WireDaemonConfig) -> Vec<String> {
     let mut args = Vec::new();
     if cli.continue_ {
@@ -58,9 +59,20 @@ fn daemon_runtime_args(cli: &Cli, config: &WireDaemonConfig) -> Vec<String> {
         args.push("--base-url".to_string());
         args.push(base_url.clone());
     }
-    if cli.thinking != "off" {
-        args.push("--thinking".to_string());
-        args.push(cli.thinking.clone());
+    match cli.thinking.as_deref() {
+        // Explicit flag (any level, including off) wins over the persisted
+        // `[model] thinking` default in the payload.
+        Some(level) => {
+            args.push("--thinking".to_string());
+            args.push(level.to_string());
+        }
+        // No flag: the persisted last-pick level from config.toml.
+        None => {
+            if let Some(level) = config.thinking_level.as_deref() {
+                args.push("--thinking".to_string());
+                args.push(level.to_string());
+            }
+        }
     }
     if cli.yes {
         args.push("--yes".to_string());
@@ -250,6 +262,7 @@ pub(crate) mod test_daemon {
         WireStatus {
             session_id: "sess-1".into(),
             model: "provider:model".into(),
+            thinking_level: "off".into(),
             model_catalog: Vec::new(),
             cwd: "/tmp/theway".into(),
             busy: false,
@@ -451,6 +464,7 @@ mod tests {
 [model]
 provider = \"acme\"
 model = \"warp-9\"
+thinking = \"high\"
 
 [builtin_skills]
 enabled = [\"debugging\"]
@@ -472,6 +486,10 @@ poll_interval_secs = 45
                 "acme",
                 "--model",
                 "warp-9",
+                // The persisted `[model] thinking` level reaches the daemon
+                // through the launch args (the user's last pick).
+                "--thinking",
+                "high",
                 "--builtin-skill",
                 "debugging",
                 "--trigger-poll-secs",
@@ -480,7 +498,8 @@ poll_interval_secs = 45
         );
 
         // CLI flags win inside the payload (and therefore in the launch args);
-        // file builtins union in after the CLI entries.
+        // file builtins union in after the CLI entries. The file's persisted
+        // thinking level still flows through when no `--thinking` flag is given.
         let cli = Cli::parse_from([
             "theway",
             "--provider",
@@ -504,12 +523,37 @@ poll_interval_secs = 45
                 "openai",
                 "--model",
                 "gpt-x",
+                "--thinking",
+                "high",
                 "--builtin-skill",
                 "code-review",
                 "--builtin-skill",
                 "debugging",
                 "--trigger-poll-secs",
                 "15",
+            ]
+        );
+
+        // A CLI `--thinking` flag beats the file's persisted level.
+        let cli = Cli::parse_from(["theway", "--thinking", "minimal"]);
+        let (config, _) =
+            crate::config_payload::assemble_config_from(&cli, Some(toml), "config.toml");
+        assert_eq!(
+            daemon_launch_args(&cli, &config)
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec![
+                "--provider",
+                "acme",
+                "--model",
+                "warp-9",
+                "--thinking",
+                "minimal",
+                "--builtin-skill",
+                "debugging",
+                "--trigger-poll-secs",
+                "45",
             ]
         );
     }

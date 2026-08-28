@@ -85,6 +85,15 @@ export interface DaemonConfig {
     | string
     | undefined;
   /**
+   * ── thinking level (persisted last-choice default) ──
+   * Full thinking level string ("off" | "minimal" | "low" | "medium" |
+   * "high" | "xhigh"). Finer-grained than the `thinking` toggle; the toggle
+   * stays for legacy compatibility.
+   */
+  thinkingLevel?:
+    | string
+    | undefined;
+  /**
    * Field names to clear before applying values present in this message.
    * Unknown names make the daemon reject the patch without partial changes.
    */
@@ -103,6 +112,7 @@ function createBaseDaemonConfig(): DaemonConfig {
     tuiMaxFeedLines: undefined,
     toolServiceAddr: undefined,
     storageServiceAddr: undefined,
+    thinkingLevel: undefined,
     clearFields: [],
   };
 }
@@ -138,6 +148,9 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
     }
     if (message.storageServiceAddr !== undefined) {
       writer.uint32(82).string(message.storageServiceAddr);
+    }
+    if (message.thinkingLevel !== undefined) {
+      writer.uint32(98).string(message.thinkingLevel);
     }
     for (const v of message.clearFields) {
       writer.uint32(90).string(v!);
@@ -232,6 +245,14 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
           message.storageServiceAddr = reader.string();
           continue;
         }
+        case 12: {
+          if (tag !== 98) {
+            break;
+          }
+
+          message.thinkingLevel = reader.string();
+          continue;
+        }
         case 11: {
           if (tag !== 90) {
             break;
@@ -289,6 +310,11 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
         : isSet(object.storage_service_addr)
         ? globalThis.String(object.storage_service_addr)
         : undefined,
+      thinkingLevel: isSet(object.thinkingLevel)
+        ? globalThis.String(object.thinkingLevel)
+        : isSet(object.thinking_level)
+        ? globalThis.String(object.thinking_level)
+        : undefined,
       clearFields: globalThis.Array.isArray(object?.clearFields)
         ? object.clearFields.map((e: any) => globalThis.String(e))
         : globalThis.Array.isArray(object?.clear_fields)
@@ -329,6 +355,9 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
     if (message.storageServiceAddr !== undefined) {
       obj.storageServiceAddr = message.storageServiceAddr;
     }
+    if (message.thinkingLevel !== undefined) {
+      obj.thinkingLevel = message.thinkingLevel;
+    }
     if (message.clearFields?.length) {
       obj.clearFields = message.clearFields;
     }
@@ -350,6 +379,7 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
     message.tuiMaxFeedLines = object.tuiMaxFeedLines ?? undefined;
     message.toolServiceAddr = object.toolServiceAddr ?? undefined;
     message.storageServiceAddr = object.storageServiceAddr ?? undefined;
+    message.thinkingLevel = object.thinkingLevel ?? undefined;
     message.clearFields = object.clearFields?.map((e) => e) || [];
     return message;
   },

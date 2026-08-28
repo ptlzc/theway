@@ -90,6 +90,19 @@ impl GrpcClient {
         Ok(accepted.into_inner().accepted)
     }
 
+    /// Set the daemon's active thinking level ("off" | "minimal" | "low" |
+    /// "medium" | "high" | "xhigh").
+    pub async fn set_thinking(&mut self, level: &str) -> Result<bool> {
+        let accepted = self
+            .command
+            .set_thinking(SetThinkingRequest {
+                level: level.to_string(),
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("set_thinking: {e}"))?;
+        Ok(accepted.into_inner().accepted)
+    }
+
     /// Stop the in-flight turn (same as a local Ctrl-C). Does not cancel DAG runs.
     pub async fn cancel(&mut self) -> Result<bool> {
         let accepted = self

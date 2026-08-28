@@ -38,7 +38,7 @@ use crate::proto::theway_grpc::{
     DeleteSessionRequest, Empty, GetNodeOutputRequest, GraphCancelRequest, GraphListRequest,
     GraphRetryRequest, GraphSkipRequest, InvokeExtensionCommandRequest, ReloadExtensionsRequest,
     RenameSessionRequest, SendMessageRequest, SessionState, SetModelRequest, SetSkillDirsRequest,
-    StreamFrame, SwitchSessionRequest,
+    SetThinkingRequest, StreamFrame, SwitchSessionRequest,
 };
 use crate::wire::{
     SessionSummary, WireDaemonConfig, WireExtensionCommandOutcome, WireExtensionReloadResult,

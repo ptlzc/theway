@@ -24,6 +24,7 @@ async fn spawn_state_server() -> (
         latest: Arc::new(Mutex::new(WireStatus {
             session_id: "sess-1".into(),
             model: "provider:model".into(),
+        thinking_level: "off".into(),
             model_catalog: Vec::new(),
             cwd: "/tmp/theway".into(),
             busy: false,

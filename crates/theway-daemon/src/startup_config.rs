@@ -16,6 +16,7 @@
 //! side: defaults + optional initial payload + CLI overrides applied by the
 //! composition root (`thewayd`).
 
+use theway_core::ThinkingLevel;
 use theway_transport::config::{ModelDefault, ThinkingSummarySettings};
 use theway_transport::triggers::DEFAULT_DYNAMIC_TRIGGER_POLL_INTERVAL_SECS;
 use theway_transport::wire::WireDaemonConfig;
@@ -32,6 +33,10 @@ pub struct StartupConfig {
     /// Default provider/model pair, applied when the CLI specifies neither
     /// `--provider` nor `--model` (`None` → env auto-detection, unchanged).
     pub model_default: Option<ModelDefault>,
+    /// Default thinking level from the settings payload, applied when the CLI
+    /// does not explicitly override it. `None` → the CLI's level (or the
+    /// built-in "off" default).
+    pub thinking_level: Option<ThinkingLevel>,
     /// Enabled builtin skill names (pre-#73: `[builtin_skills] enabled`).
     pub builtin_skills: Vec<String>,
     /// Local dynamic-trigger poll interval, in seconds.
@@ -62,6 +67,7 @@ impl Default for StartupConfig {
     fn default() -> Self {
         Self {
             model_default: None,
+            thinking_level: None,
             builtin_skills: Vec::new(),
             trigger_poll_secs: DEFAULT_DYNAMIC_TRIGGER_POLL_INTERVAL_SECS,
             tui_max_feed_lines: None,
@@ -98,6 +104,12 @@ impl StartupConfig {
                 model: model.to_string(),
             });
             touched += 1;
+        }
+        if let Some(raw) = patch.thinking_level.as_deref() {
+            if let Ok(level) = raw.parse::<ThinkingLevel>() {
+                self.thinking_level = Some(level);
+                touched += 1;
+            }
         }
         if !patch.builtin_skills.is_empty() {
             self.builtin_skills = patch.builtin_skills.clone();
@@ -152,6 +164,7 @@ mod tests {
         let payload = WireDaemonConfig {
             provider: Some("anthropic".into()),
             model: Some("claude-x".into()),
+            thinking_level: Some("high".into()),
             builtin_skills: vec!["debugging".into()],
             trigger_poll_secs: Some(30),
             tui_max_feed_lines: Some(8000),
@@ -166,9 +179,21 @@ mod tests {
             config.model_default.as_ref().map(|d| d.model.as_str()),
             Some("claude-x")
         );
+        assert_eq!(config.thinking_level, Some(ThinkingLevel::High));
         assert_eq!(config.builtin_skills, vec!["debugging".to_string()]);
         assert_eq!(config.trigger_poll_secs, 30);
         assert_eq!(config.tui_max_feed_lines, Some(8000));
+    }
+
+    #[test]
+    fn invalid_thinking_level_is_ignored() {
+        let payload = WireDaemonConfig {
+            thinking_level: Some("turbo".into()),
+            ..Default::default()
+        };
+        let mut config = StartupConfig::default();
+        assert_eq!(config.apply_wire(&payload), 0);
+        assert!(config.thinking_level.is_none());
     }
 
     #[test]

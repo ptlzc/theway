@@ -77,6 +77,7 @@ fn session_state_with_feed(
     wire::SessionState {
         session_id: snapshot.session_id.clone(),
         model: snapshot.model.clone(),
+        thinking_level: snapshot.thinking_level.clone(),
         model_catalog: snapshot
             .model_catalog
             .iter()
@@ -362,6 +363,7 @@ pub fn wire_status(state: &wire::SessionState) -> WireStatus {
     WireStatus {
         session_id: state.session_id.clone(),
         model: state.model.clone(),
+        thinking_level: state.thinking_level.clone(),
         model_catalog: state
             .model_catalog
             .iter()

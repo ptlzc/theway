@@ -20,6 +20,7 @@ fn fixture_snapshot() -> WireStatus {
     WireStatus {
         session_id: "sess-1".into(),
         model: "provider:model".into(),
+        thinking_level: "off".into(),
         model_catalog: vec![ProviderGroup {
             provider: "anthropic".into(),
             has_credential: true,
@@ -409,6 +410,7 @@ fn daemon_config_round_trips_wire_and_proto() {
         model: Some("claude-x".into()),
         base_url: Some("https://api.example.com".into()),
         thinking: Some(true),
+        thinking_level: Some("high".into()),
         builtin_skills: vec!["git".into(), "web".into()],
         skills_dirs: vec!["/home/user/.agents/skills".into()],
         trigger_poll_secs: Some(60),
@@ -426,6 +428,7 @@ fn daemon_config_round_trips_wire_and_proto() {
     assert_eq!(proto.skills_dirs, vec!["/home/user/.agents/skills"]);
     assert_eq!(proto.trigger_poll_secs, Some(60));
     assert_eq!(proto.tui_max_feed_lines, Some(8000));
+    assert_eq!(proto.thinking_level.as_deref(), Some("high"));
     assert_eq!(proto.clear_fields, vec!["tool_service_addr"]);
     assert_eq!(daemon_config_from_proto(&proto), config);
 
@@ -436,6 +439,7 @@ fn daemon_config_round_trips_wire_and_proto() {
     assert!(proto_empty.model.is_none());
     assert!(proto_empty.base_url.is_none());
     assert!(proto_empty.thinking.is_none());
+    assert!(proto_empty.thinking_level.is_none());
     assert!(proto_empty.builtin_skills.is_empty());
     assert!(proto_empty.skills_dirs.is_empty());
     assert!(proto_empty.trigger_poll_secs.is_none());

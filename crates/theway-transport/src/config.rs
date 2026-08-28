@@ -76,6 +76,31 @@ pub fn parse_model_default(toml_text: &str) -> Result<Option<ModelDefault>, Stri
     }
 }
 
+/// Default thinking level persisted in `[model] thinking = "..."` of
+/// `config.toml` (the user's last pick, written by the TUI after a confirmed
+/// switch). Applied at startup when the CLI does not explicitly override it.
+///
+/// Missing key → `None`; any value outside the accepted level set is an error
+/// (a typo would silently change reasoning behavior).
+pub fn parse_model_thinking_default(toml_text: &str) -> Result<Option<String>, String> {
+    let parsed: ConfigFile =
+        toml::from_str(toml_text).map_err(|e| format!("parse config.toml: {e}"))?;
+    let Some(section) = parsed.model else {
+        return Ok(None);
+    };
+    let Some(thinking) = section.thinking else {
+        return Ok(None);
+    };
+    let normalized = thinking.trim().to_lowercase();
+    if !crate::commands::THINKING_LEVEL_VALUES.contains(&normalized.as_str()) {
+        return Err(format!(
+            "invalid `[model] thinking` value {thinking:?}: expected one of {}",
+            crate::commands::THINKING_LEVEL_VALUES.join(", ")
+        ));
+    }
+    Ok(Some(normalized))
+}
+
 /// Default public relay endpoint for `/web-connect` (issue #22). Override with
 /// `[relay] base_url` in `~/.theway/config.toml` (e.g. a wrangler dev instance).
 pub const DEFAULT_RELAY_BASE_URL: &str = "https://pie.0xfefe.me";
@@ -163,6 +188,7 @@ pub fn parse_orchestrator_thinking_summary(
 struct ModelConfigSection {
     provider: Option<String>,
     model: Option<String>,
+    thinking: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -260,6 +286,37 @@ poll_interval_secs = 0
         let text = "[tui]\nmax_feed_lines = 8000\n";
         assert_eq!(parse_tui_max_feed_lines(text).unwrap(), Some(8000));
         assert!(parse_tui_max_feed_lines("[tui]\nmax_feed_lines = 0\n").is_err());
+    }
+
+    #[test]
+    fn parse_model_thinking_default_reads_level_and_normalizes_case() {
+        assert_eq!(
+            parse_model_thinking_default("[model]\nthinking = \"High\"\n").unwrap(),
+            Some("high".into())
+        );
+        assert_eq!(
+            parse_model_thinking_default("[model]\nthinking = \"xhigh\"\n").unwrap(),
+            Some("xhigh".into())
+        );
+    }
+
+    #[test]
+    fn parse_model_thinking_default_none_when_absent() {
+        assert_eq!(parse_model_thinking_default("").unwrap(), None);
+        assert_eq!(
+            parse_model_thinking_default("[model]\nprovider = \"anthropic\"\n").unwrap(),
+            None
+        );
+        assert_eq!(
+            parse_model_thinking_default("[tui]\nmax_feed_lines = 8000\n").unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_model_thinking_default_rejects_unknown_levels() {
+        assert!(parse_model_thinking_default("[model]\nthinking = \"turbo\"\n").is_err());
+        assert!(parse_model_thinking_default("[model]\nthinking = \"\"\n").is_err());
     }
 
     #[test]

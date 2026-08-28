@@ -92,6 +92,10 @@ export interface SetModelRequest {
   spec: string;
 }
 
+export interface SetThinkingRequest {
+  level: string;
+}
+
 export interface ApproveRequest {
   approve: boolean;
 }
@@ -443,6 +447,64 @@ export const SetModelRequest: MessageFns<SetModelRequest> = {
   },
 };
 
+function createBaseSetThinkingRequest(): SetThinkingRequest {
+  return { level: "" };
+}
+
+export const SetThinkingRequest: MessageFns<SetThinkingRequest> = {
+  encode(message: SetThinkingRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.level !== "") {
+      writer.uint32(10).string(message.level);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SetThinkingRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSetThinkingRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.level = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SetThinkingRequest {
+    return { level: isSet(object.level) ? globalThis.String(object.level) : "" };
+  },
+
+  toJSON(message: SetThinkingRequest): unknown {
+    const obj: any = {};
+    if (message.level !== "") {
+      obj.level = message.level;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SetThinkingRequest>, I>>(base?: I): SetThinkingRequest {
+    return SetThinkingRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<SetThinkingRequest>, I>>(object: I): SetThinkingRequest {
+    const message = createBaseSetThinkingRequest();
+    message.level = object.level ?? "";
+    return message;
+  },
+};
+
 function createBaseApproveRequest(): ApproveRequest {
   return { approve: false };
 }
@@ -525,6 +587,19 @@ export const CommandServiceService = {
     responseSerialize: (value: CommandResult): Buffer => Buffer.from(CommandResult.encode(value).finish()),
     responseDeserialize: (value: Buffer): CommandResult => CommandResult.decode(value),
   },
+  /**
+   * Set the active thinking level ("off" | "minimal" | "low" | "medium" |
+   * "high" | "xhigh"). Same runtime effect as the `/thinking` slash command.
+   */
+  setThinking: {
+    path: "/theway.grpc.v1.CommandService/SetThinking" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: SetThinkingRequest): Buffer => Buffer.from(SetThinkingRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): SetThinkingRequest => SetThinkingRequest.decode(value),
+    responseSerialize: (value: CommandResult): Buffer => Buffer.from(CommandResult.encode(value).finish()),
+    responseDeserialize: (value: Buffer): CommandResult => CommandResult.decode(value),
+  },
   /** Stop the in-flight turn (same as local Ctrl-C). Does not cancel DAG runs. */
   cancel: {
     path: "/theway.grpc.v1.CommandService/Cancel" as const,
@@ -554,6 +629,11 @@ export interface CommandServiceServer extends UntypedServiceImplementation {
    */
   sendMessage: handleUnaryCall<SendMessageRequest, CommandResult>;
   setModel: handleUnaryCall<SetModelRequest, CommandResult>;
+  /**
+   * Set the active thinking level ("off" | "minimal" | "low" | "medium" |
+   * "high" | "xhigh"). Same runtime effect as the `/thinking` slash command.
+   */
+  setThinking: handleUnaryCall<SetThinkingRequest, CommandResult>;
   /** Stop the in-flight turn (same as local Ctrl-C). Does not cancel DAG runs. */
   cancel: handleUnaryCall<Empty, CommandResult>;
   /** Resolve a pending control-plane approval request (approve / reject). */
@@ -591,6 +671,25 @@ export interface CommandServiceClient extends Client {
   ): ClientUnaryCall;
   setModel(
     request: SetModelRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  /**
+   * Set the active thinking level ("off" | "minimal" | "low" | "medium" |
+   * "high" | "xhigh"). Same runtime effect as the `/thinking` slash command.
+   */
+  setThinking(
+    request: SetThinkingRequest,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  setThinking(
+    request: SetThinkingRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: CommandResult) => void,
+  ): ClientUnaryCall;
+  setThinking(
+    request: SetThinkingRequest,
     metadata: Metadata,
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: CommandResult) => void,

@@ -366,6 +366,48 @@ async fn handle_web_command_routes_set_model_invalid_spec() {
 }
 
 #[tokio::test]
+async fn handle_web_command_routes_set_thinking() {
+    let mut fixture = HostFixture::new().await;
+    let host = fixture.host();
+
+    let (response, response_rx) = tokio::sync::oneshot::channel();
+    host.handle_web_command(
+        WireCommand::SetThinking {
+            level: "high".into(),
+            response,
+        },
+        &mut TurnState::default(),
+    )
+    .await;
+    assert!(response_rx.await.unwrap());
+    assert_eq!(
+        host.session.kernel.harness().agent().state().thinking_level,
+        Some(theway_core::ThinkingLevel::High)
+    );
+    // The shared GetConfig view tracks the applied level.
+    assert_eq!(
+        host.runtime.config.read().unwrap().thinking_level.as_deref(),
+        Some("high")
+    );
+
+    // Invalid levels are rejected without touching the runtime.
+    let (response, response_rx) = tokio::sync::oneshot::channel();
+    host.handle_web_command(
+        WireCommand::SetThinking {
+            level: "bogus".into(),
+            response,
+        },
+        &mut TurnState::default(),
+    )
+    .await;
+    assert!(!response_rx.await.unwrap());
+    assert_eq!(
+        host.session.kernel.harness().agent().state().thinking_level,
+        Some(theway_core::ThinkingLevel::High)
+    );
+}
+
+#[tokio::test]
 async fn handle_web_command_routes_switch_session_empty_id() {
     let mut fixture = HostFixture::new().await;
     let host = fixture.host();

@@ -81,6 +81,7 @@ fn fixture_snapshot(feed_line: &str) -> WireStatus {
     WireStatus {
         session_id: "sess-1".into(),
         model: "provider:model".into(),
+        thinking_level: "off".into(),
         model_catalog: Vec::new(),
         cwd: "/tmp/theway".into(),
         busy: false,
@@ -255,6 +256,26 @@ async fn commands_queue_with_accepted_semantics() {
     match command_rx.recv().await.unwrap() {
         WireCommand::SetModel { spec, response } => {
             assert_eq!(spec, "anthropic:claude-haiku-4-5");
+            let _ = response.send(true);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+    let result = rpc.await.unwrap();
+    assert!(result.accepted);
+
+    let rpc_state = state.clone();
+    let rpc = tokio::spawn(async move {
+        rpc_state
+            .set_thinking(Request::new(SetThinkingRequest {
+                level: "high".into(),
+            }))
+            .await
+            .unwrap()
+            .into_inner()
+    });
+    match command_rx.recv().await.unwrap() {
+        WireCommand::SetThinking { level, response } => {
+            assert_eq!(level, "high");
             let _ = response.send(true);
         }
         other => panic!("unexpected command: {other:?}"),

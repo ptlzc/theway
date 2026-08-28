@@ -132,7 +132,8 @@ async fn healthz() -> &'static str {
 // aligned to the proto service methods:
 //
 //   get_state (session.get_state) | send_message (command.send_message) |
-//   set_model (command.set_model) | complete | abort (command.cancel) |
+//   set_model (command.set_model) | set_thinking (command.set_thinking) |
+//   complete | abort (command.cancel) |
 //   trigger_immediate | control_plane_resolve (command.approve) |
 //   list_sessions (session.list) | create_session (session.create) |
 //   switch_session (session.switch) | rename_session (session.rename) |
@@ -341,6 +342,26 @@ pub(crate) async fn dispatch(
             let accepted = state
                 .commands
                 .send(WireCommand::SetModel { spec, response: tx })
+                .is_ok();
+            let accepted = if accepted {
+                rx.await.unwrap_or(false)
+            } else {
+                false
+            };
+            Ok(serde_json::json!({ "accepted": accepted }))
+        }
+        "set_thinking" | "command.set_thinking" => {
+            let level = param(params, "level")?
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            let accepted = state
+                .commands
+                .send(WireCommand::SetThinking {
+                    level,
+                    response: tx,
+                })
                 .is_ok();
             let accepted = if accepted {
                 rx.await.unwrap_or(false)

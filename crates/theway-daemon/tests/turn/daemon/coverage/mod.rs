@@ -279,6 +279,44 @@ async fn handle_configure_applies_model_selection() {
 }
 
 #[tokio::test]
+async fn handle_configure_applies_thinking_level_and_rejects_invalid() {
+    let (mut host, _scratch, _repo) = host_with_input(Vec::new()).await;
+
+    // The persisted last-choice level applies exactly (finer than the bool
+    // toggle, which only knew off/high).
+    let mut patch = WireDaemonConfig::default();
+    patch.thinking_level = Some("medium".into());
+    host.handle_configure(patch, &mut TurnState::default()).await;
+    assert_eq!(
+        host.session.kernel.harness().agent().state().thinking_level,
+        Some(theway_core::ThinkingLevel::Medium)
+    );
+    // The shared GetConfig view tracks the applied level.
+    assert_eq!(
+        host.runtime.config.read().unwrap().thinking_level.as_deref(),
+        Some("medium")
+    );
+
+    // An invalid level string is reported and changes nothing.
+    let mut patch = WireDaemonConfig::default();
+    patch.thinking_level = Some("turbo".into());
+    host.handle_configure(patch, &mut TurnState::default()).await;
+    assert_eq!(
+        host.session.kernel.harness().agent().state().thinking_level,
+        Some(theway_core::ThinkingLevel::Medium)
+    );
+
+    // Clearing the level falls back to off.
+    let mut patch = WireDaemonConfig::default();
+    patch.clear_fields.push("thinking_level".into());
+    host.handle_configure(patch, &mut TurnState::default()).await;
+    assert_eq!(
+        host.session.kernel.harness().agent().state().thinking_level,
+        Some(theway_core::ThinkingLevel::Off)
+    );
+}
+
+#[tokio::test]
 async fn resolve_control_plane_prompt_timeout_forwards_timeout() {
     let (mut host, _scratch, _repo) = host_with_input(Vec::new()).await;
     let (decision_tx, decision_rx) = oneshot::channel();

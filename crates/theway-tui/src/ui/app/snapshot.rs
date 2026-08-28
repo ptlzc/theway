@@ -94,6 +94,7 @@ impl App {
         self.panel_status = PanelStatus::from_sidebar(&self.latest.sidebar);
         self.model_catalog = self.latest.model_catalog.clone();
         self.persist_confirmed_model_default();
+        self.persist_confirmed_thinking_default();
         self.control_plane_prompt = self.latest.control_plane_prompt.clone();
         self.latest_goal = self.latest.goal.clone();
         self.latest_trigger_poll = self.latest.latest_trigger_poll.clone();
@@ -146,6 +147,43 @@ impl App {
             }
             Err(error) => self.error_line(format!(
                 "switched to {expected}, but could not save the startup default: {error}"
+            )),
+        }
+    }
+
+    /// A successful SetThinking RPC only means the daemon accepted the
+    /// command. Persist after a snapshot confirms the requested level in the
+    /// same session, so a failed runtime application never becomes a startup
+    /// default.
+    fn persist_confirmed_thinking_default(&mut self) {
+        let Some(pending) = self.pending_thinking_default.as_ref() else {
+            return;
+        };
+        if pending.session_id != self.latest.session_id {
+            self.pending_thinking_default = None;
+            return;
+        }
+        if self.latest.thinking_level != pending.level {
+            return;
+        }
+
+        let pending = self
+            .pending_thinking_default
+            .take()
+            .expect("pending thinking default was checked above");
+        match crate::config_payload::persist_thinking_default(
+            &self.model_config_path,
+            &pending.level,
+        ) {
+            Ok(()) => {
+                self.system_line(format!(
+                    "thinking level: {}; saved as the startup default",
+                    pending.level
+                ));
+            }
+            Err(error) => self.error_line(format!(
+                "thinking level: {}, but could not save the startup default: {error}",
+                pending.level
             )),
         }
     }

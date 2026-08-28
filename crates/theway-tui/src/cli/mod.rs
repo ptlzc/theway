@@ -45,13 +45,14 @@ pub(crate) struct Cli {
     /// servers such as DS4.
     #[arg(long = "base-url", value_name = "URL")]
     pub(crate) base_url: Option<String>,
-    /// Thinking level (off | minimal | low | medium | high | xhigh).
+    /// Thinking level (off | minimal | low | medium | high | xhigh). Absent
+    /// = use the persisted `[model] thinking` default from config.toml (the
+    /// user's last pick).
     #[arg(
         long,
-        default_value = "off",
         value_parser = clap::builder::PossibleValuesParser::new(commands::THINKING_LEVEL_VALUES)
     )]
-    pub(crate) thinking: String,
+    pub(crate) thinking: Option<String>,
 
     /// Select a session for this cwd to resume. Pass an id to resume a specific one
     /// directly (same as --resume-id); bare --resume opens the picker.

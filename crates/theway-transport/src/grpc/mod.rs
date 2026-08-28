@@ -63,8 +63,8 @@ use theway_grpc::{
     GraphKind, GraphListRequest, GraphListResponse, GraphNodeInterruptRequest,
     GraphNodeSteerRequest, GraphRestoreRequest, GraphRestoreResponse, GraphRetryRequest,
     GraphRetryResponse, GraphSkipRequest, GraphSkipResponse, ListSessionsResponse, MessageMode,
-    RenameSessionRequest, SendMessageRequest, SessionState, SetModelRequest, StreamFrame,
-    SwitchSessionRequest,
+    RenameSessionRequest, SendMessageRequest, SessionState, SetModelRequest, SetThinkingRequest,
+    StreamFrame, SwitchSessionRequest,
 };
 
 #[derive(Clone)]
@@ -162,6 +162,26 @@ impl CommandService for GrpcState {
             .commands
             .send(WireCommand::SetModel {
                 spec: request.into_inner().spec,
+                response: tx,
+            })
+            .is_ok();
+        let accepted = if accepted {
+            rx.await.unwrap_or(false)
+        } else {
+            false
+        };
+        Ok(Response::new(CommandResult { accepted }))
+    }
+
+    async fn set_thinking(
+        &self,
+        request: Request<SetThinkingRequest>,
+    ) -> Result<Response<CommandResult>, Status> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let accepted = self
+            .commands
+            .send(WireCommand::SetThinking {
+                level: request.into_inner().level,
                 response: tx,
             })
             .is_ok();

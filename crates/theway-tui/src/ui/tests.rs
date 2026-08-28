@@ -23,6 +23,7 @@ fn fixture_status(feed_blocks: Vec<WireFeedBlock>) -> WireStatus {
     WireStatus {
         session_id: "sess-1".into(),
         model: "provider:model".into(),
+        thinking_level: "off".into(),
         model_catalog: vec![theway_transport::wire::ProviderGroup {
             provider: "anthropic".into(),
             has_credential: true,
@@ -124,6 +125,41 @@ async fn test_app_with_sessions(
     // set `app.theme` explicitly).
     app.theme = super::theme::Theme::default();
     (app, command_rx, session_ops)
+}
+
+/// Drains the fixture's command channel on a background task and answers
+/// oneshot RPCs (`SetModel` / `SetThinking`) so `client.set_model(...)` /
+/// `client.set_thinking(...)` complete. The in-process gRPC server waits for
+/// the oneshot response, so a test that both awaits the RPC and reads the
+/// channel itself would deadlock — the drainer breaks that cycle.
+/// Returns the task handle plus a label list of every command seen
+/// (`SetModel(anthropic:claude-x)`, `SetThinking(high)`, `Submit(/model list)`).
+fn drain_commands(
+    mut rx: mpsc::UnboundedReceiver<WireCommand>,
+) -> (
+    tokio::task::JoinHandle<()>,
+    Arc<std::sync::Mutex<Vec<String>>>,
+) {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let collector = seen.clone();
+    let handle = tokio::spawn(async move {
+        while let Some(command) = rx.recv().await {
+            let label = match command {
+                WireCommand::SetModel { spec, response } => {
+                    let _ = response.send(true);
+                    format!("SetModel({spec})")
+                }
+                WireCommand::SetThinking { level, response } => {
+                    let _ = response.send(true);
+                    format!("SetThinking({level})")
+                }
+                WireCommand::Submit { text, .. } => format!("Submit({text})"),
+                other => format!("{other:?}"),
+            };
+            collector.lock().unwrap().push(label);
+        }
+    });
+    (handle, seen)
 }
 
 fn buffer_text(buf: &Buffer) -> String {

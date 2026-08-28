@@ -7,6 +7,7 @@ fn extension_http_state() -> (HttpState, mpsc::UnboundedReceiver<WireCommand>) {
     let latest = WireStatus {
         session_id: "headless".into(),
         model: "provider:model".into(),
+        thinking_level: "off".into(),
         model_catalog: Vec::new(),
         cwd: "/tmp".into(),
         busy: false,

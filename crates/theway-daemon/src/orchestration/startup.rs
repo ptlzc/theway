@@ -171,7 +171,11 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         &startup,
     )
     .await?;
-    let thinking = options.thinking;
+    let thinking = if options.thinking == ThinkingLevel::Off {
+        startup.thinking_level.unwrap_or(ThinkingLevel::Off)
+    } else {
+        options.thinking
+    };
 
     let (store, resumed) = match &options.session {
         SessionSelection::New => (repo.create(&cwd).await?, false),

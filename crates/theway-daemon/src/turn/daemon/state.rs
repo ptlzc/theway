@@ -132,6 +132,36 @@ impl TurnHost {
         }
     }
 
+    /// Apply a thinking level to the active harness (typed-RPC twin of the
+    /// `/thinking` slash command). Returns `true` when the level parsed and
+    /// the harness accepted it.
+    async fn set_thinking_level(&mut self, level: &str) -> bool {
+        let parsed: theway_core::ThinkingLevel = match level.trim().parse() {
+            Ok(level) => level,
+            Err(_) => {
+                self.error_line(format!(
+                    "invalid thinking level: {level} (expected one of {})",
+                    theway_transport::commands::THINKING_LEVEL_VALUES.join(", ")
+                ));
+                return false;
+            }
+        };
+        match self.session.kernel.harness().set_thinking_level(parsed).await {
+            Ok(_) => {
+                self.system_line(format!("thinking level: {}", parsed.as_str()));
+                // Keep the shared GetConfig view in sync with the runtime.
+                let mut view = self.runtime.config.write().unwrap();
+                view.thinking_level = Some(parsed.as_str().to_string());
+                drop(view);
+                true
+            }
+            Err(e) => {
+                self.error_line(format!("set_thinking_level failed: {e}"));
+                false
+            }
+        }
+    }
+
     async fn switch_session(&mut self, id: String) -> Result<()> {
         let previous = self.session.kernel.harness().clone();
         previous

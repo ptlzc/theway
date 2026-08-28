@@ -17,6 +17,7 @@ fn fixture_status(feed_line: &str) -> WireStatus {
     WireStatus {
         session_id: "sess-1".into(),
         model: "provider:model".into(),
+        thinking_level: "off".into(),
         model_catalog: vec![ProviderGroup {
             provider: "anthropic".into(),
             has_credential: true,
@@ -198,6 +199,41 @@ async fn client_cancel_set_model_approve_switch_session_round_trip() {
         crate::wire::WireCommand::ResolveControlPlane { approve } => assert!(approve),
         other => panic!("unexpected command: {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn client_set_thinking_round_trips_the_level() {
+    let (client, mut command_rx, _snapshot_tx) = client_and_server().await;
+    let client = Arc::new(tokio::sync::Mutex::new(client));
+
+    let rpc_client = client.clone();
+    let rpc = tokio::spawn(async move {
+        let mut client = rpc_client.lock().await;
+        client.set_thinking("xhigh").await.unwrap()
+    });
+    match command_rx.recv().await.unwrap() {
+        crate::wire::WireCommand::SetThinking { level, response } => {
+            assert_eq!(level, "xhigh");
+            let _ = response.send(true);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+    assert!(rpc.await.unwrap());
+
+    // A rejected level surfaces as `false`, not an error.
+    let rpc_client = client.clone();
+    let rpc = tokio::spawn(async move {
+        let mut client = rpc_client.lock().await;
+        client.set_thinking("bogus").await.unwrap()
+    });
+    match command_rx.recv().await.unwrap() {
+        crate::wire::WireCommand::SetThinking { level, response } => {
+            assert_eq!(level, "bogus");
+            let _ = response.send(false);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+    assert!(!rpc.await.unwrap());
 }
 
 #[tokio::test]

@@ -54,6 +54,12 @@ message DaemonConfig {
   // trigger rules, cron jobs) over RPC instead of local storage directly.
   optional string storage_service_addr = 10;
 
+  // ── thinking level (persisted last-choice default) ──
+  // Full thinking level string ("off" | "minimal" | "low" | "medium" |
+  // "high" | "xhigh"). Finer-grained than the `thinking` toggle; the toggle
+  // stays for legacy compatibility.
+  optional string thinking_level = 12;
+
   // Field names to clear before applying values present in this message.
   // Unknown names make the daemon reject the patch without partial changes.
   repeated string clear_fields = 11;

@@ -363,9 +363,11 @@ impl App {
             return;
         }
         let active = parse_model_label(&self.latest.model);
+        let thinking = self.latest.thinking_level.clone();
         self.model_picker = Some(crate::model_picker::ModelPickerState::new(
             self.model_catalog.clone(),
             active,
+            thinking,
         ));
     }
 
@@ -379,7 +381,7 @@ impl App {
         enum PickerAction {
             None,
             Close,
-            Select(String),
+            Select(crate::model_picker::PickerSelection),
         }
         let action = {
             let Some(picker) = self.model_picker.as_mut() else {
@@ -395,7 +397,7 @@ impl App {
                     PickerAction::None
                 }
                 KeyCode::Enter => match picker.enter() {
-                    Some(spec) => PickerAction::Select(spec),
+                    Some(selection) => PickerAction::Select(selection),
                     None => PickerAction::None,
                 },
                 KeyCode::Esc => {
@@ -414,9 +416,12 @@ impl App {
         match action {
             PickerAction::None => {}
             PickerAction::Close => self.model_picker = None,
-            PickerAction::Select(spec) => {
+            PickerAction::Select(selection) => {
                 self.model_picker = None;
+                let spec = selection.spec;
+                let thinking = selection.thinking;
                 self.set_model_from_spec(&spec).await;
+                self.set_thinking_from_level(&thinking).await;
             }
         }
         true
@@ -444,6 +449,27 @@ impl App {
             }
             Ok(false) => self.error_line("daemon rejected the model change"),
             Err(e) => self.error_line(format!("set_model failed: {e}")),
+        }
+    }
+
+    pub(super) async fn set_thinking_from_level(&mut self, level: &str) {
+        if !theway_transport::commands::THINKING_LEVEL_VALUES.contains(&level) {
+            self.error_line(format!("invalid thinking level: {level}"));
+            return;
+        }
+        let level = level.to_string();
+        match self.client.set_thinking(&level).await {
+            Ok(true) => {
+                self.pending_thinking_default = Some(super::PendingThinkingDefault {
+                    level: level.clone(),
+                    session_id: self.session_id.clone(),
+                });
+                self.system_line(format!("setting thinking level: {level}…"));
+                // The daemon republishes the authoritative level. Snapshot
+                // handling persists the default only after that confirmation.
+            }
+            Ok(false) => self.error_line("daemon rejected the thinking level change"),
+            Err(e) => self.error_line(format!("set_thinking failed: {e}")),
         }
     }
 

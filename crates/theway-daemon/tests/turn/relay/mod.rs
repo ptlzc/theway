@@ -185,6 +185,7 @@ fn sample_wire_status(feed_lines: Vec<String>) -> WireStatus {
     WireStatus {
         session_id: "sess-relay".into(),
         model: "faux:faux".into(),
+        thinking_level: "off".into(),
         model_catalog: Vec::new(),
         cwd: "/tmp".into(),
         busy: false,

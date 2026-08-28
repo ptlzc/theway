@@ -29,7 +29,7 @@ use theway_transport::wire::WireDaemonConfig;
 use crate::cli::Cli;
 
 mod model_default;
-pub(crate) use model_default::persist_model_default;
+pub(crate) use model_default::{persist_model_default, persist_thinking_default};
 
 /// Outcome of one provisioning push.
 #[derive(Debug, Default)]
@@ -127,11 +127,30 @@ pub(crate) fn assemble_config_from(
         }
     }
 
-    // Base URL / thinking level are CLI-only settings. The wire field is a
-    // toggle (`off` → absent, anything else → enabled).
+    // Base URL is a CLI-only setting. Thinking: an explicit CLI `--thinking`
+    // flag wins; otherwise the persisted `[model] thinking` level from
+    // config.toml (the user's last pick) becomes the payload. The legacy wire
+    // toggle (`off` → absent, anything else → enabled) stays derived from the
+    // CLI flag for compatibility.
     payload.base_url = cli.base_url.clone();
-    if cli.thinking != "off" {
-        payload.thinking = Some(true);
+    match cli.thinking.as_deref() {
+        Some(level) if level != "off" => {
+            payload.thinking = Some(true);
+            payload.thinking_level = Some(level.to_string());
+        }
+        Some("off") => {}
+        None => {
+            if let Some(text) = config_toml {
+                match config::parse_model_thinking_default(text) {
+                    Ok(Some(level)) => payload.thinking_level = Some(level),
+                    Ok(None) => {}
+                    Err(err) => diagnostics.push(format!(
+                        "model: ignoring invalid thinking default in {source}: {err}"
+                    )),
+                }
+            }
+        }
+        _ => unreachable!("thinking level values are clap-validated"),
     }
 
     // Builtin skills: CLI ∪ config file, de-duplicated, CLI order first —
@@ -242,6 +261,16 @@ pub(crate) fn reconcile(
         _ => {}
     }
 
+    match desired.thinking_level.as_deref() {
+        Some(level) if current.thinking_level.as_deref() != Some(level) => {
+            patch.thinking_level = Some(level.to_string());
+        }
+        None if desired.clears("thinking_level") && current.thinking_level.is_some() => {
+            clear_field(&mut patch, "thinking_level");
+        }
+        _ => {}
+    }
+
     if !desired.builtin_skills.is_empty() && desired.builtin_skills != current.builtin_skills {
         patch.builtin_skills = desired.builtin_skills.clone();
     } else if desired.clears("builtin_skills") && !current.builtin_skills.is_empty() {
@@ -347,6 +376,7 @@ mod tests {
 [model]
 provider = \"acme\"
 model = \"warp-9\"
+thinking = \"high\"
 
 [builtin_skills]
 enabled = [\"debugging\", \"code-review\"]
@@ -452,6 +482,23 @@ max_feed_lines = 8000
         );
         assert_eq!(payload.trigger_poll_secs, Some(45));
         assert_eq!(payload.tui_max_feed_lines, Some(8000));
+        // Persisted `[model] thinking` (the user's last pick) becomes the
+        // payload when the CLI flag is at its default.
+        assert_eq!(payload.thinking_level.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn cli_thinking_flag_wins_over_file_thinking_default() {
+        let cli = cli_from(&["theway", "--thinking", "minimal"]);
+        let (payload, _) = assemble_config_from(&cli, Some(FULL_TOML), "config.toml");
+        assert_eq!(payload.thinking_level.as_deref(), Some("minimal"));
+        assert_eq!(payload.thinking, Some(true));
+
+        let cli = cli_from(&["theway", "--thinking", "off"]);
+        let (payload, _) = assemble_config_from(&cli, Some(FULL_TOML), "config.toml");
+        // Explicit CLI off keeps the file's last-pick level out of the payload.
+        assert_eq!(payload.thinking_level, None);
+        assert_eq!(payload.thinking, None);
     }
 
     #[test]
@@ -625,13 +672,27 @@ max_feed_lines = 0
             builtin_skills: vec!["new".into()],
             base_url: Some("http://new".into()),
             thinking: Some(true),
+            thinking_level: Some("high".into()),
             ..Default::default()
         };
         let (patch, notes) = reconcile(&desired, &current, true);
         assert_eq!(patch.builtin_skills, vec!["new".to_string()]);
         assert_eq!(patch.base_url.as_deref(), Some("http://new"));
         assert_eq!(patch.thinking, Some(true));
+        assert_eq!(patch.thinking_level.as_deref(), Some("high"));
         assert!(notes.is_empty(), "{notes:?}");
+    }
+
+    #[test]
+    fn reconcile_thinking_level_matches_current_without_pushing() {
+        let current = WireDaemonConfig {
+            thinking_level: Some("high".into()),
+            ..Default::default()
+        };
+        let desired = current.clone();
+        let (patch, _) = reconcile(&desired, &current, true);
+        assert_eq!(patch.thinking_level, None);
+        assert_eq!(patch, WireDaemonConfig::default());
     }
 
     #[test]
@@ -640,6 +701,7 @@ max_feed_lines = 0
             builtin_skills: vec!["same".into()],
             base_url: Some("http://same".into()),
             thinking: Some(true),
+            thinking_level: Some("high".into()),
             ..Default::default()
         };
         let desired = current.clone();

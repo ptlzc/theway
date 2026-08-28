@@ -73,7 +73,14 @@ export interface SessionState {
    * Session-cumulative token usage: total input, cached input, non-cached
    * input, output, and cache write totals for the current session.
    */
-  sessionContextUsage?: ContextUsage | undefined;
+  sessionContextUsage?:
+    | ContextUsage
+    | undefined;
+  /**
+   * Active thinking level ("off" | "minimal" | "low" | "medium" | "high" |
+   * "xhigh"); empty for older daemons.
+   */
+  thinkingLevel: string;
 }
 
 export interface FeedBlockPatch {
@@ -379,6 +386,7 @@ function createBaseSessionState(): SessionState {
     feedBlockPatches: [],
     extensions: undefined,
     sessionContextUsage: undefined,
+    thinkingLevel: "",
   };
 }
 
@@ -446,6 +454,9 @@ export const SessionState: MessageFns<SessionState> = {
     }
     if (message.sessionContextUsage !== undefined) {
       ContextUsage.encode(message.sessionContextUsage, writer.uint32(170).fork()).join();
+    }
+    if (message.thinkingLevel !== "") {
+      writer.uint32(178).string(message.thinkingLevel);
     }
     return writer;
   },
@@ -625,6 +636,14 @@ export const SessionState: MessageFns<SessionState> = {
           message.sessionContextUsage = ContextUsage.decode(reader, reader.uint32());
           continue;
         }
+        case 22: {
+          if (tag !== 178) {
+            break;
+          }
+
+          message.thinkingLevel = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -713,6 +732,11 @@ export const SessionState: MessageFns<SessionState> = {
         : isSet(object.session_context_usage)
         ? ContextUsage.fromJSON(object.session_context_usage)
         : undefined,
+      thinkingLevel: isSet(object.thinkingLevel)
+        ? globalThis.String(object.thinkingLevel)
+        : isSet(object.thinking_level)
+        ? globalThis.String(object.thinking_level)
+        : "",
     };
   },
 
@@ -781,6 +805,9 @@ export const SessionState: MessageFns<SessionState> = {
     if (message.sessionContextUsage !== undefined) {
       obj.sessionContextUsage = ContextUsage.toJSON(message.sessionContextUsage);
     }
+    if (message.thinkingLevel !== "") {
+      obj.thinkingLevel = message.thinkingLevel;
+    }
     return obj;
   },
 
@@ -824,6 +851,7 @@ export const SessionState: MessageFns<SessionState> = {
     message.sessionContextUsage = (object.sessionContextUsage !== undefined && object.sessionContextUsage !== null)
       ? ContextUsage.fromPartial(object.sessionContextUsage)
       : undefined;
+    message.thinkingLevel = object.thinkingLevel ?? "";
     return message;
   },
 };

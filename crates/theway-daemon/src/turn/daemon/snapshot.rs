@@ -44,6 +44,15 @@ impl TurnHost {
         feed_lines_base: u64,
     ) -> WireStatus {
         let model = current_model_label(self.session.kernel.harness());
+        let thinking_level = self
+            .session
+            .kernel
+            .harness()
+            .agent()
+            .state()
+            .thinking_level
+            .map(|level| level.as_str().to_string())
+            .unwrap_or_else(|| "off".to_string());
         let context_window = context_window_for(&model);
         // Last-turn usage (not session-cumulative): the last assistant message's
         // usage so clients can compare one turn against the context window.
@@ -52,6 +61,7 @@ impl TurnHost {
         WireStatus {
             session_id: self.session.id.clone(),
             model,
+            thinking_level,
             model_catalog: self.runtime.model_catalog.clone(),
             cwd: self.runtime.cwd.display().to_string(),
             busy: self.session.busy,

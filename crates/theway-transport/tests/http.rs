@@ -20,6 +20,7 @@ fn status() -> WireStatus {
     WireStatus {
         session_id: "sess-1".into(),
         model: "m".into(),
+        thinking_level: "off".into(),
         model_catalog: Vec::new(),
         cwd: "/tmp".into(),
         busy: false,

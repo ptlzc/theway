@@ -41,6 +41,9 @@ impl TurnHost {
         let startup_thinking = startup_state
             .thinking_level
             .map(|level| level != theway_core::ThinkingLevel::Off);
+        let startup_thinking_level = startup_state
+            .thinking_level
+            .map(|level| level.as_str().to_string());
         drop(startup_state);
         let daemon_config = Arc::new(std::sync::RwLock::new(WireDaemonConfig {
             provider: startup_model.as_ref().map(|model| model.provider.0.clone()),
@@ -50,6 +53,7 @@ impl TurnHost {
                 .map(|model| model.base_url.clone())
                 .filter(|url| !url.is_empty()),
             thinking: startup_thinking,
+            thinking_level: startup_thinking_level,
             builtin_skills: config.startup.builtin_skills.clone(),
             skills_dirs: config
                 .paths

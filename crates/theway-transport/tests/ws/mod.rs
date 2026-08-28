@@ -133,6 +133,7 @@ fn ws_http_state() -> (crate::http::HttpState, tokio::sync::mpsc::UnboundedRecei
         latest: std::sync::Arc::new(parking_lot::Mutex::new(WireStatus {
             session_id: "sess-1".into(),
             model: "m".into(),
+        thinking_level: "off".into(),
             model_catalog: Vec::new(),
             cwd: "/tmp".into(),
             busy: false,

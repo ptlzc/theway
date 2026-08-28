@@ -5,31 +5,71 @@
 //! OpenAI-compatible (`openai-completions`, `openai-responses`,
 //! `openai-codex-responses`) and Claude-compatible (`anthropic-messages`).
 //! `/model <provider:model-id>` remains the uncurated escape hatch.
+//!
+//! Navigation is three levels: provider → model → thinking level. Providers
+//! without a credential ("no key") are filtered out entirely — they cannot be
+//! selected anyway, so listing them only invites dead picks. After the model,
+//! the picker asks for the thinking intensity; both choices persist as the
+//! user's last selection (config.toml `[model]`).
 
 pub use theway_transport::wire::ProviderGroup;
+
+/// Thinking levels offered by the picker, in selection order. Matches the
+/// `/thinking` command surface.
+pub(crate) const THINKING_LEVELS: [&str; 6] = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum PickerLevel {
     Providers,
-    Models { provider_idx: usize },
+    Models {
+        provider_idx: usize,
+    },
+    Thinking {
+        provider_idx: usize,
+        model_idx: usize,
+    },
 }
 
-/// Pure two-level navigation state. Rendering and IO live in `ui/`.
+/// Final picker selection: the model spec plus the chosen thinking level.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct PickerSelection {
+    pub spec: String,
+    pub thinking: String,
+}
+
+/// Pure three-level navigation state. Rendering and IO live in `ui/`.
 pub(crate) struct ModelPickerState {
+    /// Credentialed provider groups only — `has_credential == false`
+    /// ("no key") groups never enter the list.
     pub groups: Vec<ProviderGroup>,
     pub level: PickerLevel,
     pub cursor: usize,
     /// Active `(provider, id)` — marked `●` in the model list.
     pub active: Option<(String, String)>,
+    /// Active thinking level — marked `●` in the thinking list.
+    pub current_thinking: String,
 }
 
 impl ModelPickerState {
-    pub fn new(groups: Vec<ProviderGroup>, active: Option<(String, String)>) -> Self {
+    pub fn new(
+        groups: Vec<ProviderGroup>,
+        active: Option<(String, String)>,
+        current_thinking: String,
+    ) -> Self {
+        let current_thinking = if THINKING_LEVELS.contains(&current_thinking.as_str()) {
+            current_thinking
+        } else {
+            THINKING_LEVELS[0].to_string()
+        };
         Self {
-            groups,
+            groups: groups
+                .into_iter()
+                .filter(|group| group.has_credential)
+                .collect(),
             level: PickerLevel::Providers,
             cursor: 0,
             active,
+            current_thinking,
         }
     }
 
@@ -37,6 +77,7 @@ impl ModelPickerState {
         match self.level {
             PickerLevel::Providers => self.groups.len(),
             PickerLevel::Models { provider_idx } => self.groups[provider_idx].models.len(),
+            PickerLevel::Thinking { .. } => THINKING_LEVELS.len(),
         }
     }
 
@@ -50,9 +91,9 @@ impl ModelPickerState {
         }
     }
 
-    /// Enter: descend at provider level (returns `None`), select at model
-    /// level (returns the `provider:id` spec).
-    pub fn enter(&mut self) -> Option<String> {
+    /// Enter: descend at provider/model level (returns `None`), select at
+    /// thinking level (returns the `provider:id` spec + thinking level).
+    pub fn enter(&mut self) -> Option<PickerSelection> {
         match self.level {
             PickerLevel::Providers => {
                 if self.groups.is_empty() {
@@ -70,23 +111,46 @@ impl ModelPickerState {
                 None
             }
             PickerLevel::Models { provider_idx } => {
+                let model_idx = self.cursor;
+                self.cursor = THINKING_LEVELS
+                    .iter()
+                    .position(|level| *level == self.current_thinking)
+                    .unwrap_or(0);
+                self.level = PickerLevel::Thinking {
+                    provider_idx,
+                    model_idx,
+                };
+                None
+            }
+            PickerLevel::Thinking {
+                provider_idx,
+                model_idx,
+            } => {
                 let group = &self.groups[provider_idx];
-                Some(format!(
-                    "{}:{}",
-                    group.provider, group.models[self.cursor].id
-                ))
+                Some(PickerSelection {
+                    spec: format!("{}:{}", group.provider, group.models[model_idx].id),
+                    thinking: THINKING_LEVELS[self.cursor].to_string(),
+                })
             }
         }
     }
 
-    /// Esc: model list → provider list (returns `false`), provider list →
-    /// close (returns `true`).
+    /// Esc: thinking → models (returns `false`), model list → provider list
+    /// (`false`), provider list → close (`true`).
     pub fn back(&mut self) -> bool {
         match self.level {
             PickerLevel::Providers => true,
             PickerLevel::Models { provider_idx } => {
                 self.level = PickerLevel::Providers;
                 self.cursor = provider_idx;
+                false
+            }
+            PickerLevel::Thinking {
+                provider_idx,
+                model_idx,
+            } => {
+                self.level = PickerLevel::Models { provider_idx };
+                self.cursor = model_idx;
                 false
             }
         }
@@ -99,10 +163,7 @@ impl ModelPickerState {
                 "Select provider".into(),
                 self.groups
                     .iter()
-                    .map(|g| {
-                        let key = if g.has_credential { "" } else { " · no key" };
-                        format!("{} ({}){}", g.provider, g.models.len(), key)
-                    })
+                    .map(|g| format!("{} ({})", g.provider, g.models.len()))
                     .collect(),
             ),
             PickerLevel::Models { provider_idx } => {
@@ -126,6 +187,19 @@ impl ModelPickerState {
                         .collect(),
                 )
             }
+            PickerLevel::Thinking { .. } => (
+                "Thinking intensity".into(),
+                THINKING_LEVELS
+                    .iter()
+                    .map(|level| {
+                        if *level == self.current_thinking {
+                            format!("{level} ●")
+                        } else {
+                            (*level).to_string()
+                        }
+                    })
+                    .collect(),
+            ),
         };
         let visible = visible.max(1);
         let start = (self.cursor + 1).saturating_sub(visible);
@@ -173,45 +247,97 @@ mod tests {
     }
 
     #[test]
-    fn picker_navigates_descends_and_selects() {
-        let mut p = ModelPickerState::new(two_groups(), None);
-        assert_eq!(p.enter(), None); // descend into anthropic
-        assert!(matches!(p.level, PickerLevel::Models { provider_idx: 0 }));
-        p.down();
-        assert_eq!(p.enter().as_deref(), Some("anthropic:claude-opus-4-8"));
+    fn picker_filters_out_providers_without_credentials() {
+        let p = ModelPickerState::new(two_groups(), None, "off".into());
+        assert_eq!(p.groups.len(), 1);
+        assert_eq!(p.groups[0].provider, "anthropic");
+        let (_, rows) = p.view(10);
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].0.contains("anthropic"));
+        assert!(!rows[0].0.contains("no key"));
     }
 
     #[test]
-    fn picker_back_returns_to_providers_then_closes() {
-        let mut p = ModelPickerState::new(two_groups(), None);
-        p.down(); // openai
-        p.enter();
-        assert!(!p.back()); // back to providers…
+    fn picker_navigates_descends_and_selects_through_thinking_level() {
+        let mut p = ModelPickerState::new(two_groups(), None, "medium".into());
+        assert_eq!(p.enter(), None); // descend into anthropic (openai filtered)
+        assert!(matches!(p.level, PickerLevel::Models { provider_idx: 0 }));
+        p.down();
+        assert_eq!(p.enter(), None); // descend into thinking levels
+        assert!(
+            matches!(
+                p.level,
+                PickerLevel::Thinking {
+                    provider_idx: 0,
+                    model_idx: 1
+                }
+            ),
+            "{:?}",
+            p.level
+        );
+        // cursor pre-positioned on the current thinking level (medium)
+        assert_eq!(p.cursor, 3);
+        p.down();
+        assert_eq!(
+            p.enter(),
+            Some(PickerSelection {
+                spec: "anthropic:claude-opus-4-8".into(),
+                thinking: "high".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn picker_back_walks_thinking_to_models_to_providers_then_closes() {
+        let mut p = ModelPickerState::new(two_groups(), None, "off".into());
+        p.enter(); // → models
+        p.enter(); // → thinking
+        assert!(!p.back()); // → models, cursor restored
+        assert!(matches!(p.level, PickerLevel::Models { provider_idx: 0 }));
+        assert!(!p.back()); // → providers, cursor restored
         assert!(matches!(p.level, PickerLevel::Providers));
-        assert_eq!(p.cursor, 1); // …with cursor restored to openai
-        assert!(p.back()); // top level: close
+        assert_eq!(p.cursor, 0);
+        assert!(p.back()); // close
     }
 
     #[test]
     fn picker_cursor_clamps_at_bounds() {
-        let mut p = ModelPickerState::new(two_groups(), None);
+        let mut p = ModelPickerState::new(two_groups(), None, "off".into());
         p.up();
         assert_eq!(p.cursor, 0);
         p.down();
         p.down();
         p.down();
-        assert_eq!(p.cursor, 1); // two providers, clamped
+        assert_eq!(p.cursor, 0); // one credentialed provider, clamped
     }
 
     #[test]
     fn picker_starts_on_active_model_when_descending() {
         let active = Some(("anthropic".into(), "claude-opus-4-8".into()));
-        let mut p = ModelPickerState::new(two_groups(), active);
+        let mut p = ModelPickerState::new(two_groups(), active, "off".into());
         p.enter();
         assert_eq!(p.cursor, 1); // active model preselected
         let (_, rows) = p.view(10);
         assert!(rows[1].0.contains('●'));
         assert!(rows[1].1); // selected row
+    }
+
+    #[test]
+    fn picker_thinking_level_marks_current() {
+        let mut p = ModelPickerState::new(two_groups(), None, "high".into());
+        p.enter();
+        p.enter();
+        let (title, rows) = p.view(10);
+        assert_eq!(title, "Thinking intensity");
+        assert_eq!(rows.len(), 6);
+        assert!(rows[4].0.contains("high ●"));
+        assert!(rows[4].1); // pre-selected on the current level
+    }
+
+    #[test]
+    fn picker_unknown_thinking_level_falls_back_to_off() {
+        let p = ModelPickerState::new(two_groups(), None, "bogus".into());
+        assert_eq!(p.current_thinking, "off");
     }
 
     #[test]
@@ -226,7 +352,7 @@ mod tests {
                 })
                 .collect(),
         }];
-        let mut p = ModelPickerState::new(groups, None);
+        let mut p = ModelPickerState::new(groups, None, "off".into());
         p.enter();
         for _ in 0..15 {
             p.down();
@@ -241,7 +367,7 @@ mod tests {
 
     #[test]
     fn picker_empty_catalog_is_inert() {
-        let mut p = ModelPickerState::new(vec![], None);
+        let mut p = ModelPickerState::new(vec![], None, "off".into());
         assert_eq!(p.enter(), None);
         p.down();
         assert_eq!(p.cursor, 0);

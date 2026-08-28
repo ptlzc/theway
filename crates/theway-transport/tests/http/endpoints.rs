@@ -17,6 +17,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
     let latest = Arc::new(Mutex::new(WireStatus {
         session_id: "sess-1".into(),
         model: "provider:model".into(),
+        thinking_level: "off".into(),
         model_catalog: Vec::new(),
         cwd: "/tmp/theway".into(),
         busy: false,
@@ -198,6 +199,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
         .send(WireStatusUpdate::full(WireStatus {
             session_id: "sess-1".into(),
             model: "provider:model".into(),
+        thinking_level: "off".into(),
             model_catalog: Vec::new(),
             cwd: "/tmp/theway".into(),
             busy: true,
@@ -255,6 +257,7 @@ async fn websocket_serves_snapshot_and_accepts_commands() {
     let latest = Arc::new(Mutex::new(WireStatus {
         session_id: "sess-1".into(),
         model: "provider:model".into(),
+        thinking_level: "off".into(),
         model_catalog: Vec::new(),
         cwd: "/tmp/theway".into(),
         busy: false,
@@ -451,6 +454,7 @@ async fn healthz_answers_ok_without_snapshot_and_root_404s() {
     let router = test_router(WireStatus {
         session_id: "sess-1".into(),
         model: "provider:model".into(),
+        thinking_level: "off".into(),
         model_catalog: Vec::new(),
         cwd: "/tmp/theway".into(),
         busy: false,
@@ -520,6 +524,7 @@ async fn spawn_config_server(
         latest: Arc::new(Mutex::new(WireStatus {
             session_id: "sess-1".into(),
             model: "provider:model".into(),
+        thinking_level: "off".into(),
             model_catalog: Vec::new(),
             cwd: "/tmp/theway".into(),
             busy: false,
