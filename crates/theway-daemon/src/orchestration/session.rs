@@ -389,7 +389,7 @@ impl SessionExecutionContext {
 /// session-resource-model: rebuilds a fully-wired [`AgentHarness`] for any session id —
 /// the in-process version of the CLI `--resume-id` path. Constructed once at thewayd
 /// startup (harness assembly); wrapped into [`crate::session_ops::SessionFactory`]
-/// and consumed by `TurnHost::switch_session` on the serialized event loop.
+/// for session activation/resume flows.
 ///
 /// The builder retains process-owned state shared by Arc (DAG engine, subagent registry,
 /// feed/main-run channels, trigger registries). Per-session and cwd-scoped inputs arrive

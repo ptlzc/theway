@@ -35,14 +35,6 @@ impl TurnHost {
         self.projection.latest_goal = theway_core::multiagent::goal::current(self.session.kernel.harness()).await;
     }
 
-    fn sync_current_session_state(&self) {
-        let mut state = self.session.shared_state.lock();
-        state.session_id = self.session.id.clone();
-        state.busy = self.session.busy;
-        state.model = current_model_label(self.session.kernel.harness());
-        state.cwd = self.session.cwd.display().to_string();
-    }
-
     fn current_model_accepts_images(&self) -> bool {
         self.session.kernel.current_model_accepts_images()
     }
@@ -162,37 +154,6 @@ impl TurnHost {
         }
     }
 
-    async fn switch_session(&mut self, id: String) -> Result<()> {
-        let previous = self.session.kernel.harness().clone();
-        previous
-            .before_session_switch(&id)
-            .await
-            .with_context(|| format!("extension gate rejected session {id}"))?;
-        let runtime = (self.session.factory)(id.clone())
-            .await
-            .with_context(|| format!("build runtime for session {id}"))?;
-        previous.shutdown_runtime_extensions().await;
-        self.session.id = runtime.session_id.clone();
-        self.session.cwd = runtime.cwd.clone();
-        self.session.kernel.replace_runtime(runtime);
-        self.session
-            .kernel
-            .harness()
-            .session_switched(&self.session.id)
-            .await;
-        self.automation.reload
-            .set_trigger_executor(self.session.kernel.trigger_executor().clone());
-        self.clear_feed();
-        self.system_line(format!("switched to session {}", self.session.id));
-        self.session.busy = false;
-        self.session.queue.clear();
-        self.session.cumulative_usage = WireContextUsage::default();
-        self.projection.control_plane_prompt = None;
-        self.refresh_goal_state().await;
-        self.sync_current_session_state();
-        Ok(())
-    }
-
     async fn apply_activation(&mut self, activation: crate::session_activation::SessionActivation, turn: &mut TurnState) {
         if turn.fut.is_some() {
             self.request_abort(turn);
@@ -239,7 +200,6 @@ impl TurnHost {
         turn.aborted = false;
         turn.prefix = "";
         self.refresh_goal_state().await;
-        self.sync_current_session_state();
         self.publish_current_snapshot().await;
     }
 

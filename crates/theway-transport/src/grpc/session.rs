@@ -59,15 +59,6 @@ impl SessionService for GrpcState {
                 .await
                 .map_err(|e| Status::invalid_argument(e.to_string()))?;
         }
-        // Becoming current goes through the serialized event loop; the current
-        // marker in ListSessions follows on the next snapshot.
-        let accepted = self
-            .commands
-            .send(WireCommand::SwitchSession { id: new_id.clone() })
-            .is_ok();
-        if !accepted {
-            return Err(Status::unavailable("event loop command channel closed"));
-        }
         let sessions = self
             .session_ops
             .list()
@@ -78,31 +69,6 @@ impl SessionService for GrpcState {
             .find(|s| s.session_id == new_id)
             .map(session_summary_wire);
         Ok(Response::new(CreateSessionResponse { session }))
-    }
-
-    async fn switch_session(
-        &self,
-        request: Request<SwitchSessionRequest>,
-    ) -> Result<Response<CommandResult>, Status> {
-        let requested = request.into_inner().session_id;
-        let sessions = self
-            .session_ops
-            .list()
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
-        let target = resolve_session_id(&sessions, &requested)
-            .ok_or_else(|| Status::not_found(format!("no session matches id {requested}")))?;
-        let accepted = self
-            .commands
-            .send(WireCommand::SwitchSession { id: target.clone() })
-            .is_ok();
-        if accepted {
-            // Rebind the connection-level current session; the event loop applies
-            // the same change on the serialized loop and re-publishes snapshots.
-            *self.session_id.write().unwrap() = target.clone();
-            self.latest.lock().session_id = target;
-        }
-        Ok(Response::new(CommandResult { accepted }))
     }
 
     async fn rename_session(
@@ -167,7 +133,8 @@ impl SessionService for GrpcState {
             )));
         }
         // Deleted the current session → fall back to the most recent remaining
-        // session (or empty) and tell the event loop to switch to it.
+        // session (or empty). There is no session-switch RPC; clients address
+        // sessions explicitly by id.
         if self.session_id.read().unwrap().clone() == full_id {
             let remaining = self
                 .session_ops
@@ -180,11 +147,6 @@ impl SessionService for GrpcState {
                 .unwrap_or_default();
             *self.session_id.write().unwrap() = fallback.clone();
             self.latest.lock().session_id = fallback.clone();
-            if !fallback.is_empty() {
-                let _ = self
-                    .commands
-                    .send(WireCommand::SwitchSession { id: fallback });
-            }
         }
         Ok(Response::new(DeleteSessionResponse {
             running_run_ids: Vec::new(),

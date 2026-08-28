@@ -79,7 +79,6 @@ impl TurnHost {
                 tool_count: config.tool_count,
                 factory: config.session_factory,
                 repository: config.session_repo,
-                shared_state: config.current_session_state,
                 busy: false,
                 queue: VecDeque::new(),
                 cumulative_usage: WireContextUsage::default(),
@@ -205,7 +204,7 @@ impl TurnHost {
             session_ops: Arc::new(crate::session_ops::AppSessionOps::new(
                 self.session.repository.clone(),
                 self.automation.dag.clone(),
-                self.session.shared_state.clone(),
+                self.session.cwd.display().to_string(),
                 self.automation.services.session_execution.clone(),
             )),
             // Issue #68: the transport servers serve `GetPathContext` from

@@ -178,7 +178,7 @@ async fn esc_while_busy_aborts_even_with_completion_popup() {
         .await
         .expect("no cancel command")
         .unwrap();
-    assert!(matches!(cmd, WireCommand::Abort));
+    assert!(matches!(cmd, WireCommand::Abort { .. }));
     assert!(app.completions.is_empty());
 }
 

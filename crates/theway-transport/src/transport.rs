@@ -499,8 +499,8 @@ pub struct TransportEndpoints {
     /// DAG orchestration operations.
     pub graph_ops: Arc<dyn GraphOps>,
     /// session-resource-model: session lifecycle ops (list/create/rename/delete) for the
-    /// gRPC/HTTP session surfaces. Sync query/mutation only — *switching* the current
-    /// session goes through `WireCommand::SwitchSession` on the serialized event loop.
+    /// gRPC/HTTP session surfaces. Sync query/mutation only; clients address sessions
+    /// explicitly by session id.
     pub session_ops: Arc<dyn crate::transport::SessionOps>,
     /// File/tool operation handler (issue #75): backs the gRPC `ToolService`
     /// and the JSON-RPC tool methods. The daemon kernel implements the seam

@@ -108,20 +108,12 @@ async fn client_state_list_sessions_returns_summaries_and_current() {
 }
 
 #[tokio::test]
-async fn client_state_create_session_round_trips_and_queues_switch() {
-    let (mut client, mut command_rx, _snapshot_tx) = client_and_server().await;
+async fn client_state_create_session_round_trips() {
+    let (mut client, _command_rx, _snapshot_tx) = client_and_server().await;
 
     let created = client.state_create_session(Some("new one".into())).await.unwrap();
     assert_eq!(created.name, "new one");
     assert!(created.session_id.starts_with("sess-new-"));
-
-    // The full gRPC StorageService also queues SwitchSession for the new id.
-    match command_rx.recv().await.unwrap() {
-        crate::wire::WireCommand::SwitchSession { id } => {
-            assert_eq!(id, created.session_id)
-        }
-        other => panic!("unexpected command: {other:?}"),
-    }
 }
 
 #[tokio::test]

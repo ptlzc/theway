@@ -38,7 +38,6 @@ impl TurnHost {
                 let ok = self.set_thinking_level(&level).await;
                 let _ = response.send(ok);
             }
-            WireCommand::SwitchSession { id } => self.handle_switch_session(id, turn).await,
             WireCommand::SetSkillDirs { dirs } => self.handle_set_skill_dirs(dirs, turn).await,
             WireCommand::Configure { config } => self.handle_configure(config, turn).await,
             WireCommand::InvokeExtensionCommand {
@@ -413,38 +412,6 @@ impl TurnHost {
                 out.diagnostics.len()
             )),
             Err(e) => self.error_line(format!("set skill dirs: {e:#}")),
-        }
-    }
-
-    async fn handle_switch_session(&mut self, id: String, turn: &mut TurnState) {
-        let id = id.trim().to_string();
-        if id.is_empty() {
-            self.error_line("switch session: missing session id");
-            return;
-        }
-        if id == self.session.id {
-            self.system_line(format!("already on session {id}"));
-            return;
-        }
-        match self.session.repository.contains(&id).await {
-            Ok(true) => {}
-            Ok(false) => {
-                self.error_line(format!("switch session: no session matches id {id}"));
-                return;
-            }
-            Err(e) => {
-                self.error_line(format!("switch session: {e}"));
-                return;
-            }
-        }
-        if turn.fut.is_some() {
-            self.request_abort(turn);
-            if let Some(future) = turn.fut.take() {
-                let _ = future.await;
-            }
-        }
-        if let Err(e) = self.switch_session(id).await {
-            self.error_line(format!("switch session: {e:#}"));
         }
     }
 

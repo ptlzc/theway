@@ -285,24 +285,15 @@ async fn restore_session(
     if current.session_id == session_id {
         return Ok(current);
     }
-    if !client.switch_session(session_id).await? {
-        anyhow::bail!("daemon rejected recovery of session {session_id}");
+    // No session switch: read the requested session's state directly.
+    let state = client.get_state_for_session(session_id).await?;
+    let status = wire_status(&state);
+    if status.session_id != session_id {
+        anyhow::bail!(
+            "daemon did not restore session {session_id} within {SESSION_RESTORE_TIMEOUT:?}"
+        );
     }
-
-    let deadline = tokio::time::Instant::now() + SESSION_RESTORE_TIMEOUT;
-    loop {
-        let state = client.get_state().await?;
-        let status = wire_status(&state);
-        if status.session_id == session_id {
-            return Ok(status);
-        }
-        if tokio::time::Instant::now() >= deadline {
-            anyhow::bail!(
-                "daemon did not restore session {session_id} within {SESSION_RESTORE_TIMEOUT:?}"
-            );
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    Ok(status)
 }
 
 #[cfg(test)]

@@ -115,23 +115,26 @@ async fn client_graph_cancel_retry_skip_round_trip() {
     let (mut client, _command_rx, _snapshot_tx) =
         client_and_server_with_graph(graph.clone(), Arc::new(ClientJobOps::default())).await;
 
-    assert!(client.graph_cancel("run-1").await.unwrap());
+    assert!(client.graph_cancel("sess-1", "run-1").await.unwrap());
     let cancelled = graph.cancelled.lock().unwrap();
     assert_eq!(cancelled[0].0, "run-1");
     assert_eq!(cancelled[0].1.as_deref(), Some("cancelled via rpc"));
     drop(cancelled);
 
-    let reset = client.graph_retry("run-1", Some("node-1")).await.unwrap();
+    let reset = client
+        .graph_retry("sess-1", "run-1", Some("node-1"))
+        .await
+        .unwrap();
     assert_eq!(reset, vec!["node-1"]);
     let retried = graph.retried.lock().unwrap();
     assert_eq!(retried[0].0, "run-1");
     assert_eq!(retried[0].1.as_deref(), Some("node-1"));
     drop(retried);
 
-    let reset_all = client.graph_retry("run-1", None).await.unwrap();
+    let reset_all = client.graph_retry("sess-1", "run-1", None).await.unwrap();
     assert_eq!(reset_all, vec!["all"]);
 
-    assert!(client.graph_skip("run-1", "node-1").await.unwrap());
+    assert!(client.graph_skip("sess-1", "run-1", "node-1").await.unwrap());
     let skipped = graph.skipped.lock().unwrap();
     assert_eq!(skipped[0], ("run-1".to_string(), "node-1".to_string()));
 }
@@ -160,7 +163,10 @@ async fn client_get_node_output_returns_fragment() {
     let (mut client, _command_rx, _snapshot_tx) =
         client_and_server_with_graph(Arc::new(ClientGraphOps::default()), jobs).await;
 
-    let response = client.get_node_output("run-1", "node-1", 6).await.unwrap();
+    let response = client
+        .get_node_output("sess-1", "run-1", "node-1", 6)
+        .await
+        .unwrap();
     assert_eq!(response.text, "graph");
     assert_eq!(response.offset, 6);
     assert_eq!(response.total, 11);

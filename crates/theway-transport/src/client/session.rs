@@ -266,18 +266,6 @@ impl GrpcClient {
         })
     }
 
-    /// Switch the daemon to another session (aborts an in-flight turn).
-    pub async fn switch_session(&mut self, id: &str) -> Result<bool> {
-        let accepted = self
-            .session
-            .switch_session(SwitchSessionRequest {
-                session_id: id.to_string(),
-            })
-            .await
-            .map_err(|e| anyhow::anyhow!("switch_session: {e}"))?;
-        Ok(accepted.into_inner().accepted)
-    }
-
     /// List sessions (oldest → newest) plus the daemon's current session id.
     pub async fn list_sessions(&mut self) -> Result<(Vec<SessionSummary>, String)> {
         let response = self

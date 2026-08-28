@@ -145,11 +145,11 @@ fn drain_commands(
     let handle = tokio::spawn(async move {
         while let Some(command) = rx.recv().await {
             let label = match command {
-                WireCommand::SetModel { spec, response } => {
+                WireCommand::SetModel { spec, response, .. } => {
                     let _ = response.send(true);
                     format!("SetModel({spec})")
                 }
-                WireCommand::SetThinking { level, response } => {
+                WireCommand::SetThinking { level, response, .. } => {
                     let _ = response.send(true);
                     format!("SetThinking({level})")
                 }

@@ -277,7 +277,6 @@ impl TurnHost {
         snapshots: &broadcast::Sender<WireStatusUpdate>,
         metadata_dirty: bool,
     ) {
-        self.sync_current_session_state();
         if metadata_dirty {
             let snapshot = self.wire_snapshot();
             *latest.lock() = snapshot.clone();

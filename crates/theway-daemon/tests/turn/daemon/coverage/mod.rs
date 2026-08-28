@@ -24,7 +24,7 @@ use crate::agent_session::RetrySettings;
 use crate::commands::{DaemonCtx, Registry};
 use crate::control_plane_prompt::PendingControlPlanePrompt;
 use crate::paths::DaemonPaths;
-use crate::session_ops::{CurrentSessionState, SessionFactory};
+use crate::session_ops::SessionFactory;
 use crate::trigger_engine::execution::TriggerExecutor;
 use crate::trigger_engine::runtime::TriggerRuntimeConfig;
 use crate::turn::feed::FeedUpdate;
@@ -125,7 +125,6 @@ async fn host_with_registry(input: Vec<InputModality>, registry: Registry) -> (T
         subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry::new(),
         session_factory,
         session_repo: Arc::new(SqliteSessionRepo::new(repo_dir.path())),
-        current_session_state: Arc::new(parking_lot::Mutex::new(CurrentSessionState::default())),
         capabilities: RuntimeCapabilities::default(),
         thinking_summary: None,
         startup: crate::startup_config::StartupConfig::default(),

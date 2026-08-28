@@ -41,10 +41,7 @@ async fn help_line_lists_resume_command() {
 /// the current session annotated and pre-selected.
 #[tokio::test]
 async fn resume_picker_lists_sessions_and_annotates_current() {
-    let (mut app, mut rx, _ops) = test_app_with_sessions(&["sess-1", "sess-2"]).await;
-    // Arrange: make sess-2 the daemon's current session (drain the command).
-    assert!(app.client.switch_session("sess-2").await.unwrap());
-    rx.recv().await.expect("switch command");
+    let (mut app, _rx, _ops) = test_app_with_sessions(&["sess-1", "sess-2"]).await;
 
     // Act
     app.dispatch_slash("/resume", &mut terminal_placeholder())
@@ -57,11 +54,11 @@ async fn resume_picker_lists_sessions_and_annotates_current() {
         .expect("/resume must open the picker");
     assert_eq!(picker.entries.len(), 2);
     assert_eq!(picker.entries[0].id, "sess-1");
-    assert!(!picker.entries[0].current);
+    assert!(picker.entries[0].current);
     assert_eq!(picker.entries[1].id, "sess-2");
-    assert!(picker.entries[1].current);
-    assert_eq!(picker.selected, 1, "the current session is pre-selected");
-    assert_eq!(picker.entries[1].id_short, "sess-2");
+    assert!(!picker.entries[1].current);
+    assert_eq!(picker.selected, 0, "the current session is pre-selected");
+    assert_eq!(picker.entries[0].id_short, "sess-1");
 
     // Render: popup lists both sessions and the current annotation.
     let backend = TestBackend::new(80, 20);
@@ -71,22 +68,21 @@ async fn resume_picker_lists_sessions_and_annotates_current() {
     assert!(text.contains("resume"), "popup title missing:\n{text}");
     assert!(text.contains("sess-1"), "session row missing:\n{text}");
     assert!(
-        text.contains("sess-2 · current"),
+        text.contains("sess-1 · current"),
         "current row must be annotated, got:\n{text}"
     );
 }
 
-/// Issue #56: Enter switches to the highlighted session over the
-/// SwitchSession RPC (queued daemon-side — the next snapshot presents the
-/// new session) and closes the popup; Esc cancels without sending anything.
+/// Issue #56: Enter selects the highlighted session client-side and closes
+/// the popup; Esc cancels without changing the selection.
 #[tokio::test]
-async fn resume_picker_enter_switches_session_and_esc_cancels() {
-    let (mut app, mut rx, _ops) = test_app_with_sessions(&["sess-1", "sess-2"]).await;
+async fn resume_picker_enter_selects_session_and_esc_cancels() {
+    let (mut app, _rx, _ops) = test_app_with_sessions(&["sess-1", "sess-2"]).await;
     let mut term = terminal_placeholder();
     app.dispatch_slash("/resume", &mut term).await;
     assert!(app.resume_picker.is_some());
 
-    // Act: Down highlights sess-2, Enter switches to it.
+    // Act: Down highlights sess-2, Enter selects it.
     app.handle_event(
         Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::empty())),
         &mut term,
@@ -100,16 +96,9 @@ async fn resume_picker_enter_switches_session_and_esc_cancels() {
     .await
     .unwrap();
 
-    // Assert: the daemon receives SwitchSession{id}; popup closed.
-    let cmd = tokio::time::timeout(Duration::from_secs(2), rx.recv())
-        .await
-        .expect("no switch_session command")
-        .unwrap();
-    match cmd {
-        WireCommand::SwitchSession { id } => assert_eq!(id, "sess-2"),
-        other => panic!("unexpected command: {other:?}"),
-    }
+    // Assert: popup closed and the client-side session id changed.
     assert!(app.resume_picker.is_none(), "Enter must close the picker");
+    assert_eq!(app.session_id, "sess-2");
 
     // Act: reopen and cancel with Esc.
     app.dispatch_slash("/resume", &mut term).await;
@@ -121,12 +110,8 @@ async fn resume_picker_enter_switches_session_and_esc_cancels() {
     .await
     .unwrap();
 
-    // Assert: closed, nothing forwarded.
+    // Assert: closed, no command forwarded.
     assert!(app.resume_picker.is_none(), "Esc must cancel the picker");
-    assert!(
-        rx.try_recv().is_err(),
-        "Esc must not forward any command to the daemon"
-    );
 }
 
 /// Issue #56: an empty session list prints the system hint instead of
@@ -193,16 +178,15 @@ fn resume_picker_label_formats_name_busy_graph_and_current_marks() {
     assert_eq!(super::resume_picker_label(&bare), "abc1234567890");
 }
 
-/// Issue #56 busy-switch path: switching queues on the daemon's event loop
-/// (a busy turn aborts and the new session lands on the next snapshot) —
-/// `apply_snapshot`'s session-id path presents the new session
+/// Issue #56 busy-switch path: the client follows the daemon's per-session
+/// snapshot; `apply_snapshot`'s session-id path presents the new session
 /// automatically.
 #[tokio::test]
-async fn apply_snapshot_updates_session_id_when_switch_lands() {
+async fn apply_snapshot_updates_session_id_when_session_changes() {
     let (mut app, _rx) = test_app().await;
     assert_eq!(app.session_id, "sess-1");
 
-    // Arrange: the daemon republishes after a queued SwitchSession.
+    // Arrange: the daemon publishes a different session snapshot.
     let mut status = fixture_status(Vec::new());
     status.session_id = "sess-9".into();
 

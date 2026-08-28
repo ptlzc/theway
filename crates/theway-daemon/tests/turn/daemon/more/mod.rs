@@ -20,7 +20,7 @@ use crate::agent_session::RetrySettings;
 use crate::commands::Registry;
 use crate::control_plane_prompt::PendingControlPlanePrompt;
 use crate::paths::DaemonPaths;
-use crate::session_ops::{CurrentSessionState, SessionFactory};
+use crate::session_ops::SessionFactory;
 use crate::trigger_engine::execution::TriggerExecutor;
 use crate::trigger_engine::runtime::TriggerRuntimeConfig;
 use crate::turn::kernel::{QueuedTurn, TurnFut, TurnState};
@@ -132,9 +132,6 @@ impl HostFixture {
             subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry::new(),
             session_factory,
             session_repo: Arc::new(SqliteSessionRepo::new(repo_dir.path())),
-            current_session_state: Arc::new(
-                parking_lot::Mutex::new(CurrentSessionState::default()),
-            ),
             capabilities: RuntimeCapabilities::default(),
             thinking_summary: None,
             startup: crate::startup_config::StartupConfig::default(),
@@ -451,7 +448,7 @@ async fn handle_web_command_routes_abort_and_control_plane_resolve() {
     let host = fixture.host();
 
     let mut turn = sample_turn_with_future();
-    host.handle_web_command(WireCommand::Abort, &mut turn).await;
+    host.handle_web_command(WireCommand::Abort { session_id: "sess-extra".into() }, &mut turn).await;
     assert!(turn.aborted);
 
     let (decision_tx, decision_rx) = oneshot::channel();
@@ -467,7 +464,10 @@ async fn handle_web_command_routes_abort_and_control_plane_resolve() {
         responder: decision_tx,
     });
     host.handle_web_command(
-        WireCommand::ResolveControlPlane { approve: false },
+        WireCommand::ResolveControlPlane {
+            session_id: "sess-extra".into(),
+            approve: false,
+        },
         &mut turn,
     )
     .await;
@@ -488,21 +488,6 @@ async fn handle_configure_empty_update_is_a_noop() {
         .await;
 
     assert_eq!(*host.runtime.config.read().unwrap(), before);
-}
-
-#[tokio::test]
-async fn handle_switch_session_rejects_empty_and_same_id() {
-    let mut fixture = HostFixture::new().await;
-    let host = fixture.host();
-    let original = host.session.id.clone();
-
-    host.handle_switch_session("".into(), &mut TurnState::default())
-        .await;
-    assert_eq!(host.session.id, original);
-
-    host.handle_switch_session(original.clone(), &mut TurnState::default())
-        .await;
-    assert_eq!(host.session.id, original);
 }
 
 #[tokio::test]

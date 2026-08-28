@@ -31,7 +31,7 @@ use crate::agent_session::RetrySettings;
 use crate::commands::Registry;
 use crate::control_plane_prompt::PendingControlPlanePrompt;
 use crate::paths::DaemonPaths;
-use crate::session_ops::{CurrentSessionState, SessionFactory};
+use crate::session_ops::SessionFactory;
 use crate::test_env::{EnvGuard, ENV_LOCK};
 use crate::trigger_engine::execution::TriggerExecutor;
 use crate::trigger_engine::runtime::TriggerRuntimeConfig;
@@ -160,7 +160,6 @@ fn build_host_with(
         subagent_registry: SubagentJobRegistry::new(),
         session_factory,
         session_repo: Arc::new(SqliteSessionRepo::new(repo_dir.path())),
-        current_session_state: Arc::new(parking_lot::Mutex::new(CurrentSessionState::default())),
         capabilities: RuntimeCapabilities::default(),
         thinking_summary: None,
         startup: crate::startup_config::StartupConfig::default(),

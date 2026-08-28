@@ -95,20 +95,16 @@ async fn get_sessions_lists_all_and_marks_current() {
 }
 
 #[tokio::test]
-async fn post_sessions_creates_renames_and_switches() {
+async fn post_sessions_creates_and_renames() {
     let ops = Arc::new(FakeSessionOps::new());
     ops.add_session("sess-a");
-    let (base, mut rx, server) = spawn_sessions_server(ops.clone(), "sess-a").await;
+    let (base, _rx, server) = spawn_sessions_server(ops.clone(), "sess-a").await;
     let client = reqwest::Client::new();
 
     // Params optional: create without a name.
     let created = rpc_call(&client, &base, 1, "create_session", None).await;
     let first_id = created["session_id"].as_str().unwrap().to_string();
     assert!(first_id.starts_with("sess-new-"), "{first_id}");
-    match rx.recv().await.unwrap() {
-        WireCommand::SwitchSession { id } => assert_eq!(id, first_id),
-        other => panic!("unexpected command: {other:?}"),
-    }
 
     // With a name: created summary carries it.
     let created = rpc_call(
@@ -122,10 +118,6 @@ async fn post_sessions_creates_renames_and_switches() {
     assert_eq!(created["name"], "brand new");
     let second_id = created["session_id"].as_str().unwrap().to_string();
     assert_ne!(second_id, first_id);
-    match rx.recv().await.unwrap() {
-        WireCommand::SwitchSession { id } => assert_eq!(id, second_id),
-        other => panic!("unexpected command: {other:?}"),
-    }
     // Visible in the list.
     let body = rpc_call(&client, &base, 3, "list_sessions", None).await;
     assert!(
@@ -135,48 +127,6 @@ async fn post_sessions_creates_renames_and_switches() {
             .iter()
             .any(|s| s["session_id"] == second_id && s["name"] == "brand new")
     );
-
-    server.abort();
-}
-
-#[tokio::test]
-async fn switch_route_rebinds_current_and_404s_unknown() {
-    let ops = Arc::new(FakeSessionOps::new());
-    ops.add_session("sess-a");
-    ops.add_session("sess-b");
-    let (base, mut rx, server) = spawn_sessions_server(ops, "sess-a").await;
-    let client = reqwest::Client::new();
-
-    let body = rpc_call(
-        &client,
-        &base,
-        4,
-        "switch_session",
-        Some(json!({ "id": "sess-b" })),
-    )
-    .await;
-    assert_eq!(body["accepted"], true);
-    match rx.recv().await.unwrap() {
-        WireCommand::SwitchSession { id } => assert_eq!(id, "sess-b"),
-        other => panic!("unexpected command: {other:?}"),
-    }
-    // /state now reports the switched session.
-    let state = rpc_call(&client, &base, 5, "get_state", None).await;
-    assert_eq!(state["session_id"], "sess-b");
-    // And GET /sessions marks it current.
-    let body = rpc_call(&client, &base, 6, "list_sessions", None).await;
-    assert_eq!(body["current_session_id"], "sess-b");
-
-    // Unknown id → -32004.
-    let (code, _msg) = rpc_error(
-        &client,
-        &base,
-        7,
-        "switch_session",
-        Some(json!({ "id": "nope" })),
-    )
-    .await;
-    assert_eq!(code, -32004);
 
     server.abort();
 }
@@ -236,7 +186,7 @@ async fn delete_route_removes_conflicts_on_active_and_404s_unknown() {
     ops.add_session("sess-a");
     ops.add_session("sess-busy");
     ops.set_running("sess-busy", &["run-1"]);
-    let (base, mut rx, server) = spawn_sessions_server(ops, "sess-a").await;
+    let (base, _rx, server) = spawn_sessions_server(ops, "sess-a").await;
     let client = reqwest::Client::new();
 
     // -32009 while graphs are running (error message carries the run ids).
@@ -269,10 +219,6 @@ async fn delete_route_removes_conflicts_on_active_and_404s_unknown() {
     )
     .await;
     assert_eq!(deleted["deleted"], true);
-    match rx.recv().await.unwrap() {
-        WireCommand::SwitchSession { id } => assert_eq!(id, "sess-busy"),
-        other => panic!("unexpected command: {other:?}"),
-    }
     let body = rpc_call(&client, &base, 15, "list_sessions", None).await;
     assert_eq!(body["current_session_id"], "sess-busy");
     assert!(

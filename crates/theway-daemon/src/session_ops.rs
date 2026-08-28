@@ -1,16 +1,13 @@
 //! Session resources (session-resource-model) — the app-side surface the transport
 //! servers program against for the session lifecycle RPCs / HTTP routes.
 //!
-//! Two pieces live here:
-//!
 //! * [`SessionFactory`] — builds a fresh, fully-wired session runtime for any session id
 //!   (resume semantics, the in-process version of CLI `--resume-id`). Built by the daemon
 //!   orchestration layer (`orchestration::SessionRuntimeBuilder`) and carried by the transport
-//!   host (`turn::daemon::TurnHost`), which invokes it on `SwitchSession`.
+//!   host (`turn::daemon::TurnHost`).
 //! * [`SessionOps`] — sync query/mutation ops that do NOT need the event loop
-//!   (list / create / rename / delete). Switching the *current* session is deliberately
-//!   NOT here: it mutates kernel runtime state (harness, feed, busy flag) and must go
-//!   through `WireCommand::SwitchSession` on the serialized loop.
+//!   (list / create / rename / delete). Sessions are addressed explicitly by id; there is
+//!   no daemon-side session-switch operation.
 //!
 //! The daemon's transport host holds an `Arc<dyn SessionOps>` (via
 //! [`theway_transport::TransportEndpoints`]) and never touches the session repo
@@ -21,7 +18,6 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, Result, bail};
 use async_trait::async_trait;
-use parking_lot::Mutex;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::types::DagStatus;
 
@@ -35,7 +31,7 @@ use theway_transport::wire::SessionSummary;
 ///
 /// Async because opening the transcript, restoring per-session DAG state and rehydrating
 /// the agent are all IO. The returned runtime keeps the harness and trigger executor
-/// together so a session switch cannot retain session-scoped services from the previous
+/// together so a session resume cannot retain session-scoped services from the previous
 /// session.
 pub type SessionFactory = Arc<
     dyn Fn(
@@ -49,19 +45,6 @@ pub type SessionFactory = Arc<
         + Sync,
 >;
 
-/// Live "current session" state shared between the transport event loop and [`AppSessionOps`].
-///
-/// The transport loop syncs it on every published snapshot (and on session switch), so
-/// `SessionOps::list` can report `busy` / `model` for the current session without reaching
-/// into kernel internals.
-#[derive(Clone, Debug, Default)]
-pub struct CurrentSessionState {
-    pub session_id: String,
-    pub busy: bool,
-    pub model: String,
-    pub cwd: String,
-}
-
 /// Session lifecycle ops exposed to the transport servers (session-resource-model tasks
 /// 3.5/3.6). All ops are repo-backed; `delete` additionally consults the DAG engine for
 /// the delete-protection rule.
@@ -70,7 +53,7 @@ pub struct CurrentSessionState {
 pub struct AppSessionOps {
     repo: Arc<dyn SessionRepository>,
     dag_engine: Arc<DagEngine>,
-    current: Arc<Mutex<CurrentSessionState>>,
+    cwd: String,
     session_execution: SessionExecutionRegistry,
 }
 
@@ -78,13 +61,13 @@ impl AppSessionOps {
     pub fn new(
         repo: Arc<dyn SessionRepository>,
         dag_engine: Arc<DagEngine>,
-        current: Arc<Mutex<CurrentSessionState>>,
+        cwd: String,
         session_execution: SessionExecutionRegistry,
     ) -> Self {
         Self {
             repo,
             dag_engine,
-            current,
+            cwd,
             session_execution,
         }
     }
@@ -93,7 +76,6 @@ impl AppSessionOps {
 #[async_trait]
 impl SessionOps for AppSessionOps {
     async fn list(&self) -> Result<Vec<SessionSummary>> {
-        let current = self.current.lock().clone();
         let runs = self.dag_engine.list_runs();
 
         let mut summaries = Vec::new();
@@ -106,21 +88,16 @@ impl SessionOps for AppSessionOps {
                 .filter(|run| run.status == DagStatus::Running)
                 .count() as u32;
 
-            let is_current = current.session_id == record.id;
             summaries.push(SessionSummary {
                 session_id: record.id,
                 name: record.name.unwrap_or_default(),
                 cwd: record.cwd,
-                model: if is_current && !current.model.is_empty() {
-                    current.model.clone()
-                } else {
-                    record.model
-                },
+                model: record.model,
                 created_at: record.created_at,
                 last_activity_at: record.last_activity_at,
                 graph_count,
                 active_graph_count,
-                busy: is_current && current.busy,
+                busy: false,
                 preview: record.preview,
                 metadata: HashMap::new(),
             });
@@ -135,13 +112,10 @@ impl SessionOps for AppSessionOps {
     ) -> Result<String> {
         // New sessions record the daemon work_dir so activation can resolve the
         // matching execution context.
-        let cwd = {
-            let state = self.current.lock();
-            if state.cwd.is_empty() {
-                ".".to_string()
-            } else {
-                state.cwd.clone()
-            }
+        let cwd = if self.cwd.is_empty() {
+            ".".to_string()
+        } else {
+            self.cwd.clone()
         };
         let session = self
             .repo
@@ -226,22 +200,10 @@ mod tests {
 
     fn ops(
         repo: Arc<dyn SessionRepository>,
-        current_id: &str,
-    ) -> (AppSessionOps, Arc<Mutex<CurrentSessionState>>) {
+        _current_id: &str,
+    ) -> AppSessionOps {
         let engine = Arc::new(DagEngine::new());
-        let current = Arc::new(Mutex::new(CurrentSessionState {
-            session_id: current_id.to_string(),
-            busy: true,
-            model: "faux:current".into(),
-            cwd: "/cwd".into(),
-        }));
-        let ops = AppSessionOps::new(
-            repo,
-            engine.clone(),
-            current.clone(),
-            SessionExecutionRegistry::new(),
-        );
-        (ops, current)
+        AppSessionOps::new(repo, engine, "/cwd".into(), SessionExecutionRegistry::new())
     }
 
     async fn session_id_of(session: &(impl SessionReader + ?Sized)) -> String {
@@ -256,18 +218,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_reports_current_session_busy_with_live_model() {
+    async fn list_returns_repo_summaries_without_live_current_flags() {
         let dir = tempdir().unwrap();
         let repo = Arc::new(SqliteSessionRepo::new(dir.path()));
         let session = repo.create("/cwd").await.unwrap();
         let id = session_id_of(&session).await;
 
-        let (ops, _current) = ops(repo, &id);
+        let ops = ops(repo, &id);
         let summaries = ops.list().await.unwrap();
         assert_eq!(summaries.len(), 1);
         assert_eq!(summaries[0].session_id, id);
-        assert!(summaries[0].busy, "current session must report busy");
-        assert_eq!(summaries[0].model, "faux:current");
+        assert!(!summaries[0].busy, "no daemon-side current busy flag");
         assert_eq!(summaries[0].graph_count, 0);
         assert_eq!(summaries[0].active_graph_count, 0);
     }
@@ -279,7 +240,7 @@ mod tests {
         let first = repo.create("/cwd").await.unwrap();
         let first_id = session_id_of(&first).await;
 
-        let (ops, _current) = ops(repo.clone(), &first_id);
+        let ops = ops(repo.clone(), &first_id);
         let new_id = ops.create(None, &HashMap::new()).await.unwrap();
         assert_ne!(new_id, first_id);
         let summaries = ops.list().await.unwrap();
@@ -294,7 +255,7 @@ mod tests {
         let session = repo.create("/cwd").await.unwrap();
         let id = session_id_of(&session).await;
 
-        let (ops, _current) = ops(repo, &id);
+        let ops = ops(repo, &id);
         ops.rename(&id, "  my session  ").await.unwrap();
         let summaries = ops.list().await.unwrap();
         assert_eq!(summaries[0].name, "my session");
@@ -318,7 +279,7 @@ mod tests {
         let session = repo.create(work.display().to_string()).await.unwrap();
         let id = session_id_of(&session).await;
 
-        let (ops, _current) = ops(repo.clone(), &id);
+        let ops = ops(repo.clone(), &id);
         ops.session_execution
             .set(
                 id.clone(),
@@ -354,16 +315,10 @@ mod tests {
         let engine = Arc::new(DagEngine::new());
         // A goal run is a real engine run; stamp it to this session like the goal hook does.
         let run_id = engine.plan_goal("test condition", Some(id.clone()));
-        let current = Arc::new(Mutex::new(CurrentSessionState {
-            session_id: id.clone(),
-            busy: false,
-            model: String::new(),
-            cwd: "/cwd".into(),
-        }));
         let ops = AppSessionOps::new(
             repo.clone(),
             engine.clone(),
-            current,
+            "/cwd".into(),
             SessionExecutionRegistry::new(),
         );
 

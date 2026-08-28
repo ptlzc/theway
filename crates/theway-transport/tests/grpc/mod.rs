@@ -154,7 +154,9 @@ fn grpc_state_with_ops() -> (
 async fn get_state_returns_structured_session_state() {
     let (state, _command_rx) = grpc_state();
     let state = state
-        .get_state(Request::new(Empty {}))
+        .get_state(Request::new(theway_grpc::SessionStateRequest {
+            session_id: String::new(),
+        }))
         .await
         .unwrap()
         .into_inner();
@@ -175,7 +177,7 @@ fn plain_block(text: &str) -> crate::feed::WireFeedBlock {
 async fn lagged_snapshot_stream_emits_latest_full_state() {
     let (state, _command_rx) = grpc_state();
     let mut stream = state
-        .stream_events(Request::new(Empty {}))
+        .stream_events(Request::new(StreamEventsRequest { session_id: None }))
         .await
         .unwrap()
         .into_inner();
@@ -223,6 +225,7 @@ async fn commands_queue_with_accepted_semantics() {
             text,
             images,
             interrupt: _,
+            ..
         } => {
             assert_eq!(text, "hello");
             assert_eq!(images.len(), 1);
@@ -233,20 +236,23 @@ async fn commands_queue_with_accepted_semantics() {
     }
 
     let result = state
-        .cancel(Request::new(Empty {}))
+        .cancel(Request::new(CancelRequest {
+            session_id: "test-session".into(),
+        }))
         .await
         .unwrap()
         .into_inner();
     assert!(result.accepted);
     assert!(matches!(
         command_rx.recv().await.unwrap(),
-        WireCommand::Abort
+        WireCommand::Abort { .. }
     ));
 
     let rpc_state = state.clone();
     let rpc = tokio::spawn(async move {
         rpc_state
             .set_model(Request::new(SetModelRequest {
+                session_id: "test-session".into(),
                 spec: "anthropic:claude-haiku-4-5".into(),
             }))
             .await
@@ -254,7 +260,11 @@ async fn commands_queue_with_accepted_semantics() {
             .into_inner()
     });
     match command_rx.recv().await.unwrap() {
-        WireCommand::SetModel { spec, response } => {
+        WireCommand::SetModel {
+            spec,
+            response,
+            ..
+        } => {
             assert_eq!(spec, "anthropic:claude-haiku-4-5");
             let _ = response.send(true);
         }
@@ -267,6 +277,7 @@ async fn commands_queue_with_accepted_semantics() {
     let rpc = tokio::spawn(async move {
         rpc_state
             .set_thinking(Request::new(SetThinkingRequest {
+                session_id: "test-session".into(),
                 level: "high".into(),
             }))
             .await
@@ -274,7 +285,11 @@ async fn commands_queue_with_accepted_semantics() {
             .into_inner()
     });
     match command_rx.recv().await.unwrap() {
-        WireCommand::SetThinking { level, response } => {
+        WireCommand::SetThinking {
+            level,
+            response,
+            ..
+        } => {
             assert_eq!(level, "high");
             let _ = response.send(true);
         }
@@ -284,20 +299,23 @@ async fn commands_queue_with_accepted_semantics() {
     assert!(result.accepted);
 
     let result = state
-        .approve(Request::new(ApproveRequest { approve: true }))
+        .approve(Request::new(ApproveRequest {
+            session_id: "test-session".into(),
+            approve: true,
+        }))
         .await
         .unwrap()
         .into_inner();
     assert!(result.accepted);
     match command_rx.recv().await.unwrap() {
-        WireCommand::ResolveControlPlane { approve } => assert!(approve),
+        WireCommand::ResolveControlPlane { approve, .. } => assert!(approve),
         other => panic!("unexpected command: {other:?}"),
     }
 }
 
 #[tokio::test]
-async fn send_message_rejects_non_current_session() {
-    let (state, _command_rx) = grpc_state();
+async fn send_message_accepts_explicit_session_without_switch() {
+    let (state, mut command_rx) = grpc_state();
 
     // Same session (or omitted) → accepted.
     let ok = state
@@ -311,26 +329,34 @@ async fn send_message_rejects_non_current_session() {
         .unwrap()
         .into_inner();
     assert!(ok.accepted);
+    match command_rx.recv().await.unwrap() {
+        WireCommand::Submit { session_id, .. } => assert_eq!(session_id, "test-session"),
+        other => panic!("unexpected command: {other:?}"),
+    }
 
-    // Another session → FAILED_PRECONDITION, nothing queued.
-    let err = state
+    // Another session is also accepted directly; no session switch is needed.
+    let ok = state
         .send_message(Request::new(SendMessageRequest {
-            text: "hi".into(),
+            text: "hi other".into(),
             images: vec![],
             mode: MessageMode::Queue.into(),
             session_id: Some("other-session".into()),
         }))
         .await
-        .unwrap_err();
-    assert_eq!(err.code(), tonic::Code::FailedPrecondition);
-    assert!(err.message().contains("SwitchSession"));
+        .unwrap()
+        .into_inner();
+    assert!(ok.accepted);
+    match command_rx.recv().await.unwrap() {
+        WireCommand::Submit { session_id, .. } => assert_eq!(session_id, "other-session"),
+        other => panic!("unexpected command: {other:?}"),
+    }
 }
 
 #[tokio::test]
 async fn stream_events_emits_published_snapshots() {
     let (state, _command_rx) = grpc_state();
     let response = state
-        .stream_events(Request::new(Empty {}))
+        .stream_events(Request::new(StreamEventsRequest { session_id: None }))
         .await
         .unwrap()
         .into_inner();
@@ -382,6 +408,7 @@ async fn get_node_output_returns_fragment_from_offset() {
 
     let response = state
         .get_node_output(Request::new(GetNodeOutputRequest {
+            session_id: "sess-1".into(),
             run_id: "run-1".into(),
             node_id: "node-1".into(),
             offset: 6,
@@ -397,6 +424,7 @@ async fn get_node_output_returns_fragment_from_offset() {
     // Unknown node → not found.
     let err = state
         .get_node_output(Request::new(GetNodeOutputRequest {
+            session_id: "sess-1".into(),
             run_id: "run-1".into(),
             node_id: "nope".into(),
             offset: 0,
@@ -408,6 +436,7 @@ async fn get_node_output_returns_fragment_from_offset() {
     // Offset past the end → empty fragment, total preserved.
     let response = state
         .get_node_output(Request::new(GetNodeOutputRequest {
+            session_id: "sess-1".into(),
             run_id: "run-1".into(),
             node_id: "node-1".into(),
             offset: 100,
@@ -439,6 +468,7 @@ async fn get_node_output_includes_messages_json() {
 
     let response = state
         .get_node_output(Request::new(GetNodeOutputRequest {
+            session_id: "sess-1".into(),
             run_id: "run-1".into(),
             node_id: "node-1".into(),
             offset: 0,
@@ -472,6 +502,7 @@ async fn get_node_output_serves_retained_messages_without_a_live_job() {
     state.job_ops = jobs;
     let response = state
         .get_node_output(Request::new(GetNodeOutputRequest {
+            session_id: "sess-1".into(),
             run_id: "run-1".into(),
             node_id: "node-1".into(),
             offset: 0,
@@ -492,6 +523,7 @@ async fn get_node_output_serves_retained_messages_without_a_live_job() {
     // Unknown node still 404s even with a messages dir configured.
     let err = state
         .get_node_output(Request::new(GetNodeOutputRequest {
+            session_id: "sess-1".into(),
             run_id: "run-1".into(),
             node_id: "nope".into(),
             offset: 0,
@@ -507,12 +539,12 @@ async fn two_simultaneous_subscribers_both_receive_frames() {
     // to every subscriber — a second client must not starve the first.
     let (state, _command_rx) = grpc_state();
     let first = state
-        .stream_events(Request::new(Empty {}))
+        .stream_events(Request::new(StreamEventsRequest { session_id: None }))
         .await
         .unwrap()
         .into_inner();
     let second = state
-        .stream_events(Request::new(Empty {}))
+        .stream_events(Request::new(StreamEventsRequest { session_id: None }))
         .await
         .unwrap()
         .into_inner();
@@ -564,7 +596,7 @@ async fn two_simultaneous_subscribers_both_receive_frames() {
 async fn stream_events_merges_snapshot_and_event_payloads() {
     let (state, _command_rx) = grpc_state();
     let response = state
-        .stream_events(Request::new(Empty {}))
+        .stream_events(Request::new(StreamEventsRequest { session_id: None }))
         .await
         .unwrap()
         .into_inner();
@@ -627,7 +659,7 @@ async fn stream_events_merges_snapshot_and_event_payloads() {
 async fn stream_events_forwards_dag_node_status_frames() {
     let (state, _command_rx) = grpc_state();
     let response = state
-        .stream_events(Request::new(Empty {}))
+        .stream_events(Request::new(StreamEventsRequest { session_id: None }))
         .await
         .unwrap()
         .into_inner();
@@ -684,7 +716,9 @@ async fn grpc_server_over_transport_serves_client() {
     .unwrap();
 
     let state = session_client
-        .get_state(Empty {})
+        .get_state(theway_grpc::SessionStateRequest {
+            session_id: String::new(),
+        })
         .await
         .unwrap()
         .into_inner();
@@ -713,7 +747,7 @@ async fn grpc_server_over_transport_serves_client() {
             .await
             .unwrap();
     let event_stream = event_client
-        .stream_events(Empty {})
+        .stream_events(StreamEventsRequest { session_id: None })
         .await
         .unwrap()
         .into_inner();

@@ -326,15 +326,6 @@ impl StorageService for GrpcState {
                 .await
                 .map_err(|e| Status::invalid_argument(e.to_string()))?;
         }
-        // Keep parity with SessionService.CreateSession: becoming current flows
-        // through the serialized event loop.
-        let accepted = self
-            .commands
-            .send(crate::wire::WireCommand::SwitchSession { id: new_id.clone() })
-            .is_ok();
-        if !accepted {
-            return Err(Status::unavailable("event loop command channel closed"));
-        }
         let sessions = self
             .session_ops
             .list()
@@ -418,11 +409,6 @@ impl StorageService for GrpcState {
                 .unwrap_or_default();
             *self.session_id.write().unwrap() = fallback.clone();
             self.latest.lock().session_id = fallback.clone();
-            if !fallback.is_empty() {
-                let _ = self
-                    .commands
-                    .send(crate::wire::WireCommand::SwitchSession { id: fallback });
-            }
         }
         Ok(Response::new(DeleteSessionResponse {
             running_run_ids: Vec::new(),

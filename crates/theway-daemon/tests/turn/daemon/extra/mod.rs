@@ -1,13 +1,12 @@
 //! Extra `turn/daemon` tests — split out of src, bridged from a nested
 //! module so the primary `tests/turn/daemon/mod.rs` stays untouched.
 //!
-//! Focus: web-command routing arms, `Configure`/`SwitchSession` event-loop
-//! paths, a successful model switch through the catalog, populated
+//! Focus: web-command routing arms, `Configure` event-loop paths, a successful
+//! model switch through the catalog, populated
 //! `wire_snapshot` state (goal/trigger-poll/control-plane/sidebar), feed
 //! block patching, and two additional `run_transport_loop` exits
 //! (server error, aborted server task, feed update drain).
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -31,7 +30,7 @@ use crate::orchestration::SessionRuntimeBuilder;
 use crate::paths::DaemonPaths;
 use crate::runtime_storage::local_runtime_storage;
 use crate::session_activation::SessionActivator;
-use crate::session_ops::{CurrentSessionState, SessionFactory};
+use crate::session_ops::SessionFactory;
 use crate::trigger_engine::execution::TriggerExecutor;
 use crate::trigger_engine::runtime::TriggerRuntimeConfig;
 use crate::turn::feed::{FeedUpdate, TriggerPollStatus};
@@ -111,25 +110,6 @@ fn bailing_session_factory() -> SessionFactory {
     )
 }
 
-fn returning_session_factory() -> SessionFactory {
-    Arc::new(
-        |id: String| -> std::pin::Pin<
-            Box<
-                dyn std::future::Future<
-                        Output = anyhow::Result<crate::orchestration::SessionRuntime>,
-                    > + Send,
-            >,
-        > {
-            Box::pin(async {
-                Ok(crate::orchestration::SessionRuntime::for_test(
-                    id,
-                    test_harness(),
-                ))
-            })
-        },
-    )
-}
-
 fn daemon_config(
     scratch: &TempDir,
     repo_dir: &TempDir,
@@ -175,7 +155,6 @@ fn daemon_config(
         subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry::new(),
         session_factory,
         session_repo: Arc::new(SqliteSessionRepo::new(repo_dir.path())),
-        current_session_state: Arc::new(parking_lot::Mutex::new(CurrentSessionState::default())),
         capabilities: RuntimeCapabilities::default(),
         thinking_summary: None,
         startup: crate::startup_config::StartupConfig::default(),
@@ -313,6 +292,7 @@ async fn handle_web_command_routes_submit_to_start_turn() {
 
     host.handle_web_command(
         WireCommand::Submit {
+            session_id: "sess-extra".into(),
             text: "hello".into(),
             images: Vec::new(),
             interrupt: false,
@@ -355,6 +335,7 @@ async fn handle_web_command_routes_set_model_invalid_spec() {
     let (response, _rx) = tokio::sync::oneshot::channel();
     host.handle_web_command(
         WireCommand::SetModel {
+            session_id: "sess-extra".into(),
             spec: "no-colon".into(),
             response,
         },
@@ -373,6 +354,7 @@ async fn handle_web_command_routes_set_thinking() {
     let (response, response_rx) = tokio::sync::oneshot::channel();
     host.handle_web_command(
         WireCommand::SetThinking {
+            session_id: "sess-extra".into(),
             level: "high".into(),
             response,
         },
@@ -394,6 +376,7 @@ async fn handle_web_command_routes_set_thinking() {
     let (response, response_rx) = tokio::sync::oneshot::channel();
     host.handle_web_command(
         WireCommand::SetThinking {
+            session_id: "sess-extra".into(),
             level: "bogus".into(),
             response,
         },
@@ -405,62 +388,6 @@ async fn handle_web_command_routes_set_thinking() {
         host.session.kernel.harness().agent().state().thinking_level,
         Some(theway_core::ThinkingLevel::High)
     );
-}
-
-#[tokio::test]
-async fn handle_web_command_routes_switch_session_empty_id() {
-    let mut fixture = HostFixture::new().await;
-    let host = fixture.host();
-    let original = host.session.id.clone();
-
-    host.handle_web_command(
-        WireCommand::SwitchSession { id: String::new() },
-        &mut TurnState::default(),
-    )
-    .await;
-
-    assert_eq!(host.session.id, original);
-}
-
-// ── switch session ───────────────────────────────────────────────────────────────
-
-#[tokio::test]
-async fn handle_switch_session_rejects_unknown_id() {
-    let mut fixture = HostFixture::new().await;
-    let host = fixture.host();
-    let original = host.session.id.clone();
-
-    host.handle_switch_session("__missing__".into(), &mut TurnState::default())
-        .await;
-
-    assert_eq!(host.session.id, original);
-}
-
-#[tokio::test]
-async fn handle_switch_session_switches_to_known_session_file() {
-    let mut fixture = HostFixture::new_with_factory(returning_session_factory()).await;
-    // The repo only needs a matching `.db` file name for the fast path in
-    // `theway_storage::session::find_path_by_id`.
-    std::fs::write(fixture._repo.path().join("sess-two.db"), b"").unwrap();
-
-    let process_cwd = std::env::current_dir().unwrap();
-    let host = fixture.host();
-    host.handle_switch_session("sess-two".into(), &mut TurnState::default())
-        .await;
-
-    assert_eq!(host.session.id, "sess-two");
-    assert_eq!(
-        host.session.cwd,
-        std::env::temp_dir().join("theway-test").join("sess-two")
-    );
-    {
-        let state = host.session.shared_state.lock();
-        assert_eq!(state.session_id, "sess-two");
-        assert_eq!(state.cwd, host.session.cwd.display().to_string());
-    }
-    assert_eq!(std::env::current_dir().unwrap(), process_cwd);
-    assert!(!host.session.busy);
-    assert!(host.session.queue.is_empty());
 }
 
 // ── wire snapshot / state helpers ────────────────────────────────────────────────
@@ -632,29 +559,6 @@ fn apply_feed_update_records_trigger_poll_status() {
             host.projection.latest_trigger_poll.as_ref().unwrap().trace_id,
             "trace-poll"
         );
-    });
-}
-
-#[test]
-fn sync_current_session_state_writes_shared_view() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let mut fixture = HostFixture::new().await;
-        let host = fixture.host();
-        host.session.id = "custom-session".into();
-        host.session.busy = true;
-        host.session.cwd = PathBuf::from("/tmp/theway-work");
-        host.runtime.cwd = PathBuf::from("/tmp/not-used");
-
-        host.sync_current_session_state();
-
-        let state = host.session.shared_state.lock();
-        assert_eq!(state.session_id, "custom-session");
-        assert!(state.busy);
-        assert_eq!(state.cwd, "/tmp/theway-work");
-        assert_eq!(state.model, "faux:faux");
     });
 }
 

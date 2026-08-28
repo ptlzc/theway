@@ -247,6 +247,7 @@ fn session_summary_converts_to_wire_shape() {
         active_graph_count: 1,
         busy: true,
         preview: Some("last prompt".into()),
+        metadata: Default::default(),
     };
     let w = session_summary_wire(&summary);
     assert_eq!(w.session_id, "sess-1");
