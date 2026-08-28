@@ -430,7 +430,7 @@ pub fn session_tool_set_for_cwd(
     // Session graph tools (main-agent only): list/read/status/wait/attach against
     // the Turso-backed session graph.
     let graph_path = theway_contract::config::sessions_dir_for_cwd(&cwd).join("session_graph.db");
-    tools.extend(session_graph::SessionGraphTools::new(
+    tools.extend(session_graph::SessionGraphTools::create(
         repo.clone(),
         graph_path,
         cwd.clone(),

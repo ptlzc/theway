@@ -61,7 +61,7 @@ pub struct SessionGraphAttachTool {
 pub struct SessionGraphTools;
 
 impl SessionGraphTools {
-    pub fn new(
+    pub fn create(
         repo: Arc<dyn SessionRepository>,
         graph_path: PathBuf,
         cwd: PathBuf,

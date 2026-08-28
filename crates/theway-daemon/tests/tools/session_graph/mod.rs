@@ -8,7 +8,7 @@ use theway_storage::sqlite_repo::SqliteSessionRepo;
 fn session_graph_tools_are_named_and_registered() {
     let dir = tempfile::tempdir().unwrap();
     let repo: Arc<dyn SessionRepository> = Arc::new(SqliteSessionRepo::new(dir.path()));
-    let tools = crate::tools::session_graph::SessionGraphTools::new(
+    let tools = crate::tools::session_graph::SessionGraphTools::create(
         repo,
         dir.path().join("session_graph.db"),
         dir.path().to_path_buf(),

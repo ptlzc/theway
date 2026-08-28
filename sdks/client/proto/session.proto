@@ -230,7 +230,8 @@ message SessionSummary {
   // Canonical session id. New clients should use this field; `session_id`
   // remains as a deprecated alias for compatibility with older consumers.
   string id = 13;
-  string session_id = 1 [deprecated = true];
+  // Compatibility alias; new clients should read `id`.
+  string session_id = 1;
   string name = 2;
   string cwd = 3;
   string model = 4;
@@ -268,7 +269,7 @@ message SessionInfo {
   string name = 2;
   string cwd = 3;
   string created_at = 4; // RFC3339 / ISO-8601 with offset (UTC).
-  int64 last_activity_at = 5 [deprecated = true]; // Deprecated epoch milliseconds.
+  int64 last_activity_at = 5; // Deprecated epoch milliseconds.
   optional string last_activity_at_rfc3339 = 6; // RFC3339 / ISO-8601 with offset (UTC), null when absent.
   bool busy = 7;
   optional string preview = 8;
@@ -464,11 +465,9 @@ message ClearCredentialRequest {
 }
 
 service SessionService {
-  // Full structured state (binary protobuf). Deprecated in favor of
-  // GetSnapshot / GetHistory for new clients.
-  rpc GetState(SessionStateRequest) returns (SessionState) {
-    option deprecated = true;
-  }
+  // Full structured state (binary protobuf). Kept for compatibility; new
+  // clients should use GetSnapshot / GetHistory.
+  rpc GetState(SessionStateRequest) returns (SessionState);
   // Full nested session snapshot (session-snapshot-collapse contract).
   rpc GetSnapshot(SessionStateRequest) returns (SessionSnapshot);
   // Session history as a snapshot-shaped transcript (session-snapshot-collapse).

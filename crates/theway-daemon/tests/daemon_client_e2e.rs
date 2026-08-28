@@ -288,7 +288,10 @@ async fn list_sessions_marks_current_after_spawn() {
             break;
         }
     }
-    assert!(materialized, "materialized session listed after first message");
+    assert!(
+        materialized,
+        "materialized session listed after first message"
+    );
 
     unsafe { std::env::remove_var("THEWAY_DIR") };
 }

@@ -346,7 +346,7 @@ export interface SessionSummary {
    * remains as a deprecated alias for compatibility with older consumers.
    */
   id: string;
-  /** @deprecated */
+  /** Compatibility alias; new clients should read `id`. */
   sessionId: string;
   name: string;
   cwd: string;
@@ -383,11 +383,7 @@ export interface SessionInfo {
   cwd: string;
   /** RFC3339 / ISO-8601 with offset (UTC). */
   createdAt: string;
-  /**
-   * Deprecated epoch milliseconds.
-   *
-   * @deprecated
-   */
+  /** Deprecated epoch milliseconds. */
   lastActivityAt: string;
   /** RFC3339 / ISO-8601 with offset (UTC), null when absent. */
   lastActivityAtRfc3339?: string | undefined;
@@ -7764,10 +7760,8 @@ export const ClearCredentialRequest: MessageFns<ClearCredentialRequest> = {
 export type SessionServiceService = typeof SessionServiceService;
 export const SessionServiceService = {
   /**
-   * Full structured state (binary protobuf). Deprecated in favor of
-   * GetSnapshot / GetHistory for new clients.
-   *
-   * @deprecated
+   * Full structured state (binary protobuf). Kept for compatibility; new
+   * clients should use GetSnapshot / GetHistory.
    */
   getState: {
     path: "/theway.grpc.v1.SessionService/GetState" as const,
@@ -7965,10 +7959,8 @@ export const SessionServiceService = {
 
 export interface SessionServiceServer extends UntypedServiceImplementation {
   /**
-   * Full structured state (binary protobuf). Deprecated in favor of
-   * GetSnapshot / GetHistory for new clients.
-   *
-   * @deprecated
+   * Full structured state (binary protobuf). Kept for compatibility; new
+   * clients should use GetSnapshot / GetHistory.
    */
   getState: handleUnaryCall<SessionStateRequest, SessionState>;
   /** Full nested session snapshot (session-snapshot-collapse contract). */
@@ -8016,10 +8008,8 @@ export interface SessionServiceServer extends UntypedServiceImplementation {
 
 export interface SessionServiceClient extends Client {
   /**
-   * Full structured state (binary protobuf). Deprecated in favor of
-   * GetSnapshot / GetHistory for new clients.
-   *
-   * @deprecated
+   * Full structured state (binary protobuf). Kept for compatibility; new
+   * clients should use GetSnapshot / GetHistory.
    */
   getState(
     request: SessionStateRequest,
