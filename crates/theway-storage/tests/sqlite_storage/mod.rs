@@ -649,3 +649,32 @@ async fn create_lazy_respects_existing_path_and_repo_listing() {
         "materialized file keeps the pre-minted id as its stem"
     );
 }
+
+#[tokio::test]
+async fn repo_listing_excludes_session_graph_db() {
+    let dir = tempdir().unwrap();
+    let repo = crate::sqlite_repo::SqliteSessionRepo::new(dir.path());
+    repo.create("/cwd").await.unwrap();
+
+    // The session graph store keeps its database in the same directory as the
+    // session databases; it is not a session db (no meta/entries tables) and
+    // must never appear in repo listings — otherwise `list_sessions` and
+    // `resume` (which picks the newest file) trip over it.
+    crate::session_graph::SessionGraphStore::open(
+        dir.path().join(crate::session_graph::SESSION_GRAPH_DB_FILE),
+    )
+    .await
+    .unwrap();
+
+    let listed = repo.list().await.unwrap();
+    assert_eq!(listed.len(), 1, "session graph db excluded from repo listing");
+    assert!(
+        listed.iter().all(|p| {
+            p.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .as_deref()
+                != Some(crate::session_graph::SESSION_GRAPH_DB_FILE)
+        }),
+        "no listing entry may be the session graph db"
+    );
+}

@@ -59,7 +59,8 @@ impl SqliteSessionRepo {
     }
 
     /// List session databases in `root`, sorted ascending by name (≈ creation
-    /// time thanks to v7).
+    /// time thanks to v7). The per-cwd session graph store keeps its database
+    /// in this same directory; it is not a session db, so it is excluded.
     pub async fn list(&self) -> Result<Vec<PathBuf>, SessionError> {
         let mut rd = match tokio::fs::read_dir(&self.root).await {
             Ok(rd) => rd,
@@ -69,7 +70,7 @@ impl SqliteSessionRepo {
         let mut out = Vec::new();
         while let Some(entry) = rd.next_entry().await.map_err(io_err)? {
             let name = entry.file_name().to_string_lossy().into_owned();
-            if name.ends_with(".db") {
+            if name.ends_with(".db") && name != crate::session_graph::SESSION_GRAPH_DB_FILE {
                 out.push(entry.path());
             }
         }

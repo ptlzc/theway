@@ -212,8 +212,8 @@ impl TurnHost {
             })
             .abort_handle()
         };
-        let session_graph_path =
-            theway_contract::config::sessions_dir_for_cwd(&self.session.cwd).join("session_graph.db");
+        let session_graph_path = theway_contract::config::sessions_dir_for_cwd(&self.session.cwd)
+            .join(theway_storage::session_graph::SESSION_GRAPH_DB_FILE);
         TransportEndpoints {
             command_tx,
             command_rx,

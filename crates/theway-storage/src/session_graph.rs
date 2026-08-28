@@ -14,6 +14,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use turso::{Builder, Connection, Database};
 
+/// File name of the per-cwd session graph database, which lives in the same
+/// directory as the session databases (`<sessions-dir>/<cwd-hash>/`). It is
+/// NOT a session db (no `meta`/`entries` tables), so session-repo directory
+/// scans must exclude it.
+pub const SESSION_GRAPH_DB_FILE: &str = "session_graph.db";
+
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS session_graph_nodes (
     id                TEXT PRIMARY KEY,
