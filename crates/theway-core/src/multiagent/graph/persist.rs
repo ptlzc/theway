@@ -8,6 +8,8 @@
 
 use async_trait::async_trait;
 
+pub use crate::agent::session::session::SessionGraphState;
+
 use super::model::now_ms;
 use super::types::{DagNode, DagRun, DagStatus, NodeStatus};
 pub use theway_contract::dag::{PersistedNode, PersistedRun, state_path_for_project};
@@ -132,6 +134,29 @@ pub fn max_run_counter(runs: &[DagRun]) -> u64 {
         })
         .max()
         .unwrap_or(0)
+}
+
+/// Project persisted runs into a [`SessionGraphState`] with no subagent jobs.
+pub fn to_session_graph_state(runs: Vec<PersistedRun>) -> SessionGraphState {
+    SessionGraphState {
+        dags: runs,
+        subagents: Vec::new(),
+    }
+}
+
+/// Extract the persisted runs from a [`SessionGraphState`].
+pub fn from_session_graph_state(state: &SessionGraphState) -> Vec<PersistedRun> {
+    state.dags.clone()
+}
+
+/// Alias for [`to_session_graph_state`].
+pub fn session_graph_state_from_runs(runs: Vec<PersistedRun>) -> SessionGraphState {
+    to_session_graph_state(runs)
+}
+
+/// Alias for [`from_session_graph_state`].
+pub fn persisted_runs_from_session_graph_state(state: &SessionGraphState) -> Vec<PersistedRun> {
+    from_session_graph_state(state)
 }
 
 #[cfg(test)]
