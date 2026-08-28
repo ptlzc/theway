@@ -9,6 +9,7 @@ import {
   type Empty,
   type SendMessageRequest,
   type SetModelRequest,
+  type SetThinkingRequest,
 } from './generated/commands.js';
 import {
   EventServiceClient as EventServiceClientCtor,
@@ -201,6 +202,19 @@ export class ThewayGrpcClient {
   /** `SetModel` with `provider` + `model` (composed into `provider:model`). */
   setModel(provider: string, model: string, sessionId = ''): Promise<void> {
     return this.setModelSpec(`${provider}:${model}`, sessionId);
+  }
+
+  /** `SetThinking` — set the active thinking level for a session. */
+  async setThinking(level: string, sessionId = ''): Promise<void> {
+    const request: SetThinkingRequest = { sessionId, level };
+    const result = await this.#call<SetThinkingRequest, CommandResult>(
+      this.#command.setThinking.bind(this.#command),
+      'SetThinking',
+      request,
+    );
+    if (!result.accepted) {
+      throw new Error('theway grpc: SetThinking was not accepted by the server');
+    }
   }
 
   /** `Cancel` — stop the in-flight turn (same as local Ctrl-C). */
@@ -587,6 +601,17 @@ export class ThewayGrpcClient {
   }
 
   // ── event stream ──
+
+  /**
+   * `StreamEvents` — convenience alias with the session id first.
+   */
+  openEventStream(
+    sessionId: string,
+    onFrame: (frame: StreamFrame) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    return this.streamEvents(onFrame, signal, sessionId);
+  }
 
   /**
    * `StreamEvents` — server-streaming snapshot/event frames. Every frame
