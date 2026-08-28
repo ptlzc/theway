@@ -2,8 +2,18 @@ use super::*;
 
 #[tonic::async_trait]
 impl SessionService for GrpcState {
-    async fn get_state(&self, _request: Request<Empty>) -> Result<Response<SessionState>, Status> {
+    async fn get_state(
+        &self,
+        request: Request<theway_grpc::SessionStateRequest>,
+    ) -> Result<Response<SessionState>, Status> {
+        let request = request.into_inner();
         let latest = self.latest.lock();
+        if !request.session_id.is_empty() && latest.session_id != request.session_id {
+            return Err(Status::not_found(format!(
+                "session {} is not available",
+                request.session_id
+            )));
+        }
         Ok(Response::new(session_state(&latest)))
     }
 
@@ -32,9 +42,15 @@ impl SessionService for GrpcState {
         let request = request.into_inner();
         let new_id = self
             .session_ops
-            .create()
+            .create(request.session_id.as_deref(), &request.metadata)
             .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(|e| {
+                if e.to_string().contains("already exists") {
+                    Status::already_exists(e.to_string())
+                } else {
+                    Status::internal(e.to_string())
+                }
+            })?;
         if let Some(name) = request.name.as_deref()
             && !name.trim().is_empty()
         {
@@ -42,15 +58,6 @@ impl SessionService for GrpcState {
                 .rename(&new_id, name)
                 .await
                 .map_err(|e| Status::invalid_argument(e.to_string()))?;
-        }
-        // Becoming current goes through the serialized event loop; the current
-        // marker in ListSessions follows on the next snapshot.
-        let accepted = self
-            .commands
-            .send(WireCommand::SwitchSession { id: new_id.clone() })
-            .is_ok();
-        if !accepted {
-            return Err(Status::unavailable("event loop command channel closed"));
         }
         let sessions = self
             .session_ops
@@ -64,31 +71,6 @@ impl SessionService for GrpcState {
         Ok(Response::new(CreateSessionResponse { session }))
     }
 
-    async fn switch_session(
-        &self,
-        request: Request<SwitchSessionRequest>,
-    ) -> Result<Response<CommandResult>, Status> {
-        let requested = request.into_inner().session_id;
-        let sessions = self
-            .session_ops
-            .list()
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
-        let target = resolve_session_id(&sessions, &requested)
-            .ok_or_else(|| Status::not_found(format!("no session matches id {requested}")))?;
-        let accepted = self
-            .commands
-            .send(WireCommand::SwitchSession { id: target.clone() })
-            .is_ok();
-        if accepted {
-            // Rebind the connection-level current session; the event loop applies
-            // the same change on the serialized loop and re-publishes snapshots.
-            *self.session_id.write().unwrap() = target.clone();
-            self.latest.lock().session_id = target;
-        }
-        Ok(Response::new(CommandResult { accepted }))
-    }
-
     async fn rename_session(
         &self,
         request: Request<RenameSessionRequest>,
@@ -96,6 +78,24 @@ impl SessionService for GrpcState {
         let request = request.into_inner();
         self.session_ops
             .rename(&request.session_id, &request.name)
+            .await
+            .map_err(|e| {
+                if e.to_string().contains("no session matches") {
+                    Status::not_found(e.to_string())
+                } else {
+                    Status::invalid_argument(e.to_string())
+                }
+            })?;
+        Ok(Response::new(CommandResult { accepted: true }))
+    }
+
+    async fn update_session_metadata(
+        &self,
+        request: Request<theway_grpc::UpdateSessionMetadataRequest>,
+    ) -> Result<Response<CommandResult>, Status> {
+        let request = request.into_inner();
+        self.session_ops
+            .update_metadata(&request.session_id, &request.metadata)
             .await
             .map_err(|e| {
                 if e.to_string().contains("no session matches") {
@@ -133,7 +133,8 @@ impl SessionService for GrpcState {
             )));
         }
         // Deleted the current session → fall back to the most recent remaining
-        // session (or empty) and tell the event loop to switch to it.
+        // session (or empty). There is no session-switch RPC; clients address
+        // sessions explicitly by id.
         if self.session_id.read().unwrap().clone() == full_id {
             let remaining = self
                 .session_ops
@@ -146,11 +147,6 @@ impl SessionService for GrpcState {
                 .unwrap_or_default();
             *self.session_id.write().unwrap() = fallback.clone();
             self.latest.lock().session_id = fallback.clone();
-            if !fallback.is_empty() {
-                let _ = self
-                    .commands
-                    .send(WireCommand::SwitchSession { id: fallback });
-            }
         }
         Ok(Response::new(DeleteSessionResponse {
             running_run_ids: Vec::new(),

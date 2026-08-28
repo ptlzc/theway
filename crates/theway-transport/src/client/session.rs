@@ -24,32 +24,61 @@ impl GrpcClient {
         &self.addr
     }
 
-    /// Full structured state (health probe: a live daemon answers this).
+    /// Full structured state for the daemon's current session (health probe).
     pub async fn get_state(&mut self) -> Result<SessionState> {
+        self.get_state_for_session("").await
+    }
+
+    /// Full structured state for an explicit session.
+    pub async fn get_state_for_session(&mut self, session_id: &str) -> Result<SessionState> {
         let state = self
             .session
-            .get_state(Empty {})
+            .get_state(SessionStateRequest {
+                session_id: session_id.to_string(),
+            })
             .await
             .map_err(|e| anyhow::anyhow!("get_state: {e}"))?
             .into_inner();
         Ok(state)
     }
 
-    /// Open the snapshot/event frame stream. The stream ends when the daemon
-    /// dies or the event loop exits; the caller is responsible for reconnect.
+    /// Open the snapshot/event frame stream for all sessions.
     pub async fn stream_events(&mut self) -> Result<Streaming<StreamFrame>> {
+        self.stream_events_for_session(None).await
+    }
+
+    /// Open the snapshot/event frame stream, optionally filtered to one session.
+    pub async fn stream_events_for_session(
+        &mut self,
+        session_id: Option<&str>,
+    ) -> Result<Streaming<StreamFrame>> {
         let response = self
             .events
-            .stream_events(Empty {})
+            .stream_events(StreamEventsRequest {
+                session_id: session_id.map(str::to_string),
+            })
             .await
             .map_err(|e| anyhow::anyhow!("stream_events: {e}"))?;
         Ok(response.into_inner())
     }
 
-    /// Submit a message. `interrupt` = stop the current turn and run now
-    /// (INTERRUPT), otherwise queue after the current turn (QUEUE).
+    /// Submit a message to the daemon's current session. `interrupt` = stop the
+    /// current turn and run now (INTERRUPT), otherwise queue after the current
+    /// turn (QUEUE).
     pub async fn send_message(
         &mut self,
+        text: String,
+        images: Vec<WirePromptImage>,
+        interrupt: bool,
+    ) -> Result<bool> {
+        self.send_message_to_session(None, text, images, interrupt)
+            .await
+    }
+
+    /// Submit a message to an explicit session (`None` = current/default).
+    pub async fn send_message_to_session(
+        &mut self,
+        session_id: Option<&str>,
         text: String,
         images: Vec<WirePromptImage>,
         interrupt: bool,
@@ -71,18 +100,24 @@ impl GrpcClient {
                     theway_grpc::MessageMode::Queue
                 }
                 .into(),
-                session_id: None,
+                session_id: session_id.map(str::to_string),
             })
             .await
             .map_err(|e| anyhow::anyhow!("send_message: {e}"))?;
         Ok(accepted.into_inner().accepted)
     }
 
-    /// Switch the daemon's active model.
+    /// Switch the daemon's active model for the current session.
     pub async fn set_model(&mut self, spec: &str) -> Result<bool> {
+        self.set_model_for_session("", spec).await
+    }
+
+    /// Switch the daemon's active model for an explicit session.
+    pub async fn set_model_for_session(&mut self, session_id: &str, spec: &str) -> Result<bool> {
         let accepted = self
             .command
             .set_model(SetModelRequest {
+                session_id: session_id.to_string(),
                 spec: spec.to_string(),
             })
             .await
@@ -90,12 +125,21 @@ impl GrpcClient {
         Ok(accepted.into_inner().accepted)
     }
 
-    /// Set the daemon's active thinking level ("off" | "minimal" | "low" |
-    /// "medium" | "high" | "xhigh").
+    /// Set the daemon's active thinking level for the current session.
     pub async fn set_thinking(&mut self, level: &str) -> Result<bool> {
+        self.set_thinking_for_session("", level).await
+    }
+
+    /// Set the daemon's active thinking level for an explicit session.
+    pub async fn set_thinking_for_session(
+        &mut self,
+        session_id: &str,
+        level: &str,
+    ) -> Result<bool> {
         let accepted = self
             .command
             .set_thinking(SetThinkingRequest {
+                session_id: session_id.to_string(),
                 level: level.to_string(),
             })
             .await
@@ -103,21 +147,36 @@ impl GrpcClient {
         Ok(accepted.into_inner().accepted)
     }
 
-    /// Stop the in-flight turn (same as a local Ctrl-C). Does not cancel DAG runs.
+    /// Stop the in-flight turn for the current session.
     pub async fn cancel(&mut self) -> Result<bool> {
+        self.cancel_session("").await
+    }
+
+    /// Stop the in-flight turn for an explicit session.
+    pub async fn cancel_session(&mut self, session_id: &str) -> Result<bool> {
         let accepted = self
             .command
-            .cancel(Empty {})
+            .cancel(CancelRequest {
+                session_id: session_id.to_string(),
+            })
             .await
             .map_err(|e| anyhow::anyhow!("cancel: {e}"))?;
         Ok(accepted.into_inner().accepted)
     }
 
-    /// Resolve a pending control-plane prompt (approve / deny).
+    /// Resolve a pending control-plane prompt for the current session.
     pub async fn approve(&mut self, approve: bool) -> Result<bool> {
+        self.approve_for_session("", approve).await
+    }
+
+    /// Resolve a pending control-plane prompt for an explicit session.
+    pub async fn approve_for_session(&mut self, session_id: &str, approve: bool) -> Result<bool> {
         let accepted = self
             .command
-            .approve(ApproveRequest { approve })
+            .approve(ApproveRequest {
+                session_id: session_id.to_string(),
+                approve,
+            })
             .await
             .map_err(|e| anyhow::anyhow!("approve: {e}"))?;
         Ok(accepted.into_inner().accepted)
@@ -207,18 +266,6 @@ impl GrpcClient {
         })
     }
 
-    /// Switch the daemon to another session (aborts an in-flight turn).
-    pub async fn switch_session(&mut self, id: &str) -> Result<bool> {
-        let accepted = self
-            .session
-            .switch_session(SwitchSessionRequest {
-                session_id: id.to_string(),
-            })
-            .await
-            .map_err(|e| anyhow::anyhow!("switch_session: {e}"))?;
-        Ok(accepted.into_inner().accepted)
-    }
-
     /// List sessions (oldest → newest) plus the daemon's current session id.
     pub async fn list_sessions(&mut self) -> Result<(Vec<SessionSummary>, String)> {
         let response = self
@@ -230,45 +277,55 @@ impl GrpcClient {
         let sessions = response
             .sessions
             .iter()
-            .map(|s| SessionSummary {
-                session_id: s.session_id.clone(),
-                name: s.name.clone(),
-                cwd: s.cwd.clone(),
-                model: s.model.clone(),
-                created_at: s.created_at.clone(),
-                last_activity_at: s.last_activity_at,
-                graph_count: s.graph_count,
-                active_graph_count: s.active_graph_count,
-                busy: s.busy,
-                preview: s.preview.clone(),
-            })
+            .map(crate::proto::session_summary_from_proto)
             .collect();
         Ok((sessions, response.current_session_id))
     }
 
     /// Create a session (becoming current flows through the daemon's event loop).
     pub async fn create_session(&mut self, name: Option<String>) -> Result<SessionSummary> {
+        self.create_session_with_metadata(None, name, std::collections::HashMap::new())
+            .await
+    }
+
+    /// Create a session with an optional custom id and initial metadata.
+    pub async fn create_session_with_metadata(
+        &mut self,
+        session_id: Option<&str>,
+        name: Option<String>,
+        metadata: std::collections::HashMap<String, String>,
+    ) -> Result<SessionSummary> {
         let response = self
             .session
-            .create_session(CreateSessionRequest { name })
+            .create_session(CreateSessionRequest {
+                name,
+                session_id: session_id.map(str::to_string),
+                metadata,
+            })
             .await
             .map_err(|e| anyhow::anyhow!("create_session: {e}"))?
             .into_inner();
         let session = response
             .session
             .context("create_session returned no session summary")?;
-        Ok(SessionSummary {
-            session_id: session.session_id,
-            name: session.name,
-            cwd: session.cwd,
-            model: session.model,
-            created_at: session.created_at,
-            last_activity_at: session.last_activity_at,
-            graph_count: session.graph_count,
-            active_graph_count: session.active_graph_count,
-            busy: session.busy,
-            preview: session.preview,
-        })
+        Ok(crate::proto::session_summary_from_proto(&session))
+    }
+
+    /// Update arbitrary session metadata KV.
+    pub async fn update_session_metadata(
+        &mut self,
+        session_id: &str,
+        metadata: std::collections::HashMap<String, String>,
+    ) -> Result<bool> {
+        let accepted = self
+            .session
+            .update_session_metadata(UpdateSessionMetadataRequest {
+                session_id: session_id.to_string(),
+                metadata,
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("update_session_metadata: {e}"))?;
+        Ok(accepted.into_inner().accepted)
     }
 
     /// Rename a session (full id or unique prefix).

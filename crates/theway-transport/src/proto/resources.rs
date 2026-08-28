@@ -12,6 +12,23 @@ pub fn session_summary_wire(summary: &crate::wire::SessionSummary) -> wire::Sess
         active_graph_count: summary.active_graph_count,
         busy: summary.busy,
         preview: summary.preview.clone(),
+        metadata: summary.metadata.clone(),
+    }
+}
+
+pub fn session_summary_from_proto(summary: &wire::SessionSummary) -> crate::wire::SessionSummary {
+    crate::wire::SessionSummary {
+        session_id: summary.session_id.clone(),
+        name: summary.name.clone(),
+        cwd: summary.cwd.clone(),
+        model: summary.model.clone(),
+        created_at: summary.created_at.clone(),
+        last_activity_at: summary.last_activity_at,
+        graph_count: summary.graph_count,
+        active_graph_count: summary.active_graph_count,
+        busy: summary.busy,
+        preview: summary.preview.clone(),
+        metadata: summary.metadata.clone(),
     }
 }
 

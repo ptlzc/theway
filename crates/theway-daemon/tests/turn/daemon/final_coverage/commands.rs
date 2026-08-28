@@ -18,7 +18,10 @@ async fn handle_web_command_resolve_control_plane_approve_forwards_allow() {
     });
 
     host.handle_web_command(
-        WireCommand::ResolveControlPlane { approve: true },
+        WireCommand::ResolveControlPlane {
+            session_id: "sess-final".into(),
+            approve: true,
+        },
         &mut TurnState::default(),
     )
     .await;
@@ -64,42 +67,6 @@ async fn handle_set_skill_dirs_maps_reload_error() {
         host.runtime.paths.current_extra_skill_dirs(),
         vec![PathBuf::from("/new")]
     );
-}
-
-#[tokio::test]
-async fn handle_switch_session_reports_repo_errors() {
-    let built = build_host(harness_with_input(Vec::new()));
-    let (mut host, _scratch, _repo) = built.into_parts();
-
-    // Point the repo root at a file so `read_dir` fails.
-    let file = tempfile::NamedTempFile::new().unwrap();
-    host.session.repository = Arc::new(SqliteSessionRepo::new(file.path()));
-
-    let original = host.session.id.clone();
-    host.handle_switch_session("some-id".into(), &mut TurnState::default())
-        .await;
-
-    assert_eq!(host.session.id, original);
-}
-
-#[tokio::test]
-async fn handle_switch_session_aborts_in_flight_turn_and_maps_switch_error() {
-    let built = build_host_with(
-        harness_with_input(Vec::new()),
-        Registry::with_daemon_commands(),
-        bailing_session_factory(),
-        "sess-final",
-        None,
-    );
-    let (mut host, _scratch, _repo) = built.into_parts();
-    std::fs::write(_repo.path().join("sess-two.db"), b"").unwrap();
-
-    let mut turn = sample_turn_with_future();
-    host.handle_switch_session("sess-two".into(), &mut turn)
-        .await;
-
-    assert!(turn.aborted);
-    assert_eq!(host.session.id, "sess-final");
 }
 
 #[tokio::test]

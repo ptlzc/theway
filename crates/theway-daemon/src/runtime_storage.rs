@@ -20,6 +20,7 @@ use theway_core::multiagent::graph::persist::{DagPersistSink, to_persisted};
 use theway_core::multiagent::graph::types::DagStatus;
 use theway_core::multiagent::jobs::JobTranscriptStore;
 use theway_storage::sqlite_repo::SqliteSessionRepo;
+use theway_storage::sqlite_storage::SqliteSessionStorage;
 use theway_transport::client::GrpcClient;
 use theway_transport::triggers::{CronJob, DynamicTriggerRule};
 use theway_transport::wire::{
@@ -151,6 +152,9 @@ pub struct SessionImport {
 #[async_trait]
 pub trait SessionRepository: Send + Sync {
     async fn create(&self, cwd: &Path) -> Result<Arc<dyn SessionStore>>;
+    async fn create_with_id(&self, cwd: &Path, _id: Option<&str>) -> Result<Arc<dyn SessionStore>> {
+        self.create(cwd).await
+    }
     async fn resume(&self, explicit_id: Option<&str>) -> Result<Arc<dyn SessionStore>>;
     async fn contains(&self, id: &str) -> Result<bool>;
     async fn open(&self, id: &str) -> Result<Option<Arc<dyn SessionStore>>>;
@@ -169,6 +173,22 @@ pub trait SessionRepository: Send + Sync {
 impl SessionRepository for SqliteSessionRepo {
     async fn create(&self, cwd: &Path) -> Result<Arc<dyn SessionStore>> {
         Ok(Arc::new(theway_storage::session::create(self, cwd).await?))
+    }
+
+    async fn create_with_id(&self, cwd: &Path, id: Option<&str>) -> Result<Arc<dyn SessionStore>> {
+        let Some(id) = id.map(str::trim).filter(|id| !id.is_empty()) else {
+            return SessionRepository::create(self, cwd).await;
+        };
+        tokio::fs::create_dir_all(self.root()).await?;
+        let path = self.root().join(format!("{id}.db"));
+        Ok(Arc::new(
+            SqliteSessionStorage::create_with_id(
+                path,
+                cwd.to_string_lossy().to_string(),
+                Some(id.to_string()),
+            )
+            .await?,
+        ))
     }
 
     async fn resume(&self, explicit_id: Option<&str>) -> Result<Arc<dyn SessionStore>> {

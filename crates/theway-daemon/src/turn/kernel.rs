@@ -111,6 +111,7 @@ impl ReplKernel {
     ///
     /// Retry settings are process configuration and remain unchanged. Harness and trigger
     /// executor are session-scoped and must always move together.
+    #[allow(dead_code)] // used by integration tests and future runtime replacement paths
     pub fn replace_runtime(&mut self, runtime: SessionRuntime) {
         self.harness = runtime.harness;
         self.trigger_executor = runtime.trigger_executor;

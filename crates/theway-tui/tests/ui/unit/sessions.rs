@@ -227,6 +227,7 @@ async fn submit_sends_message_to_daemon() {
             text,
             images,
             interrupt,
+            ..
         } => {
             assert_eq!(text, "hello daemon");
             assert!(images.is_empty());
@@ -259,7 +260,7 @@ async fn ctrl_c_while_busy_sends_cancel() {
         .await
         .expect("no cancel command")
         .unwrap();
-    assert!(matches!(cmd, WireCommand::Abort));
+    assert!(matches!(cmd, WireCommand::Abort { .. }));
 }
 
 #[tokio::test]
@@ -280,50 +281,33 @@ async fn control_plane_prompt_key_approves_via_rpc() {
         .expect("no approve command")
         .unwrap();
     match cmd {
-        WireCommand::ResolveControlPlane { approve } => assert!(approve),
+        WireCommand::ResolveControlPlane { approve, .. } => assert!(approve),
         other => panic!("unexpected command: {other:?}"),
     }
 }
 
 #[tokio::test]
-async fn session_switch_sends_switch_session_rpc() {
-    let (mut app, mut rx) = test_app().await;
+async fn session_switch_selects_session_locally() {
+    let (mut app, _rx) = test_app().await;
     app.dispatch_slash("/session switch sess-1", &mut terminal_placeholder())
         .await;
-    let cmd = tokio::time::timeout(Duration::from_secs(2), rx.recv())
-        .await
-        .expect("no switch_session command")
-        .unwrap();
-    match cmd {
-        WireCommand::SwitchSession { id } => assert_eq!(id, "sess-1"),
-        other => panic!("unexpected command: {other:?}"),
-    }
+    assert_eq!(app.session_id, "sess-1");
+    let text = feed_text(&app);
+    assert!(text.contains("selected session sess-1"), "{text}");
 }
 
 /// Issue #52: `/new` creates a fresh session over the session-resource RPC
 /// (`FakeSessionOps` ids come from a counter — the first create yields
-/// `sess-new-1`) and switches to it. The gRPC create handler itself queues a
-/// `SwitchSession` for the new id (becoming current is serialized through the
-/// event loop), and the client-side switch queues a second one — both carry
-/// the new id. The success line notes the new session id.
+/// `sess-new-1`) and selects it client-side. No switch command is sent.
 #[tokio::test]
-async fn slash_new_creates_and_switches_session() {
-    let (mut app, mut rx) = test_app().await;
+async fn slash_new_creates_and_selects_session() {
+    let (mut app, _rx) = test_app().await;
 
     app.dispatch_slash("/new", &mut terminal_placeholder())
         .await;
 
-    // Assert: both the create-time switch and the client-side switch arrive.
-    for (i, origin) in ["create", "client-side switch"].iter().enumerate() {
-        let cmd = tokio::time::timeout(Duration::from_secs(2), rx.recv())
-            .await
-            .expect("no switch_session command")
-            .unwrap();
-        match cmd {
-            WireCommand::SwitchSession { id } => assert_eq!(id, "sess-new-1"),
-            other => panic!("unexpected command after {origin} (index {i}): {other:?}"),
-        }
-    }
+    // Assert: the new session is selected client-side.
+    assert_eq!(app.session_id, "sess-new-1");
     // Assert: the feed notes the new session id.
     let text = feed_text(&app);
     assert!(
@@ -338,8 +322,7 @@ async fn slash_new_creates_and_switches_session() {
 async fn slash_new_create_failure_shows_error_line() {
     let (mut app, rx) = test_app().await;
     // Dropping the command receiver closes the event-loop channel: the gRPC
-    // create handler fails its SwitchSession enqueue with `unavailable`, so
-    // `create_session` errors before any switch happens.
+    // create handler fails and `create_session` errors before any selection happens.
     drop(rx);
 
     app.dispatch_slash("/new", &mut terminal_placeholder())

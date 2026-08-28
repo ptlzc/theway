@@ -21,9 +21,8 @@ message SendMessageRequest {
   string text = 1;
   repeated Image images = 2;
   MessageMode mode = 3; // QUEUE (default): queue after the current turn; INTERRUPT: stop the current turn and run now
-  // Target session. Omitted = the process-current session. Only the current
-  // session can receive messages (single live agent loop); targeting another
-  // session fails with FAILED_PRECONDITION — SwitchSession first.
+  // Target session. Omitted = the process-current session for compatibility;
+  // clients should pass an explicit session_id when operating concurrently.
   optional string session_id = 4;
 }
 
@@ -39,14 +38,21 @@ message Image {
 
 message SetModelRequest {
   string spec = 1;
+  string session_id = 2;
 }
 
 message SetThinkingRequest {
   string level = 1;
+  string session_id = 2;
+}
+
+message CancelRequest {
+  string session_id = 1;
 }
 
 message ApproveRequest {
   bool approve = 1;
+  string session_id = 2;
 }
 
 service CommandService {
@@ -58,7 +64,7 @@ service CommandService {
   // "high" | "xhigh"). Same runtime effect as the `/thinking` slash command.
   rpc SetThinking(SetThinkingRequest) returns (CommandResult);
   // Stop the in-flight turn (same as local Ctrl-C). Does not cancel DAG runs.
-  rpc Cancel(Empty) returns (CommandResult);
+  rpc Cancel(CancelRequest) returns (CommandResult);
   // Resolve a pending control-plane approval request (approve / reject).
   rpc Approve(ApproveRequest) returns (CommandResult);
 }

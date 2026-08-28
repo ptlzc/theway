@@ -17,7 +17,6 @@ import {
   type Metadata,
   type UntypedServiceImplementation,
 } from "@grpc/grpc-js";
-import { Empty } from "./commands.js";
 import { SessionState } from "./session.js";
 
 export const protobufPackage = "theway.grpc.v1";
@@ -93,6 +92,11 @@ export interface RunStatus {
   runId: string;
   status: string;
   error?: string | undefined;
+}
+
+export interface StreamEventsRequest {
+  /** Omitted = all sessions; set = only events for this session. */
+  sessionId?: string | undefined;
 }
 
 function createBaseStreamFrame(): StreamFrame {
@@ -1211,29 +1215,106 @@ export const RunStatus: MessageFns<RunStatus> = {
   },
 };
 
+function createBaseStreamEventsRequest(): StreamEventsRequest {
+  return { sessionId: undefined };
+}
+
+export const StreamEventsRequest: MessageFns<StreamEventsRequest> = {
+  encode(message: StreamEventsRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sessionId !== undefined) {
+      writer.uint32(10).string(message.sessionId);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): StreamEventsRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseStreamEventsRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): StreamEventsRequest {
+    return {
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : undefined,
+    };
+  },
+
+  toJSON(message: StreamEventsRequest): unknown {
+    const obj: any = {};
+    if (message.sessionId !== undefined) {
+      obj.sessionId = message.sessionId;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<StreamEventsRequest>, I>>(base?: I): StreamEventsRequest {
+    return StreamEventsRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<StreamEventsRequest>, I>>(object: I): StreamEventsRequest {
+    const message = createBaseStreamEventsRequest();
+    message.sessionId = object.sessionId ?? undefined;
+    return message;
+  },
+};
+
 export type EventServiceService = typeof EventServiceService;
 export const EventServiceService = {
-  /** Snapshot/event stream (P0: snapshot frames; P2+: event increments). */
+  /**
+   * Snapshot/event stream (P0: snapshot frames; P2+: event increments).
+   * An optional session_id filters the stream to one session.
+   */
   streamEvents: {
     path: "/theway.grpc.v1.EventService/StreamEvents" as const,
     requestStream: false as const,
     responseStream: true as const,
-    requestSerialize: (value: Empty): Buffer => Buffer.from(Empty.encode(value).finish()),
-    requestDeserialize: (value: Buffer): Empty => Empty.decode(value),
+    requestSerialize: (value: StreamEventsRequest): Buffer => Buffer.from(StreamEventsRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): StreamEventsRequest => StreamEventsRequest.decode(value),
     responseSerialize: (value: StreamFrame): Buffer => Buffer.from(StreamFrame.encode(value).finish()),
     responseDeserialize: (value: Buffer): StreamFrame => StreamFrame.decode(value),
   },
 } as const;
 
 export interface EventServiceServer extends UntypedServiceImplementation {
-  /** Snapshot/event stream (P0: snapshot frames; P2+: event increments). */
-  streamEvents: handleServerStreamingCall<Empty, StreamFrame>;
+  /**
+   * Snapshot/event stream (P0: snapshot frames; P2+: event increments).
+   * An optional session_id filters the stream to one session.
+   */
+  streamEvents: handleServerStreamingCall<StreamEventsRequest, StreamFrame>;
 }
 
 export interface EventServiceClient extends Client {
-  /** Snapshot/event stream (P0: snapshot frames; P2+: event increments). */
-  streamEvents(request: Empty, options?: Partial<CallOptions>): ClientReadableStream<StreamFrame>;
-  streamEvents(request: Empty, metadata?: Metadata, options?: Partial<CallOptions>): ClientReadableStream<StreamFrame>;
+  /**
+   * Snapshot/event stream (P0: snapshot frames; P2+: event increments).
+   * An optional session_id filters the stream to one session.
+   */
+  streamEvents(request: StreamEventsRequest, options?: Partial<CallOptions>): ClientReadableStream<StreamFrame>;
+  streamEvents(
+    request: StreamEventsRequest,
+    metadata?: Metadata,
+    options?: Partial<CallOptions>,
+  ): ClientReadableStream<StreamFrame>;
 }
 
 export const EventServiceClient = makeGenericClientConstructor(

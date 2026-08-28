@@ -116,6 +116,7 @@ async fn run_transport_loop_polls_in_flight_turn_and_drains_commands() {
     endpoints
         .command_tx
         .send(WireCommand::Submit {
+            session_id: "sess-final".into(),
             text: "hello".into(),
             images: Vec::new(),
             interrupt: false,
@@ -299,6 +300,7 @@ async fn run_loop_and_send_signal(sig: i32) {
     endpoints
         .command_tx
         .send(WireCommand::Submit {
+            session_id: "sess-final".into(),
             text: "hold the turn open".into(),
             images: Vec::new(),
             interrupt: false,
@@ -335,4 +337,46 @@ async fn run_transport_loop_ctrl_c_aborts_in_flight_turn() {
 #[tokio::test]
 async fn run_transport_loop_sigterm_aborts_in_flight_turn() {
     run_loop_and_send_signal(libc::SIGTERM).await;
+}
+
+#[tokio::test]
+async fn transport_endpoints_forwards_events_for_multiple_sessions() {
+    let built = build_host(harness_with_input(Vec::new()));
+    let (mut host, _scratch, _repo) = built.into_parts();
+    let endpoints = host.transport_endpoints();
+    let mut rx = endpoints.events.subscribe();
+
+    let id_a = host.automation.subagents.register(SubagentJobInit {
+        agent: "faux-a".into(),
+        source: "subagent".into(),
+        run_id: None,
+        node_id: None,
+        session_id: Some("sess-a".into()),
+    });
+    let id_b = host.automation.subagents.register(SubagentJobInit {
+        agent: "faux-b".into(),
+        source: "subagent".into(),
+        run_id: None,
+        node_id: None,
+        session_id: Some("sess-b".into()),
+    });
+
+    let mut seen = std::collections::HashSet::new();
+    for _ in 0..2 {
+        let event = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .expect("forwarded event timed out")
+            .expect("registry closed before forwarding");
+        match event {
+            WireAgentEvent::Started { id, session_id, .. } => {
+                assert!(id == id_a || id == id_b);
+                seen.insert(session_id);
+            }
+            other => panic!("expected Started event, got {other:?}"),
+        }
+    }
+
+    assert_eq!(seen.len(), 2);
+    assert!(seen.contains("sess-a"));
+    assert!(seen.contains("sess-b"));
 }

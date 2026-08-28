@@ -273,6 +273,7 @@ impl SessionActivator {
             active_graph_count,
             busy: false,
             preview: record.preview,
+            metadata: Default::default(),
         };
 
         Ok(SessionActivation {

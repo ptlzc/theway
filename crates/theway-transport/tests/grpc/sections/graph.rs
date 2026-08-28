@@ -4,6 +4,22 @@ use crate::transport::SlashCompleter;
 use crate::wire::{WireGraphCheckpoint, WireGraphKind};
 use crate::TransportEndpoints;
 
+fn sample_run(id: &str) -> WireDagRunSnapshot {
+    WireDagRunSnapshot {
+        id: id.into(),
+        name: "goal".into(),
+        kind: "goal".into(),
+        status: "running".into(),
+        fail_fast: false,
+        max_concurrency: 1,
+        direction: "TD".into(),
+        created_at: 1,
+        completed_at: None,
+        error: None,
+        nodes: Vec::new(),
+    }
+}
+
 struct CheckpointGraphOps {
     checkpoints: Vec<WireGraphCheckpoint>,
     restore_result: Result<String, String>,
@@ -30,8 +46,12 @@ impl GraphOps for CheckpointGraphOps {
             Err(message) => anyhow::bail!("{message}"),
         }
     }
-    fn list(&self, _session_id: &str) -> Vec<WireDagRunSnapshot> {
-        Vec::new()
+    fn list(&self, session_id: &str) -> Vec<WireDagRunSnapshot> {
+        if session_id == "sess-1" {
+            vec![sample_run("run-1")]
+        } else {
+            Vec::new()
+        }
     }
 }
 
@@ -45,6 +65,7 @@ async fn graph_cancel_retry_skip_interrupt_steer_are_plumbed() {
 
     let cancel = state
         .graph_cancel(Request::new(theway_grpc::GraphCancelRequest {
+            session_id: "sess-1".into(),
             run_id: "run-1".into(),
         }))
         .await
@@ -54,6 +75,7 @@ async fn graph_cancel_retry_skip_interrupt_steer_are_plumbed() {
 
     let retry = state
         .graph_retry(Request::new(theway_grpc::GraphRetryRequest {
+            session_id: "sess-1".into(),
             run_id: "run-1".into(),
             node_id: Some("n1".into()),
         }))
@@ -64,6 +86,7 @@ async fn graph_cancel_retry_skip_interrupt_steer_are_plumbed() {
 
     let retry_all = state
         .graph_retry(Request::new(theway_grpc::GraphRetryRequest {
+            session_id: "sess-1".into(),
             run_id: "run-1".into(),
             node_id: None,
         }))
@@ -74,6 +97,7 @@ async fn graph_cancel_retry_skip_interrupt_steer_are_plumbed() {
 
     let skip = state
         .graph_skip(Request::new(theway_grpc::GraphSkipRequest {
+            session_id: "sess-1".into(),
             run_id: "run-1".into(),
             node_id: "skip-me".into(),
         }))
@@ -84,6 +108,7 @@ async fn graph_cancel_retry_skip_interrupt_steer_are_plumbed() {
 
     let interrupt = state
         .graph_node_interrupt(Request::new(theway_grpc::GraphNodeInterruptRequest {
+            session_id: "sess-1".into(),
             run_id: "run-1".into(),
             node_id: "n1".into(),
         }))
@@ -94,6 +119,7 @@ async fn graph_cancel_retry_skip_interrupt_steer_are_plumbed() {
 
     let steer = state
         .graph_node_steer(Request::new(theway_grpc::GraphNodeSteerRequest {
+            session_id: "sess-1".into(),
             run_id: "run-1".into(),
             node_id: "n1".into(),
             text: "go".into(),
@@ -292,4 +318,131 @@ async fn run_grpc_driver_binds_and_aborts_server_task() {
     };
     run_grpc(host, options).await.unwrap();
     assert!(seen.lock().unwrap().is_some());
+}
+
+#[derive(Default)]
+struct SessionAwareGraphOps {
+    runs: Mutex<HashMap<String, Vec<WireDagRunSnapshot>>>,
+    cancelled: Mutex<Vec<String>>,
+    retried: Mutex<Vec<String>>,
+    skipped: Mutex<Vec<String>>,
+    interrupted: Mutex<Vec<String>>,
+    steered: Mutex<Vec<String>>,
+}
+
+impl GraphOps for SessionAwareGraphOps {
+    fn cancel_run(&self, run_id: &str, _reason: Option<&str>) {
+        self.cancelled.lock().push(run_id.to_string());
+    }
+
+    fn retry(&self, run_id: &str, _node_ids: Option<&[String]>) -> Vec<String> {
+        self.retried.lock().push(run_id.to_string());
+        Vec::new()
+    }
+
+    fn skip(&self, run_id: &str, _node_id: &str) -> bool {
+        self.skipped.lock().push(run_id.to_string());
+        true
+    }
+
+    fn checkpoints(
+        &self,
+        _session_id: &str,
+        _run_id: Option<&str>,
+    ) -> anyhow::Result<Vec<WireGraphCheckpoint>> {
+        Ok(Vec::new())
+    }
+
+    fn restore(&self, _session_id: &str, _snapshot: &str) -> anyhow::Result<String> {
+        Ok("restored".into())
+    }
+
+    fn list(&self, session_id: &str) -> Vec<WireDagRunSnapshot> {
+        self.runs
+            .lock()
+            .get(session_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+}
+
+impl SessionAwareGraphOps {
+    fn seed(&self, session_id: &str, run_id: &str) {
+        self.runs.lock().entry(session_id.into()).or_default().push(sample_run(run_id));
+    }
+}
+
+#[tokio::test]
+async fn graph_rpcs_reject_runs_from_other_sessions() {
+    let (mut state, _rx, _ops, _tools) = grpc_state_with_ops();
+    let graph = Arc::new(SessionAwareGraphOps::default());
+    graph.seed("session-a", "run-a");
+    graph.seed("session-b", "run-b");
+    state.graph_ops = graph.clone();
+
+    let err = state
+        .graph_cancel(Request::new(theway_grpc::GraphCancelRequest {
+            run_id: "run-b".into(),
+            session_id: "session-a".into(),
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::NotFound);
+    assert!(graph.cancelled.lock().is_empty());
+
+    let ok = state
+        .graph_cancel(Request::new(theway_grpc::GraphCancelRequest {
+            run_id: "run-a".into(),
+            session_id: "session-a".into(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(ok.accepted);
+    assert_eq!(graph.cancelled.lock().as_slice(), ["run-a"]);
+
+    let err = state
+        .graph_retry(Request::new(theway_grpc::GraphRetryRequest {
+            run_id: "run-b".into(),
+            node_id: None,
+            session_id: "session-a".into(),
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::NotFound);
+    assert!(graph.retried.lock().is_empty());
+
+    let err = state
+        .graph_skip(Request::new(theway_grpc::GraphSkipRequest {
+            run_id: "run-b".into(),
+            node_id: "n1".into(),
+            session_id: "session-a".into(),
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::NotFound);
+    assert!(graph.skipped.lock().is_empty());
+
+    let err = state
+        .graph_node_interrupt(Request::new(theway_grpc::GraphNodeInterruptRequest {
+            run_id: "run-b".into(),
+            node_id: "n1".into(),
+            session_id: "session-a".into(),
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::NotFound);
+    assert!(graph.interrupted.lock().is_empty());
+
+    let err = state
+        .graph_node_steer(Request::new(theway_grpc::GraphNodeSteerRequest {
+            run_id: "run-b".into(),
+            node_id: "n1".into(),
+            text: "go".into(),
+            session_id: "session-a".into(),
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::NotFound);
+    assert!(graph.steered.lock().is_empty());
 }

@@ -1,8 +1,8 @@
 //! Daemon-client e2e (openspec tui-connect-daemon 1.3): spawn the real `thewayd`
 //! binary and drive it through the transport `GrpcClient` — the exact path the
 //! TUI will use. Covers readiness (2.1: get_state works immediately after the
-//! port file appears), command round-trips (send_message / switch_session /
-//! stream frames) and multi-client fan-out (2.2) against a live daemon.
+//! port file appears), command round-trips (send_message / stream frames) and
+//! multi-client fan-out (2.2) against a live daemon.
 
 use std::process::{Child, Command};
 use std::sync::Mutex;
@@ -154,19 +154,6 @@ async fn client_round_trip_against_spawned_daemon() {
         }
     }
     assert!(saw_snapshot, "stream carried a snapshot frame");
-
-    // switch_session to an unknown id → NOT_FOUND, daemon stays put.
-    let err = client
-        .switch_session("no-such-session")
-        .await
-        .unwrap_err()
-        .to_string();
-    assert!(err.contains("no session matches"), "{err}");
-    let state = client.get_state().await.unwrap();
-    assert_eq!(state.session_id, session_id, "unknown switch did not move");
-
-    // switch_session to the current session → accepted (idempotent rebind).
-    assert!(client.switch_session(&session_id).await.unwrap());
 
     unsafe { std::env::remove_var("THEWAY_DIR") };
 }

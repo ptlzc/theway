@@ -23,7 +23,7 @@ use crate::orchestration::{SessionRuntime, SessionRuntimeBuilder};
 use crate::paths::DaemonPaths;
 use crate::runtime_storage::local_runtime_storage;
 use crate::session_activation::SessionActivator;
-use crate::session_ops::{CurrentSessionState, SessionFactory};
+use crate::session_ops::SessionFactory;
 use crate::trigger_engine::execution::TriggerExecutor;
 use crate::trigger_engine::runtime::TriggerRuntimeConfig;
 use crate::turn::feed::FeedUpdate;
@@ -136,7 +136,6 @@ fn daemon_config(
         subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry::new(),
         session_factory,
         session_repo: Arc::new(SqliteSessionRepo::new(repo_dir.path())),
-        current_session_state: Arc::new(parking_lot::Mutex::new(CurrentSessionState::default())),
         capabilities: RuntimeCapabilities::default(),
         thinking_summary: None,
         startup: crate::startup_config::StartupConfig::default(),
@@ -271,34 +270,6 @@ async fn session_usage_accumulates_last_assistant_usage_across_finished_turns() 
     assert_eq!(snap.session_usage.cache_read_tokens, 160);
     assert_eq!(snap.session_usage.cache_write_tokens, 25);
     assert_eq!(snap.session_usage.output_tokens, 120);
-}
-
-#[tokio::test]
-async fn session_usage_resets_on_switch_session() {
-    let _serial = crate::test_env::ENV_LOCK.lock().unwrap();
-    let scratch = TempDir::new().unwrap();
-    let repo_dir = TempDir::new().unwrap();
-    let (config, _feed_tx, _main_run_tx) =
-        daemon_config(&scratch, &repo_dir, returning_session_factory(), "sess-one");
-    let mut host = TurnHost::new(config);
-    let mut turn = TurnState::default();
-
-    push_assistant(&mut host, 100, 40, 10, 5);
-    host.finish_turn(&mut turn, Ok(None)).await;
-    assert_eq!(host.wire_snapshot().session_usage.input_tokens, 100);
-
-    // The repository only needs a matching `.db` file name for the fast path.
-    std::fs::write(repo_dir.path().join("sess-two.db"), b"").unwrap();
-    host.handle_switch_session("sess-two".into(), &mut turn)
-        .await;
-
-    let snap = host.wire_snapshot();
-    assert_eq!(snap.session_usage.input_tokens, 0);
-    assert_eq!(snap.session_usage.output_tokens, 0);
-    assert_eq!(snap.session_usage.cache_read_tokens, 0);
-    assert_eq!(snap.session_usage.cache_write_tokens, 0);
-    assert_eq!(snap.session_usage.total_tokens, 0);
-    assert_eq!(snap.session_usage.context_window, 0);
 }
 
 #[tokio::test]

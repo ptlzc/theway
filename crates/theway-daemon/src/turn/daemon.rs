@@ -7,7 +7,7 @@
 //! lives in the `thewayd` binary; this module only owns the serialized transport
 //! event loop and the state it drives.
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -33,7 +33,7 @@ use crate::forwarding_tool_ops::ForwardingToolOps;
 use crate::orchestration::DaemonServices;
 use crate::paths::DaemonPaths;
 use crate::runtime_storage::SessionRepository;
-use crate::session_ops::{CurrentSessionState, SessionFactory};
+use crate::session_ops::SessionFactory;
 use crate::tools::assembly::reload::ReloadRuntime;
 use crate::transport_adapter::{
     CoreGraphOps, CoreJobOps, agent_event, dag_event, dag_run_snapshot, subagent_job_snapshot,
@@ -114,7 +114,6 @@ pub(crate) struct DaemonConfig {
     pub(crate) subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry,
     pub(crate) session_factory: SessionFactory,
     pub(crate) session_repo: Arc<dyn SessionRepository>,
-    pub(crate) current_session_state: Arc<Mutex<CurrentSessionState>>,
     pub(crate) capabilities: RuntimeCapabilities,
     /// `[orchestrator] thinking_summary` settings; `None` → thinking stays raw.
     pub(crate) thinking_summary: Option<super::thinking_summary::ThinkingSummarySettings>,
@@ -134,12 +133,147 @@ struct SessionRuntimeState {
     cwd: PathBuf,
     log_path: Option<PathBuf>,
     tool_count: usize,
+    retry: RetrySettings,
     factory: SessionFactory,
     repository: Arc<dyn SessionRepository>,
-    shared_state: Arc<Mutex<CurrentSessionState>>,
     busy: bool,
     queue: VecDeque<QueuedTurn>,
     cumulative_usage: WireContextUsage,
+}
+
+/// Per-session runtime registry.
+///
+/// The daemon keeps the active session in `TurnHost::session` for compatibility
+/// with the existing transport snapshot path; all other live sessions are parked
+/// here keyed by their explicit `session_id`. This lets commands address any
+/// registered session without a global `SwitchSession` first.
+struct SessionRegistry {
+    sessions: HashMap<String, SessionRuntimeState>,
+}
+
+impl SessionRuntimeState {
+    fn from_runtime(
+        runtime: crate::orchestration::SessionRuntime,
+        factory: SessionFactory,
+        repository: Arc<dyn SessionRepository>,
+        retry: crate::agent_session::RetrySettings,
+        log_path: Option<PathBuf>,
+    ) -> Self {
+        let mut kernel = ReplKernel::new(runtime.harness, runtime.trigger_executor, retry.clone());
+        kernel.set_extension_host(runtime.extension_host);
+        let id = runtime.session_id;
+        let cwd = runtime.cwd;
+        let tool_count = runtime.tool_names.len();
+        Self {
+            kernel,
+            id,
+            cwd,
+            log_path,
+            tool_count,
+            retry,
+            factory,
+            repository,
+            busy: false,
+            queue: VecDeque::new(),
+            cumulative_usage: WireContextUsage::default(),
+        }
+    }
+}
+
+#[cfg(test)]
+impl SessionRuntimeState {
+    fn for_test(id: &str) -> Self {
+        let storage = std::sync::Arc::new(theway_core::MemorySessionStorage::new());
+        let session =
+            theway_core::Session::new(storage as std::sync::Arc<dyn theway_core::SessionStorage>);
+        let model = theway_llm_provider::Model {
+            id: "faux".into(),
+            name: "Faux".into(),
+            api: theway_llm_provider::Api::from("faux"),
+            provider: theway_llm_provider::Provider::from("faux"),
+            base_url: String::new(),
+            reasoning: false,
+            thinking_level_map: None,
+            input: vec![],
+            cost: theway_llm_provider::ModelCost::default(),
+            context_window: 0,
+            max_tokens: 0,
+            headers: None,
+            compat: None,
+        };
+        let harness = std::sync::Arc::new(theway_core::AgentHarness::new(
+            theway_core::AgentHarnessOptions::new(model, session),
+        ));
+        let trigger_executor =
+            std::sync::Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+                harness.agent_arc(),
+                harness.session().clone(),
+                crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ));
+        let factory: SessionFactory = std::sync::Arc::new(|_| {
+            Box::pin(async { anyhow::bail!("session factory unused in for_test") })
+        });
+        let repository: std::sync::Arc<dyn SessionRepository> =
+            std::sync::Arc::new(theway_storage::sqlite_repo::SqliteSessionRepo::new(
+                std::env::temp_dir().join("theway-test-session-registry"),
+            ));
+        let mut kernel = ReplKernel::new(harness, trigger_executor, RetrySettings::default());
+        kernel.set_extension_host(None);
+        Self {
+            kernel,
+            id: id.to_string(),
+            cwd: std::env::temp_dir().join("theway-test").join(id),
+            log_path: None,
+            tool_count: 0,
+            retry: RetrySettings::default(),
+            factory,
+            repository,
+            busy: false,
+            queue: VecDeque::new(),
+            cumulative_usage: WireContextUsage::default(),
+        }
+    }
+}
+
+impl SessionRegistry {
+    fn new() -> Self {
+        Self {
+            sessions: HashMap::new(),
+        }
+    }
+
+    fn insert(&mut self, runtime: SessionRuntimeState) {
+        let id = runtime.id.clone();
+        self.sessions.insert(id, runtime);
+    }
+
+    #[cfg(test)]
+    fn get(&self, id: &str) -> Option<&SessionRuntimeState> {
+        self.sessions.get(id)
+    }
+
+    fn get_mut(&mut self, id: &str) -> Option<&mut SessionRuntimeState> {
+        self.sessions.get_mut(id)
+    }
+
+    fn contains(&self, id: &str) -> bool {
+        self.sessions.contains_key(id)
+    }
+
+    fn remove(&mut self, id: &str) -> Option<SessionRuntimeState> {
+        self.sessions.remove(id)
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.sessions.len()
+    }
 }
 
 struct AutomationRuntime {
@@ -213,6 +347,7 @@ struct RuntimeEventInputs {
 /// partitions.
 pub(crate) struct TurnHost {
     session: SessionRuntimeState,
+    sessions: SessionRegistry,
     automation: AutomationRuntime,
     runtime: RuntimeConfiguration,
     projection: FeedProjectionState,

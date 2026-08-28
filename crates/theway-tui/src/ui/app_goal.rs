@@ -1,31 +1,23 @@
 //! Goal + session state (`App` methods split out of `ui/mod.rs`).
 //!
-//! Client mode: goal state arrives in snapshots (`latest.goal`); session
-//! switching and control-plane resolution are RPC calls. The import-activation
-//! card is resolved locally (it writes sidecar files, no daemon round-trip).
+//! Client mode: goal state arrives in snapshots (`latest.goal`); sessions are
+//! addressed explicitly by session id, and control-plane resolution is an RPC
+//! call. The import-activation card is resolved locally (it writes sidecar
+//! files, no daemon round-trip).
 
 use anyhow::Result;
 
 use super::App;
 
 impl App {
-    /// Ask the daemon to switch to another session (aborts an in-flight turn
-    /// daemon-side; the next snapshot reflects the new session).
-    pub(crate) async fn switch_session(&mut self, id: String) -> Result<()> {
-        match self.client.switch_session(&id).await {
-            Ok(true) => {
-                self.system_line(format!("switching to session {id}…"));
-                Ok(())
-            }
-            Ok(false) => {
-                self.error_line("daemon rejected the session switch");
-                Ok(())
-            }
-            Err(e) => {
-                self.error_line(format!("switch_session failed: {e}"));
-                Ok(())
-            }
-        }
+    /// Select another session client-side. There is no daemon session switch;
+    /// subsequent RPCs use explicit session ids, and the daemon publishes
+    /// per-session state when the client subscribes to that session.
+    pub(crate) async fn select_session(&mut self, id: String) -> Result<()> {
+        self.session_id = id.clone();
+        self.latest.session_id = id.clone();
+        self.system_line(format!("selected session {id}"));
+        Ok(())
     }
 
     /// Resolve the pending daemon control-plane prompt through the `approve`

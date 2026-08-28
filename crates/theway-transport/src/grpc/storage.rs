@@ -20,6 +20,7 @@ use crate::proto::theway_grpc::{
     LoadDagRunsRequest, LoadDagRunsResponse, LoadTriggerRulesRequest, LoadTriggerRulesResponse,
     RenameSessionRequest, SaveCronJobsRequest, SaveCronJobsResponse, SaveDagRunRequest,
     SaveDagRunResponse, SaveTriggerRulesRequest, SaveTriggerRulesResponse,
+    UpdateSessionMetadataRequest,
 };
 use crate::state as codec;
 use crate::transport::{SessionOps, StorageOps};
@@ -88,9 +89,15 @@ impl StorageService for StorageServiceState {
         let request = request.into_inner();
         let new_id = self
             .session_ops
-            .create()
+            .create(request.session_id.as_deref(), &request.metadata)
             .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(|e| {
+                if e.to_string().contains("already exists") {
+                    Status::already_exists(e.to_string())
+                } else {
+                    Status::internal(e.to_string())
+                }
+            })?;
         if let Some(name) = request.name.as_deref()
             && !name.trim().is_empty()
         {
@@ -109,6 +116,24 @@ impl StorageService for StorageServiceState {
             .find(|s| s.session_id == new_id)
             .map(crate::proto::session_summary_wire);
         Ok(Response::new(CreateSessionResponse { session }))
+    }
+
+    async fn update_session_metadata(
+        &self,
+        request: Request<UpdateSessionMetadataRequest>,
+    ) -> Result<Response<CommandResult>, Status> {
+        let request = request.into_inner();
+        self.session_ops
+            .update_metadata(&request.session_id, &request.metadata)
+            .await
+            .map_err(|e| {
+                if e.to_string().contains("no session matches") {
+                    Status::not_found(e.to_string())
+                } else {
+                    Status::invalid_argument(e.to_string())
+                }
+            })?;
+        Ok(Response::new(CommandResult { accepted: true }))
     }
 
     async fn rename_session(
@@ -284,9 +309,15 @@ impl StorageService for GrpcState {
         let request = request.into_inner();
         let new_id = self
             .session_ops
-            .create()
+            .create(request.session_id.as_deref(), &request.metadata)
             .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(|e| {
+                if e.to_string().contains("already exists") {
+                    Status::already_exists(e.to_string())
+                } else {
+                    Status::internal(e.to_string())
+                }
+            })?;
         if let Some(name) = request.name.as_deref()
             && !name.trim().is_empty()
         {
@@ -294,15 +325,6 @@ impl StorageService for GrpcState {
                 .rename(&new_id, name)
                 .await
                 .map_err(|e| Status::invalid_argument(e.to_string()))?;
-        }
-        // Keep parity with SessionService.CreateSession: becoming current flows
-        // through the serialized event loop.
-        let accepted = self
-            .commands
-            .send(crate::wire::WireCommand::SwitchSession { id: new_id.clone() })
-            .is_ok();
-        if !accepted {
-            return Err(Status::unavailable("event loop command channel closed"));
         }
         let sessions = self
             .session_ops
@@ -314,6 +336,24 @@ impl StorageService for GrpcState {
             .find(|s| s.session_id == new_id)
             .map(crate::proto::session_summary_wire);
         Ok(Response::new(CreateSessionResponse { session }))
+    }
+
+    async fn update_session_metadata(
+        &self,
+        request: Request<UpdateSessionMetadataRequest>,
+    ) -> Result<Response<CommandResult>, Status> {
+        let request = request.into_inner();
+        self.session_ops
+            .update_metadata(&request.session_id, &request.metadata)
+            .await
+            .map_err(|e| {
+                if e.to_string().contains("no session matches") {
+                    Status::not_found(e.to_string())
+                } else {
+                    Status::invalid_argument(e.to_string())
+                }
+            })?;
+        Ok(Response::new(CommandResult { accepted: true }))
     }
 
     async fn rename_session(
@@ -369,11 +409,6 @@ impl StorageService for GrpcState {
                 .unwrap_or_default();
             *self.session_id.write().unwrap() = fallback.clone();
             self.latest.lock().session_id = fallback.clone();
-            if !fallback.is_empty() {
-                let _ = self
-                    .commands
-                    .send(crate::wire::WireCommand::SwitchSession { id: fallback });
-            }
         }
         Ok(Response::new(DeleteSessionResponse {
             running_run_ids: Vec::new(),

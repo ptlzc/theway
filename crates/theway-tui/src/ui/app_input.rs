@@ -258,9 +258,8 @@ impl App {
 
     /// `/resume` picker keys (issue #56): Up/Down move the highlight over
     /// the daemon's session list (tree order, oldest → newest), Enter
-    /// switches to the highlighted session via `switch_session` (the switch
-    /// queues daemon-side; a busy turn is aborted and the new session
-    /// appears on the next snapshot) and closes the popup, Esc cancels.
+    /// selects the highlighted session client-side via `select_session` and
+    /// closes the popup, Esc cancels.
     /// Returns `true` (and consumes the key) whenever the picker is open —
     /// the picker is modal.
     pub(super) async fn handle_resume_picker_key(&mut self, key: &KeyEvent) -> bool {
@@ -289,10 +288,10 @@ impl App {
                     && let Some(entry) = picker.entries.get(picker.selected)
                 {
                     let id = entry.id.clone();
-                    // `switch_session` prints its own rejected/error line and
+                    // `select_session` updates the client-side session id and
                     // never returns Err (the same contract /new relies on).
-                    if let Err(e) = self.switch_session(id.clone()).await {
-                        self.error_line(format!("switch session failed: {e}"));
+                    if let Err(e) = self.select_session(id.clone()).await {
+                        self.error_line(format!("select session failed: {e}"));
                     } else {
                         self.system_line(format!("resuming session {id}"));
                     }

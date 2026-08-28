@@ -1,6 +1,6 @@
 // Session domain: the full session state plane (snapshot, sidebar, feed,
 // model catalog, status), session resource messages
-// (list/create/switch/rename/delete), and the SessionService RPC surface.
+// (list/create/rename/delete), and the SessionService RPC surface.
 
 syntax = "proto3";
 package theway.grpc.v1;
@@ -256,14 +256,12 @@ message ListSessionsResponse {
 
 message CreateSessionRequest {
   optional string name = 1;
+  optional string session_id = 2;
+  map<string, string> metadata = 3;
 }
 
 message CreateSessionResponse {
   SessionSummary session = 1;
-}
-
-message SwitchSessionRequest {
-  string session_id = 1;
 }
 
 message RenameSessionRequest {
@@ -329,15 +327,16 @@ message ClearCredentialRequest {
 
 service SessionService {
   // Full structured state (binary protobuf).
-  rpc GetState(Empty) returns (SessionState);
-  // Session resources: list (with current marker) / create / switch / rename /
+  rpc GetState(SessionStateRequest) returns (SessionState);
+  // Session resources: list (with current marker) / create / rename /
   // delete. DeleteSession reports the offending run ids when refused because
   // the session still has running graphs.
   rpc ListSessions(Empty) returns (ListSessionsResponse);
   rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
-  rpc SwitchSession(SwitchSessionRequest) returns (CommandResult);
   rpc RenameSession(RenameSessionRequest) returns (CommandResult);
   rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse);
+  // Update arbitrary session metadata KV (opaque to thewayd).
+  rpc UpdateSessionMetadata(UpdateSessionMetadataRequest) returns (CommandResult);
   // Daemon path context (issue #68): home/base/work_dir plus the current
   // skill search directories.
   rpc GetPathContext(Empty) returns (PathContext);

@@ -17,6 +17,7 @@
 // Transport endpoints + shared host surface
 // ──────────────────────────────────────────────────────────────────────────
 
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -121,9 +122,17 @@ pub trait SessionOps: Send + Sync {
     /// counts from the shared DAG engine.
     async fn list(&self) -> Result<Vec<SessionSummary>>;
 
-    /// Create a new session (cwd inherited from the current one). Returns the new id;
-    /// *becoming current* is a separate `SwitchSession` command through the event loop.
-    async fn create(&self) -> Result<String>;
+    /// Create a new session (cwd inherited from the current one). Returns the new id.
+    /// `session_id` may be supplied by the caller; `None` lets the daemon generate one.
+    /// `metadata` is opaque KV stored with the session summary.
+    async fn create(
+        &self,
+        session_id: Option<&str>,
+        metadata: &HashMap<String, String>,
+    ) -> Result<String>;
+
+    /// Update arbitrary session metadata KV.
+    async fn update_metadata(&self, id: &str, metadata: &HashMap<String, String>) -> Result<()>;
 
     /// Rename a session (full id or unique prefix). Recorded as a `session_info` entry in
     /// the transcript, so it survives export/import.
@@ -490,8 +499,8 @@ pub struct TransportEndpoints {
     /// DAG orchestration operations.
     pub graph_ops: Arc<dyn GraphOps>,
     /// session-resource-model: session lifecycle ops (list/create/rename/delete) for the
-    /// gRPC/HTTP session surfaces. Sync query/mutation only — *switching* the current
-    /// session goes through `WireCommand::SwitchSession` on the serialized event loop.
+    /// gRPC/HTTP session surfaces. Sync query/mutation only; clients address sessions
+    /// explicitly by session id.
     pub session_ops: Arc<dyn crate::transport::SessionOps>,
     /// File/tool operation handler (issue #75): backs the gRPC `ToolService`
     /// and the JSON-RPC tool methods. The daemon kernel implements the seam

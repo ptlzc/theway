@@ -4,14 +4,17 @@ import {
   type CommandServiceClient as CommandServiceClientApi,
   MessageMode,
   type ApproveRequest,
+  type CancelRequest,
   type CommandResult,
   type Empty,
   type SendMessageRequest,
   type SetModelRequest,
+  type SetThinkingRequest,
 } from './generated/commands.js';
 import {
   EventServiceClient as EventServiceClientCtor,
   type EventServiceClient as EventServiceClientApi,
+  type StreamEventsRequest,
   type StreamFrame,
 } from './generated/events.js';
 import {
@@ -57,8 +60,9 @@ import {
   type ListSessionsResponse,
   type RenameSessionRequest,
   type SessionState,
+  type SessionStateRequest,
   type SetCredentialRequest,
-  type SwitchSessionRequest,
+  type UpdateSessionMetadataRequest,
 } from './generated/session.js';
 import {
   SettingsServiceClient as SettingsServiceClientCtor,
@@ -113,6 +117,14 @@ import {
 
 const SCHEME_PREFIX = /^https?:\/\//;
 const TRAILING_SLASHES = /\/+$/;
+const THINKING_LEVELS = new Set([
+  'off',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+]);
 
 /**
  * Typed gRPC client for the `theway --grpc` loopback server
@@ -154,9 +166,10 @@ export class ThewayGrpcClient {
 
   // ── session state ──
 
-  /** `GetState` — the latest full session state. */
-  getState(): Promise<SessionState> {
-    return this.#call<Empty, SessionState>(this.#session.getState.bind(this.#session), 'GetState', {});
+  /** `GetState` — the latest full session state. Pass a session id or omit for the daemon's current session. */
+  getState(sessionId = ''): Promise<SessionState> {
+    const request: SessionStateRequest = { sessionId };
+    return this.#call<SessionStateRequest, SessionState>(this.#session.getState.bind(this.#session), 'GetState', request);
   }
 
   /** `GetNodeOutput` — a DAG node's output fragment from an offset. */
@@ -167,8 +180,31 @@ export class ThewayGrpcClient {
   // ── commands ──
 
   /** `SendMessage` — submit a user prompt (mode=QUEUE). */
-  async prompt(text: string, images: SendMessageRequest['images'] = []): Promise<void> {
-    const request: SendMessageRequest = { text, images, mode: MessageMode.QUEUE };
+  prompt(text: string, images?: SendMessageRequest['images'], sessionId?: string): Promise<void>;
+  /** `SendMessage` — submit a user prompt to an explicit session (session id first). */
+  prompt(sessionId: string, text: string, images?: SendMessageRequest['images']): Promise<void>;
+  async prompt(
+    textOrSessionId: string,
+    imagesOrText: SendMessageRequest['images'] | string = [],
+    sessionIdOrImages?: string | SendMessageRequest['images'],
+  ): Promise<void> {
+    let text: string;
+    let images: SendMessageRequest['images'] = [];
+    let sessionId: string | undefined;
+    if (typeof imagesOrText === 'string') {
+      sessionId = textOrSessionId;
+      text = imagesOrText;
+      if (sessionIdOrImages !== undefined) {
+        images = sessionIdOrImages as SendMessageRequest['images'];
+      }
+    } else {
+      text = textOrSessionId;
+      images = imagesOrText ?? [];
+      if (sessionIdOrImages !== undefined) {
+        sessionId = sessionIdOrImages as string;
+      }
+    }
+    const request: SendMessageRequest = { text, images, mode: MessageMode.QUEUE, sessionId };
     const result = await this.sendMessage(request);
     if (!result.accepted) {
       throw new Error('theway grpc: SendMessage was not accepted by the server');
@@ -181,8 +217,8 @@ export class ThewayGrpcClient {
   }
 
   /** `SetModel` — switch model with a composed `provider:model` spec. */
-  async setModelSpec(spec: string): Promise<void> {
-    const request: SetModelRequest = { spec };
+  async setModelSpec(spec: string, sessionId = ''): Promise<void> {
+    const request: SetModelRequest = { sessionId, spec };
     const result = await this.#call<SetModelRequest, CommandResult>(
       this.#command.setModel.bind(this.#command),
       'SetModel',
@@ -194,21 +230,71 @@ export class ThewayGrpcClient {
   }
 
   /** `SetModel` with `provider` + `model` (composed into `provider:model`). */
-  setModel(provider: string, model: string): Promise<void> {
-    return this.setModelSpec(`${provider}:${model}`);
+  setModel(provider: string, model: string, sessionId?: string): Promise<void>;
+  /** `SetModel` with an explicit session id and a composed `provider:model` spec. */
+  setModel(sessionId: string, spec: string): Promise<void>;
+  setModel(providerOrSessionId: string, modelOrSpec: string, sessionId = ''): Promise<void> {
+    if (modelOrSpec.includes(':')) {
+      return this.setModelSpec(modelOrSpec, providerOrSessionId);
+    }
+    return this.setModelSpec(`${providerOrSessionId}:${modelOrSpec}`, sessionId);
+  }
+
+  /** `SetThinking` — set the active thinking level for a session. */
+  setThinking(level: string, sessionId?: string): Promise<void>;
+  /** `SetThinking` — set the active thinking level for an explicit session (session id first). */
+  setThinking(sessionId: string, level: string): Promise<void>;
+  async setThinking(levelOrSessionId: string, sessionIdOrLevel = ''): Promise<void> {
+    let level: string;
+    let sessionId: string;
+    if (THINKING_LEVELS.has(levelOrSessionId)) {
+      level = levelOrSessionId;
+      sessionId = sessionIdOrLevel;
+    } else if (THINKING_LEVELS.has(sessionIdOrLevel)) {
+      sessionId = levelOrSessionId;
+      level = sessionIdOrLevel;
+    } else {
+      level = levelOrSessionId;
+      sessionId = sessionIdOrLevel;
+    }
+    const request: SetThinkingRequest = { sessionId, level };
+    const result = await this.#call<SetThinkingRequest, CommandResult>(
+      this.#command.setThinking.bind(this.#command),
+      'SetThinking',
+      request,
+    );
+    if (!result.accepted) {
+      throw new Error('theway grpc: SetThinking was not accepted by the server');
+    }
   }
 
   /** `Cancel` — stop the in-flight turn (same as local Ctrl-C). */
-  async abort(): Promise<void> {
-    const result = await this.#call<Empty, CommandResult>(this.#command.cancel.bind(this.#command), 'Cancel', {});
+  async abort(sessionId = ''): Promise<void> {
+    const request: CancelRequest = { sessionId };
+    const result = await this.#call<CancelRequest, CommandResult>(this.#command.cancel.bind(this.#command), 'Cancel', request);
     if (!result.accepted) {
       throw new Error('theway grpc: Cancel was not accepted by the server');
     }
   }
 
   /** `Approve` — resolve the pending control-plane approval (approve / reject). */
-  async resolveControlPlane(approve: boolean): Promise<void> {
-    const request: ApproveRequest = { approve };
+  resolveControlPlane(approve: boolean, sessionId?: string): Promise<void>;
+  /** `Approve` — resolve the pending control-plane approval for an explicit session (session id first). */
+  resolveControlPlane(sessionId: string, approve: boolean): Promise<void>;
+  async resolveControlPlane(
+    approveOrSessionId: boolean | string,
+    sessionIdOrApprove: string | boolean = '',
+  ): Promise<void> {
+    let approve: boolean;
+    let sessionId: string;
+    if (typeof approveOrSessionId === 'boolean') {
+      approve = approveOrSessionId;
+      sessionId = sessionIdOrApprove as string;
+    } else {
+      sessionId = approveOrSessionId;
+      approve = sessionIdOrApprove as boolean;
+    }
+    const request: ApproveRequest = { sessionId, approve };
     const result = await this.#call<ApproveRequest, CommandResult>(
       this.#command.approve.bind(this.#command),
       'Approve',
@@ -260,8 +346,8 @@ export class ThewayGrpcClient {
   // ── graph control (DAG + goal runs) ──
 
   /** `GraphCancel` — cancel a run. */
-  async graphCancel(runId: string): Promise<void> {
-    const request: GraphCancelRequest = { runId };
+  async graphCancel(sessionId: string, runId: string): Promise<void> {
+    const request: GraphCancelRequest = { sessionId, runId };
     const result = await this.#call<GraphCancelRequest, CommandResult>(
       this.#graph.graphCancel.bind(this.#graph),
       'GraphCancel',
@@ -273,20 +359,20 @@ export class ThewayGrpcClient {
   }
 
   /** `GraphRetry` — re-run failed/cancelled nodes (omitted nodeId = all). */
-  graphRetry(runId: string, nodeId?: string): Promise<GraphRetryResponse> {
-    const request: GraphRetryRequest = { runId, nodeId };
+  graphRetry(sessionId: string, runId: string, nodeId?: string): Promise<GraphRetryResponse> {
+    const request: GraphRetryRequest = { sessionId, runId, nodeId };
     return this.#call<GraphRetryRequest, GraphRetryResponse>(this.#graph.graphRetry.bind(this.#graph), 'GraphRetry', request);
   }
 
   /** `GraphSkip` — skip a node (counts as success for downstream). */
-  graphSkip(runId: string, nodeId: string): Promise<GraphSkipResponse> {
-    const request: GraphSkipRequest = { runId, nodeId };
+  graphSkip(sessionId: string, runId: string, nodeId: string): Promise<GraphSkipResponse> {
+    const request: GraphSkipRequest = { sessionId, runId, nodeId };
     return this.#call<GraphSkipRequest, GraphSkipResponse>(this.#graph.graphSkip.bind(this.#graph), 'GraphSkip', request);
   }
 
   /** `GraphNodeInterrupt` — stop the node's in-flight turn. */
-  async graphNodeInterrupt(runId: string, nodeId: string): Promise<void> {
-    const request: GraphNodeInterruptRequest = { runId, nodeId };
+  async graphNodeInterrupt(sessionId: string, runId: string, nodeId: string): Promise<void> {
+    const request: GraphNodeInterruptRequest = { sessionId, runId, nodeId };
     const result = await this.#call<GraphNodeInterruptRequest, CommandResult>(
       this.#graph.graphNodeInterrupt.bind(this.#graph),
       'GraphNodeInterrupt',
@@ -298,8 +384,8 @@ export class ThewayGrpcClient {
   }
 
   /** `GraphNodeSteer` — queue a steering message at the node's next turn boundary. */
-  async graphNodeSteer(runId: string, nodeId: string, text: string): Promise<void> {
-    const request: GraphNodeSteerRequest = { runId, nodeId, text };
+  async graphNodeSteer(sessionId: string, runId: string, nodeId: string, text: string): Promise<void> {
+    const request: GraphNodeSteerRequest = { sessionId, runId, nodeId, text };
     const result = await this.#call<GraphNodeSteerRequest, CommandResult>(
       this.#graph.graphNodeSteer.bind(this.#graph),
       'GraphNodeSteer',
@@ -335,21 +421,37 @@ export class ThewayGrpcClient {
   }
 
   /** `CreateSession` — create a session. */
-  createSession(name?: string): Promise<CreateSessionResponse> {
-    const request: CreateSessionRequest = { name };
+  createSession(name?: string, sessionId?: string, metadata?: CreateSessionRequest['metadata']): Promise<CreateSessionResponse>;
+  /** `CreateSession` — create a session with an explicit session id and metadata. */
+  createSession(sessionId: string, metadata?: CreateSessionRequest['metadata']): Promise<CreateSessionResponse>;
+  createSession(
+    nameOrSessionId?: string,
+    sessionIdOrMetadata?: string | CreateSessionRequest['metadata'],
+    metadata: CreateSessionRequest['metadata'] = {},
+  ): Promise<CreateSessionResponse> {
+    let name: string | undefined;
+    let sessionId: string | undefined;
+    if (typeof sessionIdOrMetadata === 'object' && sessionIdOrMetadata !== null) {
+      sessionId = nameOrSessionId;
+      metadata = sessionIdOrMetadata;
+    } else {
+      name = nameOrSessionId;
+      sessionId = sessionIdOrMetadata;
+    }
+    const request: CreateSessionRequest = { name, sessionId, metadata };
     return this.#call<CreateSessionRequest, CreateSessionResponse>(this.#session.createSession.bind(this.#session), 'CreateSession', request);
   }
 
-  /** `SwitchSession` — switch the live session. */
-  async switchSession(sessionId: string): Promise<void> {
-    const request: SwitchSessionRequest = { sessionId };
-    const result = await this.#call<SwitchSessionRequest, CommandResult>(
-      this.#session.switchSession.bind(this.#session),
-      'SwitchSession',
+  /** `UpdateSessionMetadata` — update opaque session metadata KV. */
+  async updateSessionMetadata(sessionId: string, metadata: UpdateSessionMetadataRequest['metadata']): Promise<void> {
+    const request: UpdateSessionMetadataRequest = { sessionId, metadata };
+    const result = await this.#call<UpdateSessionMetadataRequest, CommandResult>(
+      this.#session.updateSessionMetadata.bind(this.#session),
+      'UpdateSessionMetadata',
       request,
     );
     if (!result.accepted) {
-      throw new Error('theway grpc: SwitchSession was not accepted by the server');
+      throw new Error('theway grpc: UpdateSessionMetadata was not accepted by the server');
     }
   }
 
@@ -570,11 +672,22 @@ export class ThewayGrpcClient {
   // ── event stream ──
 
   /**
+   * `StreamEvents` — convenience alias with the session id first.
+   */
+  openEventStream(
+    sessionId: string,
+    onFrame: (frame: StreamFrame) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    return this.streamEvents(onFrame, signal, sessionId);
+  }
+
+  /**
    * `StreamEvents` — server-streaming snapshot/event frames. Every frame
    * (snapshot and event) is delivered to `onFrame`. Resolves when the stream
    * ends normally; rejects on transport errors or when the client is closed.
    */
-  streamEvents(onFrame: (frame: StreamFrame) => void, signal?: AbortSignal): Promise<void> {
+  streamEvents(onFrame: (frame: StreamFrame) => void, signal?: AbortSignal, sessionId?: string): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const forwardAbort = (): void => {
         this.#closed = true;
@@ -582,7 +695,8 @@ export class ThewayGrpcClient {
       };
       signal?.addEventListener('abort', forwardAbort, { once: true });
 
-      const stream = this.#events.streamEvents.bind(this.#events)({});
+      const request: StreamEventsRequest = { sessionId };
+      const stream = this.#events.streamEvents.bind(this.#events)(request);
 
       stream.on('data', (frame: StreamFrame) => {
         try {
