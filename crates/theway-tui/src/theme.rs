@@ -1,22 +1,32 @@
-//! TUI theme: color roles + block layout + composer style (issues #43 + #49).
+//! TUI theme: color roles + block layout + composer style + feed rhythm
+//! (issues #43 + #49 + #30).
 //!
 //! [`Theme::load`] parses `${THEWAY_DIR:-$HOME/.theway}/theme.toml` once at
-//! startup (`[colors]` roles, `[blocks.<kind>]` sections, `[composer]`
-//! table). [`Theme::default`] mirrors the hardcoded tokyonight consts in
+//! startup. Sections: `[colors]` roles, `[blocks.<kind>]` layout,
+//! `[composer]` chrome, `[feed]` vertical rhythm, `[palette]` named colors.
+//! [`Theme::default`] mirrors the hardcoded tokyonight consts in
 //! [`crate::feed_render`] / [`crate::ui::prompt_chrome`] exactly, so a build
 //! without a theme file renders identically to the pre-theme build.
 //!
-//! The v1 parser handles the narrow TOML subset the theme file uses — section
-//! headers, `key = value` with quoted strings / plain integers, `#` comments
-//! (quote-aware) — without a `toml` dependency. Anything unknown or malformed
-//! (unknown section/role/key, invalid hex, non-`left|right` align, invalid
-//! padding) warns on stderr and keeps the current value (the default unless
-//! overridden earlier); missing sections/keys and a missing file all mean
-//! "default".
+//! v2 (issue #30) upgrades parsing to the `toml` crate while keeping the v1
+//! key set and semantics byte-identical. New in v2:
+//! - `[palette]` — named colors referenced from any color slot as `p:name`.
+//! - Extended color literals: short hex `#7AF`, ANSI names (`red`,
+//!   `lightBlue`, `default`), 256-palette indexes (`"146"`), and
+//!   `transparent` / `none` to clear optional (background) slots.
+//! - `[feed] gap` / `separator` / `separator_style` — the inter-block
+//!   vertical rhythm that v1 could not express.
+//!
+//! Forgiving posture (kept from v1): unknown sections/keys, invalid hex and
+//! invalid values warn on stderr and keep the current value (the default
+//! unless overridden earlier); missing sections/keys and a missing file all
+//! mean "default".
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use ratatui::style::Color;
+use toml::Table as TomlTable;
 
 use crate::feed_render::{
     ASSISTANT_PREFIX_DEFAULT, ASSISTANT_TEXT_DEFAULT, THINKING_BG_DEFAULT, THINKING_TEXT_DEFAULT,
@@ -25,7 +35,7 @@ use crate::feed_render::{
     USER_TEXT_DEFAULT,
 };
 use crate::ui::prompt_chrome::{
-    ACCENT_USER, BG_BASE, BORDER_FOCUSED, BORDER_UNFOCUSED, TEXT_PRIMARY, TEXT_SECONDARY,
+    ACCENT_USER, BG_BASE, BORDER_FOCUSED, BORDER_UNFOCUSED, GRAY_DIM, TEXT_PRIMARY, TEXT_SECONDARY,
 };
 
 /// Horizontal alignment of block content (issue #49).
@@ -69,6 +79,30 @@ impl Default for BlockTheme {
     }
 }
 
+/// Feed vertical rhythm (`[feed]`, issue #30): how much space separates
+/// blocks. `should_separate` (transport feed model) still decides WHERE a
+/// gap goes; this decides HOW MUCH.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FeedTheme {
+    /// Blank lines between blocks (default 1; `0` = flush).
+    pub gap: u16,
+    /// When set, a full-width line of this glyph replaces the last blank
+    /// row of the gap (e.g. `─`); `None` = pure blank lines.
+    pub separator: Option<char>,
+    /// Color of the separator line.
+    pub separator_style: Color,
+}
+
+impl Default for FeedTheme {
+    fn default() -> Self {
+        Self {
+            gap: 1,
+            separator: None,
+            separator_style: GRAY_DIM,
+        }
+    }
+}
+
 /// Composer chrome colors (`[composer]`), defaulting to
 /// [`crate::ui::prompt_chrome`]'s pre-theme consts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -100,9 +134,13 @@ impl Default for ComposerStyle {
     }
 }
 
-/// Color roles (#43), block layout (#49) and composer style in one copyable
-/// bundle. `FeedRenderOptions` carries it so the feed cache fingerprints
-/// theme changes; `App` loads it once at startup.
+/// Color roles (#43), block layout (#49), composer style and feed rhythm
+/// (#30) in one copyable bundle. `FeedRenderOptions` carries it so the feed
+/// cache fingerprints theme changes; `App` loads it once at startup.
+///
+/// Palette references are resolved eagerly at parse time — the palette never
+/// lives in the runtime theme, so it stays `Copy` and the feed cache keeps
+/// comparing plain values.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Theme {
     // ── color roles (#43) ──────────────────────────────────────────────────
@@ -131,6 +169,8 @@ pub struct Theme {
     pub thinking: BlockTheme,
     // ── composer (#49) ─────────────────────────────────────────────────────
     pub composer: ComposerStyle,
+    // ── feed rhythm (#30) ──────────────────────────────────────────────────
+    pub feed: FeedTheme,
 }
 
 impl Default for Theme {
@@ -154,6 +194,7 @@ impl Default for Theme {
             tool: BlockTheme::default(),
             thinking: BlockTheme::default(),
             composer: ComposerStyle::default(),
+            feed: FeedTheme::default(),
         }
     }
 }
@@ -174,47 +215,33 @@ impl Theme {
         }
     }
 
-    /// Parse the v1 theme.toml subset onto a default theme. Unknown sections
-    /// / keys / roles, invalid hex, unknown align and invalid padding warn on
-    /// stderr and keep the current value; everything missing stays default.
+    /// Parse the v2 theme.toml (superset of v1). Unknown sections / keys /
+    /// roles, invalid hex, unknown align and invalid values warn on stderr
+    /// and keep the current value; everything missing stays default.
     pub fn parse(text: &str) -> Self {
         let mut theme = Theme::default();
-        let mut section = "";
-        for (idx, raw) in text.lines().enumerate() {
-            let line = strip_comment(raw).trim();
-            if line.is_empty() {
-                continue;
+        let table: TomlTable = match text.parse() {
+            Ok(table) => table,
+            Err(err) => {
+                warn(&format!("parse error: {err} — using defaults"));
+                return theme;
             }
-            if let Some(header) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-                section = header.trim();
-                continue;
-            }
-            let Some((key, value)) = line.split_once('=') else {
-                warn(&format!(
-                    "line {}: expected `key = value`, got {line:?}",
-                    idx + 1
-                ));
+        };
+        // Palette first: any slot can reference `p:name` regardless of the
+        // section order in the file.
+        let palette = build_palette(&table);
+        for (section, value) in &table {
+            let Some(section_table) = value.as_table() else {
+                warn(&format!("key {section:?} outside any [section] — ignored"));
                 continue;
             };
-            let key = key.trim();
-            let mut value = value.trim();
-            if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
-                value = &value[1..value.len() - 1];
-            }
-            match section {
-                "colors" => apply_color_role(&mut theme, key, value),
-                "composer" => apply_composer_key(&mut theme.composer, key, value),
-                "blocks.user" => apply_block_key(&mut theme.user, "user", key, value),
-                "blocks.assistant" => {
-                    apply_block_key(&mut theme.assistant, "assistant", key, value)
-                }
-                "blocks.tool" => apply_block_key(&mut theme.tool, "tool", key, value),
-                "blocks.thinking" => apply_block_key(&mut theme.thinking, "thinking", key, value),
-                "" => warn(&format!("line {}: key outside any [section]", idx + 1)),
-                unknown => warn(&format!(
-                    "line {}: unknown section {unknown:?} — ignored",
-                    idx + 1
-                )),
+            match section.as_str() {
+                "palette" => {}
+                "colors" => apply_color_section(&mut theme, section_table, &palette),
+                "composer" => apply_composer_section(&mut theme.composer, section_table, &palette),
+                "blocks" => apply_blocks_section(&mut theme, section_table, &palette),
+                "feed" => apply_feed_section(&mut theme.feed, section_table, &palette),
+                unknown => warn(&format!("unknown section {unknown:?} — ignored")),
             }
         }
         theme
@@ -227,115 +254,375 @@ fn theme_toml_path() -> PathBuf {
     theway_transport::config::base_dir().join("theme.toml")
 }
 
-/// Strip a `#` comment, honoring quotes so `key = "#010203"` survives.
-fn strip_comment(line: &str) -> &str {
-    let mut in_quotes = false;
-    for (idx, ch) in line.char_indices() {
-        match ch {
-            '"' => in_quotes = !in_quotes,
-            '#' if !in_quotes => return &line[..idx],
-            _ => {}
-        }
-    }
-    line
-}
-
 fn warn(msg: &str) {
     eprintln!("theway theme: {msg}");
 }
 
-/// `#RRGGBB` → [`Color::Rgb`]; anything else (missing `#`, bad hex,
-/// unquoted values eaten by comment stripping) → `None` for the caller to
-/// warn on.
-fn parse_color(value: &str) -> Option<Color> {
-    let hex = value.strip_prefix('#')?;
-    if hex.len() != 6 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+// ── palette ────────────────────────────────────────────────────────────────
+
+/// Collect the raw `[palette]` table: name → literal string.
+fn raw_palette(table: &TomlTable) -> BTreeMap<String, String> {
+    let mut raw = BTreeMap::new();
+    let Some(toml::Value::Table(palette)) = table.get("palette") else {
+        return raw;
+    };
+    for (name, value) in palette {
+        match value.as_str() {
+            Some(text) => {
+                raw.insert(name.clone(), text.to_string());
+            }
+            None => warn(&format!(
+                "palette.{name}: expected a string color, got {value:?}"
+            )),
+        }
+    }
+    raw
+}
+
+/// Resolve every palette entry to a concrete color. Entries may reference
+/// other entries (`p:other`); cycles and unresolvable references warn once
+/// and resolve to `None`.
+fn build_palette(table: &TomlTable) -> BTreeMap<String, Option<Color>> {
+    let raw = raw_palette(table);
+    let mut resolved: BTreeMap<String, Option<Color>> = BTreeMap::new();
+    let mut stack: Vec<&str> = Vec::new();
+    for name in raw.keys() {
+        resolve_palette_entry(name, &raw, &mut resolved, &mut stack);
+    }
+    resolved
+}
+
+fn resolve_palette_entry<'a>(
+    name: &'a str,
+    raw: &'a BTreeMap<String, String>,
+    resolved: &mut BTreeMap<String, Option<Color>>,
+    stack: &mut Vec<&'a str>,
+) -> Option<Color> {
+    if let Some(color) = resolved.get(name) {
+        return *color;
+    }
+    if stack.contains(&name) {
+        let cycle = stack.join(" -> ");
+        warn(&format!(
+            "palette.{name}: reference cycle detected ({cycle}) — ignoring"
+        ));
+        resolved.insert(name.to_string(), None);
         return None;
     }
-    u32::from_str_radix(hex, 16).ok().map(Color::from_u32)
+    stack.push(name);
+    let Some(value) = raw.get(name) else {
+        resolved.insert(name.to_string(), None);
+        return None;
+    };
+    let color = match value.strip_prefix("p:") {
+        Some(referenced) => resolve_palette_entry(referenced, raw, resolved, stack),
+        None => parse_literal_color(value),
+    };
+    stack.pop();
+    resolved.insert(name.to_string(), color);
+    color
 }
 
-fn set_color(slot: &mut Color, key: &str, value: &str) {
-    match parse_color(value) {
+// ── color literals ─────────────────────────────────────────────────────────
+
+/// `#RRGGBB` / `#RGB` / ANSI names / 256-palette index → [`Color`]; anything
+/// else → `None` for the caller to warn on.
+fn parse_literal_color(value: &str) -> Option<Color> {
+    if let Some(hex) = value.strip_prefix('#') {
+        let digits: Vec<char> = hex.chars().collect();
+        let expanded: String = match digits.len() {
+            6 => hex.to_string(),
+            3 => digits.iter().flat_map(|c| [*c, *c]).collect(),
+            _ => return None,
+        };
+        if expanded.len() != 6 || !expanded.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
+        return u32::from_str_radix(&expanded, 16).ok().map(Color::from_u32);
+    }
+    match value.to_ascii_lowercase().as_str() {
+        "black" => Some(Color::Black),
+        "red" => Some(Color::Red),
+        "green" => Some(Color::Green),
+        "yellow" => Some(Color::Yellow),
+        "blue" => Some(Color::Blue),
+        "magenta" => Some(Color::Magenta),
+        "cyan" => Some(Color::Cyan),
+        "white" => Some(Color::White),
+        "gray" | "darkgray" => Some(Color::DarkGray),
+        "lightred" => Some(Color::LightRed),
+        "lightgreen" => Some(Color::LightGreen),
+        "lightyellow" => Some(Color::LightYellow),
+        "lightblue" => Some(Color::LightBlue),
+        "lightmagenta" => Some(Color::LightMagenta),
+        "lightcyan" => Some(Color::LightCyan),
+        "default" => Some(Color::Reset),
+        _ => value.parse::<u8>().ok().map(Color::Indexed),
+    }
+}
+
+/// Resolve a slot value: `p:name` looks up the (already resolved) palette;
+/// anything else parses as a literal.
+fn resolve_slot_color(value: &str, palette: &BTreeMap<String, Option<Color>>) -> Option<Color> {
+    if let Some(name) = value.strip_prefix("p:") {
+        return palette.get(name).copied().flatten();
+    }
+    parse_literal_color(value)
+}
+
+fn set_color(slot: &mut Color, key: &str, value: &str, palette: &BTreeMap<String, Option<Color>>) {
+    match resolve_slot_color(value, palette) {
         Some(color) => *slot = color,
         None => warn(&format!(
-            "colors.{key}: invalid hex {value:?} — keeping the current value"
+            "{key}: invalid color {value:?} — keeping the current value"
         )),
     }
 }
 
-fn set_opt_color(slot: &mut Option<Color>, key: &str, value: &str) {
-    match parse_color(value) {
+/// Optional slots additionally accept `transparent` / `none` to clear the
+/// color (no background).
+fn set_opt_color(
+    slot: &mut Option<Color>,
+    key: &str,
+    value: &str,
+    palette: &BTreeMap<String, Option<Color>>,
+) {
+    if matches!(value, "transparent" | "none") {
+        *slot = None;
+        return;
+    }
+    match resolve_slot_color(value, palette) {
         Some(color) => *slot = Some(color),
         None => warn(&format!(
-            "colors.{key}: invalid hex {value:?} — keeping the current value"
+            "{key}: invalid color {value:?} — keeping the current value"
         )),
     }
 }
 
-fn apply_color_role(theme: &mut Theme, key: &str, value: &str) {
-    match key {
-        "user_text" => set_color(&mut theme.user_text, key, value),
-        "user_bg" => set_color(&mut theme.user_bg, key, value),
-        "assistant_text" => set_opt_color(&mut theme.assistant_text, key, value),
-        "assistant_prefix" => set_color(&mut theme.assistant_prefix, key, value),
-        "tool_title" => set_color(&mut theme.tool_title, key, value),
-        "tool_args" => set_color(&mut theme.tool_args, key, value),
-        "tool_result" => set_color(&mut theme.tool_result, key, value),
-        "tool_error" => set_color(&mut theme.tool_error, key, value),
-        "tool_running_bg" => set_opt_color(&mut theme.tool_running_bg, key, value),
-        "tool_success_bg" => set_opt_color(&mut theme.tool_success_bg, key, value),
-        "tool_error_bg" => set_opt_color(&mut theme.tool_error_bg, key, value),
-        "thinking_text" => set_color(&mut theme.thinking_text, key, value),
-        "thinking_bg" => set_opt_color(&mut theme.thinking_bg, key, value),
-        unknown => warn(&format!("colors.{unknown}: unknown role — ignored")),
-    }
-}
-
-fn apply_block_key(block: &mut BlockTheme, name: &str, key: &str, value: &str) {
-    match key {
-        "bg" => match parse_color(value) {
-            Some(color) => block.bg = Some(color),
-            None => warn(&format!(
-                "blocks.{name}.bg: invalid hex {value:?} — keeping the current value"
-            )),
-        },
-        "padding" => match value.parse::<u16>() {
-            Ok(padding) => block.padding = padding,
-            Err(_) => warn(&format!(
-                "blocks.{name}.padding: invalid padding {value:?} — keeping the current value"
-            )),
-        },
-        "align" => match value {
-            "left" => block.align = BlockAlign::Left,
-            "right" => block.align = BlockAlign::Right,
-            other => warn(&format!(
-                "blocks.{name}.align: unknown alignment {other:?} — keeping the current value"
-            )),
-        },
-        unknown => warn(&format!("blocks.{name}.{unknown}: unknown key — ignored")),
-    }
-}
-
-fn apply_composer_key(composer: &mut ComposerStyle, key: &str, value: &str) {
-    let slot = match key {
-        "border_focused" => Some(&mut composer.border_focused),
-        "border_unfocused" => Some(&mut composer.border_unfocused),
-        "prefix" => Some(&mut composer.prefix),
-        "text" => Some(&mut composer.text),
-        "bg" => Some(&mut composer.bg),
-        "info_text" => Some(&mut composer.info_text),
-        unknown => {
-            warn(&format!("composer.{unknown}: unknown key — ignored"));
+/// String value of a toml value, warning when it is not a string.
+fn as_str<'a>(key: &str, value: &'a toml::Value) -> Option<&'a str> {
+    match value.as_str() {
+        Some(text) => Some(text),
+        None => {
+            warn(&format!("{key}: expected a string value, got {value:?}"));
             None
         }
-    };
-    let Some(slot) = slot else { return };
-    match parse_color(value) {
-        Some(color) => *slot = color,
-        None => warn(&format!(
-            "composer.{key}: invalid hex {value:?} — keeping the current value"
-        )),
+    }
+}
+
+/// Non-negative integer value: accepts a toml integer or a numeric string.
+fn as_u16(value: &toml::Value) -> Option<u16> {
+    match value {
+        toml::Value::Integer(i) => u16::try_from(*i).ok(),
+        _ => value.as_str().and_then(|s| s.parse().ok()),
+    }
+}
+
+// ── section appliers ───────────────────────────────────────────────────────
+
+fn apply_color_section(
+    theme: &mut Theme,
+    section: &TomlTable,
+    palette: &BTreeMap<String, Option<Color>>,
+) {
+    for (key, value) in section {
+        let Some(value) = as_str(key, value) else {
+            continue;
+        };
+        match key.as_str() {
+            "user_text" => set_color(
+                &mut theme.user_text,
+                &format!("colors.{key}"),
+                value,
+                palette,
+            ),
+            "user_bg" => set_color(&mut theme.user_bg, &format!("colors.{key}"), value, palette),
+            "assistant_text" => set_opt_color(
+                &mut theme.assistant_text,
+                &format!("colors.{key}"),
+                value,
+                palette,
+            ),
+            "assistant_prefix" => set_color(
+                &mut theme.assistant_prefix,
+                &format!("colors.{key}"),
+                value,
+                palette,
+            ),
+            "tool_title" => set_color(
+                &mut theme.tool_title,
+                &format!("colors.{key}"),
+                value,
+                palette,
+            ),
+            "tool_args" => set_color(
+                &mut theme.tool_args,
+                &format!("colors.{key}"),
+                value,
+                palette,
+            ),
+            "tool_result" => set_color(
+                &mut theme.tool_result,
+                &format!("colors.{key}"),
+                value,
+                palette,
+            ),
+            "tool_error" => set_color(
+                &mut theme.tool_error,
+                &format!("colors.{key}"),
+                value,
+                palette,
+            ),
+            "tool_running_bg" => set_opt_color(
+                &mut theme.tool_running_bg,
+                &format!("colors.{key}"),
+                value,
+                palette,
+            ),
+            "tool_success_bg" => set_opt_color(
+                &mut theme.tool_success_bg,
+                &format!("colors.{key}"),
+                value,
+                palette,
+            ),
+            "tool_error_bg" => set_opt_color(
+                &mut theme.tool_error_bg,
+                &format!("colors.{key}"),
+                value,
+                palette,
+            ),
+            "thinking_text" => set_color(
+                &mut theme.thinking_text,
+                &format!("colors.{key}"),
+                value,
+                palette,
+            ),
+            "thinking_bg" => set_opt_color(
+                &mut theme.thinking_bg,
+                &format!("colors.{key}"),
+                value,
+                palette,
+            ),
+            unknown => warn(&format!("colors.{unknown}: unknown role — ignored")),
+        }
+    }
+}
+
+fn apply_blocks_section(
+    theme: &mut Theme,
+    section: &TomlTable,
+    palette: &BTreeMap<String, Option<Color>>,
+) {
+    for (name, value) in section {
+        let Some(block_table) = value.as_table() else {
+            warn(&format!("blocks.{name}: expected a table — ignored"));
+            continue;
+        };
+        let block = match name.as_str() {
+            "user" => &mut theme.user,
+            "assistant" => &mut theme.assistant,
+            "tool" => &mut theme.tool,
+            "thinking" => &mut theme.thinking,
+            unknown => {
+                warn(&format!("blocks.{unknown}: unknown block kind — ignored"));
+                continue;
+            }
+        };
+        for (key, value) in block_table {
+            match key.as_str() {
+                "padding" => match as_u16(value) {
+                    Some(padding) => block.padding = padding,
+                    None => warn(&format!(
+                        "blocks.{name}.padding: invalid padding {value:?} — keeping the current value"
+                    )),
+                },
+                _ => {
+                    let Some(value) = as_str(&format!("blocks.{name}.{key}"), value) else {
+                        continue;
+                    };
+                    match key.as_str() {
+                        "bg" => match resolve_slot_color(value, palette) {
+                            Some(color) => block.bg = Some(color),
+                            None => warn(&format!(
+                                "blocks.{name}.bg: invalid hex {value:?} — keeping the current value"
+                            )),
+                        },
+                        "align" => match value {
+                            "left" => block.align = BlockAlign::Left,
+                            "right" => block.align = BlockAlign::Right,
+                            other => warn(&format!(
+                                "blocks.{name}.align: unknown alignment {other:?} — keeping the current value"
+                            )),
+                        },
+                        unknown => warn(&format!("blocks.{name}.{unknown}: unknown key — ignored")),
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn apply_feed_section(
+    feed: &mut FeedTheme,
+    section: &TomlTable,
+    palette: &BTreeMap<String, Option<Color>>,
+) {
+    for (key, value) in section {
+        match key.as_str() {
+            "gap" => match as_u16(value) {
+                Some(gap) => feed.gap = gap,
+                None => warn(&format!(
+                    "feed.gap: invalid gap {value:?} — keeping the current value"
+                )),
+            },
+            _ => {
+                let Some(value) = as_str(&format!("feed.{key}"), value) else {
+                    continue;
+                };
+                match key.as_str() {
+                    "separator" => match value.chars().count() {
+                        0 => feed.separator = None,
+                        1 => feed.separator = value.chars().next(),
+                        _ => warn(&format!(
+                            "feed.separator: expected a single glyph, got {value:?} — keeping the current value"
+                        )),
+                    },
+                    "separator_style" => set_color(
+                        &mut feed.separator_style,
+                        "feed.separator_style",
+                        value,
+                        palette,
+                    ),
+                    unknown => warn(&format!("feed.{unknown}: unknown key — ignored")),
+                }
+            }
+        }
+    }
+}
+
+fn apply_composer_section(
+    composer: &mut ComposerStyle,
+    section: &TomlTable,
+    palette: &BTreeMap<String, Option<Color>>,
+) {
+    for (key, value) in section {
+        let Some(value) = as_str(&format!("composer.{key}"), value) else {
+            continue;
+        };
+        let slot = match key.as_str() {
+            "border_focused" => Some(&mut composer.border_focused),
+            "border_unfocused" => Some(&mut composer.border_unfocused),
+            "prefix" => Some(&mut composer.prefix),
+            "text" => Some(&mut composer.text),
+            "bg" => Some(&mut composer.bg),
+            "info_text" => Some(&mut composer.info_text),
+            unknown => {
+                warn(&format!("composer.{unknown}: unknown key — ignored"));
+                None
+            }
+        };
+        let Some(slot) = slot else { continue };
+        set_color(slot, &format!("composer.{key}"), value, palette);
     }
 }
 
@@ -375,6 +662,11 @@ mod tests {
             assert_eq!(block.padding, 1);
             assert_eq!(block.align, BlockAlign::Left);
         }
+        // v2 feed rhythm defaults: one blank line, no separator glyph.
+        assert_eq!(t.feed, FeedTheme::default());
+        assert_eq!(t.feed.gap, 1);
+        assert_eq!(t.feed.separator, None);
+        assert_eq!(t.feed.separator_style, prompt_chrome::GRAY_DIM);
     }
 
     #[test]
@@ -420,6 +712,7 @@ bg = "#262728"
         assert_eq!(theme.tool_title, d.tool_title);
         assert_eq!(theme.user.bg, d.user.bg);
         assert_eq!(theme.composer.border_unfocused, d.composer.border_unfocused);
+        assert_eq!(theme.feed, d.feed);
     }
 
     #[test]
@@ -428,7 +721,8 @@ bg = "#262728"
             "[colors]\nuser_text = \"#010203\"\nwat = \"#ffffff\"\n\
              [blocks.foo]\nbg = \"#999999\"\n\
              [blocks.tool]\nwobble = 3\n\
-             [composer]\nwut = \"#888888\"\n",
+             [composer]\nwut = \"#888888\"\n\
+             [feed]\nwibble = 2\n",
         );
         let d = Theme::default();
         assert_eq!(theme.user_text, Color::Rgb(1, 2, 3));
@@ -436,6 +730,7 @@ bg = "#262728"
         assert_eq!(theme.tool.bg, d.tool.bg);
         assert_eq!(theme.tool.padding, d.tool.padding);
         assert_eq!(theme.composer, d.composer);
+        assert_eq!(theme.feed, d.feed);
     }
 
     #[test]
@@ -480,6 +775,7 @@ bg = "#262728"
         assert_eq!(theme.assistant, d.assistant);
         assert_eq!(theme.composer, d.composer);
         assert_eq!(theme.user_bg, d.user_bg);
+        assert_eq!(theme.feed, d.feed);
     }
 
     #[test]
@@ -493,6 +789,12 @@ bg = "#262728"
     #[test]
     fn parse_rejects_key_outside_section() {
         let theme = Theme::parse("user_text = \"#010203\"\n");
+        assert_eq!(theme, Theme::default());
+    }
+
+    #[test]
+    fn parse_toml_syntax_error_uses_defaults() {
+        let theme = Theme::parse("[colors\nuser_text = \"#010203\"\n");
         assert_eq!(theme, Theme::default());
     }
 
@@ -522,5 +824,106 @@ bg = "#262728"
         assert_eq!(theme.tool.bg, Some(Color::Rgb(1, 2, 3)));
         assert_eq!(theme.tool.padding, 0);
         assert_eq!(theme.tool.align, BlockAlign::Right);
+    }
+
+    // ── v2: feed rhythm (#30) ────────────────────────────────────────────
+
+    #[test]
+    fn feed_gap_parses_and_defaults() {
+        let theme = Theme::parse("[feed]\ngap = 3\n");
+        assert_eq!(theme.feed.gap, 3);
+
+        let theme = Theme::parse("[feed]\ngap = 0\n");
+        assert_eq!(theme.feed.gap, 0);
+
+        // Negative / non-numeric gaps fall back to the default.
+        let theme = Theme::parse("[feed]\ngap = -1\n");
+        assert_eq!(theme.feed.gap, 1);
+        let theme = Theme::parse("[feed]\ngap = \"lots\"\n");
+        assert_eq!(theme.feed.gap, 1);
+    }
+
+    #[test]
+    fn feed_separator_parses_glyph_style_and_empty() {
+        let theme = Theme::parse("[feed]\nseparator = \"─\"\nseparator_style = \"#565F89\"\n");
+        assert_eq!(theme.feed.separator, Some('─'));
+        assert_eq!(theme.feed.separator_style, Color::Rgb(0x56, 0x5F, 0x89));
+
+        // Empty string clears the glyph; multi-char glyphs are rejected.
+        let theme = Theme::parse("[feed]\nseparator = \"\"\n");
+        assert_eq!(theme.feed.separator, None);
+        let theme = Theme::parse("[feed]\nseparator = \"──\"\n");
+        assert_eq!(theme.feed.separator, None);
+    }
+
+    // ── v2: palette + extended literals (#30) ────────────────────────────
+
+    #[test]
+    fn palette_references_resolve_across_sections() {
+        let theme = Theme::parse(
+            "[palette]\naccent = \"#7AA2F7\"\nmuted = \"p:accent\"\n\
+             [colors]\nuser_text = \"p:accent\"\nthinking_bg = \"p:muted\"\n\
+             [blocks.tool]\nbg = \"p:accent\"\n\
+             [composer]\nprefix = \"p:accent\"\n\
+             [feed]\nseparator_style = \"p:muted\"\n",
+        );
+        let accent = Color::Rgb(0x7A, 0xA2, 0xF7);
+        assert_eq!(theme.user_text, accent);
+        assert_eq!(theme.thinking_bg, Some(accent));
+        assert_eq!(theme.tool.bg, Some(accent));
+        assert_eq!(theme.composer.prefix, accent);
+        assert_eq!(theme.feed.separator_style, accent);
+    }
+
+    #[test]
+    fn palette_missing_key_and_cycle_fall_back() {
+        // Unknown palette reference → warn + keep the slot default.
+        let theme = Theme::parse("[colors]\nuser_text = \"p:nope\"\n");
+        assert_eq!(theme.user_text, Theme::default().user_text);
+
+        // Cyclic palette entries resolve to nothing.
+        let theme =
+            Theme::parse("[palette]\na = \"p:b\"\nb = \"p:a\"\n[colors]\nuser_text = \"p:a\"\n");
+        assert_eq!(theme.user_text, Theme::default().user_text);
+
+        // A palette entry referencing a literal resolves.
+        let theme = Theme::parse("[palette]\na = \"#010203\"\n[colors]\nuser_text = \"p:a\"\n");
+        assert_eq!(theme.user_text, Color::Rgb(1, 2, 3));
+    }
+
+    #[test]
+    fn transparent_and_none_clear_optional_slots() {
+        // Set first, then clear via transparent / none.
+        let theme = Theme::parse(
+            "[colors]\nthinking_bg = \"#0d0e0f\"\n\
+             [blocks.tool]\nbg = \"#111213\"\n",
+        );
+        assert_eq!(theme.thinking_bg, Some(Color::Rgb(13, 14, 15)));
+        assert_eq!(theme.tool.bg, Some(Color::Rgb(17, 18, 19)));
+
+        let theme = Theme::parse(
+            "[colors]\nthinking_bg = \"transparent\"\n\
+             [blocks.tool]\nbg = \"none\"\n",
+        );
+        assert_eq!(theme.thinking_bg, None);
+        assert_eq!(theme.tool.bg, None);
+
+        // Required slots reject transparent (warn + keep).
+        let theme = Theme::parse("[composer]\nbg = \"transparent\"\n");
+        assert_eq!(theme.composer.bg, Theme::default().composer.bg);
+    }
+
+    #[test]
+    fn extended_color_literals_parse() {
+        let theme = Theme::parse(
+            "[colors]\nuser_text = \"#7AF\"\nassistant_prefix = \"red\"\n\
+             tool_title = \"146\"\nthinking_text = \"default\"\n\
+             user_bg = \"lightBlue\"\n",
+        );
+        assert_eq!(theme.user_text, Color::Rgb(0x77, 0xAA, 0xFF));
+        assert_eq!(theme.assistant_prefix, Color::Red);
+        assert_eq!(theme.tool_title, Color::Indexed(146));
+        assert_eq!(theme.thinking_text, Color::Reset);
+        assert_eq!(theme.user_bg, Color::LightBlue);
     }
 }
