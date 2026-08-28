@@ -227,7 +227,10 @@ message PlainBlock {
 }
 
 message SessionSummary {
-  string session_id = 1;
+  // Canonical session id. New clients should use this field; `session_id`
+  // remains as a deprecated alias for compatibility with older consumers.
+  string id = 13;
+  string session_id = 1 [deprecated = true];
   string name = 2;
   string cwd = 3;
   string model = 4;
@@ -239,6 +242,140 @@ message SessionSummary {
   optional string preview = 10;
   map<string, string> metadata = 11;
   optional string last_activity_at_rfc3339 = 12; // RFC3339 / ISO-8601 with offset (UTC), null when absent.
+}
+
+// Thinking levels supported by the runtime.
+enum ThinkingLevel {
+  THINKING_LEVEL_UNSPECIFIED = 0;
+  THINKING_LEVEL_OFF = 1;
+  THINKING_LEVEL_MINIMAL = 2;
+  THINKING_LEVEL_LOW = 3;
+  THINKING_LEVEL_MEDIUM = 4;
+  THINKING_LEVEL_HIGH = 5;
+  THINKING_LEVEL_XHIGH = 6;
+}
+
+// A resolved model reference in a session runtime.
+message ModelRef {
+  string provider = 1;
+  string model = 2;
+  optional string base_url = 3;
+}
+
+// Static/dynamic session identity and display metadata.
+message SessionInfo {
+  string id = 1;
+  string name = 2;
+  string cwd = 3;
+  string created_at = 4; // RFC3339 / ISO-8601 with offset (UTC).
+  int64 last_activity_at = 5 [deprecated = true]; // Deprecated epoch milliseconds.
+  optional string last_activity_at_rfc3339 = 6; // RFC3339 / ISO-8601 with offset (UTC), null when absent.
+  bool busy = 7;
+  optional string preview = 8;
+  map<string, string> metadata = 9;
+  uint32 graph_count = 10;
+  uint32 active_graph_count = 11;
+  uint32 queued_count = 12;
+  SidebarSnapshot sidebar = 13;
+}
+
+// Live runtime configuration and model/context metadata.
+message SessionRuntime {
+  ModelRef model = 1;
+  ThinkingLevel thinking_level = 2;
+  repeated ThinkingLevel supported_thinking_levels = 3;
+  optional ContextUsage context_usage = 4;
+  optional ContextUsage session_context_usage = 5;
+  optional uint32 tui_max_feed_lines = 6;
+  repeated ProviderGroup model_catalog = 7;
+  optional TriggerPollStatus latest_trigger_poll = 8;
+  optional GoalSnapshot goal = 9;
+  optional ControlPlanePromptSnapshot control_plane_prompt = 10;
+  ExtensionSnapshot extensions = 11;
+}
+
+// Transcript plane of a session snapshot.
+message SessionFeed {
+  repeated FeedBlock blocks = 1;
+  repeated string lines = 2;
+  uint64 blocks_base = 3;
+  uint64 lines_base = 4;
+  repeated FeedBlockPatch block_patches = 5;
+}
+
+// Graph-mode state mounted under a session snapshot.
+message SessionGraphState {
+  repeated DagRunSnapshot dags = 1;
+  repeated SubagentJobSnapshot subagents = 2;
+  repeated SessionGraphNode nodes = 3;
+  optional string active_node_id = 4;
+}
+
+// Session lineage for fork/collapse ancestry.
+message SessionLineage {
+  optional string parent_session_id = 1;
+  optional string root_session_id = 2;
+  repeated string ancestor_session_ids = 3;
+  repeated string child_session_ids = 4;
+  optional string collapsed_from_session_id = 5;
+  optional string collapsed_into_session_id = 6;
+}
+
+// Full structured session snapshot: the nested successor of SessionState.
+message SessionSnapshot {
+  string session_id = 1;
+  SessionInfo info = 2;
+  SessionRuntime runtime = 3;
+  SessionFeed feed = 4;
+  SessionGraphState graph_state = 5;
+  SessionLineage lineage = 6;
+}
+
+// Collapse a session into a graph node, optionally under another session.
+message CollapseSessionRequest {
+  string session_id = 1;
+  optional string into_session_id = 2;
+  optional string title = 3;
+  optional string summary = 4;
+}
+
+message CollapseSessionResponse {
+  string session_id = 1;
+  SessionGraphNode node = 2;
+  CollapsedSessionNode collapsed = 3;
+}
+
+message GetSessionGraphNodeRequest {
+  string session_id = 1;
+  string node_id = 2;
+}
+
+message GetSessionGraphNodeResponse {
+  SessionGraphNode node = 1;
+}
+
+message ListSessionGraphNodeMessagesRequest {
+  string session_id = 1;
+  string node_id = 2;
+  uint32 offset = 3;
+  uint32 limit = 4;
+}
+
+message ListSessionGraphNodeMessagesResponse {
+  repeated FeedBlock blocks = 1;
+}
+
+message StreamSessionGraphNodeRequest {
+  string session_id = 1;
+  string node_id = 2;
+}
+
+// Streaming frame for node changes and message appends.
+message SessionGraphNodeStreamFrame {
+  oneof payload {
+    SessionGraphNode node = 1;
+    FeedBlock block = 2;
+  }
 }
 
 message SessionStateRequest {
@@ -327,8 +464,20 @@ message ClearCredentialRequest {
 }
 
 service SessionService {
-  // Full structured state (binary protobuf).
-  rpc GetState(SessionStateRequest) returns (SessionState);
+  // Full structured state (binary protobuf). Deprecated in favor of
+  // GetSnapshot / GetHistory for new clients.
+  rpc GetState(SessionStateRequest) returns (SessionState) {
+    option deprecated = true;
+  }
+  // Full nested session snapshot (session-snapshot-collapse contract).
+  rpc GetSnapshot(SessionStateRequest) returns (SessionSnapshot);
+  // Session history as a snapshot-shaped transcript (session-snapshot-collapse).
+  rpc GetHistory(SessionStateRequest) returns (SessionSnapshot);
+  // Collapse a session into a graph node (session-snapshot-collapse).
+  rpc CollapseSession(CollapseSessionRequest) returns (CollapseSessionResponse);
+  rpc GetSessionGraphNode(GetSessionGraphNodeRequest) returns (GetSessionGraphNodeResponse);
+  rpc ListSessionGraphNodeMessages(ListSessionGraphNodeMessagesRequest) returns (ListSessionGraphNodeMessagesResponse);
+  rpc StreamSessionGraphNode(StreamSessionGraphNodeRequest) returns (stream SessionGraphNodeStreamFrame);
   // Session resources: list (with current marker) / create / rename /
   // delete. DeleteSession reports the offending run ids when refused because
   // the session still has running graphs.

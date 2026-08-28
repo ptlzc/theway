@@ -150,7 +150,7 @@ pub struct WireLoadCronJobsResult {
     pub jobs: Vec<WireStoredCronJob>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WireMcpSnapshot {
     pub servers: usize,
     pub tools: usize,
@@ -159,7 +159,7 @@ pub struct WireMcpSnapshot {
     pub tool_names: Vec<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WireToolsSnapshot {
     pub total: usize,
     pub names: Vec<String>,

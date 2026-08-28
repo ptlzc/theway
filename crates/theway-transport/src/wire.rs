@@ -312,9 +312,193 @@ pub fn epoch_millis_to_rfc3339(millis: i64) -> Option<String> {
         .map(|dt| dt.to_rfc3339())
 }
 
+/// A resolved model reference in a session runtime.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WireModelRef {
+    pub provider: String,
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+}
+
+/// Session identity/display metadata.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct WireSessionInfo {
+    pub id: String,
+    pub name: String,
+    pub cwd: String,
+    pub created_at: String,
+    /// Deprecated epoch milliseconds; prefer `last_activity_at_rfc3339`.
+    pub last_activity_at: i64,
+    pub last_activity_at_rfc3339: Option<String>,
+    pub busy: bool,
+    pub preview: Option<String>,
+    #[serde(default)]
+    pub metadata: HashMap<String, String>,
+    pub graph_count: u32,
+    pub active_graph_count: u32,
+    pub queued_count: usize,
+    pub sidebar: WireSidebarSnapshot,
+}
+
+/// Live session runtime/context.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct WireSessionRuntime {
+    pub model: WireModelRef,
+    pub thinking_level: String,
+    #[serde(default)]
+    pub supported_thinking_levels: Vec<String>,
+    #[serde(default)]
+    pub context_usage: WireContextUsage,
+    #[serde(default)]
+    pub session_context_usage: WireContextUsage,
+    pub tui_max_feed_lines: Option<u64>,
+    #[serde(default)]
+    pub model_catalog: Vec<ProviderGroup>,
+    pub latest_trigger_poll: Option<crate::feed::TriggerPollStatus>,
+    pub goal: Option<WireGoalSnapshot>,
+    pub control_plane_prompt: Option<WireControlPlanePromptSnapshot>,
+    #[serde(default, skip_serializing_if = "WireExtensionSnapshot::is_empty")]
+    pub extensions: WireExtensionSnapshot,
+}
+
+/// Transcript plane of a session snapshot.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct WireSessionFeed {
+    #[serde(default)]
+    pub blocks: Vec<crate::feed::WireFeedBlock>,
+    #[serde(default)]
+    pub lines: Vec<String>,
+    #[serde(default)]
+    pub blocks_base: u64,
+    #[serde(default)]
+    pub lines_base: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub block_patches: Vec<WireFeedBlockPatch>,
+}
+
+/// Graph-mode state mounted under a session snapshot.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct WireSessionGraphState {
+    #[serde(default)]
+    pub dags: Vec<WireDagRunSnapshot>,
+    #[serde(default)]
+    pub subagents: Vec<WireAgentJobSnapshot>,
+    #[serde(default)]
+    pub nodes: Vec<WireSessionGraphNode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_node_id: Option<String>,
+}
+
+/// Session lineage for fork/collapse ancestry.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WireSessionLineage {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_session_id: Option<String>,
+    #[serde(default)]
+    pub ancestor_session_ids: Vec<String>,
+    #[serde(default)]
+    pub child_session_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collapsed_from_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collapsed_into_session_id: Option<String>,
+}
+
+/// Full nested session snapshot: the successor of `WireStatus`.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct WireSessionSnapshot {
+    pub session_id: String,
+    pub info: WireSessionInfo,
+    pub runtime: WireSessionRuntime,
+    pub feed: WireSessionFeed,
+    pub graph_state: WireSessionGraphState,
+    pub lineage: WireSessionLineage,
+}
+
+/// Session graph node type.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WireSessionGraphNodeType {
+    #[default]
+    Unspecified,
+    Session,
+    Collapsed,
+}
+
+/// A node in the session graph.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct WireSessionGraphNode {
+    pub id: String,
+    pub session_id: String,
+    pub node_type: WireSessionGraphNodeType,
+    pub title: String,
+    pub summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_node_id: Option<String>,
+    #[serde(default)]
+    pub child_node_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collapsed_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collapsed_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+    pub message_count: u32,
+}
+
+/// Detailed record for a collapsed session.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct WireCollapsedSessionNode {
+    pub node_id: String,
+    pub session_id: String,
+    pub title: String,
+    pub summary: String,
+    pub message_count: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collapsed_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collapsed_into_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collapsed_into_node_id: Option<String>,
+    #[serde(default)]
+    pub original_session_ids: Vec<String>,
+}
+
+/// CollapseSession RPC wire request/response.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct WireCollapseSessionRequest {
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub into_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct WireCollapseSessionResponse {
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<WireSessionGraphNode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collapsed: Option<WireCollapsedSessionNode>,
+}
+
+/// Streaming frame for a session graph node.
+#[derive(Clone, Debug, PartialEq)]
+pub enum WireSessionGraphNodeStreamFrame {
+    Node(WireSessionGraphNode),
+    Block(crate::feed::WireFeedBlock),
+}
+
 /// graph mode: one DAG run (mirrors `crates/theway-transport/proto/graph_engine.proto` DagRunSnapshot; task text is
 /// deliberately excluded from the wire model — full text goes through GetNodeOutput).
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WireDagRunSnapshot {
     pub id: String,
     pub name: String,
@@ -330,7 +514,7 @@ pub struct WireDagRunSnapshot {
     pub nodes: Vec<WireDagNodeSnapshot>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WireDagNodeSnapshot {
     pub id: String,
     pub agent: String,
@@ -348,7 +532,7 @@ pub struct WireDagNodeSnapshot {
     pub live_preview: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WireNodeResultSnapshot {
     pub success: bool,
     pub error: Option<String>,
@@ -442,7 +626,7 @@ pub enum WireDagEvent {
 
 /// Graph mode: one subagent job projected by the host's job adapter (mirrors
 /// `crates/theway-transport/proto/graph_engine.proto` SubagentJobSnapshot).
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WireAgentJobSnapshot {
     pub id: String,
     pub agent: String,
@@ -467,7 +651,7 @@ pub struct WireAgentJobSnapshot {
     pub turn: Option<u32>,
 }
 
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct WireContextUsage {
     pub input_tokens: u64,
     pub output_tokens: u64,
@@ -687,7 +871,121 @@ impl From<WireStatus> for WireStatusUpdate {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+impl From<&WireStatus> for WireSessionSnapshot {
+    fn from(status: &WireStatus) -> Self {
+        let (provider, model) = split_model_spec(&status.model);
+        Self {
+            session_id: status.session_id.clone(),
+            info: WireSessionInfo {
+                id: status.session_id.clone(),
+                name: String::new(),
+                cwd: status.cwd.clone(),
+                created_at: String::new(),
+                last_activity_at: 0,
+                last_activity_at_rfc3339: None,
+                busy: status.busy,
+                preview: None,
+                metadata: HashMap::new(),
+                graph_count: 0,
+                active_graph_count: 0,
+                queued_count: status.queued_count,
+                sidebar: status.sidebar.clone(),
+            },
+            runtime: WireSessionRuntime {
+                model: WireModelRef {
+                    provider,
+                    model,
+                    base_url: None,
+                },
+                thinking_level: status.thinking_level.clone(),
+                supported_thinking_levels: vec![
+                    "off".into(),
+                    "minimal".into(),
+                    "low".into(),
+                    "medium".into(),
+                    "high".into(),
+                    "xhigh".into(),
+                ],
+                context_usage: status.usage.clone(),
+                session_context_usage: status.session_usage.clone(),
+                tui_max_feed_lines: status.tui_max_feed_lines,
+                model_catalog: status.model_catalog.clone(),
+                latest_trigger_poll: status.latest_trigger_poll.clone(),
+                goal: status.goal.clone(),
+                control_plane_prompt: status.control_plane_prompt.clone(),
+                extensions: status.extensions.clone(),
+            },
+            feed: WireSessionFeed {
+                blocks: status.feed_blocks.clone(),
+                lines: status.feed_lines.clone(),
+                blocks_base: status.feed_blocks_base,
+                lines_base: status.feed_lines_base,
+                block_patches: status.feed_block_patches.clone(),
+            },
+            graph_state: WireSessionGraphState {
+                dags: status.dags.clone(),
+                subagents: status.subagents.clone(),
+                nodes: Vec::new(),
+                active_node_id: None,
+            },
+            lineage: WireSessionLineage::default(),
+        }
+    }
+}
+
+impl From<&WireSessionSnapshot> for WireStatus {
+    fn from(snapshot: &WireSessionSnapshot) -> Self {
+        let model = join_model_spec(
+            &snapshot.runtime.model.provider,
+            &snapshot.runtime.model.model,
+        );
+        Self {
+            session_id: if !snapshot.session_id.is_empty() {
+                snapshot.session_id.clone()
+            } else {
+                snapshot.info.id.clone()
+            },
+            model,
+            thinking_level: snapshot.runtime.thinking_level.clone(),
+            model_catalog: snapshot.runtime.model_catalog.clone(),
+            cwd: snapshot.info.cwd.clone(),
+            busy: snapshot.info.busy,
+            queued_count: snapshot.info.queued_count,
+            latest_trigger_poll: snapshot.runtime.latest_trigger_poll.clone(),
+            goal: snapshot.runtime.goal.clone(),
+            control_plane_prompt: snapshot.runtime.control_plane_prompt.clone(),
+            sidebar: snapshot.info.sidebar.clone(),
+            feed_blocks: snapshot.feed.blocks.clone(),
+            feed_blocks_base: snapshot.feed.blocks_base,
+            feed_block_patches: snapshot.feed.block_patches.clone(),
+            feed_lines: snapshot.feed.lines.clone(),
+            feed_lines_base: snapshot.feed.lines_base,
+            dags: snapshot.graph_state.dags.clone(),
+            subagents: snapshot.graph_state.subagents.clone(),
+            usage: snapshot.runtime.context_usage.clone(),
+            session_usage: snapshot.runtime.session_context_usage.clone(),
+            tui_max_feed_lines: snapshot.runtime.tui_max_feed_lines,
+            extensions: snapshot.runtime.extensions.clone(),
+        }
+    }
+}
+
+fn split_model_spec(spec: &str) -> (String, String) {
+    match spec.split_once(':') {
+        Some((provider, model)) if !model.is_empty() => (provider.to_string(), model.to_string()),
+        _ => (String::new(), spec.to_string()),
+    }
+}
+
+fn join_model_spec(provider: &str, model: &str) -> String {
+    if provider.is_empty() {
+        model.to_string()
+    } else {
+        format!("{provider}:{model}")
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WireGoalSnapshot {
     pub condition: String,
     pub status: String,
@@ -695,7 +993,7 @@ pub struct WireGoalSnapshot {
     pub last_reason: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WireControlPlanePromptSnapshot {
     pub tool_name: String,
     pub label: String,
@@ -704,7 +1002,7 @@ pub struct WireControlPlanePromptSnapshot {
     pub payload: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WireSidebarSnapshot {
     pub inbox_new: usize,
     pub skills: WireSkillsSnapshot,
@@ -726,7 +1024,7 @@ pub struct WireSidebarSnapshot {
     pub runtime_revision: u64,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WireSkillsSnapshot {
     pub total: usize,
     pub enabled: usize,
@@ -737,7 +1035,7 @@ pub struct WireSkillsSnapshot {
     pub items: Vec<WireSkillSnapshot>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WireSkillSnapshot {
     pub name: String,
     pub source: String,
@@ -745,7 +1043,7 @@ pub struct WireSkillSnapshot {
     pub enabled: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WireTriggersSnapshot {
     pub total: usize,
     pub enabled: usize,
@@ -753,7 +1051,7 @@ pub struct WireTriggersSnapshot {
     pub rules: Vec<WireTriggerRuleSnapshot>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WireTriggerRuleSnapshot {
     pub id: String,
     pub full_id: String,
@@ -763,7 +1061,7 @@ pub struct WireTriggerRuleSnapshot {
     pub action: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WireCronSnapshot {
     pub total: usize,
     pub enabled: usize,
@@ -771,7 +1069,7 @@ pub struct WireCronSnapshot {
     pub jobs: Vec<WireCronJobSnapshot>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WireCronJobSnapshot {
     pub id: String,
     pub enabled: bool,

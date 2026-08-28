@@ -21,6 +21,75 @@ impl SessionService for GrpcState {
         Ok(Response::new(session_state(state)))
     }
 
+    async fn get_snapshot(
+        &self,
+        request: Request<theway_grpc::SessionStateRequest>,
+    ) -> Result<Response<theway_grpc::SessionSnapshot>, Status> {
+        let request = request.into_inner();
+        if request.session_id.is_empty() {
+            let latest = self.latest.lock();
+            return Ok(Response::new(crate::proto::session_snapshot_wire(&latest)));
+        }
+        let session_states = self.session_states.lock();
+        let Some(state) = session_states.get(&request.session_id) else {
+            return Err(Status::not_found(format!(
+                "session {} is not available",
+                request.session_id
+            )));
+        };
+        Ok(Response::new(crate::proto::session_snapshot_wire(state)))
+    }
+
+    async fn get_history(
+        &self,
+        request: Request<theway_grpc::SessionStateRequest>,
+    ) -> Result<Response<theway_grpc::SessionSnapshot>, Status> {
+        self.get_snapshot(request).await
+    }
+
+    async fn collapse_session(
+        &self,
+        _request: Request<theway_grpc::CollapseSessionRequest>,
+    ) -> Result<Response<theway_grpc::CollapseSessionResponse>, Status> {
+        Err(Status::unimplemented(
+            "session collapse is not wired in this transport build",
+        ))
+    }
+
+    async fn get_session_graph_node(
+        &self,
+        _request: Request<theway_grpc::GetSessionGraphNodeRequest>,
+    ) -> Result<Response<theway_grpc::GetSessionGraphNodeResponse>, Status> {
+        Err(Status::unimplemented(
+            "session graph nodes are not wired in this transport build",
+        ))
+    }
+
+    async fn list_session_graph_node_messages(
+        &self,
+        _request: Request<theway_grpc::ListSessionGraphNodeMessagesRequest>,
+    ) -> Result<Response<theway_grpc::ListSessionGraphNodeMessagesResponse>, Status> {
+        Err(Status::unimplemented(
+            "session graph node messages are not wired in this transport build",
+        ))
+    }
+
+    type StreamSessionGraphNodeStream = Pin<
+        Box<
+            dyn futures::Stream<Item = Result<theway_grpc::SessionGraphNodeStreamFrame, Status>>
+                + Send,
+        >,
+    >;
+
+    async fn stream_session_graph_node(
+        &self,
+        _request: Request<theway_grpc::StreamSessionGraphNodeRequest>,
+    ) -> Result<Response<Self::StreamSessionGraphNodeStream>, Status> {
+        Err(Status::unimplemented(
+            "session graph node streaming is not wired in this transport build",
+        ))
+    }
+
     // ── session resources (session-resource-model; backed by SessionOps) ──
 
     async fn list_sessions(
