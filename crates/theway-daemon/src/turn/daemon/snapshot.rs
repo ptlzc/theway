@@ -7,7 +7,19 @@ impl TurnHost {
         let old_session = std::mem::replace(&mut self.session, incoming);
         let old_cwd = self.runtime.cwd.clone();
         self.runtime.cwd = self.session.cwd.clone();
+        // Swap the parked session's projection into the active projection slot
+        // so the snapshot is generated from that session's own feed state.
+        let dummy = FeedProjectionState::new(
+            self.projection.capabilities.clone(),
+            self.projection.thinking_summary.clone(),
+        );
+        let old_projection = std::mem::replace(
+            &mut self.projection,
+            std::mem::replace(&mut self.session.projection, dummy),
+        );
         let snapshot = self.wire_snapshot();
+        let parked_projection = std::mem::replace(&mut self.projection, old_projection);
+        self.session.projection = parked_projection;
         self.runtime.cwd = old_cwd;
         let restored = std::mem::replace(&mut self.session, old_session);
         self.sessions.insert(restored);

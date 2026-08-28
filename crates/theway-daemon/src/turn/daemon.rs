@@ -26,7 +26,7 @@ use theway_core::SkillSource;
 use theway_core::multiagent::graph::types::DagEvent;
 
 use super::feed::{self, Feed, FeedUpdate, Level, TriggerPollStatus};
-use super::kernel::{QueuedTurn, ReplKernel, TurnFut, TurnState, poll_turn};
+use super::kernel::{QueuedTurn, ReplKernel, TurnState, poll_turn};
 use crate::agent_session::RetrySettings;
 use crate::bug_report;
 use crate::commands::{self, CommandCtx, CommandOutcome, Registry};

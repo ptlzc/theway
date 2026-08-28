@@ -262,7 +262,11 @@ impl TurnHost {
         let mut main_run_rx = self.inputs.main_run_rx.take().expect("main_run_rx taken once");
         let mut control_plane_prompt_rx = self.inputs.control_plane_prompt_rx.take();
         let mut turn = TurnState::default();
-        let mut parked_turns: FuturesUnordered<(String, TurnFut)> = FuturesUnordered::new();
+        let mut parked_turns: FuturesUnordered<
+            std::pin::Pin<
+                Box<dyn std::future::Future<Output = (String, Result<Option<String>, theway_core::AgentRunError>)>>,
+            >,
+        > = FuturesUnordered::new();
         self.refresh_goal_state().await;
         self.publish_snapshot(&latest, &snapshot_tx, true).await;
 

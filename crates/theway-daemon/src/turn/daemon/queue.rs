@@ -63,7 +63,14 @@ impl TurnHost {
     }
 
     /// Start queued turns for every parked session that is not already busy.
-    fn start_parked_turns(&mut self, unordered: &mut FuturesUnordered<(String, TurnFut)>) {
+    fn start_parked_turns(
+        &mut self,
+        unordered: &mut FuturesUnordered<
+            std::pin::Pin<
+                Box<dyn std::future::Future<Output = (String, Result<Option<String>, theway_core::AgentRunError>)>>,
+            >,
+        >,
+    ) {
         let ids: Vec<String> = self
             .sessions
             .sessions
@@ -81,7 +88,11 @@ impl TurnHost {
     fn start_parked_turn(
         &mut self,
         session_id: &str,
-        unordered: &mut FuturesUnordered<(String, TurnFut)>,
+        unordered: &mut FuturesUnordered<
+            std::pin::Pin<
+                Box<dyn std::future::Future<Output = (String, Result<Option<String>, theway_core::AgentRunError>)>>,
+            >,
+        >,
     ) -> bool {
         let Some(session) = self.sessions.get_mut(session_id) else {
             return false;
@@ -113,7 +124,7 @@ impl TurnHost {
             QueuedTurn::AgentPrompt {
                 display,
                 prompt,
-                error_context,
+                error_context: _,
             } => {
                 session.projection.feed.push_user(display);
                 session.kernel.prompt_turn(prompt)
@@ -133,7 +144,11 @@ impl TurnHost {
         };
         session.busy = true;
         session.aborted = false;
-        unordered.push((session_id.to_string(), fut));
+        let session_id = session_id.to_string();
+        unordered.push(Box::pin(async move {
+            let result = fut.await;
+            (session_id, result)
+        }));
         true
     }
 
@@ -243,7 +258,11 @@ impl TurnHost {
         &mut self,
         session_id: &str,
         result: Result<Option<String>, theway_core::AgentRunError>,
-        unordered: &mut FuturesUnordered<(String, TurnFut)>,
+        unordered: &mut FuturesUnordered<
+            std::pin::Pin<
+                Box<dyn std::future::Future<Output = (String, Result<Option<String>, theway_core::AgentRunError>)>>,
+            >,
+        >,
     ) {
         let Some(session) = self.sessions.get_mut(session_id) else {
             return;
