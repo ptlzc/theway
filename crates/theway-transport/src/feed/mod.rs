@@ -7,6 +7,7 @@
 pub mod model;
 pub mod plain_cache;
 pub mod preview;
+pub mod replay;
 pub mod types;
 pub mod wire;
 
@@ -15,9 +16,10 @@ pub use model::{
     TOOL_OUTPUT_ERROR_TAIL_LINES, TOOL_OUTPUT_HEAD_LINES, TOOL_OUTPUT_MAX_LINE_CHARS,
     TOOL_OUTPUT_TAIL_LINES, display_prefix, should_separate, wrap_str,
 };
-pub use plain_cache::{PlainLinesCache, block_fingerprint};
+pub use plain_cache::{PlainLinesCache, block_fingerprint, trim_feed_to_lines};
 pub use preview::{
     compact_tool_content_blocks, compact_tool_output_lines, preview, truncate_chars,
 };
+pub use replay::replay_messages;
 pub use types::{Block, FeedUpdate, Open};
 pub use wire::{Level, TriggerPollStatus, WireFeedBlock};

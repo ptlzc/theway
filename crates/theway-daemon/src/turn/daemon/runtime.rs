@@ -70,7 +70,11 @@ impl TurnHost {
         let tool_ops: Arc<dyn ToolOps> = Arc::new(ForwardingToolOps::new(daemon_config.clone()));
         let mut kernel = ReplKernel::new(config.harness, config.trigger_executor, config.retry.clone());
         kernel.set_extension_host(config.extension_host);
-        let projection = FeedProjectionState {
+        // Resume replay (issue #87): a rehydrated session's transcript has no
+        // live `FeedUpdate`s left to drive the feed, so replay it into the
+        // initial projection — the startup snapshot then carries the full
+        // history to TUI/headless clients, capped at `tui_max_feed_lines`.
+        let mut projection = FeedProjectionState {
             feed: Feed::new(),
             plain_lines_cache: theway_transport::feed::PlainLinesCache::new(100),
             block_versions: Vec::new(),
@@ -82,6 +86,11 @@ impl TurnHost {
             control_plane_prompt: None,
             capabilities: config.capabilities,
         };
+        crate::feed_replay::replay_transcript(
+            &mut projection.feed,
+            &kernel.harness().agent().state().messages,
+            config.startup.tui_max_feed_lines,
+        );
         Self {
             session: SessionRuntimeState {
                 kernel,

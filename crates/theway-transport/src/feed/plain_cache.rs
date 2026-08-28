@@ -114,6 +114,12 @@ impl PlainLinesCache {
         &self.rows
     }
 
+    /// Absolute row index where each block's rows start (aligned with the
+    /// block list, includes the blank separator row pushed before a block).
+    pub fn block_starts(&self) -> &[usize] {
+        &self.block_starts
+    }
+
     /// Reconcile with `feed`, re-rendering only the suffix after the first
     /// dirty block. Width changes invalidate everything.
     pub fn update(&mut self, feed: &Feed, width: usize) {
@@ -244,6 +250,38 @@ impl PlainLinesCache {
             previous = Some(block);
         }
     }
+}
+
+/// Trim the oldest feed blocks until the width-`width` plain-text rendering
+/// fits within `max_lines` rows — the resume-replay cap matching the TUI's
+/// `max_feed_lines` scrollback limit. Returns `true` when blocks were dropped.
+///
+/// The cut is computed from the rendered row count (same projection the wire
+/// `feed_lines` uses), so a huge tool result counts as the many rows it
+/// actually renders instead of a single block.
+pub fn trim_feed_to_lines(feed: &mut Feed, width: usize, max_lines: usize) -> bool {
+    if max_lines == 0 {
+        return false;
+    }
+    let mut cache = PlainLinesCache::new(width);
+    cache.update(feed, width);
+    let rows = cache.rows().len();
+    if rows <= max_lines {
+        return false;
+    }
+    let keep_from = rows - max_lines;
+    // `block_starts` is monotonically increasing; the first block whose first
+    // row sits at or after `keep_from` is the oldest one we can keep.
+    let first_keep = cache
+        .block_starts()
+        .partition_point(|&start| start < keep_from);
+    if first_keep == 0 {
+        return false;
+    }
+    let blocks = feed.wire_blocks();
+    let kept: Vec<super::WireFeedBlock> = blocks.into_iter().skip(first_keep).collect();
+    feed.replace_blocks(&kept);
+    true
 }
 
 // Silence an unused-import check for `Level` (used via `Block::Plain` pattern

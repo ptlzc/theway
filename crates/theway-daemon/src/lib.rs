@@ -25,6 +25,7 @@ mod dag_persist;
 pub mod env;
 pub mod executor;
 mod export;
+mod feed_replay;
 mod file_commands;
 mod forwarding_tool_ops;
 pub mod hook_executors;
