@@ -21,6 +21,12 @@ Published as a public package on the official npm registry (`https://registry.np
 npm install @theway-ai/sdk
 ```
 
+## Documentation
+
+The package ships protocol/spec documentation in [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
+It covers session identity, `SessionSnapshot`, pagination, graph node types, streaming,
+collapse, and compatibility notes.
+
 ## Usage
 
 ```ts
