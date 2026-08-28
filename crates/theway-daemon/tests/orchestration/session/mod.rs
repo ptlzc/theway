@@ -447,6 +447,7 @@ fn test_factory() -> (SessionRuntimeBuilder, Arc<dyn RuntimeStorage>, TempDir) {
         services: crate::orchestration::DaemonServices::new(),
         before_tool_call: None,
         control_plane_hook: None,
+        control_plane_prompt_tx: None,
         after_tool_call: None,
         feed_tx,
         main_run_tx,

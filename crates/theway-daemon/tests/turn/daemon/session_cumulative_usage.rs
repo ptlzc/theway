@@ -154,6 +154,7 @@ fn install_activator(config: &mut DaemonConfig, main_run_tx: mpsc::UnboundedSend
         services: config.services.clone(),
         before_tool_call: None,
         control_plane_hook: None,
+        control_plane_prompt_tx: None,
         after_tool_call: None,
         feed_tx: config.feed_tx.clone(),
         main_run_tx,

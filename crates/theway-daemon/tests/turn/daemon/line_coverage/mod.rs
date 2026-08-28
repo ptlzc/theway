@@ -204,6 +204,7 @@ async fn request_abort_does_nothing_when_no_turn_is_in_flight() {
 async fn resolve_control_plane_prompt_noop_without_prompt() {
     let (mut host, _scratch, _repo) = host_with_input(Vec::new()).await;
     let prompt = PendingControlPlanePrompt {
+        session_id: "sess-line-coverage".into(),
         request: theway_core::ControlPlanePromptRequest {
             tool_call_id: "call-1".into(),
             tool_name: "InstallSkill".into(),

@@ -242,6 +242,7 @@ async fn run_transport_loop_shows_control_plane_prompt() {
     let (prompt_tx, _prompt_rx) = oneshot::channel();
     test_control_tx
         .send(PendingControlPlanePrompt {
+            session_id: "sess-final".into(),
             request: ControlPlanePromptRequest {
                 tool_call_id: "call-ctrl".into(),
                 tool_name: "InstallSkill".into(),

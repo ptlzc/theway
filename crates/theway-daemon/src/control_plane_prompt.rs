@@ -7,6 +7,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 pub struct PendingControlPlanePrompt {
+    pub session_id: String,
     pub request: ControlPlanePromptRequest,
     pub responder: oneshot::Sender<ControlPlanePromptDecision>,
 }
@@ -22,12 +23,23 @@ pub fn interactive_hook() -> (
     mpsc::UnboundedReceiver<PendingControlPlanePrompt>,
 ) {
     let (tx, rx) = mpsc::unbounded_channel::<PendingControlPlanePrompt>();
-    let hook: OnControlPlanePromptHook = Arc::new(move |request, cancel| {
+    let hook = interactive_hook_for_session(String::new(), tx);
+    (hook, rx)
+}
+
+/// Build a control-plane hook that tags every prompt with `session_id`.
+pub fn interactive_hook_for_session(
+    session_id: String,
+    tx: mpsc::UnboundedSender<PendingControlPlanePrompt>,
+) -> OnControlPlanePromptHook {
+    Arc::new(move |request, cancel| {
         let tx = tx.clone();
+        let session_id = session_id.clone();
         Box::pin(async move {
             let (decision_tx, decision_rx) = oneshot::channel();
             if tx
                 .send(PendingControlPlanePrompt {
+                    session_id,
                     request,
                     responder: decision_tx,
                 })
@@ -46,8 +58,7 @@ pub fn interactive_hook() -> (
                 },
             }
         })
-    });
-    (hook, rx)
+    })
 }
 
 #[cfg(test)]

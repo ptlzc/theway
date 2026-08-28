@@ -303,13 +303,14 @@ async fn cancel_routes_to_parked_session() {
 }
 
 #[tokio::test]
-async fn approve_routes_only_to_active_session() {
+async fn approve_routes_to_targeted_session() {
     let mut fixture = HostFixture::new();
     let host = fixture.host();
     host.sessions.insert(SessionRuntimeState::for_test("other"));
 
-    let (decision_tx, mut decision_rx) = oneshot::channel();
+    let (decision_tx, decision_rx) = oneshot::channel();
     host.show_control_plane_prompt(PendingControlPlanePrompt {
+        session_id: "other".into(),
         request: theway_core::ControlPlanePromptRequest {
             tool_call_id: "call-1".into(),
             tool_name: "WriteFile".into(),
@@ -330,8 +331,11 @@ async fn approve_routes_only_to_active_session() {
     )
     .await;
 
-    assert!(host.projection.control_plane_prompt.is_some());
-    assert!(decision_rx.try_recv().is_err());
+    assert!(host.projection.control_plane_prompt.is_none());
+    assert!(matches!(
+        decision_rx.await.unwrap(),
+        theway_core::ControlPlanePromptDecision::Allow
+    ));
 }
 
 #[tokio::test]

@@ -31,13 +31,11 @@ impl TurnHost {
                 session_id,
                 approve,
             } => {
-                if !session_id.is_empty() && session_id != self.session.id {
-                    self.error_line(format!(
-                        "approve ignored: session {session_id} is not the active session {}",
-                        self.session.id
-                    ));
-                    return;
-                }
+                let session_id = if session_id.is_empty() {
+                    self.session.id.clone()
+                } else {
+                    session_id
+                };
                 let decision = if approve {
                     theway_core::ControlPlanePromptDecision::Allow
                 } else {
@@ -45,7 +43,7 @@ impl TurnHost {
                         reason: Some("denied by user".into()),
                     }
                 };
-                self.resolve_control_plane_prompt(decision);
+                self.resolve_control_plane_prompt_for_session(&session_id, decision);
             }
             WireCommand::SetModel {
                 session_id,

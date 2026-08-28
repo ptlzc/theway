@@ -6,6 +6,7 @@ async fn handle_web_command_resolve_control_plane_approve_forwards_allow() {
     let (mut host, _scratch, _repo) = built.into_parts();
     let (decision_tx, decision_rx) = oneshot::channel();
     host.show_control_plane_prompt(PendingControlPlanePrompt {
+        session_id: "sess-final".into(),
         request: ControlPlanePromptRequest {
             tool_call_id: "call-approve".into(),
             tool_name: "WriteFile".into(),

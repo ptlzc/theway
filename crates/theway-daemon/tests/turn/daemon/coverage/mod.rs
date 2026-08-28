@@ -320,6 +320,7 @@ async fn resolve_control_plane_prompt_timeout_forwards_timeout() {
     let (mut host, _scratch, _repo) = host_with_input(Vec::new()).await;
     let (decision_tx, decision_rx) = oneshot::channel();
     host.show_control_plane_prompt(PendingControlPlanePrompt {
+        session_id: "sess-coverage".into(),
         request: ControlPlanePromptRequest {
             tool_call_id: "call-timeout".into(),
             tool_name: "InstallSkill".into(),

@@ -283,9 +283,22 @@ impl TurnHost {
     }
 
     fn resolve_control_plane_prompt(&mut self, decision: theway_core::ControlPlanePromptDecision) {
+        let session_id = self.session.id.clone();
+        self.resolve_control_plane_prompt_for_session(&session_id, decision);
+    }
+
+    fn resolve_control_plane_prompt_for_session(
+        &mut self,
+        session_id: &str,
+        decision: theway_core::ControlPlanePromptDecision,
+    ) {
         let Some(prompt) = self.projection.control_plane_prompt.take() else {
             return;
         };
+        if prompt.session_id != session_id {
+            self.projection.control_plane_prompt = Some(prompt);
+            return;
+        }
         let outcome = match decision {
             theway_core::ControlPlanePromptDecision::Allow => "allowed",
             theway_core::ControlPlanePromptDecision::Deny { .. } => "denied",

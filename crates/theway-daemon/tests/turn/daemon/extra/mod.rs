@@ -239,6 +239,7 @@ fn install_activator(config: &mut DaemonConfig, main_run_tx: mpsc::UnboundedSend
         services: config.services.clone(),
         before_tool_call: None,
         control_plane_hook: None,
+        control_plane_prompt_tx: None,
         after_tool_call: None,
         feed_tx: config.feed_tx.clone(),
         main_run_tx,
@@ -420,6 +421,7 @@ async fn wire_snapshot_reflects_populated_goal_poll_prompt_and_sidebar_state() {
     };
     let (prompt_tx, _prompt_rx) = oneshot::channel();
     host.projection.control_plane_prompt = Some(PendingControlPlanePrompt {
+        session_id: "sess-extra".into(),
         request: ControlPlanePromptRequest {
             tool_call_id: "call-1".into(),
             tool_name: "InstallSkill".into(),

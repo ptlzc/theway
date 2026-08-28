@@ -416,6 +416,7 @@ async fn show_and_resolve_control_plane_prompt_forwards_decision() {
     let host = fixture.host();
     let (decision_tx, decision_rx) = oneshot::channel();
     host.show_control_plane_prompt(PendingControlPlanePrompt {
+        session_id: "sess-more".into(),
         request: ControlPlanePromptRequest {
             tool_call_id: "call-1".into(),
             tool_name: "InstallSkill".into(),
@@ -454,6 +455,7 @@ async fn handle_web_command_routes_abort_and_control_plane_resolve() {
 
     let (decision_tx, decision_rx) = oneshot::channel();
     host.show_control_plane_prompt(PendingControlPlanePrompt {
+        session_id: "sess-more".into(),
         request: ControlPlanePromptRequest {
             tool_call_id: "call-2".into(),
             tool_name: "WriteFile".into(),

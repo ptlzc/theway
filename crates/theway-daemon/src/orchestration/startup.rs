@@ -271,12 +271,13 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     // `tui_max_feed_lines`.
     let thinking_summary_cfg = startup.thinking_summary.clone();
     let before_tool_call = PermissionPolicy::default_for_coding_agent().as_before_tool_call();
-    let (control_plane_hook, control_plane_prompt_rx) = if options.approve_control_plane {
-        (Some(crate::control_plane_prompt::allow_hook()), None)
-    } else {
-        let (hook, rx) = crate::control_plane_prompt::interactive_hook();
-        (Some(hook), Some(rx))
-    };
+    let (control_plane_hook, control_plane_prompt_tx, control_plane_prompt_rx) =
+        if options.approve_control_plane {
+            (Some(crate::control_plane_prompt::allow_hook()), None, None)
+        } else {
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            (None, Some(tx), Some(rx))
+        };
     // TODO(#73): LSP servers are still read from local `lsp.toml` files;
     // once the settings RPC provisions them, this local read goes away. The
     // `load_local_sources` seam starts an empty supervisor instead.
@@ -303,6 +304,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         services: services.clone(),
         before_tool_call: Some(before_tool_call.clone()),
         control_plane_hook,
+        control_plane_prompt_tx,
         after_tool_call,
         feed_tx: feed_tx.clone(),
         main_run_tx: main_run_tx.clone(),

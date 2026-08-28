@@ -417,6 +417,10 @@ pub struct SessionRuntimeBuilder {
     pub services: DaemonServices,
     pub before_tool_call: Option<theway_core::BeforeToolCallHook>,
     pub control_plane_hook: Option<theway_core::OnControlPlanePromptHook>,
+    /// When set, the builder creates a per-session interactive control-plane
+    /// hook that tags every prompt with that session's id.
+    pub control_plane_prompt_tx:
+        Option<tokio::sync::mpsc::UnboundedSender<crate::control_plane_prompt::PendingControlPlanePrompt>>,
     pub after_tool_call: Option<theway_core::AfterToolCallHook>,
     pub feed_tx: tokio::sync::mpsc::UnboundedSender<FeedUpdate>,
     pub main_run_tx: tokio::sync::mpsc::UnboundedSender<String>,
@@ -625,7 +629,13 @@ impl SessionRuntimeBuilder {
         ));
         opts.turn_continuation_cap = Some(goal::MAX_CONTINUATIONS);
         opts.before_tool_call = self.before_tool_call.clone();
-        opts.on_control_plane_prompt = self.control_plane_hook.clone();
+        opts.on_control_plane_prompt = match &self.control_plane_prompt_tx {
+            Some(tx) => Some(crate::control_plane_prompt::interactive_hook_for_session(
+                session_id.clone(),
+                tx.clone(),
+            )),
+            None => self.control_plane_hook.clone(),
+        };
         opts.after_tool_call = self.after_tool_call.clone();
         let harness = std::sync::Arc::new(AgentHarness::new(opts));
         if let Some((extensions, base_tools)) = &runtime_extension_host {

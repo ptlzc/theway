@@ -16,10 +16,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use parking_lot::Mutex;
-
 use anyhow::{Context as _, Result, bail};
 use async_trait::async_trait;
+use theway_contract::session::{SessionReader, SessionStore, StoredSessionEntry};
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::types::DagStatus;
 
@@ -57,7 +56,6 @@ pub struct AppSessionOps {
     dag_engine: Arc<DagEngine>,
     cwd: String,
     session_execution: SessionExecutionRegistry,
-    metadata: Arc<Mutex<HashMap<String, HashMap<String, String>>>>,
 }
 
 impl AppSessionOps {
@@ -72,9 +70,47 @@ impl AppSessionOps {
             dag_engine,
             cwd,
             session_execution,
-            metadata: Arc::new(Mutex::new(HashMap::new())),
         }
     }
+}
+
+/// Read the latest `session_metadata` custom entry from a session transcript.
+async fn read_session_metadata(session: &(impl SessionReader + ?Sized)) -> Result<HashMap<String, String>> {
+    let entries = session.find_entries("custom").await?;
+    let mut metadata = HashMap::new();
+    for entry in entries {
+        if entry.payload.get("customType").and_then(serde_json::Value::as_str) != Some("session_metadata") {
+            continue;
+        }
+        if let Some(map) = entry
+            .payload
+            .get("metadata")
+            .and_then(|value| serde_json::from_value::<HashMap<String, String>>(value.clone()).ok())
+        {
+            metadata.extend(map);
+        }
+    }
+    Ok(metadata)
+}
+
+/// Persist a metadata map as a new `session_metadata` custom transcript entry.
+async fn append_session_metadata(
+    session: &(impl SessionStore + ?Sized),
+    metadata: &HashMap<String, String>,
+) -> Result<()> {
+    let id = session.create_entry_id().await?;
+    let parent_id = session.get_leaf_id().await?;
+    let timestamp = chrono::Utc::now().to_rfc3339();
+    let entry = StoredSessionEntry::from_payload(serde_json::json!({
+        "type": "custom",
+        "id": id,
+        "parentId": parent_id,
+        "timestamp": timestamp,
+        "customType": "session_metadata",
+        "metadata": metadata,
+    }))?;
+    session.append_entry(entry).await?;
+    Ok(())
 }
 
 #[async_trait]
@@ -92,12 +128,10 @@ impl SessionOps for AppSessionOps {
                 .filter(|run| run.status == DagStatus::Running)
                 .count() as u32;
 
-            let metadata = self
-                .metadata
-                .lock()
-                .get(&record.id)
-                .cloned()
-                .unwrap_or_default();
+            let metadata = match self.repo.open(&record.id).await? {
+                Some(session) => read_session_metadata(session.as_ref()).await?,
+                None => HashMap::new(),
+            };
             summaries.push(SessionSummary {
                 session_id: record.id,
                 name: record.name.unwrap_or_default(),
@@ -138,7 +172,7 @@ impl SessionOps for AppSessionOps {
             .unwrap_or_default()
             .to_string();
         if !metadata.is_empty() {
-            self.metadata.lock().insert(id.clone(), metadata.clone());
+            append_session_metadata(session.as_ref(), metadata).await?;
         }
         Ok(id)
     }
@@ -149,12 +183,9 @@ impl SessionOps for AppSessionOps {
             .open(id)
             .await?
             .with_context(|| format!("no session matches id {id}"))?;
-        // Metadata persistence is part of the SessionRegistry work; validate
-        // that the session exists so the RPC surfaces a NotFound early.
-        let _ = session;
-        let mut all = self.metadata.lock();
-        let entry = all.entry(id.to_string()).or_default();
-        entry.extend(metadata.iter().map(|(k, v)| (k.clone(), v.clone())));
+        let mut merged = read_session_metadata(session.as_ref()).await?;
+        merged.extend(metadata.iter().map(|(k, v)| (k.clone(), v.clone())));
+        append_session_metadata(session.as_ref(), &merged).await?;
         Ok(())
     }
 
@@ -204,7 +235,6 @@ impl SessionOps for AppSessionOps {
         // Credentials are memory-only and session-scoped; deleting the session
         // must also drop its zeroizing secrets and execution context.
         self.session_execution.remove(&session_id);
-        self.metadata.lock().remove(&session_id);
         Ok(Vec::new())
     }
 }
@@ -442,5 +472,42 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("no session matches"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn metadata_is_persisted_across_ops_instances() {
+        let dir = tempdir().unwrap();
+        let repo = Arc::new(SqliteSessionRepo::new(dir.path()));
+        let mut initial = HashMap::new();
+        initial.insert("tenant".to_string(), "acme".to_string());
+
+        let first = ops(repo.clone(), "current");
+        let id = first
+            .create(Some("persistent-meta"), &initial)
+            .await
+            .unwrap();
+
+        let mut update = HashMap::new();
+        update.insert("env".to_string(), "prod".to_string());
+        first.update_metadata(&id, &update).await.unwrap();
+
+        // A fresh AppSessionOps must read the same metadata from the repo, not
+        // from an in-memory cache.
+        let second = ops(repo, "current");
+        let summary = second
+            .list()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|s| s.session_id == id)
+            .unwrap();
+        assert_eq!(
+            summary.metadata.get("tenant").map(String::as_str),
+            Some("acme")
+        );
+        assert_eq!(
+            summary.metadata.get("env").map(String::as_str),
+            Some("prod")
+        );
     }
 }
