@@ -88,9 +88,10 @@ pub use agent::session::{
         to_session,
     },
     session::{
-        BranchSummaryInput, JsonlSessionMetadata, Session, SessionContext, SessionContextModel,
-        SessionImportOrigin, SessionMetadata, SessionStorage, SessionTreeEntry,
-        build_session_context,
+        BranchSummaryInput, JsonlSessionMetadata, SESSION_GRAPH_STATE_CUSTOM_TYPE, Session,
+        SessionContext, SessionContextModel, SessionGraphState, SessionImportOrigin,
+        SessionMetadata, SessionStorage, SessionTreeEntry, SubagentJobSnapshot,
+        build_session_context, latest_session_graph_state,
     },
 };
 #[cfg(feature = "harness")]

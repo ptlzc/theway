@@ -15,8 +15,12 @@ use crate::types::AgentMessage;
 
 use super::super::messages::{branch_summary, compaction_summary, custom};
 use super::super::types::{SessionError, SessionErrorCode};
+use theway_contract::dag::PersistedRun;
 
 pub use theway_contract::session::{JsonlSessionMetadata, SessionImportOrigin, SessionMetadata};
+
+/// Custom entry type used to persist a session's subagent graph state.
+pub const SESSION_GRAPH_STATE_CUSTOM_TYPE: &str = "session_graph_state";
 
 // ──────────────────────────────────────────────────────────────────────────────────────────
 // Entry types
@@ -191,6 +195,66 @@ pub struct SessionContextModel {
     pub provider: String,
     #[serde(rename = "modelId")]
     pub model_id: String,
+}
+
+// ──────────────────────────────────────────────────────────────────────────────────────────
+// Subagent graph state
+// ──────────────────────────────────────────────────────────────────────────────────────────
+
+/// Serializable projection of a tracked subagent job. Kept deliberately small:
+/// full transcripts remain addressable through `raw_text_ref` / job ids.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubagentJobSnapshot {
+    pub id: String,
+    pub agent: String,
+    pub source: String,
+    pub run_id: Option<String>,
+    pub node_id: Option<String>,
+    pub session_id: Option<String>,
+    pub status: String,
+    pub started_at: Option<i64>,
+    pub completed_at: Option<i64>,
+    pub attempt: u32,
+    pub total_attempts: u32,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub chars: u64,
+    pub tools_called: u64,
+    pub turn: u32,
+    pub error: Option<String>,
+    pub output_tail: String,
+    pub truncated: bool,
+    pub live_preview: Option<String>,
+    pub tps: Option<f64>,
+    pub cps: Option<f64>,
+}
+
+/// Session-scoped subagent graph state, persisted as a `session_graph_state`
+/// custom entry (similar to `goal_state`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionGraphState {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dags: Vec<PersistedRun>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subagents: Vec<SubagentJobSnapshot>,
+}
+
+/// Find the newest `session_graph_state` custom entry in root-to-leaf order.
+pub fn latest_session_graph_state(entries: &[SessionTreeEntry]) -> Option<SessionGraphState> {
+    entries.iter().rev().find_map(|entry| {
+        let SessionTreeEntry::Custom {
+            custom_type, data, ..
+        } = entry
+        else {
+            return None;
+        };
+        if custom_type != SESSION_GRAPH_STATE_CUSTOM_TYPE {
+            return None;
+        }
+        serde_json::from_value(data.clone()?).ok()
+    })
 }
 
 // ──────────────────────────────────────────────────────────────────────────────────────────
@@ -511,6 +575,52 @@ impl Session {
             data,
         })
         .await
+    }
+
+    pub async fn session_id(&self) -> Result<Option<String>, SessionError> {
+        let metadata = self.storage.get_metadata_json().await?;
+        Ok(metadata
+            .get("id")
+            .and_then(|value| value.as_str())
+            .map(str::to_string))
+    }
+
+    /// Append a `session_graph_state` custom entry. The latest entry is the
+    /// persisted baseline used by collapse material.
+    pub async fn append_session_graph_state(
+        &self,
+        state: &SessionGraphState,
+    ) -> Result<String, SessionError> {
+        let mut data = serde_json::to_value(state).map_err(|error| SessionError {
+            code: SessionErrorCode::StorageFailure,
+            message: format!("serialize session graph state: {error}"),
+        })?;
+        if let Some(object) = data.as_object_mut() {
+            object.insert(
+                "updatedAt".to_string(),
+                serde_json::Value::String(Self::now_rfc3339()),
+            );
+        }
+        self.append_custom(SESSION_GRAPH_STATE_CUSTOM_TYPE, Some(data))
+            .await
+    }
+
+    /// Read the newest persisted `session_graph_state` entry.
+    pub async fn session_graph_state(&self) -> Result<Option<SessionGraphState>, SessionError> {
+        let entries = self.entries().await?;
+        Ok(latest_session_graph_state(&entries))
+    }
+
+    /// Read the newest non-empty compaction summary (written by `/compact` or
+    /// `force_compact`). This is the compact text used by collapse material.
+    pub async fn latest_compaction_summary(&self) -> Result<Option<String>, SessionError> {
+        let entries = self.entries().await?;
+        Ok(entries.iter().rev().find_map(|entry| {
+            let SessionTreeEntry::Compaction { summary, .. } = entry else {
+                return None;
+            };
+            (!summary.is_empty()).then(|| summary.clone())
+        }))
     }
 
     pub async fn append_session_name(

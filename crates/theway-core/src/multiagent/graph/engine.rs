@@ -449,6 +449,27 @@ impl DagEngine {
             .cloned()
     }
 
+    /// Re-home every run owned by `from_session` to `to_session`. Returns the
+    /// number of runs moved. Used by collapse `--adopt` / `attach_runs`.
+    pub fn rehome_runs(&self, from_session: &str, to_session: &str) -> usize {
+        let count = {
+            let mut inner = self.inner.lock();
+            let mut count = 0;
+            for run in inner.runs.values_mut() {
+                if run.session_id.as_deref() == Some(from_session) {
+                    run.session_id = Some(to_session.to_string());
+                    run.last_activity_at = now_ms();
+                    count += 1;
+                }
+            }
+            count
+        };
+        if count > 0 {
+            self.notify_persist();
+        }
+        count
+    }
+
     // ── intervention ────────────────────────────────────────────────────────
 
     /// Abort the whole run: in-flight jobs killed, pending/ready cancelled.

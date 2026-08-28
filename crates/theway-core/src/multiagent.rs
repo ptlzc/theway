@@ -26,4 +26,5 @@ mod job_metrics;
 mod job_transcript;
 pub mod jobs;
 pub mod runner;
+pub mod session_graph;
 pub mod types;

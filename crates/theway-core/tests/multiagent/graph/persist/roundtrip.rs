@@ -187,6 +187,21 @@ fn hydrate_demotes_running_nodes_and_preserves_terminal_results() {
 }
 
 #[test]
+fn session_graph_state_projection_roundtrips_persisted_runs() {
+    // Arrange
+    let run = budgeted_run();
+    let persisted = to_persisted(&run);
+
+    // Act
+    let state = to_session_graph_state(vec![persisted.clone()]);
+    let restored = from_session_graph_state(&state);
+
+    // Assert
+    assert_eq!(restored, vec![persisted]);
+    assert!(state.subagents.is_empty());
+}
+
+#[test]
 fn max_run_counter_uses_only_well_formed_dag_ids() {
     let run = |id: &str| DagRun {
         id: id.into(),

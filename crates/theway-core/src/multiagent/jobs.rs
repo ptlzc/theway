@@ -12,6 +12,7 @@ use chrono::Utc;
 use parking_lot::Mutex;
 use uuid::Uuid;
 
+pub use crate::agent::session::session::SubagentJobSnapshot;
 use crate::observability::{
     ErrorCategory, ObservationContext, OperationDetail, OperationId, OperationOutcome,
     OperationScope, RuntimeMeasurements, RuntimeObserver, noop_runtime_observer,
@@ -158,6 +159,35 @@ impl SubagentJob {
         let end = self.completed_at.or(self.started_at)?;
         let start = self.started_at?;
         Some((end - start) as f64 / 1000.0)
+    }
+}
+
+impl From<&SubagentJob> for SubagentJobSnapshot {
+    fn from(job: &SubagentJob) -> Self {
+        Self {
+            id: job.id.clone(),
+            agent: job.agent.clone(),
+            source: job.source.clone(),
+            run_id: job.run_id.clone(),
+            node_id: job.node_id.clone(),
+            session_id: job.session_id.clone(),
+            status: job.status.as_str().to_string(),
+            started_at: job.started_at,
+            completed_at: job.completed_at,
+            attempt: job.attempt,
+            total_attempts: job.total_attempts,
+            input_tokens: job.input_tokens,
+            output_tokens: job.output_tokens,
+            chars: job.chars,
+            tools_called: job.tools_called,
+            turn: job.turn,
+            error: job.error.clone(),
+            output_tail: job.output.clone(),
+            truncated: job.truncated,
+            live_preview: None,
+            tps: job.tps(),
+            cps: job.cps(),
+        }
     }
 }
 
@@ -539,6 +569,15 @@ impl SubagentJobRegistry {
         let mut jobs = inner.jobs.clone();
         jobs.reverse();
         jobs
+    }
+
+    /// Snapshot of jobs owned by one session, newest first.
+    pub fn snapshot_for_session(&self, session_id: Option<&str>) -> Vec<SubagentJobSnapshot> {
+        self.list()
+            .into_iter()
+            .filter(|job| job.session_id.as_deref() == session_id)
+            .map(|job| SubagentJobSnapshot::from(&job))
+            .collect()
     }
 
     /// Evict oldest terminal jobs beyond MAX_JOBS.
