@@ -180,6 +180,43 @@ message GraphListResponse {
   repeated DagRunSnapshot runs = 1;
 }
 
+// Node type in a session graph.
+enum SessionGraphNodeType {
+  SESSION_GRAPH_NODE_TYPE_UNSPECIFIED = 0;
+  SESSION_GRAPH_NODE_TYPE_SESSION = 1;
+  SESSION_GRAPH_NODE_TYPE_COLLAPSED = 2;
+}
+
+// A node in the session graph. Session nodes represent live sessions;
+// collapsed nodes represent archived sessions folded into another session.
+message SessionGraphNode {
+  string id = 1;
+  string session_id = 2;
+  SessionGraphNodeType type = 3;
+  string title = 4;
+  string summary = 5;
+  optional string parent_node_id = 6;
+  repeated string child_node_ids = 7;
+  optional string collapsed_session_id = 8;
+  optional string collapsed_at = 9; // RFC3339 / ISO-8601 with offset (UTC).
+  optional string created_at = 10;
+  optional string updated_at = 11;
+  uint32 message_count = 12;
+}
+
+// Detailed record for a session that has been collapsed into another session.
+message CollapsedSessionNode {
+  string node_id = 1;
+  string session_id = 2;
+  string title = 3;
+  string summary = 4;
+  uint32 message_count = 5;
+  optional string collapsed_at = 6; // RFC3339 / ISO-8601 with offset (UTC).
+  optional string collapsed_into_session_id = 7;
+  optional string collapsed_into_node_id = 8;
+  repeated string original_session_ids = 9;
+}
+
 service GraphEngineService {
   // Fetch a DAG node's full output from an offset (P3).
   rpc GetNodeOutput(GetNodeOutputRequest) returns (GetNodeOutputResponse);

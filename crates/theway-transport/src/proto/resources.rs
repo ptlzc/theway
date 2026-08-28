@@ -1,7 +1,9 @@
 /// Convert the internal session summary (session-resource-model) into the
 /// structured wire model.
+#[allow(deprecated)]
 pub fn session_summary_wire(summary: &crate::wire::SessionSummary) -> wire::SessionSummary {
     wire::SessionSummary {
+        id: summary.session_id.clone(),
         session_id: summary.session_id.clone(),
         name: summary.name.clone(),
         cwd: summary.cwd.clone(),
@@ -17,9 +19,15 @@ pub fn session_summary_wire(summary: &crate::wire::SessionSummary) -> wire::Sess
     }
 }
 
+#[allow(deprecated)]
 pub fn session_summary_from_proto(summary: &wire::SessionSummary) -> crate::wire::SessionSummary {
+    let session_id = if !summary.id.is_empty() {
+        summary.id.clone()
+    } else {
+        summary.session_id.clone()
+    };
     crate::wire::SessionSummary {
-        session_id: summary.session_id.clone(),
+        session_id,
         name: summary.name.clone(),
         cwd: summary.cwd.clone(),
         model: summary.model.clone(),

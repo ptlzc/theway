@@ -51,7 +51,7 @@ pub enum Level {
     Qr,
 }
 
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct TriggerPollStatus {
     pub checked_at: String,
     pub trace_id: String,

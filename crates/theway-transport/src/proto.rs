@@ -28,10 +28,13 @@ pub mod health {
 
 use crate::feed::{self, WireFeedBlock};
 use crate::wire::{
-    WireAgentEvent, WireDagEvent, WireExtensionCatalogEntry, WireExtensionCommandDescriptor,
-    WireExtensionContribution, WireExtensionDiagnostic, WireExtensionSnapshot,
+    WireAgentEvent, WireCollapseSessionRequest, WireCollapseSessionResponse,
+    WireCollapsedSessionNode, WireDagEvent, WireExtensionCatalogEntry,
+    WireExtensionCommandDescriptor, WireExtensionContribution, WireExtensionDiagnostic,
+    WireExtensionSnapshot, WireSessionGraphNode, WireSessionGraphNodeStreamFrame,
+    WireSessionGraphNodeType, WireSessionInfo, WireSessionRuntime, WireSessionSnapshot, WireStatus,
 };
-use crate::wire::{WireFeedDelta, WirePathContext, WireStatus};
+use crate::wire::{WireFeedDelta, WirePathContext};
 use theway_grpc as wire;
 
 /// Convert the internal snapshot into the structured wire model.
@@ -456,6 +459,452 @@ pub fn wire_status(state: &wire::SessionState) -> WireStatus {
             .unwrap_or_default(),
         tui_max_feed_lines: state.tui_max_feed_lines.map(u64::from),
         extensions: extension_snapshot_wire(state.extensions.as_ref()),
+    }
+}
+
+/// Convert a `WireStatus` into the nested `SessionSnapshot` proto message.
+pub fn session_snapshot_wire(status: &WireStatus) -> wire::SessionSnapshot {
+    wire_session_snapshot(&WireSessionSnapshot::from(status))
+}
+
+/// Convert a `SessionSnapshot` proto message back into the internal `WireStatus`.
+pub fn wire_status_from_session_snapshot(snapshot: &wire::SessionSnapshot) -> WireStatus {
+    WireStatus::from(&wire_session_snapshot_from_proto(snapshot))
+}
+
+/// Convert the nested wire snapshot into the proto `SessionSnapshot`.
+#[allow(deprecated)]
+pub fn wire_session_snapshot(snapshot: &WireSessionSnapshot) -> wire::SessionSnapshot {
+    let status = WireStatus::from(snapshot);
+    let state = session_state(&status);
+    wire::SessionSnapshot {
+        session_id: if !snapshot.session_id.is_empty() {
+            snapshot.session_id.clone()
+        } else {
+            state.session_id.clone()
+        },
+        info: Some(wire::SessionInfo {
+            id: if !snapshot.info.id.is_empty() {
+                snapshot.info.id.clone()
+            } else {
+                state.session_id.clone()
+            },
+            name: snapshot.info.name.clone(),
+            cwd: snapshot.info.cwd.clone(),
+            created_at: snapshot.info.created_at.clone(),
+            last_activity_at: snapshot.info.last_activity_at,
+            last_activity_at_rfc3339: snapshot.info.last_activity_at_rfc3339.clone(),
+            busy: snapshot.info.busy,
+            preview: snapshot.info.preview.clone(),
+            metadata: snapshot.info.metadata.clone(),
+            graph_count: snapshot.info.graph_count,
+            active_graph_count: snapshot.info.active_graph_count,
+            queued_count: snapshot.info.queued_count as u32,
+            sidebar: state.sidebar,
+        }),
+        runtime: Some(wire::SessionRuntime {
+            model: Some(wire::ModelRef {
+                provider: snapshot.runtime.model.provider.clone(),
+                model: snapshot.runtime.model.model.clone(),
+                base_url: snapshot.runtime.model.base_url.clone(),
+            }),
+            thinking_level: thinking_level_to_proto(&snapshot.runtime.thinking_level),
+            supported_thinking_levels: snapshot
+                .runtime
+                .supported_thinking_levels
+                .iter()
+                .map(|level| thinking_level_to_proto(level))
+                .collect(),
+            context_usage: state.context_usage,
+            session_context_usage: state.session_context_usage,
+            tui_max_feed_lines: state.tui_max_feed_lines,
+            model_catalog: state.model_catalog,
+            latest_trigger_poll: state.latest_trigger_poll,
+            goal: state.goal,
+            control_plane_prompt: state.control_plane_prompt,
+            extensions: state.extensions,
+        }),
+        feed: Some(wire::SessionFeed {
+            blocks: snapshot.feed.blocks.iter().map(feed_block).collect(),
+            lines: snapshot.feed.lines.clone(),
+            blocks_base: snapshot.feed.blocks_base,
+            lines_base: snapshot.feed.lines_base,
+            block_patches: snapshot
+                .feed
+                .block_patches
+                .iter()
+                .map(|patch| wire::FeedBlockPatch {
+                    index: patch.index,
+                    block: Some(feed_block(&patch.block)),
+                })
+                .collect(),
+        }),
+        graph_state: Some(wire::SessionGraphState {
+            dags: snapshot.graph_state.dags.iter().map(dag_run_wire).collect(),
+            subagents: snapshot
+                .graph_state
+                .subagents
+                .iter()
+                .map(subagent_wire)
+                .collect(),
+            nodes: snapshot
+                .graph_state
+                .nodes
+                .iter()
+                .map(session_graph_node_wire)
+                .collect(),
+            active_node_id: snapshot.graph_state.active_node_id.clone(),
+        }),
+        lineage: Some(wire::SessionLineage {
+            parent_session_id: snapshot.lineage.parent_session_id.clone(),
+            root_session_id: snapshot.lineage.root_session_id.clone(),
+            ancestor_session_ids: snapshot.lineage.ancestor_session_ids.clone(),
+            child_session_ids: snapshot.lineage.child_session_ids.clone(),
+            collapsed_from_session_id: snapshot.lineage.collapsed_from_session_id.clone(),
+            collapsed_into_session_id: snapshot.lineage.collapsed_into_session_id.clone(),
+        }),
+    }
+}
+
+/// Convert the proto `SessionSnapshot` into the nested wire snapshot.
+pub fn wire_session_snapshot_from_proto(snapshot: &wire::SessionSnapshot) -> WireSessionSnapshot {
+    let info = session_info_from_proto(snapshot.info.as_ref());
+    WireSessionSnapshot {
+        session_id: if !snapshot.session_id.is_empty() {
+            snapshot.session_id.clone()
+        } else {
+            info.id.clone()
+        },
+        info,
+        runtime: session_runtime_from_proto(snapshot.runtime.as_ref()),
+        feed: session_feed_from_proto(snapshot.feed.as_ref()),
+        graph_state: session_graph_state_from_proto(snapshot.graph_state.as_ref()),
+        lineage: session_lineage_from_proto(snapshot.lineage.as_ref()),
+    }
+}
+
+#[allow(deprecated)]
+fn session_info_from_proto(info: Option<&wire::SessionInfo>) -> WireSessionInfo {
+    let info = info.cloned().unwrap_or_default();
+    WireSessionInfo {
+        id: info.id,
+        name: info.name,
+        cwd: info.cwd,
+        created_at: info.created_at,
+        last_activity_at: info.last_activity_at,
+        last_activity_at_rfc3339: info.last_activity_at_rfc3339,
+        busy: info.busy,
+        preview: info.preview,
+        metadata: info.metadata,
+        graph_count: info.graph_count,
+        active_graph_count: info.active_graph_count,
+        queued_count: info.queued_count as usize,
+        sidebar: sidebar_wire(info.sidebar.as_ref()),
+    }
+}
+
+fn session_runtime_from_proto(runtime: Option<&wire::SessionRuntime>) -> WireSessionRuntime {
+    let runtime = runtime.cloned().unwrap_or_default();
+    let model = runtime.model.unwrap_or_default();
+    WireSessionRuntime {
+        model: crate::wire::WireModelRef {
+            provider: model.provider,
+            model: model.model,
+            base_url: model.base_url,
+        },
+        thinking_level: thinking_level_from_proto(runtime.thinking_level),
+        supported_thinking_levels: runtime
+            .supported_thinking_levels
+            .iter()
+            .map(|level| thinking_level_from_proto(*level))
+            .collect(),
+        context_usage: context_usage_from_proto(runtime.context_usage.as_ref()),
+        session_context_usage: context_usage_from_proto(runtime.session_context_usage.as_ref()),
+        tui_max_feed_lines: runtime.tui_max_feed_lines.map(u64::from),
+        model_catalog: runtime
+            .model_catalog
+            .iter()
+            .map(|group| crate::wire::ProviderGroup {
+                provider: group.provider.clone(),
+                has_credential: group.has_credential,
+                models: group
+                    .models
+                    .iter()
+                    .map(|entry| crate::wire::ModelEntry {
+                        id: entry.id.clone(),
+                        name: entry.name.clone(),
+                    })
+                    .collect(),
+            })
+            .collect(),
+        latest_trigger_poll: runtime.latest_trigger_poll.as_ref().map(|status| {
+            crate::feed::TriggerPollStatus {
+                checked_at: status.checked_at.clone(),
+                trace_id: status.trace_id.clone(),
+                source_label: status.source_label.clone(),
+                event_label: status.event_label.clone(),
+                summary: status.summary.clone(),
+            }
+        }),
+        goal: runtime
+            .goal
+            .as_ref()
+            .map(|goal| crate::wire::WireGoalSnapshot {
+                condition: goal.condition.clone(),
+                status: goal.status.clone(),
+                iterations: goal.iterations,
+                last_reason: goal.last_reason.clone(),
+            }),
+        control_plane_prompt: runtime.control_plane_prompt.as_ref().map(|prompt| {
+            crate::wire::WireControlPlanePromptSnapshot {
+                tool_name: prompt.tool_name.clone(),
+                label: prompt.label.clone(),
+                reason: prompt.reason.clone(),
+                args_hash: prompt.args_hash.clone(),
+                payload: prompt.payload.clone(),
+            }
+        }),
+        extensions: extension_snapshot_wire(runtime.extensions.as_ref()),
+    }
+}
+
+fn context_usage_from_proto(usage: Option<&wire::ContextUsage>) -> crate::wire::WireContextUsage {
+    usage
+        .map(|usage| crate::wire::WireContextUsage {
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            cache_read_tokens: usage.cache_read_tokens,
+            cache_write_tokens: usage.cache_write_tokens,
+            total_tokens: usage.total_tokens,
+            context_window: u64::from(usage.context_window),
+        })
+        .unwrap_or_default()
+}
+
+fn session_feed_from_proto(feed: Option<&wire::SessionFeed>) -> crate::wire::WireSessionFeed {
+    let feed = feed.cloned().unwrap_or_default();
+    crate::wire::WireSessionFeed {
+        blocks: feed.blocks.iter().map(wire_feed_block).collect(),
+        lines: feed.lines,
+        blocks_base: feed.blocks_base,
+        lines_base: feed.lines_base,
+        block_patches: feed
+            .block_patches
+            .iter()
+            .filter_map(|patch| {
+                patch
+                    .block
+                    .as_ref()
+                    .map(|block| crate::wire::WireFeedBlockPatch {
+                        index: patch.index,
+                        block: wire_feed_block(block),
+                    })
+            })
+            .collect(),
+    }
+}
+
+fn session_graph_state_from_proto(
+    graph_state: Option<&wire::SessionGraphState>,
+) -> crate::wire::WireSessionGraphState {
+    let graph_state = graph_state.cloned().unwrap_or_default();
+    crate::wire::WireSessionGraphState {
+        dags: graph_state.dags.iter().map(wire_dag_run).collect(),
+        subagents: graph_state
+            .subagents
+            .iter()
+            .map(wire_subagent_job)
+            .collect(),
+        nodes: graph_state
+            .nodes
+            .iter()
+            .map(session_graph_node_from_proto)
+            .collect(),
+        active_node_id: graph_state.active_node_id,
+    }
+}
+
+fn session_lineage_from_proto(
+    lineage: Option<&wire::SessionLineage>,
+) -> crate::wire::WireSessionLineage {
+    let lineage = lineage.cloned().unwrap_or_default();
+    crate::wire::WireSessionLineage {
+        parent_session_id: lineage.parent_session_id,
+        root_session_id: lineage.root_session_id,
+        ancestor_session_ids: lineage.ancestor_session_ids,
+        child_session_ids: lineage.child_session_ids,
+        collapsed_from_session_id: lineage.collapsed_from_session_id,
+        collapsed_into_session_id: lineage.collapsed_into_session_id,
+    }
+}
+
+/// Convert one wire session-graph node into the proto message.
+pub fn session_graph_node_wire(node: &WireSessionGraphNode) -> wire::SessionGraphNode {
+    wire::SessionGraphNode {
+        id: node.id.clone(),
+        session_id: node.session_id.clone(),
+        r#type: session_graph_node_type_to_proto(node.node_type),
+        title: node.title.clone(),
+        summary: node.summary.clone(),
+        parent_node_id: node.parent_node_id.clone(),
+        child_node_ids: node.child_node_ids.clone(),
+        collapsed_session_id: node.collapsed_session_id.clone(),
+        collapsed_at: node.collapsed_at.clone(),
+        created_at: node.created_at.clone(),
+        updated_at: node.updated_at.clone(),
+        message_count: node.message_count,
+    }
+}
+
+/// Convert a proto session-graph node into the wire form.
+pub fn session_graph_node_from_proto(node: &wire::SessionGraphNode) -> WireSessionGraphNode {
+    WireSessionGraphNode {
+        id: node.id.clone(),
+        session_id: node.session_id.clone(),
+        node_type: session_graph_node_type_from_proto(node.r#type),
+        title: node.title.clone(),
+        summary: node.summary.clone(),
+        parent_node_id: node.parent_node_id.clone(),
+        child_node_ids: node.child_node_ids.clone(),
+        collapsed_session_id: node.collapsed_session_id.clone(),
+        collapsed_at: node.collapsed_at.clone(),
+        created_at: node.created_at.clone(),
+        updated_at: node.updated_at.clone(),
+        message_count: node.message_count,
+    }
+}
+
+pub fn collapsed_session_node_wire(node: &WireCollapsedSessionNode) -> wire::CollapsedSessionNode {
+    wire::CollapsedSessionNode {
+        node_id: node.node_id.clone(),
+        session_id: node.session_id.clone(),
+        title: node.title.clone(),
+        summary: node.summary.clone(),
+        message_count: node.message_count,
+        collapsed_at: node.collapsed_at.clone(),
+        collapsed_into_session_id: node.collapsed_into_session_id.clone(),
+        collapsed_into_node_id: node.collapsed_into_node_id.clone(),
+        original_session_ids: node.original_session_ids.clone(),
+    }
+}
+
+pub fn collapsed_session_node_from_proto(
+    node: &wire::CollapsedSessionNode,
+) -> WireCollapsedSessionNode {
+    WireCollapsedSessionNode {
+        node_id: node.node_id.clone(),
+        session_id: node.session_id.clone(),
+        title: node.title.clone(),
+        summary: node.summary.clone(),
+        message_count: node.message_count,
+        collapsed_at: node.collapsed_at.clone(),
+        collapsed_into_session_id: node.collapsed_into_session_id.clone(),
+        collapsed_into_node_id: node.collapsed_into_node_id.clone(),
+        original_session_ids: node.original_session_ids.clone(),
+    }
+}
+
+pub fn session_graph_node_stream_frame_wire(
+    frame: &WireSessionGraphNodeStreamFrame,
+) -> wire::SessionGraphNodeStreamFrame {
+    use wire::session_graph_node_stream_frame::Payload;
+    let payload = match frame {
+        WireSessionGraphNodeStreamFrame::Node(node) => Payload::Node(session_graph_node_wire(node)),
+        WireSessionGraphNodeStreamFrame::Block(block) => Payload::Block(feed_block(block)),
+    };
+    wire::SessionGraphNodeStreamFrame {
+        payload: Some(payload),
+    }
+}
+
+pub fn session_graph_node_stream_frame_from_proto(
+    frame: &wire::SessionGraphNodeStreamFrame,
+) -> Option<WireSessionGraphNodeStreamFrame> {
+    use wire::session_graph_node_stream_frame::Payload;
+    match frame.payload.as_ref()? {
+        Payload::Node(node) => Some(WireSessionGraphNodeStreamFrame::Node(
+            session_graph_node_from_proto(node),
+        )),
+        Payload::Block(block) => Some(WireSessionGraphNodeStreamFrame::Block(wire_feed_block(
+            block,
+        ))),
+    }
+}
+
+pub fn collapse_session_request_from_proto(
+    request: &wire::CollapseSessionRequest,
+) -> WireCollapseSessionRequest {
+    WireCollapseSessionRequest {
+        session_id: request.session_id.clone(),
+        into_session_id: request.into_session_id.clone(),
+        title: request.title.clone(),
+        summary: request.summary.clone(),
+    }
+}
+
+pub fn collapse_session_response_to_proto(
+    response: &WireCollapseSessionResponse,
+) -> wire::CollapseSessionResponse {
+    wire::CollapseSessionResponse {
+        session_id: response.session_id.clone(),
+        node: response.node.as_ref().map(session_graph_node_wire),
+        collapsed: response.collapsed.as_ref().map(collapsed_session_node_wire),
+    }
+}
+
+pub fn list_session_graph_node_messages_response_to_proto(
+    blocks: &[WireFeedBlock],
+) -> wire::ListSessionGraphNodeMessagesResponse {
+    wire::ListSessionGraphNodeMessagesResponse {
+        blocks: blocks.iter().map(feed_block).collect(),
+    }
+}
+
+pub fn list_session_graph_node_messages_response_from_proto(
+    response: &wire::ListSessionGraphNodeMessagesResponse,
+) -> Vec<WireFeedBlock> {
+    response.blocks.iter().map(wire_feed_block).collect()
+}
+
+fn thinking_level_to_proto(level: &str) -> i32 {
+    match level {
+        "off" => wire::ThinkingLevel::Off as i32,
+        "minimal" => wire::ThinkingLevel::Minimal as i32,
+        "low" => wire::ThinkingLevel::Low as i32,
+        "medium" => wire::ThinkingLevel::Medium as i32,
+        "high" => wire::ThinkingLevel::High as i32,
+        "xhigh" => wire::ThinkingLevel::Xhigh as i32,
+        _ => wire::ThinkingLevel::Unspecified as i32,
+    }
+}
+
+fn thinking_level_from_proto(level: i32) -> String {
+    match level {
+        x if x == wire::ThinkingLevel::Off as i32 => "off".to_string(),
+        x if x == wire::ThinkingLevel::Minimal as i32 => "minimal".to_string(),
+        x if x == wire::ThinkingLevel::Low as i32 => "low".to_string(),
+        x if x == wire::ThinkingLevel::Medium as i32 => "medium".to_string(),
+        x if x == wire::ThinkingLevel::High as i32 => "high".to_string(),
+        x if x == wire::ThinkingLevel::Xhigh as i32 => "xhigh".to_string(),
+        _ => String::new(),
+    }
+}
+
+fn session_graph_node_type_to_proto(node_type: WireSessionGraphNodeType) -> i32 {
+    match node_type {
+        WireSessionGraphNodeType::Unspecified => wire::SessionGraphNodeType::Unspecified as i32,
+        WireSessionGraphNodeType::Session => wire::SessionGraphNodeType::Session as i32,
+        WireSessionGraphNodeType::Collapsed => wire::SessionGraphNodeType::Collapsed as i32,
+    }
+}
+
+fn session_graph_node_type_from_proto(node_type: i32) -> WireSessionGraphNodeType {
+    match node_type {
+        x if x == wire::SessionGraphNodeType::Session as i32 => WireSessionGraphNodeType::Session,
+        x if x == wire::SessionGraphNodeType::Collapsed as i32 => {
+            WireSessionGraphNodeType::Collapsed
+        }
+        _ => WireSessionGraphNodeType::Unspecified,
     }
 }
 

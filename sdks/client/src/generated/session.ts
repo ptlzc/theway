@@ -11,7 +11,9 @@ import {
   type ChannelCredentials,
   Client,
   type ClientOptions,
+  type ClientReadableStream,
   type ClientUnaryCall,
+  type handleServerStreamingCall,
   type handleUnaryCall,
   makeGenericClientConstructor,
   type Metadata,
@@ -20,9 +22,73 @@ import {
 } from "@grpc/grpc-js";
 import { CommandResult, Empty } from "./commands.js";
 import { ExtensionSnapshot } from "./extensions.js";
-import { DagRunSnapshot, SubagentJobSnapshot } from "./graph_engine.js";
+import { CollapsedSessionNode, DagRunSnapshot, SessionGraphNode, SubagentJobSnapshot } from "./graph_engine.js";
 
 export const protobufPackage = "theway.grpc.v1";
+
+/** Thinking levels supported by the runtime. */
+export enum ThinkingLevel {
+  THINKING_LEVEL_UNSPECIFIED = 0,
+  THINKING_LEVEL_OFF = 1,
+  THINKING_LEVEL_MINIMAL = 2,
+  THINKING_LEVEL_LOW = 3,
+  THINKING_LEVEL_MEDIUM = 4,
+  THINKING_LEVEL_HIGH = 5,
+  THINKING_LEVEL_XHIGH = 6,
+  UNRECOGNIZED = -1,
+}
+
+export function thinkingLevelFromJSON(object: any): ThinkingLevel {
+  switch (object) {
+    case 0:
+    case "THINKING_LEVEL_UNSPECIFIED":
+      return ThinkingLevel.THINKING_LEVEL_UNSPECIFIED;
+    case 1:
+    case "THINKING_LEVEL_OFF":
+      return ThinkingLevel.THINKING_LEVEL_OFF;
+    case 2:
+    case "THINKING_LEVEL_MINIMAL":
+      return ThinkingLevel.THINKING_LEVEL_MINIMAL;
+    case 3:
+    case "THINKING_LEVEL_LOW":
+      return ThinkingLevel.THINKING_LEVEL_LOW;
+    case 4:
+    case "THINKING_LEVEL_MEDIUM":
+      return ThinkingLevel.THINKING_LEVEL_MEDIUM;
+    case 5:
+    case "THINKING_LEVEL_HIGH":
+      return ThinkingLevel.THINKING_LEVEL_HIGH;
+    case 6:
+    case "THINKING_LEVEL_XHIGH":
+      return ThinkingLevel.THINKING_LEVEL_XHIGH;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return ThinkingLevel.UNRECOGNIZED;
+  }
+}
+
+export function thinkingLevelToJSON(object: ThinkingLevel): string {
+  switch (object) {
+    case ThinkingLevel.THINKING_LEVEL_UNSPECIFIED:
+      return "THINKING_LEVEL_UNSPECIFIED";
+    case ThinkingLevel.THINKING_LEVEL_OFF:
+      return "THINKING_LEVEL_OFF";
+    case ThinkingLevel.THINKING_LEVEL_MINIMAL:
+      return "THINKING_LEVEL_MINIMAL";
+    case ThinkingLevel.THINKING_LEVEL_LOW:
+      return "THINKING_LEVEL_LOW";
+    case ThinkingLevel.THINKING_LEVEL_MEDIUM:
+      return "THINKING_LEVEL_MEDIUM";
+    case ThinkingLevel.THINKING_LEVEL_HIGH:
+      return "THINKING_LEVEL_HIGH";
+    case ThinkingLevel.THINKING_LEVEL_XHIGH:
+      return "THINKING_LEVEL_XHIGH";
+    case ThinkingLevel.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
 
 /**
  * Full session state (the structured form of the former WireSnapshot JSON).
@@ -275,6 +341,12 @@ export interface PlainBlock {
 }
 
 export interface SessionSummary {
+  /**
+   * Canonical session id. New clients should use this field; `session_id`
+   * remains as a deprecated alias for compatibility with older consumers.
+   */
+  id: string;
+  /** @deprecated */
   sessionId: string;
   name: string;
   cwd: string;
@@ -295,6 +367,138 @@ export interface SessionSummary {
 export interface SessionSummary_MetadataEntry {
   key: string;
   value: string;
+}
+
+/** A resolved model reference in a session runtime. */
+export interface ModelRef {
+  provider: string;
+  model: string;
+  baseUrl?: string | undefined;
+}
+
+/** Static/dynamic session identity and display metadata. */
+export interface SessionInfo {
+  id: string;
+  name: string;
+  cwd: string;
+  /** RFC3339 / ISO-8601 with offset (UTC). */
+  createdAt: string;
+  /**
+   * Deprecated epoch milliseconds.
+   *
+   * @deprecated
+   */
+  lastActivityAt: string;
+  /** RFC3339 / ISO-8601 with offset (UTC), null when absent. */
+  lastActivityAtRfc3339?: string | undefined;
+  busy: boolean;
+  preview?: string | undefined;
+  metadata: { [key: string]: string };
+  graphCount: number;
+  activeGraphCount: number;
+  queuedCount: number;
+  sidebar?: SidebarSnapshot | undefined;
+}
+
+export interface SessionInfo_MetadataEntry {
+  key: string;
+  value: string;
+}
+
+/** Live runtime configuration and model/context metadata. */
+export interface SessionRuntime {
+  model?: ModelRef | undefined;
+  thinkingLevel: ThinkingLevel;
+  supportedThinkingLevels: ThinkingLevel[];
+  contextUsage?: ContextUsage | undefined;
+  sessionContextUsage?: ContextUsage | undefined;
+  tuiMaxFeedLines?: number | undefined;
+  modelCatalog: ProviderGroup[];
+  latestTriggerPoll?: TriggerPollStatus | undefined;
+  goal?: GoalSnapshot | undefined;
+  controlPlanePrompt?: ControlPlanePromptSnapshot | undefined;
+  extensions?: ExtensionSnapshot | undefined;
+}
+
+/** Transcript plane of a session snapshot. */
+export interface SessionFeed {
+  blocks: FeedBlock[];
+  lines: string[];
+  blocksBase: string;
+  linesBase: string;
+  blockPatches: FeedBlockPatch[];
+}
+
+/** Graph-mode state mounted under a session snapshot. */
+export interface SessionGraphState {
+  dags: DagRunSnapshot[];
+  subagents: SubagentJobSnapshot[];
+  nodes: SessionGraphNode[];
+  activeNodeId?: string | undefined;
+}
+
+/** Session lineage for fork/collapse ancestry. */
+export interface SessionLineage {
+  parentSessionId?: string | undefined;
+  rootSessionId?: string | undefined;
+  ancestorSessionIds: string[];
+  childSessionIds: string[];
+  collapsedFromSessionId?: string | undefined;
+  collapsedIntoSessionId?: string | undefined;
+}
+
+/** Full structured session snapshot: the nested successor of SessionState. */
+export interface SessionSnapshot {
+  sessionId: string;
+  info?: SessionInfo | undefined;
+  runtime?: SessionRuntime | undefined;
+  feed?: SessionFeed | undefined;
+  graphState?: SessionGraphState | undefined;
+  lineage?: SessionLineage | undefined;
+}
+
+/** Collapse a session into a graph node, optionally under another session. */
+export interface CollapseSessionRequest {
+  sessionId: string;
+  intoSessionId?: string | undefined;
+  title?: string | undefined;
+  summary?: string | undefined;
+}
+
+export interface CollapseSessionResponse {
+  sessionId: string;
+  node?: SessionGraphNode | undefined;
+  collapsed?: CollapsedSessionNode | undefined;
+}
+
+export interface GetSessionGraphNodeRequest {
+  sessionId: string;
+  nodeId: string;
+}
+
+export interface GetSessionGraphNodeResponse {
+  node?: SessionGraphNode | undefined;
+}
+
+export interface ListSessionGraphNodeMessagesRequest {
+  sessionId: string;
+  nodeId: string;
+  offset: number;
+  limit: number;
+}
+
+export interface ListSessionGraphNodeMessagesResponse {
+  blocks: FeedBlock[];
+}
+
+export interface StreamSessionGraphNodeRequest {
+  sessionId: string;
+  nodeId: string;
+}
+
+/** Streaming frame for node changes and message appends. */
+export interface SessionGraphNodeStreamFrame {
+  payload?: { $case: "node"; node: SessionGraphNode } | { $case: "block"; block: FeedBlock } | undefined;
 }
 
 export interface SessionStateRequest {
@@ -3603,6 +3807,7 @@ export const PlainBlock: MessageFns<PlainBlock> = {
 
 function createBaseSessionSummary(): SessionSummary {
   return {
+    id: "",
     sessionId: "",
     name: "",
     cwd: "",
@@ -3620,6 +3825,9 @@ function createBaseSessionSummary(): SessionSummary {
 
 export const SessionSummary: MessageFns<SessionSummary> = {
   encode(message: SessionSummary, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.id !== "") {
+      writer.uint32(106).string(message.id);
+    }
     if (message.sessionId !== "") {
       writer.uint32(10).string(message.sessionId);
     }
@@ -3666,6 +3874,14 @@ export const SessionSummary: MessageFns<SessionSummary> = {
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
+        case 13: {
+          if (tag !== 106) {
+            break;
+          }
+
+          message.id = reader.string();
+          continue;
+        }
         case 1: {
           if (tag !== 10) {
             break;
@@ -3776,6 +3992,7 @@ export const SessionSummary: MessageFns<SessionSummary> = {
 
   fromJSON(object: any): SessionSummary {
     return {
+      id: isSet(object.id) ? globalThis.String(object.id) : "",
       sessionId: isSet(object.sessionId)
         ? globalThis.String(object.sessionId)
         : isSet(object.session_id)
@@ -3825,6 +4042,9 @@ export const SessionSummary: MessageFns<SessionSummary> = {
 
   toJSON(message: SessionSummary): unknown {
     const obj: any = {};
+    if (message.id !== "") {
+      obj.id = message.id;
+    }
     if (message.sessionId !== "") {
       obj.sessionId = message.sessionId;
     }
@@ -3875,6 +4095,7 @@ export const SessionSummary: MessageFns<SessionSummary> = {
   },
   fromPartial<I extends Exact<DeepPartial<SessionSummary>, I>>(object: I): SessionSummary {
     const message = createBaseSessionSummary();
+    message.id = object.id ?? "";
     message.sessionId = object.sessionId ?? "";
     message.name = object.name ?? "";
     message.cwd = object.cwd ?? "";
@@ -3971,6 +4192,2093 @@ export const SessionSummary_MetadataEntry: MessageFns<SessionSummary_MetadataEnt
     const message = createBaseSessionSummary_MetadataEntry();
     message.key = object.key ?? "";
     message.value = object.value ?? "";
+    return message;
+  },
+};
+
+function createBaseModelRef(): ModelRef {
+  return { provider: "", model: "", baseUrl: undefined };
+}
+
+export const ModelRef: MessageFns<ModelRef> = {
+  encode(message: ModelRef, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.provider !== "") {
+      writer.uint32(10).string(message.provider);
+    }
+    if (message.model !== "") {
+      writer.uint32(18).string(message.model);
+    }
+    if (message.baseUrl !== undefined) {
+      writer.uint32(26).string(message.baseUrl);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ModelRef {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseModelRef();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.provider = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.model = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.baseUrl = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ModelRef {
+    return {
+      provider: isSet(object.provider) ? globalThis.String(object.provider) : "",
+      model: isSet(object.model) ? globalThis.String(object.model) : "",
+      baseUrl: isSet(object.baseUrl)
+        ? globalThis.String(object.baseUrl)
+        : isSet(object.base_url)
+        ? globalThis.String(object.base_url)
+        : undefined,
+    };
+  },
+
+  toJSON(message: ModelRef): unknown {
+    const obj: any = {};
+    if (message.provider !== "") {
+      obj.provider = message.provider;
+    }
+    if (message.model !== "") {
+      obj.model = message.model;
+    }
+    if (message.baseUrl !== undefined) {
+      obj.baseUrl = message.baseUrl;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ModelRef>, I>>(base?: I): ModelRef {
+    return ModelRef.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ModelRef>, I>>(object: I): ModelRef {
+    const message = createBaseModelRef();
+    message.provider = object.provider ?? "";
+    message.model = object.model ?? "";
+    message.baseUrl = object.baseUrl ?? undefined;
+    return message;
+  },
+};
+
+function createBaseSessionInfo(): SessionInfo {
+  return {
+    id: "",
+    name: "",
+    cwd: "",
+    createdAt: "",
+    lastActivityAt: "0",
+    lastActivityAtRfc3339: undefined,
+    busy: false,
+    preview: undefined,
+    metadata: {},
+    graphCount: 0,
+    activeGraphCount: 0,
+    queuedCount: 0,
+    sidebar: undefined,
+  };
+}
+
+export const SessionInfo: MessageFns<SessionInfo> = {
+  encode(message: SessionInfo, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.id !== "") {
+      writer.uint32(10).string(message.id);
+    }
+    if (message.name !== "") {
+      writer.uint32(18).string(message.name);
+    }
+    if (message.cwd !== "") {
+      writer.uint32(26).string(message.cwd);
+    }
+    if (message.createdAt !== "") {
+      writer.uint32(34).string(message.createdAt);
+    }
+    if (message.lastActivityAt !== "0") {
+      writer.uint32(40).int64(message.lastActivityAt);
+    }
+    if (message.lastActivityAtRfc3339 !== undefined) {
+      writer.uint32(50).string(message.lastActivityAtRfc3339);
+    }
+    if (message.busy !== false) {
+      writer.uint32(56).bool(message.busy);
+    }
+    if (message.preview !== undefined) {
+      writer.uint32(66).string(message.preview);
+    }
+    globalThis.Object.entries(message.metadata).forEach(([key, value]: [string, string]) => {
+      SessionInfo_MetadataEntry.encode({ key: key as any, value }, writer.uint32(74).fork()).join();
+    });
+    if (message.graphCount !== 0) {
+      writer.uint32(80).uint32(message.graphCount);
+    }
+    if (message.activeGraphCount !== 0) {
+      writer.uint32(88).uint32(message.activeGraphCount);
+    }
+    if (message.queuedCount !== 0) {
+      writer.uint32(96).uint32(message.queuedCount);
+    }
+    if (message.sidebar !== undefined) {
+      SidebarSnapshot.encode(message.sidebar, writer.uint32(106).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SessionInfo {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSessionInfo();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.id = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.cwd = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.createdAt = reader.string();
+          continue;
+        }
+        case 5: {
+          if (tag !== 40) {
+            break;
+          }
+
+          message.lastActivityAt = reader.int64().toString();
+          continue;
+        }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.lastActivityAtRfc3339 = reader.string();
+          continue;
+        }
+        case 7: {
+          if (tag !== 56) {
+            break;
+          }
+
+          message.busy = reader.bool();
+          continue;
+        }
+        case 8: {
+          if (tag !== 66) {
+            break;
+          }
+
+          message.preview = reader.string();
+          continue;
+        }
+        case 9: {
+          if (tag !== 74) {
+            break;
+          }
+
+          const entry9 = SessionInfo_MetadataEntry.decode(reader, reader.uint32());
+          if (entry9.value !== undefined) {
+            message.metadata[entry9.key] = entry9.value;
+          }
+          continue;
+        }
+        case 10: {
+          if (tag !== 80) {
+            break;
+          }
+
+          message.graphCount = reader.uint32();
+          continue;
+        }
+        case 11: {
+          if (tag !== 88) {
+            break;
+          }
+
+          message.activeGraphCount = reader.uint32();
+          continue;
+        }
+        case 12: {
+          if (tag !== 96) {
+            break;
+          }
+
+          message.queuedCount = reader.uint32();
+          continue;
+        }
+        case 13: {
+          if (tag !== 106) {
+            break;
+          }
+
+          message.sidebar = SidebarSnapshot.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SessionInfo {
+    return {
+      id: isSet(object.id) ? globalThis.String(object.id) : "",
+      name: isSet(object.name) ? globalThis.String(object.name) : "",
+      cwd: isSet(object.cwd) ? globalThis.String(object.cwd) : "",
+      createdAt: isSet(object.createdAt)
+        ? globalThis.String(object.createdAt)
+        : isSet(object.created_at)
+        ? globalThis.String(object.created_at)
+        : "",
+      lastActivityAt: isSet(object.lastActivityAt)
+        ? globalThis.String(object.lastActivityAt)
+        : isSet(object.last_activity_at)
+        ? globalThis.String(object.last_activity_at)
+        : "0",
+      lastActivityAtRfc3339: isSet(object.lastActivityAtRfc3339)
+        ? globalThis.String(object.lastActivityAtRfc3339)
+        : isSet(object.last_activity_at_rfc3339)
+        ? globalThis.String(object.last_activity_at_rfc3339)
+        : undefined,
+      busy: isSet(object.busy) ? globalThis.Boolean(object.busy) : false,
+      preview: isSet(object.preview) ? globalThis.String(object.preview) : undefined,
+      metadata: isObject(object.metadata)
+        ? (globalThis.Object.entries(object.metadata) as [string, any][]).reduce(
+          (acc: { [key: string]: string }, [key, value]: [string, any]) => {
+            acc[key] = globalThis.String(value);
+            return acc;
+          },
+          {},
+        )
+        : {},
+      graphCount: isSet(object.graphCount)
+        ? globalThis.Number(object.graphCount)
+        : isSet(object.graph_count)
+        ? globalThis.Number(object.graph_count)
+        : 0,
+      activeGraphCount: isSet(object.activeGraphCount)
+        ? globalThis.Number(object.activeGraphCount)
+        : isSet(object.active_graph_count)
+        ? globalThis.Number(object.active_graph_count)
+        : 0,
+      queuedCount: isSet(object.queuedCount)
+        ? globalThis.Number(object.queuedCount)
+        : isSet(object.queued_count)
+        ? globalThis.Number(object.queued_count)
+        : 0,
+      sidebar: isSet(object.sidebar) ? SidebarSnapshot.fromJSON(object.sidebar) : undefined,
+    };
+  },
+
+  toJSON(message: SessionInfo): unknown {
+    const obj: any = {};
+    if (message.id !== "") {
+      obj.id = message.id;
+    }
+    if (message.name !== "") {
+      obj.name = message.name;
+    }
+    if (message.cwd !== "") {
+      obj.cwd = message.cwd;
+    }
+    if (message.createdAt !== "") {
+      obj.createdAt = message.createdAt;
+    }
+    if (message.lastActivityAt !== "0") {
+      obj.lastActivityAt = message.lastActivityAt;
+    }
+    if (message.lastActivityAtRfc3339 !== undefined) {
+      obj.lastActivityAtRfc3339 = message.lastActivityAtRfc3339;
+    }
+    if (message.busy !== false) {
+      obj.busy = message.busy;
+    }
+    if (message.preview !== undefined) {
+      obj.preview = message.preview;
+    }
+    if (message.metadata) {
+      const entries = globalThis.Object.entries(message.metadata) as [string, string][];
+      if (entries.length > 0) {
+        obj.metadata = {};
+        entries.forEach(([k, v]) => {
+          obj.metadata[k] = v;
+        });
+      }
+    }
+    if (message.graphCount !== 0) {
+      obj.graphCount = Math.round(message.graphCount);
+    }
+    if (message.activeGraphCount !== 0) {
+      obj.activeGraphCount = Math.round(message.activeGraphCount);
+    }
+    if (message.queuedCount !== 0) {
+      obj.queuedCount = Math.round(message.queuedCount);
+    }
+    if (message.sidebar !== undefined) {
+      obj.sidebar = SidebarSnapshot.toJSON(message.sidebar);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SessionInfo>, I>>(base?: I): SessionInfo {
+    return SessionInfo.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<SessionInfo>, I>>(object: I): SessionInfo {
+    const message = createBaseSessionInfo();
+    message.id = object.id ?? "";
+    message.name = object.name ?? "";
+    message.cwd = object.cwd ?? "";
+    message.createdAt = object.createdAt ?? "";
+    message.lastActivityAt = object.lastActivityAt ?? "0";
+    message.lastActivityAtRfc3339 = object.lastActivityAtRfc3339 ?? undefined;
+    message.busy = object.busy ?? false;
+    message.preview = object.preview ?? undefined;
+    message.metadata = (globalThis.Object.entries(object.metadata ?? {}) as [string, string][]).reduce(
+      (acc: { [key: string]: string }, [key, value]: [string, string]) => {
+        if (value !== undefined) {
+          acc[key] = globalThis.String(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    message.graphCount = object.graphCount ?? 0;
+    message.activeGraphCount = object.activeGraphCount ?? 0;
+    message.queuedCount = object.queuedCount ?? 0;
+    message.sidebar = (object.sidebar !== undefined && object.sidebar !== null)
+      ? SidebarSnapshot.fromPartial(object.sidebar)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseSessionInfo_MetadataEntry(): SessionInfo_MetadataEntry {
+  return { key: "", value: "" };
+}
+
+export const SessionInfo_MetadataEntry: MessageFns<SessionInfo_MetadataEntry> = {
+  encode(message: SessionInfo_MetadataEntry, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.key !== "") {
+      writer.uint32(10).string(message.key);
+    }
+    if (message.value !== "") {
+      writer.uint32(18).string(message.value);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SessionInfo_MetadataEntry {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSessionInfo_MetadataEntry();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.key = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.value = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SessionInfo_MetadataEntry {
+    return {
+      key: isSet(object.key) ? globalThis.String(object.key) : "",
+      value: isSet(object.value) ? globalThis.String(object.value) : "",
+    };
+  },
+
+  toJSON(message: SessionInfo_MetadataEntry): unknown {
+    const obj: any = {};
+    if (message.key !== "") {
+      obj.key = message.key;
+    }
+    if (message.value !== "") {
+      obj.value = message.value;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SessionInfo_MetadataEntry>, I>>(base?: I): SessionInfo_MetadataEntry {
+    return SessionInfo_MetadataEntry.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<SessionInfo_MetadataEntry>, I>>(object: I): SessionInfo_MetadataEntry {
+    const message = createBaseSessionInfo_MetadataEntry();
+    message.key = object.key ?? "";
+    message.value = object.value ?? "";
+    return message;
+  },
+};
+
+function createBaseSessionRuntime(): SessionRuntime {
+  return {
+    model: undefined,
+    thinkingLevel: 0,
+    supportedThinkingLevels: [],
+    contextUsage: undefined,
+    sessionContextUsage: undefined,
+    tuiMaxFeedLines: undefined,
+    modelCatalog: [],
+    latestTriggerPoll: undefined,
+    goal: undefined,
+    controlPlanePrompt: undefined,
+    extensions: undefined,
+  };
+}
+
+export const SessionRuntime: MessageFns<SessionRuntime> = {
+  encode(message: SessionRuntime, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.model !== undefined) {
+      ModelRef.encode(message.model, writer.uint32(10).fork()).join();
+    }
+    if (message.thinkingLevel !== 0) {
+      writer.uint32(16).int32(message.thinkingLevel);
+    }
+    writer.uint32(26).fork();
+    for (const v of message.supportedThinkingLevels) {
+      writer.int32(v);
+    }
+    writer.join();
+    if (message.contextUsage !== undefined) {
+      ContextUsage.encode(message.contextUsage, writer.uint32(34).fork()).join();
+    }
+    if (message.sessionContextUsage !== undefined) {
+      ContextUsage.encode(message.sessionContextUsage, writer.uint32(42).fork()).join();
+    }
+    if (message.tuiMaxFeedLines !== undefined) {
+      writer.uint32(48).uint32(message.tuiMaxFeedLines);
+    }
+    for (const v of message.modelCatalog) {
+      ProviderGroup.encode(v!, writer.uint32(58).fork()).join();
+    }
+    if (message.latestTriggerPoll !== undefined) {
+      TriggerPollStatus.encode(message.latestTriggerPoll, writer.uint32(66).fork()).join();
+    }
+    if (message.goal !== undefined) {
+      GoalSnapshot.encode(message.goal, writer.uint32(74).fork()).join();
+    }
+    if (message.controlPlanePrompt !== undefined) {
+      ControlPlanePromptSnapshot.encode(message.controlPlanePrompt, writer.uint32(82).fork()).join();
+    }
+    if (message.extensions !== undefined) {
+      ExtensionSnapshot.encode(message.extensions, writer.uint32(90).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SessionRuntime {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSessionRuntime();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.model = ModelRef.decode(reader, reader.uint32());
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.thinkingLevel = reader.int32() as any;
+          continue;
+        }
+        case 3: {
+          if (tag === 24) {
+            message.supportedThinkingLevels.push(reader.int32() as any);
+
+            continue;
+          }
+
+          if (tag === 26) {
+            const end2 = reader.uint32() + reader.pos;
+            while (reader.pos < end2) {
+              message.supportedThinkingLevels.push(reader.int32() as any);
+            }
+
+            continue;
+          }
+
+          break;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.contextUsage = ContextUsage.decode(reader, reader.uint32());
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.sessionContextUsage = ContextUsage.decode(reader, reader.uint32());
+          continue;
+        }
+        case 6: {
+          if (tag !== 48) {
+            break;
+          }
+
+          message.tuiMaxFeedLines = reader.uint32();
+          continue;
+        }
+        case 7: {
+          if (tag !== 58) {
+            break;
+          }
+
+          message.modelCatalog.push(ProviderGroup.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 8: {
+          if (tag !== 66) {
+            break;
+          }
+
+          message.latestTriggerPoll = TriggerPollStatus.decode(reader, reader.uint32());
+          continue;
+        }
+        case 9: {
+          if (tag !== 74) {
+            break;
+          }
+
+          message.goal = GoalSnapshot.decode(reader, reader.uint32());
+          continue;
+        }
+        case 10: {
+          if (tag !== 82) {
+            break;
+          }
+
+          message.controlPlanePrompt = ControlPlanePromptSnapshot.decode(reader, reader.uint32());
+          continue;
+        }
+        case 11: {
+          if (tag !== 90) {
+            break;
+          }
+
+          message.extensions = ExtensionSnapshot.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SessionRuntime {
+    return {
+      model: isSet(object.model) ? ModelRef.fromJSON(object.model) : undefined,
+      thinkingLevel: isSet(object.thinkingLevel)
+        ? thinkingLevelFromJSON(object.thinkingLevel)
+        : isSet(object.thinking_level)
+        ? thinkingLevelFromJSON(object.thinking_level)
+        : 0,
+      supportedThinkingLevels: globalThis.Array.isArray(object?.supportedThinkingLevels)
+        ? object.supportedThinkingLevels.map((e: any) => thinkingLevelFromJSON(e))
+        : globalThis.Array.isArray(object?.supported_thinking_levels)
+        ? object.supported_thinking_levels.map((e: any) => thinkingLevelFromJSON(e))
+        : [],
+      contextUsage: isSet(object.contextUsage)
+        ? ContextUsage.fromJSON(object.contextUsage)
+        : isSet(object.context_usage)
+        ? ContextUsage.fromJSON(object.context_usage)
+        : undefined,
+      sessionContextUsage: isSet(object.sessionContextUsage)
+        ? ContextUsage.fromJSON(object.sessionContextUsage)
+        : isSet(object.session_context_usage)
+        ? ContextUsage.fromJSON(object.session_context_usage)
+        : undefined,
+      tuiMaxFeedLines: isSet(object.tuiMaxFeedLines)
+        ? globalThis.Number(object.tuiMaxFeedLines)
+        : isSet(object.tui_max_feed_lines)
+        ? globalThis.Number(object.tui_max_feed_lines)
+        : undefined,
+      modelCatalog: globalThis.Array.isArray(object?.modelCatalog)
+        ? object.modelCatalog.map((e: any) => ProviderGroup.fromJSON(e))
+        : globalThis.Array.isArray(object?.model_catalog)
+        ? object.model_catalog.map((e: any) => ProviderGroup.fromJSON(e))
+        : [],
+      latestTriggerPoll: isSet(object.latestTriggerPoll)
+        ? TriggerPollStatus.fromJSON(object.latestTriggerPoll)
+        : isSet(object.latest_trigger_poll)
+        ? TriggerPollStatus.fromJSON(object.latest_trigger_poll)
+        : undefined,
+      goal: isSet(object.goal) ? GoalSnapshot.fromJSON(object.goal) : undefined,
+      controlPlanePrompt: isSet(object.controlPlanePrompt)
+        ? ControlPlanePromptSnapshot.fromJSON(object.controlPlanePrompt)
+        : isSet(object.control_plane_prompt)
+        ? ControlPlanePromptSnapshot.fromJSON(object.control_plane_prompt)
+        : undefined,
+      extensions: isSet(object.extensions) ? ExtensionSnapshot.fromJSON(object.extensions) : undefined,
+    };
+  },
+
+  toJSON(message: SessionRuntime): unknown {
+    const obj: any = {};
+    if (message.model !== undefined) {
+      obj.model = ModelRef.toJSON(message.model);
+    }
+    if (message.thinkingLevel !== 0) {
+      obj.thinkingLevel = thinkingLevelToJSON(message.thinkingLevel);
+    }
+    if (message.supportedThinkingLevels?.length) {
+      obj.supportedThinkingLevels = message.supportedThinkingLevels.map((e) => thinkingLevelToJSON(e));
+    }
+    if (message.contextUsage !== undefined) {
+      obj.contextUsage = ContextUsage.toJSON(message.contextUsage);
+    }
+    if (message.sessionContextUsage !== undefined) {
+      obj.sessionContextUsage = ContextUsage.toJSON(message.sessionContextUsage);
+    }
+    if (message.tuiMaxFeedLines !== undefined) {
+      obj.tuiMaxFeedLines = Math.round(message.tuiMaxFeedLines);
+    }
+    if (message.modelCatalog?.length) {
+      obj.modelCatalog = message.modelCatalog.map((e) => ProviderGroup.toJSON(e));
+    }
+    if (message.latestTriggerPoll !== undefined) {
+      obj.latestTriggerPoll = TriggerPollStatus.toJSON(message.latestTriggerPoll);
+    }
+    if (message.goal !== undefined) {
+      obj.goal = GoalSnapshot.toJSON(message.goal);
+    }
+    if (message.controlPlanePrompt !== undefined) {
+      obj.controlPlanePrompt = ControlPlanePromptSnapshot.toJSON(message.controlPlanePrompt);
+    }
+    if (message.extensions !== undefined) {
+      obj.extensions = ExtensionSnapshot.toJSON(message.extensions);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SessionRuntime>, I>>(base?: I): SessionRuntime {
+    return SessionRuntime.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<SessionRuntime>, I>>(object: I): SessionRuntime {
+    const message = createBaseSessionRuntime();
+    message.model = (object.model !== undefined && object.model !== null)
+      ? ModelRef.fromPartial(object.model)
+      : undefined;
+    message.thinkingLevel = object.thinkingLevel ?? 0;
+    message.supportedThinkingLevels = object.supportedThinkingLevels?.map((e) => e) || [];
+    message.contextUsage = (object.contextUsage !== undefined && object.contextUsage !== null)
+      ? ContextUsage.fromPartial(object.contextUsage)
+      : undefined;
+    message.sessionContextUsage = (object.sessionContextUsage !== undefined && object.sessionContextUsage !== null)
+      ? ContextUsage.fromPartial(object.sessionContextUsage)
+      : undefined;
+    message.tuiMaxFeedLines = object.tuiMaxFeedLines ?? undefined;
+    message.modelCatalog = object.modelCatalog?.map((e) => ProviderGroup.fromPartial(e)) || [];
+    message.latestTriggerPoll = (object.latestTriggerPoll !== undefined && object.latestTriggerPoll !== null)
+      ? TriggerPollStatus.fromPartial(object.latestTriggerPoll)
+      : undefined;
+    message.goal = (object.goal !== undefined && object.goal !== null)
+      ? GoalSnapshot.fromPartial(object.goal)
+      : undefined;
+    message.controlPlanePrompt = (object.controlPlanePrompt !== undefined && object.controlPlanePrompt !== null)
+      ? ControlPlanePromptSnapshot.fromPartial(object.controlPlanePrompt)
+      : undefined;
+    message.extensions = (object.extensions !== undefined && object.extensions !== null)
+      ? ExtensionSnapshot.fromPartial(object.extensions)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseSessionFeed(): SessionFeed {
+  return { blocks: [], lines: [], blocksBase: "0", linesBase: "0", blockPatches: [] };
+}
+
+export const SessionFeed: MessageFns<SessionFeed> = {
+  encode(message: SessionFeed, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.blocks) {
+      FeedBlock.encode(v!, writer.uint32(10).fork()).join();
+    }
+    for (const v of message.lines) {
+      writer.uint32(18).string(v!);
+    }
+    if (message.blocksBase !== "0") {
+      writer.uint32(24).uint64(message.blocksBase);
+    }
+    if (message.linesBase !== "0") {
+      writer.uint32(32).uint64(message.linesBase);
+    }
+    for (const v of message.blockPatches) {
+      FeedBlockPatch.encode(v!, writer.uint32(42).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SessionFeed {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSessionFeed();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.blocks.push(FeedBlock.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.lines.push(reader.string());
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.blocksBase = reader.uint64().toString();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.linesBase = reader.uint64().toString();
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.blockPatches.push(FeedBlockPatch.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SessionFeed {
+    return {
+      blocks: globalThis.Array.isArray(object?.blocks) ? object.blocks.map((e: any) => FeedBlock.fromJSON(e)) : [],
+      lines: globalThis.Array.isArray(object?.lines) ? object.lines.map((e: any) => globalThis.String(e)) : [],
+      blocksBase: isSet(object.blocksBase)
+        ? globalThis.String(object.blocksBase)
+        : isSet(object.blocks_base)
+        ? globalThis.String(object.blocks_base)
+        : "0",
+      linesBase: isSet(object.linesBase)
+        ? globalThis.String(object.linesBase)
+        : isSet(object.lines_base)
+        ? globalThis.String(object.lines_base)
+        : "0",
+      blockPatches: globalThis.Array.isArray(object?.blockPatches)
+        ? object.blockPatches.map((e: any) => FeedBlockPatch.fromJSON(e))
+        : globalThis.Array.isArray(object?.block_patches)
+        ? object.block_patches.map((e: any) => FeedBlockPatch.fromJSON(e))
+        : [],
+    };
+  },
+
+  toJSON(message: SessionFeed): unknown {
+    const obj: any = {};
+    if (message.blocks?.length) {
+      obj.blocks = message.blocks.map((e) => FeedBlock.toJSON(e));
+    }
+    if (message.lines?.length) {
+      obj.lines = message.lines;
+    }
+    if (message.blocksBase !== "0") {
+      obj.blocksBase = message.blocksBase;
+    }
+    if (message.linesBase !== "0") {
+      obj.linesBase = message.linesBase;
+    }
+    if (message.blockPatches?.length) {
+      obj.blockPatches = message.blockPatches.map((e) => FeedBlockPatch.toJSON(e));
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SessionFeed>, I>>(base?: I): SessionFeed {
+    return SessionFeed.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<SessionFeed>, I>>(object: I): SessionFeed {
+    const message = createBaseSessionFeed();
+    message.blocks = object.blocks?.map((e) => FeedBlock.fromPartial(e)) || [];
+    message.lines = object.lines?.map((e) => e) || [];
+    message.blocksBase = object.blocksBase ?? "0";
+    message.linesBase = object.linesBase ?? "0";
+    message.blockPatches = object.blockPatches?.map((e) => FeedBlockPatch.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseSessionGraphState(): SessionGraphState {
+  return { dags: [], subagents: [], nodes: [], activeNodeId: undefined };
+}
+
+export const SessionGraphState: MessageFns<SessionGraphState> = {
+  encode(message: SessionGraphState, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.dags) {
+      DagRunSnapshot.encode(v!, writer.uint32(10).fork()).join();
+    }
+    for (const v of message.subagents) {
+      SubagentJobSnapshot.encode(v!, writer.uint32(18).fork()).join();
+    }
+    for (const v of message.nodes) {
+      SessionGraphNode.encode(v!, writer.uint32(26).fork()).join();
+    }
+    if (message.activeNodeId !== undefined) {
+      writer.uint32(34).string(message.activeNodeId);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SessionGraphState {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSessionGraphState();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.dags.push(DagRunSnapshot.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.subagents.push(SubagentJobSnapshot.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.nodes.push(SessionGraphNode.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.activeNodeId = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SessionGraphState {
+    return {
+      dags: globalThis.Array.isArray(object?.dags) ? object.dags.map((e: any) => DagRunSnapshot.fromJSON(e)) : [],
+      subagents: globalThis.Array.isArray(object?.subagents)
+        ? object.subagents.map((e: any) => SubagentJobSnapshot.fromJSON(e))
+        : [],
+      nodes: globalThis.Array.isArray(object?.nodes) ? object.nodes.map((e: any) => SessionGraphNode.fromJSON(e)) : [],
+      activeNodeId: isSet(object.activeNodeId)
+        ? globalThis.String(object.activeNodeId)
+        : isSet(object.active_node_id)
+        ? globalThis.String(object.active_node_id)
+        : undefined,
+    };
+  },
+
+  toJSON(message: SessionGraphState): unknown {
+    const obj: any = {};
+    if (message.dags?.length) {
+      obj.dags = message.dags.map((e) => DagRunSnapshot.toJSON(e));
+    }
+    if (message.subagents?.length) {
+      obj.subagents = message.subagents.map((e) => SubagentJobSnapshot.toJSON(e));
+    }
+    if (message.nodes?.length) {
+      obj.nodes = message.nodes.map((e) => SessionGraphNode.toJSON(e));
+    }
+    if (message.activeNodeId !== undefined) {
+      obj.activeNodeId = message.activeNodeId;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SessionGraphState>, I>>(base?: I): SessionGraphState {
+    return SessionGraphState.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<SessionGraphState>, I>>(object: I): SessionGraphState {
+    const message = createBaseSessionGraphState();
+    message.dags = object.dags?.map((e) => DagRunSnapshot.fromPartial(e)) || [];
+    message.subagents = object.subagents?.map((e) => SubagentJobSnapshot.fromPartial(e)) || [];
+    message.nodes = object.nodes?.map((e) => SessionGraphNode.fromPartial(e)) || [];
+    message.activeNodeId = object.activeNodeId ?? undefined;
+    return message;
+  },
+};
+
+function createBaseSessionLineage(): SessionLineage {
+  return {
+    parentSessionId: undefined,
+    rootSessionId: undefined,
+    ancestorSessionIds: [],
+    childSessionIds: [],
+    collapsedFromSessionId: undefined,
+    collapsedIntoSessionId: undefined,
+  };
+}
+
+export const SessionLineage: MessageFns<SessionLineage> = {
+  encode(message: SessionLineage, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.parentSessionId !== undefined) {
+      writer.uint32(10).string(message.parentSessionId);
+    }
+    if (message.rootSessionId !== undefined) {
+      writer.uint32(18).string(message.rootSessionId);
+    }
+    for (const v of message.ancestorSessionIds) {
+      writer.uint32(26).string(v!);
+    }
+    for (const v of message.childSessionIds) {
+      writer.uint32(34).string(v!);
+    }
+    if (message.collapsedFromSessionId !== undefined) {
+      writer.uint32(42).string(message.collapsedFromSessionId);
+    }
+    if (message.collapsedIntoSessionId !== undefined) {
+      writer.uint32(50).string(message.collapsedIntoSessionId);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SessionLineage {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSessionLineage();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.parentSessionId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.rootSessionId = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.ancestorSessionIds.push(reader.string());
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.childSessionIds.push(reader.string());
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.collapsedFromSessionId = reader.string();
+          continue;
+        }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.collapsedIntoSessionId = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SessionLineage {
+    return {
+      parentSessionId: isSet(object.parentSessionId)
+        ? globalThis.String(object.parentSessionId)
+        : isSet(object.parent_session_id)
+        ? globalThis.String(object.parent_session_id)
+        : undefined,
+      rootSessionId: isSet(object.rootSessionId)
+        ? globalThis.String(object.rootSessionId)
+        : isSet(object.root_session_id)
+        ? globalThis.String(object.root_session_id)
+        : undefined,
+      ancestorSessionIds: globalThis.Array.isArray(object?.ancestorSessionIds)
+        ? object.ancestorSessionIds.map((e: any) => globalThis.String(e))
+        : globalThis.Array.isArray(object?.ancestor_session_ids)
+        ? object.ancestor_session_ids.map((e: any) => globalThis.String(e))
+        : [],
+      childSessionIds: globalThis.Array.isArray(object?.childSessionIds)
+        ? object.childSessionIds.map((e: any) => globalThis.String(e))
+        : globalThis.Array.isArray(object?.child_session_ids)
+        ? object.child_session_ids.map((e: any) => globalThis.String(e))
+        : [],
+      collapsedFromSessionId: isSet(object.collapsedFromSessionId)
+        ? globalThis.String(object.collapsedFromSessionId)
+        : isSet(object.collapsed_from_session_id)
+        ? globalThis.String(object.collapsed_from_session_id)
+        : undefined,
+      collapsedIntoSessionId: isSet(object.collapsedIntoSessionId)
+        ? globalThis.String(object.collapsedIntoSessionId)
+        : isSet(object.collapsed_into_session_id)
+        ? globalThis.String(object.collapsed_into_session_id)
+        : undefined,
+    };
+  },
+
+  toJSON(message: SessionLineage): unknown {
+    const obj: any = {};
+    if (message.parentSessionId !== undefined) {
+      obj.parentSessionId = message.parentSessionId;
+    }
+    if (message.rootSessionId !== undefined) {
+      obj.rootSessionId = message.rootSessionId;
+    }
+    if (message.ancestorSessionIds?.length) {
+      obj.ancestorSessionIds = message.ancestorSessionIds;
+    }
+    if (message.childSessionIds?.length) {
+      obj.childSessionIds = message.childSessionIds;
+    }
+    if (message.collapsedFromSessionId !== undefined) {
+      obj.collapsedFromSessionId = message.collapsedFromSessionId;
+    }
+    if (message.collapsedIntoSessionId !== undefined) {
+      obj.collapsedIntoSessionId = message.collapsedIntoSessionId;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SessionLineage>, I>>(base?: I): SessionLineage {
+    return SessionLineage.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<SessionLineage>, I>>(object: I): SessionLineage {
+    const message = createBaseSessionLineage();
+    message.parentSessionId = object.parentSessionId ?? undefined;
+    message.rootSessionId = object.rootSessionId ?? undefined;
+    message.ancestorSessionIds = object.ancestorSessionIds?.map((e) => e) || [];
+    message.childSessionIds = object.childSessionIds?.map((e) => e) || [];
+    message.collapsedFromSessionId = object.collapsedFromSessionId ?? undefined;
+    message.collapsedIntoSessionId = object.collapsedIntoSessionId ?? undefined;
+    return message;
+  },
+};
+
+function createBaseSessionSnapshot(): SessionSnapshot {
+  return {
+    sessionId: "",
+    info: undefined,
+    runtime: undefined,
+    feed: undefined,
+    graphState: undefined,
+    lineage: undefined,
+  };
+}
+
+export const SessionSnapshot: MessageFns<SessionSnapshot> = {
+  encode(message: SessionSnapshot, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sessionId !== "") {
+      writer.uint32(10).string(message.sessionId);
+    }
+    if (message.info !== undefined) {
+      SessionInfo.encode(message.info, writer.uint32(18).fork()).join();
+    }
+    if (message.runtime !== undefined) {
+      SessionRuntime.encode(message.runtime, writer.uint32(26).fork()).join();
+    }
+    if (message.feed !== undefined) {
+      SessionFeed.encode(message.feed, writer.uint32(34).fork()).join();
+    }
+    if (message.graphState !== undefined) {
+      SessionGraphState.encode(message.graphState, writer.uint32(42).fork()).join();
+    }
+    if (message.lineage !== undefined) {
+      SessionLineage.encode(message.lineage, writer.uint32(50).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SessionSnapshot {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSessionSnapshot();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.info = SessionInfo.decode(reader, reader.uint32());
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.runtime = SessionRuntime.decode(reader, reader.uint32());
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.feed = SessionFeed.decode(reader, reader.uint32());
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.graphState = SessionGraphState.decode(reader, reader.uint32());
+          continue;
+        }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.lineage = SessionLineage.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SessionSnapshot {
+    return {
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : "",
+      info: isSet(object.info) ? SessionInfo.fromJSON(object.info) : undefined,
+      runtime: isSet(object.runtime) ? SessionRuntime.fromJSON(object.runtime) : undefined,
+      feed: isSet(object.feed) ? SessionFeed.fromJSON(object.feed) : undefined,
+      graphState: isSet(object.graphState)
+        ? SessionGraphState.fromJSON(object.graphState)
+        : isSet(object.graph_state)
+        ? SessionGraphState.fromJSON(object.graph_state)
+        : undefined,
+      lineage: isSet(object.lineage) ? SessionLineage.fromJSON(object.lineage) : undefined,
+    };
+  },
+
+  toJSON(message: SessionSnapshot): unknown {
+    const obj: any = {};
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
+    }
+    if (message.info !== undefined) {
+      obj.info = SessionInfo.toJSON(message.info);
+    }
+    if (message.runtime !== undefined) {
+      obj.runtime = SessionRuntime.toJSON(message.runtime);
+    }
+    if (message.feed !== undefined) {
+      obj.feed = SessionFeed.toJSON(message.feed);
+    }
+    if (message.graphState !== undefined) {
+      obj.graphState = SessionGraphState.toJSON(message.graphState);
+    }
+    if (message.lineage !== undefined) {
+      obj.lineage = SessionLineage.toJSON(message.lineage);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SessionSnapshot>, I>>(base?: I): SessionSnapshot {
+    return SessionSnapshot.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<SessionSnapshot>, I>>(object: I): SessionSnapshot {
+    const message = createBaseSessionSnapshot();
+    message.sessionId = object.sessionId ?? "";
+    message.info = (object.info !== undefined && object.info !== null)
+      ? SessionInfo.fromPartial(object.info)
+      : undefined;
+    message.runtime = (object.runtime !== undefined && object.runtime !== null)
+      ? SessionRuntime.fromPartial(object.runtime)
+      : undefined;
+    message.feed = (object.feed !== undefined && object.feed !== null)
+      ? SessionFeed.fromPartial(object.feed)
+      : undefined;
+    message.graphState = (object.graphState !== undefined && object.graphState !== null)
+      ? SessionGraphState.fromPartial(object.graphState)
+      : undefined;
+    message.lineage = (object.lineage !== undefined && object.lineage !== null)
+      ? SessionLineage.fromPartial(object.lineage)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseCollapseSessionRequest(): CollapseSessionRequest {
+  return { sessionId: "", intoSessionId: undefined, title: undefined, summary: undefined };
+}
+
+export const CollapseSessionRequest: MessageFns<CollapseSessionRequest> = {
+  encode(message: CollapseSessionRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sessionId !== "") {
+      writer.uint32(10).string(message.sessionId);
+    }
+    if (message.intoSessionId !== undefined) {
+      writer.uint32(18).string(message.intoSessionId);
+    }
+    if (message.title !== undefined) {
+      writer.uint32(26).string(message.title);
+    }
+    if (message.summary !== undefined) {
+      writer.uint32(34).string(message.summary);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CollapseSessionRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCollapseSessionRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.intoSessionId = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.title = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.summary = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CollapseSessionRequest {
+    return {
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : "",
+      intoSessionId: isSet(object.intoSessionId)
+        ? globalThis.String(object.intoSessionId)
+        : isSet(object.into_session_id)
+        ? globalThis.String(object.into_session_id)
+        : undefined,
+      title: isSet(object.title) ? globalThis.String(object.title) : undefined,
+      summary: isSet(object.summary) ? globalThis.String(object.summary) : undefined,
+    };
+  },
+
+  toJSON(message: CollapseSessionRequest): unknown {
+    const obj: any = {};
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
+    }
+    if (message.intoSessionId !== undefined) {
+      obj.intoSessionId = message.intoSessionId;
+    }
+    if (message.title !== undefined) {
+      obj.title = message.title;
+    }
+    if (message.summary !== undefined) {
+      obj.summary = message.summary;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<CollapseSessionRequest>, I>>(base?: I): CollapseSessionRequest {
+    return CollapseSessionRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<CollapseSessionRequest>, I>>(object: I): CollapseSessionRequest {
+    const message = createBaseCollapseSessionRequest();
+    message.sessionId = object.sessionId ?? "";
+    message.intoSessionId = object.intoSessionId ?? undefined;
+    message.title = object.title ?? undefined;
+    message.summary = object.summary ?? undefined;
+    return message;
+  },
+};
+
+function createBaseCollapseSessionResponse(): CollapseSessionResponse {
+  return { sessionId: "", node: undefined, collapsed: undefined };
+}
+
+export const CollapseSessionResponse: MessageFns<CollapseSessionResponse> = {
+  encode(message: CollapseSessionResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sessionId !== "") {
+      writer.uint32(10).string(message.sessionId);
+    }
+    if (message.node !== undefined) {
+      SessionGraphNode.encode(message.node, writer.uint32(18).fork()).join();
+    }
+    if (message.collapsed !== undefined) {
+      CollapsedSessionNode.encode(message.collapsed, writer.uint32(26).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CollapseSessionResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCollapseSessionResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.node = SessionGraphNode.decode(reader, reader.uint32());
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.collapsed = CollapsedSessionNode.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CollapseSessionResponse {
+    return {
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : "",
+      node: isSet(object.node) ? SessionGraphNode.fromJSON(object.node) : undefined,
+      collapsed: isSet(object.collapsed) ? CollapsedSessionNode.fromJSON(object.collapsed) : undefined,
+    };
+  },
+
+  toJSON(message: CollapseSessionResponse): unknown {
+    const obj: any = {};
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
+    }
+    if (message.node !== undefined) {
+      obj.node = SessionGraphNode.toJSON(message.node);
+    }
+    if (message.collapsed !== undefined) {
+      obj.collapsed = CollapsedSessionNode.toJSON(message.collapsed);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<CollapseSessionResponse>, I>>(base?: I): CollapseSessionResponse {
+    return CollapseSessionResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<CollapseSessionResponse>, I>>(object: I): CollapseSessionResponse {
+    const message = createBaseCollapseSessionResponse();
+    message.sessionId = object.sessionId ?? "";
+    message.node = (object.node !== undefined && object.node !== null)
+      ? SessionGraphNode.fromPartial(object.node)
+      : undefined;
+    message.collapsed = (object.collapsed !== undefined && object.collapsed !== null)
+      ? CollapsedSessionNode.fromPartial(object.collapsed)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseGetSessionGraphNodeRequest(): GetSessionGraphNodeRequest {
+  return { sessionId: "", nodeId: "" };
+}
+
+export const GetSessionGraphNodeRequest: MessageFns<GetSessionGraphNodeRequest> = {
+  encode(message: GetSessionGraphNodeRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sessionId !== "") {
+      writer.uint32(10).string(message.sessionId);
+    }
+    if (message.nodeId !== "") {
+      writer.uint32(18).string(message.nodeId);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): GetSessionGraphNodeRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGetSessionGraphNodeRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.nodeId = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GetSessionGraphNodeRequest {
+    return {
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : "",
+      nodeId: isSet(object.nodeId)
+        ? globalThis.String(object.nodeId)
+        : isSet(object.node_id)
+        ? globalThis.String(object.node_id)
+        : "",
+    };
+  },
+
+  toJSON(message: GetSessionGraphNodeRequest): unknown {
+    const obj: any = {};
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
+    }
+    if (message.nodeId !== "") {
+      obj.nodeId = message.nodeId;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GetSessionGraphNodeRequest>, I>>(base?: I): GetSessionGraphNodeRequest {
+    return GetSessionGraphNodeRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<GetSessionGraphNodeRequest>, I>>(object: I): GetSessionGraphNodeRequest {
+    const message = createBaseGetSessionGraphNodeRequest();
+    message.sessionId = object.sessionId ?? "";
+    message.nodeId = object.nodeId ?? "";
+    return message;
+  },
+};
+
+function createBaseGetSessionGraphNodeResponse(): GetSessionGraphNodeResponse {
+  return { node: undefined };
+}
+
+export const GetSessionGraphNodeResponse: MessageFns<GetSessionGraphNodeResponse> = {
+  encode(message: GetSessionGraphNodeResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.node !== undefined) {
+      SessionGraphNode.encode(message.node, writer.uint32(10).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): GetSessionGraphNodeResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGetSessionGraphNodeResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.node = SessionGraphNode.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GetSessionGraphNodeResponse {
+    return { node: isSet(object.node) ? SessionGraphNode.fromJSON(object.node) : undefined };
+  },
+
+  toJSON(message: GetSessionGraphNodeResponse): unknown {
+    const obj: any = {};
+    if (message.node !== undefined) {
+      obj.node = SessionGraphNode.toJSON(message.node);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GetSessionGraphNodeResponse>, I>>(base?: I): GetSessionGraphNodeResponse {
+    return GetSessionGraphNodeResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<GetSessionGraphNodeResponse>, I>>(object: I): GetSessionGraphNodeResponse {
+    const message = createBaseGetSessionGraphNodeResponse();
+    message.node = (object.node !== undefined && object.node !== null)
+      ? SessionGraphNode.fromPartial(object.node)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseListSessionGraphNodeMessagesRequest(): ListSessionGraphNodeMessagesRequest {
+  return { sessionId: "", nodeId: "", offset: 0, limit: 0 };
+}
+
+export const ListSessionGraphNodeMessagesRequest: MessageFns<ListSessionGraphNodeMessagesRequest> = {
+  encode(message: ListSessionGraphNodeMessagesRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sessionId !== "") {
+      writer.uint32(10).string(message.sessionId);
+    }
+    if (message.nodeId !== "") {
+      writer.uint32(18).string(message.nodeId);
+    }
+    if (message.offset !== 0) {
+      writer.uint32(24).uint32(message.offset);
+    }
+    if (message.limit !== 0) {
+      writer.uint32(32).uint32(message.limit);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ListSessionGraphNodeMessagesRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListSessionGraphNodeMessagesRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.nodeId = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.offset = reader.uint32();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.limit = reader.uint32();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ListSessionGraphNodeMessagesRequest {
+    return {
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : "",
+      nodeId: isSet(object.nodeId)
+        ? globalThis.String(object.nodeId)
+        : isSet(object.node_id)
+        ? globalThis.String(object.node_id)
+        : "",
+      offset: isSet(object.offset) ? globalThis.Number(object.offset) : 0,
+      limit: isSet(object.limit) ? globalThis.Number(object.limit) : 0,
+    };
+  },
+
+  toJSON(message: ListSessionGraphNodeMessagesRequest): unknown {
+    const obj: any = {};
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
+    }
+    if (message.nodeId !== "") {
+      obj.nodeId = message.nodeId;
+    }
+    if (message.offset !== 0) {
+      obj.offset = Math.round(message.offset);
+    }
+    if (message.limit !== 0) {
+      obj.limit = Math.round(message.limit);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ListSessionGraphNodeMessagesRequest>, I>>(
+    base?: I,
+  ): ListSessionGraphNodeMessagesRequest {
+    return ListSessionGraphNodeMessagesRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ListSessionGraphNodeMessagesRequest>, I>>(
+    object: I,
+  ): ListSessionGraphNodeMessagesRequest {
+    const message = createBaseListSessionGraphNodeMessagesRequest();
+    message.sessionId = object.sessionId ?? "";
+    message.nodeId = object.nodeId ?? "";
+    message.offset = object.offset ?? 0;
+    message.limit = object.limit ?? 0;
+    return message;
+  },
+};
+
+function createBaseListSessionGraphNodeMessagesResponse(): ListSessionGraphNodeMessagesResponse {
+  return { blocks: [] };
+}
+
+export const ListSessionGraphNodeMessagesResponse: MessageFns<ListSessionGraphNodeMessagesResponse> = {
+  encode(message: ListSessionGraphNodeMessagesResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.blocks) {
+      FeedBlock.encode(v!, writer.uint32(10).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ListSessionGraphNodeMessagesResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListSessionGraphNodeMessagesResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.blocks.push(FeedBlock.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ListSessionGraphNodeMessagesResponse {
+    return {
+      blocks: globalThis.Array.isArray(object?.blocks) ? object.blocks.map((e: any) => FeedBlock.fromJSON(e)) : [],
+    };
+  },
+
+  toJSON(message: ListSessionGraphNodeMessagesResponse): unknown {
+    const obj: any = {};
+    if (message.blocks?.length) {
+      obj.blocks = message.blocks.map((e) => FeedBlock.toJSON(e));
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ListSessionGraphNodeMessagesResponse>, I>>(
+    base?: I,
+  ): ListSessionGraphNodeMessagesResponse {
+    return ListSessionGraphNodeMessagesResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ListSessionGraphNodeMessagesResponse>, I>>(
+    object: I,
+  ): ListSessionGraphNodeMessagesResponse {
+    const message = createBaseListSessionGraphNodeMessagesResponse();
+    message.blocks = object.blocks?.map((e) => FeedBlock.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseStreamSessionGraphNodeRequest(): StreamSessionGraphNodeRequest {
+  return { sessionId: "", nodeId: "" };
+}
+
+export const StreamSessionGraphNodeRequest: MessageFns<StreamSessionGraphNodeRequest> = {
+  encode(message: StreamSessionGraphNodeRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sessionId !== "") {
+      writer.uint32(10).string(message.sessionId);
+    }
+    if (message.nodeId !== "") {
+      writer.uint32(18).string(message.nodeId);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): StreamSessionGraphNodeRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseStreamSessionGraphNodeRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.nodeId = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): StreamSessionGraphNodeRequest {
+    return {
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : "",
+      nodeId: isSet(object.nodeId)
+        ? globalThis.String(object.nodeId)
+        : isSet(object.node_id)
+        ? globalThis.String(object.node_id)
+        : "",
+    };
+  },
+
+  toJSON(message: StreamSessionGraphNodeRequest): unknown {
+    const obj: any = {};
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
+    }
+    if (message.nodeId !== "") {
+      obj.nodeId = message.nodeId;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<StreamSessionGraphNodeRequest>, I>>(base?: I): StreamSessionGraphNodeRequest {
+    return StreamSessionGraphNodeRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<StreamSessionGraphNodeRequest>, I>>(
+    object: I,
+  ): StreamSessionGraphNodeRequest {
+    const message = createBaseStreamSessionGraphNodeRequest();
+    message.sessionId = object.sessionId ?? "";
+    message.nodeId = object.nodeId ?? "";
+    return message;
+  },
+};
+
+function createBaseSessionGraphNodeStreamFrame(): SessionGraphNodeStreamFrame {
+  return { payload: undefined };
+}
+
+export const SessionGraphNodeStreamFrame: MessageFns<SessionGraphNodeStreamFrame> = {
+  encode(message: SessionGraphNodeStreamFrame, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    switch (message.payload?.$case) {
+      case "node":
+        SessionGraphNode.encode(message.payload.node, writer.uint32(10).fork()).join();
+        break;
+      case "block":
+        FeedBlock.encode(message.payload.block, writer.uint32(18).fork()).join();
+        break;
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SessionGraphNodeStreamFrame {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSessionGraphNodeStreamFrame();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.payload = { $case: "node", node: SessionGraphNode.decode(reader, reader.uint32()) };
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.payload = { $case: "block", block: FeedBlock.decode(reader, reader.uint32()) };
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SessionGraphNodeStreamFrame {
+    return {
+      payload: isSet(object.node)
+        ? { $case: "node", node: SessionGraphNode.fromJSON(object.node) }
+        : isSet(object.block)
+        ? { $case: "block", block: FeedBlock.fromJSON(object.block) }
+        : undefined,
+    };
+  },
+
+  toJSON(message: SessionGraphNodeStreamFrame): unknown {
+    const obj: any = {};
+    if (message.payload?.$case === "node") {
+      obj.node = SessionGraphNode.toJSON(message.payload.node);
+    } else if (message.payload?.$case === "block") {
+      obj.block = FeedBlock.toJSON(message.payload.block);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SessionGraphNodeStreamFrame>, I>>(base?: I): SessionGraphNodeStreamFrame {
+    return SessionGraphNodeStreamFrame.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<SessionGraphNodeStreamFrame>, I>>(object: I): SessionGraphNodeStreamFrame {
+    const message = createBaseSessionGraphNodeStreamFrame();
+    switch (object.payload?.$case) {
+      case "node": {
+        if (object.payload?.node !== undefined && object.payload?.node !== null) {
+          message.payload = { $case: "node", node: SessionGraphNode.fromPartial(object.payload.node) };
+        }
+        break;
+      }
+      case "block": {
+        if (object.payload?.block !== undefined && object.payload?.block !== null) {
+          message.payload = { $case: "block", block: FeedBlock.fromPartial(object.payload.block) };
+        }
+        break;
+      }
+    }
     return message;
   },
 };
@@ -5455,7 +7763,12 @@ export const ClearCredentialRequest: MessageFns<ClearCredentialRequest> = {
 
 export type SessionServiceService = typeof SessionServiceService;
 export const SessionServiceService = {
-  /** Full structured state (binary protobuf). */
+  /**
+   * Full structured state (binary protobuf). Deprecated in favor of
+   * GetSnapshot / GetHistory for new clients.
+   *
+   * @deprecated
+   */
   getState: {
     path: "/theway.grpc.v1.SessionService/GetState" as const,
     requestStream: false as const,
@@ -5464,6 +7777,73 @@ export const SessionServiceService = {
     requestDeserialize: (value: Buffer): SessionStateRequest => SessionStateRequest.decode(value),
     responseSerialize: (value: SessionState): Buffer => Buffer.from(SessionState.encode(value).finish()),
     responseDeserialize: (value: Buffer): SessionState => SessionState.decode(value),
+  },
+  /** Full nested session snapshot (session-snapshot-collapse contract). */
+  getSnapshot: {
+    path: "/theway.grpc.v1.SessionService/GetSnapshot" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: SessionStateRequest): Buffer => Buffer.from(SessionStateRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): SessionStateRequest => SessionStateRequest.decode(value),
+    responseSerialize: (value: SessionSnapshot): Buffer => Buffer.from(SessionSnapshot.encode(value).finish()),
+    responseDeserialize: (value: Buffer): SessionSnapshot => SessionSnapshot.decode(value),
+  },
+  /** Session history as a snapshot-shaped transcript (session-snapshot-collapse). */
+  getHistory: {
+    path: "/theway.grpc.v1.SessionService/GetHistory" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: SessionStateRequest): Buffer => Buffer.from(SessionStateRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): SessionStateRequest => SessionStateRequest.decode(value),
+    responseSerialize: (value: SessionSnapshot): Buffer => Buffer.from(SessionSnapshot.encode(value).finish()),
+    responseDeserialize: (value: Buffer): SessionSnapshot => SessionSnapshot.decode(value),
+  },
+  /** Collapse a session into a graph node (session-snapshot-collapse). */
+  collapseSession: {
+    path: "/theway.grpc.v1.SessionService/CollapseSession" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: CollapseSessionRequest): Buffer =>
+      Buffer.from(CollapseSessionRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): CollapseSessionRequest => CollapseSessionRequest.decode(value),
+    responseSerialize: (value: CollapseSessionResponse): Buffer =>
+      Buffer.from(CollapseSessionResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): CollapseSessionResponse => CollapseSessionResponse.decode(value),
+  },
+  getSessionGraphNode: {
+    path: "/theway.grpc.v1.SessionService/GetSessionGraphNode" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: GetSessionGraphNodeRequest): Buffer =>
+      Buffer.from(GetSessionGraphNodeRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): GetSessionGraphNodeRequest => GetSessionGraphNodeRequest.decode(value),
+    responseSerialize: (value: GetSessionGraphNodeResponse): Buffer =>
+      Buffer.from(GetSessionGraphNodeResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): GetSessionGraphNodeResponse => GetSessionGraphNodeResponse.decode(value),
+  },
+  listSessionGraphNodeMessages: {
+    path: "/theway.grpc.v1.SessionService/ListSessionGraphNodeMessages" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: ListSessionGraphNodeMessagesRequest): Buffer =>
+      Buffer.from(ListSessionGraphNodeMessagesRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): ListSessionGraphNodeMessagesRequest =>
+      ListSessionGraphNodeMessagesRequest.decode(value),
+    responseSerialize: (value: ListSessionGraphNodeMessagesResponse): Buffer =>
+      Buffer.from(ListSessionGraphNodeMessagesResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): ListSessionGraphNodeMessagesResponse =>
+      ListSessionGraphNodeMessagesResponse.decode(value),
+  },
+  streamSessionGraphNode: {
+    path: "/theway.grpc.v1.SessionService/StreamSessionGraphNode" as const,
+    requestStream: false as const,
+    responseStream: true as const,
+    requestSerialize: (value: StreamSessionGraphNodeRequest): Buffer =>
+      Buffer.from(StreamSessionGraphNodeRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): StreamSessionGraphNodeRequest => StreamSessionGraphNodeRequest.decode(value),
+    responseSerialize: (value: SessionGraphNodeStreamFrame): Buffer =>
+      Buffer.from(SessionGraphNodeStreamFrame.encode(value).finish()),
+    responseDeserialize: (value: Buffer): SessionGraphNodeStreamFrame => SessionGraphNodeStreamFrame.decode(value),
   },
   /**
    * Session resources: list (with current marker) / create / rename /
@@ -5584,8 +7964,25 @@ export const SessionServiceService = {
 } as const;
 
 export interface SessionServiceServer extends UntypedServiceImplementation {
-  /** Full structured state (binary protobuf). */
+  /**
+   * Full structured state (binary protobuf). Deprecated in favor of
+   * GetSnapshot / GetHistory for new clients.
+   *
+   * @deprecated
+   */
   getState: handleUnaryCall<SessionStateRequest, SessionState>;
+  /** Full nested session snapshot (session-snapshot-collapse contract). */
+  getSnapshot: handleUnaryCall<SessionStateRequest, SessionSnapshot>;
+  /** Session history as a snapshot-shaped transcript (session-snapshot-collapse). */
+  getHistory: handleUnaryCall<SessionStateRequest, SessionSnapshot>;
+  /** Collapse a session into a graph node (session-snapshot-collapse). */
+  collapseSession: handleUnaryCall<CollapseSessionRequest, CollapseSessionResponse>;
+  getSessionGraphNode: handleUnaryCall<GetSessionGraphNodeRequest, GetSessionGraphNodeResponse>;
+  listSessionGraphNodeMessages: handleUnaryCall<
+    ListSessionGraphNodeMessagesRequest,
+    ListSessionGraphNodeMessagesResponse
+  >;
+  streamSessionGraphNode: handleServerStreamingCall<StreamSessionGraphNodeRequest, SessionGraphNodeStreamFrame>;
   /**
    * Session resources: list (with current marker) / create / rename /
    * delete. DeleteSession reports the offending run ids when refused because
@@ -5618,7 +8015,12 @@ export interface SessionServiceServer extends UntypedServiceImplementation {
 }
 
 export interface SessionServiceClient extends Client {
-  /** Full structured state (binary protobuf). */
+  /**
+   * Full structured state (binary protobuf). Deprecated in favor of
+   * GetSnapshot / GetHistory for new clients.
+   *
+   * @deprecated
+   */
   getState(
     request: SessionStateRequest,
     callback: (error: ServiceError | null, response: SessionState) => void,
@@ -5634,6 +8036,93 @@ export interface SessionServiceClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: SessionState) => void,
   ): ClientUnaryCall;
+  /** Full nested session snapshot (session-snapshot-collapse contract). */
+  getSnapshot(
+    request: SessionStateRequest,
+    callback: (error: ServiceError | null, response: SessionSnapshot) => void,
+  ): ClientUnaryCall;
+  getSnapshot(
+    request: SessionStateRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: SessionSnapshot) => void,
+  ): ClientUnaryCall;
+  getSnapshot(
+    request: SessionStateRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: SessionSnapshot) => void,
+  ): ClientUnaryCall;
+  /** Session history as a snapshot-shaped transcript (session-snapshot-collapse). */
+  getHistory(
+    request: SessionStateRequest,
+    callback: (error: ServiceError | null, response: SessionSnapshot) => void,
+  ): ClientUnaryCall;
+  getHistory(
+    request: SessionStateRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: SessionSnapshot) => void,
+  ): ClientUnaryCall;
+  getHistory(
+    request: SessionStateRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: SessionSnapshot) => void,
+  ): ClientUnaryCall;
+  /** Collapse a session into a graph node (session-snapshot-collapse). */
+  collapseSession(
+    request: CollapseSessionRequest,
+    callback: (error: ServiceError | null, response: CollapseSessionResponse) => void,
+  ): ClientUnaryCall;
+  collapseSession(
+    request: CollapseSessionRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: CollapseSessionResponse) => void,
+  ): ClientUnaryCall;
+  collapseSession(
+    request: CollapseSessionRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: CollapseSessionResponse) => void,
+  ): ClientUnaryCall;
+  getSessionGraphNode(
+    request: GetSessionGraphNodeRequest,
+    callback: (error: ServiceError | null, response: GetSessionGraphNodeResponse) => void,
+  ): ClientUnaryCall;
+  getSessionGraphNode(
+    request: GetSessionGraphNodeRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: GetSessionGraphNodeResponse) => void,
+  ): ClientUnaryCall;
+  getSessionGraphNode(
+    request: GetSessionGraphNodeRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: GetSessionGraphNodeResponse) => void,
+  ): ClientUnaryCall;
+  listSessionGraphNodeMessages(
+    request: ListSessionGraphNodeMessagesRequest,
+    callback: (error: ServiceError | null, response: ListSessionGraphNodeMessagesResponse) => void,
+  ): ClientUnaryCall;
+  listSessionGraphNodeMessages(
+    request: ListSessionGraphNodeMessagesRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: ListSessionGraphNodeMessagesResponse) => void,
+  ): ClientUnaryCall;
+  listSessionGraphNodeMessages(
+    request: ListSessionGraphNodeMessagesRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: ListSessionGraphNodeMessagesResponse) => void,
+  ): ClientUnaryCall;
+  streamSessionGraphNode(
+    request: StreamSessionGraphNodeRequest,
+    options?: Partial<CallOptions>,
+  ): ClientReadableStream<SessionGraphNodeStreamFrame>;
+  streamSessionGraphNode(
+    request: StreamSessionGraphNodeRequest,
+    metadata?: Metadata,
+    options?: Partial<CallOptions>,
+  ): ClientReadableStream<SessionGraphNodeStreamFrame>;
   /**
    * Session resources: list (with current marker) / create / rename /
    * delete. DeleteSession reports the offending run ids when refused because

@@ -10,6 +10,7 @@ mod coverage;
 mod extensions;
 mod session_activation;
 mod session_cumulative_usage;
+mod session_snapshot_collapse;
 use crate::feed::{Level, TriggerPollStatus};
 use crate::wire::{
     WireCronSnapshot, WireMcpSnapshot, WireSidebarSnapshot, WireSkillsSnapshot, WireToolsSnapshot,
