@@ -190,3 +190,54 @@
         };
         assert_ne!(block_fingerprint(&same_a), block_fingerprint(&user_block));
     }
+
+    // ── v2 feed rhythm (#30): gap flows through the cache ────────────────
+
+    #[test]
+    fn feed_gap_renders_and_invalidates_on_change() {
+        let feed = feed_with(&[user("hello"), assistant("world")]);
+        let mut cache = FeedRenderCache::new();
+        let mut opts = FeedRenderOptions::default();
+        opts.theme.feed.gap = 2;
+        cache.update(&feed, 40, &opts, 1000);
+        let text = flat(cache.lines());
+        let rows: Vec<&str> = text.lines().collect();
+        assert_eq!(rows[0].trim_end(), "\u{276f} hello");
+        assert_eq!(rows[1], "");
+        assert_eq!(rows[2], "");
+        assert_eq!(rows[3], "world");
+
+        // Changing the gap is a structural theme change → full rebuild.
+        opts.theme.feed.gap = 1;
+        cache.update(&feed, 40, &opts, 1000);
+        assert_eq!(cache.last_rebuilt, 2);
+        let text = flat(cache.lines());
+        let rows: Vec<&str> = text.lines().collect();
+        assert_eq!(rows[1], "");
+        assert_eq!(rows[2], "world");
+    }
+
+    #[test]
+    fn feed_separator_survives_incremental_splices() {
+        let feed = feed_with(&[user("hello"), assistant("world")]);
+        let mut cache = FeedRenderCache::new();
+        let mut opts = FeedRenderOptions::default();
+        opts.theme.feed.gap = 0;
+        opts.theme.feed.separator = Some('─');
+        cache.update(&feed, 40, &opts, 1000);
+        let text = flat(cache.lines());
+        let rows: Vec<&str> = text.lines().collect();
+        assert_eq!(rows[1], "─".repeat(40));
+
+        // Appending a block re-renders only the tail; the separator rows for
+        // the frozen prefix must survive.
+        let feed = feed_with(&[user("hello"), assistant("world"), user("third")]);
+        cache.update(&feed, 40, &opts, 1000);
+        assert_eq!(cache.last_rebuilt, 1);
+        let text = flat(cache.lines());
+        let rows: Vec<&str> = text.lines().collect();
+        assert_eq!(rows[1], "─".repeat(40), "frozen separator intact");
+        // A User block also gets a separator before it.
+        assert_eq!(rows[3], "─".repeat(40), "new block got its separator");
+        assert_eq!(rows[4].trim_end(), "\u{276f} third");
+    }

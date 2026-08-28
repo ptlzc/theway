@@ -467,6 +467,27 @@ pub(crate) fn push_rendered_markdown_line(
     }
 }
 
+/// Push the inter-block separator rows (issue #30): `gap` blank lines, or a
+/// full-width styled separator line when `[feed] separator` is set (the gap
+/// still applies above it). Callers decide WHERE a gap goes via the transport
+/// `should_separate`; this decides HOW MUCH.
+pub(crate) fn push_feed_gap(
+    out: &mut Vec<Line<'static>>,
+    width: usize,
+    feed: &crate::ui::theme::FeedTheme,
+) {
+    for _ in 0..feed.gap {
+        out.push(Line::raw(""));
+    }
+    if let Some(glyph) = feed.separator {
+        let line = glyph.to_string().repeat(width.max(1));
+        out.push(Line::from(Span::styled(
+            line,
+            Style::default().fg(feed.separator_style),
+        )));
+    }
+}
+
 /// Render the whole feed to width-wrapped `ratatui` lines, ready to scroll/draw.
 ///
 /// The production render path uses the block cache (`feed_cache`) instead;
@@ -489,7 +510,7 @@ pub fn lines(
     let mut previous: Option<&Block> = None;
     for block in feed.blocks() {
         if theway_transport::feed::should_separate(previous, block, !out.is_empty()) {
-            out.push(Line::raw(""));
+            push_feed_gap(&mut out, width, &opts.theme.feed);
         }
         out.extend(render_block(block, width, opts));
         previous = Some(block);

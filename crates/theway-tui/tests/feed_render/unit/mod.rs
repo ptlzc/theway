@@ -624,3 +624,66 @@
             }
         }
     }
+
+    // ── v2 feed rhythm (#30): [feed] gap / separator ──────────────────────
+
+    #[test]
+    fn feed_gap_controls_inter_block_spacing() {
+        let feed = feed_with(&[
+            WireFeedBlock::User {
+                text: "hello".into(),
+                timestamp: None,
+            },
+            WireFeedBlock::Assistant {
+                text: "world".into(),
+                timestamp: None,
+            },
+        ]);
+        let opts = FeedRenderOptions::default();
+        let text = flat(&super::lines(&feed, 30, &opts));
+        let rows: Vec<&str> = text.lines().collect();
+        assert_eq!(rows[0].trim_end(), "\u{276f} hello");
+        assert_eq!(rows[1], "", "default gap is one blank line");
+        assert_eq!(rows[2], "world");
+
+        let mut opts = FeedRenderOptions::default();
+        opts.theme.feed.gap = 3;
+        let text = flat(&super::lines(&feed, 30, &opts));
+        let rows: Vec<&str> = text.lines().collect();
+        assert_eq!(rows[1], "");
+        assert_eq!(rows[2], "");
+        assert_eq!(rows[3], "");
+        assert_eq!(rows[4], "world");
+
+        let mut opts = FeedRenderOptions::default();
+        opts.theme.feed.gap = 0;
+        let text = flat(&super::lines(&feed, 30, &opts));
+        let rows: Vec<&str> = text.lines().collect();
+        assert_eq!(rows[1], "world", "gap 0 renders flush");
+    }
+
+    #[test]
+    fn feed_separator_renders_full_width_styled_line() {
+        let feed = feed_with(&[
+            WireFeedBlock::User {
+                text: "hello".into(),
+                timestamp: None,
+            },
+            WireFeedBlock::Assistant {
+                text: "world".into(),
+                timestamp: None,
+            },
+        ]);
+        let mut opts = FeedRenderOptions::default();
+        opts.theme.feed.gap = 0;
+        opts.theme.feed.separator = Some('─');
+        opts.theme.feed.separator_style = ratatui::style::Color::Rgb(0x56, 0x5F, 0x89);
+        let lines = super::lines(&feed, 30, &opts);
+        let text = flat(&lines);
+        let rows: Vec<&str> = text.lines().collect();
+        assert_eq!(rows[1], "─".repeat(30), "separator spans the full width");
+        assert_eq!(rows[1].chars().count(), 30);
+        // The separator line carries the configured style.
+        let sep_line = &lines[1];
+        assert_eq!(sep_line.spans[0].style.fg, Some(ratatui::style::Color::Rgb(0x56, 0x5F, 0x89)));
+    }

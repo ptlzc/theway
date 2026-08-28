@@ -189,7 +189,7 @@ impl FeedRenderCache {
         for block in blocks.iter().skip(first_dirty) {
             let range_start = self.lines.len();
             if should_separate(previous, block, !self.lines.is_empty()) {
-                self.lines.push(Line::raw(""));
+                feed_render::push_feed_gap(&mut self.lines, width, &opts.theme.feed);
             }
             self.lines
                 .extend(feed_render::render_block(block, width, opts));
