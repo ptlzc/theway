@@ -39,7 +39,7 @@ use crate::proto::theway_grpc::{
     GraphListRequest, GraphNodeInterruptRequest, GraphNodeSteerRequest, GraphRestoreRequest,
     GraphRetryRequest, GraphSkipRequest, InvokeExtensionCommandRequest, ReloadExtensionsRequest,
     RenameSessionRequest, SendMessageRequest, SessionState, SessionStateRequest, SetModelRequest,
-    SetSkillDirsRequest, SetThinkingRequest, StreamEventsRequest, StreamFrame, SwitchSessionRequest,
+    SetSkillDirsRequest, SetThinkingRequest, StreamEventsRequest, StreamFrame,
     UpdateSessionMetadataRequest,
 };
 use crate::wire::{

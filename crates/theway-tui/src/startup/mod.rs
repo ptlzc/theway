@@ -119,17 +119,13 @@ fn fresh_attach_wanted(reused: bool, cli: &Cli) -> bool {
     reused && cli.resume.is_none() && cli.resume_id.is_none() && !cli.continue_
 }
 
-/// Create + switch to a new session after attaching to a reused daemon —
+/// Create a new session after attaching to a reused daemon —
 /// the same path `/new` drives (issue #56). Returns the new session id.
-/// The switch queues on the daemon's serialized event loop, so the current
-/// snapshot may still describe the old session until the republish lands.
+/// The client uses this id explicitly for subsequent RPCs; there is no
+/// daemon-side session switch.
 async fn attach_fresh_session(client: &mut GrpcClient) -> Result<String> {
     let summary = client.create_session(None).await?;
-    let id = summary.session_id.clone();
-    if !client.switch_session(&id).await? {
-        anyhow::bail!("daemon rejected the session switch");
-    }
-    Ok(id)
+    Ok(summary.session_id)
 }
 
 pub(crate) async fn run_repl(
@@ -347,7 +343,6 @@ mod tests {
     use super::test_daemon::test_daemon_client;
     use super::*;
     use clap::Parser as _;
-    use theway_transport::wire::WireCommand;
 
     /// Issue #56 gate: only a REUSED daemon with no explicit session
     /// selection (`--resume` bare or with an id, `--resume-id`,
@@ -559,42 +554,23 @@ poll_interval_secs = 45
     }
 
     /// Issue #56 reused path: `attach_fresh_session` runs the `/new` path —
-    /// `create_session(None)` then `switch_session(id)` — and the mock
-    /// command channel sees both, in order, carrying the new session id.
-    /// (The gRPC create handler itself enqueues the first switch — becoming
-    /// current is serialized through the event loop — and the client-side
-    /// call enqueues the second.)
+    /// `create_session(None)` — and returns the new session id. No session
+    /// switch command is sent.
     #[tokio::test]
-    async fn attach_fresh_session_creates_then_switches_in_order() {
-        let (mut client, mut rx, _session_ops) = test_daemon_client().await;
+    async fn attach_fresh_session_creates_and_returns_id() {
+        let (mut client, _rx, _session_ops) = test_daemon_client().await;
 
         // Act
         let id = attach_fresh_session(&mut client).await.unwrap();
 
         // Assert: FakeSessionOps ids come from a counter — the first create
-        // yields `sess-new-1`; both switches carry it, in command order.
+        // yields `sess-new-1`.
         assert_eq!(id, "sess-new-1");
-        for (i, origin) in ["create-time switch", "client-side switch"]
-            .iter()
-            .enumerate()
-        {
-            let cmd = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
-                .await
-                .expect("no switch_session command")
-                .unwrap();
-            match cmd {
-                WireCommand::SwitchSession { id: got } => {
-                    assert_eq!(got, "sess-new-1", "wrong id after {origin} (index {i})")
-                }
-                other => panic!("unexpected command after {origin} (index {i}): {other:?}"),
-            }
-        }
 
-        // Assert: the new session is registered and current daemon-side.
-        let (sessions, current) = client.list_sessions().await.unwrap();
+        // Assert: the new session is registered.
+        let (sessions, _current) = client.list_sessions().await.unwrap();
         assert_eq!(sessions.len(), 2);
         assert_eq!(sessions[0].session_id, "sess-1");
         assert_eq!(sessions[1].session_id, "sess-new-1");
-        assert_eq!(current, "sess-new-1");
     }
 }

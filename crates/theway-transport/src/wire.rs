@@ -65,13 +65,6 @@ pub enum WireCommand {
         level: String,
         response: tokio::sync::oneshot::Sender<bool>,
     },
-    /// session-resource-model: switch the runtime to another session (resume semantics).
-    /// `CreateSession`'s "make current" path also flows through this command — creating the
-    /// session is a sync `SessionOps` call, becoming current goes through the serialized
-    /// event loop.
-    SwitchSession {
-        id: String,
-    },
     /// dynamic skills dirs (issue #68): replace the extra skill directories and
     /// hot-reload skills from disk. The event loop applies this authoritatively;
     /// the gRPC server optimistically updates the shared path context first.

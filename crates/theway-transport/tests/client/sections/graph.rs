@@ -122,7 +122,10 @@ async fn client_graph_cancel_retry_skip_round_trip() {
     assert_eq!(cancelled[0].1.as_deref(), Some("cancelled via rpc"));
     drop(cancelled);
 
-    let reset = client.graph_retry("sess-1", "run-1", Some("node-1")).await.unwrap();
+    let reset = client
+        .graph_retry("sess-1", "run-1", Some("node-1"))
+        .await
+        .unwrap();
     assert_eq!(reset, vec!["node-1"]);
     let retried = graph.retried.lock().unwrap();
     assert_eq!(retried[0].0, "run-1");
@@ -161,7 +164,10 @@ async fn client_get_node_output_returns_fragment() {
     let (mut client, _command_rx, _snapshot_tx) =
         client_and_server_with_graph(Arc::new(ClientGraphOps::default()), jobs).await;
 
-    let response = client.get_node_output("sess-1", "run-1", "node-1", 6).await.unwrap();
+    let response = client
+        .get_node_output("sess-1", "run-1", "node-1", 6)
+        .await
+        .unwrap();
     assert_eq!(response.text, "graph");
     assert_eq!(response.offset, 6);
     assert_eq!(response.total, 11);

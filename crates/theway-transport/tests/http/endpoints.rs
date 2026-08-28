@@ -86,6 +86,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
             text,
             images,
             interrupt: _,
+            ..
         } => {
             assert_eq!(text, "hello");
             assert!(images.is_empty());
@@ -114,6 +115,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
             text,
             images,
             interrupt: _,
+            ..
         } => {
             assert_eq!(text, "describe");
             assert_eq!(images.len(), 1);

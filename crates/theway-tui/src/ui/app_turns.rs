@@ -171,10 +171,10 @@ impl App {
             "/new" => match self.client.create_session(None).await {
                 Ok(summary) => {
                     let id = summary.session_id;
-                    // `switch_session` prints its own rejected/error line and
+                    // `select_session` updates the client-side session id and
                     // never returns Err; /new adds the success line on top.
-                    if let Err(e) = self.switch_session(id.clone()).await {
-                        self.error_line(format!("switch session failed: {e}"));
+                    if let Err(e) = self.select_session(id.clone()).await {
+                        self.error_line(format!("select session failed: {e}"));
                     } else {
                         self.system_line(format!("new session {id}"));
                     }
@@ -321,7 +321,8 @@ impl App {
     /// current session row is annotated and pre-selected. An empty daemon
     /// list prints a system hint instead of opening an empty popup; a list
     /// RPC failure reports an error line. Selecting a row (Enter in
-    /// `handle_resume_picker_key`) switches via `switch_session`.
+    /// `handle_resume_picker_key`) selects the session client-side via
+    /// `select_session`.
     pub(super) async fn open_resume_picker(&mut self) {
         let (sessions, current_id) = match self.client.list_sessions().await {
             Ok(pair) => pair,
@@ -355,9 +356,9 @@ impl App {
         self.sync_resume_picker_window();
     }
 
-    /// Local `/session switch` surface (wire SwitchSession RPC). Export/import
-    /// run in the daemon (`/session export|import` is forwarded to it) — the
-    /// session archive operates on the repo the daemon owns.
+    /// Local `/session switch` surface (client-side session selection).
+    /// Export/import run in the daemon (`/session export|import` is forwarded
+    /// to it) — the session archive operates on the repo the daemon owns.
     async fn local_session_switch(&mut self, args: &str) {
         let id = args
             .trim_start()
@@ -368,9 +369,9 @@ impl App {
             self.error_line("usage: /session switch <id>");
             return;
         }
-        match self.switch_session(id.to_string()).await {
+        match self.select_session(id.to_string()).await {
             Ok(()) => {}
-            Err(e) => self.error_line(format!("switch session failed: {e}")),
+            Err(e) => self.error_line(format!("select session failed: {e}")),
         }
     }
 

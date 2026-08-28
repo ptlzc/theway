@@ -65,6 +65,7 @@ async fn graph_cancel_retry_skip_interrupt_steer_are_plumbed() {
 
     let cancel = state
         .graph_cancel(Request::new(theway_grpc::GraphCancelRequest {
+            session_id: "sess-1".into(),
             run_id: "run-1".into(),
             session_id: "sess-1".into(),
         }))
@@ -75,6 +76,7 @@ async fn graph_cancel_retry_skip_interrupt_steer_are_plumbed() {
 
     let retry = state
         .graph_retry(Request::new(theway_grpc::GraphRetryRequest {
+            session_id: "sess-1".into(),
             run_id: "run-1".into(),
             node_id: Some("n1".into()),
             session_id: "sess-1".into(),
@@ -86,6 +88,7 @@ async fn graph_cancel_retry_skip_interrupt_steer_are_plumbed() {
 
     let retry_all = state
         .graph_retry(Request::new(theway_grpc::GraphRetryRequest {
+            session_id: "sess-1".into(),
             run_id: "run-1".into(),
             node_id: None,
             session_id: "sess-1".into(),
@@ -97,6 +100,7 @@ async fn graph_cancel_retry_skip_interrupt_steer_are_plumbed() {
 
     let skip = state
         .graph_skip(Request::new(theway_grpc::GraphSkipRequest {
+            session_id: "sess-1".into(),
             run_id: "run-1".into(),
             node_id: "skip-me".into(),
             session_id: "sess-1".into(),
@@ -108,6 +112,7 @@ async fn graph_cancel_retry_skip_interrupt_steer_are_plumbed() {
 
     let interrupt = state
         .graph_node_interrupt(Request::new(theway_grpc::GraphNodeInterruptRequest {
+            session_id: "sess-1".into(),
             run_id: "run-1".into(),
             node_id: "n1".into(),
             session_id: "sess-1".into(),
@@ -119,6 +124,7 @@ async fn graph_cancel_retry_skip_interrupt_steer_are_plumbed() {
 
     let steer = state
         .graph_node_steer(Request::new(theway_grpc::GraphNodeSteerRequest {
+            session_id: "sess-1".into(),
             run_id: "run-1".into(),
             node_id: "n1".into(),
             text: "go".into(),

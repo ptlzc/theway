@@ -33,7 +33,7 @@ use crate::forwarding_tool_ops::ForwardingToolOps;
 use crate::orchestration::DaemonServices;
 use crate::paths::DaemonPaths;
 use crate::runtime_storage::SessionRepository;
-use crate::session_ops::{CurrentSessionState, SessionFactory};
+use crate::session_ops::SessionFactory;
 use crate::tools::assembly::reload::ReloadRuntime;
 use crate::transport_adapter::{
     CoreGraphOps, CoreJobOps, agent_event, dag_event, dag_run_snapshot, subagent_job_snapshot,
@@ -114,7 +114,6 @@ pub(crate) struct DaemonConfig {
     pub(crate) subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry,
     pub(crate) session_factory: SessionFactory,
     pub(crate) session_repo: Arc<dyn SessionRepository>,
-    pub(crate) current_session_state: Arc<Mutex<CurrentSessionState>>,
     pub(crate) capabilities: RuntimeCapabilities,
     /// `[orchestrator] thinking_summary` settings; `None` → thinking stays raw.
     pub(crate) thinking_summary: Option<super::thinking_summary::ThinkingSummarySettings>,
@@ -137,7 +136,6 @@ struct SessionRuntimeState {
     retry: RetrySettings,
     factory: SessionFactory,
     repository: Arc<dyn SessionRepository>,
-    shared_state: Arc<Mutex<CurrentSessionState>>,
     busy: bool,
     queue: VecDeque<QueuedTurn>,
     cumulative_usage: WireContextUsage,
@@ -158,7 +156,6 @@ impl SessionRuntimeState {
         runtime: crate::orchestration::SessionRuntime,
         factory: SessionFactory,
         repository: Arc<dyn SessionRepository>,
-        shared_state: Arc<Mutex<CurrentSessionState>>,
         retry: crate::agent_session::RetrySettings,
         log_path: Option<PathBuf>,
     ) -> Self {
@@ -176,7 +173,6 @@ impl SessionRuntimeState {
             retry,
             factory,
             repository,
-            shared_state,
             busy: false,
             queue: VecDeque::new(),
             cumulative_usage: WireContextUsage::default(),
@@ -239,7 +235,6 @@ impl SessionRuntimeState {
             retry: RetrySettings::default(),
             factory,
             repository,
-            shared_state: Arc::new(Mutex::new(CurrentSessionState::default())),
             busy: false,
             queue: VecDeque::new(),
             cumulative_usage: WireContextUsage::default(),

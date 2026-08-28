@@ -321,10 +321,6 @@ export interface CreateSessionResponse {
   session?: SessionSummary | undefined;
 }
 
-export interface SwitchSessionRequest {
-  sessionId: string;
-}
-
 export interface RenameSessionRequest {
   sessionId: string;
   name: string;
@@ -4540,70 +4536,6 @@ export const CreateSessionResponse: MessageFns<CreateSessionResponse> = {
   },
 };
 
-function createBaseSwitchSessionRequest(): SwitchSessionRequest {
-  return { sessionId: "" };
-}
-
-export const SwitchSessionRequest: MessageFns<SwitchSessionRequest> = {
-  encode(message: SwitchSessionRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.sessionId !== "") {
-      writer.uint32(10).string(message.sessionId);
-    }
-    return writer;
-  },
-
-  decode(input: BinaryReader | Uint8Array, length?: number): SwitchSessionRequest {
-    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
-    const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseSwitchSessionRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.sessionId = reader.string();
-          continue;
-        }
-      }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
-      }
-      reader.skip(tag & 7);
-    }
-    return message;
-  },
-
-  fromJSON(object: any): SwitchSessionRequest {
-    return {
-      sessionId: isSet(object.sessionId)
-        ? globalThis.String(object.sessionId)
-        : isSet(object.session_id)
-        ? globalThis.String(object.session_id)
-        : "",
-    };
-  },
-
-  toJSON(message: SwitchSessionRequest): unknown {
-    const obj: any = {};
-    if (message.sessionId !== "") {
-      obj.sessionId = message.sessionId;
-    }
-    return obj;
-  },
-
-  create<I extends Exact<DeepPartial<SwitchSessionRequest>, I>>(base?: I): SwitchSessionRequest {
-    return SwitchSessionRequest.fromPartial(base ?? ({} as any));
-  },
-  fromPartial<I extends Exact<DeepPartial<SwitchSessionRequest>, I>>(object: I): SwitchSessionRequest {
-    const message = createBaseSwitchSessionRequest();
-    message.sessionId = object.sessionId ?? "";
-    return message;
-  },
-};
-
 function createBaseRenameSessionRequest(): RenameSessionRequest {
   return { sessionId: "", name: "" };
 }
@@ -5503,7 +5435,7 @@ export const SessionServiceService = {
     responseDeserialize: (value: Buffer): SessionState => SessionState.decode(value),
   },
   /**
-   * Session resources: list (with current marker) / create / switch / rename /
+   * Session resources: list (with current marker) / create / rename /
    * delete. DeleteSession reports the offending run ids when refused because
    * the session still has running graphs.
    */
@@ -5526,15 +5458,6 @@ export const SessionServiceService = {
     responseSerialize: (value: CreateSessionResponse): Buffer =>
       Buffer.from(CreateSessionResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): CreateSessionResponse => CreateSessionResponse.decode(value),
-  },
-  switchSession: {
-    path: "/theway.grpc.v1.SessionService/SwitchSession" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: SwitchSessionRequest): Buffer => Buffer.from(SwitchSessionRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): SwitchSessionRequest => SwitchSessionRequest.decode(value),
-    responseSerialize: (value: CommandResult): Buffer => Buffer.from(CommandResult.encode(value).finish()),
-    responseDeserialize: (value: Buffer): CommandResult => CommandResult.decode(value),
   },
   renameSession: {
     path: "/theway.grpc.v1.SessionService/RenameSession" as const,
@@ -5633,13 +5556,12 @@ export interface SessionServiceServer extends UntypedServiceImplementation {
   /** Full structured state (binary protobuf). */
   getState: handleUnaryCall<SessionStateRequest, SessionState>;
   /**
-   * Session resources: list (with current marker) / create / switch / rename /
+   * Session resources: list (with current marker) / create / rename /
    * delete. DeleteSession reports the offending run ids when refused because
    * the session still has running graphs.
    */
   listSessions: handleUnaryCall<Empty, ListSessionsResponse>;
   createSession: handleUnaryCall<CreateSessionRequest, CreateSessionResponse>;
-  switchSession: handleUnaryCall<SwitchSessionRequest, CommandResult>;
   renameSession: handleUnaryCall<RenameSessionRequest, CommandResult>;
   deleteSession: handleUnaryCall<DeleteSessionRequest, DeleteSessionResponse>;
   /** Update arbitrary session metadata KV (opaque to thewayd). */
@@ -5682,7 +5604,7 @@ export interface SessionServiceClient extends Client {
     callback: (error: ServiceError | null, response: SessionState) => void,
   ): ClientUnaryCall;
   /**
-   * Session resources: list (with current marker) / create / switch / rename /
+   * Session resources: list (with current marker) / create / rename /
    * delete. DeleteSession reports the offending run ids when refused because
    * the session still has running graphs.
    */
@@ -5715,21 +5637,6 @@ export interface SessionServiceClient extends Client {
     metadata: Metadata,
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: CreateSessionResponse) => void,
-  ): ClientUnaryCall;
-  switchSession(
-    request: SwitchSessionRequest,
-    callback: (error: ServiceError | null, response: CommandResult) => void,
-  ): ClientUnaryCall;
-  switchSession(
-    request: SwitchSessionRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: CommandResult) => void,
-  ): ClientUnaryCall;
-  switchSession(
-    request: SwitchSessionRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: CommandResult) => void,
   ): ClientUnaryCall;
   renameSession(
     request: RenameSessionRequest,

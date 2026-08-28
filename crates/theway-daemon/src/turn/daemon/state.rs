@@ -13,7 +13,6 @@ impl TurnHost {
             runtime,
             self.session.factory.clone(),
             self.session.repository.clone(),
-            self.session.shared_state.clone(),
             self.session.retry.clone(),
             self.session.log_path.clone(),
         );
@@ -101,14 +100,6 @@ impl TurnHost {
 
     async fn refresh_goal_state(&mut self) {
         self.projection.latest_goal = theway_core::multiagent::goal::current(self.session.kernel.harness()).await;
-    }
-
-    fn sync_current_session_state(&self) {
-        let mut state = self.session.shared_state.lock();
-        state.session_id = self.session.id.clone();
-        state.busy = self.session.busy;
-        state.model = current_model_label(self.session.kernel.harness());
-        state.cwd = self.session.cwd.display().to_string();
     }
 
     fn current_model_accepts_images(&self) -> bool {
@@ -230,52 +221,6 @@ impl TurnHost {
         }
     }
 
-    async fn switch_session(&mut self, id: String) -> Result<()> {
-        // Fast path: a live runtime is already parked in the registry. Swap it
-        // into the active slot and park the previous active session without
-        // rebuilding (preserves per-session queues and state).
-        if let Some(incoming) = self.sessions.remove(&id) {
-            let old = std::mem::replace(&mut self.session, incoming);
-            self.sessions.insert(old);
-        } else {
-            let previous = self.session.kernel.harness().clone();
-            previous
-                .before_session_switch(&id)
-                .await
-                .with_context(|| format!("extension gate rejected session {id}"))?;
-            let runtime = (self.session.factory)(id.clone())
-                .await
-                .with_context(|| format!("build runtime for session {id}"))?;
-            previous.shutdown_runtime_extensions().await;
-            let new_state = SessionRuntimeState::from_runtime(
-                runtime,
-                self.session.factory.clone(),
-                self.session.repository.clone(),
-                self.session.shared_state.clone(),
-                self.session.retry.clone(),
-                self.session.log_path.clone(),
-            );
-            let old = std::mem::replace(&mut self.session, new_state);
-            self.sessions.insert(old);
-        }
-        self.session
-            .kernel
-            .harness()
-            .session_switched(&self.session.id)
-            .await;
-        self.automation.reload
-            .set_trigger_executor(self.session.kernel.trigger_executor().clone());
-        self.clear_feed();
-        self.system_line(format!("switched to session {}", self.session.id));
-        self.session.busy = false;
-        self.session.queue.clear();
-        self.session.cumulative_usage = WireContextUsage::default();
-        self.projection.control_plane_prompt = None;
-        self.refresh_goal_state().await;
-        self.sync_current_session_state();
-        Ok(())
-    }
-
     async fn apply_activation(&mut self, activation: crate::session_activation::SessionActivation, turn: &mut TurnState) {
         if turn.fut.is_some() {
             self.request_abort(turn);
@@ -296,7 +241,6 @@ impl TurnHost {
             runtime,
             self.session.factory.clone(),
             repository,
-            self.session.shared_state.clone(),
             self.session.retry.clone(),
             self.session.log_path.clone(),
         );
@@ -325,7 +269,6 @@ impl TurnHost {
         turn.aborted = false;
         turn.prefix = "";
         self.refresh_goal_state().await;
-        self.sync_current_session_state();
         self.publish_current_snapshot().await;
     }
 

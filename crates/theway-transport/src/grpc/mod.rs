@@ -64,7 +64,7 @@ use theway_grpc::{
     GraphNodeSteerRequest, GraphRestoreRequest, GraphRestoreResponse, GraphRetryRequest,
     GraphRetryResponse, GraphSkipRequest, GraphSkipResponse, ListSessionsResponse, MessageMode,
     RenameSessionRequest, SendMessageRequest, SessionState, SetModelRequest, SetThinkingRequest,
-    StreamEventsRequest, StreamFrame, SwitchSessionRequest,
+    StreamEventsRequest, StreamFrame,
 };
 
 #[derive(Clone)]
@@ -90,14 +90,12 @@ pub struct GrpcState {
     /// DAG orchestration operations backing GraphCancel/Retry/…
     pub graph_ops: Arc<dyn GraphOps>,
     /// session-resource-model: session lifecycle ops (list/create/rename/delete).
-    /// Switching the *current* session goes through `WireCommand::SwitchSession`.
     pub session_ops: Arc<dyn SessionOps>,
     /// Abort handle for the registry→events forwarder task spawned at startup.
     pub agent_fwd: tokio::task::AbortHandle,
     /// Owning session id: default scope for GraphCheckpoint and the mount key
-    /// under which `SessionState.dags` is served. Mutable: SwitchSession (and
-    /// the DeleteSession fallback) rebind it; the event loop re-syncs it via
-    /// snapshots.
+    /// under which `SessionState.dags` is served. Clients should pass explicit
+    /// session ids; this remains as a compatibility default for older callers.
     pub session_id: Arc<std::sync::RwLock<String>>,
     /// Shared daemon path context (issue #68): served by `GetPathContext`;
     /// `SetSkillDirs` optimistically updates `skills_dirs` before the event
@@ -129,14 +127,7 @@ impl CommandService for GrpcState {
             .clone()
             .filter(|id| !id.is_empty())
             .unwrap_or_else(|| current.clone());
-        // Explicit session targeting: only the current (live) session can receive
-        // messages — the process runs a single agent loop. Other sessions must be
-        // switched to first (connection-level binding is client-side state).
-        if session_id != current {
-            return Err(Status::failed_precondition(format!(
-                "session {session_id} is not the active session ({current}); SwitchSession first"
-            )));
-        }
+        // Sessions are addressed explicitly; no session-switch prerequisite.
         let interrupt = request.mode() == MessageMode::Interrupt;
         let accepted = self
             .commands

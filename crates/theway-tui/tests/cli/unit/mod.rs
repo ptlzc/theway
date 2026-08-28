@@ -119,6 +119,7 @@
             active_graph_count: 0,
             busy: false,
             preview: Some("hello".to_string()),
+            metadata: Default::default(),
         }
     }
 

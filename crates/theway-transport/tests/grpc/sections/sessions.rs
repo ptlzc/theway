@@ -21,8 +21,8 @@ async fn list_sessions_returns_sessions_and_current_marker() {
 }
 
 #[tokio::test]
-async fn create_session_returns_summary_and_queues_switch() {
-    let (state, mut rx, _ops, _tools) = grpc_state_with_ops();
+async fn create_session_returns_summary() {
+    let (state, _rx, _ops, _tools) = grpc_state_with_ops();
     let response = state
         .create_session(Request::new(CreateSessionRequest {
             name: Some("brand new".into()),
@@ -39,51 +39,6 @@ async fn create_session_returns_summary_and_queues_switch() {
         session.session_id
     );
     assert_eq!(session.name, "brand new");
-    // Becoming current flows through the event-loop command channel.
-    match rx.recv().await.unwrap() {
-        WireCommand::SwitchSession { id } => assert_eq!(id, session.session_id),
-        other => panic!("unexpected command: {other:?}"),
-    }
-}
-
-#[tokio::test]
-async fn switch_session_rebinds_current_and_get_state_reflects_it() {
-    let (state, mut rx, ops, _tools) = grpc_state_with_ops();
-    ops.add_session("target-session");
-    let result = state
-        .switch_session(Request::new(SwitchSessionRequest {
-            session_id: "target-session".into(),
-        }))
-        .await
-        .unwrap()
-        .into_inner();
-    assert!(result.accepted);
-    match rx.recv().await.unwrap() {
-        WireCommand::SwitchSession { id } => assert_eq!(id, "target-session"),
-        other => panic!("unexpected command: {other:?}"),
-    }
-    assert_eq!(*state.session_id.read().unwrap(), "target-session");
-    let state_snapshot = state
-        .get_state(Request::new(theway_grpc::SessionStateRequest {
-            session_id: String::new(),
-        }))
-        .await
-        .unwrap()
-        .into_inner();
-    assert_eq!(state_snapshot.session_id, "target-session");
-}
-
-#[tokio::test]
-async fn switch_session_unknown_target_errors_and_keeps_current() {
-    let (state, _rx, _ops, _tools) = grpc_state_with_ops();
-    let err = state
-        .switch_session(Request::new(SwitchSessionRequest {
-            session_id: "no-such-session".into(),
-        }))
-        .await
-        .unwrap_err();
-    assert_eq!(err.code(), tonic::Code::NotFound);
-    assert_eq!(*state.session_id.read().unwrap(), "test-session");
 }
 
 #[tokio::test]
@@ -159,7 +114,7 @@ async fn delete_session_refused_while_graphs_running() {
 
 #[tokio::test]
 async fn delete_current_session_falls_back_to_most_recent() {
-    let (state, mut rx, ops, _tools) = grpc_state_with_ops();
+    let (state, _rx, ops, _tools) = grpc_state_with_ops();
     ops.add_session("next-session");
     let response = state
         .delete_session(Request::new(DeleteSessionRequest {
@@ -169,12 +124,8 @@ async fn delete_current_session_falls_back_to_most_recent() {
         .unwrap()
         .into_inner();
     assert!(response.running_run_ids.is_empty());
-    // Current rebinds to the most recent remaining session + switch queued.
+    // Current rebinds to the most recent remaining session (no switch RPC).
     assert_eq!(*state.session_id.read().unwrap(), "next-session");
-    match rx.recv().await.unwrap() {
-        WireCommand::SwitchSession { id } => assert_eq!(id, "next-session"),
-        other => panic!("unexpected command: {other:?}"),
-    }
     let response = state
         .list_sessions(Request::new(Empty {}))
         .await

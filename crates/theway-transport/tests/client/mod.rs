@@ -143,6 +143,7 @@ async fn client_send_message_queues_submit_command() {
             text,
             images,
             interrupt,
+            ..
         } => {
             assert_eq!(session_id, "sess-1");
             assert_eq!(text, "hello daemon");
@@ -168,7 +169,7 @@ async fn client_interrupt_mode_maps_to_interrupt_flag() {
 }
 
 #[tokio::test]
-async fn client_cancel_set_model_approve_switch_session_round_trip() {
+async fn client_cancel_set_model_approve_round_trip() {
     let (client, mut command_rx, _snapshot_tx) = client_and_server().await;
     let client = Arc::new(tokio::sync::Mutex::new(client));
 
@@ -254,11 +255,21 @@ async fn client_set_thinking_round_trips_the_level() {
 }
 
 #[tokio::test]
-async fn client_switch_session_queues_command_and_rebinds() {
+async fn client_send_message_to_explicit_session_queues_submit_without_switch() {
     let (mut client, mut command_rx, _snapshot_tx) = client_and_server().await;
-    client.switch_session("sess-1").await.unwrap();
+    client
+        .send_message_to_session(Some("sess-other"), "hello other".into(), vec![], false)
+        .await
+        .unwrap();
     match command_rx.recv().await.unwrap() {
-        crate::wire::WireCommand::SwitchSession { id } => assert_eq!(id, "sess-1"),
+        crate::wire::WireCommand::Submit {
+            session_id,
+            text,
+            ..
+        } => {
+            assert_eq!(session_id, "sess-other");
+            assert_eq!(text, "hello other");
+        }
         other => panic!("unexpected command: {other:?}"),
     }
 }

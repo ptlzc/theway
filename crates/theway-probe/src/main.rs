@@ -250,7 +250,7 @@ async fn run_multi_session(addr: &str) -> Result<(usize, usize)> {
         .await?
         .into_inner();
     let initial = list_resp.sessions.len();
-    let initial_session_id = list_resp.current_session_id.clone();
+    let _initial_session_id = list_resp.current_session_id.clone();
 
     // Create session A
     let create_a = session_client
@@ -335,10 +335,10 @@ async fn run_multi_session(addr: &str) -> Result<(usize, usize)> {
         }
     }
 
-    // SendMessage to a non-current session should fail with FAILED_PRECONDITION
+    // SendMessage to another session is accepted directly; no session switch.
     let send_to_other = command_client
         .send_message(Request::new(SendMessageRequest {
-            text: "probe: should fail".to_string(),
+            text: "probe: test message".to_string(),
             images: vec![],
             mode: 0,
             session_id: Some(session_a_id.clone()),
@@ -346,32 +346,17 @@ async fn run_multi_session(addr: &str) -> Result<(usize, usize)> {
         .await;
     match send_to_other {
         Ok(resp) => {
-            if resp.into_inner().accepted {
-                anyhow::bail!(
-                    "SendMessage to non-current session unexpectedly accepted (session isolation broken)"
-                );
+            if !resp.into_inner().accepted {
+                anyhow::bail!("SendMessage to explicit session not accepted");
             }
         }
         Err(status) => {
-            // FAILED_PRECONDITION is expected
-            if status.code() != tonic::Code::FailedPrecondition {
-                anyhow::bail!(
-                    "SendMessage to non-current session returned unexpected code: {}",
-                    status.code()
-                );
-            }
+            anyhow::bail!("SendMessage to explicit session failed: {status}");
         }
     }
 
-    // Clean up: switch back to initial session, delete probe sessions
+    // Clean up: delete probe sessions
     // (best-effort, don't fail if cleanup fails)
-    let _ = session_client
-        .switch_session(Request::new(theway_grpc::SwitchSessionRequest {
-            session_id: initial_session_id,
-        }))
-        .await;
-
-    // Use DeleteSession (even if it fails with graphs running, we tried)
     for sid in [&session_a_id, &session_b_id] {
         let _ = session_client
             .delete_session(Request::new(theway_grpc::DeleteSessionRequest {

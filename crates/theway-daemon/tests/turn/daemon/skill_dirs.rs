@@ -25,7 +25,7 @@ use super::super::{DaemonConfig, RuntimeCapabilities, TurnHost};
 use crate::agent_session::RetrySettings;
 use crate::commands::Registry;
 use crate::paths::DaemonPaths;
-use crate::session_ops::{CurrentSessionState, SessionFactory};
+use crate::session_ops::SessionFactory;
 use crate::trigger_engine::execution::TriggerExecutor;
 use crate::trigger_engine::runtime::TriggerRuntimeConfig;
 use crate::turn::kernel::TurnState;
@@ -163,7 +163,6 @@ async fn host_with_extras(extras: Vec<PathBuf>) -> (TurnHost, Arc<AtomicU32>, Ve
         subagent_registry: theway_core::multiagent::jobs::SubagentJobRegistry::new(),
         session_factory,
         session_repo: Arc::new(SqliteSessionRepo::new(repo_dir.path())),
-        current_session_state: Arc::new(parking_lot::Mutex::new(CurrentSessionState::default())),
         capabilities: RuntimeCapabilities {
             mcp_servers: 0,
             mcp_tools: 0,

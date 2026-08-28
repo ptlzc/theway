@@ -43,7 +43,6 @@ pub struct HttpState {
     pub dag_events: broadcast::Sender<WireDagEvent>,
     pub job_ops: Arc<dyn JobOps>,
     /// session-resource-model: session lifecycle ops behind the `/sessions` routes.
-    /// *Switching* the current session goes through `WireCommand::SwitchSession`.
     pub session_ops: Arc<dyn SessionOps>,
     /// Shared daemon path context (issue #68): served by `GetPathContext`;
     /// `SetSkillDirs` optimistically updates `skills_dirs` before the event
@@ -136,7 +135,7 @@ async fn healthz() -> &'static str {
 //   complete | abort (command.cancel) |
 //   trigger_immediate | control_plane_resolve (command.approve) |
 //   list_sessions (session.list) | create_session (session.create) |
-//   switch_session (session.switch) | rename_session (session.rename) |
+//   rename_session (session.rename) |
 //   delete_session (session.delete) | get_node_output (graph.get_node_output) |
 //   get_path_context (session.get_path_context) |
 //   set_skill_dirs (session.set_skill_dirs) |
@@ -315,14 +314,6 @@ pub(crate) async fn dispatch(
                 .filter(|id| !id.is_empty())
                 .map(String::from)
                 .unwrap_or_else(|| current.clone());
-            if session_id != current {
-                return Err((
-                    -32001,
-                    format!(
-                        "session {session_id} is not the active session ({current}); switch first"
-                    ),
-                ));
-            }
             let accepted = state
                 .commands
                 .send(WireCommand::Submit {
@@ -477,9 +468,6 @@ pub(crate) async fn dispatch(
             {
                 return Err((-32602, e.to_string()));
             }
-            let _ = state
-                .commands
-                .send(WireCommand::SwitchSession { id: new_id.clone() });
             let summary = state
                 .session_ops
                 .list()
@@ -490,25 +478,6 @@ pub(crate) async fn dispatch(
                 .map(|s| serde_json::json!({ "session_id": s.session_id, "name": s.name, "metadata": s.metadata }))
                 .unwrap_or_else(|| serde_json::json!({ "session_id": new_id, "metadata": metadata }));
             Ok(summary)
-        }
-        "switch_session" | "session.switch" => {
-            let id = param(params, "id")?
-                .as_str()
-                .unwrap_or_default()
-                .to_string();
-            let sessions = state
-                .session_ops
-                .list()
-                .await
-                .map_err(|e| (-32000, e.to_string()))?;
-            let target = crate::proto::resolve_session_id(&sessions, &id)
-                .ok_or_else(|| (-32004, format!("no session matches id {id}")))?;
-            state.latest.lock().session_id = target.clone();
-            let accepted = state
-                .commands
-                .send(WireCommand::SwitchSession { id: target })
-                .is_ok();
-            Ok(serde_json::json!({ "accepted": accepted }))
         }
         "rename_session" | "session.rename" | "state.rename_session" | "storage.rename_session" => {
             let id = param(params, "id")?
@@ -589,11 +558,6 @@ pub(crate) async fn dispatch(
                     .map(|s| s.session_id.clone())
                     .unwrap_or_default();
                 state.latest.lock().session_id = fallback.clone();
-                if !fallback.is_empty() {
-                    let _ = state
-                        .commands
-                        .send(WireCommand::SwitchSession { id: fallback });
-                }
             }
             Ok(serde_json::json!({ "deleted": true }))
         }

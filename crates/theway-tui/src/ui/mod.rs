@@ -20,7 +20,7 @@
 //! over gRPC. The App keeps a `latest` snapshot cache, rebuilds its feed from
 //! `feed_blocks` on every snapshot frame, and maps every UI action to a typed
 //! RPC call (`send_message` / `cancel` / `approve` / `set_model` /
-//! `switch_session`). The stream is watched for drops; a reconnect timer
+//! `select_session`). The stream is watched for drops; a reconnect timer
 //! restores the connection (offline banner while down).
 //!
 //! `App`'s methods are split by domain across submodules (`app_turns`,
@@ -186,8 +186,8 @@ pub(crate) struct ForkPickerState {
 /// daemon's active session — see [`resume_picker_label`].
 #[derive(Clone, Debug)]
 pub(crate) struct ResumePickerEntry {
-    /// Full session id — what `SwitchSession` needs (also accepts unique
-    /// prefixes, but the picker always sends the full id).
+    /// Full session id — used for client-side session selection (also accepts
+    /// unique prefixes, but the picker always sends the full id).
     pub(crate) id: String,
     pub(crate) id_short: String,
     pub(crate) name: String,

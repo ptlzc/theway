@@ -61,7 +61,6 @@ import {
   type SessionState,
   type SessionStateRequest,
   type SetCredentialRequest,
-  type SwitchSessionRequest,
   type UpdateSessionMetadataRequest,
 } from './generated/session.js';
 import {
@@ -356,19 +355,6 @@ export class ThewayGrpcClient {
     );
     if (!result.accepted) {
       throw new Error('theway grpc: UpdateSessionMetadata was not accepted by the server');
-    }
-  }
-
-  /** `SwitchSession` — switch the live session. */
-  async switchSession(sessionId: string): Promise<void> {
-    const request: SwitchSessionRequest = { sessionId };
-    const result = await this.#call<SwitchSessionRequest, CommandResult>(
-      this.#session.switchSession.bind(this.#session),
-      'SwitchSession',
-      request,
-    );
-    if (!result.accepted) {
-      throw new Error('theway grpc: SwitchSession was not accepted by the server');
     }
   }
 

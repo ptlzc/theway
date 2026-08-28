@@ -448,9 +448,6 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         subagent_registry: subagent_registry.clone(),
         session_factory,
         session_repo: repo.clone(),
-        current_session_state: Arc::new(parking_lot::Mutex::new(
-            session_ops::CurrentSessionState::default(),
-        )),
         capabilities,
         thinking_summary,
         startup,
