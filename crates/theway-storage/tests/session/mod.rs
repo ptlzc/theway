@@ -495,6 +495,77 @@ async fn fork_session_does_not_copy_parent_client_binding() {
 }
 
 #[tokio::test]
+async fn create_collapsed_child_carries_compact_entries_and_records_collapse_metadata() {
+    let dir = tempdir().unwrap();
+    let repo = SqliteSessionRepo::new(dir.path());
+    let parent = repo.create("/cwd").await.unwrap();
+    let parent_meta = parent.get_metadata_json().await.unwrap();
+    let parent_path = PathBuf::from(parent_meta["path"].as_str().unwrap());
+    let parent_id = parent_meta["id"].as_str().unwrap().to_string();
+
+    parent
+        .append_entry(custom_entry("original-1", None))
+        .await
+        .unwrap();
+    parent
+        .append_entry(custom_entry("original-2", Some("original-1")))
+        .await
+        .unwrap();
+
+    let compact_tail = vec![
+        custom_entry("compact-1", None),
+        custom_entry("tail-1", Some("compact-1")),
+    ];
+    let child = create_collapsed_child(
+        &repo,
+        std::path::Path::new("/cwd"),
+        &parent,
+        compact_tail,
+        "node-collapse-1".to_string(),
+    )
+    .await
+    .unwrap();
+
+    let child_meta = child.get_metadata_json().await.unwrap();
+    let child_path = PathBuf::from(child_meta["path"].as_str().unwrap());
+    assert_ne!(child_path, parent_path);
+    assert_eq!(
+        child_meta["parentSessionPath"].as_str().unwrap(),
+        parent_path.to_str().unwrap()
+    );
+    assert_eq!(
+        child_meta["collapseNodeId"].as_str().unwrap(),
+        "node-collapse-1"
+    );
+
+    let child_entries = child.get_entries().await.unwrap();
+    let child_ids: Vec<&str> = child_entries
+        .iter()
+        .map(|entry| entry.id.as_str())
+        .collect();
+    assert_eq!(child_ids, vec!["compact-1", "tail-1"]);
+    assert!(
+        child_entries
+            .iter()
+            .all(|entry| entry.id != "original-1" && entry.id != "original-2"),
+        "collapsed child must not copy the full original transcript"
+    );
+
+    let parent_meta_after = parent.get_metadata_json().await.unwrap();
+    assert_eq!(
+        parent_meta_after["collapseNodeId"].as_str().unwrap(),
+        "node-collapse-1"
+    );
+    assert_eq!(parent_meta_after["collapsed"], true);
+
+    let listed = list_entries(&repo).await.unwrap();
+    let parent_entry = listed.iter().find(|e| e.id == parent_id).unwrap();
+    assert_eq!(parent_entry.parent_id, None);
+    let child_entry = listed.iter().find(|e| e.id != parent_id).unwrap();
+    assert_eq!(child_entry.parent_id.as_deref(), Some(parent_id.as_str()));
+}
+
+#[tokio::test]
 async fn fork_session_projects_extension_entries_at_the_exact_branch_point() {
     let dir = tempdir().unwrap();
     let repo = SqliteSessionRepo::new(dir.path());

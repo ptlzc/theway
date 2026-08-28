@@ -14,6 +14,7 @@ extern crate self as theway_storage;
 
 pub mod session;
 pub mod session_archive;
+pub mod session_graph;
 pub mod sqlite_dag;
 pub mod sqlite_repo;
 pub mod sqlite_storage;

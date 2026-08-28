@@ -243,6 +243,54 @@ pub async fn fork_session<R: SessionReader + ?Sized>(
     Ok(storage)
 }
 
+/// Create a collapsed child session.
+///
+/// Unlike [`fork_session`], this does **not** copy the full original
+/// transcript. The caller supplies only the compact summary plus the tail that
+/// should continue in the new session. The child records `parentSessionPath`
+/// and `collapseNodeId`; the parent is marked `collapsed=true` with the same
+/// collapse node id so existing session listing/tree helpers can display the
+/// collapse lineage.
+pub async fn create_collapsed_child<R: SessionStore + ?Sized>(
+    repo: &SqliteSessionRepo,
+    cwd: &std::path::Path,
+    parent: &R,
+    entries: Vec<StoredSessionEntry>,
+    collapse_node_id: impl Into<String>,
+) -> Result<SqliteSessionStorage> {
+    let collapse_node_id = collapse_node_id.into();
+    validate_session_entries(&entries).context("validate collapsed child transcript")?;
+    let parent_meta = parent.get_metadata_json().await?;
+    let parent_path = parent_meta
+        .get("path")
+        .and_then(|v| v.as_str())
+        .map(std::path::PathBuf::from)
+        .with_context(|| "parent session has no recorded path")?;
+    tokio::fs::create_dir_all(repo.root())
+        .await
+        .with_context(|| format!("create {}", repo.root().display()))?;
+    let file = repo.root().join(format!("{}.db", uuid::Uuid::now_v7()));
+    let storage = crate::sqlite_storage::SqliteSessionStorage::create(
+        &file,
+        cwd.to_string_lossy().to_string(),
+    )
+    .await?;
+    storage.append_entries(entries).await?;
+    storage.set_parent_session_path(&parent_path).await?;
+    storage
+        .set_collapse_node_id(Some(collapse_node_id.clone()))
+        .await?;
+    parent
+        .set_collapse_node_id(Some(collapse_node_id.clone()))
+        .await?;
+    parent.set_collapsed(true).await?;
+    storage
+        .checkpoint()
+        .await
+        .with_context(|| format!("checkpoint {}", file.display()))?;
+    Ok(storage)
+}
+
 // ── tree-shaped history (pi parity) ────────────────────────────────────────────────────
 
 /// One row of the flattened session tree: display fields plus the pi-style prefix

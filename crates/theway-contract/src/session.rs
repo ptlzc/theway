@@ -89,6 +89,14 @@ pub struct JsonlSessionMetadata {
     pub imported_from: Option<SessionImportOrigin>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub binding: Option<SessionBinding>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "collapseNodeId"
+    )]
+    pub collapse_node_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collapsed: Option<bool>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -175,6 +183,45 @@ impl StoredSessionEntry {
             "parentId": parent_id,
             "timestamp": timestamp,
             "name": name,
+        }))
+    }
+
+    pub fn collapse(
+        id: String,
+        parent_id: Option<String>,
+        timestamp: String,
+        source_session_id: String,
+        child_session_id: String,
+        compact_text: String,
+        raw_text_ref: String,
+        collapsed_at: String,
+    ) -> Result<Self, SessionError> {
+        Self::from_payload(serde_json::json!({
+            "type": "collapse",
+            "id": id,
+            "parentId": parent_id,
+            "timestamp": timestamp,
+            "sourceSessionId": source_session_id,
+            "childSessionId": child_session_id,
+            "compactText": compact_text,
+            "rawTextRef": raw_text_ref,
+            "collapsedAt": collapsed_at,
+        }))
+    }
+
+    pub fn session_graph_state(
+        id: String,
+        parent_id: Option<String>,
+        timestamp: String,
+        data: Value,
+    ) -> Result<Self, SessionError> {
+        Self::from_payload(serde_json::json!({
+            "type": "custom",
+            "id": id,
+            "parentId": parent_id,
+            "timestamp": timestamp,
+            "customType": "session_graph_state",
+            "data": data,
         }))
     }
 
@@ -268,7 +315,31 @@ impl StoredSessionEntry {
             "extension" => {
                 self.extension_payload()?;
             }
-            "custom" => require_string("customType")?,
+            "custom" => {
+                require_string("customType")?;
+                if object.get("customType").and_then(Value::as_str) == Some("session_graph_state") {
+                    let data = object.get("data").ok_or_else(|| {
+                        SessionError::corrupted(
+                            "session_graph_state custom entry has no data object",
+                        )
+                    })?;
+                    if !data.is_object() {
+                        return Err(SessionError::corrupted(
+                            "session_graph_state custom entry has invalid data",
+                        ));
+                    }
+                    if !data.get("dags").is_some_and(Value::is_array) {
+                        return Err(SessionError::corrupted(
+                            "session_graph_state custom entry has invalid dags",
+                        ));
+                    }
+                    if !data.get("subagents").is_some_and(Value::is_array) {
+                        return Err(SessionError::corrupted(
+                            "session_graph_state custom entry has invalid subagents",
+                        ));
+                    }
+                }
+            }
             "custom_message" => {
                 require_string("customType")?;
                 if !object.contains_key("content")
@@ -278,6 +349,13 @@ impl StoredSessionEntry {
                         "custom_message session entry has invalid content or display",
                     ));
                 }
+            }
+            "collapse" => {
+                require_string("sourceSessionId")?;
+                require_string("childSessionId")?;
+                require_string("compactText")?;
+                require_string("rawTextRef")?;
+                require_string("collapsedAt")?;
             }
             "label" => require_string("targetId")?,
             "session_info" => {
@@ -392,6 +470,25 @@ pub trait SessionStore: SessionReader {
         Err(SessionError::new(
             SessionErrorCode::StorageFailure,
             "session store does not support binding updates",
+        ))
+    }
+
+    /// Persist or clear the session-graph collapse node id. Backends that
+    /// cannot support collapse metadata must fail closed instead of silently
+    /// succeeding.
+    async fn set_collapse_node_id(&self, _id: Option<String>) -> Result<(), SessionError> {
+        Err(SessionError::new(
+            SessionErrorCode::StorageFailure,
+            "session store does not support collapse metadata",
+        ))
+    }
+
+    /// Persist or clear the collapsed flag. Backends that cannot support
+    /// collapse metadata must fail closed instead of silently succeeding.
+    async fn set_collapsed(&self, _collapsed: bool) -> Result<(), SessionError> {
+        Err(SessionError::new(
+            SessionErrorCode::StorageFailure,
+            "session store does not support collapse metadata",
         ))
     }
 
