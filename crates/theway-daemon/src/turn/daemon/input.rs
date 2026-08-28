@@ -54,7 +54,7 @@ impl TurnHost {
     /// Route a message to a non-active session's own queue. The active session
     /// keeps its existing fast path in [`Self::submit_web_text`]; this method
     /// ensures a runtime exists for `session_id` and enqueues without requiring
-    /// a SwitchSession first.
+    /// a global current-session switch first.
     async fn submit_web_text_for_session(
         &mut self,
         session_id: &str,
