@@ -9,6 +9,7 @@ import {
   type Empty,
   type SendMessageRequest,
   type SetModelRequest,
+  type SetThinkingRequest,
 } from './generated/commands.js';
 import {
   EventServiceClient as EventServiceClientCtor,
@@ -116,6 +117,14 @@ import {
 
 const SCHEME_PREFIX = /^https?:\/\//;
 const TRAILING_SLASHES = /\/+$/;
+const THINKING_LEVELS = new Set([
+  'off',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+]);
 
 /**
  * Typed gRPC client for the `theway --grpc` loopback server
@@ -171,7 +180,30 @@ export class ThewayGrpcClient {
   // ── commands ──
 
   /** `SendMessage` — submit a user prompt (mode=QUEUE). */
-  async prompt(text: string, images: SendMessageRequest['images'] = [], sessionId?: string): Promise<void> {
+  prompt(text: string, images?: SendMessageRequest['images'], sessionId?: string): Promise<void>;
+  /** `SendMessage` — submit a user prompt to an explicit session (session id first). */
+  prompt(sessionId: string, text: string, images?: SendMessageRequest['images']): Promise<void>;
+  async prompt(
+    textOrSessionId: string,
+    imagesOrText: SendMessageRequest['images'] | string = [],
+    sessionIdOrImages?: string | SendMessageRequest['images'],
+  ): Promise<void> {
+    let text: string;
+    let images: SendMessageRequest['images'] = [];
+    let sessionId: string | undefined;
+    if (typeof imagesOrText === 'string') {
+      sessionId = textOrSessionId;
+      text = imagesOrText;
+      if (sessionIdOrImages !== undefined) {
+        images = sessionIdOrImages as SendMessageRequest['images'];
+      }
+    } else {
+      text = textOrSessionId;
+      images = imagesOrText ?? [];
+      if (sessionIdOrImages !== undefined) {
+        sessionId = sessionIdOrImages as string;
+      }
+    }
     const request: SendMessageRequest = { text, images, mode: MessageMode.QUEUE, sessionId };
     const result = await this.sendMessage(request);
     if (!result.accepted) {
@@ -198,8 +230,42 @@ export class ThewayGrpcClient {
   }
 
   /** `SetModel` with `provider` + `model` (composed into `provider:model`). */
-  setModel(provider: string, model: string, sessionId = ''): Promise<void> {
-    return this.setModelSpec(`${provider}:${model}`, sessionId);
+  setModel(provider: string, model: string, sessionId?: string): Promise<void>;
+  /** `SetModel` with an explicit session id and a composed `provider:model` spec. */
+  setModel(sessionId: string, spec: string): Promise<void>;
+  setModel(providerOrSessionId: string, modelOrSpec: string, sessionId = ''): Promise<void> {
+    if (modelOrSpec.includes(':')) {
+      return this.setModelSpec(modelOrSpec, providerOrSessionId);
+    }
+    return this.setModelSpec(`${providerOrSessionId}:${modelOrSpec}`, sessionId);
+  }
+
+  /** `SetThinking` — set the active thinking level for a session. */
+  setThinking(level: string, sessionId?: string): Promise<void>;
+  /** `SetThinking` — set the active thinking level for an explicit session (session id first). */
+  setThinking(sessionId: string, level: string): Promise<void>;
+  async setThinking(levelOrSessionId: string, sessionIdOrLevel = ''): Promise<void> {
+    let level: string;
+    let sessionId: string;
+    if (THINKING_LEVELS.has(levelOrSessionId)) {
+      level = levelOrSessionId;
+      sessionId = sessionIdOrLevel;
+    } else if (THINKING_LEVELS.has(sessionIdOrLevel)) {
+      sessionId = levelOrSessionId;
+      level = sessionIdOrLevel;
+    } else {
+      level = levelOrSessionId;
+      sessionId = sessionIdOrLevel;
+    }
+    const request: SetThinkingRequest = { sessionId, level };
+    const result = await this.#call<SetThinkingRequest, CommandResult>(
+      this.#command.setThinking.bind(this.#command),
+      'SetThinking',
+      request,
+    );
+    if (!result.accepted) {
+      throw new Error('theway grpc: SetThinking was not accepted by the server');
+    }
   }
 
   /** `Cancel` — stop the in-flight turn (same as local Ctrl-C). */
@@ -212,7 +278,22 @@ export class ThewayGrpcClient {
   }
 
   /** `Approve` — resolve the pending control-plane approval (approve / reject). */
-  async resolveControlPlane(approve: boolean, sessionId = ''): Promise<void> {
+  resolveControlPlane(approve: boolean, sessionId?: string): Promise<void>;
+  /** `Approve` — resolve the pending control-plane approval for an explicit session (session id first). */
+  resolveControlPlane(sessionId: string, approve: boolean): Promise<void>;
+  async resolveControlPlane(
+    approveOrSessionId: boolean | string,
+    sessionIdOrApprove: string | boolean = '',
+  ): Promise<void> {
+    let approve: boolean;
+    let sessionId: string;
+    if (typeof approveOrSessionId === 'boolean') {
+      approve = approveOrSessionId;
+      sessionId = sessionIdOrApprove as string;
+    } else {
+      sessionId = approveOrSessionId;
+      approve = sessionIdOrApprove as boolean;
+    }
     const request: ApproveRequest = { sessionId, approve };
     const result = await this.#call<ApproveRequest, CommandResult>(
       this.#command.approve.bind(this.#command),
@@ -340,7 +421,23 @@ export class ThewayGrpcClient {
   }
 
   /** `CreateSession` — create a session. */
-  createSession(name?: string, sessionId?: string, metadata: CreateSessionRequest['metadata'] = {}): Promise<CreateSessionResponse> {
+  createSession(name?: string, sessionId?: string, metadata?: CreateSessionRequest['metadata']): Promise<CreateSessionResponse>;
+  /** `CreateSession` — create a session with an explicit session id and metadata. */
+  createSession(sessionId: string, metadata?: CreateSessionRequest['metadata']): Promise<CreateSessionResponse>;
+  createSession(
+    nameOrSessionId?: string,
+    sessionIdOrMetadata?: string | CreateSessionRequest['metadata'],
+    metadata: CreateSessionRequest['metadata'] = {},
+  ): Promise<CreateSessionResponse> {
+    let name: string | undefined;
+    let sessionId: string | undefined;
+    if (typeof sessionIdOrMetadata === 'object' && sessionIdOrMetadata !== null) {
+      sessionId = nameOrSessionId;
+      metadata = sessionIdOrMetadata;
+    } else {
+      name = nameOrSessionId;
+      sessionId = sessionIdOrMetadata;
+    }
     const request: CreateSessionRequest = { name, sessionId, metadata };
     return this.#call<CreateSessionRequest, CreateSessionResponse>(this.#session.createSession.bind(this.#session), 'CreateSession', request);
   }
@@ -573,6 +670,17 @@ export class ThewayGrpcClient {
   }
 
   // ── event stream ──
+
+  /**
+   * `StreamEvents` — convenience alias with the session id first.
+   */
+  openEventStream(
+    sessionId: string,
+    onFrame: (frame: StreamFrame) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    return this.streamEvents(onFrame, signal, sessionId);
+  }
 
   /**
    * `StreamEvents` — server-streaming snapshot/event frames. Every frame
