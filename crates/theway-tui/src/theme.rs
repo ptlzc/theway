@@ -35,7 +35,8 @@ use crate::feed_render::{
     USER_TEXT_DEFAULT,
 };
 use crate::ui::prompt_chrome::{
-    ACCENT_USER, BG_BASE, BORDER_FOCUSED, BORDER_UNFOCUSED, GRAY_DIM, TEXT_PRIMARY, TEXT_SECONDARY,
+    ACCENT_USER, BG_BASE, BORDER_FOCUSED, BORDER_UNFOCUSED, GRAY, GRAY_DIM, TEXT_PRIMARY,
+    TEXT_SECONDARY,
 };
 
 /// Horizontal alignment of block content (issue #49).
@@ -49,6 +50,19 @@ pub enum BlockAlign {
     Right,
 }
 
+/// Block edge border weight (`[blocks.<kind>] border_top/border_bottom`,
+/// issue #31).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum BlockBorder {
+    /// No border line.
+    #[default]
+    None,
+    /// Single-width line glyph `─`.
+    Thin,
+    /// Heavy line glyph `━`.
+    Thick,
+}
+
 /// Per-block layout (`[blocks.user]` / `[blocks.assistant]` / `[blocks.tool]`
 /// / `[blocks.thinking]`).
 ///
@@ -56,6 +70,11 @@ pub enum BlockAlign {
 /// background (both the section `bg` and the role background unset) the block
 /// keeps the classic flush layout, so the default theme is visually identical
 /// to the pre-theme render.
+///
+/// `margin_top` / `margin_bottom` add blank rows above/below the block
+/// (independent of `[feed] gap` — both accumulate); `border_top` /
+/// `border_bottom` draw a full-width styled line inside the margins
+/// (issue #31).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BlockTheme {
     /// Explicit section background; `None` falls back to the color role
@@ -67,6 +86,16 @@ pub struct BlockTheme {
     pub padding: u16,
     /// Content alignment within the block (default left).
     pub align: BlockAlign,
+    /// Extra blank rows above the block (default 0).
+    pub margin_top: u16,
+    /// Extra blank rows below the block (default 0).
+    pub margin_bottom: u16,
+    /// Top edge border (default none).
+    pub border_top: BlockBorder,
+    /// Bottom edge border (default none).
+    pub border_bottom: BlockBorder,
+    /// Border line color.
+    pub border_style: Color,
 }
 
 impl Default for BlockTheme {
@@ -75,6 +104,11 @@ impl Default for BlockTheme {
             bg: None,
             padding: 1,
             align: BlockAlign::Left,
+            margin_top: 0,
+            margin_bottom: 0,
+            border_top: BlockBorder::None,
+            border_bottom: BlockBorder::None,
+            border_style: crate::ui::prompt_chrome::GRAY_DIM,
         }
     }
 }
@@ -119,6 +153,12 @@ pub struct ComposerStyle {
     pub bg: Color,
     /// Info-line caption color (blended toward `bg`).
     pub info_text: Color,
+    /// Empty-input placeholder text color (issue #31).
+    pub placeholder: Color,
+    /// Hint line below the input box (issue #31).
+    pub hint: Color,
+    /// Input cursor color where the renderer draws one (issue #31).
+    pub cursor: Color,
 }
 
 impl Default for ComposerStyle {
@@ -130,6 +170,136 @@ impl Default for ComposerStyle {
             text: TEXT_PRIMARY,
             bg: BG_BASE,
             info_text: TEXT_SECONDARY,
+            placeholder: GRAY,
+            hint: Color::DarkGray,
+            cursor: TEXT_PRIMARY,
+        }
+    }
+}
+
+/// Status band (`[statusbar]`, issue #31): the busy/ready line and the
+/// working cluster above the feed. Defaults match `ui/app/status.rs`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StatusbarStyle {
+    /// Band background; `None` = terminal default.
+    pub bg: Option<Color>,
+    /// Idle/ready line color.
+    pub fg: Color,
+    /// Busy accent (spinner glyph).
+    pub accent: Color,
+    /// Error emphasis.
+    pub error: Color,
+    /// Busy/working label color.
+    pub busy: Color,
+}
+
+impl Default for StatusbarStyle {
+    fn default() -> Self {
+        Self {
+            bg: None,
+            fg: Color::DarkGray,
+            accent: Color::Yellow,
+            error: Color::Red,
+            busy: Color::Gray,
+        }
+    }
+}
+
+/// Interactive picker popups (`[picker]`, issue #31): model/fork/resume
+/// pickers and the status-panel menu. Defaults match `ui/app/render.rs`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PickerStyle {
+    /// Popup background; `None` = terminal default.
+    pub bg: Option<Color>,
+    /// Row text color.
+    pub fg: Color,
+    /// Selected-row background.
+    pub highlight_bg: Color,
+    /// Selected-row text color.
+    pub highlight_fg: Color,
+    /// Popup title color.
+    pub title: Color,
+    /// Dim/secondary text.
+    pub dim: Color,
+}
+
+impl Default for PickerStyle {
+    fn default() -> Self {
+        Self {
+            bg: None,
+            fg: Color::Cyan,
+            highlight_bg: Color::Cyan,
+            highlight_fg: Color::Black,
+            title: Color::Yellow,
+            dim: Color::DarkGray,
+        }
+    }
+}
+
+/// Side panel (`[sidebar]`, issue #31): the automation/trigger panel.
+/// Defaults match `ui/app/panel.rs`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SidebarStyle {
+    /// Panel background; `None` = terminal default.
+    pub bg: Option<Color>,
+    /// Border + plain row color.
+    pub fg: Color,
+    /// Section headings and panel title.
+    pub heading: Color,
+    /// Positive/badge emphasis.
+    pub badge: Color,
+    /// Dim/summary text.
+    pub muted: Color,
+}
+
+impl Default for SidebarStyle {
+    fn default() -> Self {
+        Self {
+            bg: None,
+            fg: Color::DarkGray,
+            heading: Color::Magenta,
+            badge: Color::Green,
+            muted: Color::DarkGray,
+        }
+    }
+}
+
+/// DAG band (`[dag_band]`, issue #31): the graph status band above the feed.
+/// Defaults match `ui/dag_band.rs`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DagBandStyle {
+    /// Band background; `None` = terminal default.
+    pub bg: Option<Color>,
+    /// Plain text color.
+    pub fg: Color,
+    /// Succeeded/ok state.
+    pub ok: Color,
+    /// Failed state.
+    pub failed: Color,
+    /// Cancelled state.
+    pub cancelled: Color,
+    /// Running state.
+    pub running: Color,
+    /// Pending/ready state.
+    pub pending: Color,
+    /// Separators and edges.
+    pub edge: Color,
+    /// Run header title.
+    pub title: Color,
+}
+
+impl Default for DagBandStyle {
+    fn default() -> Self {
+        Self {
+            bg: None,
+            fg: Color::DarkGray,
+            ok: Color::Green,
+            failed: Color::Red,
+            cancelled: Color::DarkGray,
+            running: Color::Cyan,
+            pending: Color::DarkGray,
+            edge: Color::DarkGray,
+            title: Color::Gray,
         }
     }
 }
@@ -171,6 +341,11 @@ pub struct Theme {
     pub composer: ComposerStyle,
     // ── feed rhythm (#30) ──────────────────────────────────────────────────
     pub feed: FeedTheme,
+    // ── component style tables (#31) ───────────────────────────────────────
+    pub statusbar: StatusbarStyle,
+    pub picker: PickerStyle,
+    pub sidebar: SidebarStyle,
+    pub dag_band: DagBandStyle,
 }
 
 impl Default for Theme {
@@ -195,6 +370,10 @@ impl Default for Theme {
             thinking: BlockTheme::default(),
             composer: ComposerStyle::default(),
             feed: FeedTheme::default(),
+            statusbar: StatusbarStyle::default(),
+            picker: PickerStyle::default(),
+            sidebar: SidebarStyle::default(),
+            dag_band: DagBandStyle::default(),
         }
     }
 }
@@ -241,6 +420,59 @@ impl Theme {
                 "composer" => apply_composer_section(&mut theme.composer, section_table, &palette),
                 "blocks" => apply_blocks_section(&mut theme, section_table, &palette),
                 "feed" => apply_feed_section(&mut theme.feed, section_table, &palette),
+                "statusbar" => apply_style_section(
+                    "statusbar",
+                    section_table,
+                    &palette,
+                    &mut [
+                        ("fg", &mut theme.statusbar.fg),
+                        ("accent", &mut theme.statusbar.accent),
+                        ("error", &mut theme.statusbar.error),
+                        ("busy", &mut theme.statusbar.busy),
+                    ],
+                    &mut [("bg", &mut theme.statusbar.bg)],
+                ),
+                "picker" => apply_style_section(
+                    "picker",
+                    section_table,
+                    &palette,
+                    &mut [
+                        ("fg", &mut theme.picker.fg),
+                        ("highlight_bg", &mut theme.picker.highlight_bg),
+                        ("highlight_fg", &mut theme.picker.highlight_fg),
+                        ("title", &mut theme.picker.title),
+                        ("dim", &mut theme.picker.dim),
+                    ],
+                    &mut [("bg", &mut theme.picker.bg)],
+                ),
+                "sidebar" => apply_style_section(
+                    "sidebar",
+                    section_table,
+                    &palette,
+                    &mut [
+                        ("fg", &mut theme.sidebar.fg),
+                        ("heading", &mut theme.sidebar.heading),
+                        ("badge", &mut theme.sidebar.badge),
+                        ("muted", &mut theme.sidebar.muted),
+                    ],
+                    &mut [("bg", &mut theme.sidebar.bg)],
+                ),
+                "dag_band" => apply_style_section(
+                    "dag_band",
+                    section_table,
+                    &palette,
+                    &mut [
+                        ("fg", &mut theme.dag_band.fg),
+                        ("ok", &mut theme.dag_band.ok),
+                        ("failed", &mut theme.dag_band.failed),
+                        ("cancelled", &mut theme.dag_band.cancelled),
+                        ("running", &mut theme.dag_band.running),
+                        ("pending", &mut theme.dag_band.pending),
+                        ("edge", &mut theme.dag_band.edge),
+                        ("title", &mut theme.dag_band.title),
+                    ],
+                    &mut [("bg", &mut theme.dag_band.bg)],
+                ),
                 unknown => warn(&format!("unknown section {unknown:?} — ignored")),
             }
         }
@@ -399,6 +631,16 @@ fn set_opt_color(
     }
 }
 
+/// Parse a block border weight literal (`none | thin | thick`).
+fn parse_block_border(value: &str) -> Option<BlockBorder> {
+    match value {
+        "none" => Some(BlockBorder::None),
+        "thin" => Some(BlockBorder::Thin),
+        "thick" => Some(BlockBorder::Thick),
+        _ => None,
+    }
+}
+
 /// String value of a toml value, warning when it is not a string.
 fn as_str<'a>(key: &str, value: &'a toml::Value) -> Option<&'a str> {
     match value.as_str() {
@@ -536,6 +778,18 @@ fn apply_blocks_section(
                         "blocks.{name}.padding: invalid padding {value:?} — keeping the current value"
                     )),
                 },
+                "margin_top" => match as_u16(value) {
+                    Some(margin) => block.margin_top = margin,
+                    None => warn(&format!(
+                        "blocks.{name}.margin_top: invalid margin {value:?} — keeping the current value"
+                    )),
+                },
+                "margin_bottom" => match as_u16(value) {
+                    Some(margin) => block.margin_bottom = margin,
+                    None => warn(&format!(
+                        "blocks.{name}.margin_bottom: invalid margin {value:?} — keeping the current value"
+                    )),
+                },
                 _ => {
                     let Some(value) = as_str(&format!("blocks.{name}.{key}"), value) else {
                         continue;
@@ -552,6 +806,24 @@ fn apply_blocks_section(
                             "right" => block.align = BlockAlign::Right,
                             other => warn(&format!(
                                 "blocks.{name}.align: unknown alignment {other:?} — keeping the current value"
+                            )),
+                        },
+                        "border_top" => match parse_block_border(value) {
+                            Some(border) => block.border_top = border,
+                            None => warn(&format!(
+                                "blocks.{name}.border_top: unknown border {value:?} (none|thin|thick) — keeping the current value"
+                            )),
+                        },
+                        "border_bottom" => match parse_block_border(value) {
+                            Some(border) => block.border_bottom = border,
+                            None => warn(&format!(
+                                "blocks.{name}.border_bottom: unknown border {value:?} (none|thin|thick) — keeping the current value"
+                            )),
+                        },
+                        "border_style" => match resolve_slot_color(value, palette) {
+                            Some(color) => block.border_style = color,
+                            None => warn(&format!(
+                                "blocks.{name}.border_style: invalid color {value:?} — keeping the current value"
                             )),
                         },
                         unknown => warn(&format!("blocks.{name}.{unknown}: unknown key — ignored")),
@@ -616,6 +888,9 @@ fn apply_composer_section(
             "text" => Some(&mut composer.text),
             "bg" => Some(&mut composer.bg),
             "info_text" => Some(&mut composer.info_text),
+            "placeholder" => Some(&mut composer.placeholder),
+            "hint" => Some(&mut composer.hint),
+            "cursor" => Some(&mut composer.cursor),
             unknown => {
                 warn(&format!("composer.{unknown}: unknown key — ignored"));
                 None
@@ -623,6 +898,32 @@ fn apply_composer_section(
         };
         let Some(slot) = slot else { continue };
         set_color(slot, &format!("composer.{key}"), value, palette);
+    }
+}
+
+/// Generic applier for the flat component style tables (`[statusbar]` /
+/// `[picker]` / `[sidebar]` / `[dag_band]`, issue #31): every key is a color
+/// slot; `opt_slots` additionally accept `transparent`/`none` to clear.
+fn apply_style_section(
+    label: &str,
+    section: &TomlTable,
+    palette: &BTreeMap<String, Option<Color>>,
+    color_slots: &mut [(&str, &mut Color)],
+    opt_slots: &mut [(&str, &mut Option<Color>)],
+) {
+    for (key, value) in section {
+        let Some(value) = as_str(&format!("{label}.{key}"), value) else {
+            continue;
+        };
+        if let Some(slot) = opt_slots.iter_mut().find(|(name, _)| *name == key) {
+            set_opt_color(slot.1, &format!("{label}.{key}"), value, palette);
+            continue;
+        }
+        if let Some(slot) = color_slots.iter_mut().find(|(name, _)| *name == key) {
+            set_color(slot.1, &format!("{label}.{key}"), value, palette);
+            continue;
+        }
+        warn(&format!("{label}.{key}: unknown key — ignored"));
     }
 }
 
@@ -926,4 +1227,83 @@ bg = "#262728"
         assert_eq!(theme.thinking_text, Color::Reset);
         assert_eq!(theme.user_bg, Color::LightBlue);
     }
+}
+
+// ── v2 phase 2 (#31): block margins/borders + component tables ───────
+
+#[test]
+fn default_block_and_component_tables_match_hardcoded() {
+    let d = Theme::default();
+    for block in [d.user, d.assistant, d.tool, d.thinking] {
+        assert_eq!(block.margin_top, 0);
+        assert_eq!(block.margin_bottom, 0);
+        assert_eq!(block.border_top, BlockBorder::None);
+        assert_eq!(block.border_bottom, BlockBorder::None);
+        assert_eq!(block.border_style, crate::ui::prompt_chrome::GRAY_DIM);
+    }
+    assert_eq!(d.composer.placeholder, crate::ui::prompt_chrome::GRAY);
+    assert_eq!(d.composer.hint, Color::DarkGray);
+    assert_eq!(d.composer.cursor, crate::ui::prompt_chrome::TEXT_PRIMARY);
+    assert_eq!(d.statusbar.fg, Color::DarkGray);
+    assert_eq!(d.statusbar.accent, Color::Yellow);
+    assert_eq!(d.statusbar.busy, Color::Gray);
+    assert_eq!(d.picker.fg, Color::Cyan);
+    assert_eq!(d.picker.highlight_bg, Color::Cyan);
+    assert_eq!(d.picker.highlight_fg, Color::Black);
+    assert_eq!(d.picker.title, Color::Yellow);
+    assert_eq!(d.sidebar.fg, Color::DarkGray);
+    assert_eq!(d.sidebar.heading, Color::Magenta);
+    assert_eq!(d.dag_band.ok, Color::Green);
+    assert_eq!(d.dag_band.failed, Color::Red);
+    assert_eq!(d.dag_band.cancelled, Color::DarkGray);
+    assert_eq!(d.dag_band.running, Color::Cyan);
+    assert_eq!(d.dag_band.title, Color::Gray);
+}
+
+#[test]
+fn parse_block_margins_and_borders() {
+    let theme = Theme::parse(
+        "[blocks.tool]\nmargin_top = 1\nmargin_bottom = 2\n\
+             border_top = \"thin\"\nborder_bottom = \"thick\"\nborder_style = \"#010203\"\n",
+    );
+    assert_eq!(theme.tool.margin_top, 1);
+    assert_eq!(theme.tool.margin_bottom, 2);
+    assert_eq!(theme.tool.border_top, BlockBorder::Thin);
+    assert_eq!(theme.tool.border_bottom, BlockBorder::Thick);
+    assert_eq!(theme.tool.border_style, Color::Rgb(1, 2, 3));
+    // Unset blocks keep defaults.
+    assert_eq!(theme.thinking.margin_top, 0);
+    assert_eq!(theme.thinking.border_top, BlockBorder::None);
+
+    // Invalid border literal falls back with a warning.
+    let theme = Theme::parse("[blocks.tool]\nborder_top = \"dashed\"\n");
+    assert_eq!(theme.tool.border_top, BlockBorder::None);
+    // Negative margins fall back.
+    let theme = Theme::parse("[blocks.tool]\nmargin_top = -3\n");
+    assert_eq!(theme.tool.margin_top, 0);
+}
+
+#[test]
+fn parse_component_style_tables() {
+    let theme = Theme::parse(
+        "[composer]\nplaceholder = \"#111111\"\nhint = \"#222222\"\ncursor = \"#333333\"\n\
+             [statusbar]\nfg = \"#444444\"\nbg = \"#555555\"\n\
+             [picker]\ntitle = \"#666666\"\nbg = \"transparent\"\n\
+             [sidebar]\nheading = \"#777777\"\n\
+             [dag_band]\nok = \"#888888\"\nfailed = \"p:accent\"\n\
+             [palette]\naccent = \"#999999\"\n",
+    );
+    assert_eq!(theme.composer.placeholder, Color::Rgb(0x11, 0x11, 0x11));
+    assert_eq!(theme.composer.hint, Color::Rgb(0x22, 0x22, 0x22));
+    assert_eq!(theme.composer.cursor, Color::Rgb(0x33, 0x33, 0x33));
+    assert_eq!(theme.statusbar.fg, Color::Rgb(0x44, 0x44, 0x44));
+    assert_eq!(theme.statusbar.bg, Some(Color::Rgb(0x55, 0x55, 0x55)));
+    assert_eq!(theme.picker.title, Color::Rgb(0x66, 0x66, 0x66));
+    assert_eq!(theme.picker.bg, None);
+    assert_eq!(theme.sidebar.heading, Color::Rgb(0x77, 0x77, 0x77));
+    assert_eq!(theme.dag_band.ok, Color::Rgb(0x88, 0x88, 0x88));
+    assert_eq!(theme.dag_band.failed, Color::Rgb(0x99, 0x99, 0x99));
+    // Unknown keys in the new sections warn + keep.
+    let d = Theme::default();
+    assert_eq!(theme.statusbar.accent, d.statusbar.accent);
 }
