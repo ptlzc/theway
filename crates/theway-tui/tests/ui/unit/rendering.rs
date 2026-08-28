@@ -380,3 +380,52 @@ async fn dag_band_caps_at_two_runs_with_more_line() {
     assert!(text.contains("… 1 more"), "{text}");
     assert!(!text.contains("dag-3"), "{text}");
 }
+
+/// Phase 2 (#31): the [picker] style table recolors the popups while the
+/// default theme keeps today's cyan/black-on-cyan visuals.
+#[tokio::test]
+async fn picker_theme_recolors_fork_popup_rows() {
+    let (mut app, _rx) = test_app().await;
+    app.latest.feed_blocks = vec![WireFeedBlock::User {
+        text: "hello world".into(),
+        timestamp: None,
+    }];
+    app.open_fork_picker();
+
+    let mut theme = Theme::default();
+    theme.picker.fg = Color::Rgb(200, 100, 50);
+    theme.picker.highlight_bg = Color::Rgb(50, 200, 100);
+    theme.picker.highlight_fg = Color::Rgb(10, 10, 10);
+    theme.picker.title = Color::Rgb(240, 200, 100);
+    app.theme = theme;
+
+    let backend = TestBackend::new(60, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    let buf = terminal.backend().buffer();
+    let area = buf.area;
+    let highlight = Color::Rgb(50, 200, 100);
+    let rows: Vec<u16> = (0..area.height)
+        .filter(|&y| (0..area.width).any(|x| buf[(x, y)].bg == highlight))
+        .collect();
+    assert_eq!(rows.len(), 1, "expected one picker.highlight_bg row: {rows:?}");
+    let y = rows[0];
+    let content_fg = (0..area.width)
+        .map(|x| buf[(x, y)].fg)
+        .find(|fg| *fg == Color::Rgb(10, 10, 10))
+        .expect("highlight_fg on the selected row");
+    assert_eq!(content_fg, Color::Rgb(10, 10, 10), "highlight_fg");
+    // The title row carries picker.title (find the 'f' cell of " fork ").
+    let area = buf.area;
+    let (title_y, _) = (0..area.height)
+        .find_map(|y| {
+            let row: String = (0..area.width).map(|x| buf[(x, y)].symbol()).collect();
+            row.find("fork").map(|x| (y, x))
+        })
+        .expect("fork popup title row");
+    let title_fg = (0..area.width)
+        .find(|x| buf[(*x, title_y)].symbol() == "f")
+        .map(|x| buf[(x, title_y)].fg)
+        .unwrap_or(Color::Reset);
+    assert_eq!(title_fg, Color::Rgb(240, 200, 100));
+}

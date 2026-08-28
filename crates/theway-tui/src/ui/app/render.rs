@@ -240,7 +240,7 @@ impl App {
         frame.render_widget(
             Paragraph::new(Line::styled(
                 theway_transport::feed::truncate_chars(hint, hint_area.width as usize),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(self.theme.composer.hint),
             )),
             hint_area,
         );
@@ -266,15 +266,16 @@ impl App {
         // borders (2) + title line + blank + footer = 5 rows of chrome
         let visible = rect.height.saturating_sub(5).max(1) as usize;
         let (title, rows) = picker.view(visible);
+        let picker_theme = self.theme.picker;
         let mut text = vec![
-            Line::styled(title, Style::default().fg(Color::Yellow)),
+            Line::styled(title, Style::default().fg(picker_theme.title)),
             Line::raw(""),
         ];
         for (label, selected) in rows {
             if selected {
                 text.push(Line::styled(
                     format!("❯ {label}"),
-                    Style::default().fg(Color::Cyan),
+                    Style::default().fg(picker_theme.fg),
                 ));
             } else {
                 text.push(Line::raw(format!("  {label}")));
@@ -282,12 +283,13 @@ impl App {
         }
         text.push(Line::styled(
             "↑↓/jk navigate · Enter select · Esc back",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(picker_theme.dim),
         ));
         let block = Block::default()
             .borders(Borders::ALL)
             .title(" Select model ")
-            .border_style(Style::default().fg(Color::Cyan));
+            .title_style(Style::default().fg(picker_theme.title))
+            .border_style(Style::default().fg(picker_theme.fg));
         frame.render_widget(Clear, rect);
         frame.render_widget(Paragraph::new(text).block(block), rect);
     }
@@ -355,23 +357,27 @@ impl App {
         let width = area.width.clamp(20, 34);
         let height = SIDE_PANEL_MENU_ITEMS.len() as u16 + 3; // items + hint + borders
         let rect = centered_rect(area, width, height);
+        let picker_theme = self.theme.picker;
         let mut text = Vec::with_capacity(SIDE_PANEL_MENU_ITEMS.len() + 1);
         for (i, label) in SIDE_PANEL_MENU_ITEMS.iter().enumerate() {
             let style = if i == selected {
-                Style::default().fg(Color::Black).bg(Color::Cyan)
+                Style::default()
+                    .fg(picker_theme.highlight_fg)
+                    .bg(picker_theme.highlight_bg)
             } else {
-                Style::default().fg(Color::Cyan)
+                Style::default().fg(picker_theme.fg)
             };
             text.push(Line::styled(format!(" {label} "), style));
         }
         text.push(Line::styled(
             "↑↓ move · Enter apply · Esc cancel",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(picker_theme.dim),
         ));
         let block = Block::default()
             .borders(Borders::ALL)
             .title(" status panel ")
-            .border_style(Style::default().fg(Color::Cyan));
+            .title_style(Style::default().fg(picker_theme.title))
+            .border_style(Style::default().fg(picker_theme.fg));
         frame.render_widget(Clear, rect);
         frame.render_widget(Paragraph::new(text).block(block), rect);
     }
@@ -395,12 +401,15 @@ impl App {
         let shown = (picker.entries.len() - scroll).min(FORK_POPUP_MAX);
         let height = shown as u16 + 3; // item rows + hint + borders
         let rect = centered_rect(area, width, height);
+        let picker_theme = self.theme.picker;
         let mut text = Vec::with_capacity(shown + 1);
         for (i, entry) in picker.entries.iter().skip(scroll).take(shown).enumerate() {
             let style = if scroll + i == picker.selected {
-                Style::default().fg(Color::Black).bg(Color::Cyan)
+                Style::default()
+                    .fg(picker_theme.highlight_fg)
+                    .bg(picker_theme.highlight_bg)
             } else {
-                Style::default().fg(Color::Cyan)
+                Style::default().fg(picker_theme.fg)
             };
             text.push(Line::styled(
                 format!(" {}) {}", entry.number, entry.preview),
@@ -409,12 +418,13 @@ impl App {
         }
         text.push(Line::styled(
             "↑↓ move · Enter fork · Esc cancel",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(picker_theme.dim),
         ));
         let block = Block::default()
             .borders(Borders::ALL)
             .title(" fork ")
-            .border_style(Style::default().fg(Color::Cyan));
+            .title_style(Style::default().fg(picker_theme.title))
+            .border_style(Style::default().fg(picker_theme.fg));
         frame.render_widget(Clear, rect);
         frame.render_widget(Paragraph::new(text).block(block), rect);
     }
@@ -439,12 +449,15 @@ impl App {
         let shown = (picker.entries.len() - scroll).min(RESUME_POPUP_MAX);
         let height = shown as u16 + 3; // item rows + hint + borders
         let rect = centered_rect(area, width, height);
+        let picker_theme = self.theme.picker;
         let mut text = Vec::with_capacity(shown + 1);
         for (i, entry) in picker.entries.iter().skip(scroll).take(shown).enumerate() {
             let style = if scroll + i == picker.selected {
-                Style::default().fg(Color::Black).bg(Color::Cyan)
+                Style::default()
+                    .fg(picker_theme.highlight_fg)
+                    .bg(picker_theme.highlight_bg)
             } else {
-                Style::default().fg(Color::Cyan)
+                Style::default().fg(picker_theme.fg)
             };
             text.push(Line::styled(
                 format!(" {}", resume_picker_label(entry)),
@@ -453,12 +466,13 @@ impl App {
         }
         text.push(Line::styled(
             "↑↓ move · Enter resume · Esc cancel",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(picker_theme.dim),
         ));
         let block = Block::default()
             .borders(Borders::ALL)
             .title(" resume ")
-            .border_style(Style::default().fg(Color::Cyan));
+            .title_style(Style::default().fg(picker_theme.title))
+            .border_style(Style::default().fg(picker_theme.fg));
         frame.render_widget(Clear, rect);
         frame.render_widget(Paragraph::new(text).block(block), rect);
     }

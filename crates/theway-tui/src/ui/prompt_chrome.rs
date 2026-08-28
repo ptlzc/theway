@@ -213,7 +213,12 @@ pub fn render_prompt_chrome(
     let ta_w = content_w.saturating_sub(PREFIX_WIDTH);
     if c.input_empty && !c.focused && ta_w > 0 && text_h > 0 {
         let truncated = truncate_str(c.placeholder, ta_w as usize);
-        buf.set_string(ta_x, text_y, &truncated, Style::default().fg(GRAY).bg(bg));
+        buf.set_string(
+            ta_x,
+            text_y,
+            &truncated,
+            Style::default().fg(style.placeholder).bg(bg),
+        );
     }
 
     // ── Bottom divider + info line: ╰─ model · flags ─╯ ───────────────────────
