@@ -149,7 +149,7 @@ Collapse event:
     "type": "custom",
     "role": "collapse_context",
     "payload": {
-      "summary": "Explored auth module; decided token refresh strategy; next step is the login form."
+      "summary": "goal: \ncompleted work: \nkey decisions: \nnext steps: \ncritical context: Explored auth module; decided token refresh strategy; next step is the login form."
     }
   }
 ]
@@ -159,8 +159,16 @@ After `default_convert_to_llm`:
 
 ```text
 [Previous session compact summary]
-Explored auth module; decided token refresh strategy; next step is the login form.
+goal: 
+completed work: 
+key decisions: 
+next steps: 
+critical context: Explored auth module; decided token refresh strategy; next step is the login form.
 ```
+
+Every collapse renders the same five fixed components; plain/legacy material
+lands under `critical context` and each component is bounded by the
+per-component char caps in `session_ops.rs`.
 
 ### 3. Collapse into an existing session (`into_session_id`)
 
@@ -178,7 +186,7 @@ case 2.
     "type": "custom",
     "role": "collapse_context",
     "payload": {
-      "summary": "Old session covered the parser rewrite and its tests."
+      "summary": "goal: \ncompleted work: \nkey decisions: \nnext steps: \ncritical context: Old session covered the parser rewrite and its tests."
     }
   }
 ]

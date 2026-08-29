@@ -28,6 +28,7 @@ use theway_core::multiagent::session_graph::{attach_runs, snapshot_for_session};
 
 use crate::runtime_storage::SessionRepository;
 use crate::session_execution::SessionExecutionRegistry;
+use theway_llm_provider::{ContentBlock, Message, UserContent, UserContentBlock};
 use theway_storage::session_graph::{SessionGraphNode, SessionGraphStore};
 use theway_transport::testing::empty_sidebar_snapshot;
 use theway_transport::transport::SessionOps;
@@ -159,6 +160,172 @@ fn now_rfc3339() -> String {
     Utc::now().to_rfc3339()
 }
 
+/// Fixed five-component contract for every collapse's bounded rolling
+/// summary: `(component name, per-component char cap)`. `critical context`
+/// gets the largest budget because it is the catch-all carry-forward slot.
+const ROLLING_SUMMARY_COMPONENTS: [(&str, usize); 5] = [
+    ("goal", 400),
+    ("completed work", 1_200),
+    ("key decisions", 600),
+    ("next steps", 400),
+    ("critical context", 2_400),
+];
+
+/// Header recognition for a previously-rendered rolling summary line
+/// (`name: rest`). Returns the component index and the text after the colon.
+fn rolling_summary_header(line: &str) -> Option<(usize, &str)> {
+    for (index, (name, _)) in ROLLING_SUMMARY_COMPONENTS.iter().enumerate() {
+        if let Some(rest) = line
+            .strip_prefix(name)
+            .and_then(|rest| rest.strip_prefix(':'))
+        {
+            return Some((index, rest.trim()));
+        }
+    }
+    None
+}
+
+/// Bound one component to its char cap. Values are trimmed; truncation is
+/// marked explicitly so a reader can tell the component is lossy.
+fn bounded_component(text: &str, limit: usize) -> String {
+    let text = text.trim();
+    if text.is_empty() {
+        return String::new();
+    }
+    if text.chars().count() <= limit {
+        return text.to_string();
+    }
+    const MARKER: &str = "… [truncated]";
+    let mut bounded: String = text
+        .chars()
+        .take(limit.saturating_sub(MARKER.chars().count()))
+        .collect();
+    bounded.push_str(MARKER);
+    bounded
+}
+
+/// Parse previously rendered rolling-summary components. Plain material
+/// (no recognized headers) is carried forward under `critical context`, so
+/// no information is silently dropped from a legacy compaction summary.
+#[derive(Default)]
+struct RollingSummary {
+    goal: String,
+    completed_work: String,
+    key_decisions: String,
+    next_steps: String,
+    critical_context: String,
+}
+
+impl RollingSummary {
+    fn from_material(material: &str) -> Self {
+        let mut summary = Self::default();
+        let mut values: [String; 5] = Default::default();
+        let mut current: Option<usize> = None;
+        let mut saw_header = false;
+        for line in material.lines() {
+            if let Some((index, rest)) = rolling_summary_header(line.trim()) {
+                saw_header = true;
+                current = Some(index);
+                values[index] = rest.to_string();
+                continue;
+            }
+            if let Some(index) = current {
+                if !values[index].is_empty() {
+                    values[index].push('\n');
+                }
+                values[index].push_str(line.trim());
+            }
+        }
+        if !saw_header {
+            summary.critical_context = bounded_component(material, 2_400);
+            return summary;
+        }
+        let goal = std::mem::take(&mut values[0]);
+        summary.goal = bounded_component(&goal, 400);
+        let completed = std::mem::take(&mut values[1]);
+        summary.completed_work = bounded_component(&completed, 1_200);
+        let decisions = std::mem::take(&mut values[2]);
+        summary.key_decisions = bounded_component(&decisions, 600);
+        let next = std::mem::take(&mut values[3]);
+        summary.next_steps = bounded_component(&next, 400);
+        let critical = std::mem::take(&mut values[4]);
+        summary.critical_context = bounded_component(&critical, 2_400);
+        summary
+    }
+}
+
+/// Render the bounded rolling summary: all five fixed components are always
+/// present; components without source material stay empty (structure only).
+fn render_rolling_summary(material: &str) -> String {
+    let material = material.trim();
+    if material.is_empty() {
+        return String::new();
+    }
+    let summary = RollingSummary::from_material(material);
+    let mut out = String::new();
+    out.push_str("goal: ");
+    out.push_str(&summary.goal);
+    out.push('\n');
+    out.push_str("completed work: ");
+    out.push_str(&summary.completed_work);
+    out.push('\n');
+    out.push_str("key decisions: ");
+    out.push_str(&summary.key_decisions);
+    out.push('\n');
+    out.push_str("next steps: ");
+    out.push_str(&summary.next_steps);
+    out.push('\n');
+    out.push_str("critical context: ");
+    out.push_str(&summary.critical_context);
+    out.push('\n');
+    out
+}
+
+/// Push one provider text piece into the transcript fallback material.
+fn push_provider_text(material: &mut String, text: &str) {
+    let text = text.trim();
+    if text.is_empty() {
+        return;
+    }
+    if !material.is_empty() {
+        material.push_str("\n\n");
+    }
+    material.push_str(text);
+}
+
+/// Serialize the active transcript into plain text for the
+/// `request.summary` → `latest_collapse_summary` → transcript fallback chain.
+/// Tool-result bodies are intentionally skipped; user and assistant text is
+/// what the previous generation's work was about.
+async fn transcript_material(session: &theway_core::Session) -> Result<String> {
+    let context = session.build_context().await?;
+    let provider_messages = theway_core::default_convert_to_llm()(&context.messages);
+    let mut material = String::new();
+    for message in provider_messages {
+        match message {
+            Message::User(user) => match user.content {
+                UserContent::Text(text) => push_provider_text(&mut material, &text),
+                UserContent::Blocks(blocks) => {
+                    for block in blocks {
+                        if let UserContentBlock::Text(text) = block {
+                            push_provider_text(&mut material, &text.text);
+                        }
+                    }
+                }
+            },
+            Message::Assistant(assistant) => {
+                for block in assistant.content {
+                    if let ContentBlock::Text(text) = block {
+                        push_provider_text(&mut material, &text.text);
+                    }
+                }
+            }
+            Message::ToolResult(_) => {}
+        }
+    }
+    Ok(material)
+}
+
 fn compact_context_entries(
     source_session_id: &str,
     compact_text: &str,
@@ -228,12 +395,13 @@ fn make_collapse_node(
     title: &str,
     summary: &str,
     graph_state: &theway_core::multiagent::session_graph::SessionGraphState,
+    parent_id: Option<&str>,
 ) -> SessionGraphNode {
     let now = now_rfc3339();
     SessionGraphNode {
         id: node_id.to_string(),
         node_type: "collapsed".to_string(),
-        parent_id: None,
+        parent_id: parent_id.map(str::to_string),
         name: title.to_string(),
         status: "collapsed".to_string(),
         summary: Some(summary.to_string()),
@@ -712,6 +880,9 @@ impl AppSessionOps {
             .await?
             .with_context(|| format!("no session matches id {source_id}"))?;
         let source = theway_core::Session::from_store(source_store.clone());
+        // Capture the source's existing collapse node BEFORE child creation
+        // overwrites `collapseNodeId`: it is the parent link in the node chain.
+        let parent_node_id = source.collapse_node_id().await?;
 
         let graph_state = match self.subagent_registry.as_ref() {
             Some(jobs) => snapshot_for_session(&self.dag_engine, jobs, source_id),
@@ -733,13 +904,14 @@ impl AppSessionOps {
             )
             .await?;
 
-        let compact_text = match request.summary.clone() {
+        let compact_material = match request.summary.clone() {
             Some(summary) if !summary.trim().is_empty() => summary,
-            _ => source
-                .latest_compaction_summary()
-                .await?
-                .unwrap_or_default(),
+            _ => match source.latest_collapse_summary().await? {
+                Some(summary) => summary,
+                None => transcript_material(&source).await?,
+            },
         };
+        let compact_text = render_rolling_summary(&compact_material);
         if !compact_text.is_empty() {
             let leaf = source
                 .get_leaf_id()
@@ -828,6 +1000,7 @@ impl AppSessionOps {
             &title,
             &summary,
             &graph_state,
+            parent_node_id.as_deref(),
         );
         store
             .save_node(&storage_node)
@@ -909,6 +1082,80 @@ mod tests {
             .and_then(|v| v.as_str())
             .unwrap()
             .to_string()
+    }
+
+    #[test]
+    fn rolling_summary_plain_material_lands_in_critical_context_with_all_headers() {
+        let summary = render_rolling_summary("explored auth module, decided token refresh");
+
+        for component in [
+            "goal",
+            "completed work",
+            "key decisions",
+            "next steps",
+            "critical context",
+        ] {
+            assert!(
+                summary.contains(&format!("{component}: ")),
+                "summary must always contain the fixed component {component:?}: {summary:?}"
+            );
+        }
+        assert!(summary.contains("critical context: explored auth module"));
+    }
+
+    #[test]
+    fn rolling_summary_carries_previous_components_forward_bounded() {
+        let first = render_rolling_summary(
+            "goal: ship the auth refactor\ncompleted work: auth module + tests\nkey decisions: token refresh strategy\nnext steps: login form\ncritical context: keep legacy sessions readable",
+        );
+        let second = render_rolling_summary(&first);
+
+        for component in [
+            "goal: ship the auth refactor",
+            "completed work: auth module + tests",
+            "key decisions: token refresh strategy",
+            "next steps: login form",
+            "critical context: keep legacy sessions readable",
+        ] {
+            assert!(
+                second.contains(component),
+                "{component:?} must survive the rolling pass: {second:?}"
+            );
+        }
+
+        for line in second.lines() {
+            let (name, value) = line.split_once(": ").expect("component line");
+            let limit = ROLLING_SUMMARY_COMPONENTS
+                .iter()
+                .find(|(candidate, _)| *candidate == name)
+                .expect("known component")
+                .1;
+            assert!(
+                value.chars().count() <= limit,
+                "{name} exceeded its {limit}-char cap"
+            );
+        }
+    }
+
+    #[test]
+    fn rolling_summary_bounds_every_component_even_with_long_input() {
+        let long = "x".repeat(5_000);
+        let summary = render_rolling_summary(&long);
+
+        assert!(summary.contains("critical context: "));
+        assert!(summary.contains("… [truncated]"));
+        for line in summary.lines() {
+            let (name, value) = line.split_once(": ").unwrap();
+            let limit = ROLLING_SUMMARY_COMPONENTS
+                .iter()
+                .find(|(candidate, _)| *candidate == name)
+                .unwrap()
+                .1;
+            assert!(
+                value.chars().count() <= limit,
+                "{name} exceeded its {limit}-char cap"
+            );
+        }
     }
 
     #[tokio::test]
@@ -1263,6 +1510,137 @@ mod tests {
             }),
             "collapse child build_context should materialize compact summary"
         );
+    }
+
+    #[tokio::test]
+    async fn nested_collapse_links_node_chain_and_rolls_summary_forward() {
+        let dir = tempdir().unwrap();
+        let repo = Arc::new(SqliteSessionRepo::new(dir.path()));
+        let source = repo.create("/cwd").await.unwrap();
+        let source_id = session_id_of(&source).await;
+        theway_core::Session::from_store(Arc::new(source))
+            .append_compaction(
+                concat!(
+                    "goal: gen-1 goal\n",
+                    "completed work: gen-1 completed\n",
+                    "key decisions: gen-1 decision\n",
+                    "next steps: gen-1 next\n",
+                    "critical context: gen-1 critical",
+                ),
+                "first",
+                10,
+                None,
+                true,
+            )
+            .await
+            .unwrap();
+
+        let graph_path = dir.path().join("session_graph.db");
+        let ops = AppSessionOps::with_session_graph(
+            repo.clone(),
+            Arc::new(DagEngine::new()),
+            "/cwd".into(),
+            SessionExecutionRegistry::new(),
+            SubagentJobRegistry::new(),
+            graph_path.clone(),
+        );
+
+        // S -> C1
+        let first = ops
+            .collapse_session(&WireCollapseSessionRequest {
+                session_id: source_id.clone(),
+                into_session_id: None,
+                title: Some("First collapse".into()),
+                summary: None,
+            })
+            .await
+            .unwrap();
+        let c1_id = first
+            .collapsed
+            .as_ref()
+            .unwrap()
+            .collapsed_into_session_id
+            .clone()
+            .unwrap();
+        let node1_id = first.node.as_ref().unwrap().id.clone();
+        assert_eq!(first.node.as_ref().unwrap().parent_node_id, None);
+
+        // C1 -> C2: the source is a collapse child, so the parent node id is
+        // C1's collapseNodeId and the previous compact summary rolls forward.
+        let second = ops
+            .collapse_session(&WireCollapseSessionRequest {
+                session_id: c1_id.clone(),
+                into_session_id: None,
+                title: Some("Second collapse".into()),
+                summary: None,
+            })
+            .await
+            .unwrap();
+        let c2_id = second
+            .collapsed
+            .as_ref()
+            .unwrap()
+            .collapsed_into_session_id
+            .clone()
+            .unwrap();
+        let node2_id = second.node.as_ref().unwrap().id.clone();
+        assert_eq!(
+            second.node.as_ref().unwrap().parent_node_id.as_deref(),
+            Some(node1_id.as_str())
+        );
+
+        // Node chain persists: node1.child_ids == [node2], reopen still reads it.
+        let store = SessionGraphStore::open(&graph_path).await.unwrap();
+        let node1 = store.load_node(&node1_id).await.unwrap().unwrap();
+        let node2 = store.load_node(&node2_id).await.unwrap().unwrap();
+        assert_eq!(node2.parent_id.as_deref(), Some(node1_id.as_str()));
+        assert_eq!(node1.child_ids, vec![node2_id.clone()]);
+        let nodes = store.list_nodes().await.unwrap();
+        assert_eq!(nodes.len(), 2);
+
+        // C2's compact_context is a bounded five-component rolling summary
+        // carrying the previous generation's summary text.
+        let c2_store = SessionRepository::open(repo.as_ref(), &c2_id)
+            .await
+            .unwrap()
+            .unwrap();
+        let compact = theway_core::Session::from_store(c2_store)
+            .compact_context()
+            .await
+            .unwrap()
+            .expect("compact context");
+        assert_eq!(compact.source_session_id, c1_id);
+        for component in [
+            "goal",
+            "completed work",
+            "key decisions",
+            "next steps",
+            "critical context",
+        ] {
+            assert!(
+                compact.compact_text.contains(&format!("{component}: ")),
+                "C2 rolling summary must carry {component:?}"
+            );
+        }
+        assert!(compact.compact_text.contains("gen-1 critical"));
+        assert!(compact.compact_text.contains("gen-1 completed"));
+        for line in compact.compact_text.lines() {
+            let (name, value) = line.split_once(": ").unwrap();
+            let limit = ROLLING_SUMMARY_COMPONENTS
+                .iter()
+                .find(|(candidate, _)| *candidate == name)
+                .unwrap()
+                .1;
+            assert!(value.chars().count() <= limit);
+        }
+
+        // Event-only lineage: ids present, summary text absent.
+        let lineage = crate::context::lineage::render_lineage(Some(&compact), Some(&node2_id))
+            .expect("lineage");
+        assert!(lineage.contains(&format!("node id: {node2_id}")));
+        assert!(lineage.contains(&format!("source session id: {c1_id}")));
+        assert!(!lineage.contains("gen-1"));
+        assert!(!lineage.contains("compactText"));
     }
 
     #[tokio::test]
