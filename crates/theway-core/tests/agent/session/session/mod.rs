@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use super::*;
 use crate::agent::session::memory_storage::MemorySessionStorage;
+use crate::default_convert_to_llm;
 use theway_llm_provider::{
     AssistantMessage, ContentBlock, Message as PiMessage, StopReason, UserContent, UserMessage,
     UserRole,
@@ -540,7 +541,7 @@ fn build_session_context_custom_message_with_bad_timestamp_falls_back_to_now() {
 }
 
 #[test]
-fn build_session_context_injects_compact_context_user_message() {
+fn build_session_context_injects_compact_context_custom_message() {
     let entries = vec![SessionTreeEntry::Custom {
         id: "compact".into(),
         parent_id: None,
@@ -557,16 +558,27 @@ fn build_session_context_injects_compact_context_user_message() {
 
     assert_eq!(ctx.messages.len(), 1);
     match &ctx.messages[0] {
-        AgentMessage::Llm(PiMessage::User(user)) => {
-            let text = match &user.content {
-                UserContent::Text(text) => text.clone(),
-                _ => panic!("expected text content"),
-            };
-            assert!(text.contains("explored X, decided Y"), "{text}");
-            assert!(text.contains("[Previous session compact summary]"), "{text}");
+        AgentMessage::Custom(custom) => {
+            assert_eq!(custom.role, "collapse_context");
+            assert_eq!(custom.payload["summary"], "explored X, decided Y");
         }
-        other => panic!("expected user message, got {other:?}"),
+        other => panic!("expected collapse_context custom message, got {other:?}"),
     }
+
+    let provider_messages = default_convert_to_llm()(&ctx.messages);
+    let text = provider_messages
+        .iter()
+        .filter_map(|m| match m {
+            PiMessage::User(user) => match &user.content {
+                UserContent::Text(text) => Some(text.as_str()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(text.len(), 1);
+    assert_eq!(text[0].matches("explored X, decided Y").count(), 1);
+    assert!(text[0].contains("[Previous session compact summary]"));
 }
 
 #[test]
@@ -587,15 +599,26 @@ fn build_session_context_injects_legacy_compact_context_text_field() {
 
     assert_eq!(ctx.messages.len(), 1);
     match &ctx.messages[0] {
-        AgentMessage::Llm(PiMessage::User(user)) => {
-            let text = match &user.content {
-                UserContent::Text(text) => text.clone(),
-                _ => panic!("expected text content"),
-            };
-            assert!(text.contains("legacy summary"), "{text}");
+        AgentMessage::Custom(custom) => {
+            assert_eq!(custom.role, "collapse_context");
+            assert_eq!(custom.payload["summary"], "legacy summary");
         }
-        other => panic!("expected user message, got {other:?}"),
+        other => panic!("expected collapse_context custom message, got {other:?}"),
     }
+
+    let provider_messages = default_convert_to_llm()(&ctx.messages);
+    let text = provider_messages
+        .iter()
+        .filter_map(|m| match m {
+            PiMessage::User(user) => match &user.content {
+                UserContent::Text(text) => Some(text.as_str()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(text.len(), 1);
+    assert!(text[0].contains("legacy summary"));
 }
 
 #[tokio::test]

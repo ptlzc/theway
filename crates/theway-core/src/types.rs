@@ -26,7 +26,7 @@ use tokio_util::sync::CancellationToken;
 use theway_llm_provider::{
     AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, Context as PiContext,
     ImageContent, Message, Model, SimpleStreamOptions, TextContent, ToolCall, ToolResultMessage,
-    UserContentBlock,
+    UserContent, UserContentBlock, UserMessage, UserRole,
 };
 
 // ──────────────────────────────────────────────────────────────────────────────────────────
@@ -646,16 +646,32 @@ pub type MessageQueueProvider = Arc<
     dyn Fn() -> Pin<Box<dyn std::future::Future<Output = Vec<AgentMessage>> + Send>> + Send + Sync,
 >;
 
-/// Default convert-to-llm: keep only `AgentMessage::Llm` variants.
+/// Default convert-to-llm: keep `AgentMessage::Llm` variants and materialize the known
+/// custom summary roles into framed user text. Unknown custom roles remain UI-only.
 pub fn default_convert_to_llm() -> ConvertToLlm {
     Arc::new(|msgs: &[AgentMessage]| {
         msgs.iter()
             .filter_map(|m| match m {
                 AgentMessage::Llm(m) => Some(m.clone()),
-                AgentMessage::Custom(_) => None,
+                AgentMessage::Custom(custom) => materialize_custom_message(custom),
             })
             .collect()
     })
+}
+
+fn materialize_custom_message(custom: &CustomMessage) -> Option<Message> {
+    let summary = custom.payload.get("summary")?.as_str()?;
+    let prefix = match custom.role.as_str() {
+        "compaction_summary" => "[Previous conversation compacted]",
+        "branch_summary" => "[Branch summary]",
+        "collapse_context" => "[Previous session compact summary]",
+        _ => return None,
+    };
+    Some(Message::User(UserMessage {
+        role: UserRole::User,
+        content: UserContent::Text(format!("{prefix}\n{summary}")),
+        timestamp: chrono::Utc::now().timestamp_millis(),
+    }))
 }
 
 // Re-export theway-llm-provider types frequently used alongside agent types so consumers don't need a second

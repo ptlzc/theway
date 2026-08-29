@@ -1,7 +1,5 @@
 //! Assembly of session entries into the LLM `AgentMessage` list.
 
-use theway_llm_provider::{Message as PiMessage, UserContent, UserMessage, UserRole};
-
 use crate::agent::context::collapse::{COMPACT_CONTEXT_CUSTOM_TYPE, compact_context_text};
 use crate::agent::messages::{branch_summary, compaction_summary, custom};
 use crate::agent::session::session::{SessionContext, SessionContextModel, SessionTreeEntry};
@@ -69,13 +67,11 @@ pub fn build_session_context(path_entries: &[SessionTreeEntry]) -> SessionContex
             if custom_type == COMPACT_CONTEXT_CUSTOM_TYPE =>
         {
             if let Some(text) = compact_context_text(entry) {
-                messages.push(AgentMessage::Llm(PiMessage::User(UserMessage {
-                    role: UserRole::User,
-                    content: UserContent::Text(format!(
-                        "[Previous session compact summary]\n{text}"
-                    )),
+                messages.push(AgentMessage::Custom(crate::types::CustomMessage {
+                    role: "collapse_context".into(),
                     timestamp: chrono::Utc::now().timestamp_millis(),
-                })));
+                    payload: serde_json::json!({ "summary": text }),
+                }));
             }
         }
         _ => {}

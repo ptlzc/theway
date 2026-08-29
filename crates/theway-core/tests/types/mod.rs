@@ -100,7 +100,7 @@ fn control_plane_prompt_decision_audit_str() {
 }
 
 #[test]
-fn default_convert_to_llm_keeps_only_llm_variants() {
+fn default_convert_to_llm_keeps_llm_variants_and_filters_unknown_custom() {
     let convert = default_convert_to_llm();
     let msgs = vec![
         AgentMessage::from(user_message("keep")),
@@ -113,6 +113,36 @@ fn default_convert_to_llm_keeps_only_llm_variants() {
     let out = convert(&msgs);
     assert_eq!(out.len(), 1);
     assert!(matches!(out[0], Message::User(_)));
+}
+
+#[test]
+fn default_convert_to_llm_materializes_known_custom_summary_roles() {
+    let convert = default_convert_to_llm();
+    let cases = [
+        ("compaction_summary", "[Previous conversation compacted]"),
+        ("branch_summary", "[Branch summary]"),
+        ("collapse_context", "[Previous session compact summary]"),
+    ];
+    for (role, prefix) in cases {
+        let msgs = vec![AgentMessage::Custom(CustomMessage {
+            role: role.into(),
+            timestamp: 0,
+            payload: serde_json::json!({"summary": "summary text"}),
+        })];
+        let out = convert(&msgs);
+        assert_eq!(out.len(), 1, "role {role}");
+        match &out[0] {
+            Message::User(user) => {
+                let text = match &user.content {
+                    UserContent::Text(text) => text.clone(),
+                    _ => panic!("expected text content for {role}"),
+                };
+                assert!(text.contains(prefix), "role {role}: {text}");
+                assert!(text.contains("summary text"), "role {role}: {text}");
+            }
+            other => panic!("expected user message for {role}, got {other:?}"),
+        }
+    }
 }
 
 #[test]
