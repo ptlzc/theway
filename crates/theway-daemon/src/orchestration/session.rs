@@ -609,7 +609,7 @@ impl SessionRuntimeBuilder {
             .iter()
             .map(|tool| tool.definition().name.clone())
             .collect::<Vec<_>>();
-        let system_prompt = crate::context::system_prompt_for_session(
+        let system_prompt = crate::context::session::system_prompt_for_session(
             &ctx.cwd,
             &ctx.resources.memory_block,
             &tool_names,

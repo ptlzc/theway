@@ -61,7 +61,6 @@ pub mod session_ops;
 pub mod skills;
 mod startup_config;
 mod stream_auth;
-mod system_prompt;
 
 mod runtime_capabilities;
 mod skill_overrides;

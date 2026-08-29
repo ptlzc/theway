@@ -2,7 +2,8 @@
 
 use std::sync::Arc;
 
-use super::*;
+use super::lineage::render_lineage;
+use super::session::system_prompt_for_session;
 use theway_core::agent::context::collapse::{COMPACT_CONTEXT_CUSTOM_TYPE, CompactContext};
 use theway_core::{MemorySessionStorage, Session};
 

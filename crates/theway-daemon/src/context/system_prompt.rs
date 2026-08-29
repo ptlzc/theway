@@ -49,4 +49,4 @@ When the user asks to create, save, or codify a reusable skill, workflow, checkl
 }
 
 #[cfg(test)]
-tests_bridge_macro::tests_bridge!("system_prompt");
+tests_bridge_macro::tests_bridge!("context/system_prompt");
