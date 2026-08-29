@@ -21,7 +21,8 @@ Session collapse 已经把旧 session 持久化为 graph 节点，但新 session
 
 ## Impact
 
-- `crates/theway-core/src/agent/session/session.rs`：`build_session_context` 需要识别 `compact_context` custom entry 并生成 LLM 可见消息。
-- `crates/theway-daemon/src/system_prompt.rs` / `crates/theway-daemon/src/orchestration/session.rs`：系统提示词组装时注入 lineage / handoff 块。
-- `crates/theway-daemon/src/session_ops.rs`：collapse 创建 child 时可能需要补充/规范化上下文 entry。
+- `crates/theway-core/src/agent/context.rs`：扩展为独立 `context/` 模块，统一承载上下文组装/装载/卸载（`assembly.rs`、`collapse.rs`、`transform.rs`）。
+- `crates/theway-core/src/agent/session/session.rs`：`build_session_context` 迁入/转发到 context 模块，并识别 `compact_context` custom entry 生成 LLM 可见消息。
+- `crates/theway-daemon/src/`：新增 `context/` 模块；`system_prompt.rs` / `orchestration/session.rs` 组装时注入 lineage / handoff 块。
+- `crates/theway-daemon/src/session_ops.rs`：collapse 创建 child 或 `into_session_id` 追加时规范化上下文 entry。
 - 测试：`crates/theway-core` 与 `crates/theway-daemon` 的 session/collapse 相关测试。

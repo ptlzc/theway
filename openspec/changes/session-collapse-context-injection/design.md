@@ -1,6 +1,6 @@
 ## Context
 
-现有 collapse 已经持久化 `compact_context` custom entry 和 `session_graph_state`，但 `build_session_context` 不消费 `Custom`，导致新 session 的 LLM 看不到 compact 摘要；system prompt 组装也没有 session lineage 信息。参见 proposal.md 的 Why。
+现有 collapse 已经持久化 `compact_context` custom entry 和 `session_graph_state`，但 `build_session_context` 不消费 `Custom`，导致新 session 的 LLM 看不到 compact 摘要；system prompt 组装也没有 session lineage 信息。上下文组装逻辑目前散落在 `session.rs`、`context.rs`、`system_prompt.rs` 中，缺少一个统一的 context 模块来管理“如何组装、如何装载、如何卸载”。参见 proposal.md 的 Why。
 
 ## Goals / Non-Goals
 
@@ -10,6 +10,7 @@
 - system prompt 自动注入 lineage / handoff 指引，让 LLM 知道旧 session 和 `session_graph_*` 工具。
 - 兼容已存在的 collapse 子 session（只含 `compact_context` custom entry，无需迁移 transcript）。
 - 保持原始 transcript 按需读取，不自动注入完整旧消息。
+- 将上下文组装/装载/卸载收敛到独立 `context` 模块，避免继续散落在 session 与 system prompt 各处。
 
 **Non-Goals:**
 
@@ -20,9 +21,16 @@
 
 ## Decisions
 
-### Decision 1: `build_session_context` 将 `compact_context` custom entry 转成 LLM User 消息
+### Decision 1: 新增独立 context 模块，`build_session_context` 将 `compact_context` custom entry 转成 LLM User 消息
 
-选择在 `crates/theway-core/src/agent/session/session.rs` 的 `build_session_context` 中识别 `custom_type == "compact_context"`，解析 `data.compactText`，并生成一条 `AgentMessage::Llm(UserMessage)`（文本形式类似 `[Previous session compact summary]\n{compactText}`），而不是 `AgentMessage::Custom`。
+将 `crates/theway-core/src/agent/context.rs` 从单文件扩展为 `crates/theway-core/src/agent/context/` 目录，统一承载上下文组装与装卸载逻辑：
+
+- `mod.rs`：重新导出公共 API。
+- `assembly.rs`：从 session entries 组装 `AgentMessage`（即现有 `build_session_context` 的逻辑迁入）。
+- `collapse.rs`：`compact_context` 解析与摘要消息注入。
+- `transform.rs`：现有 `virtualize_tool_results` 等上下文变换/卸载逻辑。
+
+在 `assembly.rs` 的 `build_session_context` 中识别 `custom_type == "compact_context"`，解析 `data.compactText`，并生成一条 `AgentMessage::Llm(UserMessage)`（文本形式类似 `[Previous session compact summary]\n{compactText}`），而不是 `AgentMessage::Custom`。
 
 理由：
 
@@ -44,7 +52,9 @@
 
 这样 daemon 组装 system prompt 时不需要直接依赖存储层细节。
 
-### Decision 3: `compose_system_prompt` 增加可选 lineage 块
+### Decision 3: daemon 侧新增 context 模块，`compose_system_prompt` 增加可选 lineage 块
+
+在 `crates/theway-daemon/src/` 下新增 `context/`（或 `context.rs`），负责 daemon 侧上下文组装：读取 session 的 compact context / collapse node id、渲染 lineage 块、调用 `compose_system_prompt`。`system_prompt.rs` 保留为基础 prompt 渲染，或薄封装到 context 模块。
 
 修改 `crates/theway-daemon/src/system_prompt.rs`：
 
@@ -67,7 +77,7 @@ Previous context summary: <compactText>
 Use session_graph_list / session_graph_read / session_graph_status / session_graph_wait / session_graph_attach to inspect or take over the old session graph.
 ```
 
-daemon 在 `orchestration/session.rs` 中先调用 `session.compact_context().await` 与 `session.collapse_node_id().await`，拼出 `lineage` 文本，再传入 `compose_system_prompt`。
+daemon 在 `orchestration/session.rs` 中先调用 context 模块的读取 helper（内部使用 `session.compact_context().await` 与 `session.collapse_node_id().await`），拼出 `lineage` 文本，再传入 `compose_system_prompt`。
 
 ### Decision 4: 修复 `into_session_id` 追加路径的 entry 链接
 
