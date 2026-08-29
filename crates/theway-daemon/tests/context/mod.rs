@@ -63,6 +63,7 @@ async fn context_service_injects_lineage_and_materializes_collapse_summary_once(
         std::path::Path::new("/tmp"),
         "",
         vec!["session_graph_read".to_string()],
+        None,
     );
     let bundle = service.load(&session).await.unwrap();
 
@@ -91,9 +92,25 @@ async fn context_service_injects_lineage_and_materializes_collapse_summary_once(
 async fn context_service_omits_lineage_for_normal_session() {
     let session = Session::new(Arc::new(MemorySessionStorage::new()));
 
-    let service = ContextService::new(std::path::Path::new("/tmp"), "", vec![]);
+    let service = ContextService::new(std::path::Path::new("/tmp"), "", vec![], None);
     let bundle = service.load(&session).await.unwrap();
 
     assert!(!bundle.system_prompt.contains("Session lineage"));
     assert!(bundle.messages.is_empty());
+}
+
+#[tokio::test]
+async fn context_service_uses_custom_harness_intro() {
+    let session = Session::new(Arc::new(MemorySessionStorage::new()));
+
+    let service = ContextService::new(
+        std::path::Path::new("/tmp"),
+        "",
+        vec![],
+        Some("You are a database migration specialist.".to_string()),
+    );
+    let bundle = service.load(&session).await.unwrap();
+
+    assert!(bundle.system_prompt.contains("database migration specialist"));
+    assert!(!bundle.system_prompt.contains("minimal coding assistant"));
 }

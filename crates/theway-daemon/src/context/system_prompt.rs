@@ -5,9 +5,10 @@ pub fn compose_system_prompt(
     memory: &str,
     tool_names: &[String],
     lineage: Option<&str>,
+    harness_intro: Option<&str>,
 ) -> String {
     let mut s = String::new();
-    s.push_str(&render_base_prompt(tool_names));
+    s.push_str(&render_base_prompt(tool_names, harness_intro));
     s.push_str("\n\n");
     s.push_str(&format!("Current working directory: {}\n", cwd.display()));
     if !memory.is_empty() {
@@ -24,17 +25,15 @@ pub fn compose_system_prompt(
 }
 
 /// Build the prompt header. The tool inventory is rendered from the actual registered tool
-/// definitions so adding/removing a tool in the tool assembly flows through here without
-/// a hand-edited literal list.
-fn render_base_prompt(tool_names: &[String]) -> String {
-    let inventory = if tool_names.is_empty() {
-        "no tools registered".to_string()
-    } else {
-        tool_names.join(", ")
-    };
+/// definitions, grouped by category, so adding/removing a tool flows through here without a
+/// hand-edited literal list. The harness introduction defaults to the stock theway persona
+/// and can be replaced per session.
+fn render_base_prompt(tool_names: &[String], harness_intro: Option<&str>) -> String {
+    let intro = harness_intro
+        .unwrap_or("You are theway, a minimal coding assistant running in a terminal.");
     format!(
-        "You are theway, a minimal coding assistant running in a terminal. \
-You have access to the following tools: {inventory}. \
+        "{intro} \
+You have access to the following tools:\n{inventory} \
 Prefer running a tool over guessing. When making file changes, read the file first to confirm the exact current contents, then edit or write. Keep responses concise. \
 When the user asks for a fixed time, recurring, scheduled, hourly, daily, weekly, crontab, 定时任务, 每小时, or similar time-based job, call new_cron_job instead of new_trigger. \
 When the user asks to view, list, show, inspect, or find scheduled jobs or cron job ids, call list_cron_jobs. \
@@ -44,8 +43,72 @@ When the user asks to create a trigger, reminder, watcher, or automation, call n
 When the user asks to view, list, show, inspect, or find trigger ids, call list_triggers. \
 When the user asks to pause, disable, enable, or resume a dynamic trigger, call set_trigger_state. \
 When the user asks to delete, remove, or clear dynamic triggers, call remove_trigger. \
-When the user asks to create, save, or codify a reusable skill, workflow, checklist, or convention, or to summarize recent work or this conversation into a skill (技能, 保存为技能, 把刚才的工作总结成 skill), call skill_builder with structured name/description/instructions. For summarize-into-skill requests, distill the generalizable steps from the conversation — what was actually done, the commands used, the pitfalls — not a transcript. Call once without confirm to preview and show the user the planned name and description, then call with confirm=true after they agree. Use install_skill only for installing an existing SKILL.md from a URL, file, or pasted content."
+When the user asks to create, save, or codify a reusable skill, workflow, checklist, or convention, or to summarize recent work or this conversation into a skill (技能, 保存为技能, 把刚才的工作总结成 skill), call skill_builder with structured name/description/instructions. For summarize-into-skill requests, distill the generalizable steps from the conversation — what was actually done, the commands used, the pitfalls — not a transcript. Call once without confirm to preview and show the user the planned name and description, then call with confirm=true after they agree. Use install_skill only for installing an existing SKILL.md from a URL, file, or pasted content.",
+        inventory = render_tool_inventory(tool_names),
     )
+}
+
+fn render_tool_inventory(tool_names: &[String]) -> String {
+    if tool_names.is_empty() {
+        return "no tools registered".to_string();
+    }
+
+    let mut groups = Vec::<(String, Vec<String>)>::new();
+    for name in tool_names {
+        let category = tool_category(name).to_string();
+        if let Some((_, names)) = groups.iter_mut().find(|(label, _)| label == &category) {
+            names.push(name.clone());
+        } else {
+            groups.push((category, vec![name.clone()]));
+        }
+    }
+
+    groups
+        .into_iter()
+        .map(|(category, mut names)| {
+            names.sort();
+            names.dedup();
+            format!("- {category}: {}", names.join(", "))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn tool_category(name: &str) -> &'static str {
+    if name.starts_with("dag_")
+        || name.starts_with("subagent")
+        || name.starts_with("agent_profile_")
+        || name == "todo_write"
+        || name == "ask_user"
+    {
+        "Orchestration & planning"
+    } else if name.starts_with("session_graph_") {
+        "Session graph"
+    } else if name.starts_with("memory_")
+        || name.starts_with("enhanced_")
+        || name == "read_output"
+        || name == "find_file_by_name"
+        || name.starts_with("crg__")
+    {
+        "Context & search"
+    } else if matches!(name, "read" | "write" | "edit" | "ls" | "find") {
+        "Files"
+    } else if matches!(
+        name,
+        "bash" | "exec" | "get_output" | "kill_shell" | "write_to_process"
+    ) {
+        "Execution"
+    } else if name.contains("cron")
+        || name.contains("trigger")
+        || name.starts_with("skill")
+        || name.starts_with("install_skill")
+        || name.starts_with("remove_skill")
+        || name.starts_with("set_skill_state")
+    {
+        "Automation & skills"
+    } else {
+        "Other"
+    }
 }
 
 #[cfg(test)]

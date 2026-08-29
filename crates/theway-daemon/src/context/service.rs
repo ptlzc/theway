@@ -20,14 +20,21 @@ pub struct ContextService {
     cwd: PathBuf,
     memory: String,
     tool_names: Vec<String>,
+    harness_intro: Option<String>,
 }
 
 impl ContextService {
-    pub fn new(cwd: &Path, memory: &str, tool_names: Vec<String>) -> Self {
+    pub fn new(
+        cwd: &Path,
+        memory: &str,
+        tool_names: Vec<String>,
+        harness_intro: Option<String>,
+    ) -> Self {
         Self {
             cwd: cwd.to_path_buf(),
             memory: memory.to_string(),
             tool_names,
+            harness_intro,
         }
     }
 
@@ -44,6 +51,7 @@ impl ContextService {
             &self.memory,
             &self.tool_names,
             lineage.as_deref(),
+            self.harness_intro.as_deref(),
         );
         Ok(ContextBundle {
             system_prompt,

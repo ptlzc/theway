@@ -110,7 +110,7 @@ impl AppSessionOps {
 }
 
 /// Read the latest `session_metadata` custom entry from a session transcript.
-async fn read_session_metadata(
+pub(crate) async fn read_session_metadata(
     session: &(impl SessionReader + ?Sized),
 ) -> Result<HashMap<String, String>> {
     let entries = session.find_entries("custom").await?;
@@ -1121,6 +1121,30 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("no session matches"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn harness_introduction_metadata_is_readable_after_create() {
+        let dir = tempdir().unwrap();
+        let repo = Arc::new(SqliteSessionRepo::new(dir.path()));
+        let ops = ops(repo.clone(), "current");
+
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "harnessIntroduction".to_string(),
+            "You are a database migration specialist.".to_string(),
+        );
+        let id = ops.create(Some("intro-session"), &metadata).await.unwrap();
+
+        let session = SessionRepository::open(repo.as_ref(), &id)
+            .await
+            .unwrap()
+            .unwrap();
+        let meta = read_session_metadata(session.as_ref()).await.unwrap();
+        assert_eq!(
+            meta.get("harnessIntroduction").map(String::as_str),
+            Some("You are a database migration specialist.")
+        );
     }
 
     #[tokio::test]

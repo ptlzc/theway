@@ -523,6 +523,10 @@ impl SessionRuntimeBuilder {
         skill_harness_cell: crate::tools::skill::SkillHarnessCell,
     ) -> Result<SessionRuntime> {
         let extension_state_store = Arc::clone(&store);
+        let harness_intro = crate::session_ops::read_session_metadata(store.as_ref())
+            .await?
+            .get("harnessIntroduction")
+            .cloned();
         let session = theway_core::Session::from_store(store);
 
         // Fresh per-session tool set (dag_* / task stamped with the target session; the
@@ -613,6 +617,7 @@ impl SessionRuntimeBuilder {
             &ctx.cwd,
             &ctx.resources.memory_block,
             tool_names.clone(),
+            harness_intro,
         );
         let bundle = context_service.load(&session).await?;
         opts.system_prompt = bundle.system_prompt;
