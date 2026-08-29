@@ -10,7 +10,7 @@ session entries.
 | File | Responsibility |
 | --- | --- |
 | `mod.rs` | Module declarations and test bridge. |
-| `system_prompt.rs` | Base system prompt + working directory + memory + optional lineage block. |
+| `system_prompt.rs` | Base system prompt + grouped tool inventory + working directory + memory + optional lineage block. |
 | `lineage.rs` | Collapse lineage/handoff block (identity + tool guidance only). |
 | `service.rs` | `ContextService::load(session) -> ContextBundle` single entry point. |
 
@@ -21,8 +21,9 @@ Session entries (append-only log)
   -> session.build_context()            // core: entries -> AgentMessage list
   -> session.compact_context()          // core: read compact_context custom entry
   -> session.collapse_node_id()         // core: read collapseNodeId metadata
+  -> read_session_metadata(...)         // daemon: session_metadata custom entries
   -> render_lineage(...)                // daemon: identity + tool guidance
-  -> compose_system_prompt(...)         // daemon: base prompt + cwd + memory + lineage
+  -> compose_system_prompt(...)         // daemon: intro + grouped tools + cwd + memory + lineage
   -> ContextBundle { system_prompt, messages }
 ```
 
@@ -39,6 +40,10 @@ maps the known custom summary roles to framed user text.
    not repeat `compactText`.
 4. Raw transcripts stay out of the default context and remain available
    through `session_graph_read`.
+5. The tool inventory is grouped by category; unknown tools fall into
+   `Other`.
+6. The harness introduction is customizable per session through the
+   `harnessIntroduction` session metadata key.
 
 ## Editing rule
 
@@ -53,7 +58,12 @@ from the actual system prompt.
 ### 1. Normal session, no collapse lineage
 
 ```text
-You are theway, a minimal coding assistant running in a terminal. You have access to the following tools: read, bash, edit. ...
+You are theway, a minimal coding assistant running in a terminal.
+You have access to the following tools:
+- Files: edit, read
+- Execution: bash
+- Context & search: enhanced_grep, enhanced_read
+...
 
 Current working directory: /home/user/project
 
@@ -75,7 +85,12 @@ After `/collapse`, the new session has a `compact_context` entry and
 summary text:
 
 ```text
-You are theway, a minimal coding assistant running in a terminal. You have access to the following tools: read, bash, edit, session_graph_list, session_graph_read, session_graph_status, session_graph_wait, session_graph_attach. ...
+You are theway, a minimal coding assistant running in a terminal.
+You have access to the following tools:
+- Files: edit, read
+- Execution: bash
+- Session graph: session_graph_attach, session_graph_list, session_graph_read, session_graph_status, session_graph_wait
+...
 
 Current working directory: /home/user/project
 
@@ -141,3 +156,23 @@ can still read the collapse node.
 `render_lineage` returns `None`, so `compose_system_prompt` emits no
 `## Session lineage` block. The context is the normal base prompt + cwd +
 memory only.
+
+### 6. Session with a custom harness introduction
+
+When session metadata contains
+`harnessIntroduction: "You are a database migration specialist."`, the first
+sentence of the base prompt is replaced:
+
+```text
+You are a database migration specialist.
+You have access to the following tools:
+- Files: edit, read
+- Execution: bash
+...
+
+Current working directory: /home/user/project
+```
+
+The rest of the behavioral instructions stay unchanged. To customize the
+introduction, pass the metadata key at session creation or through
+`update_metadata`.
