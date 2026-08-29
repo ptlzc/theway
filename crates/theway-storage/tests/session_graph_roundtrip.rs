@@ -123,6 +123,74 @@ async fn nodes_persist_across_reopen() {
 }
 
 #[tokio::test]
+async fn save_node_links_nested_chain_and_survives_reopen() {
+    let path = temp_db("nested-chain");
+    let _ = std::fs::remove_file(&path);
+    {
+        let store = SessionGraphStore::open(&path).await.unwrap();
+        store.save_node(&sample_node("node-1", None)).await.unwrap();
+        store
+            .save_node(&sample_node("node-2", Some("node-1")))
+            .await
+            .unwrap();
+        store
+            .save_node(&sample_node("node-3", Some("node-2")))
+            .await
+            .unwrap();
+    }
+
+    let reopened = SessionGraphStore::open(&path).await.unwrap();
+    let node1 = reopened.load_node("node-1").await.unwrap().unwrap();
+    let node2 = reopened.load_node("node-2").await.unwrap().unwrap();
+    let node3 = reopened.load_node("node-3").await.unwrap().unwrap();
+
+    assert_eq!(node2.parent_id.as_deref(), Some("node-1"));
+    assert_eq!(node3.parent_id.as_deref(), Some("node-2"));
+    assert_eq!(node1.child_ids, vec!["node-2"]);
+    assert_eq!(node2.child_ids, vec!["node-3"]);
+
+    let edges = reopened.list_edges().await.unwrap();
+    assert!(
+        edges.contains(&theway_storage::session_graph::SessionGraphEdge {
+            parent_id: "node-1".to_string(),
+            child_id: "node-2".to_string(),
+        })
+    );
+    assert!(
+        edges.contains(&theway_storage::session_graph::SessionGraphEdge {
+            parent_id: "node-2".to_string(),
+            child_id: "node-3".to_string(),
+        })
+    );
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[tokio::test]
+async fn link_child_updates_parent_child_ids_and_edge_atomically() {
+    let store = open_clean("link-child").await;
+    store.save_node(&sample_node("parent", None)).await.unwrap();
+
+    store.link_child("parent", "child").await.unwrap();
+
+    let parent = store.load_node("parent").await.unwrap().unwrap();
+    assert_eq!(parent.child_ids, vec!["child"]);
+    assert!(parent.updated_at.is_some());
+    let edges = store.list_edges().await.unwrap();
+    assert_eq!(edges.len(), 1);
+    assert_eq!(edges[0].parent_id, "parent");
+    assert_eq!(edges[0].child_id, "child");
+
+    // Idempotent: linking twice must not duplicate the child id or the edge.
+    store.link_child("parent", "child").await.unwrap();
+    let parent = store.load_node("parent").await.unwrap().unwrap();
+    assert_eq!(parent.child_ids, vec!["child"]);
+    assert_eq!(store.list_edges().await.unwrap().len(), 1);
+
+    let _ = std::fs::remove_file(temp_db("link-child"));
+}
+
+#[tokio::test]
 async fn missing_node_returns_none() {
     let store = open_clean("missing").await;
     assert!(store.load_node("nope").await.unwrap().is_none());

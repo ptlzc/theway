@@ -12,6 +12,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use turso::transaction::Transaction;
 use turso::{Builder, Connection, Database};
 
 /// File name of the per-cwd session graph database, which lives in the same
@@ -198,6 +199,10 @@ impl SessionGraphStore {
 
     /// Insert or replace a node. Also maintains `session_graph_edges` from the
     /// node's `child_ids`, replacing that node's outgoing edges.
+    ///
+    /// When the node has a `parent_id`, the parent's `child_ids` and the
+    /// parent → node edge are updated in the same transaction, so a nested
+    /// collapse chain survives reopens without a separate linking pass.
     pub async fn save_node<N: Borrow<SessionGraphNode>>(&self, node: N) -> Result<(), String> {
         let node = node.borrow();
         match self.save_node_once(node).await {
@@ -211,6 +216,80 @@ impl SessionGraphStore {
                 self.save_node_once(node).await
             }
         }
+    }
+
+    /// Atomically append `child_id` to `parent_id`'s `child_ids` and insert
+    /// the parent → child edge. No-op when the parent node is unknown.
+    pub async fn link_child(
+        &self,
+        parent_id: impl AsRef<str>,
+        child_id: impl AsRef<str>,
+    ) -> Result<(), String> {
+        let parent_id = parent_id.as_ref();
+        let child_id = child_id.as_ref();
+        if parent_id.is_empty() || child_id.is_empty() {
+            return Ok(());
+        }
+        match self.link_child_once(parent_id, child_id).await {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                tracing::warn!(
+                    "session graph {} edge write failed, rebuilding and retrying: {e}",
+                    self.path.display()
+                );
+                self.rebuild().await?;
+                self.link_child_once(parent_id, child_id).await
+            }
+        }
+    }
+
+    async fn link_child_once(&self, parent_id: &str, child_id: &str) -> Result<(), String> {
+        let mut conn = self.conn()?;
+        let tx = conn.transaction().await.map_err(|e| e.to_string())?;
+        self.append_child_edge(&tx, parent_id, child_id).await?;
+        tx.commit().await.map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Append `child_id` to the parent node's `child_ids` and edge, inside the
+    /// caller's transaction. Returns `false` when the parent does not exist.
+    async fn append_child_edge(
+        &self,
+        tx: &Transaction<'_>,
+        parent_id: &str,
+        child_id: &str,
+    ) -> Result<bool, String> {
+        let mut rows = tx
+            .query(
+                "SELECT child_ids FROM session_graph_nodes WHERE id = ?1",
+                [parent_id],
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        let Some(row) = rows.next().await.map_err(|e| e.to_string())? else {
+            return Ok(false);
+        };
+        let stored: String = row.get(0).map_err(|e| e.to_string())?;
+        let mut child_ids: Vec<String> =
+            serde_json::from_str(&stored).map_err(|e| e.to_string())?;
+        if !child_ids.iter().any(|id| id == child_id) {
+            child_ids.push(child_id.to_string());
+        }
+        let child_ids_json = serde_json::to_string(&child_ids).map_err(|e| e.to_string())?;
+        let updated_at = chrono::Utc::now().to_rfc3339();
+        tx.execute(
+            "UPDATE session_graph_nodes SET child_ids = ?1, updated_at = ?2 WHERE id = ?3",
+            [child_ids_json.as_str(), updated_at.as_str(), parent_id],
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "INSERT OR IGNORE INTO session_graph_edges (parent_id, child_id) VALUES (?1, ?2)",
+            [parent_id, child_id],
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        Ok(true)
     }
 
     async fn save_node_once(&self, node: &SessionGraphNode) -> Result<(), String> {
@@ -247,9 +326,20 @@ impl SessionGraphStore {
         .await
         .map_err(|e| e.to_string())?;
 
-        // Replace this node's outgoing edges. Incoming parent edges are owned
-        // by the parent's `child_ids`, so they are only touched when that
-        // parent node is saved.
+        // Link the incoming edge before replacing the node's outgoing edges.
+        // Updating the parent's `child_ids` and the edge in the same
+        // transaction keeps node chains traversable after a crash/reopen.
+        if let Some(parent_id) = node
+            .parent_id
+            .as_deref()
+            .filter(|parent_id| !parent_id.is_empty())
+        {
+            self.append_child_edge(&tx, parent_id, &node.id).await?;
+        }
+
+        // Replace this node's outgoing edges. Incoming edges are inserted
+        // above whenever the node declares a `parent_id`, and remain owned by
+        // the parent's `child_ids` whenever the parent is saved later.
         tx.execute(
             "DELETE FROM session_graph_edges WHERE parent_id = ?1",
             [node.id.as_str()],
