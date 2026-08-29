@@ -609,14 +609,13 @@ impl SessionRuntimeBuilder {
             .iter()
             .map(|tool| tool.definition().name.clone())
             .collect::<Vec<_>>();
-        let system_prompt = crate::context::session::system_prompt_for_session(
+        let context_service = crate::context::service::ContextService::new(
             &ctx.cwd,
             &ctx.resources.memory_block,
-            &tool_names,
-            &session,
-        )
-        .await?;
-        opts.system_prompt = system_prompt;
+            tool_names.clone(),
+        );
+        let bundle = context_service.load(&session).await?;
+        opts.system_prompt = bundle.system_prompt;
         opts.thinking_level = ctx.thinking;
         opts.tools = tools;
         opts.skills = ctx.resources.skills.clone();

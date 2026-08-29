@@ -1227,16 +1227,17 @@ mod tests {
 
         let session = theway_core::Session::from_store(child);
         let ctx = session.build_context().await.unwrap();
+        let provider_messages = theway_core::default_convert_to_llm()(&ctx.messages);
         assert!(
-            ctx.messages.iter().any(|m| {
-                if let theway_core::AgentMessage::Llm(theway_llm_provider::Message::User(u)) = m {
+            provider_messages.iter().any(|m| {
+                if let theway_llm_provider::Message::User(u) = m {
                     if let theway_llm_provider::UserContent::Text(text) = &u.content {
                         return text.contains("compact summary");
                     }
                 }
                 false
             }),
-            "collapse child build_context should include compact summary"
+            "collapse child build_context should materialize compact summary"
         );
     }
 
@@ -1308,16 +1309,17 @@ mod tests {
 
         let session = theway_core::Session::from_store(target_store);
         let ctx = session.build_context().await.unwrap();
+        let provider_messages = theway_core::default_convert_to_llm()(&ctx.messages);
         assert!(
-            ctx.messages.iter().any(|m| {
-                if let theway_core::AgentMessage::Llm(theway_llm_provider::Message::User(u)) = m {
+            provider_messages.iter().any(|m| {
+                if let theway_llm_provider::Message::User(u) = m {
                     if let theway_llm_provider::UserContent::Text(text) = &u.content {
                         return text.contains("compact summary");
                     }
                 }
                 false
             }),
-            "build_context should include the compact summary user message"
+            "build_context should materialize the compact summary message"
         );
     }
 }

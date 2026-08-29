@@ -22,12 +22,6 @@ pub fn render_lineage(
                 compact.source_session_id
             ));
         }
-        if !compact.compact_text.is_empty() {
-            block.push_str(&format!(
-                "Previous context summary: {}\n",
-                compact.compact_text
-            ));
-        }
     }
     block.push_str(
         "Use session_graph_list / session_graph_read / session_graph_status / \

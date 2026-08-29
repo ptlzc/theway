@@ -5,7 +5,7 @@
 //! agent harness.
 
 pub mod lineage;
-pub mod session;
+pub mod service;
 pub mod system_prompt;
 
 #[cfg(test)]

@@ -3,9 +3,9 @@
 use std::sync::Arc;
 
 use super::lineage::render_lineage;
-use super::session::system_prompt_for_session;
+use super::service::ContextService;
 use theway_core::agent::context::collapse::{COMPACT_CONTEXT_CUSTOM_TYPE, CompactContext};
-use theway_core::{MemorySessionStorage, Session};
+use theway_core::{MemorySessionStorage, Session, default_convert_to_llm};
 
 #[test]
 fn render_lineage_returns_none_without_collapse_context() {
@@ -25,7 +25,7 @@ fn render_lineage_includes_session_and_node_and_tools() {
     assert!(block.contains("## Session lineage"));
     assert!(block.contains("Collapse node: node-123"));
     assert!(block.contains("This session continues from old-session."));
-    assert!(block.contains("Previous context summary: explored X, decided Y"));
+    assert!(!block.contains("Previous context summary"));
     assert!(block.contains("session_graph_read"));
     assert!(block.contains("session_graph_attach"));
 }
@@ -45,7 +45,7 @@ fn render_lineage_uses_node_id_when_compact_text_is_empty() {
 }
 
 #[tokio::test]
-async fn system_prompt_for_session_includes_lineage_for_collapse_child() {
+async fn context_service_injects_lineage_and_materializes_collapse_summary_once() {
     let session = Session::new(Arc::new(MemorySessionStorage::new()));
     session
         .append_custom(
@@ -59,33 +59,41 @@ async fn system_prompt_for_session_includes_lineage_for_collapse_child() {
         .await
         .unwrap();
 
-    let prompt = system_prompt_for_session(
+    let service = ContextService::new(
         std::path::Path::new("/tmp"),
         "",
-        &["session_graph_read".to_string()],
-        &session,
-    )
-    .await
-    .unwrap();
+        vec!["session_graph_read".to_string()],
+    );
+    let bundle = service.load(&session).await.unwrap();
 
-    assert!(prompt.contains("## Session lineage"));
-    assert!(prompt.contains("old-session"));
-    assert!(prompt.contains("Previous context summary: explored X"));
-    assert!(prompt.contains("session_graph_read"));
+    assert!(bundle.system_prompt.contains("## Session lineage"));
+    assert!(bundle.system_prompt.contains("old-session"));
+    assert!(!bundle.system_prompt.contains("Previous context summary"));
+    assert!(bundle.system_prompt.contains("session_graph_read"));
+
+    let provider_messages = default_convert_to_llm()(&bundle.messages);
+    let summary_text = provider_messages
+        .iter()
+        .filter_map(|m| match m {
+            theway_llm_provider::Message::User(user) => match &user.content {
+                theway_llm_provider::UserContent::Text(text) => Some(text.as_str()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(summary_text.len(), 1);
+    assert_eq!(summary_text[0].matches("explored X").count(), 1);
+    assert!(summary_text[0].contains("[Previous session compact summary]"));
 }
 
 #[tokio::test]
-async fn system_prompt_for_session_omits_lineage_for_normal_session() {
+async fn context_service_omits_lineage_for_normal_session() {
     let session = Session::new(Arc::new(MemorySessionStorage::new()));
 
-    let prompt = system_prompt_for_session(
-        std::path::Path::new("/tmp"),
-        "",
-        &[],
-        &session,
-    )
-    .await
-    .unwrap();
+    let service = ContextService::new(std::path::Path::new("/tmp"), "", vec![]);
+    let bundle = service.load(&session).await.unwrap();
 
-    assert!(!prompt.contains("Session lineage"));
+    assert!(!bundle.system_prompt.contains("Session lineage"));
+    assert!(bundle.messages.is_empty());
 }
