@@ -544,7 +544,7 @@ impl SessionRuntimeBuilder {
         tools.extend(ctx.mcp.tools.iter().cloned());
 
         let goal_harness_cell: Arc<OnceLock<Arc<AgentHarness>>> = Arc::new(OnceLock::new());
-        let mut opts = AgentHarnessOptions::new(ctx.model.clone(), session);
+        let mut opts = AgentHarnessOptions::new(ctx.model.clone(), session.clone());
         opts.observer = self.subagent_registry.observer();
         opts.observation_context = theway_core::ObservationContext {
             session_id: Some(session_id.clone()),
@@ -609,11 +609,13 @@ impl SessionRuntimeBuilder {
             .iter()
             .map(|tool| tool.definition().name.clone())
             .collect::<Vec<_>>();
-        let system_prompt = crate::system_prompt::compose_system_prompt(
+        let system_prompt = crate::context::system_prompt_for_session(
             &ctx.cwd,
             &ctx.resources.memory_block,
             &tool_names,
-        );
+            &session,
+        )
+        .await?;
         opts.system_prompt = system_prompt;
         opts.thinking_level = ctx.thinking;
         opts.tools = tools;

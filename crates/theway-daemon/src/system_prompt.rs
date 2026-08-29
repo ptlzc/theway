@@ -1,6 +1,11 @@
 //! System prompt composition for the startup harness.
 
-pub fn compose_system_prompt(cwd: &std::path::Path, memory: &str, tool_names: &[String]) -> String {
+pub fn compose_system_prompt(
+    cwd: &std::path::Path,
+    memory: &str,
+    tool_names: &[String],
+    lineage: Option<&str>,
+) -> String {
     let mut s = String::new();
     s.push_str(&render_base_prompt(tool_names));
     s.push_str("\n\n");
@@ -8,6 +13,11 @@ pub fn compose_system_prompt(cwd: &std::path::Path, memory: &str, tool_names: &[
     if !memory.is_empty() {
         s.push('\n');
         s.push_str(memory);
+        s.push('\n');
+    }
+    if let Some(lineage) = lineage.filter(|lineage| !lineage.trim().is_empty()) {
+        s.push('\n');
+        s.push_str(lineage);
         s.push('\n');
     }
     s

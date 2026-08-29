@@ -164,6 +164,7 @@ fn compact_context_entries(
     compact_text: &str,
     raw_text_ref: &str,
     graph_state: &theway_core::multiagent::session_graph::SessionGraphState,
+    parent_id: Option<&str>,
 ) -> Result<Vec<StoredSessionEntry>> {
     let timestamp = now_rfc3339();
     let first_id = uuid::Uuid::now_v7().to_string();
@@ -171,7 +172,7 @@ fn compact_context_entries(
     let compact = StoredSessionEntry::from_payload(serde_json::json!({
         "type": "custom",
         "id": first_id,
-        "parentId": null,
+        "parentId": parent_id,
         "timestamp": timestamp,
         "customType": "compact_context",
         "data": {
@@ -760,7 +761,6 @@ impl AppSessionOps {
             compact_text.clone()
         };
         let node_id = format!("node-{}", uuid::Uuid::now_v7());
-        let entries = compact_context_entries(source_id, &compact_text, source_id, &graph_state)?;
 
         let child_store = if let Some(into_id) = request
             .into_session_id
@@ -773,7 +773,22 @@ impl AppSessionOps {
                 .open(into_id)
                 .await?
                 .with_context(|| format!("no session matches id {into_id}"))?;
+            let leaf = child.get_leaf_id().await?;
+            let entries = compact_context_entries(
+                source_id,
+                &compact_text,
+                source_id,
+                &graph_state,
+                leaf.as_deref(),
+            )?;
+            let last_id = entries
+                .last()
+                .map(|entry| entry.id.clone())
+                .unwrap_or_default();
             child.append_entries(entries).await?;
+            if !last_id.is_empty() {
+                child.set_leaf_id(Some(last_id)).await?;
+            }
             child.set_collapse_node_id(Some(node_id.clone())).await?;
             source_store
                 .set_collapse_node_id(Some(node_id.clone()))
@@ -781,6 +796,8 @@ impl AppSessionOps {
             source_store.set_collapsed(true).await?;
             child
         } else {
+            let entries =
+                compact_context_entries(source_id, &compact_text, source_id, &graph_state, None)?;
             self.repo
                 .create_collapsed_child(
                     std::path::Path::new(&self.cwd),
@@ -1206,6 +1223,101 @@ mod tests {
                 .iter()
                 .any(|e| e.payload["customType"] == "compact_context"),
             "child must carry compact context entries"
+        );
+
+        let session = theway_core::Session::from_store(child);
+        let ctx = session.build_context().await.unwrap();
+        assert!(
+            ctx.messages.iter().any(|m| {
+                if let theway_core::AgentMessage::Llm(theway_llm_provider::Message::User(u)) = m {
+                    if let theway_llm_provider::UserContent::Text(text) = &u.content {
+                        return text.contains("compact summary");
+                    }
+                }
+                false
+            }),
+            "collapse child build_context should include compact summary"
+        );
+    }
+
+    #[tokio::test]
+    async fn collapse_into_existing_session_links_compact_context_to_active_branch() {
+        let dir = tempdir().unwrap();
+        let repo = Arc::new(SqliteSessionRepo::new(dir.path()));
+        let source = repo.create("/cwd").await.unwrap();
+        let source_id = session_id_of(&source).await;
+        let target = repo.create("/cwd").await.unwrap();
+        let target_id = session_id_of(&target).await;
+        target
+            .append_entry(
+                StoredSessionEntry::from_payload(serde_json::json!({
+                    "type": "message",
+                    "id": "msg-1",
+                    "parentId": null,
+                    "timestamp": "2026-08-24T00:00:00Z",
+                    "message": { "role": "user", "content": "existing", "timestamp": 1 },
+                }))
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let graph_path = dir.path().join("session_graph.db");
+        let ops = AppSessionOps::with_session_graph(
+            repo.clone(),
+            Arc::new(DagEngine::new()),
+            "/cwd".into(),
+            SessionExecutionRegistry::new(),
+            SubagentJobRegistry::new(),
+            graph_path.clone(),
+        );
+        let request = WireCollapseSessionRequest {
+            session_id: source_id.clone(),
+            into_session_id: Some(target_id.clone()),
+            title: Some("Archived".into()),
+            summary: Some("compact summary".into()),
+        };
+        let response = ops.collapse_session(&request).await.unwrap();
+        assert!(response.node.is_some());
+
+        let target_store = SessionRepository::open(repo.as_ref(), &target_id)
+            .await
+            .unwrap()
+            .unwrap();
+        let entries = target_store.get_entries().await.unwrap();
+        assert!(
+            entries
+                .iter()
+                .any(|e| e.payload["customType"] == "compact_context"),
+            "target must carry compact context entries"
+        );
+        assert!(
+            entries
+                .iter()
+                .any(|e| e.payload["customType"] == "session_graph_state"),
+            "target must carry session graph state entry"
+        );
+
+        let leaf = target_store.get_leaf_id().await.unwrap().unwrap();
+        let path = target_store.get_path_to_root(Some(&leaf)).await.unwrap();
+        assert!(
+            path.iter()
+                .any(|e| e.payload["customType"] == "compact_context"),
+            "compact context must be on the active branch"
+        );
+
+        let session = theway_core::Session::from_store(target_store);
+        let ctx = session.build_context().await.unwrap();
+        assert!(
+            ctx.messages.iter().any(|m| {
+                if let theway_core::AgentMessage::Llm(theway_llm_provider::Message::User(u)) = m {
+                    if let theway_llm_provider::UserContent::Text(text) = &u.content {
+                        return text.contains("compact summary");
+                    }
+                }
+                false
+            }),
+            "build_context should include the compact summary user message"
         );
     }
 }

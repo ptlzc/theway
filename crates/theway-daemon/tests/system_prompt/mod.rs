@@ -9,7 +9,7 @@ fn compose_system_prompt_puts_base_then_cwd_then_memory() {
     let tools = vec!["bash".to_string(), "grep".to_string()];
 
     // Act
-    let prompt = compose_system_prompt(cwd, "Remember: be concise.", &tools);
+    let prompt = compose_system_prompt(cwd, "Remember: be concise.", &tools, None);
 
     // Assert
     let base = prompt.find("You are theway").expect("base prompt present");
@@ -29,11 +29,32 @@ fn compose_system_prompt_with_empty_memory_omits_memory_block() {
     let cwd = std::path::Path::new("/tmp/waypoint");
 
     // Act
-    let prompt = compose_system_prompt(cwd, "", &[]);
+    let prompt = compose_system_prompt(cwd, "", &[], None);
 
     // Assert
     assert!(prompt.contains("Current working directory: /tmp/waypoint\n"));
     assert!(!prompt.contains("Remember"));
+}
+
+#[test]
+fn compose_system_prompt_appends_lineage_block_when_provided() {
+    let cwd = std::path::Path::new("/tmp/waypoint");
+    let lineage = "## Session lineage\n\nThis session continues from old-session.\nPrevious context summary: explored X.\nUse session_graph_read to inspect the old graph.";
+
+    let prompt = compose_system_prompt(cwd, "", &["session_graph_read".to_string()], Some(lineage));
+
+    assert!(prompt.contains("## Session lineage"));
+    assert!(prompt.contains("old-session"));
+    assert!(prompt.contains("session_graph_read"));
+}
+
+#[test]
+fn compose_system_prompt_omits_lineage_when_none() {
+    let cwd = std::path::Path::new("/tmp/waypoint");
+
+    let prompt = compose_system_prompt(cwd, "", &[], None);
+
+    assert!(!prompt.contains("Session lineage"));
 }
 
 #[test]

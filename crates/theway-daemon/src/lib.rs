@@ -20,6 +20,7 @@ pub mod agent_specs;
 mod bug_report;
 mod builtin_skills;
 mod commands;
+mod context;
 mod control_plane_prompt;
 mod dag_persist;
 pub mod env;
