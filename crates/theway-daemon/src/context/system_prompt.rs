@@ -86,13 +86,17 @@ fn tool_category(name: &str) -> &'static str {
         "Session graph"
     } else if name.starts_with("memory_")
         || name.starts_with("enhanced_")
+        || name == "grep"
+        || name == "outline"
         || name == "read_output"
         || name == "find_file_by_name"
         || name.starts_with("crg__")
     {
         "Context & search"
-    } else if matches!(name, "read" | "write" | "edit" | "ls" | "find") {
+    } else if matches!(name, "read" | "write" | "edit" | "ls" | "find" | "git") {
         "Files"
+    } else if name.starts_with("web_") {
+        "Web"
     } else if matches!(
         name,
         "bash" | "exec" | "get_output" | "kill_shell" | "write_to_process"

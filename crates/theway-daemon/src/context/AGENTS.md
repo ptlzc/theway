@@ -60,9 +60,9 @@ from the actual system prompt.
 ```text
 You are theway, a minimal coding assistant running in a terminal.
 You have access to the following tools:
-- Files: edit, read
+- Files: edit, git, ls, read, write
 - Execution: bash
-- Context & search: enhanced_grep, enhanced_read
+- Context & search: grep, outline
 ...
 
 Current working directory: /home/user/project
@@ -87,8 +87,9 @@ summary text:
 ```text
 You are theway, a minimal coding assistant running in a terminal.
 You have access to the following tools:
-- Files: edit, read
+- Files: edit, read, write
 - Execution: bash
+- Context & search: grep, outline
 - Session graph: session_graph_attach, session_graph_list, session_graph_read, session_graph_status, session_graph_wait
 ...
 
@@ -166,8 +167,9 @@ sentence of the base prompt is replaced:
 ```text
 You are a database migration specialist.
 You have access to the following tools:
-- Files: edit, read
+- Files: edit, read, write
 - Execution: bash
+- Context & search: grep, outline
 ...
 
 Current working directory: /home/user/project
