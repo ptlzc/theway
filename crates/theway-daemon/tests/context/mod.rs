@@ -13,7 +13,7 @@ fn render_lineage_returns_none_without_collapse_context() {
 }
 
 #[test]
-fn render_lineage_includes_session_and_node_and_tools() {
+fn render_lineage_records_collapse_event_ids_only() {
     let compact = CompactContext {
         source_session_id: "old-session".into(),
         compact_text: "explored X, decided Y".into(),
@@ -23,11 +23,11 @@ fn render_lineage_includes_session_and_node_and_tools() {
     let block = render_lineage(Some(&compact), Some("node-123")).expect("lineage");
 
     assert!(block.contains("## Session lineage"));
-    assert!(block.contains("Collapse node: node-123"));
-    assert!(block.contains("This session continues from old-session."));
-    assert!(!block.contains("Previous context summary"));
-    assert!(block.contains("session_graph_read"));
-    assert!(block.contains("session_graph_attach"));
+    assert!(block.contains("Collapse event:"));
+    assert!(block.contains("node id: node-123"));
+    assert!(block.contains("source session id: old-session"));
+    assert!(!block.contains("explored X, decided Y"));
+    assert!(!block.contains("session_graph_read"));
 }
 
 #[test]
@@ -40,7 +40,7 @@ fn render_lineage_uses_node_id_when_compact_text_is_empty() {
 
     let block = render_lineage(Some(&compact), Some("node-1")).expect("lineage");
 
-    assert!(block.contains("Collapse node: node-1"));
+    assert!(block.contains("node id: node-1"));
     assert!(!block.contains("Previous context summary:"));
 }
 

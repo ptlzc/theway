@@ -50,13 +50,18 @@ behavioral rules:
 
 1. Session model: append-only message tree, compaction tail/summary, and
    virtualized tool results (`session_tool_result` / `session_tool_result_grep`).
-2. Collapse model: collapsed sessions become graph nodes; full transcripts are
-   read on demand through `session_graph_read` / `session_graph_status` /
-   `session_graph_wait` / `session_graph_attach`.
+2. Collapse model: repeated collapses are allowed; every collapse emits one
+   bounded rolling compact summary with fixed components (goal, completed work,
+   key decisions, next steps, critical context). Precision loss is expected.
+   The lineage block records only the collapse event and node/session ids;
+   full transcripts are read on demand through `session_graph_*`.
 3. Exploration model: outline + offset/limit reads + grep before edits.
 4. Graph and subagent orchestration principles: dependency-declared DAG nodes,
    file-disjoint parallel tasks, `dag_wait` harvesting, orchestrator-owned git
    history.
+
+The composed prompt order is `<harness>` first, then `<tools>`, then
+`<environment>`, then optional `<lineage>`.
 
 ## Editing rule
 
@@ -130,9 +135,9 @@ Current working directory: /home/user/project
 <lineage>
 ## Session lineage
 
-Collapse node: node-01JEXAMPLE0000000000000000
-This session continues from session-123.
-Use session_graph_list / session_graph_read / session_graph_status / session_graph_wait / session_graph_attach to inspect or take over the old session graph.
+Collapse event:
+  node id: node-01JEXAMPLE0000000000000000
+  source session id: session-123
 </lineage>
 ```
 

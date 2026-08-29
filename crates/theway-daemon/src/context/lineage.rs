@@ -11,21 +11,17 @@ pub fn render_lineage(
         return None;
     }
 
-    let mut block = String::from("## Session lineage\n\n");
+    let mut block = String::from("## Session lineage\n\nCollapse event:\n");
     if let Some(node_id) = collapse_node_id {
-        block.push_str(&format!("Collapse node: {node_id}\n"));
+        block.push_str(&format!("  node id: {node_id}\n"));
     }
     if let Some(compact) = compact {
         if !compact.source_session_id.is_empty() {
             block.push_str(&format!(
-                "This session continues from {}.\n",
+                "  source session id: {}\n",
                 compact.source_session_id
             ));
         }
     }
-    block.push_str(
-        "Use session_graph_list / session_graph_read / session_graph_status / \
-         session_graph_wait / session_graph_attach to inspect or take over the old session graph.",
-    );
     Some(block)
 }

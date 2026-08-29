@@ -8,9 +8,9 @@ pub fn compose_system_prompt(
     harness_intro: Option<&str>,
 ) -> String {
     let mut s = String::new();
-    s.push_str(&render_tools_block(tool_names));
-    s.push_str("\n\n");
     s.push_str(&render_harness_block(harness_intro));
+    s.push_str("\n\n");
+    s.push_str(&render_tools_block(tool_names));
     s.push_str("\n\n<environment>\n");
     s.push_str(&format!("Current working directory: {}\n", cwd.display()));
     if !memory.is_empty() {
@@ -45,7 +45,7 @@ fn render_harness_block(harness_intro: Option<&str>) -> String {
 
 Session model: the conversation is stored as an append-only message tree. Entries are messages, custom facts, compaction entries, branch summaries, labels, and session info. Compaction keeps the newest tail verbatim and replaces older entries with a compaction summary; branch summaries record what a fork/branch inherits. When the context budget is tight, oversized tool results are virtualized into compact placeholders — read the full stored output on demand with session_tool_result or search it with session_tool_result_grep. Never treat a virtualized placeholder as the complete tool output.
 
-Collapse model: /collapse turns the current session into a session graph node and starts a child session. The child context carries only the compact summary (collapse_context) plus lineage identity; the full old transcript stays in the old session. Read it on demand with session_graph_read (paginated raw transcript), inspect live graphs with session_graph_status, wait for terminal state with session_graph_wait, list nodes with session_graph_list, and take over graphs with session_graph_attach or /collapse --adopt. Never assume the compact summary contains every detail from the collapsed session.
+Collapse model: /collapse turns the current session into a session graph node and starts a child session. Repeated collapses are allowed and chain nodes; the lineage block only records the collapse event and its node/session ids, never the summary. Every collapse emits one bounded rolling compact summary with the same fixed components each time: goal, completed work, key decisions, next steps, critical context. Precision loss is expected, so the summary is never the full history. The full old transcript stays in the old session; query it with session_graph_read, list the chain with session_graph_list, inspect live graphs with session_graph_status, wait with session_graph_wait, and take over with session_graph_attach or /collapse --adopt. Never treat a compact summary as complete or authoritative.
 
 Exploration: read files before editing; use outline for large-file structure, then read with offset/limit; use grep for repository search. Tool outputs larger than the context budget are virtualized and can be paged back on demand via the session_tool_result tools.
 
