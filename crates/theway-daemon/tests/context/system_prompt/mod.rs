@@ -3,7 +3,7 @@
 use super::*;
 
 #[test]
-fn compose_system_prompt_puts_base_then_cwd_then_memory() {
+fn compose_system_prompt_puts_tools_then_harness_then_cwd_then_memory() {
     // Arrange
     let cwd = std::path::Path::new("/tmp/waypoint");
     let tools = vec!["bash".to_string(), "enhanced_grep".to_string()];
@@ -12,17 +12,21 @@ fn compose_system_prompt_puts_base_then_cwd_then_memory() {
     let prompt = compose_system_prompt(cwd, "Remember: be concise.", &tools, None, None);
 
     // Assert
+    let tools_at = prompt.find("<tools>").expect("tools block present");
+    let inventory_at = prompt.find("Execution: bash").expect("tool inventory present");
+    let harness_at = prompt.find("<harness>").expect("harness block present");
     let base = prompt.find("You are theway").expect("base prompt present");
-    let tools_at = prompt.find("Execution: bash").expect("tool inventory present");
     let cwd_at = prompt
         .find("Current working directory: /tmp/waypoint")
         .expect("cwd present");
     let memory_at = prompt
         .find("Remember: be concise.")
         .expect("memory present");
-    assert!(base < tools_at && tools_at < cwd_at && cwd_at < memory_at);
-    assert!(prompt.find("<harness>") < Some(tools_at));
-    assert!(tools_at < prompt.find("</tools>").unwrap());
+    assert!(tools_at < inventory_at);
+    assert!(inventory_at < harness_at);
+    assert!(harness_at < base);
+    assert!(base < cwd_at && cwd_at < memory_at);
+    assert!(prompt.contains("</tools>"));
     assert!(prompt.contains("<environment>"));
 }
 
@@ -68,26 +72,24 @@ fn compose_system_prompt_omits_lineage_when_none() {
 }
 
 #[test]
-fn render_base_prompt_uses_no_tools_registered_for_empty_inventory() {
+fn render_tools_block_uses_no_tools_registered_for_empty_inventory() {
     // Act
-    let prompt = render_base_prompt(&[], None);
+    let prompt = render_tools_block(&[]);
 
     // Assert
+    assert!(prompt.contains("<tools>"));
     assert!(prompt.contains("no tools registered"));
 }
 
 #[test]
-fn render_base_prompt_groups_tool_names_by_category() {
+fn render_tools_block_groups_tool_names_by_category() {
     // Act
-    let prompt = render_base_prompt(
-        &[
-            "bash".to_string(),
-            "enhanced_grep".to_string(),
-            "dag_plan".to_string(),
-            "session_graph_read".to_string(),
-        ],
-        None,
-    );
+    let prompt = render_tools_block(&[
+        "bash".to_string(),
+        "enhanced_grep".to_string(),
+        "dag_plan".to_string(),
+        "session_graph_read".to_string(),
+    ]);
 
     // Assert
     assert!(prompt.contains("- Execution: bash"));
@@ -97,27 +99,29 @@ fn render_base_prompt_groups_tool_names_by_category() {
 }
 
 #[test]
-fn render_base_prompt_describes_runtime_model_before_tools() {
+fn render_harness_block_describes_runtime_model() {
     // Act
-    let prompt = render_base_prompt(&["dag_plan".to_string()], None);
+    let prompt = render_harness_block(None);
 
     // Assert
     assert!(prompt.contains("<harness>"));
-    assert!(prompt.contains("Session model: the conversation is stored as an append-only message tree"));
+    assert!(
+        prompt.contains("Session model: the conversation is stored as an append-only message tree")
+    );
     assert!(prompt.contains("session_tool_result_grep"));
-    assert!(prompt.contains("Collapse model: /collapse turns the current session into a session graph node"));
+    assert!(prompt.contains(
+        "Collapse model: /collapse turns the current session into a session graph node"
+    ));
     assert!(prompt.contains("session_graph_read"));
     assert!(prompt.contains("Exploration: read files before editing"));
     assert!(prompt.contains("Graph and subagent orchestration principles"));
     assert!(prompt.contains("harvest DAG results only with dag_wait"));
-    assert!(prompt.contains("<tools>"));
-    assert!(prompt.find("<tools>").unwrap() > prompt.find("</harness>").unwrap());
 }
 
 #[test]
-fn render_base_prompt_uses_custom_harness_intro() {
+fn render_harness_block_uses_custom_harness_intro() {
     // Act
-    let prompt = render_base_prompt(&[], Some("You are a database migration specialist."));
+    let prompt = render_harness_block(Some("You are a database migration specialist."));
 
     // Assert
     assert!(prompt.contains("You are a database migration specialist."));

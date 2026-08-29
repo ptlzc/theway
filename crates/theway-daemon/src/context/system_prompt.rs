@@ -8,7 +8,9 @@ pub fn compose_system_prompt(
     harness_intro: Option<&str>,
 ) -> String {
     let mut s = String::new();
-    s.push_str(&render_base_prompt(tool_names, harness_intro));
+    s.push_str(&render_tools_block(tool_names));
+    s.push_str("\n\n");
+    s.push_str(&render_harness_block(harness_intro));
     s.push_str("\n\n<environment>\n");
     s.push_str(&format!("Current working directory: {}\n", cwd.display()));
     if !memory.is_empty() {
@@ -25,14 +27,18 @@ pub fn compose_system_prompt(
     s
 }
 
-/// Build the `<harness>` and `<tools>` blocks. The harness block explains the runtime model
-/// before the tool inventory so the model understands session storage, exploration, and
-/// graph/subagent orchestration before seeing which tools implement them. The tool inventory
-/// is rendered from the actual registered tool definitions, grouped by category.
-fn render_base_prompt(tool_names: &[String], harness_intro: Option<&str>) -> String {
+/// Render the `<tools>` block first: the model learns which capabilities are
+/// attached before reading any harness prose.
+fn render_tools_block(tool_names: &[String]) -> String {
+    format!("<tools>\n{}\n</tools>", render_tool_inventory(tool_names))
+}
+
+/// Render the `<harness>` block. It explains the runtime model after the tool
+/// inventory so the model can map session storage, exploration, collapse, and
+/// graph/subagent orchestration concepts onto the tools it just saw.
+fn render_harness_block(harness_intro: Option<&str>) -> String {
     let intro = harness_intro
         .unwrap_or("You are theway, a minimal coding assistant running in a terminal.");
-    let inventory = render_tool_inventory(tool_names);
     let template = r#"
 <harness>
 {intro}
@@ -57,37 +63,9 @@ When the user asks to pause, disable, enable, or resume a dynamic trigger, call 
 When the user asks to delete, remove, or clear dynamic triggers, call remove_trigger.
 When the user asks to create, save, or codify a reusable skill, workflow, checklist, or convention, or to summarize recent work or this conversation into a skill (技能, 保存为技能, 把刚才的工作总结成 skill), call skill_builder with structured name/description/instructions. For summarize-into-skill requests, distill the generalizable steps from the conversation — what was actually done, the commands used, the pitfalls — not a transcript. Call once without confirm to preview and show the user the planned name and description, then call with confirm=true after they agree. Use install_skill only for installing an existing SKILL.md from a URL, file, or pasted content.
 </harness>
-
-<tools>
-{inventory}
-</tools>
 "#;
-    let rendered = template
-        .replace("{intro}", intro)
-        .replace("{inventory}", &inventory);
+    let rendered = template.replace("{intro}", intro);
     dedent(rendered.trim_start_matches('\n').trim_end())
-}
-
-fn dedent(text: &str) -> String {
-    let lines: Vec<&str> = text.lines().collect();
-    let common_indent = lines
-        .iter()
-        .filter(|line| !line.trim().is_empty())
-        .map(|line| line.chars().take_while(|c| *c == ' ').count())
-        .min()
-        .unwrap_or(0);
-    let mut out = String::new();
-    for (index, line) in lines.iter().enumerate() {
-        if index > 0 {
-            out.push('\n');
-        }
-        if line.len() > common_indent {
-            out.push_str(&line[common_indent..]);
-        } else {
-            out.push_str(line.trim_end());
-        }
-    }
-    out
 }
 
 fn render_tool_inventory(tool_names: &[String]) -> String {
@@ -155,6 +133,28 @@ fn tool_category(name: &str) -> &'static str {
     } else {
         "Other"
     }
+}
+
+fn dedent(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let common_indent = lines
+        .iter()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.chars().take_while(|c| *c == ' ').count())
+        .min()
+        .unwrap_or(0);
+    let mut out = String::new();
+    for (index, line) in lines.iter().enumerate() {
+        if index > 0 {
+            out.push('\n');
+        }
+        if line.len() > common_indent {
+            out.push_str(&line[common_indent..]);
+        } else {
+            out.push_str(line.trim_end());
+        }
+    }
+    out
 }
 
 #[cfg(test)]
