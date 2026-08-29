@@ -430,7 +430,7 @@ impl App {
         frame.render_widget(Paragraph::new(text).block(block), rect);
     }
 
-    /// Interactive `/resume` picker (issue #56): a centered popup listing
+    /// Interactive `/resume` picker (issue #56): a full-width popup listing
     /// the daemon's sessions in tree order (oldest → newest), reusing the
     /// completion popup style — cyan rows, black-on-cyan highlight, a fixed
     /// [`RESUME_POPUP_MAX`]-row window that slides with the selection.
@@ -445,7 +445,7 @@ impl App {
             return;
         }
         let area = self.theme.screen.inset(frame.area());
-        let width = area.width.clamp(24, 90);
+        let width = area.width;
         let scroll = picker.scroll.min(picker.entries.len().saturating_sub(1));
         let shown = (picker.entries.len() - scroll).min(RESUME_POPUP_MAX);
         let height = shown as u16 + 3; // item rows + hint + borders

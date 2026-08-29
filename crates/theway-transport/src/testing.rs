@@ -82,6 +82,7 @@ fn summary(id: &str) -> SessionSummary {
         active_graph_count: 0,
         busy: false,
         preview: None,
+        tree_prefix: String::new(),
         metadata: HashMap::new(),
     }
 }

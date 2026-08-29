@@ -364,6 +364,8 @@ impl App {
                 id: s.session_id.clone(),
                 id_short: crate::cli::short_id(&s.session_id),
                 name: s.name.clone(),
+                tree_prefix: s.tree_prefix.clone(),
+                last_activity_at_rfc3339: s.last_activity_at_rfc3339.clone(),
                 busy: s.busy,
                 graph_count: s.graph_count,
                 active_graph_count: s.active_graph_count,

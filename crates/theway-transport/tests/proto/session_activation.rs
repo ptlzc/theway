@@ -14,6 +14,7 @@ fn fixture_summary() -> crate::wire::SessionSummary {
         active_graph_count: 1,
         busy: false,
         preview: Some("last prompt".into()),
+        tree_prefix: String::new(),
         metadata: std::collections::HashMap::new(),
     }
 }
@@ -39,7 +40,11 @@ fn session_runtime_context_preserves_optional_presence() {
         base_url: None,
         ..Default::default()
     };
-    assert!(session_runtime_context_to_proto(&omitted).base_url.is_none());
+    assert!(
+        session_runtime_context_to_proto(&omitted)
+            .base_url
+            .is_none()
+    );
     let explicit_empty = crate::wire::WireSessionRuntimeContext {
         base_url: Some(String::new()),
         ..Default::default()

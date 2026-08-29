@@ -6,7 +6,7 @@ English | [中文](architecture.zh.md)
 
 `theway-tui` owns the terminal client form and controller-local resources. It speaks only records and services from `theway-transport` and uses `theway-storage` for controller-local persistence. It does not import the agent runtime or daemon application crates.
 
-Client-specific behavior includes terminal layout, keyboard handling, feed rendering, local pickers and commands, clipboard images, daemon attachment defaults, and how local files/processes are exposed through the controller services. Mouse selection and text copying remain owned by the terminal or tmux: the TUI does not enable mouse tracking or write selected feed text to the clipboard. Cross-client runtime behavior starts in transport records and is implemented by the daemon.
+Client-specific behavior includes terminal layout, keyboard handling, feed rendering, local pickers and commands, clipboard images, daemon attachment defaults, and how local files/processes are exposed through the controller services. Mouse capture is enabled so the TUI can receive wheel events and scroll its feed; because capture is active, native mouse-drag selection may require a terminal-specific modifier (often Shift). The TUI does not write selected feed text to the clipboard. Cross-client runtime behavior starts in transport records and is implemented by the daemon.
 
 ## Command dispatch
 

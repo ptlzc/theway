@@ -276,6 +276,7 @@ impl SessionActivator {
             active_graph_count,
             busy: false,
             preview: record.preview,
+            tree_prefix: record.tree_prefix,
             metadata: Default::default(),
         };
 

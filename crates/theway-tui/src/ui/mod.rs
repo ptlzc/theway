@@ -191,6 +191,10 @@ pub(crate) struct ResumePickerEntry {
     pub(crate) id: String,
     pub(crate) id_short: String,
     pub(crate) name: String,
+    /// Pi-style tree prefix (`├─ ` / `└─ ` / `│ `) for fork-lineage display.
+    pub(crate) tree_prefix: String,
+    /// Last activity time, RFC3339 when available.
+    pub(crate) last_activity_at_rfc3339: Option<String>,
     pub(crate) busy: bool,
     pub(crate) graph_count: u32,
     pub(crate) active_graph_count: u32,
@@ -388,6 +392,10 @@ pub struct App {
     /// count. The event loop resolves this with the authoritative GetState
     /// path before accepting another delta.
     resync_pending: bool,
+    /// Session id the client selected locally (`/resume`, `/session switch`).
+    /// The event loop recreates its frame stream for this session after the
+    /// current input event finishes so live updates follow the selection.
+    resubscribe_session: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -542,14 +550,39 @@ fn fork_picker_entries(blocks: &[theway_transport::feed::WireFeedBlock]) -> Vec<
         .collect()
 }
 
-/// `/resume` popup row label (issue #56): `{short id} {name}` plus marks —
-/// `busy` when the session is mid-turn, `graphs N (M active)` when it has
-/// DAG runs, `current` on the daemon's active session. Marks join with `·`;
-/// a bare session renders just the short id.
+/// Format a session's last-activity RFC3339 timestamp as a short relative
+/// duration (`now`, `5m`, `3h`, `2d`) for the `/resume` popup.
+fn format_relative_time(rfc3339: Option<&str>) -> Option<String> {
+    let rfc3339 = rfc3339?;
+    let dt = chrono::DateTime::parse_from_rfc3339(rfc3339).ok()?;
+    let now = chrono::Utc::now();
+    let seconds = (now - dt.with_timezone(&chrono::Utc)).num_seconds().max(0);
+    if seconds < 60 {
+        Some("now".to_string())
+    } else if seconds < 3600 {
+        Some(format!("{}m", seconds / 60))
+    } else if seconds < 86_400 {
+        Some(format!("{}h", seconds / 3600))
+    } else {
+        Some(format!("{}d", seconds / 86_400))
+    }
+}
+
+/// `/resume` popup row label (issue #56): tree prefix + aligned short id +
+/// `|` + relative last-activity time + session title, plus marks — `busy`
+/// when the session is mid-turn, `graphs N (M active)` when it has DAG runs,
+/// `current` on the daemon's active session. Marks join with `·`.
 fn resume_picker_label(entry: &ResumePickerEntry) -> String {
-    let mut head = vec![entry.id_short.clone()];
+    const ID_COL_WIDTH: usize = 16;
+    const TIME_COL_WIDTH: usize = 4;
+    let id_col = format!("{:<ID_COL_WIDTH$}", entry.id_short);
+    let time = format_relative_time(entry.last_activity_at_rfc3339.as_deref())
+        .unwrap_or_else(|| "-".to_string());
+    let time_col = format!("{:<TIME_COL_WIDTH$}", time);
+    let mut label = format!("{}{} | {}", entry.tree_prefix, id_col, time_col);
     if !entry.name.is_empty() {
-        head.push(entry.name.clone());
+        label.push_str("  ");
+        label.push_str(&entry.name);
     }
     let mut marks = Vec::new();
     if entry.busy {
@@ -568,11 +601,11 @@ fn resume_picker_label(entry: &ResumePickerEntry) -> String {
     if entry.current {
         marks.push("current".to_string());
     }
-    if marks.is_empty() {
-        head.join(" ")
-    } else {
-        format!("{} · {}", head.join(" "), marks.join(" · "))
+    if !marks.is_empty() {
+        label.push_str(" · ");
+        label.push_str(&marks.join(" · "));
     }
+    label.trim_end().to_string()
 }
 
 /// Assemble the slash-command completion list: the TUI-local command set from

@@ -442,6 +442,18 @@ pub async fn first_user_text<R: SessionReader + ?Sized>(session: &R) -> Option<S
     None
 }
 
+/// Last user message text, truncated to a short preview. Used as the default
+/// session title when no plugin has recorded a session name.
+pub async fn last_user_text<R: SessionReader + ?Sized>(session: &R) -> Option<String> {
+    let entries = session.get_entries().await.ok()?;
+    for e in entries.iter().rev() {
+        if let Some(preview) = user_message_text(e) {
+            return Some(preview);
+        }
+    }
+    None
+}
+
 /// Latest non-empty session name recorded in append order.
 pub async fn session_name<R: SessionReader + ?Sized>(session: &R) -> Option<String> {
     let entries = session.find_entries("session_info").await.ok()?;

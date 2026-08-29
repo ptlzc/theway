@@ -299,6 +299,8 @@ pub struct SessionSummary {
     pub active_graph_count: u32,
     pub busy: bool,
     pub preview: Option<String>,
+    /// Pi-style tree prefix (`├─ ` / `└─ ` / `│ `) for fork-lineage display.
+    pub tree_prefix: String,
     #[serde(default)]
     pub metadata: HashMap<String, String>,
 }

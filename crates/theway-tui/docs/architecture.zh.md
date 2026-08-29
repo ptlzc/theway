@@ -6,7 +6,7 @@
 
 `theway-tui` 负责终端客户端形态和 controller 本地资源。它只使用 `theway-transport` 的记录与服务，并用 `theway-storage` 进行 controller 本地持久化；不导入 agent 运行时或 daemon 应用 crate。
 
-客户端专用行为包括终端布局、键盘处理、feed 渲染、本地 picker 与命令、clipboard 图像、daemon 连接默认值，以及如何通过 controller 服务暴露本地文件/进程。鼠标选择和文本复制由 terminal 或 tmux 负责：TUI 不启用鼠标追踪，也不把选中的 feed 文本写入 clipboard。跨客户端运行时行为从 transport 记录开始，并由 daemon 实现。
+客户端专用行为包括终端布局、键盘处理、feed 渲染、本地 picker 与命令、clipboard 图像、daemon 连接默认值，以及如何通过 controller 服务暴露本地文件/进程。TUI 会启用鼠标捕获以接收滚轮事件并滚动 feed；由于捕获开启，原生鼠标拖拽选择文字可能需要终端特定的修饰键（通常是 Shift）。TUI 不会把选中的 feed 文本写入 clipboard。跨客户端运行时行为从 transport 记录开始，并由 daemon 实现。
 
 ## 命令分派
 

@@ -101,7 +101,8 @@ impl TurnHost {
     }
 
     async fn refresh_goal_state(&mut self) {
-        self.projection.latest_goal = theway_core::multiagent::goal::current(self.session.kernel.harness()).await;
+        self.projection.latest_goal =
+            theway_core::multiagent::goal::current(self.session.kernel.harness()).await;
     }
 
     fn current_model_accepts_images(&self) -> bool {
@@ -159,7 +160,9 @@ impl TurnHost {
             }
         };
         if candidates.len() == 1 {
-            return self.apply_model(candidates.into_iter().next().unwrap()).await;
+            return self
+                .apply_model(candidates.into_iter().next().unwrap())
+                .await;
         }
         if candidates.len() > 1 {
             self.error_line(format!(
@@ -207,7 +210,13 @@ impl TurnHost {
                 return false;
             }
         };
-        match self.session.kernel.harness().set_thinking_level(parsed).await {
+        match self
+            .session
+            .kernel
+            .harness()
+            .set_thinking_level(parsed)
+            .await
+        {
             Ok(_) => {
                 self.system_line(format!("thinking level: {}", parsed.as_str()));
                 // Keep the shared GetConfig view in sync with the runtime.
@@ -223,7 +232,26 @@ impl TurnHost {
         }
     }
 
-    async fn apply_activation(&mut self, activation: crate::session_activation::SessionActivation, turn: &mut TurnState) {
+    /// Move the active projection into a parked session's projection slot and
+    /// reset the active projection for the incoming session.
+    ///
+    /// Active sessions render from `self.projection`; parked sessions render from
+    /// `SessionRuntimeState::projection`. Without this handoff, a previously active
+    /// session would be parked with an empty feed and any later authoritative
+    /// snapshot for it would clear the client's history.
+    fn take_active_projection(&mut self) -> FeedProjectionState {
+        let next = FeedProjectionState::new(
+            self.projection.capabilities.clone(),
+            self.projection.thinking_summary.clone(),
+        );
+        std::mem::replace(&mut self.projection, next)
+    }
+
+    async fn apply_activation(
+        &mut self,
+        activation: crate::session_activation::SessionActivation,
+        turn: &mut TurnState,
+    ) {
         if turn.fut.is_some() {
             self.request_abort(turn);
             if let Some(future) = turn.fut.take() {
@@ -239,6 +267,7 @@ impl TurnHost {
             ..
         } = activation;
         let cwd = runtime.cwd.clone();
+        let old_projection = self.take_active_projection();
         let new_state = SessionRuntimeState::from_runtime(
             runtime,
             self.session.factory.clone(),
@@ -250,21 +279,26 @@ impl TurnHost {
                 self.projection.thinking_summary.clone(),
             ),
         );
-        let old = std::mem::replace(&mut self.session, new_state);
+        let mut old = std::mem::replace(&mut self.session, new_state);
+        old.projection = old_projection;
         self.sessions.insert(old);
         self.runtime.cwd = cwd;
         self.runtime.paths = context.paths.clone();
-        self.runtime.registry.set_file_commands(crate::file_commands::scan_file_commands(
-            &self.runtime.cwd,
-            &self.runtime.paths.home,
-        ));
-        self.runtime.completer = SlashCompleter::from_commands(slash_commands(&self.runtime.registry));
+        self.runtime
+            .registry
+            .set_file_commands(crate::file_commands::scan_file_commands(
+                &self.runtime.cwd,
+                &self.runtime.paths.home,
+            ));
+        self.runtime.completer =
+            SlashCompleter::from_commands(slash_commands(&self.runtime.registry));
         self.session
             .kernel
             .harness()
             .session_switched(&self.session.id)
             .await;
-        self.automation.reload
+        self.automation
+            .reload
             .set_trigger_executor(self.session.kernel.trigger_executor().clone());
         self.clear_feed();
         // Resume replay: the activated runtime rehydrated its transcript, so
@@ -363,7 +397,9 @@ fn apply_feed_update_to_projection(
         FeedUpdate::ThinkingSummary { block_index, .. } => Some(*block_index),
         FeedUpdate::TextDelta(_) | FeedUpdate::ThinkingDelta(_) => before_len.checked_sub(1),
         FeedUpdate::ToolProgress { tool_call_id, .. }
-        | FeedUpdate::ToolEnd { tool_call_id, .. } => projection.feed.tool_result_index(tool_call_id),
+        | FeedUpdate::ToolEnd { tool_call_id, .. } => {
+            projection.feed.tool_result_index(tool_call_id)
+        }
         _ => None,
     };
     match update {

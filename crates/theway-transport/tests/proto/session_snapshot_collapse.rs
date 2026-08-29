@@ -23,10 +23,7 @@ fn session_snapshot_round_trips_wire_status() {
     let runtime = proto.runtime.as_ref().unwrap();
     assert_eq!(runtime.model.as_ref().unwrap().provider, "provider");
     assert_eq!(runtime.model.as_ref().unwrap().model, "model");
-    assert_eq!(
-        runtime.thinking_level,
-        wire::ThinkingLevel::Off as i32
-    );
+    assert_eq!(runtime.thinking_level, wire::ThinkingLevel::Off as i32);
     assert_eq!(runtime.supported_thinking_levels.len(), 6);
 
     let feed = proto.feed.as_ref().unwrap();
@@ -135,6 +132,7 @@ fn session_summary_id_is_populated_and_deprecated_session_id_is_kept() {
         active_graph_count: 0,
         busy: false,
         preview: None,
+        tree_prefix: String::new(),
         metadata: std::collections::HashMap::new(),
     };
 
@@ -151,7 +149,10 @@ fn session_summary_id_is_populated_and_deprecated_session_id_is_kept() {
         session_id: "legacy-session".into(),
         ..proto
     };
-    assert_eq!(session_summary_from_proto(&legacy).session_id, "legacy-session");
+    assert_eq!(
+        session_summary_from_proto(&legacy).session_id,
+        "legacy-session"
+    );
 }
 
 #[test]
@@ -175,10 +176,7 @@ fn session_graph_node_codec_round_trips() {
     assert_eq!(proto.id, "node-1");
     assert_eq!(proto.r#type, wire::SessionGraphNodeType::Collapsed as i32);
     assert_eq!(proto.message_count, 42);
-    assert_eq!(
-        proto.collapsed_session_id.as_deref(),
-        Some("old-session")
-    );
+    assert_eq!(proto.collapsed_session_id.as_deref(), Some("old-session"));
 
     assert_eq!(session_graph_node_from_proto(&proto), node);
 }
@@ -230,7 +228,12 @@ fn collapse_session_codec_round_trips() {
     let proto_response = collapse_session_response_to_proto(&response);
     assert_eq!(proto_response.session_id, "sess-old");
     assert_eq!(
-        proto_response.node.as_ref().unwrap().collapsed_session_id.as_deref(),
+        proto_response
+            .node
+            .as_ref()
+            .unwrap()
+            .collapsed_session_id
+            .as_deref(),
         Some("sess-old")
     );
     assert_eq!(

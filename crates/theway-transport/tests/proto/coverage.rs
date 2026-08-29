@@ -56,16 +56,41 @@ fn rich_snapshot() -> WireStatus {
     snapshot.sidebar.commands = vec!["/cmd".into()];
     snapshot.sidebar.runtime_revision = 9;
     snapshot.feed_blocks = vec![
-        WireFeedBlock::User { text: "u".into(), timestamp: Some("t1".into()) },
-        WireFeedBlock::Assistant { text: "a".into(), timestamp: None },
-        WireFeedBlock::Thinking { text: "th".into(), timestamp: Some("t2".into()) },
-        WireFeedBlock::Tool { name: "bash".into(), args: " ls".into(), timestamp: None },
-        WireFeedBlock::ToolResult { lines: vec!["ok".into()], is_error: true, timestamp: Some("t3".into()) },
-        WireFeedBlock::Plain { text: "p".into(), level: crate::feed::Level::Qr, timestamp: None },
+        WireFeedBlock::User {
+            text: "u".into(),
+            timestamp: Some("t1".into()),
+        },
+        WireFeedBlock::Assistant {
+            text: "a".into(),
+            timestamp: None,
+        },
+        WireFeedBlock::Thinking {
+            text: "th".into(),
+            timestamp: Some("t2".into()),
+        },
+        WireFeedBlock::Tool {
+            name: "bash".into(),
+            args: " ls".into(),
+            timestamp: None,
+        },
+        WireFeedBlock::ToolResult {
+            lines: vec!["ok".into()],
+            is_error: true,
+            timestamp: Some("t3".into()),
+        },
+        WireFeedBlock::Plain {
+            text: "p".into(),
+            level: crate::feed::Level::Qr,
+            timestamp: None,
+        },
     ];
     snapshot.feed_block_patches = vec![crate::wire::WireFeedBlockPatch {
         index: 0,
-        block: WireFeedBlock::Plain { text: "patch".into(), level: crate::feed::Level::Header, timestamp: None },
+        block: WireFeedBlock::Plain {
+            text: "patch".into(),
+            level: crate::feed::Level::Header,
+            timestamp: None,
+        },
     }];
     snapshot.usage = crate::wire::WireContextUsage {
         input_tokens: 1,
@@ -198,15 +223,27 @@ fn wire_feed_block_missing_kind_and_levels_fall_back() {
         WireFeedBlock::Plain { text, level: crate::feed::Level::Output, timestamp: None } if text.is_empty()
     ));
 
-    assert!(matches!(level_from_str("system"), crate::feed::Level::System));
+    assert!(matches!(
+        level_from_str("system"),
+        crate::feed::Level::System
+    ));
     assert!(matches!(level_from_str("error"), crate::feed::Level::Error));
     assert!(matches!(level_from_str("note"), crate::feed::Level::Note));
-    assert!(matches!(level_from_str("header"), crate::feed::Level::Header));
+    assert!(matches!(
+        level_from_str("header"),
+        crate::feed::Level::Header
+    ));
     assert!(matches!(level_from_str("qr"), crate::feed::Level::Qr));
-    assert!(matches!(level_from_str("unknown"), crate::feed::Level::Output));
+    assert!(matches!(
+        level_from_str("unknown"),
+        crate::feed::Level::Output
+    ));
 }
 
 #[test]
 fn extension_snapshot_wire_none_returns_default() {
-    assert_eq!(extension_snapshot_wire(None), WireExtensionSnapshot::default());
+    assert_eq!(
+        extension_snapshot_wire(None),
+        WireExtensionSnapshot::default()
+    );
 }

@@ -249,6 +249,7 @@ fn session_summary_converts_to_wire_shape() {
         active_graph_count: 1,
         busy: true,
         preview: Some("last prompt".into()),
+        tree_prefix: String::new(),
         metadata: std::collections::HashMap::new(),
     };
     let w = session_summary_wire(&summary);
@@ -463,12 +464,12 @@ fn daemon_config_merge_replaces_present_fields_only() {
         model: Some("claude-x".into()),
         skills_dirs: vec!["/old".into()],
         ..Default::default()
- };
+    };
     let patch = WireDaemonConfig {
         model: Some("claude-y".into()),
         trigger_poll_secs: Some(30),
         ..Default::default()
- };
+    };
     let touched = current.merge_from(&patch);
 
     // Present fields replaced, absent ones kept; repeated-empty does not clear.
@@ -482,7 +483,7 @@ fn daemon_config_merge_replaces_present_fields_only() {
     let dirs = WireDaemonConfig {
         skills_dirs: vec!["/new".into()],
         ..Default::default()
- };
+    };
     let touched = current.merge_from(&dirs);
     assert_eq!(touched, 1);
     assert_eq!(current.skills_dirs, vec!["/new"]);
@@ -516,7 +517,10 @@ fn daemon_config_merge_supports_explicit_clear_and_set_wins() {
     assert_eq!(current.thinking, Some(false), "set wins over clear");
     assert!(current.skills_dirs.is_empty());
     assert!(current.tool_service_addr.is_none());
-    assert!(current.clear_fields.is_empty(), "snapshots never retain patch intent");
+    assert!(
+        current.clear_fields.is_empty(),
+        "snapshots never retain patch intent"
+    );
 }
 
 #[test]

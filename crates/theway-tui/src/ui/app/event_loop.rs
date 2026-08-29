@@ -49,7 +49,27 @@ impl App {
                 biased;
                 maybe_event = reader.next() => {
                     match maybe_event {
-                        Some(Ok(event)) => self.handle_event(event, terminal).await?,
+                        Some(Ok(event)) => {
+                            self.handle_event(event, terminal).await?;
+                            // A local session selection (`/resume`, `/session
+                            // switch`) changes the session id; recreate the
+                            // frame stream so live snapshots follow the new
+                            // session instead of staying on the old filter.
+                            if let Some(new_id) = self.resubscribe_session.take() {
+                                stream = None;
+                                match self
+                                    .client
+                                    .stream_events_for_session(Some(&new_id))
+                                    .await
+                                {
+                                    Ok(new_stream) => stream = Some(new_stream),
+                                    Err(e) => {
+                                        self.connected = false;
+                                        self.error_line(format!("daemon stream: {e}"));
+                                    }
+                                }
+                            }
+                        }
                         Some(Err(_)) => {}
                         None => self.quit = true,
                     }

@@ -36,15 +36,16 @@ fn extension_snapshot_round_trip_keeps_open_contribution_kind() {
 fn session_state_keeps_extension_snapshot_additive() {
     let mut snapshot = fixture_snapshot();
     snapshot.extensions.revision = 3;
-    snapshot.extensions.contributions.push(
-        crate::wire::WireExtensionContribution {
+    snapshot
+        .extensions
+        .contributions
+        .push(crate::wire::WireExtensionContribution {
             contribution_id: "unknown".into(),
             extension_id: "future.extension".into(),
             scope: "session".into(),
             kind: "unknown_to_this_client".into(),
             payload: serde_json::json!({"safe": true}),
-        },
-    );
+        });
     let state = session_state(&snapshot);
     assert_eq!(state.extensions.as_ref().unwrap().revision, 3);
     let round_trip = wire_status(&state);

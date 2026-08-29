@@ -227,6 +227,7 @@ fn activated_summary() -> crate::wire::SessionSummary {
         active_graph_count: 0,
         busy: false,
         preview: None,
+        tree_prefix: String::new(),
         metadata: std::collections::HashMap::new(),
     }
 }
@@ -238,10 +239,7 @@ async fn grpc_activate_session_queues_one_shot_and_updates_only_after_success() 
         match command_rx.recv().await.unwrap() {
             WireCommand::ActivateSession { request, response } => {
                 assert_eq!(request.client_key, "client-1");
-                assert_eq!(
-                    request.runtime.as_ref().unwrap().work_dir,
-                    "/tmp/theway"
-                );
+                assert_eq!(request.runtime.as_ref().unwrap().work_dir, "/tmp/theway");
                 response
                     .send(Ok(crate::wire::WireActivateSessionResponse {
                         session: Some(activated_summary()),
@@ -326,11 +324,12 @@ async fn grpc_clear_credential_queues_clear_all_and_maps_rpc_error() {
             WireCommand::ClearCredential { request, response } => {
                 assert_eq!(request.session_id, "sess-1");
                 assert!(request.provider.is_none());
-                response.send(Err(crate::wire::WireRpcError {
-                    code: "not_found".into(),
-                    message: "session sess-1 is not registered; activate it first".into(),
-                }))
-                .unwrap();
+                response
+                    .send(Err(crate::wire::WireRpcError {
+                        code: "not_found".into(),
+                        message: "session sess-1 is not registered; activate it first".into(),
+                    }))
+                    .unwrap();
             }
             other => panic!("unexpected command: {other:?}"),
         }
@@ -404,13 +403,21 @@ async fn grpc_set_credential_maps_event_loop_rpc_errors() {
             tonic::Code::InvalidArgument,
             "unknown provider",
         ),
-        ("not_found", tonic::Code::NotFound, "session is not registered"),
+        (
+            "not_found",
+            tonic::Code::NotFound,
+            "session is not registered",
+        ),
         (
             "failed_precondition",
             tonic::Code::FailedPrecondition,
             "session is not active",
         ),
-        ("unavailable", tonic::Code::Unavailable, "credential store down"),
+        (
+            "unavailable",
+            tonic::Code::Unavailable,
+            "credential store down",
+        ),
     ];
 
     for (code, expected, message) in cases {
@@ -482,13 +489,21 @@ async fn grpc_clear_credential_maps_event_loop_rpc_errors() {
             tonic::Code::InvalidArgument,
             "unknown provider",
         ),
-        ("not_found", tonic::Code::NotFound, "session is not registered"),
+        (
+            "not_found",
+            tonic::Code::NotFound,
+            "session is not registered",
+        ),
         (
             "failed_precondition",
             tonic::Code::FailedPrecondition,
             "session is not active",
         ),
-        ("unavailable", tonic::Code::Unavailable, "credential store down"),
+        (
+            "unavailable",
+            tonic::Code::Unavailable,
+            "credential store down",
+        ),
     ];
 
     for (code, expected, message) in cases {

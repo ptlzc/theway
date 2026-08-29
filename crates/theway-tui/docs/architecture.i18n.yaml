@@ -1,4 +1,4 @@
 # English-first bilingual documentation record. Update both files, then run:
 #   scripts/verify-doc-i18n.py --write crates/theway-tui/docs/architecture.md
-architecture.md: bcfb1fdb4f3d712d9d5f04367ae8a5b9785d666f
-architecture.zh.md: 91770c6fc26e6fd44e87d7baef5d539d9a34682d
+architecture.md: 0447df8b286c701dd0a703f9746c200dd991f747
+architecture.zh.md: cf9d340f55bd6710e3b634ef4d4841a6955e6d17

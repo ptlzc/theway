@@ -15,6 +15,7 @@ pub fn session_summary_wire(summary: &crate::wire::SessionSummary) -> wire::Sess
         active_graph_count: summary.active_graph_count,
         busy: summary.busy,
         preview: summary.preview.clone(),
+        tree_prefix: summary.tree_prefix.clone(),
         metadata: summary.metadata.clone(),
     }
 }
@@ -38,6 +39,7 @@ pub fn session_summary_from_proto(summary: &wire::SessionSummary) -> crate::wire
         active_graph_count: summary.active_graph_count,
         busy: summary.busy,
         preview: summary.preview.clone(),
+        tree_prefix: summary.tree_prefix.clone(),
         metadata: summary.metadata.clone(),
     }
 }

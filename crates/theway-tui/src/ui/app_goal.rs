@@ -20,8 +20,18 @@ impl App {
         self.pending_fresh_attach = false;
         self.session_id = id.clone();
         self.latest.session_id = id.clone();
-        self.system_line(format!("selected session {id}"));
+        // Load the selected session's authoritative feed immediately; the
+        // current frame stream is still filtered to the previous session until
+        // the event loop resubscribes below.
+        if let Ok(state) = self.client.get_state_for_session(&id).await {
+            self.apply_snapshot(theway_transport::proto::wire_status(&state));
+        }
+        // A newly created session (`/new`) may not have a daemon runtime in
+        // the snapshot map yet; that is fine, the resubscribed stream will
+        // publish its first authoritative snapshot once it exists.
+        self.resubscribe_session = Some(id.clone());
         self.refresh_session_snapshot().await;
+        self.system_line(format!("selected session {id}"));
         Ok(())
     }
 

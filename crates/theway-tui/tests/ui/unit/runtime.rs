@@ -68,7 +68,7 @@ async fn resume_picker_lists_sessions_and_annotates_current() {
     assert!(text.contains("resume"), "popup title missing:\n{text}");
     assert!(text.contains("sess-1"), "session row missing:\n{text}");
     assert!(
-        text.contains("sess-1 · current"),
+        text.lines().any(|line| line.contains("sess-1") && line.contains("current")),
         "current row must be annotated, got:\n{text}"
     );
 }
@@ -146,6 +146,8 @@ fn resume_picker_label_formats_name_busy_graph_and_current_marks() {
         id: "abc1234567890".into(),
         id_short: "abc1234567890".into(),
         name: "plan".into(),
+        tree_prefix: "├─ ".into(),
+        last_activity_at_rfc3339: Some(chrono::Utc::now().to_rfc3339()),
         busy: true,
         graph_count: 3,
         active_graph_count: 2,
@@ -155,7 +157,7 @@ fn resume_picker_label_formats_name_busy_graph_and_current_marks() {
     // Act + Assert
     assert_eq!(
         super::resume_picker_label(&full),
-        "abc1234567890 plan · busy · graphs 3 (2 active) · current"
+        "├─ abc1234567890    | now   plan · busy · graphs 3 (2 active) · current"
     );
     let inactive_graphs = super::ResumePickerEntry {
         busy: false,
@@ -165,7 +167,7 @@ fn resume_picker_label_formats_name_busy_graph_and_current_marks() {
     };
     assert_eq!(
         super::resume_picker_label(&inactive_graphs),
-        "abc1234567890 plan · graphs 3"
+        "├─ abc1234567890    | now   plan · graphs 3"
     );
     let bare = super::ResumePickerEntry {
         name: String::new(),
@@ -175,7 +177,10 @@ fn resume_picker_label_formats_name_busy_graph_and_current_marks() {
         current: false,
         ..full.clone()
     };
-    assert_eq!(super::resume_picker_label(&bare), "abc1234567890");
+    assert_eq!(
+        super::resume_picker_label(&bare),
+        "├─ abc1234567890    | now"
+    );
 }
 
 /// Issue #56 busy-switch path: the client follows the daemon's per-session

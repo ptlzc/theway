@@ -14,7 +14,7 @@ use theway_llm_provider::{
 };
 use tokio::sync::mpsc;
 
-use super::super::{DaemonConfig, RuntimeCapabilities, TurnHost};
+use super::super::{DaemonConfig, RuntimeCapabilities, SessionRuntimeState, TurnHost};
 use crate::agent_session::RetrySettings;
 use crate::commands::Registry;
 use crate::orchestration::SessionRuntime;
@@ -53,18 +53,23 @@ fn test_harness() -> Arc<AgentHarness> {
 }
 
 fn push_user(harness: &Arc<AgentHarness>, text: &str) {
-    harness.agent().state().messages.push(AgentMessage::Llm(
-        Message::User(UserMessage {
+    harness
+        .agent()
+        .state()
+        .messages
+        .push(AgentMessage::Llm(Message::User(UserMessage {
             role: Default::default(),
             content: UserContent::Text(text.to_string()),
             timestamp: 1_700_000_000_000,
-        }),
-    ));
+        })));
 }
 
 fn push_assistant(harness: &Arc<AgentHarness>, text: &str) {
-    harness.agent().state().messages.push(AgentMessage::Llm(
-        Message::Assistant(AssistantMessage {
+    harness
+        .agent()
+        .state()
+        .messages
+        .push(AgentMessage::Llm(Message::Assistant(AssistantMessage {
             role: AssistantRole::Assistant,
             content: vec![ContentBlock::Text(TextContent {
                 text: text.to_string(),
@@ -80,18 +85,13 @@ fn push_assistant(harness: &Arc<AgentHarness>, text: &str) {
             stop_reason: StopReason::Stop,
             error_message: None,
             timestamp: 1_700_000_100_000,
-        }),
-    ));
+        })));
 }
 
 fn returning_session_factory() -> crate::session_ops::SessionFactory {
     Arc::new(
         |id: String| -> std::pin::Pin<
-            Box<
-                dyn std::future::Future<
-                        Output = anyhow::Result<SessionRuntime>,
-                    > + Send,
-            >,
+            Box<dyn std::future::Future<Output = anyhow::Result<SessionRuntime>> + Send>,
         > { Box::pin(async { Ok(SessionRuntime::for_test(id, test_harness())) }) },
     )
 }
@@ -209,6 +209,51 @@ async fn startup_replay_without_history_is_empty() {
     let repo_dir = TempDir::new().unwrap();
     let mut host = TurnHost::new(daemon_config(&scratch, &repo_dir, test_harness(), None));
     let snapshot = host.wire_snapshot();
-    assert!(snapshot.feed_blocks.is_empty(), "{:?}", snapshot.feed_blocks);
+    assert!(
+        snapshot.feed_blocks.is_empty(),
+        "{:?}",
+        snapshot.feed_blocks
+    );
     assert!(snapshot.feed_lines.is_empty());
+}
+
+#[tokio::test]
+async fn parking_active_session_preserves_its_feed_projection() {
+    let _serial = crate::test_env::ENV_LOCK.lock().unwrap();
+    let scratch = TempDir::new().unwrap();
+    let repo_dir = TempDir::new().unwrap();
+    let harness = test_harness();
+    push_user(&harness, "hello");
+    push_assistant(&harness, "hi there");
+    let mut host = TurnHost::new(daemon_config(&scratch, &repo_dir, harness, None));
+
+    // Simulate the active-session handoff performed by `apply_activation`:
+    // the active session's projection must move into its parked state.
+    let old_projection = host.take_active_projection();
+    let mut old = std::mem::replace(
+        &mut host.session,
+        SessionRuntimeState::for_test("sess-other"),
+    );
+    old.projection = old_projection;
+    host.sessions.insert(old);
+
+    let snapshot = host
+        .wire_snapshot_for_session("sess-one")
+        .expect("parked active session snapshot");
+    assert!(
+        snapshot.feed_blocks.iter().any(|b| matches!(
+            b,
+            theway_transport::feed::WireFeedBlock::User { text, .. } if text == "hello"
+        )),
+        "parked session lost its feed: {:?}",
+        snapshot.feed_blocks
+    );
+    assert!(
+        snapshot.feed_blocks.iter().any(|b| matches!(
+            b,
+            theway_transport::feed::WireFeedBlock::Assistant { text, .. } if text == "hi there"
+        )),
+        "parked session lost its assistant history: {:?}",
+        snapshot.feed_blocks
+    );
 }

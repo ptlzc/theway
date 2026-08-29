@@ -81,6 +81,7 @@ impl App {
             quit: false,
             connected: true,
             resync_pending: false,
+            resubscribe_session: None,
             auto_session: config.auto_session,
             messaged_sessions: std::collections::HashSet::new(),
         }

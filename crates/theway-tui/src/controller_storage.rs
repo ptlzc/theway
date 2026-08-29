@@ -59,7 +59,13 @@ impl SessionOps for ControllerSessionOps {
                 .and_then(|v| v.as_str())
                 .unwrap_or_default()
                 .to_string();
-            let name = session::session_name(&session).await.unwrap_or_default();
+            let name = match session::session_name(&session).await {
+                Some(name) if !name.trim().is_empty() => name,
+                _ => session::last_user_text(&session)
+                    .await
+                    .map(|text| text.chars().take(15).collect())
+                    .unwrap_or_default(),
+            };
             let preview = session::first_user_text(&session).await;
             let model = session::last_model_change(&session).await;
             let last_activity_at = tokio::fs::metadata(&path)
@@ -81,6 +87,7 @@ impl SessionOps for ControllerSessionOps {
                 active_graph_count: 0,
                 busy: false,
                 preview,
+                tree_prefix: String::new(),
                 metadata: HashMap::new(),
             });
         }

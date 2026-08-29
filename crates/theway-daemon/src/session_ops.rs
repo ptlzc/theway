@@ -366,13 +366,28 @@ impl SessionOps for AppSessionOps {
                 .filter(|run| run.status == DagStatus::Running)
                 .count() as u32;
 
-            let metadata = match self.repo.open(&record.id).await? {
-                Some(session) => read_session_metadata(session.as_ref()).await?,
-                None => HashMap::new(),
+            let (metadata, last_user_text) = match self.repo.open(&record.id).await? {
+                Some(session) => (
+                    read_session_metadata(session.as_ref()).await?,
+                    theway_storage::session::last_user_text(session.as_ref()).await,
+                ),
+                None => (HashMap::new(), None),
             };
+            // Plugin-set session name wins; otherwise fall back to the last user
+            // input, truncated to 15 chars, as the display title.
+            let name = record
+                .name
+                .clone()
+                .filter(|name| !name.trim().is_empty())
+                .unwrap_or_else(|| {
+                    last_user_text
+                        .as_deref()
+                        .map(|text| text.chars().take(15).collect())
+                        .unwrap_or_default()
+                });
             summaries.push(SessionSummary {
                 session_id: record.id,
-                name: record.name.unwrap_or_default(),
+                name,
                 cwd: record.cwd,
                 model: record.model,
                 created_at: record.created_at,
@@ -382,6 +397,7 @@ impl SessionOps for AppSessionOps {
                 active_graph_count,
                 busy: false,
                 preview: record.preview,
+                tree_prefix: record.tree_prefix,
                 metadata,
             });
         }

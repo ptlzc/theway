@@ -30,6 +30,7 @@ fn client_activated_summary() -> crate::wire::SessionSummary {
         active_graph_count: 0,
         busy: false,
         preview: None,
+        tree_prefix: String::new(),
         metadata: std::collections::HashMap::new(),
     }
 }

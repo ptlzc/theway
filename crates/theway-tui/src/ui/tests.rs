@@ -6,6 +6,7 @@ use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use theway_transport::client::GrpcClient;
@@ -82,11 +83,21 @@ async fn test_app_with_sessions(
         session_ops.add_session(id);
     }
     let current: String = seeds.first().copied().unwrap_or("").to_string();
+    let session_states = Arc::new(parking_lot::Mutex::new(
+        seeds
+            .iter()
+            .map(|id| {
+                let mut status = fixture_status(Vec::new());
+                status.session_id = (*id).to_string();
+                ((*id).to_string(), status)
+            })
+            .collect::<HashMap<_, _>>(),
+    ));
     let state = GrpcState {
         commands: command_tx,
         snapshots: snapshot_tx,
         latest,
-        session_states: Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new())),
+        session_states,
         events: event_tx,
         dag_events: dag_event_tx,
         job_ops: Arc::new(theway_transport::UnavailableJobOps),
@@ -190,8 +201,8 @@ fn terminal_lifecycle_enables_mouse_and_paste_capture() {
     assert!(enter.windows(8).any(|bytes| bytes == b"\x1b[?2004h"));
     assert!(leave.windows(8).any(|bytes| bytes == b"\x1b[?2004l"));
     // Mouse capture (SGR mode) is enabled on enter so the wheel can scroll
-    // (works under tmux, which forwards app mouse tracking), and disabled
-    // on leave so the terminal keeps its own mouse mode untouched.
+    // the TUI feed, and disabled on leave so the terminal keeps its own
+    // mouse mode untouched.
     assert!(enter.windows(8).any(|bytes| bytes == b"\x1b[?1006h"));
     assert!(leave.windows(8).any(|bytes| bytes == b"\x1b[?1006l"));
 }
