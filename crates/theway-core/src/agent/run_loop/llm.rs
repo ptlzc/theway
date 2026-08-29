@@ -139,6 +139,13 @@ pub(super) async fn call_llm(
             tools: (!request.visible_tools.is_empty()).then_some(request.visible_tools),
         };
 
+        let prefix_estimate = inner.context_cache.lock().estimate(
+            inner.options.session_id.as_deref(),
+            &model.provider.0,
+            &model.id,
+            &context,
+        );
+
         let stream_fn = inner
             .options
             .stream_fn
@@ -221,8 +228,21 @@ pub(super) async fn call_llm(
             }
         }
         inner.state.lock().streaming_message = None;
-        let message = last_message
+        let mut message = last_message
             .ok_or_else(|| AgentRunError::Other("LLM stream produced no message".into()))?;
+        let total_input_tokens = message.usage.input.saturating_add(message.usage.cache_read);
+        let prefix_result = inner
+            .context_cache
+            .lock()
+            .finalize(&prefix_estimate, total_input_tokens);
+        message.usage.prefix_hit_tokens = Some(prefix_result.prefix_hit_tokens);
+        message.usage.prefix_cache_hit_rate = prefix_result.prefix_cache_hit_rate;
+        message.usage.provider_cache_hit_rate =
+            if total_input_tokens > 0 && message.usage.cache_read > 0 {
+                Some(message.usage.cache_read as f64 / total_input_tokens as f64)
+            } else {
+                None
+            };
         Ok(ModelCallResult {
             message,
             executable_tools,

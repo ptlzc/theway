@@ -14,6 +14,9 @@ fn usage() -> Usage {
         cache_read: 3,
         cache_write: 4,
         total_tokens: 37,
+        prefix_hit_tokens: None,
+        prefix_cache_hit_rate: None,
+        provider_cache_hit_rate: None,
         cost: UsageCost {
             input: 0.001,
             output: 0.002,
@@ -33,6 +36,9 @@ fn record_accumulates_usage_and_costs() {
         cache_read: 10,
         cache_write: 5,
         total_tokens: 165,
+        prefix_hit_tokens: None,
+        prefix_cache_hit_rate: None,
+        provider_cache_hit_rate: None,
         cost: UsageCost {
             input: 0.001,
             output: 0.0005,

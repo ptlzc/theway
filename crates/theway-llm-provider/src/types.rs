@@ -297,6 +297,17 @@ pub struct Usage {
     pub cache_write: u64,
     #[serde(rename = "totalTokens")]
     pub total_tokens: u64,
+    /// Client-side prefix-overlap token estimate (theway-core populates this
+    /// after each LLM call).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefix_hit_tokens: Option<u64>,
+    /// Client-side prefix cache hit rate estimate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefix_cache_hit_rate: Option<f64>,
+    /// Provider cache hit rate; `None` when the provider does not report cache
+    /// read tokens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_cache_hit_rate: Option<f64>,
     pub cost: UsageCost,
 }
 
@@ -433,7 +444,7 @@ pub struct Tool {
     pub parameters: serde_json::Value,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct Context {
     pub system_prompt: Option<String>,
     pub messages: Vec<Message>,

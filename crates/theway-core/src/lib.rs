@@ -14,6 +14,10 @@ pub mod observability;
 pub mod types;
 
 // Public surface — mirrors `packages/agent/src/index.ts`.
+pub use agent::context_cache::{
+    CONTEXT_CHUNK_SIZE, ContextCacheTracker, PrefixHitEstimate, PrefixHitResult,
+    canonical_context_bytes,
+};
 pub use agent::model_request::{NormalizedGenerationOptions, NormalizedModelRequestDraft};
 pub use agent::{
     Agent, AgentOptions, AgentRunError, LOOP_EVENT_BROADCAST_CAPACITY, LoopListener,

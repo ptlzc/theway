@@ -160,11 +160,14 @@ export interface FeedBlockPatch {
 
 /** Token usage for the current/last turn, plus the model's context window size. */
 export interface ContextUsage {
-  inputTokens: string;
+  cachedTokens: string;
+  newTokens: string;
+  totalInputTokens: string;
   outputTokens: string;
-  cacheReadTokens: string;
   cacheWriteTokens: string;
-  totalTokens: string;
+  providerCacheHitRate?: number | undefined;
+  prefixCacheHitRate?: number | undefined;
+  prefixHitTokens?: string | undefined;
   contextWindow: number;
 }
 
@@ -294,9 +297,10 @@ export interface FeedBlock {
     | { $case: "user"; user: UserBlock }
     | { $case: "assistant"; assistant: AssistantBlock }
     | { $case: "thinking"; thinking: ThinkingBlock }
-    | { $case: "tool"; tool: ToolBlock }
     | { $case: "toolResult"; toolResult: ToolResultBlock }
     | { $case: "plain"; plain: PlainBlock }
+    | { $case: "toolCall"; toolCall: ToolCallBlock }
+    | { $case: "error"; error: ErrorBlock }
     | undefined;
 }
 
@@ -318,9 +322,21 @@ export interface ThinkingBlock {
   timestamp?: string | undefined;
 }
 
-export interface ToolBlock {
+export interface ToolCallBlock {
   name: string;
   args: string;
+  /** Optional tool-call metadata (JSON string). */
+  metadata?:
+    | string
+    | undefined;
+  /** RFC3339 / ISO-8601 with offset (UTC), null when absent. */
+  timestamp?: string | undefined;
+}
+
+export interface ErrorBlock {
+  message: string;
+  code?: string | undefined;
+  recoverable: boolean;
   /** RFC3339 / ISO-8601 with offset (UTC), null when absent. */
   timestamp?: string | undefined;
 }
@@ -1173,34 +1189,46 @@ export const FeedBlockPatch: MessageFns<FeedBlockPatch> = {
 
 function createBaseContextUsage(): ContextUsage {
   return {
-    inputTokens: "0",
+    cachedTokens: "0",
+    newTokens: "0",
+    totalInputTokens: "0",
     outputTokens: "0",
-    cacheReadTokens: "0",
     cacheWriteTokens: "0",
-    totalTokens: "0",
+    providerCacheHitRate: undefined,
+    prefixCacheHitRate: undefined,
+    prefixHitTokens: undefined,
     contextWindow: 0,
   };
 }
 
 export const ContextUsage: MessageFns<ContextUsage> = {
   encode(message: ContextUsage, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.inputTokens !== "0") {
-      writer.uint32(8).uint64(message.inputTokens);
+    if (message.cachedTokens !== "0") {
+      writer.uint32(8).uint64(message.cachedTokens);
+    }
+    if (message.newTokens !== "0") {
+      writer.uint32(16).uint64(message.newTokens);
+    }
+    if (message.totalInputTokens !== "0") {
+      writer.uint32(24).uint64(message.totalInputTokens);
     }
     if (message.outputTokens !== "0") {
-      writer.uint32(16).uint64(message.outputTokens);
-    }
-    if (message.cacheReadTokens !== "0") {
-      writer.uint32(24).uint64(message.cacheReadTokens);
+      writer.uint32(32).uint64(message.outputTokens);
     }
     if (message.cacheWriteTokens !== "0") {
-      writer.uint32(32).uint64(message.cacheWriteTokens);
+      writer.uint32(40).uint64(message.cacheWriteTokens);
     }
-    if (message.totalTokens !== "0") {
-      writer.uint32(40).uint64(message.totalTokens);
+    if (message.providerCacheHitRate !== undefined) {
+      writer.uint32(49).double(message.providerCacheHitRate);
+    }
+    if (message.prefixCacheHitRate !== undefined) {
+      writer.uint32(57).double(message.prefixCacheHitRate);
+    }
+    if (message.prefixHitTokens !== undefined) {
+      writer.uint32(64).uint64(message.prefixHitTokens);
     }
     if (message.contextWindow !== 0) {
-      writer.uint32(48).uint32(message.contextWindow);
+      writer.uint32(72).uint32(message.contextWindow);
     }
     return writer;
   },
@@ -1217,7 +1245,7 @@ export const ContextUsage: MessageFns<ContextUsage> = {
             break;
           }
 
-          message.inputTokens = reader.uint64().toString();
+          message.cachedTokens = reader.uint64().toString();
           continue;
         }
         case 2: {
@@ -1225,7 +1253,7 @@ export const ContextUsage: MessageFns<ContextUsage> = {
             break;
           }
 
-          message.outputTokens = reader.uint64().toString();
+          message.newTokens = reader.uint64().toString();
           continue;
         }
         case 3: {
@@ -1233,7 +1261,7 @@ export const ContextUsage: MessageFns<ContextUsage> = {
             break;
           }
 
-          message.cacheReadTokens = reader.uint64().toString();
+          message.totalInputTokens = reader.uint64().toString();
           continue;
         }
         case 4: {
@@ -1241,7 +1269,7 @@ export const ContextUsage: MessageFns<ContextUsage> = {
             break;
           }
 
-          message.cacheWriteTokens = reader.uint64().toString();
+          message.outputTokens = reader.uint64().toString();
           continue;
         }
         case 5: {
@@ -1249,11 +1277,35 @@ export const ContextUsage: MessageFns<ContextUsage> = {
             break;
           }
 
-          message.totalTokens = reader.uint64().toString();
+          message.cacheWriteTokens = reader.uint64().toString();
           continue;
         }
         case 6: {
-          if (tag !== 48) {
+          if (tag !== 49) {
+            break;
+          }
+
+          message.providerCacheHitRate = reader.double();
+          continue;
+        }
+        case 7: {
+          if (tag !== 57) {
+            break;
+          }
+
+          message.prefixCacheHitRate = reader.double();
+          continue;
+        }
+        case 8: {
+          if (tag !== 64) {
+            break;
+          }
+
+          message.prefixHitTokens = reader.uint64().toString();
+          continue;
+        }
+        case 9: {
+          if (tag !== 72) {
             break;
           }
 
@@ -1271,31 +1323,46 @@ export const ContextUsage: MessageFns<ContextUsage> = {
 
   fromJSON(object: any): ContextUsage {
     return {
-      inputTokens: isSet(object.inputTokens)
-        ? globalThis.String(object.inputTokens)
-        : isSet(object.input_tokens)
-        ? globalThis.String(object.input_tokens)
+      cachedTokens: isSet(object.cachedTokens)
+        ? globalThis.String(object.cachedTokens)
+        : isSet(object.cached_tokens)
+        ? globalThis.String(object.cached_tokens)
+        : "0",
+      newTokens: isSet(object.newTokens)
+        ? globalThis.String(object.newTokens)
+        : isSet(object.new_tokens)
+        ? globalThis.String(object.new_tokens)
+        : "0",
+      totalInputTokens: isSet(object.totalInputTokens)
+        ? globalThis.String(object.totalInputTokens)
+        : isSet(object.total_input_tokens)
+        ? globalThis.String(object.total_input_tokens)
         : "0",
       outputTokens: isSet(object.outputTokens)
         ? globalThis.String(object.outputTokens)
         : isSet(object.output_tokens)
         ? globalThis.String(object.output_tokens)
         : "0",
-      cacheReadTokens: isSet(object.cacheReadTokens)
-        ? globalThis.String(object.cacheReadTokens)
-        : isSet(object.cache_read_tokens)
-        ? globalThis.String(object.cache_read_tokens)
-        : "0",
       cacheWriteTokens: isSet(object.cacheWriteTokens)
         ? globalThis.String(object.cacheWriteTokens)
         : isSet(object.cache_write_tokens)
         ? globalThis.String(object.cache_write_tokens)
         : "0",
-      totalTokens: isSet(object.totalTokens)
-        ? globalThis.String(object.totalTokens)
-        : isSet(object.total_tokens)
-        ? globalThis.String(object.total_tokens)
-        : "0",
+      providerCacheHitRate: isSet(object.providerCacheHitRate)
+        ? globalThis.Number(object.providerCacheHitRate)
+        : isSet(object.provider_cache_hit_rate)
+        ? globalThis.Number(object.provider_cache_hit_rate)
+        : undefined,
+      prefixCacheHitRate: isSet(object.prefixCacheHitRate)
+        ? globalThis.Number(object.prefixCacheHitRate)
+        : isSet(object.prefix_cache_hit_rate)
+        ? globalThis.Number(object.prefix_cache_hit_rate)
+        : undefined,
+      prefixHitTokens: isSet(object.prefixHitTokens)
+        ? globalThis.String(object.prefixHitTokens)
+        : isSet(object.prefix_hit_tokens)
+        ? globalThis.String(object.prefix_hit_tokens)
+        : undefined,
       contextWindow: isSet(object.contextWindow)
         ? globalThis.Number(object.contextWindow)
         : isSet(object.context_window)
@@ -1306,20 +1373,29 @@ export const ContextUsage: MessageFns<ContextUsage> = {
 
   toJSON(message: ContextUsage): unknown {
     const obj: any = {};
-    if (message.inputTokens !== "0") {
-      obj.inputTokens = message.inputTokens;
+    if (message.cachedTokens !== "0") {
+      obj.cachedTokens = message.cachedTokens;
+    }
+    if (message.newTokens !== "0") {
+      obj.newTokens = message.newTokens;
+    }
+    if (message.totalInputTokens !== "0") {
+      obj.totalInputTokens = message.totalInputTokens;
     }
     if (message.outputTokens !== "0") {
       obj.outputTokens = message.outputTokens;
     }
-    if (message.cacheReadTokens !== "0") {
-      obj.cacheReadTokens = message.cacheReadTokens;
-    }
     if (message.cacheWriteTokens !== "0") {
       obj.cacheWriteTokens = message.cacheWriteTokens;
     }
-    if (message.totalTokens !== "0") {
-      obj.totalTokens = message.totalTokens;
+    if (message.providerCacheHitRate !== undefined) {
+      obj.providerCacheHitRate = message.providerCacheHitRate;
+    }
+    if (message.prefixCacheHitRate !== undefined) {
+      obj.prefixCacheHitRate = message.prefixCacheHitRate;
+    }
+    if (message.prefixHitTokens !== undefined) {
+      obj.prefixHitTokens = message.prefixHitTokens;
     }
     if (message.contextWindow !== 0) {
       obj.contextWindow = Math.round(message.contextWindow);
@@ -1332,11 +1408,14 @@ export const ContextUsage: MessageFns<ContextUsage> = {
   },
   fromPartial<I extends Exact<DeepPartial<ContextUsage>, I>>(object: I): ContextUsage {
     const message = createBaseContextUsage();
-    message.inputTokens = object.inputTokens ?? "0";
+    message.cachedTokens = object.cachedTokens ?? "0";
+    message.newTokens = object.newTokens ?? "0";
+    message.totalInputTokens = object.totalInputTokens ?? "0";
     message.outputTokens = object.outputTokens ?? "0";
-    message.cacheReadTokens = object.cacheReadTokens ?? "0";
     message.cacheWriteTokens = object.cacheWriteTokens ?? "0";
-    message.totalTokens = object.totalTokens ?? "0";
+    message.providerCacheHitRate = object.providerCacheHitRate ?? undefined;
+    message.prefixCacheHitRate = object.prefixCacheHitRate ?? undefined;
+    message.prefixHitTokens = object.prefixHitTokens ?? undefined;
     message.contextWindow = object.contextWindow ?? 0;
     return message;
   },
@@ -3135,14 +3214,17 @@ export const FeedBlock: MessageFns<FeedBlock> = {
       case "thinking":
         ThinkingBlock.encode(message.kind.thinking, writer.uint32(26).fork()).join();
         break;
-      case "tool":
-        ToolBlock.encode(message.kind.tool, writer.uint32(34).fork()).join();
-        break;
       case "toolResult":
         ToolResultBlock.encode(message.kind.toolResult, writer.uint32(42).fork()).join();
         break;
       case "plain":
         PlainBlock.encode(message.kind.plain, writer.uint32(50).fork()).join();
+        break;
+      case "toolCall":
+        ToolCallBlock.encode(message.kind.toolCall, writer.uint32(58).fork()).join();
+        break;
+      case "error":
+        ErrorBlock.encode(message.kind.error, writer.uint32(66).fork()).join();
         break;
     }
     return writer;
@@ -3179,14 +3261,6 @@ export const FeedBlock: MessageFns<FeedBlock> = {
           message.kind = { $case: "thinking", thinking: ThinkingBlock.decode(reader, reader.uint32()) };
           continue;
         }
-        case 4: {
-          if (tag !== 34) {
-            break;
-          }
-
-          message.kind = { $case: "tool", tool: ToolBlock.decode(reader, reader.uint32()) };
-          continue;
-        }
         case 5: {
           if (tag !== 42) {
             break;
@@ -3201,6 +3275,22 @@ export const FeedBlock: MessageFns<FeedBlock> = {
           }
 
           message.kind = { $case: "plain", plain: PlainBlock.decode(reader, reader.uint32()) };
+          continue;
+        }
+        case 7: {
+          if (tag !== 58) {
+            break;
+          }
+
+          message.kind = { $case: "toolCall", toolCall: ToolCallBlock.decode(reader, reader.uint32()) };
+          continue;
+        }
+        case 8: {
+          if (tag !== 66) {
+            break;
+          }
+
+          message.kind = { $case: "error", error: ErrorBlock.decode(reader, reader.uint32()) };
           continue;
         }
       }
@@ -3220,14 +3310,18 @@ export const FeedBlock: MessageFns<FeedBlock> = {
         ? { $case: "assistant", assistant: AssistantBlock.fromJSON(object.assistant) }
         : isSet(object.thinking)
         ? { $case: "thinking", thinking: ThinkingBlock.fromJSON(object.thinking) }
-        : isSet(object.tool)
-        ? { $case: "tool", tool: ToolBlock.fromJSON(object.tool) }
         : isSet(object.toolResult)
         ? { $case: "toolResult", toolResult: ToolResultBlock.fromJSON(object.toolResult) }
         : isSet(object.tool_result)
         ? { $case: "toolResult", toolResult: ToolResultBlock.fromJSON(object.tool_result) }
         : isSet(object.plain)
         ? { $case: "plain", plain: PlainBlock.fromJSON(object.plain) }
+        : isSet(object.toolCall)
+        ? { $case: "toolCall", toolCall: ToolCallBlock.fromJSON(object.toolCall) }
+        : isSet(object.tool_call)
+        ? { $case: "toolCall", toolCall: ToolCallBlock.fromJSON(object.tool_call) }
+        : isSet(object.error)
+        ? { $case: "error", error: ErrorBlock.fromJSON(object.error) }
         : undefined,
     };
   },
@@ -3240,12 +3334,14 @@ export const FeedBlock: MessageFns<FeedBlock> = {
       obj.assistant = AssistantBlock.toJSON(message.kind.assistant);
     } else if (message.kind?.$case === "thinking") {
       obj.thinking = ThinkingBlock.toJSON(message.kind.thinking);
-    } else if (message.kind?.$case === "tool") {
-      obj.tool = ToolBlock.toJSON(message.kind.tool);
     } else if (message.kind?.$case === "toolResult") {
       obj.toolResult = ToolResultBlock.toJSON(message.kind.toolResult);
     } else if (message.kind?.$case === "plain") {
       obj.plain = PlainBlock.toJSON(message.kind.plain);
+    } else if (message.kind?.$case === "toolCall") {
+      obj.toolCall = ToolCallBlock.toJSON(message.kind.toolCall);
+    } else if (message.kind?.$case === "error") {
+      obj.error = ErrorBlock.toJSON(message.kind.error);
     }
     return obj;
   },
@@ -3274,12 +3370,6 @@ export const FeedBlock: MessageFns<FeedBlock> = {
         }
         break;
       }
-      case "tool": {
-        if (object.kind?.tool !== undefined && object.kind?.tool !== null) {
-          message.kind = { $case: "tool", tool: ToolBlock.fromPartial(object.kind.tool) };
-        }
-        break;
-      }
       case "toolResult": {
         if (object.kind?.toolResult !== undefined && object.kind?.toolResult !== null) {
           message.kind = { $case: "toolResult", toolResult: ToolResultBlock.fromPartial(object.kind.toolResult) };
@@ -3289,6 +3379,18 @@ export const FeedBlock: MessageFns<FeedBlock> = {
       case "plain": {
         if (object.kind?.plain !== undefined && object.kind?.plain !== null) {
           message.kind = { $case: "plain", plain: PlainBlock.fromPartial(object.kind.plain) };
+        }
+        break;
+      }
+      case "toolCall": {
+        if (object.kind?.toolCall !== undefined && object.kind?.toolCall !== null) {
+          message.kind = { $case: "toolCall", toolCall: ToolCallBlock.fromPartial(object.kind.toolCall) };
+        }
+        break;
+      }
+      case "error": {
+        if (object.kind?.error !== undefined && object.kind?.error !== null) {
+          message.kind = { $case: "error", error: ErrorBlock.fromPartial(object.kind.error) };
         }
         break;
       }
@@ -3525,28 +3627,31 @@ export const ThinkingBlock: MessageFns<ThinkingBlock> = {
   },
 };
 
-function createBaseToolBlock(): ToolBlock {
-  return { name: "", args: "", timestamp: undefined };
+function createBaseToolCallBlock(): ToolCallBlock {
+  return { name: "", args: "", metadata: undefined, timestamp: undefined };
 }
 
-export const ToolBlock: MessageFns<ToolBlock> = {
-  encode(message: ToolBlock, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+export const ToolCallBlock: MessageFns<ToolCallBlock> = {
+  encode(message: ToolCallBlock, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.name !== "") {
       writer.uint32(10).string(message.name);
     }
     if (message.args !== "") {
       writer.uint32(18).string(message.args);
     }
+    if (message.metadata !== undefined) {
+      writer.uint32(26).string(message.metadata);
+    }
     if (message.timestamp !== undefined) {
-      writer.uint32(26).string(message.timestamp);
+      writer.uint32(34).string(message.timestamp);
     }
     return writer;
   },
 
-  decode(input: BinaryReader | Uint8Array, length?: number): ToolBlock {
+  decode(input: BinaryReader | Uint8Array, length?: number): ToolCallBlock {
     const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
     const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseToolBlock();
+    const message = createBaseToolCallBlock();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
@@ -3571,6 +3676,14 @@ export const ToolBlock: MessageFns<ToolBlock> = {
             break;
           }
 
+          message.metadata = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
           message.timestamp = reader.string();
           continue;
         }
@@ -3583,15 +3696,16 @@ export const ToolBlock: MessageFns<ToolBlock> = {
     return message;
   },
 
-  fromJSON(object: any): ToolBlock {
+  fromJSON(object: any): ToolCallBlock {
     return {
       name: isSet(object.name) ? globalThis.String(object.name) : "",
       args: isSet(object.args) ? globalThis.String(object.args) : "",
+      metadata: isSet(object.metadata) ? globalThis.String(object.metadata) : undefined,
       timestamp: isSet(object.timestamp) ? globalThis.String(object.timestamp) : undefined,
     };
   },
 
-  toJSON(message: ToolBlock): unknown {
+  toJSON(message: ToolCallBlock): unknown {
     const obj: any = {};
     if (message.name !== "") {
       obj.name = message.name;
@@ -3599,19 +3713,131 @@ export const ToolBlock: MessageFns<ToolBlock> = {
     if (message.args !== "") {
       obj.args = message.args;
     }
+    if (message.metadata !== undefined) {
+      obj.metadata = message.metadata;
+    }
     if (message.timestamp !== undefined) {
       obj.timestamp = message.timestamp;
     }
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<ToolBlock>, I>>(base?: I): ToolBlock {
-    return ToolBlock.fromPartial(base ?? ({} as any));
+  create<I extends Exact<DeepPartial<ToolCallBlock>, I>>(base?: I): ToolCallBlock {
+    return ToolCallBlock.fromPartial(base ?? ({} as any));
   },
-  fromPartial<I extends Exact<DeepPartial<ToolBlock>, I>>(object: I): ToolBlock {
-    const message = createBaseToolBlock();
+  fromPartial<I extends Exact<DeepPartial<ToolCallBlock>, I>>(object: I): ToolCallBlock {
+    const message = createBaseToolCallBlock();
     message.name = object.name ?? "";
     message.args = object.args ?? "";
+    message.metadata = object.metadata ?? undefined;
+    message.timestamp = object.timestamp ?? undefined;
+    return message;
+  },
+};
+
+function createBaseErrorBlock(): ErrorBlock {
+  return { message: "", code: undefined, recoverable: false, timestamp: undefined };
+}
+
+export const ErrorBlock: MessageFns<ErrorBlock> = {
+  encode(message: ErrorBlock, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.message !== "") {
+      writer.uint32(10).string(message.message);
+    }
+    if (message.code !== undefined) {
+      writer.uint32(18).string(message.code);
+    }
+    if (message.recoverable !== false) {
+      writer.uint32(24).bool(message.recoverable);
+    }
+    if (message.timestamp !== undefined) {
+      writer.uint32(34).string(message.timestamp);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ErrorBlock {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseErrorBlock();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.message = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.code = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.recoverable = reader.bool();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.timestamp = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ErrorBlock {
+    return {
+      message: isSet(object.message) ? globalThis.String(object.message) : "",
+      code: isSet(object.code) ? globalThis.String(object.code) : undefined,
+      recoverable: isSet(object.recoverable) ? globalThis.Boolean(object.recoverable) : false,
+      timestamp: isSet(object.timestamp) ? globalThis.String(object.timestamp) : undefined,
+    };
+  },
+
+  toJSON(message: ErrorBlock): unknown {
+    const obj: any = {};
+    if (message.message !== "") {
+      obj.message = message.message;
+    }
+    if (message.code !== undefined) {
+      obj.code = message.code;
+    }
+    if (message.recoverable !== false) {
+      obj.recoverable = message.recoverable;
+    }
+    if (message.timestamp !== undefined) {
+      obj.timestamp = message.timestamp;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ErrorBlock>, I>>(base?: I): ErrorBlock {
+    return ErrorBlock.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ErrorBlock>, I>>(object: I): ErrorBlock {
+    const message = createBaseErrorBlock();
+    message.message = object.message ?? "";
+    message.code = object.code ?? undefined;
+    message.recoverable = object.recoverable ?? false;
     message.timestamp = object.timestamp ?? undefined;
     return message;
   },

@@ -22,6 +22,7 @@ pub mod assembly;
 #[cfg(feature = "harness")]
 pub mod compaction;
 pub mod context;
+pub mod context_cache;
 #[cfg(feature = "harness")]
 pub mod cost;
 #[cfg(feature = "harness")]
@@ -169,6 +170,9 @@ pub(crate) struct AgentInner {
     pub idle: Notify,
     /// Hard cap on loop iterations (see [`AgentOptions::max_iterations`]).
     pub max_iterations: Option<u32>,
+    /// Per-session client-side prefix cache tracker (core-owned, daemon reads
+    /// the results through assistant message `Usage`).
+    pub context_cache: Mutex<crate::agent::context_cache::ContextCacheTracker>,
 }
 
 pub(crate) struct AgentRunPermit {
@@ -269,6 +273,7 @@ impl Agent {
             turn_cancel: Mutex::new(None),
             idle: Notify::new(),
             max_iterations,
+            context_cache: Mutex::new(crate::agent::context_cache::ContextCacheTracker::new()),
         };
         Self {
             inner: Arc::new(inner),

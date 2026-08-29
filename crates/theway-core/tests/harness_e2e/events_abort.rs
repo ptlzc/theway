@@ -73,6 +73,9 @@ async fn budget_cap_blocks_new_prompts_after_cap_reached() {
         cache_read: 0,
         cache_write: 0,
         total_tokens: 15,
+        prefix_hit_tokens: None,
+        prefix_cache_hit_rate: None,
+        provider_cache_hit_rate: None,
         cost: UsageCost {
             input: 0.04,
             output: 0.02,
@@ -199,6 +202,9 @@ async fn cost_tracker_accumulates_across_turns() {
         cache_read: 3,
         cache_write: 0,
         total_tokens: 35,
+        prefix_hit_tokens: None,
+        prefix_cache_hit_rate: None,
+        provider_cache_hit_rate: None,
         cost: UsageCost {
             input: 0.01,
             output: 0.02,
