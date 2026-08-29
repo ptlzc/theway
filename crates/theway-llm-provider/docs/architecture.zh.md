@@ -24,7 +24,7 @@ Provider 模块只在该模型与外部 wire 协议之间转换。`AgentMessage`
 
 ## 请求与流流水线
 
-发送请求前，[`providers/transform_messages.rs`](../src/providers/transform_messages.rs) 按目标模型能力调整历史。它可以降级不支持的图像、转换不兼容 thinking block、规范化工具调用标识、移除不可用错误 turn，并补全缺失工具结果，使 provider API 收到合法工具序列。
+发送请求前，[`providers/transform_messages.rs`](../src/providers/transform_messages.rs) 按目标模型能力调整历史。它可以降级不支持的图像、转换不兼容 thinking block、规范化工具调用标识、移除不可用错误 turn，并删除孤儿工具调用，使 provider API 收到合法工具序列。
 
 [`providers/mod.rs`](../src/providers/mod.rs) 下每个 provider 模块负责请求 body、认证 header、端点选择、流解码、usage/stop reason 映射和协议专用工具/thinking 转换。共享 Responses、Google、prompt cache、SSE、AWS event stream、retry、overflow、validation 和 Unicode 辅助逻辑保留在 `providers/` 对应共享模块或 [`utils/mod.rs`](../src/utils/mod.rs)。
 

@@ -7,7 +7,8 @@
 //! - drop redacted thinking cross-model; convert plain thinking to text cross-model
 //! - strip `thought_signature` cross-model; normalise tool-call ids
 //! - skip errored/aborted assistant turns
-//! - synthesize empty tool results for orphaned tool calls
+//! - drop orphaned tool calls (and their unmatched tool results) so provider APIs
+//!   never see an assistant tool call without a corresponding tool message
 
 use std::collections::{HashMap, HashSet};
 
@@ -151,39 +152,54 @@ pub fn transform_messages(
         })
         .collect();
 
-    // Second pass: synthesize empty tool results for orphaned tool calls.
+    // Second pass: drop orphaned tool calls and unmatched tool results. An assistant
+    // tool call without a matching tool result is incomplete (e.g. a daemon restart
+    // interrupted execution before the result was persisted). Removing the orphan keeps
+    // the history valid without inventing a fake result.
     let mut result: Vec<Message> = Vec::with_capacity(transformed.len());
     let mut pending: Vec<ToolCall> = Vec::new();
     let mut existing_ids: HashSet<String> = HashSet::new();
 
-    fn flush(
+    fn remove_orphan_tool_calls(
         result: &mut Vec<Message>,
-        pending: &mut Vec<ToolCall>,
-        existing_ids: &mut HashSet<String>,
+        pending: &[ToolCall],
+        existing_ids: &HashSet<String>,
     ) {
         if pending.is_empty() {
             return;
         }
-        for tc in pending.drain(..) {
-            if !existing_ids.contains(&tc.id) {
-                result.push(Message::ToolResult(ToolResultMessage {
-                    role: ToolResultRole::ToolResult,
-                    tool_call_id: tc.id,
-                    tool_name: tc.name,
-                    content: vec![UserContentBlock::text("No result provided")],
-                    details: None,
-                    is_error: true,
-                    timestamp: chrono::Utc::now().timestamp_millis(),
-                }));
-            }
+        let orphan_ids: HashSet<&str> = pending
+            .iter()
+            .filter(|tc| !existing_ids.contains(&tc.id))
+            .map(|tc| tc.id.as_str())
+            .collect();
+        if orphan_ids.is_empty() {
+            return;
         }
-        existing_ids.clear();
+        let Some(idx) = result
+            .iter()
+            .rposition(|m| matches!(m, Message::Assistant(_)))
+        else {
+            return;
+        };
+        let Message::Assistant(a) = &mut result[idx] else {
+            return;
+        };
+        a.content.retain(|block| match block {
+            ContentBlock::ToolCall(tc) => !orphan_ids.contains(tc.id.as_str()),
+            _ => true,
+        });
+        if a.content.is_empty() {
+            result.remove(idx);
+        }
     }
 
     for msg in transformed {
         match msg {
             Message::Assistant(a) => {
-                flush(&mut result, &mut pending, &mut existing_ids);
+                remove_orphan_tool_calls(&mut result, &pending, &existing_ids);
+                pending.clear();
+                existing_ids.clear();
                 // Skip errored/aborted assistant turns — incomplete, must not be replayed.
                 if matches!(a.stop_reason, StopReason::Error | StopReason::Aborted) {
                     continue;
@@ -203,16 +219,21 @@ pub fn transform_messages(
                 result.push(Message::Assistant(a));
             }
             Message::ToolResult(tr) => {
-                existing_ids.insert(tr.tool_call_id.clone());
-                result.push(Message::ToolResult(tr));
+                if pending.iter().any(|tc| tc.id == tr.tool_call_id) {
+                    existing_ids.insert(tr.tool_call_id.clone());
+                    result.push(Message::ToolResult(tr));
+                }
+                // Drop tool results that do not match a pending assistant tool call.
             }
             Message::User(u) => {
-                flush(&mut result, &mut pending, &mut existing_ids);
+                remove_orphan_tool_calls(&mut result, &pending, &existing_ids);
+                pending.clear();
+                existing_ids.clear();
                 result.push(Message::User(u));
             }
         }
     }
-    flush(&mut result, &mut pending, &mut existing_ids);
+    remove_orphan_tool_calls(&mut result, &pending, &existing_ids);
 
     result
 }
@@ -295,7 +316,7 @@ mod tests {
     }
 
     #[test]
-    fn orphaned_tool_call_gets_synthetic_result() {
+    fn orphaned_tool_call_is_dropped() {
         let mut args = serde_json::Map::new();
         args.insert("x".into(), serde_json::json!(1));
         let msgs = vec![
@@ -316,11 +337,90 @@ mod tests {
             }),
         ];
         let out = transform_messages(msgs, &target_model(), None);
-        // assistant, synthetic toolResult, user
+        // The orphaned assistant tool-call turn is removed; only the user turn remains.
+        assert_eq!(out.len(), 1);
+        assert!(matches!(out[0], Message::User(_)));
+    }
+
+    #[test]
+    fn orphaned_parallel_tool_call_is_dropped_while_matched_one_survives() {
+        let mut args = serde_json::Map::new();
+        args.insert("x".into(), serde_json::json!(1));
+        let msgs = vec![
+            assistant_from(
+                "anthropic",
+                vec![
+                    ContentBlock::ToolCall(ToolCall {
+                        id: "call_1".into(),
+                        name: "tool".into(),
+                        arguments: args.clone(),
+                        thought_signature: None,
+                    }),
+                    ContentBlock::ToolCall(ToolCall {
+                        id: "call_2".into(),
+                        name: "tool".into(),
+                        arguments: args,
+                        thought_signature: None,
+                    }),
+                ],
+                StopReason::ToolUse,
+            ),
+            Message::ToolResult(ToolResultMessage {
+                role: ToolResultRole::ToolResult,
+                tool_call_id: "call_1".into(),
+                tool_name: "tool".into(),
+                content: vec![UserContentBlock::text("done")],
+                details: None,
+                is_error: false,
+                timestamp: 0,
+            }),
+            Message::User(UserMessage {
+                role: UserRole::User,
+                content: UserContent::Text("continue".into()),
+                timestamp: 0,
+            }),
+        ];
+        let out = transform_messages(msgs, &target_model(), None);
         assert_eq!(out.len(), 3);
-        assert!(
-            matches!(out[1], Message::ToolResult(ref tr) if tr.is_error && tr.tool_call_id == "call_1")
-        );
+        match &out[0] {
+            Message::Assistant(a) => {
+                let calls: Vec<_> = a
+                    .content
+                    .iter()
+                    .filter_map(|b| match b {
+                        ContentBlock::ToolCall(tc) => Some(tc.id.as_str()),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(calls, vec!["call_1"]);
+            }
+            _ => panic!("expected assistant"),
+        }
+        assert!(matches!(&out[1], Message::ToolResult(tr) if tr.tool_call_id == "call_1"));
+        assert!(matches!(&out[2], Message::User(_)));
+    }
+
+    #[test]
+    fn unmatched_tool_result_is_dropped() {
+        let msgs = vec![
+            Message::ToolResult(ToolResultMessage {
+                role: ToolResultRole::ToolResult,
+                tool_call_id: "call_orphan".into(),
+                tool_name: "tool".into(),
+                content: vec![UserContentBlock::text("done")],
+                details: None,
+                is_error: false,
+                timestamp: 0,
+            }),
+            Message::User(UserMessage {
+                role: UserRole::User,
+                content: UserContent::Text("continue".into()),
+                timestamp: 0,
+            }),
+        ];
+        let out = transform_messages(msgs, &target_model(), None);
+        assert_eq!(out.len(), 1);
+        assert!(matches!(out[0], Message::User(_)));
     }
 
     #[test]

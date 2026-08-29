@@ -24,7 +24,7 @@ Provider modules convert only between this model and an external wire protocol. 
 
 ## Request and stream pipeline
 
-Before a provider sends a request, [`providers/transform_messages.rs`](../src/providers/transform_messages.rs) reconciles history with target-model capabilities. It can downgrade unsupported images, convert incompatible thinking blocks, normalize tool-call ids, remove unusable error turns, and synthesize missing tool results so provider APIs receive a valid tool sequence.
+Before a provider sends a request, [`providers/transform_messages.rs`](../src/providers/transform_messages.rs) reconciles history with target-model capabilities. It can downgrade unsupported images, convert incompatible thinking blocks, normalize tool-call ids, remove unusable error turns, and drop orphaned tool calls so provider APIs receive a valid tool sequence.
 
 Each provider module under [`providers/mod.rs`](../src/providers/mod.rs) owns request-body construction, authentication headers, endpoint selection, stream decoding, usage mapping, stop-reason mapping, and protocol-specific tool/thinking conversion. Shared Responses, Google, prompt-cache, SSE, AWS event-stream, retry, overflow, validation, and Unicode helpers stay in their corresponding shared modules under `providers/` or [`utils/mod.rs`](../src/utils/mod.rs).
 

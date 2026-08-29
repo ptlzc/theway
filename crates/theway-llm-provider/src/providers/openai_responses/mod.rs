@@ -10,8 +10,10 @@
 //! - `reasoning.effort` + `reasoning.summary` + `include: ["reasoning.encrypted_content"]`
 //! - service_tier knob (cost multiplier TODO)
 //!
+//! Cross-provider history cleanup (including orphaned tool-call removal) is applied
+//! centrally in [`crate::stream`] before any provider serializes a request.
+//!
 //! TODO:
-//! - Cross-provider transform_messages
 //! - GitHub Copilot dynamic headers + Cloudflare AI Gateway URL rewriting
 //! - Tool-call id `call|item` normalization across provider handoffs
 //! - service_tier pricing multiplier
