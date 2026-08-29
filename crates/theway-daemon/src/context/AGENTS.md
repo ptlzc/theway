@@ -40,6 +40,14 @@ maps the known custom summary roles to framed user text.
 4. Raw transcripts stay out of the default context and remain available
    through `session_graph_read`.
 
+## Editing rule
+
+When a user asks to adjust one of the example prompts in this document, modify
+the prompt-composition source code (`system_prompt.rs`, `lineage.rs`, or
+`service.rs`), not the example text itself. The examples are renderings of the
+source behavior; changing only the example would make this document diverge
+from the actual system prompt.
+
 ## Example contexts
 
 ### 1. Normal session, no collapse lineage
