@@ -50,4 +50,4 @@ graph TD
 - [x] 6.2 `cargo clippy --workspace --all-targets -- -D warnings` green (per-crate if probe build blocks workspace)
 - [x] 6.3 `cargo fmt --all --check` green
 - [x] 6.4 SDK regeneration check (`make sdks-check` or repo sdk sync)
-- [ ] 6.5 Push commits and close #51, #52
+- [x] 6.5 Push commits and close #51, #52
