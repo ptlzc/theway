@@ -120,6 +120,31 @@ async fn collapse_material_reads_compaction_summary_session_id_and_graph_state()
 }
 
 #[tokio::test]
+async fn collapse_material_falls_back_to_compact_context_for_nested_collapse() {
+    // Arrange: a collapse child has a compact_context entry but no Compaction.
+    let storage = std::sync::Arc::new(MemorySessionStorage::new());
+    let session = Session::new(storage);
+    session
+        .append_custom(
+            crate::agent::context::collapse::COMPACT_CONTEXT_CUSTOM_TYPE,
+            Some(serde_json::json!({
+                "sourceSessionId": "parent-session",
+                "compactText": "previous generation summary",
+                "rawTextRef": "parent-session",
+            })),
+        )
+        .await
+        .unwrap();
+
+    // Act
+    let (compact_text, raw_text_ref, _) = collapse_material(&session).await;
+
+    // Assert
+    assert_eq!(compact_text, "previous generation summary");
+    assert!(!raw_text_ref.is_empty());
+}
+
+#[tokio::test]
 async fn collapse_material_accepts_bare_graph_state() {
     // Arrange
     let state = SessionGraphState::default();

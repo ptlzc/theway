@@ -82,7 +82,7 @@ pub trait CollapseMaterialSource {
 #[async_trait]
 impl CollapseMaterialSource for Session {
     async fn compact_text(&self) -> String {
-        self.latest_compaction_summary()
+        self.latest_collapse_summary()
             .await
             .ok()
             .flatten()
@@ -121,7 +121,7 @@ impl CollapseMaterialSource for SessionGraphState {
 impl CollapseMaterialSource for &Session {
     async fn compact_text(&self) -> String {
         (**self)
-            .latest_compaction_summary()
+            .latest_collapse_summary()
             .await
             .ok()
             .flatten()

@@ -527,6 +527,24 @@ impl Session {
         }))
     }
 
+    /// Read the collapse rolling-summary input for this session.
+    ///
+    /// Priority: newest non-empty `Compaction` summary first, then newest
+    /// non-empty `compact_context.compactText`. The fallback keeps nested
+    /// collapses rolling: collapsing a collapse child (which has no new
+    /// compaction) still inherits its previous-generation summary.
+    pub async fn latest_collapse_summary(&self) -> Result<Option<String>, SessionError> {
+        if let Some(summary) = self.latest_compaction_summary().await? {
+            return Ok(Some(summary));
+        }
+        let entries = self.entries().await?;
+        Ok(entries.iter().rev().find_map(|entry| {
+            crate::agent::context::collapse::compact_context_from_entry(entry)
+                .map(|context| context.compact_text)
+                .filter(|text| !text.trim().is_empty())
+        }))
+    }
+
     /// Read the newest `compact_context` entry written by collapse.
     pub async fn compact_context(&self) -> Result<Option<CompactContext>, SessionError> {
         let entries = self.entries().await?;
