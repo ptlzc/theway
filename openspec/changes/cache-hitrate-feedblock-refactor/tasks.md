@@ -46,7 +46,7 @@ graph TD
 
 ## 6. Verification & Close
 
-- [ ] 6.1 `cargo test -p theway-transport -p theway-core -p theway-daemon -p theway-tui` green
+- [x] 6.1 `cargo test -p theway-transport -p theway-core -p theway-daemon -p theway-tui` green
 - [x] 6.2 `cargo clippy --workspace --all-targets -- -D warnings` green (per-crate if probe build blocks workspace)
 - [x] 6.3 `cargo fmt --all --check` green
 - [x] 6.4 SDK regeneration check (`make sdks-check` or repo sdk sync)
