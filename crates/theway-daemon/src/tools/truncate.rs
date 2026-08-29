@@ -4,10 +4,6 @@
 pub const DEFAULT_MAX_LINES: usize = 2_000;
 pub const DEFAULT_MAX_BYTES: usize = 256 * 1024; // 256 KiB
 
-/// Loose insurance cap for full-output tools (`bash`, `git`): outputs below this
-/// are stored/returned in full; only larger outputs are tail-truncated.
-pub const SAFE_MAX_BYTES: usize = 10 * 1024 * 1024; // 10 MiB
-
 #[derive(Clone, Debug, Default)]
 pub struct Truncation {
     pub total_lines: usize,

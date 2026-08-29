@@ -27,7 +27,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::exec::run_with_kill_on_timeout_or_cancel;
 
-use super::truncate::{SAFE_MAX_BYTES, truncate_tail};
+use super::truncate::{DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, truncate_tail};
 
 /// Default command timeout when the agent does not pass `timeout`.
 ///
@@ -102,7 +102,6 @@ impl AgentTool for BashTool {
         .await?;
 
         let exit = outcome.rendered_exit();
-        let (stdout_trim, st) = truncate_tail(&outcome.stdout, usize::MAX, SAFE_MAX_BYTES);
         let mut stderr_full = outcome.stderr;
         if let Some(suffix) = &outcome.stderr_suffix {
             if !stderr_full.is_empty() && !stderr_full.ends_with('\n') {
@@ -110,7 +109,29 @@ impl AgentTool for BashTool {
             }
             stderr_full.push_str(suffix);
         }
-        let (stderr_trim, _) = truncate_tail(&stderr_full, usize::MAX, SAFE_MAX_BYTES);
+
+        // Keep the full rendered result in details so session_tool_result can page
+        // through it later, while the model-visible content stays bounded.
+        let mut full_text = format!("$ {command}\n");
+        if !outcome.stdout.is_empty() {
+            full_text.push_str(&outcome.stdout);
+            if !outcome.stdout.ends_with('\n') {
+                full_text.push('\n');
+            }
+        }
+        if !stderr_full.is_empty() {
+            full_text.push_str("[stderr]\n");
+            full_text.push_str(&stderr_full);
+            if !stderr_full.ends_with('\n') {
+                full_text.push('\n');
+            }
+        }
+        full_text.push_str(&format!("[exit {exit}]"));
+
+        let (stdout_trim, st) =
+            truncate_tail(&outcome.stdout, DEFAULT_MAX_LINES, DEFAULT_MAX_BYTES);
+        let (stderr_trim, stderr_st) =
+            truncate_tail(&stderr_full, DEFAULT_MAX_LINES, DEFAULT_MAX_BYTES);
         let mut text = format!("$ {command}\n");
         if let Some(note) = st.note() {
             text.push_str(&note);
@@ -132,12 +153,15 @@ impl AgentTool for BashTool {
         text.push_str(&format!("[exit {exit}]"));
 
         let is_error = exit != 0;
+        let truncated = st.truncated_lines > 0 || stderr_st.truncated_lines > 0;
         Ok(AgentToolResult {
             content: vec![UserContentBlock::text(text)],
             details: json!({
                 "command": command,
                 "exitCode": exit,
                 "isError": is_error,
+                "full_text": full_text,
+                "truncated": truncated,
             }),
             terminate: None,
         })
@@ -148,8 +172,8 @@ use once_cell::sync::Lazy;
 static DEFINITION: Lazy<Tool> = Lazy::new(|| Tool {
     name: "bash".into(),
     description: format!(
-        "Run a shell command via `sh -c`. With `run_in_background: true` the command runs in a background shell and the tool returns its shell_id immediately — manage it with get_output / kill_shell / write_to_process. Returns stdout+stderr (full output up to a {} MiB safety cap) and exit code. Optional `timeout` in seconds. Timeouts and cancellations kill the child process; stdout and stderr are drained concurrently so high-output commands do not deadlock the tool.",
-        SAFE_MAX_BYTES / (1024 * 1024)
+        "Run a shell command via `sh -c`. With `run_in_background: true` the command runs in a background shell and the tool returns its shell_id immediately — manage it with get_output / kill_shell / write_to_process. Returns stdout+stderr (tail-truncated to {DEFAULT_MAX_LINES} lines / {} KiB) and exit code. Optional `timeout` in seconds. Timeouts and cancellations kill the child process; stdout and stderr are drained concurrently so high-output commands do not deadlock the tool.",
+        DEFAULT_MAX_BYTES / 1024
     ),
     parameters: json!({
         "type": "object",

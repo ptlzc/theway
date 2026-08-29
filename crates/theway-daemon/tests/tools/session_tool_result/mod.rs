@@ -37,6 +37,24 @@ fn stored_tool_result(id: &str, call_id: &str, tool_name: &str, content: &str) -
     encode_session_entry(&entry).expect("encode fixture")
 }
 
+fn stored_tool_result_with_full(
+    id: &str,
+    call_id: &str,
+    tool_name: &str,
+    content: &str,
+    full_text: &str,
+) -> StoredSessionEntry {
+    let mut message = tool_result_message(call_id, tool_name, content);
+    message.details = Some(json!({ "exitCode": 0, "full_text": full_text }));
+    let entry = SessionTreeEntry::Message {
+        id: id.into(),
+        parent_id: None,
+        timestamp: "2026-01-01T00:00:00Z".into(),
+        message: AgentMessage::Llm(PiMessage::ToolResult(message)),
+    };
+    encode_session_entry(&entry).expect("encode fixture")
+}
+
 #[derive(Default)]
 struct FakeStore {
     entries: Mutex<Vec<StoredSessionEntry>>,
@@ -222,6 +240,38 @@ async fn read_returns_paginated_chunk_and_has_more() {
 }
 
 #[tokio::test]
+async fn read_uses_full_text_from_details_when_content_is_truncated() {
+    let store = Arc::new(FakeStore::default());
+    store
+        .append_entries(vec![stored_tool_result_with_full(
+            "e1",
+            "call_1",
+            "bash",
+            "truncated line\n",
+            "line1\nline2\nline3\n",
+        )])
+        .await
+        .unwrap();
+    let tool = read_tool(store);
+
+    let result = tool
+        .execute(
+            "r",
+            json!({ "tool_call_id": "call_1", "offset": 1, "max_lines": 10 }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+    let text = match &result.content[0] {
+        UserContentBlock::Text(t) => t.text.clone(),
+        _ => panic!("expected text"),
+    };
+    assert!(text.contains("line3"), "full_text should be read: {text}");
+    assert_eq!(result.details["total_lines"], 3);
+}
+
+#[tokio::test]
 async fn read_unknown_call_id_errors() {
     let store = Arc::new(FakeStore::default());
     let tool = read_tool(store);
@@ -277,6 +327,37 @@ async fn grep_returns_line_numbers_and_matches() {
     assert!(text.contains("3:alpha gamma"), "got: {text}");
     assert_eq!(result.details["matches"].as_array().unwrap().len(), 2);
     assert_eq!(result.details["truncated"], false);
+}
+
+#[tokio::test]
+async fn grep_uses_full_text_from_details_when_content_is_truncated() {
+    let store = Arc::new(FakeStore::default());
+    store
+        .append_entries(vec![stored_tool_result_with_full(
+            "e1",
+            "call_1",
+            "bash",
+            "truncated line\n",
+            "alpha\nbeta\ngamma\n",
+        )])
+        .await
+        .unwrap();
+    let tool = grep_tool(store);
+
+    let result = tool
+        .execute(
+            "g",
+            json!({ "tool_call_id": "call_1", "pattern": "gamma" }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+    let text = match &result.content[0] {
+        UserContentBlock::Text(t) => t.text.clone(),
+        _ => panic!("expected text"),
+    };
+    assert!(text.contains("3:gamma"), "full_text should be grepped: {text}");
 }
 
 #[tokio::test]

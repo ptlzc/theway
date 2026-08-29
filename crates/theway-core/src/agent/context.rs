@@ -36,7 +36,7 @@ pub fn virtualize_tool_results(messages: Vec<AgentMessage>) -> Vec<AgentMessage>
 }
 
 fn virtualize_tool_result(mut result: ToolResultMessage) -> ToolResultMessage {
-    let full_text = tool_result_text(&result.content);
+    let full_text = tool_result_text(&result);
     if full_text.len() <= TOOL_RESULT_VIRTUALIZATION_THRESHOLD_BYTES {
         return result;
     }
@@ -61,8 +61,17 @@ fn virtualize_tool_result(mut result: ToolResultMessage) -> ToolResultMessage {
     result
 }
 
-fn tool_result_text(content: &[UserContentBlock]) -> String {
-    content
+fn tool_result_text(result: &ToolResultMessage) -> String {
+    // Tools that truncate their model-visible content keep the full text in
+    // `details.full_text` so context virtualization and on-demand reads still see
+    // the complete output.
+    if let Some(details) = &result.details {
+        if let Some(full) = details.get("full_text").and_then(|v| v.as_str()) {
+            return full.to_string();
+        }
+    }
+    result
+        .content
         .iter()
         .filter_map(|block| match block {
             UserContentBlock::Text(text) => Some(text.text.as_str()),

@@ -124,6 +124,23 @@ fn missing_exit_code_uses_is_error() {
 }
 
 #[test]
+fn virtualization_uses_full_text_from_details() {
+    let message = tool_result(
+        "call_1",
+        "bash",
+        "truncated line\n",
+        Some(json!({ "exitCode": 0, "full_text": "x".repeat(5000) })),
+        false,
+    );
+    let out = virtualize_tool_results(vec![message]);
+    let text = text_of(&out[0]);
+    assert!(
+        text.contains("[tool_result bash call_1: 5000 / 1, exit 0;"),
+        "placeholder should reflect full_text from details: {text}"
+    );
+}
+
+#[test]
 fn virtualization_is_deterministic() {
     let message = tool_result(
         "call_1",

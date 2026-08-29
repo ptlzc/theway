@@ -20,7 +20,7 @@ use theway_llm_provider::{Tool, UserContentBlock};
 use tokio_util::sync::CancellationToken;
 
 const SUBCOMMANDS: &[&str] = &["status", "diff", "log"];
-const SAFE_MAX_BYTES: usize = 10 * 1024 * 1024; // 10 MiB insurance cap
+const MAX_OUTPUT_BYTES: usize = 64 * 1024;
 
 /// Wall-clock bound for a git invocation — mirrors the `LocalExecutor` git timeout
 /// (cwd/timeout semantics align with the executor, sdk-split-local-sandbox node 8).
@@ -112,11 +112,11 @@ impl AgentTool for GitTool {
         } else {
             output.stdout
         };
-        let (body, truncated) = truncate(&body);
-
         let header = format!("git {subcommand} (cwd={})\n", cwd.as_deref().unwrap_or("."));
+        let full_text = format!("{header}{body}");
+        let (body, truncated) = truncate(&body);
         let suffix = if truncated {
-            format!("\n\n(truncated at {} MiB)", SAFE_MAX_BYTES / (1024 * 1024))
+            format!("\n\n(truncated at {} KiB)", MAX_OUTPUT_BYTES / 1024)
         } else {
             String::new()
         };
@@ -126,6 +126,7 @@ impl AgentTool for GitTool {
                 "subcommand": subcommand,
                 "exit_status": output.exit_code,
                 "argv": argv,
+                "full_text": full_text,
                 "truncated": truncated,
             }),
             terminate: None,
@@ -158,10 +159,10 @@ fn build_argv(subcommand: &str, extra: &[String]) -> Vec<String> {
 }
 
 fn truncate(s: &str) -> (String, bool) {
-    if s.len() <= SAFE_MAX_BYTES {
+    if s.len() <= MAX_OUTPUT_BYTES {
         return (s.to_string(), false);
     }
-    let mut end = SAFE_MAX_BYTES;
+    let mut end = MAX_OUTPUT_BYTES;
     while !s.is_char_boundary(end) {
         end -= 1;
     }

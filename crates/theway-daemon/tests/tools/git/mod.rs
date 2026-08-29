@@ -192,10 +192,10 @@ fn truncate_under_limit_returns_unchanged_and_not_truncated() {
 
 #[test]
 fn truncate_over_limit_steps_back_to_char_boundary() {
-    // Arrange: SAFE_MAX_BYTES-1 ASCII bytes, then a 2-byte `é` straddling SAFE_MAX_BYTES.
-    let prefix = "a".repeat(SAFE_MAX_BYTES - 1);
+    // Arrange: MAX_OUTPUT_BYTES-1 ASCII bytes, then a 2-byte `é` straddling MAX_OUTPUT_BYTES.
+    let prefix = "a".repeat(MAX_OUTPUT_BYTES - 1);
     let s = format!("{prefix}é{}", "b".repeat(100));
-    assert!(s.len() > SAFE_MAX_BYTES);
+    assert!(s.len() > MAX_OUTPUT_BYTES);
 
     // Act
     let (out, truncated) = truncate(&s);
@@ -260,6 +260,10 @@ async fn execute_renders_success_with_header_and_details() {
     assert_eq!(result.details["subcommand"], "status");
     assert_eq!(result.details["exit_status"], 0);
     assert_eq!(result.details["truncated"], false);
+    assert_eq!(
+        result.details["full_text"],
+        "git status (cwd=/tmp/repo)\n M file.txt\n"
+    );
     assert_eq!(
         result.details["argv"],
         json!(["status", "--short", "--branch", "--ignored"])

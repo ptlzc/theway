@@ -264,9 +264,10 @@ async fn high_volume_stderr_does_not_deadlock_stdout() {
     assert!(text.contains("[stderr]"));
 }
 
-/// Outputs below the 10 MiB safety cap are returned in full (no `[truncated]` note).
+/// Outputs above the 256 KiB truncation cap are tail-truncated in content, while
+/// the full text is preserved in details for on-demand session_tool_result reads.
 #[tokio::test]
-async fn large_output_below_safety_cap_is_not_truncated() {
+async fn large_output_is_truncated_and_full_text_stored_in_details() {
     let tool = BashTool;
     let result = tool
         .execute(
@@ -278,8 +279,13 @@ async fn large_output_below_safety_cap_is_not_truncated() {
         .await
         .expect("large output should not error");
     let text = text_of(&result);
-    assert!(!text.contains("[truncated"), "got: {text}");
+    assert!(text.contains("[truncated"), "got: {text}");
     assert!(text.contains("[exit 0]"), "got: {text}");
+    let full_text = result.details["full_text"]
+        .as_str()
+        .expect("full_text in details");
+    assert!(full_text.contains(&"x".repeat(300_000)), "full text missing");
+    assert_eq!(result.details["truncated"], true);
 }
 
 /// Sanity: a small, fast command still works the same as before.

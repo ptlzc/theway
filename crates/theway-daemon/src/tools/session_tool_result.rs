@@ -97,6 +97,13 @@ async fn find_tool_result(
 }
 
 fn tool_result_text(result: &ToolResultMessage) -> String {
+    // Truncated tool results keep the full text in `details.full_text`; prefer it
+    // so session_tool_result / session_tool_result_grep operate on complete output.
+    if let Some(details) = &result.details {
+        if let Some(full) = details.get("full_text").and_then(|v| v.as_str()) {
+            return full.to_string();
+        }
+    }
     result
         .content
         .iter()
