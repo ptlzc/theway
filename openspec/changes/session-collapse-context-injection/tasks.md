@@ -27,4 +27,4 @@
 - [x] 4.1 增加集成测试：collapse 创建 child 后，`child.build_context()` 包含 compactText；daemon context 模块组装 system prompt 包含 lineage。
 - [x] 4.2 运行 `cargo test -p theway-core -p theway-daemon -p theway-storage` 相关测试。
 - [x] 4.3 运行 `cargo clippy --workspace --all-targets -- -D warnings` 与 `cargo fmt --all --check`。
-- [ ] 4.4 按 crate 小步提交，Conventional Commits 引用 issue #53；推送前 `git fetch + rebase origin/main`。
+- [x] 4.4 按 crate 小步提交，Conventional Commits 引用 issue #53；推送前 `git fetch + rebase origin/main`。
