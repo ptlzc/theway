@@ -4,6 +4,7 @@
 //! tools/call (bash executes), and unknown-tool error.
 
 use serde_json::json;
+use tempfile::TempDir;
 use theway_mcp::{McpClient, StdioTransport};
 
 fn thewayd_bin() -> &'static str {
@@ -12,10 +13,27 @@ fn thewayd_bin() -> &'static str {
 
 #[tokio::test]
 async fn mcp_server_initialize_tools_list_and_call() {
+    // Run the MCP server from an empty scratch cwd/home so local source
+    // discovery (skills, MCP clients, hooks) does not scan the repository and
+    // stall startup.
+    let cwd = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    let data = TempDir::new().unwrap();
     let transport = Arc::new(
-        StdioTransport::spawn(thewayd_bin(), &["--mcp"])
-            .await
-            .expect("spawn theway --mcp"),
+        StdioTransport::spawn(
+            thewayd_bin(),
+            &[
+                "--mcp",
+                "--cwd",
+                cwd.path().to_str().unwrap(),
+                "--home",
+                home.path().to_str().unwrap(),
+                "--theway-dir",
+                data.path().to_str().unwrap(),
+            ],
+        )
+        .await
+        .expect("spawn theway --mcp"),
     );
     let client = McpClient::new(transport);
 
