@@ -45,6 +45,19 @@ maps the known custom summary roles to framed user text.
 6. The harness introduction is customizable per session through the
    `harnessIntroduction` session metadata key.
 
+The `<harness>` block carries four runtime-model descriptions before the
+behavioral rules:
+
+1. Session model: append-only message tree, compaction tail/summary, and
+   virtualized tool results (`session_tool_result` / `session_tool_result_grep`).
+2. Collapse model: collapsed sessions become graph nodes; full transcripts are
+   read on demand through `session_graph_read` / `session_graph_status` /
+   `session_graph_wait` / `session_graph_attach`.
+3. Exploration model: outline + offset/limit reads + grep before edits.
+4. Graph and subagent orchestration principles: dependency-declared DAG nodes,
+   file-disjoint parallel tasks, `dag_wait` harvesting, orchestrator-owned git
+   history.
+
 ## Editing rule
 
 When a user asks to adjust one of the example prompts in this document, modify

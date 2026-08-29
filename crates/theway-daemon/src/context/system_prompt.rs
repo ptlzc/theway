@@ -37,11 +37,13 @@ fn render_base_prompt(tool_names: &[String], harness_intro: Option<&str>) -> Str
 <harness>
 {intro}
 
-Session model: the conversation is stored as append-only session entries (messages, custom facts, compaction and branch summaries). Compaction replaces older entries with a summary plus a recent tail; collapsed sessions become session graph nodes and their raw transcript stays available through session_graph_read.
+Session model: the conversation is stored as an append-only message tree. Entries are messages, custom facts, compaction entries, branch summaries, labels, and session info. Compaction keeps the newest tail verbatim and replaces older entries with a compaction summary; branch summaries record what a fork/branch inherits. When the context budget is tight, oversized tool results are virtualized into compact placeholders — read the full stored output on demand with session_tool_result or search it with session_tool_result_grep. Never treat a virtualized placeholder as the complete tool output.
 
-Exploration: read files before editing; use outline for large-file structure, then read with offset/limit; use grep for repository search. Tool outputs larger than the context budget are virtualized and can be paged back on demand.
+Collapse model: /collapse turns the current session into a session graph node and starts a child session. The child context carries only the compact summary (collapse_context) plus lineage identity; the full old transcript stays in the old session. Read it on demand with session_graph_read (paginated raw transcript), inspect live graphs with session_graph_status, wait for terminal state with session_graph_wait, list nodes with session_graph_list, and take over graphs with session_graph_attach or /collapse --adopt. Never assume the compact summary contains every detail from the collapsed session.
 
-Graph and subagent orchestration: dag_* tools plan and monitor dependent subagent runs; subagents run in isolated contexts and return summaries; session_graph_* tools inspect or take over collapsed session graphs. Use todo_write for linear plans and dag_plan for 2+ dependent subtasks.
+Exploration: read files before editing; use outline for large-file structure, then read with offset/limit; use grep for repository search. Tool outputs larger than the context budget are virtualized and can be paged back on demand via the session_tool_result tools.
+
+Graph and subagent orchestration principles: use todo_write for linear work and dag_plan for 2+ dependent subtasks; every non-root DAG node must declare its dependency; keep parallel nodes file-disjoint and pin each node's task text to the exact directory and files it may touch; harvest DAG results only with dag_wait (never subagent_wait for DAG nodes); do not manually launch background jobs for DAG nodes; inspect failures with dag_inspect and recover with dag_retry/dag_skip; verify final results against the latest worktree state; only the orchestrator writes git history. Subagents run in isolated contexts and return summaries; their full output is stored and can be read back rather than polluting the parent context.
 
 Behavioral rules:
 Prefer running a tool over guessing. When making file changes, read the file first to confirm the exact current contents, then edit or write. Keep responses concise.

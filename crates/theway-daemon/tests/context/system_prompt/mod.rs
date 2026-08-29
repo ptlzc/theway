@@ -103,9 +103,13 @@ fn render_base_prompt_describes_runtime_model_before_tools() {
 
     // Assert
     assert!(prompt.contains("<harness>"));
-    assert!(prompt.contains("Session model: the conversation is stored as append-only session entries"));
+    assert!(prompt.contains("Session model: the conversation is stored as an append-only message tree"));
+    assert!(prompt.contains("session_tool_result_grep"));
+    assert!(prompt.contains("Collapse model: /collapse turns the current session into a session graph node"));
+    assert!(prompt.contains("session_graph_read"));
     assert!(prompt.contains("Exploration: read files before editing"));
-    assert!(prompt.contains("Graph and subagent orchestration: dag_* tools"));
+    assert!(prompt.contains("Graph and subagent orchestration principles"));
+    assert!(prompt.contains("harvest DAG results only with dag_wait"));
     assert!(prompt.contains("<tools>"));
     assert!(prompt.find("<tools>").unwrap() > prompt.find("</harness>").unwrap());
 }
