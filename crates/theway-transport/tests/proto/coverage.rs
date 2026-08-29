@@ -68,10 +68,17 @@ fn rich_snapshot() -> WireStatus {
             text: "th".into(),
             timestamp: Some("t2".into()),
         },
-        WireFeedBlock::Tool {
+        WireFeedBlock::ToolCall {
             name: "bash".into(),
             args: " ls".into(),
+            metadata: Some("{\"id\":\"call-1\"}".into()),
             timestamp: None,
+        },
+        WireFeedBlock::Error {
+            message: "boom".into(),
+            code: Some("E42".into()),
+            recoverable: true,
+            timestamp: Some("t3".into()),
         },
         WireFeedBlock::ToolResult {
             lines: vec!["ok".into()],
@@ -93,11 +100,14 @@ fn rich_snapshot() -> WireStatus {
         },
     }];
     snapshot.usage = crate::wire::WireContextUsage {
-        input_tokens: 1,
+        cached_tokens: 3,
+        new_tokens: 1,
+        total_input_tokens: 4,
         output_tokens: 2,
-        cache_read_tokens: 3,
         cache_write_tokens: 4,
-        total_tokens: 10,
+        provider_cache_hit_rate: Some(0.75),
+        prefix_cache_hit_rate: Some(0.5),
+        prefix_hit_tokens: 2,
         context_window: 1000,
     };
     snapshot.tui_max_feed_lines = Some(5000);

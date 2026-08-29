@@ -655,11 +655,23 @@ pub struct WireAgentJobSnapshot {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct WireContextUsage {
-    pub input_tokens: u64,
+    pub cached_tokens: u64,
+    pub new_tokens: u64,
+    pub total_input_tokens: u64,
     pub output_tokens: u64,
-    pub cache_read_tokens: u64,
     pub cache_write_tokens: u64,
-    pub total_tokens: u64,
+    /// Provider-reported cache read ratio; `None` when the provider does not
+    /// report cache read tokens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_cache_hit_rate: Option<f64>,
+    /// Client-side longest-common-prefix estimate; `None` before the first
+    /// request baseline is available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefix_cache_hit_rate: Option<f64>,
+    /// Prefix-overlap token estimate used to aggregate session-cumulative
+    /// prefix hit metrics.
+    #[serde(default)]
+    pub prefix_hit_tokens: u64,
     pub context_window: u64,
 }
 

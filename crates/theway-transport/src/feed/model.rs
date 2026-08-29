@@ -109,7 +109,7 @@ pub fn should_separate_with(
         (_, Block::User { .. })
             | (
                 Some(Block::User { .. }),
-                Block::Assistant { .. } | Block::Thinking { .. } | Block::Tool { .. }
+                Block::Assistant { .. } | Block::Thinking { .. } | Block::ToolCall { .. }
             )
     )
 }
@@ -227,19 +227,40 @@ impl Feed {
                 *level = *next_level;
             }
             (
-                Block::Tool {
+                Block::ToolCall {
                     name,
                     args,
+                    metadata,
                     timestamp: _,
                 },
-                WireFeedBlock::Tool {
+                WireFeedBlock::ToolCall {
                     name: next_name,
                     args: next_args,
+                    metadata: next_metadata,
                     timestamp: _,
                 },
             ) => {
                 *name = next_name.clone();
                 *args = next_args.clone();
+                *metadata = next_metadata.clone();
+            }
+            (
+                Block::Error {
+                    message,
+                    code,
+                    recoverable,
+                    timestamp: _,
+                },
+                WireFeedBlock::Error {
+                    message: next_message,
+                    code: next_code,
+                    recoverable: next_recoverable,
+                    timestamp: _,
+                },
+            ) => {
+                *message = next_message.clone();
+                *code = next_code.clone();
+                *recoverable = *next_recoverable;
             }
             (
                 Block::ToolResult {
@@ -280,11 +301,28 @@ impl Feed {
             WireFeedBlock::Thinking { text, timestamp } => {
                 self.push_thinking_with_timestamp(text.clone(), timestamp.clone())
             }
-            WireFeedBlock::Tool {
+            WireFeedBlock::ToolCall {
                 name,
                 args,
+                metadata,
                 timestamp,
-            } => self.push_tool_with_timestamp(name.clone(), args.clone(), timestamp.clone()),
+            } => self.push_tool_call_with_timestamp(
+                name.clone(),
+                args.clone(),
+                metadata.clone(),
+                timestamp.clone(),
+            ),
+            WireFeedBlock::Error {
+                message,
+                code,
+                recoverable,
+                timestamp,
+            } => self.push_error_with_timestamp(
+                message.clone(),
+                code.clone(),
+                *recoverable,
+                timestamp.clone(),
+            ),
             WireFeedBlock::ToolResult {
                 lines,
                 is_error,
@@ -364,19 +402,59 @@ impl Feed {
     }
 
     pub fn push_tool(&mut self, name: impl Into<String>, args: impl Into<String>) {
-        self.push_tool_with_timestamp(name, args, current_time_label());
+        self.push_tool_call(name, args);
     }
 
-    fn push_tool_with_timestamp(
+    pub fn push_tool_call(&mut self, name: impl Into<String>, args: impl Into<String>) {
+        self.push_tool_call_with_metadata(name, args, None);
+    }
+
+    pub fn push_tool_call_with_metadata(
         &mut self,
         name: impl Into<String>,
         args: impl Into<String>,
+        metadata: Option<String>,
+    ) {
+        self.push_tool_call_with_timestamp(name, args, metadata, current_time_label());
+    }
+
+    fn push_tool_call_with_timestamp(
+        &mut self,
+        name: impl Into<String>,
+        args: impl Into<String>,
+        metadata: Option<String>,
         timestamp: Option<String>,
     ) {
         self.open = Open::None;
-        self.blocks.push(Block::Tool {
+        self.blocks.push(Block::ToolCall {
             name: name.into(),
             args: args.into(),
+            metadata,
+            timestamp,
+        });
+    }
+
+    pub fn push_error(
+        &mut self,
+        message: impl Into<String>,
+        code: Option<String>,
+        recoverable: bool,
+    ) {
+        self.push_error_with_timestamp(message, code, recoverable, current_time_label());
+    }
+
+    fn push_error_with_timestamp(
+        &mut self,
+        message: impl Into<String>,
+        code: Option<String>,
+        recoverable: bool,
+        timestamp: Option<String>,
+    ) {
+        self.open = Open::None;
+        self.blocks.push(Block::Error {
+            message: message.into(),
+            code,
+            recoverable,
             timestamp,
         });
     }
@@ -555,12 +633,32 @@ impl Feed {
                     let prefix = display_prefix(timestamp.as_deref(), "[thinking] ");
                     push_plain_paragraphs(&mut out, text, Some(&prefix), width);
                 }
-                Block::Tool {
+                Block::ToolCall {
                     name,
                     args,
+                    metadata,
                     timestamp,
                 } => {
-                    let text = format!("\u{2699} {name}{args}");
+                    let mut text = format!("\u{2699} {name}{args}");
+                    if let Some(metadata) = metadata {
+                        text.push_str(&format!(" · {metadata}"));
+                    }
+                    let prefix = display_prefix(timestamp.as_deref(), "");
+                    push_plain_paragraphs(&mut out, &text, Some(&prefix), width);
+                }
+                Block::Error {
+                    message,
+                    code,
+                    recoverable,
+                    timestamp,
+                } => {
+                    let mut text = format!("error: {message}");
+                    if let Some(code) = code {
+                        text.push_str(&format!(" ({code})"));
+                    }
+                    if *recoverable {
+                        text.push_str(" [recoverable]");
+                    }
                     let prefix = display_prefix(timestamp.as_deref(), "");
                     push_plain_paragraphs(&mut out, &text, Some(&prefix), width);
                 }
@@ -622,13 +720,26 @@ fn wire_block(block: &Block) -> WireFeedBlock {
             text: text.clone(),
             timestamp: timestamp.clone(),
         },
-        Block::Tool {
+        Block::ToolCall {
             name,
             args,
+            metadata,
             timestamp,
-        } => WireFeedBlock::Tool {
+        } => WireFeedBlock::ToolCall {
             name: name.clone(),
             args: args.clone(),
+            metadata: metadata.clone(),
+            timestamp: timestamp.clone(),
+        },
+        Block::Error {
+            message,
+            code,
+            recoverable,
+            timestamp,
+        } => WireFeedBlock::Error {
+            message: message.clone(),
+            code: code.clone(),
+            recoverable: *recoverable,
             timestamp: timestamp.clone(),
         },
         Block::ToolResult {

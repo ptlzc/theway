@@ -389,13 +389,26 @@ fn feed_block(block: &WireFeedBlock) -> wire::FeedBlock {
             text: text.clone(),
             timestamp: timestamp.clone(),
         }),
-        WireFeedBlock::Tool {
+        WireFeedBlock::ToolCall {
             name,
             args,
+            metadata,
             timestamp,
-        } => Kind::Tool(wire::ToolBlock {
+        } => Kind::ToolCall(wire::ToolCallBlock {
             name: name.clone(),
             args: args.clone(),
+            metadata: metadata.clone(),
+            timestamp: timestamp.clone(),
+        }),
+        WireFeedBlock::Error {
+            message,
+            code,
+            recoverable,
+            timestamp,
+        } => Kind::Error(wire::ErrorBlock {
+            message: message.clone(),
+            code: code.clone(),
+            recoverable: *recoverable,
             timestamp: timestamp.clone(),
         }),
         WireFeedBlock::ToolResult {

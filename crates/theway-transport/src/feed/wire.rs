@@ -16,9 +16,16 @@ pub enum WireFeedBlock {
         text: String,
         timestamp: Option<String>,
     },
-    Tool {
+    ToolCall {
         name: String,
         args: String,
+        metadata: Option<String>,
+        timestamp: Option<String>,
+    },
+    Error {
+        message: String,
+        code: Option<String>,
+        recoverable: bool,
         timestamp: Option<String>,
     },
     ToolResult {

@@ -41,14 +41,28 @@ pub fn block_fingerprint(block: &Block) -> u64 {
             mix(text.as_bytes());
             mix(timestamp.as_deref().unwrap_or("").as_bytes());
         }
-        Block::Tool {
+        Block::ToolCall {
             name,
             args,
+            metadata,
             timestamp,
         } => {
-            mix(b"tool\x00");
+            mix(b"tool_call\x00");
             mix(name.as_bytes());
             mix(args.as_bytes());
+            mix(metadata.as_deref().unwrap_or("").as_bytes());
+            mix(timestamp.as_deref().unwrap_or("").as_bytes());
+        }
+        Block::Error {
+            message,
+            code,
+            recoverable,
+            timestamp,
+        } => {
+            mix(b"error\x00");
+            mix(message.as_bytes());
+            mix(code.as_deref().unwrap_or("").as_bytes());
+            mix(if *recoverable { b"1" } else { b"0" });
             mix(timestamp.as_deref().unwrap_or("").as_bytes());
         }
         Block::ToolResult {
@@ -233,12 +247,36 @@ impl PlainLinesCache {
                     )),
                     width,
                 ),
-                Block::Tool {
+                Block::ToolCall {
                     name,
                     args,
+                    metadata,
                     timestamp,
                 } => {
-                    let text = format!("\u{2699} {name}{args}");
+                    let mut text = format!("\u{2699} {name}{args}");
+                    if let Some(metadata) = metadata {
+                        text.push_str(&format!(" · {metadata}"));
+                    }
+                    push_plain_paragraphs(
+                        &mut self.rows,
+                        &text,
+                        Some(&super::model::display_prefix(timestamp.as_deref(), "")),
+                        width,
+                    );
+                }
+                Block::Error {
+                    message,
+                    code,
+                    recoverable,
+                    timestamp,
+                } => {
+                    let mut text = format!("error: {message}");
+                    if let Some(code) = code {
+                        text.push_str(&format!(" ({code})"));
+                    }
+                    if *recoverable {
+                        text.push_str(" [recoverable]");
+                    }
                     push_plain_paragraphs(
                         &mut self.rows,
                         &text,
@@ -402,9 +440,10 @@ mod tests {
     }
 
     fn tool(name: &str, args: &str) -> WireFeedBlock {
-        WireFeedBlock::Tool {
+        WireFeedBlock::ToolCall {
             name: name.into(),
             args: args.into(),
+            metadata: None,
             timestamp: None,
         }
     }

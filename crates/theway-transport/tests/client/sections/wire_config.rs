@@ -37,9 +37,16 @@ fn session_state_round_trips_feed_block_kinds() {
                 text: "pondering".into(),
                 timestamp: None,
             },
-            WireFeedBlock::Tool {
+            WireFeedBlock::ToolCall {
                 name: "read".into(),
                 args: "(path=\"x\")".into(),
+                metadata: None,
+                timestamp: None,
+            },
+            WireFeedBlock::Error {
+                message: "boom".into(),
+                code: Some("E1".into()),
+                recoverable: false,
                 timestamp: None,
             },
             WireFeedBlock::ToolResult {
@@ -63,16 +70,19 @@ fn session_state_round_trips_feed_block_kinds() {
             WireFeedBlock::User { .. } => "user",
             WireFeedBlock::Assistant { .. } => "assistant",
             WireFeedBlock::Thinking { .. } => "thinking",
-            WireFeedBlock::Tool { .. } => "tool",
+            WireFeedBlock::ToolCall { .. } => "tool_call",
+            WireFeedBlock::Error { .. } => "error",
             WireFeedBlock::ToolResult { .. } => "tool_result",
             WireFeedBlock::Plain { .. } => "plain",
         })
         .collect();
     assert_eq!(
         kinds,
-        ["assistant", "thinking", "tool", "tool_result", "plain"]
+        [
+            "assistant", "thinking", "tool_call", "error", "tool_result", "plain"
+        ]
     );
-    match &back.feed_blocks[4] {
+    match &back.feed_blocks[5] {
         WireFeedBlock::Plain { level, .. } => {
             assert_eq!(*level, crate::feed::Level::System);
         }

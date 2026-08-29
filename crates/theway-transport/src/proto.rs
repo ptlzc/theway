@@ -213,22 +213,8 @@ fn session_state_with_feed(
         feed_lines_base,
         dags: snapshot.dags.iter().map(dag_run_wire).collect(),
         subagents: snapshot.subagents.iter().map(subagent_wire).collect(),
-        context_usage: Some(wire::ContextUsage {
-            input_tokens: snapshot.usage.input_tokens,
-            output_tokens: snapshot.usage.output_tokens,
-            cache_read_tokens: snapshot.usage.cache_read_tokens,
-            cache_write_tokens: snapshot.usage.cache_write_tokens,
-            total_tokens: snapshot.usage.total_tokens,
-            context_window: snapshot.usage.context_window.min(u32::MAX as u64) as u32,
-        }),
-        session_context_usage: Some(wire::ContextUsage {
-            input_tokens: snapshot.session_usage.input_tokens,
-            output_tokens: snapshot.session_usage.output_tokens,
-            cache_read_tokens: snapshot.session_usage.cache_read_tokens,
-            cache_write_tokens: snapshot.session_usage.cache_write_tokens,
-            total_tokens: snapshot.session_usage.total_tokens,
-            context_window: snapshot.session_usage.context_window.min(u32::MAX as u64) as u32,
-        }),
+        context_usage: Some(context_usage_to_proto(&snapshot.usage)),
+        session_context_usage: Some(context_usage_to_proto(&snapshot.session_usage)),
         tui_max_feed_lines: snapshot.tui_max_feed_lines.map(|n| n as u32),
         extensions: Some(extension_snapshot_proto(&snapshot.extensions)),
     }
@@ -436,26 +422,12 @@ pub fn wire_status(state: &wire::SessionState) -> WireStatus {
         usage: state
             .context_usage
             .as_ref()
-            .map(|usage| crate::wire::WireContextUsage {
-                input_tokens: usage.input_tokens,
-                output_tokens: usage.output_tokens,
-                cache_read_tokens: usage.cache_read_tokens,
-                cache_write_tokens: usage.cache_write_tokens,
-                total_tokens: usage.total_tokens,
-                context_window: u64::from(usage.context_window),
-            })
+            .map(|usage| context_usage_from_proto(Some(usage)))
             .unwrap_or_default(),
         session_usage: state
             .session_context_usage
             .as_ref()
-            .map(|usage| crate::wire::WireContextUsage {
-                input_tokens: usage.input_tokens,
-                output_tokens: usage.output_tokens,
-                cache_read_tokens: usage.cache_read_tokens,
-                cache_write_tokens: usage.cache_write_tokens,
-                total_tokens: usage.total_tokens,
-                context_window: u64::from(usage.context_window),
-            })
+            .map(|usage| context_usage_from_proto(Some(usage)))
             .unwrap_or_default(),
         tui_max_feed_lines: state.tui_max_feed_lines.map(u64::from),
         extensions: extension_snapshot_wire(state.extensions.as_ref()),
@@ -668,14 +640,31 @@ fn session_runtime_from_proto(runtime: Option<&wire::SessionRuntime>) -> WireSes
     }
 }
 
+fn context_usage_to_proto(usage: &crate::wire::WireContextUsage) -> wire::ContextUsage {
+    wire::ContextUsage {
+        cached_tokens: usage.cached_tokens,
+        new_tokens: usage.new_tokens,
+        total_input_tokens: usage.total_input_tokens,
+        output_tokens: usage.output_tokens,
+        cache_write_tokens: usage.cache_write_tokens,
+        provider_cache_hit_rate: usage.provider_cache_hit_rate,
+        prefix_cache_hit_rate: usage.prefix_cache_hit_rate,
+        prefix_hit_tokens: Some(usage.prefix_hit_tokens),
+        context_window: usage.context_window.min(u32::MAX as u64) as u32,
+    }
+}
+
 fn context_usage_from_proto(usage: Option<&wire::ContextUsage>) -> crate::wire::WireContextUsage {
     usage
         .map(|usage| crate::wire::WireContextUsage {
-            input_tokens: usage.input_tokens,
+            cached_tokens: usage.cached_tokens,
+            new_tokens: usage.new_tokens,
+            total_input_tokens: usage.total_input_tokens,
             output_tokens: usage.output_tokens,
-            cache_read_tokens: usage.cache_read_tokens,
             cache_write_tokens: usage.cache_write_tokens,
-            total_tokens: usage.total_tokens,
+            provider_cache_hit_rate: usage.provider_cache_hit_rate,
+            prefix_cache_hit_rate: usage.prefix_cache_hit_rate,
+            prefix_hit_tokens: usage.prefix_hit_tokens.unwrap_or(0),
             context_window: u64::from(usage.context_window),
         })
         .unwrap_or_default()
@@ -1087,9 +1076,16 @@ fn wire_feed_block(block: &wire::FeedBlock) -> WireFeedBlock {
             text: block.text.clone(),
             timestamp: block.timestamp.clone(),
         },
-        Kind::Tool(block) => WireFeedBlock::Tool {
+        Kind::ToolCall(block) => WireFeedBlock::ToolCall {
             name: block.name.clone(),
             args: block.args.clone(),
+            metadata: block.metadata.clone(),
+            timestamp: block.timestamp.clone(),
+        },
+        Kind::Error(block) => WireFeedBlock::Error {
+            message: block.message.clone(),
+            code: block.code.clone(),
+            recoverable: block.recoverable,
             timestamp: block.timestamp.clone(),
         },
         Kind::ToolResult(block) => WireFeedBlock::ToolResult {

@@ -62,9 +62,10 @@
             text: "yo".into(),
             timestamp: None,
         };
-        let tool = Block::Tool {
+        let tool = Block::ToolCall {
             name: "bash".into(),
             args: "".into(),
+            metadata: None,
             timestamp: None,
         };
         let result = Block::ToolResult {
@@ -96,9 +97,10 @@
             text: "yo".into(),
             timestamp: None,
         };
-        let tool = Block::Tool {
+        let tool = Block::ToolCall {
             name: "bash".into(),
             args: "".into(),
+            metadata: None,
             timestamp: None,
         };
         assert!(should_separate_with(None, &user, true, true));

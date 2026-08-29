@@ -59,12 +59,15 @@ message FeedBlockPatch {
 
 // Token usage for the current/last turn, plus the model's context window size.
 message ContextUsage {
-  uint64 input_tokens = 1;
-  uint64 output_tokens = 2;
-  uint64 cache_read_tokens = 3;
-  uint64 cache_write_tokens = 4;
-  uint64 total_tokens = 5;
-  uint32 context_window = 6;
+  uint64 cached_tokens = 1;
+  uint64 new_tokens = 2;
+  uint64 total_input_tokens = 3;
+  uint64 output_tokens = 4;
+  uint64 cache_write_tokens = 5;
+  optional double provider_cache_hit_rate = 6;
+  optional double prefix_cache_hit_rate = 7;
+  optional uint64 prefix_hit_tokens = 8;
+  uint32 context_window = 9;
 }
 
 message ProviderGroup {
@@ -187,9 +190,10 @@ message FeedBlock {
     UserBlock user = 1;
     AssistantBlock assistant = 2;
     ThinkingBlock thinking = 3;
-    ToolBlock tool = 4;
     ToolResultBlock tool_result = 5;
     PlainBlock plain = 6;
+    ToolCallBlock tool_call = 7;
+    ErrorBlock error = 8;
   }
 }
 
@@ -208,10 +212,18 @@ message ThinkingBlock {
   optional string timestamp = 2; // RFC3339 / ISO-8601 with offset (UTC), null when absent.
 }
 
-message ToolBlock {
+message ToolCallBlock {
   string name = 1;
   string args = 2;
-  optional string timestamp = 3; // RFC3339 / ISO-8601 with offset (UTC), null when absent.
+  optional string metadata = 3; // Optional tool-call metadata (JSON string).
+  optional string timestamp = 4; // RFC3339 / ISO-8601 with offset (UTC), null when absent.
+}
+
+message ErrorBlock {
+  string message = 1;
+  optional string code = 2;
+  bool recoverable = 3;
+  optional string timestamp = 4; // RFC3339 / ISO-8601 with offset (UTC), null when absent.
 }
 
 message ToolResultBlock {

@@ -63,9 +63,10 @@ pub fn replay_messages<'a>(feed: &mut Feed, messages: impl IntoIterator<Item = &
                             text: t.thinking.clone(),
                             timestamp: timestamp_label(assistant.timestamp),
                         },
-                        ContentBlock::ToolCall(call) => WireFeedBlock::Tool {
+                        ContentBlock::ToolCall(call) => WireFeedBlock::ToolCall {
                             name: call.name.clone(),
                             args: preview(&serde_json::Value::Object(call.arguments.clone())),
+                            metadata: None,
                             timestamp: timestamp_label(assistant.timestamp),
                         },
                         ContentBlock::Image(_) => WireFeedBlock::Assistant {
@@ -188,7 +189,7 @@ mod tests {
             panic!("block 2 not assistant");
         };
         assert_eq!(text, "let me check");
-        let Block::Tool { name, args, .. } = &blocks[3] else {
+        let Block::ToolCall { name, args, .. } = &blocks[3] else {
             panic!("block 3 not tool");
         };
         assert_eq!(name, "bash");
