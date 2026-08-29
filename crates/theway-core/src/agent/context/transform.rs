@@ -122,6 +122,3 @@ fn exit_code(result: &ToolResultMessage) -> String {
         "0".into()
     }
 }
-
-#[cfg(test)]
-tests_bridge_macro::tests_bridge!("agent/context");

@@ -49,6 +49,74 @@ fn session_with_storage() -> (Session, Arc<MemorySessionStorage>) {
     (Session::new(storage.clone()), storage)
 }
 
+struct MetadataSessionStorage {
+    inner: MemorySessionStorage,
+    metadata: serde_json::Value,
+}
+
+impl MetadataSessionStorage {
+    fn with_collapse_node_id(node_id: &str) -> Self {
+        Self {
+            inner: MemorySessionStorage::new(),
+            metadata: serde_json::json!({
+                "id": "session-with-metadata",
+                "createdAt": "now",
+                "collapseNodeId": node_id,
+            }),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl SessionStorage for MetadataSessionStorage {
+    async fn get_metadata_json(&self) -> Result<serde_json::Value, SessionError> {
+        Ok(self.metadata.clone())
+    }
+
+    async fn get_leaf_id(&self) -> Result<Option<String>, SessionError> {
+        self.inner.get_leaf_id().await
+    }
+
+    async fn set_leaf_id(&self, id: Option<String>) -> Result<(), SessionError> {
+        self.inner.set_leaf_id(id).await
+    }
+
+    async fn create_entry_id(&self) -> Result<String, SessionError> {
+        self.inner.create_entry_id().await
+    }
+
+    async fn append_entry(&self, entry: SessionTreeEntry) -> Result<(), SessionError> {
+        self.inner.append_entry(entry).await
+    }
+
+    async fn append_entries(&self, entries: Vec<SessionTreeEntry>) -> Result<(), SessionError> {
+        self.inner.append_entries(entries).await
+    }
+
+    async fn get_entry(&self, id: &str) -> Result<Option<SessionTreeEntry>, SessionError> {
+        self.inner.get_entry(id).await
+    }
+
+    async fn get_entries(&self) -> Result<Vec<SessionTreeEntry>, SessionError> {
+        self.inner.get_entries().await
+    }
+
+    async fn get_path_to_root(
+        &self,
+        leaf_id: Option<&str>,
+    ) -> Result<Vec<SessionTreeEntry>, SessionError> {
+        self.inner.get_path_to_root(leaf_id).await
+    }
+
+    async fn find_entries(&self, entry_type: &str) -> Result<Vec<SessionTreeEntry>, SessionError> {
+        self.inner.find_entries(entry_type).await
+    }
+
+    async fn get_label(&self, id: &str) -> Result<Option<String>, SessionError> {
+        self.inner.get_label(id).await
+    }
+}
+
 #[test]
 fn session_tree_entry_accessors_expose_id_parent_and_type() {
     let entry = SessionTreeEntry::Message {
@@ -469,6 +537,98 @@ fn build_session_context_custom_message_with_bad_timestamp_falls_back_to_now() {
 
     assert_eq!(ctx.messages.len(), 1);
     assert!(matches!(ctx.messages[0], AgentMessage::Custom(_)));
+}
+
+#[test]
+fn build_session_context_injects_compact_context_user_message() {
+    let entries = vec![SessionTreeEntry::Custom {
+        id: "compact".into(),
+        parent_id: None,
+        timestamp: "t".into(),
+        custom_type: COMPACT_CONTEXT_CUSTOM_TYPE.into(),
+        data: Some(serde_json::json!({
+            "sourceSessionId": "old-session",
+            "compactText": "explored X, decided Y",
+            "rawTextRef": "old-session",
+        })),
+    }];
+
+    let ctx = build_session_context(&entries);
+
+    assert_eq!(ctx.messages.len(), 1);
+    match &ctx.messages[0] {
+        AgentMessage::Llm(PiMessage::User(user)) => {
+            let text = match &user.content {
+                UserContent::Text(text) => text.clone(),
+                _ => panic!("expected text content"),
+            };
+            assert!(text.contains("explored X, decided Y"), "{text}");
+            assert!(text.contains("[Previous session compact summary]"), "{text}");
+        }
+        other => panic!("expected user message, got {other:?}"),
+    }
+}
+
+#[test]
+fn build_session_context_injects_legacy_compact_context_text_field() {
+    let entries = vec![SessionTreeEntry::Custom {
+        id: "compact".into(),
+        parent_id: None,
+        timestamp: "t".into(),
+        custom_type: COMPACT_CONTEXT_CUSTOM_TYPE.into(),
+        data: Some(serde_json::json!({
+            "sourceSessionId": "old-session",
+            "text": "legacy summary",
+            "rawTextRef": "old-session",
+        })),
+    }];
+
+    let ctx = build_session_context(&entries);
+
+    assert_eq!(ctx.messages.len(), 1);
+    match &ctx.messages[0] {
+        AgentMessage::Llm(PiMessage::User(user)) => {
+            let text = match &user.content {
+                UserContent::Text(text) => text.clone(),
+                _ => panic!("expected text content"),
+            };
+            assert!(text.contains("legacy summary"), "{text}");
+        }
+        other => panic!("expected user message, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn session_compact_context_reads_latest_entry() {
+    let (session, _storage) = session_with_storage();
+
+    session
+        .append_custom(
+            COMPACT_CONTEXT_CUSTOM_TYPE,
+            Some(serde_json::json!({
+                "sourceSessionId": "old-session",
+                "compactText": "latest summary",
+                "rawTextRef": "old-session",
+            })),
+        )
+        .await
+        .unwrap();
+
+    let context = session.compact_context().await.unwrap().expect("compact context");
+    assert_eq!(context.source_session_id, "old-session");
+    assert_eq!(context.compact_text, "latest summary");
+    assert_eq!(context.raw_text_ref, "old-session");
+}
+
+#[tokio::test]
+async fn session_collapse_node_id_reads_metadata() {
+    let storage = Arc::new(MetadataSessionStorage::with_collapse_node_id("node-123"));
+    let session = Session::new(storage as Arc<dyn SessionStorage>);
+
+    assert_eq!(
+        session.collapse_node_id().await.unwrap(),
+        Some("node-123".into())
+    );
 }
 
 #[test]

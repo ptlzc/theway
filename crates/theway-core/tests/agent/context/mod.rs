@@ -1,6 +1,7 @@
 //! Tests for deterministic tool-result virtualization in LLM context.
 
 use super::*;
+use crate::AgentMessage;
 use serde_json::json;
 use theway_llm_provider::{
     Message as PiMessage, ToolResultMessage, ToolResultRole, UserContentBlock,
