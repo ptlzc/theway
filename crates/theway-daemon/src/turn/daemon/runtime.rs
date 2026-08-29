@@ -150,7 +150,7 @@ impl TurnHost {
     fn error_line(&mut self, text: impl AsRef<str>) {
         self.projection
             .feed
-            .push_plain_untimed(text.as_ref(), Level::Error);
+            .push_error(text.as_ref(), None, false);
     }
 
     /// Build the public transport channels and wire the event planes

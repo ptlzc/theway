@@ -227,13 +227,25 @@ impl TurnHost {
                 last_turn_usage(&self.session.kernel.harness().agent().state().messages)
         {
             let cumulative = &mut self.session.cumulative_usage;
-            cumulative.input_tokens = cumulative.input_tokens.saturating_add(usage.input);
+            cumulative.cached_tokens = cumulative.cached_tokens.saturating_add(usage.cache_read);
+            cumulative.new_tokens = cumulative.new_tokens.saturating_add(usage.input);
+            cumulative.total_input_tokens = cumulative
+                .total_input_tokens
+                .saturating_add(usage.input.saturating_add(usage.cache_read));
             cumulative.output_tokens = cumulative.output_tokens.saturating_add(usage.output);
-            cumulative.cache_read_tokens =
-                cumulative.cache_read_tokens.saturating_add(usage.cache_read);
             cumulative.cache_write_tokens =
                 cumulative.cache_write_tokens.saturating_add(usage.cache_write);
-            cumulative.total_tokens = cumulative.total_tokens.saturating_add(usage.total_tokens);
+            cumulative.prefix_hit_tokens = cumulative
+                .prefix_hit_tokens
+                .saturating_add(usage.prefix_hit_tokens.unwrap_or(0));
+            cumulative.provider_cache_hit_rate = provider_cache_hit_rate(
+                cumulative.cached_tokens,
+                cumulative.total_input_tokens,
+            );
+            cumulative.prefix_cache_hit_rate = prefix_cache_hit_rate(
+                cumulative.prefix_hit_tokens,
+                cumulative.total_input_tokens,
+            );
         }
         if turn.aborted {
             self.system_line("[aborted]");
@@ -275,13 +287,25 @@ impl TurnHost {
                 last_turn_usage(&session.kernel.harness().agent().state().messages)
         {
             let cumulative = &mut session.cumulative_usage;
-            cumulative.input_tokens = cumulative.input_tokens.saturating_add(usage.input);
+            cumulative.cached_tokens = cumulative.cached_tokens.saturating_add(usage.cache_read);
+            cumulative.new_tokens = cumulative.new_tokens.saturating_add(usage.input);
+            cumulative.total_input_tokens = cumulative
+                .total_input_tokens
+                .saturating_add(usage.input.saturating_add(usage.cache_read));
             cumulative.output_tokens = cumulative.output_tokens.saturating_add(usage.output);
-            cumulative.cache_read_tokens =
-                cumulative.cache_read_tokens.saturating_add(usage.cache_read);
             cumulative.cache_write_tokens =
                 cumulative.cache_write_tokens.saturating_add(usage.cache_write);
-            cumulative.total_tokens = cumulative.total_tokens.saturating_add(usage.total_tokens);
+            cumulative.prefix_hit_tokens = cumulative
+                .prefix_hit_tokens
+                .saturating_add(usage.prefix_hit_tokens.unwrap_or(0));
+            cumulative.provider_cache_hit_rate = provider_cache_hit_rate(
+                cumulative.cached_tokens,
+                cumulative.total_input_tokens,
+            );
+            cumulative.prefix_cache_hit_rate = prefix_cache_hit_rate(
+                cumulative.prefix_hit_tokens,
+                cumulative.total_input_tokens,
+            );
         }
         if aborted {
             session.projection.feed.push_plain_untimed("[aborted]", Level::System);
@@ -291,9 +315,10 @@ impl TurnHost {
                     session.projection.feed.push_plain_untimed(message, Level::Output)
                 }
                 Ok(None) => {}
-                Err(e) => session.projection.feed.push_plain_untimed(
+                Err(e) => session.projection.feed.push_error(
                     user_facing_run_error(&e.to_string()),
-                    Level::Error,
+                    None,
+                    false,
                 ),
             }
         }

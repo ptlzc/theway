@@ -507,6 +507,22 @@ fn last_turn_usage(messages: &[AgentMessage]) -> Option<Usage> {
     })
 }
 
+fn provider_cache_hit_rate(cached_tokens: u64, total_input_tokens: u64) -> Option<f64> {
+    if total_input_tokens == 0 || cached_tokens == 0 {
+        None
+    } else {
+        Some(cached_tokens as f64 / total_input_tokens as f64)
+    }
+}
+
+fn prefix_cache_hit_rate(prefix_hit_tokens: u64, total_input_tokens: u64) -> Option<f64> {
+    if total_input_tokens == 0 {
+        None
+    } else {
+        Some(prefix_hit_tokens as f64 / total_input_tokens as f64)
+    }
+}
+
 fn wire_preview(text: &str) -> String {
     feed::truncate_chars(&bug_report::redact(text), 120)
 }

@@ -127,14 +127,17 @@ impl TurnHost {
                 .filter(|job| job.session_id.as_deref() == Some(self.session.id.as_str()))
                 .map(subagent_job_snapshot)
                 .collect(),
-            // Last-turn token usage (input/output/cache/total from the last
-            // assistant message) + the active model's context window.
+            // Last-turn token usage (cached/new/total from the last assistant
+            // message) + the active model's context window.
             usage: WireContextUsage {
-                input_tokens: usage.input,
+                cached_tokens: usage.cache_read,
+                new_tokens: usage.input,
+                total_input_tokens: usage.input.saturating_add(usage.cache_read),
                 output_tokens: usage.output,
-                cache_read_tokens: usage.cache_read,
                 cache_write_tokens: usage.cache_write,
-                total_tokens: usage.total_tokens,
+                provider_cache_hit_rate: usage.provider_cache_hit_rate,
+                prefix_cache_hit_rate: usage.prefix_cache_hit_rate,
+                prefix_hit_tokens: usage.prefix_hit_tokens.unwrap_or(0),
                 context_window,
             },
             session_usage: self.session.cumulative_usage.clone(),
