@@ -9,31 +9,31 @@ pub fn compose_system_prompt(
 ) -> String {
     let mut s = String::new();
     s.push_str(&render_base_prompt(tool_names, harness_intro));
-    s.push_str("\n\n");
+    s.push_str("\n\n<environment>\n");
     s.push_str(&format!("Current working directory: {}\n", cwd.display()));
     if !memory.is_empty() {
-        s.push('\n');
+        s.push_str("<memory>\n");
         s.push_str(memory);
-        s.push('\n');
+        s.push_str("\n</memory>\n");
     }
+    s.push_str("</environment>");
     if let Some(lineage) = lineage.filter(|lineage| !lineage.trim().is_empty()) {
-        s.push('\n');
+        s.push_str("\n\n<lineage>\n");
         s.push_str(lineage);
-        s.push('\n');
+        s.push_str("\n</lineage>");
     }
     s
 }
 
-/// Build the prompt header. The tool inventory is rendered from the actual registered tool
-/// definitions, grouped by category, so adding/removing a tool flows through here without a
-/// hand-edited literal list. The harness introduction defaults to the stock theway persona
-/// and can be replaced per session.
+/// Build the `<harness>` and `<tools>` blocks. The harness block explains the runtime model
+/// before the tool inventory so the model understands session storage, exploration, and
+/// graph/subagent orchestration before seeing which tools implement them. The tool inventory
+/// is rendered from the actual registered tool definitions, grouped by category.
 fn render_base_prompt(tool_names: &[String], harness_intro: Option<&str>) -> String {
     let intro = harness_intro
         .unwrap_or("You are theway, a minimal coding assistant running in a terminal.");
     format!(
-        "{intro} \
-You have access to the following tools:\n{inventory} \
+        "<harness>\n{intro}\n\nSession model: the conversation is stored as append-only session entries (messages, custom facts, compaction and branch summaries). Compaction replaces older entries with a summary plus a recent tail; collapsed sessions become session graph nodes and their raw transcript stays available through session_graph_read.\n\nExploration: read files before editing; use outline for large-file structure, then read with offset/limit; use grep for repository search. Tool outputs larger than the context budget are virtualized and can be paged back on demand.\n\nGraph and subagent orchestration: dag_* tools plan and monitor dependent subagent runs; subagents run in isolated contexts and return summaries; session_graph_* tools inspect or take over collapsed session graphs. Use todo_write for linear plans and dag_plan for 2+ dependent subtasks.\n\nBehavioral rules:\n\
 Prefer running a tool over guessing. When making file changes, read the file first to confirm the exact current contents, then edit or write. Keep responses concise. \
 When the user asks for a fixed time, recurring, scheduled, hourly, daily, weekly, crontab, 定时任务, 每小时, or similar time-based job, call new_cron_job instead of new_trigger. \
 When the user asks to view, list, show, inspect, or find scheduled jobs or cron job ids, call list_cron_jobs. \
@@ -43,7 +43,7 @@ When the user asks to create a trigger, reminder, watcher, or automation, call n
 When the user asks to view, list, show, inspect, or find trigger ids, call list_triggers. \
 When the user asks to pause, disable, enable, or resume a dynamic trigger, call set_trigger_state. \
 When the user asks to delete, remove, or clear dynamic triggers, call remove_trigger. \
-When the user asks to create, save, or codify a reusable skill, workflow, checklist, or convention, or to summarize recent work or this conversation into a skill (技能, 保存为技能, 把刚才的工作总结成 skill), call skill_builder with structured name/description/instructions. For summarize-into-skill requests, distill the generalizable steps from the conversation — what was actually done, the commands used, the pitfalls — not a transcript. Call once without confirm to preview and show the user the planned name and description, then call with confirm=true after they agree. Use install_skill only for installing an existing SKILL.md from a URL, file, or pasted content.",
+When the user asks to create, save, or codify a reusable skill, workflow, checklist, or convention, or to summarize recent work or this conversation into a skill (技能, 保存为技能, 把刚才的工作总结成 skill), call skill_builder with structured name/description/instructions. For summarize-into-skill requests, distill the generalizable steps from the conversation — what was actually done, the commands used, the pitfalls — not a transcript. Call once without confirm to preview and show the user the planned name and description, then call with confirm=true after they agree. Use install_skill only for installing an existing SKILL.md from a URL, file, or pasted content.\n</harness>\n\n<tools>\n{inventory}\n</tools>",
         inventory = render_tool_inventory(tool_names),
     )
 }

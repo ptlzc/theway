@@ -58,16 +58,26 @@ from the actual system prompt.
 ### 1. Normal session, no collapse lineage
 
 ```text
+<harness>
 You are theway, a minimal coding assistant running in a terminal.
-You have access to the following tools:
+
+Session model: the conversation is stored as append-only session entries ...
+Exploration: read files before editing ...
+Graph and subagent orchestration: dag_* tools ...
+</harness>
+
+<tools>
 - Files: edit, git, ls, read, write
 - Execution: bash
 - Context & search: grep, outline
-...
+</tools>
 
+<environment>
 Current working directory: /home/user/project
-
+<memory>
 Remember: keep commit messages conventional.
+</memory>
+</environment>
 ```
 
 `messages`:
@@ -85,21 +95,32 @@ After `/collapse`, the new session has a `compact_context` entry and
 summary text:
 
 ```text
+<harness>
 You are theway, a minimal coding assistant running in a terminal.
-You have access to the following tools:
+
+Session model: ...
+Exploration: ...
+Graph and subagent orchestration: ...
+</harness>
+
+<tools>
 - Files: edit, read, write
 - Execution: bash
 - Context & search: grep, outline
 - Session graph: session_graph_attach, session_graph_list, session_graph_read, session_graph_status, session_graph_wait
-...
+</tools>
 
+<environment>
 Current working directory: /home/user/project
+</environment>
 
+<lineage>
 ## Session lineage
 
 Collapse node: node-01JEXAMPLE0000000000000000
 This session continues from session-123.
 Use session_graph_list / session_graph_read / session_graph_status / session_graph_wait / session_graph_attach to inspect or take over the old session graph.
+</lineage>
 ```
 
 `ContextBundle.messages` before provider materialization:
@@ -165,14 +186,23 @@ When session metadata contains
 sentence of the base prompt is replaced:
 
 ```text
+<harness>
 You are a database migration specialist.
-You have access to the following tools:
+
+Session model: ...
+Exploration: ...
+Graph and subagent orchestration: ...
+</harness>
+
+<tools>
 - Files: edit, read, write
 - Execution: bash
 - Context & search: grep, outline
-...
+</tools>
 
+<environment>
 Current working directory: /home/user/project
+</environment>
 ```
 
 The rest of the behavioral instructions stay unchanged. To customize the

@@ -21,6 +21,9 @@ fn compose_system_prompt_puts_base_then_cwd_then_memory() {
         .find("Remember: be concise.")
         .expect("memory present");
     assert!(base < tools_at && tools_at < cwd_at && cwd_at < memory_at);
+    assert!(prompt.find("<harness>") < Some(tools_at));
+    assert!(tools_at < prompt.find("</tools>").unwrap());
+    assert!(prompt.contains("<environment>"));
 }
 
 #[test]
@@ -49,6 +52,7 @@ fn compose_system_prompt_appends_lineage_block_when_provided() {
         None,
     );
 
+    assert!(prompt.contains("<lineage>"));
     assert!(prompt.contains("## Session lineage"));
     assert!(prompt.contains("old-session"));
     assert!(prompt.contains("session_graph_read"));
@@ -90,6 +94,20 @@ fn render_base_prompt_groups_tool_names_by_category() {
     assert!(prompt.contains("- Context & search: enhanced_grep"));
     assert!(prompt.contains("- Orchestration & planning: dag_plan"));
     assert!(prompt.contains("- Session graph: session_graph_read"));
+}
+
+#[test]
+fn render_base_prompt_describes_runtime_model_before_tools() {
+    // Act
+    let prompt = render_base_prompt(&["dag_plan".to_string()], None);
+
+    // Assert
+    assert!(prompt.contains("<harness>"));
+    assert!(prompt.contains("Session model: the conversation is stored as append-only session entries"));
+    assert!(prompt.contains("Exploration: read files before editing"));
+    assert!(prompt.contains("Graph and subagent orchestration: dag_* tools"));
+    assert!(prompt.contains("<tools>"));
+    assert!(prompt.find("<tools>").unwrap() > prompt.find("</harness>").unwrap());
 }
 
 #[test]
