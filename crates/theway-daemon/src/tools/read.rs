@@ -17,7 +17,7 @@ use theway_core::{AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate, T
 use theway_llm_provider::{Tool, UserContentBlock};
 use tokio_util::sync::CancellationToken;
 
-use super::truncate::{DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, truncate_head};
+use super::truncate::{DEFAULT_MAX_LINES, truncate_head};
 
 /// Files larger than this many lines get the outline hint when read without `offset`.
 const OUTLINE_HINT_THRESHOLD: usize = 200;
@@ -89,7 +89,7 @@ impl AgentTool for ReadTool {
             taken_lines.push(line);
         }
         let slice: String = taken_lines.concat();
-        let (slice, trunc) = truncate_head(&slice, limit, DEFAULT_MAX_BYTES);
+        let (slice, trunc) = truncate_head(&slice, limit, usize::MAX);
 
         let mut text = String::new();
         if !offset_given && total_lines > OUTLINE_HINT_THRESHOLD {
@@ -127,9 +127,8 @@ static DEFINITION: Lazy<Tool> = Lazy::new(|| Tool {
     name: "read".into(),
     description: format!(
         "Read the contents of a UTF-8 text file. Use offset/limit for large files; output is \
-         truncated to {DEFAULT_MAX_LINES} lines or {} KiB (whichever first). Files over \
+         truncated to {DEFAULT_MAX_LINES} lines (no byte cap). Files over \
          {OUTLINE_HINT_THRESHOLD} lines read without offset print an outline hint first.",
-        DEFAULT_MAX_BYTES / 1024
     ),
     parameters: json!({
         "type": "object",

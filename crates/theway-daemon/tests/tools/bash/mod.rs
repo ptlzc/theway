@@ -264,6 +264,24 @@ async fn high_volume_stderr_does_not_deadlock_stdout() {
     assert!(text.contains("[stderr]"));
 }
 
+/// Outputs below the 10 MiB safety cap are returned in full (no `[truncated]` note).
+#[tokio::test]
+async fn large_output_below_safety_cap_is_not_truncated() {
+    let tool = BashTool;
+    let result = tool
+        .execute(
+            "big",
+            json!({ "command": "head -c 300000 /dev/zero | tr '\\0' 'x'" }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect("large output should not error");
+    let text = text_of(&result);
+    assert!(!text.contains("[truncated"), "got: {text}");
+    assert!(text.contains("[exit 0]"), "got: {text}");
+}
+
 /// Sanity: a small, fast command still works the same as before.
 #[tokio::test]
 async fn ok_path_still_works() {

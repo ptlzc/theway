@@ -20,7 +20,7 @@ use theway_llm_provider::{Tool, UserContentBlock};
 use tokio_util::sync::CancellationToken;
 
 const SUBCOMMANDS: &[&str] = &["status", "diff", "log"];
-const MAX_OUTPUT_BYTES: usize = 64 * 1024;
+const SAFE_MAX_BYTES: usize = 10 * 1024 * 1024; // 10 MiB insurance cap
 
 /// Wall-clock bound for a git invocation — mirrors the `LocalExecutor` git timeout
 /// (cwd/timeout semantics align with the executor, sdk-split-local-sandbox node 8).
@@ -116,7 +116,7 @@ impl AgentTool for GitTool {
 
         let header = format!("git {subcommand} (cwd={})\n", cwd.as_deref().unwrap_or("."));
         let suffix = if truncated {
-            format!("\n\n(truncated at {} KiB)", MAX_OUTPUT_BYTES / 1024)
+            format!("\n\n(truncated at {} MiB)", SAFE_MAX_BYTES / (1024 * 1024))
         } else {
             String::new()
         };
@@ -158,10 +158,10 @@ fn build_argv(subcommand: &str, extra: &[String]) -> Vec<String> {
 }
 
 fn truncate(s: &str) -> (String, bool) {
-    if s.len() <= MAX_OUTPUT_BYTES {
+    if s.len() <= SAFE_MAX_BYTES {
         return (s.to_string(), false);
     }
-    let mut end = MAX_OUTPUT_BYTES;
+    let mut end = SAFE_MAX_BYTES;
     while !s.is_char_boundary(end) {
         end -= 1;
     }

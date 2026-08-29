@@ -209,7 +209,10 @@ impl AgentHarness {
         let transform_runtime = Arc::clone(&runtime_extensions);
         let transform_context: TransformContext = Arc::new(move |messages, cancel| {
             let runtime = Arc::clone(&transform_runtime);
-            Box::pin(async move { runtime.transform_context(messages, cancel).await })
+            Box::pin(async move {
+                let messages = runtime.transform_context(messages, cancel).await;
+                crate::agent::context::virtualize_tool_results(messages)
+            })
         });
 
         let request_runtime = Arc::clone(&runtime_extensions);

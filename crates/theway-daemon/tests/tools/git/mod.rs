@@ -192,10 +192,10 @@ fn truncate_under_limit_returns_unchanged_and_not_truncated() {
 
 #[test]
 fn truncate_over_limit_steps_back_to_char_boundary() {
-    // Arrange: 65535 ASCII bytes, then a 2-byte `é` straddling MAX_OUTPUT_BYTES.
-    let prefix = "a".repeat(MAX_OUTPUT_BYTES - 1);
+    // Arrange: SAFE_MAX_BYTES-1 ASCII bytes, then a 2-byte `é` straddling SAFE_MAX_BYTES.
+    let prefix = "a".repeat(SAFE_MAX_BYTES - 1);
     let s = format!("{prefix}é{}", "b".repeat(100));
-    assert!(s.len() > MAX_OUTPUT_BYTES);
+    assert!(s.len() > SAFE_MAX_BYTES);
 
     // Act
     let (out, truncated) = truncate(&s);

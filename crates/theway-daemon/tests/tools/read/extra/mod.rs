@@ -139,7 +139,7 @@ async fn execute_limit_limits_returned_lines() {
 }
 
 #[tokio::test]
-async fn execute_byte_truncation_adds_note() {
+async fn execute_large_lines_are_not_byte_truncated() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("wide.txt");
     let mut body = String::new();
@@ -158,17 +158,17 @@ async fn execute_byte_truncation_adds_note() {
             None,
         )
         .await
-        .expect("byte-truncated read must still succeed");
+        .expect("large-line read must still succeed");
 
     let text = text_of(&result);
-    assert!(text.contains("[truncated: kept 1/2 lines"), "got: {text}");
+    assert!(!text.contains("[truncated"), "got: {text}");
     assert!(
         text.contains(&"a".repeat(200 * 1024)),
-        "first line must be kept"
+        "first large line must be returned in full"
     );
     assert!(
-        !text.contains(&"b".repeat(200 * 1024)),
-        "second line must be dropped"
+        text.contains(&"b".repeat(200 * 1024)),
+        "second large line must be returned in full"
     );
 }
 

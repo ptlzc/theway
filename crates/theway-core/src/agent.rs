@@ -21,6 +21,7 @@
 pub mod assembly;
 #[cfg(feature = "harness")]
 pub mod compaction;
+pub mod context;
 #[cfg(feature = "harness")]
 pub mod cost;
 #[cfg(feature = "harness")]
