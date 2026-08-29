@@ -12,7 +12,7 @@ async fn thinking_stats_line_shows_cps_and_in_out_tokens() {
         timestamp: None,
     }]);
     status.usage = WireContextUsage {
-        input_tokens: 57_100,
+        total_input_tokens: 57_100,
         output_tokens: 1_200,
         ..Default::default()
     };
@@ -74,7 +74,7 @@ async fn busy_stats_follow_working_instead_of_right_aligning() {
     let (mut app, _rx) = test_app().await;
     let mut status = fixture_status(Vec::new());
     status.usage = WireContextUsage {
-        input_tokens: 57_100,
+        total_input_tokens: 57_100,
         output_tokens: 1_200,
         ..Default::default()
     };
@@ -612,18 +612,21 @@ async fn busy_stats_line_shows_session_cache_metrics_from_session_usage() {
     let mut status = fixture_status(Vec::new());
     status.busy = true;
     status.session_usage = WireContextUsage {
-        input_tokens: 1_200,
+        cached_tokens: 800,
+        new_tokens: 400,
+        total_input_tokens: 1_200,
         output_tokens: 340,
-        cache_read_tokens: 800,
         cache_write_tokens: 50,
-        total_tokens: 1_540,
+        provider_cache_hit_rate: Some(800.0 / 1_200.0),
+        prefix_cache_hit_rate: None,
+        prefix_hit_tokens: 0,
         context_window: 200_000,
     };
     app.apply_snapshot(status);
     app.busy = true;
     app.busy_started = Some(std::time::Instant::now());
 
-    let backend = TestBackend::new(100, 12);
+    let backend = TestBackend::new(120, 12);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|frame| app.render(frame)).unwrap();
     let text = buffer_text(terminal.backend().buffer());
@@ -632,12 +635,13 @@ async fn busy_stats_line_shows_session_cache_metrics_from_session_usage() {
         .find(|line| line.contains("working"))
         .expect("busy status row");
 
-    // Total input, cached tokens, non-cached input, output, and hit rate.
+    // Total input, cached tokens, non-cached input, output, and dual hit rates.
     assert!(row.contains("input: 1.2k"), "total input missing: {row}");
     assert!(row.contains("cached: 800"), "cached tokens missing: {row}");
     assert!(row.contains("new: 400"), "non-cached input missing: {row}");
     assert!(row.contains("output: 340"), "output missing: {row}");
-    assert!(row.contains("hit: 66.7%"), "cache hit rate missing: {row}");
+    assert!(row.contains("cache 66.7%"), "provider cache hit rate missing: {row}");
+    assert!(row.contains("prefix -"), "prefix hit rate missing: {row}");
 
     // The session-cumulative stats line is a token/cache display, not a cost
     // display: monetary values must never appear.

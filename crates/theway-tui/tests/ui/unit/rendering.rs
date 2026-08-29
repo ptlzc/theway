@@ -163,9 +163,10 @@ async fn custom_theme_paints_tool_and_thinking_blocks() {
     app.theme = theme;
     app.tools_expanded = true;
     let status = fixture_status(vec![
-        WireFeedBlock::Tool {
+        WireFeedBlock::ToolCall {
             name: "read".into(),
             args: "(path=\"x\")".into(),
+            metadata: None,
             timestamp: None,
         },
         WireFeedBlock::ToolResult {
@@ -260,9 +261,10 @@ async fn custom_theme_recolors_composer_chrome() {
 async fn default_theme_keeps_feed_blocks_unpainted() {
     let (mut app, _rx) = test_app().await;
     let status = fixture_status(vec![
-        WireFeedBlock::Tool {
+        WireFeedBlock::ToolCall {
             name: "read".into(),
             args: "(path=\"x\")".into(),
+            metadata: None,
             timestamp: None,
         },
         WireFeedBlock::Thinking {

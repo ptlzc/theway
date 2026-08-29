@@ -247,9 +247,10 @@
         let feed = feed_with(&[
             user("hello"),
             assistant("world"),
-            WireFeedBlock::Tool {
+            WireFeedBlock::ToolCall {
                 name: "bash".into(),
                 args: " ls".into(),
+            metadata: None,
                 timestamp: None,
             },
             user("third"),
@@ -287,9 +288,10 @@
         let feed = feed_with(&[
             user("hello"),
             assistant("world"),
-            WireFeedBlock::Tool {
+            WireFeedBlock::ToolCall {
                 name: "bash".into(),
                 args: " ls".into(),
+            metadata: None,
                 timestamp: None,
             },
             user("third"),
@@ -338,9 +340,10 @@
     fn block_frame_survives_incremental_splices() {
         let feed = feed_with(&[
             user("hello"),
-            WireFeedBlock::Tool {
+            WireFeedBlock::ToolCall {
                 name: "bash".into(),
                 args: " ls".into(),
+            metadata: None,
                 timestamp: None,
             },
         ]);
@@ -358,9 +361,10 @@
         // Appending keeps the frozen frame intact.
         let feed = feed_with(&[
             user("hello"),
-            WireFeedBlock::Tool {
+            WireFeedBlock::ToolCall {
                 name: "bash".into(),
                 args: " ls".into(),
+            metadata: None,
                 timestamp: None,
             },
             user("third"),

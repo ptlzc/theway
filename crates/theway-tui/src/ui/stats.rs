@@ -115,32 +115,41 @@ pub fn busy_stats_text(cps: f64, input_tokens: Option<u64>, output_tokens: Optio
     text
 }
 
+/// Format a cache hit ratio for display (`72.3%` or `-` when unknown).
+fn format_hit_rate(rate: Option<f64>) -> String {
+    match rate {
+        Some(rate) => {
+            let pct = rate * 100.0;
+            let rounded = (pct * 10.0).round() / 10.0;
+            if (rounded - rounded.round()).abs() < f64::EPSILON {
+                format!("{}%", rounded.round() as u64)
+            } else {
+                format!("{rounded:.1}%")
+            }
+        }
+        None => "-".to_string(),
+    }
+}
+
 /// Busy-band session-cumulative stats line: total input, cached input,
-/// non-cached input, output, and cache hit rate.
+/// non-cached input, output, and dual cache hit rates.
 #[must_use]
 pub fn busy_stats_text_with_session(
     cps: f64,
-    input_tokens: u64,
-    cache_read_tokens: u64,
+    total_input_tokens: u64,
+    cached_tokens: u64,
+    new_tokens: u64,
     output_tokens: u64,
+    provider_cache_hit_rate: Option<f64>,
+    prefix_cache_hit_rate: Option<f64>,
 ) -> String {
-    let new_tokens = input_tokens.saturating_sub(cache_read_tokens);
-    let hit = if input_tokens == 0 {
-        0.0
-    } else {
-        cache_read_tokens as f64 * 100.0 / input_tokens as f64
-    };
-    let hit_rounded = (hit * 10.0).round() / 10.0;
-    let hit = if (hit_rounded - hit_rounded.round()).abs() < f64::EPSILON {
-        format!("{}", hit_rounded.round() as u64)
-    } else {
-        format!("{hit_rounded:.1}")
-    };
+    let provider = format_hit_rate(provider_cache_hit_rate);
+    let prefix = format_hit_rate(prefix_cache_hit_rate);
     format!(
-        "{} char/s · input: {} · cached: {} · new: {} · output: {} · hit: {hit}%",
+        "{} char/s · input: {} · cached: {} · new: {} · output: {} · cache {provider} · prefix {prefix}",
         cps.round() as u64,
-        human_count(input_tokens),
-        human_count(cache_read_tokens),
+        human_count(total_input_tokens),
+        human_count(cached_tokens),
         human_count(new_tokens),
         human_count(output_tokens),
     )

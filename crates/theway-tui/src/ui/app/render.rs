@@ -67,7 +67,7 @@ impl App {
             // the snapshot usage carries the most recent round, and the wire
             // resets it to 0 between turns, so a 0 naturally renders as 0.
             thinking_cps: self.cps_meter.cps(),
-            thinking_input_tokens: self.latest.usage.input_tokens,
+            thinking_input_tokens: self.latest.usage.total_input_tokens,
             thinking_output_tokens: self.latest.usage.output_tokens,
             // Theme colors + block layout (issues #43 + #49): structural —
             // a change invalidates the feed cache via `PartialEq`.
@@ -185,13 +185,14 @@ impl App {
         // session-cumulative totals.
         let usage_label = {
             let usage = &self.latest.usage;
-            if usage.context_window > 0 && usage.total_tokens > 0 {
-                let pct = ((usage.total_tokens as f64 * 100.0 / usage.context_window as f64)
+            let total_tokens = usage.total_input_tokens.saturating_add(usage.output_tokens);
+            if usage.context_window > 0 && total_tokens > 0 {
+                let pct = ((total_tokens as f64 * 100.0 / usage.context_window as f64)
                     .round())
                 .clamp(0.0, 100.0) as u64;
                 format!("{pct}% ctx")
-            } else if usage.total_tokens > 0 {
-                render_utils::human_tokens(usage.total_tokens)
+            } else if total_tokens > 0 {
+                render_utils::human_tokens(total_tokens)
             } else {
                 String::new()
             }

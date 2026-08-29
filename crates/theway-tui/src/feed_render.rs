@@ -589,7 +589,12 @@ pub(crate) fn render_block(
             apply_block_frame(&mut rows, width, &theme.thinking);
             out.extend(rows);
         }
-        Block::Tool { name, args, .. } => {
+        Block::ToolCall {
+            name,
+            args,
+            metadata,
+            ..
+        } => {
             let bg = theme.tool.bg.or(theme.tool_running_bg);
             let content_w = block_content_width(width, bg, theme.tool.padding);
             let mut spans = vec![Span::styled(
@@ -599,12 +604,40 @@ pub(crate) fn render_block(
             if !args.is_empty() {
                 spans.push(Span::styled(format!(" {args}"), tool_args_style(theme)));
             }
+            if let Some(metadata) = metadata {
+                spans.push(Span::styled(
+                    format!(" · {metadata}"),
+                    tool_args_style(theme),
+                ));
+            }
             let mut line = Line::from(spans);
             truncate_line(&mut line, content_w);
             let mut rows = vec![line];
             apply_block_layout(&mut rows, width, bg, &theme.tool);
             apply_block_frame(&mut rows, width, &theme.tool);
             out.extend(rows);
+        }
+        Block::Error {
+            message,
+            code,
+            recoverable,
+            timestamp,
+        } => {
+            let mut text = message.clone();
+            if let Some(code) = code {
+                text.push_str(&format!(" ({code})"));
+            }
+            if *recoverable {
+                text.push_str(" [recoverable]");
+            }
+            let prefix = timestamp.as_deref().map(|ts| display_prefix(Some(ts), ""));
+            push_paragraphs(
+                &mut out,
+                &text,
+                style_for_level(Level::Error),
+                prefix.as_deref(),
+                width,
+            );
         }
         Block::ToolResult {
             lines, is_error, ..

@@ -50,16 +50,19 @@ impl App {
                 ),
             ];
             let session_usage = &self.latest.session_usage;
-            let stats = if session_usage.input_tokens > 0 {
+            let stats = if session_usage.total_input_tokens > 0 {
                 stats::busy_stats_text_with_session(
                     self.cps_meter.cps(),
-                    session_usage.input_tokens,
-                    session_usage.cache_read_tokens,
+                    session_usage.total_input_tokens,
+                    session_usage.cached_tokens,
+                    session_usage.new_tokens,
                     session_usage.output_tokens,
+                    session_usage.provider_cache_hit_rate,
+                    session_usage.prefix_cache_hit_rate,
                 )
             } else {
                 let usage = &self.latest.usage;
-                let input = (usage.input_tokens > 0).then_some(usage.input_tokens);
+                let input = (usage.total_input_tokens > 0).then_some(usage.total_input_tokens);
                 let output = (usage.output_tokens > 0).then_some(usage.output_tokens);
                 stats::busy_stats_text(self.cps_meter.cps(), input, output)
             };

@@ -147,9 +147,10 @@
 
     #[test]
     fn tool_call_is_single_accent_line_without_timestamp() {
-        let feed = feed_with(&[WireFeedBlock::Tool {
+        let feed = feed_with(&[WireFeedBlock::ToolCall {
             name: "read".into(),
             args: "(path=\"x\")".into(),
+            metadata: None,
             timestamp: Some("2026-01-01 12:00".into()),
         }]);
         let opts = FeedRenderOptions::default();
@@ -410,9 +411,10 @@
             theme,
             ..Default::default()
         };
-        let feed = feed_with(&[WireFeedBlock::Tool {
+        let feed = feed_with(&[WireFeedBlock::ToolCall {
             name: "read".into(),
             args: String::new(),
+            metadata: None,
             timestamp: None,
         }]);
         let lines = super::lines(&feed, 20, &opts);
@@ -545,9 +547,10 @@
     #[test]
     fn default_theme_keeps_classic_tool_and_thinking_rows() {
         let feed = feed_with(&[
-            WireFeedBlock::Tool {
+            WireFeedBlock::ToolCall {
                 name: "read".into(),
                 args: "(path=\"x\")".into(),
+            metadata: None,
                 timestamp: None,
             },
             WireFeedBlock::Thinking {
@@ -713,9 +716,10 @@
     // ── v2 block frame (#31): margins + borders ──────────────────────────
 
     fn tool_block() -> Feed {
-        feed_with(&[WireFeedBlock::Tool {
+        feed_with(&[WireFeedBlock::ToolCall {
             name: "bash".into(),
             args: " ls".into(),
+            metadata: None,
             timestamp: None,
         }])
     }
@@ -765,9 +769,10 @@
                 text: "hello".into(),
                 timestamp: None,
             },
-            WireFeedBlock::Tool {
+            WireFeedBlock::ToolCall {
                 name: "bash".into(),
                 args: " ls".into(),
+            metadata: None,
                 timestamp: None,
             },
         ]);

@@ -499,7 +499,8 @@ fn feed_text_bytes(blocks: &[theway_transport::feed::WireFeedBlock]) -> usize {
             | Block::Assistant { text, .. }
             | Block::Thinking { text, .. }
             | Block::Plain { text, .. } => text.len(),
-            Block::Tool { name, args, .. } => name.len() + args.len(),
+            Block::ToolCall { name, args, .. } => name.len() + args.len(),
+            Block::Error { message, .. } => message.len(),
             Block::ToolResult { lines, .. } => lines.iter().map(String::len).sum(),
         })
         .sum()

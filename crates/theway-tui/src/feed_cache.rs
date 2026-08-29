@@ -467,13 +467,26 @@ mod streaming_tests {
                     text: text.clone(),
                     timestamp: timestamp.clone(),
                 },
-                Block::Tool {
+                Block::ToolCall {
                     name,
                     args,
+                    metadata,
                     timestamp,
-                } => WireFeedBlock::Tool {
+                } => WireFeedBlock::ToolCall {
                     name: name.clone(),
                     args: args.clone(),
+                    metadata: metadata.clone(),
+                    timestamp: timestamp.clone(),
+                },
+                Block::Error {
+                    message,
+                    code,
+                    recoverable,
+                    timestamp,
+                } => WireFeedBlock::Error {
+                    message: message.clone(),
+                    code: code.clone(),
+                    recoverable: *recoverable,
                     timestamp: timestamp.clone(),
                 },
                 Block::ToolResult {
@@ -675,9 +688,10 @@ mod streaming_tests {
                 text: "answer text".into(),
                 timestamp: None,
             },
-            Block::Tool {
+            Block::ToolCall {
                 name: "read".into(),
                 args: "(path=\"x\")".into(),
+                metadata: None,
                 timestamp: None,
             },
         ];
