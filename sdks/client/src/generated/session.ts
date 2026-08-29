@@ -361,7 +361,11 @@ export interface SessionSummary {
   preview?: string | undefined;
   metadata: { [key: string]: string };
   /** RFC3339 / ISO-8601 with offset (UTC), null when absent. */
-  lastActivityAtRfc3339?: string | undefined;
+  lastActivityAtRfc3339?:
+    | string
+    | undefined;
+  /** Pi-style tree prefix (`├─ ` / `└─ ` / `│ `) for fork-lineage display. */
+  treePrefix: string;
 }
 
 export interface SessionSummary_MetadataEntry {
@@ -3816,6 +3820,7 @@ function createBaseSessionSummary(): SessionSummary {
     preview: undefined,
     metadata: {},
     lastActivityAtRfc3339: undefined,
+    treePrefix: "",
   };
 }
 
@@ -3859,6 +3864,9 @@ export const SessionSummary: MessageFns<SessionSummary> = {
     });
     if (message.lastActivityAtRfc3339 !== undefined) {
       writer.uint32(98).string(message.lastActivityAtRfc3339);
+    }
+    if (message.treePrefix !== "") {
+      writer.uint32(114).string(message.treePrefix);
     }
     return writer;
   },
@@ -3977,6 +3985,14 @@ export const SessionSummary: MessageFns<SessionSummary> = {
           message.lastActivityAtRfc3339 = reader.string();
           continue;
         }
+        case 14: {
+          if (tag !== 114) {
+            break;
+          }
+
+          message.treePrefix = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -4033,6 +4049,11 @@ export const SessionSummary: MessageFns<SessionSummary> = {
         : isSet(object.last_activity_at_rfc3339)
         ? globalThis.String(object.last_activity_at_rfc3339)
         : undefined,
+      treePrefix: isSet(object.treePrefix)
+        ? globalThis.String(object.treePrefix)
+        : isSet(object.tree_prefix)
+        ? globalThis.String(object.tree_prefix)
+        : "",
     };
   },
 
@@ -4083,6 +4104,9 @@ export const SessionSummary: MessageFns<SessionSummary> = {
     if (message.lastActivityAtRfc3339 !== undefined) {
       obj.lastActivityAtRfc3339 = message.lastActivityAtRfc3339;
     }
+    if (message.treePrefix !== "") {
+      obj.treePrefix = message.treePrefix;
+    }
     return obj;
   },
 
@@ -4112,6 +4136,7 @@ export const SessionSummary: MessageFns<SessionSummary> = {
       {},
     );
     message.lastActivityAtRfc3339 = object.lastActivityAtRfc3339 ?? undefined;
+    message.treePrefix = object.treePrefix ?? "";
     return message;
   },
 };

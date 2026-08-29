@@ -243,6 +243,7 @@ message SessionSummary {
   optional string preview = 10;
   map<string, string> metadata = 11;
   optional string last_activity_at_rfc3339 = 12; // RFC3339 / ISO-8601 with offset (UTC), null when absent.
+  string tree_prefix = 14; // Pi-style tree prefix (`├─ ` / `└─ ` / `│ `) for fork-lineage display.
 }
 
 // Thinking levels supported by the runtime.
