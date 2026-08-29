@@ -71,6 +71,7 @@ pub mod grep;
 pub mod ls;
 pub mod outline;
 pub mod read;
+pub mod session_tool_result;
 pub mod truncate;
 pub mod web_fetch;
 pub mod web_search;
@@ -435,6 +436,12 @@ pub fn session_tool_set_for_cwd(
         repo.clone(),
         graph_path,
         cwd.clone(),
+    ));
+    // On-demand stored tool-result access (#50): the model can grep and page through
+    // full results that were virtualized into placeholders in the LLM context.
+    tools.extend(session_tool_result::SessionToolResultTools::create(
+        repo.clone(),
+        session_id.to_string(),
     ));
     // Trigger/cron family: harness-adjacent but implemented in this crate.
     tools.push(new_cron_job_tool(
