@@ -80,9 +80,13 @@ impl App {
                             self.apply_frame(frame);
                             if self.resync_pending {
                                 self.resync_pending = false;
-                                match self.client.get_state_for_session(&self.session_id).await {
-                                    Ok(state) => self.apply_snapshot(wire_status(&state)),
-                                    Err(e) => self.error_line(format!("get_state: {e}")),
+                                match self.client.get_snapshot_for_session(&self.session_id).await {
+                                    Ok(state) => {
+                                        self.apply_snapshot(wire_status_from_session_snapshot(
+                                            &state,
+                                        ))
+                                    }
+                                    Err(e) => self.error_line(format!("GetSnapshot: {e}")),
                                 }
                             }
                         }
@@ -120,11 +124,13 @@ impl App {
                                 // succeed on the candidate connection.
                                 match candidate.stream_events_for_session(Some(&session_id)).await {
                                     Ok(candidate_stream) => {
-                                        match candidate.get_state_for_session(&session_id).await {
+                                        match candidate.get_snapshot_for_session(&session_id).await {
                                             Ok(state) => {
                                                 let addr = candidate.addr().to_string();
                                                 self.client = candidate;
-                                                self.apply_snapshot(wire_status(&state));
+                                                self.apply_snapshot(
+                                                    wire_status_from_session_snapshot(&state),
+                                                );
                                                 self.connected = true;
                                                 if reused {
                                                     self.connection_line(format!(

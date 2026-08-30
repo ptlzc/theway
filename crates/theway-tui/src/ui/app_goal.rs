@@ -23,8 +23,10 @@ impl App {
         // Load the selected session's authoritative feed immediately; the
         // current frame stream is still filtered to the previous session until
         // the event loop resubscribes below.
-        if let Ok(state) = self.client.get_state_for_session(&id).await {
-            self.apply_snapshot(theway_transport::proto::wire_status(&state));
+        if let Ok(state) = self.client.get_snapshot_for_session(&id).await {
+            self.apply_snapshot(theway_transport::proto::wire_status_from_session_snapshot(
+                &state,
+            ));
         }
         // A newly created session (`/new`) may not have a daemon runtime in
         // the snapshot map yet; that is fine, the resubscribed stream will

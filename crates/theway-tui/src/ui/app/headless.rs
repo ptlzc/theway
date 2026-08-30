@@ -24,8 +24,9 @@ impl App {
             while let Some(frame) = stream.next().await {
                 let Ok(frame) = frame else { continue };
                 if let Some(stream_frame::Payload::Snapshot(state)) = frame.payload {
-                    let base = state.feed_lines_base as usize;
-                    let lines = state.feed_lines;
+                    let Some(feed) = state.feed else { continue };
+                    let base = feed.lines_base as usize;
+                    let lines = feed.lines;
                     if let Some(start) = headless_unprinted_start(base, lines.len(), &mut printed) {
                         for line in &lines[start..] {
                             println!("{line}");

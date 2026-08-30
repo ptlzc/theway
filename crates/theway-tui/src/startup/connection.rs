@@ -14,7 +14,7 @@ use theway_transport::client::{
 use theway_transport::grpc::{
     StorageServiceState, ToolServiceState, serve_storage_service, serve_tool_service,
 };
-use theway_transport::proto::wire_status;
+use theway_transport::proto::wire_status_from_session_snapshot;
 use theway_transport::transport::{SessionOps, StorageOps, ToolOps};
 use theway_transport::wire::{WireDaemonConfig, WireStatus};
 use tokio::net::TcpListener;
@@ -189,10 +189,10 @@ impl DaemonConnector {
         if outcome.pushed {
             tracing::info!("provisioned daemon config at {addr} via settings RPC");
         }
-        let state = client.get_state_for_session("").await?;
+        let state = client.get_snapshot_for_session("").await?;
         Ok(Some(DaemonConnection {
             client,
-            status: wire_status(&state),
+            status: wire_status_from_session_snapshot(&state),
             reused: true,
             notes: outcome.notes,
         }))
@@ -230,10 +230,10 @@ impl DaemonConnector {
             tracing::info!("provisioned daemon config at {addr} via settings RPC");
         }
         notes.extend(outcome.notes);
-        let state = client.get_state_for_session("").await?;
+        let state = client.get_snapshot_for_session("").await?;
         Ok(DaemonConnection {
             client,
-            status: wire_status(&state),
+            status: wire_status_from_session_snapshot(&state),
             reused: false,
             notes,
         })
@@ -286,8 +286,8 @@ async fn restore_session(
         return Ok(current);
     }
     // No session switch: read the requested session's state directly.
-    let state = client.get_state_for_session(session_id).await?;
-    let status = wire_status(&state);
+    let state = client.get_snapshot_for_session(session_id).await?;
+    let status = wire_status_from_session_snapshot(&state);
     if status.session_id != session_id {
         anyhow::bail!(
             "daemon did not restore session {session_id} within {SESSION_RESTORE_TIMEOUT:?}"

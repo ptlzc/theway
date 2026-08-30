@@ -197,7 +197,7 @@ impl App {
     pub(super) fn apply_frame(&mut self, frame: theway_grpc::StreamFrame) {
         match frame.payload {
             Some(stream_frame::Payload::Snapshot(state)) => {
-                self.apply_snapshot(wire_status(&state));
+                self.apply_snapshot(wire_status_from_session_snapshot(&state));
             }
             Some(stream_frame::Payload::Event(_)) | None => {}
         }

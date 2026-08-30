@@ -289,7 +289,9 @@ pub(crate) mod test_daemon {
     use std::sync::Arc;
     use theway_transport::client::GrpcClient;
     use theway_transport::grpc::{GrpcState, serve_grpc};
-    use theway_transport::testing::FakeSessionOps;
+    use theway_transport::testing::{
+        ChannelCommandOps, FakeSessionOps, LiveSessionObservability, SharedSettingsOps,
+    };
     use theway_transport::wire::{WireCommand, WireDaemonConfig, WirePathContext, WireStatus};
     use tokio::sync::{broadcast, mpsc};
 
@@ -343,11 +345,33 @@ pub(crate) mod test_daemon {
             session_ops.add_session(id);
         }
         let current: String = seeds.first().copied().unwrap_or("").to_string();
+        let path_context = Arc::new(std::sync::RwLock::new(WirePathContext::default()));
+        let daemon_config = Arc::new(std::sync::RwLock::new(WireDaemonConfig::default()));
+        let session_states = Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new()));
+        let external_ops: Arc<dyn theway_transport::ExternalProtocolOps> =
+            Arc::new(theway_transport::CompositeExternalProtocolOps::new(
+                Arc::new(ChannelCommandOps::new(command_tx.clone())),
+                session_ops.clone(),
+                Arc::new(LiveSessionObservability::new(
+                    session_ops.clone(),
+                    session_states.clone(),
+                    latest.clone(),
+                    current.clone(),
+                )),
+                Arc::new(theway_transport::UnavailableGraphOps),
+                Arc::new(theway_transport::UnavailableToolOps),
+                Arc::new(theway_transport::UnavailableStorageOps),
+                Arc::new(SharedSettingsOps::new(
+                    path_context.clone(),
+                    daemon_config.clone(),
+                    command_tx.clone(),
+                )),
+            ));
         let state = GrpcState {
             commands: command_tx,
             snapshots: snapshot_tx,
             latest,
-            session_states: Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new())),
+            session_states,
             events: event_tx,
             dag_events: dag_event_tx,
             job_ops: Arc::new(theway_transport::UnavailableJobOps),
@@ -355,10 +379,11 @@ pub(crate) mod test_daemon {
             session_ops: session_ops.clone(),
             session_id: Arc::new(std::sync::RwLock::new(current)),
             agent_fwd,
-            path_context: Arc::new(std::sync::RwLock::new(WirePathContext::default())),
-            daemon_config: Arc::new(std::sync::RwLock::new(WireDaemonConfig::default())),
+            path_context,
+            daemon_config,
             tool_ops: Arc::new(theway_transport::UnavailableToolOps),
             storage_ops: Arc::new(theway_transport::UnavailableStorageOps),
+            external_ops,
         };
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap().to_string();

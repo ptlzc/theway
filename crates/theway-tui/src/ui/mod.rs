@@ -72,7 +72,7 @@ use theway_transport::history::HistoryStore;
 use theway_transport::images::EncodedImage;
 use theway_transport::mentions;
 use theway_transport::proto::theway_grpc::stream_frame;
-use theway_transport::proto::{theway_grpc, wire_status};
+use theway_transport::proto::{theway_grpc, wire_status_from_session_snapshot};
 use theway_transport::transport::SlashCompleter;
 use theway_transport::wire::{WireSessionSnapshot, WireStatus};
 
@@ -221,7 +221,7 @@ pub struct AppConfig {
     /// Controller-side daemon discovery/spawn state. Unit fixtures without a
     /// process boundary leave this unset.
     pub(crate) connector: Option<DaemonConnector>,
-    /// Initial snapshot (`get_state` result) — seeds the feed, the panel and
+    /// Initial snapshot (`GetSnapshot` result) — seeds the feed, the panel and
     /// the status line before the first stream frame arrives.
     pub initial: WireStatus,
     pub cwd: PathBuf,
@@ -256,7 +256,7 @@ pub struct AppConfig {
 pub struct App {
     client: GrpcClient,
     connector: Option<DaemonConnector>,
-    /// Latest snapshot cache: updated from the initial `get_state` and every
+    /// Latest snapshot cache: updated from the initial `GetSnapshot` and every
     /// stream snapshot frame; everything renderable reads from here.
     latest: WireStatus,
     /// Latest nested session snapshot (session-snapshot-collapse). Refreshed
@@ -389,7 +389,7 @@ pub struct App {
     /// Stream connection state: `Some` while the frame stream is open.
     connected: bool,
     /// An incremental feed frame did not continue from the local block
-    /// count. The event loop resolves this with the authoritative GetState
+    /// count. The event loop resolves this with the authoritative GetSnapshot
     /// path before accepting another delta.
     resync_pending: bool,
     /// Session id the client selected locally (`/resume`, `/session switch`).
