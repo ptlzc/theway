@@ -368,6 +368,34 @@ Two zones in one crate:
   re-exported from `theway-contract`, so storage and the daemon can share
   them without depending on this crate.
 
+### Single-version protocol: `SessionSnapshot` + `ExternalProtocolOps`
+
+All three protocol surfaces (gRPC, HTTP JSON-RPC, MCP stdio) share one
+non-streaming application service:
+
+- `theway_transport::ExternalProtocolOps` combines `CommandOps`, `SessionOps`,
+  `SessionObservabilityOps`, `GraphOps`, `ToolOps`, `StorageOps`, and
+  `SettingsOps`. The daemon builds `DaemonExternalProtocolOps` once and
+  injects the same `Arc<dyn ExternalProtocolOps>` into `GrpcState`,
+  `HttpState`, and the MCP `ToolDispatcher`; each protocol only parses
+  parameters, maps errors, and serializes results.
+- `SessionSnapshot` is the only snapshot shape. `GetSnapshot` (gRPC),
+  `session.get_snapshot` (JSON-RPC), and MCP `session_get_snapshot` return the
+  authoritative current state: `runtime`, `feed`, `system_context`, `dags`,
+  and `subagents` come from the live projection; `info`, graph nodes,
+  `active_node_id`, and `lineage` come from the session resource plane.
+- Full message history is not carried by the snapshot. `ListSessionMessages`
+  (gRPC), `session.list_messages` (JSON-RPC), and MCP
+  `session_list_messages` page through the active branch with a `limit` and an
+  exclusive `before_entry_id` cursor; the server caps `limit` at 500 and
+  returns `blocks`, `next_before_entry_id`, `has_more`, and `total`.
+- `StreamEvents` pushes `SessionSnapshot` directly. The first frame and any
+  lagged-resync frame are full authoritative snapshots; incremental frames
+  clone the previous frame and update only the `feed` plane. SSE `/events`
+  and WebSocket status frames use the serde twin `WireSessionSnapshot` JSON.
+- The previous flat snapshot and history-read surface was removed; clients
+  use `GetSnapshot` + `ListSessionMessages`.
+
 ### `theway-tui` — the terminal client
 
 The `theway` binary is a pure client of the kernel: on startup it reuses a

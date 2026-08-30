@@ -64,10 +64,11 @@ import {
   type GetSessionGraphNodeResponse,
   type ListSessionGraphNodeMessagesRequest,
   type ListSessionGraphNodeMessagesResponse,
+  type ListSessionMessagesRequest,
   type ListSessionsResponse,
   type RenameSessionRequest,
+  type SessionMessagePage,
   type SessionSnapshot,
-  type SessionState,
   type SessionStateRequest,
   type SetCredentialRequest,
   type StreamSessionGraphNodeRequest,
@@ -175,24 +176,28 @@ export class ThewayGrpcClient {
 
   // ── session state ──
 
-  /** `GetState` — the latest full session state. Pass a session id or omit for the daemon's current session. */
-  getState(sessionId = ''): Promise<SessionState> {
-    const request: SessionStateRequest = { sessionId };
-    return this.#call<SessionStateRequest, SessionState>(this.#session.getState.bind(this.#session), 'GetState', request);
-  }
-
-  // ── session snapshot / history / collapse ──
-
   /** `GetSnapshot` — the full nested session snapshot. Pass a session id or omit for the daemon's current session. */
   getSnapshot(sessionId = ''): Promise<SessionSnapshot> {
     const request: SessionStateRequest = { sessionId };
     return this.#call<SessionStateRequest, SessionSnapshot>(this.#session.getSnapshot.bind(this.#session), 'GetSnapshot', request);
   }
 
-  /** `GetHistory` — snapshot-shaped session transcript for an explicit session. */
-  getHistory(sessionId = ''): Promise<SessionSnapshot> {
-    const request: SessionStateRequest = { sessionId };
-    return this.#call<SessionStateRequest, SessionSnapshot>(this.#session.getHistory.bind(this.#session), 'GetHistory', request);
+  /** `ListSessionMessages` — cursor-paginated full message history. */
+  listSessionMessages(
+    sessionId: string,
+    limit = 50,
+    beforeEntryId?: string,
+  ): Promise<SessionMessagePage> {
+    const request: ListSessionMessagesRequest = {
+      sessionId,
+      limit,
+      beforeEntryId,
+    };
+    return this.#call<ListSessionMessagesRequest, SessionMessagePage>(
+      this.#session.listSessionMessages.bind(this.#session),
+      'ListSessionMessages',
+      request,
+    );
   }
 
   /** `CollapseSession` — collapse a session into a session graph node. */

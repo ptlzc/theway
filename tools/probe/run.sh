@@ -8,7 +8,7 @@
 # What it does:
 #   1. Builds theway (--grpc mode) and theway-probe.
 #   2. Starts theway --grpc on a random/fixed port, waits until it's healthy.
-#   3. Runs theway-probe against it (health-check, health-watch, multi-session, get-state).
+#   3. Runs theway-probe against it (health-check, health-watch, multi-session, get-snapshot).
 #   4. Tests graceful shutdown: SIGTERM → clean exit; SIGINT → clean exit.
 #   5. Collects results into <output-dir>/ and writes a summary report.
 #

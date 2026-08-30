@@ -34,8 +34,8 @@ import { ThewayGrpcClient, HealthClient } from '@theway-ai/sdk';
 
 const client = new ThewayGrpcClient('http://127.0.0.1:34567');
 
-// Full session state (typed SessionState)
-const state = await client.getState();
+// Authoritative current session snapshot (typed SessionSnapshot)
+const snapshot = await client.getSnapshot();
 
 // Commands — throw when the server replies accepted: false
 await client.prompt('hello');

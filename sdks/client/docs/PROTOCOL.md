@@ -50,20 +50,23 @@ the supported values.
 
 ## Pagination
 
-### GetHistory
+### ListSessionMessages
 
-Reads a session feed page by page.
+Reads the full message history of a session's active branch page by page.
 
 ```ts
-const res = await client.getHistory({
-  sessionId: 'sess-1',
-  offset: 0,
-  limit: 50,
-});
-// res.blocks: FeedBlock[]
-// res.nextOffset
-// res.total?
+const page = await client.listSessionMessages('sess-1', 50);
+// page.blocks: FeedBlock[] (oldest → newest within the page)
+// page.nextBeforeEntryId: string | undefined — pass as beforeEntryId for the
+//   previous page
+// page.hasMore: boolean
+// page.total: number
+
+const older = await client.listSessionMessages('sess-1', 50, page.nextBeforeEntryId);
 ```
+
+The server caps `limit` at 500. `GetSnapshot` carries the current feed
+projection only; full history always goes through `ListSessionMessages`.
 
 ### ListSessionGraphNodeMessages
 
@@ -121,6 +124,6 @@ const res = await client.collapseSession({
 
 ## Compatibility
 
-- `getState()` remains available and returns the legacy `SessionState`.
-- New code should prefer `getSnapshot()`.
+- The previous flat state / snapshot-shaped history client methods were
+  removed; use `getSnapshot()` + `listSessionMessages()`.
 - `session_id` fields on request messages remain the routing identifier.

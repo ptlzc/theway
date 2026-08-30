@@ -12,9 +12,9 @@ import {
   GetSessionGraphNodeResponse,
   ListSessionGraphNodeMessagesResponse,
   SessionGraphNodeStreamFrame,
+  SessionMessagePage,
   SessionServiceService,
   SessionSnapshot,
-  SessionState,
   UpdateSessionMetadataRequest,
 } from '../src/generated/session.js';
 
@@ -60,10 +60,6 @@ async function startServer(): Promise<{
   server.addService(
     SessionServiceService,
     {
-      getState(call: any, callback: any) {
-        requests.push({ method: 'GetState', request: call.request });
-        callback(null, SessionState.create({ sessionId: call.request.sessionId }));
-      },
       getSnapshot(call: any, callback: any) {
         requests.push({ method: 'GetSnapshot', request: call.request });
         callback(
@@ -78,13 +74,20 @@ async function startServer(): Promise<{
           }),
         );
       },
-      getHistory(call: any, callback: any) {
-        requests.push({ method: 'GetHistory', request: call.request });
+      listSessionMessages(call: any, callback: any) {
+        requests.push({ method: 'ListSessionMessages', request: call.request });
         callback(
           null,
-          SessionSnapshot.create({
+          SessionMessagePage.create({
             sessionId: call.request.sessionId,
-            feed: { blocks: [], lines: ['history'] },
+            blocks: [
+              {
+                kind: { $case: 'plain', plain: { text: 'history', level: 'output' } },
+              },
+            ],
+            nextBeforeEntryId: 'entry-1',
+            hasMore: false,
+            total: 1,
           }),
         );
       },
@@ -245,14 +248,22 @@ async function startServer(): Promise<{
   };
 }
 
-test('getState(sessionId) sends the explicit session id', async () => {
+test('listSessionMessages(sessionId) sends the explicit session id and cursor', async () => {
   const { port, requests, close } = await startServer();
   try {
     const client = new ThewayGrpcClient(`http://127.0.0.1:${port}`);
-    const state = await client.getState('sess-1');
-    assert.equal(state.sessionId, 'sess-1');
-    assert.equal(requests[0]?.method, 'GetState');
-    assert.equal((requests[0]?.request as { sessionId: string }).sessionId, 'sess-1');
+    const page = await client.listSessionMessages('sess-1', 25, 'entry-9');
+    assert.equal(page.sessionId, 'sess-1');
+    assert.equal(page.blocks[0].kind?.$case, 'plain');
+    assert.equal(requests[0]?.method, 'ListSessionMessages');
+    const request = requests[0]?.request as {
+      sessionId: string;
+      limit: number;
+      beforeEntryId?: string;
+    };
+    assert.equal(request.sessionId, 'sess-1');
+    assert.equal(request.limit, 25);
+    assert.equal(request.beforeEntryId, 'entry-9');
     client.close();
   } finally {
     await close();
@@ -488,15 +499,17 @@ test('getSnapshot(sessionId) returns the nested session snapshot', async () => {
   }
 });
 
-test('getHistory(sessionId) returns the snapshot-shaped transcript', async () => {
+test('listSessionMessages(sessionId) returns the cursor page', async () => {
   const { port, requests, close } = await startServer();
   try {
     const client = new ThewayGrpcClient(`http://127.0.0.1:${port}`);
-    const snapshot = await client.getHistory('sess-hist');
-    assert.equal(snapshot.sessionId, 'sess-hist');
-    assert.equal(snapshot.feed?.lines[0], 'history');
-    assert.equal(requests[0]?.method, 'GetHistory');
-    assert.equal((requests[0]?.request as { sessionId: string }).sessionId, 'sess-hist');
+    const page = await client.listSessionMessages('sess-hist');
+    assert.equal(page.sessionId, 'sess-hist');
+    assert.equal(page.total, 1);
+    assert.equal(page.nextBeforeEntryId, 'entry-1');
+    assert.equal(requests[0]?.method, 'ListSessionMessages');
+    const request = requests[0]?.request as { sessionId: string };
+    assert.equal(request.sessionId, 'sess-hist');
     client.close();
   } finally {
     await close();
