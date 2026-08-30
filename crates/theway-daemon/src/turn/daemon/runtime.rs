@@ -214,6 +214,41 @@ impl TurnHost {
         };
         let session_graph_path = theway_contract::config::sessions_dir_for_cwd(&self.session.cwd)
             .join(theway_storage::session_graph::SESSION_GRAPH_DB_FILE);
+        let session_ops: Arc<dyn theway_transport::transport::SessionOps> = Arc::new(
+            crate::session_ops::AppSessionOps::with_session_graph(
+                self.session.repository.clone(),
+                self.automation.dag.clone(),
+                self.session.cwd.display().to_string(),
+                self.automation.services.session_execution.clone(),
+                self.automation.subagents.clone(),
+                session_graph_path,
+            ),
+        );
+        let graph_ops: Arc<dyn theway_transport::transport::GraphOps> =
+            Arc::new(CoreGraphOps::new(self.automation.dag.clone()));
+        let tool_ops: Arc<dyn theway_transport::transport::ToolOps> = self.runtime.tool_ops.clone();
+        let storage_ops: Arc<dyn theway_transport::transport::StorageOps> =
+            std::sync::Arc::new(theway_transport::UnavailableStorageOps);
+        let observability: Arc<
+            dyn theway_transport::session_observability::SessionObservabilityOps,
+        > = Arc::new(crate::session_observability::DaemonSessionObservability::new(
+            session_ops.clone(),
+            session_states.clone(),
+            latest.clone(),
+            self.session.repository.clone(),
+        ));
+        let external_ops: Arc<dyn theway_transport::ExternalProtocolOps> = Arc::new(
+            crate::external_protocol_ops::DaemonExternalProtocolOps::new(
+                command_tx.clone(),
+                session_ops.clone(),
+                observability,
+                graph_ops.clone(),
+                tool_ops.clone(),
+                storage_ops.clone(),
+                self.runtime.path_context.clone(),
+                self.runtime.config.clone(),
+            ),
+        );
         TransportEndpoints {
             command_tx,
             command_rx,
@@ -227,15 +262,8 @@ impl TurnHost {
                 self.automation.subagents.clone(),
                 self.automation.dag.clone(),
             )),
-            graph_ops: Arc::new(CoreGraphOps::new(self.automation.dag.clone())),
-            session_ops: Arc::new(crate::session_ops::AppSessionOps::with_session_graph(
-                self.session.repository.clone(),
-                self.automation.dag.clone(),
-                self.session.cwd.display().to_string(),
-                self.automation.services.session_execution.clone(),
-                self.automation.subagents.clone(),
-                session_graph_path,
-            )),
+            graph_ops,
+            session_ops,
             // Issue #68: the transport servers serve `GetPathContext` from
             // this handle and apply the `SetSkillDirs` optimistic update
             // against it; the event loop holds the authoritative copy.
@@ -246,11 +274,12 @@ impl TurnHost {
             // Issue #76: file/process operations are forwarded to the
             // controller's ToolService endpoint through the shared config's
             // `tool_service_addr`.
-            tool_ops: self.runtime.tool_ops.clone(),
+            tool_ops,
             // Issue #84: runtime state externalization is wired as an RPC
             // contract first; the storage-backed implementation lands with
             // the controller-storage phase (#85/#86).
-            storage_ops: std::sync::Arc::new(theway_transport::UnavailableStorageOps),
+            storage_ops,
+            external_ops,
             session_id: self.session.id.clone(),
             agent_fwd,
         }

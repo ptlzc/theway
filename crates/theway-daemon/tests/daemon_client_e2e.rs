@@ -1,6 +1,6 @@
 //! Daemon-client e2e (openspec tui-connect-daemon 1.3): spawn the real `thewayd`
 //! binary and drive it through the transport `GrpcClient` — the exact path the
-//! TUI will use. Covers readiness (2.1: get_state works immediately after the
+//! TUI will use. Covers readiness (2.1: GetSnapshot works immediately after the
 //! port file appears), command round-trips (send_message / stream frames) and
 //! multi-client fan-out (2.2) against a live daemon.
 
@@ -85,16 +85,19 @@ async fn wait_ready_ignores_stale_entry_from_a_dead_daemon() {
         "wait_ready accepted the stale port instead of the spawned daemon's"
     );
     let mut client = GrpcClient::connect(&addr).await.unwrap();
-    let state = client.get_state().await.unwrap();
+    let state = client.get_snapshot().await.unwrap();
     let expected_cwd =
         std::fs::canonicalize(dir.path()).unwrap_or_else(|_| dir.path().to_path_buf());
-    assert_eq!(state.cwd, expected_cwd.display().to_string());
+    assert_eq!(
+        state.info.as_ref().unwrap().cwd,
+        expected_cwd.display().to_string()
+    );
 
     unsafe { std::env::remove_var("THEWAY_DIR") };
 }
 
 #[tokio::test]
-async fn spawned_daemon_serves_get_state_immediately() {
+async fn spawned_daemon_serves_get_snapshot_immediately() {
     let _guard = DAEMON_E2E_LOCK.lock().unwrap();
     let dir = tempfile::tempdir().unwrap();
     // SAFETY: serialized on DAEMON_E2E_LOCK; no other test touches THEWAY_DIR.
@@ -103,17 +106,20 @@ async fn spawned_daemon_serves_get_state_immediately() {
     let (_daemon, addr) = spawn_daemon(dir.path()).await;
     let mut client = GrpcClient::connect(&addr).await.unwrap();
 
-    // 2.1 readiness: get_state works right after the port file appears (the
+    // 2.1 readiness: GetSnapshot works right after the port file appears (the
     // daemon writes the file on bind, before serve — but a probe must succeed
     // immediately, not hang).
-    let state = tokio::time::timeout(Duration::from_secs(5), client.get_state())
+    let state = tokio::time::timeout(Duration::from_secs(5), client.get_snapshot())
         .await
-        .expect("get_state hung after readiness")
+        .expect("GetSnapshot hung after readiness")
         .unwrap();
     assert!(!state.session_id.is_empty(), "daemon created a session");
     let expected_cwd =
         std::fs::canonicalize(dir.path()).unwrap_or_else(|_| dir.path().to_path_buf());
-    assert_eq!(state.cwd, expected_cwd.display().to_string());
+    assert_eq!(
+        state.info.as_ref().unwrap().cwd,
+        expected_cwd.display().to_string()
+    );
 
     unsafe { std::env::remove_var("THEWAY_DIR") };
 }
@@ -127,7 +133,7 @@ async fn client_round_trip_against_spawned_daemon() {
 
     let (_daemon, addr) = spawn_daemon(dir.path()).await;
     let mut client = GrpcClient::connect(&addr).await.unwrap();
-    let state = client.get_state().await.unwrap();
+    let state = client.get_snapshot().await.unwrap();
     let session_id = state.session_id.clone();
 
     // send_message → accepted (no credential, so the turn errors server-side,

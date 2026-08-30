@@ -1,7 +1,7 @@
 //! `session_graph_*` tools — inspect and manage the Turso-backed session graph.
 //!
 //! These tools let the agent discover collapsed sessions, read their raw text
-//! through the same transcript pagination used by GetHistory/GetNodeOutput,
+//! through the same transcript pagination used by ListSessionMessages/GetNodeOutput,
 //! check node status, wait for a node to settle, and attach to a session id.
 
 use std::path::PathBuf;

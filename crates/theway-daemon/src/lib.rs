@@ -26,6 +26,7 @@ mod dag_persist;
 pub mod env;
 pub mod executor;
 mod export;
+mod external_protocol_ops;
 mod feed_replay;
 mod file_commands;
 mod forwarding_tool_ops;
@@ -57,6 +58,7 @@ pub(crate) use theway_transport::auth;
 mod session_activation;
 #[allow(dead_code)] // Session assembly consumes this after context construction is introduced.
 mod session_execution;
+mod session_observability;
 pub mod session_ops;
 pub mod skills;
 mod startup_config;

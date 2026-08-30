@@ -1,134 +1,135 @@
-//! Mirrored unit tests for the private MCP `ToolDispatcher` helpers.
+//! Mirrored unit tests for the private MCP `ToolDispatcher` manifest and
+//! routing helpers.
 //!
 //! The full stdio handshake is covered by `tests/mcp_e2e.rs`; these tests focus
 //! on the pure mapping helpers that the e2e path also exercises.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use rmcp::model::Implementation;
-use theway_core::{AgentTool, AgentToolError, AgentToolResult};
-use theway_llm_provider::{Tool, UserContentBlock};
+use theway_transport::testing::LiveSessionObservability;
+use theway_transport::wire::{WireContextUsage, WireStatus};
 
 use super::*;
 
-struct FakeTool {
-    def: Tool,
-    result: AgentToolResult,
-}
-
-
-impl FakeTool {
-    fn ok(name: &str) -> Self {
-        Self {
-            def: Tool {
-                name: name.into(),
-                description: format!("{name} description"),
-                parameters: serde_json::json!({ "type": "object" }),
-            },
-            result: AgentToolResult {
-                content: vec![UserContentBlock::text("ok")],
-                details: serde_json::Value::Null,
-                terminate: None,
-            },
-        }
+fn live_status(session_id: &str) -> WireStatus {
+    WireStatus {
+        session_id: session_id.into(),
+        model: "provider:model".into(),
+        thinking_level: "off".into(),
+        model_catalog: Vec::new(),
+        cwd: "/tmp/theway".into(),
+        busy: false,
+        queued_count: 0,
+        latest_trigger_poll: None,
+        goal: None,
+        control_plane_prompt: None,
+        sidebar: theway_transport::testing::empty_sidebar_snapshot(),
+        feed_blocks: Vec::new(),
+        feed_blocks_base: 0,
+        feed_block_patches: Vec::new(),
+        feed_lines: Vec::new(),
+        feed_lines_base: 0,
+        dags: Vec::new(),
+        subagents: Vec::new(),
+        usage: WireContextUsage::default(),
+        session_usage: WireContextUsage::default(),
+        tui_max_feed_lines: None,
+        extensions: theway_transport::wire::WireExtensionSnapshot::default(),
+        system_context: String::new(),
     }
 }
 
-#[async_trait::async_trait]
-impl AgentTool for FakeTool {
-    fn definition(&self) -> &Tool {
-        &self.def
-    }
-
-    fn label(&self) -> &str {
-        "fake"
-    }
-
-    async fn execute(
-        &self,
-        _tool_call_id: &str,
-        _params: serde_json::Value,
-        _cancel: tokio_util::sync::CancellationToken,
-        _on_update: Option<theway_core::AgentToolUpdate>,
-    ) -> Result<AgentToolResult, AgentToolError> {
-        Ok(self.result.clone())
+fn dispatcher_with_snapshot(session_id: &str) -> ToolDispatcher {
+    let session_ops: Arc<dyn theway_transport::transport::SessionOps> =
+        Arc::new(theway_transport::testing::FakeSessionOps::new());
+    let latest = Arc::new(parking_lot::Mutex::new(live_status(session_id)));
+    let states = Arc::new(parking_lot::Mutex::new(HashMap::from([(
+        session_id.to_string(),
+        live_status(session_id),
+    )])));
+    let ops: Arc<dyn ExternalProtocolOps> = Arc::new(theway_transport::CompositeExternalProtocolOps::new(
+        Arc::new(theway_transport::UnavailableCommandOps),
+        session_ops.clone(),
+        Arc::new(LiveSessionObservability::new(
+            session_ops,
+            states,
+            latest,
+            session_id.to_string(),
+        )),
+        Arc::new(theway_transport::UnavailableGraphOps),
+        Arc::new(theway_transport::UnavailableToolOps),
+        Arc::new(theway_transport::UnavailableStorageOps),
+        Arc::new(theway_transport::UnavailableSettingsOps),
+    ));
+    ToolDispatcher {
+        ops,
+        job_ops: Arc::new(theway_transport::UnavailableJobOps),
     }
 }
 
 #[test]
-fn dispatcher_find_locates_tool_by_name() {
-    let dispatcher = ToolDispatcher {
-        tools: vec![Arc::new(FakeTool::ok("alpha"))],
-    };
-
-    assert!(dispatcher.find("alpha").is_some());
-    assert!(dispatcher.find("beta").is_none());
+fn manifest_covers_the_shared_service_domains() {
+    let specs = tool_specs();
+    let names: Vec<&str> = specs.iter().map(|spec| spec.name).collect();
+    for expected in [
+        "session_list",
+        "session_create",
+        "session_get_snapshot",
+        "session_list_messages",
+        "graph_list",
+        "graph_cancel",
+        "tool_read",
+        "tool_memory_save",
+        "settings_get_config",
+        "settings_set_skill_dirs",
+        "storage_save_dag_run",
+        "storage_load_dag_runs",
+    ] {
+        assert!(names.contains(&expected), "missing manifest tool {expected}");
+    }
 }
 
 #[test]
-fn mcp_tool_uses_definition_schema_and_falls_back_to_empty_object() {
-    let dispatcher = ToolDispatcher {
-        tools: vec![Arc::new(FakeTool::ok("schema-tool"))],
-    };
-    let tool = dispatcher.mcp_tool(dispatcher.tools[0].as_ref());
-    assert_eq!(tool.name.as_ref(), "schema-tool");
-    assert_eq!(tool.description.as_deref(), Some("schema-tool description"));
-    assert_eq!(
-        *tool.input_schema,
-        serde_json::json!({ "type": "object" })
-            .as_object()
-            .cloned()
-            .unwrap_or_default()
-    );
-
-    let bad = FakeTool {
-        def: Tool {
-            name: "bad-schema".into(),
-            description: String::new(),
-            parameters: serde_json::json!("not-an-object"),
-        },
-        result: AgentToolResult::default(),
-    };
-    let tool = dispatcher.mcp_tool(&bad);
-    assert!(tool.input_schema.is_empty());
+fn mcp_tool_generates_schema_from_manifest() {
+    let spec = tool_specs()
+        .into_iter()
+        .find(|spec| spec.name == "session_list_messages")
+        .unwrap();
+    let tool = ToolDispatcher::mcp_tool(&spec);
+    assert_eq!(tool.name.as_ref(), "session_list_messages");
+    let schema = serde_json::Value::Object((*tool.input_schema).clone());
+    assert_eq!(schema["required"][0], "session_id");
 }
 
-#[test]
-fn render_tool_result_joins_text_blocks_and_details() {
-    let result = AgentToolResult {
-        content: vec![
-            UserContentBlock::text("hello"),
-            UserContentBlock::text("world"),
-        ],
-        details: serde_json::json!({ "exit_code": 0 }),
-        terminate: None,
-    };
-
-    let text = render_tool_result(&result);
-
-    assert_eq!(text, "hello\nworld\n{\"exit_code\":0}\n");
+#[tokio::test]
+async fn unknown_tool_fails_without_executing_business_logic() {
+    let dispatcher = dispatcher_with_snapshot("sess-1");
+    let error = dispatcher
+        .execute("unknown_tool", serde_json::json!({}))
+        .await
+        .unwrap_err();
+    assert!(error.contains("tool not found"), "{error}");
 }
 
-#[test]
-fn render_tool_result_formats_non_text_blocks() {
-    let result = AgentToolResult {
-        content: vec![UserContentBlock::Image(theway_llm_provider::ImageContent {
-            data: String::new(),
-            mime_type: "image/png".into(),
-        })],
-        details: serde_json::Value::Null,
-        terminate: None,
-    };
-
-    let text = render_tool_result(&result);
-
-    assert!(text.contains("Image"), "{text}");
-    assert!(text.ends_with('\n'), "{text}");
+#[tokio::test]
+async fn session_get_snapshot_routes_to_the_shared_service() {
+    let dispatcher = dispatcher_with_snapshot("sess-1");
+    let value = dispatcher
+        .execute(
+            "session_get_snapshot",
+            serde_json::json!({ "session_id": "sess-1" }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(value["session_id"], "sess-1");
+    assert_eq!(value["feed"]["lines"], serde_json::json!([]));
 }
 
 #[test]
 fn get_info_reports_theway_implementation() {
-    let dispatcher = ToolDispatcher { tools: vec![] };
+    let dispatcher = dispatcher_with_snapshot("sess-1");
     let info = dispatcher.get_info();
     assert_eq!(info.server_info.name, "theway");
     assert_eq!(

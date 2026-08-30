@@ -437,7 +437,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         }
     });
 
-    let host = TurnHost::new(DaemonConfig {
+    let mut host = TurnHost::new(DaemonConfig {
         harness: harness.clone(),
         extension_host,
         trigger_executor,
@@ -505,11 +505,14 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
                     let _ = std::fs::remove_file(&port_file);
                 }
             }
+            // Build the same shared service the gRPC/HTTP servers use, then
+            // serve it through the MCP stdio protocol.
+            let endpoints = host.transport_endpoints();
             supervise_controller_storage(options.storage_service_addr.as_deref(), async {
-                crate::mcp_server::run_mcp_server(crate::tools::local_tools_for_cwd(
-                    executor.clone(),
-                    cwd.clone(),
-                ))
+                crate::mcp_server::run_mcp_server(
+                    endpoints.external_ops.clone(),
+                    endpoints.job_ops.clone(),
+                )
                 .await
                 .map_err(|e| anyhow::anyhow!("mcp server: {e}"))
             })

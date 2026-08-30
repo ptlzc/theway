@@ -41,25 +41,30 @@ async fn mcp_server_initialize_tools_list_and_call() {
     let info = client.initialize("e2e").await.expect("initialize");
     assert_eq!(info.server_info.name, "theway", "serverInfo name");
 
-    // tools/list: the 15 local-execution tools.
+    // tools/list: the static manifest mirrors the shared JSON-RPC surface.
     let tools = client.tools_list().await.expect("tools/list");
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
-    for expected in ["read", "write", "bash", "exec", "grep", "git", "web_fetch"] {
+    for expected in [
+        "session_list",
+        "session_get_snapshot",
+        "session_list_messages",
+        "graph_list",
+        "tool_read",
+        "settings_get_config",
+        "storage_load_dag_runs",
+    ] {
         assert!(
             names.contains(&expected),
             "missing tool {expected}: {names:?}"
         );
     }
 
-    // tools/call: bash executes a command.
+    // tools/call: the shared settings service answers the same GetConfig
+    // shape as JSON-RPC.
     let result = client
-        .tools_call(
-            "bash",
-            Some(json!({ "command": "echo mcp-e2e-works" })),
-            None,
-        )
+        .tools_call("settings_get_config", Some(json!({})), None)
         .await
-        .expect("tools/call bash");
+        .expect("tools/call settings_get_config");
     let text: String = result
         .content
         .iter()
@@ -68,9 +73,10 @@ async fn mcp_server_initialize_tools_list_and_call() {
             other => format!("{other:?}"),
         })
         .collect();
+    let config: serde_json::Value = serde_json::from_str(&text).expect("config JSON");
     assert!(
-        text.contains("mcp-e2e-works"),
-        "bash output missing marker: {text}"
+        config.is_object(),
+        "GetConfig must return an object: {text}"
     );
 
     // tools/call: unknown tool → error.

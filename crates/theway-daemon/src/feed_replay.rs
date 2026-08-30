@@ -8,8 +8,8 @@
 //! headless clients see the conversation immediately, capped at the
 //! `tui_max_feed_lines` scrollback limit.
 
-use theway_core::AgentMessage;
-use theway_transport::feed::{Feed, replay_messages, trim_feed_to_lines};
+use theway_core::{AgentMessage, SessionTreeEntry};
+use theway_transport::feed::{Feed, WireFeedBlock, replay_messages, trim_feed_to_lines};
 
 /// Replay `messages` into `feed` as finished blocks.
 ///
@@ -26,6 +26,26 @@ pub fn replay_transcript(feed: &mut Feed, messages: &[AgentMessage], max_lines: 
     if let Some(limit) = max_lines {
         trim_feed_to_lines(feed, 100, limit as usize);
     }
+}
+
+/// Convert one transcript message into finished feed blocks, reusing the
+/// same replay rules as [`replay_transcript`] (custom messages are skipped).
+/// Shared by snapshot feed replay and `ListSessionMessages` pagination.
+pub fn agent_message_wire_blocks(message: &AgentMessage) -> Vec<WireFeedBlock> {
+    let mut feed = Feed::new();
+    replay_transcript(&mut feed, std::slice::from_ref(message), None);
+    feed.wire_blocks()
+}
+
+/// Convert a `Message` tree entry into its wire feed blocks. Non-message
+/// entries (model/thinking changes, compaction markers, …) return `None`;
+/// message pagination only counts transcript message entries.
+pub fn session_tree_entry_wire_blocks(entry: &SessionTreeEntry) -> Option<Vec<WireFeedBlock>> {
+    let SessionTreeEntry::Message { message, .. } = entry else {
+        return None;
+    };
+    let blocks = agent_message_wire_blocks(message);
+    (!blocks.is_empty()).then_some(blocks)
 }
 
 #[cfg(test)]
@@ -114,5 +134,35 @@ mod tests {
         let mut feed = Feed::new();
         replay_transcript(&mut feed, &messages, None);
         assert_eq!(feed.blocks().len(), 2);
+    }
+
+    #[test]
+    fn agent_message_wire_blocks_skips_custom_messages() {
+        assert_eq!(agent_message_wire_blocks(&user("hello")).len(), 1);
+        assert!(agent_message_wire_blocks(&custom()).is_empty());
+    }
+
+    #[test]
+    fn session_tree_entry_wire_blocks_filters_non_message_entries() {
+        let message = SessionTreeEntry::Message {
+            id: "entry-1".into(),
+            parent_id: None,
+            timestamp: "2026-01-01T00:00:00Z".into(),
+            message: user("hello"),
+        };
+        assert_eq!(
+            session_tree_entry_wire_blocks(&message)
+                .expect("message entry converts")
+                .len(),
+            1
+        );
+        let label = SessionTreeEntry::Label {
+            id: "entry-2".into(),
+            parent_id: None,
+            timestamp: "2026-01-01T00:00:00Z".into(),
+            target_id: "entry-1".into(),
+            label: None,
+        };
+        assert!(session_tree_entry_wire_blocks(&label).is_none());
     }
 }
