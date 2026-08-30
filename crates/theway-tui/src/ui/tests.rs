@@ -460,7 +460,23 @@ include!(concat!(
 
 include!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/tests/ui/unit/sessions.rs"
+    "/tests/ui/unit/sessions/feed.rs"
+));
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/ui/unit/sessions/input.rs"
+));
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/ui/unit/sessions/status_panel.rs"
+));
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/ui/unit/sessions/fork.rs"
+));
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/ui/unit/sessions/collapse.rs"
 ));
 include!(concat!(
     env!("CARGO_MANIFEST_DIR"),
