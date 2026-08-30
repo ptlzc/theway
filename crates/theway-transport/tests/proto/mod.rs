@@ -11,6 +11,7 @@ mod extensions;
 mod session_activation;
 mod session_cumulative_usage;
 mod session_snapshot_collapse;
+mod system_context;
 use crate::feed::{Level, TriggerPollStatus};
 use crate::wire::{
     WireCronSnapshot, WireMcpSnapshot, WireSidebarSnapshot, WireSkillsSnapshot, WireToolsSnapshot,
@@ -102,6 +103,7 @@ fn fixture_snapshot() -> WireStatus {
         session_usage: WireContextUsage::default(),
         tui_max_feed_lines: None,
         extensions: WireExtensionSnapshot::default(),
+        system_context: String::new(),
     }
 }
 

@@ -178,5 +178,6 @@ fn session_state_with_feed(
         session_context_usage: Some(context_usage_to_proto(&snapshot.session_usage)),
         tui_max_feed_lines: snapshot.tui_max_feed_lines.map(|n| n as u32),
         extensions: Some(extension_snapshot_proto(&snapshot.extensions)),
+        system_context: snapshot.system_context.clone(),
     }
 }

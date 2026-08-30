@@ -147,6 +147,13 @@ export interface SessionState {
    * "xhigh"); empty for older daemons.
    */
   thinkingLevel: string;
+  /**
+   * Full rendered system context for the next request: base prompt + skills +
+   * tool inventory + working directory + memory + lineage. Mirrors the
+   * request/header epoch snapshot in deepseek-harness session logs. Empty for
+   * older daemons.
+   */
+  systemContext: string;
 }
 
 export interface FeedBlockPatch {
@@ -433,7 +440,15 @@ export interface SessionRuntime {
   latestTriggerPoll?: TriggerPollStatus | undefined;
   goal?: GoalSnapshot | undefined;
   controlPlanePrompt?: ControlPlanePromptSnapshot | undefined;
-  extensions?: ExtensionSnapshot | undefined;
+  extensions?:
+    | ExtensionSnapshot
+    | undefined;
+  /**
+   * Full rendered system context for the next request (base prompt + skills +
+   * tool inventory + working directory + memory + lineage). Mirrors the
+   * request/header epoch snapshot in deepseek-harness session logs.
+   */
+  systemContext: string;
 }
 
 /** Transcript plane of a session snapshot. */
@@ -640,6 +655,7 @@ function createBaseSessionState(): SessionState {
     extensions: undefined,
     sessionContextUsage: undefined,
     thinkingLevel: "",
+    systemContext: "",
   };
 }
 
@@ -710,6 +726,9 @@ export const SessionState: MessageFns<SessionState> = {
     }
     if (message.thinkingLevel !== "") {
       writer.uint32(178).string(message.thinkingLevel);
+    }
+    if (message.systemContext !== "") {
+      writer.uint32(186).string(message.systemContext);
     }
     return writer;
   },
@@ -897,6 +916,14 @@ export const SessionState: MessageFns<SessionState> = {
           message.thinkingLevel = reader.string();
           continue;
         }
+        case 23: {
+          if (tag !== 186) {
+            break;
+          }
+
+          message.systemContext = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -990,6 +1017,11 @@ export const SessionState: MessageFns<SessionState> = {
         : isSet(object.thinking_level)
         ? globalThis.String(object.thinking_level)
         : "",
+      systemContext: isSet(object.systemContext)
+        ? globalThis.String(object.systemContext)
+        : isSet(object.system_context)
+        ? globalThis.String(object.system_context)
+        : "",
     };
   },
 
@@ -1061,6 +1093,9 @@ export const SessionState: MessageFns<SessionState> = {
     if (message.thinkingLevel !== "") {
       obj.thinkingLevel = message.thinkingLevel;
     }
+    if (message.systemContext !== "") {
+      obj.systemContext = message.systemContext;
+    }
     return obj;
   },
 
@@ -1105,6 +1140,7 @@ export const SessionState: MessageFns<SessionState> = {
       ? ContextUsage.fromPartial(object.sessionContextUsage)
       : undefined;
     message.thinkingLevel = object.thinkingLevel ?? "";
+    message.systemContext = object.systemContext ?? "";
     return message;
   },
 };
@@ -4945,6 +4981,7 @@ function createBaseSessionRuntime(): SessionRuntime {
     goal: undefined,
     controlPlanePrompt: undefined,
     extensions: undefined,
+    systemContext: "",
   };
 }
 
@@ -4984,6 +5021,9 @@ export const SessionRuntime: MessageFns<SessionRuntime> = {
     }
     if (message.extensions !== undefined) {
       ExtensionSnapshot.encode(message.extensions, writer.uint32(90).fork()).join();
+    }
+    if (message.systemContext !== "") {
+      writer.uint32(98).string(message.systemContext);
     }
     return writer;
   },
@@ -5093,6 +5133,14 @@ export const SessionRuntime: MessageFns<SessionRuntime> = {
           message.extensions = ExtensionSnapshot.decode(reader, reader.uint32());
           continue;
         }
+        case 12: {
+          if (tag !== 98) {
+            break;
+          }
+
+          message.systemContext = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -5147,6 +5195,11 @@ export const SessionRuntime: MessageFns<SessionRuntime> = {
         ? ControlPlanePromptSnapshot.fromJSON(object.control_plane_prompt)
         : undefined,
       extensions: isSet(object.extensions) ? ExtensionSnapshot.fromJSON(object.extensions) : undefined,
+      systemContext: isSet(object.systemContext)
+        ? globalThis.String(object.systemContext)
+        : isSet(object.system_context)
+        ? globalThis.String(object.system_context)
+        : "",
     };
   },
 
@@ -5185,6 +5238,9 @@ export const SessionRuntime: MessageFns<SessionRuntime> = {
     if (message.extensions !== undefined) {
       obj.extensions = ExtensionSnapshot.toJSON(message.extensions);
     }
+    if (message.systemContext !== "") {
+      obj.systemContext = message.systemContext;
+    }
     return obj;
   },
 
@@ -5218,6 +5274,7 @@ export const SessionRuntime: MessageFns<SessionRuntime> = {
     message.extensions = (object.extensions !== undefined && object.extensions !== null)
       ? ExtensionSnapshot.fromPartial(object.extensions)
       : undefined;
+    message.systemContext = object.systemContext ?? "";
     return message;
   },
 };

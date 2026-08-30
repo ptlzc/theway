@@ -67,6 +67,13 @@ pub struct WireStatus {
     /// this plane without adding conversation feed blocks.
     #[serde(default, skip_serializing_if = "WireExtensionSnapshot::is_empty")]
     pub extensions: WireExtensionSnapshot,
+    /// Full rendered system context for the next request: base prompt + skills
+    /// + tool inventory + working directory + memory + lineage.
+    ///
+    /// Mirrors the request/header epoch snapshot in deepseek-harness session
+    /// logs. Empty for older daemons.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub system_context: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -273,6 +280,7 @@ impl From<&WireStatus> for WireSessionSnapshot {
                 goal: status.goal.clone(),
                 control_plane_prompt: status.control_plane_prompt.clone(),
                 extensions: status.extensions.clone(),
+                system_context: status.system_context.clone(),
             },
             feed: WireSessionFeed {
                 blocks: status.feed_blocks.clone(),
@@ -325,6 +333,7 @@ impl From<&WireSessionSnapshot> for WireStatus {
             session_usage: snapshot.runtime.session_context_usage.clone(),
             tui_max_feed_lines: snapshot.runtime.tui_max_feed_lines,
             extensions: snapshot.runtime.extensions.clone(),
+            system_context: snapshot.runtime.system_context.clone(),
         }
     }
 }

@@ -71,20 +71,20 @@ impl TurnHost {
         feed_lines_base: u64,
     ) -> WireStatus {
         let model = current_model_label(self.session.kernel.harness());
-        let thinking_level = self
-            .session
-            .kernel
-            .harness()
-            .agent()
-            .state()
-            .thinking_level
-            .map(|level| level.as_str().to_string())
-            .unwrap_or_else(|| "off".to_string());
+        // One lock pass for the live request context: thinking level, last-turn
+        // usage, and the full rendered system prompt the next request will use.
+        let (thinking_level, usage, system_context) = {
+            let state = self.session.kernel.harness().agent().state();
+            let thinking_level = state
+                .thinking_level
+                .map(|level| level.as_str().to_string())
+                .unwrap_or_else(|| "off".to_string());
+            let usage = last_turn_usage(&state.messages).unwrap_or_default();
+            (thinking_level, usage, state.system_prompt.clone())
+        };
         let context_window = context_window_for(&model);
         // Last-turn usage (not session-cumulative): the last assistant message's
         // usage so clients can compare one turn against the context window.
-        let usage =
-            last_turn_usage(&self.session.kernel.harness().agent().state().messages).unwrap_or_default();
         WireStatus {
             session_id: self.session.id.clone(),
             model,
@@ -143,6 +143,7 @@ impl TurnHost {
             session_usage: self.session.cumulative_usage.clone(),
             tui_max_feed_lines: self.runtime.feed_history_limit,
             extensions: self.wire_extension_snapshot(),
+            system_context,
         }
     }
 

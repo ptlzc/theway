@@ -48,6 +48,11 @@ message SessionState {
   // Active thinking level ("off" | "minimal" | "low" | "medium" | "high" |
   // "xhigh"); empty for older daemons.
   string thinking_level = 22;
+  // Full rendered system context for the next request: base prompt + skills +
+  // tool inventory + working directory + memory + lineage. Mirrors the
+  // request/header epoch snapshot in deepseek-harness session logs. Empty for
+  // older daemons.
+  string system_context = 23;
 }
 
 message FeedBlockPatch {
@@ -306,6 +311,10 @@ message SessionRuntime {
   optional GoalSnapshot goal = 9;
   optional ControlPlanePromptSnapshot control_plane_prompt = 10;
   ExtensionSnapshot extensions = 11;
+  // Full rendered system context for the next request (base prompt + skills +
+  // tool inventory + working directory + memory + lineage). Mirrors the
+  // request/header epoch snapshot in deepseek-harness session logs.
+  string system_context = 12;
 }
 
 // Transcript plane of a session snapshot.

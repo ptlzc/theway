@@ -49,6 +49,7 @@ mod activation;
 mod configuration;
 mod credentials;
 mod model_trigger;
+mod system_context;
 
 fn faux_model() -> theway_llm_provider::Model {
     theway_llm_provider::Model {

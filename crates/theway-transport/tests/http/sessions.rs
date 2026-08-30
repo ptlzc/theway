@@ -32,6 +32,7 @@ fn wire_status(session_id: &str) -> WireStatus {
         session_usage: WireContextUsage::default(),
         tui_max_feed_lines: None,
         extensions: WireExtensionSnapshot::default(),
+        system_context: String::new(),
     }
 }
 

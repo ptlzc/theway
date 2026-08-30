@@ -85,6 +85,7 @@ pub fn wire_status(state: &wire::SessionState) -> WireStatus {
             .unwrap_or_default(),
         tui_max_feed_lines: state.tui_max_feed_lines.map(u64::from),
         extensions: extension_snapshot_wire(state.extensions.as_ref()),
+        system_context: state.system_context.clone(),
     }
 }
 
@@ -149,6 +150,7 @@ pub fn wire_session_snapshot(snapshot: &WireSessionSnapshot) -> wire::SessionSna
             goal: state.goal,
             control_plane_prompt: state.control_plane_prompt,
             extensions: state.extensions,
+            system_context: snapshot.runtime.system_context.clone(),
         }),
         feed: Some(wire::SessionFeed {
             blocks: snapshot.feed.blocks.iter().map(feed_block).collect(),
@@ -291,6 +293,7 @@ fn session_runtime_from_proto(runtime: Option<&wire::SessionRuntime>) -> WireSes
             }
         }),
         extensions: extension_snapshot_wire(runtime.extensions.as_ref()),
+        system_context: runtime.system_context.clone(),
     }
 }
 

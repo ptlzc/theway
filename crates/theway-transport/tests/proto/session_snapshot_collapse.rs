@@ -73,6 +73,7 @@ fn wire_session_snapshot_nested_shape_round_trips() {
             goal: None,
             control_plane_prompt: None,
             extensions: crate::wire::WireExtensionSnapshot::default(),
+            system_context: String::new(),
         },
         feed: crate::wire::WireSessionFeed {
             blocks: vec![crate::feed::WireFeedBlock::Plain {

@@ -181,6 +181,7 @@ pub(super) async fn session_snapshot(
             goal: None,
             control_plane_prompt: None,
             extensions: theway_transport::wire::WireExtensionSnapshot::default(),
+            system_context: String::new(),
         },
         feed: WireSessionFeed {
             blocks: Vec::new(),

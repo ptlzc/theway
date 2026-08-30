@@ -95,6 +95,7 @@ fn sample_snapshot(session_id: &str) -> grpc_proto::SessionSnapshot {
             goal: None,
             control_plane_prompt: None,
             extensions: None,
+            system_context: String::new(),
         }),
         feed: Some(grpc_proto::SessionFeed {
             blocks: vec![proto_plain_block("hello")],

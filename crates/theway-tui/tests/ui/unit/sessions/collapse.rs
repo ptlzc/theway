@@ -74,6 +74,7 @@ async fn side_panel_renders_session_lineage_and_collapsed_nodes() {
             goal: None,
             control_plane_prompt: None,
             extensions: Default::default(),
+            system_context: String::new(),
         },
         feed: WireSessionFeed {
             blocks: Vec::new(),

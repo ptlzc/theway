@@ -258,6 +258,7 @@ fn sample_wire_status(feed_lines: Vec<String>) -> WireStatus {
         session_usage: WireContextUsage::default(),
         tui_max_feed_lines: None,
         extensions: theway_transport::wire::WireExtensionSnapshot::default(),
+        system_context: String::new(),
     }
 }
 

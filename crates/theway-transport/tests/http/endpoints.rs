@@ -37,6 +37,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
         session_usage: WireContextUsage::default(),
         tui_max_feed_lines: None,
         extensions: WireExtensionSnapshot::default(),
+        system_context: String::new(),
     }));
     let router = web_router(HttpState {
         commands: command_tx,
@@ -231,6 +232,7 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
             session_usage: WireContextUsage::default(),
             tui_max_feed_lines: None,
             extensions: WireExtensionSnapshot::default(),
+            system_context: String::new(),
         }))
         .unwrap();
     let chunk = tokio::time::timeout(Duration::from_secs(2), stream.next())
@@ -289,6 +291,7 @@ async fn websocket_serves_snapshot_and_accepts_commands() {
         session_usage: WireContextUsage::default(),
         tui_max_feed_lines: None,
         extensions: WireExtensionSnapshot::default(),
+        system_context: String::new(),
     }));
     let router = web_router(HttpState {
         commands: command_tx,
@@ -487,6 +490,7 @@ async fn healthz_answers_ok_without_snapshot_and_root_404s() {
         session_usage: WireContextUsage::default(),
         tui_max_feed_lines: None,
         extensions: WireExtensionSnapshot::default(),
+        system_context: String::new(),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -557,6 +561,7 @@ async fn spawn_config_server(
             session_usage: WireContextUsage::default(),
             tui_max_feed_lines: None,
             extensions: WireExtensionSnapshot::default(),
+            system_context: String::new(),
         })),
         session_states: Arc::new(Mutex::new(std::collections::HashMap::new())),
         completer: SlashCompleter::from_commands(Vec::new()),

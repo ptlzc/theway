@@ -154,6 +154,7 @@ fn ws_http_state() -> (crate::http::HttpState, tokio::sync::mpsc::UnboundedRecei
             session_usage: WireContextUsage::default(),
             tui_max_feed_lines: None,
             extensions: WireExtensionSnapshot::default(),
+            system_context: String::new(),
         })),
         session_states: Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new())),
         completer: SlashCompleter::from_commands(Vec::new()),

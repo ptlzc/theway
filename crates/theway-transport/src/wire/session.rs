@@ -80,6 +80,13 @@ pub struct WireSessionRuntime {
     pub control_plane_prompt: Option<WireControlPlanePromptSnapshot>,
     #[serde(default, skip_serializing_if = "WireExtensionSnapshot::is_empty")]
     pub extensions: WireExtensionSnapshot,
+    /// Full rendered system context for the next request (base prompt + skills
+    /// + tool inventory + working directory + memory + lineage).
+    ///
+    /// Mirrors the request/header epoch snapshot in deepseek-harness session
+    /// logs.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub system_context: String,
 }
 
 /// Transcript plane of a session snapshot.
