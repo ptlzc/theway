@@ -4,7 +4,10 @@
 
 use super::super::*;
 use crate::TransportEndpoints;
-use crate::testing::{FakeSessionOps, FakeStorageOps, FakeToolOps, empty_sidebar_snapshot};
+use crate::testing::{
+    ChannelCommandOps, FakeSessionOps, FakeStorageOps, FakeToolOps, LiveSessionObservability,
+    SharedSettingsOps, empty_sidebar_snapshot,
+};
 use crate::wire::{
     WireContextUsage, WireDagEvent, WireExtensionSnapshot, WireNodeOutput,
 };
@@ -39,25 +42,81 @@ fn status(session_id: &str) -> WireStatus {
 }
 
 fn state_with(commands: mpsc::UnboundedSender<WireCommand>) -> HttpState {
+    let session_ops: std::sync::Arc<dyn crate::transport::SessionOps> =
+        std::sync::Arc::new(FakeSessionOps::new());
+    let graph_ops: std::sync::Arc<dyn crate::GraphOps> =
+        std::sync::Arc::new(crate::UnavailableGraphOps);
+    let tool_ops: std::sync::Arc<dyn crate::ToolOps> = std::sync::Arc::new(FakeToolOps::new());
+    let storage_ops: std::sync::Arc<dyn crate::StorageOps> =
+        std::sync::Arc::new(FakeStorageOps::new());
+    let path_context = std::sync::Arc::new(std::sync::RwLock::new(
+        crate::wire::WirePathContext::default(),
+    ));
+    let daemon_config = std::sync::Arc::new(std::sync::RwLock::new(
+        crate::wire::WireDaemonConfig::default(),
+    ));
+    let session_states = Arc::new(Mutex::new(std::collections::HashMap::new()));
+    let latest = Arc::new(Mutex::new(status("sess-1")));
+    let external_ops: std::sync::Arc<dyn crate::ExternalProtocolOps> = std::sync::Arc::new(
+        crate::CompositeExternalProtocolOps::new(
+            std::sync::Arc::new(ChannelCommandOps::new(commands.clone())),
+            session_ops.clone(),
+            std::sync::Arc::new(LiveSessionObservability::new(
+                session_ops.clone(),
+                session_states.clone(),
+                latest.clone(),
+                "sess-1",
+            )),
+            graph_ops.clone(),
+            tool_ops.clone(),
+            storage_ops.clone(),
+            std::sync::Arc::new(SharedSettingsOps::new(
+                path_context.clone(),
+                daemon_config.clone(),
+                commands.clone(),
+            )),
+        ),
+    );
     HttpState {
         commands,
         snapshots: broadcast::channel(16).0,
-        latest: Arc::new(Mutex::new(status("sess-1"))),
-        session_states: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        latest,
+        session_states,
         completer: SlashCompleter::from_commands(vec!["/help".into()]),
         events: broadcast::channel::<WireAgentEvent>(16).0,
         dag_events: broadcast::channel::<WireDagEvent>(16).0,
         job_ops: Arc::new(crate::UnavailableJobOps),
-        session_ops: Arc::new(FakeSessionOps::new()),
-        path_context: std::sync::Arc::new(std::sync::RwLock::new(
-            crate::wire::WirePathContext::default(),
-        )),
-        daemon_config: std::sync::Arc::new(std::sync::RwLock::new(
-            crate::wire::WireDaemonConfig::default(),
-        )),
-        tool_ops: Arc::new(FakeToolOps::new()),
-        storage_ops: Arc::new(FakeStorageOps::new()),
+        session_ops,
+        path_context,
+        daemon_config,
+        tool_ops,
+        storage_ops,
+        external_ops,
     }
+}
+
+/// Rebuild the composed external service after a test mutates one of its
+/// input handles (`session_ops`, shared views).
+fn rebind_external_ops(state: &mut HttpState) {
+    let current = state.latest.lock().session_id.clone();
+    state.external_ops = Arc::new(crate::CompositeExternalProtocolOps::new(
+        Arc::new(ChannelCommandOps::new(state.commands.clone())),
+        state.session_ops.clone(),
+        Arc::new(LiveSessionObservability::new(
+            state.session_ops.clone(),
+            state.session_states.clone(),
+            state.latest.clone(),
+            current,
+        )),
+        Arc::new(crate::UnavailableGraphOps),
+        state.tool_ops.clone(),
+        state.storage_ops.clone(),
+        Arc::new(SharedSettingsOps::new(
+            state.path_context.clone(),
+            state.daemon_config.clone(),
+            state.commands.clone(),
+        )),
+    ));
 }
 
 #[derive(Default)]
@@ -190,6 +249,7 @@ async fn dispatch_create_rename_error_and_delete_last_current() {
     ops.add_session("only");
     state.session_ops = ops.clone();
     state.latest.lock().session_id = "only".into();
+    rebind_external_ops(&mut state);
 
     let err = dispatch(
         &state,
@@ -315,6 +375,7 @@ async fn run_web_driver_binds_and_aborts_server_task() {
         session_ops: state.session_ops.clone(),
         tool_ops: state.tool_ops.clone(),
         storage_ops: state.storage_ops.clone(),
+        external_ops: state.external_ops.clone(),
         path_context: state.path_context.clone(),
         daemon_config: state.daemon_config.clone(),
         session_id: "sess-1".into(),

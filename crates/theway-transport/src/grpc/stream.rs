@@ -1,4 +1,5 @@
-use super::{SessionState, WireStatus, WireStatusUpdate, incremental_session_state, session_state};
+use super::{WireStatus, WireStatusUpdate, theway_grpc};
+use crate::proto::{incremental_session_snapshot, session_snapshot};
 
 #[derive(Debug)]
 pub(super) struct StreamCursor {
@@ -23,7 +24,7 @@ pub(super) fn project_stream_snapshot(
     update: &WireStatusUpdate,
     authoritative: &WireStatus,
     cursor: &mut StreamCursor,
-) -> SessionState {
+) -> theway_grpc::SessionSnapshot {
     let delta = match update {
         WireStatusUpdate::Full(snapshot) => {
             return project_authoritative_snapshot(snapshot, cursor);
@@ -54,10 +55,10 @@ pub(super) fn project_stream_snapshot(
         || !lines_are_contiguous
         || !patches_are_contiguous;
 
-    let state = if needs_full {
-        session_state(authoritative)
+    let snapshot = if needs_full {
+        session_snapshot(authoritative)
     } else {
-        incremental_session_state(authoritative, delta, cursor.feed_lines)
+        incremental_session_snapshot(authoritative, delta, cursor.feed_lines)
     };
     cursor.feed_lines = if needs_full {
         authoritative.feed_lines.len()
@@ -71,16 +72,16 @@ pub(super) fn project_stream_snapshot(
     };
     cursor.first_frame = false;
     cursor.resync_pending = false;
-    state
+    snapshot
 }
 
 pub(super) fn project_authoritative_snapshot(
     snapshot: &WireStatus,
     cursor: &mut StreamCursor,
-) -> SessionState {
+) -> theway_grpc::SessionSnapshot {
     cursor.feed_lines = snapshot.feed_lines.len();
     cursor.feed_blocks = snapshot.feed_blocks.len();
     cursor.first_frame = false;
     cursor.resync_pending = false;
-    session_state(snapshot)
+    session_snapshot(snapshot)
 }

@@ -17,6 +17,7 @@ fn grpc_state_with_path_context(
 ) -> (GrpcState, mpsc::UnboundedReceiver<WireCommand>) {
     let (mut state, command_rx, _ops, _tools) = grpc_state_with_ops();
     state.path_context = Arc::new(std::sync::RwLock::new(ctx));
+    rebind_external_ops(&mut state);
     (state, command_rx)
 }
 

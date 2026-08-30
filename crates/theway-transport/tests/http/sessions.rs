@@ -48,6 +48,31 @@ async fn spawn_sessions_server(
 ) {
     let (command_tx, command_rx) = mpsc::unbounded_channel::<WireCommand>();
     let (snapshot_tx, _) = broadcast::channel::<WireStatusUpdate>(16);
+    let tool_ops: std::sync::Arc<dyn crate::ToolOps> =
+        std::sync::Arc::new(crate::testing::FakeToolOps::new());
+    let storage_ops: std::sync::Arc<dyn crate::StorageOps> =
+        std::sync::Arc::new(crate::testing::FakeStorageOps::new());
+    let path_context = std::sync::Arc::new(std::sync::RwLock::new(
+        crate::wire::WirePathContext::default(),
+    ));
+    let daemon_config = std::sync::Arc::new(std::sync::RwLock::new(
+        crate::wire::WireDaemonConfig::default(),
+    ));
+    let external_ops: std::sync::Arc<dyn crate::ExternalProtocolOps> = std::sync::Arc::new(
+        crate::CompositeExternalProtocolOps::new(
+            std::sync::Arc::new(crate::testing::ChannelCommandOps::new(command_tx.clone())),
+            ops.clone(),
+            std::sync::Arc::new(crate::UnavailableSessionObservability),
+            std::sync::Arc::new(crate::UnavailableGraphOps),
+            tool_ops.clone(),
+            storage_ops.clone(),
+            std::sync::Arc::new(crate::testing::SharedSettingsOps::new(
+                path_context.clone(),
+                daemon_config.clone(),
+                command_tx.clone(),
+            )),
+        ),
+    );
     let state = HttpState {
         commands: command_tx,
         snapshots: snapshot_tx,
@@ -58,14 +83,11 @@ async fn spawn_sessions_server(
         dag_events: broadcast::channel::<WireDagEvent>(16).0,
         job_ops: Arc::new(crate::UnavailableJobOps),
         session_ops: ops,
-        path_context: std::sync::Arc::new(std::sync::RwLock::new(
-            crate::wire::WirePathContext::default(),
-        )),
-        daemon_config: std::sync::Arc::new(std::sync::RwLock::new(
-            crate::wire::WireDaemonConfig::default(),
-        )),
-        tool_ops: std::sync::Arc::new(crate::testing::FakeToolOps::new()),
-        storage_ops: std::sync::Arc::new(crate::testing::FakeStorageOps::new()),
+        path_context,
+        daemon_config,
+        tool_ops,
+        storage_ops,
+        external_ops,
     };
     let router = web_router(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

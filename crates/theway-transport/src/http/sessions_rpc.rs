@@ -23,6 +23,10 @@ pub(super) fn handles(method: &str) -> bool {
             | "session.delete"
             | "state.delete_session"
             | "storage.delete_session"
+            | "get_snapshot"
+            | "session.get_snapshot"
+            | "list_messages"
+            | "session.list_messages"
             | "get_path_context"
             | "session.get_path_context"
             | "get_config"
@@ -44,9 +48,7 @@ pub(super) async fn dispatch(
     match method {
         "list_sessions" | "session.list" | "state.list_sessions" | "storage.list_sessions" => {
             let current_session_id = state.latest.lock().session_id.clone();
-            let sessions = state
-                .session_ops
-                .list()
+            let sessions = SessionOps::list(state.external_ops.as_ref())
                 .await
                 .map_err(|e| (-32000, e.to_string()))?;
             Ok(
@@ -70,7 +72,7 @@ pub(super) async fn dispatch(
                 })
                 .unwrap_or_default();
             let new_id = state
-                .session_ops
+                .external_ops
                 .create(session_id.as_deref(), &metadata)
                 .await
                 .map_err(|e| {
@@ -82,13 +84,11 @@ pub(super) async fn dispatch(
                 })?;
             if let Some(name) = name.as_deref()
                 && !name.trim().is_empty()
-                && let Err(e) = state.session_ops.rename(&new_id, name).await
+                && let Err(e) = state.external_ops.rename(&new_id, name).await
             {
                 return Err((-32602, e.to_string()));
             }
-            let summary = state
-                .session_ops
-                .list()
+            let summary = SessionOps::list(state.external_ops.as_ref())
                 .await
                 .map_err(|e| (-32000, e.to_string()))?
                 .into_iter()
@@ -106,15 +106,13 @@ pub(super) async fn dispatch(
                 .as_str()
                 .unwrap_or_default()
                 .to_string();
-            let sessions = state
-                .session_ops
-                .list()
+            let sessions = SessionOps::list(state.external_ops.as_ref())
                 .await
                 .map_err(|e| (-32000, e.to_string()))?;
             let target = crate::proto::resolve_session_id(&sessions, &id)
                 .ok_or_else(|| (-32004, format!("no session matches id {id}")))?;
             state
-                .session_ops
+                .external_ops
                 .rename(&target, &name)
                 .await
                 .map_err(|e| (-32602, e.to_string()))?;
@@ -136,7 +134,7 @@ pub(super) async fn dispatch(
                 })
                 .unwrap_or_default();
             state
-                .session_ops
+                .external_ops
                 .update_metadata(&id, &metadata)
                 .await
                 .map_err(|e| {
@@ -153,15 +151,13 @@ pub(super) async fn dispatch(
                 .as_str()
                 .unwrap_or_default()
                 .to_string();
-            let sessions = state
-                .session_ops
-                .list()
+            let sessions = SessionOps::list(state.external_ops.as_ref())
                 .await
                 .map_err(|e| (-32000, e.to_string()))?;
             let target = crate::proto::resolve_session_id(&sessions, &id)
                 .ok_or_else(|| (-32004, format!("no session matches id {id}")))?;
             let running = state
-                .session_ops
+                .external_ops
                 .delete(&target)
                 .await
                 .map_err(|e| (-32000, e.to_string()))?;
@@ -176,7 +172,9 @@ pub(super) async fn dispatch(
             }
             let was_current = state.latest.lock().session_id == target;
             if was_current {
-                let remaining = state.session_ops.list().await.unwrap_or_default();
+                let remaining = SessionOps::list(state.external_ops.as_ref())
+                    .await
+                    .unwrap_or_default();
                 let fallback = remaining
                     .last()
                     .map(|s| s.session_id.clone())
@@ -190,20 +188,75 @@ pub(super) async fn dispatch(
                 .send(WireCommand::SessionDeleted { id: target });
             Ok(serde_json::json!({ "deleted": true }))
         }
+        "get_snapshot" | "session.get_snapshot" => {
+            let session_id = params
+                .and_then(|p| p.get("session_id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            let session_id = if session_id.is_empty() {
+                state.latest.lock().session_id.clone()
+            } else {
+                session_id.to_string()
+            };
+            let snapshot = state
+                .external_ops
+                .authoritative_snapshot(&session_id)
+                .await
+                .map_err(|e| (-32004, e.to_string()))?;
+            Ok(serde_json::to_value(snapshot).unwrap_or_default())
+        }
+        "list_messages" | "session.list_messages" => {
+            let session_id = params
+                .and_then(|p| p.get("session_id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            let session_id = if session_id.is_empty() {
+                state.latest.lock().session_id.clone()
+            } else {
+                session_id.to_string()
+            };
+            let limit = params
+                .and_then(|p| p.get("limit"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(50);
+            let before_entry_id = params
+                .and_then(|p| p.get("before_entry_id"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let page = state
+                .external_ops
+                .list_session_messages(&crate::session_observability::ListSessionMessagesRequest {
+                    session_id,
+                    before_entry_id,
+                    limit: limit.min(u32::MAX as u64) as u32,
+                })
+                .await
+                .map_err(|e| (-32000, e.to_string()))?;
+            Ok(serde_json::to_value(page).unwrap_or_default())
+        }
         "get_path_context" | "session.get_path_context" => {
-            let ctx = state.path_context.read().unwrap();
-            Ok(serde_json::to_value(&*ctx).unwrap_or_default())
+            let ctx = state
+                .external_ops
+                .get_path_context()
+                .await
+                .map_err(|e| (-32000, e.to_string()))?;
+            Ok(serde_json::to_value(ctx).unwrap_or_default())
         }
         "get_config" | "settings.get_config" => {
-            let config = state.daemon_config.read().unwrap();
-            Ok(serde_json::to_value(&*config).unwrap_or_default())
+            let config = state
+                .external_ops
+                .get_config()
+                .await
+                .map_err(|e| (-32000, e.to_string()))?;
+            Ok(serde_json::to_value(config).unwrap_or_default())
         }
         "set_config" | "settings.set_config" | "configure" | "settings.configure" => {
             let config = parse_daemon_config(params)?;
             let accepted = state
-                .commands
-                .send(WireCommand::Configure { config })
-                .is_ok();
+                .external_ops
+                .set_config(&config)
+                .await
+                .unwrap_or(false);
             Ok(serde_json::json!({ "accepted": accepted }))
         }
         "set_skill_dirs" | "session.set_skill_dirs" => {
@@ -216,11 +269,11 @@ pub(super) async fn dispatch(
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            state.path_context.write().unwrap().skills_dirs = dirs.clone();
             let accepted = state
-                .commands
-                .send(WireCommand::SetSkillDirs { dirs })
-                .is_ok();
+                .external_ops
+                .set_skill_dirs(&dirs)
+                .await
+                .unwrap_or(false);
             Ok(serde_json::json!({ "accepted": accepted }))
         }
         _ => Err((-32601, format!("method not found: {method}"))),

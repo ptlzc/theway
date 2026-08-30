@@ -6,6 +6,7 @@ fn grpc_state_with_daemon_config(
 ) -> (GrpcState, mpsc::UnboundedReceiver<WireCommand>) {
     let (mut state, command_rx, _ops, _tools) = grpc_state_with_ops();
     state.daemon_config = Arc::new(std::sync::RwLock::new(config));
+    rebind_external_ops(&mut state);
     (state, command_rx)
 }
 

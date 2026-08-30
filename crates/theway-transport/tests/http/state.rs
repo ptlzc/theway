@@ -18,6 +18,21 @@ async fn spawn_state_server() -> (
     let storage = std::sync::Arc::new(FakeStorageOps::new());
     let (command_tx, _command_rx) = mpsc::unbounded_channel::<WireCommand>();
     let (snapshot_tx, _) = broadcast::channel::<WireStatusUpdate>(16);
+    let session_ops: std::sync::Arc<dyn crate::transport::SessionOps> =
+        std::sync::Arc::new(FakeSessionOps::new());
+    let tool_ops: std::sync::Arc<dyn crate::ToolOps> =
+        std::sync::Arc::new(crate::testing::FakeToolOps::new());
+    let external_ops: std::sync::Arc<dyn crate::ExternalProtocolOps> = std::sync::Arc::new(
+        crate::CompositeExternalProtocolOps::new(
+            std::sync::Arc::new(crate::UnavailableCommandOps),
+            session_ops.clone(),
+            std::sync::Arc::new(crate::UnavailableSessionObservability),
+            std::sync::Arc::new(crate::UnavailableGraphOps),
+            tool_ops.clone(),
+            storage.clone(),
+            std::sync::Arc::new(crate::UnavailableSettingsOps),
+        ),
+    );
     let state = HttpState {
         commands: command_tx,
         snapshots: snapshot_tx,
@@ -51,15 +66,16 @@ async fn spawn_state_server() -> (
         events: broadcast::channel::<WireAgentEvent>(16).0,
         dag_events: broadcast::channel::<WireDagEvent>(16).0,
         job_ops: Arc::new(crate::UnavailableJobOps),
-        session_ops: Arc::new(FakeSessionOps::new()),
+        session_ops,
         path_context: std::sync::Arc::new(std::sync::RwLock::new(
             crate::wire::WirePathContext::default(),
         )),
         daemon_config: std::sync::Arc::new(std::sync::RwLock::new(
             crate::wire::WireDaemonConfig::default(),
         )),
-        tool_ops: std::sync::Arc::new(crate::testing::FakeToolOps::new()),
+        tool_ops,
         storage_ops: storage.clone(),
+        external_ops,
     };
     let router = web_router(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

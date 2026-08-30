@@ -1,7 +1,10 @@
 //! Tests for `grpc` — split out of src (see docs/rust-test-files.md).
 
 use super::*;
-use crate::testing::{FakeSessionOps, FakeStorageOps, FakeToolOps, empty_sidebar_snapshot};
+use crate::testing::{
+    ChannelCommandOps, FakeSessionOps, FakeStorageOps, FakeToolOps, LiveSessionObservability,
+    SharedSettingsOps, empty_sidebar_snapshot,
+};
 use crate::wire::{
     WireAgentEvent, WireContextUsage, WireDaemonConfig, WireDagEvent, WireDagRunSnapshot,
     WireFeedBlockPatch, WireNodeOutput, WirePathContext, WireStatusUpdate,
@@ -128,28 +131,77 @@ fn grpc_state_with_ops() -> (
     let session_ops = Arc::new(FakeSessionOps::new());
     session_ops.add_session("test-session");
     let tool_ops = Arc::new(FakeToolOps::new());
+    let graph_ops: Arc<dyn crate::GraphOps> = Arc::new(TestGraphOps::default());
+    let storage_ops: Arc<dyn crate::StorageOps> = Arc::new(FakeStorageOps::new());
+    let path_context = Arc::new(std::sync::RwLock::new(WirePathContext::default()));
+    let daemon_config = Arc::new(std::sync::RwLock::new(WireDaemonConfig::default()));
+    let session_states = Arc::new(Mutex::new(std::collections::HashMap::new()));
+    let external_ops: Arc<dyn crate::ExternalProtocolOps> =
+        Arc::new(crate::CompositeExternalProtocolOps::new(
+            Arc::new(ChannelCommandOps::new(command_tx.clone())),
+            session_ops.clone(),
+            Arc::new(LiveSessionObservability::new(
+                session_ops.clone(),
+                session_states.clone(),
+                latest.clone(),
+                "test-session",
+            )),
+            graph_ops.clone(),
+            tool_ops.clone(),
+            storage_ops.clone(),
+            Arc::new(SharedSettingsOps::new(
+                path_context.clone(),
+                daemon_config.clone(),
+                command_tx.clone(),
+            )),
+        ));
     (
         GrpcState {
             commands: command_tx,
             snapshots: snapshot_tx,
             latest,
-        session_states: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            session_states,
             events: event_tx,
             dag_events: dag_event_tx,
             job_ops: Arc::new(TestJobOps::default()),
-            graph_ops: Arc::new(TestGraphOps::default()),
+            graph_ops,
             session_ops: session_ops.clone(),
             session_id: Arc::new(std::sync::RwLock::new("test-session".into())),
-            path_context: Arc::new(std::sync::RwLock::new(WirePathContext::default())),
-            daemon_config: Arc::new(std::sync::RwLock::new(WireDaemonConfig::default())),
+            path_context,
+            daemon_config,
             tool_ops: tool_ops.clone(),
-            storage_ops: Arc::new(FakeStorageOps::new()),
+            storage_ops,
+            external_ops,
             agent_fwd,
         },
         command_rx,
         session_ops,
         tool_ops,
     )
+}
+
+/// Rebuild the composed external service after a test mutates one of the
+/// shared views (`path_context` / `daemon_config`).
+fn rebind_external_ops(state: &mut GrpcState) {
+    let current = state.session_id.read().unwrap().clone();
+    state.external_ops = Arc::new(crate::CompositeExternalProtocolOps::new(
+        Arc::new(ChannelCommandOps::new(state.commands.clone())),
+        state.session_ops.clone(),
+        Arc::new(LiveSessionObservability::new(
+            state.session_ops.clone(),
+            state.session_states.clone(),
+            state.latest.clone(),
+            current.clone(),
+        )),
+        state.graph_ops.clone(),
+        state.tool_ops.clone(),
+        state.storage_ops.clone(),
+        Arc::new(SharedSettingsOps::new(
+            state.path_context.clone(),
+            state.daemon_config.clone(),
+            state.commands.clone(),
+        )),
+    ));
 }
 
 include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/grpc/sections/state.rs"));
@@ -164,4 +216,5 @@ include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/grpc/sections/sessions.rs")
 include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/grpc/sections/paths.rs"));
 include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/grpc/sections/config.rs"));
 include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/grpc/sections/tools.rs"));
+include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/grpc/sections/shared_service.rs"));
 

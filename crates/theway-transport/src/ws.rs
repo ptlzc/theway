@@ -29,7 +29,7 @@ use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
 use super::http::HttpState;
-use crate::wire::{WireAgentEvent, WireDagEvent};
+use crate::wire::{WireAgentEvent, WireDagEvent, WireSessionSnapshot};
 
 /// `GET /ws` upgrade handler.
 pub(crate) async fn ws_upgrade(
@@ -44,7 +44,7 @@ async fn run_ws(mut socket: WebSocket, state: HttpState) {
     let latest = state.latest.lock().clone();
     let _ = socket
         .send(Message::Text(
-            json!({ "jsonrpc": "2.0", "method": "status", "params": latest })
+            json!({ "jsonrpc": "2.0", "method": "status", "params": WireSessionSnapshot::from(&latest) })
                 .to_string()
                 .into(),
         ))
@@ -61,7 +61,7 @@ async fn run_ws(mut socket: WebSocket, state: HttpState) {
                 | Err(BroadcastStreamRecvError::Lagged(_)) => latest.lock().clone(),
             };
             Some(Ok::<Message, ()>(Message::Text(
-                json!({ "jsonrpc": "2.0", "method": "status", "params": snapshot })
+                json!({ "jsonrpc": "2.0", "method": "status", "params": WireSessionSnapshot::from(&snapshot) })
                     .to_string()
                     .into(),
             )))

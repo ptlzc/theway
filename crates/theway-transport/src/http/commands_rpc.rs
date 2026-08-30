@@ -3,9 +3,7 @@ use super::*;
 pub(super) fn handles(method: &str) -> bool {
     matches!(
         method,
-        "get_state"
-            | "session.get_state"
-            | "ping"
+        "ping"
             | "get_node_output"
             | "graph.get_node_output"
             | "send_message"
@@ -29,19 +27,6 @@ pub(super) async fn dispatch(
     params: Option<&serde_json::Value>,
 ) -> RpcResult {
     match method {
-        "get_state" | "session.get_state" => {
-            let session_id = params
-                .and_then(|p| p.get("session_id"))
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
-            if session_id.is_empty() {
-                Ok(serde_json::json!(state.latest.lock().clone()))
-            } else if let Some(snapshot) = state.session_states.lock().get(session_id) {
-                Ok(serde_json::json!(snapshot))
-            } else {
-                Err((-32004, format!("session {session_id} is not available")))
-            }
-        }
         "ping" => Ok(serde_json::Value::Null),
         "get_node_output" | "graph.get_node_output" => {
             let run_id = param(params, "run_id")?
@@ -101,14 +86,10 @@ pub(super) async fn dispatch(
                 .map(String::from)
                 .unwrap_or_else(|| current.clone());
             let accepted = state
-                .commands
-                .send(WireCommand::Submit {
-                    session_id,
-                    text,
-                    images,
-                    interrupt: false,
-                })
-                .is_ok();
+                .external_ops
+                .submit(&session_id, &text, images, false)
+                .await
+                .unwrap_or(false);
             Ok(serde_json::json!({ "accepted": accepted }))
         }
         "set_model" | "command.set_model" => {
@@ -122,20 +103,11 @@ pub(super) async fn dispatch(
                 .filter(|id| !id.is_empty())
                 .map(String::from)
                 .unwrap_or_else(|| state.latest.lock().session_id.clone());
-            let (tx, rx) = tokio::sync::oneshot::channel();
             let accepted = state
-                .commands
-                .send(WireCommand::SetModel {
-                    session_id,
-                    spec,
-                    response: tx,
-                })
-                .is_ok();
-            let accepted = if accepted {
-                rx.await.unwrap_or(false)
-            } else {
-                false
-            };
+                .external_ops
+                .set_model(&session_id, &spec)
+                .await
+                .unwrap_or(false);
             Ok(serde_json::json!({ "accepted": accepted }))
         }
         "set_thinking" | "command.set_thinking" => {
@@ -149,20 +121,11 @@ pub(super) async fn dispatch(
                 .filter(|id| !id.is_empty())
                 .map(String::from)
                 .unwrap_or_else(|| state.latest.lock().session_id.clone());
-            let (tx, rx) = tokio::sync::oneshot::channel();
             let accepted = state
-                .commands
-                .send(WireCommand::SetThinking {
-                    session_id,
-                    level,
-                    response: tx,
-                })
-                .is_ok();
-            let accepted = if accepted {
-                rx.await.unwrap_or(false)
-            } else {
-                false
-            };
+                .external_ops
+                .set_thinking(&session_id, &level)
+                .await
+                .unwrap_or(false);
             Ok(serde_json::json!({ "accepted": accepted }))
         }
         "complete" => {
@@ -179,10 +142,7 @@ pub(super) async fn dispatch(
                 .filter(|id| !id.is_empty())
                 .map(String::from)
                 .unwrap_or_else(|| state.latest.lock().session_id.clone());
-            let accepted = state
-                .commands
-                .send(WireCommand::Abort { session_id })
-                .is_ok();
+            let accepted = state.external_ops.abort(&session_id).await.unwrap_or(false);
             Ok(serde_json::json!({ "accepted": accepted }))
         }
         "trigger_immediate" => {
@@ -190,10 +150,7 @@ pub(super) async fn dispatch(
                 .as_str()
                 .unwrap_or_default()
                 .to_string();
-            let accepted = state
-                .commands
-                .send(WireCommand::TriggerRuleNow { id })
-                .is_ok();
+            let accepted = state.external_ops.trigger_now(&id).await.unwrap_or(false);
             Ok(serde_json::json!({ "accepted": accepted }))
         }
         "control_plane_resolve" | "command.approve" => {
@@ -205,12 +162,10 @@ pub(super) async fn dispatch(
                 .map(String::from)
                 .unwrap_or_else(|| state.latest.lock().session_id.clone());
             let accepted = state
-                .commands
-                .send(WireCommand::ResolveControlPlane {
-                    session_id,
-                    approve,
-                })
-                .is_ok();
+                .external_ops
+                .resolve_control_plane(&session_id, approve)
+                .await
+                .unwrap_or(false);
             Ok(serde_json::json!({ "accepted": accepted }))
         }
         _ => Err((-32601, format!("method not found: {method}"))),

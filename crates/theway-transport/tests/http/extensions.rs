@@ -58,6 +58,15 @@ fn extension_http_state() -> (HttpState, mpsc::UnboundedReceiver<WireCommand>) {
             daemon_config: Arc::new(RwLock::new(WireDaemonConfig::default())),
             tool_ops: Arc::new(FakeToolOps::new()),
             storage_ops: Arc::new(FakeStorageOps::new()),
+            external_ops: Arc::new(crate::CompositeExternalProtocolOps::new(
+                Arc::new(crate::UnavailableCommandOps),
+                Arc::new(FakeSessionOps::new()),
+                Arc::new(crate::UnavailableSessionObservability),
+                Arc::new(crate::UnavailableGraphOps),
+                Arc::new(FakeToolOps::new()),
+                Arc::new(FakeStorageOps::new()),
+                Arc::new(crate::UnavailableSettingsOps),
+            )),
         },
         command_rx,
     )

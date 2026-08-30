@@ -11,24 +11,55 @@ use serde_json::json;
 pub(crate) fn test_router(latest: WireStatus) -> Router {
     let (command_tx, _) = mpsc::unbounded_channel::<WireCommand>();
     let (snapshot_tx, _) = broadcast::channel::<WireStatusUpdate>(16);
+    let session_ops: std::sync::Arc<dyn crate::transport::SessionOps> =
+        std::sync::Arc::new(crate::testing::FakeSessionOps::new());
+    let tool_ops: std::sync::Arc<dyn crate::ToolOps> =
+        std::sync::Arc::new(crate::testing::FakeToolOps::new());
+    let storage_ops: std::sync::Arc<dyn crate::StorageOps> =
+        std::sync::Arc::new(crate::testing::FakeStorageOps::new());
+    let path_context = std::sync::Arc::new(std::sync::RwLock::new(
+        crate::wire::WirePathContext::default(),
+    ));
+    let daemon_config = std::sync::Arc::new(std::sync::RwLock::new(
+        crate::wire::WireDaemonConfig::default(),
+    ));
+    let session_states = Arc::new(Mutex::new(std::collections::HashMap::new()));
+    let latest = Arc::new(Mutex::new(latest));
+    let external_ops: std::sync::Arc<dyn crate::ExternalProtocolOps> = std::sync::Arc::new(
+        crate::CompositeExternalProtocolOps::new(
+            std::sync::Arc::new(crate::testing::ChannelCommandOps::new(command_tx.clone())),
+            session_ops.clone(),
+            std::sync::Arc::new(crate::testing::LiveSessionObservability::new(
+                session_ops.clone(),
+                session_states.clone(),
+                latest.clone(),
+                latest.lock().session_id.clone(),
+            )),
+            std::sync::Arc::new(crate::UnavailableGraphOps),
+            tool_ops.clone(),
+            storage_ops.clone(),
+            std::sync::Arc::new(crate::testing::SharedSettingsOps::new(
+                path_context.clone(),
+                daemon_config.clone(),
+                command_tx.clone(),
+            )),
+        ),
+    );
     web_router(HttpState {
         commands: command_tx,
         snapshots: snapshot_tx,
-        latest: Arc::new(Mutex::new(latest)),
-        session_states: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        latest,
+        session_states,
         completer: SlashCompleter::from_commands(vec!["/help".into(), "/model".into(), "/goal".into()]),
         events: broadcast::channel::<crate::wire::WireAgentEvent>(16).0,
         dag_events: broadcast::channel::<crate::wire::WireDagEvent>(16).0,
         job_ops: std::sync::Arc::new(crate::UnavailableJobOps),
-        session_ops: std::sync::Arc::new(crate::testing::FakeSessionOps::new()),
-        path_context: std::sync::Arc::new(std::sync::RwLock::new(
-            crate::wire::WirePathContext::default(),
-        )),
-        daemon_config: std::sync::Arc::new(std::sync::RwLock::new(
-            crate::wire::WireDaemonConfig::default(),
-        )),
-        tool_ops: std::sync::Arc::new(crate::testing::FakeToolOps::new()),
-        storage_ops: std::sync::Arc::new(crate::testing::FakeStorageOps::new()),
+        session_ops,
+        path_context,
+        daemon_config,
+        tool_ops,
+        storage_ops,
+        external_ops,
     })
 }
 

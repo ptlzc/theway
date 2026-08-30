@@ -128,6 +128,29 @@ fn client_frames_parse_jsonrpc_requests() {
 
 fn ws_http_state() -> (crate::http::HttpState, tokio::sync::mpsc::UnboundedReceiver<WireCommand>) {
     let (commands, command_rx) = tokio::sync::mpsc::unbounded_channel();
+    let session_ops: std::sync::Arc<dyn crate::transport::SessionOps> =
+        std::sync::Arc::new(crate::testing::FakeSessionOps::new());
+    let tool_ops: std::sync::Arc<dyn crate::ToolOps> =
+        std::sync::Arc::new(crate::testing::FakeToolOps::new());
+    let storage_ops: std::sync::Arc<dyn crate::StorageOps> =
+        std::sync::Arc::new(crate::testing::FakeStorageOps::new());
+    let path_context = std::sync::Arc::new(std::sync::RwLock::new(WirePathContext::default()));
+    let daemon_config = std::sync::Arc::new(std::sync::RwLock::new(WireDaemonConfig::default()));
+    let external_ops: std::sync::Arc<dyn crate::ExternalProtocolOps> = std::sync::Arc::new(
+        crate::CompositeExternalProtocolOps::new(
+            std::sync::Arc::new(crate::testing::ChannelCommandOps::new(commands.clone())),
+            session_ops.clone(),
+            std::sync::Arc::new(crate::UnavailableSessionObservability),
+            std::sync::Arc::new(crate::UnavailableGraphOps),
+            tool_ops.clone(),
+            storage_ops.clone(),
+            std::sync::Arc::new(crate::testing::SharedSettingsOps::new(
+                path_context.clone(),
+                daemon_config.clone(),
+                commands.clone(),
+            )),
+        ),
+    );
     let state = crate::http::HttpState {
         commands,
         snapshots: tokio::sync::broadcast::channel(16).0,
@@ -161,11 +184,12 @@ fn ws_http_state() -> (crate::http::HttpState, tokio::sync::mpsc::UnboundedRecei
         events: tokio::sync::broadcast::channel(16).0,
         dag_events: tokio::sync::broadcast::channel(16).0,
         job_ops: std::sync::Arc::new(crate::UnavailableJobOps),
-        session_ops: std::sync::Arc::new(crate::testing::FakeSessionOps::new()),
-        path_context: std::sync::Arc::new(std::sync::RwLock::new(WirePathContext::default())),
-        daemon_config: std::sync::Arc::new(std::sync::RwLock::new(WireDaemonConfig::default())),
-        tool_ops: std::sync::Arc::new(crate::testing::FakeToolOps::new()),
-        storage_ops: std::sync::Arc::new(crate::testing::FakeStorageOps::new()),
+        session_ops,
+        path_context,
+        daemon_config,
+        tool_ops,
+        storage_ops,
+        external_ops,
     };
     (state, command_rx)
 }

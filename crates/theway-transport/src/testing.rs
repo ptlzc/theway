@@ -345,6 +345,212 @@ pub fn empty_sidebar_snapshot() -> WireSidebarSnapshot {
     }
 }
 
+/// Test `CommandOps` wired directly to an event-loop command channel (the
+/// same path the real daemon composition uses).
+#[derive(Clone)]
+pub struct ChannelCommandOps {
+    commands: tokio::sync::mpsc::UnboundedSender<crate::wire::WireCommand>,
+}
+
+impl ChannelCommandOps {
+    pub fn new(commands: tokio::sync::mpsc::UnboundedSender<crate::wire::WireCommand>) -> Self {
+        Self { commands }
+    }
+}
+
+#[async_trait]
+impl crate::CommandOps for ChannelCommandOps {
+    async fn submit(
+        &self,
+        session_id: &str,
+        text: &str,
+        images: Vec<crate::wire::WirePromptImage>,
+        interrupt: bool,
+    ) -> Result<bool> {
+        Ok(self
+            .commands
+            .send(crate::wire::WireCommand::Submit {
+                session_id: session_id.to_string(),
+                text: text.to_string(),
+                images,
+                interrupt,
+            })
+            .is_ok())
+    }
+
+    async fn trigger_now(&self, id: &str) -> Result<bool> {
+        Ok(self
+            .commands
+            .send(crate::wire::WireCommand::TriggerRuleNow { id: id.to_string() })
+            .is_ok())
+    }
+
+    async fn abort(&self, session_id: &str) -> Result<bool> {
+        Ok(self
+            .commands
+            .send(crate::wire::WireCommand::Abort {
+                session_id: session_id.to_string(),
+            })
+            .is_ok())
+    }
+
+    async fn resolve_control_plane(&self, session_id: &str, approve: bool) -> Result<bool> {
+        Ok(self
+            .commands
+            .send(crate::wire::WireCommand::ResolveControlPlane {
+                session_id: session_id.to_string(),
+                approve,
+            })
+            .is_ok())
+    }
+
+    async fn set_model(&self, session_id: &str, spec: &str) -> Result<bool> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        if self
+            .commands
+            .send(crate::wire::WireCommand::SetModel {
+                session_id: session_id.to_string(),
+                spec: spec.to_string(),
+                response: tx,
+            })
+            .is_err()
+        {
+            return Ok(false);
+        }
+        Ok(rx.await.unwrap_or(false))
+    }
+
+    async fn set_thinking(&self, session_id: &str, level: &str) -> Result<bool> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        if self
+            .commands
+            .send(crate::wire::WireCommand::SetThinking {
+                session_id: session_id.to_string(),
+                level: level.to_string(),
+                response: tx,
+            })
+            .is_err()
+        {
+            return Ok(false);
+        }
+        Ok(rx.await.unwrap_or(false))
+    }
+}
+
+/// Test `SettingsOps` backed by the same shared path/config views the real
+/// daemon composition uses.
+#[derive(Clone)]
+pub struct SharedSettingsOps {
+    path_context: std::sync::Arc<std::sync::RwLock<crate::wire::WirePathContext>>,
+    daemon_config: std::sync::Arc<std::sync::RwLock<crate::wire::WireDaemonConfig>>,
+    commands: tokio::sync::mpsc::UnboundedSender<crate::wire::WireCommand>,
+}
+
+impl SharedSettingsOps {
+    pub fn new(
+        path_context: std::sync::Arc<std::sync::RwLock<crate::wire::WirePathContext>>,
+        daemon_config: std::sync::Arc<std::sync::RwLock<crate::wire::WireDaemonConfig>>,
+        commands: tokio::sync::mpsc::UnboundedSender<crate::wire::WireCommand>,
+    ) -> Self {
+        Self {
+            path_context,
+            daemon_config,
+            commands,
+        }
+    }
+}
+
+#[async_trait]
+impl crate::SettingsOps for SharedSettingsOps {
+    async fn get_config(&self) -> Result<crate::wire::WireDaemonConfig> {
+        Ok(self.daemon_config.read().unwrap().clone())
+    }
+
+    async fn set_config(&self, config: &crate::wire::WireDaemonConfig) -> Result<bool> {
+        Ok(self
+            .commands
+            .send(crate::wire::WireCommand::Configure {
+                config: config.clone(),
+            })
+            .is_ok())
+    }
+
+    async fn configure(&self, config: &crate::wire::WireDaemonConfig) -> Result<bool> {
+        self.set_config(config).await
+    }
+
+    async fn get_path_context(&self) -> Result<crate::wire::WirePathContext> {
+        Ok(self.path_context.read().unwrap().clone())
+    }
+
+    async fn set_skill_dirs(&self, dirs: &[String]) -> Result<bool> {
+        self.path_context.write().unwrap().skills_dirs = dirs.to_vec();
+        Ok(self
+            .commands
+            .send(crate::wire::WireCommand::SetSkillDirs {
+                dirs: dirs.to_vec(),
+            })
+            .is_ok())
+    }
+}
+
+/// Test `SessionObservabilityOps` that mirrors the old legacy fallback:
+/// resource snapshot first, then the live per-session / latest projection.
+#[derive(Clone)]
+pub struct LiveSessionObservability {
+    session_ops: std::sync::Arc<dyn crate::transport::SessionOps>,
+    session_states: std::sync::Arc<
+        parking_lot::Mutex<std::collections::HashMap<String, crate::wire::WireStatus>>,
+    >,
+    latest: std::sync::Arc<parking_lot::Mutex<crate::wire::WireStatus>>,
+    current_session_id: String,
+}
+
+impl LiveSessionObservability {
+    pub fn new(
+        session_ops: std::sync::Arc<dyn crate::transport::SessionOps>,
+        session_states: std::sync::Arc<
+            parking_lot::Mutex<std::collections::HashMap<String, crate::wire::WireStatus>>,
+        >,
+        latest: std::sync::Arc<parking_lot::Mutex<crate::wire::WireStatus>>,
+        current_session_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            session_ops,
+            session_states,
+            latest,
+            current_session_id: current_session_id.into(),
+        }
+    }
+}
+
+#[async_trait]
+impl crate::SessionObservabilityOps for LiveSessionObservability {
+    async fn authoritative_snapshot(
+        &self,
+        session_id: &str,
+    ) -> Result<crate::wire::WireSessionSnapshot> {
+        if let Ok(snapshot) = self.session_ops.session_snapshot(session_id).await {
+            return Ok(snapshot);
+        }
+        let live = self
+            .session_states
+            .lock()
+            .get(session_id)
+            .cloned()
+            .or_else(|| (session_id == self.current_session_id).then(|| self.latest.lock().clone()))
+            .ok_or_else(|| anyhow::anyhow!("session {session_id} is not available"))?;
+        Ok(crate::wire::WireSessionSnapshot::from(&live))
+    }
+
+    async fn list_session_messages(
+        &self,
+        _request: &crate::session_observability::ListSessionMessagesRequest,
+    ) -> Result<crate::session_observability::SessionMessagePage> {
+        anyhow::bail!("list_session_messages is not wired in this fixture")
+    }
+}
+
 include!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/src/testing/tool_ops.rs"

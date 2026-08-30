@@ -61,6 +61,15 @@ async fn http_serve_web_healthz_smoke() {
         daemon_config: Arc::new(std::sync::RwLock::new(WireDaemonConfig::default())),
         tool_ops: Arc::new(FakeToolOps::new()),
         storage_ops: Arc::new(FakeStorageOps::new()),
+        external_ops: Arc::new(theway_transport::CompositeExternalProtocolOps::new(
+            Arc::new(theway_transport::UnavailableCommandOps),
+            Arc::new(FakeSessionOps::new()),
+            Arc::new(theway_transport::UnavailableSessionObservability),
+            Arc::new(theway_transport::UnavailableGraphOps),
+            Arc::new(FakeToolOps::new()),
+            Arc::new(FakeStorageOps::new()),
+            Arc::new(theway_transport::UnavailableSettingsOps),
+        )),
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

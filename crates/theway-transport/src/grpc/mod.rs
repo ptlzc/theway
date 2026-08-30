@@ -2,7 +2,7 @@
 //!
 //! The gRPC surface mirrors the `--http` (axum) surface: commands are queued
 //! into the same single-turn event loop via [`WireCommand`], and state is served
-//! as structured binary protobuf ([`SessionState`]) streamed over server-streaming
+//! as structured binary protobuf ([`SessionSnapshot`]) streamed over server-streaming
 //! RPC instead of SSE. Loopback-only, same bind policy as the web UI.
 //!
 //! Domain split: the `ToolService` implementation (issue #75) lives in
@@ -43,9 +43,8 @@ use crate::proto::health::{HealthCheckRequest, HealthCheckResponse};
 use crate::proto::theway_grpc;
 use crate::proto::{
     activate_session_request_from_proto, activate_session_response_to_proto,
-    clear_credential_request_from_proto, dag_event_wire, dag_run_wire, incremental_session_state,
-    resolve_session_id, session_state, session_summary_wire, set_credential_request_from_proto,
-    stream_event_wire,
+    clear_credential_request_from_proto, dag_event_wire, dag_run_wire, resolve_session_id,
+    session_summary_wire, set_credential_request_from_proto, stream_event_wire,
 };
 use theway_grpc::DaemonConfig;
 use theway_grpc::command_service_server::{CommandService, CommandServiceServer};
@@ -63,7 +62,7 @@ use theway_grpc::{
     GraphKind, GraphListRequest, GraphListResponse, GraphNodeInterruptRequest,
     GraphNodeSteerRequest, GraphRestoreRequest, GraphRestoreResponse, GraphRetryRequest,
     GraphRetryResponse, GraphSkipRequest, GraphSkipResponse, ListSessionsResponse, MessageMode,
-    RenameSessionRequest, SendMessageRequest, SessionState, SetModelRequest, SetThinkingRequest,
+    RenameSessionRequest, SendMessageRequest, SetModelRequest, SetThinkingRequest,
     StreamEventsRequest, StreamFrame,
 };
 
@@ -96,7 +95,7 @@ pub struct GrpcState {
     /// Abort handle for the registry→events forwarder task spawned at startup.
     pub agent_fwd: tokio::task::AbortHandle,
     /// Owning session id: default scope for GraphCheckpoint and the mount key
-    /// under which `SessionState.dags` is served. Clients should pass explicit
+    /// under which `SessionSnapshot.graph_state.dags` is served. Clients should pass explicit
     /// session ids; this remains as a compatibility default for older callers.
     pub session_id: Arc<std::sync::RwLock<String>>,
     /// Shared daemon path context (issue #68): served by `GetPathContext`;
@@ -114,6 +113,10 @@ pub struct GrpcState {
     /// surface (`SaveDagRun` / `LoadDagRuns` / trigger/cron persistence). The
     /// daemon kernel implements the seam against the `RuntimeStorage` adapter.
     pub storage_ops: Arc<dyn crate::transport::StorageOps>,
+    /// Combined non-streaming external service (external-protocol-service
+    /// unification): command / session / observability / graph / tool /
+    /// storage / settings operations all dispatch through this object.
+    pub external_ops: Arc<dyn crate::ExternalProtocolOps>,
 }
 
 #[tonic::async_trait]
@@ -132,11 +135,11 @@ impl CommandService for GrpcState {
         // Sessions are addressed explicitly; no session-switch prerequisite.
         let interrupt = request.mode() == MessageMode::Interrupt;
         let accepted = self
-            .commands
-            .send(WireCommand::Submit {
-                session_id,
-                text: request.text,
-                images: request
+            .external_ops
+            .submit(
+                &session_id,
+                &request.text,
+                request
                     .images
                     .into_iter()
                     .map(|image| WirePromptImage {
@@ -145,8 +148,9 @@ impl CommandService for GrpcState {
                     })
                     .collect(),
                 interrupt,
-            })
-            .is_ok();
+            )
+            .await
+            .unwrap_or(false);
         Ok(Response::new(CommandResult { accepted }))
     }
 
@@ -156,20 +160,11 @@ impl CommandService for GrpcState {
     ) -> Result<Response<CommandResult>, Status> {
         let request = request.into_inner();
         let session_id = self.resolve_session_id(&request.session_id).await?;
-        let (tx, rx) = tokio::sync::oneshot::channel();
         let accepted = self
-            .commands
-            .send(WireCommand::SetModel {
-                session_id,
-                spec: request.spec,
-                response: tx,
-            })
-            .is_ok();
-        let accepted = if accepted {
-            rx.await.unwrap_or(false)
-        } else {
-            false
-        };
+            .external_ops
+            .set_model(&session_id, &request.spec)
+            .await
+            .unwrap_or(false);
         Ok(Response::new(CommandResult { accepted }))
     }
 
@@ -179,20 +174,11 @@ impl CommandService for GrpcState {
     ) -> Result<Response<CommandResult>, Status> {
         let request = request.into_inner();
         let session_id = self.resolve_session_id(&request.session_id).await?;
-        let (tx, rx) = tokio::sync::oneshot::channel();
         let accepted = self
-            .commands
-            .send(WireCommand::SetThinking {
-                session_id,
-                level: request.level,
-                response: tx,
-            })
-            .is_ok();
-        let accepted = if accepted {
-            rx.await.unwrap_or(false)
-        } else {
-            false
-        };
+            .external_ops
+            .set_thinking(&session_id, &request.level)
+            .await
+            .unwrap_or(false);
         Ok(Response::new(CommandResult { accepted }))
     }
 
@@ -202,10 +188,7 @@ impl CommandService for GrpcState {
     ) -> Result<Response<CommandResult>, Status> {
         let request = request.into_inner();
         let session_id = self.resolve_session_id(&request.session_id).await?;
-        let accepted = self
-            .commands
-            .send(WireCommand::Abort { session_id })
-            .is_ok();
+        let accepted = self.external_ops.abort(&session_id).await.unwrap_or(false);
         Ok(Response::new(CommandResult { accepted }))
     }
 
@@ -216,12 +199,10 @@ impl CommandService for GrpcState {
         let request = request.into_inner();
         let session_id = self.resolve_session_id(&request.session_id).await?;
         let accepted = self
-            .commands
-            .send(WireCommand::ResolveControlPlane {
-                session_id,
-                approve: request.approve,
-            })
-            .is_ok();
+            .external_ops
+            .resolve_control_plane(&session_id, request.approve)
+            .await
+            .unwrap_or(false);
         Ok(Response::new(CommandResult { accepted }))
     }
 }
@@ -231,7 +212,11 @@ impl CommandService for GrpcState {
 #[tonic::async_trait]
 impl SettingsService for GrpcState {
     async fn get_config(&self, _request: Request<Empty>) -> Result<Response<DaemonConfig>, Status> {
-        let config = self.daemon_config.read().unwrap();
+        let config = self
+            .external_ops
+            .get_config()
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
         Ok(Response::new(crate::proto::daemon_config_to_proto(&config)))
     }
 
@@ -240,9 +225,12 @@ impl SettingsService for GrpcState {
         request: Request<DaemonConfig>,
     ) -> Result<Response<CommandResult>, Status> {
         let config = crate::proto::daemon_config_from_proto(&request.into_inner());
-        Ok(Response::new(CommandResult {
-            accepted: self.enqueue_configure(config)?,
-        }))
+        let accepted = self
+            .external_ops
+            .set_config(&config)
+            .await
+            .map_err(|e| Status::unavailable(e.to_string()))?;
+        Ok(Response::new(CommandResult { accepted }))
     }
 
     async fn configure(
@@ -250,23 +238,16 @@ impl SettingsService for GrpcState {
         request: Request<DaemonConfig>,
     ) -> Result<Response<CommandResult>, Status> {
         let config = crate::proto::daemon_config_from_proto(&request.into_inner());
-        Ok(Response::new(CommandResult {
-            accepted: self.enqueue_configure(config)?,
-        }))
+        let accepted = self
+            .external_ops
+            .configure(&config)
+            .await
+            .map_err(|e| Status::unavailable(e.to_string()))?;
+        Ok(Response::new(CommandResult { accepted }))
     }
 }
 
 impl GrpcState {
-    /// Shared SetConfig / Configure body: enqueue the patch for the serialized
-    /// daemon event loop. The shared GetConfig view changes only after the
-    /// daemon validates and applies the requested fields.
-    fn enqueue_configure(&self, config: WireDaemonConfig) -> Result<bool, Status> {
-        self.commands
-            .send(WireCommand::Configure { config })
-            .map_err(|_| Status::unavailable("event loop command channel closed"))?;
-        Ok(true)
-    }
-
     async fn resolve_session_id(&self, requested: &str) -> Result<String, Status> {
         let requested = requested.trim().to_string();
         if requested.is_empty() {
@@ -677,6 +658,7 @@ pub async fn run_grpc(mut app: Box<dyn TransportHost>, options: GrpcOptions) -> 
         daemon_config: endpoints.daemon_config.clone(),
         tool_ops: endpoints.tool_ops.clone(),
         storage_ops: endpoints.storage_ops.clone(),
+        external_ops: endpoints.external_ops.clone(),
     };
     let server_task = serve_grpc(listener, grpc_state);
 

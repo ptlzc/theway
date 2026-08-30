@@ -44,6 +44,8 @@ use crate::wire::{
     WireToolSkillInstallResult, WireToolWriteRequest, WireToolWriteResult,
 };
 
+use crate::ExternalProtocolOps;
+
 /// Read/control access to subagent jobs. Protocol servers depend on this seam,
 /// not on the runtime registry that happens to back it in the daemon.
 pub trait JobOps: Send + Sync {
@@ -533,10 +535,10 @@ pub struct TransportEndpoints {
     /// Snapshot publications. The authoritative state stays in `latest`;
     /// routine publications carry only transcript deltas.
     pub snapshot_tx: broadcast::Sender<WireStatusUpdate>,
-    /// Latest snapshot (served by `GET /state` / `GetState`).
+    /// Latest snapshot (served by `GET /state` / `GetSnapshot`).
     pub latest: Arc<Mutex<WireStatus>>,
     /// Per-session authoritative snapshots, keyed by `session_id`. Served by
-    /// `GetState` / HTTP `get_state` for any registered session.
+    /// `GetSnapshot` / HTTP `session.get_snapshot` for any registered session.
     pub session_states: Arc<Mutex<HashMap<String, WireStatus>>>,
     /// Event plane (graph mode): subagent started/output/metrics/completed.
     pub events: broadcast::Sender<WireAgentEvent>,
@@ -560,6 +562,10 @@ pub struct TransportEndpoints {
     /// `StorageService` and the JSON-RPC state methods. The daemon kernel
     /// implements the seam against the `RuntimeStorage` adapter.
     pub storage_ops: Arc<dyn crate::transport::StorageOps>,
+    /// Combined non-streaming external service. gRPC / JSON-RPC / MCP state
+    /// objects hold the same object; streaming channels stay on
+    /// `snapshot_tx`/`latest`.
+    pub external_ops: Arc<dyn ExternalProtocolOps>,
     /// Shared daemon path context (issue #68): served by `GetPathContext`,
     /// optimistically updated by `SetSkillDirs` before the event loop applies
     /// the change authoritatively. Built once in

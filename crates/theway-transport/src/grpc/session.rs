@@ -2,25 +2,6 @@ use super::*;
 
 #[tonic::async_trait]
 impl SessionService for GrpcState {
-    async fn get_state(
-        &self,
-        request: Request<theway_grpc::SessionStateRequest>,
-    ) -> Result<Response<SessionState>, Status> {
-        let request = request.into_inner();
-        if request.session_id.is_empty() {
-            let latest = self.latest.lock();
-            return Ok(Response::new(session_state(&latest)));
-        }
-        let session_states = self.session_states.lock();
-        let Some(state) = session_states.get(&request.session_id) else {
-            return Err(Status::not_found(format!(
-                "session {} is not available",
-                request.session_id
-            )));
-        };
-        Ok(Response::new(session_state(state)))
-    }
-
     async fn get_snapshot(
         &self,
         request: Request<theway_grpc::SessionStateRequest>,
@@ -31,37 +12,41 @@ impl SessionService for GrpcState {
         } else {
             request.session_id.clone()
         };
-        if let Ok(snapshot) = self
-            .session_ops
-            .session_snapshot(&session_id)
+        let snapshot = self
+            .external_ops
+            .authoritative_snapshot(&session_id)
             .await
-            .map_err(|e| Status::internal(e.to_string()))
-        {
-            return Ok(Response::new(crate::proto::wire_session_snapshot(
-                &snapshot,
-            )));
-        }
-        // Fallback to the legacy WireStatus projection for fakes and older
-        // in-memory session stores that do not implement the collapse seam.
-        if request.session_id.is_empty() {
-            let latest = self.latest.lock();
-            return Ok(Response::new(crate::proto::session_snapshot_wire(&latest)));
-        }
-        let session_states = self.session_states.lock();
-        let Some(state) = session_states.get(&request.session_id) else {
-            return Err(Status::not_found(format!(
-                "session {} is not available",
-                request.session_id
-            )));
-        };
-        Ok(Response::new(crate::proto::session_snapshot_wire(state)))
+            .map_err(|e| Status::not_found(e.to_string()))?;
+        Ok(Response::new(crate::proto::wire_session_snapshot(
+            &snapshot,
+        )))
     }
 
-    async fn get_history(
+    async fn list_session_messages(
         &self,
-        request: Request<theway_grpc::SessionStateRequest>,
-    ) -> Result<Response<theway_grpc::SessionSnapshot>, Status> {
-        self.get_snapshot(request).await
+        request: Request<theway_grpc::ListSessionMessagesRequest>,
+    ) -> Result<Response<theway_grpc::SessionMessagePage>, Status> {
+        let request = request.into_inner();
+        let page = self
+            .external_ops
+            .list_session_messages(&crate::session_observability::ListSessionMessagesRequest {
+                session_id: request.session_id,
+                before_entry_id: request.before_entry_id,
+                limit: request.limit,
+            })
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+        Ok(Response::new(theway_grpc::SessionMessagePage {
+            session_id: page.session_id,
+            blocks: page
+                .blocks
+                .iter()
+                .map(crate::proto::wire_feed_block_to_proto)
+                .collect(),
+            next_before_entry_id: page.next_before_entry_id,
+            has_more: page.has_more,
+            total: page.total,
+        }))
     }
 
     async fn collapse_session(
@@ -307,7 +292,11 @@ impl SessionService for GrpcState {
         &self,
         _request: Request<Empty>,
     ) -> Result<Response<theway_grpc::PathContext>, Status> {
-        let ctx = self.path_context.read().unwrap();
+        let ctx = self
+            .external_ops
+            .get_path_context()
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
         Ok(Response::new(crate::proto::wire_path_context_to_proto(
             &ctx,
         )))
@@ -318,14 +307,15 @@ impl SessionService for GrpcState {
         request: Request<theway_grpc::SetSkillDirsRequest>,
     ) -> Result<Response<CommandResult>, Status> {
         let dirs = request.into_inner().dirs;
-        // Optimistic update: readers (GetPathContext) see the new dirs right
-        // away; the event loop applies the same command authoritatively
-        // (skills hot-reload) and re-publishes snapshots.
-        self.path_context.write().unwrap().skills_dirs = dirs.clone();
-        self.commands
-            .send(WireCommand::SetSkillDirs { dirs })
-            .map_err(|_| Status::unavailable("event loop command channel closed"))?;
-        Ok(Response::new(CommandResult { accepted: true }))
+        // Shared service updates the optimistic view and queues the command;
+        // the event loop applies it authoritatively (skills hot-reload) and
+        // re-publishes snapshots.
+        let accepted = self
+            .external_ops
+            .set_skill_dirs(&dirs)
+            .await
+            .map_err(|e| Status::unavailable(e.to_string()))?;
+        Ok(Response::new(CommandResult { accepted }))
     }
 
     async fn activate_session(

@@ -298,6 +298,7 @@ async fn run_grpc_driver_binds_and_aborts_server_task() {
         session_ops: state.session_ops.clone(),
         tool_ops: state.tool_ops.clone(),
         storage_ops: state.storage_ops.clone(),
+        external_ops: state.external_ops.clone(),
         path_context: state.path_context.clone(),
         daemon_config: state.daemon_config.clone(),
         session_id: state.session_id.read().unwrap().clone(),

@@ -24,11 +24,13 @@
 
 // ── protocol zone: wire model + transport implementations ──
 pub mod client;
+pub mod external_protocol_ops;
 pub mod grpc;
 pub mod host;
 pub mod http;
 pub mod inbox;
 pub mod proto;
+pub mod session_observability;
 pub mod state;
 pub mod testing;
 mod text_cursor;
@@ -48,6 +50,14 @@ pub mod images;
 pub mod mentions;
 pub mod triggers;
 
+pub use external_protocol_ops::{
+    CommandOps, CompositeExternalProtocolOps, ExternalProtocolOps, SettingsOps,
+    UnavailableCommandOps, UnavailableSettingsOps,
+};
+pub use session_observability::{
+    ListSessionMessagesRequest, SessionMessagePage, SessionObservabilityOps,
+    UnavailableSessionObservability,
+};
 pub use transport::{
     GraphOps, JobOps, StorageOps, ToolExecStream, ToolOps, TransportEndpoints, TransportMode,
     UnavailableGraphOps, UnavailableJobOps, UnavailableStorageOps, UnavailableToolOps,

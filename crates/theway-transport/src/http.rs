@@ -66,6 +66,10 @@ pub struct HttpState {
     /// methods (`state.save_dag_run` / `state.load_dag_runs` / …). The daemon
     /// kernel implements the seam against the `RuntimeStorage` adapter.
     pub storage_ops: Arc<dyn crate::transport::StorageOps>,
+    /// Combined non-streaming external service (external-protocol-service
+    /// unification): command / session / observability / graph / tool /
+    /// storage / settings operations all dispatch through this object.
+    pub external_ops: Arc<dyn crate::ExternalProtocolOps>,
 }
 
 /// Full `--http` driver: bind, wire the transport channels, spawn the axum
@@ -92,6 +96,7 @@ pub async fn run_web(mut app: Box<dyn TransportHost>, options: WebOptions) -> Re
         daemon_config: endpoints.daemon_config.clone(),
         tool_ops: endpoints.tool_ops.clone(),
         storage_ops: endpoints.storage_ops.clone(),
+        external_ops: endpoints.external_ops.clone(),
     };
     let server_task = serve_web(listener, state);
 
@@ -138,7 +143,7 @@ async fn healthz() -> &'static str {
 // Method names mirror the pre-JSON-RPC endpoints, with namespaced aliases
 // aligned to the proto service methods:
 //
-//   get_state (session.get_state) | send_message (command.send_message) |
+//   session.get_snapshot | session.list_messages | send_message (command.send_message) |
 //   set_model (command.set_model) | set_thinking (command.set_thinking) |
 //   complete | abort (command.cancel) |
 //   trigger_immediate | control_plane_resolve (command.approve) |
@@ -295,7 +300,7 @@ async fn events(
         let data = serde_json::json!({
             "jsonrpc": "2.0",
             "method": "status",
-            "params": snapshot,
+            "params": WireSessionSnapshot::from(&snapshot),
         })
         .to_string();
         Some((
