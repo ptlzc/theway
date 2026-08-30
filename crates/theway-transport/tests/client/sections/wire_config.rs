@@ -1,10 +1,10 @@
-// ── wire_status (proto → wire) round-trip ─────────────────────────
+// ── session snapshot (proto → wire) round-trip ─────────────────────────
 
 #[test]
-fn session_state_wire_status_round_trips() {
+fn session_snapshot_wire_status_round_trips() {
     let status = fixture_status("hello");
-    let state = session_state(&status);
-    let back = wire_status(&state);
+    let state = session_snapshot(&status);
+    let back = wire_status_from_session_snapshot(&state);
     assert_eq!(back.session_id, "sess-1");
     assert_eq!(back.model, "provider:model");
     assert_eq!(back.cwd, "/tmp/theway");
@@ -26,7 +26,7 @@ fn session_state_wire_status_round_trips() {
 }
 
 #[test]
-fn session_state_round_trips_feed_block_kinds() {
+fn session_snapshot_round_trips_feed_block_kinds() {
     let status = WireStatus {
         feed_blocks: vec![
             WireFeedBlock::Assistant {
@@ -62,7 +62,7 @@ fn session_state_round_trips_feed_block_kinds() {
         ],
         ..fixture_status("x")
     };
-    let back = wire_status(&session_state(&status));
+    let back = wire_status_from_session_snapshot(&session_snapshot(&status));
     let kinds: Vec<&str> = back
         .feed_blocks
         .iter()
@@ -84,7 +84,7 @@ fn session_state_round_trips_feed_block_kinds() {
     );
     match &back.feed_blocks[5] {
         WireFeedBlock::Plain { level, .. } => {
-            assert_eq!(*level, crate::feed::Level::System);
+            assert_eq!(level, &crate::feed::Level::System);
         }
         other => panic!("expected Plain block, got {other:?}"),
     }

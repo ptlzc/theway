@@ -17,7 +17,7 @@ use crate::proto::theway_grpc::session_service_server::{SessionService, SessionS
 #[derive(Default, Clone)]
 struct MockSessionService {
     snapshot: Option<grpc_proto::SessionSnapshot>,
-    history: Option<grpc_proto::SessionSnapshot>,
+    message_page: Option<grpc_proto::SessionMessagePage>,
     collapse_response: Option<grpc_proto::CollapseSessionResponse>,
     graph_node: Option<grpc_proto::SessionGraphNode>,
     messages: Vec<grpc_proto::FeedBlock>,
@@ -123,13 +123,6 @@ fn sample_snapshot(session_id: &str) -> grpc_proto::SessionSnapshot {
 
 #[tonic::async_trait]
 impl SessionService for MockSessionService {
-    async fn get_state(
-        &self,
-        _request: Request<grpc_proto::SessionStateRequest>,
-    ) -> Result<Response<grpc_proto::SessionState>, Status> {
-        Err(unimpl())
-    }
-
     async fn get_snapshot(
         &self,
         request: Request<grpc_proto::SessionStateRequest>,
@@ -142,16 +135,16 @@ impl SessionService for MockSessionService {
         self.snapshot.clone().map(Response::new).ok_or_else(unimpl)
     }
 
-    async fn get_history(
+    async fn list_session_messages(
         &self,
-        request: Request<grpc_proto::SessionStateRequest>,
-    ) -> Result<Response<grpc_proto::SessionSnapshot>, Status> {
-        let session_id = request.into_inner().session_id;
-        self.requests
-            .lock()
-            .unwrap()
-            .push(format!("GetHistory({session_id})"));
-        self.history.clone().map(Response::new).ok_or_else(unimpl)
+        request: Request<grpc_proto::ListSessionMessagesRequest>,
+    ) -> Result<Response<grpc_proto::SessionMessagePage>, Status> {
+        let request = request.into_inner();
+        self.requests.lock().unwrap().push(format!(
+            "ListSessionMessages({}, limit={}, before={:?})",
+            request.session_id, request.limit, request.before_entry_id
+        ));
+        self.message_page.clone().map(Response::new).ok_or_else(unimpl)
     }
 
     async fn collapse_session(
@@ -337,17 +330,29 @@ async fn client_get_snapshot_returns_nested_session_snapshot() {
 }
 
 #[tokio::test]
-async fn client_get_history_returns_snapshot_shaped_transcript() {
+async fn client_list_session_messages_round_trips_cursor_page() {
     let service = MockSessionService {
-        history: Some(sample_snapshot("sess-1")),
+        message_page: Some(grpc_proto::SessionMessagePage {
+            session_id: "sess-1".to_string(),
+            blocks: vec![proto_plain_block("hello")],
+            next_before_entry_id: Some("entry-1".to_string()),
+            has_more: false,
+            total: 1,
+        }),
         ..Default::default()
     };
     let mut client = spawn_mock_session_server(&service).await;
 
-    let snapshot = client.get_history("sess-1").await.unwrap();
+    let page = client
+        .list_session_messages("sess-1", 50, None)
+        .await
+        .unwrap();
 
-    assert_eq!(snapshot.session_id, "sess-1");
-    assert_eq!(snapshot.feed.as_ref().unwrap().lines, vec!["hello"]);
+    assert_eq!(page.session_id, "sess-1");
+    assert_eq!(page.blocks.len(), 1);
+    assert_eq!(page.next_before_entry_id.as_deref(), Some("entry-1"));
+    assert!(!page.has_more);
+    assert_eq!(page.total, 1);
 }
 
 #[tokio::test]

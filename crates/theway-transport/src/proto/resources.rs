@@ -433,6 +433,11 @@ fn feed_block(block: &WireFeedBlock) -> wire::FeedBlock {
     wire::FeedBlock { kind: Some(kind) }
 }
 
+/// Public wrapper for protocol adapters: serde feed block → proto oneof.
+pub fn wire_feed_block_to_proto(block: &WireFeedBlock) -> wire::FeedBlock {
+    feed_block(block)
+}
+
 /// `feed::Level` serializes as snake_case variant names on the JSON surface.
 fn level_str(level: &feed::Level) -> &'static str {
     match level {

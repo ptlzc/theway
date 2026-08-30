@@ -90,76 +90,11 @@ export function thinkingLevelToJSON(object: ThinkingLevel): string {
   }
 }
 
-/**
- * Full session state (the structured form of the former WireSnapshot JSON).
- * Low-frequency, whole-replacement: GetState / stream snapshot frames.
- */
-export interface SessionState {
-  sessionId: string;
-  model: string;
-  modelCatalog: ProviderGroup[];
-  cwd: string;
-  busy: boolean;
-  queuedCount: number;
-  latestTriggerPoll?: TriggerPollStatus | undefined;
-  goal?: GoalSnapshot | undefined;
-  controlPlanePrompt?: ControlPlanePromptSnapshot | undefined;
-  sidebar?: SidebarSnapshot | undefined;
-  feedBlocks: FeedBlock[];
-  feedLines: string[];
-  /** graph mode (P1/P2 fill these): */
-  dags: DagRunSnapshot[];
-  subagents: SubagentJobSnapshot[];
-  /** TUI display settings pushed from the daemon (read from config.toml). */
-  tuiMaxFeedLines?:
-    | number
-    | undefined;
-  /** Token usage + context window for the live session. */
-  contextUsage?:
-    | ContextUsage
-    | undefined;
-  /**
-   * Absolute index of feed_lines[0] in the full transcript (issue #35):
-   * stream snapshots carry only rows appended since the last publish; the
-   * initial get_state snapshot carries everything (base 0).
-   */
-  feedLinesBase: string;
-  /**
-   * Incremental gRPC snapshot frames require this many blocks to already be
-   * present on the consumer. Zero denotes a full replacement frame.
-   */
-  feedBlocksBase: string;
-  /** Appends/replacements since feed_blocks_base. Full frames leave this empty. */
-  feedBlockPatches: FeedBlockPatch[];
-  /** Runtime-extension status is additive; older clients ignore this field. */
-  extensions?:
-    | ExtensionSnapshot
-    | undefined;
-  /**
-   * Session-cumulative token usage: total input, cached input, non-cached
-   * input, output, and cache write totals for the current session.
-   */
-  sessionContextUsage?:
-    | ContextUsage
-    | undefined;
-  /**
-   * Active thinking level ("off" | "minimal" | "low" | "medium" | "high" |
-   * "xhigh"); empty for older daemons.
-   */
-  thinkingLevel: string;
-  /**
-   * Full rendered system context for the next request: base prompt + skills +
-   * tool inventory + working directory + memory + lineage. Mirrors the
-   * request/header epoch snapshot in deepseek-harness session logs. Empty for
-   * older daemons.
-   */
-  systemContext: string;
-}
-
+/** Incremental transcript patch: appends/replacements since a consumer cursor. */
 export interface FeedBlockPatch {
   /**
    * index == consumer length appends; index < length replaces; index > length
-   * is a gap and requires a full GetState resync.
+   * is a gap and requires a full snapshot resync.
    */
   index: string;
   block?: FeedBlock | undefined;
@@ -478,7 +413,10 @@ export interface SessionLineage {
   collapsedIntoSessionId?: string | undefined;
 }
 
-/** Full structured session snapshot: the nested successor of SessionState. */
+/**
+ * Full structured session snapshot: the single-version authoritative current
+ * state shape served by GetSnapshot and StreamEvents snapshot frames.
+ */
 export interface SessionSnapshot {
   sessionId: string;
   info?: SessionInfo | undefined;
@@ -486,6 +424,32 @@ export interface SessionSnapshot {
   feed?: SessionFeed | undefined;
   graphState?: SessionGraphState | undefined;
   lineage?: SessionLineage | undefined;
+}
+
+/**
+ * Cursor-paginated read of the session's full message history. Entries are
+ * addressed by storage entry id; `before_entry_id` returns the page of
+ * message blocks strictly older than that entry.
+ */
+export interface ListSessionMessagesRequest {
+  sessionId: string;
+  /** Omitted = newest page of the active branch. */
+  beforeEntryId?:
+    | string
+    | undefined;
+  /** Page size; server caps at 500. */
+  limit: number;
+}
+
+export interface SessionMessagePage {
+  sessionId: string;
+  /** Oldest → newest within the page. */
+  blocks: FeedBlock[];
+  /** Entry id of the oldest message in this page; empty when no older page. */
+  nextBeforeEntryId?: string | undefined;
+  hasMore: boolean;
+  /** Total message count on the active branch. */
+  total: string;
 }
 
 /** Collapse a session into a graph node, optionally under another session. */
@@ -630,520 +594,6 @@ export interface ClearCredentialRequest {
   sessionId: string;
   provider?: string | undefined;
 }
-
-function createBaseSessionState(): SessionState {
-  return {
-    sessionId: "",
-    model: "",
-    modelCatalog: [],
-    cwd: "",
-    busy: false,
-    queuedCount: 0,
-    latestTriggerPoll: undefined,
-    goal: undefined,
-    controlPlanePrompt: undefined,
-    sidebar: undefined,
-    feedBlocks: [],
-    feedLines: [],
-    dags: [],
-    subagents: [],
-    tuiMaxFeedLines: undefined,
-    contextUsage: undefined,
-    feedLinesBase: "0",
-    feedBlocksBase: "0",
-    feedBlockPatches: [],
-    extensions: undefined,
-    sessionContextUsage: undefined,
-    thinkingLevel: "",
-    systemContext: "",
-  };
-}
-
-export const SessionState: MessageFns<SessionState> = {
-  encode(message: SessionState, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.sessionId !== "") {
-      writer.uint32(10).string(message.sessionId);
-    }
-    if (message.model !== "") {
-      writer.uint32(18).string(message.model);
-    }
-    for (const v of message.modelCatalog) {
-      ProviderGroup.encode(v!, writer.uint32(26).fork()).join();
-    }
-    if (message.cwd !== "") {
-      writer.uint32(34).string(message.cwd);
-    }
-    if (message.busy !== false) {
-      writer.uint32(40).bool(message.busy);
-    }
-    if (message.queuedCount !== 0) {
-      writer.uint32(48).uint32(message.queuedCount);
-    }
-    if (message.latestTriggerPoll !== undefined) {
-      TriggerPollStatus.encode(message.latestTriggerPoll, writer.uint32(58).fork()).join();
-    }
-    if (message.goal !== undefined) {
-      GoalSnapshot.encode(message.goal, writer.uint32(66).fork()).join();
-    }
-    if (message.controlPlanePrompt !== undefined) {
-      ControlPlanePromptSnapshot.encode(message.controlPlanePrompt, writer.uint32(74).fork()).join();
-    }
-    if (message.sidebar !== undefined) {
-      SidebarSnapshot.encode(message.sidebar, writer.uint32(82).fork()).join();
-    }
-    for (const v of message.feedBlocks) {
-      FeedBlock.encode(v!, writer.uint32(90).fork()).join();
-    }
-    for (const v of message.feedLines) {
-      writer.uint32(98).string(v!);
-    }
-    for (const v of message.dags) {
-      DagRunSnapshot.encode(v!, writer.uint32(106).fork()).join();
-    }
-    for (const v of message.subagents) {
-      SubagentJobSnapshot.encode(v!, writer.uint32(114).fork()).join();
-    }
-    if (message.tuiMaxFeedLines !== undefined) {
-      writer.uint32(120).uint32(message.tuiMaxFeedLines);
-    }
-    if (message.contextUsage !== undefined) {
-      ContextUsage.encode(message.contextUsage, writer.uint32(130).fork()).join();
-    }
-    if (message.feedLinesBase !== "0") {
-      writer.uint32(136).uint64(message.feedLinesBase);
-    }
-    if (message.feedBlocksBase !== "0") {
-      writer.uint32(144).uint64(message.feedBlocksBase);
-    }
-    for (const v of message.feedBlockPatches) {
-      FeedBlockPatch.encode(v!, writer.uint32(154).fork()).join();
-    }
-    if (message.extensions !== undefined) {
-      ExtensionSnapshot.encode(message.extensions, writer.uint32(162).fork()).join();
-    }
-    if (message.sessionContextUsage !== undefined) {
-      ContextUsage.encode(message.sessionContextUsage, writer.uint32(170).fork()).join();
-    }
-    if (message.thinkingLevel !== "") {
-      writer.uint32(178).string(message.thinkingLevel);
-    }
-    if (message.systemContext !== "") {
-      writer.uint32(186).string(message.systemContext);
-    }
-    return writer;
-  },
-
-  decode(input: BinaryReader | Uint8Array, length?: number): SessionState {
-    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
-    const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseSessionState();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.sessionId = reader.string();
-          continue;
-        }
-        case 2: {
-          if (tag !== 18) {
-            break;
-          }
-
-          message.model = reader.string();
-          continue;
-        }
-        case 3: {
-          if (tag !== 26) {
-            break;
-          }
-
-          message.modelCatalog.push(ProviderGroup.decode(reader, reader.uint32()));
-          continue;
-        }
-        case 4: {
-          if (tag !== 34) {
-            break;
-          }
-
-          message.cwd = reader.string();
-          continue;
-        }
-        case 5: {
-          if (tag !== 40) {
-            break;
-          }
-
-          message.busy = reader.bool();
-          continue;
-        }
-        case 6: {
-          if (tag !== 48) {
-            break;
-          }
-
-          message.queuedCount = reader.uint32();
-          continue;
-        }
-        case 7: {
-          if (tag !== 58) {
-            break;
-          }
-
-          message.latestTriggerPoll = TriggerPollStatus.decode(reader, reader.uint32());
-          continue;
-        }
-        case 8: {
-          if (tag !== 66) {
-            break;
-          }
-
-          message.goal = GoalSnapshot.decode(reader, reader.uint32());
-          continue;
-        }
-        case 9: {
-          if (tag !== 74) {
-            break;
-          }
-
-          message.controlPlanePrompt = ControlPlanePromptSnapshot.decode(reader, reader.uint32());
-          continue;
-        }
-        case 10: {
-          if (tag !== 82) {
-            break;
-          }
-
-          message.sidebar = SidebarSnapshot.decode(reader, reader.uint32());
-          continue;
-        }
-        case 11: {
-          if (tag !== 90) {
-            break;
-          }
-
-          message.feedBlocks.push(FeedBlock.decode(reader, reader.uint32()));
-          continue;
-        }
-        case 12: {
-          if (tag !== 98) {
-            break;
-          }
-
-          message.feedLines.push(reader.string());
-          continue;
-        }
-        case 13: {
-          if (tag !== 106) {
-            break;
-          }
-
-          message.dags.push(DagRunSnapshot.decode(reader, reader.uint32()));
-          continue;
-        }
-        case 14: {
-          if (tag !== 114) {
-            break;
-          }
-
-          message.subagents.push(SubagentJobSnapshot.decode(reader, reader.uint32()));
-          continue;
-        }
-        case 15: {
-          if (tag !== 120) {
-            break;
-          }
-
-          message.tuiMaxFeedLines = reader.uint32();
-          continue;
-        }
-        case 16: {
-          if (tag !== 130) {
-            break;
-          }
-
-          message.contextUsage = ContextUsage.decode(reader, reader.uint32());
-          continue;
-        }
-        case 17: {
-          if (tag !== 136) {
-            break;
-          }
-
-          message.feedLinesBase = reader.uint64().toString();
-          continue;
-        }
-        case 18: {
-          if (tag !== 144) {
-            break;
-          }
-
-          message.feedBlocksBase = reader.uint64().toString();
-          continue;
-        }
-        case 19: {
-          if (tag !== 154) {
-            break;
-          }
-
-          message.feedBlockPatches.push(FeedBlockPatch.decode(reader, reader.uint32()));
-          continue;
-        }
-        case 20: {
-          if (tag !== 162) {
-            break;
-          }
-
-          message.extensions = ExtensionSnapshot.decode(reader, reader.uint32());
-          continue;
-        }
-        case 21: {
-          if (tag !== 170) {
-            break;
-          }
-
-          message.sessionContextUsage = ContextUsage.decode(reader, reader.uint32());
-          continue;
-        }
-        case 22: {
-          if (tag !== 178) {
-            break;
-          }
-
-          message.thinkingLevel = reader.string();
-          continue;
-        }
-        case 23: {
-          if (tag !== 186) {
-            break;
-          }
-
-          message.systemContext = reader.string();
-          continue;
-        }
-      }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
-      }
-      reader.skip(tag & 7);
-    }
-    return message;
-  },
-
-  fromJSON(object: any): SessionState {
-    return {
-      sessionId: isSet(object.sessionId)
-        ? globalThis.String(object.sessionId)
-        : isSet(object.session_id)
-        ? globalThis.String(object.session_id)
-        : "",
-      model: isSet(object.model) ? globalThis.String(object.model) : "",
-      modelCatalog: globalThis.Array.isArray(object?.modelCatalog)
-        ? object.modelCatalog.map((e: any) => ProviderGroup.fromJSON(e))
-        : globalThis.Array.isArray(object?.model_catalog)
-        ? object.model_catalog.map((e: any) => ProviderGroup.fromJSON(e))
-        : [],
-      cwd: isSet(object.cwd) ? globalThis.String(object.cwd) : "",
-      busy: isSet(object.busy) ? globalThis.Boolean(object.busy) : false,
-      queuedCount: isSet(object.queuedCount)
-        ? globalThis.Number(object.queuedCount)
-        : isSet(object.queued_count)
-        ? globalThis.Number(object.queued_count)
-        : 0,
-      latestTriggerPoll: isSet(object.latestTriggerPoll)
-        ? TriggerPollStatus.fromJSON(object.latestTriggerPoll)
-        : isSet(object.latest_trigger_poll)
-        ? TriggerPollStatus.fromJSON(object.latest_trigger_poll)
-        : undefined,
-      goal: isSet(object.goal) ? GoalSnapshot.fromJSON(object.goal) : undefined,
-      controlPlanePrompt: isSet(object.controlPlanePrompt)
-        ? ControlPlanePromptSnapshot.fromJSON(object.controlPlanePrompt)
-        : isSet(object.control_plane_prompt)
-        ? ControlPlanePromptSnapshot.fromJSON(object.control_plane_prompt)
-        : undefined,
-      sidebar: isSet(object.sidebar) ? SidebarSnapshot.fromJSON(object.sidebar) : undefined,
-      feedBlocks: globalThis.Array.isArray(object?.feedBlocks)
-        ? object.feedBlocks.map((e: any) => FeedBlock.fromJSON(e))
-        : globalThis.Array.isArray(object?.feed_blocks)
-        ? object.feed_blocks.map((e: any) => FeedBlock.fromJSON(e))
-        : [],
-      feedLines: globalThis.Array.isArray(object?.feedLines)
-        ? object.feedLines.map((e: any) => globalThis.String(e))
-        : globalThis.Array.isArray(object?.feed_lines)
-        ? object.feed_lines.map((e: any) => globalThis.String(e))
-        : [],
-      dags: globalThis.Array.isArray(object?.dags)
-        ? object.dags.map((e: any) => DagRunSnapshot.fromJSON(e))
-        : [],
-      subagents: globalThis.Array.isArray(object?.subagents)
-        ? object.subagents.map((e: any) => SubagentJobSnapshot.fromJSON(e))
-        : [],
-      tuiMaxFeedLines: isSet(object.tuiMaxFeedLines)
-        ? globalThis.Number(object.tuiMaxFeedLines)
-        : isSet(object.tui_max_feed_lines)
-        ? globalThis.Number(object.tui_max_feed_lines)
-        : undefined,
-      contextUsage: isSet(object.contextUsage)
-        ? ContextUsage.fromJSON(object.contextUsage)
-        : isSet(object.context_usage)
-        ? ContextUsage.fromJSON(object.context_usage)
-        : undefined,
-      feedLinesBase: isSet(object.feedLinesBase)
-        ? globalThis.String(object.feedLinesBase)
-        : isSet(object.feed_lines_base)
-        ? globalThis.String(object.feed_lines_base)
-        : "0",
-      feedBlocksBase: isSet(object.feedBlocksBase)
-        ? globalThis.String(object.feedBlocksBase)
-        : isSet(object.feed_blocks_base)
-        ? globalThis.String(object.feed_blocks_base)
-        : "0",
-      feedBlockPatches: globalThis.Array.isArray(object?.feedBlockPatches)
-        ? object.feedBlockPatches.map((e: any) => FeedBlockPatch.fromJSON(e))
-        : globalThis.Array.isArray(object?.feed_block_patches)
-        ? object.feed_block_patches.map((e: any) => FeedBlockPatch.fromJSON(e))
-        : [],
-      extensions: isSet(object.extensions) ? ExtensionSnapshot.fromJSON(object.extensions) : undefined,
-      sessionContextUsage: isSet(object.sessionContextUsage)
-        ? ContextUsage.fromJSON(object.sessionContextUsage)
-        : isSet(object.session_context_usage)
-        ? ContextUsage.fromJSON(object.session_context_usage)
-        : undefined,
-      thinkingLevel: isSet(object.thinkingLevel)
-        ? globalThis.String(object.thinkingLevel)
-        : isSet(object.thinking_level)
-        ? globalThis.String(object.thinking_level)
-        : "",
-      systemContext: isSet(object.systemContext)
-        ? globalThis.String(object.systemContext)
-        : isSet(object.system_context)
-        ? globalThis.String(object.system_context)
-        : "",
-    };
-  },
-
-  toJSON(message: SessionState): unknown {
-    const obj: any = {};
-    if (message.sessionId !== "") {
-      obj.sessionId = message.sessionId;
-    }
-    if (message.model !== "") {
-      obj.model = message.model;
-    }
-    if (message.modelCatalog?.length) {
-      obj.modelCatalog = message.modelCatalog.map((e) => ProviderGroup.toJSON(e));
-    }
-    if (message.cwd !== "") {
-      obj.cwd = message.cwd;
-    }
-    if (message.busy !== false) {
-      obj.busy = message.busy;
-    }
-    if (message.queuedCount !== 0) {
-      obj.queuedCount = Math.round(message.queuedCount);
-    }
-    if (message.latestTriggerPoll !== undefined) {
-      obj.latestTriggerPoll = TriggerPollStatus.toJSON(message.latestTriggerPoll);
-    }
-    if (message.goal !== undefined) {
-      obj.goal = GoalSnapshot.toJSON(message.goal);
-    }
-    if (message.controlPlanePrompt !== undefined) {
-      obj.controlPlanePrompt = ControlPlanePromptSnapshot.toJSON(message.controlPlanePrompt);
-    }
-    if (message.sidebar !== undefined) {
-      obj.sidebar = SidebarSnapshot.toJSON(message.sidebar);
-    }
-    if (message.feedBlocks?.length) {
-      obj.feedBlocks = message.feedBlocks.map((e) => FeedBlock.toJSON(e));
-    }
-    if (message.feedLines?.length) {
-      obj.feedLines = message.feedLines;
-    }
-    if (message.dags?.length) {
-      obj.dags = message.dags.map((e) => DagRunSnapshot.toJSON(e));
-    }
-    if (message.subagents?.length) {
-      obj.subagents = message.subagents.map((e) => SubagentJobSnapshot.toJSON(e));
-    }
-    if (message.tuiMaxFeedLines !== undefined) {
-      obj.tuiMaxFeedLines = Math.round(message.tuiMaxFeedLines);
-    }
-    if (message.contextUsage !== undefined) {
-      obj.contextUsage = ContextUsage.toJSON(message.contextUsage);
-    }
-    if (message.feedLinesBase !== "0") {
-      obj.feedLinesBase = message.feedLinesBase;
-    }
-    if (message.feedBlocksBase !== "0") {
-      obj.feedBlocksBase = message.feedBlocksBase;
-    }
-    if (message.feedBlockPatches?.length) {
-      obj.feedBlockPatches = message.feedBlockPatches.map((e) => FeedBlockPatch.toJSON(e));
-    }
-    if (message.extensions !== undefined) {
-      obj.extensions = ExtensionSnapshot.toJSON(message.extensions);
-    }
-    if (message.sessionContextUsage !== undefined) {
-      obj.sessionContextUsage = ContextUsage.toJSON(message.sessionContextUsage);
-    }
-    if (message.thinkingLevel !== "") {
-      obj.thinkingLevel = message.thinkingLevel;
-    }
-    if (message.systemContext !== "") {
-      obj.systemContext = message.systemContext;
-    }
-    return obj;
-  },
-
-  create<I extends Exact<DeepPartial<SessionState>, I>>(base?: I): SessionState {
-    return SessionState.fromPartial(base ?? ({} as any));
-  },
-  fromPartial<I extends Exact<DeepPartial<SessionState>, I>>(object: I): SessionState {
-    const message = createBaseSessionState();
-    message.sessionId = object.sessionId ?? "";
-    message.model = object.model ?? "";
-    message.modelCatalog = object.modelCatalog?.map((e) => ProviderGroup.fromPartial(e)) || [];
-    message.cwd = object.cwd ?? "";
-    message.busy = object.busy ?? false;
-    message.queuedCount = object.queuedCount ?? 0;
-    message.latestTriggerPoll = (object.latestTriggerPoll !== undefined && object.latestTriggerPoll !== null)
-      ? TriggerPollStatus.fromPartial(object.latestTriggerPoll)
-      : undefined;
-    message.goal = (object.goal !== undefined && object.goal !== null)
-      ? GoalSnapshot.fromPartial(object.goal)
-      : undefined;
-    message.controlPlanePrompt = (object.controlPlanePrompt !== undefined && object.controlPlanePrompt !== null)
-      ? ControlPlanePromptSnapshot.fromPartial(object.controlPlanePrompt)
-      : undefined;
-    message.sidebar = (object.sidebar !== undefined && object.sidebar !== null)
-      ? SidebarSnapshot.fromPartial(object.sidebar)
-      : undefined;
-    message.feedBlocks = object.feedBlocks?.map((e) => FeedBlock.fromPartial(e)) || [];
-    message.feedLines = object.feedLines?.map((e) => e) || [];
-    message.dags = object.dags?.map((e) => DagRunSnapshot.fromPartial(e)) || [];
-    message.subagents = object.subagents?.map((e) => SubagentJobSnapshot.fromPartial(e)) || [];
-    message.tuiMaxFeedLines = object.tuiMaxFeedLines ?? undefined;
-    message.contextUsage = (object.contextUsage !== undefined && object.contextUsage !== null)
-      ? ContextUsage.fromPartial(object.contextUsage)
-      : undefined;
-    message.feedLinesBase = object.feedLinesBase ?? "0";
-    message.feedBlocksBase = object.feedBlocksBase ?? "0";
-    message.feedBlockPatches = object.feedBlockPatches?.map((e) => FeedBlockPatch.fromPartial(e)) || [];
-    message.extensions = (object.extensions !== undefined && object.extensions !== null)
-      ? ExtensionSnapshot.fromPartial(object.extensions)
-      : undefined;
-    message.sessionContextUsage = (object.sessionContextUsage !== undefined && object.sessionContextUsage !== null)
-      ? ContextUsage.fromPartial(object.sessionContextUsage)
-      : undefined;
-    message.thinkingLevel = object.thinkingLevel ?? "";
-    message.systemContext = object.systemContext ?? "";
-    return message;
-  },
-};
 
 function createBaseFeedBlockPatch(): FeedBlockPatch {
   return { index: "0", block: undefined };
@@ -5865,6 +5315,242 @@ export const SessionSnapshot: MessageFns<SessionSnapshot> = {
   },
 };
 
+function createBaseListSessionMessagesRequest(): ListSessionMessagesRequest {
+  return { sessionId: "", beforeEntryId: undefined, limit: 0 };
+}
+
+export const ListSessionMessagesRequest: MessageFns<ListSessionMessagesRequest> = {
+  encode(message: ListSessionMessagesRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sessionId !== "") {
+      writer.uint32(10).string(message.sessionId);
+    }
+    if (message.beforeEntryId !== undefined) {
+      writer.uint32(18).string(message.beforeEntryId);
+    }
+    if (message.limit !== 0) {
+      writer.uint32(24).uint32(message.limit);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ListSessionMessagesRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListSessionMessagesRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.beforeEntryId = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.limit = reader.uint32();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ListSessionMessagesRequest {
+    return {
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : "",
+      beforeEntryId: isSet(object.beforeEntryId)
+        ? globalThis.String(object.beforeEntryId)
+        : isSet(object.before_entry_id)
+        ? globalThis.String(object.before_entry_id)
+        : undefined,
+      limit: isSet(object.limit) ? globalThis.Number(object.limit) : 0,
+    };
+  },
+
+  toJSON(message: ListSessionMessagesRequest): unknown {
+    const obj: any = {};
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
+    }
+    if (message.beforeEntryId !== undefined) {
+      obj.beforeEntryId = message.beforeEntryId;
+    }
+    if (message.limit !== 0) {
+      obj.limit = Math.round(message.limit);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ListSessionMessagesRequest>, I>>(base?: I): ListSessionMessagesRequest {
+    return ListSessionMessagesRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ListSessionMessagesRequest>, I>>(object: I): ListSessionMessagesRequest {
+    const message = createBaseListSessionMessagesRequest();
+    message.sessionId = object.sessionId ?? "";
+    message.beforeEntryId = object.beforeEntryId ?? undefined;
+    message.limit = object.limit ?? 0;
+    return message;
+  },
+};
+
+function createBaseSessionMessagePage(): SessionMessagePage {
+  return { sessionId: "", blocks: [], nextBeforeEntryId: undefined, hasMore: false, total: "0" };
+}
+
+export const SessionMessagePage: MessageFns<SessionMessagePage> = {
+  encode(message: SessionMessagePage, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sessionId !== "") {
+      writer.uint32(10).string(message.sessionId);
+    }
+    for (const v of message.blocks) {
+      FeedBlock.encode(v!, writer.uint32(18).fork()).join();
+    }
+    if (message.nextBeforeEntryId !== undefined) {
+      writer.uint32(26).string(message.nextBeforeEntryId);
+    }
+    if (message.hasMore !== false) {
+      writer.uint32(32).bool(message.hasMore);
+    }
+    if (message.total !== "0") {
+      writer.uint32(40).uint64(message.total);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SessionMessagePage {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSessionMessagePage();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.blocks.push(FeedBlock.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.nextBeforeEntryId = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.hasMore = reader.bool();
+          continue;
+        }
+        case 5: {
+          if (tag !== 40) {
+            break;
+          }
+
+          message.total = reader.uint64().toString();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SessionMessagePage {
+    return {
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : "",
+      blocks: globalThis.Array.isArray(object?.blocks) ? object.blocks.map((e: any) => FeedBlock.fromJSON(e)) : [],
+      nextBeforeEntryId: isSet(object.nextBeforeEntryId)
+        ? globalThis.String(object.nextBeforeEntryId)
+        : isSet(object.next_before_entry_id)
+        ? globalThis.String(object.next_before_entry_id)
+        : undefined,
+      hasMore: isSet(object.hasMore)
+        ? globalThis.Boolean(object.hasMore)
+        : isSet(object.has_more)
+        ? globalThis.Boolean(object.has_more)
+        : false,
+      total: isSet(object.total) ? globalThis.String(object.total) : "0",
+    };
+  },
+
+  toJSON(message: SessionMessagePage): unknown {
+    const obj: any = {};
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
+    }
+    if (message.blocks?.length) {
+      obj.blocks = message.blocks.map((e) => FeedBlock.toJSON(e));
+    }
+    if (message.nextBeforeEntryId !== undefined) {
+      obj.nextBeforeEntryId = message.nextBeforeEntryId;
+    }
+    if (message.hasMore !== false) {
+      obj.hasMore = message.hasMore;
+    }
+    if (message.total !== "0") {
+      obj.total = message.total;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SessionMessagePage>, I>>(base?: I): SessionMessagePage {
+    return SessionMessagePage.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<SessionMessagePage>, I>>(object: I): SessionMessagePage {
+    const message = createBaseSessionMessagePage();
+    message.sessionId = object.sessionId ?? "";
+    message.blocks = object.blocks?.map((e) => FeedBlock.fromPartial(e)) || [];
+    message.nextBeforeEntryId = object.nextBeforeEntryId ?? undefined;
+    message.hasMore = object.hasMore ?? false;
+    message.total = object.total ?? "0";
+    return message;
+  },
+};
+
 function createBaseCollapseSessionRequest(): CollapseSessionRequest {
   return { sessionId: "", intoSessionId: undefined, title: undefined, summary: undefined };
 }
@@ -8067,20 +7753,7 @@ export const ClearCredentialRequest: MessageFns<ClearCredentialRequest> = {
 
 export type SessionServiceService = typeof SessionServiceService;
 export const SessionServiceService = {
-  /**
-   * Full structured state (binary protobuf). Kept for compatibility; new
-   * clients should use GetSnapshot / GetHistory.
-   */
-  getState: {
-    path: "/theway.grpc.v1.SessionService/GetState" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: SessionStateRequest): Buffer => Buffer.from(SessionStateRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): SessionStateRequest => SessionStateRequest.decode(value),
-    responseSerialize: (value: SessionState): Buffer => Buffer.from(SessionState.encode(value).finish()),
-    responseDeserialize: (value: Buffer): SessionState => SessionState.decode(value),
-  },
-  /** Full nested session snapshot (session-snapshot-collapse contract). */
+  /** Full nested session snapshot: the single authoritative current snapshot. */
   getSnapshot: {
     path: "/theway.grpc.v1.SessionService/GetSnapshot" as const,
     requestStream: false as const,
@@ -8090,15 +7763,16 @@ export const SessionServiceService = {
     responseSerialize: (value: SessionSnapshot): Buffer => Buffer.from(SessionSnapshot.encode(value).finish()),
     responseDeserialize: (value: Buffer): SessionSnapshot => SessionSnapshot.decode(value),
   },
-  /** Session history as a snapshot-shaped transcript (session-snapshot-collapse). */
-  getHistory: {
-    path: "/theway.grpc.v1.SessionService/GetHistory" as const,
+  /** Cursor-paginated full message history on the session's active branch. */
+  listSessionMessages: {
+    path: "/theway.grpc.v1.SessionService/ListSessionMessages" as const,
     requestStream: false as const,
     responseStream: false as const,
-    requestSerialize: (value: SessionStateRequest): Buffer => Buffer.from(SessionStateRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): SessionStateRequest => SessionStateRequest.decode(value),
-    responseSerialize: (value: SessionSnapshot): Buffer => Buffer.from(SessionSnapshot.encode(value).finish()),
-    responseDeserialize: (value: Buffer): SessionSnapshot => SessionSnapshot.decode(value),
+    requestSerialize: (value: ListSessionMessagesRequest): Buffer =>
+      Buffer.from(ListSessionMessagesRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): ListSessionMessagesRequest => ListSessionMessagesRequest.decode(value),
+    responseSerialize: (value: SessionMessagePage): Buffer => Buffer.from(SessionMessagePage.encode(value).finish()),
+    responseDeserialize: (value: Buffer): SessionMessagePage => SessionMessagePage.decode(value),
   },
   /** Collapse a session into a graph node (session-snapshot-collapse). */
   collapseSession: {
@@ -8266,15 +7940,10 @@ export const SessionServiceService = {
 } as const;
 
 export interface SessionServiceServer extends UntypedServiceImplementation {
-  /**
-   * Full structured state (binary protobuf). Kept for compatibility; new
-   * clients should use GetSnapshot / GetHistory.
-   */
-  getState: handleUnaryCall<SessionStateRequest, SessionState>;
-  /** Full nested session snapshot (session-snapshot-collapse contract). */
+  /** Full nested session snapshot: the single authoritative current snapshot. */
   getSnapshot: handleUnaryCall<SessionStateRequest, SessionSnapshot>;
-  /** Session history as a snapshot-shaped transcript (session-snapshot-collapse). */
-  getHistory: handleUnaryCall<SessionStateRequest, SessionSnapshot>;
+  /** Cursor-paginated full message history on the session's active branch. */
+  listSessionMessages: handleUnaryCall<ListSessionMessagesRequest, SessionMessagePage>;
   /** Collapse a session into a graph node (session-snapshot-collapse). */
   collapseSession: handleUnaryCall<CollapseSessionRequest, CollapseSessionResponse>;
   getSessionGraphNode: handleUnaryCall<GetSessionGraphNodeRequest, GetSessionGraphNodeResponse>;
@@ -8315,26 +7984,7 @@ export interface SessionServiceServer extends UntypedServiceImplementation {
 }
 
 export interface SessionServiceClient extends Client {
-  /**
-   * Full structured state (binary protobuf). Kept for compatibility; new
-   * clients should use GetSnapshot / GetHistory.
-   */
-  getState(
-    request: SessionStateRequest,
-    callback: (error: ServiceError | null, response: SessionState) => void,
-  ): ClientUnaryCall;
-  getState(
-    request: SessionStateRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: SessionState) => void,
-  ): ClientUnaryCall;
-  getState(
-    request: SessionStateRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: SessionState) => void,
-  ): ClientUnaryCall;
-  /** Full nested session snapshot (session-snapshot-collapse contract). */
+  /** Full nested session snapshot: the single authoritative current snapshot. */
   getSnapshot(
     request: SessionStateRequest,
     callback: (error: ServiceError | null, response: SessionSnapshot) => void,
@@ -8350,21 +8000,21 @@ export interface SessionServiceClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: SessionSnapshot) => void,
   ): ClientUnaryCall;
-  /** Session history as a snapshot-shaped transcript (session-snapshot-collapse). */
-  getHistory(
-    request: SessionStateRequest,
-    callback: (error: ServiceError | null, response: SessionSnapshot) => void,
+  /** Cursor-paginated full message history on the session's active branch. */
+  listSessionMessages(
+    request: ListSessionMessagesRequest,
+    callback: (error: ServiceError | null, response: SessionMessagePage) => void,
   ): ClientUnaryCall;
-  getHistory(
-    request: SessionStateRequest,
+  listSessionMessages(
+    request: ListSessionMessagesRequest,
     metadata: Metadata,
-    callback: (error: ServiceError | null, response: SessionSnapshot) => void,
+    callback: (error: ServiceError | null, response: SessionMessagePage) => void,
   ): ClientUnaryCall;
-  getHistory(
-    request: SessionStateRequest,
+  listSessionMessages(
+    request: ListSessionMessagesRequest,
     metadata: Metadata,
     options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: SessionSnapshot) => void,
+    callback: (error: ServiceError | null, response: SessionMessagePage) => void,
   ): ClientUnaryCall;
   /** Collapse a session into a graph node (session-snapshot-collapse). */
   collapseSession(

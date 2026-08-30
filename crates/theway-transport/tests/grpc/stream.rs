@@ -1,5 +1,9 @@
 use super::*;
 
+fn feed_of(state: &theway_grpc::SessionSnapshot) -> &theway_grpc::SessionFeed {
+    state.feed.as_ref().expect("snapshot feed")
+}
+
 #[test]
 fn stream_snapshot_first_frame_is_authoritative() {
     let mut snapshot = fixture_snapshot("one");
@@ -11,11 +15,12 @@ fn stream_snapshot_first_frame_is_authoritative() {
 
     let update = WireStatusUpdate::full(snapshot.clone());
     let state = project_stream_snapshot(&update, &snapshot, &mut StreamCursor::default());
+    let feed = feed_of(&state);
 
-    assert_eq!(state.feed_blocks.len(), 1);
-    assert!(state.feed_block_patches.is_empty());
-    assert_eq!(state.feed_blocks_base, 0);
-    assert_eq!(state.feed_lines, vec!["one"]);
+    assert_eq!(feed.blocks.len(), 1);
+    assert!(feed.block_patches.is_empty());
+    assert_eq!(feed.blocks_base, 0);
+    assert_eq!(feed.lines, vec!["one"]);
 }
 
 #[test]
@@ -39,12 +44,13 @@ fn stream_snapshot_slices_normal_incremental_frame() {
     }];
     let update = WireStatusUpdate::delta_from_status(delta, 2, 2);
     let state = project_stream_snapshot(&update, &authoritative, &mut cursor);
+    let feed = feed_of(&state);
 
-    assert!(state.feed_blocks.is_empty());
-    assert_eq!(state.feed_blocks_base, 1);
-    assert_eq!(state.feed_block_patches.len(), 1);
-    assert_eq!(state.feed_lines_base, 1);
-    assert_eq!(state.feed_lines, vec!["two"]);
+    assert!(feed.blocks.is_empty());
+    assert_eq!(feed.blocks_base, 1);
+    assert_eq!(feed.block_patches.len(), 1);
+    assert_eq!(feed.lines_base, 1);
+    assert_eq!(feed.lines, vec!["two"]);
 }
 
 #[test]
@@ -62,8 +68,9 @@ fn stream_snapshot_resyncs_after_lag_or_clear() {
     unchanged.feed_blocks_base = 2;
     let unchanged = WireStatusUpdate::delta_from_status(unchanged, 2, 1);
     let lagged = project_stream_snapshot(&unchanged, &first, &mut cursor);
-    assert_eq!(lagged.feed_blocks.len(), 2);
-    assert!(lagged.feed_block_patches.is_empty());
+    let lagged_feed = feed_of(&lagged);
+    assert_eq!(lagged_feed.blocks.len(), 2);
+    assert!(lagged_feed.block_patches.is_empty());
 
     let mut cleared = fixture_snapshot("new");
     cleared.feed_blocks = vec![plain_block("new")];
@@ -73,7 +80,8 @@ fn stream_snapshot_resyncs_after_lag_or_clear() {
     }];
     let cleared_update = WireStatusUpdate::full(cleared.clone());
     let reset = project_stream_snapshot(&cleared_update, &cleared, &mut cursor);
-    assert_eq!(reset.feed_blocks.len(), 1);
-    assert!(reset.feed_block_patches.is_empty());
-    assert_eq!(reset.feed_blocks_base, 0);
+    let reset_feed = feed_of(&reset);
+    assert_eq!(reset_feed.blocks.len(), 1);
+    assert!(reset_feed.block_patches.is_empty());
+    assert_eq!(reset_feed.blocks_base, 0);
 }

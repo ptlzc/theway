@@ -261,7 +261,7 @@ export interface GraphSkipResponse {
 
 /**
  * Checkpoints are organized by session: a session owns its runs
- * (DagRun.session_id), and `SessionState.dags` mounts the live graph status
+ * (DagRun.session_id), and `SessionSnapshot.graph_state.dags` mounts the live graph status
  * under that session. Checkpoint exports one run or the session's whole graph
  * set as portable JSON snapshots; restore revives them back under the session.
  */

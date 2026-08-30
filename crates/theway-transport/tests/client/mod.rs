@@ -3,8 +3,11 @@
 use super::*;
 use crate::feed::WireFeedBlock;
 use crate::grpc::{GrpcState, serve_grpc};
-use crate::proto::{session_state, wire_status};
-use crate::testing::{FakeSessionOps, FakeStorageOps, FakeToolOps, empty_sidebar_snapshot};
+use crate::proto::{session_snapshot, wire_status_from_session_snapshot};
+use crate::testing::{
+    ChannelCommandOps, FakeSessionOps, FakeStorageOps, FakeToolOps, LiveSessionObservability,
+    SharedSettingsOps, empty_sidebar_snapshot,
+};
 use crate::wire::WireContextUsage;
 use crate::wire::{
     ModelEntry, ProviderGroup, WireDaemonConfig, WirePathContext, WireStatus, WireStatusUpdate,
@@ -60,26 +63,76 @@ fn grpc_state() -> (GrpcState, mpsc::UnboundedReceiver<crate::wire::WireCommand>
     let agent_fwd = tokio::spawn(std::future::pending::<()>()).abort_handle();
     let session_ops = Arc::new(FakeSessionOps::new());
     session_ops.add_session("sess-1");
+    let path_context = std::sync::Arc::new(std::sync::RwLock::new(WirePathContext::default()));
+    let daemon_config = std::sync::Arc::new(std::sync::RwLock::new(WireDaemonConfig::default()));
+    let session_states = Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new()));
+    let graph_ops: Arc<dyn crate::GraphOps> = Arc::new(crate::UnavailableGraphOps);
+    let tool_ops: Arc<dyn crate::ToolOps> = Arc::new(FakeToolOps::new());
+    let storage_ops: Arc<dyn crate::StorageOps> = Arc::new(FakeStorageOps::new());
+    let external_ops: Arc<dyn crate::ExternalProtocolOps> =
+        Arc::new(crate::CompositeExternalProtocolOps::new(
+            Arc::new(ChannelCommandOps::new(command_tx.clone())),
+            session_ops.clone(),
+            Arc::new(LiveSessionObservability::new(
+                session_ops.clone(),
+                session_states.clone(),
+                latest.clone(),
+                "sess-1",
+            )),
+            graph_ops,
+            tool_ops.clone(),
+            storage_ops.clone(),
+            Arc::new(SharedSettingsOps::new(
+                path_context.clone(),
+                daemon_config.clone(),
+                command_tx.clone(),
+            )),
+        ));
     (
         GrpcState {
             commands: command_tx,
             snapshots: snapshot_tx,
             latest,
-            session_states: Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new())),
+            session_states,
             events: event_tx,
             dag_events: dag_event_tx,
             job_ops: Arc::new(crate::UnavailableJobOps),
             graph_ops: Arc::new(crate::UnavailableGraphOps),
             session_ops,
             session_id: Arc::new(std::sync::RwLock::new("sess-1".into())),
-            path_context: Arc::new(std::sync::RwLock::new(WirePathContext::default())),
-            daemon_config: Arc::new(std::sync::RwLock::new(WireDaemonConfig::default())),
-            tool_ops: Arc::new(FakeToolOps::new()),
-            storage_ops: Arc::new(FakeStorageOps::new()),
+            path_context,
+            daemon_config,
+            tool_ops,
+            storage_ops,
+            external_ops,
             agent_fwd,
         },
         command_rx,
     )
+}
+
+/// Rebuild the composed external service after a test mutates one of the
+/// shared views (`path_context` / `daemon_config`).
+fn rebind_external_ops(state: &mut GrpcState) {
+    let current = state.session_id.read().unwrap().clone();
+    state.external_ops = Arc::new(crate::CompositeExternalProtocolOps::new(
+        Arc::new(ChannelCommandOps::new(state.commands.clone())),
+        state.session_ops.clone(),
+        Arc::new(LiveSessionObservability::new(
+            state.session_ops.clone(),
+            state.session_states.clone(),
+            state.latest.clone(),
+            current,
+        )),
+        state.graph_ops.clone(),
+        state.tool_ops.clone(),
+        state.storage_ops.clone(),
+        Arc::new(SharedSettingsOps::new(
+            state.path_context.clone(),
+            state.daemon_config.clone(),
+            state.commands.clone(),
+        )),
+    ));
 }
 
 /// Spawn an in-process gRPC server on a random port and connect a client to it.
@@ -104,6 +157,7 @@ async fn client_and_server_with_path_context(
 ) {
     let (mut state, command_rx) = grpc_state();
     state.path_context = Arc::new(std::sync::RwLock::new(path_context));
+    rebind_external_ops(&mut state);
     let snapshot_tx = state.snapshots.clone();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -116,12 +170,14 @@ async fn client_and_server_with_path_context(
 }
 
 #[tokio::test]
-async fn client_get_state_returns_structured_state() {
+async fn client_get_snapshot_returns_structured_state() {
     let (mut client, _command_rx, _snapshot_tx) = client_and_server().await;
-    let state = client.get_state().await.unwrap();
+    let state = client.get_snapshot().await.unwrap();
     assert_eq!(state.session_id, "sess-1");
-    assert_eq!(state.cwd, "/tmp/theway");
-    assert_eq!(state.feed_lines, vec!["ready"]);
+    let info = state.info.unwrap();
+    assert_eq!(info.cwd, "/tmp/theway");
+    let feed = state.feed.unwrap();
+    assert_eq!(feed.lines, vec!["ready"]);
 }
 
 #[tokio::test]

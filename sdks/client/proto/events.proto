@@ -10,7 +10,7 @@ import "session.proto";
 // Unified envelope for StreamEvents / WebSocket frames.
 message StreamFrame {
   oneof payload {
-    SessionState snapshot = 1; // connection start + periodic full state
+    SessionSnapshot snapshot = 1; // connection start + full resync frames
     StreamEvent event = 2; // high-frequency increment
   }
 }

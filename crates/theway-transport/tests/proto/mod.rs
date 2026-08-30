@@ -7,6 +7,7 @@ use crate::wire::{
 };
 
 mod coverage;
+mod breaking_contract;
 mod extensions;
 mod session_activation;
 mod session_cumulative_usage;
@@ -108,31 +109,35 @@ fn fixture_snapshot() -> WireStatus {
 }
 
 #[test]
-fn converts_full_snapshot_to_session_state() {
-    let state = session_state(&fixture_snapshot());
+fn converts_full_snapshot_to_session_snapshot() {
+    let state = session_snapshot(&fixture_snapshot());
     assert_eq!(state.session_id, "sess-1");
-    assert_eq!(state.model, "provider:model");
-    assert_eq!(state.cwd, "/tmp/theway");
-    assert!(state.busy);
-    assert_eq!(state.queued_count, 2);
-    assert_eq!(state.model_catalog.len(), 1);
-    assert_eq!(state.model_catalog[0].provider, "anthropic");
-    assert_eq!(state.model_catalog[0].models[0].id, "claude-x");
-    let poll = state.latest_trigger_poll.as_ref().unwrap();
+    let info = state.info.as_ref().unwrap();
+    let runtime = state.runtime.as_ref().unwrap();
+    assert_eq!(runtime.model.as_ref().unwrap().model, "model");
+    assert_eq!(runtime.model.as_ref().unwrap().provider, "provider");
+    assert_eq!(info.cwd, "/tmp/theway");
+    assert!(info.busy);
+    assert_eq!(info.queued_count, 2);
+    assert_eq!(runtime.model_catalog.len(), 1);
+    assert_eq!(runtime.model_catalog[0].provider, "anthropic");
+    assert_eq!(runtime.model_catalog[0].models[0].id, "claude-x");
+    let poll = runtime.latest_trigger_poll.as_ref().unwrap();
     assert_eq!(poll.trace_id, "tr-1");
     assert_eq!(poll.summary, "ok");
-    let sidebar = state.sidebar.as_ref().unwrap();
+    let sidebar = info.sidebar.as_ref().unwrap();
     assert_eq!(sidebar.inbox_new, 1);
     assert_eq!(sidebar.skills.as_ref().unwrap().total, 2);
     assert_eq!(sidebar.tools.as_ref().unwrap().names, vec!["read"]);
     assert_eq!(sidebar.runtime, vec!["ok"]);
-    assert_eq!(state.feed_blocks.len(), 2);
-    let user = state.feed_blocks[0].kind.as_ref().unwrap();
+    let feed = state.feed.as_ref().unwrap();
+    assert_eq!(feed.blocks.len(), 2);
+    let user = feed.blocks[0].kind.as_ref().unwrap();
     match user {
         wire::feed_block::Kind::User(b) => assert_eq!(b.text, "hi"),
         other => panic!("expected user block, got {other:?}"),
     }
-    let plain = state.feed_blocks[1].kind.as_ref().unwrap();
+    let plain = feed.blocks[1].kind.as_ref().unwrap();
     match plain {
         wire::feed_block::Kind::Plain(b) => {
             assert_eq!(b.text, "note");
@@ -141,10 +146,11 @@ fn converts_full_snapshot_to_session_state() {
         }
         other => panic!("expected plain block, got {other:?}"),
     }
-    assert_eq!(state.feed_lines, vec!["line"]);
+    assert_eq!(feed.lines, vec!["line"]);
     // graph mode planes are empty until P1/P2.
-    assert!(state.dags.is_empty());
-    assert!(state.subagents.is_empty());
+    let graph_state = state.graph_state.as_ref().unwrap();
+    assert!(graph_state.dags.is_empty());
+    assert!(graph_state.subagents.is_empty());
 }
 
 #[test]
@@ -163,13 +169,14 @@ fn incremental_feed_block_patches_round_trip_through_proto() {
     let update = crate::wire::WireStatusUpdate::delta_from_status(delta_status, 2, 1);
     let delta = update.feed_delta().unwrap();
 
-    let proto = incremental_session_state(&authoritative, delta, 0);
-    assert_eq!(proto.feed_blocks_base, 2);
-    assert!(proto.feed_blocks.is_empty());
-    assert_eq!(proto.feed_block_patches.len(), 1);
-    assert_eq!(proto.feed_block_patches[0].index, 1);
+    let proto = incremental_session_snapshot(&authoritative, delta, 0);
+    let feed = proto.feed.as_ref().unwrap();
+    assert_eq!(feed.blocks_base, 2);
+    assert!(feed.blocks.is_empty());
+    assert_eq!(feed.block_patches.len(), 1);
+    assert_eq!(feed.block_patches[0].index, 1);
 
-    let restored = wire_status(&proto);
+    let restored = wire_status_from_session_snapshot(&proto);
     assert_eq!(restored.feed_blocks_base, 2);
     assert_eq!(restored.feed_block_patches, delta.feed_block_patches);
 }
@@ -219,13 +226,14 @@ fn dag_run_wire_shape_maps_to_proto() {
     assert_eq!(node.input_tokens, Some(120));
     assert_eq!(node.depends_on, vec!["explore"]);
 
-    let state = session_state(&{
+    let state = session_snapshot(&{
         let mut snap = fixture_snapshot();
         snap.dags = vec![web];
         snap
     });
-    assert_eq!(state.dags.len(), 1);
-    let w = &state.dags[0];
+    let graph_state = state.graph_state.as_ref().unwrap();
+    assert_eq!(graph_state.dags.len(), 1);
+    let w = &graph_state.dags[0];
     assert_eq!(w.name, "test-run");
     assert_eq!(w.kind, "dag");
     assert_eq!(w.max_concurrency, 4);
@@ -323,12 +331,12 @@ fn goal_run_round_trips_kind_and_dag_event_wire() {
         nodes: Vec::new(),
     };
     assert_eq!(web.kind, "goal");
-    let state = session_state(&{
+    let state = session_snapshot(&{
         let mut snap = fixture_snapshot();
         snap.dags = vec![web];
         snap
     });
-    assert_eq!(state.dags[0].kind, "goal");
+    assert_eq!(state.graph_state.as_ref().unwrap().dags[0].kind, "goal");
 
     let event = dag_event_wire(&WireDagEvent::RunStatus {
         run_id: id.clone(),

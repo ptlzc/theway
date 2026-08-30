@@ -1,20 +1,22 @@
 #[tokio::test]
-async fn get_state_returns_structured_session_state() {
+async fn get_snapshot_returns_structured_session_snapshot() {
     let (state, _command_rx) = grpc_state();
     let state = state
-        .get_state(Request::new(theway_grpc::SessionStateRequest {
+        .get_snapshot(Request::new(theway_grpc::SessionStateRequest {
             session_id: String::new(),
         }))
         .await
         .unwrap()
         .into_inner();
     assert_eq!(state.session_id, "sess-1");
-    assert_eq!(state.cwd, "/tmp/theway");
-    assert_eq!(state.feed_lines, vec!["ready"]);
+    let info = state.info.unwrap();
+    assert_eq!(info.cwd, "/tmp/theway");
+    let feed = state.feed.unwrap();
+    assert_eq!(feed.lines, vec!["ready"]);
 }
 
 #[tokio::test]
-async fn get_state_returns_registered_session_snapshot() {
+async fn get_snapshot_returns_registered_session_snapshot() {
     let (state, _command_rx) = grpc_state();
     let mut other = fixture_snapshot("other-ready");
     other.session_id = "other-session".into();
@@ -26,18 +28,20 @@ async fn get_state_returns_registered_session_snapshot() {
         .insert("other-session".into(), other);
 
     let response = state
-        .get_state(Request::new(theway_grpc::SessionStateRequest {
+        .get_snapshot(Request::new(theway_grpc::SessionStateRequest {
             session_id: "other-session".into(),
         }))
         .await
         .unwrap()
         .into_inner();
     assert_eq!(response.session_id, "other-session");
-    assert_eq!(response.cwd, "/other/cwd");
-    assert_eq!(response.feed_lines, vec!["other feed"]);
+    let info = response.info.unwrap();
+    assert_eq!(info.cwd, "/other/cwd");
+    let feed = response.feed.unwrap();
+    assert_eq!(feed.lines, vec!["other feed"]);
 
     let err = state
-        .get_state(Request::new(theway_grpc::SessionStateRequest {
+        .get_snapshot(Request::new(theway_grpc::SessionStateRequest {
             session_id: "missing".into(),
         }))
         .await
@@ -75,8 +79,9 @@ async fn lagged_snapshot_stream_emits_latest_full_state() {
     let Some(theway_grpc::stream_frame::Payload::Snapshot(snapshot)) = frame.payload else {
         panic!("expected snapshot frame");
     };
-    assert_eq!(snapshot.feed_lines, vec!["latest"]);
-    assert_eq!(snapshot.feed_blocks.len(), 1);
-    assert!(snapshot.feed_block_patches.is_empty());
-    assert_eq!(snapshot.feed_blocks_base, 0);
+    let feed = snapshot.feed.unwrap();
+    assert_eq!(feed.lines, vec!["latest"]);
+    assert_eq!(feed.blocks.len(), 1);
+    assert!(feed.block_patches.is_empty());
+    assert_eq!(feed.blocks_base, 0);
 }

@@ -19,7 +19,7 @@ async fn stream_events_emits_published_snapshots() {
     let frame = item.unwrap();
     match frame.payload {
         Some(theway_grpc::stream_frame::Payload::Snapshot(state)) => {
-            assert_eq!(state.feed_lines, vec!["streamed"]);
+            assert_eq!(state.feed.as_ref().unwrap().lines, vec!["streamed"]);
         }
         other => panic!("expected snapshot payload, got {other:?}"),
     }

@@ -29,7 +29,7 @@ async fn two_simultaneous_subscribers_both_receive_frames() {
         let frame = item.unwrap();
         match frame.payload {
             Some(theway_grpc::stream_frame::Payload::Snapshot(state)) => {
-                assert_eq!(state.feed_lines, vec!["fan-out"], "{label} subscriber");
+                assert_eq!(state.feed.as_ref().unwrap().lines, vec!["fan-out"], "{label} subscriber");
             }
             other => panic!("{label} subscriber: expected snapshot, got {other:?}"),
         }
@@ -50,8 +50,9 @@ async fn two_simultaneous_subscribers_both_receive_frames() {
         .unwrap();
     match item.payload {
         Some(theway_grpc::stream_frame::Payload::Snapshot(state)) => {
-            assert_eq!(state.feed_lines, vec!["second-wave"]);
-            assert_eq!(state.feed_lines_base, 1);
+            let feed = state.feed.as_ref().unwrap();
+            assert_eq!(feed.lines, vec!["second-wave"]);
+            assert_eq!(feed.lines_base, 1);
         }
         other => panic!("expected snapshot, got {other:?}"),
     }

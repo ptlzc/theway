@@ -216,8 +216,8 @@ fn rich_snapshot_round_trips_all_proto_fields() {
     // Incremental patch metadata is a stream-only concept; full-snapshot proto
     // round-trips intentionally carry the authoritative blocks without patches.
     snapshot.feed_block_patches.clear();
-    let proto = session_state(&snapshot);
-    let restored = wire_status(&proto);
+    let proto = session_snapshot(&snapshot);
+    let restored = wire_status_from_session_snapshot(&proto);
 
     assert_eq!(
         serde_json::to_value(&restored).unwrap(),

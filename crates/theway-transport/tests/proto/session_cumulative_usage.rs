@@ -1,7 +1,7 @@
-//! Session-cumulative KV cache usage round-trips through `SessionState` and
+//! Session-cumulative KV cache usage round-trips through `SessionSnapshot` and
 //! `WireStatus`.
 //!
-//! The proto `SessionState.session_context_usage` field and the wire
+//! The proto `SessionRuntime.session_context_usage` field and the wire
 //! `WireStatus.session_usage` field carry the same session-cumulative token
 //! counters: total input, cached input, non-cached input, output, and cache
 //! write totals.
@@ -9,7 +9,7 @@
 use super::*;
 
 #[test]
-fn session_context_usage_round_trips_through_session_state_and_wire_status() {
+fn session_context_usage_round_trips_through_session_snapshot_and_wire_status() {
     // Arrange: a full snapshot with session-cumulative usage populated.
     let mut snapshot = fixture_snapshot();
     snapshot.session_usage = WireContextUsage {
@@ -24,12 +24,15 @@ fn session_context_usage_round_trips_through_session_state_and_wire_status() {
         context_window: 200_000,
     };
 
-    // Act: convert WireStatus -> SessionState -> WireStatus.
-    let proto = session_state(&snapshot);
-    let restored = wire_status(&proto);
+    // Act: convert WireStatus -> SessionSnapshot -> WireStatus.
+    let proto = session_snapshot(&snapshot);
+    let restored = wire_status_from_session_snapshot(&proto);
 
     // Assert: the proto carries the session usage and the round-trip preserves it.
     let proto_usage = proto
+        .runtime
+        .as_ref()
+        .expect("runtime must be populated")
         .session_context_usage
         .as_ref()
         .expect("session_context_usage must be populated");
@@ -86,7 +89,7 @@ fn default_session_usage_round_trips_as_zero() {
     // Arrange: fixture already defaults `session_usage` to all-zero counters.
 
     // Act
-    let restored = wire_status(&session_state(&fixture_snapshot()));
+    let restored = wire_status_from_session_snapshot(&session_snapshot(&fixture_snapshot()));
 
     // Assert
     assert_eq!(restored.session_usage.cached_tokens, 0);

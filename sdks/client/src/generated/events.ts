@@ -17,7 +17,7 @@ import {
   type Metadata,
   type UntypedServiceImplementation,
 } from "@grpc/grpc-js";
-import { SessionState } from "./session.js";
+import { SessionSnapshot } from "./session.js";
 
 export const protobufPackage = "theway.grpc.v1";
 
@@ -25,8 +25,8 @@ export const protobufPackage = "theway.grpc.v1";
 export interface StreamFrame {
   payload?:
     | //
-    /** connection start + periodic full state */
-    { $case: "snapshot"; snapshot: SessionState }
+    /** connection start + full resync frames */
+    { $case: "snapshot"; snapshot: SessionSnapshot }
     | //
     /** high-frequency increment */
     { $case: "event"; event: StreamEvent }
@@ -107,7 +107,7 @@ export const StreamFrame: MessageFns<StreamFrame> = {
   encode(message: StreamFrame, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     switch (message.payload?.$case) {
       case "snapshot":
-        SessionState.encode(message.payload.snapshot, writer.uint32(10).fork()).join();
+        SessionSnapshot.encode(message.payload.snapshot, writer.uint32(10).fork()).join();
         break;
       case "event":
         StreamEvent.encode(message.payload.event, writer.uint32(18).fork()).join();
@@ -128,7 +128,7 @@ export const StreamFrame: MessageFns<StreamFrame> = {
             break;
           }
 
-          message.payload = { $case: "snapshot", snapshot: SessionState.decode(reader, reader.uint32()) };
+          message.payload = { $case: "snapshot", snapshot: SessionSnapshot.decode(reader, reader.uint32()) };
           continue;
         }
         case 2: {
@@ -151,7 +151,7 @@ export const StreamFrame: MessageFns<StreamFrame> = {
   fromJSON(object: any): StreamFrame {
     return {
       payload: isSet(object.snapshot)
-        ? { $case: "snapshot", snapshot: SessionState.fromJSON(object.snapshot) }
+        ? { $case: "snapshot", snapshot: SessionSnapshot.fromJSON(object.snapshot) }
         : isSet(object.event)
         ? { $case: "event", event: StreamEvent.fromJSON(object.event) }
         : undefined,
@@ -161,7 +161,7 @@ export const StreamFrame: MessageFns<StreamFrame> = {
   toJSON(message: StreamFrame): unknown {
     const obj: any = {};
     if (message.payload?.$case === "snapshot") {
-      obj.snapshot = SessionState.toJSON(message.payload.snapshot);
+      obj.snapshot = SessionSnapshot.toJSON(message.payload.snapshot);
     } else if (message.payload?.$case === "event") {
       obj.event = StreamEvent.toJSON(message.payload.event);
     }
@@ -176,7 +176,7 @@ export const StreamFrame: MessageFns<StreamFrame> = {
     switch (object.payload?.$case) {
       case "snapshot": {
         if (object.payload?.snapshot !== undefined && object.payload?.snapshot !== null) {
-          message.payload = { $case: "snapshot", snapshot: SessionState.fromPartial(object.payload.snapshot) };
+          message.payload = { $case: "snapshot", snapshot: SessionSnapshot.fromPartial(object.payload.snapshot) };
         }
         break;
       }

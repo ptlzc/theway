@@ -33,7 +33,7 @@ fn extension_snapshot_round_trip_keeps_open_contribution_kind() {
 }
 
 #[test]
-fn session_state_keeps_extension_snapshot_additive() {
+fn session_snapshot_keeps_extension_snapshot_additive() {
     let mut snapshot = fixture_snapshot();
     snapshot.extensions.revision = 3;
     snapshot
@@ -46,8 +46,8 @@ fn session_state_keeps_extension_snapshot_additive() {
             kind: "unknown_to_this_client".into(),
             payload: serde_json::json!({"safe": true}),
         });
-    let state = session_state(&snapshot);
-    assert_eq!(state.extensions.as_ref().unwrap().revision, 3);
-    let round_trip = wire_status(&state);
+    let state = session_snapshot(&snapshot);
+    assert_eq!(state.runtime.as_ref().unwrap().extensions.as_ref().unwrap().revision, 3);
+    let round_trip = wire_status_from_session_snapshot(&state);
     assert_eq!(round_trip.extensions, snapshot.extensions);
 }

@@ -17,7 +17,7 @@ async fn grpc_server_over_transport_serves_client() {
     .unwrap();
 
     let state = session_client
-        .get_state(theway_grpc::SessionStateRequest {
+        .get_snapshot(theway_grpc::SessionStateRequest {
             session_id: String::new(),
         })
         .await

@@ -85,7 +85,12 @@ impl TestResult {
 async fn main() -> Result<()> {
     let args = Args::parse();
     let tests: Vec<&str> = if args.tests == "all" {
-        vec!["health-check", "health-watch", "multi-session", "get-state"]
+        vec![
+            "health-check",
+            "health-watch",
+            "multi-session",
+            "get-snapshot",
+        ]
     } else {
         args.tests.split(',').map(str::trim).collect()
     };
@@ -96,7 +101,7 @@ async fn main() -> Result<()> {
             "health-check" => test_health_check(&args.server_addr).await,
             "health-watch" => test_health_watch(&args.server_addr).await,
             "multi-session" => test_multi_session(&args.server_addr).await,
-            "get-state" => test_get_state(&args.server_addr).await,
+            "get-snapshot" => test_get_snapshot(&args.server_addr).await,
             other => TestResult::fail(other, "unknown test", "n/a", None),
         };
         results.push(r);
@@ -368,33 +373,46 @@ async fn run_multi_session(addr: &str) -> Result<(usize, usize)> {
     Ok((2, after_create))
 }
 
-/// 4. GetState: verify the domain service responds with structured state.
-async fn test_get_state(addr: &str) -> TestResult {
-    match run_get_state(addr).await {
-        Ok(state) => TestResult::pass(
-            "get-state",
-            &format!(
-                "GetState returned SessionState: model={}, cwd={}, busy={}, blocks={}, sid={}",
-                state.model,
-                state.cwd,
-                state.busy,
-                state.feed_blocks.len(),
-                &state.session_id[..state.session_id.len().min(16)],
-            ),
-        ),
+/// 4. GetSnapshot: verify the domain service responds with the single-version snapshot.
+async fn test_get_snapshot(addr: &str) -> TestResult {
+    match run_get_snapshot(addr).await {
+        Ok(state) => {
+            let feed = state.feed.unwrap_or_default();
+            let runtime = state.runtime.unwrap_or_default();
+            let cwd = state
+                .info
+                .as_ref()
+                .map(|info| info.cwd.clone())
+                .unwrap_or_default();
+            let busy = state.info.as_ref().is_some_and(|info| info.busy);
+            TestResult::pass(
+                "get-snapshot",
+                &format!(
+                    "GetSnapshot returned SessionSnapshot: model={}, cwd={}, busy={}, blocks={}, sid={}",
+                    runtime
+                        .model
+                        .map(|model| format!("{}:{}", model.provider, model.model))
+                        .unwrap_or_default(),
+                    cwd,
+                    busy,
+                    feed.blocks.len(),
+                    &state.session_id[..state.session_id.len().min(16)],
+                ),
+            )
+        }
         Err(e) => TestResult::fail(
-            "get-state",
-            &format!("GetState RPC failed: {e}"),
-            "SessionService::GetState not functional",
+            "get-snapshot",
+            &format!("GetSnapshot RPC failed: {e}"),
+            "SessionService::GetSnapshot not functional",
             Some(format!("{e:#}")),
         ),
     }
 }
 
-async fn run_get_state(addr: &str) -> Result<theway_grpc::SessionState> {
+async fn run_get_snapshot(addr: &str) -> Result<theway_grpc::SessionSnapshot> {
     let mut client = SessionServiceClient::connect(addr.to_string()).await?;
     let resp = client
-        .get_state(Request::new(SessionStateRequest {
+        .get_snapshot(Request::new(SessionStateRequest {
             session_id: String::new(),
         }))
         .await?;

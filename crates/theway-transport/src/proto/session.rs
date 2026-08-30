@@ -1,94 +1,3 @@
-/// Convert a `SessionState` (proto, from a gRPC client) back into the internal
-/// serde snapshot model. The client half of the protocol (TUI, future local
-/// clients) renders from `WireStatus` exactly like the JSON surface does, so
-/// every snapshot frame round-trips through this conversion.
-pub fn wire_status(state: &wire::SessionState) -> WireStatus {
-    WireStatus {
-        session_id: state.session_id.clone(),
-        model: state.model.clone(),
-        thinking_level: state.thinking_level.clone(),
-        model_catalog: state
-            .model_catalog
-            .iter()
-            .map(|group| crate::wire::ProviderGroup {
-                provider: group.provider.clone(),
-                has_credential: group.has_credential,
-                models: group
-                    .models
-                    .iter()
-                    .map(|entry| crate::wire::ModelEntry {
-                        id: entry.id.clone(),
-                        name: entry.name.clone(),
-                    })
-                    .collect(),
-            })
-            .collect(),
-        cwd: state.cwd.clone(),
-        busy: state.busy,
-        queued_count: state.queued_count as usize,
-        latest_trigger_poll: state.latest_trigger_poll.as_ref().map(|status| {
-            crate::feed::TriggerPollStatus {
-                checked_at: status.checked_at.clone(),
-                trace_id: status.trace_id.clone(),
-                source_label: status.source_label.clone(),
-                event_label: status.event_label.clone(),
-                summary: status.summary.clone(),
-            }
-        }),
-        goal: state
-            .goal
-            .as_ref()
-            .map(|goal| crate::wire::WireGoalSnapshot {
-                condition: goal.condition.clone(),
-                status: goal.status.clone(),
-                iterations: goal.iterations,
-                last_reason: goal.last_reason.clone(),
-            }),
-        control_plane_prompt: state.control_plane_prompt.as_ref().map(|prompt| {
-            crate::wire::WireControlPlanePromptSnapshot {
-                tool_name: prompt.tool_name.clone(),
-                label: prompt.label.clone(),
-                reason: prompt.reason.clone(),
-                args_hash: prompt.args_hash.clone(),
-                payload: prompt.payload.clone(),
-            }
-        }),
-        sidebar: sidebar_wire(state.sidebar.as_ref()),
-        feed_blocks: state.feed_blocks.iter().map(wire_feed_block).collect(),
-        feed_blocks_base: state.feed_blocks_base,
-        feed_block_patches: state
-            .feed_block_patches
-            .iter()
-            .filter_map(|patch| {
-                patch
-                    .block
-                    .as_ref()
-                    .map(|block| crate::wire::WireFeedBlockPatch {
-                        index: patch.index,
-                        block: wire_feed_block(block),
-                    })
-            })
-            .collect(),
-        feed_lines: state.feed_lines.clone(),
-        feed_lines_base: state.feed_lines_base,
-        dags: state.dags.iter().map(wire_dag_run).collect(),
-        subagents: state.subagents.iter().map(wire_subagent_job).collect(),
-        usage: state
-            .context_usage
-            .as_ref()
-            .map(|usage| context_usage_from_proto(Some(usage)))
-            .unwrap_or_default(),
-        session_usage: state
-            .session_context_usage
-            .as_ref()
-            .map(|usage| context_usage_from_proto(Some(usage)))
-            .unwrap_or_default(),
-        tui_max_feed_lines: state.tui_max_feed_lines.map(u64::from),
-        extensions: extension_snapshot_wire(state.extensions.as_ref()),
-        system_context: state.system_context.clone(),
-    }
-}
-
 /// Convert a `WireStatus` into the nested `SessionSnapshot` proto message.
 pub fn session_snapshot_wire(status: &WireStatus) -> wire::SessionSnapshot {
     wire_session_snapshot(&WireSessionSnapshot::from(status))
@@ -103,18 +12,17 @@ pub fn wire_status_from_session_snapshot(snapshot: &wire::SessionSnapshot) -> Wi
 #[allow(deprecated)]
 pub fn wire_session_snapshot(snapshot: &WireSessionSnapshot) -> wire::SessionSnapshot {
     let status = WireStatus::from(snapshot);
-    let state = session_state(&status);
     wire::SessionSnapshot {
         session_id: if !snapshot.session_id.is_empty() {
             snapshot.session_id.clone()
         } else {
-            state.session_id.clone()
+            status.session_id.clone()
         },
         info: Some(wire::SessionInfo {
             id: if !snapshot.info.id.is_empty() {
                 snapshot.info.id.clone()
             } else {
-                state.session_id.clone()
+                status.session_id.clone()
             },
             name: snapshot.info.name.clone(),
             cwd: snapshot.info.cwd.clone(),
@@ -127,7 +35,7 @@ pub fn wire_session_snapshot(snapshot: &WireSessionSnapshot) -> wire::SessionSna
             graph_count: snapshot.info.graph_count,
             active_graph_count: snapshot.info.active_graph_count,
             queued_count: snapshot.info.queued_count as u32,
-            sidebar: state.sidebar,
+            sidebar: sidebar_proto(&status.sidebar),
         }),
         runtime: Some(wire::SessionRuntime {
             model: Some(wire::ModelRef {
@@ -142,14 +50,50 @@ pub fn wire_session_snapshot(snapshot: &WireSessionSnapshot) -> wire::SessionSna
                 .iter()
                 .map(|level| thinking_level_to_proto(level))
                 .collect(),
-            context_usage: state.context_usage,
-            session_context_usage: state.session_context_usage,
-            tui_max_feed_lines: state.tui_max_feed_lines,
-            model_catalog: state.model_catalog,
-            latest_trigger_poll: state.latest_trigger_poll,
-            goal: state.goal,
-            control_plane_prompt: state.control_plane_prompt,
-            extensions: state.extensions,
+            context_usage: Some(context_usage_to_proto(&status.usage)),
+            session_context_usage: Some(context_usage_to_proto(&status.session_usage)),
+            tui_max_feed_lines: status.tui_max_feed_lines.map(|n| n as u32),
+            model_catalog: status
+                .model_catalog
+                .iter()
+                .map(|group| wire::ProviderGroup {
+                    provider: group.provider.clone(),
+                    has_credential: group.has_credential,
+                    models: group
+                        .models
+                        .iter()
+                        .map(|entry| wire::ModelEntry {
+                            id: entry.id.clone(),
+                            name: entry.name.clone(),
+                        })
+                        .collect(),
+                })
+                .collect(),
+            latest_trigger_poll: status.latest_trigger_poll.as_ref().map(|poll| {
+                wire::TriggerPollStatus {
+                    checked_at: poll.checked_at.clone(),
+                    trace_id: poll.trace_id.clone(),
+                    source_label: poll.source_label.clone(),
+                    event_label: poll.event_label.clone(),
+                    summary: poll.summary.clone(),
+                }
+            }),
+            goal: status.goal.as_ref().map(|goal| wire::GoalSnapshot {
+                condition: goal.condition.clone(),
+                status: goal.status.clone(),
+                iterations: goal.iterations,
+                last_reason: goal.last_reason.clone(),
+            }),
+            control_plane_prompt: status.control_plane_prompt.as_ref().map(|prompt| {
+                wire::ControlPlanePromptSnapshot {
+                    tool_name: prompt.tool_name.clone(),
+                    label: prompt.label.clone(),
+                    reason: prompt.reason.clone(),
+                    args_hash: prompt.args_hash.clone(),
+                    payload: prompt.payload.clone(),
+                }
+            }),
+            extensions: Some(extension_snapshot_proto(&status.extensions)),
             system_context: snapshot.runtime.system_context.clone(),
         }),
         feed: Some(wire::SessionFeed {

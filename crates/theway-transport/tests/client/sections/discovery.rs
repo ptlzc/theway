@@ -76,7 +76,8 @@ async fn client_stream_events_receives_snapshot_frames() {
     match frame.payload {
         Some(crate::proto::theway_grpc::stream_frame::Payload::Snapshot(state)) => {
             assert_eq!(state.session_id, "sess-1");
-            assert_eq!(state.feed_lines, vec!["streamed"]);
+            let feed = state.feed.unwrap();
+            assert_eq!(feed.lines, vec!["streamed"]);
         }
         other => panic!("expected snapshot payload, got {other:?}"),
     }

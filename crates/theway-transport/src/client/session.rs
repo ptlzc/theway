@@ -24,26 +24,7 @@ impl GrpcClient {
         &self.addr
     }
 
-    /// Full structured state for the daemon's current session (health probe).
-    pub async fn get_state(&mut self) -> Result<SessionState> {
-        self.get_state_for_session("").await
-    }
-
-    /// Full structured state for an explicit session.
-    #[allow(deprecated)]
-    pub async fn get_state_for_session(&mut self, session_id: &str) -> Result<SessionState> {
-        let state = self
-            .session
-            .get_state(SessionStateRequest {
-                session_id: session_id.to_string(),
-            })
-            .await
-            .map_err(|e| anyhow::anyhow!("get_state: {e}"))?
-            .into_inner();
-        Ok(state)
-    }
-
-    /// Full nested session snapshot for the daemon's current session.
+    /// Full nested snapshot for the daemon's current session (health probe).
     pub async fn get_snapshot(&mut self) -> Result<SessionSnapshot> {
         self.get_snapshot_for_session("").await
     }
@@ -61,17 +42,24 @@ impl GrpcClient {
         Ok(snapshot)
     }
 
-    /// Session history as a snapshot-shaped transcript for an explicit session.
-    pub async fn get_history(&mut self, session_id: &str) -> Result<SessionSnapshot> {
-        let snapshot = self
+    /// Cursor-paginated full message history for an explicit session.
+    pub async fn list_session_messages(
+        &mut self,
+        session_id: &str,
+        limit: u32,
+        before_entry_id: Option<&str>,
+    ) -> Result<SessionMessagePage> {
+        let page = self
             .session
-            .get_history(SessionStateRequest {
+            .list_session_messages(ListSessionMessagesRequest {
                 session_id: session_id.to_string(),
+                limit,
+                before_entry_id: before_entry_id.map(str::to_string),
             })
             .await
-            .map_err(|e| anyhow::anyhow!("get_history: {e}"))?
+            .map_err(|e| anyhow::anyhow!("list_session_messages: {e}"))?
             .into_inner();
-        Ok(snapshot)
+        Ok(page)
     }
 
     /// Collapse a session into a graph node (session-snapshot-collapse).

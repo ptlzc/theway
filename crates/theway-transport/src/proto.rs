@@ -1,15 +1,13 @@
-//! `WireStatus` ↔ `SessionState` conversion (transport layer).
+//! `WireStatus` ↔ `SessionSnapshot` conversion (transport layer).
 //!
-//! `WireStatus` (serde, `crate::wire`) is the internal model shared by the
-//! `--http` JSON surface and the UI event loop; `SessionState` (prost, generated
-//! from the seven domain proto files — `commands.proto`, `session.proto`,
-//! `graph_engine.proto`, `events.proto`, `settings.proto`, `tools.proto`,
-//! `state.proto` — plus `health.proto` by this crate's build.rs) is the
-//! structured wire model for gRPC. The gRPC server serializes `SessionState`
-//! as binary protobuf; JSON channels keep using `WireStatus` until the
-//! protojson migration (see docs/PROTOCOL.md). The tool-operation
-//! (`tools.proto`) codecs live in [`crate::tools`]; the runtime-state
-//! (`state.proto`) codecs live in [`crate::state`].
+//! `WireStatus` (serde, `crate::wire`) is the internal live projection shared
+//! by the daemon event loop; `SessionSnapshot` (prost, generated from the
+//! domain proto files) is the single-version structured wire model for gRPC,
+//! StreamEvents snapshot frames, and the JSON surface. The gRPC server
+//! serializes `SessionSnapshot` as binary protobuf; JSON channels serialize
+//! the serde twin `WireSessionSnapshot`. The tool-operation (`tools.proto`)
+//! codecs live in [`crate::tools`]; the runtime-state (`state.proto`) codecs
+//! live in [`crate::state`].
 
 /// Generated protobuf code for package `theway.grpc.v1`, produced by this
 /// crate's `build.rs` into its own OUT_DIR. Each domain proto file carries its

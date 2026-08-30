@@ -6,7 +6,7 @@
 //! [`wait_ready`]) that implement the `daemon-client` capability: find the
 //! daemon via a per-cwd discovery file (`<THEWAY_DIR>/daemon-port-<cwd-hash>`,
 //! carrying `<port> <pid>`) or the default port 44777, verify it is alive with
-//! a `get_state` health probe, and spawn one on demand.
+//! a `GetSnapshot` health probe, and spawn one on demand.
 //!
 //! Loopback-only, same trust model as the daemon itself: no auth is performed
 //! beyond the loopback bind the daemon uses.
@@ -39,10 +39,10 @@ use crate::proto::theway_grpc::{
     GetNodeOutputRequest, GetSessionGraphNodeRequest, GraphCancelRequest, GraphCheckpointRequest,
     GraphListRequest, GraphNodeInterruptRequest, GraphNodeSteerRequest, GraphRestoreRequest,
     GraphRetryRequest, GraphSkipRequest, InvokeExtensionCommandRequest,
-    ListSessionGraphNodeMessagesRequest, ReloadExtensionsRequest, RenameSessionRequest,
-    SendMessageRequest, SessionSnapshot, SessionState, SessionStateRequest, SetModelRequest,
-    SetSkillDirsRequest, SetThinkingRequest, StreamEventsRequest, StreamFrame,
-    StreamSessionGraphNodeRequest, UpdateSessionMetadataRequest,
+    ListSessionGraphNodeMessagesRequest, ListSessionMessagesRequest, ReloadExtensionsRequest,
+    RenameSessionRequest, SendMessageRequest, SessionMessagePage, SessionSnapshot,
+    SessionStateRequest, SetModelRequest, SetSkillDirsRequest, SetThinkingRequest,
+    StreamEventsRequest, StreamFrame, StreamSessionGraphNodeRequest, UpdateSessionMetadataRequest,
 };
 use crate::wire::{
     SessionSummary, WireDaemonConfig, WireExtensionCommandOutcome, WireExtensionReloadResult,
@@ -141,7 +141,7 @@ pub fn read_port_file(cwd: &Path) -> Result<Option<PortEntry>> {
 
 /// Liveness check for a recorded daemon pid: `/proc/<pid>` on Linux. Outside
 /// Linux we cannot verify process existence without a libc dep, so treat the
-/// entry as live (best effort — the `get_state` probe remains the final arbiter).
+/// entry as live (best effort — the `GetSnapshot` probe remains the final arbiter).
 pub fn pid_alive(pid: u32) -> bool {
     #[cfg(target_os = "linux")]
     {
@@ -198,22 +198,22 @@ include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/client/tools.rs"));
 
 include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/client/graph.rs"));
 
-/// Health probe: `get_state` with a short timeout. `Ok` = a live daemon answered;
+/// Health probe: `GetSnapshot` with a short timeout. `Ok` = a live daemon answered;
 /// `Err` = unreachable or unresponsive (never hangs — the timeout bounds it).
-pub async fn probe(addr: &str, timeout: Duration) -> Result<SessionState> {
+pub async fn probe(addr: &str, timeout: Duration) -> Result<SessionSnapshot> {
     let mut client = GrpcClient::connect(addr).await?;
-    let state = tokio::time::timeout(timeout, client.get_state())
+    let snapshot = tokio::time::timeout(timeout, client.get_snapshot())
         .await
         .with_context(|| {
-            format!("daemon at {addr} did not answer get_state within {timeout:?}")
+            format!("daemon at {addr} did not answer GetSnapshot within {timeout:?}")
         })??;
-    Ok(state)
+    Ok(snapshot)
 }
 
 /// Controller-storage health probe: connect to `addr` and complete the
 /// standard gRPC health check for `StorageService` within `timeout`.
 ///
-/// A daemon's own `get_state` can remain healthy after the controller process
+/// A daemon's own `GetSnapshot` can remain healthy after the controller process
 /// that owns its remote storage has disappeared. Callers use this stronger
 /// probe before reusing a controller-backed daemon so a live protocol socket
 /// is never mistaken for a usable runtime.
@@ -256,7 +256,7 @@ pub fn candidate_addrs(cwd: &Path) -> Vec<String> {
 }
 
 /// Discover a running daemon for `cwd`: probe the per-cwd port-file address,
-/// then the default port. Returns the first address that answers `get_state`,
+/// then the default port. Returns the first address that answers `GetSnapshot`,
 /// or `None`.
 pub async fn discover(timeout: Duration, cwd: &Path) -> Result<Option<String>> {
     for addr in candidate_addrs(cwd) {
@@ -352,7 +352,7 @@ fn spawn_daemon_with_stdio(
 
 /// Wait for a spawned daemon (`pid`) to become ready: poll the per-cwd port
 /// file until it carries an entry whose pid matches the child, then
-/// `get_state` until it answers (or the timeout expires). A leftover entry
+/// `GetSnapshot` until it answers (or the timeout expires). A leftover entry
 /// from a dead daemon (different pid) is ignored — the pre-existing-file race
 /// that broke cold starts is gone.
 pub async fn wait_ready(timeout: Duration, cwd: &Path, pid: u32) -> Result<String> {
