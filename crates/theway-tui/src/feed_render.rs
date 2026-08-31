@@ -7,7 +7,7 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use theway_transport::feed::{Block, Level, display_prefix, wrap_str};
+use theway_transport::feed::{Block, Level, block_fingerprint, display_prefix, wrap_str};
 
 use crate::ui::theme::{BlockAlign, BlockBorder, BlockTheme, Theme};
 

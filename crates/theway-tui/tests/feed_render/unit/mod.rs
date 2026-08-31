@@ -788,3 +788,70 @@
         assert_eq!(rows[3], "─".repeat(30), "tool border_top");
         assert!(rows[4].contains("bash"));
     }
+
+    /// A tool call followed by its result renders as ONE tool area (issue
+    /// #69): no internal feed gap between them even under `separate_all`,
+    /// and the call row + result body share one background band with an
+    /// optional internal divider (the call block's `border_bottom`).
+    #[test]
+    fn tool_pair_renders_as_one_area_with_internal_divider() {
+        let mut theme = crate::ui::theme::Theme::default();
+        theme.tool.bg = Some(Color::Rgb(40, 40, 46)); // gray band
+        theme.tool.border_bottom = crate::ui::theme::BlockBorder::Thin;
+        let opts = FeedRenderOptions {
+            theme,
+            ..Default::default()
+        };
+        let feed = feed_with(&[
+            WireFeedBlock::ToolCall {
+                name: "read".into(),
+                args: " /tmp/x.md".into(),
+                metadata: None,
+                timestamp: None,
+            },
+            WireFeedBlock::ToolResult {
+                lines: vec!["one".into(), "two".into()],
+                is_error: false,
+                timestamp: None,
+            },
+        ]);
+        let lines = super::lines(&feed, 24, &opts);
+        let text = flat(&lines);
+        let rows: Vec<&str> = text.lines().collect();
+        // call row, divider, then the two result rows — no blank row inside.
+        assert!(rows[0].contains("⏵ read"), "{rows:?}");
+        assert_eq!(rows[1], "─".repeat(24), "internal divider: {rows:?}");
+        assert!(rows[2].contains("one"), "{rows:?}");
+        assert!(rows[3].contains("two"), "{rows:?}");
+        assert_eq!(rows.len(), 4, "no gap rows inside the area: {rows:?}");
+        // The divider and every content row carry the shared band background.
+        for line in &lines {
+            for span in &line.spans {
+                assert_eq!(span.style.bg, Some(Color::Rgb(40, 40, 46)));
+            }
+        }
+    }
+
+    /// Standalone tool call (result not yet arrived) renders alone with its
+    /// own frame — the pair merge must not kick in.
+    #[test]
+    fn standalone_tool_call_keeps_single_block_frame() {
+        let mut theme = crate::ui::theme::Theme::default();
+        theme.tool.bg = Some(Color::Rgb(40, 40, 46));
+        theme.tool.border_bottom = crate::ui::theme::BlockBorder::Thin;
+        let opts = FeedRenderOptions {
+            theme,
+            ..Default::default()
+        };
+        let feed = feed_with(&[WireFeedBlock::ToolCall {
+            name: "read".into(),
+            args: String::new(),
+            metadata: None,
+            timestamp: None,
+        }]);
+        let text = flat(&super::lines(&feed, 20, &opts));
+        let rows: Vec<&str> = text.lines().collect();
+        assert_eq!(rows.len(), 2, "call row + closing border: {rows:?}");
+        assert!(rows[0].contains("⏵ read"));
+        assert_eq!(rows[1], "─".repeat(20));
+    }

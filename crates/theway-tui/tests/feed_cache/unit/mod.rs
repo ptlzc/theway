@@ -377,3 +377,68 @@
         assert!(rows[6].trim_end().ends_with("third"), "{rows:?}");
     }
 
+
+    /// Tool area unit semantics (issue #69): a lone tool call renders as one
+    /// unit; when its result arrives the pair becomes a SINGLE unit — the
+    /// prefix scan must treat call+result as one fingerprint, and the update
+    /// must re-render the pair without leaving a gap between them.
+    #[test]
+    fn tool_result_arrival_rebuilds_pair_as_one_unit() {
+        let mut theme = crate::ui::theme::Theme::default();
+        theme.tool.bg = Some(ratatui::style::Color::Rgb(40, 40, 46));
+        theme.feed.separate_all = true;
+        let opts = FeedRenderOptions {
+            theme,
+            ..Default::default()
+        };
+        let mut feed = Feed::new();
+        feed.replace_blocks(&[
+            WireFeedBlock::User {
+                text: "go".into(),
+                timestamp: None,
+            },
+            WireFeedBlock::ToolCall {
+                name: "read".into(),
+                args: " x".into(),
+                metadata: None,
+                timestamp: None,
+            },
+        ]);
+        let mut cache = FeedRenderCache::new();
+        cache.update(&feed, 40, &opts, 1000);
+        assert_eq!(cache.last_rebuilt, 2, "user + call units");
+
+        // Result arrives: [User, ToolCall] -> [User, ToolCall, ToolResult].
+        feed.replace_blocks(&[
+            WireFeedBlock::User {
+                text: "go".into(),
+                timestamp: None,
+            },
+            WireFeedBlock::ToolCall {
+                name: "read".into(),
+                args: " x".into(),
+                metadata: None,
+                timestamp: None,
+            },
+            WireFeedBlock::ToolResult {
+                lines: vec!["content".into()],
+                is_error: false,
+                timestamp: None,
+            },
+        ]);
+        cache.update(&feed, 40, &opts, 1000);
+        assert_eq!(cache.last_rebuilt, 1, "only the pair unit rebuilds");
+        let text = flat(cache.lines());
+        let rows: Vec<&str> = text.lines().collect();
+        assert!(rows[0].contains("go"), "{rows:?}");
+        assert_eq!(rows[1], "", "separate_all gap at user->call: {rows:?}");
+        assert!(rows[2].contains("⏵ read"), "{rows:?}");
+        assert!(rows[3].contains("content"), "{rows:?}");
+        // User->call boundary has a gap (separate_all); the pair itself has
+        // none — call row and result body are adjacent.
+        assert_eq!(rows.len(), 4, "no gap inside the pair: {rows:?}");
+
+        // Re-update with the same feed: everything cached.
+        cache.update(&feed, 40, &opts, 1000);
+        assert_eq!(cache.last_rebuilt, 0);
+    }

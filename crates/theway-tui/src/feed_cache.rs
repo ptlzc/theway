@@ -123,19 +123,26 @@ impl FeedRenderCache {
         self.opts = *opts;
         let blocks = feed.blocks();
 
-        // Prefix scan: the first block whose fingerprint differs (or is new).
+        // Prefix scan over render UNITS (a tool call + its result is one
+        // unit): the first unit whose fingerprint differs (or is new).
         let mut first_dirty = 0;
-        while first_dirty < blocks.len()
-            && first_dirty < self.fingerprints.len()
-            && self.fingerprints[first_dirty] == block_fingerprint(&blocks[first_dirty])
-        {
+        let mut block_i = 0;
+        let mut previous: Option<&Block> = None;
+        while block_i < blocks.len() && first_dirty < self.fingerprints.len() {
+            if self.fingerprints[first_dirty] != feed_render::unit_fingerprint(blocks, block_i) {
+                break;
+            }
+            let n = feed_render::tool_pair_len(blocks, block_i);
+            previous = Some(&blocks[block_i + n - 1]);
+            block_i += n;
             first_dirty += 1;
         }
-        self.last_rebuilt = blocks.len().saturating_sub(first_dirty);
+        let unit_count = feed_render::unit_count(blocks);
+        self.last_rebuilt = unit_count.saturating_sub(first_dirty);
 
         // A shrunken feed (e.g. `/clear`) has nothing to rebuild but must
-        // still truncate: only return early when the block count is stable.
-        if self.last_rebuilt == 0 && blocks.len() == self.fingerprints.len() {
+        // still truncate: only return early when the unit count is stable.
+        if self.last_rebuilt == 0 && unit_count == self.fingerprints.len() {
             return;
         }
 
@@ -147,9 +154,10 @@ impl FeedRenderCache {
             .map(|range| range.start)
             .unwrap_or(self.lines.len());
 
-        // Streaming fast path: exactly one dirty block (the last) that
-        // appends. `stream_block` owns the splice (it truncates to
-        // `cut + frozen_rows` itself, keeping the frozen prefix intact).
+        // Streaming fast path: exactly one dirty unit (the last block, a
+        // single-block unit that appends). `stream_block` owns the splice
+        // (it truncates to `cut + frozen_rows` itself, keeping the frozen
+        // prefix intact).
         if blocks.len() == first_dirty + 1
             && let Some(block) = blocks.last()
             && let Some((streamable, text)) = streamable_block_text(block, opts)
@@ -173,35 +181,46 @@ impl FeedRenderCache {
                 && let Some(entry) = entry
                 && text.len().saturating_sub(entry.rebase_source_len) < REBASE_BYTES
             {
-                let previous = first_dirty.checked_sub(1).map(|index| &blocks[index]);
                 self.stream_block(first_dirty, cut, entry, block, previous, text, width);
                 return;
             }
         }
 
-        // One-shot fallback: render the dirty suffix block by block.
+        // One-shot fallback: render the dirty suffix unit by unit.
         self.streaming = None;
-        if first_dirty < self.fingerprints.len() || blocks.len() != self.fingerprints.len() {
+        if first_dirty < self.fingerprints.len() || unit_count != self.fingerprints.len() {
             self.lines.truncate(cut);
             self.block_ranges.truncate(first_dirty);
             self.fingerprints.truncate(first_dirty);
         }
-        let mut previous = first_dirty.checked_sub(1).map(|index| &blocks[index]);
-        for block in blocks.iter().skip(first_dirty) {
+        let mut i = block_i;
+        while i < blocks.len() {
+            let n = feed_render::tool_pair_len(blocks, i);
             let range_start = self.lines.len();
             if should_separate_with(
                 previous,
-                block,
+                &blocks[i],
                 !self.lines.is_empty(),
                 opts.theme.feed.separate_all,
             ) {
                 feed_render::push_feed_gap(&mut self.lines, width, &opts.theme.feed);
             }
-            self.lines
-                .extend(feed_render::render_block(block, width, opts));
+            if n == 2 {
+                self.lines.extend(feed_render::render_tool_pair(
+                    &blocks[i],
+                    &blocks[i + 1],
+                    width,
+                    opts,
+                ));
+            } else {
+                self.lines
+                    .extend(feed_render::render_block(&blocks[i], width, opts));
+            }
             self.block_ranges.push(range_start..self.lines.len());
-            self.fingerprints.push(block_fingerprint(block));
-            previous = Some(block);
+            self.fingerprints
+                .push(feed_render::unit_fingerprint(blocks, i));
+            previous = Some(&blocks[i + n - 1]);
+            i += n;
         }
 
         // Head trim with margin: drain down to `cap` only once the margin is
