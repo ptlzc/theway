@@ -9,7 +9,7 @@ fn help_lists_thinking_possible_values() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("[possible values: off, minimal, low, medium, high, xhigh]"),
+        stdout.contains("[possible values: off, minimal, low, medium, high, xhigh, max]"),
         "help should list accepted --thinking values:\n{stdout}"
     );
 }
@@ -123,7 +123,7 @@ fn invalid_thinking_value_reports_candidates() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("invalid value 'turbo'"), "{stderr}");
     assert!(
-        stderr.contains("[possible values: off, minimal, low, medium, high, xhigh]"),
+        stderr.contains("[possible values: off, minimal, low, medium, high, xhigh, max]"),
         "{stderr}"
     );
 }

@@ -70,7 +70,7 @@ pub(crate) fn translate_simple(options: Option<&SimpleStreamOptions>) -> StreamO
                         ThinkingLevel::Minimal => b.minimal,
                         ThinkingLevel::Low => b.low,
                         ThinkingLevel::Medium => b.medium,
-                        ThinkingLevel::High | ThinkingLevel::Xhigh => b.high,
+                        ThinkingLevel::High | ThinkingLevel::Xhigh | ThinkingLevel::Max => b.high,
                     })
                     .unwrap_or(8192);
                 base.provider_extras

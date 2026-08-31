@@ -138,9 +138,10 @@ fn map_reasoning_effort(level: ThinkingLevel) -> Option<&'static str> {
         ThinkingLevel::Low => "low",
         ThinkingLevel::Medium => "medium",
         ThinkingLevel::High => "high",
-        // OpenAI Responses API does not natively accept "xhigh" — providers map via
+        // OpenAI Responses API does not natively accept "xhigh"/"max" — providers map via
         // `thinkingLevelMap` to whatever the concrete model accepts.
         ThinkingLevel::Xhigh => "xhigh",
+        ThinkingLevel::Max => "max",
     })
 }
 

@@ -90,6 +90,7 @@ pub enum ThinkingLevel {
     Medium,
     High,
     Xhigh,
+    Max,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -101,6 +102,7 @@ pub enum ModelThinkingLevel {
     Medium,
     High,
     Xhigh,
+    Max,
 }
 
 /// Maps pi thinking levels to provider/model-specific values. `None` value marks the level as

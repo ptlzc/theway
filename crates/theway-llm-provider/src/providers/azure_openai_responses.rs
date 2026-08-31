@@ -71,6 +71,7 @@ impl ApiProvider for AzureOpenAIResponsesProvider {
                         ThinkingLevel::Medium => "medium",
                         ThinkingLevel::High => "high",
                         ThinkingLevel::Xhigh => "xhigh",
+                        ThinkingLevel::Max => "max",
                     };
                     base.provider_extras
                         .insert("reasoning_effort".to_string(), json!(effort));

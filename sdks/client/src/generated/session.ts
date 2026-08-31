@@ -35,6 +35,7 @@ export enum ThinkingLevel {
   THINKING_LEVEL_MEDIUM = 4,
   THINKING_LEVEL_HIGH = 5,
   THINKING_LEVEL_XHIGH = 6,
+  THINKING_LEVEL_MAX = 7,
   UNRECOGNIZED = -1,
 }
 
@@ -61,6 +62,9 @@ export function thinkingLevelFromJSON(object: any): ThinkingLevel {
     case 6:
     case "THINKING_LEVEL_XHIGH":
       return ThinkingLevel.THINKING_LEVEL_XHIGH;
+    case 7:
+    case "THINKING_LEVEL_MAX":
+      return ThinkingLevel.THINKING_LEVEL_MAX;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -84,6 +88,8 @@ export function thinkingLevelToJSON(object: ThinkingLevel): string {
       return "THINKING_LEVEL_HIGH";
     case ThinkingLevel.THINKING_LEVEL_XHIGH:
       return "THINKING_LEVEL_XHIGH";
+    case ThinkingLevel.THINKING_LEVEL_MAX:
+      return "THINKING_LEVEL_MAX";
     case ThinkingLevel.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";

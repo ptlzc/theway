@@ -66,7 +66,8 @@ macro_rules! cprintln {
 }
 
 /// Thinking levels accepted by `/thinking` and the `--thinking` CLI flag.
-pub const THINKING_LEVEL_VALUES: [&str; 6] = ["off", "minimal", "low", "medium", "high", "xhigh"];
+pub const THINKING_LEVEL_VALUES: [&str; 7] =
+    ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 /// Outcome of running a command. Drives the REPL's next action.
 #[cfg_attr(test, allow(dead_code))]

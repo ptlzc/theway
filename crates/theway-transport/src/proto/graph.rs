@@ -134,6 +134,7 @@ fn thinking_level_to_proto(level: &str) -> i32 {
         "medium" => wire::ThinkingLevel::Medium as i32,
         "high" => wire::ThinkingLevel::High as i32,
         "xhigh" => wire::ThinkingLevel::Xhigh as i32,
+        "max" => wire::ThinkingLevel::Max as i32,
         _ => wire::ThinkingLevel::Unspecified as i32,
     }
 }
@@ -146,6 +147,7 @@ fn thinking_level_from_proto(level: i32) -> String {
         x if x == wire::ThinkingLevel::Medium as i32 => "medium".to_string(),
         x if x == wire::ThinkingLevel::High as i32 => "high".to_string(),
         x if x == wire::ThinkingLevel::Xhigh as i32 => "xhigh".to_string(),
+        x if x == wire::ThinkingLevel::Max as i32 => "max".to_string(),
         _ => String::new(),
     }
 }

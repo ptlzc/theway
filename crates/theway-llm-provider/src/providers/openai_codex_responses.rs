@@ -72,7 +72,7 @@ impl ApiProvider for OpenAICodexResponsesProvider {
                         ThinkingLevel::Minimal => "minimal",
                         ThinkingLevel::Low => "low",
                         ThinkingLevel::Medium => "medium",
-                        ThinkingLevel::High | ThinkingLevel::Xhigh => "high",
+                        ThinkingLevel::High | ThinkingLevel::Xhigh | ThinkingLevel::Max => "high",
                     };
                     base.provider_extras
                         .insert("reasoning_effort".to_string(), json!(effort));

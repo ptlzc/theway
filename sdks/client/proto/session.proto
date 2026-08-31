@@ -227,6 +227,7 @@ enum ThinkingLevel {
   THINKING_LEVEL_MEDIUM = 4;
   THINKING_LEVEL_HIGH = 5;
   THINKING_LEVEL_XHIGH = 6;
+  THINKING_LEVEL_MAX = 7;
 }
 
 // A resolved model reference in a session runtime.

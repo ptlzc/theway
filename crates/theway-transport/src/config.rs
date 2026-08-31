@@ -298,6 +298,10 @@ poll_interval_secs = 0
             parse_model_thinking_default("[model]\nthinking = \"xhigh\"\n").unwrap(),
             Some("xhigh".into())
         );
+        assert_eq!(
+            parse_model_thinking_default("[model]\nthinking = \"max\"\n").unwrap(),
+            Some("max".into())
+        );
     }
 
     #[test]

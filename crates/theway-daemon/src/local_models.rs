@@ -97,6 +97,7 @@ fn ds4_model(base_url: String) -> Model {
         (ModelThinkingLevel::Medium, Some("medium".into())),
         (ModelThinkingLevel::High, Some("high".into())),
         (ModelThinkingLevel::Xhigh, Some("xhigh".into())),
+        (ModelThinkingLevel::Max, Some("max".into())),
     ]
     .into_iter()
     .collect::<ThinkingLevelMap>();

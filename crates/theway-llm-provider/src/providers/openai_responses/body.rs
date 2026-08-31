@@ -67,6 +67,7 @@ pub(crate) fn build_request_body(
                         "medium" => ModelThinkingLevel::Medium,
                         "high" => ModelThinkingLevel::High,
                         "xhigh" => ModelThinkingLevel::Xhigh,
+                        "max" => ModelThinkingLevel::Max,
                         _ => ModelThinkingLevel::Medium,
                     };
                     m.get(&lvl).cloned().flatten()

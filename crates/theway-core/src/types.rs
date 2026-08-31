@@ -69,6 +69,7 @@ pub enum ThinkingLevel {
     Medium,
     High,
     Xhigh,
+    Max,
 }
 
 impl ThinkingLevel {
@@ -86,6 +87,7 @@ impl ThinkingLevel {
             Self::Medium => Some(theway_llm_provider::ThinkingLevel::Medium),
             Self::High => Some(theway_llm_provider::ThinkingLevel::High),
             Self::Xhigh => Some(theway_llm_provider::ThinkingLevel::Xhigh),
+            Self::Max => Some(theway_llm_provider::ThinkingLevel::Max),
         }
     }
 }

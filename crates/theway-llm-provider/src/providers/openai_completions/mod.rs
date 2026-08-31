@@ -101,6 +101,7 @@ fn map_reasoning_effort(model: &Model, level: ThinkingLevel) -> Option<String> {
             ThinkingLevel::Medium => ModelThinkingLevel::Medium,
             ThinkingLevel::High => ModelThinkingLevel::High,
             ThinkingLevel::Xhigh => ModelThinkingLevel::Xhigh,
+            ThinkingLevel::Max => ModelThinkingLevel::Max,
         };
         return map.get(&key).cloned().flatten();
     }
@@ -109,7 +110,9 @@ fn map_reasoning_effort(model: &Model, level: ThinkingLevel) -> Option<String> {
             ThinkingLevel::Minimal => "minimal",
             ThinkingLevel::Low => "low",
             ThinkingLevel::Medium => "medium",
-            ThinkingLevel::High | ThinkingLevel::Xhigh => "high",
+            // Legacy fallback: xhigh/max collapse to "high", which every completions
+            // vendor accepts (models with a real "max" value declare it via thinkingLevelMap).
+            ThinkingLevel::High | ThinkingLevel::Xhigh | ThinkingLevel::Max => "high",
         }
         .to_string(),
     )

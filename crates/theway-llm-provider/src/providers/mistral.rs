@@ -76,7 +76,8 @@ fn reasoning_effort(level: ThinkingLevel) -> &'static str {
     match level {
         ThinkingLevel::Minimal | ThinkingLevel::Low => "low",
         ThinkingLevel::Medium => "medium",
-        ThinkingLevel::High | ThinkingLevel::Xhigh => "high",
+        // Mistral accepts low/medium/high; xhigh/max collapse to "high".
+        ThinkingLevel::High | ThinkingLevel::Xhigh | ThinkingLevel::Max => "high",
     }
 }
 
