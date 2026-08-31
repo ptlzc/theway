@@ -45,6 +45,40 @@ fn osc52_bytes(text: &str) -> Vec<u8> {
     format!("\x1b]52;c;{b64}\x07").into_bytes()
 }
 
+/// True inside code-server / VS Code-family terminals (browser xterm.js).
+/// These terminals do not handle OSC 52, so theway falls back to the
+/// code-server clipboard command.
+fn code_server_terminal() -> bool {
+    std::env::var("TERM_PROGRAM").as_deref() == Ok("vscode")
+        || std::env::var("CODE_SERVER_SESSION_SOCKET").is_ok()
+}
+
+/// code-server >= 4.90 supports `code-server --stdin-to-clipboard` (alias
+/// `-c`): pipe the selected text to it, and the browser-side integrated
+/// terminal writes it to the user's system clipboard. Runs on a background
+/// thread so the TUI never stalls on process startup.
+fn copy_via_code_server(text: &str) {
+    if !code_server_terminal() {
+        return;
+    }
+    let text = text.to_string();
+    std::thread::spawn(move || {
+        let child = std::process::Command::new("code-server")
+            .arg("--stdin-to-clipboard")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+        if let Ok(mut child) = child {
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(text.as_bytes());
+                drop(stdin);
+            }
+            let _ = child.wait();
+        }
+    });
+}
+
 impl App {
     async fn handle_event<B: ratatui::backend::Backend>(
         &mut self,
@@ -148,6 +182,9 @@ impl App {
         let mut out = std::io::stdout();
         let _ = out.write_all(&bytes);
         let _ = out.flush();
+        // code-server's browser terminal ignores OSC 52; pipe the same text
+        // to its native clipboard command when running there.
+        copy_via_code_server(&self.selected_text());
     }
 
     /// Map a crossterm mouse position (0-based, as crossterm reports it) to a
