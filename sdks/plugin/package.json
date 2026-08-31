@@ -1,13 +1,14 @@
 {
   "name": "@theway-ai/plugin-sdk",
   "version": "0.1.9",
-  "description": "TypeScript authoring SDK for theway runtime extensions.",
+  "description": "TypeScript authoring SDK for building runtime extensions for theway, a terminal-first local AI agent runtime.",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ptlzc/theway.git",
     "directory": "sdks/plugin"
   },
+  "homepage": "https://github.com/ptlzc/theway",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

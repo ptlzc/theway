@@ -1,5 +1,16 @@
 # @theway-ai/plugin-sdk
 
+## theway
+
+[theway](https://github.com/ptlzc/theway) is a local, terminal-first AI agent
+runtime for developer workflows. It runs inside a project as a `theway` terminal
+client plus a `thewayd` daemon, keeps resumable sessions, inspects and edits
+files, runs shell commands, and drives model providers including local
+OpenAI-compatible servers. Extension authors extend that runtime without
+rebuilding the daemon.
+
+## This package
+
 TypeScript authoring SDK for theway runtime extensions. It supplies the single public host API, checked-in JSON Schemas, and the same `defineExtension` descriptor used by the daemon's isolated QuickJS host. The host and SDK expose no ABI version selector.
 
 ## Install

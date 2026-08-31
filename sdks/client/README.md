@@ -1,5 +1,23 @@
 # @theway-ai/sdk
 
+## theway
+
+[theway](https://github.com/ptlzc/theway) is a local, terminal-first AI agent
+runtime for developer workflows. It runs inside a project as a `theway` terminal
+client plus a `thewayd` daemon, keeps resumable sessions, inspects and edits
+files, runs shell commands, and drives model providers including local
+OpenAI-compatible servers.
+
+Core capabilities:
+
+- Resumable agent sessions with feed, history, slash commands, and multiple model providers.
+- Filesystem and shell tools, skills, and MCP tool integration.
+- Cron jobs, triggers, and local automation with a triage inbox for recurring-loop findings.
+- Multi-agent DAG orchestration for running and monitoring parallel subagent graphs.
+- A gRPC / HTTP+SSE+WS daemon protocol with typed SDKs for external clients.
+
+## This package
+
 Typed TypeScript SDK for the **theway** gRPC daemon (`theway --grpc` loopback server).
 Generated from the five domain protos
 ([`proto/commands.proto`](proto/commands.proto),
