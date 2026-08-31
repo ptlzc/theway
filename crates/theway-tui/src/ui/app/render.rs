@@ -99,11 +99,28 @@ impl App {
             }
             capped
         };
+        // Clamp a live mouse selection to the current row count (the feed can
+        // shrink between frames, e.g. `/clear`) before it reaches the window
+        // renderer (issue #70).
+        if let Some(sel) = self.mouse_select {
+            let last = total.saturating_sub(1);
+            let anchor = sel.anchor.min(last);
+            let current = sel.current.min(last);
+            if anchor != sel.anchor || current != sel.current {
+                self.mouse_select = Some(MouseSelect {
+                    anchor,
+                    current,
+                    ..sel
+                });
+            }
+        }
+        self.last_display_scroll = display_scroll;
         crate::feed_render::render_lines_window(
             frame.buffer_mut(),
             feed_area,
             lines,
             display_scroll,
+            self.mouse_select.map(|sel| sel.range()),
         );
         // Feed scrollbar (theway-pager-render primitive): right edge of the
         // feed pane, subtle while following, brighter when scrolled up.

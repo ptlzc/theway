@@ -337,6 +337,12 @@ pub struct App {
     feed_cache: crate::feed_cache::FeedRenderCache,
     last_viewport_h: usize,
     last_feed_area: Option<Rect>,
+    /// Display scroll (capped rows) of the last rendered frame — maps mouse
+    /// rows to feed lines (issue #70).
+    last_display_scroll: usize,
+    /// Live left-button row selection over the feed (issue #70); copied via
+    /// OSC 52 on release.
+    mouse_select: Option<MouseSelect>,
 
     busy: bool,
     spinner_frame: usize,

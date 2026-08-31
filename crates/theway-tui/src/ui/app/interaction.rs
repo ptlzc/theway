@@ -1,3 +1,32 @@
+/// Mouse row selection over the feed (issue #70): the left button anchors a
+/// drag on a capped feed line; the selection spans `anchor..=current` (in
+/// either order) and is copied to the clipboard via OSC 52 on release.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct MouseSelect {
+    /// First row of the drag (capped feed line index).
+    pub anchor: usize,
+    /// Current drag row (capped feed line index).
+    pub current: usize,
+    /// True while the button is held down.
+    pub dragging: bool,
+}
+
+impl MouseSelect {
+    /// Selected row range, normalized (anchor <= current).
+    pub fn range(&self) -> std::ops::RangeInclusive<usize> {
+        self.anchor.min(self.current)..=self.anchor.max(self.current)
+    }
+}
+
+/// OSC 52 clipboard-set sequence: `ESC ] 52 ; c ; <base64> BEL`. The `c`
+/// (clipboard) selection targets the system clipboard; terminals and tmux
+/// (with `set-clipboard on`) forward it to the OS clipboard.
+fn osc52_bytes(text: &str) -> Vec<u8> {
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
+    format!("\x1b]52;c;{b64}\x07").into_bytes()
+}
+
 impl App {
     async fn handle_event<B: ratatui::backend::Backend>(
         &mut self,
@@ -24,28 +53,136 @@ impl App {
         Ok(())
     }
 
-    /// Mouse wheel scrolls the feed (issue #4): each notch
-    /// moves [`WHEEL_SCROLL_LINES`] lines. Scrolling up detaches follow,
-    /// scrolling down re-attaches it once the bottom is reached (clamped by
-    /// render()). Any other mouse event is inert.
+    /// Mouse handling: wheel scrolls the feed (issue #4), left-button
+    /// press-drag-release selects feed rows and copies them to the system
+    /// clipboard via OSC 52 (issue #70). Pressing any other button clears a
+    /// live selection; scrolling clears it too (row indices shift).
     pub(super) fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent) {
-        use crossterm::event::MouseEventKind;
+        use crossterm::event::{MouseButton, MouseEventKind};
         match mouse.kind {
-            MouseEventKind::ScrollUp => self.scroll_up(Self::WHEEL_SCROLL_LINES),
-            MouseEventKind::ScrollDown => self.scroll_down(Self::WHEEL_SCROLL_LINES),
-            _ => {}
+            MouseEventKind::ScrollUp => {
+                self.clear_mouse_select();
+                self.scroll_up(Self::WHEEL_SCROLL_LINES);
+            }
+            MouseEventKind::ScrollDown => {
+                self.clear_mouse_select();
+                self.scroll_down(Self::WHEEL_SCROLL_LINES);
+            }
+            MouseEventKind::Down(MouseButton::Left) => self.mouse_down_left(mouse),
+            MouseEventKind::Drag(MouseButton::Left) => self.mouse_drag_left(mouse),
+            MouseEventKind::Up(MouseButton::Left) => self.mouse_up_left(),
+            _ => self.clear_mouse_select(),
         }
     }
 
     /// Wheel scroll step per notch.
     const WHEEL_SCROLL_LINES: usize = 3;
 
+    /// Left-button press inside the feed pane starts a row selection at the
+    /// clicked row; a press outside the pane clears any selection.
+    fn mouse_down_left(&mut self, mouse: crossterm::event::MouseEvent) {
+        let Some(line) = self.feed_line_at(mouse.row, mouse.column) else {
+            self.clear_mouse_select();
+            return;
+        };
+        self.mouse_select = Some(MouseSelect {
+            anchor: line,
+            current: line,
+            dragging: true,
+        });
+    }
+
+    /// Left-button drag extends the selection (clamped to the feed rows).
+    fn mouse_drag_left(&mut self, mouse: crossterm::event::MouseEvent) {
+        let Some(sel) = self.mouse_select else { return };
+        if !sel.dragging {
+            return;
+        }
+        let Some(line) = self.feed_line_at(mouse.row, mouse.column) else {
+            return;
+        };
+        self.mouse_select = Some(MouseSelect { current: line, ..sel });
+    }
+
+    /// Left-button release ends the drag: a drag (anchor moved) copies the
+    /// selected rows to the clipboard via OSC 52 and stays highlighted; a
+    /// plain click (no drag) just clears.
+    fn mouse_up_left(&mut self) {
+        let Some(sel) = self.mouse_select else { return };
+        if !sel.dragging {
+            return;
+        }
+        if sel.anchor == sel.current {
+            // Click without drag: no selection to keep.
+            self.clear_mouse_select();
+            return;
+        }
+        self.mouse_select = Some(MouseSelect {
+            dragging: false,
+            ..sel
+        });
+        let Some(bytes) = self.selection_bytes() else {
+            self.clear_mouse_select();
+            return;
+        };
+        use std::io::Write;
+        let mut out = std::io::stdout();
+        let _ = out.write_all(&bytes);
+        let _ = out.flush();
+    }
+
+    /// Map a crossterm mouse position (1-based) to a capped feed line index
+    /// inside the last rendered feed pane, `None` outside it.
+    fn feed_line_at(&self, row: u16, column: u16) -> Option<usize> {
+        let area = self.last_feed_area?;
+        let row = row.saturating_sub(1);
+        let column = column.saturating_sub(1);
+        if row < area.y || row >= area.bottom() || column < area.x || column >= area.right() {
+            return None;
+        }
+        let total = self.feed_cache.lines().len();
+        let line = self.last_display_scroll + (row - area.y) as usize;
+        Some(line.min(total.saturating_sub(1)))
+    }
+
+    /// Text of the current selection: rendered feed rows joined with `\n`,
+    /// each row's trailing padding trimmed.
+    fn selected_text(&self) -> String {
+        let Some(sel) = self.mouse_select else {
+            return String::new();
+        };
+        let lines = self.feed_cache.lines();
+        let mut parts = Vec::new();
+        for line in &lines[sel.range()] {
+            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            parts.push(text.trim_end().to_string());
+        }
+        parts.join("\n")
+    }
+
+    /// OSC 52 clipboard payload for the current selection: `None` when the
+    /// selection holds no copyable text.
+    fn selection_bytes(&self) -> Option<Vec<u8>> {
+        let text = self.selected_text();
+        if text.is_empty() {
+            return None;
+        }
+        Some(osc52_bytes(&text))
+    }
+
+    /// Clear any active mouse selection.
+    fn clear_mouse_select(&mut self) {
+        self.mouse_select = None;
+    }
+
     fn scroll_up(&mut self, n: usize) {
+        self.clear_mouse_select();
         self.follow = false;
         self.scroll = self.scroll.saturating_sub(n);
     }
 
     fn scroll_down(&mut self, n: usize) {
+        self.clear_mouse_select();
         self.scroll = self.scroll.saturating_add(n);
         // render() clamps and re-enables follow when we reach the bottom.
     }

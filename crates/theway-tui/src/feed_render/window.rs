@@ -2,11 +2,17 @@
 /// cache-friendly replacement for `Paragraph::new(lines).scroll(...)` (issue
 /// #34). Rows outside the window are never touched, and the area is cleared
 /// first so a shrinking feed cannot leave stale cells behind.
+///
+/// `selection` (capped line indices, inclusive) paints the selected rows
+/// with [`SELECTION_BG`] — the fg/modifiers of each cell are preserved, only
+/// the background is overlaid, so the selection reads as a highlight band
+/// over any block styling.
 pub fn render_lines_window(
     buf: &mut ratatui::buffer::Buffer,
     area: ratatui::layout::Rect,
     lines: &[Line<'static>],
     offset: usize,
+    selection: Option<std::ops::RangeInclusive<usize>>,
 ) {
     for y in area.y..area.bottom() {
         for x in area.x..area.right() {
@@ -22,8 +28,19 @@ pub fn render_lines_window(
         }
         let y = area.y + row as u16;
         set_line_safe(buf, area.x, y, line, area.width);
+        if selection.as_ref().is_some_and(|range| range.contains(&i)) {
+            for x in area.x..area.right() {
+                if let Some(cell) = buf.cell_mut((x, y)) {
+                    cell.bg = SELECTION_BG;
+                }
+            }
+        }
     }
 }
+
+/// Background color for the mouse-selected feed rows (grok tokyonight
+/// accent-blue, `prompt_chrome::BORDER_FOCUSED`).
+const SELECTION_BG: Color = Color::Rgb(75, 92, 140);
 
 /// Bounds-checked `Buffer::set_line`: resize races can leave a momentarily
 /// out-of-bounds rect — skip the write instead of panicking.

@@ -855,3 +855,50 @@
         assert!(rows[0].contains("⏵ read"));
         assert_eq!(rows[1], "─".repeat(20));
     }
+
+    /// Mouse selection highlight (issue #70): rows in the selection range
+    /// get the selection background overlaid (fg preserved), rows outside it
+    /// keep their own styling; the range is in capped coordinates and slides
+    /// with the scroll offset.
+    #[test]
+    fn render_lines_window_highlights_selected_rows() {
+        let lines = vec![
+            Line::raw("alpha"),
+            Line::raw("beta"),
+            Line::raw("gamma"),
+            Line::styled("delta", Style::new().fg(Color::Red)),
+        ];
+        let mut buf = ratatui::buffer::Buffer::empty(ratatui::layout::Rect::new(0, 0, 20, 5));
+        super::render_lines_window(
+            &mut buf,
+            ratatui::layout::Rect::new(0, 0, 20, 5),
+            &lines,
+            0,
+            Some(1..=2),
+        );
+        assert_eq!(buf.cell((0, 0)).unwrap().bg, Color::Reset, "unselected row");
+        assert_eq!(buf.cell((0, 1)).unwrap().bg, super::SELECTION_BG, "first selected row");
+        assert_eq!(buf.cell((0, 2)).unwrap().bg, super::SELECTION_BG, "second selected row");
+        assert_eq!(buf.cell((0, 3)).unwrap().bg, Color::Reset, "row after selection");
+        assert_eq!(
+            buf.cell((0, 3)).unwrap().fg,
+            Color::Red,
+            "fg survives selection overlay"
+        );
+
+        // With a scroll offset the selection stays in capped coordinates.
+        let mut buf = ratatui::buffer::Buffer::empty(ratatui::layout::Rect::new(0, 0, 20, 5));
+        super::render_lines_window(
+            &mut buf,
+            ratatui::layout::Rect::new(0, 0, 20, 5),
+            &lines,
+            2,
+            Some(3..=3),
+        );
+        assert_eq!(
+            buf.cell((0, 1)).unwrap().bg,
+            super::SELECTION_BG,
+            "capped line 3 = second visible row under offset 2"
+        );
+        assert_eq!(buf.cell((0, 0)).unwrap().bg, Color::Reset);
+    }

@@ -492,6 +492,185 @@ async fn wheel_scrolls_feed_and_other_mouse_events_are_inert() {
     assert_eq!(app.scroll, 23, "non-scroll mouse events are inert");
 }
 
+// ── mouse row selection + OSC 52 copy (issue #70) ─────────────────────────
+
+fn mouse_event(kind: crossterm::event::MouseEventKind, row: u16, column: u16) -> crossterm::event::MouseEvent {
+    crossterm::event::MouseEvent {
+        kind,
+        row,
+        column,
+        modifiers: crossterm::event::KeyModifiers::NONE,
+    }
+}
+
+/// Left-button press/drag/release over the feed selects the dragged rows,
+/// keeps them highlighted, and emits an OSC 52 clipboard payload on release.
+#[tokio::test]
+async fn mouse_left_drag_selects_rows_and_copies_via_osc52() {
+    let (mut app, _rx) = test_app().await;
+    let status = fixture_status(vec![
+        WireFeedBlock::Plain {
+            text: "row A".into(),
+            level: theway_transport::feed::Level::Output,
+            timestamp: None,
+        },
+        WireFeedBlock::Plain {
+            text: "row B".into(),
+            level: theway_transport::feed::Level::Output,
+            timestamp: None,
+        },
+        WireFeedBlock::Plain {
+            text: "row C".into(),
+            level: theway_transport::feed::Level::Output,
+            timestamp: None,
+        },
+    ]);
+    app.apply_snapshot(status);
+    let backend = TestBackend::new(80, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    // Pin the geometry the mouse handler hit-tests against.
+    app.last_feed_area = Some(ratatui::layout::Rect::new(0, 0, 80, 10));
+    app.last_display_scroll = 0;
+
+    // Press on row 2 (1-based) -> capped line 1 ("row B").
+    app.handle_mouse(mouse_event(
+        crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        2,
+        5,
+    ));
+    let sel = app.mouse_select.expect("press starts a selection");
+    assert_eq!((sel.anchor, sel.current), (1, 1));
+    assert!(sel.dragging);
+
+    // Drag down to row 4 -> capped line 3, clamped to the last feed row.
+    app.handle_mouse(mouse_event(
+        crossterm::event::MouseEventKind::Drag(crossterm::event::MouseButton::Left),
+        4,
+        10,
+    ));
+    let sel = app.mouse_select.expect("drag extends the selection");
+    assert_eq!((sel.anchor, sel.current), (1, 2));
+    assert_eq!(app.selected_text(), "row B\nrow C");
+
+    // Release: selection stays (highlighted), OSC 52 payload emitted.
+    app.handle_mouse(mouse_event(
+        crossterm::event::MouseEventKind::Up(crossterm::event::MouseButton::Left),
+        4,
+        10,
+    ));
+    let sel = app.mouse_select.expect("release keeps the selection");
+    assert!(!sel.dragging, "drag ended");
+    let bytes = app.selection_bytes().expect("selection yields OSC 52 bytes");
+    let prefix = b"\x1b]52;c;";
+    assert!(bytes.starts_with(prefix), "OSC 52 prefix: {bytes:?}");
+    assert_eq!(*bytes.last().unwrap(), 0x07, "BEL terminator");
+    use base64::Engine;
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(&bytes[prefix.len()..bytes.len() - 1])
+        .unwrap();
+    assert_eq!(
+        String::from_utf8(decoded).unwrap(),
+        "row B\nrow C",
+        "clipboard payload decodes to the selected text"
+    );
+}
+
+/// A plain click (press+release without dragging) clears any selection and
+/// copies nothing; a press outside the feed pane also clears.
+#[tokio::test]
+async fn mouse_click_and_outside_press_clear_selection() {
+    let (mut app, _rx) = test_app().await;
+    app.apply_snapshot(fixture_status(vec![
+        WireFeedBlock::Plain {
+            text: "row A".into(),
+            level: theway_transport::feed::Level::Output,
+            timestamp: None,
+        },
+        WireFeedBlock::Plain {
+            text: "row B".into(),
+            level: theway_transport::feed::Level::Output,
+            timestamp: None,
+        },
+    ]));
+    let backend = TestBackend::new(80, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    app.last_feed_area = Some(ratatui::layout::Rect::new(0, 0, 80, 10));
+    app.last_display_scroll = 0;
+
+    // Drag a selection, then a plain click clears it.
+    app.handle_mouse(mouse_event(
+        crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        2,
+        5,
+    ));
+    app.handle_mouse(mouse_event(
+        crossterm::event::MouseEventKind::Drag(crossterm::event::MouseButton::Left),
+        3,
+        5,
+    ));
+    assert!(app.mouse_select.is_some());
+    app.handle_mouse(mouse_event(
+        crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        2,
+        5,
+    ));
+    app.handle_mouse(mouse_event(
+        crossterm::event::MouseEventKind::Up(crossterm::event::MouseButton::Left),
+        2,
+        5,
+    ));
+    assert!(app.mouse_select.is_none(), "click without drag clears");
+
+    // A press outside the feed pane clears too.
+    app.handle_mouse(mouse_event(
+        crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        2,
+        5,
+    ));
+    app.handle_mouse(mouse_event(
+        crossterm::event::MouseEventKind::Drag(crossterm::event::MouseButton::Left),
+        3,
+        5,
+    ));
+    assert!(app.mouse_select.is_some());
+    app.handle_mouse(mouse_event(
+        crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        20, // below the 10-row feed pane
+        5,
+    ));
+    assert!(app.mouse_select.is_none(), "outside press clears");
+}
+
+/// Wheel scrolling clears a live selection (row indices shift under it).
+#[tokio::test]
+async fn mouse_wheel_clears_selection() {
+    let (mut app, _rx) = test_app().await;
+    app.apply_snapshot(fixture_status(vec![WireFeedBlock::Plain {
+        text: "row A".into(),
+        level: theway_transport::feed::Level::Output,
+        timestamp: None,
+    }]));
+    let backend = TestBackend::new(80, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    app.last_feed_area = Some(ratatui::layout::Rect::new(0, 0, 80, 10));
+    app.last_display_scroll = 0;
+    app.handle_mouse(mouse_event(
+        crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        2,
+        5,
+    ));
+    assert!(app.mouse_select.is_some());
+    app.handle_mouse(mouse_event(
+        crossterm::event::MouseEventKind::ScrollUp,
+        1,
+        1,
+    ));
+    assert!(app.mouse_select.is_none(), "wheel scroll clears selection");
+}
+
 #[test]
 fn extension_contribution_renderer_uses_known_kinds_and_ignores_unknown() {
     let extensions = theway_transport::wire::WireExtensionSnapshot {

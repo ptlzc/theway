@@ -62,6 +62,8 @@ impl App {
             feed_cache: crate::feed_cache::FeedRenderCache::new(),
             last_viewport_h: 1,
             last_feed_area: None,
+            last_display_scroll: 0,
+            mouse_select: None,
             busy: false,
             spinner_frame: 0,
             busy_started: None,
