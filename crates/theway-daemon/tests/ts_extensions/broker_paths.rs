@@ -51,7 +51,7 @@ fn resolve_write_path_constructs_new_file_below_existing_parent() {
     let sub = dir.path().join("sub");
     std::fs::create_dir(&sub).unwrap();
     let resolved = resolve_write_path(dir.path(), "sub/new.txt").unwrap();
-    assert_eq!(resolved, sub.join("new.txt"));
+    assert_eq!(resolved, std::fs::canonicalize(&sub).unwrap().join("new.txt"));
 }
 
 #[test]

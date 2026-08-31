@@ -24,19 +24,26 @@ async fn set_model_from_spec_resolves_unique_bare_id_with_base_url() {
     let Some(model) = theway_llm_provider::list_models().into_iter().find(|model| {
         SUPPORTED_APIS.contains(&model.api.0.as_str())
             && !model.base_url.is_empty()
+            && !model.id.contains('/')
+            && !model.id.contains(':')
             && theway_llm_provider::list_models()
                 .iter()
                 .filter(|candidate| candidate.id == model.id)
                 .count()
                 == 1
     }) else {
-        // The test requires a catalog with a unique base-URL-pinned model;
-        // environments with a reduced catalog (e.g. only faux) skip it.
+        // The test requires a catalog with a unique base-URL-pinned model
+        // whose bare id has no provider separator; environments with a
+        // reduced catalog (e.g. only faux) skip it.
         return;
     };
     host.runtime.config.write().unwrap().base_url = Some(model.base_url.clone());
 
-    host.set_model_from_spec(&model.id).await;
+    assert!(
+        host.set_model_from_spec(&model.id).await,
+        "bare model id {} did not resolve",
+        model.id
+    );
 
     assert_eq!(
         current_model_label(host.session.kernel.harness()),
