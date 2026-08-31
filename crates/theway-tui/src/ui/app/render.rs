@@ -104,12 +104,18 @@ impl App {
         // renderer (issue #70).
         if let Some(sel) = self.mouse_select {
             let last = total.saturating_sub(1);
-            let anchor = sel.anchor.min(last);
-            let current = sel.current.min(last);
-            if anchor != sel.anchor || current != sel.current {
+            let anchor_line = sel.anchor.line.min(last);
+            let current_line = sel.current.line.min(last);
+            if anchor_line != sel.anchor.line || current_line != sel.current.line {
                 self.mouse_select = Some(MouseSelect {
-                    anchor,
-                    current,
+                    anchor: MousePos {
+                        line: anchor_line,
+                        col: sel.anchor.col,
+                    },
+                    current: MousePos {
+                        line: current_line,
+                        col: sel.current.col,
+                    },
                     ..sel
                 });
             }
@@ -120,7 +126,15 @@ impl App {
             feed_area,
             lines,
             display_scroll,
-            self.mouse_select.map(|sel| sel.range()),
+            self.mouse_select.map(|sel| {
+                let (start, end) = sel.bounds();
+                crate::feed_render::TextSelection {
+                    start_line: start.line,
+                    start_col: start.col,
+                    end_line: end.line,
+                    end_col: end.col,
+                }
+            }),
         );
         // Feed scrollbar (theway-pager-render primitive): right edge of the
         // feed pane, subtle while following, brighter when scrolled up.

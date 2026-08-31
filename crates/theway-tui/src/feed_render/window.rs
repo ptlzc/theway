@@ -1,18 +1,30 @@
+/// Character-level text selection over the rendered feed. Columns are
+/// 0-based display columns inside the feed pane (`area.x`-relative); `end_col`
+/// is exclusive. Use [`usize::MAX`] for an open-ended selection to the end of
+/// a line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TextSelection {
+    pub start_line: usize,
+    pub start_col: usize,
+    pub end_line: usize,
+    pub end_col: usize,
+}
+
 /// Draw pre-wrapped lines into the visible window only (O(viewport)) — the
 /// cache-friendly replacement for `Paragraph::new(lines).scroll(...)` (issue
 /// #34). Rows outside the window are never touched, and the area is cleared
 /// first so a shrinking feed cannot leave stale cells behind.
 ///
-/// `selection` (capped line indices, inclusive) paints the selected rows
-/// with [`SELECTION_BG`] — the fg/modifiers of each cell are preserved, only
-/// the background is overlaid, so the selection reads as a highlight band
-/// over any block styling.
+/// `selection` paints the selected character columns with [`SELECTION_BG`] —
+/// the fg/modifiers of each cell are preserved, only the background is
+/// overlaid, so the selection reads as a highlight band over any block
+/// styling.
 pub fn render_lines_window(
     buf: &mut ratatui::buffer::Buffer,
     area: ratatui::layout::Rect,
     lines: &[Line<'static>],
     offset: usize,
-    selection: Option<std::ops::RangeInclusive<usize>>,
+    selection: Option<TextSelection>,
 ) {
     for y in area.y..area.bottom() {
         for x in area.x..area.right() {
@@ -28,14 +40,99 @@ pub fn render_lines_window(
         }
         let y = area.y + row as u16;
         set_line_safe(buf, area.x, y, line, area.width);
-        if selection.as_ref().is_some_and(|range| range.contains(&i)) {
-            for x in area.x..area.right() {
-                if let Some(cell) = buf.cell_mut((x, y)) {
-                    cell.bg = SELECTION_BG;
+        if let Some(sel) = selection
+            && sel.start_line <= i
+            && i <= sel.end_line
+        {
+            let (start_col, end_col) = if sel.start_line == sel.end_line {
+                (sel.start_col, sel.end_col)
+            } else if i == sel.start_line {
+                (sel.start_col, usize::MAX)
+            } else if i == sel.end_line {
+                (0, sel.end_col)
+            } else {
+                (0, usize::MAX)
+            };
+            let width = line_width(line);
+            let start_x = start_col.min(width).min(area.width as usize);
+            let end_x = end_col.min(width).min(area.width as usize);
+            if end_x > start_x {
+                for x in area.x + start_x as u16..area.x + end_x as u16 {
+                    if let Some(cell) = buf.cell_mut((x, y)) {
+                        cell.bg = SELECTION_BG;
+                    }
                 }
             }
         }
     }
+}
+
+/// Text of a character-level selection, joining selected rows with `\n` and
+/// trimming each row's trailing padding.
+pub(crate) fn selection_text(
+    lines: &[Line<'static>],
+    selection: TextSelection,
+) -> String {
+    if lines.is_empty() || selection.start_line >= lines.len() {
+        return String::new();
+    }
+    let end_line = selection.end_line.min(lines.len() - 1);
+    let mut parts = Vec::new();
+    for (i, line) in lines
+        .iter()
+        .enumerate()
+        .take(end_line.saturating_add(1))
+        .skip(selection.start_line)
+    {
+        let part = if i == selection.start_line {
+            if selection.start_line == end_line {
+                slice_line_by_columns(line, selection.start_col, selection.end_col)
+            } else {
+                slice_line_by_columns(line, selection.start_col, usize::MAX)
+            }
+        } else if i == end_line {
+            slice_line_by_columns(line, 0, selection.end_col)
+        } else {
+            slice_line_by_columns(line, 0, usize::MAX)
+        };
+        parts.push(part.trim_end().to_string());
+    }
+    parts.join("\n")
+}
+
+/// Display width of a rendered line (sum of every span's Unicode width).
+fn line_width(line: &Line<'_>) -> usize {
+    line.spans
+        .iter()
+        .map(|s| unicode_width::UnicodeWidthStr::width(s.content.as_ref()))
+        .sum()
+}
+
+/// Slice a rendered line by display column range, keeping whole Unicode
+/// characters (wide chars are never cut in half). `start_col` is inclusive,
+/// `end_col` exclusive; `usize::MAX` means “to the end of the line”.
+fn slice_line_by_columns(line: &Line<'_>, start_col: usize, end_col: usize) -> String {
+    let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+    let mut chars: Vec<(char, usize, usize)> = Vec::new();
+    let mut col = 0usize;
+    for ch in text.chars() {
+        let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0).max(1);
+        let start = col;
+        col += w;
+        chars.push((ch, start, col));
+    }
+    let start_idx = chars
+        .iter()
+        .position(|(_, _, end)| *end > start_col)
+        .unwrap_or(chars.len());
+    let end_idx = chars
+        .iter()
+        .position(|(_, start, _)| *start >= end_col)
+        .unwrap_or(chars.len());
+    chars[start_idx..end_idx]
+        .iter()
+        .map(|(ch, _, _)| *ch)
+        .collect()
 }
 
 /// Background color for the mouse-selected feed rows (grok tokyonight

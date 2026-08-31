@@ -1,20 +1,38 @@
-/// Mouse row selection over the feed (issue #70): the left button anchors a
-/// drag on a capped feed line; the selection spans `anchor..=current` (in
-/// either order) and is copied to the clipboard via OSC 52 on release.
+/// A mouse position inside the rendered feed: capped line index plus a
+/// 0-based display column (relative to the feed pane's left edge).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct MousePos {
+    /// Capped feed line index.
+    pub line: usize,
+    /// 0-based display column inside the feed line.
+    pub col: usize,
+}
+
+/// Mouse character selection over the feed (issue #70): the left button
+/// anchors a drag on a capped feed position; the selection spans
+/// `anchor..=current` (in either order) and is copied to the clipboard via
+/// OSC 52 on release.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct MouseSelect {
-    /// First row of the drag (capped feed line index).
-    pub anchor: usize,
-    /// Current drag row (capped feed line index).
-    pub current: usize,
+    /// First position of the drag (capped feed line + column).
+    pub anchor: MousePos,
+    /// Current drag position (capped feed line + column).
+    pub current: MousePos,
     /// True while the button is held down.
     pub dragging: bool,
 }
 
 impl MouseSelect {
-    /// Selected row range, normalized (anchor <= current).
-    pub fn range(&self) -> std::ops::RangeInclusive<usize> {
-        self.anchor.min(self.current)..=self.anchor.max(self.current)
+    /// Selected endpoints, normalized so `(start, end)` reads top-to-bottom,
+    /// left-to-right.
+    pub fn bounds(&self) -> (MousePos, MousePos) {
+        if self.anchor.line < self.current.line
+            || (self.anchor.line == self.current.line && self.anchor.col <= self.current.col)
+        {
+            (self.anchor, self.current)
+        } else {
+            (self.current, self.anchor)
+        }
     }
 }
 
@@ -54,9 +72,9 @@ impl App {
     }
 
     /// Mouse handling: wheel scrolls the feed (issue #4), left-button
-    /// press-drag-release selects feed rows and copies them to the system
-    /// clipboard via OSC 52 (issue #70). Pressing any other button clears a
-    /// live selection; scrolling clears it too (row indices shift).
+    /// press-drag-release selects feed characters and copies them to the
+    /// system clipboard via OSC 52 (issue #70). Pressing any other button
+    /// clears a live selection; scrolling clears it too (row indices shift).
     pub(super) fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent) {
         use crossterm::event::{MouseButton, MouseEventKind};
         match mouse.kind {
@@ -78,35 +96,36 @@ impl App {
     /// Wheel scroll step per notch.
     const WHEEL_SCROLL_LINES: usize = 3;
 
-    /// Left-button press inside the feed pane starts a row selection at the
-    /// clicked row; a press outside the pane clears any selection.
+    /// Left-button press inside the feed pane starts a character selection at
+    /// the clicked position; a press outside the pane clears any selection.
     fn mouse_down_left(&mut self, mouse: crossterm::event::MouseEvent) {
-        let Some(line) = self.feed_line_at(mouse.row, mouse.column) else {
+        let Some(pos) = self.feed_pos_at(mouse.row, mouse.column) else {
             self.clear_mouse_select();
             return;
         };
         self.mouse_select = Some(MouseSelect {
-            anchor: line,
-            current: line,
+            anchor: pos,
+            current: pos,
             dragging: true,
         });
     }
 
-    /// Left-button drag extends the selection (clamped to the feed rows).
+    /// Left-button drag extends the character selection (clamped to the feed
+    /// rows).
     fn mouse_drag_left(&mut self, mouse: crossterm::event::MouseEvent) {
         let Some(sel) = self.mouse_select else { return };
         if !sel.dragging {
             return;
         }
-        let Some(line) = self.feed_line_at(mouse.row, mouse.column) else {
+        let Some(pos) = self.feed_pos_at(mouse.row, mouse.column) else {
             return;
         };
-        self.mouse_select = Some(MouseSelect { current: line, ..sel });
+        self.mouse_select = Some(MouseSelect { current: pos, ..sel });
     }
 
     /// Left-button release ends the drag: a drag (anchor moved) copies the
-    /// selected rows to the clipboard via OSC 52 and stays highlighted; a
-    /// plain click (no drag) just clears.
+    /// selected characters to the clipboard via OSC 52 and stays highlighted;
+    /// a plain click (no drag) just clears.
     fn mouse_up_left(&mut self) {
         let Some(sel) = self.mouse_select else { return };
         if !sel.dragging {
@@ -131,9 +150,9 @@ impl App {
         let _ = out.flush();
     }
 
-    /// Map a crossterm mouse position (1-based) to a capped feed line index
-    /// inside the last rendered feed pane, `None` outside it.
-    fn feed_line_at(&self, row: u16, column: u16) -> Option<usize> {
+    /// Map a crossterm mouse position (1-based) to a capped feed line and
+    /// display column inside the last rendered feed pane, `None` outside it.
+    fn feed_pos_at(&self, row: u16, column: u16) -> Option<MousePos> {
         let area = self.last_feed_area?;
         let row = row.saturating_sub(1);
         let column = column.saturating_sub(1);
@@ -142,22 +161,28 @@ impl App {
         }
         let total = self.feed_cache.lines().len();
         let line = self.last_display_scroll + (row - area.y) as usize;
-        Some(line.min(total.saturating_sub(1)))
+        Some(MousePos {
+            line: line.min(total.saturating_sub(1)),
+            col: (column - area.x) as usize,
+        })
     }
 
-    /// Text of the current selection: rendered feed rows joined with `\n`,
-    /// each row's trailing padding trimmed.
+    /// Text of the current selection: rendered feed characters joined with
+    /// `\n`, each row's trailing padding trimmed.
     fn selected_text(&self) -> String {
         let Some(sel) = self.mouse_select else {
             return String::new();
         };
-        let lines = self.feed_cache.lines();
-        let mut parts = Vec::new();
-        for line in &lines[sel.range()] {
-            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-            parts.push(text.trim_end().to_string());
-        }
-        parts.join("\n")
+        let (start, end) = sel.bounds();
+        crate::feed_render::selection_text(
+            self.feed_cache.lines(),
+            crate::feed_render::TextSelection {
+                start_line: start.line,
+                start_col: start.col,
+                end_line: end.line,
+                end_col: end.col,
+            },
+        )
     }
 
     /// OSC 52 clipboard payload for the current selection: `None` when the

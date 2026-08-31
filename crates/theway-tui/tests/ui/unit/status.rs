@@ -492,7 +492,7 @@ async fn wheel_scrolls_feed_and_other_mouse_events_are_inert() {
     assert_eq!(app.scroll, 23, "non-scroll mouse events are inert");
 }
 
-// ── mouse row selection + OSC 52 copy (issue #70) ─────────────────────────
+// ── mouse character selection + OSC 52 copy (issue #70) ────────────────────
 
 fn mouse_event(kind: crossterm::event::MouseEventKind, row: u16, column: u16) -> crossterm::event::MouseEvent {
     crossterm::event::MouseEvent {
@@ -503,10 +503,11 @@ fn mouse_event(kind: crossterm::event::MouseEventKind, row: u16, column: u16) ->
     }
 }
 
-/// Left-button press/drag/release over the feed selects the dragged rows,
-/// keeps them highlighted, and emits an OSC 52 clipboard payload on release.
+/// Left-button press/drag/release over the feed selects the dragged
+/// characters, keeps them highlighted, and emits an OSC 52 clipboard payload
+/// on release.
 #[tokio::test]
-async fn mouse_left_drag_selects_rows_and_copies_via_osc52() {
+async fn mouse_left_drag_selects_characters_and_copies_via_osc52() {
     let (mut app, _rx) = test_app().await;
     let status = fixture_status(vec![
         WireFeedBlock::Plain {
@@ -533,25 +534,28 @@ async fn mouse_left_drag_selects_rows_and_copies_via_osc52() {
     app.last_feed_area = Some(ratatui::layout::Rect::new(0, 0, 80, 10));
     app.last_display_scroll = 0;
 
-    // Press on row 2 (1-based) -> capped line 1 ("row B").
+    // Press on row 2 column 5 (1-based) -> line 1, sub-column 4 ("B" of
+    // "row B").
     app.handle_mouse(mouse_event(
         crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
         2,
         5,
     ));
     let sel = app.mouse_select.expect("press starts a selection");
-    assert_eq!((sel.anchor, sel.current), (1, 1));
+    assert_eq!(sel.anchor, super::MousePos { line: 1, col: 4 });
+    assert_eq!(sel.current, super::MousePos { line: 1, col: 4 });
     assert!(sel.dragging);
 
-    // Drag down to row 4 -> capped line 3, clamped to the last feed row.
+    // Drag down to row 4 column 10 -> line 2, col 9 (past "row C"'s end).
     app.handle_mouse(mouse_event(
         crossterm::event::MouseEventKind::Drag(crossterm::event::MouseButton::Left),
         4,
         10,
     ));
     let sel = app.mouse_select.expect("drag extends the selection");
-    assert_eq!((sel.anchor, sel.current), (1, 2));
-    assert_eq!(app.selected_text(), "row B\nrow C");
+    assert_eq!(sel.anchor, super::MousePos { line: 1, col: 4 });
+    assert_eq!(sel.current, super::MousePos { line: 2, col: 9 });
+    assert_eq!(app.selected_text(), "B\nrow C");
 
     // Release: selection stays (highlighted), OSC 52 payload emitted.
     app.handle_mouse(mouse_event(
@@ -571,7 +575,7 @@ async fn mouse_left_drag_selects_rows_and_copies_via_osc52() {
         .unwrap();
     assert_eq!(
         String::from_utf8(decoded).unwrap(),
-        "row B\nrow C",
+        "B\nrow C",
         "clipboard payload decodes to the selected text"
     );
 }
