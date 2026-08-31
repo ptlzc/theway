@@ -48,9 +48,14 @@ fn osc52_bytes(text: &str) -> Vec<u8> {
 /// True inside code-server / VS Code-family terminals (browser xterm.js).
 /// These terminals do not handle OSC 52, so theway falls back to the
 /// code-server clipboard command.
+///
+/// Inside tmux `TERM_PROGRAM` is usually rewritten to `tmux`, so also accept
+/// the code-server CLI pipe variable (`VSCODE_IPC_HOOK_CLI`) as evidence of
+/// a VS Code-family terminal.
 fn code_server_terminal() -> bool {
     std::env::var("TERM_PROGRAM").as_deref() == Ok("vscode")
         || std::env::var("CODE_SERVER_SESSION_SOCKET").is_ok()
+        || std::env::var("VSCODE_IPC_HOOK_CLI").is_ok()
 }
 
 /// code-server >= 4.90 supports `code-server --stdin-to-clipboard` (alias
@@ -58,7 +63,7 @@ fn code_server_terminal() -> bool {
 /// terminal writes it to the user's system clipboard. Runs on a background
 /// thread so the TUI never stalls on process startup.
 fn copy_via_code_server(text: &str) {
-    if !code_server_terminal() {
+    if cfg!(test) || !code_server_terminal() {
         return;
     }
     let text = text.to_string();
