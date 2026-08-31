@@ -15,8 +15,11 @@
 pub use theway_transport::wire::ProviderGroup;
 
 /// Thinking levels offered by the picker, in selection order. Matches the
-/// `/thinking` command surface.
-pub(crate) const THINKING_LEVELS: [&str; 6] = ["off", "minimal", "low", "medium", "high", "xhigh"];
+/// `/thinking` command surface, including the `max` level (issue #72): this
+/// list is the TUI picker's own mirror of
+/// [`theway_transport::commands::THINKING_LEVEL_VALUES`].
+pub(crate) const THINKING_LEVELS: [&str; 7] =
+    ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum PickerLevel {
@@ -81,6 +84,14 @@ impl ModelPickerState {
         }
     }
 
+    /// Number of choices in the *active* cascade column (issue #72). Used by
+    /// the renderer to size the inline band: the band is a single breadcrumb
+    /// row plus this many choice rows (capped by the caller). Empty catalog →
+    /// 0 (band degrades to just the breadcrumb).
+    pub fn active_len(&self) -> usize {
+        self.len()
+    }
+
     pub fn up(&mut self) {
         self.cursor = self.cursor.saturating_sub(1);
     }
@@ -91,35 +102,141 @@ impl ModelPickerState {
         }
     }
 
+    /// Fixed provider for the current navigation position (the chosen
+    /// provider when at/descended past the model level, the hovered one at
+    /// the provider level). Empty when the catalog is empty.
+    pub fn pinned_provider(&self) -> &str {
+        match self.level {
+            PickerLevel::Providers => self
+                .groups
+                .get(self.cursor)
+                .map(|g| g.provider.as_str())
+                .unwrap_or(""),
+            PickerLevel::Models { provider_idx } | PickerLevel::Thinking { provider_idx, .. } => {
+                self.groups
+                    .get(provider_idx)
+                    .map(|g| g.provider.as_str())
+                    .unwrap_or("")
+            }
+        }
+    }
+
+    /// Fixed model for the current navigation position (the chosen model when
+    /// at/descended past the thinking level, the hovered one at the model
+    /// level). Empty at the provider level.
+    pub fn pinned_model(&self) -> String {
+        match self.level {
+            PickerLevel::Providers => String::new(),
+            PickerLevel::Models { provider_idx } => self
+                .groups
+                .get(provider_idx)
+                .and_then(|g| g.models.get(self.cursor))
+                .map(|m| m.id.clone())
+                .unwrap_or_default(),
+            PickerLevel::Thinking {
+                provider_idx,
+                model_idx,
+            } => self
+                .groups
+                .get(provider_idx)
+                .and_then(|g| g.models.get(model_idx))
+                .map(|m| m.id.clone())
+                .unwrap_or_default(),
+        }
+    }
+
+    /// The thinking level shown at the cascade's third column: the *hovered*
+    /// level while at the thinking column, otherwise the persisted current
+    /// level.
+    pub fn pinned_thinking(&self) -> &str {
+        match self.level {
+            PickerLevel::Thinking { .. } => THINKING_LEVELS[self.cursor],
+            _ => &self.current_thinking,
+        }
+    }
+
+    /// Left: ascend one column (thinking → model → provider). Returns
+    /// `false` at the provider column (already at the left edge). Purely
+    /// navigational — never closes the cascade.
+    pub fn left(&mut self) -> bool {
+        match self.level {
+            PickerLevel::Providers => false,
+            PickerLevel::Models { provider_idx } => {
+                self.level = PickerLevel::Providers;
+                self.cursor = provider_idx;
+                true
+            }
+            PickerLevel::Thinking {
+                provider_idx,
+                model_idx,
+            } => {
+                self.level = PickerLevel::Models { provider_idx };
+                self.cursor = model_idx;
+                true
+            }
+        }
+    }
+
+    /// Right: descend one column (provider → model → thinking). Returns
+    /// `false` at the thinking column (already at the right edge). Purely
+    /// navigational — commit there with [`Self::enter`] / [`Self::enter_cascade`].
+    pub fn right(&mut self) -> bool {
+        match self.level {
+            PickerLevel::Providers => {
+                if self.groups.is_empty() {
+                    return false;
+                }
+                self.descend_to_models();
+                true
+            }
+            PickerLevel::Models { .. } => {
+                self.descend_to_thinking();
+                true
+            }
+            PickerLevel::Thinking { .. } => false,
+        }
+    }
+
+    fn descend_to_models(&mut self) {
+        if self.groups.is_empty() {
+            return;
+        }
+        let provider_idx = self.cursor.min(self.groups.len().saturating_sub(1));
+        let group = &self.groups[provider_idx];
+        self.cursor = self
+            .active
+            .as_ref()
+            .filter(|(p, _)| *p == group.provider)
+            .and_then(|(_, id)| group.models.iter().position(|m| m.id == *id))
+            .unwrap_or(0);
+        self.level = PickerLevel::Models { provider_idx };
+    }
+
+    fn descend_to_thinking(&mut self) {
+        let PickerLevel::Models { provider_idx } = self.level else {
+            return;
+        };
+        let model_idx = self.cursor;
+        self.cursor = THINKING_LEVELS
+            .iter()
+            .position(|level| *level == self.current_thinking)
+            .unwrap_or(0);
+        self.level = PickerLevel::Thinking {
+            provider_idx,
+            model_idx,
+        };
+    }
+
     /// Enter: descend at provider/model level (returns `None`), select at
     /// thinking level (returns the `provider:id` spec + thinking level).
     pub fn enter(&mut self) -> Option<PickerSelection> {
         match self.level {
             PickerLevel::Providers => {
-                if self.groups.is_empty() {
-                    return None;
-                }
-                let provider_idx = self.cursor;
-                let group = &self.groups[provider_idx];
-                self.cursor = self
-                    .active
-                    .as_ref()
-                    .filter(|(p, _)| *p == group.provider)
-                    .and_then(|(_, id)| group.models.iter().position(|m| m.id == *id))
-                    .unwrap_or(0);
-                self.level = PickerLevel::Models { provider_idx };
+                self.descend_to_models();
                 None
             }
-            PickerLevel::Models { provider_idx } => {
-                let model_idx = self.cursor;
-                self.cursor = THINKING_LEVELS
-                    .iter()
-                    .position(|level| *level == self.current_thinking)
-                    .unwrap_or(0);
-                self.level = PickerLevel::Thinking {
-                    provider_idx,
-                    model_idx,
-                };
+            PickerLevel::Models { .. } => {
+                self.descend_to_thinking();
                 None
             }
             PickerLevel::Thinking {
@@ -212,6 +329,50 @@ impl ModelPickerState {
             .collect();
         (title, windowed)
     }
+
+    /// Render data for the inline cascade band (issue #72): the three column
+    /// labels (provider → model → thinking), which column is active, and the
+    /// active column's choice window (`(text, is_cursor)`). The renderer lays
+    /// these out horizontally above the composer instead of a centered popup.
+    pub fn cascade(&self, visible: usize) -> CascadeData {
+        let (title, rows) = self.view(visible);
+        CascadeData {
+            provider: self.pinned_provider().to_string(),
+            model: self.pinned_model(),
+            thinking: self.pinned_thinking().to_string(),
+            active: match self.level {
+                PickerLevel::Providers => CascadeColumn::Provider,
+                PickerLevel::Models { .. } => CascadeColumn::Model,
+                PickerLevel::Thinking { .. } => CascadeColumn::Thinking,
+            },
+            title,
+            rows,
+        }
+    }
+}
+
+/// Which column of the inline cascade is active (receives ↑/↓).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CascadeColumn {
+    Provider,
+    Model,
+    Thinking,
+}
+
+/// Snapshot of the cascade band for rendering (issue #72).
+pub(crate) struct CascadeData {
+    /// Pinned/hovered provider label.
+    pub provider: String,
+    /// Pinned/hovered model label.
+    pub model: String,
+    /// Pinned/hovered thinking label.
+    pub thinking: String,
+    /// Which column the cursor is in.
+    pub active: CascadeColumn,
+    /// Active column heading.
+    pub title: String,
+    /// Active column choice window; `(text, is_cursor)`.
+    pub rows: Vec<(String, bool)>,
 }
 
 #[cfg(test)]
@@ -329,9 +490,10 @@ mod tests {
         p.enter();
         let (title, rows) = p.view(10);
         assert_eq!(title, "Thinking intensity");
-        assert_eq!(rows.len(), 6);
+        assert_eq!(rows.len(), 7);
         assert!(rows[4].0.contains("high ●"));
         assert!(rows[4].1); // pre-selected on the current level
+        assert_eq!(rows[6].0, "max"); // the max level is offered (issue #72)
     }
 
     #[test]
@@ -372,5 +534,67 @@ mod tests {
         p.down();
         assert_eq!(p.cursor, 0);
         assert!(p.back()); // closes immediately
+    }
+
+    // ── cascade navigation (issue #72) ────────────────────────────────────────
+
+    #[test]
+    fn cascade_right_walks_provider_model_thinking() {
+        let mut p = ModelPickerState::new(two_groups(), None, "off".into());
+        assert!(matches!(p.level, PickerLevel::Providers));
+        assert!(p.right()); // → model
+        assert!(matches!(p.level, PickerLevel::Models { provider_idx: 0 }));
+        assert!(p.right()); // → thinking
+        assert!(matches!(
+            p.level,
+            PickerLevel::Thinking {
+                provider_idx: 0,
+                model_idx: 0
+            }
+        ));
+        assert!(!p.right()); // already at the rightmost column
+    }
+
+    #[test]
+    fn cascade_left_walks_back_to_provider() {
+        let mut p = ModelPickerState::new(two_groups(), None, "off".into());
+        p.right();
+        p.right();
+        assert!(p.left()); // → model
+        assert!(matches!(p.level, PickerLevel::Models { provider_idx: 0 }));
+        assert!(p.left()); // → provider
+        assert!(matches!(p.level, PickerLevel::Providers));
+        assert!(!p.left()); // left edge
+    }
+
+    #[test]
+    fn cascade_pins_provider_model_thinking() {
+        let mut p = ModelPickerState::new(two_groups(), None, "medium".into());
+        assert_eq!(p.cascade(10).provider, "anthropic");
+        assert_eq!(p.cascade(10).model, "");
+        assert_eq!(p.cascade(10).thinking, "medium");
+        p.down(); // anthropic has only one credentialed provider? no: openai filtered
+        // only "anthropic" credentialed → two_groups has 2 entries but openai is
+        // filtered => 1 credentialed provider, cursor stays at 0.
+        p.right();
+        assert_eq!(p.pinned_model(), "claude-haiku-4-5");
+        p.down();
+        assert_eq!(p.pinned_model(), "claude-opus-4-8");
+        p.right();
+        assert_eq!(p.pinned_thinking(), "medium");
+    }
+
+    #[test]
+    fn cascade_pins_thinking_hover_when_at_thinking_column() {
+        let mut p = ModelPickerState::new(two_groups(), None, "high".into());
+        p.right();
+        p.right();
+        // Cursor is pre-positioned on the current level (high = index 4);
+        // moving down walks the hovered level, not the persisted one.
+        assert_eq!(p.pinned_thinking(), "high");
+        p.down();
+        assert_eq!(p.pinned_thinking(), "xhigh");
+        p.down();
+        assert_eq!(p.pinned_thinking(), "max");
     }
 }

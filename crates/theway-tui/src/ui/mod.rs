@@ -93,6 +93,9 @@ const SPINNER_TICK_MS: u64 = 10;
 /// from the head (issue #27).
 pub(crate) const DEFAULT_MAX_FEED_LINES: usize = 3_000;
 const COMPLETION_POPUP_MAX: usize = 8;
+/// Inline cascade choice rows (issue #72): the model selector band above the
+/// composer shows at most this many rows of the active column's choices.
+const CASCADE_CHOICE_ROWS: usize = 6;
 /// Fork-picker popup window size (issue #55): at most this many user-message
 /// rows render at once, mirroring the completion popup's fixed window; the
 /// window slides with the selection.
@@ -387,6 +390,10 @@ pub struct App {
     /// unit assertions.
     last_status_area: Option<Rect>,
     last_input_area: Option<Rect>,
+    /// Inline cascade band rect (model selector, issue #72): the region above
+    /// the prompt chrome while the picker is open. Cleared to `None` when the
+    /// picker closes so a stale rect never matches a render.
+    last_cascade_area: Option<Rect>,
     /// Rendered side-panel rect; `None` when the panel is not rendered.
     last_panel_area: Option<Rect>,
     last_ctrlc: Option<Instant>,

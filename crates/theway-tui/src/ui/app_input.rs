@@ -395,6 +395,17 @@ impl App {
                     picker.down();
                     PickerAction::None
                 }
+                // Cascade navigation (issue #72): ←/→ move between the
+                // provider→model→thinking columns; the armed column receives
+                // ↑/↓. Enter commits from the thinking column.
+                KeyCode::Left | KeyCode::Char('h') => {
+                    picker.left();
+                    PickerAction::None
+                }
+                KeyCode::Right | KeyCode::Char('l') => {
+                    picker.right();
+                    PickerAction::None
+                }
                 KeyCode::Enter => match picker.enter() {
                     Some(selection) => PickerAction::Select(selection),
                     None => PickerAction::None,
@@ -414,9 +425,13 @@ impl App {
         };
         match action {
             PickerAction::None => {}
-            PickerAction::Close => self.model_picker = None,
+            PickerAction::Close => {
+                self.model_picker = None;
+                self.last_cascade_area = None;
+            }
             PickerAction::Select(selection) => {
                 self.model_picker = None;
+                self.last_cascade_area = None;
                 let spec = selection.spec;
                 let thinking = selection.thinking;
                 self.set_model_from_spec(&spec).await;

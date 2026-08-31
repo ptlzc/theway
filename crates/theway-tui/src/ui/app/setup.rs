@@ -78,6 +78,7 @@ impl App {
             resume_picker: None,
             last_status_area: None,
             last_input_area: None,
+            last_cascade_area: None,
             last_panel_area: None,
             last_ctrlc: None,
             quit: false,

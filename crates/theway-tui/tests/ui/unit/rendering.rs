@@ -435,3 +435,84 @@ async fn picker_theme_recolors_fork_popup_rows() {
         .unwrap_or(Color::Reset);
     assert_eq!(title_fg, Color::Rgb(240, 200, 100));
 }
+
+/// Cascade model selector (issue #72): opening the picker renders an inline
+/// band above the composer (provider → model → thinking breadcrumb) instead
+/// of a centered popup. The active column's choices render under the
+/// breadcrumb.
+#[tokio::test]
+async fn cascade_band_renders_inline_above_composer() {
+    let (mut app, _rx) = test_app().await;
+    let mut status = fixture_status(Vec::new());
+    status.model_catalog = vec![
+        theway_transport::wire::ProviderGroup {
+            provider: "anthropic".into(),
+            has_credential: true,
+            models: vec![
+                theway_transport::wire::ModelEntry {
+                    id: "claude-x".into(),
+                    name: "Claude X".into(),
+                },
+                theway_transport::wire::ModelEntry {
+                    id: "claude-opus".into(),
+                    name: "Claude Opus".into(),
+                },
+            ],
+        },
+        theway_transport::wire::ProviderGroup {
+            provider: "openai".into(),
+            has_credential: true,
+            models: vec![theway_transport::wire::ModelEntry {
+                id: "gpt-5".into(),
+                name: "GPT 5".into(),
+            }],
+        },
+    ];
+    app.apply_snapshot(status);
+    app.open_model_picker();
+    assert!(app.model_picker.is_some());
+
+    let backend = TestBackend::new(70, 20);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    let text = buffer_text(terminal.backend().buffer());
+    // The band sits above the composer; verify the provider column label and
+    // the active column's choices appear. The provider column is active at
+    // open, so its choices (the credentialed providers) render under it.
+    assert!(
+        text.contains("provider › anthropic"),
+        "cascade breadcrumb provider missing:\n{text}"
+    );
+    assert!(
+        text.contains("model › "),
+        "cascade model column missing:\n{text}"
+    );
+    assert!(
+        text.contains("thinking › off"),
+        "cascade thinking column missing:\n{text}"
+    );
+    // Provider column (active) shows both credentialed providers.
+    assert!(text.contains("anthropic (2)"), "{text}");
+    assert!(text.contains("openai (1)"), "{text}");
+
+    // ←/→ cascade navigation is wired (no commit here — a commit would await
+    // the daemon RPC, which this rendering fixture does not drain).
+    let right = crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Right,
+        crossterm::event::KeyModifiers::empty(),
+    );
+    assert!(app.handle_model_picker_key(&right).await);
+    let picker = app.model_picker.as_ref().unwrap();
+    assert!(matches!(picker.level, crate::model_picker::PickerLevel::Models { .. }));
+    let (_, rows) = picker.view(10);
+    assert!(
+        rows.iter().any(|(t, _)| t.contains("claude-x")),
+        "model column should list the provider's models"
+    );
+    assert!(app.handle_model_picker_key(&right).await);
+    let picker = app.model_picker.as_ref().unwrap();
+    assert!(matches!(
+        picker.level,
+        crate::model_picker::PickerLevel::Thinking { .. }
+    ));
+}

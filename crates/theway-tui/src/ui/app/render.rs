@@ -2,10 +2,20 @@ impl App {
     fn render(&mut self, frame: &mut ratatui::Frame) {
         let area = self.theme.screen.inset(frame.area());
         let input_rows = self.composer_rows(area.width);
+        // Cascade model selector (issue #72): while the picker is open the
+        // input area gains an inline band (breadcrumb + active-column choices)
+        // above the prompt chrome instead of a centered popup. The band is
+        // 1 row for the breadcrumb plus up to `CASCADE_CHOICE_ROWS` rows for
+        // the active column's choices.
+        let cascade_rows: u16 = self
+            .model_picker
+            .as_ref()
+            .map(|p| 1 + p.active_len().clamp(1, CASCADE_CHOICE_ROWS))
+            .unwrap_or(0) as u16;
         let chunks = Layout::vertical([
             Constraint::Min(1),
             Constraint::Length(1), // status rule / single-cell Braille indicator
-            Constraint::Length(input_rows + 2), // input box with border
+            Constraint::Length(input_rows + 2 + cascade_rows), // input box + cascade band
             Constraint::Length(1), // hint line
         ])
         .split(area);
@@ -15,6 +25,16 @@ impl App {
         let hint_area = chunks[3];
         self.last_status_area = Some(status_area);
         self.last_input_area = Some(input_area);
+        // The cascade band occupies the top `cascade_rows` of the input area;
+        // the prompt chrome starts below it.
+        let (cascade_area, chrome_area) = if cascade_rows > 0 {
+            let split = Layout::vertical([Constraint::Length(cascade_rows), Constraint::Min(1)])
+                .split(input_area);
+            (Some(split[0]), split[1])
+        } else {
+            (None, input_area)
+        };
+        self.last_cascade_area = cascade_area;
         // DAG status band (issue #38): while DAG runs are live the band
         // squeezes the feed's bottom rows, between the feed and the busy
         // band.
@@ -242,7 +262,7 @@ impl App {
         };
         let text_area = prompt_chrome::render_prompt_chrome(
             frame.buffer_mut(),
-            input_area,
+            chrome_area,
             &chrome,
             &self.theme.composer,
         );
@@ -264,8 +284,11 @@ impl App {
             frame.set_cursor_position(ratatui::layout::Position::new(x, y));
         }
 
-        // Hint line.
-        let hint = if self.busy {
+        // Hint line. While the model cascade is open the hint reflects the
+        // column navigation (↑/↓ choice, ←/→ column, Enter commit, Esc back).
+        let hint = if self.model_picker.is_some() {
+            "↑↓ pick · ←/→ column · Enter commit · Esc back · Ctrl-O thinking · Ctrl-T tools"
+        } else if self.busy {
             "Enter queue next · Ctrl-O thinking · Ctrl-T tools · Ctrl-V paste · Ctrl-C abort"
         } else {
             "Enter send · Ctrl-O thinking · Ctrl-T tools · Ctrl-V paste · ↑↓ history · PgUp/PgDn scroll · Ctrl-C abort"
@@ -288,43 +311,107 @@ impl App {
         self.render_extension_view(frame);
     }
 
+    /// Inline cascade band for the model selector (issue #72): a horizontal
+    /// breadcrumb row (`provider › model › thinking`) above the composer,
+    /// with the active column's choice window rendered as a vertical list
+    /// under its header. The user moves ←/→ between the columns (cascade) and
+    /// ↑/↓ within the active column; Enter commits from the thinking column.
     fn render_model_picker(&self, frame: &mut ratatui::Frame) {
         let Some(picker) = self.model_picker.as_ref() else {
             return;
         };
-        let area = self.theme.screen.inset(frame.area());
-        let width = area.width.clamp(40, 64);
-        let height = area.height.clamp(8, 18);
-        let rect = centered_rect(area, width, height);
-        // borders (2) + title line + blank + footer = 5 rows of chrome
-        let visible = rect.height.saturating_sub(5).max(1) as usize;
-        let (title, rows) = picker.view(visible);
+        let Some(cascade_area) = self.last_cascade_area else {
+            return;
+        };
+        // `cascade()` windows the active column's choices (this is the active
+        // column at either the provider, model or thinking level).
+        let data = picker.cascade(CASCADE_CHOICE_ROWS);
         let picker_theme = self.theme.picker;
-        let mut text = vec![
-            Line::styled(title, Style::default().fg(picker_theme.title)),
-            Line::raw(""),
+        let composer = &self.theme.composer;
+
+        // Background fill so the band reads as part of the composer chrome.
+        frame.render_widget(Clear, cascade_area);
+        frame.render_widget(
+            Block::default().style(Style::default().bg(composer.bg)),
+            cascade_area,
+        );
+
+        // Breadcrumb row: the three pinned labels, the active one accented.
+        let breadcrumb = [
+            ("provider", data.provider.as_str()),
+            ("model", data.model.as_str()),
+            ("thinking", data.thinking.as_str()),
         ];
-        for (label, selected) in rows {
-            if selected {
-                text.push(Line::styled(
-                    format!("❯ {label}"),
-                    Style::default().fg(picker_theme.fg),
-                ));
-            } else {
-                text.push(Line::raw(format!("  {label}")));
+        let breadcrumb_y = cascade_area.y;
+        let is_active = |name: &str| {
+            matches!(
+                (name, data.active),
+                ("provider", crate::model_picker::CascadeColumn::Provider)
+                    | ("model", crate::model_picker::CascadeColumn::Model)
+                    | ("thinking", crate::model_picker::CascadeColumn::Thinking)
+            )
+        };
+        let crumb_text = breadcrumb
+            .iter()
+            .map(|(name, pinned)| {
+                let crumb = format!("{name} › {pinned}");
+                if is_active(name) {
+                    format!("❯ {crumb}")
+                } else {
+                    crumb
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("   ");
+        let crumb_w = cascade_area.width as usize;
+        let crumb_style = Style::default().fg(composer.info_text).bg(composer.bg);
+        frame.buffer_mut().set_string(
+            cascade_area.x,
+            breadcrumb_y,
+            theway_transport::feed::truncate_chars(&crumb_text, crumb_w),
+            crumb_style,
+        );
+
+        // The active column's choices, rendered as a vertical list below the
+        // breadcrumb, left-padded past the ❯ marker of the breadcrumb.
+        let list_y = breadcrumb_y + 1;
+        let list_x = cascade_area.x + 2;
+        let list_w = cascade_area.width.saturating_sub(2) as usize;
+        let mut y = list_y;
+        for (text, is_cursor) in &data.rows {
+            if y >= cascade_area.bottom() {
+                break;
             }
+            let style = if *is_cursor {
+                Style::default()
+                    .fg(picker_theme.highlight_fg)
+                    .bg(picker_theme.highlight_bg)
+                    .add_modifier(ratatui::style::Modifier::BOLD)
+            } else {
+                Style::default().fg(picker_theme.fg).bg(composer.bg)
+            };
+            let line = format!("{text}  ({})", data.title);
+            frame.buffer_mut().set_string(
+                list_x,
+                y,
+                theway_transport::feed::truncate_chars(&line, list_w),
+                style,
+            );
+            y += 1;
         }
-        text.push(Line::styled(
-            "↑↓/jk navigate · Enter select · Esc back",
-            Style::default().fg(picker_theme.dim),
-        ));
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(" Select model ")
-            .title_style(Style::default().fg(picker_theme.title))
-            .border_style(Style::default().fg(picker_theme.fg));
-        frame.render_widget(Clear, rect);
-        frame.render_widget(Paragraph::new(text).block(block), rect);
+        if y == list_y {
+            // Empty active column: show a single dim hint so the band is not
+            // blank.
+            frame.buffer_mut().set_string(
+                list_x,
+                list_y,
+                theway_transport::feed::truncate_chars(
+                    "(no choices — use /model <provider:model>)",
+                    list_w,
+                ),
+                Style::default().fg(picker_theme.dim).bg(composer.bg),
+            );
+        }
     }
 
     fn render_control_plane_prompt(&self, frame: &mut ratatui::Frame) {
