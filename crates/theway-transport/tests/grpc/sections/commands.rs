@@ -22,7 +22,6 @@ async fn commands_queue_with_accepted_semantics() {
             session_id: _,
             text,
             images,
-            interrupt: _,
             ..
         } => {
             assert_eq!(text, "hello");

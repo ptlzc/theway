@@ -117,7 +117,6 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
             session_id: _,
             text,
             images,
-            interrupt: _,
             ..
         } => {
             assert_eq!(text, "hello");
@@ -146,7 +145,6 @@ async fn endpoints_return_state_accept_commands_and_stream_snapshots() {
             session_id: _,
             text,
             images,
-            interrupt: _,
             ..
         } => {
             assert_eq!(text, "describe");
