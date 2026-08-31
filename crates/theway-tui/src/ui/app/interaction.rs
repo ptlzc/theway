@@ -150,12 +150,11 @@ impl App {
         let _ = out.flush();
     }
 
-    /// Map a crossterm mouse position (1-based) to a capped feed line and
-    /// display column inside the last rendered feed pane, `None` outside it.
+    /// Map a crossterm mouse position (0-based, as crossterm reports it) to a
+    /// capped feed line and display column inside the last rendered feed pane,
+    /// `None` outside it.
     fn feed_pos_at(&self, row: u16, column: u16) -> Option<MousePos> {
         let area = self.last_feed_area?;
-        let row = row.saturating_sub(1);
-        let column = column.saturating_sub(1);
         if row < area.y || row >= area.bottom() || column < area.x || column >= area.right() {
             return None;
         }

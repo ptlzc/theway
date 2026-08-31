@@ -534,23 +534,23 @@ async fn mouse_left_drag_selects_characters_and_copies_via_osc52() {
     app.last_feed_area = Some(ratatui::layout::Rect::new(0, 0, 80, 10));
     app.last_display_scroll = 0;
 
-    // Press on row 2 column 5 (1-based) -> line 1, sub-column 4 ("B" of
-    // "row B").
+    // Press at row 1 column 4 (0-based, crossterm coordinates) -> line 1,
+    // sub-column 4 ("B" of "row B").
     app.handle_mouse(mouse_event(
         crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
-        2,
-        5,
+        1,
+        4,
     ));
     let sel = app.mouse_select.expect("press starts a selection");
     assert_eq!(sel.anchor, super::MousePos { line: 1, col: 4 });
     assert_eq!(sel.current, super::MousePos { line: 1, col: 4 });
     assert!(sel.dragging);
 
-    // Drag down to row 4 column 10 -> line 2, col 9 (past "row C"'s end).
+    // Drag down to row 3 column 9 -> line 2, col 9 (past "row C"'s end).
     app.handle_mouse(mouse_event(
         crossterm::event::MouseEventKind::Drag(crossterm::event::MouseButton::Left),
-        4,
-        10,
+        3,
+        9,
     ));
     let sel = app.mouse_select.expect("drag extends the selection");
     assert_eq!(sel.anchor, super::MousePos { line: 1, col: 4 });
@@ -560,8 +560,8 @@ async fn mouse_left_drag_selects_characters_and_copies_via_osc52() {
     // Release: selection stays (highlighted), OSC 52 payload emitted.
     app.handle_mouse(mouse_event(
         crossterm::event::MouseEventKind::Up(crossterm::event::MouseButton::Left),
-        4,
-        10,
+        3,
+        9,
     ));
     let sel = app.mouse_select.expect("release keeps the selection");
     assert!(!sel.dragging, "drag ended");
