@@ -25,9 +25,9 @@ use crate::config_payload::{assemble_config, provision_config};
 use crate::controller_storage::{ControllerSessionOps, ControllerStorageOps};
 use crate::local_tool_ops::LocalToolOps;
 
-const DISCOVERY_TIMEOUT: Duration = Duration::from_millis(800);
+const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(3);
 const STORAGE_PROBE_TIMEOUT: Duration = Duration::from_millis(800);
-const SPAWN_TIMEOUT: Duration = Duration::from_secs(20);
+const SPAWN_TIMEOUT: Duration = Duration::from_secs(30);
 const SESSION_RESTORE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Which daemon spawn variant the connector should use.

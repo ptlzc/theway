@@ -375,9 +375,18 @@ pub async fn wait_ready(timeout: Duration, cwd: &Path, pid: u32) -> Result<Strin
     };
     let addr = format!("127.0.0.1:{port}");
     // Then probe until the gRPC surface answers (bind → serve is nearly
-    // immediate, but a slow machine may need a few tries).
+    // immediate, but the first authoritative snapshot can take a couple of
+    // seconds on a large session repo). Each attempt gets the remaining
+    // budget or at most 5s, so short test timeouts stay short.
     loop {
-        if probe(&addr, Duration::from_millis(500)).await.is_ok() {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            anyhow::bail!("daemon at {addr} did not become ready within {timeout:?}");
+        }
+        if probe(&addr, remaining.min(Duration::from_secs(5)))
+            .await
+            .is_ok()
+        {
             return Ok(addr);
         }
         if tokio::time::Instant::now() >= deadline {
