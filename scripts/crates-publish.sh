@@ -37,6 +37,14 @@ if [ "${#CRATES[@]}" -eq 0 ]; then
   exit 1
 fi
 
+# The release checkout does not carry Cargo.lock (it is gitignored for this
+# workspace). `cargo pkgid` and `cargo publish` need a lock, and publishing
+# package manifests with path dependencies must be free to rewrite their
+# sources to registry versions, so generate the lock and do not pass --locked.
+if [ ! -f Cargo.lock ]; then
+  cargo generate-lockfile
+fi
+
 crate_version_on_registry() {
   local crate="$1"
   local code
@@ -70,7 +78,7 @@ for crate in "${CRATES[@]}"; do
   fi
 
   echo "[crates-publish] publish ${crate}@${VERSION}"
-  cargo publish -p "$crate" --locked
+  cargo publish -p "$crate"
 
   if ! crate_version_on_registry "$crate"; then
     echo "error: ${crate}@${VERSION} not visible on crates.io after publish" >&2
