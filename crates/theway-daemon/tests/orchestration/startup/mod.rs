@@ -170,7 +170,9 @@ async fn resolve_startup_model_applies_cli_base_url() {
 }
 
 #[tokio::test]
-async fn resolve_startup_model_returns_credential_less_default_without_credentials() {
+async fn resolve_startup_model_errors_without_credentials() {
+    // Issue #71: no credential + no model default must fail loudly instead of
+    // silently resolving a built-in Anthropic default.
     let _lock = ENV_LOCK.lock().unwrap();
     let base = TempDir::new().unwrap();
     let cwd = TempDir::new().unwrap();
@@ -186,7 +188,7 @@ async fn resolve_startup_model_returns_credential_less_default_without_credentia
         EnvGuard::remove("GOOGLE_API_KEY"),
     ];
 
-    let model = resolve_startup_model(
+    let err = resolve_startup_model(
         cwd.path(),
         None,
         None,
@@ -194,10 +196,11 @@ async fn resolve_startup_model_returns_credential_less_default_without_credentia
         &crate::startup_config::StartupConfig::default(),
     )
     .await
-    .unwrap();
+    .unwrap_err();
 
-    assert!(!model.id.is_empty());
-    assert!(!model.provider.0.is_empty());
+    let text = err.to_string();
+    assert!(text.contains("no API key found"), "{text}");
+    assert!(!text.contains("claude-haiku-4-5"), "{text}");
 }
 
 #[tokio::test]

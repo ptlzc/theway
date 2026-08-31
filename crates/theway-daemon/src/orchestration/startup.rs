@@ -599,16 +599,10 @@ async fn resolve_startup_model(
             None => (None, None),
         }
     };
-    let mut model = match crate::model::auto_detect_model(provider_override, model_override) {
-        Ok(model) => model,
-        Err(e) if provider_override.is_none() && model_override.is_none() => {
-            tracing::warn!(
-                "no credential found: {e}; starting credential-less (turns will fail until a key is configured)"
-            );
-            crate::model::credential_less_default()
-        }
-        Err(e) => return Err(e),
-    };
+    // Issue #71: a missing model must never silently resurrect a built-in
+    // provider default (e.g. Anthropic). If no credential/model can be
+    // resolved the daemon fails startup with the resolver's clear error.
+    let mut model = crate::model::auto_detect_model(provider_override, model_override)?;
     if let Some(base_url) = cli_base_url.map(str::trim).filter(|url| !url.is_empty()) {
         model.base_url = base_url.to_string();
     }

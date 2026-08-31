@@ -4,8 +4,7 @@ use theway_llm_provider::{Api, Model, Provider};
 use theway_transport::auth::{AuthStore, ProviderCredential};
 
 use crate::model::{
-    auto_detect_model, credential_less_default, explicit_model_not_found_message,
-    first_model_for_provider, CANDIDATES,
+    auto_detect_model, explicit_model_not_found_message, first_model_for_provider, CANDIDATES,
 };
 use crate::test_env::{EnvGuard, ENV_LOCK};
 
@@ -62,10 +61,14 @@ fn candidates_start_with_anthropic_and_cover_eight_providers() {
 }
 
 #[test]
-fn credential_less_default_is_catalog_backed() {
-    let model = credential_less_default();
-    assert!(!model.id.is_empty());
-    assert!(theway_llm_provider::get_model(&model.provider, &model.id).is_some());
+fn credential_less_startup_fails_loudly_with_guidance() {
+    let _env_lock = ENV_LOCK.lock().unwrap();
+    let _guards = remove_envs_for_candidates();
+
+    let err = auto_detect_model(None, None).unwrap_err().to_string();
+    assert!(err.contains("no API key found"), "{err}");
+    assert!(err.contains("--provider"), "{err}");
+    assert!(err.contains("config.toml"), "{err}");
 }
 
 #[test]

@@ -78,7 +78,11 @@ async fn test_context(
         storage,
         paths,
         crate::executor::executor_for_cwd(cwd.to_path_buf()),
-        crate::model::credential_less_default(),
+        theway_llm_provider::get_model(
+            &theway_llm_provider::Provider::from("openai"),
+            "gpt-4o-mini",
+        )
+        .expect("openai catalog model"),
         theway_core::ThinkingLevel::Off,
         resources,
         crate::orchestration::SessionMcpResources::default(),
