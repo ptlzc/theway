@@ -1,0 +1,13 @@
+# crates.io release allowlist — dependency order (leaf crates first, daemon last).
+# Consumed by scripts/release-validate.sh (version alignment) and
+# scripts/crates-publish.sh (publishing). theway-probe and the fixed-version
+# vendored/ported crates are deliberately excluded.
+tests-bridge-macro
+theway-contract
+theway-mcp
+theway-llm-provider
+theway-storage
+theway-transport
+theway-core
+theway-tui
+theway-daemon

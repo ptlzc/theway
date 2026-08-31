@@ -29,19 +29,13 @@ if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
   exit 1
 fi
 
-# Dependency-ordered allowlist: dev-macro first (runtime crates depend on it
-# as a dev-dependency), then leaves, then dependents; daemon last.
-CRATES=(
-  tests-bridge-macro
-  theway-contract
-  theway-mcp
-  theway-llm-provider
-  theway-storage
-  theway-transport
-  theway-core
-  theway-tui
-  theway-daemon
-)
+# Dependency-ordered allowlist shared with scripts/release-validate.sh:
+# leaf/dev crates first, dependents later, daemon last.
+mapfile -t CRATES < <(grep -vE '^\s*(#|$)' scripts/release-crates.txt)
+if [ "${#CRATES[@]}" -eq 0 ]; then
+  echo "error: scripts/release-crates.txt is empty" >&2
+  exit 1
+fi
 
 crate_version_on_registry() {
   local crate="$1"

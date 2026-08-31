@@ -31,6 +31,41 @@ if [ "$TAG" != "v$WORKSPACE_VERSION" ]; then
   exit 1
 fi
 
+# Runtime crates in the release allowlist (including the protocol crates
+# theway-transport and theway-contract) must all resolve to the workspace
+# version. `version.workspace = true` is the normal form; an explicit equal
+# version is accepted but should not be used.
+mapfile -t RELEASE_CRATES < <(grep -vE '^\s*(#|$)' scripts/release-crates.txt)
+if [ "${#RELEASE_CRATES[@]}" -eq 0 ]; then
+  echo "error: scripts/release-crates.txt is empty" >&2
+  exit 1
+fi
+
+crate_version_decl() {
+  awk '/^\[package\]/{in_pkg=1; next} in_pkg && /^\[/{exit} in_pkg && /^version/{print; exit}' "$1"
+}
+
+for crate in "${RELEASE_CRATES[@]}"; do
+  manifest="crates/${crate}/Cargo.toml"
+  if [ ! -f "$manifest" ]; then
+    echo "error: release crate manifest missing: $manifest" >&2
+    exit 1
+  fi
+  decl="$(crate_version_decl "$manifest")"
+  case "$decl" in
+    *version.workspace*true*)
+      ;;
+    *)
+      declared="$(printf '%s' "$decl" | sed -nE 's/^version[ \t]*=[ \t]*"([^"]+)".*/\1/p')"
+      if [ "$declared" != "$WORKSPACE_VERSION" ]; then
+        echo "error: ${crate} version must equal workspace ${WORKSPACE_VERSION}, got: ${decl}" >&2
+        exit 1
+      fi
+      ;;
+  esac
+done
+echo "aligned ${#RELEASE_CRATES[@]} runtime crates at ${WORKSPACE_VERSION}" >&2
+
 node - "$WORKSPACE_VERSION" <<'NODE'
 const fs = require('fs');
 const expected = process.argv[2];

@@ -91,8 +91,9 @@ npm run gen      # protoc (grpc-tools) + ts-proto → src/generated/
 
 Releases publish from one `vX.Y.Z` tag through the repository release workflow
 ([`.github/workflows/release.yml`](../../.github/workflows/release.yml)). The tag
-version must equal the Cargo workspace version, this package's version, and
-`@theway-ai/plugin-sdk`'s version; [`scripts/release-validate.sh`](../../scripts/release-validate.sh)
+version must equal the Cargo workspace version, every runtime crate in
+[`scripts/release-crates.txt`](../../scripts/release-crates.txt), this package's
+version, and `@theway-ai/plugin-sdk`'s version; [`scripts/release-validate.sh`](../../scripts/release-validate.sh)
 rejects any mismatch. The workflow publishes the GitHub Release binaries, the crates.io
 allowlist, and both npm SDK packages.
 
