@@ -188,8 +188,8 @@
                 ..Default::default()
             },
         ));
-        assert!(expanded.contains("    line a"), "{expanded}");
-        assert!(expanded.contains("    line b"), "{expanded}");
+        assert!(expanded.contains("  line a"), "{expanded}");
+        assert!(expanded.contains("  line b"), "{expanded}");
     }
 
     #[test]
@@ -258,8 +258,8 @@
             "expected mermaid box art: {expanded}"
         );
         // Non-fence lines stay as today (indented text rows).
-        assert!(expanded.contains("    before"), "{expanded}");
-        assert!(expanded.contains("    after"), "{expanded}");
+        assert!(expanded.contains("  before"), "{expanded}");
+        assert!(expanded.contains("  after"), "{expanded}");
         // The fence delimiters are consumed by the diagram.
         assert!(!expanded.contains("```"), "{expanded}");
     }

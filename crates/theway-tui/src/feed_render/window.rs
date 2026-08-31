@@ -183,6 +183,8 @@ fn push_thinking_peek(
 /// Collapsed tool result: a bordered preview of the first
 /// [`TOOL_RESULT_PREVIEW_LINES`] lines plus an `…(N more lines)` elision row
 /// when the result is taller. Full expansion (Ctrl+T) keeps the whole body.
+/// The left `│` bar is drawn in the block's border color (dimmer than the
+/// body text) and sits flush at the content edge.
 fn push_tool_result_preview(
     out: &mut Vec<Line<'static>>,
     lines: &[String],
@@ -195,28 +197,34 @@ fn push_tool_result_preview(
     } else {
         Style::default().fg(theme.tool_result)
     };
+    let border_style = Style::default().fg(theme.tool.border_style);
     let border_w = unicode_width::UnicodeWidthStr::width(TOOL_RESULT_BORDER);
     let content_w = width.saturating_sub(border_w).max(1);
     let preview_n = lines.len().min(TOOL_RESULT_PREVIEW_LINES);
     for line in &lines[..preview_n] {
         for row in wrap_str(line, content_w) {
-            out.push(Line::styled(format!("{TOOL_RESULT_BORDER}{row}"), style));
+            out.push(Line::from(vec![
+                Span::styled(TOOL_RESULT_BORDER, border_style),
+                Span::styled(row, style),
+            ]));
         }
     }
     if lines.len() > TOOL_RESULT_PREVIEW_LINES {
         let more = lines.len() - TOOL_RESULT_PREVIEW_LINES;
-        out.push(Line::styled(
-            format!("{TOOL_RESULT_BORDER}…({more} more lines)"),
-            RESULT_SUMMARY_STYLE,
-        ));
+        out.push(Line::from(vec![
+            Span::styled(TOOL_RESULT_BORDER, border_style),
+            Span::styled(format!("…({more} more lines)"), RESULT_SUMMARY_STYLE),
+        ]));
     }
 }
 
 /// Expanded tool result (issue #41): non-fence lines render exactly as
-/// before (`    `-indented, width-wrapped, result-colored); a ```mermaid
+/// before (`  `-indented, width-wrapped, result-colored); a ```mermaid
 /// fence routes its body through the markdown mermaid render path into a
 /// box-and-arrow diagram. The fence lines themselves are consumed by the
-/// diagram, matching pretty-mode markdown.
+/// diagram, matching pretty-mode markdown. The 2-space indent keeps the
+/// expanded body at the same left offset as the preview content (behind the
+/// `│` bar).
 fn push_tool_result_expanded(
     out: &mut Vec<Line<'static>>,
     lines: &[String],
@@ -238,7 +246,7 @@ fn push_tool_result_expanded(
             i = j + 1;
             continue;
         }
-        for row in wrap_str(&format!("    {}", lines[i]), width) {
+        for row in wrap_str(&format!("  {}", lines[i]), width) {
             out.push(Line::styled(row, style));
         }
         i += 1;

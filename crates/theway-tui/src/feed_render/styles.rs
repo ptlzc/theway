@@ -3,6 +3,7 @@ const ACCENT_USER: Color = Color::Rgb(122, 162, 247); // BLUE — user `❯` pre
 const ACCENT_ASSISTANT: Color = Color::Rgb(187, 154, 247); // legacy theme role
 const ACCENT_TOOL: Color = Color::Rgb(115, 122, 162); // DARK5 — tool name
 const TEXT_PRIMARY: Color = Color::Rgb(192, 202, 245); // FG — body text
+const TEXT_SECONDARY: Color = Color::Rgb(169, 177, 214); // TEXT_SECONDARY — secondary text
 const BG_HIGHLIGHT: Color = Color::Rgb(41, 46, 66); // BG_HIGHLIGHT — user band / selection
 
 // ── Theme-role defaults (issue #43) ─────────────────────────────────────────
@@ -15,7 +16,7 @@ pub(crate) const ASSISTANT_TEXT_DEFAULT: Option<Color> = None;
 pub(crate) const ASSISTANT_PREFIX_DEFAULT: Color = ACCENT_ASSISTANT;
 pub(crate) const TOOL_TITLE_DEFAULT: Color = ACCENT_TOOL;
 pub(crate) const TOOL_ARGS_DEFAULT: Color = Color::DarkGray;
-pub(crate) const TOOL_RESULT_DEFAULT: Color = Color::Green;
+pub(crate) const TOOL_RESULT_DEFAULT: Color = TEXT_SECONDARY; // neutral gray, not green
 pub(crate) const TOOL_ERROR_DEFAULT: Color = Color::Red;
 pub(crate) const TOOL_RUNNING_BG_DEFAULT: Option<Color> = None;
 pub(crate) const TOOL_SUCCESS_BG_DEFAULT: Option<Color> = None;
@@ -120,8 +121,10 @@ impl PartialEq for FeedRenderOptions {
 /// Lines shown in the thinking peek window.
 pub(crate) const THINKING_PEEK_LINES: usize = 3;
 
-/// Left border + indent prefixed to each tool result preview line.
-const TOOL_RESULT_BORDER: &str = "   \u{2502} ";
+/// Left border + indent prefixed to each tool result preview line. The bar
+/// sits at the block's content edge (no leading indent) so the result body
+/// hugs the left side.
+const TOOL_RESULT_BORDER: &str = "\u{2502} ";
 /// Tool result preview height before the `…(N more lines)` elision row.
 const TOOL_RESULT_PREVIEW_LINES: usize = 5;
 
