@@ -1,6 +1,6 @@
 {
   "name": "@theway-ai/plugin-sdk",
-  "version": "0.1.1",
+  "version": "0.1.9",
   "description": "TypeScript authoring SDK for theway runtime extensions.",
   "license": "MIT",
   "repository": {

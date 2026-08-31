@@ -105,7 +105,7 @@ i18n-test: ## test the bilingual documentation verifier
 doc-sync: i18n-test i18n-check ## verify bilingual documentation synchronization
 
 .PHONY: ci
-ci: fmt-check file-size-check layering-check package-check doc-sync sdks-check lint feature-gate test ## run the full CI pipeline locally
+ci: fmt-check release-check file-size-check layering-check package-check doc-sync sdks-check lint feature-gate test ## run the full CI pipeline locally
 
 # --- run / install ----------------------------------------------------------
 
@@ -145,9 +145,10 @@ hooks: ## enable the repo git hooks (transport proto change -> auto client SDK r
 sdk-sync: ## sync transport proto -> sdks/client/proto + regenerate the TypeScript client
 	bash scripts/sdk-sync.sh
 
-.PHONY: sdk-publish
-sdk-publish: ## publish the client SDK (BUMP=patch|minor|major, ISSUE="#n")
-	bash scripts/sdk-publish.sh $(BUMP) $(ISSUE)
+.PHONY: release-check
+TAG ?= v$(shell grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+release-check: ## validate a v* tag aligns workspace + npm SDK versions (TAG=v0.1.9)
+	bash scripts/release-validate.sh $(TAG)
 
 .PHONY: plugin-sdk-check
 plugin-sdk-check: ## build, typecheck examples, and test the plugin development SDK

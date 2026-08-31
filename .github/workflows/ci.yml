@@ -55,6 +55,19 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all --check
 
+  release-alignment:
+    name: Release version alignment
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: check workspace and npm SDK versions
+        run: |
+          version="$(awk -F '"' '/^\[workspace.package\]/{found=1; next} found && /^version = /{print $2; exit}' Cargo.toml)"
+          make release-check TAG="v$version"
+
   sdks:
     name: TypeScript SDKs
     runs-on: ubuntu-latest

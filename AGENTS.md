@@ -50,13 +50,13 @@ The [`Makefile`](Makefile) mirrors `.github/workflows/ci.yml`; prefer it.
 
 ## crates.io publication policy
 
-GitHub Release binaries and crates.io packages use separate explicit allowlists. A Cargo workspace member, a package that passes `cargo package` or `cargo publish --dry-run`, and a binary included in CI are not automatically approved for crates.io publication.
+GitHub Release binaries, crates.io packages, and npm SDKs publish together from one `vX.Y.Z` tag through [`.github/workflows/release.yml`](.github/workflows/release.yml). [`scripts/release-validate.sh`](scripts/release-validate.sh) requires the tag, the Cargo workspace version, `sdks/client/package.json`, and `sdks/plugin/package.json` to be the same version; a mismatched tag stops the workflow before any external write. A Cargo workspace member, a package that passes `cargo package` or `cargo publish --dry-run`, and a binary included in CI are not automatically approved for crates.io publication.
 
-- The release issue or release plan must list every approved crates.io `(package, version)` pair before the first upload. The default public set is `theway-tui`, `theway-daemon`, and only the library or support crates required for those registry packages to resolve and install. Any other package requires explicit user approval recorded in the release issue.
+- The release issue or release plan must list every approved crates.io `(package, version)` pair before the first upload. The release workflow publishes the fixed dependency-ordered allowlist in [`scripts/crates-publish.sh`](scripts/crates-publish.sh): `tests-bridge-macro`, `theway-contract`, `theway-mcp`, `theway-llm-provider`, `theway-storage`, `theway-transport`, `theway-core`, `theway-tui`, `theway-daemon`. Any other package requires explicit user approval recorded in the release issue before it is added to that script.
 - `theway-probe` is a repository-local gRPC serviceability and release-validation binary. Build and test it from this workspace with `make package-check` or package-specific Cargo commands; do not run `cargo publish -p theway-probe` and do not add it to the crates.io allowlist.
 - Never use `cargo publish --workspace`. Publish one approved package at a time with `cargo publish -p <package>`, in dependency order, after confirming the exact version does not already exist. Treat an upload as immutable: after an uncertain response, query crates.io before retrying.
-- A request to publish "binaries and packages together" means the approved GitHub Release binary matrix and the approved crates.io package allowlist, not every binary target or workspace member. Expanding either allowlist requires explicit user confirmation before the external write.
-- After each upload, verify the exact package version, repository metadata, and yank state through crates.io. Complete the release only after the installable end-user binaries have also been installed from the registry and their versions checked.
+- A request to publish "binaries and packages together" means the GitHub Release binary matrix, the fixed crates.io allowlist, and both npm SDK packages under the same tag, not every binary target or workspace member. Expanding either allowlist requires explicit user confirmation before the external write.
+- After the workflow run, verify the exact package versions, repository metadata, and yank state through crates.io. Complete the release only after the installable end-user binaries have also been installed from the registry and their versions checked.
 
 ## Testing
 

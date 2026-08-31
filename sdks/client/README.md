@@ -89,20 +89,19 @@ npm run gen      # protoc (grpc-tools) + ts-proto → src/generated/
 
 ## Publishing
 
-Publishing to the official npm registry is manual ([`scripts/sdk-publish.sh`](../../scripts/sdk-publish.sh)):
+Releases publish from one `vX.Y.Z` tag through the repository release workflow
+([`.github/workflows/release.yml`](../../.github/workflows/release.yml)). The tag
+version must equal the Cargo workspace version, this package's version, and
+`@theway-ai/plugin-sdk`'s version; [`scripts/release-validate.sh`](../../scripts/release-validate.sh)
+rejects any mismatch. The workflow publishes the GitHub Release binaries, the crates.io
+allowlist, and both npm SDK packages.
 
-```sh
-cd ../..
-make sdk-publish BUMP=minor ISSUE="#62"
-# 或: bash scripts/sdk-publish.sh minor "#62"
-```
-
-The script verifies the tree is clean and in sync, checks the active npm identity against the official
-registry, bumps the version, publishes with public access, and commits the version bump. Run
-`npm login --registry=https://registry.npmjs.org/` before invoking it; the account must satisfy npm's
-two-factor authentication requirements for publishing.
+To cut a release, bump `version` in the root `Cargo.toml` workspace section and in both
+`sdks/*/package.json` (plus their `package-lock.json` files), commit to `main`, then push
+`git tag vX.Y.Z && git push origin vX.Y.Z`. No local npm login is required — GitHub Actions
+uses npm trusted publishing.
 
 ## Versioning
 
-The SDK version tracks the theway release that the proto contract was cut from
-(theway v1.0.0 → SDK 1.0.0). Bump together with contract changes.
+The SDK version always equals the daemon/workspace version. Protocol contract changes
+bump the shared version once, and that one version publishes every artifact.
