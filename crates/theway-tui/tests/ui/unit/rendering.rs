@@ -68,10 +68,10 @@ async fn chrome_top_divider_shows_feature_labels() {
     let lines: Vec<&str> = text.lines().collect();
     let divider = lines
         .iter()
-        .find(|l| l.contains('╭'))
+        .find(|l| l.contains("graph engine"))
         .unwrap_or_else(|| panic!("composer top divider missing:\n{text}"));
     assert!(
-        divider.contains("graph engine") && !divider.contains("goal"),
+        divider.contains('╭') && !divider.contains("goal"),
         "divider row: {divider}"
     );
 }
@@ -346,15 +346,16 @@ async fn dag_band_renders_between_feed_and_busy() {
         "header: {}",
         lines[header]
     );
-    // The node row with state glyphs and the error summary follows.
-    let node_row = lines[header + 1];
+    // The bordered box rows with state glyphs and the error summary follow
+    // the header (one node per row; the 4th node folds into the tail row).
+    let node_rows = &lines[header + 1..header + 7].join("\n");
     for needle in [
         "✓ 1-explore",
         "✗ 2-impl compile error",
         "▶ 3-verify",
-        "· 4-ship",
+        "… 1 more",
     ] {
-        assert!(node_row.contains(needle), "node row: {node_row}");
+        assert!(node_rows.contains(needle), "node rows: {node_rows}");
     }
     // The band sits between the feed and the busy band (above "working").
     let working = lines

@@ -2,14 +2,21 @@
 //! between the feed and the composer busy band while `latest.dags` is
 //! non-empty.
 //!
-//! Each run gets a header line (`dag-2 · name · done/total · c/s 84`, with
-//! a mini rainbow spinner while any node runs) plus node rows: wire-order
-//! state glyphs separated by ` · `, wrapping to the band width and capped
-//! at three rows; runs beyond the first two collapse into a `… N more`
+//! Each run renders as a bordered box. The header (`dag-2 · name · done/total
+//! · c/s 84`, with a mini rainbow spinner while any node runs) is embedded in
+//! the top border; every node takes one text row — state glyph + id, a dim
+//! `← dep` annotation listing the node's dependencies, and the error summary
+//! for failed/cancelled nodes — capped at [`MAX_NODE_ROWS`] rows with a
+//! `… N more` tail row inside the box.
+//!
+//! Box widths adapt to their content (header and widest node row). When two
+//! runs fit side by side within the band width they are placed next to each
+//! other and the band takes the height of the taller box; otherwise boxes
+//! stack vertically. Runs beyond [`MAX_RUNS`] collapse into a `… N more`
 //! line. Run-level throughput reuses the busy-band [`CpsMeter`]: one meter
-//! per run samples the cumulative `sum(node.output_tokens)` each tick over
-//! a 1 s sliding window, and the same cps → step-delay mapping drives the
-//! mini spinner speed.
+//! per run samples the cumulative `sum(node.output_tokens)` each tick over a
+//! 1 s sliding window, and the same cps → step-delay mapping drives the mini
+//! spinner speed.
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -18,7 +25,6 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use theway_markdown::{MermaidStyles, render_mermaid_art};
 use theway_transport::wire::{WireDagNodeSnapshot, WireDagRunSnapshot};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -27,19 +33,19 @@ use super::stats::CpsMeter;
 
 /// Maximum runs rendered; extra runs collapse into the `… N more` line.
 pub const MAX_RUNS: usize = 2;
-/// Node rows per run before the band truncates (plus one header row).
+/// Node rows per run before the box appends a `… N more` tail row.
 pub const MAX_NODE_ROWS: usize = 3;
 /// Spinner animation cadence — one tick per event-loop frame interval,
 /// matching `SPINNER_TICK_MS` in `ui/mod.rs`.
 const TICK_MS: u64 = 10;
 /// Error summary length after a failed/cancelled node (chars).
 const ERROR_SUMMARY_CHARS: usize = 20;
-/// Node separator.
+/// Node separator inside the run header.
 const SEPARATOR: &str = " · ";
-/// Left indent for the header line and the `… N more` line.
-const HEADER_INDENT: u16 = 1;
-/// Left indent for node rows.
-const NODE_INDENT: u16 = 3;
+/// Horizontal gap between side-by-side boxes (columns).
+const BOX_GAP: u16 = 1;
+/// Box border padding: `╭─ ` … `╮` and `│ ` … ` │` (4 columns total).
+const BOX_PAD: u16 = 4;
 
 /// State glyph, color, and modifier for a node status string (design §8.2
 /// table). Unknown statuses render as pending. Colors come from the
@@ -141,7 +147,8 @@ pub fn mini_spinner(tick: u64, cps: f64) -> Span<'static> {
 
 /// Run header: `[spinner ]{id} · {name} · {done}/{total} · c/s {n}`. The
 /// mini spinner renders only while any node is running; the name truncates
-/// to fit `width` (display cells).
+/// to fit `width` (display cells). Callers embedding the header into a box
+/// top border pass a generous width and fit it separately.
 #[must_use]
 pub fn run_header_line(
     run: &WireDagRunSnapshot,
@@ -184,135 +191,82 @@ fn separator_style(band: &crate::ui::theme::DagBandStyle) -> Style {
     Style::default().fg(band.edge)
 }
 
-/// One node's spans + display width: state glyph + id in the state color
-/// (cancelled also strikes through); failed/cancelled nodes append the dim
-/// error summary.
-fn node_entry(
+/// One node's text row: state glyph + id in the state color (cancelled also
+/// strikes through), then a dim `← dep1, dep2` dependency annotation, then
+/// the error summary for failed/cancelled nodes. The row is fitted to
+/// `max_w` display cells: trailing annotation spans drop first, then the
+/// id truncates with an ellipsis.
+fn node_line(
     node: &WireDagNodeSnapshot,
     band: &crate::ui::theme::DagBandStyle,
-) -> (Vec<Span<'static>>, usize) {
+    max_w: usize,
+) -> Line<'static> {
     let (glyph, color, modifier) = node_style(&node.status, band);
     let mut spans = vec![Span::styled(
         format!("{glyph} {}", node.id),
         Style::default().fg(color).add_modifier(modifier),
     )];
-    let mut width = 2 + UnicodeWidthStr::width(node.id.as_str());
+    if !node.depends_on.is_empty() {
+        spans.push(Span::styled(
+            format!(" ← {}", node.depends_on.join(", ")),
+            Style::default().fg(band.fg).add_modifier(Modifier::DIM),
+        ));
+    }
     if matches!(node.status.as_str(), "failed" | "cancelled")
         && let Some(error) = node.error.as_deref()
         && !error.trim().is_empty()
     {
-        let summary = error_summary(error);
-        width += 1 + UnicodeWidthStr::width(summary.as_str());
         spans.push(Span::styled(
-            format!(" {summary}"),
+            format!(" {}", error_summary(error)),
             Style::default().fg(band.fg),
         ));
     }
-    (spans, width)
-}
-
-/// Wrap the run's node entries into rows of at most `width` display cells,
-/// ` · `-separated within a row, capped at [`MAX_NODE_ROWS`] rows (overflow
-/// entries drop).
-fn node_rows(
-    run: &WireDagRunSnapshot,
-    width: usize,
-    band: &crate::ui::theme::DagBandStyle,
-) -> Vec<Vec<Span<'static>>> {
-    let sep_w = UnicodeWidthStr::width(SEPARATOR);
-    let mut rows: Vec<Vec<Span<'static>>> = Vec::new();
-    let mut cur: Vec<Span<'static>> = Vec::new();
-    let mut cur_w = 0usize;
-    for (spans, w) in run.nodes.iter().map(|node| node_entry(node, band)) {
-        if !cur.is_empty() && cur_w + sep_w + w > width {
-            rows.push(std::mem::take(&mut cur));
-            cur_w = 0;
-            if rows.len() == MAX_NODE_ROWS {
-                return rows;
-            }
-        }
-        if !cur.is_empty() {
-            cur.push(Span::styled(SEPARATOR, separator_style(band)));
-            cur_w += sep_w;
-        }
-        cur_w += w;
-        cur.extend(spans);
+    // Fit to `max_w`: drop trailing annotation/error spans, then truncate
+    // the glyph+id span itself.
+    let mut total = spans
+        .iter()
+        .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+        .sum::<usize>();
+    while total > max_w && spans.len() > 1 {
+        spans.pop();
+        total = spans
+            .iter()
+            .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+            .sum::<usize>();
     }
-    if !cur.is_empty() {
-        rows.push(cur);
-    }
-    rows
-}
-
-// ── mermaid box diagram (issue #41) ───────────────────────────────────────
-
-/// Flatten a node id into a mermaid identifier: alphanumerics and `_`
-/// survive, everything else becomes `_` (mermaid ids are bare words).
-fn mermaid_id(id: &str) -> String {
-    id.chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
-
-/// Flatten a node id for use inside a `["…"]` label: quotes and newlines
-/// break the source, so they become `'` and spaces.
-fn mermaid_label(id: &str) -> String {
-    id.chars()
-        .map(|c| match c {
-            '"' => '\'',
-            '\n' | '\r' => ' ',
-            other => other,
-        })
-        .collect()
-}
-
-/// Synthesize a `graph {direction}` mermaid source for one run: one
-/// `id["{glyph} {id}"]` node per wire node plus a `dep --> id` edge for each
-/// `depends_on` entry. Node ids are sanitized via [`mermaid_id`]; the
-/// direction comes from the run (`TD` when unknown/absent).
-#[must_use]
-pub fn synthesize_mermaid(run: &WireDagRunSnapshot) -> String {
-    let direction = run.direction.to_ascii_uppercase();
-    let direction = match direction.as_str() {
-        "TD" | "TB" | "BT" | "LR" | "RL" => direction,
-        _ => "TD".to_string(),
-    };
-    let mut src = format!("graph {direction}\n");
-    for node in &run.nodes {
-        let glyph = node_style(&node.status, &crate::ui::theme::DagBandStyle::default()).0;
-        src.push_str(&format!(
-            "  {}[\"{glyph} {}\"]\n",
-            mermaid_id(&node.id),
-            mermaid_label(&node.id)
+    if total > max_w {
+        let main = spans.remove(0);
+        spans.push(Span::styled(
+            truncate_to_width(main.content.as_ref(), max_w),
+            main.style,
         ));
     }
-    for node in &run.nodes {
-        for dep in &node.depends_on {
-            src.push_str(&format!(
-                "  {} --> {}\n",
-                mermaid_id(dep),
-                mermaid_id(&node.id)
-            ));
-        }
-    }
-    src
+    Line::from(spans)
 }
 
-/// Border/edge styles for the per-run diagram, in the band palette.
-fn diagram_styles(band: &crate::ui::theme::DagBandStyle) -> MermaidStyles {
-    MermaidStyles {
-        border: separator_style(band),
-        edge: separator_style(band),
-        edge_label: Style::default().fg(band.edge),
-        title: Style::default().fg(band.title),
-        ..MermaidStyles::default()
+/// The run's node text rows, one per node and capped at [`MAX_NODE_ROWS`];
+/// overflow appends a `… N more` tail row (also width-fitted).
+fn run_node_lines(
+    run: &WireDagRunSnapshot,
+    band: &crate::ui::theme::DagBandStyle,
+    max_w: usize,
+) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line<'static>> = run
+        .nodes
+        .iter()
+        .take(MAX_NODE_ROWS)
+        .map(|node| node_line(node, band, max_w))
+        .collect();
+    if run.nodes.len() > MAX_NODE_ROWS {
+        lines.push(Line::styled(
+            truncate_to_width(
+                &format!("… {} more", run.nodes.len() - MAX_NODE_ROWS),
+                max_w,
+            ),
+            Style::default().fg(band.fg),
+        ));
     }
+    lines
 }
 
 fn line_width(line: &Line<'_>) -> usize {
@@ -322,64 +276,127 @@ fn line_width(line: &Line<'_>) -> usize {
         .sum()
 }
 
-/// Try to render `run` as a mermaid box diagram that fits `width` columns
-/// and `height_budget` rows (excluding the header row). `None` when the run
-/// carries no dependency edges (a flat glyph list reads better as text), or
-/// the render falls back to the framed source box / is too wide / too tall —
-/// callers then fall back to the wrapped text rows.
-fn run_diagram(
-    run: &WireDagRunSnapshot,
-    width: u16,
-    height_budget: u16,
-    band: &crate::ui::theme::DagBandStyle,
-) -> Option<Vec<Line<'static>>> {
-    if !run.nodes.iter().any(|node| !node.depends_on.is_empty()) {
-        return None;
-    }
-    let src = synthesize_mermaid(run);
-    let art = render_mermaid_art(&src, &diagram_styles(band), Some(usize::from(width)))?;
-    if art.fallback {
-        return None;
-    }
-    if art.styled_lines.len() > usize::from(height_budget)
-        || art
-            .styled_lines
-            .iter()
-            .any(|line| line_width(line) > usize::from(width))
-    {
-        return None;
-    }
-    Some(art.styled_lines)
+/// A laid-out box: header line (embedded in the top border), node rows,
+/// and its position/size relative to the band origin.
+#[derive(Clone)]
+struct PlacedBox {
+    header: Line<'static>,
+    lines: Vec<Line<'static>>,
+    x: u16,
+    y: u16,
+    w: u16,
+    h: u16,
 }
 
-/// Band height (rows) for `dags` at `width`: each shown run contributes one
-/// header row plus its mermaid box diagram (when one renders within the
-/// band width) or its wrapped node rows (capped at [`MAX_NODE_ROWS`]), and
-/// runs beyond [`MAX_RUNS`] add one `… N more` row. Zero with no runs.
-#[must_use]
-pub fn band_rows(dags: &[WireDagRunSnapshot], width: u16) -> u16 {
+/// Fit the header into `max_w` display cells: when it overflows, the whole
+/// line flattens and truncates with an ellipsis (rare — only on very narrow
+/// bands, where the colored spans degrade to the plain band foreground).
+fn fit_header(
+    header: &Line<'static>,
+    max_w: usize,
+    band: &crate::ui::theme::DagBandStyle,
+) -> Line<'static> {
+    if line_width(header) <= max_w {
+        return header.clone();
+    }
+    let text: String = header.spans.iter().map(|s| s.content.as_ref()).collect();
+    Line::styled(
+        truncate_to_width(&text, max_w),
+        Style::default().fg(band.fg),
+    )
+}
+
+/// Compute the box layout for `dags` within `width` columns: box widths
+/// adapt to content, two runs go side by side when they fit (returned as
+/// `side_by_side`), otherwise boxes stack vertically. `meters`/`tick` only
+/// shape the header spinner glyph, never the widths.
+fn layout_boxes(
+    dags: &[WireDagRunSnapshot],
+    width: u16,
+    meters: &HashMap<String, CpsMeter>,
+    tick: u64,
+    band: &crate::ui::theme::DagBandStyle,
+) -> (Vec<PlacedBox>, bool) {
     let shown = dags.len().min(MAX_RUNS);
-    let text_width = width.saturating_sub(NODE_INDENT);
-    let mut rows: u16 = 0;
-    for run in &dags[..shown] {
-        rows += 1;
-        match run_diagram(
-            run,
-            text_width,
-            u16::MAX,
-            &crate::ui::theme::DagBandStyle::default(),
-        ) {
-            Some(diagram) => rows += diagram.len() as u16,
-            None => {
-                rows += node_rows(
-                    run,
-                    usize::from(text_width),
-                    &crate::ui::theme::DagBandStyle::default(),
-                )
-                .len() as u16;
-            }
+    let text_w = usize::from(width.saturating_sub(BOX_PAD));
+    struct Raw {
+        header: Line<'static>,
+        lines: Vec<Line<'static>>,
+        w: u16,
+    }
+    let raws: Vec<Raw> = dags[..shown]
+        .iter()
+        .map(|run| {
+            let cps = meters.get(&run.id).map(CpsMeter::cps).unwrap_or(0.0);
+            let header = run_header_line(run, cps, tick, u16::MAX, band);
+            let header_w = line_width(&header);
+            // First pass at the full band text width: enough to decide the
+            // box width. Once `w` is known the rows are re-fitted to the
+            // box's actual inner width below.
+            let lines = run_node_lines(run, band, text_w);
+            let node_w = lines.iter().map(line_width).max().unwrap_or(0);
+            let content_w = header_w.max(node_w);
+            let w = u16::try_from(content_w)
+                .unwrap_or(u16::MAX)
+                .saturating_add(BOX_PAD)
+                .min(width);
+            let lines = run_node_lines(run, band, usize::from(w.saturating_sub(BOX_PAD)));
+            Raw { header, lines, w }
+        })
+        .collect();
+    let side_by_side = raws.len() >= 2 && raws[0].w + BOX_GAP + raws[1].w <= width;
+    let mut boxes = Vec::with_capacity(raws.len());
+    if side_by_side {
+        let h = raws
+            .iter()
+            .map(|raw| raw.lines.len() as u16 + 2)
+            .max()
+            .unwrap_or(2);
+        let second_x = raws[0].w + BOX_GAP;
+        for (i, raw) in raws.iter().enumerate() {
+            boxes.push(PlacedBox {
+                header: raw.header.clone(),
+                lines: raw.lines.clone(),
+                x: if i == 0 { 0 } else { second_x },
+                y: 0,
+                w: raw.w,
+                h,
+            });
+        }
+    } else {
+        let mut y = 0u16;
+        for raw in &raws {
+            let h = raw.lines.len() as u16 + 2;
+            boxes.push(PlacedBox {
+                header: raw.header.clone(),
+                lines: raw.lines.clone(),
+                x: 0,
+                y,
+                w: raw.w,
+                h,
+            });
+            y += h;
         }
     }
+    (boxes, side_by_side)
+}
+
+/// Band height (rows) for `dags` at `width`: side-by-side boxes take the
+/// taller height, stacked boxes sum, and runs beyond [`MAX_RUNS`] add one
+/// `… N more` row. Zero with no runs.
+#[must_use]
+pub fn band_rows(dags: &[WireDagRunSnapshot], width: u16) -> u16 {
+    if dags.is_empty() {
+        return 0;
+    }
+    let (boxes, _) = layout_boxes(
+        dags,
+        width,
+        &HashMap::new(),
+        0,
+        &crate::ui::theme::DagBandStyle::default(),
+    );
+    let mut rows = boxes.iter().map(|b| b.y + b.h).max().unwrap_or(0);
     if dags.len() > MAX_RUNS {
         rows += 1;
     }
@@ -413,10 +430,69 @@ pub fn record_meters_at(
     meters.retain(|id, _| dags.iter().any(|run| run.id == *id));
 }
 
-/// Render the DAG band into `buf` at `area`: per run one header row then
-/// its mermaid box diagram (when one renders within the remaining rows) or
-/// the wrapped node rows; a `… N more` row closes runs beyond [`MAX_RUNS`].
-/// Pure: reads only `dags`, `meters`, and `tick`.
+/// Draw one bordered box at `(x, y)` (absolute buffer coordinates):
+/// `╭─ header ─╮` top border with the header embedded, one `│ … │` row per
+/// node line, `╰───╯` bottom border.
+fn draw_box(
+    buf: &mut Buffer,
+    area: Rect,
+    x: u16,
+    y: u16,
+    pb: &PlacedBox,
+    band: &crate::ui::theme::DagBandStyle,
+) {
+    let edge = separator_style(band);
+    let inner_w = usize::from(pb.w.saturating_sub(BOX_PAD));
+    // Top border with the embedded header: `╭─ {header} ─╮` — the leading
+    // space keeps the header visually detached from the corner.
+    let header = fit_header(&pb.header, inner_w, band);
+    let header_w = line_width(&header);
+    let fill = usize::from(pb.w).saturating_sub(3 + header_w + 1);
+    let mut top_spans = vec![Span::styled("╭─ ", edge)];
+    top_spans.extend(header.spans);
+    top_spans.push(Span::styled(format!("{}╮", "─".repeat(fill)), edge));
+    buf.set_line(x, y, &Line::from(top_spans), pb.w);
+    // Node rows: every row between top and bottom gets the `│` border, so
+    // boxes placed side by side align flush at the bottom even when one has
+    // fewer nodes — the shorter box renders empty bordered rows up to the
+    // shared height.
+    let rows = usize::from(pb.h.saturating_sub(2));
+    for i in 0..rows {
+        let row_y = y + 1 + i as u16;
+        if row_y >= area.bottom() {
+            break;
+        }
+        let mut spans = vec![Span::styled("│ ", edge)];
+        match pb.lines.get(i) {
+            Some(line) => {
+                let line_w = line_width(line);
+                let pad = inner_w.saturating_sub(line_w);
+                spans.extend(line.spans.clone());
+                spans.push(Span::raw(" ".repeat(pad)));
+            }
+            None => spans.push(Span::raw(" ".repeat(inner_w))),
+        }
+        spans.push(Span::styled(" │", edge));
+        buf.set_line(x, row_y, &Line::from(spans), pb.w);
+    }
+    // Bottom border.
+    let bottom_y = y + pb.h - 1;
+    if bottom_y < area.bottom() {
+        buf.set_line(
+            x,
+            bottom_y,
+            &Line::from(Span::styled(
+                format!("╰{}╯", "─".repeat(usize::from(pb.w) - 2)),
+                edge,
+            )),
+            pb.w,
+        );
+    }
+}
+
+/// Render the DAG band into `buf` at `area`: bordered text boxes per run,
+/// side by side when they fit, then a `… N more` row for runs beyond
+/// [`MAX_RUNS`]. Pure: reads only `dags`, `meters`, and `tick`.
 pub fn render_dag_band(
     buf: &mut Buffer,
     area: Rect,
@@ -428,55 +504,24 @@ pub fn render_dag_band(
     if dags.is_empty() || area.width == 0 || area.height == 0 {
         return;
     }
-    let mut y = area.y;
-    for run in &dags[..dags.len().min(MAX_RUNS)] {
+    let (boxes, _) = layout_boxes(dags, area.width, meters, tick, band);
+    for pb in &boxes {
+        let x = area.x + pb.x;
+        let y = area.y + pb.y;
         if y >= area.bottom() {
-            break;
+            continue;
         }
-        let cps = meters.get(&run.id).map(CpsMeter::cps).unwrap_or(0.0);
-        let width = area.width.saturating_sub(HEADER_INDENT);
-        let header = run_header_line(run, cps, tick, width, band);
-        buf.set_line(area.x + HEADER_INDENT, y, &header, width);
-        y += 1;
-        let text_width = area.width.saturating_sub(NODE_INDENT);
-        match run_diagram(run, text_width, area.bottom().saturating_sub(y), band) {
-            Some(diagram) => {
-                for line in diagram {
-                    if y >= area.bottom() {
-                        break;
-                    }
-                    buf.set_line(area.x + NODE_INDENT, y, &line, text_width);
-                    y += 1;
-                }
-            }
-            None => {
-                for row in node_rows(run, usize::from(text_width), band) {
-                    if y >= area.bottom() {
-                        break;
-                    }
-                    let line = Line::from(row);
-                    buf.set_line(
-                        area.x + NODE_INDENT,
-                        y,
-                        &line,
-                        area.width.saturating_sub(NODE_INDENT),
-                    );
-                    y += 1;
-                }
-            }
-        }
+        draw_box(buf, area, x, y, pb, band);
     }
-    if dags.len() > MAX_RUNS && y < area.bottom() {
-        let more = Line::styled(
-            format!("… {} more", dags.len() - MAX_RUNS),
-            separator_style(band),
-        );
-        buf.set_line(
-            area.x + HEADER_INDENT,
-            y,
-            &more,
-            area.width.saturating_sub(HEADER_INDENT),
-        );
+    if dags.len() > MAX_RUNS {
+        let more_y = area.y + boxes.iter().map(|b| b.y + b.h).max().unwrap_or(0);
+        if more_y < area.bottom() {
+            let more = Line::styled(
+                format!("… {} more", dags.len() - MAX_RUNS),
+                separator_style(band),
+            );
+            buf.set_line(area.x, more_y, &more, area.width);
+        }
     }
 }
 

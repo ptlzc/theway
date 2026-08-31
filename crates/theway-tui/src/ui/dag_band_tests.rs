@@ -179,44 +179,7 @@ fn mini_spinner_speed_follows_cps() {
     );
 }
 
-// ── node row wrapping ───────────────────────────────────────────────
-
-#[test]
-fn node_rows_wrap_with_separator_and_cap() {
-    let ids: Vec<String> = (0..10).map(|i| format!("n{i}")).collect();
-    let nodes: Vec<_> = ids.iter().map(|id| node(id, "succeeded")).collect();
-    let fixture = run("dag-1", nodes);
-    // Entry "✓ n0" = 4 cells; width 15 fits two entries (4+3+4 = 11,
-    // a third would need 18) — 10 nodes wrap to 5 rows, capped at 3.
-    let rows = node_rows(&fixture, 15, &band());
-    assert_eq!(rows.len(), MAX_NODE_ROWS);
-    let first: String = rows[0].iter().map(|s| s.content.as_ref()).collect();
-    assert_eq!(first, "✓ n0 · ✓ n1");
-    // A wide band fits all entries on one row.
-    let wide = node_rows(&fixture, 80, &band());
-    assert_eq!(wide.len(), 1);
-}
-
-#[test]
-fn band_rows_counts_runs_and_more_line() {
-    assert_eq!(band_rows(&[], 80), 0);
-    let one = vec![run("dag-1", vec![node("a", "pending")])];
-    assert_eq!(band_rows(&one, 80), 2); // header + one node row
-    let three = vec![
-        run("dag-1", Vec::new()),
-        run("dag-2", Vec::new()),
-        run("dag-3", Vec::new()),
-    ];
-    // Two shown runs (header-only each) + the `… 1 more` line.
-    assert_eq!(band_rows(&three, 80), 3);
-    // Per-run cap: header + at most three node rows.
-    let ids: Vec<String> = (0..50).map(|i| format!("n{i}")).collect();
-    let nodes: Vec<_> = ids.iter().map(|id| node(id, "pending")).collect();
-    let big = vec![run("dag-1", nodes)];
-    assert_eq!(band_rows(&big, 20), 1 + MAX_NODE_ROWS as u16);
-}
-
-// ── mermaid box diagram (issue #41) ─────────────────────────────────
+// ── node text rows ──────────────────────────────────────────────────
 
 /// Three-node dependency chain: `1-explore → 2-impl → 3-verify`.
 fn chained_run() -> WireDagRunSnapshot {
@@ -229,122 +192,170 @@ fn chained_run() -> WireDagRunSnapshot {
 }
 
 #[test]
-fn synthesize_mermaid_source_snapshot() {
-    let src = synthesize_mermaid(&chained_run());
-    let expected = "graph TD\n  \
-            1_explore[\"✓ 1-explore\"]\n  \
-            2_impl[\"▶ 2-impl\"]\n  \
-            3_verify[\"· 3-verify\"]\n  \
-            1_explore --> 2_impl\n  \
-            2_impl --> 3_verify\n";
-    assert_eq!(src, expected);
+fn node_line_annotates_deps_and_errors() {
+    let mut n = node("2-impl", "failed");
+    n.depends_on = vec!["1-explore".into(), "side".into()];
+    n.error = Some("compile error".into());
+    let line = node_line(&n, &band(), 80);
+    assert_eq!(line_text(&line), "✗ 2-impl ← 1-explore, side compile error");
+    // No annotation without deps or error.
+    let plain = node_line(&node("a", "succeeded"), &band(), 80);
+    assert_eq!(line_text(&plain), "✓ a");
 }
 
 #[test]
-fn synthesize_mermaid_sanitizes_ids_and_direction() {
-    let mut wide = run("dag-1", vec![node("1-a", "succeeded")]);
-    wide.direction = "lr".into();
-    let src = synthesize_mermaid(&wide);
-    assert!(src.starts_with("graph LR\n"), "{src}");
-    assert!(src.contains("1_a[\"✓ 1-a\"]"), "{src}");
+fn node_line_fits_to_max_width() {
+    let mut n = node("very-long-node-id", "succeeded");
+    n.depends_on = vec!["another-long-dep".into()];
+    let line = node_line(&n, &band(), 12);
+    let text = line_text(&line);
+    assert!(UnicodeWidthStr::width(text.as_str()) <= 12, "{text}");
+    assert!(text.starts_with("✓ very"), "{text}");
+    assert!(text.ends_with('…'), "{text}");
+    // Generous width keeps the whole annotation.
+    let wide = node_line(&n, &band(), 80);
+    assert_eq!(line_text(&wide), "✓ very-long-node-id ← another-long-dep");
 }
 
 #[test]
-fn run_diagram_renders_box_and_arrow_art() {
-    let diagram = run_diagram(&chained_run(), 60, 20, &band()).expect("diagram must render");
-    let text: String = diagram
-        .iter()
-        .flat_map(|line| line.spans.iter().map(|s| s.content.as_ref()))
+fn run_node_lines_caps_at_max_rows() {
+    let nodes: Vec<_> = (0..7)
+        .map(|i| node(&format!("n{i}"), "succeeded"))
         .collect();
-    assert!(text.contains('┌') && text.contains('┐'), "{text}");
-    assert!(text.contains('▼'), "TD arrow glyph missing: {text}");
-    assert!(text.contains("✓ 1-explore"), "{text}");
-    assert!(text.contains("3-verify"), "{text}");
-    // Every diagram row fits the band width.
-    for line in &diagram {
-        assert!(line_width(line) <= 60, "{line:?}");
-    }
+    let fixture = run("dag-1", nodes);
+    let lines = run_node_lines(&fixture, &band(), 80);
+    assert_eq!(lines.len(), MAX_NODE_ROWS + 1); // 3 nodes + `… 4 more`
+    assert_eq!(line_text(&lines[0]), "✓ n0");
+    assert!(line_text(&lines[MAX_NODE_ROWS]).contains("… 4 more"));
+    // Under the cap: no tail row.
+    let small = run("dag-1", vec![node("a", "succeeded")]);
+    assert_eq!(run_node_lines(&small, &band(), 80).len(), 1);
+}
+
+// ── band layout: bordered boxes, side by side when they fit ─────────
+
+#[test]
+fn band_rows_counts_boxes_and_more_line() {
+    assert_eq!(band_rows(&[], 80), 0);
+    // One node → top border + node row + bottom border.
+    let one = vec![run("dag-1", vec![node("a", "pending")])];
+    assert_eq!(band_rows(&one, 80), 3);
+    // Three empty runs: two header-only boxes side by side (2 rows) + `… 1 more`.
+    let three = vec![
+        run("dag-1", Vec::new()),
+        run("dag-2", Vec::new()),
+        run("dag-3", Vec::new()),
+    ];
+    assert_eq!(band_rows(&three, 80), 3);
+    // Per-run cap: top border + 3 node rows + `… N more` + bottom border.
+    let ids: Vec<String> = (0..50).map(|i| format!("n{i}")).collect();
+    let nodes: Vec<_> = ids.iter().map(|id| node(id, "pending")).collect();
+    let big = vec![run("dag-1", nodes)];
+    assert_eq!(band_rows(&big, 20), MAX_NODE_ROWS as u16 + 3);
 }
 
 #[test]
-fn run_diagram_returns_none_without_dependency_edges() {
-    let flat = run("dag-1", vec![node("a", "pending"), node("b", "pending")]);
-    assert!(run_diagram(&flat, 60, 20, &band()).is_none());
-    assert!(run_diagram(&run("dag-1", Vec::new()), 60, 20, &band()).is_none());
+fn band_rows_side_by_side_when_width_fits() {
+    // Two chained runs: each box = top + 3 node rows + bottom = 5 rows.
+    let dags = vec![chained_run(), chained_run()];
+    // Wide band: boxes sit next to each other, height = taller box = 5.
+    assert_eq!(band_rows(&dags, 80), 5);
+    // Narrow band: boxes stack, heights sum (5 + 5 = 10).
+    let ids = [
+        "node-aaaaaaaaaaaa",
+        "node-bbbbbbbbbbbb",
+        "node-cccccccccccc",
+    ];
+    let wide_nodes: Vec<_> = ids.iter().map(|id| node(id, "succeeded")).collect();
+    let wide_run = run("dag-1", wide_nodes);
+    let dags = vec![wide_run.clone(), wide_run.clone()];
+    assert_eq!(band_rows(&dags, 20), 10);
+    // A single run never stacks with itself.
+    assert_eq!(band_rows(std::slice::from_ref(&wide_run), 20), 5);
 }
 
 #[test]
-fn run_diagram_falls_back_when_too_tall() {
-    let chained = chained_run();
-    let full = run_diagram(&chained, 60, 100, &band()).expect("diagram renders");
-    assert!(full.len() > MAX_NODE_ROWS);
-    assert!(run_diagram(&chained, 60, full.len() as u16 - 1, &band()).is_none());
-}
-
-#[test]
-fn run_diagram_falls_back_when_too_wide() {
-    let mut prev: Option<String> = None;
-    let mut nodes = Vec::new();
-    for i in 0..6 {
-        let mut n = node(&format!("node-{i}"), "succeeded");
-        if let Some(p) = &prev {
-            n.depends_on = vec![p.clone()];
-        }
-        prev = Some(n.id.clone());
-        nodes.push(n);
-    }
-    let mut wide = run("dag-1", nodes);
-    wide.direction = "LR".into();
-    // The horizontal chain exceeds a 20-column band.
-    assert!(
-        run_diagram(&wide, 20, 50, &band()).is_none(),
-        "over-wide diagram must fall back"
-    );
-    // The same source lays out fine at a generous width.
-    assert!(run_diagram(&wide, 200, 50, &band()).is_some());
-}
-
-#[test]
-fn band_rows_counts_diagram_height() {
-    let chained = chained_run();
-    let diagram = run_diagram(&chained, 80 - NODE_INDENT, u16::MAX, &band()).unwrap();
-    assert_eq!(band_rows(&[chained], 80), 1 + diagram.len() as u16);
-    // Flat runs (no edges) keep the text-row accounting.
-    let flat = run("dag-1", vec![node("a", "pending"), node("b", "pending")]);
-    assert_eq!(band_rows(&[flat], 80), 2);
-}
-
-#[test]
-fn render_dag_band_draws_box_diagram_that_fits() {
-    let chained = chained_run();
-    let rows = band_rows(std::slice::from_ref(&chained), 80);
+fn render_dag_band_draws_bordered_boxes_side_by_side() {
+    // A 3-node chained run next to an empty run: the empty box stretches to
+    // the taller height so both bottoms align flush on the same row.
+    let dags = vec![chained_run(), run("dag-2", Vec::new())];
+    let rows = band_rows(&dags, 80);
+    assert_eq!(rows, 5);
     let area = Rect::new(0, 0, 80, rows);
     let mut buf = Buffer::empty(area);
-    render_dag_band(&mut buf, area, &[chained], &HashMap::new(), 0, &band());
+    render_dag_band(&mut buf, area, &dags, &HashMap::new(), 0, &band());
     let text = buffer_text(&buf);
-    assert!(
-        text.lines().next().unwrap().contains("dag-1 · demo"),
-        "{text}"
+    let lines: Vec<&str> = text.lines().collect();
+    // Both box tops on the same row (side by side). The first run has a
+    // running node, so its header starts with the mini spinner after the
+    // `╭─ ` border prefix.
+    assert!(lines[0].starts_with("╭─ "), "{}", lines[0]);
+    assert!(lines[0].contains("dag-1 · demo"), "{}", lines[0]);
+    assert!(lines[0].contains("╭─ dag-2 · demo"), "{}", lines[0]);
+    // Node rows carry the dependency annotation.
+    assert!(lines[1].contains("✓ 1-explore"), "{}", lines[1]);
+    assert!(lines[2].contains("▶ 2-impl ← 1-explore"), "{}", lines[2]);
+    assert!(lines[3].contains("· 3-verify ← 2-impl"), "{}", lines[3]);
+    // Equal-height alignment: the empty box renders bordered empty rows, and
+    // both bottom borders land on the same (last) row.
+    assert!(lines[1].contains("│"), "{}", lines[1]);
+    assert_eq!(
+        lines[4].matches('╰').count(),
+        2,
+        "both boxes must bottom-align on the last row: {}",
+        lines[4]
     );
-    assert!(text.contains('┌') && text.contains('┐'), "{text}");
-    assert!(text.contains('▼'), "TD arrow glyph missing: {text}");
-    assert!(text.contains("✓ 1-explore"), "{text}");
-    // The diagram replaces the wrapped text rows.
-    assert!(!text.contains("✓ 1-explore · "), "{text}");
+    // Every row exactly fills its box width (no overflow past the border).
+    for line in &lines {
+        let trimmed = line.trim_end();
+        assert!(
+            UnicodeWidthStr::width(trimmed) <= 80,
+            "row too wide: {trimmed}"
+        );
+    }
 }
 
 #[test]
-fn render_dag_band_falls_back_to_text_rows_when_too_tall() {
-    let chained = chained_run();
-    // Header + 3 text rows fit; the chained diagram does not.
-    let area = Rect::new(0, 0, 80, 4);
+fn render_dag_band_stacks_when_too_narrow() {
+    let dags = vec![chained_run(), chained_run()];
+    let rows = band_rows(&dags, 20);
+    assert_eq!(rows, 10);
+    let area = Rect::new(0, 0, 20, rows);
     let mut buf = Buffer::empty(area);
-    render_dag_band(&mut buf, area, &[chained], &HashMap::new(), 0, &band());
+    render_dag_band(&mut buf, area, &dags, &HashMap::new(), 0, &band());
     let text = buffer_text(&buf);
-    assert!(text.contains("dag-1 · demo"), "{text}");
-    assert!(text.contains("✓ 1-explore"), "{text}");
-    assert!(text.contains("▶ 2-impl"), "{text}");
-    assert!(!text.contains('┌'), "{text}");
+    let lines: Vec<&str> = text.lines().collect();
+    // Box 1 occupies rows 0-4, box 2 rows 5-9.
+    assert!(
+        lines[0].starts_with("╭─ ") && lines[0].contains("dag-1 · demo"),
+        "{}",
+        lines[0]
+    );
+    assert!(
+        lines[5].starts_with("╭─ ") && lines[5].contains("dag-1 · demo"),
+        "{}",
+        lines[5]
+    );
+    assert!(lines[4].contains("╰"), "{}", lines[4]);
+    assert!(lines[9].contains("╰"), "{}", lines[9]);
+}
+
+#[test]
+fn render_dag_band_fits_header_and_nodes_into_narrow_box() {
+    // A very long run name must not overflow the box.
+    let mut wide = run("dag-1", vec![node("a", "succeeded")]);
+    wide.name = "this-is-an-extremely-long-run-name-that-cannot-possibly-fit".into();
+    let area = Rect::new(0, 0, 24, 3);
+    let mut buf = Buffer::empty(area);
+    render_dag_band(&mut buf, area, &[wide], &HashMap::new(), 0, &band());
+    let text = buffer_text(&buf);
+    for row in text.lines() {
+        assert!(
+            UnicodeWidthStr::width(row.trim_end()) <= 24,
+            "row overflows narrow band: {row}"
+        );
+    }
+    assert!(text.contains('…'), "{text}");
 }
 
 // ── c/s meter accounting ────────────────────────────────────────────
@@ -377,6 +388,7 @@ fn record_meters_accounts_output_token_deltas() {
 fn band_fixture() -> Vec<WireDagRunSnapshot> {
     let mut failed = node("2-impl", "failed");
     failed.error = Some("compile error".into());
+    failed.depends_on = vec!["1-explore".into()];
     vec![
         run(
             "dag-1",
@@ -384,10 +396,6 @@ fn band_fixture() -> Vec<WireDagRunSnapshot> {
                 node("1-explore", "succeeded"),
                 failed,
                 node("3-verify", "running"),
-                node("4-ship", "pending"),
-                node("5-done", "skipped"),
-                node("6-stop", "cancelled"),
-                node("7-wait", "ready"),
             ],
         ),
         run("dag-2", Vec::new()),
@@ -398,14 +406,15 @@ fn band_fixture() -> Vec<WireDagRunSnapshot> {
 #[test]
 fn render_dag_band_header_nodes_and_more() {
     let dags = band_fixture();
-    let area = Rect::new(0, 0, 100, 9);
+    let area = Rect::new(0, 0, 100, 7);
     let mut buf = Buffer::empty(area);
     render_dag_band(&mut buf, area, &dags, &HashMap::new(), 0, &band());
     let text = buffer_text(&buf);
     let lines: Vec<&str> = text.lines().collect();
-    // Header with spinner (a node is running), progress, and c/s.
+    // Top border embeds the header (spinner: a node is running).
+    assert!(lines[0].starts_with("╭─ "), "{}", lines[0]);
     assert!(
-        lines[0].contains("dag-1 · demo · 2/7 · c/s 0"),
+        lines[0].contains("dag-1 · demo · 1/3 · c/s 0"),
         "{}",
         lines[0]
     );
@@ -416,29 +425,25 @@ fn render_dag_band_header_nodes_and_more() {
         "{}",
         lines[0]
     );
-    // All seven state glyphs on the node row with the error summary.
+    // One node row per node, dependency annotation included.
     assert!(lines[1].contains("✓ 1-explore"), "{}", lines[1]);
-    assert!(lines[1].contains("✗ 2-impl compile error"), "{}", lines[1]);
-    assert!(lines[1].contains("▶ 3-verify"), "{}", lines[1]);
-    assert!(lines[1].contains("· 4-ship"), "{}", lines[1]);
-    assert!(lines[1].contains("↷ 5-done"), "{}", lines[1]);
-    assert!(lines[1].contains("× 6-stop"), "{}", lines[1]);
-    assert!(lines[1].contains("▸ 7-wait"), "{}", lines[1]);
-    // Second run header, then the overflow line; the third run's id
-    // never renders.
     assert!(
-        lines[2].contains("dag-2 · demo · 0/0 · c/s 0"),
+        lines[2].contains("✗ 2-impl ← 1-explore compile error"),
         "{}",
         lines[2]
     );
-    assert!(lines[3].contains("… 1 more"), "{}", lines[3]);
+    assert!(lines[3].contains("▶ 3-verify"), "{}", lines[3]);
+    // Bottom border of the first box, second box top on the same row.
+    assert!(lines[4].contains("╰"), "{}", lines[4]);
+    // The third run folds into the `… 1 more` row after the boxes.
+    assert!(text.contains("… 1 more"), "{text}");
     assert!(!text.contains("dag-3"), "{text}");
 }
 
 #[test]
 fn render_dag_band_node_colors() {
     let dags = band_fixture();
-    let area = Rect::new(0, 0, 100, 9);
+    let area = Rect::new(0, 0, 100, 7);
     let mut buf = Buffer::empty(area);
     render_dag_band(&mut buf, area, &dags, &HashMap::new(), 0, &band());
     let (x, y) = find_cell(&buf, "✓");
@@ -447,24 +452,15 @@ fn render_dag_band_node_colors() {
     assert_eq!(buf[(x, y)].fg, Color::Red);
     let (x, y) = find_cell(&buf, "▶");
     assert_eq!(buf[(x, y)].fg, Color::Cyan);
-    let (x, y) = find_cell(&buf, "×");
-    assert_eq!(buf[(x, y)].fg, Color::DarkGray);
-    assert!(buf[(x, y)].modifier.contains(Modifier::CROSSED_OUT));
-    let (x, y) = find_cell(&buf, "↷");
-    assert_eq!(buf[(x, y)].fg, Color::Gray);
-    let (x, y) = find_cell(&buf, "▸");
-    assert_eq!(buf[(x, y)].fg, Color::Yellow);
-    // Pending: the `·` glyph also serves as the separator, so locate it
-    // via its node id ("· 4-ship").
+    // The dependency annotation is dimmed.
     let row_y = (0..area.height)
-        .find(|&y| buffer_row(&buf, y).contains("4-ship"))
+        .find(|&y| buffer_row(&buf, y).contains("2-impl"))
         .unwrap();
-    let x = (2..area.width)
-        .find(|&x| {
-            buf[(x, row_y)].symbol() == "4"
-                && buf[(x - 1, row_y)].symbol() == " "
-                && buf[(x - 2, row_y)].symbol() == "·"
-        })
+    let x = (0..area.width)
+        .find(|&x| buf[(x, row_y)].symbol() == "←")
         .unwrap();
-    assert_eq!(buf[(x - 2, row_y)].fg, Color::DarkGray);
+    assert!(buf[(x, row_y)].modifier.contains(Modifier::DIM));
+    // The border uses the edge color.
+    let (bx, by) = find_cell(&buf, "╭");
+    assert_eq!(buf[(bx, by)].fg, band().edge);
 }
