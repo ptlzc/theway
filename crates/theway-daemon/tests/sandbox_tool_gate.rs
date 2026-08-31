@@ -25,12 +25,14 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use tempfile::TempDir;
 use theway_core::AgentTool;
 use theway_core::executor::{ExecutorKind, ToolExecutor};
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::jobs::SubagentJobRegistry;
 use theway_daemon::DaemonServices;
 use theway_daemon::executor::sandbox::SandboxExecutor;
+use theway_daemon::runtime_storage::SessionRepository;
 use theway_daemon::tools;
 use theway_daemon::tools::assembly;
 use theway_daemon::tools::assembly::reload::ReloadRuntimeSlot;
@@ -176,6 +178,10 @@ fn session_tool_set_assembly_is_fail_closed() {
     let dag_engine = Arc::new(DagEngine::new());
     let registry = SubagentJobRegistry::new();
     let model = faux_model();
+    let repo_dir = TempDir::new().unwrap();
+    let repo: Arc<dyn SessionRepository> = Arc::new(
+        theway_storage::sqlite_repo::SqliteSessionRepo::new(repo_dir.path()),
+    );
     let tools = tools::session_tool_set_for_cwd(
         std::path::Path::new("/nonexistent-memory-dir"),
         std::path::Path::new("/nonexistent-theway-base"),
@@ -187,6 +193,7 @@ fn session_tool_set_assembly_is_fail_closed() {
         "session-sandbox-gate",
         sandbox_exec(),
         &DaemonServices::new(),
+        repo,
         std::path::PathBuf::from("/tmp/session-cwd"),
     );
     let names = names(&tools);
