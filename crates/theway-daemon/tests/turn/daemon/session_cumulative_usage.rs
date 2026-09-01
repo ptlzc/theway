@@ -164,7 +164,6 @@ fn install_activator(config: &mut DaemonConfig, main_run_tx: mpsc::UnboundedSend
         builder,
         local_runtime_storage(),
         config.paths.clone(),
-        faux_model(),
         theway_core::ThinkingLevel::High,
         Vec::new(),
         Vec::new(),

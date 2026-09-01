@@ -326,7 +326,6 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
             &session_runtime_builder,
             storage.clone(),
             paths.clone(),
-            model.clone(),
             thinking,
             options.builtin_skills.clone(),
             startup.builtin_skills.clone(),
@@ -398,6 +397,12 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
                     "Summarize the following reasoning transcript into a STRUCTURED markdown summary. Output ONLY the summary:\n## Goal\n- ...\n## Key steps\n- ...\n## Findings\n- ...\n## Decision\n- ...\n\nThinking transcript:\n\n{}",
                     theway_transport::feed::truncate_chars(&text, 24_000)
                 );
+                // Thinking summarization needs a model; a model-less session
+                // cannot summarise reasoning yet.
+                let Some(summarizer_model) = summarizer_model else {
+                    return Err("no model set for this session; cannot summarize thinking"
+                        .to_string());
+                };
                 let result = theway_core::multiagent::runner::run_agent(
                     theway_core::multiagent::runner::AgentRunOptions {
                         launch,
@@ -557,13 +562,18 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     result
 }
 
+/// Resolve the startup model, if any. Model is session-level (injected by the
+/// client per-session via `SetModel`), so startup does NOT auto-detect from
+/// environment variables or fail when none is configured. The daemon therefore
+/// starts model-less when neither the CLI flags nor a settings-provided default
+/// is present; the client later injects a model for each session.
 async fn resolve_startup_model(
     cwd: &std::path::Path,
     cli_provider: Option<&str>,
     cli_model: Option<&str>,
     cli_base_url: Option<&str>,
     startup: &StartupConfig,
-) -> Result<theway_llm_provider::Model> {
+) -> Result<Option<theway_llm_provider::Model>> {
     // TODO(#73): custom model definitions are still read from local
     // `models.json` files; once the settings RPC provisions custom models,
     // this local read goes away. A controller-provided StorageService owns
@@ -584,9 +594,9 @@ async fn resolve_startup_model(
     }
 
     // Issue #73: the default provider/model comes from the in-memory
-    // StartupConfig (settings RPC), not a `[model]` config.toml read. Until
-    // the controller provisions a default this stays None and the legacy env
-    // auto-detection path applies; a lone CLI flag keeps that path too.
+    // StartupConfig (settings RPC), not a `[model]` config.toml read. A lone
+    // CLI flag keeps that path. We never fall back to env auto-detection here:
+    // model selection is the client's job (per-session).
     let cli_overrides_model = cli_provider.is_some() || cli_model.is_some();
     let (provider_override, model_override) = if cli_overrides_model {
         (cli_provider, cli_model)
@@ -599,14 +609,16 @@ async fn resolve_startup_model(
             None => (None, None),
         }
     };
-    // Issue #71: a missing model must never silently resurrect a built-in
-    // provider default (e.g. Anthropic). If no credential/model can be
-    // resolved the daemon fails startup with the resolver's clear error.
-    let mut model = crate::model::auto_detect_model(provider_override, model_override)?;
+    let Some((provider, id)) = provider_override.zip(model_override) else {
+        // No explicit model and no settings default: start model-less. The client
+        // injects a per-session model via `SetModel` on attach.
+        return Ok(None);
+    };
+    let mut model = crate::model::auto_detect_model(Some(provider), Some(id))?;
     if let Some(base_url) = cli_base_url.map(str::trim).filter(|url| !url.is_empty()) {
         model.base_url = base_url.to_string();
     }
-    Ok(model)
+    Ok(Some(model))
 }
 
 #[cfg(test)]

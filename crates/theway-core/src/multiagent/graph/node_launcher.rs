@@ -49,7 +49,7 @@ struct NodeJob {
     launch: AgentRunParams,
     /// Resolved tool set for this node's subagent (from the launcher's resolver).
     tools: Vec<Arc<dyn AgentTool>>,
-    model: Model,
+    model: Option<Model>,
     stream_fn: Option<StreamFn>,
     task_text: String,
     thinking: Option<String>,
@@ -69,8 +69,9 @@ struct NodeJob {
 pub struct NodeLauncherImpl {
     engine: Arc<DagEngine>,
     /// Parent agent's model, cloned at construction (same as `SubagentTool`) so a later
-    /// `/model` switch doesn't change in-flight node settings.
-    model: Model,
+    /// `/model` switch doesn't change in-flight node settings. `None` when the session has
+    /// no model yet — launching a node errors with a clear message.
+    model: Option<Model>,
     /// Stream fn shared with the parent. `None` falls back to `theway_llm_provider::stream_simple`.
     stream_fn: Option<StreamFn>,
     /// Working directory context for the run (spawned agents run in the process cwd; the
@@ -158,13 +159,18 @@ impl NodeLauncher for NodeLauncherImpl {
         );
 
         // v1 model override: rewrite only the id, keep the parent's provider/base_url.
-        // A full lookup against the loaded models catalog is a follow-up.
-        let model = match node.model.as_deref() {
-            Some(mid) if mid != self.model.id => Model {
-                id: mid.to_string(),
-                ..self.model.clone()
+        // A full lookup against the loaded models catalog is a follow-up. When the
+        // parent session has no model, the node inherits `None` and fails when the
+        // sub-harness tries to run (clear "no model" error).
+        let model = match &self.model {
+            Some(parent) => match node.model.as_deref() {
+                Some(mid) if mid != parent.id => Some(Model {
+                    id: mid.to_string(),
+                    ..parent.clone()
+                }),
+                _ => Some(parent.clone()),
             },
-            _ => self.model.clone(),
+            None => None,
         };
 
         let job = NodeJob {
@@ -190,7 +196,7 @@ impl NodeLauncher for NodeLauncherImpl {
 /// the app-layer tool-set + launch resolvers (spec name → tools / launch params).
 pub fn node_launcher(
     engine: Arc<DagEngine>,
-    model: Model,
+    model: impl Into<Option<Model>>,
     stream_fn: Option<StreamFn>,
     cwd: PathBuf,
     registry: SubagentJobRegistry,
@@ -199,7 +205,7 @@ pub fn node_launcher(
 ) -> Arc<NodeLauncherImpl> {
     Arc::new(NodeLauncherImpl {
         engine,
-        model,
+        model: model.into(),
         stream_fn,
         cwd,
         registry,
@@ -225,11 +231,35 @@ async fn run_node(job: NodeJob, cancel: CancellationToken) {
     let engine_cb = engine.clone();
     let run_id_cb = run_id.clone();
     let node_id_cb = node_id.clone();
+    // A DAG node runs a subagent, which needs a model. When the owning session has no
+    // model yet, fail the node with a clear, retryable error instead of building the
+    // sub-harness model-less.
+    let Some(node_model) = job.model else {
+        engine.on_node_completed(
+            &run_id,
+            &node_id,
+            NodeOutcome {
+                success: false,
+                error: Some(
+                    "no model set for this session; select a model in the TUI before launching DAG nodes"
+                        .to_string(),
+                ),
+                duration_ms: 0,
+                attempt,
+                total_attempts: attempt,
+                input_tokens: 0,
+                output_tokens: 0,
+                output: None,
+            },
+        );
+        let _ = (engine_cb, run_id_cb, node_id_cb);
+        return;
+    };
     let result = run_agent(AgentRunOptions {
         launch: job.launch,
         tools: job.tools,
         prompt: job.task_text,
-        model: job.model,
+        model: node_model,
         stream_fn: job.stream_fn,
         timeout: job.timeout,
         thinking: job.thinking,

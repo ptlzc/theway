@@ -160,7 +160,7 @@ mod tests {
     fn build_harness_with_skills(skills: Vec<Skill>) -> Arc<AgentHarness> {
         let storage = Arc::new(MemorySessionStorage::new()) as Arc<dyn SessionStorage>;
         let session = Session::new(storage);
-        let mut opts = AgentHarnessOptions::new(fake_model(), session);
+        let mut opts = AgentHarnessOptions::new(Some(fake_model()), session);
         opts.skills = skills;
         Arc::new(AgentHarness::new(opts))
     }

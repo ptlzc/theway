@@ -214,7 +214,7 @@ impl SessionRuntimeState {
             compat: None,
         };
         let harness = std::sync::Arc::new(theway_core::AgentHarness::new(
-            theway_core::AgentHarnessOptions::new(model, session),
+            theway_core::AgentHarnessOptions::new(Some(model), session),
         ));
         let trigger_executor =
             std::sync::Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(

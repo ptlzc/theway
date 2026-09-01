@@ -42,20 +42,15 @@ impl App {
         let label_x = track_x.saturating_add(3);
         if label_x < area.right() {
             let band = self.theme.statusbar;
-            let mut spans = vec![
-                Span::styled("working", Style::default().fg(band.busy)),
-                Span::styled(
-                    format!(" {}", self.elapsed_label()),
-                    Style::default().fg(band.fg),
-                ),
-            ];
+            let mut spans = vec![Span::styled(
+                "working",
+                Style::default().fg(band.busy),
+            )];
             let session_usage = &self.latest.session_usage;
             let stats = if session_usage.total_input_tokens > 0 {
                 stats::busy_stats_text_with_session(
-                    self.cps_meter.cps(),
+                    self.token_meter.cps(),
                     session_usage.total_input_tokens,
-                    session_usage.cached_tokens,
-                    session_usage.new_tokens,
                     session_usage.output_tokens,
                     session_usage.provider_cache_hit_rate,
                     session_usage.prefix_cache_hit_rate,
@@ -64,40 +59,15 @@ impl App {
                 let usage = &self.latest.usage;
                 let input = (usage.total_input_tokens > 0).then_some(usage.total_input_tokens);
                 let output = (usage.output_tokens > 0).then_some(usage.output_tokens);
-                stats::busy_stats_text(self.cps_meter.cps(), input, output)
+                stats::busy_stats_text(self.token_meter.cps(), input, output)
             };
             spans.push(Span::styled(
                 format!(" · {stats}"),
                 Style::default().fg(band.fg),
             ));
-            if self.latest.queued_count > 0 {
-                spans.push(Span::styled(
-                    format!(" · {} queued", self.latest.queued_count),
-                    Style::default().fg(band.fg),
-                ));
-            }
-            if !self.follow {
-                spans.push(Span::styled(
-                    " · ↑scrolled",
-                    Style::default().fg(band.fg),
-                ));
-            }
             let line = Line::from(spans);
             let w = area.right().saturating_sub(label_x);
             frame.buffer_mut().set_line(label_x, area.y, &line, w);
-        }
-    }
-
-    /// Elapsed time since the busy window began (`m s` after a minute).
-    fn elapsed_label(&self) -> String {
-        let Some(start) = self.busy_started else {
-            return String::new();
-        };
-        let secs = start.elapsed().as_secs_f32();
-        if secs < 60.0 {
-            format!("{secs:.1}s")
-        } else {
-            format!("{}m {:.1}s", secs as u32 / 60, secs % 60.0)
         }
     }
 

@@ -47,8 +47,9 @@ pub type SubagentToolsFn = ToolSetResolver;
 
 pub struct SubagentTool {
     /// Model used by spawned subagents. Cloned from the parent at construction time so a
-    /// later `/model` switch doesn't change in-flight subagent settings.
-    model: Model,
+    /// later `/model` switch doesn't change in-flight subagent settings. `None` when the
+    /// session has no model yet — spawning a subagent then errors with a clear message.
+    model: Option<Model>,
     /// Optional stream_fn shared with the parent. `None` falls back to `theway_llm_provider::stream_simple`.
     stream_fn: Option<StreamFn>,
     /// App-layer tool-set resolver for subagents, keyed by spec name (see
@@ -73,7 +74,7 @@ pub struct SubagentTool {
 
 impl SubagentTool {
     pub fn new(
-        model: Model,
+        model: impl Into<Option<Model>>,
         stream_fn: Option<StreamFn>,
         subagent_tools: SubagentToolsFn,
         launch_resolver: AgentRunResolver,
@@ -82,7 +83,7 @@ impl SubagentTool {
     ) -> Self {
         Self {
             definition: build_definition(&spec_names),
-            model,
+            model: model.into(),
             stream_fn,
             subagent_tools,
             launch_resolver,
@@ -174,11 +175,20 @@ impl AgentTool for SubagentTool {
             None => tools,
             Some(allow) => filter_tool_set(tools, allow).map_err(AgentToolError::Message)?,
         };
+        // The owning session has no model yet (daemon launched model-less and the
+        // client has not injected one): subagent delegation cannot spawn without
+        // a model. Fail fast with a clear, retryable message.
+        let model = self.model.clone().ok_or_else(|| {
+            AgentToolError::Message(
+                "no model set for this session; select a model in the TUI before delegating"
+                    .to_string(),
+            )
+        })?;
         let result = run_agent(AgentRunOptions {
             launch,
             tools,
             prompt,
-            model: self.model.clone(),
+            model,
             stream_fn: self.stream_fn.clone(),
             timeout: None,
             thinking: None,

@@ -106,6 +106,35 @@ async fn subagent_returns_final_text() {
 }
 
 #[tokio::test]
+async fn subagent_without_model_errors_clearly() {
+    // Model is session-level (injected by the client): a subagent tool built with
+    // no model must fail with a clear error instead of spawning a model-less run.
+    let tool = subagent::SubagentTool::new(
+        None,
+        Some(faux_stream("nope")),
+        Arc::new(|_| Vec::new()),
+        test_launch_resolver(),
+        vec!["general".to_string()],
+        theway_core::multiagent::jobs::SubagentJobRegistry::new(),
+    );
+    let err = tool
+        .execute(
+            "t-no-model",
+            serde_json::json!({
+                "subagent_type": "general",
+                "description": "look up X",
+                "prompt": "tell me about X",
+            }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("no model set for this session"), "{err}");
+}
+
+#[tokio::test]
 async fn subagent_unknown_type_errors() {
     let tool = subagent::SubagentTool::new(
         faux_model(),

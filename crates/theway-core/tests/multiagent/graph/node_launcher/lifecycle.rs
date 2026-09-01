@@ -20,6 +20,27 @@ async fn unknown_agent_fails_node_synchronously() {
 }
 
 #[tokio::test]
+async fn missing_model_fails_the_node_with_clear_error() {
+    // Model is session-level (injected by the client): a launcher created with
+    // no model must fail any node it spawns with a clear, retryable error.
+    let engine = engine_with_launcher_model(None, faux_stream("nope"));
+    let run_id = plan_single_node(&engine, "general", "do the thing", None);
+    let results = engine
+        .wait_for_runs(std::slice::from_ref(&run_id), Duration::from_secs(10), None)
+        .await;
+    assert_eq!(results, vec![(run_id.clone(), false)], "run must finish");
+    let run = engine.get_run(&run_id).unwrap();
+    assert_eq!(run.status, DagStatus::Failed);
+    let node = run.node("a").unwrap();
+    assert_eq!(node.status, NodeStatus::Failed);
+    assert_eq!(
+        node.error.as_deref(),
+        Some("no model set for this session; select a model in the TUI before launching DAG nodes")
+    );
+    assert!(node.input_tokens.is_none() || node.input_tokens == Some(0));
+}
+
+#[tokio::test]
 async fn known_agent_completes_with_output_and_tokens() {
     let engine = engine_with_launcher(faux_model(), faux_stream("dag done"));
     let run_id = plan_single_node(&engine, "general", "do the thing", None);
@@ -137,7 +158,7 @@ fn launch_ignores_missing_run_or_node() {
     let engine = Arc::new(DagEngine::new());
     let launcher = node_launcher(
         engine.clone(),
-        faux_model(),
+        Some(faux_model()),
         Some(faux_stream("unused")),
         PathBuf::from("."),
         crate::multiagent::jobs::SubagentJobRegistry::new(),

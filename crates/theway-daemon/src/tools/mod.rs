@@ -268,7 +268,7 @@ pub fn local_tools(_executor: Arc<dyn ToolExecutor>) -> Vec<Arc<dyn AgentTool>> 
 /// local tools). The main agent picks the spec (explorer / planner / executor-coder /
 /// checker / general) and defines in the prompt what the subagent may do.
 pub fn subagent_tool(
-    model: theway_llm_provider::Model,
+    model: impl Into<Option<theway_llm_provider::Model>>,
     stream_fn: Option<theway_core::StreamFn>,
     registry: SubagentJobRegistry,
     memory_dir: PathBuf,
@@ -335,7 +335,7 @@ pub fn subagent_tool_sets_for_cwd(
 /// family's host paths.
 pub fn node_launcher(
     engine: Arc<DagEngine>,
-    model: theway_llm_provider::Model,
+    model: impl Into<Option<theway_llm_provider::Model>>,
     stream_fn: Option<theway_core::StreamFn>,
     cwd: PathBuf,
     registry: SubagentJobRegistry,
@@ -346,7 +346,7 @@ pub fn node_launcher(
 ) -> Arc<node_launcher::NodeLauncherImpl> {
     node_launcher::node_launcher(
         engine,
-        model,
+        model.into(),
         stream_fn,
         cwd.clone(),
         registry,
@@ -362,12 +362,12 @@ pub fn node_launcher(
 /// ([`local_tools`]) + engine tools ([`crate::tools::assembly::engine_tools`]) +
 /// the server-side trigger/cron family. Process-level tool groups (MCP tools) are the
 /// caller's to add.
-pub fn session_tool_set(
+pub fn session_tool_set<'a>(
     memory_dir: &std::path::Path,
     base_dir: &std::path::Path,
     dag_engine: &Arc<DagEngine>,
     subagent_registry: &SubagentJobRegistry,
-    model: &theway_llm_provider::Model,
+    model: impl Into<Option<&'a theway_llm_provider::Model>>,
     stream_fn: Option<&theway_core::StreamFn>,
     skill_harness_cell: &SkillHarnessCell,
     session_id: &str,
@@ -380,7 +380,7 @@ pub fn session_tool_set(
         base_dir,
         dag_engine,
         subagent_registry,
-        model,
+        model.into(),
         stream_fn,
         skill_harness_cell,
         session_id,
@@ -396,7 +396,7 @@ pub fn session_tool_set_for_cwd(
     base_dir: &std::path::Path,
     dag_engine: &Arc<DagEngine>,
     subagent_registry: &SubagentJobRegistry,
-    model: &theway_llm_provider::Model,
+    model: Option<&theway_llm_provider::Model>,
     stream_fn: Option<&theway_core::StreamFn>,
     skill_harness_cell: &SkillHarnessCell,
     session_id: &str,

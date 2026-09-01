@@ -83,14 +83,7 @@ impl App {
             self.last_runtime_revision = runtime_revision;
             self.theme = Theme::load();
         }
-        let was_busy = self.busy;
         self.busy = self.latest.busy;
-        if self.busy && !was_busy {
-            // Fresh busy window: restart the pixel-loader elapsed timer.
-            self.busy_started = Some(Instant::now());
-        } else if !self.busy {
-            self.busy_started = None;
-        }
         self.panel_status = PanelStatus::from_sidebar(&self.latest.sidebar);
         self.model_catalog = self.latest.model_catalog.clone();
         self.persist_confirmed_model_default();

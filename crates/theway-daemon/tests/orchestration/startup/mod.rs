@@ -43,7 +43,8 @@ async fn controller_backing_keeps_user_custom_models_available() {
 
     let model = resolve_startup_model(cwd.path(), Some(provider), Some(model_id), None, &startup)
         .await
-        .unwrap();
+        .unwrap()
+        .expect("explicit provider/model should resolve a model");
 
     assert_eq!(model.provider.0, provider);
     assert_eq!(model.id, model_id);
@@ -143,7 +144,8 @@ async fn resolve_startup_model_uses_startup_default_when_no_cli_override() {
 
     let model = resolve_startup_model(cwd.path(), None, None, None, &startup)
         .await
-        .unwrap();
+        .unwrap()
+        .expect("startup default should resolve a model");
 
     assert_eq!(model.provider.0, "anthropic");
     assert_eq!(model.id, "claude-haiku-4-5");
@@ -164,15 +166,17 @@ async fn resolve_startup_model_applies_cli_base_url() {
         &crate::startup_config::StartupConfig::default(),
     )
     .await
-    .unwrap();
+    .unwrap()
+    .expect("explicit provider/model should resolve a model");
 
     assert_eq!(model.base_url, "http://example.test/v1");
 }
 
 #[tokio::test]
-async fn resolve_startup_model_errors_without_credentials() {
-    // Issue #71: no credential + no model default must fail loudly instead of
-    // silently resolving a built-in Anthropic default.
+async fn resolve_startup_model_returns_none_without_credentials() {
+    // Model is session-level (injected by the client per-session via `SetModel`),
+    // so startup no longer auto-detects from environment variables or fails when
+    // no credential is present: it starts model-less and returns `None`.
     let _lock = ENV_LOCK.lock().unwrap();
     let base = TempDir::new().unwrap();
     let cwd = TempDir::new().unwrap();
@@ -188,7 +192,7 @@ async fn resolve_startup_model_errors_without_credentials() {
         EnvGuard::remove("GOOGLE_API_KEY"),
     ];
 
-    let err = resolve_startup_model(
+    let model = resolve_startup_model(
         cwd.path(),
         None,
         None,
@@ -196,11 +200,9 @@ async fn resolve_startup_model_errors_without_credentials() {
         &crate::startup_config::StartupConfig::default(),
     )
     .await
-    .unwrap_err();
+    .unwrap();
 
-    let text = err.to_string();
-    assert!(text.contains("no API key found"), "{text}");
-    assert!(!text.contains("claude-haiku-4-5"), "{text}");
+    assert!(model.is_none(), "model-less startup must return None, got {model:?}");
 }
 
 #[tokio::test]

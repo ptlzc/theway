@@ -349,12 +349,13 @@ pub struct App {
 
     busy: bool,
     spinner_frame: usize,
-    /// Wall-clock start of the current busy window (pixel-loader elapsed
-    /// timer, issue #37); `None` while idle.
-    busy_started: Option<Instant>,
     /// Streaming throughput meter behind the busy-band stats line
     /// (issue #38).
     cps_meter: stats::CpsMeter,
+    /// Streaming token-per-second meter behind the busy-band `tps` figure
+    /// (streamlined status line): samples the estimated token count of the
+    /// feed each spinner tick, same 1 s sliding window as [`App::cps_meter`].
+    token_meter: stats::CpsMeter,
     /// Shared step counter driving the busy-band snake loader cadence
     /// (issue #42).
     spinner: pixel_loader::RainbowSpinner,
@@ -515,6 +516,42 @@ fn feed_text_bytes(blocks: &[theway_transport::feed::WireFeedBlock]) -> usize {
             Block::ToolCall { name, args, .. } => name.len() + args.len(),
             Block::Error { message, .. } => message.len(),
             Block::ToolResult { lines, .. } => lines.iter().map(String::len).sum(),
+        })
+        .sum()
+}
+
+/// Rough token estimate for a text slice (~4 chars per token for ASCII, ~1
+/// token per character for non-ASCII), matching `theway-core`'s estimator
+/// so the busy band's `tps` figure tracks real token accounting.
+fn estimate_token_chars(text: &str) -> usize {
+    let mut ascii = 0usize;
+    let mut non_ascii = 0usize;
+    for c in text.chars() {
+        if c.is_ascii() {
+            ascii += 1;
+        } else {
+            non_ascii += 1;
+        }
+    }
+    ascii.div_ceil(4) + non_ascii
+}
+
+/// Cumulative *estimated token* count across the feed blocks — the counter
+/// the busy-band token-per-second meter samples each spinner tick.
+fn feed_text_tokens(blocks: &[theway_transport::feed::WireFeedBlock]) -> usize {
+    use theway_transport::feed::WireFeedBlock as Block;
+    blocks
+        .iter()
+        .map(|block| match block {
+            Block::User { text, .. }
+            | Block::Assistant { text, .. }
+            | Block::Thinking { text, .. }
+            | Block::Plain { text, .. } => estimate_token_chars(text),
+            Block::ToolCall { name, args, .. } => {
+                estimate_token_chars(name) + estimate_token_chars(args)
+            }
+            Block::Error { message, .. } => estimate_token_chars(message),
+            Block::ToolResult { lines, .. } => lines.iter().map(|l| estimate_token_chars(l)).sum(),
         })
         .sum()
 }

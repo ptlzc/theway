@@ -46,14 +46,9 @@ fn daemon_launch_args(cli: &Cli, config: &WireDaemonConfig) -> Vec<String> {
 /// authoritative current session id.
 fn daemon_runtime_args(cli: &Cli, config: &WireDaemonConfig) -> Vec<String> {
     let mut args = Vec::new();
-    if let Some(provider) = &config.provider {
-        args.push("--provider".to_string());
-        args.push(provider.clone());
-    }
-    if let Some(model) = &config.model {
-        args.push("--model".to_string());
-        args.push(model.clone());
-    }
+    // Model is session-level, injected by the client per-session via `SetModel`
+    // (through the settings/Configure path). The daemon no longer accepts or
+    // resolves a startup model, so `--provider` / `--model` are NOT passed.
     if let Some(base_url) = &cli.base_url {
         args.push("--base-url".to_string());
         args.push(base_url.clone());
@@ -522,8 +517,6 @@ mod tests {
                 .map(String::as_str)
                 .collect::<Vec<_>>(),
             vec![
-                "--provider",
-                "acme",
                 "--home",
                 "/tmp/fake-home",
                 "--skills-dir",
@@ -554,10 +547,9 @@ mod tests {
         let args = daemon_runtime_args(&cli, &config);
         assert!(!args.iter().any(|arg| arg == "--continue"));
         assert!(!args.iter().any(|arg| arg == "--resume-id"));
-        assert_eq!(
-            args.iter().map(String::as_str).collect::<Vec<_>>(),
-            vec!["--provider", "openai", "--model", "gpt-test"]
-        );
+        // The daemon no longer accepts a startup model; the session-level model
+        // is injected by the client via Configure/SetModel after attach.
+        assert!(args.is_empty());
     }
 
     /// Issue #74: the config-shaped launch args come from the ASSEMBLED
@@ -588,12 +580,6 @@ poll_interval_secs = 45
                 .map(String::as_str)
                 .collect::<Vec<_>>(),
             vec![
-                "--provider",
-                "acme",
-                "--model",
-                "warp-9",
-                // The persisted `[model] thinking` level reaches the daemon
-                // through the launch args (the user's last pick).
                 "--thinking",
                 "high",
                 "--builtin-skill",
@@ -625,10 +611,6 @@ poll_interval_secs = 45
                 .map(String::as_str)
                 .collect::<Vec<_>>(),
             vec![
-                "--provider",
-                "openai",
-                "--model",
-                "gpt-x",
                 "--thinking",
                 "high",
                 "--builtin-skill",
@@ -650,10 +632,6 @@ poll_interval_secs = 45
                 .map(String::as_str)
                 .collect::<Vec<_>>(),
             vec![
-                "--provider",
-                "acme",
-                "--model",
-                "warp-9",
                 "--thinking",
                 "minimal",
                 "--builtin-skill",

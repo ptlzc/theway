@@ -168,6 +168,8 @@ impl App {
                         self.spinner_frame = self.spinner_frame.wrapping_add(1);
                         self.cps_meter
                             .record(feed_text_bytes(&self.latest.feed_blocks));
+                        self.token_meter
+                            .record(feed_text_tokens(&self.latest.feed_blocks));
                         let cps = self.cps_meter.cps();
                         self.spinner.advance(cps);
                         self.spinner.tick(SPINNER_TICK_MS);

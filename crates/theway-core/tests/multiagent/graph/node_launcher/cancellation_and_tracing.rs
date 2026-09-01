@@ -112,7 +112,7 @@ fn launch_returns_early_when_cancel_is_already_cancelled() {
     let (engine, run_id) = engine_with_run();
     let launcher = node_launcher(
         Arc::new(engine),
-        faux_model(),
+        Some(faux_model()),
         None,
         PathBuf::from("."),
         SubagentJobRegistry::new(),
@@ -168,7 +168,7 @@ async fn launch_logs_debug_fields_when_subscriber_enabled() {
     let (engine, run_id) = engine_with_run();
     let launcher = node_launcher(
         Arc::new(engine),
-        faux_model(),
+        Some(faux_model()),
         Some(quick_stream()),
         PathBuf::from("."),
         SubagentJobRegistry::new(),

@@ -321,7 +321,7 @@ mod tests {
             assistant("ok", StopReason::Stop, None),
         ]));
 
-        let mut opts = AgentHarnessOptions::new(faux_model(), session.clone());
+        let mut opts = AgentHarnessOptions::new(Some(faux_model()), session.clone());
         opts.stream_fn = Some(stream_fn_with(responses));
         let harness = Arc::new(AgentHarness::new(opts));
         let runner = AgentSession::new(

@@ -100,17 +100,20 @@ pub fn human_count(n: u64) -> String {
     }
 }
 
-/// Busy-band stats line: `{cps} char/s`, extended with `input:` /
-/// `output:` token counts when usage data is present (`None` slots are
-/// skipped — no usage data at all leaves just the char/s figure).
+/// Busy-band stats line: `tps: {tps} · in: {in} · out: {out} · cache {hit}`.
+/// `tps` is the live token-per-second estimate from the streamed feed; `in`
+/// / `out` are the session-cumulative input/output token counts; `cache` is
+/// the provider cache hit rate (falling back to the prefix estimate when the
+/// provider does not report one, `-` when neither is known). Missing usage
+/// slots are skipped.
 #[must_use]
-pub fn busy_stats_text(cps: f64, input_tokens: Option<u64>, output_tokens: Option<u64>) -> String {
-    let mut text = format!("{} char/s", cps.round() as u64);
+pub fn busy_stats_text(tps: f64, input_tokens: Option<u64>, output_tokens: Option<u64>) -> String {
+    let mut text = format!("tps: {}", tps.round() as u64);
     if let Some(tokens) = input_tokens {
-        text.push_str(&format!(" · input: {}", human_count(tokens)));
+        text.push_str(&format!(" · in: {}", human_count(tokens)));
     }
     if let Some(tokens) = output_tokens {
-        text.push_str(&format!(" · output: {}", human_count(tokens)));
+        text.push_str(&format!(" · out: {}", human_count(tokens)));
     }
     text
 }
@@ -131,26 +134,23 @@ fn format_hit_rate(rate: Option<f64>) -> String {
     }
 }
 
-/// Busy-band session-cumulative stats line: total input, cached input,
-/// non-cached input, output, and dual cache hit rates.
+/// Busy-band stats line backed by session-cumulative usage: `tps: {tps} ·
+/// in: {in} · out: {out} · cache {hit}`. The cache hit rate prefers the
+/// provider-reported ratio and falls back to the client-side prefix estimate.
 #[must_use]
 pub fn busy_stats_text_with_session(
-    cps: f64,
+    tps: f64,
     total_input_tokens: u64,
-    cached_tokens: u64,
-    new_tokens: u64,
     output_tokens: u64,
     provider_cache_hit_rate: Option<f64>,
     prefix_cache_hit_rate: Option<f64>,
 ) -> String {
-    let provider = format_hit_rate(provider_cache_hit_rate);
-    let prefix = format_hit_rate(prefix_cache_hit_rate);
+    let hit = provider_cache_hit_rate.or(prefix_cache_hit_rate);
+    let hit = format_hit_rate(hit);
     format!(
-        "{} char/s · input: {} · cached: {} · new: {} · output: {} · cache {provider} · prefix {prefix}",
-        cps.round() as u64,
+        "tps: {} · in: {} · out: {} · cache {hit}",
+        tps.round() as u64,
         human_count(total_input_tokens),
-        human_count(cached_tokens),
-        human_count(new_tokens),
         human_count(output_tokens),
     )
 }
@@ -238,17 +238,14 @@ mod tests {
     }
 
     #[test]
-    fn busy_stats_text_full_and_char_s_only() {
+    fn busy_stats_text_full_and_tps_only() {
         assert_eq!(
             busy_stats_text(84.0, Some(57_100), Some(1_200)),
-            "84 char/s · input: 57.1k · output: 1.2k"
+            "tps: 84 · in: 57.1k · out: 1.2k"
         );
-        // No usage data → char/s only; fractional cps rounds.
-        assert_eq!(busy_stats_text(83.6, None, None), "84 char/s");
+        // No usage data → tps only; fractional tps rounds.
+        assert_eq!(busy_stats_text(83.6, None, None), "tps: 84");
         // Partial usage data renders only the present slots.
-        assert_eq!(
-            busy_stats_text(0.0, Some(500), None),
-            "0 char/s · input: 500"
-        );
+        assert_eq!(busy_stats_text(0.0, Some(500), None), "tps: 0 · in: 500");
     }
 }

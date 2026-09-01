@@ -95,32 +95,17 @@ fn resolve_provider_model_rejects_incomplete_persisted_selection() {
 }
 
 #[test]
-fn resolve_effective_model_uses_startup_when_no_selection() {
-    // Arrange
-    let startup = sample_model("startup", "provider-startup");
+fn resolve_effective_model_errors_without_any_selection() {
+    // Model is session-level: no startup fallback. When neither the activate
+    // request nor the persisted binding supplies a model, activation errors.
     let persisted = runtime_context(Path::new("/tmp"));
 
     // Act
-    let model = resolve_effective_model(&startup, &persisted, None, None, None).unwrap();
+    let err = resolve_effective_model(&persisted, None, None, None).unwrap_err();
 
     // Assert
-    assert_eq!(model.id, "startup");
-    assert_eq!(model.provider.0, "provider-startup");
-}
-
-#[test]
-fn resolve_effective_model_applies_base_url_to_startup_fallback() {
-    // Arrange
-    let startup = sample_model("startup", "provider-startup");
-    let persisted = runtime_context(Path::new("/tmp"));
-
-    // Act
-    let model =
-        resolve_effective_model(&startup, &persisted, None, None, Some(" http://localhost:8080 "))
-            .unwrap();
-
-    // Assert
-    assert_eq!(model.base_url, "http://localhost:8080");
+    let text = err.message;
+    assert!(text.contains("no model configured"), "{text}");
 }
 
 #[test]
@@ -129,12 +114,10 @@ fn resolve_effective_model_returns_catalog_model_for_requested_pair() {
     let provider = "unit-test-provider";
     let model_id = "unit-test-model";
     theway_llm_provider::register_custom_model(sample_model(model_id, provider));
-    let startup = sample_model("startup", "provider-startup");
     let persisted = runtime_context(Path::new("/tmp"));
 
     // Act
-    let model = resolve_effective_model(&startup, &persisted, Some(provider), Some(model_id), None)
-        .unwrap();
+    let model = resolve_effective_model(&persisted, Some(provider), Some(model_id), None).unwrap();
 
     // Assert
     assert_eq!(model.id, model_id);
@@ -147,12 +130,10 @@ fn resolve_effective_model_returns_catalog_model_for_requested_pair() {
 #[test]
 fn resolve_effective_model_rejects_unknown_model() {
     // Arrange
-    let startup = sample_model("startup", "provider-startup");
     let persisted = runtime_context(Path::new("/tmp"));
 
     // Act
     let err = resolve_effective_model(
-        &startup,
         &persisted,
         Some("no-such-provider"),
         Some("no-such-model"),

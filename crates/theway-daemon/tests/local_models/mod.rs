@@ -229,7 +229,10 @@ fn auto_detect_prefers_models_json_and_auth_json_provider_over_builtin_default()
 
     load_all_from_paths(&[path]).unwrap();
 
-    let model = crate::model::auto_detect_model(None, None).unwrap();
+    // The daemon no longer auto-detects a model from auth.json / env at startup;
+    // it only resolves an explicit pair. The custom model from models.json is
+    // registered by `load_all_from_paths`, so an explicit override resolves it.
+    let model = crate::model::auto_detect_model(Some(provider), Some(id)).unwrap();
     assert_eq!(model.provider.0, provider);
     assert_eq!(model.id, id);
     theway_llm_provider::unregister_custom_model(
@@ -489,13 +492,12 @@ async fn ds4_env_without_url_reports_base_url_config() {
     let _theway_dir_env = EnvGuard::set("THEWAY_DIR", _theway_dir.path());
     unregister_ds4_default();
 
+    // The daemon no longer auto-detects from env: a missing override is a
+    // client-side "select a model" error, not a provider-specific hint.
     let err = crate::model::auto_detect_model(None, None)
         .unwrap_err()
         .to_string();
-    assert!(err.contains("provider=ds4"), "{err}");
-    assert!(err.contains("--base-url"), "{err}");
-    assert!(err.contains("DS4_BASE_URL"), "{err}");
-    assert!(err.contains("models.json"), "{err}");
+    assert!(err.contains("no model selected"), "{err}");
 
     let explicit_err = crate::model::auto_detect_model(Some("ds4"), Some("deepseek-v4-flash"))
         .unwrap_err()

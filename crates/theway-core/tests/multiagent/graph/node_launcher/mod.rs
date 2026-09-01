@@ -244,6 +244,12 @@ impl AgentTool for RecordingTool {
 }
 
 fn engine_with_launcher(model: Model, stream: StreamFn) -> Arc<DagEngine> {
+    engine_with_launcher_model(Some(model), stream)
+}
+
+/// Engine wired to a launcher whose captured model is `model` (may be `None`,
+/// which must fail nodes with a clear "no model" error).
+fn engine_with_launcher_model(model: Option<Model>, stream: StreamFn) -> Arc<DagEngine> {
     let engine = Arc::new(DagEngine::new());
     let launcher = node_launcher(
         engine.clone(),
@@ -271,7 +277,7 @@ fn engine_with_tools(
     let engine = Arc::new(DagEngine::new());
     let launcher = node_launcher(
         engine.clone(),
-        model,
+        Some(model),
         Some(stream),
         PathBuf::from("."),
         crate::multiagent::jobs::SubagentJobRegistry::new(),

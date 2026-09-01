@@ -80,7 +80,6 @@ async fn busy_stats_follow_working_instead_of_right_aligning() {
     };
     app.apply_snapshot(status);
     app.busy = true;
-    app.busy_started = Some(std::time::Instant::now());
     let now = std::time::Instant::now();
     app.cps_meter.record_at(now - Duration::from_millis(500), 0);
     app.cps_meter.record_at(now, 500);
@@ -94,12 +93,12 @@ async fn busy_stats_follow_working_instead_of_right_aligning() {
         .find(|line| line.contains("working"))
         .expect("busy status row");
     let working = row.find("working").unwrap();
-    let throughput = row.find("char/s").expect("busy throughput");
+    let throughput = row.find("tps:").expect("busy throughput");
     assert!(
         throughput - working < 30,
         "throughput must follow working without a flexible gap: {row}"
     );
-    assert!(row.contains("output: 1.2k"), "output counter missing: {row}");
+    assert!(row.contains("out: 1.2k"), "output counter missing: {row}");
     assert!(
         row.chars().count() < 80,
         "left cluster must not expand to the 100-column right edge: {row}"
@@ -110,7 +109,6 @@ async fn busy_stats_follow_working_instead_of_right_aligning() {
 async fn narrow_busy_status_truncates_the_left_cluster_safely() {
     let (mut app, _rx) = test_app().await;
     app.busy = true;
-    app.busy_started = Some(std::time::Instant::now());
     let backend = TestBackend::new(24, 8);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|frame| app.render(frame)).unwrap();
@@ -807,7 +805,6 @@ async fn busy_stats_line_shows_session_cache_metrics_from_session_usage() {
     };
     app.apply_snapshot(status);
     app.busy = true;
-    app.busy_started = Some(std::time::Instant::now());
 
     let backend = TestBackend::new(120, 12);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -818,15 +815,17 @@ async fn busy_stats_line_shows_session_cache_metrics_from_session_usage() {
         .find(|line| line.contains("working"))
         .expect("busy status row");
 
-    // Total input, cached tokens, non-cached input, output, and dual hit rates.
-    assert!(row.contains("input: 1.2k"), "total input missing: {row}");
-    assert!(row.contains("cached: 800"), "cached tokens missing: {row}");
-    assert!(row.contains("new: 400"), "non-cached input missing: {row}");
-    assert!(row.contains("output: 340"), "output missing: {row}");
+    // Total input, output, and the provider cache hit rate.
+    assert!(row.contains("in: 1.2k"), "total input missing: {row}");
+    assert!(row.contains("out: 340"), "output missing: {row}");
     assert!(row.contains("cache 66.7%"), "provider cache hit rate missing: {row}");
-    assert!(row.contains("prefix -"), "prefix hit rate missing: {row}");
+    // The streamlined status line drops the cached/new/prefix breakdown.
+    assert!(!row.contains("cached:"), "cached tokens must not appear: {row}");
+    assert!(!row.contains("new:"), "non-cached input must not appear: {row}");
+    assert!(!row.contains("prefix"), "prefix hit rate must not appear: {row}");
+    assert!(!row.contains("char/s"), "char/s must not appear: {row}");
 
-    // The session-cumulative stats line is a token/cache display, not a cost
-    // display: monetary values must never appear.
+    // The status line is a token/cache display, not a cost display: monetary
+    // values must never appear.
     assert!(!row.contains('$'), "monetary values must not appear: {row}");
 }

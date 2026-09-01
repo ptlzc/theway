@@ -175,7 +175,7 @@ impl SessionRuntimeBuilder {
             &ctx.paths.base,
             &self.dag_engine,
             &self.subagent_registry,
-            &ctx.model,
+            ctx.model.as_ref(),
             Some(&self.stream_fn),
             &skill_harness_cell,
             &session_id,

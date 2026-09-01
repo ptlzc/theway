@@ -1,80 +1,31 @@
-//! Model auto-detection. Picks the first provider with credentials in env and resolves a
-//! reasonable default model id from the embedded theway-llm-provider catalog.
+//! Model resolution for an explicitly-selected provider/model pair.
+//!
+//! Model selection is session-level and owned by the client (the daemon starts
+//! model-less and the TUI injects a model per-session via `SetModel`). The
+//! daemon therefore never auto-detects a model from environment variables or
+//! an auth store here — it only resolves a pair the caller explicitly passed.
 
 use anyhow::{Result, bail};
 use theway_llm_provider::{Model, Provider, get_model};
 
-/// Resolution candidates in priority order. Each is (env var, provider id, default model id).
-/// First env var that's set wins.
-const CANDIDATES: &[(&str, &str, &str)] = &[
-    ("ANTHROPIC_API_KEY", "anthropic", "claude-haiku-4-5"),
-    ("OPENAI_API_KEY", "openai", "gpt-4o-mini"),
-    ("DS4_API_KEY", "ds4", "deepseek-v4-flash"),
-    ("OPENROUTER_API_KEY", "openrouter", "openai/gpt-4o-mini"),
-    ("GROQ_API_KEY", "groq", "llama-3.3-70b-versatile"),
-    ("MISTRAL_API_KEY", "mistral", "mistral-large-latest"),
-    ("GEMINI_API_KEY", "google", "gemini-2.0-flash"),
-    ("GOOGLE_API_KEY", "google", "gemini-2.0-flash"),
-];
-
-/// Returns the resolved model + provider id of the chosen entry. If the catalog doesn't
-/// contain the default model id, returns an error so the caller can ask the user to specify
-/// a model explicitly.
+/// Resolve an explicitly-selected `(provider, model)` pair against the model
+/// catalog. Neither may be omitted: the daemon no longer auto-detects a model
+/// from env credentials, so a missing override is an error that tells the
+/// caller the model must come from the client (session-level).
 pub fn auto_detect_model(
     override_provider: Option<&str>,
     override_model: Option<&str>,
 ) -> Result<Model> {
-    // Explicit overrides win.
-    if let (Some(p), Some(id)) = (override_provider, override_model) {
-        let provider = Provider::from(p);
-        if let Some(m) = get_model(&provider, id) {
-            return Ok(m);
-        }
-        bail!("{}", explicit_model_not_found_message(p, id, true));
+    let Some((provider, id)) = override_provider.zip(override_model) else {
+        bail!(
+            "no model selected. The daemon starts model-less: select a model in the TUI so it can be injected into the session"
+        );
+    };
+    let provider_obj = Provider::from(provider);
+    if let Some(m) = get_model(&provider_obj, id) {
+        return Ok(m);
     }
-    // Detect by env, with the auth.json store as fallback (issue #13).
-    let store = theway_transport::auth::AuthStore::load().unwrap_or_default();
-    // Prefer models explicitly configured in `models.json` (or registered local defaults)
-    // over the built-in candidate list, as long as their provider has a credential.
-    let local_models = theway_llm_provider::list_custom_models();
-    if let Some(model) = local_models
-        .iter()
-        .find(|model| store.resolve_for_provider(&model.provider.0).is_some())
-    {
-        return Ok(model.clone());
-    }
-    for (env, provider, model_id) in CANDIDATES {
-        let env_set = std::env::var(env)
-            .ok()
-            .map(|v| !v.trim().is_empty())
-            .unwrap_or(false);
-        let stored = store.get(provider).is_some();
-        if !env_set && !stored {
-            continue;
-        }
-        if let Some(m) = get_model(&Provider::from(*provider), model_id) {
-            return Ok(m);
-        }
-        // Catalog miss — pick *any* model for this provider as a fallback so the agent
-        // still runs.
-        if let Some(any) = first_model_for_provider(provider) {
-            return Ok(any);
-        }
-        if *provider == "ds4" {
-            bail!(
-                "{}",
-                explicit_model_not_found_message(provider, model_id, true)
-            );
-        }
-    }
-    bail!(
-        "no API key found and no model configured. Set one of: {} env vars, run `/login <provider> <key>` from inside theway, pass `--provider <provider> --model <id>` to theway/thewayd, or configure a default via `[model] provider/model` in config.toml",
-        CANDIDATES
-            .iter()
-            .map(|c| c.0)
-            .collect::<Vec<_>>()
-            .join(", ")
-    );
+    bail!("{}", explicit_model_not_found_message(provider, id, true));
 }
 
 fn explicit_model_not_found_message(provider: &str, id: &str, show_local_hint: bool) -> String {
@@ -118,13 +69,6 @@ fn explicit_model_not_found_message(provider: &str, id: &str, show_local_hint: b
     format!(
         "model not found in catalog: provider={provider} id={id}. Candidates: {candidates}{more}"
     )
-}
-
-fn first_model_for_provider(provider: &str) -> Option<Model> {
-    let p = Provider::from(provider);
-    theway_llm_provider::list_models()
-        .into_iter()
-        .find(|m| m.provider == p)
 }
 
 #[cfg(test)]

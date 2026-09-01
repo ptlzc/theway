@@ -181,7 +181,7 @@ async fn custom_theme_paints_tool_and_thinking_blocks() {
     ]);
     app.apply_snapshot(status);
 
-    let backend = TestBackend::new(60, 12);
+    let backend = TestBackend::new(60, 14);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|f| app.render(f)).unwrap();
     let buf = terminal.backend().buffer();

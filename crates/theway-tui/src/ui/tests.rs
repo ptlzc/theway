@@ -263,7 +263,7 @@ async fn renders_feed_above_pinned_input_box() {
     let lines: Vec<&str> = text.lines().collect();
     let status_row = lines.iter().position(|l| l.contains("ready")).unwrap();
     assert!(
-        status_row >= lines.len() - 5,
+        status_row >= lines.len() - 6,
         "status rule should be pinned near the bottom (row {status_row} of {}):\n{text}",
         lines.len()
     );
@@ -391,7 +391,7 @@ async fn chrome_info_line_shows_model_with_provider() {
 }
 
 #[tokio::test]
-async fn busy_status_shows_braille_spinner_with_elapsed() {
+async fn busy_status_shows_braille_spinner() {
     let (mut app, _rx) = test_app().await;
     let mut status = fixture_status(Vec::new());
     status.busy = true;
@@ -403,14 +403,6 @@ async fn busy_status_shows_braille_spinner_with_elapsed() {
     let buf = terminal.backend().buffer();
     let text = buffer_text(buf);
     assert!(text.contains("working"), "busy label missing:\n{text}");
-    assert!(
-        text.contains("working 0."),
-        "elapsed timer should follow the label (sub-second in test):\n{text}"
-    );
-    assert!(
-        text.contains("2 queued"),
-        "queue depth missing from the busy band:\n{text}"
-    );
     // Pi's Braille spinner stays in one terminal cell while the busy band
     // remains one row high.
     let status_area = app.last_status_area.unwrap();
@@ -429,7 +421,7 @@ async fn busy_status_shows_braille_spinner_with_elapsed() {
         })
         .collect::<Vec<_>>();
     assert!(
-        text.contains("char/s"),
+        text.contains("tps:"),
         "throughput stats must share the busy row:\n{text}"
     );
     let first_color = buf[(status_area.x + 1, status_area.y)].fg;
@@ -439,10 +431,11 @@ async fn busy_status_shows_braille_spinner_with_elapsed() {
         .iter()
         .rposition(|l| l.contains('╭'))
         .expect("composer top border missing");
+    // The composer now starts one row below the status bar (blank spacer).
     assert_eq!(
         border_row,
-        label_row + 1,
-        "composer should sit directly below the compact busy band:\n{text}"
+        label_row + 2,
+        "composer should sit one blank row below the busy band:\n{text}"
     );
     // Advance one base-cadence step: the mask and hue change in place.
     app.spinner.tick(130);
@@ -461,12 +454,6 @@ async fn busy_status_shows_braille_spinner_with_elapsed() {
         moved_working_cells, working_cells,
         "working label must not change style between spinner frames"
     );
-    // The busy window timer arms on the false→true edge and clears on idle.
-    assert!(app.busy_started.is_some());
-    let mut idle = fixture_status(Vec::new());
-    idle.busy = false;
-    app.apply_snapshot(idle);
-    assert!(app.busy_started.is_none());
 }
 
 include!(concat!(

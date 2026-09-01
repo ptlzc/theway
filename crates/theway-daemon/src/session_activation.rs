@@ -20,7 +20,6 @@ pub(crate) struct SessionActivator {
     builder: Weak<SessionRuntimeBuilder>,
     storage: Arc<dyn RuntimeStorage>,
     paths: crate::DaemonPaths,
-    startup_model: Model,
     startup_thinking: theway_core::ThinkingLevel,
     cli_builtin_skills: Vec<String>,
     config_builtin_skills: Vec<String>,
@@ -39,7 +38,6 @@ impl SessionActivator {
         builder: &Arc<SessionRuntimeBuilder>,
         storage: Arc<dyn RuntimeStorage>,
         paths: crate::DaemonPaths,
-        startup_model: Model,
         startup_thinking: theway_core::ThinkingLevel,
         cli_builtin_skills: Vec<String>,
         config_builtin_skills: Vec<String>,
@@ -49,7 +47,6 @@ impl SessionActivator {
             builder: Arc::downgrade(builder),
             storage,
             paths,
-            startup_model,
             startup_thinking,
             cli_builtin_skills,
             config_builtin_skills,
@@ -167,7 +164,6 @@ impl SessionActivator {
             });
         let (provider, model) = resolve_provider_model(&persisted, runtime)?;
         let effective_model = resolve_effective_model(
-            &self.startup_model,
             &persisted,
             provider.as_deref(),
             model.as_deref(),
@@ -181,7 +177,7 @@ impl SessionActivator {
             repo.clone(),
             self.storage.clone(),
             self.paths.clone(),
-            effective_model.clone(),
+            Some(effective_model.clone()),
             effective_thinking,
             &self.cli_builtin_skills,
             &self.config_builtin_skills,
@@ -389,22 +385,22 @@ fn resolve_provider_model(
 }
 
 fn resolve_effective_model(
-    startup_model: &Model,
     persisted: &SessionRuntimeContext,
     provider: Option<&str>,
     model: Option<&str>,
     requested_base_url: Option<&str>,
 ) -> Result<Model, WireRpcError> {
-    if provider.is_none() && model.is_none() {
-        let mut model = startup_model.clone();
-        if let Some(base_url) = resolved_base_url(persisted, requested_base_url) {
-            model.base_url = base_url;
-        }
-        return Ok(model);
-    }
+    // Model is session-level: it must be supplied explicitly (activate-request
+    // runtime provider/model or a persisted session binding). There is no
+    // startup default anymore — a session without a model is an error (方案 A).
     let (provider, model) = match (provider, model) {
         (Some(provider), Some(model)) => (provider, model),
-        _ => unreachable!("resolve_provider_model rejects partial selections"),
+        _ => {
+            return Err(rpc(
+                "failed_precondition",
+                "no model configured for session; select a model in the TUI",
+            ));
+        }
     };
     let mut model = get_model(&Provider::from(provider), model).ok_or_else(|| {
         rpc(

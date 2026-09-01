@@ -274,8 +274,10 @@ pub struct SessionExecutionContext {
     pub paths: crate::DaemonPaths,
     /// Execution environment this context's harness tools dispatch through.
     pub executor: Arc<dyn theway_core::executor::ToolExecutor>,
-    /// Effective model for this context.
-    pub model: theway_llm_provider::Model,
+    /// Effective active model for this context. `None` when the client has not
+    /// yet injected a model for the session; the turn loop errors until one is
+    /// assigned via `set_model`.
+    pub model: Option<theway_llm_provider::Model>,
     /// Effective thinking level for this context's harness builds.
     pub thinking: theway_core::ThinkingLevel,
     pub resources: SessionProjectResources,
@@ -295,7 +297,7 @@ impl SessionExecutionContext {
         storage: Arc<dyn RuntimeStorage>,
         paths: crate::DaemonPaths,
         executor: Arc<dyn theway_core::executor::ToolExecutor>,
-        model: theway_llm_provider::Model,
+        model: impl Into<Option<theway_llm_provider::Model>>,
         thinking: theway_core::ThinkingLevel,
         resources: SessionProjectResources,
         mcp: SessionMcpResources,
@@ -319,7 +321,7 @@ impl SessionExecutionContext {
             storage,
             paths,
             executor,
-            model,
+            model: model.into(),
             thinking,
             resources,
             mcp,
@@ -337,7 +339,7 @@ impl SessionExecutionContext {
         repo: Arc<dyn SessionRepository>,
         storage: Arc<dyn RuntimeStorage>,
         base_paths: crate::DaemonPaths,
-        model: theway_llm_provider::Model,
+        model: impl Into<Option<theway_llm_provider::Model>>,
         thinking: theway_core::ThinkingLevel,
         cli_builtin_skills: &[String],
         config_builtin_skills: &[String],

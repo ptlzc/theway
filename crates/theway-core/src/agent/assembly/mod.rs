@@ -63,7 +63,10 @@ pub const SESSION_EVENT_BROADCAST_CAPACITY: usize = 128;
 pub struct AgentHarnessOptions {
     /// Base system prompt prepended to the rendered skill catalog.
     pub system_prompt: String,
-    pub model: Model,
+    /// Active model. `None` when no model is configured yet (daemon launches
+    /// model-less and the client injects one per-session via `set_model`); the
+    /// turn loop errors with "Agent has no model set" until one is assigned.
+    pub model: Option<Model>,
     pub thinking_level: ThinkingLevel,
     pub skills: Vec<Skill>,
     pub prompt_templates: Vec<PromptTemplate>,
@@ -108,10 +111,13 @@ pub struct AgentHarnessOptions {
 }
 
 impl AgentHarnessOptions {
-    pub fn new(model: Model, session: Session) -> Self {
+    /// `model` may be a concrete `Model` (wrapped into `Some`) or an
+    /// `Option<Model>` (kept as-is) so both the model-less daemon path and the
+    /// existing concrete-model callers build through one constructor.
+    pub fn new(model: impl Into<Option<Model>>, session: Session) -> Self {
         Self {
             system_prompt: String::new(),
-            model,
+            model: model.into(),
             thinking_level: ThinkingLevel::Off,
             skills: Vec::new(),
             prompt_templates: Vec::new(),
@@ -192,14 +198,17 @@ impl AgentHarness {
                 options.runtime_extension_cwd.clone()
             },
             options.runtime_extension_has_interactive_client,
-            Some(theway_contract::extension::ExtensionModelRef {
-                provider: options.model.provider.0.clone(),
-                model: options.model.id.clone(),
-            }),
+            options
+                .model
+                .as_ref()
+                .map(|m| theway_contract::extension::ExtensionModelRef {
+                    provider: m.provider.0.clone(),
+                    model: m.id.clone(),
+                }),
             options.runtime_extension_model_context.clone(),
         ));
         let state = AgentState {
-            model: Some(options.model),
+            model: options.model,
             thinking_level: Some(options.thinking_level),
             tools: options.tools,
             system_prompt: build_system_prompt(&options.system_prompt, &options.skills),

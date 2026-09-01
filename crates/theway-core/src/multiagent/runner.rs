@@ -142,7 +142,7 @@ pub async fn run_agent(opts: AgentRunOptions) -> AgentRunResult {
 
     let storage = Arc::new(MemorySessionStorage::new());
     let session = Session::new(storage as Arc<dyn SessionStorage>);
-    let mut harness_opts = AgentHarnessOptions::new(opts.model, session);
+    let mut harness_opts = AgentHarnessOptions::new(Some(opts.model), session);
     harness_opts.observer = opts.registry.observer();
     harness_opts.observation_context = ObservationContext {
         session_id: opts.session_id.clone(),

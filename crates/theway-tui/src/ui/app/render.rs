@@ -14,15 +14,19 @@ impl App {
             .unwrap_or(0) as u16;
         let chunks = Layout::vertical([
             Constraint::Min(1),
+            // Blank spacer between the feed/output and the status bar.
+            Constraint::Length(1),
             Constraint::Length(1), // status rule / single-cell Braille indicator
+            // Blank spacer between the status bar and the composer.
+            Constraint::Length(1),
             Constraint::Length(input_rows + 2 + cascade_rows), // input box + cascade band
             Constraint::Length(1), // hint line
         ])
         .split(area);
         let content_area = chunks[0];
-        let status_area = chunks[1];
-        let input_area = chunks[2];
-        let hint_area = chunks[3];
+        let status_area = chunks[2];
+        let input_area = chunks[4];
+        let hint_area = chunks[5];
         self.last_status_area = Some(status_area);
         self.last_input_area = Some(input_area);
         // The cascade band occupies the top `cascade_rows` of the input area;

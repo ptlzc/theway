@@ -97,7 +97,7 @@ pub fn engine_tools(
     subagent_tools: SubagentToolsFn,
     launch_resolver: AgentRunResolver,
     spec_names: Vec<String>,
-    model: &Model,
+    model: Option<&Model>,
     stream_fn: Option<&StreamFn>,
     skill_harness_cell: &SkillHarnessCell,
     session_id: &str,
@@ -115,7 +115,7 @@ pub fn engine_tools(
     // stamped with this session.
     tools.push(Arc::new(
         SubagentTool::new(
-            model.clone(),
+            model.cloned(),
             stream_fn.cloned(),
             subagent_tools,
             launch_resolver,
