@@ -65,6 +65,41 @@ impl App {
                 format!(" · {stats}"),
                 Style::default().fg(band.fg),
             ));
+            // Issue #78: DAG / subagent / live-shell counters in the busy band.
+            // `[n graph]` counts Running DAG runs and appears only while the
+            // DAG band is Hidden (issue #76); `[n sub]` counts Running
+            // subagents and `[n shell]` the live background shells, both shown
+            // only when non-zero.
+            let running_dags = self
+                .latest
+                .dags
+                .iter()
+                .filter(|d| d.status == "running")
+                .count();
+            if self.dag_band_mode == crate::ui::DagBandMode::Hidden && running_dags > 0 {
+                spans.push(Span::styled(
+                    format!(" · [{running_dags} graph]"),
+                    Style::default().fg(band.fg),
+                ));
+            }
+            let running_subs = self
+                .latest
+                .subagents
+                .iter()
+                .filter(|s| s.status == "running")
+                .count();
+            if running_subs > 0 {
+                spans.push(Span::styled(
+                    format!(" · [{running_subs} sub]"),
+                    Style::default().fg(band.fg),
+                ));
+            }
+            if self.latest.shell_count > 0 {
+                spans.push(Span::styled(
+                    format!(" · [{} shell]", self.latest.shell_count),
+                    Style::default().fg(band.fg),
+                ));
+            }
             let line = Line::from(spans);
             let w = area.right().saturating_sub(label_x);
             frame.buffer_mut().set_line(label_x, area.y, &line, w);
