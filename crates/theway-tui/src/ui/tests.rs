@@ -62,15 +62,18 @@ fn fixture_status(feed_blocks: Vec<WireFeedBlock>) -> WireStatus {
 /// same GrpcState shape the transport tests use), so submit/cancel/approve
 /// round-trip through actual tonic frames.
 async fn test_app() -> (App, mpsc::UnboundedReceiver<WireCommand>) {
-    let (app, rx, _ops) = test_app_with_sessions(&["sess-1"]).await;
+    let (app, rx, _ops) = test_app_with_sessions(&["sess-1"], false).await;
     (app, rx)
 }
 
 /// [`test_app`] with an explicit seed session list (empty = a daemon with
 /// no sessions) plus the `FakeSessionOps` handle for tests that inspect or
-/// mutate the session table (issue #56).
+/// mutate the session table (issue #56). `fresh_attach` mirrors
+/// `AppConfig::fresh_attach` (issue #79): when true, `App::new` leaves the
+/// initial feed empty instead of seeding the previous session's messages.
 async fn test_app_with_sessions(
     seeds: &[&str],
+    fresh_attach: bool,
 ) -> (
     App,
     mpsc::UnboundedReceiver<WireCommand>,
@@ -156,7 +159,7 @@ async fn test_app_with_sessions(
         registry: crate::local_commands::local_registry(),
         pending_images: vec![],
         color_level: theway_markdown::ColorLevel::TrueColor,
-        fresh_attach: false,
+        fresh_attach,
         auto_session: None,
     });
     let mut app = app;
@@ -523,7 +526,7 @@ include!(concat!(
 /// behind.
 #[tokio::test]
 async fn first_submit_creates_deferred_fresh_session() {
-    let (mut app, rx, _ops) = test_app_with_sessions(&["sess-1"]).await;
+    let (mut app, rx, _ops) = test_app_with_sessions(&["sess-1"], false).await;
     // Simulate the startup wiring: `run_repl` arms the flag when it reuses
     // a live daemon without explicit session selection.
     app.pending_fresh_attach = true;
@@ -559,13 +562,27 @@ async fn first_submit_creates_deferred_fresh_session() {
     drainer.abort();
 }
 
+/// Issue #79: a reused-daemon fresh attach (no explicit resume) starts with
+/// an EMPTY feed — `App::new` deliberately does not seed the previous
+/// session's messages, so the stale conversation isn't shown. The fresh
+/// session is created only on the first submitted message (issue #46).
+#[tokio::test]
+async fn fresh_attach_starts_with_empty_feed() {
+    let (app, _rx, _ops) = test_app_with_sessions(&["sess-1"], true).await;
+    assert!(
+        app.feed.blocks().is_empty(),
+        "fresh attach must not show the previous session's feed, got {}",
+        app.feed.blocks().len()
+    );
+}
+
 /// Issue #46: an explicit session selection (e.g. `/new`, `/resume`,
 /// `/session switch` — all routed through `select_session`) cancels the
 /// pending deferred fresh attach, so the next message goes to the chosen
 /// session without creating anything extra.
 #[tokio::test]
 async fn explicit_session_selection_cancels_deferred_fresh_attach() {
-    let (mut app, _rx, ops) = test_app_with_sessions(&["sess-1"]).await;
+    let (mut app, _rx, ops) = test_app_with_sessions(&["sess-1"], false).await;
     app.pending_fresh_attach = true;
 
     // `/new`-style explicit create + select: creates the session immediately
@@ -596,7 +613,7 @@ async fn explicit_session_selection_cancels_deferred_fresh_attach() {
 /// conversation.
 #[tokio::test]
 async fn reap_empty_auto_session_deletes_unmessaged_session() {
-    let (mut app, _rx, ops) = test_app_with_sessions(&["sess-1"]).await;
+    let (mut app, _rx, ops) = test_app_with_sessions(&["sess-1"], false).await;
     let auto_id = ops.add_session("sess-auto");
     app.auto_session = Some(auto_id.clone());
 
@@ -614,7 +631,7 @@ async fn reap_empty_auto_session_deletes_unmessaged_session() {
 /// it was the daemon's startup session.
 #[tokio::test]
 async fn reap_empty_auto_session_keeps_messaged_session() {
-    let (mut app, _rx, ops) = test_app_with_sessions(&["sess-1"]).await;
+    let (mut app, _rx, ops) = test_app_with_sessions(&["sess-1"], false).await;
     let auto_id = ops.add_session("sess-auto");
     app.auto_session = Some(auto_id.clone());
     app.messaged_sessions.insert(auto_id.clone());
@@ -632,7 +649,7 @@ async fn reap_empty_auto_session_keeps_messaged_session() {
 /// the reap is a no-op.
 #[tokio::test]
 async fn reap_empty_auto_session_noop_without_auto_session() {
-    let (mut app, _rx, _ops) = test_app_with_sessions(&["sess-1"]).await;
+    let (mut app, _rx, _ops) = test_app_with_sessions(&["sess-1"], false).await;
 
     app.reap_empty_auto_session().await;
 

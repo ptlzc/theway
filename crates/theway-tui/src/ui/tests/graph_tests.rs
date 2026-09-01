@@ -7,7 +7,7 @@ use super::*;
 /// aborts a busy turn nor exits.
 #[tokio::test]
 async fn ctrl_c_with_text_clears_input_without_abort_or_quit() {
-    let (mut app, rx, _ops) = test_app_with_sessions(&["sess-1"]).await;
+    let (mut app, rx, _ops) = test_app_with_sessions(&["sess-1"], false).await;
     let (drainer, seen) = drain_commands(rx);
     let backend = TestBackend::new(60, 12);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -36,7 +36,7 @@ async fn ctrl_c_with_text_clears_input_without_abort_or_quit() {
 /// Ctrl-C on an empty composer while a turn is busy still aborts.
 #[tokio::test]
 async fn ctrl_c_empty_busy_aborts() {
-    let (mut app, rx, _ops) = test_app_with_sessions(&["sess-1"]).await;
+    let (mut app, rx, _ops) = test_app_with_sessions(&["sess-1"], false).await;
     let (drainer, seen) = drain_commands(rx);
     let backend = TestBackend::new(60, 12);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -66,7 +66,7 @@ async fn ctrl_c_empty_busy_aborts() {
 /// on the second (within the 1.5 s window).
 #[tokio::test]
 async fn ctrl_c_empty_idle_two_presses_exits() {
-    let (mut app, _rx, _ops) = test_app_with_sessions(&["sess-1"]).await;
+    let (mut app, _rx, _ops) = test_app_with_sessions(&["sess-1"], false).await;
     let backend = TestBackend::new(60, 12);
     let mut terminal = Terminal::new(backend).unwrap();
 
@@ -82,7 +82,7 @@ async fn ctrl_c_empty_idle_two_presses_exits() {
 /// Bare `/graph` toggles the DAG band Show ↔ Hidden.
 #[tokio::test]
 async fn graph_bare_toggles_band_mode() {
-    let (mut app, _rx, _ops) = test_app_with_sessions(&["sess-1"]).await;
+    let (mut app, _rx, _ops) = test_app_with_sessions(&["sess-1"], false).await;
     let backend = TestBackend::new(60, 12);
     let mut terminal = Terminal::new(backend).unwrap();
 
@@ -107,7 +107,7 @@ async fn graph_bare_toggles_band_mode() {
 /// `/graph show` / `/graph hidden` set the band mode explicitly.
 #[tokio::test]
 async fn graph_show_and_hidden_set_mode_explicitly() {
-    let (mut app, _rx, _ops) = test_app_with_sessions(&["sess-1"]).await;
+    let (mut app, _rx, _ops) = test_app_with_sessions(&["sess-1"], false).await;
     let backend = TestBackend::new(60, 12);
     let mut terminal = Terminal::new(backend).unwrap();
 
@@ -123,7 +123,7 @@ async fn graph_show_and_hidden_set_mode_explicitly() {
 /// `/graph clear` clears the current session's terminal runs via the daemon.
 #[tokio::test]
 async fn graph_clear_calls_daemon_clear_session_runs() {
-    let (mut app, rx, _ops) = test_app_with_sessions(&["sess-1"]).await;
+    let (mut app, rx, _ops) = test_app_with_sessions(&["sess-1"], false).await;
     let (drainer, seen) = drain_commands(rx);
     let backend = TestBackend::new(60, 12);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -149,7 +149,7 @@ async fn graph_clear_calls_daemon_clear_session_runs() {
 async fn graph_counter_hidden_only_and_sub_shell() {
     use theway_transport::wire::{WireAgentJobSnapshot, WireDagNodeSnapshot, WireDagRunSnapshot};
 
-    let (mut app, _rx, _ops) = test_app_with_sessions(&["sess-1"]).await;
+    let (mut app, _rx, _ops) = test_app_with_sessions(&["sess-1"], false).await;
     let mut status = fixture_status(Vec::new());
     status.dags = vec![WireDagRunSnapshot {
         id: "run-1".into(),
@@ -257,7 +257,7 @@ async fn graph_counter_hidden_only_and_sub_shell() {
 async fn hidden_dag_band_is_not_rendered() {
     use theway_transport::wire::{WireDagNodeSnapshot, WireDagRunSnapshot};
 
-    let (mut app, _rx, _ops) = test_app_with_sessions(&["sess-1"]).await;
+    let (mut app, _rx, _ops) = test_app_with_sessions(&["sess-1"], false).await;
     let mut status = fixture_status(Vec::new());
     status.dags = vec![WireDagRunSnapshot {
         id: "graph-band-test".into(),

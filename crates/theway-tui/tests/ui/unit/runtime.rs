@@ -41,7 +41,7 @@ async fn help_line_lists_resume_command() {
 /// the current session annotated and pre-selected.
 #[tokio::test]
 async fn resume_picker_lists_sessions_and_annotates_current() {
-    let (mut app, _rx, _ops) = test_app_with_sessions(&["sess-1", "sess-2"]).await;
+    let (mut app, _rx, _ops) = test_app_with_sessions(&["sess-1", "sess-2"], false).await;
 
     // Act
     app.dispatch_slash("/resume", &mut terminal_placeholder())
@@ -77,7 +77,7 @@ async fn resume_picker_lists_sessions_and_annotates_current() {
 /// the popup; Esc cancels without changing the selection.
 #[tokio::test]
 async fn resume_picker_enter_selects_session_and_esc_cancels() {
-    let (mut app, _rx, _ops) = test_app_with_sessions(&["sess-1", "sess-2"]).await;
+    let (mut app, _rx, _ops) = test_app_with_sessions(&["sess-1", "sess-2"], false).await;
     let mut term = terminal_placeholder();
     app.dispatch_slash("/resume", &mut term).await;
     assert!(app.resume_picker.is_some());
@@ -118,7 +118,7 @@ async fn resume_picker_enter_selects_session_and_esc_cancels() {
 /// opening an empty popup.
 #[tokio::test]
 async fn resume_picker_empty_list_prints_no_sessions_hint() {
-    let (mut app, _rx, _ops) = test_app_with_sessions(&[]).await;
+    let (mut app, _rx, _ops) = test_app_with_sessions(&[], false).await;
 
     // Act
     app.dispatch_slash("/resume", &mut terminal_placeholder())
