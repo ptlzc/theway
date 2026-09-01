@@ -73,10 +73,16 @@ impl App {
             // forwarded, keep it inert: the TUI neither copies nor aborts.
             KeyCode::Char('c' | 'C') if ctrl && shift => {}
             KeyCode::Char('c') if ctrl => {
-                if self.busy {
-                    self.request_abort();
-                } else if self.on_idle_ctrlc() {
-                    self.quit = true;
+                // With text in the composer, Ctrl-C clears the input first
+                // (matching the Ctrl-D branch) instead of aborting/exiting.
+                if self.input_text().is_empty() {
+                    if self.busy {
+                        self.request_abort();
+                    } else if self.on_idle_ctrlc() {
+                        self.quit = true;
+                    }
+                } else {
+                    self.clear_input();
                 }
             }
             KeyCode::Char('d') if ctrl => {
