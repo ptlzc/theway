@@ -105,6 +105,7 @@ fn fixture_snapshot() -> WireStatus {
         tui_max_feed_lines: None,
         extensions: WireExtensionSnapshot::default(),
         system_context: String::new(),
+        shell_count: 3,
     }
 }
 
@@ -125,6 +126,7 @@ fn converts_full_snapshot_to_session_snapshot() {
     let poll = runtime.latest_trigger_poll.as_ref().unwrap();
     assert_eq!(poll.trace_id, "tr-1");
     assert_eq!(poll.summary, "ok");
+    assert_eq!(runtime.shell_count, Some(3));
     let sidebar = info.sidebar.as_ref().unwrap();
     assert_eq!(sidebar.inbox_new, 1);
     assert_eq!(sidebar.skills.as_ref().unwrap().total, 2);
@@ -543,4 +545,14 @@ fn daemon_config_reports_unknown_clear_fields() {
     };
 
     assert_eq!(config.unknown_clear_fields(), vec!["typo"]);
+}
+
+#[test]
+fn shell_count_survives_session_snapshot_round_trip() {
+    let mut status = fixture_snapshot();
+    status.shell_count = 7;
+    let proto = session_snapshot(&status);
+    assert_eq!(proto.runtime.as_ref().unwrap().shell_count, Some(7));
+    let restored = wire_status_from_session_snapshot(&proto);
+    assert_eq!(restored.shell_count, 7, "shell_count must survive the proto round-trip");
 }

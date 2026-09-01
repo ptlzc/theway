@@ -110,7 +110,7 @@ fn tail_start(chunk: &str) -> usize {
 // Registry
 // ──────────────────────────────────────────────────────────────────────────────────────────
 
-struct ShellRegistry {
+pub(crate) struct ShellRegistry {
     shells: Mutex<HashMap<String, Arc<ShellHandle>>>,
     next_id: AtomicU64,
 }
@@ -137,6 +137,18 @@ impl ShellRegistry {
         }
     }
 
+    /// Count shells that are still alive — i.e. currently registered and not yet exited.
+    /// Exited handles are filtered out, and shells already removed from the map are not
+    /// counted (removal only happens after exit, so a live shell is always present here).
+    pub fn alive_count(&self) -> usize {
+        self.shells
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|h| !h.exited.load(Ordering::SeqCst))
+            .count()
+    }
+
     fn ids(&self) -> Vec<String> {
         self.shells.lock().unwrap().keys().cloned().collect()
     }
@@ -146,7 +158,7 @@ impl ShellRegistry {
 /// session so they survive across turns and sessions.
 static REGISTRY: OnceLock<Arc<ShellRegistry>> = OnceLock::new();
 
-fn registry() -> &'static Arc<ShellRegistry> {
+pub(crate) fn registry() -> &'static Arc<ShellRegistry> {
     REGISTRY.get_or_init(|| {
         Arc::new(ShellRegistry {
             shells: Mutex::new(HashMap::new()),

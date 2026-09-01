@@ -144,6 +144,7 @@ impl TurnHost {
             tui_max_feed_lines: self.runtime.feed_history_limit,
             extensions: self.wire_extension_snapshot(),
             system_context,
+            shell_count: crate::tools::exec_shell::registry().alive_count() as u64,
         }
     }
 

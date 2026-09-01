@@ -7,6 +7,15 @@ mod decode;
 mod output;
 mod tools;
 
+/// Serializes tests that spawn/query background shells. The shell registry is a
+/// process-global singleton and `alive_count` reads its live count; running
+/// these tests concurrently makes the absolute count (and any `before` delta)
+/// race. A single process-wide mutex keeps the registry stable per test.
+pub(super) fn registry_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().expect("exec_shell registry test lock poisoned")
+}
+
 pub(super) fn text_of(result: &AgentToolResult) -> String {
     match &result.content[0] {
         UserContentBlock::Text(t) => t.text.clone(),

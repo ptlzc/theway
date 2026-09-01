@@ -57,6 +57,7 @@ async fn spawn_tools_server() -> (String, std::sync::Arc<FakeToolOps>, tokio::ta
             tui_max_feed_lines: None,
             extensions: WireExtensionSnapshot::default(),
             system_context: String::new(),
+            shell_count: 0,
         })),
         session_states: Arc::new(Mutex::new(std::collections::HashMap::new())),
         completer: SlashCompleter::from_commands(vec!["/help".into()]),

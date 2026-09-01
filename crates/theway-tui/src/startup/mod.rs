@@ -315,6 +315,7 @@ pub(crate) mod test_daemon {
             tui_max_feed_lines: None,
             extensions: theway_transport::wire::WireExtensionSnapshot::default(),
             system_context: String::new(),
+            shell_count: 0,
         }
     }
 

@@ -20,6 +20,7 @@ async fn exec_foreground_matches_bash() {
 
 #[tokio::test]
 async fn exec_background_returns_shell_id() {
+    let _registry = registry_test_lock();
     let result = ExecTool
         .execute(
             "e2",

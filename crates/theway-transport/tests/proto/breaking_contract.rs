@@ -74,6 +74,7 @@ fn stream_frame_session_snapshot_round_trips() {
             context_usage: None,
             session_context_usage: None,
             tui_max_feed_lines: None,
+            shell_count: None,
             model_catalog: Vec::new(),
             latest_trigger_poll: None,
             goal: None,

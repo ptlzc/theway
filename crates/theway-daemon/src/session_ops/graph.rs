@@ -176,6 +176,7 @@ pub(super) async fn session_snapshot(
             context_usage: theway_transport::wire::WireContextUsage::default(),
             session_context_usage: theway_transport::wire::WireContextUsage::default(),
             tui_max_feed_lines: None,
+            shell_count: 0,
             model_catalog: Vec::new(),
             latest_trigger_poll: None,
             goal: None,

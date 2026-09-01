@@ -4,6 +4,7 @@ use theway_llm_provider::{Api, Model, Provider};
 
 use crate::model::{auto_detect_model, explicit_model_not_found_message};
 
+#[allow(dead_code)]
 fn local_model(provider: &str, id: &str) -> Model {
     Model {
         id: id.into(),

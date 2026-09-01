@@ -60,6 +60,10 @@ pub struct WireStatus {
     /// input, output, and cache write totals for the current session.
     #[serde(default)]
     pub session_usage: WireContextUsage,
+    /// Number of background shells that are still alive (registered and not yet
+    /// exited) across the whole daemon process.
+    #[serde(default)]
+    pub shell_count: u64,
     /// TUI display settings resolved by the daemon from `config.toml`
     /// (`[tui] max_feed_lines`); `None` → the TUI built-in default applies.
     pub tui_max_feed_lines: Option<u64>,
@@ -275,6 +279,7 @@ impl From<&WireStatus> for WireSessionSnapshot {
                 context_usage: status.usage.clone(),
                 session_context_usage: status.session_usage.clone(),
                 tui_max_feed_lines: status.tui_max_feed_lines,
+                shell_count: status.shell_count,
                 model_catalog: status.model_catalog.clone(),
                 latest_trigger_poll: status.latest_trigger_poll.clone(),
                 goal: status.goal.clone(),
@@ -334,6 +339,7 @@ impl From<&WireSessionSnapshot> for WireStatus {
             tui_max_feed_lines: snapshot.runtime.tui_max_feed_lines,
             extensions: snapshot.runtime.extensions.clone(),
             system_context: snapshot.runtime.system_context.clone(),
+            shell_count: snapshot.runtime.shell_count,
         }
     }
 }

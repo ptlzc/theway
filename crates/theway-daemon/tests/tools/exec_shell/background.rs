@@ -2,6 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn background_shell_get_output_waits_and_reports_exit() {
+    let _registry = registry_test_lock();
     let bg = run_in_background(&format!("{} && echo hello", short_sleep_cmd()))
         .await
         .expect("spawn");
@@ -37,7 +38,66 @@ async fn background_shell_get_output_waits_and_reports_exit() {
 }
 
 #[tokio::test]
+async fn alive_count_tracks_running_shells() {
+    let _registry = registry_test_lock();
+    let before = registry().alive_count();
+
+    let bg = run_in_background(long_sleep_cmd()).await.expect("spawn");
+    // A live (not yet exited) shell counts toward alive_count.
+    assert_eq!(
+        registry().alive_count(),
+        before + 1,
+        "running shell should be counted as alive"
+    );
+
+    // Clean up so we don't leak a background process across tests.
+    KillShellTool
+        .execute(
+            "alive1",
+            json!({ "shell_id": bg.id }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect("cleanup kill");
+    // kill_shell removes the entry from the registry, so it no longer counts.
+    assert!(
+        registry().get(&bg.id).is_none(),
+        "shell should be removed after kill"
+    );
+    assert_eq!(
+        registry().alive_count(),
+        before,
+        "killed/removed shell should not be counted as alive"
+    );
+}
+
+#[tokio::test]
+async fn alive_count_excludes_exited_shells() {
+    let _registry = registry_test_lock();
+    let before = registry().alive_count();
+
+    // A short-lived command exits on its own; once marked exited (retained handle
+    // still queryable), it must not count as alive.
+    let bg = run_in_background(short_sleep_cmd()).await.expect("spawn");
+    let handle = registry().get(&bg.id).expect("registered");
+
+    // Wait for natural exit so the handle is marked exited.
+    get_output_text(&handle, Some(15), &CancellationToken::new()).await;
+    assert!(
+        handle.exited.load(std::sync::atomic::Ordering::SeqCst),
+        "shell should have exited"
+    );
+    assert_eq!(
+        registry().alive_count(),
+        before,
+        "exited shell should not be counted as alive"
+    );
+}
+
+#[tokio::test]
 async fn kill_shell_terminates_background_process() {
+    let _registry = registry_test_lock();
     let bg = run_in_background(long_sleep_cmd()).await.expect("spawn");
     let handle = registry().get(&bg.id).expect("registered");
 
@@ -89,6 +149,7 @@ async fn kill_shell_terminates_background_process() {
 #[cfg(unix)]
 #[tokio::test]
 async fn kill_shell_kills_backgrounded_descendant_processes() {
+    let _registry = registry_test_lock();
     use tempfile::tempdir;
     let dir = tempdir().expect("tempdir");
     let marker = dir.path().join("exec-shell-leak-marker");
@@ -127,6 +188,7 @@ async fn kill_shell_kills_backgrounded_descendant_processes() {
 
 #[tokio::test]
 async fn write_to_process_writes_stdin() {
+    let _registry = registry_test_lock();
     let bg = run_in_background(stdin_echo_cmd()).await.expect("spawn");
     let handle = registry().get(&bg.id).expect("registered");
 

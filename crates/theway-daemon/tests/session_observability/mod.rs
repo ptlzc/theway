@@ -54,6 +54,7 @@ fn live_status(session_id: &str, system_context: &str) -> WireStatus {
         tui_max_feed_lines: None,
         extensions: theway_transport::wire::WireExtensionSnapshot::default(),
         system_context: system_context.to_string(),
+        shell_count: 0,
     }
 }
 
@@ -82,6 +83,7 @@ fn resource_snapshot(session_id: &str, cwd: &str, lineage: WireSessionLineage) -
             context_usage: Default::default(),
             session_context_usage: Default::default(),
             tui_max_feed_lines: None,
+            shell_count: 0,
             model_catalog: Vec::new(),
             latest_trigger_poll: None,
             goal: None,

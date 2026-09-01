@@ -73,6 +73,12 @@ pub struct WireSessionRuntime {
     #[serde(default)]
     pub session_context_usage: WireContextUsage,
     pub tui_max_feed_lines: Option<u64>,
+    /// Number of background shells still alive (registered and not yet
+    /// exited) across the daemon process. Mirrors `WireStatus::shell_count`;
+    /// carried through this nested snapshot so the gRPC/HTTP session snapshot
+    /// round-trip preserves it for the TUI `[n shell]` counter.
+    #[serde(default)]
+    pub shell_count: u64,
     #[serde(default)]
     pub model_catalog: Vec<ProviderGroup>,
     pub latest_trigger_poll: Option<crate::feed::TriggerPollStatus>,

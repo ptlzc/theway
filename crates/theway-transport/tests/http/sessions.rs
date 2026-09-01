@@ -33,6 +33,7 @@ fn wire_status(session_id: &str) -> WireStatus {
         tui_max_feed_lines: None,
         extensions: WireExtensionSnapshot::default(),
         system_context: String::new(),
+        shell_count: 0,
     }
 }
 

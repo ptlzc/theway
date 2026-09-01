@@ -26,6 +26,7 @@ fn decode_bytes_input_maps_markers() {
 #[cfg(unix)]
 #[tokio::test]
 async fn bytes_input_decodes_to_ctrl_byte() {
+    let _registry = registry_test_lock();
     let bg = run_in_background("cat").await.expect("spawn");
     let handle = registry().get(&bg.id).expect("registered");
 

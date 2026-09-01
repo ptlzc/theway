@@ -271,6 +271,11 @@ message SessionRuntime {
   // tool inventory + working directory + memory + lineage). Mirrors the
   // request/header epoch snapshot in deepseek-harness session logs.
   string system_context = 12;
+  // Number of background shells still alive (registered and not yet exited)
+  // across the daemon process. Mirrors `WireStatus.shell_count`; carried so
+  // the gRPC session-snapshot round-trip preserves the TUI `[n shell]`
+  // counter.
+  optional uint64 shell_count = 13;
 }
 
 // Transcript plane of a session snapshot.

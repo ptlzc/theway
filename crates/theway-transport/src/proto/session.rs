@@ -53,6 +53,7 @@ pub fn wire_session_snapshot(snapshot: &WireSessionSnapshot) -> wire::SessionSna
             context_usage: Some(context_usage_to_proto(&status.usage)),
             session_context_usage: Some(context_usage_to_proto(&status.session_usage)),
             tui_max_feed_lines: status.tui_max_feed_lines.map(|n| n as u32),
+            shell_count: Some(status.shell_count),
             model_catalog: status
                 .model_catalog
                 .iter()
@@ -193,6 +194,7 @@ fn session_runtime_from_proto(runtime: Option<&wire::SessionRuntime>) -> WireSes
         context_usage: context_usage_from_proto(runtime.context_usage.as_ref()),
         session_context_usage: context_usage_from_proto(runtime.session_context_usage.as_ref()),
         tui_max_feed_lines: runtime.tui_max_feed_lines.map(u64::from),
+        shell_count: runtime.shell_count.unwrap_or(0),
         model_catalog: runtime
             .model_catalog
             .iter()

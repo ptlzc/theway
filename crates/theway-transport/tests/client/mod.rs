@@ -51,6 +51,7 @@ fn fixture_status(feed_line: &str) -> WireStatus {
         tui_max_feed_lines: None,
         extensions: crate::wire::WireExtensionSnapshot::default(),
         system_context: String::new(),
+        shell_count: 0,
     }
 }
 

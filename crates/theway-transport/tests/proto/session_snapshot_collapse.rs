@@ -68,6 +68,7 @@ fn wire_session_snapshot_nested_shape_round_trips() {
             context_usage: crate::wire::WireContextUsage::default(),
             session_context_usage: crate::wire::WireContextUsage::default(),
             tui_max_feed_lines: Some(5000),
+            shell_count: 0,
             model_catalog: Vec::new(),
             latest_trigger_poll: None,
             goal: None,

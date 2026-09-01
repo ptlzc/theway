@@ -69,6 +69,7 @@ async fn side_panel_renders_session_lineage_and_collapsed_nodes() {
             context_usage: Default::default(),
             session_context_usage: Default::default(),
             tui_max_feed_lines: None,
+            shell_count: 0,
             model_catalog: Vec::new(),
             latest_trigger_poll: None,
             goal: None,
