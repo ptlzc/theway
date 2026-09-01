@@ -1,6 +1,6 @@
 {
   "name": "@theway-ai/sdk",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "Typed TypeScript SDK for theway, a terminal-first local AI agent runtime: commands, sessions, DAG orchestration, events, settings, and health over gRPC.",
   "license": "MIT",
   "repository": {
