@@ -2,16 +2,27 @@
 //!
 //! [`virtualize_tool_results`] replaces large stored tool results with a compact,
 //! self-describing placeholder before a model request is built. The placeholder only
-//! depends on the tool name, call id, byte/line counts, exit code, and tail preview —
-//! never on wall-clock age — so unchanged history produces byte-stable context prefixes
-//! for provider prompt caches.
+//! depends on the tool name, call id, character/line counts, exit code, and the front
+//! + tail previews — never on wall-clock age — so unchanged history produces byte-stable
+//!   context prefixes for provider prompt caches.
 
 use theway_llm_provider::{Message as PiMessage, ToolResultMessage, UserContentBlock};
 
 use crate::types::AgentMessage;
 
-/// Tool results at or below this size stay inline in the LLM context.
-pub const TOOL_RESULT_VIRTUALIZATION_THRESHOLD_BYTES: usize = 4 * 1024;
+/// Default maximum character count for a tool result to stay inline in the LLM context.
+///
+/// Tool results with more than [`TOOL_RESULT_VIRTUALIZATION_MAX_CHARS`] characters are
+/// replaced by [`virtualize_tool_results`] with a compact placeholder. The value is read
+/// from [`TOOL_RESULT_VIRTUALIZATION_MAX_CHARS_ENV`] at call time when set; missing,
+/// malformed, or non-positive values fall back to this default.
+pub const TOOL_RESULT_VIRTUALIZATION_MAX_CHARS: usize = 20_000;
+
+/// Environment variable that overrides [`TOOL_RESULT_VIRTUALIZATION_MAX_CHARS`].
+///
+/// Set it to a positive integer (the maximum tool-result character count to keep inline).
+/// A missing, malformed, or zero value falls back to the default.
+pub const TOOL_RESULT_VIRTUALIZATION_MAX_CHARS_ENV: &str = "THEWAY_TOOL_RESULT_MAX_CHARS";
 
 /// Number of trailing lines included in the placeholder preview.
 pub const TOOL_RESULT_TAIL_PREVIEW_LINES: usize = 5;
@@ -19,42 +30,72 @@ pub const TOOL_RESULT_TAIL_PREVIEW_LINES: usize = 5;
 /// Maximum characters per preview line before a UTF-8-safe ellipsis is appended.
 pub const TOOL_RESULT_TAIL_PREVIEW_LINE_CHARS: usize = 200;
 
+/// Maximum leading characters included in the placeholder front preview.
+pub const TOOL_RESULT_FRONT_PREVIEW_CHARS: usize = 200;
+
+/// Resolve the effective tool-result virtualization threshold in characters.
+///
+/// Reads [`TOOL_RESULT_VIRTUALIZATION_MAX_CHARS_ENV`]; a positive integer overrides the
+/// default. Missing, malformed, or non-positive values fall back to
+/// [`TOOL_RESULT_VIRTUALIZATION_MAX_CHARS`].
+fn effective_max_chars() -> usize {
+    std::env::var(TOOL_RESULT_VIRTUALIZATION_MAX_CHARS_ENV)
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|&value| value > 0)
+        .unwrap_or(TOOL_RESULT_VIRTUALIZATION_MAX_CHARS)
+}
+
 /// Replace oversized `ToolResult` message content with a deterministic placeholder.
 ///
 /// The `ToolResultMessage` role, `tool_call_id`, `tool_name`, and `is_error` fields are
 /// preserved so provider tool-call/tool-result pairing remains intact.
 pub fn virtualize_tool_results(messages: Vec<AgentMessage>) -> Vec<AgentMessage> {
+    virtualize_tool_results_with_max_chars(messages, effective_max_chars())
+}
+
+/// Virtualize using an explicit character threshold.
+///
+/// [`virtualize_tool_results`] resolves the threshold from the environment/config and
+/// delegates here; keeping the threshold an explicit parameter makes the transform
+/// deterministic and trivially unit-testable without mutating the process environment.
+pub(crate) fn virtualize_tool_results_with_max_chars(
+    messages: Vec<AgentMessage>,
+    max_chars: usize,
+) -> Vec<AgentMessage> {
     messages
         .into_iter()
         .map(|message| match message {
-            AgentMessage::Llm(PiMessage::ToolResult(result)) => {
-                AgentMessage::Llm(PiMessage::ToolResult(virtualize_tool_result(result)))
-            }
+            AgentMessage::Llm(PiMessage::ToolResult(result)) => AgentMessage::Llm(
+                PiMessage::ToolResult(virtualize_tool_result(result, max_chars)),
+            ),
             other => other,
         })
         .collect()
 }
 
-fn virtualize_tool_result(mut result: ToolResultMessage) -> ToolResultMessage {
+fn virtualize_tool_result(mut result: ToolResultMessage, max_chars: usize) -> ToolResultMessage {
     let full_text = tool_result_text(&result);
-    if full_text.len() <= TOOL_RESULT_VIRTUALIZATION_THRESHOLD_BYTES {
+    if full_text.chars().count() <= max_chars {
         return result;
     }
 
-    let bytes = full_text.len();
+    let chars = full_text.chars().count();
     let lines = count_lines(&full_text);
+    let front = front_preview(&full_text, TOOL_RESULT_FRONT_PREVIEW_CHARS);
     let tail = tail_preview(
         &full_text,
         TOOL_RESULT_TAIL_PREVIEW_LINES,
         TOOL_RESULT_TAIL_PREVIEW_LINE_CHARS,
     );
     let placeholder = format!(
-        "[tool_result {} {}: {} / {}, exit {}; tail: {}]",
+        "[tool_result {} {}: {} / {}, exit {}; front: {}; tail: {}]",
         result.tool_name,
         result.tool_call_id,
-        bytes,
+        chars,
         lines,
         exit_code(&result),
+        front,
         tail
     );
     result.content = vec![UserContentBlock::text(placeholder)];
@@ -79,6 +120,16 @@ fn tool_result_text(result: &ToolResultMessage) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn front_preview(text: &str, max_chars: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= max_chars {
+        text.to_string()
+    } else {
+        let head: String = chars.into_iter().take(max_chars).collect();
+        format!("{head}…")
+    }
 }
 
 fn count_lines(text: &str) -> usize {

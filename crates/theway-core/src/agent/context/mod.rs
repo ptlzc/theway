@@ -14,8 +14,9 @@ pub mod transform;
 #[cfg(feature = "harness")]
 pub use assembly::build_session_context;
 pub use transform::{
-    TOOL_RESULT_TAIL_PREVIEW_LINE_CHARS, TOOL_RESULT_TAIL_PREVIEW_LINES,
-    TOOL_RESULT_VIRTUALIZATION_THRESHOLD_BYTES, virtualize_tool_results,
+    TOOL_RESULT_FRONT_PREVIEW_CHARS, TOOL_RESULT_TAIL_PREVIEW_LINE_CHARS,
+    TOOL_RESULT_TAIL_PREVIEW_LINES, TOOL_RESULT_VIRTUALIZATION_MAX_CHARS,
+    TOOL_RESULT_VIRTUALIZATION_MAX_CHARS_ENV, virtualize_tool_results,
 };
 
 #[cfg(test)]
