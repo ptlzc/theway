@@ -216,6 +216,18 @@ pub(crate) struct ResumePickerState {
     pub(crate) scroll: usize,
 }
 
+/// DAG status band visibility (issue #76 `/graph` command). TUI-local state,
+/// not persisted: `Show` renders the DAG band while runs are live, `Hidden`
+/// suppresses it entirely (and the status bar shows `[n graph]` instead, see
+/// issue #78). `/graph show` / `/graph hidden` set it explicitly, bare
+/// `/graph` toggles, `/graph clear` clears the session's terminal runs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum DagBandMode {
+    #[default]
+    Show,
+    Hidden,
+}
+
 /// Everything the client App needs, assembled by `main.rs` after the daemon
 /// is discovered/spawned and the initial snapshot is fetched.
 pub struct AppConfig {
@@ -276,6 +288,10 @@ pub struct App {
     /// or by any explicit session selection (`/new`, `/resume`, `/session
     /// switch`).
     pending_fresh_attach: bool,
+    /// Issue #76: DAG status band visibility (`/graph`). Defaults to `Show`;
+    /// when `Hidden` the band is not rendered and the status bar shows
+    /// `[n graph]` (issue #78).
+    dag_band_mode: DagBandMode,
     model_config_path: PathBuf,
     pending_model_default: Option<PendingModelDefault>,
     pending_thinking_default: Option<PendingThinkingDefault>,

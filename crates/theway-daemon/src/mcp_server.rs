@@ -109,6 +109,17 @@ fn tool_specs() -> Vec<ToolSpec> {
             }),
         },
         ToolSpec {
+            name: "graph_clear",
+            description: "Clear the terminal DAG/goal runs of a session, keeping running runs.",
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "session_id": { "type": "string" },
+                    "keep": { "type": "integer" }
+                }
+            }),
+        },
+        ToolSpec {
             name: "graph_cancel",
             description: "Cancel a DAG/goal run.",
             schema: json!({
@@ -436,6 +447,16 @@ impl ToolDispatcher {
                 let run_id = arg_str(&args, "run_id")?;
                 GraphOps::cancel_run(self.ops.as_ref(), run_id, Some("cancelled via mcp"));
                 Ok(json!({ "accepted": true }))
+            }
+            "graph_clear" => {
+                let session_id = args
+                    .get("session_id")
+                    .and_then(Value::as_str)
+                    .map(|s| s.to_string());
+                let keep = args.get("keep").and_then(Value::as_u64).unwrap_or(0) as usize;
+                let removed =
+                    GraphOps::clear_session_runs(self.ops.as_ref(), session_id.as_deref(), keep);
+                Ok(json!({ "removed": removed }))
             }
             "graph_retry" => {
                 let run_id = arg_str(&args, "run_id")?;

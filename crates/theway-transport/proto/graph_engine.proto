@@ -180,6 +180,19 @@ message GraphListResponse {
   repeated DagRunSnapshot runs = 1;
 }
 
+// Clear the terminal (Completed/Failed/Cancelled) runs of a session, keeping
+// the newest `keep` of them. Running runs are never removed.
+message GraphClearRequest {
+  // Owning session. Omitted = the session this connection belongs to.
+  optional string session_id = 1;
+  // Keep the newest `keep` terminal runs (default 0 = clear all).
+  uint32 keep = 2;
+}
+
+message GraphClearResponse {
+  uint64 removed = 1;
+}
+
 // Node type in a session graph.
 enum SessionGraphNodeType {
   SESSION_GRAPH_NODE_TYPE_UNSPECIFIED = 0;
@@ -233,4 +246,7 @@ service GraphEngineService {
   rpc GraphRestore(GraphRestoreRequest) returns (GraphRestoreResponse);
   // Enumerate one session's graph runs (DagRunSnapshot shape).
   rpc GraphList(GraphListRequest) returns (GraphListResponse);
+  // Clear the terminal runs of a session (keeps running runs; `keep` keeps
+  // the newest N terminal runs). Backs `/graph clear` and MCP `graph_clear`.
+  rpc GraphClear(GraphClearRequest) returns (GraphClearResponse);
 }

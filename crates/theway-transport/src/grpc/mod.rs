@@ -59,11 +59,11 @@ use theway_grpc::{
     ApproveRequest, CancelRequest, CommandResult, CreateSessionRequest, CreateSessionResponse,
     DeleteSessionRequest, DeleteSessionResponse, Empty, GetNodeOutputRequest,
     GetNodeOutputResponse, GraphCancelRequest, GraphCheckpointRequest, GraphCheckpointResponse,
-    GraphKind, GraphListRequest, GraphListResponse, GraphNodeInterruptRequest,
-    GraphNodeSteerRequest, GraphRestoreRequest, GraphRestoreResponse, GraphRetryRequest,
-    GraphRetryResponse, GraphSkipRequest, GraphSkipResponse, ListSessionsResponse, MessageMode,
-    RenameSessionRequest, SendMessageRequest, SetModelRequest, SetThinkingRequest,
-    StreamEventsRequest, StreamFrame,
+    GraphClearRequest, GraphClearResponse, GraphKind, GraphListRequest, GraphListResponse,
+    GraphNodeInterruptRequest, GraphNodeSteerRequest, GraphRestoreRequest, GraphRestoreResponse,
+    GraphRetryRequest, GraphRetryResponse, GraphSkipRequest, GraphSkipResponse,
+    ListSessionsResponse, MessageMode, RenameSessionRequest, SendMessageRequest, SetModelRequest,
+    SetThinkingRequest, StreamEventsRequest, StreamFrame,
 };
 
 #[derive(Clone)]
@@ -466,6 +466,23 @@ impl GraphEngineService for GrpcState {
             .map(dag_run_wire)
             .collect();
         Ok(Response::new(GraphListResponse { runs }))
+    }
+
+    async fn graph_clear(
+        &self,
+        request: Request<GraphClearRequest>,
+    ) -> Result<Response<GraphClearResponse>, Status> {
+        let request = request.into_inner();
+        let session_id = match request.session_id.as_deref() {
+            Some(id) if !id.trim().is_empty() => id.to_string(),
+            _ => self.session_id.read().unwrap().clone(),
+        };
+        let removed = self
+            .graph_ops
+            .clear_session_runs(Some(&session_id), request.keep as usize);
+        Ok(Response::new(GraphClearResponse {
+            removed: removed as u64,
+        }))
     }
 }
 

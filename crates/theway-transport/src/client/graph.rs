@@ -131,6 +131,21 @@ impl GrpcClient {
         Ok(response.into_inner().runs)
     }
 
+    /// Clear the terminal (Completed/Failed/Cancelled) runs of a session,
+    /// keeping the newest `keep` of them. Running runs are never removed.
+    /// Returns the number of runs removed.
+    pub async fn graph_clear(&mut self, session_id: &str, keep: usize) -> Result<u64> {
+        let response = self
+            .graph
+            .graph_clear(GraphClearRequest {
+                session_id: Some(session_id.to_string()),
+                keep: keep as u32,
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("graph_clear: {e}"))?;
+        Ok(response.into_inner().removed)
+    }
+
     /// A DAG node's full output text from an offset.
     pub async fn get_node_output(
         &mut self,

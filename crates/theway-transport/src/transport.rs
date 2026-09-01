@@ -67,6 +67,12 @@ pub trait GraphOps: Send + Sync {
     ) -> Result<Vec<WireGraphCheckpoint>>;
     fn restore(&self, session_id: &str, snapshot: &str) -> Result<String>;
     fn list(&self, session_id: &str) -> Vec<WireDagRunSnapshot>;
+    /// Clear the terminal (Completed/Failed/Cancelled) runs of `session_id`,
+    /// keeping the newest `keep` of them. Returns the number of runs removed.
+    /// Default no-op (0) for clients/ops seams that expose no clear path.
+    fn clear_session_runs(&self, _session_id: Option<&str>, _keep: usize) -> usize {
+        0
+    }
 }
 
 /// Empty operation seams for clients/tests that only exercise unrelated

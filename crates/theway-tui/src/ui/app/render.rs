@@ -42,7 +42,9 @@ impl App {
         // DAG status band (issue #38): while DAG runs are live the band
         // squeezes the feed's bottom rows, between the feed and the busy
         // band.
-        let (content_area, dag_band_area) = if self.latest.dags.is_empty() {
+        let (content_area, dag_band_area) = if self.latest.dags.is_empty()
+            || self.dag_band_mode == crate::ui::DagBandMode::Hidden
+        {
             (content_area, None)
         } else {
             let rows = dag_band::band_rows(&self.latest.dags, content_area.width)

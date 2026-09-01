@@ -131,6 +131,10 @@ impl GraphOps for CoreGraphOps {
             .map(|run| dag_run_snapshot(&run))
             .collect()
     }
+
+    fn clear_session_runs(&self, session_id: Option<&str>, keep: usize) -> usize {
+        self.engine.clear_session_runs(session_id, keep)
+    }
 }
 
 pub fn dag_run_snapshot(run: &DagRun) -> WireDagRunSnapshot {

@@ -8,6 +8,7 @@ struct ClientGraphOps {
     retried: Mutex<Vec<(String, Option<String>)>>,
     skipped: Mutex<Vec<(String, String)>>,
     runs: Mutex<Vec<WireDagRunSnapshot>>,
+    clears: Mutex<Vec<(Option<String>, usize)>>,
 }
 
 impl crate::GraphOps for ClientGraphOps {
@@ -50,6 +51,14 @@ impl crate::GraphOps for ClientGraphOps {
 
     fn list(&self, _session_id: &str) -> Vec<WireDagRunSnapshot> {
         self.runs.lock().unwrap().clone()
+    }
+
+    fn clear_session_runs(&self, session_id: Option<&str>, keep: usize) -> usize {
+        self.clears
+            .lock()
+            .unwrap()
+            .push((session_id.map(str::to_string), keep));
+        3
     }
 }
 
@@ -154,6 +163,19 @@ async fn client_graph_list_returns_runs_for_session() {
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0].id, "dag-1");
     assert_eq!(runs[0].kind, "goal");
+}
+
+#[tokio::test]
+async fn client_graph_clear_clears_session_terminal_runs() {
+    let graph = Arc::new(ClientGraphOps::default());
+    let (mut client, _command_rx, _snapshot_tx) =
+        client_and_server_with_graph(graph.clone(), Arc::new(ClientJobOps::default())).await;
+
+    let removed = client.graph_clear("sess-1", 2).await.unwrap();
+    assert_eq!(removed, 3);
+    let clears = graph.clears.lock().unwrap();
+    assert_eq!(clears.len(), 1);
+    assert_eq!(clears[0], (Some("sess-1".to_string()), 2));
 }
 
 #[tokio::test]

@@ -139,6 +139,50 @@ impl App {
             "/status-panel" => {
                 self.status_panel_menu = Some(0);
             }
+            // Issue #76: `/graph` controls the DAG status band. Bare `/graph`
+            // toggles Show/Hidden; `/graph show` / `/graph hidden` set it
+            // explicitly; `/graph clear` clears the current session's terminal
+            // DAG runs via the daemon. Band visibility is TUI-local (issue #76);
+            // the `[n graph]` status-bar counter (issue #78) only appears while
+            // Hidden.
+            "/graph" if args.is_empty() => {
+                self.dag_band_mode = match self.dag_band_mode {
+                    crate::ui::DagBandMode::Show => crate::ui::DagBandMode::Hidden,
+                    crate::ui::DagBandMode::Hidden => crate::ui::DagBandMode::Show,
+                };
+                self.system_line(if self.dag_band_mode == crate::ui::DagBandMode::Hidden {
+                    "DAG band 已隐藏 (/graph show 恢复)"
+                } else {
+                    "DAG band 已显示 (/graph hidden 隐藏)"
+                });
+            }
+            "/graph" if args == "show" => {
+                self.dag_band_mode = crate::ui::DagBandMode::Show;
+                self.system_line("DAG band 已显示");
+            }
+            "/graph" if args == "hidden" => {
+                self.dag_band_mode = crate::ui::DagBandMode::Hidden;
+                self.system_line("DAG band 已隐藏");
+            }
+            "/graph" if args == "clear" => {
+                let session_id = self.session_id.clone();
+                match self.client.graph_clear(&session_id, 0).await {
+                    Ok(removed) => {
+                        if removed > 0 {
+                            self.system_line(format!(
+                                "✓ 已清除 {removed} 个终态 DAG (Completed/Failed/Cancelled)"
+                            ));
+                        } else {
+                            self.system_line(
+                                "当前没有可清除的终态 DAG; 运行中的 DAG 保留。",
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        self.error_line(format!("graph clear failed: {error}"));
+                    }
+                }
+            }
             "/extensions" => match self.client.get_extensions().await {
                 Ok(extensions) => {
                     self.latest.extensions = extensions;

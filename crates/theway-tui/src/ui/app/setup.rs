@@ -3,7 +3,13 @@ impl App {
         let initial = config.initial;
         let initial_runtime_revision = initial.sidebar.runtime_revision;
         let mut feed = Feed::new();
-        feed.replace_blocks(&initial.feed_blocks);
+        // Issue #79: on a fresh attach (reused daemon, no explicit resume) the
+        // App must NOT show the previous session's feed — it starts empty and
+        // the session is created on the first message (issue #46). Any explicit
+        // session selection loads that session's feed via `select_session`.
+        if !config.fresh_attach {
+            feed.replace_blocks(&initial.feed_blocks);
+        }
         let mut commands = collect_slash_commands(
             &config.registry,
             &initial.sidebar.skills.items,
@@ -23,6 +29,7 @@ impl App {
             connector: config.connector,
             session_id: initial.session_id.clone(),
             pending_fresh_attach: config.fresh_attach,
+            dag_band_mode: crate::ui::DagBandMode::Show,
             cwd: config.cwd,
             model_config_path: config.model_config_path,
             pending_model_default: None,
@@ -110,6 +117,15 @@ impl App {
         );
         self.feed
             .push_plain_untimed(format!("session: {}", self.session_id), Level::Output);
+        // Issue #79: fresh attach (reused daemon, no explicit resume) starts a
+        // brand-new session on the first message; surface that instead of the
+        // stale previous-session id.
+        if self.pending_fresh_attach {
+            self.feed.push_plain_untimed(
+                "新 session: 将在首条消息时创建 (不再加载上一会话)",
+                Level::System,
+            );
+        }
         let tools = if self.latest.sidebar.tools.names.is_empty() {
             "(none)".to_string()
         } else {
