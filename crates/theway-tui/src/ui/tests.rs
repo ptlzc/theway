@@ -462,6 +462,14 @@ include!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/tests/ui/unit/status.rs"
 ));
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/ui/unit/mouse.rs"
+));
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/ui/unit/extension.rs"
+));
 
 include!(concat!(
     env!("CARGO_MANIFEST_DIR"),
