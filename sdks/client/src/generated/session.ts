@@ -390,6 +390,13 @@ export interface SessionRuntime {
    * request/header epoch snapshot in deepseek-harness session logs.
    */
   systemContext: string;
+  /**
+   * Number of background shells still alive (registered and not yet exited)
+   * across the daemon process. Mirrors `WireStatus.shell_count`; carried so
+   * the gRPC session-snapshot round-trip preserves the TUI `[n shell]`
+   * counter.
+   */
+  shellCount?: string | undefined;
 }
 
 /** Transcript plane of a session snapshot. */
@@ -4438,6 +4445,7 @@ function createBaseSessionRuntime(): SessionRuntime {
     controlPlanePrompt: undefined,
     extensions: undefined,
     systemContext: "",
+    shellCount: undefined,
   };
 }
 
@@ -4480,6 +4488,9 @@ export const SessionRuntime: MessageFns<SessionRuntime> = {
     }
     if (message.systemContext !== "") {
       writer.uint32(98).string(message.systemContext);
+    }
+    if (message.shellCount !== undefined) {
+      writer.uint32(104).uint64(message.shellCount);
     }
     return writer;
   },
@@ -4597,6 +4608,14 @@ export const SessionRuntime: MessageFns<SessionRuntime> = {
           message.systemContext = reader.string();
           continue;
         }
+        case 13: {
+          if (tag !== 104) {
+            break;
+          }
+
+          message.shellCount = reader.uint64().toString();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -4656,6 +4675,11 @@ export const SessionRuntime: MessageFns<SessionRuntime> = {
         : isSet(object.system_context)
         ? globalThis.String(object.system_context)
         : "",
+      shellCount: isSet(object.shellCount)
+        ? globalThis.String(object.shellCount)
+        : isSet(object.shell_count)
+        ? globalThis.String(object.shell_count)
+        : undefined,
     };
   },
 
@@ -4697,6 +4721,9 @@ export const SessionRuntime: MessageFns<SessionRuntime> = {
     if (message.systemContext !== "") {
       obj.systemContext = message.systemContext;
     }
+    if (message.shellCount !== undefined) {
+      obj.shellCount = message.shellCount;
+    }
     return obj;
   },
 
@@ -4731,6 +4758,7 @@ export const SessionRuntime: MessageFns<SessionRuntime> = {
       ? ExtensionSnapshot.fromPartial(object.extensions)
       : undefined;
     message.systemContext = object.systemContext ?? "";
+    message.shellCount = object.shellCount ?? undefined;
     return message;
   },
 };

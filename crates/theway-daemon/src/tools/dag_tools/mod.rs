@@ -1,6 +1,7 @@
 //! `dag_*` tools — the DAG orchestration tool face: define (dag_plan), monitor
 //! (dag_status / dag_inspect), harvest (dag_wait), intervene (dag_retry /
-//! dag_skip / dag_cancel). 1:1 port of the dag-orchestrator extension's
+//! dag_skip / dag_cancel), clean up (dag_clear). 1:1 port of the
+//! dag-orchestrator extension's
 //! `tools.ts`, driving the engine in
 //! `theway_core::multiagent::graph::engine` (which owns the
 //! scheduler/state machine; the real subagent launcher lives in
@@ -12,7 +13,8 @@
 //! injected at construction by p3c-wire (`None` = no isolation, e.g. REPL).
 //!
 //! Layout: one submodule per tool ([`plan`], [`status`], [`inspect`], [`wait`],
-//! [`retry`], [`skip`], [`cancel`]) plus the shared helpers in [`utils`].
+//! [`retry`], [`skip`], [`cancel`], [`clear`]) plus the shared helpers in
+//! [`utils`].
 
 use std::sync::Arc;
 
@@ -40,6 +42,7 @@ use utils::{
 };
 
 pub mod cancel;
+pub mod clear;
 pub mod inspect;
 pub mod plan;
 pub mod retry;
@@ -50,6 +53,7 @@ pub mod wait;
 
 // Keep the pre-split public paths (`dag_tools::DagPlanTool`, …) reachable.
 pub use cancel::DagCancelTool;
+pub use clear::DagClearTool;
 pub use inspect::DagInspectTool;
 pub use plan::{DagPlanTool, plan_from_definition};
 pub use retry::DagRetryTool;
@@ -65,7 +69,7 @@ const NODE_RESULT_DEFAULT_TAIL: usize = 800;
 
 // ── construction ─────────────────────────────────────────────────────────────
 
-/// Build the seven `dag_*` tools, all sharing one engine and the owning pi
+/// Build the eight `dag_*` tools, all sharing one engine and the owning pi
 /// session id (p3c-wire passes `Some(session_id)` from the harness; `None`
 /// disables session isolation).
 pub struct DagTools;
@@ -107,7 +111,11 @@ impl DagTools {
                 engine: engine.clone(),
                 session_id: session_id.clone(),
             }),
-            Arc::new(DagCancelTool { engine, session_id }),
+            Arc::new(DagCancelTool {
+                engine: engine.clone(),
+                session_id: session_id.clone(),
+            }),
+            Arc::new(DagClearTool { engine, session_id }),
         ]
     }
 }

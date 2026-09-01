@@ -294,12 +294,14 @@ impl DagEngine {
                         error: run.error.clone(),
                     },
                     run.status.clone(),
+                    run.session_id.clone(),
                 ))
             }
         };
-        if let Some((event, status)) = terminal {
+        if let Some((event, status, session_id)) = terminal {
             self.finish_run_observation(run_id, status);
             self.emit(event);
+            self.evict(session_id.as_deref());
             self.wake_waiters(run_id);
         }
         self.notify_persist();

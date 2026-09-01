@@ -13,6 +13,7 @@ mod observability;
 mod persist_sink;
 mod plan;
 mod restore;
+mod retention;
 mod retry_skip_cancel;
 mod schedule;
 mod terminal;

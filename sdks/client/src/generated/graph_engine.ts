@@ -311,6 +311,23 @@ export interface GraphListResponse {
 }
 
 /**
+ * Clear the terminal (Completed/Failed/Cancelled) runs of a session, keeping
+ * the newest `keep` of them. Running runs are never removed.
+ */
+export interface GraphClearRequest {
+  /** Owning session. Omitted = the session this connection belongs to. */
+  sessionId?:
+    | string
+    | undefined;
+  /** Keep the newest `keep` terminal runs (default 0 = clear all). */
+  keep: number;
+}
+
+export interface GraphClearResponse {
+  removed: string;
+}
+
+/**
  * A node in the session graph. Session nodes represent live sessions;
  * collapsed nodes represent archived sessions folded into another session.
  */
@@ -2959,6 +2976,144 @@ export const GraphListResponse: MessageFns<GraphListResponse> = {
   },
 };
 
+function createBaseGraphClearRequest(): GraphClearRequest {
+  return { sessionId: undefined, keep: 0 };
+}
+
+export const GraphClearRequest: MessageFns<GraphClearRequest> = {
+  encode(message: GraphClearRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sessionId !== undefined) {
+      writer.uint32(10).string(message.sessionId);
+    }
+    if (message.keep !== 0) {
+      writer.uint32(16).uint32(message.keep);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): GraphClearRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGraphClearRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.keep = reader.uint32();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GraphClearRequest {
+    return {
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : undefined,
+      keep: isSet(object.keep) ? globalThis.Number(object.keep) : 0,
+    };
+  },
+
+  toJSON(message: GraphClearRequest): unknown {
+    const obj: any = {};
+    if (message.sessionId !== undefined) {
+      obj.sessionId = message.sessionId;
+    }
+    if (message.keep !== 0) {
+      obj.keep = Math.round(message.keep);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GraphClearRequest>, I>>(base?: I): GraphClearRequest {
+    return GraphClearRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<GraphClearRequest>, I>>(object: I): GraphClearRequest {
+    const message = createBaseGraphClearRequest();
+    message.sessionId = object.sessionId ?? undefined;
+    message.keep = object.keep ?? 0;
+    return message;
+  },
+};
+
+function createBaseGraphClearResponse(): GraphClearResponse {
+  return { removed: "0" };
+}
+
+export const GraphClearResponse: MessageFns<GraphClearResponse> = {
+  encode(message: GraphClearResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.removed !== "0") {
+      writer.uint32(8).uint64(message.removed);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): GraphClearResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGraphClearResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.removed = reader.uint64().toString();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GraphClearResponse {
+    return { removed: isSet(object.removed) ? globalThis.String(object.removed) : "0" };
+  },
+
+  toJSON(message: GraphClearResponse): unknown {
+    const obj: any = {};
+    if (message.removed !== "0") {
+      obj.removed = message.removed;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GraphClearResponse>, I>>(base?: I): GraphClearResponse {
+    return GraphClearResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<GraphClearResponse>, I>>(object: I): GraphClearResponse {
+    const message = createBaseGraphClearResponse();
+    message.removed = object.removed ?? "0";
+    return message;
+  },
+};
+
 function createBaseSessionGraphNode(): SessionGraphNode {
   return {
     id: "",
@@ -3561,6 +3716,19 @@ export const GraphEngineServiceService = {
     responseSerialize: (value: GraphListResponse): Buffer => Buffer.from(GraphListResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): GraphListResponse => GraphListResponse.decode(value),
   },
+  /**
+   * Clear the terminal runs of a session (keeps running runs; `keep` keeps
+   * the newest N terminal runs). Backs `/graph clear` and MCP `graph_clear`.
+   */
+  graphClear: {
+    path: "/theway.grpc.v1.GraphEngineService/GraphClear" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: GraphClearRequest): Buffer => Buffer.from(GraphClearRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): GraphClearRequest => GraphClearRequest.decode(value),
+    responseSerialize: (value: GraphClearResponse): Buffer => Buffer.from(GraphClearResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): GraphClearResponse => GraphClearResponse.decode(value),
+  },
 } as const;
 
 export interface GraphEngineServiceServer extends UntypedServiceImplementation {
@@ -3579,6 +3747,11 @@ export interface GraphEngineServiceServer extends UntypedServiceImplementation {
   graphRestore: handleUnaryCall<GraphRestoreRequest, GraphRestoreResponse>;
   /** Enumerate one session's graph runs (DagRunSnapshot shape). */
   graphList: handleUnaryCall<GraphListRequest, GraphListResponse>;
+  /**
+   * Clear the terminal runs of a session (keeps running runs; `keep` keeps
+   * the newest N terminal runs). Backs `/graph clear` and MCP `graph_clear`.
+   */
+  graphClear: handleUnaryCall<GraphClearRequest, GraphClearResponse>;
 }
 
 export interface GraphEngineServiceClient extends Client {
@@ -3722,6 +3895,25 @@ export interface GraphEngineServiceClient extends Client {
     metadata: Metadata,
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: GraphListResponse) => void,
+  ): ClientUnaryCall;
+  /**
+   * Clear the terminal runs of a session (keeps running runs; `keep` keeps
+   * the newest N terminal runs). Backs `/graph clear` and MCP `graph_clear`.
+   */
+  graphClear(
+    request: GraphClearRequest,
+    callback: (error: ServiceError | null, response: GraphClearResponse) => void,
+  ): ClientUnaryCall;
+  graphClear(
+    request: GraphClearRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: GraphClearResponse) => void,
+  ): ClientUnaryCall;
+  graphClear(
+    request: GraphClearRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: GraphClearResponse) => void,
   ): ClientUnaryCall;
 }
 
