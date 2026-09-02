@@ -100,10 +100,23 @@ impl HookRegistration {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RawRegistration {
     registration_id: u64,
-    event: ExtensionLifecycleEvent,
+    /// Public (`namespace/action`) or internal snake_case event name; resolved
+    /// by [`event_name`] (public name wins, internal names stay as aliases).
+    event: Value,
     #[serde(default)]
     descriptor: RawDescriptor,
     sequence: u64,
+}
+
+/// Resolve a subscription event name: try the public harness name first, then
+/// the internal snake_case name, so plugins may subscribe with either form
+/// and the same event is never delivered twice through both.
+fn event_name(raw: &Value) -> Result<ExtensionLifecycleEvent, String> {
+    let name = raw
+        .as_str()
+        .ok_or_else(|| "event must be a string".to_string())?;
+    ExtensionLifecycleEvent::from_public_name(name)
+        .ok_or_else(|| format!("unknown extension event name: {name}"))
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -134,23 +147,25 @@ pub(super) fn validate_registrations(metadata: Value) -> Result<Vec<HookRegistra
         .map_err(|error| format!("extension registrations are invalid: {error}"))?;
     let mut ids = BTreeSet::new();
     let mut validated = Vec::with_capacity(raw.len());
-    for registration in raw {
-        if !ids.insert(registration.registration_id) {
+    for raw_registration in raw {
+        if !ids.insert(raw_registration.registration_id) {
             return Err("extension registration ids must be unique".into());
         }
+        let event = event_name(&raw_registration.event)?;
+        let registration = raw_registration;
         let class = registration
             .descriptor
             .class
-            .unwrap_or_else(|| default_class(registration.event));
-        let contract = ExtensionHookContract::for_hook(registration.event, class)
-            .map_err(|error| error.message)?;
+            .unwrap_or_else(|| default_class(event));
+        let contract =
+            ExtensionHookContract::for_hook(event, class).map_err(|error| error.message)?;
         if let Some(actions) = &registration.descriptor.allowed_actions {
             let declared: BTreeSet<_> = actions.iter().copied().collect();
             let canonical: BTreeSet<_> = contract.allowed_actions.iter().copied().collect();
             if declared != canonical || declared.len() != actions.len() {
                 return Err(format!(
                     "hook {:?}/{class:?} allowedActions must match the ABI contract",
-                    registration.event
+                    event
                 ));
             }
         }
@@ -161,7 +176,7 @@ pub(super) fn validate_registrations(metadata: Value) -> Result<Vec<HookRegistra
         {
             return Err(format!(
                 "hook {:?}/{class:?} deadline must match the ABI contract",
-                registration.event
+                event
             ));
         }
         if registration
@@ -171,7 +186,7 @@ pub(super) fn validate_registrations(metadata: Value) -> Result<Vec<HookRegistra
         {
             return Err(format!(
                 "hook {:?}/{class:?} delivery must match the ABI contract",
-                registration.event
+                event
             ));
         }
         if registration
@@ -181,14 +196,14 @@ pub(super) fn validate_registrations(metadata: Value) -> Result<Vec<HookRegistra
         {
             return Err(format!(
                 "hook {:?}/{class:?} failure must match the ABI contract",
-                registration.event
+                event
             ));
         }
         let priority = registration.descriptor.priority.unwrap_or_default();
         if !(MIN_HOOK_PRIORITY..=MAX_HOOK_PRIORITY).contains(&priority) {
             return Err(format!(
                 "hook {:?} priority must be between {MIN_HOOK_PRIORITY} and {MAX_HOOK_PRIORITY}",
-                registration.event
+                event
             ));
         }
         let payload_schema = registration
@@ -198,7 +213,7 @@ pub(super) fn validate_registrations(metadata: Value) -> Result<Vec<HookRegistra
         validate_schema(&payload_schema)?;
         validated.push(HookRegistration {
             registration_id: registration.registration_id,
-            event: registration.event,
+            event: event,
             class,
             payload_schema,
             priority,

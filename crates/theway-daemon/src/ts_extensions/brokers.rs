@@ -136,6 +136,23 @@ impl BrokerRuntime {
             let arguments: NativeArguments = parse_arguments(serialized_arguments)?;
             return self.native_call(&arguments);
         }
+        if operation == "events.publish" {
+            // v1: a plugin-emitted event is recorded in the audit log; routing
+            // the event to same-session `on` subscriptions of arbitrary custom
+            // names (beyond the public event surface) is a follow-up — the
+            // public surface events are delivered by the host's hook dispatch.
+            let arguments: PublishArguments = parse_arguments(serialized_arguments)?;
+            self.services.audit.record(
+                self.extension_id.clone(),
+                Some(self.session_id.clone()),
+                ExtensionAuditOperation::NativeNotify,
+                ExtensionAuditOutcome::Allowed,
+                None,
+                Some(&arguments.event),
+                std::iter::empty(),
+            );
+            return Ok(Value::Null);
+        }
         self.quota.consume().map_err(|message| {
             self.diagnose(ExtensionDiagnosticCode::ResourceLimit, message);
             BrokerError::new("resource_limit", message)
@@ -692,6 +709,16 @@ struct NativeArguments {
     name: String,
     #[serde(default)]
     args: serde_json::Map<String, Value>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PublishArguments {
+    event: String,
+    #[serde(default)]
+    payload: Option<Value>,
+    #[serde(default)]
+    mode: Option<String>,
 }
 
 #[derive(Deserialize)]

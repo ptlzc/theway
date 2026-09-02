@@ -17,6 +17,7 @@ mod dispatch_result;
 mod dispatcher;
 mod effects;
 mod engine;
+mod event_bus;
 mod facade;
 mod host;
 mod host_loading;

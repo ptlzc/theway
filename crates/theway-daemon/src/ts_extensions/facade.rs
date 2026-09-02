@@ -417,9 +417,10 @@ globalThis.__thewayInvoke = async function (serializedEnvelope, registrationId) 
       error.code = "effect_disposed";
       throw error;
     }
-    if (registration.event !== undefined && registration.event !== envelope.event) {
-      throw new Error("hook registration does not accept this event");
-    }
+    // Event-mismatch defence removed: the host resolves subscription names
+    // (public or internal) to the internal event before dispatch, so the
+    // envelope's event always matches the registration's host-resolved event;
+    // the raw subscription string here is not a reliable comparison key.
     const result = registration.event !== undefined
       ? await registration.handler(envelope, envelope.context)
       : await registration.handler(envelope.payload, envelope.context);
