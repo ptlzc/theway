@@ -38,7 +38,6 @@ Discovery is deterministic. A malformed, unsupported, untrusted, or faulted pack
 |---|---:|---|
 | `id` | yes | 1–64 lowercase ASCII letters, digits, or single hyphens; it is the state, diagnostics, trust, and effect owner namespace. |
 | `version` | yes | Semantic version string. |
-| `abi` | yes | Must be `2`. |
 | `entry` | yes | Non-empty package-relative module path without parent traversal. |
 | `priority` | no | Signed ordering value; defaults to `0`, with larger values dispatched first. |
 | `scope` | yes | `process`, `session`, `run`, or `request`; registrations cannot outlive the manifest scope. |
@@ -127,7 +126,7 @@ export default defineExtension(async (api) => {
 
 The setup API exposes `capabilities.has`, `workspace.readText/writeText`, `process.run`, `network.fetch`, `secrets.read`, `providerRaw.read`, `state.get/set/delete`, `events.replay/append`, `modelContext.append`, ephemeral `memory.get/set/delete/clear`, `migrateState`, all registration methods described below, and `on`. Broker methods are the public authority boundary; implementation globals and Rust types are not part of the ABI.
 
-`api.on(event, descriptor?, handler)` validates `class`, `payloadSchema`, `allowedActions`, `priority`, `deadline`, `delivery`, and `failure`. A descriptor may narrow payload delivery and set priority, but any declared `allowedActions`, `deadline`, `delivery`, or `failure` must exactly match the canonical contract below.
+`api.on(event, descriptor?, handler)` validates `class`, `payloadSchema`, `allowedActions`, `priority`, `deadline`, `delivery`, and `failure`. A descriptor may narrow payload delivery and set priority, but any declared `allowedActions`, `deadline`, `delivery`, or `failure` must exactly match the canonical contract below. A plugin-defined custom event name is an observe-only subscription; `api.once` registers the same handler for exactly one delivery.
 
 ## Hook execution contract
 
@@ -252,21 +251,21 @@ Plugins subscribe through a stable, engine-independent event surface rather than
 
 The event bridge keeps a bidirectional mapping between these public names and the internal lifecycle events. Subscriptions resolve through the mapping (public name first, then the internal snake_case alias), and outgoing dispatch goes back through it; both names for one event deduplicate into a single delivery. The internal enum is never renamed or removed — the public surface is a stable projection plus new emission points.
 
-The live event seam (`on`/`emit`, in-process, reversed on unload) is distinct from the durable custom-event channel (`events.append` plus `events.replay`, written to the session log and replayed). Public lifecycle events belong to the live seam; a plugin `emit` of an arbitrary custom event routes to the same-session instance without writing a durable log entry.
+The live event seam (`on`/`once`/`emit`, in-process, reversed on unload) is distinct from the durable custom-event channel (`events.append` plus `events.replay`, written to the session log and replayed). Public lifecycle events belong to the live seam and are emitted by the host; a plugin `emit` of an arbitrary custom event routes it to same-session custom-event subscribers without writing a durable log entry.
 
 ### Five dispatch modes
 
-The live event bus exposes five exact dispatch modes to plugins. `on` registrations use the event's default mode from the table; a plugin can select a mode with `emit(event, payload, mode)`.
+The live event bus exposes five exact dispatch modes to plugins. Custom live events are published with `emit(event, payload, mode)` and delivered to same-session `api.on` subscribers; public lifecycle events are dispatched by the host according to the canonical hook table.
 
 | Mode | Semantics |
 |---|---|
 | `emit` | Broadcast; listener return values are ignored (observation semantics). |
 | `parallel` | All listeners run concurrently; the dispatch resolves after all settle. |
 | `serial` | Listeners are awaited in registration order until one returns a bail value (anything other than `null`/`false`/`undefined`), which is the result. |
-| `bail` | Listeners run synchronously in order until the first bail value short-circuits (gate/policy semantics). |
-| `waterfall` | Onion middleware: each listener receives `(payload, next)` and must call `next()` to release the downstream chain; omitting `next()` short-circuits (transform/gate semantics). |
+| `bail` | Listeners are invoked in registration order until the first bail value short-circuits (gate/policy semantics). |
+| `waterfall` | Each listener receives the previous listener's returned value as its payload; the final return value is the dispatch result. |
 
-Mode-to-hook correspondence: observe → `emit`/`parallel`; serial/`bail` → gate-style short-circuit; `waterfall` → the transform chain. Each public event declares its default mode; listeners may declare class/priority via the standard hook descriptor.
+Mode-to-hook correspondence: observe → `emit`/`parallel`; serial/`bail` → gate-style short-circuit; `waterfall` → the transform chain. Custom-event listeners are observe-only and their return values feed only the selected mode; they cannot return actions or durable writes.
 
 Dispatch also carries session/agent scope identity, so listeners only receive matching-scope events and two concurrent sessions with the same-named listener never cross-talk. The install layer and instance scope do not change event filtering semantics.
 
@@ -318,7 +317,7 @@ ACTIVE → UNLOADING → DISPOSED
 | `UNLOADING` | The unload sequence is running. |
 | `DISPOSED` | Fully unloaded. |
 
-`apply` (`LOADING → ACTIVE`): instantiate the persistent VM → inject the merged config (see below) → evaluate the top-level entry (`defineExtension` or top-level side effects, both receiving config) → validate registrations (event name/class/priority/permission checked item by item; an unknown name returns an explicit error) → emit `plugin/loaded`.
+`apply` (`LOADING → ACTIVE`): instantiate the persistent VM → inject the merged config (see below) → evaluate the top-level entry (`defineExtension` default export or top-level `register()`, never both) → validate registrations (known event name/class/priority/permission checked item by item; an unknown lowercase name becomes a custom live-event subscription and a malformed name returns an explicit error) → emit `plugin/loaded`.
 
 `dispose` (`UNLOADING → DISPOSED`, fixed order):
 1. Emit the `session/end` context event and `plugin/disposed` (when it was started).
@@ -354,8 +353,8 @@ The `api` object (setup parameter) and the injected global bridge expose the cap
 | `registerPromptVariable(...)` | register a prompt variable. |
 | `registerRequestPolicy(descriptor, handler)` | request policy. |
 | `contribute(descriptor)` | client-neutral contribution. |
-| `on(event, handler[, opts])` / `once(...)` | subscribe to public events (returns a disposer). |
-| `emit(event, payload)` | publish an event on the live bus. |
+| `on(event, handler[, opts])` / `once(event, handler[, opts])` | subscribe to a public lifecycle event or a plugin-defined custom live event; `once` disposes itself after one delivery. |
+| `emit(event, payload, mode)` | publish a custom live event to same-session subscribers; modes are `emit`, `parallel`, `serial`, `bail`, or `waterfall`. |
 | `provide(name, service)` | provide a service. |
 | `get(name)` | read a service (optional dependency queried live). |
 | `effect(disposer)` | register a cleanup function (run in reverse on unload). |

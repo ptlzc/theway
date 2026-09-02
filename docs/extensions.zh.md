@@ -38,7 +38,6 @@ $THEWAY_DIR/extensions/<extension-id>/index.js
 |---|---:|---|
 | `id` | 是 | 1–64 个小写 ASCII 字母、数字或单个连字符；它是状态、诊断、信任和 effect owner 的命名空间。 |
 | `version` | 是 | 语义化版本字符串。 |
-| `abi` | 是 | 必须为 `2`。 |
 | `entry` | 是 | 非空的 package 相对模块路径，不允许父目录穿越。 |
 | `priority` | 否 | 有符号排序值；默认为 `0`，较大值先分发。 |
 | `scope` | 是 | `process`、`session`、`run` 或 `request`；注册不能超过 manifest scope 的生命周期。 |
@@ -127,7 +126,7 @@ export default defineExtension(async (api) => {
 
 Setup API 暴露 `capabilities.has`、`workspace.readText/writeText`、`process.run`、`network.fetch`、`secrets.read`、`providerRaw.read`、`state.get/set/delete`、`events.replay/append`、`modelContext.append`、临时 `memory.get/set/delete/clear`、`migrateState`、下文描述的全部注册方法以及 `on`。Broker 方法是公开权限边界；实现全局对象和 Rust 类型不属于 ABI。
 
-`api.on(event, descriptor?, handler)` 校验 `class`、`payloadSchema`、`allowedActions`、`priority`、`deadline`、`delivery` 和 `failure`。Descriptor 可以收窄 payload 投递并设置 priority，但显式声明的 `allowedActions`、`deadline`、`delivery` 或 `failure` 必须与下述规范契约完全一致。
+`api.on(event, descriptor?, handler)` 校验 `class`、`payloadSchema`、`allowedActions`、`priority`、`deadline`、`delivery` 和 `failure`。Descriptor 可以收窄 payload 投递并设置 priority，但显式声明的 `allowedActions`、`deadline`、`delivery` 或 `failure` 必须与下述规范契约完全一致。插件自定义事件名是仅 observe 的订阅；`api.once` 注册的 handler 只投递一次。
 
 ## Hook 执行契约
 
@@ -252,21 +251,21 @@ Availability 和 request predicate 包含可选的精确 `providers`、`models` 
 
 事件桥在这些公共名与内部生命周期事件之间维护双向映射。订阅通过映射解析（先公共名，再内部 snake_case 别名），外发投递也经过该映射；同一事件的两种名称去重为一次投递。内部 enum 不重命名、不删除——公共面只是其上的稳定投影加上新的发射点。
 
-活的事件缝（`on`/`emit`，进程内实时、随卸载回卷）与持久自定义事件通道（`events.append` 加 `events.replay`，写入 session 日志并可重放）语义不同。公共生命周期事件属于前者；插件 `emit` 的自定义事件路由到同会话实例，不写入持久日志。
+活的事件缝（`on`/`once`/`emit`，进程内实时、随卸载回卷）与持久自定义事件通道（`events.append` 加 `events.replay`，写入 session 日志并可重放）语义不同。公共生命周期事件由宿主外发，属于前者；插件 `emit` 的自定义事件路由到同会话的自定义事件订阅者，不写入持久日志。
 
 ### 五种分发模式
 
-活的事件总线向插件暴露五种精确分发模式。`on` 注册使用表中该事件的默认模式；插件可用 `emit(event, payload, mode)` 选择模式。
+活的事件总线向插件暴露五种精确分发模式。自定义活事件用 `emit(event, payload, mode)` 发布并投递给同会话的 `api.on` 订阅者；公共生命周期事件按规范 hook 表由宿主分发。
 
 | 模式 | 语义 |
 |---|---|
 | `emit` | 广播，忽略监听者返回值（观察语义）。 |
 | `parallel` | 所有监听者并发执行，全部 settle 后 resolve。 |
-| `serial` | 按注册顺序依次 await，直到某个监听者返回 bail 值（非 `null`/`false`/`undefined`）即停止，该值即为结果。 |
-| `bail` | 同步按序调用，首个 bail 值短路（门控/策略语义）。 |
-| `waterfall` | 洋葱中间件：监听者收到 `(payload, next)`，必须调 `next()` 才放行下游；不调 = 短路（变换/网关语义）。 |
+| `serial` | 按注册顺序依次 await，直到某个监听者返回 bail 值（除 `null`/`false`/`undefined` 外的任何值）即停止，该值即为结果。 |
+| `bail` | 按注册顺序调用，首个 bail 值短路（门控/策略语义）。 |
+| `waterfall` | 每个监听者收到上一个监听者返回的值作为 payload；最终返回值是分发结果。 |
 
-模式与内部 hook 语义的对应：observe → `emit`/`parallel`；serial/`bail` → gate 风格短路；`waterfall` → transform 链。每个公共事件声明其默认模式；监听者可用标准 hook descriptor 声明 class/优先级。
+模式与内部 hook 语义的对应：observe → `emit`/`parallel`；serial/`bail` → gate 风格短路；`waterfall` → transform 链。自定义事件监听者是 observe-only，返回值只影响所选模式，不能返回 action 或持久写入。
 
 分发还携带会话/agent 作用域身份，监听者只收到匹配作用域的事件；两个并发会话的同名监听者互不串扰。安装层与实例作用域不改变事件过滤语义。
 
@@ -318,7 +317,7 @@ ACTIVE → UNLOADING → DISPOSED
 | `UNLOADING` | 正在执行卸载序列。 |
 | `DISPOSED` | 完全卸载。 |
 
-`apply`（`LOADING → ACTIVE`）：实例化持久 VM → 注入合并 config（见下）→ 执行顶层入口（`defineExtension` 或顶层副作用，均可收到 config）→ 注册校验（事件名/class/优先级/权限逐项核对；未知事件名返回明确错误）→ 外发 `plugin/loaded`。
+`apply`（`LOADING → ACTIVE`）：实例化持久 VM → 注入合并 config（见下）→ 执行顶层入口（`defineExtension` 默认导出或顶层 `register()`，二者不能同时使用）→ 注册校验（已知事件名/class/优先级/权限逐项核对；未知的小写名称成为自定义活事件订阅，非法名称返回明确错误）→ 外发 `plugin/loaded`。
 
 `dispose`（`UNLOADING → DISPOSED`，固定顺序）：
 1. 外发 `session/end` 上下文事件与 `plugin/disposed`（若处于 Started）；
@@ -354,8 +353,8 @@ v1 值语义：服务值为 JSON 可序列化快照（跨 QuickJS VM 不传递 l
 | `registerPromptVariable(...)` | 注册 prompt variable。 |
 | `registerRequestPolicy(descriptor, handler)` | 请求策略。 |
 | `contribute(descriptor)` | 客户端中性 contribution。 |
-| `on(event, handler[, opts])` / `once(...)` | 订阅公共事件（返回 disposer）。 |
-| `emit(event, payload)` | 在活的事件总线上发布事件。 |
+| `on(event, handler[, opts])` / `once(event, handler[, opts])` | 订阅公共生命周期事件或插件自定义活事件；`once` 投递一次后自动 dispose。 |
+| `emit(event, payload, mode)` | 向同会话订阅者发布自定义活事件；mode 为 `emit`、`parallel`、`serial`、`bail` 或 `waterfall`。 |
 | `provide(name, service)` | 提供服务。 |
 | `get(name)` | 读取服务（可选依赖现场查询）。 |
 | `effect(disposer)` | 注册清理函数（卸载时逆序执行）。 |
