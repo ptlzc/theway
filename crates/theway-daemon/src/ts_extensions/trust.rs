@@ -223,6 +223,14 @@ impl ExtensionTrustStore {
             }
             return blocked(ExtensionDiagnosticCode::PermissionDenied);
         }
+        // Managed packages are platform-shipped and read-only; they do not
+        // require a user trust record and are granted exactly what they request.
+        if package.source() == ExtensionSourceLayer::Managed {
+            return TrustEvaluation {
+                granted_permissions: requested,
+                blocked: None,
+            };
+        }
         if package.source() == ExtensionSourceLayer::Global {
             return match self.file.global_policy {
                 GlobalExtensionPolicy::AllowDeclared => TrustEvaluation {

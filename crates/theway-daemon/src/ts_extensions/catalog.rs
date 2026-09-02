@@ -87,6 +87,39 @@ impl ExtensionPackage {
             Ok(self.entry_source.to_string())
         }
     }
+
+    /// Build a validated package from in-memory parts (no on-disk manifest or
+    /// entry to read). Used by sibling nodes (issue #82) to synthesize a
+    /// single-file `kind` extension package; the package still carries the
+    /// source layer and a deterministic content hash so trust and diagnostics
+    /// treat it like any other package.
+    ///
+    /// `dead_code` is allowed until the issue #82 kind-router node consumes it.
+    #[allow(dead_code)]
+    pub(super) fn synthetic_package(
+        manifest: ExtensionPackageManifest,
+        source: ExtensionSourceLayer,
+        package_dir: PathBuf,
+        entry_path: PathBuf,
+        entry_source: &str,
+    ) -> ExtensionPackage {
+        let mut content = Sha256::new();
+        if let Ok(encoded) = serde_json::to_vec(&manifest) {
+            content.update(encoded);
+        }
+        content.update([0]);
+        content.update(entry_source.as_bytes());
+        ExtensionPackage {
+            workspace_root: package_dir.clone(),
+            manifest,
+            source,
+            package_dir,
+            entry_path,
+            entry_source: Arc::from(entry_source),
+            content_sha256: hex::encode(content.finalize()),
+            granted_permissions: BTreeSet::new(),
+        }
+    }
 }
 
 /// Deterministic package catalog. Discovery failures remain represented as
@@ -107,6 +140,7 @@ impl PackageCatalog {
     pub fn discover_with_trust(cwd: &Path, base: &Path, trust: &ExtensionTrustStore) -> Self {
         let workspace_root = std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
         let roots = [
+            (ExtensionSourceLayer::Managed, base.join("extensions-managed")),
             (ExtensionSourceLayer::Global, base.join("extensions")),
             (
                 ExtensionSourceLayer::Project,
@@ -144,11 +178,12 @@ impl PackageCatalog {
 
         let mut selected = Vec::new();
         for (extension_id, mut packages) in by_id {
+            // Closest-wins resolution across the managed / user (Global) /
+            // project layers. `ExtensionSourceLayer` orders Managed < Global <
+            // Project, so the greatest source (project) wins; every other
+            // package keeps a catalog record marked Shadowed.
             packages.sort_by_key(|package| package.source);
-            let winner = packages
-                .iter()
-                .rposition(|package| package.source == ExtensionSourceLayer::Project)
-                .unwrap_or(0);
+            let winner = packages.len() - 1;
             for (index, package) in packages.into_iter().enumerate() {
                 if index == winner {
                     let mut package = package;
