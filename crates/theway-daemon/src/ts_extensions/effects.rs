@@ -62,6 +62,8 @@ pub enum EffectKind {
     PromptSection,
     RequestPolicy,
     Contribution,
+    Action,
+    Service,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

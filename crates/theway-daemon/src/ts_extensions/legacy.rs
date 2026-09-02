@@ -42,6 +42,12 @@ impl TsExtension {
         &self.path
     }
 
+    /// Transpiled module source (the package-host entry text for synthesized
+    /// single-file `kind` packages).
+    pub(super) fn source(&self) -> &str {
+        &self.js
+    }
+
     fn fingerprint(&self) -> String {
         let digest = Sha256::digest(self.js.as_bytes());
         format!(

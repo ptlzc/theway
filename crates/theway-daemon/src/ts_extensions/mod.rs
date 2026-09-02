@@ -91,7 +91,7 @@ impl ExtensionRegistry {
     /// `<base>/extensions`.
     pub fn discover(cwd: &Path, base: &Path) -> Self {
         let legacy = LegacyExtensionRegistry::discover(cwd, base);
-        let packages = PackageCatalog::discover(cwd, base);
+        let mut packages = PackageCatalog::discover(cwd, base);
         let mut errors = legacy.errors.clone();
         errors.extend(
             packages
@@ -99,6 +99,12 @@ impl ExtensionRegistry {
                 .iter()
                 .map(|diagnostic| format!("{}: {}", diagnostic.extension_id, diagnostic.message)),
         );
+        // Route single-file extensions declaring a harness kind (issue #82)
+        // into the package host: each becomes a synthetic project-layer
+        // package whose manifest declares the kind-bound permission set.
+        // `compaction` and kind-less files stay on the legacy path.
+        let synthetic = synthesize_single_file_kinds(&legacy);
+        packages.merge_synthetic_packages(synthetic);
         Self {
             legacy,
             packages,
@@ -132,9 +138,63 @@ impl ExtensionRegistry {
     }
 }
 
+/// Harness kinds a single-file `.ts` extension may declare (issue #82).
+const HARNESS_SINGLE_FILE_KINDS: &[&str] = &["tool", "action", "prompt", "hook", "service"];
+
+/// Kind → manifest permission set binding for synthesized single-file packages.
+fn kind_permissions(kind: &str) -> Vec<theway_contract::extension::ExtensionPermission> {
+    use theway_contract::extension::ExtensionPermission as P;
+    match kind {
+        "tool" => vec![P::ToolsRegister],
+        "action" => vec![P::ActionsRegister],
+        "prompt" => vec![P::PromptsRegister],
+        "hook" => vec![P::HooksSubscribe],
+        "service" => vec![P::ServicesProvide],
+        _ => Vec::new(),
+    }
+}
+
+/// Fold legacy single-file extensions declaring a harness kind into synthetic
+/// project-layer packages. `compaction` / kind-less files are left untouched
+/// and keep the legacy host path.
+fn synthesize_single_file_kinds(
+    legacy: &LegacyExtensionRegistry,
+) -> Vec<crate::ts_extensions::ExtensionPackage> {
+    let mut synthetic = Vec::new();
+    for kind in HARNESS_SINGLE_FILE_KINDS {
+        for extension in legacy.by_kind(kind) {
+            let package_dir = extension
+                .path()
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."))
+                .to_path_buf();
+            let manifest = theway_contract::extension::ExtensionPackageManifest {
+                id: extension.name().to_string(),
+                version: "0.0.0-single-file".into(),
+                entry: "index.js".into(),
+                priority: 0,
+                scope: theway_contract::extension::ExtensionScope::Session,
+                state_schema: None,
+                config_schema: None,
+                permissions: kind_permissions(kind),
+                optional_permissions: Vec::new(),
+            };
+            synthetic.push(
+                crate::ts_extensions::catalog::ExtensionPackage::synthetic_package(
+                    manifest,
+                    theway_contract::extension::ExtensionSourceLayer::Project,
+                    package_dir.clone(),
+                    package_dir.join("index.js"),
+                    extension.source(),
+                ),
+            );
+        }
+    }
+    synthetic
+}
+
 #[cfg(test)]
 tests_bridge_macro::tests_bridge!("ts_extensions");
-
 #[cfg(test)]
 mod harness_install_layers_tests {
     tests_bridge_macro::tests_bridge!("harness_install_layers");

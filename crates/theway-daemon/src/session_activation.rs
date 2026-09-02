@@ -24,7 +24,8 @@ pub(crate) struct SessionActivator {
     cli_builtin_skills: Vec<String>,
     config_builtin_skills: Vec<String>,
     load_local_sources: bool,
-}pub(crate) struct SessionActivation {
+}
+pub(crate) struct SessionActivation {
     pub session_id: String,
     pub created: bool,
     pub runtime: SessionRuntime,

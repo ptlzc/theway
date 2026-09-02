@@ -89,13 +89,10 @@ impl ExtensionPackage {
     }
 
     /// Build a validated package from in-memory parts (no on-disk manifest or
-    /// entry to read). Used by sibling nodes (issue #82) to synthesize a
-    /// single-file `kind` extension package; the package still carries the
-    /// source layer and a deterministic content hash so trust and diagnostics
-    /// treat it like any other package.
-    ///
-    /// `dead_code` is allowed until the issue #82 kind-router node consumes it.
-    #[allow(dead_code)]
+    /// entry to read). Used by the single-file `kind` router (issue #82) to
+    /// synthesize a single-file extension package; the package still carries
+    /// the source layer and a deterministic content hash so trust and
+    /// diagnostics treat it like any other package.
     pub(super) fn synthetic_package(
         manifest: ExtensionPackageManifest,
         source: ExtensionSourceLayer,
@@ -120,6 +117,17 @@ impl ExtensionPackage {
             granted_permissions: BTreeSet::new(),
         }
     }
+
+    /// Override the granted permission set. Synthetic single-file packages skip
+    /// trust evaluation, so `merge_synthetic_packages` grants the kind-bound
+    /// permission set declared by the synthesized manifest.
+    pub(super) fn with_granted_permissions(
+        mut self,
+        permissions: BTreeSet<ExtensionPermission>,
+    ) -> Self {
+        self.granted_permissions = permissions;
+        self
+    }
 }
 
 /// Deterministic package catalog. Discovery failures remain represented as
@@ -140,7 +148,10 @@ impl PackageCatalog {
     pub fn discover_with_trust(cwd: &Path, base: &Path, trust: &ExtensionTrustStore) -> Self {
         let workspace_root = std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
         let roots = [
-            (ExtensionSourceLayer::Managed, base.join("extensions-managed")),
+            (
+                ExtensionSourceLayer::Managed,
+                base.join("extensions-managed"),
+            ),
             (ExtensionSourceLayer::Global, base.join("extensions")),
             (
                 ExtensionSourceLayer::Project,
@@ -309,6 +320,31 @@ impl PackageCatalog {
         entry.status = status;
         entry.reason_code = reason;
         true
+    }
+
+    /// Fold synthetic single-file `kind` packages (issue #82) into the
+    /// catalog as effective entries. Trust evaluation does not apply: legacy
+    /// single files have no trust decision, so the kind-bound permission set
+    /// from the synthesized manifest is granted verbatim. Entries + packages
+    /// stay consistent so `effective_packages()` and `fingerprint()` cover
+    /// synthetic packages like any discovered one.
+    pub(super) fn merge_synthetic_packages(&mut self, packages: Vec<ExtensionPackage>) {
+        for package in packages {
+            let granted: BTreeSet<ExtensionPermission> = package
+                .manifest
+                .permissions
+                .iter()
+                .chain(&package.manifest.optional_permissions)
+                .cloned()
+                .collect();
+            let package = Arc::new(package.with_granted_permissions(granted));
+            self.entries.push(catalog_entry(
+                &package,
+                ExtensionCatalogStatus::Effective,
+                None,
+            ));
+            self.packages.push(package);
+        }
     }
 }
 

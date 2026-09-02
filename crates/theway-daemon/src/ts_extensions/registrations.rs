@@ -4,6 +4,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use theway_contract::extension::{
     ExtensionClientContribution, ExtensionCommandDescriptor, ExtensionPermission, ExtensionScope,
+    PluginActionRegistration, ServiceRegistration,
 };
 use theway_llm_provider::{Api, InputModality, Model, ModelCost, Provider, Tool};
 
@@ -46,6 +47,8 @@ pub enum OwnedRegistration {
     PromptSection(PromptSectionRegistration),
     RequestPolicy(RequestPolicyRegistration),
     Contribution(ExtensionClientContribution),
+    Action(PluginActionRegistration),
+    Service(ServiceRegistration),
 }
 
 impl OwnedRegistration {
@@ -58,6 +61,8 @@ impl OwnedRegistration {
             Self::PromptSection(_) => EffectKind::PromptSection,
             Self::RequestPolicy(_) => EffectKind::RequestPolicy,
             Self::Contribution(_) => EffectKind::Contribution,
+            Self::Action(_) => EffectKind::Action,
+            Self::Service(_) => EffectKind::Service,
         }
     }
 
@@ -70,6 +75,7 @@ impl OwnedRegistration {
             Self::PromptSection(value) => value.scope,
             Self::RequestPolicy(value) => value.scope,
             Self::Contribution(value) => value.scope,
+            Self::Action(_) | Self::Service(_) => ExtensionScope::Session,
         }
     }
 
@@ -82,6 +88,8 @@ impl OwnedRegistration {
             Self::PromptSection(value) => value.section_id.clone(),
             Self::RequestPolicy(value) => value.policy_id.clone(),
             Self::Contribution(value) => value.contribution_id.clone(),
+            Self::Action(value) => value.name.clone(),
+            Self::Service(value) => value.name.clone(),
         }
     }
 
@@ -241,6 +249,8 @@ enum RawEffectKind {
     PromptSection,
     RequestPolicy,
     Contribution,
+    Action,
+    Service,
 }
 
 #[derive(Deserialize)]
@@ -491,6 +501,23 @@ fn decode_registration(
             contribution.validate().map_err(|error| error.to_string())?;
             Ok(OwnedRegistration::Contribution(contribution))
         }
+        RawEffectKind::Action => {
+            let raw: PluginActionRegistration = decode(descriptor, "action")?;
+            validate_name(&raw.name, "action")?;
+            validate_schema(&raw.input_schema, "action input")?;
+            Ok(OwnedRegistration::Action(PluginActionRegistration {
+                name: raw.name,
+                description: raw.description,
+                input_schema: raw.input_schema,
+            }))
+        }
+        RawEffectKind::Service => {
+            let raw: ServiceRegistration = decode(descriptor, "service")?;
+            validate_name(&raw.name, "service")?;
+            Ok(OwnedRegistration::Service(ServiceRegistration {
+                name: raw.name,
+            }))
+        }
     }
 }
 
@@ -507,6 +534,8 @@ fn require_permission(
         OwnedRegistration::Command(_) => vec![ExtensionPermission::CommandsRegister],
         OwnedRegistration::Provider(_) => vec![ExtensionPermission::ProvidersRegister],
         OwnedRegistration::Contribution(_) => vec![ExtensionPermission::ClientContribute],
+        OwnedRegistration::Action(_) => vec![ExtensionPermission::ActionsRegister],
+        OwnedRegistration::Service(_) => vec![ExtensionPermission::ServicesProvide],
         OwnedRegistration::Hook(_)
         | OwnedRegistration::PromptSection(_)
         | OwnedRegistration::RequestPolicy(_) => Vec::new(),
