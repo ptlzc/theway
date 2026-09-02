@@ -14,6 +14,8 @@ pub enum ExtensionAuditOperation {
     NetworkConnect,
     SecretRead,
     ProviderRawRead,
+    NativeNotify,
+    NativeLog,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

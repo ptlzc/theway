@@ -639,6 +639,22 @@ impl EngineInstance {
             js(&ctx, promise.finish::<()>())?;
             let namespace = js(&ctx, module.namespace())?;
             js(&ctx, ctx.globals().set("__thewayExtension", namespace))?;
+            // Runtime identity (issue #86 v2 bridge surface).
+            js(
+                &ctx,
+                ctx.globals()
+                    .set("__thewayRuntimeVersion", env!("CARGO_PKG_VERSION")),
+            )?;
+            js(
+                &ctx,
+                ctx.globals()
+                    .set("__thewayRuntimePluginId", key.extension_id.as_str()),
+            )?;
+            js(
+                &ctx,
+                ctx.globals()
+                    .set("__thewayRuntimeSessionId", key.session_id.as_str()),
+            )?;
             js(
                 &ctx,
                 ctx.eval::<(), _>(super::facade::HOST_BOOTSTRAP_SOURCE),

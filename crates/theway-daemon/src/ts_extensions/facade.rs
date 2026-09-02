@@ -8,6 +8,10 @@ globalThis.__thewayCurrentEnvelope = null;
 globalThis.__thewayPendingDurableActions = [];
 globalThis.__thewayPendingState = new Map();
 globalThis.__thewayDisposers = [];
+// Runtime identity injected by the host before setup (v2 bridge surface).
+globalThis.__thewayRuntimeVersion = globalThis.__thewayRuntimeVersion ?? "0.0.0";
+globalThis.__thewayRuntimePluginId = globalThis.__thewayRuntimePluginId ?? "";
+globalThis.__thewayRuntimeSessionId = globalThis.__thewayRuntimeSessionId ?? "";
 
 function __thewayDisposedRegistrationIds() {
   return Object.values(globalThis.__thewayRegistrations)
@@ -277,6 +281,26 @@ globalThis.__thewaySetup = async function () {
         return __thewayHandle(registration);
       },
       registerTool(descriptor, handler) {
+        // Dual signature: registerTool(name, desc, schema, fn) positional form
+        // and registerTool(descriptor, handler) object form.
+        if (typeof descriptor === "string" && arguments.length >= 3) {
+          const name = descriptor;
+          const description = arguments[1];
+          const inputSchema = arguments[2];
+          handler = arguments[3];
+          descriptor = {
+            name,
+            label: description,
+            description,
+            inputSchema,
+          };
+        } else if (descriptor && typeof descriptor === "object") {
+          // Object form: tolerate the bare { name, description, inputSchema }
+          // shape by deriving the required label from description/name.
+          if (descriptor.label === undefined) {
+            descriptor = { ...descriptor, label: descriptor.description ?? descriptor.name ?? "" };
+          }
+        }
         return __thewayRegister("tool", descriptor, handler);
       },
       registerCommand(descriptor, handler) {
@@ -314,6 +338,38 @@ globalThis.__thewaySetup = async function () {
         (globalThis.__thewayHandlers[event] ??= []).push(registration);
         globalThis.__thewayRegistrations[registration.id] = registration;
         return __thewayHandle(registration);
+      },
+      registerAction(descriptor, handler) {
+        // Dual shape: registerAction(name, fn) or registerAction(descriptor, handler).
+        if (typeof descriptor === "string") {
+          handler = arguments[1];
+          descriptor = { name: descriptor, description: "", inputSchema: {} };
+        }
+        return __thewayRegister("action", descriptor, handler);
+      },
+      registerPromptVariable(descriptor) {
+        return __thewayRegister("prompt_variable", descriptor, undefined);
+      },
+      native(name, args) {
+        return __thewayBrokerCall("native.call", { name, args: args ?? {} });
+      },
+      log(level, message) {
+        return __thewayBrokerCall("native.call", {
+          name: "log",
+          args: { level, message },
+        });
+      },
+      runtime: Object.freeze({
+        version: __thewayRuntimeVersion,
+        pluginId: __thewayRuntimePluginId,
+        sessionId: __thewayRuntimeSessionId,
+      }),
+      emit(event, payload, mode) {
+        return __thewayBrokerCall("events.publish", {
+          event,
+          payload: payload ?? null,
+          mode: mode ?? null,
+        });
       },
     });
     await setup(api);

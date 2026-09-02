@@ -247,6 +247,7 @@ enum RawEffectKind {
     Command,
     Provider,
     PromptSection,
+    PromptVariable,
     RequestPolicy,
     Contribution,
     Action,
@@ -469,6 +470,23 @@ fn decode_registration(
             let raw: RawPromptSectionRegistration = decode(descriptor, "prompt section")?;
             validate_local_id(&raw.section_id)?;
             validate_text(&raw.text, "prompt section text")?;
+            Ok(OwnedRegistration::PromptSection(
+                PromptSectionRegistration {
+                    section_id: raw.section_id,
+                    text: raw.text,
+                    priority: raw.priority,
+                    predicate: raw.predicate,
+                    scope: raw.scope,
+                },
+            ))
+        }
+        RawEffectKind::PromptVariable => {
+            // Prompt variables share the prompt-section registration shape in
+            // v1 (the host projects them into the same assembly); the kind is
+            // distinguished for capability accounting only.
+            let raw: RawPromptSectionRegistration = decode(descriptor, "prompt variable")?;
+            validate_local_id(&raw.section_id)?;
+            validate_text(&raw.text, "prompt variable text")?;
             Ok(OwnedRegistration::PromptSection(
                 PromptSectionRegistration {
                     section_id: raw.section_id,
