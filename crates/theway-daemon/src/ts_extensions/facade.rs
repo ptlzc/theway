@@ -122,6 +122,14 @@ globalThis.__thewaySetup = async function () {
     if (typeof setup !== "function") {
       throw new TypeError("extension default export must be created by defineExtension");
     }
+    // Optional service dependency declaration: `export const inject = ["svc"]`
+    // (module scope) or the default export's `inject` field. Array of strings.
+    const moduleInject = globalThis.__thewayExtension.inject;
+    const declaredInject = Array.isArray(moduleInject)
+      ? moduleInject
+      : Array.isArray(candidate?.inject)
+        ? candidate.inject
+        : [];
     const api = Object.freeze({
       capabilities: Object.freeze({
         has(permission) {
@@ -245,6 +253,13 @@ globalThis.__thewaySetup = async function () {
       getConfig() {
         return __thewayBrokerCall("config.get", {});
       },
+      provide(name, value) {
+        return __thewayBrokerCall("services.provide", { name, value });
+      },
+      get(name) {
+        const value = __thewayBrokerCall("services.get", { name });
+        return value === null ? undefined : value;
+      },
       migrateState(handler) {        if (typeof handler !== "function") {
           throw new TypeError("api.migrateState requires a handler");
         }
@@ -323,6 +338,7 @@ globalThis.__thewaySetup = async function () {
             sequence,
           })),
         migrationRegistrationId: globalThis.__thewayMigrationRegistrationId,
+        inject: declaredInject,
       },
     });
   } catch (error) {

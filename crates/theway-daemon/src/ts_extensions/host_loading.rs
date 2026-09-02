@@ -4,14 +4,16 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use theway_contract::extension::{
-    ExtensionDeliveryPolicy, ExtensionHookDeadline, ExtensionLifecycleEvent,
+    ExtensionDeliveryPolicy, ExtensionDiagnosticCode, ExtensionHookDeadline,
+    ExtensionLifecycleEvent,
 };
 use theway_core::agent::runtime_extensions::{
     NoopSessionExtensionStatePort, SessionExtensionStatePort,
 };
 
-use super::catalog::PackageCatalog;
+use super::catalog::{ExtensionPackage, PackageCatalog};
 use super::compaction::LegacyCompactionHost;
+use super::diagnostics;
 use super::dispatcher::{self, RuntimeExtensionHostConfig};
 use super::effects::{InstanceHealth, InstanceLifecyclePhase};
 use super::engine::{EngineInstanceKey, QuickJsEnginePool};
@@ -151,116 +153,185 @@ impl SessionPluginHost {
     pub(super) async fn load_effective_packages(&self) {
         let packages = self.catalog.read().effective_packages();
         let mut active = self.active.lock().await;
-        for package in packages {
-            let key = EngineInstanceKey::new(&self.session_id, &package.manifest().id);
-            if let Err(error) = self.state_runtime.reconstruct(&package).await {
-                self.record_state_migration_fault(&package, error);
-                continue;
+        // Dependency-aware activation: packages whose `inject` services are
+        // not yet provided are collected and retried once after the first
+        // round (providers may sort after their consumers). A still-missing
+        // dependency leaves the plugin inactive with a diagnostic.
+        let mut pending: Vec<Arc<ExtensionPackage>> = Vec::new();
+        let mut first_round = true;
+        loop {
+            let mut retry: Vec<Arc<ExtensionPackage>> = Vec::new();
+            let round: Vec<Arc<ExtensionPackage>> = if first_round {
+                packages.clone()
+            } else {
+                std::mem::take(&mut pending)
+            };
+            if round.is_empty() {
+                break;
             }
-            // Config: validate the manifest configSchema, fill defaults, and
-            // merge the session override (none in v1) before setup runs, so
-            // api.getConfig() inside apply returns the merged config. Invalid
-            // config fails the plugin loudly (issue #83 §6).
-            let config = match package.manifest().config_schema.as_ref() {
-                Some(schema) => {
-                    match super::config::validate_and_default(schema, serde_json::json!({})) {
-                        Ok(config) => config,
-                        Err(error) => {
-                            self.record_load_fault(&package, error);
-                            continue;
-                        }
+            for package in round {
+                if !self.load_one(&package, &mut active, &mut retry).await {
+                    // Nothing to retry on final round.
+                }
+            }
+            if retry.is_empty() {
+                break;
+            }
+            if !first_round {
+                for package in retry {
+                    let key = EngineInstanceKey::new(&self.session_id, &package.manifest().id);
+                    self.diagnostics.lock().push(diagnostics::invocation(
+                        package.manifest().id.clone(),
+                        self.session_id.clone(),
+                        ExtensionLifecycleEvent::ExtensionLoad,
+                        ExtensionDiagnosticCode::ContractViolation,
+                        format!("plugin stays inactive: required service is not provided"),
+                    ));
+                    let _ = self.engine.dispose(&key).await;
+                }
+                break;
+            }
+            pending = retry;
+            first_round = false;
+        }
+    }
+
+    /// Load one package; returns false when the plugin is left pending and
+    /// belongs in the retry round (only for a missing `inject` service).
+    async fn load_one(
+        &self,
+        package: &Arc<ExtensionPackage>,
+        active: &mut Vec<ActiveExtension>,
+        retry: &mut Vec<Arc<ExtensionPackage>>,
+    ) -> bool {
+        let key = EngineInstanceKey::new(&self.session_id, &package.manifest().id);
+        if let Err(error) = self.state_runtime.reconstruct(package).await {
+            self.record_state_migration_fault(package, error);
+            return false;
+        }
+        // Config: validate the manifest configSchema, fill defaults, and
+        // merge the session override (none in v1) before setup runs, so
+        // api.getConfig() inside apply returns the merged config. Invalid
+        // config fails the plugin loudly (issue #83 §6).
+        let config = match package.manifest().config_schema.as_ref() {
+            Some(schema) => {
+                match super::config::validate_and_default(schema, serde_json::json!({})) {
+                    Ok(config) => config,
+                    Err(error) => {
+                        self.record_load_fault(package, error);
+                        return false;
                     }
                 }
-                None => serde_json::Value::Null,
-            };
-            let metadata = match self
-                .engine
-                .load_with_config(key.clone(), &package, config)
-                .await
-            {
-                Ok(metadata) => metadata,
-                Err(error) => {
-                    self.record_load_fault(&package, error);
-                    continue;
-                }
-            };
-            if let Err(error) = self
-                .state_runtime
-                .migrate_if_needed(
-                    &package,
-                    &key,
-                    &metadata,
-                    self.sequence.next(),
-                    self.config.deadline(ExtensionHookDeadline::Long),
-                    self.config.broker_operation_quota,
+            }
+            None => serde_json::Value::Null,
+        };
+        let metadata = match self
+            .engine
+            .load_with_config(key.clone(), package, config)
+            .await
+        {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                self.record_load_fault(package, error);
+                return false;
+            }
+        };
+        if let Err(error) = self
+            .state_runtime
+            .migrate_if_needed(
+                package,
+                &key,
+                &metadata,
+                self.sequence.next(),
+                self.config.deadline(ExtensionHookDeadline::Long),
+                self.config.broker_operation_quota,
+            )
+            .await
+        {
+            self.engine.dispose(&key).await;
+            self.record_state_migration_fault(package, error);
+            return false;
+        }
+        // Service dependency gate (issue #83 §7): a plugin declaring
+        // `inject` stays pending until every required service is provided
+        // in this session. Missing dependencies are retried once; a
+        // permanently-missing dependency leaves the plugin inactive.
+        let inject: Vec<String> = serde_json::from_value(
+            metadata
+                .get("inject")
+                .cloned()
+                .unwrap_or_else(|| serde_json::Value::Array(Vec::new())),
+        )
+        .unwrap_or_default();
+        if let Some(_missing) = inject
+            .iter()
+            .find(|name| self.engine.service(&self.session_id, name).is_none())
+        {
+            let _ = self.engine.dispose(&key).await;
+            retry.push(package.clone());
+            return false;
+        }
+        let registrations = match dispatcher::validate_registrations(metadata.clone()) {
+            Ok(registrations) => registrations,
+            Err(error) => {
+                self.engine.dispose(&key).await;
+                self.record_load_fault(package, error);
+                return false;
+            }
+        };
+        if let Err(error) = dispatcher::validate_registration_capabilities(
+            &registrations,
+            package.granted_permissions(),
+        ) {
+            self.engine.dispose(&key).await;
+            self.record_load_fault(package, error);
+            return false;
+        }
+        if let Err(error) = self.accept_package_effects(package, &metadata, &registrations) {
+            self.engine.dispose(&key).await;
+            self.record_load_fault(package, error);
+            return false;
+        }
+        let extension = ActiveExtension {
+            package: package.clone(),
+            key,
+            observation_queues: registrations
+                .iter()
+                .filter(|registration| {
+                    registration.delivery == ExtensionDeliveryPolicy::BoundedCoalescing
+                })
+                .map(|registration| {
+                    (
+                        registration.registration_id,
+                        Arc::new(ObservationQueue::new(
+                            self.config.observation_queue_capacity,
+                        )),
+                    )
+                })
+                .collect(),
+            registrations,
+            phase: InstanceLifecyclePhase::Loaded,
+            health: Arc::new(InstanceHealth::default()),
+        };
+        if extension
+            .registrations
+            .iter()
+            .any(|registration| registration.event == ExtensionLifecycleEvent::ExtensionLoad)
+            && let Err(error) = self
+                .invoke_extension(
+                    &extension,
+                    ExtensionLifecycleEvent::ExtensionLoad,
+                    serde_json::json!({"reason": "initial"}),
                 )
                 .await
-            {
-                self.engine.dispose(&key).await;
-                self.record_state_migration_fault(&package, error);
-                continue;
-            }
-            let registrations = match dispatcher::validate_registrations(metadata.clone()) {
-                Ok(registrations) => registrations,
-                Err(error) => {
-                    self.engine.dispose(&key).await;
-                    self.record_load_fault(&package, error);
-                    continue;
-                }
-            };
-            if let Err(error) = dispatcher::validate_registration_capabilities(
-                &registrations,
-                package.granted_permissions(),
-            ) {
-                self.engine.dispose(&key).await;
-                self.record_load_fault(&package, error);
-                continue;
-            }
-            if let Err(error) = self.accept_package_effects(&package, &metadata, &registrations) {
-                self.engine.dispose(&key).await;
-                self.record_load_fault(&package, error);
-                continue;
-            }
-            let extension = ActiveExtension {
-                package,
-                key,
-                observation_queues: registrations
-                    .iter()
-                    .filter(|registration| {
-                        registration.delivery == ExtensionDeliveryPolicy::BoundedCoalescing
-                    })
-                    .map(|registration| {
-                        (
-                            registration.registration_id,
-                            Arc::new(ObservationQueue::new(
-                                self.config.observation_queue_capacity,
-                            )),
-                        )
-                    })
-                    .collect(),
-                registrations,
-                phase: InstanceLifecyclePhase::Loaded,
-                health: Arc::new(InstanceHealth::default()),
-            };
-            if extension
-                .registrations
-                .iter()
-                .any(|registration| registration.event == ExtensionLifecycleEvent::ExtensionLoad)
-                && let Err(error) = self
-                    .invoke_extension(
-                        &extension,
-                        ExtensionLifecycleEvent::ExtensionLoad,
-                        serde_json::json!({"reason": "initial"}),
-                    )
-                    .await
-            {
-                self.cleanup_failed_start(&extension, false).await;
-                self.record_load_fault(&extension.package, error);
-                continue;
-            }
-            self.add_subscriptions(&extension.registrations);
-            active.push(extension);
+        {
+            self.cleanup_failed_start(&extension, false).await;
+            self.record_load_fault(&extension.package, error);
+            return false;
         }
+        self.add_subscriptions(&extension.registrations);
+        active.push(extension);
+        true
     }
 
     pub(super) async fn start_sessions(&self, reason: &str) {

@@ -112,6 +112,24 @@ impl BrokerRuntime {
             // (setup reads it during apply).
             return Ok(self.config.read().clone());
         }
+        if operation == "services.provide" || operation == "services.get" {
+            let arguments: ServiceArguments = parse_arguments(serialized_arguments)?;
+            let name = arguments.name.as_str();
+            // Services are session-scoped and readable during setup (before any
+            // invocation) like config.
+            if operation == "services.provide" {
+                let value = arguments.value.unwrap_or(Value::Null);
+                self.services
+                    .services
+                    .provide(&self.session_id, &self.extension_id, name, &value)
+                    .map_err(|message| BrokerError::dynamic("service_conflict", message))?;
+            }
+            return Ok(self
+                .services
+                .services
+                .get(&self.session_id, name)
+                .unwrap_or(Value::Null));
+        }
         self.quota.consume().map_err(|message| {
             self.diagnose(ExtensionDiagnosticCode::ResourceLimit, message);
             BrokerError::new("resource_limit", message)
@@ -555,12 +573,23 @@ impl BrokerRuntime {
 #[derive(Debug)]
 pub(super) struct BrokerError {
     pub(super) code: &'static str,
-    pub(super) message: &'static str,
+    pub(super) message: std::borrow::Cow<'static, str>,
 }
 
 impl BrokerError {
     pub(super) fn new(code: &'static str, message: &'static str) -> Self {
-        Self { code, message }
+        Self {
+            code,
+            message: std::borrow::Cow::Borrowed(message),
+        }
+    }
+
+    /// Broker error with a runtime-owned message (String).
+    pub(super) fn dynamic(code: &'static str, message: String) -> Self {
+        Self {
+            code,
+            message: std::borrow::Cow::Owned(message),
+        }
     }
 
     pub(super) fn contract(message: &'static str) -> Self {
@@ -572,6 +601,14 @@ impl BrokerError {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CapabilityArguments {
     permission: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ServiceArguments {
+    name: String,
+    #[serde(default)]
+    value: Option<Value>,
 }
 
 #[derive(Deserialize)]

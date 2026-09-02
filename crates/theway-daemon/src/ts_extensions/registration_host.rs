@@ -190,6 +190,9 @@ impl SessionPluginHost {
         if !disposed.is_empty() {
             self.publish_reloaded_tools();
         }
+        // Services provided by this extension are effect-owned too: unregister
+        // them so dependents never read a dead provider's snapshot.
+        self.engine.dispose_services(&self.session_id, extension_id);
     }
 
     pub(super) fn dispose_boundary_effects(&self, scope: ExtensionScope, scope_id: Option<&str>) {

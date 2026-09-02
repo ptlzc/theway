@@ -28,6 +28,7 @@ mod registration_host;
 mod registration_runtime;
 mod registrations;
 mod reload;
+mod services;
 mod state;
 mod state_broker;
 mod state_runtime;

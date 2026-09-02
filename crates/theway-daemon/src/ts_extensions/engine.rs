@@ -372,6 +372,19 @@ impl QuickJsEnginePool {
         self.inner.broker_services.secret(name)
     }
 
+    /// Read a session-keyed plugin service value (service dependency gate).
+    pub(super) fn service(&self, session_id: &str, name: &str) -> Option<serde_json::Value> {
+        self.inner.broker_services.services.get(session_id, name)
+    }
+
+    /// Unregister every service a plugin provided in this session.
+    pub(super) fn dispose_services(&self, session_id: &str, extension_id: &str) {
+        self.inner
+            .broker_services
+            .services
+            .dispose_owner(session_id, extension_id);
+    }
+
     pub(super) fn install_extension_state(
         &self,
         key: &EngineInstanceKey,

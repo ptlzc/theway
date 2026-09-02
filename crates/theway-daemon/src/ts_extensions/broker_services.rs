@@ -17,6 +17,8 @@ pub struct ExtensionBrokerServices {
     pub(super) audit: ExtensionAuditLog,
     pub(super) diagnostics: Arc<parking_lot::Mutex<Vec<ExtensionDiagnostic>>>,
     pub(super) state: ExtensionStateBroker,
+    /// Process-global session-keyed plugin service registry.
+    pub(super) services: super::services::ServiceRegistry,
     runtime: Option<tokio::runtime::Handle>,
 }
 
@@ -28,6 +30,7 @@ impl ExtensionBrokerServices {
             audit: ExtensionAuditLog::for_base(base),
             diagnostics: Arc::new(parking_lot::Mutex::new(Vec::new())),
             state: ExtensionStateBroker::default(),
+            services: super::services::ServiceRegistry::new(),
             runtime: tokio::runtime::Handle::try_current().ok(),
         }
     }
