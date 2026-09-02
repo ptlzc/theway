@@ -177,8 +177,16 @@ impl TurnHost {
     async fn apply_model(&mut self, model: theway_llm_provider::Model) -> bool {
         let provider = model.provider.0.clone();
         let id = model.id.clone();
-        match self.session.kernel.harness().set_model(model).await {
+        match self.session.kernel.harness().set_model(model.clone()).await {
             Ok(_) => {
+                // Propagate the switch to the session's DAG launcher: node jobs inherit the
+                // model snapshot taken at session activation, so a model set after attach
+                // must rebuild the launcher (reusing the session's skill harness cell).
+                if let Some(activator) = self.automation.services.session_activator.get()
+                    && let Some(builder) = activator.builder()
+                {
+                    builder.refresh_dag_launcher(&self.session.id, model.clone());
+                }
                 if let Some(hint) = commands::model_credential_hint(&provider) {
                     self.system_line(format!(
                         "selected {provider}:{id}, but login is required: {hint}"

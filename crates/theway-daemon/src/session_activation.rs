@@ -24,8 +24,7 @@ pub(crate) struct SessionActivator {
     cli_builtin_skills: Vec<String>,
     config_builtin_skills: Vec<String>,
     load_local_sources: bool,
-}
-pub(crate) struct SessionActivation {
+}pub(crate) struct SessionActivation {
     pub session_id: String,
     pub created: bool,
     pub runtime: SessionRuntime,
@@ -53,6 +52,12 @@ impl SessionActivator {
             load_local_sources,
         }
     }
+
+    /// The shared runtime builder, when the owning daemon slot still holds it.
+    pub(crate) fn builder(&self) -> Option<Arc<SessionRuntimeBuilder>> {
+        self.builder.upgrade()
+    }
+
     pub(crate) async fn activate(
         &self,
         request: &WireActivateSessionRequest,

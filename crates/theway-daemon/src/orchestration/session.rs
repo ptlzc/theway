@@ -65,6 +65,11 @@ pub struct SessionRuntimeBuilder {
     pub feed_tx: tokio::sync::mpsc::UnboundedSender<(String, FeedUpdate)>,
     pub main_run_tx: tokio::sync::mpsc::UnboundedSender<String>,
     pub debug: bool,
+    /// Per-session skill harness cells, keyed by session id. `install_execution_context`
+    /// registers the cell it hands to the DAG launcher's tool-set closures so a later
+    /// `refresh_dag_launcher` (model switch) can rebuild the launcher with the SAME cell
+    /// instead of orphaning the one already populated with the session harness.
+    pub session_cells: parking_lot::Mutex<std::collections::HashMap<String, crate::tools::skill::SkillHarnessCell>>,
 }
 
 /// Session-scoped services that must be replaced as one unit.

@@ -319,6 +319,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         feed_tx: feed_tx.clone(),
         main_run_tx: main_run_tx.clone(),
         debug: options.debug,
+        session_cells: Default::default(),
     });
     services
         .session_activator

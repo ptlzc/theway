@@ -41,6 +41,9 @@ impl SessionRuntimeBuilder {
         );
 
         let skill_harness_cell = new_skill_harness_cell();
+        self.session_cells
+            .lock()
+            .insert(ctx.session_id.clone(), skill_harness_cell.clone());
         self.dag_engine.set_session_launcher(
             Some(ctx.session_id.clone()),
             tools::node_launcher(
@@ -67,6 +70,39 @@ impl SessionRuntimeBuilder {
             );
         }
         skill_harness_cell
+    }
+
+    /// Rebuild the DAG launcher for one installed session with a new parent model,
+    /// reusing the session's original skill harness cell so subagent tool sets keep
+    /// the already-populated skill source. `SetModel` after activation must reach
+    /// future DAG node launches; the launcher otherwise keeps the model snapshot
+    /// from activation time. Returns `false` when the session was never installed.
+    pub(crate) fn refresh_dag_launcher(
+        &self,
+        session_id: &str,
+        model: theway_llm_provider::Model,
+    ) -> bool {
+        let Some(cell) = self.session_cells.lock().get(session_id).cloned() else {
+            return false;
+        };
+        let Some(ctx) = self.services.session_execution.get_context(session_id) else {
+            return false;
+        };
+        self.dag_engine.set_session_launcher(
+            Some(session_id.to_string()),
+            tools::node_launcher(
+                self.dag_engine.clone(),
+                model,
+                Some(self.stream_fn.clone()),
+                ctx.cwd.clone(),
+                self.subagent_registry.clone(),
+                ctx.resources.memory_dir.clone(),
+                ctx.paths.base.clone(),
+                cell,
+                ctx.executor.clone(),
+            ),
+        );
+        true
     }
 }
 

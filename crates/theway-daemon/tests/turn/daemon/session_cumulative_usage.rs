@@ -159,6 +159,7 @@ fn install_activator(config: &mut DaemonConfig, main_run_tx: mpsc::UnboundedSend
         feed_tx: config.feed_tx.clone(),
         main_run_tx,
         debug: false,
+        session_cells: Default::default(),
     })));
     let activator = SessionActivator::new(
         builder,

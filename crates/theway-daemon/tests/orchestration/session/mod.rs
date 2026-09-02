@@ -452,6 +452,7 @@ fn test_factory() -> (SessionRuntimeBuilder, Arc<dyn RuntimeStorage>, TempDir) {
         feed_tx,
         main_run_tx,
         debug: false,
+        session_cells: Default::default(),
     };
     (factory, storage, state)
 }
