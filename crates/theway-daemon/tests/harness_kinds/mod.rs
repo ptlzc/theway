@@ -5,9 +5,6 @@
 //! hook / service being synthesized into package-catalog entries with the
 //! kind-bound permission set, plus the legacy compaction path regression.
 
-use std::path::PathBuf;
-
-use serde_json::json;
 use theway_contract::extension::{
     ExtensionCatalogStatus, ExtensionPackageManifest, ExtensionPermission, ExtensionScope,
     ExtensionSourceLayer,

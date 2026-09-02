@@ -79,15 +79,13 @@ async fn start_host(
         }
         None => QuickJsEnginePool::new(1),
     };
-    Arc::new(
-        SessionPluginHost::start(
-            PackageCatalog::discover(project, base),
-            engine,
-            "registration-session",
-            project,
-        )
-        .await,
+    SessionPluginHost::start(
+        PackageCatalog::discover(project, base),
+        engine,
+        "registration-session",
+        project,
     )
+    .await
 }
 
 fn tool_effect(

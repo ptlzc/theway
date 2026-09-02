@@ -163,17 +163,15 @@ pub async fn start_anchor(
     trust_anchor(project, base, grant_override);
     let services = ExtensionBrokerServices::new(base, Arc::new(LocalExecutor::with_cwd(project)));
     let engine = QuickJsEnginePool::with_broker_services(1, Default::default(), services);
-    let host = Arc::new(
-        SessionPluginHost::load_with_state(
-            PackageCatalog::discover(project, base),
-            engine.clone(),
-            SESSION_ID,
-            project,
-            config,
-            state,
-        )
-        .await,
-    );
+    let host = SessionPluginHost::load_with_state(
+        PackageCatalog::discover(project, base),
+        engine.clone(),
+        SESSION_ID,
+        project,
+        config,
+        state,
+    )
+    .await;
     (host, engine)
 }
 

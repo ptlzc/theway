@@ -81,15 +81,13 @@ async fn start_host(
 ) -> (Arc<SessionPluginHost>, QuickJsEnginePool) {
     let engine =
         QuickJsEnginePool::with_broker_services(1, QuickJsEngineLimits::default(), services);
-    let host = Arc::new(
-        SessionPluginHost::start(
-            PackageCatalog::discover(project, base),
-            engine.clone(),
-            "security-session",
-            project,
-        )
-        .await,
-    );
+    let host = SessionPluginHost::start(
+        PackageCatalog::discover(project, base),
+        engine.clone(),
+        "security-session",
+        project,
+    )
+    .await;
     (host, engine)
 }
 

@@ -168,15 +168,13 @@ export default defineExtension((api) => {
     )
     .unwrap();
     let catalog = PackageCatalog::discover(&host.runtime.cwd, &host.runtime.paths.base);
-    let extension_host = Arc::new(
-        SessionPluginHost::start(
-            catalog,
-            QuickJsEnginePool::new(1),
-            host.session.id.clone(),
-            &host.runtime.cwd,
-        )
-        .await,
-    );
+    let extension_host = SessionPluginHost::start(
+        catalog,
+        QuickJsEnginePool::new(1),
+        host.session.id.clone(),
+        &host.runtime.cwd,
+    )
+    .await;
     host.session
         .kernel
         .set_extension_host(Some(extension_host.clone()));

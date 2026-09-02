@@ -6,7 +6,10 @@
 //! host capabilities.
 
 mod audit;
+mod broker_error;
 mod broker_paths;
+mod broker_quota;
+mod broker_sdk;
 mod broker_services;
 mod brokers;
 mod catalog;
@@ -17,12 +20,15 @@ mod dispatch_result;
 mod dispatcher;
 mod effects;
 mod engine;
+mod engine_instance;
 mod event_bus;
 mod facade;
 mod host;
 mod host_loading;
 mod host_ports;
 mod legacy;
+mod live_event;
+mod live_events;
 mod observation;
 mod registered_tool;
 mod registration_host;

@@ -8,7 +8,7 @@
 //! objects (QuickJS VMs cannot share references). Method-call shape is
 //! deferred to a broker-based extension.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use serde_json::Value;
 
@@ -97,17 +97,6 @@ impl ServiceRegistry {
             }
         });
         removed
-    }
-
-    /// Names of services provided in `session_id` (for diagnostics).
-    pub fn provided_names(&self, session_id: &str) -> BTreeSet<String> {
-        self.inner
-            .lock()
-            .services
-            .keys()
-            .filter(|(sid, _)| sid == session_id)
-            .map(|(_, name)| name.clone())
-            .collect()
     }
 }
 

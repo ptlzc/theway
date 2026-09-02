@@ -271,7 +271,7 @@ async fn reload_waits_for_stream_and_tool_settlement_boundaries() {
     .await;
 
     RuntimeRunExtensionPort::invoke_run(
-        &host,
+        &*host,
         observe_invocation(ExtensionLifecycleEvent::RunStarted, 1, Some("run-1"), None),
     )
     .await
@@ -292,7 +292,7 @@ async fn reload_waits_for_stream_and_tool_settlement_boundaries() {
     assert!(host.reload_pending());
     assert_eq!(marker(&host).await, "old");
     RuntimeRunExtensionPort::invoke_run(
-        &host,
+        &*host,
         observe_invocation(ExtensionLifecycleEvent::RunSettled, 2, Some("run-1"), None),
     )
     .await
@@ -302,7 +302,7 @@ async fn reload_waits_for_stream_and_tool_settlement_boundaries() {
     assert_eq!(marker(&host).await, "run-new");
 
     RuntimeToolExtensionPort::invoke_tool(
-        &host,
+        &*host,
         observe_invocation(
             ExtensionLifecycleEvent::ToolExecutionStart,
             3,
@@ -327,7 +327,7 @@ async fn reload_waits_for_stream_and_tool_settlement_boundaries() {
     );
     assert_eq!(marker(&host).await, "run-new");
     RuntimeToolExtensionPort::invoke_tool(
-        &host,
+        &*host,
         observe_invocation(
             ExtensionLifecycleEvent::ToolExecutionEnd,
             4,
@@ -341,7 +341,7 @@ async fn reload_waits_for_stream_and_tool_settlement_boundaries() {
     assert_eq!(marker(&host).await, "tool-new");
 
     RuntimeRunExtensionPort::invoke_run(
-        &host,
+        &*host,
         observe_invocation(
             ExtensionLifecycleEvent::RunStarted,
             5,
@@ -368,7 +368,7 @@ async fn reload_waits_for_stream_and_tool_settlement_boundaries() {
     cancelled.scope.run_id = Some("run-cancelled".into());
     cancelled.cancelled = true;
     RuntimeRunExtensionPort::invoke_run(
-        &host,
+        &*host,
         RuntimeExtensionInvocation::new(
             ExtensionLifecycleEvent::RunSettled,
             ExtensionHookClass::Observe,
@@ -440,7 +440,7 @@ export default defineExtension((api) => {
     });
 
     RuntimeRunExtensionPort::invoke_run(
-        &host,
+        &*host,
         observe_invocation(
             ExtensionLifecycleEvent::TurnCompleted,
             1,
@@ -460,7 +460,7 @@ export default defineExtension((api) => {
     assert_eq!(*published_tools.lock(), after_request);
 
     RuntimeRunExtensionPort::invoke_run(
-        &host,
+        &*host,
         observe_invocation(ExtensionLifecycleEvent::RunSettled, 2, Some("run-1"), None),
     )
     .await

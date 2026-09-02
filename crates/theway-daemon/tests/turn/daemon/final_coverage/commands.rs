@@ -115,15 +115,13 @@ export default defineExtension((api) => {
         &host.runtime.cwd,
         &host.runtime.paths.base,
     );
-    let extension_host = Arc::new(
-        crate::ts_extensions::SessionPluginHost::start(
-            catalog,
-            crate::ts_extensions::QuickJsEnginePool::new(1),
-            host.session.id.clone(),
-            &host.runtime.cwd,
-        )
-        .await,
-    );
+    let extension_host = crate::ts_extensions::SessionPluginHost::start(
+        catalog,
+        crate::ts_extensions::QuickJsEnginePool::new(1),
+        host.session.id.clone(),
+        &host.runtime.cwd,
+    )
+    .await;
     host.session
         .kernel
         .set_extension_host(Some(extension_host.clone()));

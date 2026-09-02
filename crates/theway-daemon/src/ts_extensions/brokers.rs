@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
@@ -11,10 +11,17 @@ use theway_contract::extension::{
     ExtensionDiagnosticSeverity, ExtensionLifecycleEvent, ExtensionPermission,
 };
 
+pub(super) use super::broker_error::BrokerError;
 use super::broker_paths::{audit_path, resolve_existing_path, resolve_write_path};
 use super::broker_services::ExtensionBrokerServices;
 use super::catalog::ExtensionPackage;
 use super::engine::EngineInstanceKey;
+use super::live_event::{LiveEvent, LiveEventMode, validate_custom_event_name};
+
+pub(super) use super::broker_quota::BrokerOperationQuota;
+pub(super) use super::broker_sdk::{
+    FORBIDDEN_DIRECT_GLOBALS, PLUGIN_SDK_MODULE, generated_theway_module,
+};
 
 const MAX_FILE_BYTES: usize = 1024 * 1024;
 const MAX_NETWORK_BYTES: usize = 1024 * 1024;
@@ -137,11 +144,24 @@ impl BrokerRuntime {
             return self.native_call(&arguments);
         }
         if operation == "events.publish" {
-            // v1: a plugin-emitted event is recorded in the audit log; routing
-            // the event to same-session `on` subscriptions of arbitrary custom
-            // names (beyond the public event surface) is a follow-up — the
-            // public surface events are delivered by the host's hook dispatch.
             let arguments: PublishArguments = parse_arguments(serialized_arguments)?;
+            validate_custom_event_name(&arguments.event)
+                .map_err(|error| BrokerError::dynamic("invalid_arguments", error))?;
+            let mode = LiveEventMode::parse(arguments.mode.as_deref())
+                .map_err(|error| BrokerError::dynamic("invalid_arguments", error))?;
+            let payload = arguments.payload.unwrap_or(Value::Null);
+            self.services
+                .live_events
+                .publish(
+                    &self.session_id,
+                    LiveEvent::new(
+                        arguments.event.clone(),
+                        payload,
+                        mode,
+                        Some(self.extension_id.clone()),
+                    ),
+                )
+                .map_err(|error| BrokerError::dynamic("event_dispatch_unavailable", error))?;
             self.services.audit.record(
                 self.extension_id.clone(),
                 Some(self.session_id.clone()),
@@ -662,33 +682,6 @@ impl BrokerRuntime {
     }
 }
 
-#[derive(Debug)]
-pub(super) struct BrokerError {
-    pub(super) code: &'static str,
-    pub(super) message: std::borrow::Cow<'static, str>,
-}
-
-impl BrokerError {
-    pub(super) fn new(code: &'static str, message: &'static str) -> Self {
-        Self {
-            code,
-            message: std::borrow::Cow::Borrowed(message),
-        }
-    }
-
-    /// Broker error with a runtime-owned message (String).
-    pub(super) fn dynamic(code: &'static str, message: String) -> Self {
-        Self {
-            code,
-            message: std::borrow::Cow::Owned(message),
-        }
-    }
-
-    pub(super) fn contract(message: &'static str) -> Self {
-        Self::new("invalid_arguments", message)
-    }
-}
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CapabilityArguments {
@@ -796,85 +789,4 @@ fn truncate_bytes(mut value: String, limit: usize) -> String {
     }
     value.truncate(boundary);
     value
-}
-
-/// Invocation-local budget shared by all capability brokers installed in one
-/// QuickJS context. Broker adapters consume one unit before touching a daemon
-/// resource, so a failed broker operation still counts toward the limit.
-pub(super) struct BrokerOperationQuota {
-    remaining: AtomicUsize,
-}
-
-impl BrokerOperationQuota {
-    pub(super) fn new() -> Self {
-        Self {
-            remaining: AtomicUsize::new(0),
-        }
-    }
-
-    pub(super) fn begin(&self, limit: usize) {
-        self.remaining.store(limit, Ordering::Release);
-    }
-
-    pub(super) fn consume(&self) -> Result<(), &'static str> {
-        self.remaining
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |remaining| {
-                remaining.checked_sub(1)
-            })
-            .map(|_| ())
-            .map_err(|_| "extension broker operation quota exceeded")
-    }
-}
-
-/// Package name of the only host module available to extension imports.
-pub(super) const PLUGIN_SDK_MODULE: &str = "@theway-ai/plugin-sdk";
-
-/// Generate the plugin SDK host module. Capability brokers are added as
-/// explicit API methods; no ambient daemon authority is copied into the
-/// JavaScript global object.
-pub(super) fn generated_theway_module() -> String {
-    r#"
-export function defineExtension(setup) {
-  if (typeof setup !== "function") {
-    throw new TypeError("defineExtension requires a setup function");
-  }
-  return Object.freeze({ setup });
-}
-"#
-    .to_string()
-}
-
-/// Names intentionally absent from the direct package environment. Tests use
-/// this list to keep future host additions capability-brokered.
-pub(super) const FORBIDDEN_DIRECT_GLOBALS: &[&str] = &[
-    "process",
-    "Deno",
-    "Bun",
-    "require",
-    "fetch",
-    "XMLHttpRequest",
-    "WebSocket",
-    "thewayFilesystem",
-    "thewayNetwork",
-    "thewayEnvironment",
-    "thewaySecrets",
-    "thewayProvider",
-    "thewayPersistence",
-];
-
-#[cfg(test)]
-mod tests {
-    use super::BrokerOperationQuota;
-
-    #[test]
-    fn broker_quota_rejects_operations_after_the_configured_limit() {
-        let quota = BrokerOperationQuota::new();
-        quota.begin(2);
-        assert_eq!(quota.consume(), Ok(()));
-        assert_eq!(quota.consume(), Ok(()));
-        assert_eq!(
-            quota.consume(),
-            Err("extension broker operation quota exceeded")
-        );
-    }
 }

@@ -13,7 +13,7 @@ use super::super::engine::QuickJsEnginePool;
 use super::super::host::SessionPluginHost;
 use super::super::dispatcher::RuntimeExtensionHostConfig;
 
-async fn empty_host() -> SessionPluginHost {
+async fn empty_host() -> std::sync::Arc<SessionPluginHost> {
     let cwd = tempfile::tempdir().unwrap();
     SessionPluginHost::load_with_state(
         PackageCatalog::default(),

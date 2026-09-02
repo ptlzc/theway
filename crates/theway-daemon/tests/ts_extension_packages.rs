@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use serde_json::{Value, json};
 use tempfile::tempdir;
@@ -337,13 +336,11 @@ async fn persistent_instances_retain_memory_and_isolate_concurrent_sessions() {
     );
     let catalog = discover(project.path(), base.path());
     let engine = QuickJsEnginePool::new(2);
-    let host_a = Arc::new(
+    let host_a =
         SessionPluginHost::start(catalog.clone(), engine.clone(), "session-a", project.path())
-            .await,
-    );
-    let host_b = Arc::new(
-        SessionPluginHost::start(catalog, engine.clone(), "session-b", project.path()).await,
-    );
+            .await;
+    let host_b =
+        SessionPluginHost::start(catalog, engine.clone(), "session-b", project.path()).await;
     assert_eq!(engine.instance_count().await, 2);
 
     let (a_first, b_first) = tokio::join!(

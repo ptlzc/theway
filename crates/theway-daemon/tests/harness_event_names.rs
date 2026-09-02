@@ -69,7 +69,7 @@ async fn public_and_internal_event_names_resolve() {
 }
 
 #[tokio::test]
-async fn unknown_event_name_rejects_plugin() {
+async fn malformed_custom_event_name_rejects_plugin() {
     let base = tempdir().unwrap();
     write_package(
         &global_root(base.path()),
@@ -77,7 +77,7 @@ async fn unknown_event_name_rejects_plugin() {
         r#"
 import { defineExtension } from "@theway-ai/plugin-sdk";
 export default defineExtension((api) => {
-  api.on("no/such-event", () => {});
+  api.on("NO/SLASH", () => {});
 });
 "#,
     );
@@ -86,7 +86,31 @@ export default defineExtension((api) => {
     let host = SessionPluginHost::start(catalog, engine.clone(), "session", base.path()).await;
     assert!(
         host.active_extension_ids().await.is_empty(),
-        "unknown event name must reject the plugin"
+        "malformed custom event name must reject the plugin"
+    );
+    host.shutdown().await;
+}
+
+#[tokio::test]
+async fn valid_custom_event_name_loads_as_a_custom_subscription() {
+    let base = tempdir().unwrap();
+    write_package(
+        &global_root(base.path()),
+        "custom-sub",
+        r#"
+import { defineExtension } from "@theway-ai/plugin-sdk";
+export default defineExtension((api) => {
+  api.on("metrics/updated", () => "ok");
+});
+"#,
+    );
+    let catalog = PackageCatalog::discover(base.path(), base.path());
+    let engine = QuickJsEnginePool::new(1);
+    let host = SessionPluginHost::start(catalog, engine.clone(), "session", base.path()).await;
+    assert_eq!(
+        host.active_extension_ids().await,
+        ["custom-sub"],
+        "plugin-defined custom event subscriptions load"
     );
     host.shutdown().await;
 }

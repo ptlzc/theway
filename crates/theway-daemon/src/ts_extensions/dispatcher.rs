@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -27,6 +27,10 @@ pub struct RuntimeExtensionHostConfig {
     pub max_durable_entries: usize,
     pub max_durable_entry_bytes: usize,
     pub max_extension_durable_bytes: usize,
+    /// Session-level per-extension configuration overrides. The key is the
+    /// extension ID; values are merged over schema defaults and the package
+    /// instance configuration before setup runs.
+    pub plugin_configs: BTreeMap<String, Value>,
 }
 
 impl Default for RuntimeExtensionHostConfig {
@@ -42,6 +46,7 @@ impl Default for RuntimeExtensionHostConfig {
             max_durable_entries: 32,
             max_durable_entry_bytes: 64 * 1024,
             max_extension_durable_bytes: 4 * 1024 * 1024,
+            plugin_configs: BTreeMap::new(),
         }
     }
 }
@@ -80,6 +85,10 @@ impl RuntimeExtensionHostConfig {
 pub(super) struct HookRegistration {
     pub registration_id: u64,
     pub event: ExtensionLifecycleEvent,
+    /// Original subscription name. Known public or internal lifecycle names
+    /// resolve to their internal event; unknown names become
+    /// [`ExtensionLifecycleEvent::Custom`] events keyed by this string.
+    pub custom_event: Option<String>,
     pub class: ExtensionHookClass,
     pub payload_schema: Value,
     pub priority: i32,
@@ -110,13 +119,17 @@ struct RawRegistration {
 
 /// Resolve a subscription event name: try the public harness name first, then
 /// the internal snake_case name, so plugins may subscribe with either form
-/// and the same event is never delivered twice through both.
-fn event_name(raw: &Value) -> Result<ExtensionLifecycleEvent, String> {
+/// and the same event is never delivered twice through both. Unknown names are
+/// treated as plugin-defined custom live events.
+fn event_name(raw: &Value) -> Result<(ExtensionLifecycleEvent, Option<String>), String> {
     let name = raw
         .as_str()
         .ok_or_else(|| "event must be a string".to_string())?;
-    ExtensionLifecycleEvent::from_public_name(name)
-        .ok_or_else(|| format!("unknown extension event name: {name}"))
+    if let Some(event) = ExtensionLifecycleEvent::from_public_name(name) {
+        return Ok((event, None));
+    }
+    super::live_event::validate_custom_event_name(name)?;
+    Ok((ExtensionLifecycleEvent::Custom, Some(name.to_string())))
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -151,12 +164,15 @@ pub(super) fn validate_registrations(metadata: Value) -> Result<Vec<HookRegistra
         if !ids.insert(raw_registration.registration_id) {
             return Err("extension registration ids must be unique".into());
         }
-        let event = event_name(&raw_registration.event)?;
+        let (event, custom_event) = event_name(&raw_registration.event)?;
         let registration = raw_registration;
         let class = registration
             .descriptor
             .class
             .unwrap_or_else(|| default_class(event));
+        if custom_event.is_some() && class != ExtensionHookClass::Observe {
+            return Err("custom live events only support observe subscriptions".into());
+        }
         let contract =
             ExtensionHookContract::for_hook(event, class).map_err(|error| error.message)?;
         if let Some(actions) = &registration.descriptor.allowed_actions {
@@ -206,14 +222,18 @@ pub(super) fn validate_registrations(metadata: Value) -> Result<Vec<HookRegistra
                 event
             ));
         }
-        let payload_schema = registration
-            .descriptor
-            .payload_schema
-            .unwrap_or_else(|| serde_json::json!({"type": "object"}));
+        let payload_schema = registration.descriptor.payload_schema.unwrap_or_else(|| {
+            if custom_event.is_some() {
+                serde_json::json!(true)
+            } else {
+                serde_json::json!({"type": "object"})
+            }
+        });
         validate_schema(&payload_schema)?;
         validated.push(HookRegistration {
             registration_id: registration.registration_id,
-            event: event,
+            event,
+            custom_event,
             class,
             payload_schema,
             priority,

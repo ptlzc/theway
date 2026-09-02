@@ -128,7 +128,7 @@ async fn load_host(
     session_id: &str,
     port: Arc<dyn SessionExtensionStatePort>,
     config: RuntimeExtensionHostConfig,
-) -> SessionPluginHost {
+) -> std::sync::Arc<SessionPluginHost> {
     SessionPluginHost::load_with_state(
         PackageCatalog::discover(project, base),
         QuickJsEnginePool::new(1),
@@ -241,7 +241,7 @@ export default defineExtension((api) => {
     .await;
 
     let first =
-        RuntimeRequestExtensionPort::invoke_request(&host, request("state-session", 1, "first"))
+        RuntimeRequestExtensionPort::invoke_request(&*host, request("state-session", 1, "first"))
             .await
             .unwrap();
     assert_eq!(replacement_value(&first), "none::1");
@@ -250,7 +250,7 @@ export default defineExtension((api) => {
     assert_eq!(host.model_context_projection().items().len(), 1);
 
     let second =
-        RuntimeRequestExtensionPort::invoke_request(&host, request("state-session", 2, "second"))
+        RuntimeRequestExtensionPort::invoke_request(&*host, request("state-session", 2, "second"))
             .await
             .unwrap();
     assert_eq!(
@@ -270,7 +270,7 @@ export default defineExtension((api) => {
     )
     .await;
     let replayed = RuntimeRequestExtensionPort::invoke_request(
-        &relocated,
+        &*relocated,
         request("state-session", 3, "relocated"),
     )
     .await
@@ -338,7 +338,7 @@ export default defineExtension((api) => {
     )
     .await;
     let result =
-        RuntimeRequestExtensionPort::invoke_request(&host, request("branch-session", 6, "replay"))
+        RuntimeRequestExtensionPort::invoke_request(&*host, request("branch-session", 6, "replay"))
             .await
             .unwrap();
     let replayed: Value =
@@ -406,7 +406,7 @@ export default defineExtension((api) => {
     )
     .await;
     let parent_result = RuntimeRequestExtensionPort::invoke_request(
-        &parent,
+        &*parent,
         request("branching-session", 5, "parent"),
     )
     .await
@@ -429,7 +429,7 @@ export default defineExtension((api) => {
     )
     .await;
     let child_result = RuntimeRequestExtensionPort::invoke_request(
-        &child,
+        &*child,
         request("branching-session", 3, "child"),
     )
     .await
@@ -452,7 +452,7 @@ export default defineExtension((api) => {
     )
     .await;
     let switched_result = RuntimeRequestExtensionPort::invoke_request(
-        &switched_back,
+        &*switched_back,
         request("branching-session", 6, "parent-again"),
     )
     .await
@@ -486,7 +486,7 @@ async fn persistence_failure_rolls_back_the_associated_request_transform() {
     )
     .await;
     let result =
-        RuntimeRequestExtensionPort::invoke_request(&host, request("atomic-session", 1, "normal"))
+        RuntimeRequestExtensionPort::invoke_request(&*host, request("atomic-session", 1, "normal"))
             .await
             .unwrap();
     assert!(result.actions.is_empty());
@@ -536,7 +536,7 @@ export default defineExtension((api) => {
     )
     .await;
     let count_result = RuntimeRequestExtensionPort::invoke_request(
-        &count_host,
+        &*count_host,
         request("count-session", 1, "count"),
     )
     .await
@@ -557,10 +557,12 @@ export default defineExtension((api) => {
         },
     )
     .await;
-    let size_result =
-        RuntimeRequestExtensionPort::invoke_request(&size_host, request("size-session", 1, "size"))
-            .await
-            .unwrap();
+    let size_result = RuntimeRequestExtensionPort::invoke_request(
+        &*size_host,
+        request("size-session", 1, "size"),
+    )
+    .await
+    .unwrap();
     assert!(size_result.actions.is_empty());
     assert!(size_port.entries(extension_id).is_empty());
     size_host.shutdown().await;
@@ -587,7 +589,7 @@ export default defineExtension((api) => {
     )
     .await;
     let total_result = RuntimeRequestExtensionPort::invoke_request(
-        &total_host,
+        &*total_host,
         request("total-session", 2, "total"),
     )
     .await
@@ -651,7 +653,7 @@ export default defineExtension((api) => {
         }
     ));
     let result = RuntimeRequestExtensionPort::invoke_request(
-        &host,
+        &*host,
         request("migration-session", 3, "migrated"),
     )
     .await

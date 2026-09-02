@@ -87,6 +87,32 @@ function __thewayRegister(kind, descriptor, handler) {
   return __thewayHandle(registration);
 }
 
+function __thewayRegisterHandler(event, descriptor, handler, once) {
+  let effectiveHandler = handler;
+  if (once) {
+    effectiveHandler = async (envelope, context) => {
+      registration.disposed = true;
+      try {
+        return await handler(envelope, context);
+      } catch (error) {
+        throw error;
+      }
+    };
+  }
+  const registration = {
+    id: globalThis.__thewayRegistrationSequence,
+    event,
+    descriptor: descriptor ?? {},
+    handler: effectiveHandler,
+    priority: Number.isFinite(descriptor?.priority) ? descriptor.priority : 0,
+    sequence: globalThis.__thewayRegistrationSequence++,
+    disposed: false,
+  };
+  (globalThis.__thewayHandlers[event] ??= []).push(registration);
+  globalThis.__thewayRegistrations[registration.id] = registration;
+  return __thewayHandle(registration);
+}
+
 function __thewayBrokerCall(operation, brokerArgs = {}) {
   const response = JSON.parse(globalThis.__thewayBroker(operation, JSON.stringify(brokerArgs)));
   if (!response.ok) {
@@ -121,13 +147,19 @@ function __thewayQueueDurable(kind, entry) {
 
 globalThis.__thewaySetup = async function () {
   try {
-    const candidate = globalThis.__thewayExtension.default;
+    const registered = globalThis.__thewayRegisteredExtension ?? null;
+    const defaultExport = globalThis.__thewayExtension?.default;
+    if (registered !== null && defaultExport !== undefined && defaultExport !== null) {
+      throw new TypeError("extension entry uses both register() and a default export; choose one");
+    }
+    const candidate = registered ?? defaultExport;
     const setup = typeof candidate === "function" ? candidate : candidate?.setup;
     if (typeof setup !== "function") {
-      throw new TypeError("extension default export must be created by defineExtension");
+      throw new TypeError("extension entry must call register(setup) or export defineExtension(setup)");
     }
     // Optional service dependency declaration: `export const inject = ["svc"]`
-    // (module scope) or the default export's `inject` field. Array of strings.
+    // (module scope), the definition's `inject` field, or `register(setup,
+    // { inject })` for the side-effect entry form.
     const moduleInject = globalThis.__thewayExtension.inject;
     const declaredInject = Array.isArray(moduleInject)
       ? moduleInject
@@ -326,18 +358,17 @@ globalThis.__thewaySetup = async function () {
         if (typeof event !== "string" || event.length === 0 || typeof handler !== "function") {
           throw new TypeError("api.on requires an event name and handler");
         }
-        const registration = {
-          id: globalThis.__thewayRegistrationSequence,
-          event,
-          descriptor: descriptor ?? {},
-          handler,
-          priority: Number.isFinite(descriptor?.priority) ? descriptor.priority : 0,
-          sequence: globalThis.__thewayRegistrationSequence++,
-          disposed: false,
-        };
-        (globalThis.__thewayHandlers[event] ??= []).push(registration);
-        globalThis.__thewayRegistrations[registration.id] = registration;
-        return __thewayHandle(registration);
+        return __thewayRegisterHandler(event, descriptor, handler, false);
+      },
+      once(event, descriptor, handler) {
+        if (typeof descriptor === "function") {
+          handler = descriptor;
+          descriptor = {};
+        }
+        if (typeof event !== "string" || event.length === 0 || typeof handler !== "function") {
+          throw new TypeError("api.once requires an event name and handler");
+        }
+        return __thewayRegisterHandler(event, descriptor, handler, true);
       },
       registerAction(descriptor, handler) {
         // Dual shape: registerAction(name, fn) or registerAction(descriptor, handler).
@@ -404,7 +435,7 @@ globalThis.__thewaySetup = async function () {
 
 globalThis.__thewayInvoke = async function (serializedEnvelope, registrationId) {
   try {
-    const envelope = JSON.parse(serializedEnvelope);
+    let envelope = JSON.parse(serializedEnvelope);
     globalThis.__thewayCurrentEnvelope = envelope;
     globalThis.__thewayPendingDurableActions = [];
     globalThis.__thewayPendingState = new Map();
@@ -417,10 +448,20 @@ globalThis.__thewayInvoke = async function (serializedEnvelope, registrationId) 
       error.code = "effect_disposed";
       throw error;
     }
-    // Event-mismatch defence removed: the host resolves subscription names
-    // (public or internal) to the internal event before dispatch, so the
-    // envelope's event always matches the registration's host-resolved event;
-    // the raw subscription string here is not a reliable comparison key.
+    // The host resolves public names to the internal event before dispatch.
+    // Restore the author-facing subscription name for the handler, and unwrap
+    // the custom-event envelope (`custom` → { event, payload }).
+    if (typeof registration.event === "string" && registration.event !== envelope.event) {
+      envelope = {
+        ...envelope,
+        event: registration.event,
+        payload: envelope.event === "custom" && envelope.payload !== null
+          && typeof envelope.payload === "object"
+          ? envelope.payload.payload
+          : envelope.payload,
+      };
+      globalThis.__thewayCurrentEnvelope = envelope;
+    }
     const result = registration.event !== undefined
       ? await registration.handler(envelope, envelope.context)
       : await registration.handler(envelope.payload, envelope.context);

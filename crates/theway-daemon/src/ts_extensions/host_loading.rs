@@ -32,7 +32,7 @@ impl SessionPluginHost {
         engine: QuickJsEnginePool,
         session_id: impl Into<String>,
         cwd: &Path,
-    ) -> Self {
+    ) -> Arc<Self> {
         let host = Self::load(catalog, engine, session_id, cwd).await;
         host.start_sessions("initial").await;
         host
@@ -44,7 +44,7 @@ impl SessionPluginHost {
         session_id: impl Into<String>,
         cwd: &Path,
         config: RuntimeExtensionHostConfig,
-    ) -> Self {
+    ) -> Arc<Self> {
         let host = Self::load_with_config(catalog, engine, session_id, cwd, config).await;
         host.start_sessions("initial").await;
         host
@@ -58,7 +58,7 @@ impl SessionPluginHost {
         engine: QuickJsEnginePool,
         session_id: impl Into<String>,
         cwd: &Path,
-    ) -> Self {
+    ) -> Arc<Self> {
         Self::load_with_config(
             catalog,
             engine,
@@ -75,7 +75,7 @@ impl SessionPluginHost {
         session_id: impl Into<String>,
         cwd: &Path,
         config: RuntimeExtensionHostConfig,
-    ) -> Self {
+    ) -> Arc<Self> {
         Self::load_with_state(
             catalog,
             engine,
@@ -94,7 +94,7 @@ impl SessionPluginHost {
         cwd: &Path,
         config: RuntimeExtensionHostConfig,
         state_port: Arc<dyn SessionExtensionStatePort>,
-    ) -> Self {
+    ) -> Arc<Self> {
         Self::load_with_state_and_legacy(
             catalog, engine, session_id, cwd, config, state_port, None, None,
         )
@@ -110,7 +110,7 @@ impl SessionPluginHost {
         state_port: Arc<dyn SessionExtensionStatePort>,
         legacy_compaction: Option<Arc<LegacyCompactionHost>>,
         reload_catalog: Option<Arc<parking_lot::RwLock<PackageCatalog>>>,
-    ) -> Self {
+    ) -> Arc<Self> {
         config
             .validate()
             .expect("runtime extension host config must be valid");
@@ -146,6 +146,30 @@ impl SessionPluginHost {
             reload_base_tools: parking_lot::Mutex::new(Vec::new()),
             reload_tool_publisher: parking_lot::Mutex::new(None),
         };
+        // Live event pump: broker calls from QuickJS workers publish through a
+        // session-keyed unbounded channel, and this task delivers them against
+        // the session's active instances. The pump holds a weak reference; the
+        // returned `Arc<Self>` keeps the host alive for its caller.
+        let (live_event_sender, live_event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        host.engine
+            .register_live_event_sender(&host.session_id, live_event_sender);
+        let host = Arc::new(host);
+        let weak = Arc::downgrade(&host);
+        tokio::spawn(async move {
+            let mut receiver = live_event_receiver;
+            while let Some(event) = receiver.recv().await {
+                let Some(host) = weak.upgrade() else {
+                    break;
+                };
+                if let Err(error) = host.dispatch_live_event(event).await {
+                    tracing::warn!(
+                        target: "extensions",
+                        session_id = %host.session_id,
+                        "live event dispatch failed: {error}"
+                    );
+                }
+            }
+        });
         host.load_effective_packages().await;
         host
     }
@@ -185,7 +209,7 @@ impl SessionPluginHost {
                         self.session_id.clone(),
                         ExtensionLifecycleEvent::ExtensionLoad,
                         ExtensionDiagnosticCode::ContractViolation,
-                        format!("plugin stays inactive: required service is not provided"),
+                        "plugin stays inactive: required service is not provided".to_string(),
                     ));
                     let _ = self.engine.dispose(&key).await;
                 }
@@ -209,13 +233,30 @@ impl SessionPluginHost {
             self.record_state_migration_fault(package, error);
             return false;
         }
-        // Config: validate the manifest configSchema, fill defaults, and
-        // merge the session override (none in v1) before setup runs, so
-        // api.getConfig() inside apply returns the merged config. Invalid
-        // config fails the plugin loudly (issue #83 §6).
+        // Config: validate the manifest configSchema, fill defaults, merge
+        // any session-level override from host config, and re-validate the
+        // merged object before setup runs, so api.getConfig() inside apply
+        // returns the merged config. Invalid config fails the plugin loudly
+        // (issue #83 §6).
         let config = match package.manifest().config_schema.as_ref() {
             Some(schema) => {
-                match super::config::validate_and_default(schema, serde_json::json!({})) {
+                let defaulted =
+                    match super::config::validate_and_default(schema, serde_json::json!({})) {
+                        Ok(config) => config,
+                        Err(error) => {
+                            self.record_load_fault(package, error);
+                            return false;
+                        }
+                    };
+                let merged = super::config::merge(
+                    defaulted,
+                    self.config
+                        .plugin_configs
+                        .get(&package.manifest().id)
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null),
+                );
+                match super::config::validate_and_default(schema, merged) {
                     Ok(config) => config,
                     Err(error) => {
                         self.record_load_fault(package, error);

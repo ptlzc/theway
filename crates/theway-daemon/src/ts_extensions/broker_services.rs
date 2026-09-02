@@ -5,10 +5,42 @@ use std::sync::Arc;
 
 use theway_contract::extension::{ExtensionDiagnostic, ExtensionDurableEntry};
 use theway_core::executor::ToolExecutor;
+use tokio::sync::mpsc;
 
 use super::audit::ExtensionAuditLog;
 use super::engine::EngineInstanceKey;
+use super::live_event::LiveEvent;
 use super::state_broker::ExtensionStateBroker;
+
+/// Session-keyed publisher for the live plugin event seam. Every session host
+/// registers one unbounded sender; capability brokers call [`publish`] directly
+/// from the QuickJS worker and the host pump delivers the event asynchronously.
+#[derive(Clone, Default)]
+pub(super) struct LiveEventPublisher {
+    senders: Arc<parking_lot::Mutex<BTreeMap<String, mpsc::UnboundedSender<LiveEvent>>>>,
+}
+
+impl LiveEventPublisher {
+    pub(super) fn register(&self, session_id: &str, sender: mpsc::UnboundedSender<LiveEvent>) {
+        self.senders.lock().insert(session_id.to_string(), sender);
+    }
+
+    pub(super) fn unregister(&self, session_id: &str) {
+        self.senders.lock().remove(session_id);
+    }
+
+    pub(super) fn publish(&self, session_id: &str, event: LiveEvent) -> Result<(), String> {
+        let sender = self
+            .senders
+            .lock()
+            .get(session_id)
+            .cloned()
+            .ok_or_else(|| "no live event host is registered for this session".to_string())?;
+        sender
+            .send(event)
+            .map_err(|_| "session live event host has shut down".to_string())
+    }
+}
 
 #[derive(Clone)]
 pub struct ExtensionBrokerServices {
@@ -19,6 +51,8 @@ pub struct ExtensionBrokerServices {
     pub(super) state: ExtensionStateBroker,
     /// Process-global session-keyed plugin service registry.
     pub(super) services: super::services::ServiceRegistry,
+    /// Session-keyed live event publisher consumed by `api.emit`.
+    pub(super) live_events: LiveEventPublisher,
     runtime: Option<tokio::runtime::Handle>,
 }
 
@@ -31,6 +65,7 @@ impl ExtensionBrokerServices {
             diagnostics: Arc::new(parking_lot::Mutex::new(Vec::new())),
             state: ExtensionStateBroker::default(),
             services: super::services::ServiceRegistry::new(),
+            live_events: LiveEventPublisher::default(),
             runtime: tokio::runtime::Handle::try_current().ok(),
         }
     }

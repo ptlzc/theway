@@ -211,7 +211,7 @@ impl SessionRuntimeBuilder {
         let mut runtime_extension_host = None;
         if let Some(engine) = &ctx.extension_resources.runtime_extension_engine {
             let base_tools = tools.clone();
-            let extensions = Arc::new(
+            let extensions =
                 crate::ts_extensions::SessionPluginHost::load_with_state_and_legacy(
                     ctx.extension_resources.runtime_extension_packages.read().clone(),
                     engine.as_ref().clone(),
@@ -226,8 +226,7 @@ impl SessionRuntimeBuilder {
                     ctx.extension_resources.legacy_compaction_host.clone(),
                     Some(ctx.extension_resources.runtime_extension_packages.clone()),
                 )
-                .await,
-            );
+                .await;
             for diagnostic in extensions
                 .diagnostics()
                 .into_iter()

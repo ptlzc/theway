@@ -126,6 +126,7 @@ impl SessionPluginHost {
         if self.shutdown.swap(true, Ordering::AcqRel) {
             return;
         }
+        self.engine.unregister_live_event_sender(&self.session_id);
         let mut active = self.active.lock().await;
         for mut extension in active.drain(..) {
             if extension.phase == InstanceLifecyclePhase::Started {
@@ -668,6 +669,7 @@ impl SessionPluginHost {
         if self.shutdown.swap(true, Ordering::AcqRel) {
             return;
         }
+        self.engine.unregister_live_event_sender(&self.session_id);
         let mut active = self.active.lock().await;
         for mut extension in active.drain(..) {
             self.invoke_cleanup_event(

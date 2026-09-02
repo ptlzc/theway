@@ -59,7 +59,7 @@ async fn host_for(
     base: &Path,
     engine: QuickJsEnginePool,
     config: RuntimeExtensionHostConfig,
-) -> SessionPluginHost {
+) -> Arc<SessionPluginHost> {
     let requested = PackageCatalog::discover(project, base)
         .selected_packages()
         .into_iter()
@@ -173,7 +173,7 @@ export default defineExtension((api) => {
     );
 
     let result = RuntimeRequestExtensionPort::invoke_request(
-        &host,
+        &*host,
         invocation(
             ExtensionLifecycleEvent::Context,
             ExtensionHookClass::Transform,
@@ -228,7 +228,7 @@ export default defineExtension((api) => {
     )
     .await;
     let result = RuntimeToolExtensionPort::invoke_tool(
-        &host,
+        &*host,
         invocation(
             ExtensionLifecycleEvent::ToolCall,
             ExtensionHookClass::Gate,
@@ -288,7 +288,7 @@ export default defineExtension((api) => {{
             )
         };
         for _ in 0..2 {
-            let result = RuntimeToolExtensionPort::invoke_tool(&host, gate())
+            let result = RuntimeToolExtensionPort::invoke_tool(&*host, gate())
                 .await
                 .unwrap();
             assert!(matches!(
@@ -345,7 +345,7 @@ export default defineExtension((api) => {
     )
     .await;
     let mutation = RuntimeMessageExtensionPort::invoke_message(
-        &host,
+        &*host,
         invocation(
             ExtensionLifecycleEvent::MessageStart,
             ExtensionHookClass::Observe,
@@ -359,7 +359,7 @@ export default defineExtension((api) => {
     let started = Instant::now();
     for index in 0..20 {
         RuntimeMessageExtensionPort::invoke_message(
-            &host,
+            &*host,
             invocation(
                 ExtensionLifecycleEvent::MessageUpdate,
                 ExtensionHookClass::Observe,
@@ -461,7 +461,7 @@ export default defineExtension((api) => {{
         };
         let host = host_for(project.path(), base.path(), engine, config).await;
         let result = RuntimeRequestExtensionPort::invoke_request(
-            &host,
+            &*host,
             invocation(
                 ExtensionLifecycleEvent::Input,
                 ExtensionHookClass::Transform,
@@ -511,17 +511,17 @@ export default defineExtension((api) => {
             json!({"message": {}, "fail": fail}),
         )
     };
-    RuntimeRequestExtensionPort::invoke_request(&host, call(true))
+    RuntimeRequestExtensionPort::invoke_request(&*host, call(true))
         .await
         .unwrap();
-    RuntimeRequestExtensionPort::invoke_request(&host, call(false))
+    RuntimeRequestExtensionPort::invoke_request(&*host, call(false))
         .await
         .unwrap();
-    RuntimeRequestExtensionPort::invoke_request(&host, call(true))
+    RuntimeRequestExtensionPort::invoke_request(&*host, call(true))
         .await
         .unwrap();
     assert_eq!(engine.instance_count().await, 1);
-    RuntimeRequestExtensionPort::invoke_request(&host, call(true))
+    RuntimeRequestExtensionPort::invoke_request(&*host, call(true))
         .await
         .unwrap();
     assert_eq!(engine.instance_count().await, 0);
@@ -550,15 +550,13 @@ export default defineExtension((api) => {
         standard_deadline: Duration::from_secs(5),
         ..RuntimeExtensionHostConfig::default()
     };
-    let host = Arc::new(
-        host_for(
-            project.path(),
-            base.path(),
-            QuickJsEnginePool::new(1),
-            config,
-        )
-        .await,
-    );
+    let host = host_for(
+        project.path(),
+        base.path(),
+        QuickJsEnginePool::new(1),
+        config,
+    )
+    .await;
     let invoking = {
         let host = Arc::clone(&host);
         tokio::spawn(async move {
