@@ -115,16 +115,21 @@ impl App {
             ),
             Level::Output,
         );
-        self.feed
-            .push_plain_untimed(format!("session: {}", self.session_id), Level::Output);
         // Issue #79: fresh attach (reused daemon, no explicit resume) starts a
-        // brand-new session on the first message; surface that instead of the
-        // stale previous-session id.
+        // brand-new session on the first message. Do not show the reused
+        // daemon's current session id — the App is not attached to it yet.
         if self.pending_fresh_attach {
+            self.feed.push_plain_untimed(
+                "session: (pending new)",
+                Level::Output,
+            );
             self.feed.push_plain_untimed(
                 "新 session: 将在首条消息时创建 (不再加载上一会话)",
                 Level::System,
             );
+        } else {
+            self.feed
+                .push_plain_untimed(format!("session: {}", self.session_id), Level::Output);
         }
         let tools = if self.latest.sidebar.tools.names.is_empty() {
             "(none)".to_string()

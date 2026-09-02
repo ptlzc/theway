@@ -1,6 +1,10 @@
 impl App {
     pub async fn run(mut self) -> Result<()> {
-        self.refresh_session_snapshot().await;
+        // Issue #79: a reused-daemon fresh attach must not load the old
+        // session's nested snapshot before the fresh session is created.
+        if !self.pending_fresh_attach {
+            self.refresh_session_snapshot().await;
+        }
         if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
             return self.run_headless().await;
         }
@@ -27,16 +31,24 @@ impl App {
         let mut tick = tokio::time::interval(Duration::from_millis(SPINNER_TICK_MS));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut reconnect = tokio::time::interval(Duration::from_secs(1));
-        let mut stream = match self
-            .client
-            .stream_events_for_session(Some(&self.session_id))
-            .await
-        {
-            Ok(stream) => Some(stream),
-            Err(e) => {
-                self.connected = false;
-                self.error_line(format!("daemon stream: {e}"));
-                None
+        // Issue #79: on a reused-daemon fresh attach, do not subscribe to the
+        // daemon's current (old) session at all. The first submitted message
+        // creates + selects the fresh session, and the resubscribe branch
+        // below opens the stream for that new session.
+        let mut stream = if self.pending_fresh_attach {
+            None
+        } else {
+            match self
+                .client
+                .stream_events_for_session(Some(&self.session_id))
+                .await
+            {
+                Ok(stream) => Some(stream),
+                Err(e) => {
+                    self.connected = false;
+                    self.error_line(format!("daemon stream: {e}"));
+                    None
+                }
             }
         };
 
@@ -105,7 +117,7 @@ impl App {
                         }
                     }
                 }
-                _ = reconnect.tick(), if stream.is_none() => {
+                _ = reconnect.tick(), if stream.is_none() && !self.pending_fresh_attach => {
                     if !self.quit {
                         let session_id = self.session_id.clone();
                         let attempt: Result<(GrpcClient, bool, Vec<String>)> =
