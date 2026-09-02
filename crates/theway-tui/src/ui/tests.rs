@@ -426,7 +426,7 @@ async fn busy_status_shows_braille_spinner() {
         })
         .collect::<Vec<_>>();
     assert!(
-        text.contains("tps:"),
+        text.contains("t/s"),
         "throughput stats must share the busy row:\n{text}"
     );
     let first_color = buf[(status_area.x + 1, status_area.y)].fg;

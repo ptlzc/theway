@@ -93,7 +93,7 @@ async fn busy_stats_follow_working_instead_of_right_aligning() {
         .find(|line| line.contains("working"))
         .expect("busy status row");
     let working = row.find("working").unwrap();
-    let throughput = row.find("tps:").expect("busy throughput");
+    let throughput = row.find("t/s").expect("busy throughput");
     assert!(
         throughput - working < 30,
         "throughput must follow working without a flexible gap: {row}"

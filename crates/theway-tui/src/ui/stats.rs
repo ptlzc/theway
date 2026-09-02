@@ -100,7 +100,43 @@ pub fn human_count(n: u64) -> String {
     }
 }
 
-/// Busy-band stats line: `tps: {tps} · in: {in} · out: {out} · cache {hit}`.
+/// Default busy-band stats template: `{tps} t/s · in: … · out: …`.
+/// Can be overridden with `[statusbar] stats_format = "…"` in `theme.toml`.
+pub const DEFAULT_BUSY_STATS_TEMPLATE: &str = "{tps} t/s · in: {in} · out: {out}";
+
+/// Default template when session-cumulative usage is available: same as
+/// [`DEFAULT_BUSY_STATS_TEMPLATE`] plus the cache hit rate.
+pub const DEFAULT_BUSY_STATS_TEMPLATE_WITH_CACHE: &str =
+    "{tps} t/s · in: {in} · out: {out} · cache {hit}";
+
+/// Format the busy-band stats line from a configurable template. Supported
+/// placeholders: `{tps}`, `{in}`, `{out}`, `{hit}`. `None` uses
+/// [`DEFAULT_BUSY_STATS_TEMPLATE`].
+#[must_use]
+pub fn busy_stats_line(
+    template: Option<&str>,
+    tps: f64,
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    hit_rate: Option<f64>,
+) -> String {
+    let template = template.unwrap_or(DEFAULT_BUSY_STATS_TEMPLATE);
+    let tps_text = (tps.round() as u64).to_string();
+    let in_text = input_tokens
+        .map(human_count)
+        .unwrap_or_else(|| "0".to_string());
+    let out_text = output_tokens
+        .map(human_count)
+        .unwrap_or_else(|| "0".to_string());
+    let hit_text = format_hit_rate(hit_rate);
+    template
+        .replace("{tps}", &tps_text)
+        .replace("{in}", &in_text)
+        .replace("{out}", &out_text)
+        .replace("{hit}", &hit_text)
+}
+
+/// Busy-band stats line: `{tps} t/s · in: {in} · out: {out} · cache {hit}`.
 /// `tps` is the live token-per-second estimate from the streamed feed; `in`
 /// / `out` are the session-cumulative input/output token counts; `cache` is
 /// the provider cache hit rate (falling back to the prefix estimate when the
@@ -108,14 +144,7 @@ pub fn human_count(n: u64) -> String {
 /// slots are skipped.
 #[must_use]
 pub fn busy_stats_text(tps: f64, input_tokens: Option<u64>, output_tokens: Option<u64>) -> String {
-    let mut text = format!("tps: {}", tps.round() as u64);
-    if let Some(tokens) = input_tokens {
-        text.push_str(&format!(" · in: {}", human_count(tokens)));
-    }
-    if let Some(tokens) = output_tokens {
-        text.push_str(&format!(" · out: {}", human_count(tokens)));
-    }
-    text
+    busy_stats_line(None, tps, input_tokens, output_tokens, None)
 }
 
 /// Format a cache hit ratio for display (`72.3%` or `-` when unknown).
@@ -145,13 +174,12 @@ pub fn busy_stats_text_with_session(
     provider_cache_hit_rate: Option<f64>,
     prefix_cache_hit_rate: Option<f64>,
 ) -> String {
-    let hit = provider_cache_hit_rate.or(prefix_cache_hit_rate);
-    let hit = format_hit_rate(hit);
-    format!(
-        "tps: {} · in: {} · out: {} · cache {hit}",
-        tps.round() as u64,
-        human_count(total_input_tokens),
-        human_count(output_tokens),
+    busy_stats_line(
+        Some(DEFAULT_BUSY_STATS_TEMPLATE_WITH_CACHE),
+        tps,
+        Some(total_input_tokens),
+        Some(output_tokens),
+        provider_cache_hit_rate.or(prefix_cache_hit_rate),
     )
 }
 
@@ -241,11 +269,28 @@ mod tests {
     fn busy_stats_text_full_and_tps_only() {
         assert_eq!(
             busy_stats_text(84.0, Some(57_100), Some(1_200)),
-            "tps: 84 · in: 57.1k · out: 1.2k"
+            "84 t/s · in: 57.1k · out: 1.2k"
         );
-        // No usage data → tps only; fractional tps rounds.
-        assert_eq!(busy_stats_text(83.6, None, None), "tps: 84");
+        // No usage data → still shows the default template with zeros.
+        assert_eq!(busy_stats_text(83.6, None, None), "84 t/s · in: 0 · out: 0");
         // Partial usage data renders only the present slots.
-        assert_eq!(busy_stats_text(0.0, Some(500), None), "tps: 0 · in: 500");
+        assert_eq!(
+            busy_stats_text(0.0, Some(500), None),
+            "0 t/s · in: 500 · out: 0"
+        );
+    }
+
+    #[test]
+    fn custom_stats_template_replaces_placeholders() {
+        assert_eq!(
+            busy_stats_line(
+                Some("{tps} tok/s in={in} out={out} hit={hit}"),
+                12.6,
+                Some(1_000),
+                Some(2_000),
+                Some(0.723),
+            ),
+            "13 tok/s in=1.0k out=2.0k hit=72.3%"
+        );
     }
 }

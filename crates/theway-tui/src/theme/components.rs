@@ -195,6 +195,10 @@ pub struct StatusbarStyle {
     pub error: Color,
     /// Busy/working label color.
     pub busy: Color,
+    /// Optional template for the busy-band stats line. Supports `{tps}`,
+    /// `{in}`, `{out}`, and `{hit}` placeholders. `None` uses the built-in
+    /// default (`{tps} t/s · in: {in} · out: {out} · cache {hit}`).
+    pub stats_format: Option<&'static str>,
 }
 
 impl Default for StatusbarStyle {
@@ -205,6 +209,7 @@ impl Default for StatusbarStyle {
             accent: Color::Yellow,
             error: Color::Red,
             busy: Color::Gray,
+            stats_format: None,
         }
     }
 }

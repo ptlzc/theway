@@ -299,6 +299,7 @@ fn apply_style_section(
     palette: &BTreeMap<String, Option<Color>>,
     color_slots: &mut [(&str, &mut Color)],
     opt_slots: &mut [(&str, &mut Option<Color>)],
+    string_slots: &mut [(&str, &mut Option<&'static str>)],
 ) {
     for (key, value) in section {
         let Some(value) = as_str(&format!("{label}.{key}"), value) else {
@@ -306,6 +307,10 @@ fn apply_style_section(
         };
         if let Some(slot) = opt_slots.iter_mut().find(|(name, _)| *name == key) {
             set_opt_color(slot.1, &format!("{label}.{key}"), value, palette);
+            continue;
+        }
+        if let Some(slot) = string_slots.iter_mut().find(|(name, _)| *name == key) {
+            *slot.1 = Some(Box::leak(value.to_string().into_boxed_str()));
             continue;
         }
         if let Some(slot) = color_slots.iter_mut().find(|(name, _)| *name == key) {

@@ -6,7 +6,7 @@ use super::stats::busy_stats_text_with_session;
 fn busy_stats_text_with_session_renders_token_and_cache_metrics() {
     assert_eq!(
         busy_stats_text_with_session(84.0, 10_000, 1_200, Some(0.7), Some(0.8)),
-        "tps: 84 · in: 10.0k · out: 1.2k · cache 70%"
+        "84 t/s · in: 10.0k · out: 1.2k · cache 70%"
     );
 }
 
@@ -16,7 +16,7 @@ fn busy_stats_text_with_session_falls_back_to_prefix_hit_rate() {
     // shown instead.
     assert_eq!(
         busy_stats_text_with_session(84.0, 10_000, 1_200, None, Some(0.8)),
-        "tps: 84 · in: 10.0k · out: 1.2k · cache 80%"
+        "84 t/s · in: 10.0k · out: 1.2k · cache 80%"
     );
 }
 
@@ -24,6 +24,6 @@ fn busy_stats_text_with_session_falls_back_to_prefix_hit_rate() {
 fn busy_stats_text_with_session_zero_input_renders_zero_hit() {
     assert_eq!(
         busy_stats_text_with_session(0.0, 0, 0, None, None),
-        "tps: 0 · in: 0 · out: 0 · cache -"
+        "0 t/s · in: 0 · out: 0 · cache -"
     );
 }

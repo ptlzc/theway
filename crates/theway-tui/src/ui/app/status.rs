@@ -48,18 +48,31 @@ impl App {
             )];
             let session_usage = &self.latest.session_usage;
             let stats = if session_usage.total_input_tokens > 0 {
-                stats::busy_stats_text_with_session(
+                stats::busy_stats_line(
+                    Some(
+                        self.theme
+                            .statusbar
+                            .stats_format
+                            .unwrap_or(stats::DEFAULT_BUSY_STATS_TEMPLATE_WITH_CACHE),
+                    ),
                     self.token_meter.cps(),
-                    session_usage.total_input_tokens,
-                    session_usage.output_tokens,
-                    session_usage.provider_cache_hit_rate,
-                    session_usage.prefix_cache_hit_rate,
+                    Some(session_usage.total_input_tokens),
+                    Some(session_usage.output_tokens),
+                    session_usage
+                        .provider_cache_hit_rate
+                        .or(session_usage.prefix_cache_hit_rate),
                 )
             } else {
                 let usage = &self.latest.usage;
                 let input = (usage.total_input_tokens > 0).then_some(usage.total_input_tokens);
                 let output = (usage.output_tokens > 0).then_some(usage.output_tokens);
-                stats::busy_stats_text(self.token_meter.cps(), input, output)
+                stats::busy_stats_line(
+                    self.theme.statusbar.stats_format,
+                    self.token_meter.cps(),
+                    input,
+                    output,
+                    None,
+                )
             };
             spans.push(Span::styled(
                 format!(" · {stats}"),

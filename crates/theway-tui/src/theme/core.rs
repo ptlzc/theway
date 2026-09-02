@@ -131,6 +131,7 @@ impl Theme {
                         ("busy", &mut theme.statusbar.busy),
                     ],
                     &mut [("bg", &mut theme.statusbar.bg)],
+                    &mut [("stats_format", &mut theme.statusbar.stats_format)],
                 ),
                 "picker" => apply_style_section(
                     "picker",
@@ -144,6 +145,7 @@ impl Theme {
                         ("dim", &mut theme.picker.dim),
                     ],
                     &mut [("bg", &mut theme.picker.bg)],
+                    &mut [],
                 ),
                 "sidebar" => apply_style_section(
                     "sidebar",
@@ -158,6 +160,7 @@ impl Theme {
                         ("muted", &mut theme.sidebar.muted),
                     ],
                     &mut [("bg", &mut theme.sidebar.bg)],
+                    &mut [],
                 ),
                 "dag_band" => apply_style_section(
                     "dag_band",
@@ -175,6 +178,7 @@ impl Theme {
                         ("title", &mut theme.dag_band.title),
                     ],
                     &mut [("bg", &mut theme.dag_band.bg)],
+                    &mut [],
                 ),
                 unknown => warn(&format!("unknown section {unknown:?} — ignored")),
             }

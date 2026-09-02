@@ -36,8 +36,8 @@ pub(crate) const THINKING_STYLE: Style = Style::new()
     .add_modifier(Modifier::ITALIC);
 pub(crate) const RESULT_SUMMARY_STYLE: Style = Style::new().fg(Color::DarkGray);
 
-fn user_body_style(theme: &Theme) -> Style {
-    Style::new().fg(theme.user_text)
+fn user_body_style(theme: &Theme, bg: Color) -> Style {
+    Style::new().fg(theme.user_text).bg(bg)
 }
 fn tool_name_style(theme: &Theme) -> Style {
     Style::new()

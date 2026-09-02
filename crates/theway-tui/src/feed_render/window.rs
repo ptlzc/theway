@@ -170,9 +170,14 @@ fn push_user_block(out: &mut Vec<Line<'static>>, text: &str, width: usize, theme
         for row in wrap_str(body, width.saturating_sub(prefix_width).max(1)) {
             let mut spans = Vec::with_capacity(3);
             if first && let Some(prefix) = prefix {
-                spans.push(Span::styled(prefix.to_string(), USER_STYLE));
+                // The whole user row is one colored band: prefix and body
+                // spans carry the same background, not just the padding.
+                spans.push(Span::styled(prefix.to_string(), USER_STYLE.bg(band_bg)));
             }
-            spans.push(Span::styled(row.clone(), user_body_style(theme)));
+            spans.push(Span::styled(
+                row.clone(),
+                user_body_style(theme, band_bg),
+            ));
             first = false;
             let row_width = if prefix.is_some() && spans.len() > 1 {
                 prefix_width

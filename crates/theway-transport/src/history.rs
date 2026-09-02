@@ -29,7 +29,12 @@ impl HistoryStore {
         let entries: Vec<String> = text
             .lines()
             .filter(|s| !s.trim().is_empty())
-            .map(|s| s.to_string())
+            .map(|s| {
+                // New format: one JSON string per physical line, so multiline
+                // prompts stay one history entry. Old plain-text lines fall
+                // back to the raw line (backwards compatibility).
+                serde_json::from_str::<String>(s).unwrap_or_else(|_| s.to_string())
+            })
             .collect();
         Self {
             path: path.to_path_buf(),
@@ -74,7 +79,15 @@ impl HistoryStore {
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let body = self.entries.join("\n") + "\n";
+        // One JSON string per line: embedded newlines in a prompt stay inside
+        // that entry instead of splitting into separate history rows.
+        let body = self
+            .entries
+            .iter()
+            .map(|entry| serde_json::to_string(entry).unwrap_or_else(|_| entry.clone()))
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
         std::fs::write(&self.path, body)
     }
 }
@@ -98,6 +111,31 @@ mod tests {
         // Reload and verify on-disk state matches.
         let reloaded = HistoryStore::load_from(&path);
         assert_eq!(reloaded.entries, vec!["first", "second", "third"]);
+    }
+
+    #[test]
+    fn multiline_entry_roundtrips_as_one_history_row() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("history");
+        let mut h = HistoryStore::load_from(&path);
+        h.append("first line\nsecond line\nthird line");
+
+        let reloaded = HistoryStore::load_from(&path);
+        assert_eq!(
+            reloaded.entries,
+            vec!["first line\nsecond line\nthird line"],
+            "multiline prompt must not split into separate entries"
+        );
+    }
+
+    #[test]
+    fn old_plain_history_lines_keep_working() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("history");
+        std::fs::write(&path, "plain one\nplain two\n").unwrap();
+
+        let reloaded = HistoryStore::load_from(&path);
+        assert_eq!(reloaded.entries, vec!["plain one", "plain two"]);
     }
 
     #[test]
