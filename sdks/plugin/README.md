@@ -11,7 +11,7 @@ rebuilding the daemon.
 
 ## This package
 
-TypeScript authoring SDK for theway runtime extensions. It supplies the single public host API, checked-in JSON Schemas, and the same `defineExtension` descriptor used by the daemon's isolated QuickJS host. The host and SDK expose no ABI version selector.
+TypeScript authoring SDK for theway runtime extensions. It supplies the single public host API, checked-in JSON Schemas, and the same `defineExtension` / `register` descriptors used by the daemon's isolated QuickJS host. The host and SDK expose no ABI version selector.
 
 ## Install
 
@@ -31,8 +31,15 @@ export default defineExtension((api) => {
       payload: { message: payload.message },
     }],
   }));
+
+  api.on('workspace/note-written', ({ payload }) => {
+    const note = payload as { path: string };
+    api.log('info', `note written: ${note.path}`);
+  });
 });
 ```
+
+The side-effect entry form imports `register` and calls it at module top level instead of exporting a default.
 
 Compile the entry as an ES module and leave `@theway-ai/plugin-sdk` external. The daemon resolves that specifier to its virtual capability-brokered host module. Extension packages do not ship `node_modules` and cannot access Node globals through this SDK.
 

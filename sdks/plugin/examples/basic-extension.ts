@@ -38,4 +38,11 @@ export default defineExtension(async (api) => {
       },
     ],
   }));
+
+  api.once('workspace/note-written', ({ payload }) => {
+    const note = payload as { path: string };
+    api.log('info', `note written: ${note.path}`);
+  });
+
+  api.emit('example/ready', { extension: 'workspace-note' }, 'emit');
 });

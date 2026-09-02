@@ -52,7 +52,10 @@ export type NormalizedModelRequest = JsonObject & {
   generationOptions: NormalizedGenerationOptions;
 };
 
+export type ExtensionEventName = ExtensionLifecycleEvent | (string & {});
+
 export interface KnownLifecyclePayloads {
+  custom: { event: string; payload: JsonValue };
   input: { message: JsonValue };
   context: { messages: JsonValue[] };
   before_model_request: { request: NormalizedModelRequest };
@@ -70,10 +73,10 @@ export interface KnownLifecyclePayloads {
   tool_result: { toolCall: JsonValue; args: JsonValue; result: JsonValue; isError: boolean };
 }
 
-export type LifecyclePayload<E extends ExtensionLifecycleEvent> =
-  E extends keyof KnownLifecyclePayloads ? KnownLifecyclePayloads[E] : JsonObject;
+export type LifecyclePayload<E extends ExtensionEventName> =
+  E extends keyof KnownLifecyclePayloads ? KnownLifecyclePayloads[E] : JsonValue;
 
-export type LifecycleEnvelope<E extends ExtensionLifecycleEvent = ExtensionLifecycleEvent> = Omit<
+export type LifecycleEnvelope<E extends ExtensionEventName = ExtensionLifecycleEvent> = Omit<
   ExtensionEventEnvelope,
   'event' | 'payload'
 > & {
@@ -91,8 +94,8 @@ export interface HookDescriptor {
   failure?: ExtensionHookFailurePolicy;
 }
 
-export type HookResult = MaybePromise<ExtensionActionBatch | null | undefined | void>;
-export type HookHandler<E extends ExtensionLifecycleEvent> = (
+export type HookResult = MaybePromise<ExtensionActionBatch | JsonValue | null | undefined | void>;
+export type HookHandler<E extends ExtensionEventName> = (
   event: LifecycleEnvelope<E>,
   context: ExtensionEventContext,
 ) => HookResult;
@@ -354,14 +357,14 @@ export interface ExtensionApi {
   contribute(
     descriptor: ExtensionClientContribution,
   ): RegistrationHandle<ExtensionClientContribution>;
-  on<E extends ExtensionLifecycleEvent>(event: E, handler: HookHandler<E>): RegistrationHandle;
-  on<E extends ExtensionLifecycleEvent>(
+  on<E extends ExtensionEventName>(event: E, handler: HookHandler<E>): RegistrationHandle;
+  on<E extends ExtensionEventName>(
     event: E,
     descriptor: HookDescriptor,
     handler: HookHandler<E>,
   ): RegistrationHandle<HookDescriptor>;
-  once<E extends ExtensionLifecycleEvent>(event: E, handler: HookHandler<E>): RegistrationHandle;
-  once<E extends ExtensionLifecycleEvent>(
+  once<E extends ExtensionEventName>(event: E, handler: HookHandler<E>): RegistrationHandle;
+  once<E extends ExtensionEventName>(
     event: E,
     descriptor: HookDescriptor,
     handler: HookHandler<E>,
@@ -381,4 +384,18 @@ export function defineExtension(setup: ExtensionSetup): Readonly<ExtensionDefini
     throw new TypeError('defineExtension requires a setup function');
   }
   return Object.freeze({ setup });
+}
+
+export interface RegisterOptions {
+  inject?: readonly string[];
+}
+
+export function register(
+  setup: ExtensionSetup,
+  options: RegisterOptions = {},
+): Readonly<ExtensionDefinition & { inject: readonly string[] }> {
+  if (typeof setup !== 'function') {
+    throw new TypeError('register requires a setup function');
+  }
+  return Object.freeze({ setup, inject: options.inject ?? [] });
 }
