@@ -205,6 +205,31 @@ async fn send_message_routes_to_parked_session_queue() {
 }
 
 #[tokio::test]
+async fn send_message_to_parked_session_dispatches_slash_command_not_queue() {
+    let mut fixture = HostFixture::new();
+    let host = fixture.host();
+    host.sessions.insert(SessionRuntimeState::for_test("other"));
+
+    host.handle_web_command(
+        WireCommand::Submit {
+            session_id: "other".into(),
+            text: "/help".into(),
+            images: Vec::new(),
+            interrupt: false,
+        },
+        &mut TurnState::default(),
+    )
+    .await;
+
+    assert_eq!(
+        host.sessions.get("other").unwrap().queue.len(),
+        0,
+        "a slash command addressed to a parked session must be dispatched, not queued as a user prompt"
+    );
+    assert!(host.session.queue.is_empty());
+}
+
+#[tokio::test]
 async fn run_transport_loop_runs_active_and_parked_sessions_concurrently() {
     let _transport_loop_guard = crate::turn::daemon::TRANSPORT_LOOP_TEST_LOCK.lock().await;
     let mut fixture = HostFixture::new();

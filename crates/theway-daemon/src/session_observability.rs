@@ -64,8 +64,22 @@ impl SessionObservabilityOps for DaemonSessionObservability {
 
         // 2. Live projection (per-session map first, then the active latest).
         let Some(live) = self.live_status(session_id) else {
-            // No live projection: the resource snapshot is authoritative.
-            return resource;
+            // No live projection: this is a cold /resume or explicit-session
+            // read. Seed the resource snapshot with the persisted transcript
+            // so the client sees the conversation immediately; the full
+            // runtime is still built lazily on the first message.
+            let mut resource = resource?;
+            if let Ok(page) = self
+                .list_session_messages(&ListSessionMessagesRequest {
+                    session_id: session_id.to_string(),
+                    before_entry_id: None,
+                    limit: u32::MAX,
+                })
+                .await
+            {
+                resource.feed.blocks = page.blocks;
+            }
+            return Ok(resource);
         };
 
         let Ok(mut resource) = resource else {

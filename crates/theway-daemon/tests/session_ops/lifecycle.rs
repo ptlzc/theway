@@ -17,6 +17,23 @@ async fn list_returns_repo_summaries_without_live_current_flags() {
 }
 
 #[tokio::test]
+async fn list_skips_corrupt_session_db() {
+    let dir = tempdir().unwrap();
+    let repo = Arc::new(SqliteSessionRepo::new(dir.path()));
+    let session = repo.create("/cwd").await.unwrap();
+    let id = session_id_of(&session).await;
+
+    // An empty file is not a valid SQLite session; it must not take down
+    // session listing (one corrupt/orphaned db should be skipped).
+    std::fs::write(dir.path().join("corrupt-session.db"), b"").unwrap();
+
+    let ops = ops(repo, &id);
+    let summaries = ops.list().await.unwrap();
+    assert_eq!(summaries.len(), 1);
+    assert_eq!(summaries[0].session_id, id);
+}
+
+#[tokio::test]
 async fn create_makes_new_session_with_inherited_cwd() {
     let dir = tempdir().unwrap();
     let repo = Arc::new(SqliteSessionRepo::new(dir.path()));

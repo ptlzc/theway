@@ -221,6 +221,12 @@ async fn authoritative_snapshot_merges_live_and_resource_planes() {
 async fn authoritative_snapshot_falls_back_to_resource_when_no_live_projection() {
     let temp = tempfile::tempdir().unwrap();
     let repo: Arc<dyn SessionRepository> = Arc::new(SqliteSessionRepo::new(temp.path()));
+    let store = SessionRepository::create_with_id(repo.as_ref(), temp.path(), Some("sess-1"))
+        .await
+        .unwrap();
+    let session = Session::from_store(store);
+    session.append_message(user_message("persisted first")).await.unwrap();
+    session.append_message(user_message("persisted second")).await.unwrap();
     let resource = resource_snapshot("sess-1", "/resource/cwd", Default::default());
     let states = Arc::new(Mutex::new(HashMap::new()));
     let latest = Arc::new(Mutex::new(live_status("other-session", "")));
@@ -228,7 +234,17 @@ async fn authoritative_snapshot_falls_back_to_resource_when_no_live_projection()
 
     let snapshot = ops.authoritative_snapshot("sess-1").await.unwrap();
     assert_eq!(snapshot.info.cwd, "/resource/cwd");
-    assert!(snapshot.feed.lines.is_empty());
+    // No live runtime: the resource snapshot is seeded from persisted history
+    // so a cold resume has visible context (full runtime builds on first send).
+    assert_eq!(snapshot.feed.blocks.len(), 2);
+    let theway_transport::feed::WireFeedBlock::User { text, .. } = &snapshot.feed.blocks[0] else {
+        panic!("expected user block");
+    };
+    assert_eq!(text, "persisted first");
+    let theway_transport::feed::WireFeedBlock::User { text, .. } = &snapshot.feed.blocks[1] else {
+        panic!("expected user block");
+    };
+    assert_eq!(text, "persisted second");
     assert!(snapshot.runtime.system_context.is_empty());
 }
 

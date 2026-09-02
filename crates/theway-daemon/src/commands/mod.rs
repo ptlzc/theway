@@ -490,15 +490,23 @@ fn run_skill_shortcut(
 pub async fn dispatch(input: &str, registry: &Registry, ctx: &CommandCtx<'_>) -> CommandOutcome {
     registry
         .output
-        .scope(dispatch_with_output(input, registry, ctx))
+        .scope(dispatch_impl(input, registry, ctx))
         .await
 }
 
-async fn dispatch_with_output(
+/// Dispatch a slash command through a specific output sink. Used by parked
+/// (non-active) sessions so their command lines land in that session's own
+/// feed instead of the daemon's startup session feed.
+pub async fn dispatch_with_output(
     input: &str,
     registry: &Registry,
     ctx: &CommandCtx<'_>,
+    output: CommandOutput,
 ) -> CommandOutcome {
+    output.scope(dispatch_impl(input, registry, ctx)).await
+}
+
+async fn dispatch_impl(input: &str, registry: &Registry, ctx: &CommandCtx<'_>) -> CommandOutcome {
     let (name, argv) = match parse(input) {
         Some(parts) => parts,
         None => return CommandOutcome::Error("not a slash command".into()),

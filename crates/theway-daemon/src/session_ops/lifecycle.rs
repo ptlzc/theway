@@ -22,12 +22,20 @@ pub(super) async fn list(ops: &AppSessionOps) -> Result<Vec<SessionSummary>> {
             .filter(|run| run.status == DagStatus::Running)
             .count() as u32;
 
-        let (metadata, last_user_text) = match ops.repo.open(&record.id).await? {
-            Some(session) => (
-                read_session_metadata(session.as_ref()).await?,
-                theway_storage::session::last_user_text(session.as_ref()).await,
-            ),
-            None => (HashMap::new(), None),
+        let (metadata, last_user_text) = match ops.repo.open(&record.id).await {
+            Ok(Some(session)) => {
+                // A corrupt/unreadable session must not take down the whole
+                // session list; skip that record and continue with the rest.
+                let Ok(metadata) = read_session_metadata(session.as_ref()).await else {
+                    continue;
+                };
+                (
+                    metadata,
+                    theway_storage::session::last_user_text(session.as_ref()).await,
+                )
+            }
+            Ok(None) => (HashMap::new(), None),
+            Err(_) => continue,
         };
         // Plugin-set session name wins; otherwise fall back to the last user
         // input, truncated to 15 chars, as the display title.

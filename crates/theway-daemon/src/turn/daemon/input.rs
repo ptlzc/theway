@@ -77,6 +77,13 @@ impl TurnHost {
             self.error_line(format!("send_message: no session runtime for {session_id}"));
             return;
         }
+        // Slash commands addressed to a non-active session must run in that
+        // session's own runtime/context (issue: `/collapse` typed after a
+        // client-side `/resume` was being queued as a normal user prompt).
+        if trimmed.starts_with('/') && loaded_images.is_empty() {
+            self.dispatch_web_slash_for_session(session_id, &trimmed).await;
+            return;
+        }
         let Some(session) = self.sessions.get_mut(session_id) else {
             return;
         };
@@ -211,6 +218,174 @@ impl TurnHost {
         }
         if input.trim_start().starts_with("/goal") {
             self.refresh_goal_state().await;
+        }
+    }
+
+    /// Dispatch a slash command against a parked (non-active) session's own
+    /// harness/context. Command output is rerouted to that session's feed.
+    async fn dispatch_web_slash_for_session(&mut self, session_id: &str, input: &str) {
+        let output = commands::CommandOutput::new({
+            let tx = self.inputs.feed_tx.clone();
+            let session_id = session_id.to_string();
+            move |line| {
+                let _ = tx.send((
+                    session_id.clone(),
+                    FeedUpdate::Plain {
+                        text: line,
+                        level: Level::Output,
+                    },
+                ));
+            }
+        });
+        let outcome = {
+            let Some(session) = self.sessions.get_mut(session_id) else {
+                return;
+            };
+            let ctx = CommandCtx {
+                harness: session.kernel.harness(),
+                trigger_executor: session.kernel.trigger_executor(),
+                session_id: &session.id,
+                log_path: session.log_path.as_ref(),
+                tool_count: session.tool_count,
+                cwd: &session.cwd,
+            };
+            commands::dispatch_with_output(input, &self.runtime.registry, &ctx, output).await
+        };
+        self.handle_parked_command_outcome(session_id, input, outcome);
+    }
+
+    fn handle_parked_command_outcome(
+        &mut self,
+        session_id: &str,
+        input: &str,
+        outcome: CommandOutcome,
+    ) {
+        let Some(session) = self.sessions.get_mut(session_id) else {
+            return;
+        };
+        // Run-style outcomes push the display in `start_parked_turn`; all
+        // other outcomes mirror the active slash path and show the command
+        // line immediately.
+        let queued_outcome = matches!(
+            outcome,
+            CommandOutcome::RunAgentPrompt { .. }
+                | CommandOutcome::RunPromptTemplate { .. }
+                | CommandOutcome::RunCompaction { .. }
+        );
+        if !queued_outcome {
+            session.projection.feed.push_user(input.to_string());
+        }
+        match outcome {
+            CommandOutcome::Quit => {
+                session.projection.feed.push_plain_untimed(
+                    "daemon stays running; stop it with Ctrl-C / SIGTERM".to_string(),
+                    Level::System,
+                );
+            }
+            CommandOutcome::ClearScreen => {
+                session.projection.feed.clear();
+            }
+            CommandOutcome::Error(e) => {
+                session.projection.feed.push_error(e, None, false);
+            }
+            CommandOutcome::AttachSkill { name } => {
+                session.projection.feed.push_plain_untimed(
+                    format!("skill `{name}` attached for the next prompt"),
+                    Level::System,
+                );
+            }
+            CommandOutcome::RunAgentPrompt {
+                prompt,
+                error_context,
+            } => {
+                session.queue.push_back(QueuedTurn::AgentPrompt {
+                    display: input.to_string(),
+                    prompt,
+                    error_context,
+                });
+            }
+            CommandOutcome::RunPromptTemplate { name, vars } => {
+                session.queue.push_back(QueuedTurn::PromptTemplate {
+                    display: input.to_string(),
+                    name,
+                    vars,
+                });
+            }
+            CommandOutcome::RunCompaction { custom } => {
+                session.queue.push_back(QueuedTurn::Compaction {
+                    display: input.to_string(),
+                    custom,
+                });
+            }
+            CommandOutcome::WebRelay(_) => {
+                session.projection.feed.push_plain_untimed(
+                    "web relay is a client feature; the daemon is already a server".to_string(),
+                    Level::System,
+                );
+            }
+            CommandOutcome::SessionImportActivation {
+                session_path,
+                trigger_ids,
+                cron_ids,
+            } => {
+                session.projection.feed.push_plain_untimed(
+                    format!(
+                        "imported session {} has automation that was left disabled (imports always \
+                         disable triggers/cron)",
+                        session_path.display()
+                    ),
+                    Level::System,
+                );
+                const ID_PREVIEW: usize = 5;
+                let list_ids = |ids: &[String], what: &str, enable_cmd: &str| {
+                    let shown: Vec<&str> =
+                        ids.iter().take(ID_PREVIEW).map(String::as_str).collect();
+                    let mut line =
+                        format!("{what} not enabled ({}): {}", ids.len(), shown.join(", "));
+                    if ids.len() > ID_PREVIEW {
+                        line.push_str(&format!(" … (+{} more)", ids.len() - ID_PREVIEW));
+                    }
+                    line.push_str(&format!(" — enable with `{enable_cmd} <id>`"));
+                    line
+                };
+                if !trigger_ids.is_empty() {
+                    session.projection.feed.push_plain_untimed(
+                        list_ids(&trigger_ids, "triggers", "/triggers enable"),
+                        Level::System,
+                    );
+                }
+                if !cron_ids.is_empty() {
+                    session.projection.feed.push_plain_untimed(
+                        list_ids(&cron_ids, "cron jobs", "/cron enable"),
+                        Level::System,
+                    );
+                }
+            }
+            CommandOutcome::LoginSecret {
+                provider,
+                recovery_command,
+                ..
+            } => {
+                let command =
+                    recovery_command.unwrap_or_else(|| format!("/login {provider}"));
+                session.projection.feed.push_plain_untimed(
+                    format!(
+                        "login is not implemented in the daemon; run `{command}` from a client"
+                    ),
+                    Level::System,
+                );
+            }
+            CommandOutcome::OpenModelPicker => {
+                let active = match session.kernel.harness().agent().state().model.clone() {
+                    Some(m) => format!("active model: {}:{}", m.provider.0, m.id),
+                    None => "(no model active)".into(),
+                };
+                session.projection.feed.push_plain_untimed(
+                    format!("{active} — switch via SetModel (web/grpc client)"),
+                    Level::System,
+                );
+            }
+            CommandOutcome::Handled => {}
         }
     }
 }
