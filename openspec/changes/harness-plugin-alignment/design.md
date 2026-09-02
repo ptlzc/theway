@@ -121,7 +121,7 @@ kind 声明与文件实际注册内容不符（如 `kind = "tool"` 但未调用�
 
 **作用域过滤（scope-filtered dispatch）**：每个 dispatch 携带会话/agent 作用域身份；监听按其注册作用域只收到匹配事件（两个并发会话的同名监听互不串扰）。安装层与实例作用域都不改变事件过滤语义。
 
-**两条通道分离**：活的事件缝（`on`/`emit`，进程内实时、随卸载回卷）与持久自定义事件（`events.append` + `events.replay`，进 session log、可重放）语义不同，文档明确区分；公共事件面属于前者。
+**两条通道分离**：活的事件缝（`on`/`emit`，进程内实时、随卸载回卷）与持久自定义事件（`events.append` + `events.replay`，进 session log、可重放）语义不同，文档明确区分；公共事件面属于前者。插件 `emit` 的自定义事件经内部 `Custom` 事件变体路由到同会话实例，不写持久日志。
 
 ### 4. 安装层级与实例作用域
 
@@ -129,8 +129,8 @@ kind 声明与文件实际注册内容不符（如 `kind = "tool"` 但未调用�
 
 | 层 | 目录 | 说明 |
 | --- | --- | --- |
-| `managed` | 平台托管目录（安装/发行目录） | 随发行自带，用户只读 |
-| `user` | `<base>/extensions` | 用户级（现状 Global 层改名） |
+| `managed` | 平台托管目录（安装/发行目录，`<base>/extensions-managed`） | 随发行自带，用户只读 |
+| `user` | `<base>/extensions` | 用户级（现状 Global 层；**内部变体名保留 `Global` 以兼容 wire 与 fixtures**，文档与诊断称 user 层） |
 | `project` | `<cwd>/.theway/extensions` | 项目级（现状 Project 层） |
 
 同名插件按**最近者优先**解析：project > user > managed；被遮蔽者保留 catalog 记录并标记 shadowed。`ExtensionSourceLayer` 增加 `Managed` 变体；三层目录均参与信任评估与诊断。
@@ -178,6 +178,7 @@ ACTIVE → UNLOADING → DISPOSED
 ### 7. 服务模型
 
 - 服务 = 挂在会话 host 上的具名能力；任意插件可 `provide(name, service)`（返回 disposer，卸载自动注销；同名冲突返回明确错误），其它插件 `get(name)` 或 `inject` 消费。
+- **v1 值语义**：服务值是 JSON 可序列化快照（跨 QuickJS VM 不传递 live 对象）；`get(name)` 返回深拷贝，方法调用形态不在 v1 范围，后续以 broker 化服务调用扩展。
 - 同一会话内多个 host 实例天然隔离；`isolate` 语义不在 v1 范围（会话即隔离边界）。
 - `provide` 的注册内容进入 effect ledger，随实例作用域与卸载回卷。
 

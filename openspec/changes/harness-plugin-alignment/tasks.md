@@ -5,7 +5,7 @@
 
 ## 1. 安装层级三层与最近者优先（issue #85）
 
-- [ ] 1.1 `theway-contract`：`ExtensionSourceLayer` 增加 `Managed` 变体；排序 Managed < User < Project；catalog entry / trust / diagnostics 同步。
+- [ ] 1.1 `theway-contract`：`ExtensionSourceLayer` 增加 `Managed` 变体；排序 Managed < Global < Project（**变体名保留 `Global`**，避免 wire/fixture 破坏，文档称 user 层）；catalog entry / trust / diagnostics 同步。
 - [ ] 1.2 `catalog.rs`：发现 root 增加 managed 目录（平台托管，daemon 配置传入）；user 目录 = 现有 base 层。
 - [ ] 1.3 同名解析改最近者优先（project > user > managed），shadowed 标记与诊断保留；单测覆盖三层遮蔽与移除后自动生效。
 - [ ] 1.4 文档：InstallLayer 与 InstanceScope 命名区分。
@@ -24,6 +24,7 @@
 - [ ] 3.3 capability 门控：新 API 调用检查声明能力，未声明返回结构化明确错误（含 native 白名单、actions/prompts/services 权限）。
 - [ ] 3.4 SDK：`sdks/plugin` 类型声明与 JSON Schema 同步 v2；双入口类型与示例。
 - [ ] 3.5 桥测试：每个新 API 的成功路径与未授权拒绝路径；config 合并结果正确。
+- [ ] 3.6 注：`emit` / `once` 属事件桥面，由 issue #84 节点（4.1/4.3）落地；本节点只实现 `once` 的 JS 侧封装约定与 API 预留。
 
 ## 4. 事件桥（issue #84）
 
@@ -38,7 +39,7 @@
 - [ ] 5.1 实例状态机补 PENDING/LOADING/FAILED/UNLOADING 显式语义（基于现有 phase 演进），依赖未就绪等待。
 - [ ] 5.2 JS disposer：`effect()` 队列 + 卸载时逆序执行、逐个隔离；VM 销毁前执行。
 - [ ] 5.3 config 注入：manifest `configSchema`、加载时校验 + 默认值、实例配置 < 会话覆盖合并、`getConfig()`。
-- [ ] 5.4 服务生命周期联动：inject 等待、提供方消失 → 依赖自动卸载、恢复 → 自动重载。
+- [ ] 5.4 服务生命周期联动：inject 等待、提供方消失 → 依赖自动卸载、恢复 → 自动重载；服务值 = JSON 可序列化快照（v1 值语义），提供非 JSON 值返回明确错误。
 - [ ] 5.5 失败隔离与热重载回归：apply 抛错只 faulted 自身；HMR 走 dispose→apply 无残留。
 - [ ] 5.6 卸载顺序端到端测试：JS disposer 逆序 → Rust ledger 逆序 → VM 销毁。
 
