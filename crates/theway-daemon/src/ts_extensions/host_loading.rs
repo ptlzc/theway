@@ -157,7 +157,27 @@ impl SessionPluginHost {
                 self.record_state_migration_fault(&package, error);
                 continue;
             }
-            let metadata = match self.engine.load(key.clone(), &package).await {
+            // Config: validate the manifest configSchema, fill defaults, and
+            // merge the session override (none in v1) before setup runs, so
+            // api.getConfig() inside apply returns the merged config. Invalid
+            // config fails the plugin loudly (issue #83 §6).
+            let config = match package.manifest().config_schema.as_ref() {
+                Some(schema) => {
+                    match super::config::validate_and_default(schema, serde_json::json!({})) {
+                        Ok(config) => config,
+                        Err(error) => {
+                            self.record_load_fault(&package, error);
+                            continue;
+                        }
+                    }
+                }
+                None => serde_json::Value::Null,
+            };
+            let metadata = match self
+                .engine
+                .load_with_config(key.clone(), &package, config)
+                .await
+            {
                 Ok(metadata) => metadata,
                 Err(error) => {
                     self.record_load_fault(&package, error);

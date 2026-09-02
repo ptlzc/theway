@@ -107,6 +107,7 @@ enum EngineCommand {
         key: EngineInstanceKey,
         source: String,
         package: ExtensionPackage,
+        config: serde_json::Value,
         response: oneshot::Sender<Result<Value, String>>,
     },
     Invoke {
@@ -205,6 +206,19 @@ impl QuickJsEnginePool {
         key: EngineInstanceKey,
         package: &ExtensionPackage,
     ) -> Result<Value, String> {
+        self.load_with_config(key, package, serde_json::Value::Null)
+            .await
+    }
+
+    /// Load with a session config: the value is validated/merged by the host
+    /// before this call and installed on the instance's broker before setup
+    /// runs, so `api.getConfig()` inside `apply` returns the merged config.
+    pub async fn load_with_config(
+        &self,
+        key: EngineInstanceKey,
+        package: &ExtensionPackage,
+        config: serde_json::Value,
+    ) -> Result<Value, String> {
         let source = package.prepared_source()?;
         let (response, receiver) = oneshot::channel();
         self.send(
@@ -213,6 +227,7 @@ impl QuickJsEnginePool {
                 key: key.clone(),
                 source,
                 package: package.clone(),
+                config,
                 response,
             },
         )?;
@@ -421,6 +436,7 @@ fn run_worker(
                 key,
                 source,
                 package,
+                config,
                 response,
             } => {
                 let result = match instances.entry(key) {
@@ -433,6 +449,7 @@ fn run_worker(
                         limits,
                         &package,
                         broker_services.clone(),
+                        config,
                     )
                     .map(|(instance, subscriptions)| {
                         entry.insert(instance);
@@ -473,13 +490,16 @@ fn run_worker(
                 let report = match instances.remove(&key) {
                     Some(mut instance) => {
                         let deadline = Instant::now() + DISPOSER_TIMEOUT;
-                        instance.interrupt.begin(deadline, Arc::new(AtomicBool::new(false)));
-                        let report = instance
-                            .run_disposers()
-                            .unwrap_or_else(|error| DisposeReport {
-                                executed: 0,
-                                errors: vec![error],
-                            });
+                        instance
+                            .interrupt
+                            .begin(deadline, Arc::new(AtomicBool::new(false)));
+                        let report =
+                            instance
+                                .run_disposers()
+                                .unwrap_or_else(|error| DisposeReport {
+                                    executed: 0,
+                                    errors: vec![error],
+                                });
                         instance.interrupt.finish();
                         Some(report)
                     }
@@ -553,6 +573,7 @@ impl EngineInstance {
         limits: QuickJsEngineLimits,
         package: &ExtensionPackage,
         broker_services: ExtensionBrokerServices,
+        config: serde_json::Value,
     ) -> Result<(Self, Value), String> {
         let runtime = Runtime::new().map_err(|error| error.to_string())?;
         runtime.set_memory_limit(limits.memory_bytes);
@@ -570,6 +591,7 @@ impl EngineInstance {
         );
         let context = Context::full(&runtime).map_err(|error| error.to_string())?;
         let broker = Arc::new(brokers::BrokerRuntime::new(key, package, broker_services));
+        broker.set_config(config);
         let load_cancellation = Arc::new(AtomicBool::new(false));
         let load_deadline = Instant::now() + LOAD_TIMEOUT;
         interrupt.begin(load_deadline, Arc::clone(&load_cancellation));

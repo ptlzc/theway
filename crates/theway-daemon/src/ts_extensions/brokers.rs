@@ -37,6 +37,7 @@ pub(super) struct BrokerRuntime {
     services: ExtensionBrokerServices,
     quota: BrokerOperationQuota,
     active: parking_lot::Mutex<Option<ActiveBrokerInvocation>>,
+    config: parking_lot::RwLock<serde_json::Value>,
 }
 
 impl BrokerRuntime {
@@ -54,7 +55,12 @@ impl BrokerRuntime {
             services,
             quota: BrokerOperationQuota::new(),
             active: parking_lot::Mutex::new(None),
+            config: parking_lot::RwLock::new(serde_json::Value::Null),
         }
+    }
+
+    pub(super) fn set_config(&self, config: serde_json::Value) {
+        *self.config.write() = config;
     }
 
     pub(super) fn begin(
@@ -100,6 +106,11 @@ impl BrokerRuntime {
                 BrokerError::contract("capability name is not a valid extension permission")
             })?;
             return Ok(Value::Bool(self.permissions.contains(&permission)));
+        }
+        if operation == "config.get" {
+            // Config is session-scoped and available outside any invocation
+            // (setup reads it during apply).
+            return Ok(self.config.read().clone());
         }
         self.quota.consume().map_err(|message| {
             self.diagnose(ExtensionDiagnosticCode::ResourceLimit, message);

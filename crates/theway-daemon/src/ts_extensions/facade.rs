@@ -242,6 +242,9 @@ globalThis.__thewaySetup = async function () {
         globalThis.__thewayRegistrations[registration.id] = registration;
         return __thewayHandle(registration);
       },
+      getConfig() {
+        return __thewayBrokerCall("config.get", {});
+      },
       migrateState(handler) {        if (typeof handler !== "function") {
           throw new TypeError("api.migrateState requires a handler");
         }

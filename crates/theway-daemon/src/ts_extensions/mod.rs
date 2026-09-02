@@ -11,6 +11,7 @@ mod broker_services;
 mod brokers;
 mod catalog;
 mod compaction;
+mod config;
 mod diagnostics;
 mod dispatch_result;
 mod dispatcher;
