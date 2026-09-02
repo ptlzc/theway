@@ -7,11 +7,41 @@ globalThis.__thewayMigrationRegistrationId = null;
 globalThis.__thewayCurrentEnvelope = null;
 globalThis.__thewayPendingDurableActions = [];
 globalThis.__thewayPendingState = new Map();
+globalThis.__thewayDisposers = [];
 
 function __thewayDisposedRegistrationIds() {
   return Object.values(globalThis.__thewayRegistrations)
     .filter(({ disposed }) => disposed)
     .map(({ id }) => id);
+}
+
+// Dispose queue: `api.effect(fn)` runs `fn` immediately; the disposer it
+// returns is executed in reverse registration order when the plugin unloads
+// (before the QuickJS VM is destroyed). Each disposer runs isolated — one
+// throwing disposer cannot stop the rest.
+function __thewayDispose() {
+  const report = { executed: 0, errors: [] };
+  for (let index = globalThis.__thewayDisposers.length - 1; index >= 0; index--) {
+    const entry = globalThis.__thewayDisposers[index];
+    if (entry.disposed) continue;
+    entry.disposed = true;
+    // Count every queue entry as executed even when its disposer throws:
+    // a throwing disposer still ran; the error is isolated per entry.
+    report.executed++;
+    try {
+      const disposer = entry.disposer;
+      if (typeof disposer === "function") {
+        const result = disposer();
+        if (result && typeof result.then === "function") {
+          result.catch((error) => report.errors.push(String(error?.message ?? error)));
+        }
+      }
+    } catch (error) {
+      report.errors.push(String(error?.message ?? error));
+    }
+  }
+  globalThis.__thewayDisposers = [];
+  return report;
 }
 
 function __thewayHandle(registration) {
@@ -195,8 +225,24 @@ globalThis.__thewaySetup = async function () {
           return __thewayBrokerCall("memory.clear", {});
         },
       }),
-      migrateState(handler) {
-        if (typeof handler !== "function") {
+      effect(execute) {
+        if (typeof execute !== "function") {
+          throw new TypeError("api.effect requires a function");
+        }
+        const disposer = execute();
+        globalThis.__thewayDisposers.push({
+          disposer: typeof disposer === "function" ? disposer : null,
+          disposed: false,
+        });
+        const registration = {
+          id: globalThis.__thewayRegistrationSequence++,
+          kind: "effect",
+          disposed: false,
+        };
+        globalThis.__thewayRegistrations[registration.id] = registration;
+        return __thewayHandle(registration);
+      },
+      migrateState(handler) {        if (typeof handler !== "function") {
           throw new TypeError("api.migrateState requires a handler");
         }
         if (globalThis.__thewayMigrationRegistrationId !== null) {

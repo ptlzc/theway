@@ -16,6 +16,8 @@ use super::brokers;
 use super::catalog::{ExtensionPackage, PackageCatalog};
 
 const LOAD_TIMEOUT: Duration = Duration::from_secs(2);
+/// Budget for running the JS disposer queue during instance dispose.
+const DISPOSER_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Clone, Copy, Debug)]
 pub struct QuickJsEngineLimits {
@@ -53,6 +55,15 @@ pub(super) struct EngineInvocationResult {
     pub value: Value,
     pub disposed_registration_ids: Vec<u64>,
     pub queued_durable_actions: Vec<ExtensionAction>,
+}
+
+/// Result of running the plugin's JS disposer queue before VM teardown.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DisposeReport {
+    /// How many registered disposers ran.
+    pub executed: usize,
+    /// Per-disposer failure messages (one throwing disposer does not stop the rest).
+    pub errors: Vec<String>,
 }
 
 impl EngineInvocationError {
@@ -109,7 +120,7 @@ enum EngineCommand {
     },
     Dispose {
         key: EngineInstanceKey,
-        response: oneshot::Sender<bool>,
+        response: oneshot::Sender<Option<DisposeReport>>,
     },
     Count {
         response: oneshot::Sender<usize>,
@@ -294,6 +305,12 @@ impl QuickJsEnginePool {
     }
 
     pub async fn dispose(&self, key: &EngineInstanceKey) -> bool {
+        self.dispose_with_report(key).await.is_some()
+    }
+
+    /// Dispose one instance, running its JS disposer queue first. Returns the
+    /// disposer report when the instance existed; `None` when it did not.
+    pub async fn dispose_with_report(&self, key: &EngineInstanceKey) -> Option<DisposeReport> {
         let (response, receiver) = oneshot::channel();
         if self
             .send(
@@ -305,9 +322,9 @@ impl QuickJsEnginePool {
             )
             .is_err()
         {
-            return false;
+            return None;
         }
-        receiver.await.unwrap_or(false)
+        receiver.await.ok().flatten()
     }
 
     pub async fn instance_count(&self) -> usize {
@@ -453,7 +470,22 @@ fn run_worker(
                 let _ = response.send(result);
             }
             EngineCommand::Dispose { key, response } => {
-                let _ = response.send(instances.remove(&key).is_some());
+                let report = match instances.remove(&key) {
+                    Some(mut instance) => {
+                        let deadline = Instant::now() + DISPOSER_TIMEOUT;
+                        instance.interrupt.begin(deadline, Arc::new(AtomicBool::new(false)));
+                        let report = instance
+                            .run_disposers()
+                            .unwrap_or_else(|error| DisposeReport {
+                                executed: 0,
+                                errors: vec![error],
+                            });
+                        instance.interrupt.finish();
+                        Some(report)
+                    }
+                    None => None,
+                };
+                let _ = response.send(report);
             }
             EngineCommand::Count { response } => {
                 let _ = response.send(instances.len());
@@ -677,6 +709,19 @@ impl EngineInstance {
                 EngineInvocationErrorKind::Runtime
             };
             EngineInvocationError::new(kind, message)
+        })
+    }
+
+    /// Run the plugin's JS disposer queue (`api.effect` registrations) in
+    /// reverse registration order, isolating per-disposer failures. Invoked
+    /// once right before the VM is dropped during dispose. The caller owns the
+    /// interrupt budget (dispose deadline).
+    fn run_disposers(&mut self) -> Result<DisposeReport, String> {
+        let script = "JSON.stringify(globalThis.__thewayDispose())";
+        self.context.with(|ctx| {
+            let output: String = ctx.eval(script).map_err(|e| e.to_string())?;
+            serde_json::from_str(&output)
+                .map_err(|error| format!("disposer report is invalid: {error}"))
         })
     }
 }
