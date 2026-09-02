@@ -105,7 +105,15 @@
         "compaction_succeeded",
         "compaction_failed",
         "session_shutdown",
-        "extension_unload"
+        "extension_unload",
+        "session_resume",
+        "approval_request",
+        "approval_resolved",
+        "file_write",
+        "sandbox_exec",
+        "notification_send",
+        "agent_status",
+        "custom"
       ],
       "type": "string"
     },

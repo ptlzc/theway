@@ -124,7 +124,7 @@ fn typescript(schemas: &[(&str, Value)]) -> Result<String, serde_json::Error> {
 const TYPESCRIPT_DECLARATIONS: &str = r#"
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 export type ExtensionScope = "process" | "session" | "run" | "request";
-export type ExtensionSourceLayer = "global" | "project";
+export type ExtensionSourceLayer = "managed" | "global" | "project";
 export type ExtensionPermission =
   | "session.write"
   | "tools.register"
@@ -132,6 +132,10 @@ export type ExtensionPermission =
   | "commands.register"
   | "providers.register"
   | "client.contribute"
+  | "actions.register"
+  | "prompts.register"
+  | "hooks.subscribe"
+  | "services.provide"
   | "workspace.read"
   | "workspace.write"
   | "process.spawn"
@@ -146,8 +150,18 @@ export interface ExtensionPackageManifest {
   priority?: number;
   scope: ExtensionScope;
   stateSchema?: number;
+  configSchema?: JsonValue;
   permissions?: ExtensionPermission[];
   optionalPermissions?: ExtensionPermission[];
+}
+
+export interface PluginActionRegistration {
+  name: string;
+  description?: string;
+  inputSchema: JsonValue;
+}
+export interface ServiceRegistration {
+  name: string;
 }
 
 export type ExtensionTrustSubject =
@@ -172,7 +186,10 @@ export type ExtensionLifecycleEvent =
   | "tool_execution_start" | "tool_execution_update" | "tool_execution_end" | "tool_result"
   | "turn_completed" | "run_ended" | "run_error" | "run_settled"
   | "before_compaction" | "compaction_succeeded" | "compaction_failed"
-  | "session_shutdown" | "extension_unload";
+  | "session_shutdown" | "extension_unload"
+  | "session_resume" | "approval_request" | "approval_resolved"
+  | "file_write" | "sandbox_exec" | "notification_send"
+  | "agent_status" | "custom";
 export interface ExtensionScopeIds {
   runId?: string;
   turnId?: string;

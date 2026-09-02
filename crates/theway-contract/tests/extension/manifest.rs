@@ -1,6 +1,7 @@
 use serde_json::json;
 use theway_contract::extension::{
     ExtensionManifestError, ExtensionPackageManifest, ExtensionPermission, ExtensionScope,
+    ExtensionSourceLayer,
 };
 
 fn valid_manifest() -> ExtensionPackageManifest {
@@ -117,4 +118,71 @@ fn package_manifest_unknown_or_wildcard_permission_is_rejected_during_decode() {
         }));
         assert!(decoded.is_err(), "permission {permission} must be rejected");
     }
+}
+
+#[test]
+fn new_permissions_parse_and_display_canonical_names() {
+    for (name, expected) in [
+        ("actions.register", ExtensionPermission::ActionsRegister),
+        ("prompts.register", ExtensionPermission::PromptsRegister),
+        ("hooks.subscribe", ExtensionPermission::HooksSubscribe),
+        ("services.provide", ExtensionPermission::ServicesProvide),
+    ] {
+        let parsed: ExtensionPermission = name.parse().unwrap();
+        assert_eq!(parsed, expected);
+        assert_eq!(parsed.to_string(), name);
+        assert_eq!(parsed.canonical_name(), name);
+    }
+}
+
+#[test]
+fn new_permissions_round_trip_through_serde() {
+    for permission in [
+        ExtensionPermission::ActionsRegister,
+        ExtensionPermission::PromptsRegister,
+        ExtensionPermission::HooksSubscribe,
+        ExtensionPermission::ServicesProvide,
+    ] {
+        let encoded = serde_json::to_string(&permission).unwrap();
+        let decoded: ExtensionPermission = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, permission);
+        assert_eq!(encoded, format!("\"{}\"", permission.canonical_name()));
+    }
+}
+
+#[test]
+fn managed_source_layer_round_trips_and_sorts_before_global_and_project() {
+    let serialized = serde_json::to_string(&ExtensionSourceLayer::Managed).unwrap();
+    assert_eq!(serialized, "\"managed\"");
+
+    let decoded: ExtensionSourceLayer = serde_json::from_str(&serialized).unwrap();
+    assert_eq!(decoded, ExtensionSourceLayer::Managed);
+
+    assert!(ExtensionSourceLayer::Managed < ExtensionSourceLayer::Global);
+    assert!(ExtensionSourceLayer::Global < ExtensionSourceLayer::Project);
+}
+
+#[test]
+fn config_schema_round_trips_both_states() {
+    let manifest = valid_manifest();
+    assert!(manifest.config_schema.is_none());
+    let encoded = serde_json::to_value(&manifest).unwrap();
+    assert!(encoded.get("configSchema").is_none());
+
+    let with_schema = ExtensionPackageManifest {
+        config_schema: Some(json!({
+            "type": "object",
+            "properties": {"threshold": {"type": "number"}}
+        })),
+        ..valid_manifest()
+    };
+    let encoded = serde_json::to_value(&with_schema).unwrap();
+    assert_eq!(
+        encoded["configSchema"]["properties"]["threshold"]["type"],
+        "number"
+    );
+
+    let decoded: ExtensionPackageManifest = serde_json::from_value(encoded.clone()).unwrap();
+    assert_eq!(decoded.config_schema, with_schema.config_schema);
+    assert_eq!(decoded, with_schema);
 }

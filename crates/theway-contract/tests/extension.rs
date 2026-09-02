@@ -16,6 +16,9 @@ mod lifecycle;
 #[path = "extension/manifest.rs"]
 mod manifest;
 
+#[path = "extension/plugin.rs"]
+mod plugin;
+
 #[path = "extension/schema.rs"]
 mod schema;
 

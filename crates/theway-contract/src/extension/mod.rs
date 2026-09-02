@@ -10,6 +10,7 @@ mod contribution;
 mod diagnostic;
 mod lifecycle;
 mod manifest;
+mod plugin;
 mod state;
 mod trust;
 
@@ -21,6 +22,7 @@ pub use manifest::{
     ExtensionManifestError, ExtensionPackageManifest, ExtensionPermission, ExtensionScope,
     ExtensionSourceLayer,
 };
+pub use plugin::{PluginActionRegistration, ServiceRegistration};
 pub use state::{
     ExtensionDurableEntry, ExtensionDurableEntryKind, ExtensionDurableEntryPayload,
     ExtensionModelContextPlacement, ExtensionStateMutation, ExtensionStateValidationError,

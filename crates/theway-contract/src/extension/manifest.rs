@@ -46,6 +46,7 @@ pub enum ExtensionScope {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum ExtensionSourceLayer {
+    Managed,
     Global,
     Project,
 }
@@ -59,6 +60,10 @@ pub enum ExtensionPermission {
     CommandsRegister,
     ProvidersRegister,
     ClientContribute,
+    ActionsRegister,
+    PromptsRegister,
+    HooksSubscribe,
+    ServicesProvide,
     WorkspaceRead,
     WorkspaceWrite,
     ProcessSpawn,
@@ -76,6 +81,10 @@ impl ExtensionPermission {
             Self::CommandsRegister => Cow::Borrowed("commands.register"),
             Self::ProvidersRegister => Cow::Borrowed("providers.register"),
             Self::ClientContribute => Cow::Borrowed("client.contribute"),
+            Self::ActionsRegister => Cow::Borrowed("actions.register"),
+            Self::PromptsRegister => Cow::Borrowed("prompts.register"),
+            Self::HooksSubscribe => Cow::Borrowed("hooks.subscribe"),
+            Self::ServicesProvide => Cow::Borrowed("services.provide"),
             Self::WorkspaceRead => Cow::Borrowed("workspace.read"),
             Self::WorkspaceWrite => Cow::Borrowed("workspace.write"),
             Self::ProcessSpawn => Cow::Borrowed("process.spawn"),
@@ -110,6 +119,10 @@ impl FromStr for ExtensionPermission {
             "commands.register" => Self::CommandsRegister,
             "providers.register" => Self::ProvidersRegister,
             "client.contribute" => Self::ClientContribute,
+            "actions.register" => Self::ActionsRegister,
+            "prompts.register" => Self::PromptsRegister,
+            "hooks.subscribe" => Self::HooksSubscribe,
+            "services.provide" => Self::ServicesProvide,
             "workspace.read" => Self::WorkspaceRead,
             "workspace.write" => Self::WorkspaceWrite,
             "process.spawn" => Self::ProcessSpawn,
@@ -165,6 +178,10 @@ impl schemars::JsonSchema for ExtensionPermission {
                         "commands.register",
                         "providers.register",
                         "client.contribute",
+                        "actions.register",
+                        "prompts.register",
+                        "hooks.subscribe",
+                        "services.provide",
                         "workspace.read",
                         "workspace.write",
                         "process.spawn",
@@ -193,6 +210,8 @@ pub struct ExtensionPackageManifest {
     pub scope: ExtensionScope,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state_schema: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_schema: Option<serde_json::Value>,
     #[serde(default)]
     pub permissions: Vec<ExtensionPermission>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

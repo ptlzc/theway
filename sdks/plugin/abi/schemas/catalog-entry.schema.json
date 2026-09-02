@@ -43,6 +43,10 @@
             "commands.register",
             "providers.register",
             "client.contribute",
+            "actions.register",
+            "prompts.register",
+            "hooks.subscribe",
+            "services.provide",
             "workspace.read",
             "workspace.write",
             "process.spawn",
@@ -69,6 +73,7 @@
     "ExtensionSourceLayer": {
       "description": "Discovery layer attached by the host after reading a package manifest.",
       "enum": [
+        "managed",
         "global",
         "project"
       ],

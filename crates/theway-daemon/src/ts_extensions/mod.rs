@@ -134,3 +134,28 @@ impl ExtensionRegistry {
 
 #[cfg(test)]
 tests_bridge_macro::tests_bridge!("ts_extensions");
+
+#[cfg(test)]
+mod harness_install_layers_tests {
+    tests_bridge_macro::tests_bridge!("harness_install_layers");
+}
+
+#[cfg(test)]
+mod harness_kinds_tests {
+    tests_bridge_macro::tests_bridge!("harness_kinds");
+}
+
+#[cfg(test)]
+mod harness_lifecycle_tests {
+    tests_bridge_macro::tests_bridge!("harness_lifecycle");
+}
+
+#[cfg(test)]
+mod harness_bridge_tests {
+    tests_bridge_macro::tests_bridge!("harness_bridge");
+}
+
+#[cfg(test)]
+mod harness_events_tests {
+    tests_bridge_macro::tests_bridge!("harness_events");
+}
