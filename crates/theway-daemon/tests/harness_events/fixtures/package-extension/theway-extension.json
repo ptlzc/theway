@@ -1,0 +1,14 @@
+{
+  "id": "harness-bridge-fixture",
+  "version": "1.0.0",
+  "entry": "index.ts",
+  "priority": 0,
+  "scope": "session",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "greeting": {"type": "string", "default": "hello"}
+    }
+  },
+  "permissions": ["tools.register", "actions.register", "hooks.subscribe", "session.write"]
+}

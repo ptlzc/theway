@@ -43,6 +43,7 @@ Discovery is deterministic. A malformed, unsupported, untrusted, or faulted pack
 | `priority` | no | Signed ordering value; defaults to `0`, with larger values dispatched first. |
 | `scope` | yes | `process`, `session`, `run`, or `request`; registrations cannot outlive the manifest scope. |
 | `stateSchema` | no | Positive durable-state schema version; required when the package owns versioned state or migrations. |
+| `configSchema` | no | Optional JSON Schema used to validate and default the plugin configuration returned by `getConfig()`. |
 | `permissions` | no | Required capabilities; denial blocks the package. |
 | `optionalPermissions` | no | Capabilities the package can detect with `api.capabilities.has`; denial does not block loading. |
 
@@ -72,6 +73,10 @@ Omitting permissions from a trusted TUI decision grants the selected catalog ent
 | `commands.register` | Register a daemon command. |
 | `providers.register` | Register declarative provider/model metadata. |
 | `client.contribute` | Publish validated client-neutral contributions. |
+| `actions.register` | Register a platform/command-channel action. |
+| `prompts.register` | Register a prompt section or variable. |
+| `hooks.subscribe` | Subscribe to public events and lifecycle hooks. |
+| `services.provide` | Provide a named session service. |
 | `workspace.read` | Read a canonical path inside the allowed workspace roots. |
 | `workspace.write` | Write a canonical path inside the allowed workspace roots. |
 | `process.spawn` | Run a process through the daemon executor and cancellation policy. |
@@ -217,6 +222,150 @@ Client contributions use one of these declarative payloads:
 | `form_action` | `title`, object `schema`, `submitCommand` |
 
 Clients render supported kinds from transport data only and ignore unknown kinds. Contributions and routine lifecycle status never append synthetic assistant messages or operation-log lines to the conversation feed.
+
+## Public event surface
+
+Plugins subscribe through a stable, engine-independent event surface rather than the internal runtime events. Each public event uses a lowercase `namespace/action` name; payloads are flat JSON and the internal snake_case event name is accepted as a permanent subscription alias (a plugin subscribing under both names observes the event once). Every public event is observable; the "mode" column gives the primary dispatch semantics that are also available to `emit`.
+
+| Group | Public event | Mode | Primary payload |
+|---|---|---|---|
+| Session | `session/start` | emit | `session_id`, `cwd`, `scope` |
+| Session | `session/resume` | emit | `session_id`, `cwd` |
+| Session | `agent/end` | emit | `session_id`, `turn_id` |
+| Turn | `before_turn` | emit | `session_id`, `turn_id`, `input` |
+| Turn | `after_turn` | emit | `session_id`, `turn_id`, `result` |
+| Tool | `before_tool_call` | emit | `tool_name`, `args`, `scope` |
+| Tool | `after_tool_call` | emit | `tool_name`, `result`, `scope` |
+| Tool | `tools/result` | emit | `tool_name`, `result` |
+| Request | `agent/request` | waterfall | normalized request snapshot |
+| Approval | `approval/request` | waterfall | `approval_id`, `kind`, `scope` |
+| Approval | `approval/resolved` | emit | `approval_id`, `outcome` |
+| Workspace | `workspace/file-write` | emit | `path`, `operation` |
+| Sandbox | `sandbox/exec` | emit | `command`, `cwd` |
+| Notification | `notification/send` | emit | `notification_id`, `channel` |
+| State | `agent/status` | emit | `status` |
+| Plugin | `plugin/loaded` | emit | `plugin_id` |
+| Plugin | `plugin/disposed` | emit | `plugin_id` |
+| Session structure | `compaction` | emit | `session_id`, `before_tokens`, `after_tokens` |
+| Session structure | `branch` | emit | `session_id`, `branch_id` |
+| Session structure | `chat/composition_selected` | emit | `chat_id`, `composition_id` |
+
+The event bridge keeps a bidirectional mapping between these public names and the internal lifecycle events. Subscriptions resolve through the mapping (public name first, then the internal snake_case alias), and outgoing dispatch goes back through it; both names for one event deduplicate into a single delivery. The internal enum is never renamed or removed — the public surface is a stable projection plus new emission points.
+
+The live event seam (`on`/`emit`, in-process, reversed on unload) is distinct from the durable custom-event channel (`events.append` plus `events.replay`, written to the session log and replayed). Public lifecycle events belong to the live seam; a plugin `emit` of an arbitrary custom event routes to the same-session instance without writing a durable log entry.
+
+### Five dispatch modes
+
+The live event bus exposes five exact dispatch modes to plugins. `on` registrations use the event's default mode from the table; a plugin can select a mode with `emit(event, payload, mode)`.
+
+| Mode | Semantics |
+|---|---|
+| `emit` | Broadcast; listener return values are ignored (observation semantics). |
+| `parallel` | All listeners run concurrently; the dispatch resolves after all settle. |
+| `serial` | Listeners are awaited in registration order until one returns a bail value (anything other than `null`/`false`/`undefined`), which is the result. |
+| `bail` | Listeners run synchronously in order until the first bail value short-circuits (gate/policy semantics). |
+| `waterfall` | Onion middleware: each listener receives `(payload, next)` and must call `next()` to release the downstream chain; omitting `next()` short-circuits (transform/gate semantics). |
+
+Mode-to-hook correspondence: observe → `emit`/`parallel`; serial/`bail` → gate-style short-circuit; `waterfall` → the transform chain. Each public event declares its default mode; listeners may declare class/priority via the standard hook descriptor.
+
+Dispatch also carries session/agent scope identity, so listeners only receive matching-scope events and two concurrent sessions with the same-named listener never cross-talk. The install layer and instance scope do not change event filtering semantics.
+
+## Install layers and instance scope
+
+Installation is layered and decides which plugin takes effect for a given extension ID. `managed`, `user`, and `project` are the three install layers.
+
+| Layer | Directory | Meaning |
+|---|---|---|
+| `managed` | platform-managed directory (`<base>/extensions-managed`) | shipped with the platform; user read-only |
+| `user` | `<base>/extensions` | user-level (the internal wire variant keeps the name `Global` for compatibility; documentation and diagnostics call it the user layer) |
+| `project` | `<cwd>/.theway/extensions` | project-level |
+
+Same-ID plugins resolve closest-wins: `project` > `user` > `managed`. A shadowed plugin keeps a catalog record and is marked shadowed; removing the closer layer promotes the next one automatically. The managed layer participates in trust evaluation and diagnostics.
+
+Instance scope is orthogonal: a manifest `scope` (`process`/`session`/`run`/`request`) constrains how long a registration effect lives, independent of the install layer. The two concepts are named and documented separately and never mixed.
+
+## Contributed extension points (single-file kinds)
+
+A top-level single-file `.theway/extensions/*.ts` declares its extension point with `export const kind`. `compaction` stays on the legacy path; the other kinds are synthesized into a package host entry with the kind-bound permission.
+
+| kind | Semantics | Bound permission |
+|---|---|---|
+| `tool` | register a tool | `tools.register` |
+| `action` | register an action | `actions.register` |
+| `prompt` | register a prompt section / variable | `prompts.register` |
+| `hook` | subscribe to events / lifecycle hooks | `hooks.subscribe` |
+| `service` | provide a service | `services.provide` |
+| `compaction` | compaction algorithm (legacy) | none |
+
+A kind declaration that does not match the file's actual registrations (for example `kind = "tool"` with no tool registered) produces a structured diagnostic and rejects that file without affecting the others. Package-form plugins (`theway-extension.json` in a directory) are not bound by a single kind and may freely combine registrations.
+
+## Session lifecycle
+
+A plugin instance runs through the explicit state machine below. `apply` enters `LOADING → ACTIVE`; `dispose` performs `UNLOADING → DISPOSED`.
+
+```
+PENDING → LOADING → ACTIVE
+              ↘ FAILED   (apply threw → only this plugin is faulted)
+ACTIVE → UNLOADING → DISPOSED
+```
+
+| State | Meaning |
+|---|---|
+| `PENDING` | Discovered and trust-passed, but a declared dependent service is not ready (waiting). |
+| `LOADING` | Dependencies ready, config validation passed, `apply` is running. |
+| `ACTIVE` | Running; events and registrations dispatch normally. |
+| `FAILED` | `apply` or a runtime fatal failure; the diagnostic is recorded and effects are reversed. |
+| `UNLOADING` | The unload sequence is running. |
+| `DISPOSED` | Fully unloaded. |
+
+`apply` (`LOADING → ACTIVE`): instantiate the persistent VM → inject the merged config (see below) → evaluate the top-level entry (`defineExtension` or top-level side effects, both receiving config) → validate registrations (event name/class/priority/permission checked item by item; an unknown name returns an explicit error) → emit `plugin/loaded`.
+
+`dispose` (`UNLOADING → DISPOSED`, fixed order):
+1. Emit the `session/end` context event and `plugin/disposed` (when it was started).
+2. Run the JS disposer queue (`effect()` entries) — in reverse, each isolated; a single failure is only diagnosed. Order-sensitive cleanup is serialized inside one effect.
+3. Revert the Rust effect ledger in reverse registration order (tool override restoration, subscription removal, service unregistration, state cleanup).
+4. Destroy the VM instance.
+
+Failure isolation: an `apply` error faults only that plugin plus a diagnostic and continues loading the rest; repeated runtime failures trip the circuit breaker and use the same reversal sequence. Session hot reload reuses the same `dispose → apply` path with no leftover old instance.
+
+Dependency-driven lifecycle: a plugin declares required services via `inject` (at module scope or on the definition's `inject` field); when a service is not ready the plugin stays `PENDING`. When the provider unloads, dependent plugins automatically `UNLOADING`; when the service returns they automatically reload. Optional dependencies are queried live with `get(name)` (which may be `undefined`).
+
+## Configuration
+
+A manifest may declare an optional `configSchema` (JSON Schema). When absent the plugin has no configuration (`getConfig()` returns an empty object). On load the host validates against the schema, fills defaults, and fails a plugin loudly on an invalid config (the plugin is `FAILED`, never silently degraded). Merge precedence: schema defaults < instance config (manifest/install layer) < session override; `getConfig()` returns the merged result.
+
+## Services
+
+A service is a named capability hanging off the session host. Any plugin may `provide(name, service)` (returns a disposer; unload auto-unregisters; a same-name conflict returns an explicit error) and other plugins consume it with `get(name)` or `inject`.
+
+v1 value semantics: a service value is a JSON-serializable snapshot (live objects are not shared across QuickJS VMs); `get(name)` returns a deep copy, and a method-call shape is out of v1 scope (a broker-based service call extension is later). Multiple host instances within one session are naturally isolated; `isolate` semantics are out of v1 scope (the session is the isolation boundary). A `provide` registration enters the effect ledger and is reversed with the instance scope and unload.
+
+## Plugin setup API (bridge v2)
+
+The `api` object (setup parameter) and the injected global bridge expose the capabilities below, each gated by capability (manifest permissions / runtime declaration). Calling an undeclared capability returns an explicit structured error, never a silent success. Entry supports both plugin forms: `defineExtension((api) => …)` default export and top-level side-effect `register()` (the bridge is injected globally and the entry calls it directly); both are one `apply(ctx, config)`.
+
+| API | Semantics |
+|---|---|
+| `registerTool(descriptor)` / `registerTool(name, desc, schema, fn)` | register an Agent tool (dual signature). |
+| `registerAction(name, fn)` | register an action (platform/command-channel call). |
+| `registerCommand(descriptor, handler)` | register a daemon command (`/ext:`). |
+| `registerProvider(descriptor)` | declarative provider/model. |
+| `registerPromptSection(descriptor)` | ordered prompt section to system-prompt assembly. |
+| `registerPromptVariable(...)` | register a prompt variable. |
+| `registerRequestPolicy(descriptor, handler)` | request policy. |
+| `contribute(descriptor)` | client-neutral contribution. |
+| `on(event, handler[, opts])` / `once(...)` | subscribe to public events (returns a disposer). |
+| `emit(event, payload)` | publish an event on the live bus. |
+| `provide(name, service)` | provide a service. |
+| `get(name)` | read a service (optional dependency queried live). |
+| `effect(disposer)` | register a cleanup function (run in reverse on unload). |
+| `getConfig()` | read the merged config. |
+| `native(name, args)` | whitelisted host native capability (`notify`/`httpRequest`/`log`). |
+| `log(level, msg)` | structured log (goes to the audit). |
+| `runtime` | `{ version, pluginId, sessionId }`. |
+| `capabilities.has(permission)` | host capability probe. |
+| workspace/process/network/secrets/state/modelContext/memory/events.replay | safe broker capabilities. |
+| `migrateState(handler)` | state migration. |
 
 ## Durable state, context, and migration
 

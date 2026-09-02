@@ -44,7 +44,11 @@ export default defineExtension((api) => {
 #[tokio::test]
 async fn disposers_run_with_per_disposer_isolation() {
     let base = tempdir().unwrap();
-    write_package(&global_root(base.path()), "disposer-ext", DISPOSER_EXTENSION);
+    write_package(
+        &global_root(base.path()),
+        "disposer-ext",
+        DISPOSER_EXTENSION,
+    );
     let catalog = PackageCatalog::discover(base.path(), base.path());
     let package = catalog
         .effective_packages()

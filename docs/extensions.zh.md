@@ -43,6 +43,7 @@ $THEWAY_DIR/extensions/<extension-id>/index.js
 | `priority` | 否 | 有符号排序值；默认为 `0`，较大值先分发。 |
 | `scope` | 是 | `process`、`session`、`run` 或 `request`；注册不能超过 manifest scope 的生命周期。 |
 | `stateSchema` | 否 | 正数形式的持久状态 schema 版本；package 拥有版本化状态或迁移时需要。 |
+| `configSchema` | 否 | 可选的 JSON Schema，用于校验并为插件配置填默认值，配置由 `getConfig()` 返回。 |
 | `permissions` | 否 | 必需 capability；拒绝其中一项会阻止 package。 |
 | `optionalPermissions` | 否 | Package 可用 `api.capabilities.has` 探测的 capability；拒绝不会阻止加载。 |
 
@@ -72,6 +73,10 @@ TUI 通过以下命令暴露客户端中立的协议操作：
 | `commands.register` | 注册 daemon 命令。 |
 | `providers.register` | 注册声明式 provider/model 元数据。 |
 | `client.contribute` | 发布经过校验的客户端中立 contribution。 |
+| `actions.register` | 注册平台/命令通道 action。 |
+| `prompts.register` | 注册 prompt section 或 variable。 |
+| `hooks.subscribe` | 订阅公共事件和 lifecycle hook。 |
+| `services.provide` | 提供具名的会话服务。 |
 | `workspace.read` | 读取允许的工作区根目录内的规范路径。 |
 | `workspace.write` | 写入允许的工作区根目录内的规范路径。 |
 | `process.spawn` | 通过 daemon executor 和取消策略运行进程。 |
@@ -217,6 +222,150 @@ Availability 和 request predicate 包含可选的精确 `providers`、`models` 
 | `form_action` | `title`、对象 `schema`、`submitCommand` |
 
 客户端只从 transport 数据渲染支持的 kind，并忽略未知 kind。Contribution 和常规 lifecycle status 不会向会话 feed 追加合成 assistant message 或 operation-log 行。
+
+## 公共事件面
+
+插件通过稳定的、与引擎无关的事件面订阅，而不是直接使用内部运行时事件。每个公共事件使用小写的 `namespace/action` 名称；payload 为平铺 JSON，内部 snake_case 事件名作为永久订阅别名保留（同一事件用两种名称订阅只触发一次）。每个公共事件都可 observe；“模式”列给出该事件的主要分发语义，`emit` 也可选用这些模式。
+
+| 分组 | 公共事件 | 模式 | 主要 payload |
+|---|---|---|---|
+| 会话 | `session/start` | emit | `session_id`、`cwd`、`scope` |
+| 会话 | `session/resume` | emit | `session_id`、`cwd` |
+| 会话 | `agent/end` | emit | `session_id`、`turn_id` |
+| Turn | `before_turn` | emit | `session_id`、`turn_id`、`input` |
+| Turn | `after_turn` | emit | `session_id`、`turn_id`、`result` |
+| 工具 | `before_tool_call` | emit | `tool_name`、`args`、`scope` |
+| 工具 | `after_tool_call` | emit | `tool_name`、`result`、`scope` |
+| 工具 | `tools/result` | emit | `tool_name`、`result` |
+| 请求 | `agent/request` | waterfall | 规范化请求快照 |
+| 审批 | `approval/request` | waterfall | `approval_id`、`kind`、`scope` |
+| 审批 | `approval/resolved` | emit | `approval_id`、`outcome` |
+| 工作区 | `workspace/file-write` | emit | `path`、`operation` |
+| 沙箱 | `sandbox/exec` | emit | `command`、`cwd` |
+| 通知 | `notification/send` | emit | `notification_id`、`channel` |
+| 状态 | `agent/status` | emit | `status` |
+| 插件 | `plugin/loaded` | emit | `plugin_id` |
+| 插件 | `plugin/disposed` | emit | `plugin_id` |
+| 会话结构 | `compaction` | emit | `session_id`、`before_tokens`、`after_tokens` |
+| 会话结构 | `branch` | emit | `session_id`、`branch_id` |
+| 会话结构 | `chat/composition_selected` | emit | `chat_id`、`composition_id` |
+
+事件桥在这些公共名与内部生命周期事件之间维护双向映射。订阅通过映射解析（先公共名，再内部 snake_case 别名），外发投递也经过该映射；同一事件的两种名称去重为一次投递。内部 enum 不重命名、不删除——公共面只是其上的稳定投影加上新的发射点。
+
+活的事件缝（`on`/`emit`，进程内实时、随卸载回卷）与持久自定义事件通道（`events.append` 加 `events.replay`，写入 session 日志并可重放）语义不同。公共生命周期事件属于前者；插件 `emit` 的自定义事件路由到同会话实例，不写入持久日志。
+
+### 五种分发模式
+
+活的事件总线向插件暴露五种精确分发模式。`on` 注册使用表中该事件的默认模式；插件可用 `emit(event, payload, mode)` 选择模式。
+
+| 模式 | 语义 |
+|---|---|
+| `emit` | 广播，忽略监听者返回值（观察语义）。 |
+| `parallel` | 所有监听者并发执行，全部 settle 后 resolve。 |
+| `serial` | 按注册顺序依次 await，直到某个监听者返回 bail 值（非 `null`/`false`/`undefined`）即停止，该值即为结果。 |
+| `bail` | 同步按序调用，首个 bail 值短路（门控/策略语义）。 |
+| `waterfall` | 洋葱中间件：监听者收到 `(payload, next)`，必须调 `next()` 才放行下游；不调 = 短路（变换/网关语义）。 |
+
+模式与内部 hook 语义的对应：observe → `emit`/`parallel`；serial/`bail` → gate 风格短路；`waterfall` → transform 链。每个公共事件声明其默认模式；监听者可用标准 hook descriptor 声明 class/优先级。
+
+分发还携带会话/agent 作用域身份，监听者只收到匹配作用域的事件；两个并发会话的同名监听者互不串扰。安装层与实例作用域不改变事件过滤语义。
+
+## 安装层级与实例作用域
+
+安装分层次，并决定某个 extension ID 由哪个插件生效。`managed`、`user`、`project` 是三个安装层。
+
+| 层 | 目录 | 含义 |
+|---|---|---|
+| `managed` | 平台托管目录（`<base>/extensions-managed`） | 随发行自带；用户只读 |
+| `user` | `<base>/extensions` | 用户级（内部 wire 变体名保留 `Global` 以兼容；文档与诊断称 user 层） |
+| `project` | `<cwd>/.theway/extensions` | 项目级 |
+
+同名插件按最近者优先解析：`project` > `user` > `managed`。被遮蔽者保留 catalog 记录并标记为 shadowed；移除更近层后自动提升下一层。managed 层同样参与信任评估与诊断。
+
+实例作用域与安装层正交：manifest 的 `scope`（`process`/`session`/`run`/`request`）约束注册效果的存活边界，独立于安装层。两者在文档、诊断与类型命名上严格区分、绝不混用。
+
+## 贡献扩展点（单文件 kind）
+
+扩展根目录正下方的顶层单文件 `.theway/extensions/*.ts` 用 `export const kind` 声明扩展点。`compaction` 走 legacy 路径；其余 kind 被合成为 package host 条目，并绑定该 kind 对应权限。
+
+| kind | 语义 | 绑定权限 |
+|---|---|---|
+| `tool` | 注册 tool | `tools.register` |
+| `action` | 注册 action | `actions.register` |
+| `prompt` | 注册 prompt section / variable | `prompts.register` |
+| `hook` | 订阅事件 / lifecycle hook | `hooks.subscribe` |
+| `service` | 提供服务 | `services.provide` |
+| `compaction` | 压缩算法（legacy） | 无 |
+
+kind 声明与文件实际注册内容不符（如 `kind = "tool"` 但未注册任何 tool）会产生结构化诊断并拒绝该文件，不影响其它文件。package 形态（带 `theway-extension.json` 的目录）不受单一 kind 限制，可自由组合多种注册。
+
+## 会话级生命周期
+
+插件实例运行在下面的显式状态机中。`apply` 进入 `LOADING → ACTIVE`；`dispose` 执行 `UNLOADING → DISPOSED`。
+
+```
+PENDING → LOADING → ACTIVE
+              ↘ FAILED   (apply threw → only this plugin is faulted)
+ACTIVE → UNLOADING → DISPOSED
+```
+
+| 状态 | 语义 |
+|---|---|
+| `PENDING` | 已发现且信任通过，但声明的依赖服务未就绪（等待）。 |
+| `LOADING` | 依赖就绪，config 校验通过，正在执行 apply。 |
+| `ACTIVE` | 运行中，事件/注册正常派发。 |
+| `FAILED` | apply 或运行期致命失败；记录诊断，效果回卷。 |
+| `UNLOADING` | 正在执行卸载序列。 |
+| `DISPOSED` | 完全卸载。 |
+
+`apply`（`LOADING → ACTIVE`）：实例化持久 VM → 注入合并 config（见下）→ 执行顶层入口（`defineExtension` 或顶层副作用，均可收到 config）→ 注册校验（事件名/class/优先级/权限逐项核对；未知事件名返回明确错误）→ 外发 `plugin/loaded`。
+
+`dispose`（`UNLOADING → DISPOSED`，固定顺序）：
+1. 外发 `session/end` 上下文事件与 `plugin/disposed`（若处于 Started）；
+2. 执行 JS 侧 disposer 队列（`effect()` 注册项）——逆序、逐个隔离；单个失败只记诊断；顺序敏感的清理在单个 effect 内自行串行；
+3. Rust effect ledger 按注册逆序回卷（工具覆盖还原、订阅移除、服务注销、状态清理）；
+4. 销毁 VM 实例。
+
+失败隔离：`apply` 抛错只 faulted 自身并加诊断，继续加载其余插件；运行期连续失败触发 circuit breaker，走同一回卷序列。会话内热重载复用同一条 `dispose → apply` 路径，不产生旧实例残留。
+
+依赖驱动生命周期：插件用 `inject` 声明必需服务（在模块作用域或定义的 `inject` 字段上）；服务未就绪时保持 `PENDING`。提供方卸载 → 依赖插件自动 `UNLOADING`；服务恢复 → 自动重载。可选依赖用 `get(name)` 现场查询（可能为 `undefined`）。
+
+## 配置
+
+manifest 可声明可选的 `configSchema`（JSON Schema）。缺失时插件无配置（`getConfig()` 返回空对象）。加载时宿主按 schema 校验并填默认值；非法配置会让该插件响亮失败（插件 `FAILED`，绝不静默降级）。合并优先级：schema 默认值 < 实例配置（manifest/安装层提供）< 会话级覆盖；`getConfig()` 返回合并结果。
+
+## 服务模型
+
+服务是挂在会话 host 上的具名能力。任意插件可 `provide(name, service)`（返回 disposer，卸载自动注销；同名冲突返回明确错误），其它插件用 `get(name)` 或 `inject` 消费。
+
+v1 值语义：服务值为 JSON 可序列化快照（跨 QuickJS VM 不传递 live 对象）；`get(name)` 返回深拷贝；方法调用形态不在 v1 范围（后续以 broker 化服务调用扩展）。同一会话内多个 host 实例天然隔离；`isolate` 语义不在 v1 范围（会话即隔离边界）。`provide` 注册进入 effect ledger，随实例作用域与卸载回卷。
+
+## 插件 setup API（桥 v2）
+
+`api` 对象（setup 参数）与注入的全局桥提供以下能力，全部受 capability 门控（manifest permissions / 运行时声明）。调用未声明能力返回明确的结构化错误，绝不静默。入口兼容两种插件形态：`defineExtension((api) => …)` 默认导出，以及顶层副作用 `register()`（桥注入全局、入口直接调用）；二者都视为一次 `apply(ctx, config)`。
+
+| API | 语义 |
+|---|---|
+| `registerTool(descriptor)` / `registerTool(name, desc, schema, fn)` | 注册 Agent tool（双签名）。 |
+| `registerAction(name, fn)` | 注册 action（平台/命令通道调用）。 |
+| `registerCommand(descriptor, handler)` | 注册 daemon 命令（`/ext:`）。 |
+| `registerProvider(descriptor)` | 声明式 provider/model。 |
+| `registerPromptSection(descriptor)` | 有序 prompt section → system prompt 装配。 |
+| `registerPromptVariable(...)` | 注册 prompt variable。 |
+| `registerRequestPolicy(descriptor, handler)` | 请求策略。 |
+| `contribute(descriptor)` | 客户端中性 contribution。 |
+| `on(event, handler[, opts])` / `once(...)` | 订阅公共事件（返回 disposer）。 |
+| `emit(event, payload)` | 在活的事件总线上发布事件。 |
+| `provide(name, service)` | 提供服务。 |
+| `get(name)` | 读取服务（可选依赖现场查询）。 |
+| `effect(disposer)` | 注册清理函数（卸载时逆序执行）。 |
+| `getConfig()` | 读取合并配置。 |
+| `native(name, args)` | 白名单宿主原生能力（`notify`/`httpRequest`/`log`）。 |
+| `log(level, msg)` | 结构化日志（进审计）。 |
+| `runtime` | `{ version, pluginId, sessionId }`。 |
+| `capabilities.has(permission)` | 宿主能力探测。 |
+| workspace/process/network/secrets/state/modelContext/memory/events.replay | 安全 broker 能力。 |
+| `migrateState(handler)` | 状态迁移。 |
 
 ## 持久状态、上下文与迁移
 

@@ -197,6 +197,42 @@ export type RequestPolicyHandler = (
   context: ExtensionEventContext,
 ) => HookResult;
 
+export interface ActionRegistrationDescriptor {
+  name: string;
+  description?: string;
+  inputSchema: JsonSchema;
+  scope?: ExtensionScope;
+}
+
+export type ActionHandler<Arguments = JsonValue> = (
+  invocation: { arguments: Arguments },
+  context: ExtensionEventContext,
+) => MaybePromise<JsonValue>;
+
+export interface PromptVariableDescriptor {
+  sectionId: string;
+  text: string;
+  priority?: number;
+  predicate?: RegistrationPredicate;
+  scope?: ExtensionScope;
+}
+
+export interface RuntimeIdentity {
+  version: string;
+  pluginId: string;
+  sessionId: string;
+}
+
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+export type DispatchMode = 'emit' | 'parallel' | 'serial' | 'bail' | 'waterfall';
+
+export type NativeName = 'notify' | 'httpRequest' | 'log';
+
+export interface ServiceHandle {
+  dispose(): void;
+}
+
 export interface CustomEvent {
   eventId: string;
   type: string;
@@ -271,9 +307,23 @@ export interface ExtensionApi {
     delete(key: string): void;
     clear(): void;
   };
+  readonly runtime: RuntimeIdentity;
+  effect(execute: () => MaybePromise<void | (() => MaybePromise<void>)>): RegistrationHandle;
+  getConfig(): JsonValue;
+  provide(name: string, value: JsonValue): ServiceHandle;
+  get(name: string): JsonValue | undefined;
+  native(name: NativeName, args?: JsonObject): JsonValue;
+  log(level: LogLevel, message: string): void;
+  emit(event: string, payload?: JsonValue, mode?: DispatchMode): JsonValue;
   migrateState(handler: StateMigrationHandler): RegistrationHandle;
   registerTool<Arguments = JsonValue>(
     descriptor: ToolRegistrationDescriptor,
+    handler: ToolHandler<Arguments>,
+  ): RegistrationHandle<ToolRegistrationDescriptor>;
+  registerTool<Arguments = JsonValue>(
+    name: string,
+    description: string,
+    inputSchema: JsonSchema,
     handler: ToolHandler<Arguments>,
   ): RegistrationHandle<ToolRegistrationDescriptor>;
   registerCommand<Arguments = JsonValue>(
@@ -286,15 +336,32 @@ export interface ExtensionApi {
   registerPromptSection(
     descriptor: PromptSectionDescriptor,
   ): RegistrationHandle<PromptSectionDescriptor>;
+  registerPromptVariable(
+    descriptor: PromptVariableDescriptor,
+  ): RegistrationHandle<PromptVariableDescriptor>;
   registerRequestPolicy(
     descriptor: RequestPolicyDescriptor,
     handler: RequestPolicyHandler,
   ): RegistrationHandle<RequestPolicyDescriptor>;
+  registerAction<Arguments = JsonValue>(
+    descriptor: ActionRegistrationDescriptor,
+    handler: ActionHandler<Arguments>,
+  ): RegistrationHandle<ActionRegistrationDescriptor>;
+  registerAction<Arguments = JsonValue>(
+    name: string,
+    handler: ActionHandler<Arguments>,
+  ): RegistrationHandle<ActionRegistrationDescriptor>;
   contribute(
     descriptor: ExtensionClientContribution,
   ): RegistrationHandle<ExtensionClientContribution>;
   on<E extends ExtensionLifecycleEvent>(event: E, handler: HookHandler<E>): RegistrationHandle;
   on<E extends ExtensionLifecycleEvent>(
+    event: E,
+    descriptor: HookDescriptor,
+    handler: HookHandler<E>,
+  ): RegistrationHandle<HookDescriptor>;
+  once<E extends ExtensionLifecycleEvent>(event: E, handler: HookHandler<E>): RegistrationHandle;
+  once<E extends ExtensionLifecycleEvent>(
     event: E,
     descriptor: HookDescriptor,
     handler: HookHandler<E>,
@@ -305,6 +372,8 @@ export type ExtensionSetup = (api: ExtensionApi) => MaybePromise<void>;
 
 export interface ExtensionDefinition {
   readonly setup: ExtensionSetup;
+  readonly inject?: readonly string[];
+  readonly kind?: string;
 }
 
 export function defineExtension(setup: ExtensionSetup): Readonly<ExtensionDefinition> {
