@@ -121,20 +121,18 @@ pub fn render_prompt_chrome(
     style: &ComposerStyle,
 ) -> Rect {
     if area.width < 4 || area.height < 2 {
-        buf.set_style(area, Style::default().fg(style.text).bg(style.bg));
+        buf.set_style(area, Style::default().fg(style.text));
         return area;
     }
-    let bg = style.bg;
     let border_color = if c.focused {
         style.border_focused
     } else {
         style.border_unfocused
     };
-    let div_style = Style::default().fg(border_color).bg(bg);
-
-    // Fill the whole area so every cell has RGB colors (grok does the same
-    // for later blending); the textarea overpaints the content cells.
-    buf.set_style(area, Style::default().fg(style.text).bg(bg));
+    // The composer renders transparent (no background fill): the chrome is
+    // border/prefix/caption fg colors only, and the terminal background
+    // shows through everywhere else.
+    let div_style = Style::default().fg(border_color);
 
     let content_x = area.x + PAD_LEFT;
     let content_w = area.width.saturating_sub(PAD_LEFT + PAD_RIGHT);
@@ -180,7 +178,7 @@ pub fn render_prompt_chrome(
             let truncated = truncate_str(&label, max_w as usize);
             let label_w = UnicodeWidthStr::width(truncated.as_str()) as u16;
             let x = area.x + area.width.saturating_sub(3 + label_w);
-            let style = Style::default().fg(GRAY).bg(bg).add_modifier(Modifier::DIM);
+            let style = Style::default().fg(GRAY).add_modifier(Modifier::DIM);
             buf.set_string(x, top_y, &truncated, style);
         }
     }
@@ -188,12 +186,7 @@ pub fn render_prompt_chrome(
     // ── ❯ prefix on the first text row ───────────────────────────────────────
     let prefix_color = if c.focused { style.prefix } else { GRAY_DIM };
     if text_h > 0 && content_w > PREFIX_WIDTH {
-        buf.set_string(
-            content_x,
-            text_y,
-            PREFIX,
-            Style::default().fg(prefix_color).bg(bg),
-        );
+        buf.set_string(content_x, text_y, PREFIX, Style::default().fg(prefix_color));
     }
 
     // ── Side borders: │ on each text row ─────────────────────────────────────
@@ -217,7 +210,7 @@ pub fn render_prompt_chrome(
             ta_x,
             text_y,
             &truncated,
-            Style::default().fg(style.placeholder).bg(bg),
+            Style::default().fg(style.placeholder),
         );
     }
 
@@ -253,13 +246,14 @@ pub fn render_prompt_chrome(
 }
 
 /// Caption style for text embedded in the border chrome (info-line model
-/// name, divider title): the theme `info_text` color over the prompt bg,
-/// fading further when unfocused — grok's `chrome_caption_style`.
+/// name, divider title): the theme `info_text` color, dimmed further when
+/// unfocused (the composer has no background to blend toward anymore).
 fn caption_style(style: &ComposerStyle, focused: bool) -> Style {
-    let opacity = if focused { 0.6 } else { 0.4 };
-    let fg =
-        theway_pager_render::color::blend_color(style.bg, style.info_text, opacity).unwrap_or(GRAY);
-    Style::default().fg(fg).bg(style.bg)
+    let mut s = Style::default().fg(style.info_text);
+    if !focused {
+        s = s.add_modifier(Modifier::DIM);
+    }
+    s
 }
 
 /// Render the info line on the bottom divider: left-aligned
@@ -270,24 +264,23 @@ fn render_info_line(buf: &mut Buffer, area: Rect, c: &PromptChrome, style: &Comp
     if area.width == 0 || area.height == 0 {
         return;
     }
-    let bg = style.bg;
-    let sep_style = Style::default().fg(GRAY_DIM).bg(bg);
-    let flag_style = Style::default().fg(GRAY).bg(bg);
+    let sep_style = Style::default().fg(GRAY_DIM);
+    let flag_style = Style::default().fg(GRAY);
     let model_style = caption_style(style, c.focused);
 
     // Left side: model name + flags, wrapped in padding spaces so the cells
     // next to ╰ / ╯ are blanked out instead of showing `─`.
-    let mut left_spans: Vec<Span<'static>> = vec![Span::styled(" ", Style::default().bg(bg))];
+    let mut left_spans: Vec<Span<'static>> = vec![Span::raw(" ")];
     left_spans.push(Span::styled(c.model_name.to_owned(), model_style));
     for flag in c.flags {
         left_spans.push(Span::styled(" · ", sep_style));
-        let mut style = Style::default().fg(flag.color).bg(bg);
+        let mut style = Style::default().fg(flag.color);
         if flag.bold {
             style = style.add_modifier(Modifier::BOLD);
         }
         left_spans.push(Span::styled(flag.text.to_owned(), style));
     }
-    left_spans.push(Span::styled(" ", Style::default().bg(bg)));
+    left_spans.push(Span::raw(" "));
 
     // Right side: context-usage label. The "multiline" indicator is no
     // longer rendered (issue #38) even though the field is still accepted.
@@ -298,7 +291,7 @@ fn render_info_line(buf: &mut Buffer, area: Rect, c: &PromptChrome, style: &Comp
 
     let left_line = Line::from(left_spans);
     let metadata_x = if !right_spans.is_empty() {
-        right_spans.push(Span::styled(" ", Style::default().bg(bg)));
+        right_spans.push(Span::raw(" "));
         let right_line = Line::from(right_spans);
         let right_w = right_line.width() as u16;
         let left_w = (left_line.width() as u16).min(area.width.saturating_sub(right_w + 1));
@@ -325,9 +318,9 @@ fn render_info_line(buf: &mut Buffer, area: Rect, c: &PromptChrome, style: &Comp
         if path_w > 0 {
             let label = shorten_path(path, path_w as usize);
             let path_line = Line::from(vec![
-                Span::styled(" ", Style::default().bg(bg)),
+                Span::raw(" "),
                 Span::styled(label, caption_style(style, c.focused)),
-                Span::styled(" ", Style::default().bg(bg)),
+                Span::raw(" "),
             ]);
             set_line_safe(buf, area.x, area.y, &path_line, path_w + 2);
         }

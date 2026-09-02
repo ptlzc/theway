@@ -310,3 +310,86 @@ async fn hidden_dag_band_is_not_rendered() {
         "Hidden mode must not render the DAG band:\n{hidden_text}"
     );
 }
+
+/// The DAG band is scrollable content: it renders at the bottom of the feed
+/// while following, and scrolling up carries it with the feed (instead of
+/// pinning it between the feed and the status bar).
+#[tokio::test]
+async fn dag_band_scrolls_with_feed() {
+    use theway_transport::feed::WireFeedBlock;
+    use theway_transport::wire::{WireDagNodeSnapshot, WireDagRunSnapshot};
+
+    let (mut app, _rx, _ops) = test_app_with_sessions(&["sess-1"], false).await;
+    let mut status = fixture_status(Vec::new());
+    status.feed_blocks = (0..30)
+        .map(|i| WireFeedBlock::User {
+            text: format!("history message {i}"),
+            timestamp: None,
+        })
+        .collect();
+    status.dags = vec![WireDagRunSnapshot {
+        id: "band-run".into(),
+        name: "demo".into(),
+        kind: "dag".into(),
+        status: "running".into(),
+        fail_fast: false,
+        max_concurrency: 4,
+        direction: "TD".into(),
+        created_at: 0,
+        completed_at: None,
+        error: None,
+        nodes: vec![WireDagNodeSnapshot {
+            id: "n1".into(),
+            agent: "a".into(),
+            status: "running".into(),
+            depends_on: vec![],
+            job_id: None,
+            attempt: 1,
+            started_at: None,
+            completed_at: None,
+            error: None,
+            input_tokens: None,
+            output_tokens: None,
+            result: None,
+            output_tail: None,
+            live_preview: None,
+        }],
+    }];
+    app.apply_snapshot(status);
+
+    let backend = TestBackend::new(80, 16);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let band_row = |buf: &ratatui::buffer::Buffer| {
+        buffer_text(buf)
+            .lines()
+            .position(|line| line.contains("band-run"))
+    };
+
+    terminal.draw(|f| app.render(f)).unwrap();
+    let before = band_row(terminal.backend().buffer())
+        .expect("band must be visible at the bottom while following");
+
+    // Scrolling up shifts the band exactly with the feed rows (it is content,
+    // not a pinned region).
+    app.scroll_up(2);
+    terminal.draw(|f| app.render(f)).unwrap();
+    let after = band_row(terminal.backend().buffer())
+        .expect("band must still be partially visible after 2 rows");
+    assert_eq!(after, before + 2, "the band must move with the feed scroll");
+
+    // Scrolling further up carries the band out of the viewport entirely.
+    app.scroll_up(30);
+    terminal.draw(|f| app.render(f)).unwrap();
+    assert!(
+        band_row(terminal.backend().buffer()).is_none(),
+        "the band must scroll off-screen with the feed"
+    );
+
+    // Scrolling back down restores the band at the bottom (follow).
+    app.scroll_down(1_000);
+    terminal.draw(|f| app.render(f)).unwrap();
+    assert!(
+        band_row(terminal.backend().buffer()).is_some(),
+        "the band must return when scrolled back to the bottom"
+    );
+}

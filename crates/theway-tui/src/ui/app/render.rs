@@ -17,16 +17,12 @@ impl App {
             // Blank spacer between the feed/output and the status bar.
             Constraint::Length(1),
             Constraint::Length(1), // status rule / single-cell Braille indicator
-            // Blank spacer between the status bar and the composer.
-            Constraint::Length(1),
             Constraint::Length(input_rows + 2 + cascade_rows), // input box + cascade band
-            Constraint::Length(1), // hint line
         ])
         .split(area);
         let content_area = chunks[0];
         let status_area = chunks[2];
-        let input_area = chunks[4];
-        let hint_area = chunks[5];
+        let input_area = chunks[3];
         self.last_status_area = Some(status_area);
         self.last_input_area = Some(input_area);
         // The cascade band occupies the top `cascade_rows` of the input area;
@@ -39,24 +35,6 @@ impl App {
             (None, input_area)
         };
         self.last_cascade_area = cascade_area;
-        // DAG status band (issue #38): while DAG runs are live the band
-        // squeezes the feed's bottom rows, between the feed and the busy
-        // band.
-        let (content_area, dag_band_area) = if self.latest.dags.is_empty()
-            || self.dag_band_mode == crate::ui::DagBandMode::Hidden
-        {
-            (content_area, None)
-        } else {
-            let rows = dag_band::band_rows(&self.latest.dags, content_area.width)
-                .min(content_area.height.saturating_sub(1));
-            if rows == 0 {
-                (content_area, None)
-            } else {
-                let split = Layout::vertical([Constraint::Min(1), Constraint::Length(rows)])
-                    .split(content_area);
-                (split[0], Some(split[1]))
-            }
-        };
         let (feed_area, trigger_area) = match self.side_panel_width(content_area.width) {
             Some(width) => {
                 let cols = Layout::horizontal([Constraint::Min(40), Constraint::Length(width)])
@@ -104,7 +82,19 @@ impl App {
             .update(&self.feed, feed_area.width as usize, &opts, max_feed_lines);
         let lines = self.feed_cache.lines();
         let trimmed = self.feed_cache.trimmed();
-        let total = lines.len();
+        // DAG status band (issue #38): the band joins the scrollable content
+        // as rows appended after the newest feed row, so it scrolls with the
+        // feed (up and off-screen) instead of pinning between the feed and
+        // the status bar. Hidden mode renders no band rows.
+        let band_rows = if self.latest.dags.is_empty()
+            || self.dag_band_mode == crate::ui::DagBandMode::Hidden
+        {
+            0
+        } else {
+            dag_band::band_rows(&self.latest.dags, feed_area.width) as usize
+        };
+        let feed_total = lines.len();
+        let total = feed_total + band_rows;
         let uncapped_total = total + trimmed;
         let viewport = feed_area.height as usize;
         self.last_viewport_h = viewport;
@@ -127,9 +117,10 @@ impl App {
         };
         // Clamp a live mouse selection to the current row count (the feed can
         // shrink between frames, e.g. `/clear`) before it reaches the window
-        // renderer (issue #70).
+        // renderer (issue #70). Selection stays feed-only: band rows are not
+        // selectable.
         if let Some(sel) = self.mouse_select {
-            let last = total.saturating_sub(1);
+            let last = feed_total.saturating_sub(1);
             let anchor_line = sel.anchor.line.min(last);
             let current_line = sel.current.line.min(last);
             if anchor_line != sel.anchor.line || current_line != sel.current.line {
@@ -147,9 +138,19 @@ impl App {
             }
         }
         self.last_display_scroll = display_scroll;
+        // The feed occupies the rows above the band's top edge; the band rows
+        // live at the very bottom of the scrollable content.
+        let feed_visible = (feed_total as i64 - display_scroll as i64)
+            .clamp(0, viewport as i64) as u16;
+        let feed_render_area = Rect {
+            x: feed_area.x,
+            y: feed_area.y,
+            width: feed_area.width,
+            height: feed_visible,
+        };
         crate::feed_render::render_lines_window(
             frame.buffer_mut(),
-            feed_area,
+            feed_render_area,
             lines,
             display_scroll,
             self.mouse_select.map(|sel| {
@@ -162,6 +163,55 @@ impl App {
                 }
             }),
         );
+        // DAG band inside the scrollable feed: render the band into a
+        // scratch buffer once, then blit the visible rows at the band's
+        // scrolled position (clipped against the viewport).
+        if band_rows > 0 {
+            let band_top_index = feed_total as i64;
+            let band_top_y = feed_area.y as i64 + (band_top_index - display_scroll as i64);
+            let clip_y = band_top_y.max(feed_area.y as i64) as u16;
+            let skip_rows = (display_scroll as i64 - band_top_index).max(0) as usize;
+            if clip_y < feed_area.bottom() {
+                let mut band_buf = ratatui::buffer::Buffer::empty(Rect::new(
+                    0,
+                    0,
+                    feed_area.width,
+                    band_rows as u16,
+                ));
+                dag_band::render_dag_band(
+                    &mut band_buf,
+                    Rect::new(0, 0, feed_area.width, band_rows as u16),
+                    &self.latest.dags,
+                    &self.dag_meters,
+                    self.dag_tick,
+                    &self.theme.dag_band,
+                );
+                for y in clip_y..feed_area.bottom() {
+                    let src_row = skip_rows + (y - clip_y) as usize;
+                    if src_row >= band_rows {
+                        break;
+                    }
+                    // Clear the row first so the band never leaves feed
+                    // cells behind its transparent padding.
+                    for x in feed_area.x..feed_area.right() {
+                        if let Some(cell) = frame.buffer_mut().cell_mut((x, y)) {
+                            cell.reset();
+                        }
+                    }
+                    for x in feed_area.x..feed_area.right() {
+                        let Some(src) = band_buf.cell((x - feed_area.x, src_row as u16)) else {
+                            continue;
+                        };
+                        if src.symbol() == " " && src.style() == Style::default() {
+                            continue;
+                        }
+                        if let Some(dst) = frame.buffer_mut().cell_mut((x, y)) {
+                            dst.set_symbol(src.symbol());
+                            dst.set_style(src.style());
+                        }                    }
+                }
+            }
+        }
         // Feed scrollbar (theway-pager-render primitive): right edge of the
         // feed pane, subtle while following, brighter when scrolled up.
         if max_scroll > 0 {
@@ -182,16 +232,6 @@ impl App {
         }
         if let Some(area) = trigger_area {
             self.render_trigger_panel(frame, area);
-        }
-        if let Some(band_area) = dag_band_area {
-            dag_band::render_dag_band(
-                frame.buffer_mut(),
-                band_area,
-                &self.latest.dags,
-                &self.dag_meters,
-                self.dag_tick,
-                &self.theme.dag_band,
-            );
         }
 
         // Status rule: plain ready/offline rule when idle; a single-cell
@@ -290,23 +330,6 @@ impl App {
             frame.set_cursor_position(ratatui::layout::Position::new(x, y));
         }
 
-        // Hint line. While the model cascade is open the hint reflects the
-        // column navigation (↑/↓ choice, ←/→ column, Enter commit, Esc back).
-        let hint = if self.model_picker.is_some() {
-            "↑↓ pick · ←/→ column · Enter commit · Esc back · Ctrl-O thinking · Ctrl-T tools"
-        } else if self.busy {
-            "Enter queue next · Ctrl-O thinking · Ctrl-T tools · Ctrl-V paste · Ctrl-C abort"
-        } else {
-            "Enter send · Ctrl-O thinking · Ctrl-T tools · Ctrl-V paste · ↑↓ history · PgUp/PgDn scroll · Ctrl-C abort"
-        };
-        frame.render_widget(
-            Paragraph::new(Line::styled(
-                theway_transport::feed::truncate_chars(hint, hint_area.width as usize),
-                Style::default().fg(self.theme.composer.hint),
-            )),
-            hint_area,
-        );
-
         // Completion popup, drawn above the input over the feed.
         self.render_completions(frame, status_area);
         self.render_model_picker(frame);
@@ -335,12 +358,9 @@ impl App {
         let picker_theme = self.theme.picker;
         let composer = &self.theme.composer;
 
-        // Background fill so the band reads as part of the composer chrome.
+        // Transparent band (composer background removed): the choices render
+        // over the feed with only fg colors.
         frame.render_widget(Clear, cascade_area);
-        frame.render_widget(
-            Block::default().style(Style::default().bg(composer.bg)),
-            cascade_area,
-        );
 
         // Breadcrumb row: the three pinned labels, the active one accented.
         let breadcrumb = [
@@ -370,7 +390,7 @@ impl App {
             .collect::<Vec<_>>()
             .join("   ");
         let crumb_w = cascade_area.width as usize;
-        let crumb_style = Style::default().fg(composer.info_text).bg(composer.bg);
+        let crumb_style = Style::default().fg(composer.info_text);
         frame.buffer_mut().set_string(
             cascade_area.x,
             breadcrumb_y,
@@ -394,7 +414,7 @@ impl App {
                     .bg(picker_theme.highlight_bg)
                     .add_modifier(ratatui::style::Modifier::BOLD)
             } else {
-                Style::default().fg(picker_theme.fg).bg(composer.bg)
+                Style::default().fg(picker_theme.fg)
             };
             let line = format!("{text}  ({})", data.title);
             frame.buffer_mut().set_string(
@@ -415,7 +435,7 @@ impl App {
                     "(no choices — use /model <provider:model>)",
                     list_w,
                 ),
-                Style::default().fg(picker_theme.dim).bg(composer.bg),
+                Style::default().fg(picker_theme.dim),
             );
         }
     }

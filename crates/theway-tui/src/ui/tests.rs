@@ -436,11 +436,11 @@ async fn busy_status_shows_braille_spinner() {
         .iter()
         .rposition(|l| l.contains('╭'))
         .expect("composer top border missing");
-    // The composer now starts one row below the status bar (blank spacer).
+    // The composer now starts directly below the status bar (no spacer).
     assert_eq!(
         border_row,
-        label_row + 2,
-        "composer should sit one blank row below the busy band:\n{text}"
+        label_row + 1,
+        "composer should sit directly below the busy band:\n{text}"
     );
     // Advance one base-cadence step: the mask and hue change in place.
     app.spinner.tick(130);

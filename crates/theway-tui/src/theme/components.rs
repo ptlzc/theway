@@ -112,7 +112,9 @@ pub struct ComposerStyle {
     pub prefix: Color,
     /// Content text color.
     pub text: Color,
-    /// Prompt background surface.
+    /// Prompt background surface. Kept for theme-file compatibility only —
+    /// the composer renders transparent since the background was removed;
+    /// setting this key has no visual effect.
     pub bg: Color,
     /// Info-line caption color (blended toward `bg`).
     pub info_text: Color,

@@ -214,8 +214,8 @@ async fn custom_theme_paints_tool_and_thinking_blocks() {
 }
 
 /// Custom composer style (issue #49): the prompt chrome reads
-/// `[composer]` colors from the theme — border, prefix, background and the
-/// blended info-line caption all change.
+/// `[composer]` colors from the theme — border, prefix and the info-line
+/// caption all change; the background renders transparent.
 #[tokio::test]
 async fn custom_theme_recolors_composer_chrome() {
     let (mut app, _rx) = test_app().await;
@@ -236,23 +236,22 @@ async fn custom_theme_recolors_composer_chrome() {
     let buf = terminal.backend().buffer();
     let input = app.last_input_area.unwrap();
 
-    // Top divider corner: focused border color over the prompt background.
+    // Top divider corner: focused border color on a transparent background
+    // (the composer background fill was removed).
     let corner = &buf[(input.x, input.y)];
     assert_eq!(corner.fg, border, "divider border color");
-    assert_eq!(corner.bg, bg, "prompt background on the divider");
-    // Filled prompt surface left of the ❯ prefix.
-    assert_eq!(buf[(input.x + 1, input.y + 1)].bg, bg);
+    assert_eq!(corner.bg, Color::Reset, "composer background is transparent");
+    // Prompt surface left of the ❯ prefix stays transparent.
+    assert_eq!(buf[(input.x + 1, input.y + 1)].bg, Color::Reset);
     // ❯ prefix uses the theme prefix color.
     assert_eq!(buf[(input.x + 2, input.y + 1)].fg, prefix);
-    // Info-line caption: info_text blended onto bg at 0.6 (focused), same
-    // blend the chrome applies.
-    let expected = theway_pager_render::color::blend_color(bg, info, 0.6)
-        .unwrap_or(super::prompt_chrome::GRAY);
+    // Info-line caption: the theme info_text color directly (no background
+    // to blend toward anymore).
     let info_row = input.y + input.height - 1;
     let p_x = (input.x..input.x.saturating_add(input.width))
         .find(|x| buf[(*x, info_row)].symbol() == "p")
         .expect("model name missing from the info line");
-    assert_eq!(buf[(p_x, info_row)].fg, expected, "info caption color");
+    assert_eq!(buf[(p_x, info_row)].fg, info, "info caption color");
 }
 
 /// Default theme: with no theme.toml the tool/thinking blocks keep the

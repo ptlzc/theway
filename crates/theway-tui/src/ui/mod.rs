@@ -9,11 +9,16 @@
 //! │ ⚙ read(path="src/main.rs")                                              │
 //! │     …file contents…                                                     │
 //! │ Done. The input box is now pinned to the bottom.                        │
+//! │ dag-1 · harness-plugin-alignment · ⠋ 3/7                                │
 //! ├── theway · anthropic:claude · ⠹ working ──────────────────────────────────┤
-//! │ > type here…                                                            │
-//! │ Enter send · Alt+Enter newline · ↑↓ history · PgUp/PgDn scroll · /help  │
+//! │ ❯ type here…                                                            │
 //! └─────────────────────────────────────────────────────────────────────────┘
 //! ```
+//!
+//! The DAG status band (graph runs) lives at the bottom of the feed as
+//! scrollable content, so scrolling up carries it off-screen with the feed.
+//! The composer renders without a background fill and sits directly under the
+//! status row (no spacer, no hint line below).
 //!
 //! No harness / kernel / turn scheduling lives here: the daemon owns the
 //! transcript and the turn loop, and publishes full [`WireStatus`] snapshots
