@@ -21,14 +21,23 @@ itself is always registered.
 
 ## Install
 
-Copy the directory into a project or global extension root, then record trust
-for the `workspace.read` permission and reload the catalog:
+`scripts/install.sh` copies this package into
+`$THEWAY_DIR/extensions-managed/tui-docs` — the managed layer. Managed
+packages are discovered automatically, granted their declared permissions
+(`workspace.read`) without a trust record, and are user read-only, so
+script-based installs get the pointer with zero setup.
+
+Manual installs (`cargo install` without the script) copy the directory into
+a project or user extension root, then record trust for `workspace.read` and
+reload the catalog:
 
 ```bash
 cp -r extensions/tui-docs <cwd>/.theway/extensions/tui-docs
 # in the TUI: /extension-trust → trust the project with workspace.read,
 # then /extension-reload (or restart the daemon)
 ```
+
+A project or user package with the same id shadows the managed copy.
 
 Verified by `crates/theway-daemon/tests/tui_docs_extension.rs` (workspace
 pointer + installed-copy fallback), and the bundled-doc materialization by
