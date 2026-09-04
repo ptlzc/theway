@@ -8,6 +8,7 @@
 
 - [ ] 1.1 新增 `crates/theway-tui/src/template_scan.rs`：镜像 daemon `crate::templates` 规则——根 `work_dir/.theway/templates` 与 `base/templates`、只收根级 `*.md`、不递归、同名 project 覆盖 user；frontmatter name（缺省 = 文件 stem）/description；产出 `WireProvisionedTemplate`。
 - [ ] 1.2 单元测试：平铺命中、project 覆盖 user、非 md 跳过、缺 description 跳过、frontmatter 缺 name 用 stem。
+- [ ] [depends: 2-wire-catalogs]
 
 ## 2-wire-catalogs（theway-transport）
 
@@ -21,6 +22,7 @@
 - [ ] 3.2 `turn/daemon.rs` + `runtime.rs`：`DaemonConfig` / `RuntimeConfiguration` 增加 `provisioned_templates` 字段；启动 `WireDaemonConfig` 种子回显 slot。
 - [ ] 3.3 `turn/daemon/commands.rs`：`Configure` 新增 templates 分支（wire → `PromptTemplate` 映射 → harness template catalog 替换 + slot 写 + 配置视图回显；clear 语义）。
 - [ ] 3.4 测试：controller 模式 load 不扫盘 + reload 保留 slot；Configure 应用 / 清除 templates；standalone 回归（本地模板照常加载）。
+- [ ] [depends: 2-wire-catalogs]
 
 ## 4-tui-wiring（theway-tui）
 
