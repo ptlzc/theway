@@ -29,6 +29,7 @@ sandbox = []
 # model's `api` actually gets exercised.
 theway-llm-provider = { version = "0.1.5", path = "../theway-llm-provider", default-features = false, features = ["all-providers"] }
 theway-contract = { version = "0.1.5", path = "../theway-contract" }
+theway-extensions = { version = "0.1.5", path = "../theway-extensions" }
 theway-core = { version = "0.1.5", path = "../theway-core" }
 theway-storage = { version = "0.1.5", path = "../theway-storage" }
 theway-mcp = { version = "0.1.5", path = "../theway-mcp" }

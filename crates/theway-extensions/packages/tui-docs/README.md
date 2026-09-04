@@ -21,18 +21,19 @@ itself is always registered.
 
 ## Install
 
-`scripts/install.sh` copies this package into
-`$THEWAY_DIR/extensions-managed/tui-docs` — the managed layer. Managed
-packages are discovered automatically, granted their declared permissions
-(`workspace.read`) without a trust record, and are user read-only, so
-script-based installs get the pointer with zero setup.
+No install step is needed: the package lives under
+`crates/theway-extensions/packages/tui-docs` and the `theway-extensions`
+crate embeds it into the daemon, which provisions it into the managed layer
+`$THEWAY_DIR/extensions-managed/tui-docs` at startup. Managed packages are
+discovered automatically, granted their declared permissions
+(`workspace.read`) without a trust record, and are user read-only — every
+install method (source, `scripts/install.sh`, crates.io) ships it with zero
+setup.
 
-Manual installs (`cargo install` without the script) copy the directory into
-a project or user extension root, then record trust for `workspace.read` and
-reload the catalog:
+Manual copies still work for experimentation:
 
 ```bash
-cp -r extensions/tui-docs <cwd>/.theway/extensions/tui-docs
+cp -r crates/theway-extensions/packages/tui-docs <cwd>/.theway/extensions/tui-docs
 # in the TUI: /extension-trust → trust the project with workspace.read,
 # then /extension-reload (or restart the daemon)
 ```
@@ -40,5 +41,6 @@ cp -r extensions/tui-docs <cwd>/.theway/extensions/tui-docs
 A project or user package with the same id shadows the managed copy.
 
 Verified by `crates/theway-daemon/tests/tui_docs_extension.rs` (workspace
-pointer + installed-copy fallback), and the bundled-doc materialization by
+pointer + installed-copy fallback), the managed-layer provisioning by
+`crates/theway-extensions` unit tests, and the bundled-doc materialization by
 `crates/theway-tui/src/tui_docs.rs` unit tests.

@@ -4,6 +4,7 @@
 # vendored/ported crates are deliberately excluded.
 tests-bridge-macro
 theway-contract
+theway-extensions
 theway-mcp
 theway-llm-provider
 theway-storage

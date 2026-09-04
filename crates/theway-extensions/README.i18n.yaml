@@ -1,0 +1,4 @@
+# English-first bilingual documentation record. Update both files, then run:
+#   scripts/verify-doc-i18n.py --write crates/theway-extensions/README.md
+README.md: d82ddec7462468d9e0d5e2ddf8d582b068bb1774
+README.zh.md: 4f3ffec9b33a1315df8dcea68ce1aea8552e782f

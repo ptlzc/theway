@@ -1,0 +1,4 @@
+# English-first bilingual documentation record. Update both files, then run:
+#   scripts/verify-doc-i18n.py --write crates/theway-extensions/docs/architecture.md
+architecture.md: 7a9f9e080edd462d9964ccc0dc800f1ecc1b044e
+architecture.zh.md: c105324493809415e9e8e66b72247cf757972f2c

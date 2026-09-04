@@ -165,6 +165,13 @@ impl SessionExtensionResources {
         load_local_sources: bool,
     ) -> Self {
         let ts_extensions = if load_local_sources {
+            // Issue #91: provision the official shipped packages into the
+            // managed layer first, so the catalog below discovers them — every
+            // install method (source, scripts/install.sh, crates.io) carries
+            // the same embedded packages.
+            for warning in theway_extensions::ensure_managed_installed(base) {
+                tracing::warn!(target: "extensions", "{warning}");
+            }
             crate::ts_extensions::ExtensionRegistry::discover(cwd, base)
         } else {
             crate::ts_extensions::ExtensionRegistry::new()

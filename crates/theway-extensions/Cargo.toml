@@ -1,0 +1,16 @@
+[package]
+name = "theway-extensions"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "theway official runtime extension packages embedded as build-time data — package sources compiled into the binary and materialized into the managed extensions layer on demand."
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+serde_json = "1"
+tempfile = "3"

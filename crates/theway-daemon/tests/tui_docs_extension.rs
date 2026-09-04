@@ -4,7 +4,7 @@
 //! plugin registers one small prompt-section pointer naming where the TUI
 //! documentation lives — it never injects the document body.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use serde_json::json;
@@ -22,18 +22,16 @@ use theway_daemon::ts_extensions::{
     SessionPluginHost,
 };
 
-fn source_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join("extensions")
-        .join("tui-docs")
-}
-
 fn install_plugin(project: &Path) {
-    let target = project.join(".theway").join("extensions").join("tui-docs");
+    let package = &theway_extensions::TUI_DOCS;
+    let target = project.join(".theway").join("extensions").join(package.id);
     std::fs::create_dir_all(&target).unwrap();
-    for file in ["theway-extension.json", "index.js"] {
-        std::fs::copy(source_dir().join(file), target.join(file)).unwrap();
+    for (relative, content) in package.files {
+        let path = target.join(relative);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&path, content).unwrap();
     }
 }
 
@@ -41,15 +39,19 @@ fn trust_project(project: &Path, base: &Path) {
     let requested = vec!["workspace.read".parse::<ExtensionPermission>().unwrap()];
     let mut trust = ExtensionTrustStore::load(base);
     trust
-        .decide_project(project, requested.clone(), requested, ExtensionTrustDecision::Trusted)
+        .decide_project(
+            project,
+            requested.clone(),
+            requested,
+            ExtensionTrustDecision::Trusted,
+        )
         .unwrap();
     trust.save().unwrap();
 }
 
 async fn start_host(project: &Path, base: &Path) -> Arc<SessionPluginHost> {
     trust_project(project, base);
-    let services =
-        ExtensionBrokerServices::new(base, Arc::new(LocalExecutor::with_cwd(project)));
+    let services = ExtensionBrokerServices::new(base, Arc::new(LocalExecutor::with_cwd(project)));
     let engine = QuickJsEnginePool::with_broker_services(1, Default::default(), services);
     SessionPluginHost::start(
         PackageCatalog::discover(project, base),
@@ -104,7 +106,15 @@ async fn workspace_document_yields_pointer_not_content() {
     let marker = "TUI_DOC_CONTENT_MARKER_9f3a_never_injected";
     let doc = format!("# TUI doc\n\n{marker}\n\n{}", "x".repeat(16_000));
     std::fs::create_dir_all(project.path().join(".agents").join("overview")).unwrap();
-    std::fs::write(project.path().join(".agents").join("overview").join("tui.md"), &doc).unwrap();
+    std::fs::write(
+        project
+            .path()
+            .join(".agents")
+            .join("overview")
+            .join("tui.md"),
+        &doc,
+    )
+    .unwrap();
 
     let host = start_host(project.path(), base.path()).await;
     let appended = appended_instructions(&host).await;

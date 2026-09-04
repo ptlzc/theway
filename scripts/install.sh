@@ -15,8 +15,8 @@
 #   - 安装后停掉正在运行的旧版 thewayd (先 SIGTERM 优雅退出, 再 SIGKILL 兜底)
 #     并移除残留端口文件 — 协议随版本演进, 旧 daemon 留着会变成不可发现的僵尸
 #     (注意: 其他终端正在运行的 theway 会话会被断开)
-#   - 把内置扩展包 (extensions/tui-docs 等) 复制到 $THEWAY_DIR/extensions-managed/
-#     (managed 层: 平台随安装分发, daemon 自动发现, 免信任记录, 用户只读)
+#   - 内置扩展包无需在此复制: theway-extensions crate 把官方插件嵌入 thewayd
+#     二进制, daemon 启动时自举到 $THEWAY_DIR/extensions-managed/ (issue #91)
 #   - 同时生成 `tw` 简写 (与 theway 相同的二进制副本, Makefile 同款约定)
 #   - 安装后打印版本; 若目标 bin 目录不在 PATH 中会给出提示
 #
@@ -30,7 +30,7 @@ CARGO="${CARGO:-cargo}"
 EXE="${EXE:-}" # Windows 下可设为 .exe (与 Makefile 的 EXE 变量同约定)
 
 usage() {
-    sed -n '2,21p' "${BASH_SOURCE[0]}"
+    sed -n '2,13p' "${BASH_SOURCE[0]}"
 }
 
 INSTALL_ROOT=""
@@ -87,18 +87,6 @@ pkill -KILL -x thewayd 2>/dev/null || true
 # 移除旧全局端口文件 + 残留 per-cwd 条目 (新 daemon 启动时会写自己的).
 THEWAY_BASE="${THEWAY_DIR:-$HOME/.theway}"
 rm -f "$THEWAY_BASE"/daemon-port "$THEWAY_BASE"/daemon-port-*
-
-# ── managed 扩展包 ──────────────────────────────────────────────────────────
-# extensions/ 下随安装分发的扩展包复制到 managed 层 (issue #90):
-# $THEWAY_DIR/extensions-managed/ 由 daemon 自动发现, 免信任记录、按声明的
-# 权限授予, 用户只读; project / user 层同名包照常按优先级遮蔽.
-# 目前只分发 tui-docs (TUI 文档指针); deepseek-anchor 属参考实现, 不随装.
-echo "==> 安装 managed 扩展包到 $THEWAY_BASE/extensions-managed"
-mkdir -p "$THEWAY_BASE/extensions-managed"
-for pkg in tui-docs; do
-    rm -rf "$THEWAY_BASE/extensions-managed/$pkg"
-    cp -R "$ROOT/extensions/$pkg" "$THEWAY_BASE/extensions-managed/$pkg"
-done
 
 echo "==> 生成 tw 简写"
 cp "$BIN_DIR/theway$EXE" "$BIN_DIR/tw$EXE"

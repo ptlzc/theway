@@ -76,13 +76,6 @@ impl SessionExtensionStatePort for MemoryStatePort {
     }
 }
 
-pub fn anchor_source_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join("extensions")
-        .join(EXTENSION_ID)
-}
-
 pub fn package_dir(project: &Path) -> PathBuf {
     project
         .join(".theway")
@@ -91,14 +84,15 @@ pub fn package_dir(project: &Path) -> PathBuf {
 }
 
 pub fn install_anchor(project: &Path, config: &Value) {
+    let package = &theway_extensions::DEEPSEEK_ANCHOR;
     let target = package_dir(project);
     std::fs::create_dir_all(&target).unwrap();
-    for file in [
-        "theway-extension.json",
-        "index.js",
-        "anchor-config.schema.json",
-    ] {
-        std::fs::copy(anchor_source_dir().join(file), target.join(file)).unwrap();
+    for (relative, content) in package.files {
+        if *relative == "anchor-config.json" {
+            continue; // replaced by the caller's test config below
+        }
+        let path = target.join(relative);
+        std::fs::write(path, content).unwrap();
     }
     std::fs::write(
         target.join("anchor-config.json"),

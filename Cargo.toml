@@ -4,6 +4,7 @@ members = [
     "crates/theway-llm-provider",
     "crates/mermaid-parser",
     "crates/theway-contract",
+    "crates/theway-extensions",
     "crates/theway-core",
     "crates/theway-storage",
     "crates/theway-daemon",
@@ -19,12 +20,12 @@ members = [
 ]
 
 # Version policy: the runtime crates (theway-core, theway-daemon, theway-tui,
-# theway-transport, theway-storage, theway-contract, theway-mcp,
-# theway-llm-provider, theway-probe, tests-bridge-macro) release together and
-# inherit this version. Vendored/port crates keep independent versions and
-# licenses: `mermaid-rs-parser` (vendored upstream, MIT) and the Grok Build
-# ports (`theway-markdown`, `theway-markdown-core`, `theway-pager-render`,
-# `theway-ratatui-textarea`, Apache-2.0).
+# theway-transport, theway-storage, theway-contract, theway-extensions,
+# theway-mcp, theway-llm-provider, theway-probe, tests-bridge-macro) release
+# together and inherit this version. Vendored/port crates keep independent
+# versions and licenses: `mermaid-rs-parser` (vendored upstream, MIT) and the
+# Grok Build ports (`theway-markdown`, `theway-markdown-core`,
+# `theway-pager-render`, `theway-ratatui-textarea`, Apache-2.0).
 [workspace.package]
 version = "0.1.14"
 edition = "2024"
