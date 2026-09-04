@@ -1,5 +1,7 @@
 impl App {
-    fn status_line(&self, width: usize, _max_scroll: usize) -> Paragraph<'static> {
+    /// Status-bar label text (without the horizontal rule fill), shared by the
+    /// renderer and the mouse-selection snapshot (issue #103).
+    fn status_label(&self) -> String {
         let queue = if self.latest.queued_count == 0 {
             String::new()
         } else {
@@ -11,9 +13,13 @@ impl App {
             format!("ready{queue}")
         };
         let scrolled = if self.follow { "" } else { " ↑scrolled" };
-        let label = format!(" {status}{scrolled} ");
-        let mut text = label.clone();
-        let used = unicode_width::UnicodeWidthStr::width(label.as_str());
+        format!(" {status}{scrolled} ")
+    }
+
+    fn status_line(&self, width: usize, _max_scroll: usize) -> Paragraph<'static> {
+        let label = self.status_label();
+        let mut text = label;
+        let used = unicode_width::UnicodeWidthStr::width(text.as_str());
         if width > used {
             text.push_str(&"─".repeat(width - used));
         }

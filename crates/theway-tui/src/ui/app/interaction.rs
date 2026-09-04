@@ -8,15 +8,28 @@ pub(crate) struct MousePos {
     pub col: usize,
 }
 
-/// Mouse character selection over the feed (issue #70): the left button
-/// anchors a drag on a capped feed position; the selection spans
+/// Which rendered region a mouse selection belongs to (issue #103): the feed
+/// keeps its scrolling-aware line index, while the composer, side panel and
+/// status bar use region-local 0-based line/column coordinates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SelectRegion {
+    Feed,
+    Composer,
+    Panel,
+    Status,
+}
+
+/// Mouse character selection over a rendered region (issue #70, #103): the
+/// left button anchors a drag on a capped position; the selection spans
 /// `anchor..=current` (in either order) and is copied to the clipboard via
 /// OSC 52 on release.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct MouseSelect {
-    /// First position of the drag (capped feed line + column).
+    /// Which region the selection started in.
+    pub region: SelectRegion,
+    /// First position of the drag (capped line + column).
     pub anchor: MousePos,
-    /// Current drag position (capped feed line + column).
+    /// Current drag position (capped line + column).
     pub current: MousePos,
     /// True while the button is held down.
     pub dragging: bool,
@@ -135,30 +148,36 @@ impl App {
     /// Wheel scroll step per notch.
     const WHEEL_SCROLL_LINES: usize = 3;
 
-    /// Left-button press inside the feed pane starts a character selection at
-    /// the clicked position; a press outside the pane clears any selection.
+    /// Left-button press inside a selectable region starts a character
+    /// selection at the clicked position; a press outside clears it.
     fn mouse_down_left(&mut self, mouse: crossterm::event::MouseEvent) {
-        let Some(pos) = self.feed_pos_at(mouse.row, mouse.column) else {
+        let Some((region, pos)) = self.region_pos_at(mouse.row, mouse.column) else {
             self.clear_mouse_select();
             return;
         };
         self.mouse_select = Some(MouseSelect {
+            region,
             anchor: pos,
             current: pos,
             dragging: true,
         });
     }
 
-    /// Left-button drag extends the character selection (clamped to the feed
-    /// rows).
+    /// Left-button drag extends the character selection (clamped to the
+    /// region's rows).
     fn mouse_drag_left(&mut self, mouse: crossterm::event::MouseEvent) {
         let Some(sel) = self.mouse_select else { return };
         if !sel.dragging {
             return;
         }
-        let Some(pos) = self.feed_pos_at(mouse.row, mouse.column) else {
+        let Some((region, pos)) = self.region_pos_at(mouse.row, mouse.column) else {
             return;
         };
+        // A drag that leaves the region keeps the selection in the original
+        // region (feed rows shift; panel/composer/status are static).
+        if region != sel.region {
+            return;
+        }
         self.mouse_select = Some(MouseSelect { current: pos, ..sel });
     }
 
@@ -208,15 +227,66 @@ impl App {
         })
     }
 
-    /// Text of the current selection: rendered feed characters joined with
+    /// Map a crossterm mouse position to `(region, MousePos)` across the four
+    /// selectable regions (issue #103). The feed keeps its scrolling-aware
+    /// line index; the composer, side panel and status bar use region-local
+    /// 0-based line/column coordinates.
+    fn region_pos_at(&self, row: u16, column: u16) -> Option<(SelectRegion, MousePos)> {
+        // Feed first: it occupies the largest area and its position mapping is
+        // scrolling-aware (feed_pos_at).
+        if let Some(pos) = self.feed_pos_at(row, column) {
+            return Some((SelectRegion::Feed, pos));
+        }
+        // Panel, composer, status: static rects, region-local coordinates.
+        // The composer uses the chrome's inner text rect so columns align with
+        // the input text (the full input_area includes the border + ❯ prefix).
+        for (region, area) in [
+            (SelectRegion::Panel, self.last_panel_area),
+            (SelectRegion::Composer, self.last_input_text_area),
+            (SelectRegion::Status, self.last_status_area),
+        ] {
+            let Some(area) = area else { continue };
+            if row < area.y || row >= area.bottom() || column < area.x || column >= area.right() {
+                continue;
+            }
+            return Some((
+                region,
+                MousePos {
+                    line: (row - area.y) as usize,
+                    col: (column - area.x) as usize,
+                },
+            ));
+        }
+        None
+    }
+
+    /// Selectable text lines for a region (issue #103): the feed reuses its
+    /// render cache; the composer is the live input text; the panel and status
+    /// bar lines are snapshotted during render.
+    fn region_lines(&self, region: SelectRegion) -> Vec<Line<'static>> {
+        match region {
+            SelectRegion::Feed => self.feed_cache.lines().to_vec(),
+            SelectRegion::Composer => self
+                .input
+                .text()
+                .split('\n')
+                .map(|line| Line::raw(line.to_string()))
+                .collect(),
+            SelectRegion::Panel => self.panel_select_lines.clone(),
+            SelectRegion::Status => self.status_select_lines.clone(),
+        }
+    }
+
+    /// Text of the current selection: rendered region characters joined with
     /// `\n`, each row's trailing padding trimmed.
     fn selected_text(&self) -> String {
         let Some(sel) = self.mouse_select else {
             return String::new();
         };
         let (start, end) = sel.bounds();
+        let lines = self.region_lines(sel.region);
         crate::feed_render::selection_text(
-            self.feed_cache.lines(),
+            &lines,
             crate::feed_render::TextSelection {
                 start_line: start.line,
                 start_col: start.col,

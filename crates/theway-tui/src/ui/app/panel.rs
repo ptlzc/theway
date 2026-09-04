@@ -1,7 +1,9 @@
 impl App {
-    fn render_trigger_panel(&self, frame: &mut ratatui::Frame, area: Rect) {
+    fn render_trigger_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
         let lines =
             self.trigger_panel_lines(area.width.saturating_sub(2) as usize, area.height as usize);
+        // Issue #103: snapshot the selectable lines for mouse selection.
+        self.panel_select_lines = lines.clone();
         let panel = Paragraph::new(lines).block(
             Block::default()
                 .borders(Borders::LEFT)

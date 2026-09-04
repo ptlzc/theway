@@ -116,11 +116,13 @@ impl App {
             }
             capped
         };
-        // Clamp a live mouse selection to the current row count (the feed can
-        // shrink between frames, e.g. `/clear`) before it reaches the window
-        // renderer (issue #70). Selection stays feed-only: band rows are not
-        // selectable.
-        if let Some(sel) = self.mouse_select {
+        // Clamp a live FEED mouse selection to the current row count (the feed
+        // can shrink between frames, e.g. `/clear`) before it reaches the
+        // window renderer (issue #70). Other regions (composer/panel/status)
+        // are static per frame and need no clamp.
+        if let Some(sel) = self.mouse_select
+            && sel.region == SelectRegion::Feed
+        {
             let last = feed_total.saturating_sub(1);
             let anchor_line = sel.anchor.line.min(last);
             let current_line = sel.current.line.min(last);
@@ -154,15 +156,17 @@ impl App {
             feed_render_area,
             lines,
             display_scroll,
-            self.mouse_select.map(|sel| {
-                let (start, end) = sel.bounds();
-                crate::feed_render::TextSelection {
-                    start_line: start.line,
-                    start_col: start.col,
-                    end_line: end.line,
-                    end_col: end.col,
-                }
-            }),
+            self.mouse_select
+                .filter(|sel| sel.region == SelectRegion::Feed)
+                .map(|sel| {
+                    let (start, end) = sel.bounds();
+                    crate::feed_render::TextSelection {
+                        start_line: start.line,
+                        start_col: start.col,
+                        end_line: end.line,
+                        end_col: end.col,
+                    }
+                }),
         );
         // DAG band inside the scrollable feed: render the band into a
         // scratch buffer once, then blit the visible rows at the band's
@@ -239,7 +243,12 @@ impl App {
         // rainbow Braille spinner while busy.
         if self.busy {
             self.render_busy_status(frame, status_area);
+            // Issue #103: snapshot a selectable busy-band line (spinner glyph
+            // is replaced by a plain "working" marker for copy purposes).
+            self.status_select_lines = vec![Line::raw(" working ".to_string())];
         } else {
+            let label = self.status_label();
+            self.status_select_lines = vec![Line::raw(label.clone())];
             frame.render_widget(
                 self.status_line(status_area.width as usize, max_scroll),
                 status_area,
@@ -313,6 +322,9 @@ impl App {
             &chrome,
             &self.theme.composer,
         );
+        // Issue #103: the chrome's inner text rect (past the border + ❯
+        // prefix) is the column-accurate composer selection area.
+        self.last_input_text_area = (text_area.width > 0).then_some(text_area);
         let mut cursor_pos = None;
         if text_area.width > 0 && text_area.height > 0 {
             let input = &self.input;

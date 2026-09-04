@@ -217,3 +217,77 @@ async fn mouse_wheel_clears_selection() {
     assert!(app.mouse_select.is_none(), "wheel scroll clears selection");
 }
 
+
+// ── mouse selection across regions (issue #103) ────────────────────────────
+
+/// Press/drag over the side panel, composer and status bar selects and copies
+/// text from those regions (feed selection is covered by issue #70 tests).
+#[tokio::test]
+async fn mouse_selects_panel_composer_and_status_regions() {
+    let (mut app, _rx) = test_app().await;
+
+    // Pin geometry + snapshotted lines for the non-feed regions.
+    let panel_area = ratatui::layout::Rect::new(60, 0, 20, 10);
+    let input_area = ratatui::layout::Rect::new(0, 11, 80, 4);
+    let status_area = ratatui::layout::Rect::new(0, 9, 80, 1);
+    app.last_panel_area = Some(panel_area);
+    app.last_input_text_area = Some(input_area);
+    app.last_status_area = Some(status_area);
+    app.last_feed_area = Some(ratatui::layout::Rect::new(0, 0, 59, 8));
+    app.panel_select_lines = vec![
+        ratatui::text::Line::raw("Session".to_string()),
+        ratatui::text::Line::raw("…78dc · unnamed".to_string()),
+        ratatui::text::Line::raw("Skills".to_string()),
+    ];
+    app.status_select_lines = vec![ratatui::text::Line::raw(" ready ".to_string())];
+    app.set_input("hello world");
+
+    // Panel: press at (row 1, col 61) -> panel line 1, col 1 ("…78dc…").
+    app.handle_mouse(mouse_event(
+        crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        1,
+        61,
+    ));
+    let sel = app.mouse_select.expect("panel press starts a selection");
+    assert_eq!(sel.region, super::SelectRegion::Panel);
+    assert_eq!(sel.anchor, super::MousePos { line: 1, col: 1 });
+    app.handle_mouse(mouse_event(
+        crossterm::event::MouseEventKind::Drag(crossterm::event::MouseButton::Left),
+        2,
+        66,
+    ));
+    app.handle_mouse(mouse_event(
+        crossterm::event::MouseEventKind::Up(crossterm::event::MouseButton::Left),
+        2,
+        66,
+    ));
+    assert!(
+        app.selected_text().contains("78dc · unnamed"),
+        "panel selection text: {:?}",
+        app.selected_text()
+    );
+
+    // Status: press at (row 9, col 3) -> status col 3 ("ready" region).
+    app.handle_mouse(mouse_event(
+        crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        9,
+        3,
+    ));
+    let sel = app.mouse_select.expect("status press starts a selection");
+    assert_eq!(sel.region, super::SelectRegion::Status);
+
+    // Composer: press/drag over the input text.
+    app.handle_mouse(mouse_event(
+        crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        11,
+        0,
+    ));
+    app.handle_mouse(mouse_event(
+        crossterm::event::MouseEventKind::Drag(crossterm::event::MouseButton::Left),
+        11,
+        5,
+    ));
+    let sel = app.mouse_select.expect("composer drag keeps selection");
+    assert_eq!(sel.region, super::SelectRegion::Composer);
+    assert_eq!(app.selected_text(), "hello", "composer selection text");
+}

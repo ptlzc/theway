@@ -387,12 +387,21 @@ pub struct App {
     feed_cache: crate::feed_cache::FeedRenderCache,
     last_viewport_h: usize,
     last_feed_area: Option<Rect>,
+    /// Composer text-render rect (past the chrome border + ❯ prefix), used for
+    /// column-accurate mouse selection in the input box (issue #103).
+    last_input_text_area: Option<Rect>,
     /// Display scroll (capped rows) of the last rendered frame — maps mouse
     /// rows to feed lines (issue #70).
     last_display_scroll: usize,
     /// Live left-button row selection over the feed (issue #70); copied via
-    /// OSC 52 on release.
+    /// OSC 52 on release. Region-scoped as of issue #103.
     mouse_select: Option<MouseSelect>,
+    /// Snapshotted selectable lines for the side panel (issue #103), captured
+    /// during render so mouse selection can reuse them without re-deriving the
+    /// panel's render-width-dependent content.
+    panel_select_lines: Vec<Line<'static>>,
+    /// Snapshotted selectable line for the status bar (issue #103).
+    status_select_lines: Vec<Line<'static>>,
 
     busy: bool,
     spinner_frame: usize,
