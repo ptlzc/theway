@@ -152,3 +152,53 @@ use super::*;
         assert!(notes.is_empty(), "{notes:?}");
     }
 
+    // ── reconcile: provisioned templates (issue #96) ───────────────────
+
+    fn template(
+        name: &str,
+        description: &str,
+        content: &str,
+    ) -> theway_transport::wire::WireProvisionedTemplate {
+        theway_transport::wire::WireProvisionedTemplate {
+            name: name.to_string(),
+            description: description.to_string(),
+            content: content.to_string(),
+            file_path: format!("/tmp/{name}.md"),
+        }
+    }
+
+    #[test]
+    fn reconcile_pushes_template_catalog_when_it_differs() {
+        let current = WireDaemonConfig {
+            templates: vec![template("a", "user a", "old body")],
+            ..Default::default()
+        };
+        let desired = WireDaemonConfig {
+            templates: vec![template("a", "user a", "new body")],
+            ..Default::default()
+        };
+        let (patch, notes) = reconcile(&desired, &current, true);
+        assert!(notes.is_empty(), "{notes:?}");
+        assert_eq!(patch.templates, desired.templates);
+
+        // Equal catalogs skip the push entirely.
+        let (patch, _) = reconcile(&desired, &desired.clone(), true);
+        assert!(patch.templates.is_empty());
+        assert_eq!(patch, WireDaemonConfig::default());
+    }
+
+    #[test]
+    fn reconcile_forwards_explicit_template_clear() {
+        let current = WireDaemonConfig {
+            templates: vec![template("a", "user a", "body")],
+            ..Default::default()
+        };
+        let desired = WireDaemonConfig {
+            clear_fields: vec!["templates".into()],
+            ..Default::default()
+        };
+        let (patch, notes) = reconcile(&desired, &current, true);
+        assert_eq!(patch.clear_fields, vec!["templates".to_string()]);
+        assert!(notes.is_empty(), "{notes:?}");
+    }
+

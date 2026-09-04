@@ -171,3 +171,121 @@ max_feed_lines = 0
         assert_eq!(payload.trigger_poll_secs, None);
     }
 
+    // ── payload assembly: provisioned templates (issue #96) ────────────
+
+    // `assemble_config_from` resolves the user template root through
+    // `theway_transport::config::base_dir()` ($THEWAY_DIR), so the template
+    // wiring tests set/restore THEWAY_DIR. The lock mirrors theway-daemon's
+    // process-wide `test_env::ENV_LOCK` pattern: every env mutation in this
+    // test binary is serialized so a racing test never observes a
+    // half-swapped env.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct EnvGuard {
+        key: &'static str,
+        original: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &Path) -> Self {
+            let original = std::env::var_os(key);
+            // SAFETY: ENV_LOCK serializes every env mutation in this test
+            // process; the daemon uses the same guard pattern for THEWAY_DIR.
+            unsafe { std::env::set_var(key, value) };
+            Self { key, original }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match self.original.take() {
+                Some(value) => unsafe { std::env::set_var(self.key, value) },
+                None => unsafe { std::env::remove_var(self.key) },
+            }
+        }
+    }
+
+    fn write(path: &Path, content: &str) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, content).unwrap();
+    }
+
+    #[test]
+    fn assemble_scans_user_and_project_templates() {
+        let _serial = ENV_LOCK.lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().join("base");
+        let project = tmp.path().join("project");
+
+        write(
+            &base.join("templates/a.md"),
+            "---\nname: a\ndescription: user a\n---\nuser body",
+        );
+        write(
+            &base.join("templates/shared.md"),
+            "---\nname: shared\ndescription: user shared\n---\nuser shared body",
+        );
+        write(
+            &project.join(".theway/templates/b.md"),
+            "---\nname: b\ndescription: project b\n---\nproject body",
+        );
+        write(
+            &project.join(".theway/templates/shared.md"),
+            "---\nname: shared\ndescription: project shared\n---\nproject shared body",
+        );
+
+        let _theway = EnvGuard::set("THEWAY_DIR", &base);
+        let cli = cli_from(&["theway"]);
+        let (payload, diagnostics) =
+            assemble_config_from(&cli, None, "config.toml", &project);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+        let templates = &payload.templates;
+        assert_eq!(templates.len(), 3, "{templates:?}");
+        let by_name = |name: &str| {
+            templates
+                .iter()
+                .find(|template| template.name == name)
+                .unwrap()
+        };
+
+        let a = by_name("a");
+        assert_eq!(a.description, "user a");
+        assert_eq!(a.content, "user body");
+        assert!(a.file_path.ends_with("templates/a.md"), "{}", a.file_path);
+
+        let b = by_name("b");
+        assert_eq!(b.description, "project b");
+        assert_eq!(b.content, "project body");
+        assert!(
+            b.file_path.contains(".theway/templates/b.md"),
+            "{}",
+            b.file_path
+        );
+
+        // Project layer replaces a same-named user entry (project wins).
+        let shared = by_name("shared");
+        assert_eq!(shared.description, "project shared");
+        assert_eq!(shared.content, "project shared body");
+        assert!(
+            shared.file_path.contains(".theway/templates/shared.md"),
+            "{}",
+            shared.file_path
+        );
+    }
+
+    #[test]
+    fn assemble_template_scan_is_empty_when_roots_missing() {
+        let _serial = ENV_LOCK.lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().join("base");
+        let project = tmp.path().join("project");
+
+        let _theway = EnvGuard::set("THEWAY_DIR", &base);
+        let cli = cli_from(&["theway"]);
+        let (payload, diagnostics) =
+            assemble_config_from(&cli, None, "config.toml", &project);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert!(payload.templates.is_empty(), "{:?}", payload.templates);
+    }
+

@@ -191,6 +191,12 @@ pub(crate) fn assemble_config_from(
         &cli.skills_dir,
     );
 
+    // Issue #96: the controller owns local template discovery too, mirroring
+    // the skill scan — the daemon never reads template files in a
+    // controller-provisioned session.
+    payload.templates =
+        crate::template_scan::scan_templates(cwd, &theway_transport::config::base_dir());
+
     // Trigger poll interval: CLI wins over `[triggers] poll_interval_secs`.
     payload.trigger_poll_secs = match cli.trigger_poll_secs {
         Some(secs) => Some(secs),
@@ -310,6 +316,14 @@ pub(crate) fn reconcile(
         patch.skills = desired.skills.clone();
     } else if desired.clears("skills") && !current.skills.is_empty() {
         clear_field(&mut patch, "skills");
+    }
+
+    // Provisioned template catalog (issue #96): pushed when the controller's
+    // scan differs from what the daemon holds.
+    if !desired.templates.is_empty() && desired.templates != current.templates {
+        patch.templates = desired.templates.clone();
+    } else if desired.clears("templates") && !current.templates.is_empty() {
+        clear_field(&mut patch, "templates");
     }
 
     if let Some(secs) = desired.trigger_poll_secs {
