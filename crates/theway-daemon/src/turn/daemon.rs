@@ -528,14 +528,13 @@ fn wire_preview(text: &str) -> String {
 }
 
 fn prompt_display(text: &str, image_count: usize) -> String {
+    // The feed is the transcript: display the user message in full (issue
+    // #93). The TUI wraps multiline text and enforces its own scrollback
+    // cap, so a display-side truncation only hid content silently.
     if image_count == 0 {
-        text.chars().take(60).collect()
+        text.to_string()
     } else {
-        format!(
-            "{} [{} image(s)]",
-            text.chars().take(48).collect::<String>(),
-            image_count
-        )
+        format!("{text} [{image_count} image(s)]")
     }
 }
 

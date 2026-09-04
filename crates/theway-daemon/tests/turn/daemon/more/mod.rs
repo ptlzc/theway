@@ -247,16 +247,23 @@ fn wire_preview_caps_at_120_chars() {
 }
 
 #[test]
-fn prompt_display_truncates_and_counts_images() {
+fn prompt_display_keeps_full_text_and_counts_images() {
     assert_eq!(prompt_display("hi", 0), "hi");
 
     let long = "y".repeat(100);
-    assert_eq!(prompt_display(&long, 0).chars().count(), 60);
+    assert_eq!(prompt_display(&long, 0), long, "full text, no truncation");
+    let multiline = "line one\nline two\nline three";
+    assert_eq!(
+        prompt_display(multiline, 0),
+        multiline,
+        "multiline messages must reach the feed intact"
+    );
 
     assert_eq!(prompt_display("hello", 2), "hello [2 image(s)]");
     assert_eq!(
-        prompt_display(&long, 1).chars().count(),
-        48 + " [1 image(s)]".len()
+        prompt_display(&long, 1),
+        format!("{long} [1 image(s)]"),
+        "the image suffix appends after the full text"
     );
 }
 
