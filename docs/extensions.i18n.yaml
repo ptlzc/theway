@@ -1,4 +1,4 @@
 # English-first bilingual documentation record. Update both files, then run:
 #   scripts/verify-doc-i18n.py --write docs/extensions.md
-extensions.md: 79e46666d6f5160b6db59508fa157ba4bd3bdb4f
-extensions.zh.md: f71e02f4143c87073386ef67ccbb3e8434c6ee09
+extensions.md: 2e9c6719df9c84f55cd4b9860530f407ca434b56
+extensions.zh.md: 90daa8568d594ce9091df49c1ef0ea1f474f5a4b

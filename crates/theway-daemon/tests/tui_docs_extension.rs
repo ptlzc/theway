@@ -105,22 +105,14 @@ async fn workspace_document_yields_pointer_not_content() {
     let base = tempdir().unwrap();
     install_plugin(project.path());
     let marker = "TUI_DOC_CONTENT_MARKER_9f3a_never_injected";
-    let doc = format!("# TUI doc\n\n{marker}\n\n{}", "x".repeat(16_000));
-    std::fs::create_dir_all(project.path().join(".agents").join("overview")).unwrap();
-    std::fs::write(
-        project
-            .path()
-            .join(".agents")
-            .join("overview")
-            .join("tui.md"),
-        &doc,
-    )
-    .unwrap();
+    let doc = format!("# theway config\n\n{marker}\n\n{}", "x".repeat(16_000));
+    std::fs::create_dir_all(project.path().join("docs")).unwrap();
+    std::fs::write(project.path().join("docs").join("tui.md"), &doc).unwrap();
 
     let host = start_host(project.path(), base.path()).await;
     let appended = appended_instructions(&host).await;
     assert!(
-        appended.contains(".agents/overview/tui.md"),
+        appended.contains("docs/tui.md"),
         "pointer must name the workspace copy: {appended}"
     );
     assert!(

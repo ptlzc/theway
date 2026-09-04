@@ -1,15 +1,15 @@
 # tui-docs
 
-Runtime extension package that tells the model where the theway TUI
-documentation lives, through one small prompt-section pointer appended to the
-request's `systemInstructions`. It never injects the document body, so the
-per-request cost is a single short sentence; the model reads the file with the
-read tool only when it actually needs TUI details.
+Runtime extension package that tells the model where the theway
+configuration guide lives, through one small prompt-section pointer appended
+to the request's `systemInstructions`. It never injects the document body, so
+the per-request cost is a single short sentence; the model reads the file
+with the read tool only when it actually needs theway configuration details.
 
 Pointer resolution at package load:
 
-1. A workspace copy, when readable: `.agents/overview/tui.md`, then
-   `docs/tui.md` (checked via `api.workspace.read`).
+1. A workspace copy of the guide, when readable: `docs/theway-config.md`,
+   `theway-config.md`, then `docs/tui.md` (checked via `api.workspace.read`).
 2. Otherwise the installed copy: `$THEWAY_DIR/docs/tui.md` (default
    `~/.theway/docs/tui.md`), which the `theway` client bundles in its binary
    (theway-tui's `docs/theway-config.md`, the LLM-facing configuration guide)

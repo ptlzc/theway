@@ -410,7 +410,7 @@ The same normalized bootstrap and promotion behavior is exercised through OpenAI
 
 ## TUI docs reference package
 
-`tui-docs` registers one small prompt-section pointer telling the model where the theway configuration guide lives — it never injects the document body. It prefers a workspace copy (`.agents/overview/tui.md`, then `docs/tui.md`, checked via `api.workspace.read`) and otherwise points at `$THEWAY_DIR/docs/tui.md` (default `~/.theway/docs/tui.md`), the LLM-facing config guide bundled into the `theway` binary (theway-tui's `docs/theway-config.md`) and materialized on startup by the client. The package lives under `crates/theway-extensions/packages/tui-docs`; the `theway-extensions` crate embeds it into the daemon, which provisions it into the managed layer (`$THEWAY_DIR/extensions-managed/`, no trust record needed) at startup, so every install method ships it. Manual copies into a project or user extension root keep working and shadow the managed copy.
+`tui-docs` registers one small prompt-section pointer telling the model where the theway configuration guide lives — it never injects the document body. It prefers a workspace copy of the guide (`docs/theway-config.md`, `theway-config.md`, then `docs/tui.md`, checked via `api.workspace.read`) and otherwise points at `$THEWAY_DIR/docs/tui.md` (default `~/.theway/docs/tui.md`), the LLM-facing config guide bundled into the `theway` binary (theway-tui's `docs/theway-config.md`) and materialized on startup by the client. The package lives under `crates/theway-extensions/packages/tui-docs` (see Package layout and discovery for how it ships); manual copies into a project or user extension root keep working and shadow the managed copy.
 
 ## Compaction compatibility format
 

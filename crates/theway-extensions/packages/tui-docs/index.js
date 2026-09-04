@@ -1,13 +1,17 @@
 import { defineExtension } from "@theway-ai/plugin-sdk";
 
 // tui-docs: registers one small prompt-section pointer telling the model
-// where the theway TUI documentation lives — it never injects the document
-// body. A workspace copy wins (checked through api.workspace.read);
-// otherwise the pointer names the copy bundled with the `theway` binary and
-// materialized to $THEWAY_DIR/docs/tui.md (default ~/.theway/docs/tui.md)
-// by the client on startup.
+// where the theway configuration guide lives — it never injects the
+// document body. A workspace copy of the guide wins (checked through
+// api.workspace.read); otherwise the pointer names the copy bundled with
+// the `theway` binary and materialized to $THEWAY_DIR/docs/tui.md
+// (default ~/.theway/docs/tui.md) by the client on startup.
 
-const WORKSPACE_CANDIDATES = [".agents/overview/tui.md", "docs/tui.md"];
+const WORKSPACE_CANDIDATES = [
+  "docs/theway-config.md",
+  "theway-config.md",
+  "docs/tui.md",
+];
 const INSTALLED_DOC = "$THEWAY_DIR/docs/tui.md (default ~/.theway/docs/tui.md)";
 
 export default defineExtension(async (api) => {

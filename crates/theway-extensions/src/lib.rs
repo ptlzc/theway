@@ -29,7 +29,6 @@ pub const TUI_DOCS: EmbeddedPackage = EmbeddedPackage {
             include_str!("../packages/tui-docs/theway-extension.json"),
         ),
         ("index.js", include_str!("../packages/tui-docs/index.js")),
-        ("README.md", include_str!("../packages/tui-docs/README.md")),
     ],
 };
 

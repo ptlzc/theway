@@ -410,7 +410,7 @@ Catalog 状态和诊断通过 gRPC、HTTP JSON-RPC、SSE/WebSocket snapshot、ty
 
 ## TUI docs 参考 package
 
-`tui-docs` 注册一个简短的 prompt-section 指针，告诉模型 theway 配置指南在哪里——绝不注入文档正文。优先指向工作区副本（`.agents/overview/tui.md`，其次 `docs/tui.md`，通过 `api.workspace.read` 探测）；否则指向 `$THEWAY_DIR/docs/tui.md`（默认 `~/.theway/docs/tui.md`）——这份面向 LLM 的配置指南打包在 `theway` 二进制内（theway-tui 的 `docs/theway-config.md`），客户端启动时落盘。该 package 位于 `crates/theway-extensions/packages/tui-docs`；`theway-extensions` crate 把它嵌入 daemon，daemon 启动时将其装配到 managed 层（`$THEWAY_DIR/extensions-managed/`，免信任记录），因此任何安装方式都自带该插件。手动复制到 project 或 user extension root 依然可用，并遮蔽 managed 副本。
+`tui-docs` 注册一个简短的 prompt-section 指针，告诉模型 theway 配置指南在哪里——绝不注入文档正文。优先指向工作区里的配置指南副本（`docs/theway-config.md`、`theway-config.md`，其次 `docs/tui.md`，通过 `api.workspace.read` 探测）；否则指向 `$THEWAY_DIR/docs/tui.md`（默认 `~/.theway/docs/tui.md`）——这份面向 LLM 的配置指南打包在 `theway` 二进制内（theway-tui 的 `docs/theway-config.md`），客户端启动时落盘。该 package 位于 `crates/theway-extensions/packages/tui-docs`（发行方式见 Package layout and discovery）；手动复制到 project 或 user extension root 依然可用，并遮蔽 managed 副本。
 
 ## 压缩兼容格式
 
