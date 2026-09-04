@@ -516,7 +516,12 @@ mod tests {
             Some(std::path::Path::new("/tmp/fake-home"))
         );
         assert_eq!(cli.skills_dir.len(), 2);
-        let (config, _) = crate::config_payload::assemble_config_from(&cli, None, "config.toml");
+        let (config, _) = crate::config_payload::assemble_config_from(
+            &cli,
+            None,
+            "config.toml",
+            std::path::Path::new("/tmp/fake-cwd"),
+        );
         assert_eq!(
             daemon_launch_args(&cli, &config)
                 .iter()
@@ -578,8 +583,12 @@ poll_interval_secs = 45
 ";
         // No CLI config flags at all — every config launch arg is file-derived.
         let cli = Cli::parse_from(["theway"]);
-        let (config, _) =
-            crate::config_payload::assemble_config_from(&cli, Some(toml), "config.toml");
+        let (config, _) = crate::config_payload::assemble_config_from(
+            &cli,
+            Some(toml),
+            "config.toml",
+            std::path::Path::new("/tmp/fake-cwd"),
+        );
         assert_eq!(
             daemon_launch_args(&cli, &config)
                 .iter()
@@ -609,8 +618,12 @@ poll_interval_secs = 45
             "--trigger-poll-secs",
             "15",
         ]);
-        let (config, _) =
-            crate::config_payload::assemble_config_from(&cli, Some(toml), "config.toml");
+        let (config, _) = crate::config_payload::assemble_config_from(
+            &cli,
+            Some(toml),
+            "config.toml",
+            std::path::Path::new("/tmp/fake-cwd"),
+        );
         assert_eq!(
             daemon_launch_args(&cli, &config)
                 .iter()
@@ -630,8 +643,12 @@ poll_interval_secs = 45
 
         // A CLI `--thinking` flag beats the file's persisted level.
         let cli = Cli::parse_from(["theway", "--thinking", "minimal"]);
-        let (config, _) =
-            crate::config_payload::assemble_config_from(&cli, Some(toml), "config.toml");
+        let (config, _) = crate::config_payload::assemble_config_from(
+            &cli,
+            Some(toml),
+            "config.toml",
+            std::path::Path::new("/tmp/fake-cwd"),
+        );
         assert_eq!(
             daemon_launch_args(&cli, &config)
                 .iter()

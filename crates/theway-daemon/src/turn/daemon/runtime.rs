@@ -55,6 +55,23 @@ impl TurnHost {
             thinking: startup_thinking,
             thinking_level: startup_thinking_level,
             builtin_skills: config.startup.builtin_skills.clone(),
+            skills: config
+                .provisioned_skills
+                .read()
+                .unwrap()
+                .iter()
+                .map(|skill| theway_transport::wire::WireProvisionedSkill {
+                    name: skill.name.clone(),
+                    description: skill.description.clone(),
+                    content: skill.content.clone(),
+                    file_path: skill.file_path.clone(),
+                    source: match skill.source {
+                        theway_core::SkillSource::Project => "project".to_string(),
+                        _ => "user".to_string(),
+                    },
+                    disable_model_invocation: skill.disable_model_invocation,
+                })
+                .collect(),
             skills_dirs: config
                 .paths
                 .current_extra_skill_dirs()
@@ -124,6 +141,7 @@ impl TurnHost {
                 paths: config.paths,
                 path_context,
                 config: daemon_config,
+                provisioned_skills: config.provisioned_skills,
                 tool_ops,
                 model_catalog: model_catalog(),
                 feed_history_limit: config.startup.tui_max_feed_lines,

@@ -794,53 +794,42 @@ export default defineExtension((api) => {
     assert_eq!(engine.instance_count().await, 1);
     runtime.harness.shutdown_runtime_extensions().await;
     assert_eq!(engine.instance_count().await, 0);
-    drop(state);
 }
 mod context_build; mod runtime_tool_isolation; mod runtime_transcript_isolation;
 
 #[tokio::test]
-async fn controller_mode_still_loads_local_skills_and_templates() {
+async fn controller_mode_reload_closure_keeps_provisioned_skills() {
     let base = tempfile::tempdir().unwrap();
-    // A user-layer skill under the home `.agents/skills` root.
-    let skill_dir = base.path().join(".agents").join("skills").join("controller-skill");
-    std::fs::create_dir_all(&skill_dir).unwrap();
-    std::fs::write(
-        skill_dir.join("SKILL.md"),
-        "---\nname: controller-skill\ndescription: loads in controller mode\n---\nbody\n",
-    )
-    .unwrap();
-
     let paths = crate::DaemonPaths {
         base: base.path().to_path_buf(),
         home: base.path().to_path_buf(),
         work_dir: base.path().to_path_buf(),
         extra_skill_dirs: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
     };
-    // `false` = controller-provisioned (the default TUI flow). Skills are
-    // plain local file catalogs and must still load (issue #95).
+    // `false` = controller-provisioned: no local disk scan; the catalog
+    // comes from the provisioned slot (issue #95).
     let resources = SessionProjectResources::load(&paths, &[], &[], false)
         .await
         .unwrap();
     assert!(
-        resources
-            .skills
-            .iter()
-            .any(|skill| skill.name == "controller-skill"),
-        "controller mode must load skills from ~/.agents/skills: {:?}",
-        resources
-            .skills
-            .iter()
-            .map(|skill| &skill.name)
-            .collect::<Vec<_>>()
+        resources.skills.is_empty(),
+        "controller mode must not scan skill files on disk"
     );
 
-    // The reload closure keeps the same behavior.
+    *resources.provisioned_skills.write().unwrap() = vec![theway_core::Skill {
+        name: "provisioned-skill".into(),
+        description: "from the controller".into(),
+        file_path: "/tmp/provisioned-skill/SKILL.md".into(),
+        content: "body".into(),
+        disable_model_invocation: false,
+        source: theway_core::SkillSource::User,
+    }];
     let output = (resources.reload_skills_fn)().await;
     assert!(
         output
             .skills
             .iter()
-            .any(|skill| skill.name == "controller-skill"),
-        "reload must keep loading local skills in controller mode"
+            .any(|skill| skill.name == "provisioned-skill"),
+        "reload must carry the provisioned slot forward instead of wiping it"
     );
 }

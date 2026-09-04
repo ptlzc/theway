@@ -135,6 +135,12 @@ pub struct WireDaemonConfig {
     /// Enabled builtin skill names.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub builtin_skills: Vec<String>,
+    /// Controller-scanned skills (issue #95): the TUI owns local skill
+    /// discovery and provisions the daemon with the scanned catalog —
+    /// name/description/body included, so the daemon never reads skill files
+    /// in a controller-provisioned session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills: Vec<WireProvisionedSkill>,
     /// Extra skill search directories (mirrors `WirePathContext::skills_dirs`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skills_dirs: Vec<String>,
@@ -160,14 +166,34 @@ pub struct WireDaemonConfig {
     pub clear_fields: Vec<String>,
 }
 
+/// One controller-scanned skill (issue #95): the TUI walks the local skill
+/// roots and provisions the daemon with the full catalog so a
+/// controller-provisioned session never needs the daemon to read skill files.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct WireProvisionedSkill {
+    /// Canonical skill name (matches the daemon-side `Skill.name` rules).
+    pub name: String,
+    /// Free-form description shown in the catalog / system prompt.
+    pub description: String,
+    /// Markdown body without the YAML frontmatter.
+    pub content: String,
+    /// Absolute path to the source `SKILL.md` (or root-level `.md`).
+    pub file_path: String,
+    /// Discovery layer: `"user"` or `"project"` (mirrors `SkillSource`).
+    pub source: String,
+    /// When true the model must not auto-invoke this skill.
+    pub disable_model_invocation: bool,
+}
+
 impl WireDaemonConfig {
-    pub const FIELDS: [&'static str; 11] = [
+    pub const FIELDS: [&'static str; 12] = [
         "provider",
         "model",
         "base_url",
         "thinking",
         "thinking_level",
         "builtin_skills",
+        "skills",
         "skills_dirs",
         "trigger_poll_secs",
         "tui_max_feed_lines",
@@ -200,6 +226,7 @@ impl WireDaemonConfig {
                 "thinking" => self.thinking.take().is_some(),
                 "thinking_level" => self.thinking_level.take().is_some(),
                 "builtin_skills" => !std::mem::take(&mut self.builtin_skills).is_empty(),
+                "skills" => !std::mem::take(&mut self.skills).is_empty(),
                 "skills_dirs" => !std::mem::take(&mut self.skills_dirs).is_empty(),
                 "trigger_poll_secs" => self.trigger_poll_secs.take().is_some(),
                 "tui_max_feed_lines" => self.tui_max_feed_lines.take().is_some(),
@@ -231,6 +258,10 @@ impl WireDaemonConfig {
         }
         if !patch.builtin_skills.is_empty() {
             self.builtin_skills = patch.builtin_skills.clone();
+            touched += 1;
+        }
+        if !patch.skills.is_empty() {
+            self.skills = patch.skills.clone();
             touched += 1;
         }
         if !patch.skills_dirs.is_empty() {

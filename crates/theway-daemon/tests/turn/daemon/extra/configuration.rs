@@ -108,3 +108,100 @@ async fn handle_configure_clear_and_set_follow_patch_precedence() {
     assert_eq!(view.tui_max_feed_lines, None);
     assert_eq!(host.runtime.feed_history_limit, None);
 }
+
+#[tokio::test]
+async fn handle_configure_provisions_skill_catalog_and_reload_keeps_it() {
+    let mut fixture = HostFixture::new().await;
+    let host = fixture.host();
+
+    let mut patch = WireDaemonConfig::default();
+    patch.skills = vec![
+        theway_transport::wire::WireProvisionedSkill {
+            name: "provisioned-skill".into(),
+            description: "provisioned by the controller".into(),
+            content: "body".into(),
+            file_path: "/tmp/provisioned-skill/SKILL.md".into(),
+            source: "user".into(),
+            disable_model_invocation: false,
+        },
+        theway_transport::wire::WireProvisionedSkill {
+            name: "project-skill".into(),
+            description: "project layer".into(),
+            content: "body".into(),
+            file_path: "/tmp/project-skill/SKILL.md".into(),
+            source: "project".into(),
+            disable_model_invocation: false,
+        },
+    ];
+    host.handle_configure(patch.clone(), &mut TurnState::default())
+        .await;
+
+    let skills = host.session.kernel.harness().skills();
+    let provisioned = skills
+        .iter()
+        .find(|skill| skill.name == "provisioned-skill")
+        .expect("provisioned skill must land in the harness catalog");
+    assert_eq!(provisioned.content, "body");
+    assert!(matches!(provisioned.source, theway_core::SkillSource::User));
+    let project = skills
+        .iter()
+        .find(|skill| skill.name == "project-skill")
+        .expect("project skill must land in the harness catalog");
+    assert!(matches!(
+        project.source,
+        theway_core::SkillSource::Project
+    ));
+
+    // The shared slot mirrors the catalog and the config view echoes it.
+    assert_eq!(host.runtime.provisioned_skills.read().unwrap().len(), 2);
+    assert_eq!(host.runtime.config.read().unwrap().skills, patch.skills);
+}
+
+#[tokio::test]
+async fn handle_configure_clear_skills_empties_the_catalog() {
+    let mut fixture = HostFixture::new().await;
+    let host = fixture.host();
+
+    let mut patch = WireDaemonConfig::default();
+    patch.skills = vec![theway_transport::wire::WireProvisionedSkill {
+        name: "ephemeral-skill".into(),
+        description: "temp".into(),
+        content: "body".into(),
+        file_path: "/tmp/ephemeral/SKILL.md".into(),
+        source: "user".into(),
+        disable_model_invocation: false,
+    }];
+    host.handle_configure(patch, &mut TurnState::default()).await;
+    assert!(
+        host.session
+            .kernel
+            .harness()
+            .skills()
+            .iter()
+            .any(|skill| skill.name == "ephemeral-skill")
+    );
+
+    host.handle_configure(
+        WireDaemonConfig {
+            clear_fields: vec!["skills".into()],
+            ..Default::default()
+        },
+        &mut TurnState::default(),
+    )
+    .await;
+
+    assert!(
+        host.session
+            .kernel
+            .harness()
+            .skills()
+            .iter()
+            .all(|skill| skill.name != "ephemeral-skill"),
+        "cleared skills must leave the catalog"
+    );
+    assert!(host.runtime.provisioned_skills.read().unwrap().is_empty());
+    assert!(
+        host.runtime.config.read().unwrap().skills.is_empty(),
+        "the config view reflects the cleared catalog"
+    );
+}

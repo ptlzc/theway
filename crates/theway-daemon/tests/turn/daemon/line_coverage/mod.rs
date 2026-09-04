@@ -84,6 +84,7 @@ async fn host_with_input(input: Vec<InputModality>) -> (TurnHost, TempDir, TempD
         registry: Registry::with_daemon_commands(),
         cwd: work_dir,
         paths,
+        provisioned_skills: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
         session_id: "sess-line-coverage".into(),
         log_path: None,
         tool_count: 0,

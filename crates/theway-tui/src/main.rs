@@ -26,6 +26,7 @@ mod local_commands;
 mod local_tool_ops;
 mod model_picker;
 mod resume_picker;
+mod skill_scan;
 mod startup;
 mod tui_docs;
 pub mod ui;

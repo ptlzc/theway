@@ -114,6 +114,7 @@ async fn host_with_registry(input: Vec<InputModality>, registry: Registry) -> (T
         registry,
         cwd: work_dir,
         paths,
+        provisioned_skills: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
         session_id: "sess-coverage".into(),
         log_path: None,
         tool_count: 0,

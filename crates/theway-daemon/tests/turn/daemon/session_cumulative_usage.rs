@@ -125,6 +125,7 @@ fn daemon_config(
         registry: Registry::with_daemon_commands(),
         cwd: work_dir,
         paths,
+        provisioned_skills: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
         session_id: session_id.to_string(),
         log_path: None,
         tool_count: 0,

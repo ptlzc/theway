@@ -167,6 +167,7 @@ pub fn daemon_config_from_proto(config: &wire::DaemonConfig) -> crate::wire::Wir
         thinking: config.thinking,
         thinking_level: config.thinking_level.clone(),
         builtin_skills: config.builtin_skills.clone(),
+        skills: Vec::new(),
         skills_dirs: config.skills_dirs.clone(),
         trigger_poll_secs: config.trigger_poll_secs.map(u64::from),
         tui_max_feed_lines: config.tui_max_feed_lines.map(u64::from),

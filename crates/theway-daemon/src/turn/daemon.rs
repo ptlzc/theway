@@ -103,6 +103,10 @@ pub(crate) struct DaemonConfig {
     /// Startup-fixed home/base/work directory plus dynamically replaceable
     /// extra skill directories.
     pub(crate) paths: DaemonPaths,
+    /// Controller-provisioned skill catalog slot (issue #95): the settings
+    /// applier writes it alongside the harness catalog so `/reload` /
+    /// `SetSkillDirs` keep the provisioned skills instead of wiping them.
+    pub(crate) provisioned_skills: Arc<std::sync::RwLock<Vec<theway_core::Skill>>>,
     pub(crate) session_id: String,
     pub(crate) log_path: Option<PathBuf>,
     pub(crate) tool_count: usize,
@@ -315,6 +319,9 @@ struct RuntimeConfiguration {
     /// when `Configure` commands land. Cloned into [`TransportEndpoints`] so
     /// the transport servers and this host observe one authoritative value.
     config: Arc<std::sync::RwLock<WireDaemonConfig>>,
+    /// Controller-provisioned skill catalog slot (issue #95); see
+    /// [`crate::turn::DaemonConfig::provisioned_skills`].
+    provisioned_skills: Arc<std::sync::RwLock<Vec<theway_core::Skill>>>,
     /// Controller tool endpoint forwarder (issue #76): routes `ToolOps`
     /// calls to the connected controller's `ToolService` server.
     tool_ops: Arc<dyn ToolOps>,

@@ -26,7 +26,7 @@ fn persist_model_default_missing_config_creates_startup_default() {
     assert_eq!(config::parse_model_default(&text).unwrap(), Some(default));
     let cli = cli_from(&["theway"]);
     let (payload, diagnostics) =
-        assemble_config_from(&cli, Some(&text), &path.display().to_string());
+        assemble_config_from(&cli, Some(&text), &path.display().to_string(), std::path::Path::new("/tmp/fake-cwd"));
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     assert_eq!(payload.provider.as_deref(), Some("anthropic"));
     assert_eq!(payload.model.as_deref(), Some("claude-x"));

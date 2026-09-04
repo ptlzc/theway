@@ -23,7 +23,7 @@ use super::*;
             "--trigger-poll-secs",
             "30",
         ]);
-        let (payload, diagnostics) = assemble_config_from(&cli, None, "config.toml");
+        let (payload, diagnostics) = assemble_config_from(&cli, None, "config.toml", std::path::Path::new("/tmp/fake-cwd"));
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert_eq!(payload.provider.as_deref(), Some("anthropic"));
         assert_eq!(payload.model.as_deref(), Some("claude-x"));
@@ -44,11 +44,11 @@ use super::*;
     #[test]
     fn thinking_off_is_absent_from_the_payload() {
         let cli = cli_from(&["theway"]);
-        let (payload, _) = assemble_config_from(&cli, None, "config.toml");
+        let (payload, _) = assemble_config_from(&cli, None, "config.toml", std::path::Path::new("/tmp/fake-cwd"));
         assert_eq!(payload.thinking, None);
 
         let cli = cli_from(&["theway", "--thinking", "off"]);
-        let (payload, _) = assemble_config_from(&cli, None, "config.toml");
+        let (payload, _) = assemble_config_from(&cli, None, "config.toml", std::path::Path::new("/tmp/fake-cwd"));
         assert_eq!(payload.thinking, None);
     }
 
@@ -57,7 +57,7 @@ use super::*;
     #[test]
     fn file_settings_apply_when_no_cli_flag_given() {
         let cli = cli_from(&["theway"]);
-        let (payload, diagnostics) = assemble_config_from(&cli, Some(FULL_TOML), "config.toml");
+        let (payload, diagnostics) = assemble_config_from(&cli, Some(FULL_TOML), "config.toml", std::path::Path::new("/tmp/fake-cwd"));
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert_eq!(payload.provider.as_deref(), Some("acme"));
         assert_eq!(payload.model.as_deref(), Some("warp-9"));
@@ -75,12 +75,12 @@ use super::*;
     #[test]
     fn cli_thinking_flag_wins_over_file_thinking_default() {
         let cli = cli_from(&["theway", "--thinking", "minimal"]);
-        let (payload, _) = assemble_config_from(&cli, Some(FULL_TOML), "config.toml");
+        let (payload, _) = assemble_config_from(&cli, Some(FULL_TOML), "config.toml", std::path::Path::new("/tmp/fake-cwd"));
         assert_eq!(payload.thinking_level.as_deref(), Some("minimal"));
         assert_eq!(payload.thinking, Some(true));
 
         let cli = cli_from(&["theway", "--thinking", "off"]);
-        let (payload, _) = assemble_config_from(&cli, Some(FULL_TOML), "config.toml");
+        let (payload, _) = assemble_config_from(&cli, Some(FULL_TOML), "config.toml", std::path::Path::new("/tmp/fake-cwd"));
         // Explicit CLI off keeps the file's last-pick level out of the payload.
         assert_eq!(payload.thinking_level, None);
         assert_eq!(payload.thinking, None);
@@ -97,7 +97,7 @@ use super::*;
             "--trigger-poll-secs",
             "15",
         ]);
-        let (payload, _) = assemble_config_from(&cli, Some(FULL_TOML), "config.toml");
+        let (payload, _) = assemble_config_from(&cli, Some(FULL_TOML), "config.toml", std::path::Path::new("/tmp/fake-cwd"));
         assert_eq!(payload.provider.as_deref(), Some("openai"));
         assert_eq!(payload.model.as_deref(), Some("gpt-x"));
         assert_eq!(payload.trigger_poll_secs, Some(15));
@@ -111,7 +111,7 @@ use super::*;
         // flag is given — a lone `--provider` keeps env auto-detection for
         // the model half instead of mixing sources.
         let cli = cli_from(&["theway", "--provider", "openai"]);
-        let (payload, _) = assemble_config_from(&cli, Some(FULL_TOML), "config.toml");
+        let (payload, _) = assemble_config_from(&cli, Some(FULL_TOML), "config.toml", std::path::Path::new("/tmp/fake-cwd"));
         assert_eq!(payload.provider.as_deref(), Some("openai"));
         assert_eq!(payload.model, None);
     }
@@ -125,7 +125,7 @@ use super::*;
             "--builtin-skill",
             "debugging",
         ]);
-        let (payload, _) = assemble_config_from(&cli, Some(FULL_TOML), "config.toml");
+        let (payload, _) = assemble_config_from(&cli, Some(FULL_TOML), "config.toml", std::path::Path::new("/tmp/fake-cwd"));
         // CLI order first; file entries already on the CLI are not repeated.
         assert_eq!(
             payload.builtin_skills,
@@ -146,7 +146,7 @@ poll_interval_secs = 0
 max_feed_lines = 0
 ";
         let cli = cli_from(&["theway"]);
-        let (payload, diagnostics) = assemble_config_from(&cli, Some(toml), "cfg.toml");
+        let (payload, diagnostics) = assemble_config_from(&cli, Some(toml), "cfg.toml", std::path::Path::new("/tmp/fake-cwd"));
         assert_eq!(payload.provider, None);
         assert_eq!(payload.model, None);
         assert_eq!(payload.trigger_poll_secs, None);
@@ -164,7 +164,7 @@ max_feed_lines = 0
     #[test]
     fn missing_file_yields_cli_only_payload() {
         let cli = cli_from(&["theway", "--model", "m1"]);
-        let (payload, diagnostics) = assemble_config_from(&cli, None, "config.toml");
+        let (payload, diagnostics) = assemble_config_from(&cli, None, "config.toml", std::path::Path::new("/tmp/fake-cwd"));
         assert!(diagnostics.is_empty());
         assert_eq!(payload.model.as_deref(), Some("m1"));
         assert_eq!(payload.provider, None);

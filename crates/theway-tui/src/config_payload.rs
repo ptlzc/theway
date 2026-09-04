@@ -81,7 +81,10 @@ fn resolve_config_base_dir(
 /// file is the config-file-free posture) merged with the CLI flags — CLI
 /// flags win. Returns the payload plus human-readable diagnostics for
 /// malformed file values (soft fail-closed, same as the pre-#73 readers).
-pub(crate) async fn assemble_config(cli: &Cli) -> (WireDaemonConfig, Vec<String>) {
+pub(crate) async fn assemble_config(
+    cli: &Cli,
+    cwd: &std::path::Path,
+) -> (WireDaemonConfig, Vec<String>) {
     let path = config_path(cli.home.as_deref());
     let text = match tokio::fs::read_to_string(&path).await {
         Ok(text) => Some(text),
@@ -89,12 +92,12 @@ pub(crate) async fn assemble_config(cli: &Cli) -> (WireDaemonConfig, Vec<String>
         Err(e) => {
             // Unreadable (permissions, …): report, provision from CLI flags only.
             return (
-                assemble_config_from(cli, None, &path.display().to_string()).0,
+                assemble_config_from(cli, None, &path.display().to_string(), cwd).0,
                 vec![format!("config: cannot read {}: {e}", path.display())],
             );
         }
     };
-    assemble_config_from(cli, text.as_deref(), &path.display().to_string())
+    assemble_config_from(cli, text.as_deref(), &path.display().to_string(), cwd)
 }
 
 /// Pure payload assembly from CLI flags + already-read `config.toml` text.
@@ -103,6 +106,7 @@ pub(crate) fn assemble_config_from(
     cli: &Cli,
     config_toml: Option<&str>,
     source: &str,
+    cwd: &std::path::Path,
 ) -> (WireDaemonConfig, Vec<String>) {
     let mut diagnostics = Vec::new();
     let mut payload = WireDaemonConfig::default();
@@ -171,6 +175,21 @@ pub(crate) fn assemble_config_from(
         .iter()
         .map(|dir| dir.display().to_string())
         .collect();
+
+    // Issue #95: the controller owns local skill discovery. Scan the roots
+    // and provision the full catalog — the daemon never reads skill files in
+    // a controller-provisioned session.
+    let home = cli
+        .home
+        .clone()
+        .or_else(|| std::env::var("HOME").ok().map(std::path::PathBuf::from))
+        .unwrap_or_default();
+    payload.skills = crate::skill_scan::scan_skills(
+        cwd,
+        &theway_transport::config::base_dir(),
+        &home,
+        &cli.skills_dir,
+    );
 
     // Trigger poll interval: CLI wins over `[triggers] poll_interval_secs`.
     payload.trigger_poll_secs = match cli.trigger_poll_secs {
@@ -283,6 +302,14 @@ pub(crate) fn reconcile(
         patch.skills_dirs = desired.skills_dirs.clone();
     } else if desired.clears("skills_dirs") && !current.skills_dirs.is_empty() {
         clear_field(&mut patch, "skills_dirs");
+    }
+
+    // Provisioned skill catalog (issue #95): pushed when the controller's
+    // scan differs from what the daemon holds.
+    if !desired.skills.is_empty() && desired.skills != current.skills {
+        patch.skills = desired.skills.clone();
+    } else if desired.clears("skills") && !current.skills.is_empty() {
+        clear_field(&mut patch, "skills");
     }
 
     if let Some(secs) = desired.trigger_poll_secs {

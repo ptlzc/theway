@@ -106,7 +106,7 @@ impl DaemonConnector {
             StorageServiceState::new(session_ops, storage_ops),
         );
 
-        let (mut desired_config, notes) = assemble_config(cli).await;
+        let (mut desired_config, notes) = assemble_config(cli, cwd).await;
         apply_controller_endpoints(
             &mut desired_config,
             cli.daemon,

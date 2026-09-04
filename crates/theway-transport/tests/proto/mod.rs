@@ -432,6 +432,7 @@ fn daemon_config_round_trips_wire_and_proto() {
         thinking: Some(true),
         thinking_level: Some("high".into()),
         builtin_skills: vec!["git".into(), "web".into()],
+        skills: Vec::new(),
         skills_dirs: vec!["/home/user/.agents/skills".into()],
         trigger_poll_secs: Some(60),
         tui_max_feed_lines: Some(8000),
@@ -474,6 +475,7 @@ fn daemon_config_merge_replaces_present_fields_only() {
     let mut current = WireDaemonConfig {
         provider: Some("anthropic".into()),
         model: Some("claude-x".into()),
+        skills: Vec::new(),
         skills_dirs: vec!["/old".into()],
         ..Default::default()
     };
@@ -493,6 +495,7 @@ fn daemon_config_merge_replaces_present_fields_only() {
 
     // Non-empty repeated fields replace the list.
     let dirs = WireDaemonConfig {
+        skills: Vec::new(),
         skills_dirs: vec!["/new".into()],
         ..Default::default()
     };
@@ -510,6 +513,7 @@ fn daemon_config_merge_supports_explicit_clear_and_set_wins() {
 
     let mut current = WireDaemonConfig {
         thinking: Some(true),
+        skills: Vec::new(),
         skills_dirs: vec!["/old".into()],
         tool_service_addr: Some("http://old".into()),
         ..Default::default()

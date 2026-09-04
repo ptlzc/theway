@@ -19,6 +19,11 @@ pub struct SessionProjectResources {
     pub memory_dir: std::path::PathBuf,
     pub reload_skills_fn: theway_core::ReloadSkillsFn,
     pub load_local_sources: bool,
+    /// Controller-provisioned skill catalog (issue #95): written by the
+    /// settings applier when the TUI pushes `WireDaemonConfig.skills`; the
+    /// controller-mode reload closure reads it so `/reload` and `SetSkillDirs`
+    /// never wipe the provisioned catalog.
+    pub provisioned_skills: Arc<std::sync::RwLock<Vec<theway_core::Skill>>>,
 }
 
 impl SessionProjectResources {
@@ -31,33 +36,67 @@ impl SessionProjectResources {
         // Memory is process-global under the resolved daemon base, not cwd-local.
         let memory_dir = paths.base.join("memory");
         let memory_block = crate::tools::memory::load_memory_block(&memory_dir).await;
-        // Skills and templates are plain local file catalogs (issue #95): they
-        // load from the local roots regardless of the controller-provisioning
-        // seam. `load_local_sources` still gates MCP/hooks/LSP/extensions, which
-        // spawn processes and merge runtime tools the controller owns — but a
-        // controller-provisioned daemon (the default TUI flow) must not lose
-        // the user's `~/.agents/skills` etc. until a provisioning RPC exists.
-        let loaded_skills = crate::skills::load_all(paths).await;
-        let loaded_templates = crate::templates::load_all(paths).await;
+        // Skills / templates load locally only when the daemon owns the local
+        // scan (standalone mode). Controller-provisioned sessions get the
+        // skill catalog through `WireDaemonConfig.skills` instead (issue #95):
+        // the TUI scans the roots and provisions the daemon — the daemon never
+        // reads skill files for a controller-backed runtime.
+        let loaded_skills = if load_local_sources {
+            crate::skills::load_all(paths).await
+        } else {
+            crate::skills::LoadedSkills {
+                skills: Vec::new(),
+                diagnostics: Vec::new(),
+            }
+        };
+        let loaded_templates = if load_local_sources {
+            crate::templates::load_all(paths).await
+        } else {
+            crate::templates::LoadedTemplates {
+                templates: Vec::new(),
+                diagnostics: Vec::new(),
+            }
+        };
         let resolved_builtins =
             crate::builtin_skills::resolve_builtins(cli_builtin_skills, config_builtin_skills)?;
         let mut skills = crate::builtin_skills::merge_with_user_project(
             resolved_builtins.skills.clone(),
             &loaded_skills.skills,
         );
-        let state = crate::skill_overrides::load(&paths.base).await;
+        let state = if load_local_sources {
+            crate::skill_overrides::load(&paths.base).await
+        } else {
+            crate::skill_overrides::SkillOverrides::default()
+        };
         crate::skill_overrides::apply(&state, &mut skills);
+        let provisioned_skills = Arc::new(std::sync::RwLock::new(Vec::new()));
         let reload_skills_fn: theway_core::ReloadSkillsFn = {
             let paths = paths.clone();
             let builtins = resolved_builtins.skills.clone();
+            let provisioned = Arc::clone(&provisioned_skills);
             std::sync::Arc::new(move || {
                 let paths = paths.clone();
                 let builtins = builtins.clone();
+                let provisioned = Arc::clone(&provisioned);
                 Box::pin(async move {
-                    let loaded = crate::skills::load_all(&paths).await;
+                    let loaded = if load_local_sources {
+                        crate::skills::load_all(&paths).await
+                    } else {
+                        // Controller mode: the TUI owns scanning; reload keeps
+                        // the currently provisioned catalog instead of wiping
+                        // it with an empty disk scan.
+                        crate::skills::LoadedSkills {
+                            skills: provisioned.read().unwrap().clone(),
+                            diagnostics: Vec::new(),
+                        }
+                    };
                     let mut merged =
                         crate::builtin_skills::merge_with_user_project(builtins, &loaded.skills);
-                    let state = crate::skill_overrides::load(&paths.base).await;
+                    let state = if load_local_sources {
+                        crate::skill_overrides::load(&paths.base).await
+                    } else {
+                        crate::skill_overrides::SkillOverrides::default()
+                    };
                     crate::skill_overrides::apply(&state, &mut merged);
                     theway_core::LoadSkillsOutput {
                         skills: merged,
@@ -73,6 +112,7 @@ impl SessionProjectResources {
             memory_dir,
             reload_skills_fn,
             load_local_sources,
+            provisioned_skills,
         })
     }
 }
