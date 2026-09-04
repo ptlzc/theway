@@ -146,6 +146,9 @@ impl AgentTool for ReloadTool {
         // tool_count, so dummies are safe there; cwd, harness and trigger
         // executor are the live daemon values.
         let trigger_executor = runtime.trigger_executor();
+        // The `/reload` path never writes the inheritance slot; a local empty
+        // slot satisfies the dispatch context (issue #100).
+        let inherit_slot = Arc::new(std::sync::Mutex::new(None));
         let ctx = CommandCtx {
             harness,
             trigger_executor: &trigger_executor,
@@ -153,6 +156,7 @@ impl AgentTool for ReloadTool {
             log_path: None,
             tool_count: 0,
             cwd: &runtime.cwd,
+            inherit_slot: &inherit_slot,
         };
         match commands::dispatch("/reload", &runtime.registry, &ctx).await {
             CommandOutcome::Handled => {

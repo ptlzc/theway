@@ -329,6 +329,10 @@ struct RuntimeConfiguration {
     /// Controller-provisioned prompt-template catalog slot (issue #96); see
     /// [`crate::turn::DaemonConfig::provisioned_templates`].
     provisioned_templates: Arc<std::sync::RwLock<Vec<theway_core::PromptTemplate>>>,
+    /// Runtime-settings inheritance slot (issue #100): slash commands write
+    /// child-session settings here; `dispatch_web_slash` consumes the slot
+    /// right after dispatch.
+    inherit_slot: Arc<std::sync::Mutex<Option<crate::commands::InheritedSessionSettings>>>,
     /// Controller tool endpoint forwarder (issue #76): routes `ToolOps`
     /// calls to the connected controller's `ToolService` server.
     tool_ops: Arc<dyn ToolOps>,

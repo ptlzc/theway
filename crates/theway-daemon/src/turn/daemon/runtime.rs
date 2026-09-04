@@ -155,6 +155,7 @@ impl TurnHost {
                 config: daemon_config,
                 provisioned_skills: config.provisioned_skills,
                 provisioned_templates: config.provisioned_templates,
+                inherit_slot: Arc::new(std::sync::Mutex::new(None)),
                 tool_ops,
                 model_catalog: model_catalog(),
                 feed_history_limit: config.startup.tui_max_feed_lines,

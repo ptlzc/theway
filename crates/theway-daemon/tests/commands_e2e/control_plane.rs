@@ -53,6 +53,7 @@ async fn dispatch_new_trigger_registers_dynamic_rule() {
         log_path: None,
         tool_count: 0,
         cwd: &cwd,
+        inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
 
     let condition = "\u{73b0}\u{5728}\u{662f} 11pm";

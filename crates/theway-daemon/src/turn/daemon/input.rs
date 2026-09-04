@@ -113,9 +113,30 @@ impl TurnHost {
                 log_path: self.session.log_path.as_ref(),
                 tool_count: self.session.tool_count,
                 cwd: &self.runtime.cwd,
+                inherit_slot: &self.runtime.inherit_slot,
             };
             commands::dispatch(input, &self.runtime.registry, &ctx).await
         };
+        // Issue #100: a dispatched command may have created a child session
+        // (collapse) and requested runtime-settings inheritance. Apply the
+        // carried model + thinking level to the child now — the command layer
+        // has no &mut TurnHost, so the host consumes the slot.
+        let inherit = self.runtime.inherit_slot.lock().unwrap().take();
+        if let Some(inherit) = inherit {
+            let ok = self
+                .set_model_for_session(&inherit.session_id, &inherit.model_spec)
+                .await;
+            if !ok {
+                self.error_line(format!(
+                    "inherit model '{}' for child session {} failed",
+                    inherit.model_spec, inherit.session_id
+                ));
+            }
+            if let Some(level) = inherit.thinking_level {
+                self.set_thinking_for_session(&inherit.session_id, &level)
+                    .await;
+            }
+        }
         match outcome {
             CommandOutcome::Quit => {
                 self.system_line("daemon stays running; stop it with Ctrl-C / SIGTERM");
@@ -248,6 +269,7 @@ impl TurnHost {
                 log_path: session.log_path.as_ref(),
                 tool_count: session.tool_count,
                 cwd: &session.cwd,
+                inherit_slot: &self.runtime.inherit_slot,
             };
             commands::dispatch_with_output(input, &self.runtime.registry, &ctx, output).await
         };

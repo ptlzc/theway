@@ -526,6 +526,24 @@ impl SlashCommand<DaemonCtx> for CollapseCommand {
             .as_ref()
             .map(|n| n.id.clone())
             .unwrap_or_default();
+        // Issue #100: carry the source session's model + thinking level over
+        // to the child. The model is daemon-memory per-session state — the
+        // child runtime would otherwise have none and the first DAG launch /
+        // delegation in it would fail with "no model set for this session".
+        if !child_id.is_empty() {
+            let state = ctx.extra.harness.agent().state();
+            if let Some(model) = &state.model {
+                let model_spec = format!("{}:{}", model.provider.0, model.id);
+                let thinking_level = state.thinking_level.map(|level| level.as_str().to_string());
+                if let Ok(mut slot) = ctx.extra.inherit_slot.lock() {
+                    *slot = Some(crate::commands::InheritedSessionSettings {
+                        session_id: child_id.clone(),
+                        model_spec,
+                        thinking_level,
+                    });
+                }
+            }
+        }
         cprintln!(
             "collapsed {} into node {} (child session {})",
             ctx.session_id,

@@ -43,6 +43,7 @@ async fn dispatch_goal_sets_and_reports_session_goal() {
         log_path: None,
         tool_count: 0,
         cwd: &cwd,
+        inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
 
     let outcome =
@@ -110,6 +111,7 @@ async fn dispatch_goal_start_runs_prompt_when_goal_active() {
         log_path: None,
         tool_count: 0,
         cwd: &cwd,
+        inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
 
     let outcome = commands::dispatch("/goal start run cargo test", &registry, &ctx).await;
@@ -158,6 +160,7 @@ async fn dispatch_goal_start_shortcut_runs_prompt_when_goal_active() {
         log_path: None,
         tool_count: 0,
         cwd: &cwd,
+        inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
 
     let outcome = commands::dispatch("/goal-start run cargo test", &registry, &ctx).await;
@@ -202,6 +205,7 @@ async fn dispatch_goal_start_requires_active_goal() {
         log_path: None,
         tool_count: 0,
         cwd: &cwd,
+        inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
 
     let outcome = commands::dispatch("/goal start run cargo test", &registry, &ctx).await;
@@ -253,6 +257,7 @@ async fn dispatch_goal_clear_hides_current_goal() {
         log_path: None,
         tool_count: 0,
         cwd: &cwd,
+        inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
 
     let outcome = commands::dispatch("/goal clear", &registry, &ctx).await;
@@ -388,6 +393,7 @@ async fn dispatch_goal_pause_and_resume_round_trip() {
         log_path: None,
         tool_count: 0,
         cwd: &cwd,
+        inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
 
     let outcome = commands::dispatch("/goal pause", &registry, &ctx).await;
@@ -438,6 +444,7 @@ async fn dispatch_goal_status_prints_paused_goal() {
         log_path: None,
         tool_count: 0,
         cwd: &cwd,
+        inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
 
     let outcome = commands::dispatch("/goal", &registry, &ctx).await;
@@ -479,6 +486,7 @@ async fn dispatch_goal_start_empty_prompt_is_error() {
         log_path: None,
         tool_count: 0,
         cwd: &cwd,
+        inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
 
     let outcome = commands::dispatch("/goal start", &registry, &ctx).await;
@@ -521,6 +529,7 @@ async fn dispatch_goal_empty_condition_is_error() {
         log_path: None,
         tool_count: 0,
         cwd: &cwd,
+        inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
 
     let outcome = commands::dispatch("/goal \"   \"", &registry, &ctx).await;
@@ -564,6 +573,7 @@ async fn dispatch_goal_resume_without_paused_goal_errors() {
         log_path: None,
         tool_count: 0,
         cwd: &cwd,
+        inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
 
     let outcome = commands::dispatch("/goal resume", &registry, &ctx).await;
@@ -606,6 +616,7 @@ async fn dispatch_goal_clear_without_goal_still_succeeds() {
         log_path: None,
         tool_count: 0,
         cwd: &cwd,
+        inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
 
     let outcome = commands::dispatch("/goal clear", &registry, &ctx).await;
@@ -659,6 +670,7 @@ async fn dispatch_goal_status_prints_achieved_goal_with_reason() {
         log_path: None,
         tool_count: 0,
         cwd: &cwd,
+        inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
 
     let outcome = commands::dispatch("/goal", &registry, &ctx).await;

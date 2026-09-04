@@ -41,6 +41,7 @@ async fn dispatch_thinking_command_updates_state_and_session() {
         log_path: None,
         tool_count: 0,
         cwd: &cwd,
+        inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
 
     let outcome = commands::dispatch("/thinking high", &registry, &ctx).await;
@@ -108,6 +109,7 @@ async fn dispatch_session_export_writes_archive_with_bounded_output() {
         log_path: None,
         tool_count: 0,
         cwd: &cwd,
+        inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
 
     let outcome =
@@ -148,6 +150,7 @@ async fn dispatch_unknown_command_runs_it_as_agent_prompt() {
         log_path: None,
         tool_count: 0,
         cwd: &cwd,
+        inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
     // Issue #37: a leading `/` is not necessarily a command — a path like
     // `/notarealcommand` is a plain user message, not an error.
@@ -187,6 +190,7 @@ async fn dispatch_template_returns_repl_owned_agent_work() {
         log_path: None,
         tool_count: 0,
         cwd: &cwd,
+        inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
     let outcome = commands::dispatch("/template release version=1.2.3", &registry, &ctx).await;
     match outcome {
@@ -229,6 +233,7 @@ async fn dispatch_compact_returns_repl_owned_agent_work() {
         log_path: None,
         tool_count: 0,
         cwd: &cwd,
+        inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
     let outcome = commands::dispatch("/compact keep decisions", &registry, &ctx).await;
     match outcome {
@@ -312,6 +317,7 @@ async fn dispatch_undo_removes_last_turn_from_active_branch() {
         log_path: None,
         tool_count: 0,
         cwd: &cwd,
+        inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
     let outcome = commands::dispatch("/undo", &registry, &ctx).await;
     assert!(matches!(outcome, commands::CommandOutcome::Handled));
@@ -350,6 +356,7 @@ async fn dispatch_name_sets_session_name() {
         log_path: None,
         tool_count: 0,
         cwd: &cwd,
+        inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
     let outcome = commands::dispatch("/name my-thing", &registry, &ctx).await;
     assert!(matches!(outcome, commands::CommandOutcome::Handled));
@@ -386,6 +393,7 @@ async fn dispatch_quit_returns_quit_outcome() {
         log_path: None,
         tool_count: 0,
         cwd: &cwd,
+        inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
 
     // quit/clear/help are TUI-local commands (daemon-kernel-layers); the
@@ -427,6 +435,7 @@ async fn dispatch_login_prompts_for_secret_instead_of_accepting_inline_key() {
         log_path: None,
         tool_count: 0,
         cwd: &cwd,
+        inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
 
     let outcome = commands::dispatch("/login ds4", &registry, &ctx).await;
@@ -472,6 +481,7 @@ async fn dispatch_login_rejects_inline_secret_material() {
         log_path: None,
         tool_count: 0,
         cwd: &cwd,
+        inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
 
     let outcome = commands::dispatch(&format!("/login ds4 {secret}"), &registry, &ctx).await;
@@ -541,6 +551,7 @@ async fn dispatch_share_default_uses_gh_private_default_without_secret_flag() {
         log_path: None,
         tool_count: 0,
         cwd: &cwd,
+        inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
 
     let outcome = commands::dispatch("/share", &registry, &ctx).await;
@@ -593,6 +604,7 @@ async fn dispatch_share_public_passes_public_flag() {
         log_path: None,
         tool_count: 0,
         cwd: &cwd,
+        inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
 
     let outcome = commands::dispatch("/share --public", &registry, &ctx).await;
@@ -637,6 +649,7 @@ async fn dispatch_share_preserves_gh_stderr_on_failure() {
         log_path: None,
         tool_count: 0,
         cwd: &cwd,
+        inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
 
     let outcome = commands::dispatch("/share", &registry, &ctx).await;

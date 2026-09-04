@@ -181,6 +181,10 @@ pub struct CommandCtx<'a> {
     pub log_path: Option<&'a PathBuf>,
     pub tool_count: usize,
     pub cwd: &'a std::path::Path,
+    /// Runtime-settings inheritance slot (issue #100): the host consumes it
+    /// right after dispatch and applies the carried settings to the child
+    /// session's runtime.
+    pub inherit_slot: &'a Arc<std::sync::Mutex<Option<InheritedSessionSettings>>>,
 }
 
 /// Daemon-only context extras handed to command implementations through the shared
@@ -198,6 +202,21 @@ pub struct DaemonCtx {
     pub storage: Arc<dyn RuntimeStorage>,
     pub dynamic_triggers: crate::triggers::dynamic::DynamicTriggerRegistry,
     pub cron: crate::triggers::cron::CronRegistry,
+    /// Runtime-settings inheritance slot (issue #100): commands that create a
+    /// child session (collapse) write the settings to carry over here; the
+    /// host consumes the slot right after dispatch and applies them to the
+    /// child runtime (model + thinking level).
+    pub inherit_slot: Arc<std::sync::Mutex<Option<crate::commands::InheritedSessionSettings>>>,
+}
+
+/// Settings a newly created child session should inherit from its parent
+/// (issue #100): the parent's model spec and thinking level. Written by the
+/// collapse command, consumed by the host after dispatch.
+#[derive(Clone, Debug)]
+pub struct InheritedSessionSettings {
+    pub session_id: String,
+    pub model_spec: String,
+    pub thinking_level: Option<String>,
 }
 
 /// Slash-command registry: the shared framework's generic registry parameterized by the daemon's
@@ -555,6 +574,7 @@ async fn dispatch_impl(input: &str, registry: &Registry, ctx: &CommandCtx<'_>) -
         storage: registry.storage.clone(),
         dynamic_triggers: registry.dynamic_triggers.clone(),
         cron: registry.cron.clone(),
+        inherit_slot: ctx.inherit_slot.clone(),
     };
     let sdk_ctx = theway_transport::commands::CommandCtx {
         session_id: ctx.session_id,

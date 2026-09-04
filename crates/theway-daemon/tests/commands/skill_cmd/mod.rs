@@ -107,6 +107,7 @@ async fn skill_command_requires_exactly_one_name() {
         storage: local_runtime_storage(),
         dynamic_triggers: crate::triggers::global_registry().clone(),
         cron: crate::triggers::global_cron_registry().clone(),
+        inherit_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
     let ctx = command_ctx(&extra, tmp.path());
 
@@ -126,7 +127,8 @@ async fn skill_command_attaches_loaded_skill() {
         storage: local_runtime_storage(),
         dynamic_triggers: crate::triggers::global_registry().clone(),
         cron: crate::triggers::global_cron_registry().clone(),
-    };
+       inherit_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
+};
     let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SkillCommand.run(&["review-pr".into()], &ctx).await;
@@ -142,7 +144,8 @@ async fn skill_command_rejects_disabled_skill() {
         storage: local_runtime_storage(),
         dynamic_triggers: crate::triggers::global_registry().clone(),
         cron: crate::triggers::global_cron_registry().clone(),
-    };
+       inherit_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
+};
     let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SkillCommand.run(&["review-pr".into()], &ctx).await;
@@ -162,7 +165,8 @@ async fn skill_command_suggests_prefix_and_contains_matches() {
         storage: local_runtime_storage(),
         dynamic_triggers: crate::triggers::global_registry().clone(),
         cron: crate::triggers::global_cron_registry().clone(),
-    };
+       inherit_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
+};
     let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SkillCommand.run(&["review".into()], &ctx).await;
@@ -181,7 +185,8 @@ async fn skill_command_unknown_name_has_no_hint() {
         storage: local_runtime_storage(),
         dynamic_triggers: crate::triggers::global_registry().clone(),
         cron: crate::triggers::global_cron_registry().clone(),
-    };
+       inherit_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
+};
     let ctx = command_ctx(&extra, tmp.path());
 
     let outcome = SkillCommand.run(&["zzz".into()], &ctx).await;

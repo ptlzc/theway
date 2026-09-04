@@ -108,6 +108,7 @@ fn daemon_ctx_with(
         storage,
         dynamic_triggers: crate::triggers::global_registry().clone(),
         cron: crate::triggers::global_cron_registry().clone(),
+        inherit_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
     }
 }
 

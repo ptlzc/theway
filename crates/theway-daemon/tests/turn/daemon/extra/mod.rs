@@ -692,3 +692,72 @@ async fn dispatch_web_slash_unknown_slash_runs_as_agent_prompt() {
     assert!(turn.fut.is_some());
     assert!(host.session.busy);
 }
+
+/// Issue #100: the inheritance slot written by a dispatched command is
+/// consumed right after dispatch — the model (and thinking level) are applied
+/// to the target session's runtime.
+#[tokio::test]
+async fn dispatch_web_slash_consumes_runtime_settings_inheritance_slot() {
+    let mut fixture = HostFixture::new().await;
+    let host = fixture.host();
+
+    let model = theway_llm_provider::list_models()
+        .into_iter()
+        .find(|m| SUPPORTED_APIS.contains(&m.api.0.as_str()))
+        .expect("a supported model should exist in the catalog");
+    let spec = format!("{}:{}", model.provider.0, model.id);
+
+    // The current session stands in for the collapse child: setting it must
+    // route through set_model_from_spec (same-session fast path).
+    *host.runtime.inherit_slot.lock().unwrap() =
+        Some(crate::commands::InheritedSessionSettings {
+            session_id: "sess-extra".into(),
+            model_spec: spec.clone(),
+            thinking_level: Some("high".into()),
+        });
+
+    host.dispatch_web_slash("/help", &mut TurnState::default())
+        .await;
+
+    assert!(
+        host.runtime.inherit_slot.lock().unwrap().is_none(),
+        "the host must consume the inheritance slot after dispatch"
+    );
+    assert_eq!(current_model_label(host.session.kernel.harness()), spec);
+    assert_eq!(
+        host.session
+            .kernel
+            .harness()
+            .agent()
+            .state()
+            .thinking_level
+            .map(|level| level.as_str().to_string()),
+        Some("high".to_string())
+    );
+}
+
+/// Issue #100: when the inherited settings cannot be applied (the child
+/// runtime cannot be built), the host reports an error line and keeps going.
+#[tokio::test]
+async fn inheritance_application_failure_surfaces_an_error_line() {
+    let mut fixture = HostFixture::new().await;
+    let host = fixture.host();
+
+    *host.runtime.inherit_slot.lock().unwrap() =
+        Some(crate::commands::InheritedSessionSettings {
+            session_id: "sess-child-missing".into(),
+            model_spec: "anthropic:claude-x".into(),
+            thinking_level: None,
+        });
+
+    host.dispatch_web_slash("/help", &mut TurnState::default())
+        .await;
+
+    assert!(host.runtime.inherit_slot.lock().unwrap().is_none());
+    let feed = host.projection.feed.plain_lines(120);
+    assert!(
+        feed.iter()
+            .any(|line| line.contains("inherit model 'anthropic:claude-x'")),
+        "the failure must surface as an error line: {feed:?}"
+    );
+}
