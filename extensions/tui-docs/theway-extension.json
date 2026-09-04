@@ -1,0 +1,8 @@
+{
+  "id": "tui-docs",
+  "version": "1.0.0",
+  "entry": "index.js",
+  "priority": 0,
+  "scope": "session",
+  "permissions": ["workspace.read"]
+}
