@@ -140,8 +140,11 @@ impl DaemonConnector {
         let mut args = vec!["--resume-id".to_string(), session_id.to_string()];
         args.extend(self.runtime_args.clone());
         let mut connection = self.connect(args, false).await?;
-        connection.status =
-            restore_session(&mut connection.client, connection.status, session_id).await?;
+        connection.status = crate::ui::daemon_call(
+            "restore_session",
+            restore_session(&mut connection.client, connection.status, session_id),
+        )
+        .await?;
         Ok(connection)
     }
 
@@ -164,8 +167,7 @@ impl DaemonConnector {
 
     async fn connect_existing(&self, addr: &str) -> Result<Option<DaemonConnection>> {
         let mut client = GrpcClient::connect(addr).await?;
-        let current = client
-            .get_config()
+        let current = crate::ui::daemon_call("get_config", client.get_config())
             .await
             .with_context(|| format!("query daemon config at {addr}"))?;
 
@@ -183,13 +185,17 @@ impl DaemonConnector {
         // to that daemon's controller instead of stealing tool forwarding.
         let desired =
             config_for_existing_controller(&self.desired_config, &current, &self.storage_addr);
-        let outcome = provision_config(&mut client, &desired, true)
-            .await
-            .with_context(|| format!("provision daemon config at {addr}"))?;
+        let outcome = crate::ui::daemon_call(
+            "provision_config",
+            provision_config(&mut client, &desired, true),
+        )
+        .await
+        .with_context(|| format!("provision daemon config at {addr}"))?;
         if outcome.pushed {
             tracing::info!("provisioned daemon config at {addr} via settings RPC");
         }
-        let state = client.get_snapshot_for_session("").await?;
+        let state =
+            crate::ui::daemon_call("get_snapshot", client.get_snapshot_for_session("")).await?;
         Ok(Some(DaemonConnection {
             client,
             status: wire_status_from_session_snapshot(&state),
@@ -230,7 +236,8 @@ impl DaemonConnector {
             tracing::info!("provisioned daemon config at {addr} via settings RPC");
         }
         notes.extend(outcome.notes);
-        let state = client.get_snapshot_for_session("").await?;
+        let state =
+            crate::ui::daemon_call("get_snapshot", client.get_snapshot_for_session("")).await?;
         Ok(DaemonConnection {
             client,
             status: wire_status_from_session_snapshot(&state),

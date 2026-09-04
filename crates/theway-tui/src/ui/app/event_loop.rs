@@ -38,10 +38,12 @@ impl App {
         let mut stream = if self.pending_fresh_attach {
             None
         } else {
-            match self
-                .client
-                .stream_events_for_session(Some(&self.session_id))
-                .await
+            match crate::ui::daemon_call(
+                "stream_events",
+                self.client
+                    .stream_events_for_session(Some(&self.session_id)),
+            )
+            .await
             {
                 Ok(stream) => Some(stream),
                 Err(e) => {
@@ -69,10 +71,11 @@ impl App {
                             // session instead of staying on the old filter.
                             if let Some(new_id) = self.resubscribe_session.take() {
                                 stream = None;
-                                match self
-                                    .client
-                                    .stream_events_for_session(Some(&new_id))
-                                    .await
+                                match crate::ui::daemon_call(
+                                    "stream_events",
+                                    self.client.stream_events_for_session(Some(&new_id)),
+                                )
+                                .await
                                 {
                                     Ok(new_stream) => stream = Some(new_stream),
                                     Err(e) => {
@@ -134,7 +137,12 @@ impl App {
                                 // A recovery is announced only after both the
                                 // event stream and an authoritative snapshot
                                 // succeed on the candidate connection.
-                                match candidate.stream_events_for_session(Some(&session_id)).await {
+                                match crate::ui::daemon_call(
+                                    "stream_events",
+                                    candidate.stream_events_for_session(Some(&session_id)),
+                                )
+                                .await
+                                {
                                     Ok(candidate_stream) => {
                                         match candidate.get_snapshot_for_session(&session_id).await {
                                             Ok(state) => {

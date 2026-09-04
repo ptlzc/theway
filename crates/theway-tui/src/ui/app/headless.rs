@@ -49,10 +49,12 @@ impl App {
                         continue;
                     }
                     "/new" => {
-                        match self
-                            .client
-                            .create_session_with_metadata(None, None, Default::default())
-                            .await
+                        match crate::ui::daemon_call(
+                            "create_session",
+                            self.client
+                                .create_session_with_metadata(None, None, Default::default()),
+                        )
+                        .await
                         {
                             Ok(summary) => {
                                 let id = summary.session_id;
@@ -126,10 +128,12 @@ impl App {
             let (expanded, _) = mentions::expand(input, &self.cwd).await;
             let prompt = commands::attach_skill_prompt(expanded, None);
             self.messaged_sessions.insert(self.session_id.clone());
-            match self
-                .client
-                .send_message_to_session(Some(&self.session_id), prompt, vec![], false)
-                .await
+            match crate::ui::daemon_call(
+                "send_message",
+                self.client
+                    .send_message_to_session(Some(&self.session_id), prompt, vec![], false),
+            )
+            .await
             {
                 Ok(true) => {}
                 Ok(false) => println!("error: daemon rejected the message"),

@@ -233,6 +233,32 @@ pub(crate) enum DagBandMode {
     Hidden,
 }
 
+/// Issue #99: hard bound for any daemon RPC awaited from the client paths
+/// (event loop, startup, headless). A hung/errored daemon must degrade to an
+/// error line — never freeze the UI.
+pub(crate) const DAEMON_CALL_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Run a daemon RPC with [`DAEMON_CALL_TIMEOUT`]: on timeout the error names
+/// the call so the UI can surface it and keep running.
+pub(crate) async fn daemon_call<T>(
+    what: &'static str,
+    fut: impl std::future::Future<Output = Result<T>>,
+) -> Result<T> {
+    daemon_call_with(DAEMON_CALL_TIMEOUT, what, fut).await
+}
+
+/// [`daemon_call`] with an explicit timeout (tests use a short one).
+pub(crate) async fn daemon_call_with<T>(
+    timeout: Duration,
+    what: &'static str,
+    fut: impl std::future::Future<Output = Result<T>>,
+) -> Result<T> {
+    match tokio::time::timeout(timeout, fut).await {
+        Ok(inner) => inner,
+        Err(_) => anyhow::bail!("daemon did not answer {what} within {timeout:?}"),
+    }
+}
+
 /// Everything the client App needs, assembled by `main.rs` after the daemon
 /// is discovered/spawned and the initial snapshot is fetched.
 pub struct AppConfig {

@@ -99,10 +99,12 @@ impl App {
         }
         // Issue #47: this session received a message — never reap it on exit.
         self.messaged_sessions.insert(self.session_id.clone());
-        match self
-            .client
-            .send_message_to_session(Some(&self.session_id), prompt_text, images, false)
-            .await
+        match crate::ui::daemon_call(
+            "send_message",
+            self.client
+                .send_message_to_session(Some(&self.session_id), prompt_text, images, false),
+        )
+        .await
         {
             Ok(true) => {}
             Ok(false) => self.error_line("daemon rejected the message"),
@@ -166,7 +168,12 @@ impl App {
             }
             "/graph" if args == "clear" => {
                 let session_id = self.session_id.clone();
-                match self.client.graph_clear(&session_id, 0).await {
+                match crate::ui::daemon_call(
+                    "graph_clear",
+                    self.client.graph_clear(&session_id, 0),
+                )
+                .await
+                {
                     Ok(removed) => {
                         if removed > 0 {
                             self.system_line(format!(
@@ -183,7 +190,12 @@ impl App {
                     }
                 }
             }
-            "/extensions" => match self.client.get_extensions().await {
+            "/extensions" => match crate::ui::daemon_call(
+                "get_extensions",
+                self.client.get_extensions(),
+            )
+            .await
+            {
                 Ok(extensions) => {
                     self.latest.extensions = extensions;
                     self.extension_view = true;
@@ -192,7 +204,12 @@ impl App {
             },
             "/extension-reload" => {
                 let cancel_active = args.split_whitespace().any(|arg| arg == "--cancel");
-                match self.client.reload_extensions(cancel_active).await {
+                match crate::ui::daemon_call(
+                    "reload_extensions",
+                    self.client.reload_extensions(cancel_active),
+                )
+                .await
+                {
                     Ok(result) => self.system_line(format!(
                         "extension reload: {} (revision {})",
                         result.status, result.revision
@@ -224,10 +241,12 @@ impl App {
             // startup `--resume` terminal picker (`resume_picker.rs`) is a
             // different mechanism and stays untouched.
             "/resume" => self.open_resume_picker().await,
-            "/new" => match self
-                .client
-                .create_session_with_metadata(None, None, Default::default())
-                .await
+            "/new" => match crate::ui::daemon_call(
+                "create_session",
+                self.client
+                    .create_session_with_metadata(None, None, Default::default()),
+            )
+            .await
             {
                 Ok(summary) => {
                     let id = summary.session_id;
@@ -251,10 +270,12 @@ impl App {
                     self.error_line(format!("new session failed: {e}"));
                     return;
                 }
-                match self
-                    .client
-                    .send_message_to_session(Some(&self.session_id), trimmed.to_string(), vec![], false)
-                    .await
+                match crate::ui::daemon_call(
+                    "send_message",
+                    self.client
+                        .send_message_to_session(Some(&self.session_id), trimmed.to_string(), vec![], false),
+                )
+                .await
                 {
                     Ok(true) => {}
                     Ok(false) => self.error_line("daemon rejected the command"),
@@ -280,10 +301,11 @@ impl App {
                 }
             }
         };
-        match self
-            .client
-            .invoke_extension_command(name, arguments, true)
-            .await
+        match crate::ui::daemon_call(
+            "invoke_extension_command",
+            self.client.invoke_extension_command(name, arguments, true),
+        )
+        .await
         {
             Ok(outcome) => {
                 let mut summary = format!("extension command {name}: {}", outcome.status);
@@ -354,7 +376,12 @@ impl App {
             decision: decision.into(),
             granted_permissions,
         };
-        match self.client.decide_extension_trust(request).await {
+        match crate::ui::daemon_call(
+            "decide_extension_trust",
+            self.client.decide_extension_trust(request),
+        )
+        .await
+        {
             Ok(result) => self.system_line(format!(
                 "extension trust accepted; reload {} (revision {})",
                 result.reload.status, result.reload.revision
@@ -391,13 +418,14 @@ impl App {
     /// `handle_resume_picker_key`) selects the session client-side via
     /// `select_session`.
     pub(super) async fn open_resume_picker(&mut self) {
-        let (sessions, current_id) = match self.client.list_sessions().await {
-            Ok(pair) => pair,
-            Err(e) => {
-                self.error_line(format!("list sessions failed: {e}"));
-                return;
-            }
-        };
+        let (sessions, current_id) =
+            match crate::ui::daemon_call("list_sessions", self.client.list_sessions()).await {
+                Ok(pair) => pair,
+                Err(e) => {
+                    self.error_line(format!("list sessions failed: {e}"));
+                    return;
+                }
+            };
         if sessions.is_empty() {
             self.system_line("no sessions to resume");
             return;

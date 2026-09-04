@@ -454,10 +454,12 @@ impl App {
         };
         let provider = provider.to_string();
         let id = id.to_string();
-        match self
-            .client
-            .set_model_for_session(&self.session_id, &format!("{provider}:{id}"))
-            .await
+        match crate::ui::daemon_call(
+            "set_model",
+            self.client
+                .set_model_for_session(&self.session_id, &format!("{provider}:{id}")),
+        )
+        .await
         {
             Ok(true) => {
                 self.pending_model_default = Some(super::PendingModelDefault {
@@ -482,10 +484,12 @@ impl App {
             return;
         }
         let level = level.to_string();
-        match self
-            .client
-            .set_thinking_for_session(&self.session_id, &level)
-            .await
+        match crate::ui::daemon_call(
+            "set_thinking",
+            self.client
+                .set_thinking_for_session(&self.session_id, &level),
+        )
+        .await
         {
             Ok(true) => {
                 self.pending_thinking_default = Some(super::PendingThinkingDefault {

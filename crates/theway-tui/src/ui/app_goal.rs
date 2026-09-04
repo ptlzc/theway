@@ -22,11 +22,22 @@ impl App {
         self.latest.session_id = id.clone();
         // Load the selected session's authoritative feed immediately; the
         // current frame stream is still filtered to the previous session until
-        // the event loop resubscribes below.
-        if let Ok(state) = self.client.get_snapshot_for_session(&id).await {
-            self.apply_snapshot(theway_transport::proto::wire_status_from_session_snapshot(
-                &state,
-            ));
+        // the event loop resubscribes below. Bounded (#99): a hung daemon
+        // must not freeze the selection.
+        match crate::ui::daemon_call(
+            "get_snapshot_for_session",
+            self.client.get_snapshot_for_session(&id),
+        )
+        .await
+        {
+            Ok(state) => {
+                self.apply_snapshot(theway_transport::proto::wire_status_from_session_snapshot(
+                    &state,
+                ));
+            }
+            Err(error) => {
+                self.error_line(format!("load session {id}: {error}"));
+            }
         }
         // A newly created session (`/new`) may not have a daemon runtime in
         // the snapshot map yet; that is fine, the resubscribed stream will
@@ -41,7 +52,12 @@ impl App {
     /// The TUI uses it to render session lineage and collapsed graph nodes;
     /// failures are non-fatal (the legacy `WireStatus` view remains usable).
     pub(super) async fn refresh_session_snapshot(&mut self) {
-        match self.client.get_snapshot_for_session(&self.session_id).await {
+        match crate::ui::daemon_call(
+            "get_snapshot_for_session",
+            self.client.get_snapshot_for_session(&self.session_id),
+        )
+        .await
+        {
             Ok(snapshot) => {
                 self.session_snapshot = Some(
                     theway_transport::proto::wire_session_snapshot_from_proto(&snapshot),
@@ -63,10 +79,12 @@ impl App {
         if !self.pending_fresh_attach {
             return Ok(self.session_id.clone());
         }
-        let summary = match self
-            .client
-            .create_session_with_metadata(None, None, Default::default())
-            .await
+        let summary = match crate::ui::daemon_call(
+            "create_session",
+            self.client
+                .create_session_with_metadata(None, None, Default::default()),
+        )
+        .await
         {
             Ok(summary) => summary,
             Err(error) => {
@@ -103,7 +121,7 @@ impl App {
         if self.messaged_sessions.contains(&id) {
             return;
         }
-        match self.client.delete_session(&id).await {
+        match crate::ui::daemon_call("delete_session", self.client.delete_session(&id)).await {
             Ok(running) if running.is_empty() => {
                 tracing::debug!("reaped empty startup session {id}");
             }

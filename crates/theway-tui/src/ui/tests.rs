@@ -751,3 +751,27 @@ async fn eager_fresh_attach_returns_and_selects_the_new_session() {
         "an untouched fresh session must be reaped on idle exit"
     );
 }
+
+/// Issue #99: a daemon RPC that never answers must fail fast instead of
+/// hanging the UI — the helper bounds the await and names the call.
+#[tokio::test]
+async fn daemon_call_times_out_instead_of_hanging() {
+    let start = std::time::Instant::now();
+    let result = crate::ui::daemon_call_with(
+        std::time::Duration::from_millis(200),
+        "get_snapshot",
+        std::future::pending::<anyhow::Result<()>>(),
+    )
+    .await;
+    assert!(result.is_err(), "a hung call must surface an error");
+    let message = result.unwrap_err().to_string();
+    assert!(
+        message.contains("get_snapshot"),
+        "the error must name the call: {message}"
+    );
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(2),
+        "the timeout must be respected (took {:?})",
+        start.elapsed()
+    );
+}
