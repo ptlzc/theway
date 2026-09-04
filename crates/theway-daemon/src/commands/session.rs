@@ -404,7 +404,24 @@ fn fork_success_line(new_id: &str) -> String {
 
 /// `/collapse` — collapse the current session into a session-graph node and
 /// create a fresh child session with compact context.
+///
+/// Issue #94: when no prior summary exists and the session is idle, the
+/// collapse first asks the current model to summarize the session (through
+/// the harness compaction path, so custom algorithms / observability /
+/// budget retries all apply). The summarizer is instructed to emit the five
+/// rolling components, which the child then carries as its bounded rolling
+/// summary. Busy sessions, missing models, and provider failures degrade to
+/// the deterministic transcript rolling fallback.
 pub struct CollapseCommand;
+
+/// Instruction appended to the compaction summarizer prompt so the result
+/// parses as the five rolling components of [`render_rolling_summary`].
+const COLLAPSE_SUMMARY_INSTRUCTION: &str = "This summary will become the new session's entire memory of this conversation (a session collapse). Output exactly the following five labeled sections, one section per line, each a single concise paragraph, and nothing else:\n\
+goal: <one sentence — what this session set out to achieve>\n\
+completed work: <what was done and what changed>\n\
+key decisions: <decisions made and why>\n\
+next steps: <what remains to do>\n\
+critical context: <facts and constraints the next session must not lose>";
 
 #[async_trait]
 impl SlashCommand<DaemonCtx> for CollapseCommand {
@@ -434,12 +451,65 @@ impl SlashCommand<DaemonCtx> for CollapseCommand {
             Ok(repo) => repo,
             Err(e) => return CommandOutcome::Error(format!("open session repo: {e}")),
         };
+
+        // Resolve the collapse summary first (issue #94): reuse the newest
+        // existing summary; otherwise summarize with the current model when
+        // the session is idle. Busy sessions skip the summarizer so it cannot
+        // race the live turn — the ops layer then falls back to the
+        // deterministic transcript rolling summary.
+        let mut summarized = false;
+        let summary = match repo.open(ctx.session_id).await {
+            Ok(Some(store)) => {
+                let source = theway_core::Session::from_store(store);
+                let existing = match source.latest_collapse_summary().await {
+                    Ok(Some(summary)) if !summary.trim().is_empty() => Some(summary),
+                    _ => None,
+                };
+                match existing {
+                    Some(summary) => Some(summary),
+                    None if ctx.extra.harness.agent().is_streaming() => {
+                        cprintln!(
+                            "collapse during a busy turn: LLM summarization skipped; \
+                             rolling transcript fallback used"
+                        );
+                        None
+                    }
+                    None => {
+                        let instruction = COLLAPSE_SUMMARY_INSTRUCTION.to_string();
+                        match ctx
+                            .extra
+                            .harness
+                            .summarize_for_collapse(Some(instruction))
+                            .await
+                        {
+                            Ok(Some(summary)) => {
+                                summarized = true;
+                                Some(summary)
+                            }
+                            Ok(None) => None,
+                            Err(e) => {
+                                cprintln!(
+                                    "summarize before collapse failed: {e}; \
+                                     rolling transcript fallback used"
+                                );
+                                None
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(None) => {
+                return CommandOutcome::Error(format!("no session matches id {}", ctx.session_id));
+            }
+            Err(e) => return CommandOutcome::Error(format!("open session: {e}")),
+        };
         let response = match theway_daemon::session_ops::collapse_session_for_command(
             repo,
             ctx.cwd,
             ctx.session_id,
             name,
             adopt,
+            summary,
         )
         .await
         {
@@ -462,6 +532,9 @@ impl SlashCommand<DaemonCtx> for CollapseCommand {
             node_id,
             child_id
         );
+        if summarized {
+            cprintln!("summarized with the current model before collapsing");
+        }
         if adopt {
             cprintln!("--adopt: ownership migration requested");
         }

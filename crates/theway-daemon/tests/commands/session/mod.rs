@@ -2,11 +2,18 @@
 
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
+use theway_contract::session::SessionStore;
 use theway_core::{
-    AgentHarness, AgentHarnessOptions, MemorySessionStorage, Session, SessionStorage,
+    AgentHarness, AgentHarnessOptions, AgentMessage, MemorySessionStorage, Session, SessionStorage,
+    StreamFn,
 };
-use theway_llm_provider::{Api, Model, Provider};
+use theway_llm_provider::{
+    Api, AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, AssistantRole,
+    ContentBlock, DoneReason, Message, Model, Provider, StopReason, TextContent, Usage,
+    UserContent, UserMessage, UserRole,
+};
 use theway_transport::commands::{CommandCtx, CommandOutcome};
 
 use super::*;
@@ -14,7 +21,7 @@ use crate::commands::DaemonCtx;
 use crate::test_env::{EnvGuard, ENV_LOCK};
 use crate::trigger_engine::execution::TriggerExecutor;
 use crate::trigger_engine::runtime::TriggerRuntimeConfig;
-use theway_daemon::runtime_storage::local_runtime_storage;
+use theway_daemon::runtime_storage::{SessionRepository, local_runtime_storage};
 
 fn faux_model() -> Model {
     Model {
@@ -254,4 +261,202 @@ async fn session_import_requires_exactly_one_path() {
         .run(&["import".into(), "a".into(), "b".into()], &ctx)
         .await;
     assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("usage: /session import <path>")));
+}
+
+// ── /collapse LLM summarization (issue #94) ─────────────────────────────────
+
+/// A `StreamFn` that answers every call with one canned assistant message.
+fn canned_summary_stream(summary: &str, calls: Arc<AtomicUsize>) -> StreamFn {
+    let summary = summary.to_string();
+    Arc::new(move |_, _, _| {
+        calls.fetch_add(1, Ordering::SeqCst);
+        let (stream, mut sender) = AssistantMessageEventStream::new();
+        sender.push(AssistantMessageEvent::Done {
+            reason: DoneReason::Stop,
+            message: AssistantMessage {
+                role: AssistantRole::Assistant,
+                content: vec![ContentBlock::Text(TextContent {
+                    text: summary.clone(),
+                    text_signature: None,
+                })],
+                api: Api::from("faux"),
+                provider: Provider::from("faux"),
+                model: "faux".into(),
+                response_model: None,
+                response_id: None,
+                diagnostics: None,
+                usage: Usage::default(),
+                stop_reason: StopReason::Stop,
+                error_message: None,
+                timestamp: 0,
+            },
+        });
+        stream
+    })
+}
+
+/// Create a repo-backed session (id `test-session`, matching the test
+/// command context) with a short transcript, and return repo + store.
+async fn repo_backed_session(cwd: &Path) -> (Arc<dyn SessionRepository>, Arc<dyn SessionStore>) {
+    let repo = local_runtime_storage().session_repository(cwd).await.unwrap();
+    let source = repo.create_with_id(cwd, Some("test-session")).await.unwrap();
+    let session = theway_core::Session::from_store(source.clone());
+    let user = |text: &str| AgentMessage::Llm(Message::User(UserMessage {
+        role: UserRole::User,
+        content: UserContent::Text(text.to_string()),
+        timestamp: 0,
+    }));
+    let assistant = |text: &str| {
+        AgentMessage::Llm(Message::Assistant(AssistantMessage {
+            role: AssistantRole::Assistant,
+            content: vec![ContentBlock::Text(TextContent {
+                text: text.to_string(),
+                text_signature: None,
+            })],
+            api: Api::from("faux"),
+            provider: Provider::from("faux"),
+            model: "faux".into(),
+            response_model: None,
+            response_id: None,
+            diagnostics: None,
+            usage: Usage::default(),
+            stop_reason: StopReason::Stop,
+            error_message: None,
+            timestamp: 0,
+        }))
+    };
+    session
+        .append_messages(vec![user("build a thing"), assistant("did the work")])
+        .await
+        .unwrap();
+    (repo, source)
+}
+
+/// The child's `compact_context` entry, resolved from the repo (the only
+/// session that is not the source).
+async fn child_compact_text(
+    repo: &Arc<dyn SessionRepository>,
+) -> theway_core::agent::context::collapse::CompactContext {
+    let child_id = repo
+        .list()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|record| record.id)
+        .find(|id| id != "test-session")
+        .expect("collapse must create a child session");
+    let child = repo.open(&child_id).await.unwrap().unwrap();
+    theway_core::Session::from_store(child)
+        .compact_context()
+        .await
+        .unwrap()
+        .expect("child must carry compact context")
+}
+
+#[tokio::test]
+async fn collapse_summarizes_with_model_before_creating_child() {
+    let _env_lock = ENV_LOCK.lock().unwrap();
+    let base = tempfile::tempdir().unwrap();
+    let _theway_dir = EnvGuard::set("THEWAY_DIR", base.path());
+    let cwd = tempfile::tempdir().unwrap();
+    let (repo, source) = repo_backed_session(cwd.path()).await;
+
+    let summary = concat!(
+        "goal: build the thing\n",
+        "completed work: did the work\n",
+        "key decisions: chose A\n",
+        "next steps: verify\n",
+        "critical context: remember X",
+    );
+    let mut options = AgentHarnessOptions::new(faux_model(), theway_core::Session::from_store(source));
+    options.stream_fn = Some(canned_summary_stream(summary, Arc::new(AtomicUsize::new(0))));
+    let harness = Arc::new(AgentHarness::new(options));
+    let executor = executor_for(&harness);
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, cwd.path());
+
+    let outcome = CollapseCommand.run(&[], &ctx).await;
+    assert!(matches!(outcome, CommandOutcome::Handled), "{outcome:?}");
+
+    let compact = child_compact_text(&repo).await;
+    for component in [
+        "goal: build the thing",
+        "completed work: did the work",
+        "key decisions: chose A",
+        "next steps: verify",
+        "critical context: remember X",
+    ] {
+        assert!(
+            compact.compact_text.contains(component),
+            "missing {component:?} in {:?}",
+            compact.compact_text
+        );
+    }
+}
+
+#[tokio::test]
+async fn collapse_without_model_falls_back_to_transcript_rolling() {
+    let _env_lock = ENV_LOCK.lock().unwrap();
+    let base = tempfile::tempdir().unwrap();
+    let _theway_dir = EnvGuard::set("THEWAY_DIR", base.path());
+    let cwd = tempfile::tempdir().unwrap();
+    let (repo, source) = repo_backed_session(cwd.path()).await;
+
+    let options = AgentHarnessOptions::new(None, theway_core::Session::from_store(source));
+    let harness = Arc::new(AgentHarness::new(options));
+    let executor = executor_for(&harness);
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, cwd.path());
+
+    let outcome = CollapseCommand.run(&[], &ctx).await;
+    assert!(matches!(outcome, CommandOutcome::Handled), "{outcome:?}");
+
+    let compact = child_compact_text(&repo).await;
+    assert!(
+        compact.compact_text.contains("critical context"),
+        "transcript material must land in critical context: {:?}",
+        compact.compact_text
+    );
+    assert!(
+        compact.compact_text.contains("build a thing"),
+        "transcript fallback must carry the source text: {:?}",
+        compact.compact_text
+    );
+}
+
+#[tokio::test]
+async fn collapse_while_busy_skips_summarizer() {
+    let _env_lock = ENV_LOCK.lock().unwrap();
+    let base = tempfile::tempdir().unwrap();
+    let _theway_dir = EnvGuard::set("THEWAY_DIR", base.path());
+    let cwd = tempfile::tempdir().unwrap();
+    let (repo, source) = repo_backed_session(cwd.path()).await;
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut options =
+        AgentHarnessOptions::new(faux_model(), theway_core::Session::from_store(source));
+    options.stream_fn = Some(canned_summary_stream(
+        "goal: ignored",
+        calls.clone(),
+    ));
+    let harness = Arc::new(AgentHarness::new(options));
+    harness.agent().state().is_streaming = true;
+    let executor = executor_for(&harness);
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, cwd.path());
+
+    let outcome = CollapseCommand.run(&[], &ctx).await;
+    assert!(matches!(outcome, CommandOutcome::Handled), "{outcome:?}");
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        0,
+        "a busy session must not run the summarizer"
+    );
+
+    let compact = child_compact_text(&repo).await;
+    assert!(
+        compact.compact_text.contains("build a thing"),
+        "busy collapse must still fall back to the transcript: {:?}",
+        compact.compact_text
+    );
 }

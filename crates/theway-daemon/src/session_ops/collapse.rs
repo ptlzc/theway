@@ -213,6 +213,7 @@ pub async fn collapse_session_for_command(
     session_id: &str,
     title: Option<String>,
     adopt: bool,
+    summary: Option<String>,
 ) -> Result<WireCollapseSessionResponse> {
     let graph_path = theway_contract::config::sessions_dir_for_cwd(cwd)
         .join(theway_storage::session_graph::SESSION_GRAPH_DB_FILE);
@@ -228,7 +229,7 @@ pub async fn collapse_session_for_command(
         session_id: session_id.to_string(),
         into_session_id: None,
         title,
-        summary: None,
+        summary,
     };
     ops.collapse_session_with_adopt(&request, adopt).await
 }

@@ -7,6 +7,7 @@
 
 use crate::agent::AgentRunError;
 use crate::agent::assembly::SessionEvent;
+use crate::agent::compaction::algorithm::SummarizeRequest;
 use crate::agent::compaction::compaction::{
     SummarizeError, compact_with_model_context, estimate_context_tokens,
 };
@@ -26,6 +27,58 @@ impl crate::agent::assembly::AgentHarness {
     ) -> Result<bool, AgentRunError> {
         self.start_runtime_extensions().await;
         self.do_compact(true, custom_instructions).await
+    }
+
+    /// Summarize the WHOLE session for a collapse (issue #94): bypasses the
+    /// auto-compaction cut point so even a small session gets a model summary.
+    /// Runs through the configured algorithm (builtin LLM summarizer or a
+    /// custom TS algorithm) and returns the summary text.
+    ///
+    /// Returns `Ok(None)` when there is no model, no material, or the summary
+    /// came back empty — callers fall back to deterministic material. Nothing
+    /// is persisted here; the caller owns summary placement.
+    pub async fn summarize_for_collapse(
+        &self,
+        custom_instructions: Option<String>,
+    ) -> Result<Option<String>, AgentRunError> {
+        self.start_runtime_extensions().await;
+        let model = match self.agent.state().model.clone() {
+            Some(model) => model,
+            None => return Ok(None),
+        };
+        let settings = self.compaction_settings.lock().clone();
+        let algorithm = self.compact_algorithms.algorithm(&settings.algorithm);
+        let entries = match self.session.branch(None).await {
+            Ok(entries) => entries,
+            Err(_) => return Ok(None),
+        };
+        // Fold everything: persistent model context plus every session
+        // message. Tool-result bodies are skipped by the entry projection,
+        // matching `transcript_material` semantics.
+        let mut messages = self.runtime_compaction_context_messages();
+        messages.extend(entries.iter().filter_map(|entry| match entry {
+            SessionTreeEntry::Message { message, .. } => Some(message.clone()),
+            _ => None,
+        }));
+        if messages.is_empty() {
+            return Ok(None);
+        }
+        let request = SummarizeRequest {
+            model: &model,
+            messages: &messages,
+            custom_instructions: custom_instructions.as_deref(),
+            settings: &settings,
+            stream_fn: self.stream_fn.as_ref(),
+            cancel: &self.agent.active_token().unwrap_or_default(),
+        };
+        match algorithm.summarize_prefix(&request).await {
+            Ok(outcome) if !outcome.summary.trim().is_empty() => Ok(Some(outcome.summary)),
+            Ok(_) => Ok(None),
+            Err(SummarizeError::Aborted) => Ok(None),
+            Err(error) => Err(AgentRunError::Other(format!(
+                "collapse summarization failed: {error}"
+            ))),
+        }
     }
 
     pub(crate) async fn run_auto_compaction(&self) -> Result<(), AgentRunError> {
