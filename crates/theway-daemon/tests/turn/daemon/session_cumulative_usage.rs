@@ -260,9 +260,10 @@ async fn session_usage_accumulates_last_assistant_usage_across_finished_turns() 
     push_assistant(host, 100, 40, 10, 5);
     host.finish_turn(&mut turn, Ok(None)).await;
     let snap = host.wire_snapshot();
-    assert_eq!(snap.session_usage.new_tokens, 100);
+    // input already includes cache_read (issue #105): new = input - cached.
+    assert_eq!(snap.session_usage.new_tokens, 90);
     assert_eq!(snap.session_usage.cached_tokens, 10);
-    assert_eq!(snap.session_usage.total_input_tokens, 110);
+    assert_eq!(snap.session_usage.total_input_tokens, 100);
     assert_eq!(snap.session_usage.cache_write_tokens, 5);
     assert_eq!(snap.session_usage.output_tokens, 40);
 
@@ -270,9 +271,9 @@ async fn session_usage_accumulates_last_assistant_usage_across_finished_turns() 
     push_assistant(host, 200, 80, 150, 20);
     host.finish_turn(&mut turn, Ok(None)).await;
     let snap = host.wire_snapshot();
-    assert_eq!(snap.session_usage.new_tokens, 300);
+    assert_eq!(snap.session_usage.new_tokens, 140);
     assert_eq!(snap.session_usage.cached_tokens, 160);
-    assert_eq!(snap.session_usage.total_input_tokens, 460);
+    assert_eq!(snap.session_usage.total_input_tokens, 300);
     assert_eq!(snap.session_usage.cache_write_tokens, 25);
     assert_eq!(snap.session_usage.output_tokens, 120);
 }
@@ -291,7 +292,7 @@ async fn session_usage_resets_on_activate_session() {
 
     push_assistant(host, 100, 40, 10, 5);
     host.finish_turn(&mut turn, Ok(None)).await;
-    assert_eq!(host.wire_snapshot().session_usage.total_input_tokens, 110);
+    assert_eq!(host.wire_snapshot().session_usage.total_input_tokens, 100);
 
     let (tx, rx) = oneshot::channel();
     host.handle_web_command(
@@ -322,4 +323,23 @@ async fn session_usage_resets_on_activate_session() {
     assert_eq!(snap.session_usage.output_tokens, 0);
     assert_eq!(snap.session_usage.cache_write_tokens, 0);
     assert_eq!(snap.session_usage.context_window, 0);
+}
+
+#[tokio::test]
+async fn session_usage_cache_hit_rate_not_pinned_at_half() {
+    let _serial = crate::test_env::ENV_LOCK.lock().unwrap();
+    let mut fixture = HostFixture::new().await;
+    let host = fixture.host();
+    let mut turn = TurnState::default();
+
+    // 90 of 100 input tokens are cached (90% hit): the reported rate must
+    // reflect that instead of double-counting cached reads into ~50%.
+    push_assistant(host, 100, 40, 90, 5);
+    host.finish_turn(&mut turn, Ok(None)).await;
+    let snap = host.wire_snapshot();
+    let rate = snap.session_usage.provider_cache_hit_rate.unwrap();
+    assert!(
+        (rate - 0.9).abs() < 1e-9,
+        "expected ~90% hit rate, got {rate}"
+    );
 }

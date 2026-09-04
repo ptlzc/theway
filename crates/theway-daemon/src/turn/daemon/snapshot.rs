@@ -131,8 +131,8 @@ impl TurnHost {
             // message) + the active model's context window.
             usage: WireContextUsage {
                 cached_tokens: usage.cache_read,
-                new_tokens: usage.input,
-                total_input_tokens: usage.input.saturating_add(usage.cache_read),
+                new_tokens: usage.input.saturating_sub(usage.cache_read),
+                total_input_tokens: usage.input,
                 output_tokens: usage.output,
                 cache_write_tokens: usage.cache_write,
                 provider_cache_hit_rate: usage.provider_cache_hit_rate,

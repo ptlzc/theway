@@ -228,10 +228,14 @@ impl TurnHost {
         {
             let cumulative = &mut self.session.cumulative_usage;
             cumulative.cached_tokens = cumulative.cached_tokens.saturating_add(usage.cache_read);
-            cumulative.new_tokens = cumulative.new_tokens.saturating_add(usage.input);
+            cumulative.new_tokens = cumulative
+                .new_tokens
+                .saturating_add(usage.input.saturating_sub(usage.cache_read));
+            // Issue #105: `usage.input` already includes cached reads; adding
+            // `cache_read` again double-counted and pinned the hit rate ~50%.
             cumulative.total_input_tokens = cumulative
                 .total_input_tokens
-                .saturating_add(usage.input.saturating_add(usage.cache_read));
+                .saturating_add(usage.input);
             cumulative.output_tokens = cumulative.output_tokens.saturating_add(usage.output);
             cumulative.cache_write_tokens =
                 cumulative.cache_write_tokens.saturating_add(usage.cache_write);
@@ -288,10 +292,13 @@ impl TurnHost {
         {
             let cumulative = &mut session.cumulative_usage;
             cumulative.cached_tokens = cumulative.cached_tokens.saturating_add(usage.cache_read);
-            cumulative.new_tokens = cumulative.new_tokens.saturating_add(usage.input);
+            cumulative.new_tokens = cumulative
+                .new_tokens
+                .saturating_add(usage.input.saturating_sub(usage.cache_read));
+            // Issue #105: `usage.input` already includes cached reads.
             cumulative.total_input_tokens = cumulative
                 .total_input_tokens
-                .saturating_add(usage.input.saturating_add(usage.cache_read));
+                .saturating_add(usage.input);
             cumulative.output_tokens = cumulative.output_tokens.saturating_add(usage.output);
             cumulative.cache_write_tokens =
                 cumulative.cache_write_tokens.saturating_add(usage.cache_write);

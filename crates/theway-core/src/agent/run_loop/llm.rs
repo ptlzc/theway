@@ -230,7 +230,12 @@ pub(super) async fn call_llm(
         inner.state.lock().streaming_message = None;
         let mut message = last_message
             .ok_or_else(|| AgentRunError::Other("LLM stream produced no message".into()))?;
-        let total_input_tokens = message.usage.input.saturating_add(message.usage.cache_read);
+        // Issue #105: `usage.input` is the TOTAL input token count (prompt
+        // tokens already include cached reads on OpenAI/DeepSeek), and
+        // `usage.cache_read` is the cached subset of it. Adding them again
+        // double-counted cache reads and pinned the hit rate near 50% for
+        // high-hit sessions.
+        let total_input_tokens = message.usage.input;
         let prefix_result = inner
             .context_cache
             .lock()
