@@ -28,6 +28,7 @@ mod model_picker;
 mod resume_picker;
 mod skill_scan;
 mod startup;
+mod template_scan;
 mod tui_docs;
 pub mod ui;
 
