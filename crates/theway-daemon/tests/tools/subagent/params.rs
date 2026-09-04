@@ -130,3 +130,125 @@ async fn execute_absent_tools_uses_full_tool_set() {
     assert_eq!(body, "done via bash");
     assert!(bash.was_called());
 }
+
+/// The regression case behind the feature request: an explicit
+/// `provider + model` pair must delegate even when the owning session has no
+/// model (e.g. a collapse-inherited session with empty model state).
+#[tokio::test]
+async fn execute_provider_model_resolves_without_parent_model() {
+    let provider = "test-subagent-provider";
+    let id = "test-subagent-model";
+    let mut catalog = faux_model();
+    catalog.provider = theway_llm_provider::Provider::from(provider);
+    catalog.id = id.into();
+    catalog.name = format!("{provider} {id}");
+    theway_llm_provider::register_custom_model(catalog);
+
+    let tool = SubagentTool::new(
+        None,
+        Some(faux_stream("catalog done")),
+        Arc::new(|_| vec![]),
+        spec_launch_resolver(),
+        vec!["general".into()],
+        SubagentJobRegistry::new(),
+    );
+    let result = tool
+        .execute(
+            "call-1",
+            json!({
+                "subagent_type": "general",
+                "prompt": "p",
+                "provider": provider,
+                "model": id,
+                "thinking": "high",
+            }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect("explicit catalog model must launch without a session model");
+
+    theway_llm_provider::unregister_custom_model(
+        &theway_llm_provider::Provider::from(provider),
+        id,
+    );
+
+    let body = match &result.content[0] {
+        UserContentBlock::Text(t) => t.text.clone(),
+        _ => panic!("expected text content"),
+    };
+    assert_eq!(body, "catalog done");
+}
+
+#[tokio::test]
+async fn execute_invalid_thinking_fails_the_call() {
+    let tool = subagent_tool(faux_stream("unreachable"), Vec::new());
+    let err = tool
+        .execute(
+            "call-1",
+            json!({
+                "subagent_type": "general",
+                "prompt": "p",
+                "thinking": "ultra",
+            }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect_err("an invalid thinking level must fail before spawning");
+    let AgentToolError::Message(msg) = err else {
+        panic!("expected Message error, got {err}");
+    };
+    assert!(msg.contains("invalid thinking level: ultra"), "{msg}");
+}
+
+#[tokio::test]
+async fn execute_provider_without_model_fails_the_call() {
+    let tool = subagent_tool(faux_stream("unreachable"), Vec::new());
+    let err = tool
+        .execute(
+            "call-1",
+            json!({ "subagent_type": "general", "prompt": "p", "provider": "deepseek" }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect_err("provider-only override must fail");
+    let AgentToolError::Message(msg) = err else {
+        panic!("expected Message error, got {err}");
+    };
+    assert!(
+        msg.contains("provider override requires a model override"),
+        "{msg}"
+    );
+}
+
+#[tokio::test]
+async fn execute_model_only_without_session_model_fails_with_hint() {
+    let tool = SubagentTool::new(
+        None,
+        Some(faux_stream("unreachable")),
+        Arc::new(|_| vec![]),
+        spec_launch_resolver(),
+        vec!["general".into()],
+        SubagentJobRegistry::new(),
+    );
+    let err = tool
+        .execute(
+            "call-1",
+            json!({
+                "subagent_type": "general",
+                "prompt": "p",
+                "model": "some-model",
+            }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect_err("model-only override without a session model must fail");
+    let AgentToolError::Message(msg) = err else {
+        panic!("expected Message error, got {err}");
+    };
+    assert!(msg.contains("no model set for this session"), "{msg}");
+    assert!(msg.contains("pass provider + model"), "{msg}");
+}

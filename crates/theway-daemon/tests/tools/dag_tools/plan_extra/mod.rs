@@ -24,6 +24,21 @@ async fn plan_definition_and_metadata() {
     );
 }
 
+#[tokio::test]
+async fn plan_definition_advertises_node_provider_model_thinking() {
+    let tools = tools(engine_no_launcher(), None);
+    let t = tool_by(&tools, "dag_plan");
+    let node_props = &t.definition().parameters["properties"]["nodes"]["items"]["properties"];
+
+    assert_eq!(node_props["provider"]["type"], "string");
+    assert_eq!(node_props["model"]["type"], "string");
+    let thinking_enum = node_props["thinking"]["enum"]
+        .as_array()
+        .expect("thinking enum");
+    assert!(thinking_enum.iter().any(|v| v == "off"));
+    assert!(thinking_enum.iter().any(|v| v == "max"));
+}
+
 #[test]
 fn plan_from_definition_rejects_invalid_json() {
     let err = plan_from_definition("n", "not json", None, None, None).unwrap_err();

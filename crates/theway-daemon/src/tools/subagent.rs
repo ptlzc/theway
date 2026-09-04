@@ -4,13 +4,15 @@
 //!
 //! v1 scope:
 //! - Subagent specs: the full builtin table (explorer / planner / executor-coder /
-//!   checker / general — same table the DAG node launcher resolves against), same model
-//!   as parent. ONE uniform tool set for every spec, injected from the app layer at
+//!   checker / general — same table the DAG node launcher resolves against), inheriting
+//!   the parent model by default with per-call `provider` + `model` catalog overrides. ONE uniform tool set for every spec, injected from the app layer at
 //!   construction (engine tools minus subagent/dag_* plus local tools — the spec's
 //!   system prompt and the parent's task prompt define behavior); the iteration budget
-//!   comes from the spec table. Per-call `max_iterations` and `tools` (allowlist)
-//!   override the spec budget / narrow the tool set at launch; an unknown allowlist
-//!   name fails the call. MemorySessionStorage so nothing leaks to disk.
+//!   comes from the spec table. Per-call `max_iterations`, `provider` + `model`
+//!   (catalog-resolved, independent of the parent session model), `thinking`, and
+//!   `tools` (allowlist) override the spec budget / model / narrow the tool set at
+//!   launch; an unknown allowlist name fails the call. MemorySessionStorage so
+//!   nothing leaks to disk.
 //! - Concurrent execution mode (Parallel) so the parent can fire multiple subagent calls in one
 //!   turn and they run together.
 //! - Parent abort cascades: the tool listens on the parent's cancellation token and aborts
@@ -34,7 +36,10 @@ use theway_core::{
 use theway_llm_provider::{Model, Tool, UserContentBlock};
 use tokio_util::sync::CancellationToken;
 
-use theway_core::multiagent::runner::{AgentRunOptions, filter_tool_set, run_agent};
+use theway_core::ThinkingLevel;
+use theway_core::multiagent::runner::{
+    AgentRunOptions, filter_tool_set, resolve_run_model, run_agent,
+};
 use theway_core::multiagent::types::AgentRunResolver;
 use theway_core::multiagent::types::ToolSetResolver;
 
@@ -48,7 +53,8 @@ pub type SubagentToolsFn = ToolSetResolver;
 pub struct SubagentTool {
     /// Model used by spawned subagents. Cloned from the parent at construction time so a
     /// later `/model` switch doesn't change in-flight subagent settings. `None` when the
-    /// session has no model yet — spawning a subagent then errors with a clear message.
+    /// session has no model yet — a call then fails unless it passes an explicit
+    /// `provider` + `model` pair that resolves from the model catalog.
     model: Option<Model>,
     /// Optional stream_fn shared with the parent. `None` falls back to `theway_llm_provider::stream_simple`.
     stream_fn: Option<StreamFn>,
@@ -155,6 +161,16 @@ impl AgentTool for SubagentTool {
                     .filter_map(|x| x.as_str().map(String::from))
                     .collect()
             });
+        let provider = params.get("provider").and_then(|v| v.as_str());
+        let model_id = params.get("model").and_then(|v| v.as_str());
+        let thinking = params.get("thinking").and_then(|v| v.as_str());
+        if let Some(raw) = thinking {
+            if raw.parse::<ThinkingLevel>().is_err() {
+                return Err(AgentToolError::Message(format!(
+                    "invalid thinking level: {raw} (allowed: off, minimal, low, medium, high, xhigh, max)"
+                )));
+            }
+        }
 
         // All specs in the app's table are valid subagents; the shared runner drives
         // the harness from the resolved spec (system prompt); the tool set comes from
@@ -175,15 +191,19 @@ impl AgentTool for SubagentTool {
             None => tools,
             Some(allow) => filter_tool_set(tools, allow).map_err(AgentToolError::Message)?,
         };
-        // The owning session has no model yet (daemon launched model-less and the
-        // client has not injected one): subagent delegation cannot spawn without
-        // a model. Fail fast with a clear, retryable message.
-        let model = self.model.clone().ok_or_else(|| {
-            AgentToolError::Message(
-                "no model set for this session; select a model in the TUI before delegating"
-                    .to_string(),
-            )
-        })?;
+        // Explicit `provider + model` resolves against the loaded models
+        // catalog independently of the parent session model (so model-less
+        // sessions can still delegate); `model` alone keeps the legacy
+        // parent-model id rewrite. The owning session has no model at all and
+        // no explicit pair was given: fail fast with a clear, retryable message.
+        let model = resolve_run_model(self.model.as_ref(), provider, model_id)
+            .map_err(AgentToolError::Message)?
+            .ok_or_else(|| {
+                AgentToolError::Message(
+                    "no model set for this session; select a model in the TUI before delegating (or pass provider + model)"
+                        .to_string(),
+                )
+            })?;
         let result = run_agent(AgentRunOptions {
             launch,
             tools,
@@ -191,7 +211,7 @@ impl AgentTool for SubagentTool {
             model,
             stream_fn: self.stream_fn.clone(),
             timeout: None,
-            thinking: None,
+            thinking: thinking.map(str::to_string),
             registry: self.registry.clone(),
             source: "subagent".into(),
             run_id: None,
@@ -239,6 +259,7 @@ fn build_definition(spec_names: &[String]) -> Tool {
         name: "subagent".into(),
         description:
             "Delegate a self-contained task to a fresh sub-agent. The subagent gets its own context window and the uniform subagent tool set (engine tools minus subagent/dag_* plus local tools); this tool returns a single text result from the subagent. Use this when you need to inspect a large surface area (search, file reads) or run a contained change without polluting the main conversation.\n\
+             Model: by default the subagent inherits the parent session's model. Pass provider + model to resolve a concrete model from the loaded catalog (deepseek:deepseek-v4-flash, anthropic:claude-haiku-4-5, …) — this works even when the session has no model set; model without provider keeps the parent provider and only swaps the model id. thinking overrides the reasoning intensity (off, minimal, low, medium, high, xhigh, max).\n\
              Budget: the subagent defaults to 300 LLM-turn attempts — the code-harness budget (compile → fix loops need it). For short, fast tasks (a quick read, a single check) lower max_iterations to a reasonable range like 4-32.\n\
              Tools: by default the subagent gets every orchestrator tool except dag_* and subagent; pass tools: [\"read\", \"bash\"] to restrict it to specific tools (unknown names fail the call).".into(),
         parameters: json!({
@@ -253,6 +274,19 @@ fn build_definition(spec_names: &[String]) -> Tool {
                 "description": {
                     "type": "string",
                     "description": "Short label for the task (visible in UI logs).",
+                },
+                "provider": {
+                    "type": "string",
+                    "description": "Provider for the subagent model override, resolved with `model` against the loaded model catalog (e.g. deepseek, anthropic). Works independently of the parent session model; omit to inherit the parent session's provider.",
+                },
+                "model": {
+                    "type": "string",
+                    "description": "Subagent model override. With `provider`: a catalog model id resolved independently of the parent session model. Without `provider`: swaps the model id while keeping the parent session's provider/base_url (requires a parent session model).",
+                },
+                "thinking": {
+                    "type": "string",
+                    "enum": ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+                    "description": "Reasoning-intensity override for the subagent. Providers without a thinking_level_map ignore the reasoning option at stream time.",
                 },
                 "prompt": {
                     "type": "string",

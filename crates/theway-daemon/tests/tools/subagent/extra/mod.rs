@@ -112,6 +112,12 @@ fn definition_label_and_execution_mode_are_built_from_spec_names() {
         .expect("subagent_type enum");
     assert!(enum_values.iter().any(|v| v == "general"));
     assert!(enum_values.iter().any(|v| v == "explorer"));
+    assert_eq!(def.parameters["properties"]["provider"]["type"], "string");
+    assert_eq!(def.parameters["properties"]["model"]["type"], "string");
+    let thinking_enum = def.parameters["properties"]["thinking"]["enum"]
+        .as_array()
+        .expect("thinking enum");
+    assert!(thinking_enum.iter().any(|v| v == "max"));
 }
 
 #[tokio::test]
