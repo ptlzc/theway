@@ -331,9 +331,13 @@ sandbox-only builds.
 - **DAG persistence** (`dag_persist`): debounced writer behind the core
   `DagPersistSink` contract; run state lives per session in
   `<cwd>/.pi/graph-engineering-state-<sessionId>.db`.
-- **Supporting surfaces**: skills loading (multi-root priority scan — see
-  [Daemon path context](#daemon-path-context)), prompt-template loading
-  (dual-root project ↻ user), MCP loader + LSP supervisor, lifecycle hooks
+- **Supporting surfaces**: skills loading and prompt-template loading — the
+  local scans in the standalone daemon (skills: multi-root priority scan,
+  see [Daemon path context](#daemon-path-context); templates: dual-root
+  project ↻ user). In controller-provisioned mode the daemon does zero local
+  file IO for either catalog: the TUI scans and provisions both through the
+  settings surface (`WireDaemonConfig.skills` / `templates`, carried on both
+  gRPC and JSON-RPC). MCP loader + LSP supervisor, lifecycle hooks
   (`hooks`, `hook_executors`), TS extension host, and runtime observability exporters.
 
 The daemon re-exports the shared client-contract modules
