@@ -433,6 +433,7 @@ fn daemon_config_round_trips_wire_and_proto() {
         thinking_level: Some("high".into()),
         builtin_skills: vec!["git".into(), "web".into()],
         skills: Vec::new(),
+        templates: Vec::new(),
         skills_dirs: vec!["/home/user/.agents/skills".into()],
         trigger_poll_secs: Some(60),
         tui_max_feed_lines: Some(8000),

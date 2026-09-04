@@ -58,6 +58,52 @@ fn wire_daemon_config_merge_counts_only_actual_clears() {
 }
 
 #[test]
+fn wire_daemon_config_merge_replaces_templates_when_non_empty() {
+    let mut current = WireDaemonConfig {
+        templates: vec![crate::wire::WireProvisionedTemplate {
+            name: "old-template".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let patch = WireDaemonConfig {
+        templates: vec![crate::wire::WireProvisionedTemplate {
+            name: "new-template".into(),
+            description: "a prompt template".into(),
+            content: "template body".into(),
+            file_path: "/templates/new-template.md".into(),
+        }],
+        ..Default::default()
+    };
+
+    let touched = current.merge_from(&patch);
+
+    assert_eq!(touched, 1);
+    assert_eq!(current.templates.len(), 1);
+    assert_eq!(current.templates[0].name, "new-template");
+}
+
+#[test]
+fn wire_daemon_config_clear_fields_empties_templates() {
+    let mut current = WireDaemonConfig {
+        templates: vec![crate::wire::WireProvisionedTemplate {
+            name: "template".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let patch = WireDaemonConfig {
+        clear_fields: vec!["templates".into()],
+        ..Default::default()
+    };
+
+    let touched = current.merge_from(&patch);
+
+    assert_eq!(touched, 1);
+    assert!(current.templates.is_empty());
+}
+
+#[test]
 fn wire_daemon_config_serde_round_trips_partial_and_clear_fields() {
     let config = WireDaemonConfig {
         provider: Some("anthropic".into()),

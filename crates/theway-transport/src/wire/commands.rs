@@ -141,6 +141,10 @@ pub struct WireDaemonConfig {
     /// in a controller-provisioned session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skills: Vec<WireProvisionedSkill>,
+    /// Controller-scanned templates (issue #96), mirrors the skills
+    /// provisioning path.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub templates: Vec<WireProvisionedTemplate>,
     /// Extra skill search directories (mirrors `WirePathContext::skills_dirs`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skills_dirs: Vec<String>,
@@ -185,8 +189,23 @@ pub struct WireProvisionedSkill {
     pub disable_model_invocation: bool,
 }
 
+/// One controller-scanned prompt template (#96): the TUI walks the template
+/// roots and provisions the daemon with the full catalog; mirrors
+/// `PromptTemplate` but keeps description as a plain string (empty = none).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct WireProvisionedTemplate {
+    /// Canonical template name.
+    pub name: String,
+    /// Free-form description (empty = none).
+    pub description: String,
+    /// Template body content.
+    pub content: String,
+    /// Absolute path to the source template file.
+    pub file_path: String,
+}
+
 impl WireDaemonConfig {
-    pub const FIELDS: [&'static str; 12] = [
+    pub const FIELDS: [&'static str; 13] = [
         "provider",
         "model",
         "base_url",
@@ -194,6 +213,7 @@ impl WireDaemonConfig {
         "thinking_level",
         "builtin_skills",
         "skills",
+        "templates",
         "skills_dirs",
         "trigger_poll_secs",
         "tui_max_feed_lines",
@@ -227,6 +247,7 @@ impl WireDaemonConfig {
                 "thinking_level" => self.thinking_level.take().is_some(),
                 "builtin_skills" => !std::mem::take(&mut self.builtin_skills).is_empty(),
                 "skills" => !std::mem::take(&mut self.skills).is_empty(),
+                "templates" => !std::mem::take(&mut self.templates).is_empty(),
                 "skills_dirs" => !std::mem::take(&mut self.skills_dirs).is_empty(),
                 "trigger_poll_secs" => self.trigger_poll_secs.take().is_some(),
                 "tui_max_feed_lines" => self.tui_max_feed_lines.take().is_some(),
@@ -262,6 +283,10 @@ impl WireDaemonConfig {
         }
         if !patch.skills.is_empty() {
             self.skills = patch.skills.clone();
+            touched += 1;
+        }
+        if !patch.templates.is_empty() {
+            self.templates = patch.templates.clone();
             touched += 1;
         }
         if !patch.skills_dirs.is_empty() {

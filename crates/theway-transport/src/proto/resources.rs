@@ -136,6 +136,8 @@ pub fn wire_path_context_from_proto(p: &wire::PathContext) -> WirePathContext {
 
 /// Convert the daemon configuration view (issue #72) into the structured wire
 /// model.
+// NOTE(#96): skills/templates are dropped in the proto direction until the
+// proto twin lands (proto-parity step).
 pub fn daemon_config_to_proto(config: &crate::wire::WireDaemonConfig) -> wire::DaemonConfig {
     wire::DaemonConfig {
         provider: config.provider.clone(),
@@ -168,6 +170,9 @@ pub fn daemon_config_from_proto(config: &wire::DaemonConfig) -> crate::wire::Wir
         thinking_level: config.thinking_level.clone(),
         builtin_skills: config.builtin_skills.clone(),
         skills: Vec::new(),
+        // Placeholder until the real proto conversion lands in the
+        // proto-parity step (#96).
+        templates: Vec::new(),
         skills_dirs: config.skills_dirs.clone(),
         trigger_poll_secs: config.trigger_poll_secs.map(u64::from),
         tui_max_feed_lines: config.tui_max_feed_lines.map(u64::from),
