@@ -62,9 +62,11 @@ Each node is a fresh subagent `AgentHarness` (in-memory session, `MemorySessionS
 | `general` | read-only set (identical to the `task` tool) |
 
 Unknown agent names are rejected at `dag_plan` time (like the TS extension's config.yaml
-validation). Node-level `model` / `thinking` / `timeout` overrides: `model` swaps the
-parent model's id (provider stays), `thinking` applies when the model declares a
-`thinkingLevelMap`, `timeout` is an **idle timeout** with TS `runPiOnce` semantics — the
+validation). Node-level `provider` / `model` / `thinking` / `timeout` overrides:
+`provider` + `model` together resolve against the loaded model catalog
+(`theway-llm-provider::get_model`) and are independent of the parent session model;
+`model` alone swaps the parent model's id (provider stays), `thinking` applies when the
+model declares a `thinkingLevelMap`, `timeout` is an **idle timeout** with TS `runPiOnce` semantics — the
 subagent is killed only after N seconds of no output activity (any token chunk / tool
 update reschedules the watchdog; abort → 5s grace → force-kill; failure text
 `Timed out: no output for {N}s (idle timeout)`), default 120s when unset.
