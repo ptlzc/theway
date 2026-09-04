@@ -53,26 +53,43 @@ impl App {
         }
     }
 
-    /// Issue #46: create + select the deferred fresh session. Called right
-    /// before the first submitted message reaches the daemon (reused-daemon
-    /// fresh attach, issue #56) — the session file is only created when the
-    /// TUI actually sends something, so an idle TUI leaves no empty
-    /// conversation behind. Idempotent: no-op once the flag is cleared.
-    pub(crate) async fn ensure_fresh_session(&mut self) -> Result<()> {
+    /// Issue #46 + #97: create + select the fresh session for a reused-daemon
+    /// attach (issue #56). Called right before the first submitted message
+    /// reaches the daemon, and at startup when the fresh attach is eager
+    /// (issue #97: the new session exists immediately — the TUI never shows
+    /// the previous session's id anywhere). Idempotent: no-op once the flag
+    /// is cleared. Returns the created session id.
+    pub(crate) async fn ensure_fresh_session(&mut self) -> Result<String> {
         if !self.pending_fresh_attach {
-            return Ok(());
+            return Ok(self.session_id.clone());
         }
-        // Clear BEFORE select_session (which also clears it); the message
-        // right after this call must not re-trigger creation.
-        self.pending_fresh_attach = false;
-        let summary = self
+        let summary = match self
             .client
             .create_session_with_metadata(None, None, Default::default())
-            .await?;
+            .await
+        {
+            Ok(summary) => summary,
+            Err(error) => {
+                // Keep the flag armed so the next submit retries the creation
+                // instead of silently writing into the daemon's current
+                // session (issue #97).
+                return Err(error);
+            }
+        };
+        // Clear before select_session (which also clears it); the message
+        // right after this call must not re-trigger creation.
+        self.pending_fresh_attach = false;
         let id = summary.session_id;
         self.select_session(id.clone()).await?;
         self.system_line(format!("new session {id}"));
-        Ok(())
+        Ok(id)
+    }
+
+    /// Issue #97: mark the eagerly-created fresh-attach session as the
+    /// startup-auto session so the idle reap (issue #47) deletes it on exit
+    /// when no message ever reached it.
+    pub(crate) fn set_auto_session(&mut self, id: String) {
+        self.auto_session = Some(id);
     }
 
     /// Issue #47: on exit, delete the session the SPAWNED daemon created at

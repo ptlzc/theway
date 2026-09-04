@@ -723,3 +723,31 @@ async fn bare_slash_surfaces_skill_catalog_first() {
         app.completions
     );
 }
+
+/// Issue #97: an eager fresh attach produces the new session id immediately
+/// — `ensure_fresh_session` returns it and the App points at it (panel/feed/
+/// stream never reference the daemon's previous session).
+#[tokio::test]
+async fn eager_fresh_attach_returns_and_selects_the_new_session() {
+    use theway_transport::transport::SessionOps;
+
+    let (mut app, _rx, ops) = test_app_with_sessions(&["sess-1"], true).await;
+    assert_eq!(app.session_id, "sess-1", "fixture seeds the previous id");
+
+    let id = app.ensure_fresh_session().await.unwrap();
+    assert_ne!(id, "sess-1", "fresh attach must create a brand-new session");
+    assert_eq!(app.session_id, id, "the App must point at the new session");
+    assert!(
+        ops.list().await.unwrap().iter().any(|s| s.session_id == id),
+        "the new session must exist server-side"
+    );
+    assert!(!app.pending_fresh_attach);
+
+    // Marking it as the auto session + idle exit reaps it (issue #47).
+    app.set_auto_session(id.clone());
+    app.reap_empty_auto_session().await;
+    assert!(
+        ops.list().await.unwrap().iter().all(|s| s.session_id != id),
+        "an untouched fresh session must be reaped on idle exit"
+    );
+}

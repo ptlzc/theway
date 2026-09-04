@@ -251,6 +251,24 @@ pub(crate) async fn run_repl(
         fresh_attach,
         auto_session,
     });
+    // Issue #97: on a fresh attach the new session is created eagerly — the
+    // panel, stream and snapshot point at it from the first frame, so the
+    // previous session is never visible as "current". The fresh id is also
+    // marked as the auto session: an idle exit reaps it (issue #47), keeping
+    // the no-empty-conversation invariant from issue #46.
+    if fresh_attach {
+        match app.ensure_fresh_session().await {
+            Ok(id) => {
+                app.set_auto_session(id.clone());
+                app.system_line(format!(
+                    "attached to a running daemon; created fresh session {id} (previous session not attached)"
+                ));
+            }
+            Err(error) => {
+                app.system_line(format!("fresh session create failed: {error}"));
+            }
+        }
+    }
     app.banner();
     app.system_line(format!(
         "connected to daemon at {} (cwd: {})",
@@ -261,11 +279,6 @@ pub(crate) async fn run_repl(
     // reports (values the running daemon cannot re-apply at runtime).
     for note in config_notes {
         app.system_line(note);
-    }
-    if fresh_attach {
-        app.system_line(
-            "attached to a running daemon; a fresh session will be created on your first message",
-        );
     }
     app.run().await
 }
