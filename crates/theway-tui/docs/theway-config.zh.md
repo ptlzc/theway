@@ -49,7 +49,7 @@ theme 改动热重载：daemon 侧 reload 使 runtime revision 递增后，已�
 
 - Skills 从 `~/.theway/skills/`、`<cwd>/.theway/skills/` 和内置 skill 中解析；更近的层按名称覆盖。`/reload` 重新扫描 skills 与 file commands。
 - Templates（带 frontmatter 的 `.md`）从 `~/.theway/templates/` 和 `<cwd>/.theway/templates/` 解析；用 `/template <name>` 运行。
-- Extension package 从 `<base>/extensions-managed/`、`<base>/extensions/` 和 `<cwd>/.theway/extensions/` 解析（project > user > managed）。Project package 需要在 `<base>/extensions/trust.json` 中有信任记录；用 `/extension-trust` 管理，用 `/extension-reload` 重载。
+- Extension package 从 `<base>/extensions-managed/`、`<base>/extensions/` 和 `<cwd>/.theway/extensions/` 解析（project > user > managed）。官方 package（`tui-docs`）内嵌在 daemon 二进制中，启动时自动装配到 managed 层。Project package 需要在 `<base>/extensions/trust.json` 中有信任记录；用 `/extension-trust` 管理，用 `/extension-reload` 重载。
 
 ## 给 agent 的指引
 

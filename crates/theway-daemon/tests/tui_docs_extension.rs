@@ -1,7 +1,8 @@
 #![cfg(feature = "local")]
 
-//! Regression tests for the committed `extensions/tui-docs` package: the
-//! plugin registers one small prompt-section pointer naming where the TUI
+//! Regression tests for the `tui-docs` package embedded by the
+//! `theway-extensions` crate (`crates/theway-extensions/packages/tui-docs`):
+//! the plugin registers one small prompt-section pointer naming where the TUI
 //! documentation lives — it never injects the document body.
 
 use std::path::Path;

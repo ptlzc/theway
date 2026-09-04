@@ -49,7 +49,7 @@ MCP stdio/HTTP server definitions under `[[server]]` entries: `name`, `kind`, `c
 
 - Skills resolve from `~/.theway/skills/`, `<cwd>/.theway/skills/`, and built-ins; closer layers override by name. `/reload` rescans skills and file commands.
 - Templates (`.md` with frontmatter) resolve from `~/.theway/templates/` and `<cwd>/.theway/templates/`; run with `/template <name>`.
-- Extension packages resolve from `<base>/extensions-managed/`, `<base>/extensions/`, and `<cwd>/.theway/extensions/` (project > user > managed). Project packages require a trust record in `<base>/extensions/trust.json`; manage via `/extension-trust` and reload with `/extension-reload`.
+- Extension packages resolve from `<base>/extensions-managed/`, `<base>/extensions/`, and `<cwd>/.theway/extensions/` (project > user > managed). The official packages (`tui-docs`) are embedded in the daemon binary and auto-provisioned into the managed layer at startup. Project packages require a trust record in `<base>/extensions/trust.json`; manage via `/extension-trust` and reload with `/extension-reload`.
 
 ## Guidance for an agent
 

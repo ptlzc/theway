@@ -221,6 +221,7 @@ The daemon resolves its host paths once at startup (`--cwd`, `--home`, repeatabl
 | [`crates/theway-transport`](crates/theway-transport/README.md) | `theway-transport` | Cross-client wire model plus gRPC, HTTP/JSON-RPC, SSE, and WebSocket carriers. |
 | [`crates/theway-tui`](crates/theway-tui/README.md) | `theway-tui` | `theway` terminal client/controller and offline session-maintenance commands. |
 | [`crates/theway-contract`](crates/theway-contract/README.md) | `theway-contract` | Leaf persistence and path contracts with no workspace dependencies. |
+| [`crates/theway-extensions`](crates/theway-extensions/README.md) | `theway-extensions` | Official runtime extension packages embedded as build-time data, provisioned into the managed extensions layer. |
 | [`crates/theway-storage`](crates/theway-storage/README.md) | `theway-storage` | SQLite session and DAG persistence plus session archives. |
 | [`crates/theway-llm-provider`](crates/theway-llm-provider/README.md) | `theway-llm-provider` | Normalized streaming LLM client, provider integrations, and model catalogs. |
 | [`crates/theway-mcp`](crates/theway-mcp/README.md) | `theway-mcp` | MCP stdio client and JSON-RPC framing. |

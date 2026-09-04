@@ -15,7 +15,11 @@
 <cwd>/.theway/extensions/<extension-id>/index.js
 $THEWAY_DIR/extensions/<extension-id>/theway-extension.json
 $THEWAY_DIR/extensions/<extension-id>/index.js
+$THEWAY_DIR/extensions-managed/<extension-id>/theway-extension.json
+$THEWAY_DIR/extensions-managed/<extension-id>/index.js
 ```
+
+官方 package（`tui-docs`，以及参考实现的 `deepseek-anchor`）位于 `crates/theway-extensions/packages/`，由 `theway-extensions` crate 嵌入 daemon 二进制；daemon 启动时把随发行的那部分装配到 managed 层（见 Install layers and instance scope）。
 
 发现过程是确定性的。格式错误、不受支持、未受信任或已故障的 package 会留在扩展 catalog 中并带有结构化诊断，不会阻止 daemon 或无关 package 启动。Catalog 按 manifest priority 降序、来源层和扩展 ID 排列有效 package。
 

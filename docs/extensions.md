@@ -15,7 +15,11 @@ Each extension is a directory containing a strict `theway-extension.json` manife
 <cwd>/.theway/extensions/<extension-id>/index.js
 $THEWAY_DIR/extensions/<extension-id>/theway-extension.json
 $THEWAY_DIR/extensions/<extension-id>/index.js
+$THEWAY_DIR/extensions-managed/<extension-id>/theway-extension.json
+$THEWAY_DIR/extensions-managed/<extension-id>/index.js
 ```
+
+The official packages (`tui-docs`, plus the reference `deepseek-anchor`) live under `crates/theway-extensions/packages/` and are embedded into the daemon binary by the `theway-extensions` crate; at startup the daemon provisions the shipped ones into the managed layer (see Install layers and instance scope).
 
 Discovery is deterministic. A malformed, unsupported, untrusted, or faulted package remains visible in the extension catalog with a structured diagnostic and does not prevent the daemon or unrelated packages from starting. The catalog orders effective packages by descending manifest priority, source layer, and extension ID.
 

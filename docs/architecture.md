@@ -22,6 +22,7 @@ theway is a three-layer agent runtime:
 | [`crates/theway-transport`](../crates/theway-transport/README.md) | `theway-transport` | Cross-client wire model and operations carried over gRPC, HTTP/JSON-RPC, SSE, and WebSocket; no MCP implementation. |
 | [`crates/theway-tui`](../crates/theway-tui/README.md) | `theway-tui` | `theway` terminal client/controller, daemon discovery, controller tool/storage services, and offline session commands. |
 | [`crates/theway-contract`](../crates/theway-contract/README.md) | `theway-contract` | Leaf persistence records, interfaces, automation sidecars, and path derivation with no workspace dependencies. |
+| [`crates/theway-extensions`](../crates/theway-extensions/README.md) | `theway-extensions` | Official runtime extension packages embedded as build-time data; the daemon provisions the shipped ones into the managed extensions layer. |
 | [`crates/theway-storage`](../crates/theway-storage/README.md) | `theway-storage` | SQLite session/DAG persistence and session archives implementing contract interfaces without core or transport dependencies. |
 | [`crates/theway-llm-provider`](../crates/theway-llm-provider/README.md) | `theway-llm-provider` | Normalized streaming LLM client, provider implementations, message transforms, and model/image catalogs. |
 | [`crates/theway-mcp`](../crates/theway-mcp/README.md) | `theway-mcp` | External MCP stdio client, JSON-RPC framing, tool discovery, and tool calls. |
