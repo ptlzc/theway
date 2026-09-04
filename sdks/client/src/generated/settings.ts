@@ -94,10 +94,55 @@ export interface DaemonConfig {
     | string
     | undefined;
   /**
+   * ── provisioned skills / templates (issues #95 / #96) ──
+   * Controller-scanned skills: the TUI provisions the daemon with the full
+   * catalog (name/description/body included) so a controller-provisioned
+   * session never needs the daemon to read skill files.
+   */
+  skills: ProvisionedSkill[];
+  /** Controller-scanned prompt templates, mirroring the skills path. */
+  templates: ProvisionedTemplate[];
+  /**
    * Field names to clear before applying values present in this message.
    * Unknown names make the daemon reject the patch without partial changes.
    */
   clearFields: string[];
+}
+
+/**
+ * One controller-scanned skill (issues #95 / #96): the TUI walks the local
+ * skill roots and provisions the daemon with the full catalog so a
+ * controller-provisioned session never needs the daemon to read skill files.
+ */
+export interface ProvisionedSkill {
+  /** Canonical skill name (matches the daemon-side `Skill.name` rules). */
+  name: string;
+  /** Free-form description shown in the catalog / system prompt. */
+  description: string;
+  /** Markdown body without the YAML frontmatter. */
+  content: string;
+  /** Absolute path to the source `SKILL.md` (or root-level `.md`). */
+  filePath: string;
+  /** Discovery layer: `"user"` or `"project"` (mirrors `SkillSource`). */
+  source: string;
+  /** When true the model must not auto-invoke this skill. */
+  disableModelInvocation: boolean;
+}
+
+/**
+ * One controller-scanned prompt template (#96): the TUI walks the template
+ * roots and provisions the daemon with the full catalog; mirrors
+ * `PromptTemplate` but keeps description as a plain string (empty = none).
+ */
+export interface ProvisionedTemplate {
+  /** Canonical template name. */
+  name: string;
+  /** Free-form description (empty = none). */
+  description: string;
+  /** Template body content. */
+  content: string;
+  /** Absolute path to the source template file. */
+  filePath: string;
 }
 
 function createBaseDaemonConfig(): DaemonConfig {
@@ -113,6 +158,8 @@ function createBaseDaemonConfig(): DaemonConfig {
     toolServiceAddr: undefined,
     storageServiceAddr: undefined,
     thinkingLevel: undefined,
+    skills: [],
+    templates: [],
     clearFields: [],
   };
 }
@@ -151,6 +198,12 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
     }
     if (message.thinkingLevel !== undefined) {
       writer.uint32(98).string(message.thinkingLevel);
+    }
+    for (const v of message.skills) {
+      ProvisionedSkill.encode(v!, writer.uint32(106).fork()).join();
+    }
+    for (const v of message.templates) {
+      ProvisionedTemplate.encode(v!, writer.uint32(114).fork()).join();
     }
     for (const v of message.clearFields) {
       writer.uint32(90).string(v!);
@@ -253,6 +306,22 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
           message.thinkingLevel = reader.string();
           continue;
         }
+        case 13: {
+          if (tag !== 106) {
+            break;
+          }
+
+          message.skills.push(ProvisionedSkill.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 14: {
+          if (tag !== 114) {
+            break;
+          }
+
+          message.templates.push(ProvisionedTemplate.decode(reader, reader.uint32()));
+          continue;
+        }
         case 11: {
           if (tag !== 90) {
             break;
@@ -315,6 +384,12 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
         : isSet(object.thinking_level)
         ? globalThis.String(object.thinking_level)
         : undefined,
+      skills: globalThis.Array.isArray(object?.skills)
+        ? object.skills.map((e: any) => ProvisionedSkill.fromJSON(e))
+        : [],
+      templates: globalThis.Array.isArray(object?.templates)
+        ? object.templates.map((e: any) => ProvisionedTemplate.fromJSON(e))
+        : [],
       clearFields: globalThis.Array.isArray(object?.clearFields)
         ? object.clearFields.map((e: any) => globalThis.String(e))
         : globalThis.Array.isArray(object?.clear_fields)
@@ -358,6 +433,12 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
     if (message.thinkingLevel !== undefined) {
       obj.thinkingLevel = message.thinkingLevel;
     }
+    if (message.skills?.length) {
+      obj.skills = message.skills.map((e) => ProvisionedSkill.toJSON(e));
+    }
+    if (message.templates?.length) {
+      obj.templates = message.templates.map((e) => ProvisionedTemplate.toJSON(e));
+    }
     if (message.clearFields?.length) {
       obj.clearFields = message.clearFields;
     }
@@ -380,7 +461,269 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
     message.toolServiceAddr = object.toolServiceAddr ?? undefined;
     message.storageServiceAddr = object.storageServiceAddr ?? undefined;
     message.thinkingLevel = object.thinkingLevel ?? undefined;
+    message.skills = object.skills?.map((e) => ProvisionedSkill.fromPartial(e)) || [];
+    message.templates = object.templates?.map((e) => ProvisionedTemplate.fromPartial(e)) || [];
     message.clearFields = object.clearFields?.map((e) => e) || [];
+    return message;
+  },
+};
+
+function createBaseProvisionedSkill(): ProvisionedSkill {
+  return { name: "", description: "", content: "", filePath: "", source: "", disableModelInvocation: false };
+}
+
+export const ProvisionedSkill: MessageFns<ProvisionedSkill> = {
+  encode(message: ProvisionedSkill, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.name !== "") {
+      writer.uint32(10).string(message.name);
+    }
+    if (message.description !== "") {
+      writer.uint32(18).string(message.description);
+    }
+    if (message.content !== "") {
+      writer.uint32(26).string(message.content);
+    }
+    if (message.filePath !== "") {
+      writer.uint32(34).string(message.filePath);
+    }
+    if (message.source !== "") {
+      writer.uint32(42).string(message.source);
+    }
+    if (message.disableModelInvocation !== false) {
+      writer.uint32(48).bool(message.disableModelInvocation);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ProvisionedSkill {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseProvisionedSkill();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.description = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.content = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.filePath = reader.string();
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.source = reader.string();
+          continue;
+        }
+        case 6: {
+          if (tag !== 48) {
+            break;
+          }
+
+          message.disableModelInvocation = reader.bool();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ProvisionedSkill {
+    return {
+      name: isSet(object.name) ? globalThis.String(object.name) : "",
+      description: isSet(object.description) ? globalThis.String(object.description) : "",
+      content: isSet(object.content) ? globalThis.String(object.content) : "",
+      filePath: isSet(object.filePath)
+        ? globalThis.String(object.filePath)
+        : isSet(object.file_path)
+        ? globalThis.String(object.file_path)
+        : "",
+      source: isSet(object.source) ? globalThis.String(object.source) : "",
+      disableModelInvocation: isSet(object.disableModelInvocation)
+        ? globalThis.Boolean(object.disableModelInvocation)
+        : isSet(object.disable_model_invocation)
+        ? globalThis.Boolean(object.disable_model_invocation)
+        : false,
+    };
+  },
+
+  toJSON(message: ProvisionedSkill): unknown {
+    const obj: any = {};
+    if (message.name !== "") {
+      obj.name = message.name;
+    }
+    if (message.description !== "") {
+      obj.description = message.description;
+    }
+    if (message.content !== "") {
+      obj.content = message.content;
+    }
+    if (message.filePath !== "") {
+      obj.filePath = message.filePath;
+    }
+    if (message.source !== "") {
+      obj.source = message.source;
+    }
+    if (message.disableModelInvocation !== false) {
+      obj.disableModelInvocation = message.disableModelInvocation;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ProvisionedSkill>, I>>(base?: I): ProvisionedSkill {
+    return ProvisionedSkill.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ProvisionedSkill>, I>>(object: I): ProvisionedSkill {
+    const message = createBaseProvisionedSkill();
+    message.name = object.name ?? "";
+    message.description = object.description ?? "";
+    message.content = object.content ?? "";
+    message.filePath = object.filePath ?? "";
+    message.source = object.source ?? "";
+    message.disableModelInvocation = object.disableModelInvocation ?? false;
+    return message;
+  },
+};
+
+function createBaseProvisionedTemplate(): ProvisionedTemplate {
+  return { name: "", description: "", content: "", filePath: "" };
+}
+
+export const ProvisionedTemplate: MessageFns<ProvisionedTemplate> = {
+  encode(message: ProvisionedTemplate, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.name !== "") {
+      writer.uint32(10).string(message.name);
+    }
+    if (message.description !== "") {
+      writer.uint32(18).string(message.description);
+    }
+    if (message.content !== "") {
+      writer.uint32(26).string(message.content);
+    }
+    if (message.filePath !== "") {
+      writer.uint32(34).string(message.filePath);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ProvisionedTemplate {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseProvisionedTemplate();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.description = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.content = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.filePath = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ProvisionedTemplate {
+    return {
+      name: isSet(object.name) ? globalThis.String(object.name) : "",
+      description: isSet(object.description) ? globalThis.String(object.description) : "",
+      content: isSet(object.content) ? globalThis.String(object.content) : "",
+      filePath: isSet(object.filePath)
+        ? globalThis.String(object.filePath)
+        : isSet(object.file_path)
+        ? globalThis.String(object.file_path)
+        : "",
+    };
+  },
+
+  toJSON(message: ProvisionedTemplate): unknown {
+    const obj: any = {};
+    if (message.name !== "") {
+      obj.name = message.name;
+    }
+    if (message.description !== "") {
+      obj.description = message.description;
+    }
+    if (message.content !== "") {
+      obj.content = message.content;
+    }
+    if (message.filePath !== "") {
+      obj.filePath = message.filePath;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ProvisionedTemplate>, I>>(base?: I): ProvisionedTemplate {
+    return ProvisionedTemplate.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ProvisionedTemplate>, I>>(object: I): ProvisionedTemplate {
+    const message = createBaseProvisionedTemplate();
+    message.name = object.name ?? "";
+    message.description = object.description ?? "";
+    message.content = object.content ?? "";
+    message.filePath = object.filePath ?? "";
     return message;
   },
 };

@@ -136,8 +136,6 @@ pub fn wire_path_context_from_proto(p: &wire::PathContext) -> WirePathContext {
 
 /// Convert the daemon configuration view (issue #72) into the structured wire
 /// model.
-// NOTE(#96): skills/templates are dropped in the proto direction until the
-// proto twin lands (proto-parity step).
 pub fn daemon_config_to_proto(config: &crate::wire::WireDaemonConfig) -> wire::DaemonConfig {
     wire::DaemonConfig {
         provider: config.provider.clone(),
@@ -146,6 +144,28 @@ pub fn daemon_config_to_proto(config: &crate::wire::WireDaemonConfig) -> wire::D
         thinking: config.thinking,
         thinking_level: config.thinking_level.clone(),
         builtin_skills: config.builtin_skills.clone(),
+        skills: config
+            .skills
+            .iter()
+            .map(|skill| wire::ProvisionedSkill {
+                name: skill.name.clone(),
+                description: skill.description.clone(),
+                content: skill.content.clone(),
+                file_path: skill.file_path.clone(),
+                source: skill.source.clone(),
+                disable_model_invocation: skill.disable_model_invocation,
+            })
+            .collect(),
+        templates: config
+            .templates
+            .iter()
+            .map(|template| wire::ProvisionedTemplate {
+                name: template.name.clone(),
+                description: template.description.clone(),
+                content: template.content.clone(),
+                file_path: template.file_path.clone(),
+            })
+            .collect(),
         skills_dirs: config.skills_dirs.clone(),
         trigger_poll_secs: config
             .trigger_poll_secs
@@ -169,10 +189,28 @@ pub fn daemon_config_from_proto(config: &wire::DaemonConfig) -> crate::wire::Wir
         thinking: config.thinking,
         thinking_level: config.thinking_level.clone(),
         builtin_skills: config.builtin_skills.clone(),
-        skills: Vec::new(),
-        // Placeholder until the real proto conversion lands in the
-        // proto-parity step (#96).
-        templates: Vec::new(),
+        skills: config
+            .skills
+            .iter()
+            .map(|skill| crate::wire::WireProvisionedSkill {
+                name: skill.name.clone(),
+                description: skill.description.clone(),
+                content: skill.content.clone(),
+                file_path: skill.file_path.clone(),
+                source: skill.source.clone(),
+                disable_model_invocation: skill.disable_model_invocation,
+            })
+            .collect(),
+        templates: config
+            .templates
+            .iter()
+            .map(|template| crate::wire::WireProvisionedTemplate {
+                name: template.name.clone(),
+                description: template.description.clone(),
+                content: template.content.clone(),
+                file_path: template.file_path.clone(),
+            })
+            .collect(),
         skills_dirs: config.skills_dirs.clone(),
         trigger_poll_secs: config.trigger_poll_secs.map(u64::from),
         tui_max_feed_lines: config.tui_max_feed_lines.map(u64::from),

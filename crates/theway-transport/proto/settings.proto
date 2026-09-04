@@ -60,9 +60,49 @@ message DaemonConfig {
   // stays for legacy compatibility.
   optional string thinking_level = 12;
 
+  // ── provisioned skills / templates (issues #95 / #96) ──
+  // Controller-scanned skills: the TUI provisions the daemon with the full
+  // catalog (name/description/body included) so a controller-provisioned
+  // session never needs the daemon to read skill files.
+  repeated ProvisionedSkill skills = 13;
+  // Controller-scanned prompt templates, mirroring the skills path.
+  repeated ProvisionedTemplate templates = 14;
+
   // Field names to clear before applying values present in this message.
   // Unknown names make the daemon reject the patch without partial changes.
   repeated string clear_fields = 11;
+}
+
+// One controller-scanned skill (issues #95 / #96): the TUI walks the local
+// skill roots and provisions the daemon with the full catalog so a
+// controller-provisioned session never needs the daemon to read skill files.
+message ProvisionedSkill {
+  // Canonical skill name (matches the daemon-side `Skill.name` rules).
+  string name = 1;
+  // Free-form description shown in the catalog / system prompt.
+  string description = 2;
+  // Markdown body without the YAML frontmatter.
+  string content = 3;
+  // Absolute path to the source `SKILL.md` (or root-level `.md`).
+  string file_path = 4;
+  // Discovery layer: `"user"` or `"project"` (mirrors `SkillSource`).
+  string source = 5;
+  // When true the model must not auto-invoke this skill.
+  bool disable_model_invocation = 6;
+}
+
+// One controller-scanned prompt template (#96): the TUI walks the template
+// roots and provisions the daemon with the full catalog; mirrors
+// `PromptTemplate` but keeps description as a plain string (empty = none).
+message ProvisionedTemplate {
+  // Canonical template name.
+  string name = 1;
+  // Free-form description (empty = none).
+  string description = 2;
+  // Template body content.
+  string content = 3;
+  // Absolute path to the source template file.
+  string file_path = 4;
 }
 
 service SettingsService {

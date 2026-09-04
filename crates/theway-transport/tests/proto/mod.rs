@@ -432,8 +432,20 @@ fn daemon_config_round_trips_wire_and_proto() {
         thinking: Some(true),
         thinking_level: Some("high".into()),
         builtin_skills: vec!["git".into(), "web".into()],
-        skills: Vec::new(),
-        templates: Vec::new(),
+        skills: vec![crate::wire::WireProvisionedSkill {
+            name: "git-commit".into(),
+            description: "Draft a conventional commit".into(),
+            content: "# git-commit\n\nWrite a commit message.".into(),
+            file_path: "/home/user/.agents/skills/git-commit/SKILL.md".into(),
+            source: "user".into(),
+            disable_model_invocation: true,
+        }],
+        templates: vec![crate::wire::WireProvisionedTemplate {
+            name: "pr-description".into(),
+            description: "Pull request description template".into(),
+            content: "# Pull Request\n\nDescribe the change.".into(),
+            file_path: "/home/user/.agents/templates/pr-description.md".into(),
+        }],
         skills_dirs: vec!["/home/user/.agents/skills".into()],
         trigger_poll_secs: Some(60),
         tui_max_feed_lines: Some(8000),
@@ -452,6 +464,29 @@ fn daemon_config_round_trips_wire_and_proto() {
     assert_eq!(proto.tui_max_feed_lines, Some(8000));
     assert_eq!(proto.thinking_level.as_deref(), Some("high"));
     assert_eq!(proto.clear_fields, vec!["tool_service_addr"]);
+
+    assert_eq!(proto.skills.len(), 1);
+    let skill = &proto.skills[0];
+    assert_eq!(skill.name, "git-commit");
+    assert_eq!(skill.description, "Draft a conventional commit");
+    assert_eq!(skill.content, "# git-commit\n\nWrite a commit message.");
+    assert_eq!(
+        skill.file_path,
+        "/home/user/.agents/skills/git-commit/SKILL.md"
+    );
+    assert_eq!(skill.source, "user");
+    assert!(skill.disable_model_invocation);
+
+    assert_eq!(proto.templates.len(), 1);
+    let template = &proto.templates[0];
+    assert_eq!(template.name, "pr-description");
+    assert_eq!(template.description, "Pull request description template");
+    assert_eq!(template.content, "# Pull Request\n\nDescribe the change.");
+    assert_eq!(
+        template.file_path,
+        "/home/user/.agents/templates/pr-description.md"
+    );
+
     assert_eq!(daemon_config_from_proto(&proto), config);
 
     // Default (all-absent) config round-trips too: no field gains presence.
@@ -463,6 +498,8 @@ fn daemon_config_round_trips_wire_and_proto() {
     assert!(proto_empty.thinking.is_none());
     assert!(proto_empty.thinking_level.is_none());
     assert!(proto_empty.builtin_skills.is_empty());
+    assert!(proto_empty.skills.is_empty());
+    assert!(proto_empty.templates.is_empty());
     assert!(proto_empty.skills_dirs.is_empty());
     assert!(proto_empty.trigger_poll_secs.is_none());
     assert!(proto_empty.tui_max_feed_lines.is_none());
