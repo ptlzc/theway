@@ -556,6 +556,34 @@ fn prompt_display(text: &str, image_count: usize) -> String {
     }
 }
 
+/// Build the `AgentMessage::User` steering payload for interleaving a queued
+/// user message into a running turn (issue #102). Mirrors `prompt_with_images`
+/// content shaping: plain text stays `UserContent::Text`, images become a
+/// text+image block list.
+fn interleaved_user_message(text: String, images: Vec<ImageContent>) -> AgentMessage {
+    let timestamp = chrono::Utc::now().timestamp_millis();
+    if images.is_empty() {
+        AgentMessage::Llm(Message::User(theway_llm_provider::UserMessage {
+            role: theway_llm_provider::UserRole::User,
+            content: theway_llm_provider::UserContent::Text(text),
+            timestamp,
+        }))
+    } else {
+        let mut blocks: Vec<theway_llm_provider::UserContentBlock> = images
+            .into_iter()
+            .map(theway_llm_provider::UserContentBlock::Image)
+            .collect();
+        if !text.is_empty() {
+            blocks.insert(0, theway_llm_provider::UserContentBlock::text(text));
+        }
+        AgentMessage::Llm(Message::User(theway_llm_provider::UserMessage {
+            role: theway_llm_provider::UserRole::User,
+            content: theway_llm_provider::UserContent::Blocks(blocks),
+            timestamp,
+        }))
+    }
+}
+
 fn wire_control_plane_prompt_snapshot(
     request: &theway_core::ControlPlanePromptRequest,
 ) -> WireControlPlanePromptSnapshot {

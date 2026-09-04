@@ -761,3 +761,70 @@ async fn inheritance_application_failure_surfaces_an_error_line() {
         "the failure must surface as an error line: {feed:?}"
     );
 }
+
+/// Issue #102: `interleaved_user_message` shapes a plain-text steering payload
+/// as `UserContent::Text` and an image-bearing one as a text+image block list.
+#[test]
+fn interleaved_user_message_shapes_text_and_image_payloads() {
+    use theway_core::AgentMessage;
+    use theway_llm_provider::{UserContent, UserContentBlock};
+
+    let AgentMessage::Llm(theway_llm_provider::Message::User(text_msg)) =
+        super::super::interleaved_user_message("hello mid-turn".into(), Vec::new())
+    else {
+        panic!("plain payload must be a user message");
+    };
+    assert!(matches!(
+        text_msg.content,
+        UserContent::Text(t) if t == "hello mid-turn"
+    ));
+
+    let AgentMessage::Llm(theway_llm_provider::Message::User(image_msg)) =
+        super::super::interleaved_user_message(
+            "look at this".into(),
+            vec![theway_llm_provider::ImageContent {
+                data: "iVBORw0KGgo=".into(),
+                mime_type: "image/png".into(),
+            }],
+        )
+    else {
+        panic!("image payload must be a user message");
+    };
+    match image_msg.content {
+        UserContent::Blocks(blocks) => {
+            assert_eq!(blocks.len(), 2);
+            assert!(matches!(&blocks[0], UserContentBlock::Text(t) if t.text == "look at this"));
+            assert!(matches!(&blocks[1], UserContentBlock::Image(_)));
+        }
+        other => panic!("image payload must be blocks, got {other:?}"),
+    }
+}
+
+/// Issue #102: a non-interrupt submit while a turn is running interleaves the
+/// message into the core steering queue (not the daemon queue) and echoes it
+/// into the feed immediately.
+#[tokio::test]
+async fn submit_web_text_interleaves_into_a_running_turn() {
+    let mut fixture = HostFixture::new().await;
+    let host = fixture.host();
+    let mut turn = sample_turn_with_future();
+
+    host.submit_web_text("hello mid-turn".into(), Vec::new(), false, &mut turn)
+        .await;
+
+    assert!(!turn.aborted);
+    assert!(
+        host.session.queue.is_empty(),
+        "must not enqueue for a whole-turn drain"
+    );
+    let feed = host.projection.feed.plain_lines(120);
+    assert!(
+        feed.iter().any(|line| line.contains("hello mid-turn")),
+        "the message must be echoed into the feed immediately: {feed:?}"
+    );
+    assert!(
+        feed.iter()
+            .any(|line| line.contains("interleaved new message")),
+        "the interleave notice must be shown: {feed:?}"
+    );
+}

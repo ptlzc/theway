@@ -42,13 +42,39 @@ impl TurnHost {
             self.request_abort(turn);
             self.session.queue.clear();
             self.system_line("interrupt: stopping current turn for new message");
-        }
-        if turn.fut.is_some() {
-            self.queue_user_prompt(display, prompt_text, loaded_images);
+            if turn.fut.is_some() {
+                self.queue_user_prompt(display, prompt_text, loaded_images);
+            } else {
+                self.projection.feed.push_user(display);
+                self.start_user_prompt_turn(prompt_text, loaded_images, turn);
+            }
+        } else if turn.fut.is_some() {
+            // Issue #102: a busy tool-calling turn must see the new user
+            // message on its NEXT LLM request, not after the whole turn
+            // finishes. Inject into the core steering queue + interrupt the
+            // in-flight LLM call (a no-op mid-tool, where the steering is
+            // drained at the turn boundary anyway).
+            self.interleave_user_message(display, prompt_text, loaded_images);
         } else {
             self.projection.feed.push_user(display);
             self.start_user_prompt_turn(prompt_text, loaded_images, turn);
         }
+    }
+
+    /// Issue #102: push a queued user message into the running turn's steering
+    /// queue so the model sees it before its next LLM call, instead of waiting
+    /// for the turn to finish. The message is also echoed into the feed now.
+    fn interleave_user_message(
+        &mut self,
+        display: String,
+        prompt_text: String,
+        images: Vec<ImageContent>,
+    ) {
+        self.projection.feed.push_user(display);
+        let message = interleaved_user_message(prompt_text, images);
+        self.session.kernel.harness().enqueue_steering(message);
+        self.session.kernel.harness().interrupt();
+        self.system_line("interleaved new message into the running turn");
     }
 
     /// Route a message to a non-active session's own queue. The active session
@@ -95,13 +121,24 @@ impl TurnHost {
         if interrupt {
             session.queue.clear();
         }
-        session
-            .queue
-            .push_back(QueuedTurn::UserPrompt {
+        if !interrupt && session.busy {
+            // Issue #102: interleave into the running turn instead of waiting
+            // for it to finish.
+            session.projection.feed.push_user(display);
+            let message = interleaved_user_message(prompt_text, loaded_images);
+            session.kernel.harness().enqueue_steering(message);
+            session.kernel.harness().interrupt();
+            session
+                .projection
+                .feed
+                .push_plain_untimed("interleaved new message into the running turn", Level::System);
+        } else {
+            session.queue.push_back(QueuedTurn::UserPrompt {
                 display,
                 prompt: prompt_text,
                 images: loaded_images,
             });
+        }
     }
 
     async fn dispatch_web_slash(&mut self, input: &str, turn: &mut TurnState) {
