@@ -384,6 +384,19 @@ fn layout_boxes(
 /// Band height (rows) for `dags` at `width`: side-by-side boxes take the
 /// taller height, stacked boxes sum, and runs beyond [`MAX_RUNS`] add one
 /// `… N more` row. Zero with no runs.
+///
+/// Issue #98: a run is "live" until it reaches a terminal state. The band
+/// (and the idle tick that animates it) only cares about live runs — once
+/// every run is terminal the band closes by itself.
+#[must_use]
+pub fn has_live_runs(dags: &[WireDagRunSnapshot]) -> bool {
+    dags.iter()
+        .any(|run| !matches!(run.status.as_str(), "succeeded" | "failed" | "cancelled"))
+}
+
+/// Band height (rows) for `dags` at `width`: side-by-side boxes take the
+/// taller height, stacked boxes sum, and runs beyond [`MAX_RUNS`] add one
+/// `… N more` row. Zero with no runs.
 #[must_use]
 pub fn band_rows(dags: &[WireDagRunSnapshot], width: u16) -> u16 {
     if dags.is_empty() {

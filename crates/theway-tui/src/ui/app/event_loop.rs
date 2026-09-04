@@ -175,7 +175,7 @@ impl App {
                         }
                     }
                 }
-                _ = tick.tick(), if self.busy || !self.latest.dags.is_empty() => {
+                _ = tick.tick(), if self.busy || crate::ui::dag_band::has_live_runs(&self.latest.dags) => {
                     if self.busy {
                         self.spinner_frame = self.spinner_frame.wrapping_add(1);
                         self.cps_meter

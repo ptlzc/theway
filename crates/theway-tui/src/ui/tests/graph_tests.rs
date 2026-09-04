@@ -393,3 +393,71 @@ async fn dag_band_scrolls_with_feed() {
         "the band must return when scrolled back to the bottom"
     );
 }
+
+/// Issue #98: once every DAG run reaches a terminal state the band closes by
+/// itself (Show mode renders only live runs); a single live run keeps it up.
+#[tokio::test]
+async fn terminal_only_dags_auto_hide_the_band() {
+    use theway_transport::wire::{WireDagNodeSnapshot, WireDagRunSnapshot};
+
+    fn run(id: &str, status: &str) -> WireDagRunSnapshot {
+        WireDagRunSnapshot {
+            id: id.into(),
+            name: "band-name".into(),
+            kind: "dag".into(),
+            status: status.into(),
+            fail_fast: false,
+            max_concurrency: 4,
+            direction: "TD".into(),
+            created_at: 0,
+            completed_at: None,
+            error: None,
+            nodes: vec![WireDagNodeSnapshot {
+                id: "n1".into(),
+                agent: "a".into(),
+                status: status.into(),
+                depends_on: vec![],
+                job_id: None,
+                attempt: 1,
+                started_at: None,
+                completed_at: None,
+                error: None,
+                input_tokens: None,
+                output_tokens: None,
+                result: None,
+                output_tail: None,
+                live_preview: None,
+            }],
+        }
+    }
+
+    let (mut app, _rx, _ops) = test_app_with_sessions(&["sess-1"], false).await;
+
+    // All terminal: the band must not render, even in Show mode.
+    let mut status = fixture_status(Vec::new());
+    status.dags = vec![
+        run("run-done", "succeeded"),
+        run("run-failed", "failed"),
+        run("run-cancelled", "cancelled"),
+    ];
+    app.apply_snapshot(status);
+    let backend = TestBackend::new(80, 16);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    let text = buffer_text(terminal.backend().buffer());
+    assert!(
+        !text.contains("run-done"),
+        "terminal-only dags must auto-close the band:\n{text}"
+    );
+
+    // One live run keeps the whole band (incl. terminal siblings) visible.
+    let mut status = fixture_status(Vec::new());
+    status.dags = vec![run("run-done", "succeeded"), run("run-live", "running")];
+    app.apply_snapshot(status);
+    terminal.draw(|f| app.render(f)).unwrap();
+    let text = buffer_text(terminal.backend().buffer());
+    assert!(
+        text.contains("run-live") && text.contains("run-done"),
+        "a live run must keep the band (with its siblings) rendered:\n{text}"
+    );
+}

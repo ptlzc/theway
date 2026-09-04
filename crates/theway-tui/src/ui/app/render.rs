@@ -85,8 +85,9 @@ impl App {
         // DAG status band (issue #38): the band joins the scrollable content
         // as rows appended after the newest feed row, so it scrolls with the
         // feed (up and off-screen) instead of pinning between the feed and
-        // the status bar. Hidden mode renders no band rows.
-        let band_rows = if self.latest.dags.is_empty()
+        // the status bar. Hidden mode renders no band rows. Issue #98: once
+        // every run reaches a terminal state the band closes by itself.
+        let band_rows = if !dag_band::has_live_runs(&self.latest.dags)
             || self.dag_band_mode == crate::ui::DagBandMode::Hidden
         {
             0
