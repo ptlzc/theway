@@ -84,7 +84,7 @@ use theway_transport::wire::{WireSessionSnapshot, WireStatus};
 use crate::startup::DaemonConnector;
 
 use render_utils::{
-    centered_rect, panel_line, panel_rule_preview, safe_control_prompt_label,
+    centered_rect, id_suffix, panel_line, panel_rule_preview, safe_control_prompt_label,
     safe_control_prompt_text,
 };
 use render_utils::{enter_tui, leave_tui, new_textarea};

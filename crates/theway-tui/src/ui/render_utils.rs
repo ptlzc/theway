@@ -28,6 +28,18 @@ pub(super) fn panel_line(text: String, color: Color, width: usize) -> Line<'stat
     )
 }
 
+/// Last `n` characters of an id (session/node id), for compact panel display
+/// (issue #104): `id_suffix("01a06cc8-…-78dc", 5)` → `"78dc"`.
+pub(super) fn id_suffix(id: &str, n: usize) -> String {
+    id.chars()
+        .rev()
+        .take(n)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect()
+}
+
 pub(super) fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
     let width = width.min(area.width);
     let height = height.min(area.height);
@@ -127,4 +139,16 @@ pub(super) fn write_leave_tui_commands(out: &mut impl std::io::Write) -> std::io
         LeaveAlternateScreen
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn id_suffix_takes_last_n_chars() {
+        assert_eq!(id_suffix("01a06cc8-ee64-7ed0-9091-07b5ce78dc", 5), "e78dc");
+        assert_eq!(id_suffix("abc", 5), "abc");
+        assert_eq!(id_suffix("", 5), "");
+    }
 }

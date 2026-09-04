@@ -126,8 +126,8 @@ impl App {
             lines.push(panel_line("Session".to_string(), s.section, width));
             lines.push(panel_line(
                 format!(
-                    "{} · {}",
-                    snapshot.info.id,
+                    "…{} · {}",
+                    id_suffix(&snapshot.info.id, 5),
                     if snapshot.info.name.is_empty() {
                         "unnamed"
                     } else {
