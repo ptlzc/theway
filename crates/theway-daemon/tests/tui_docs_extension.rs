@@ -1,8 +1,8 @@
 #![cfg(feature = "local")]
 
 //! Regression tests for the committed `extensions/tui-docs` package: the
-//! plugin reads the TUI documentation from the workspace at load time and
-//! registers it as ordered prompt sections appended to `systemInstructions`.
+//! plugin registers one small prompt-section pointer naming where the TUI
+//! documentation lives — it never injects the document body.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -60,13 +60,14 @@ async fn start_host(project: &Path, base: &Path) -> Arc<SessionPluginHost> {
     .await
 }
 
-fn invocation() -> RuntimeExtensionInvocation {
+/// Invoke the before-model-request seam and return the appended instructions.
+async fn appended_instructions(host: &Arc<SessionPluginHost>) -> String {
     let mut context = RuntimeExtensionContext::new("tui-docs-session", "/workspace", 1);
     context.model = Some(ExtensionModelRef {
         provider: "openai".into(),
         model: "target-model".into(),
     });
-    RuntimeExtensionInvocation::new(
+    let invocation = RuntimeExtensionInvocation::new(
         ExtensionLifecycleEvent::BeforeModelRequest,
         ExtensionHookClass::Transform,
         context,
@@ -75,36 +76,8 @@ fn invocation() -> RuntimeExtensionInvocation {
             "systemInstructions": "base", "generationOptions": {}, "tools": [],
         }}),
     )
-    .unwrap()
-}
-
-/// Single newlines only: no blank lines, no trailing newline, so the
-/// section-boundary join ("\n\n") is exactly reproducible.
-fn fixture_doc() -> String {
-    let mut doc = String::from("TUI_DOC_FIXTURE_START\n");
-    let mut line = 0usize;
-    // > 16 KiB so the plugin must shard into multiple prompt sections.
-    while doc.len() < 17_000 {
-        doc.push_str(&format!(
-            "行 {line}：theway-tui 客户端与守护进程架构说明文档内容，注入模型上下文。\n"
-        ));
-        line += 1;
-    }
-    doc.push_str("TUI_DOC_FIXTURE_END");
-    doc
-}
-
-#[tokio::test]
-async fn injects_tui_document_into_system_instructions_in_order() {
-    let project = tempdir().unwrap();
-    let base = tempdir().unwrap();
-    install_plugin(project.path());
-    let doc = fixture_doc();
-    std::fs::create_dir_all(project.path().join(".agents").join("overview")).unwrap();
-    std::fs::write(project.path().join(".agents").join("overview").join("tui.md"), &doc).unwrap();
-
-    let host = start_host(project.path(), base.path()).await;
-    let matched = RuntimeRequestExtensionPort::invoke_request(&*host, invocation())
+    .unwrap();
+    let matched = RuntimeRequestExtensionPort::invoke_request(&**host, invocation)
         .await
         .unwrap();
     let replacement = matched
@@ -114,54 +87,59 @@ async fn injects_tui_document_into_system_instructions_in_order() {
         .expect("plugin must append a replace_model_request action");
     let instructions = replacement.payload["request"]["systemInstructions"]
         .as_str()
-        .unwrap();
+        .unwrap()
+        .to_string();
     assert!(
         instructions.starts_with("base\n\n"),
-        "extension sections must append after the base instructions: {instructions}"
+        "pointer must append after the base instructions: {instructions}"
     );
-    let appended = &instructions["base\n\n".len()..];
-    let parts: Vec<&str> = appended.split("\n\n").collect();
+    instructions["base\n\n".len()..].to_string()
+}
+
+#[tokio::test]
+async fn workspace_document_yields_pointer_not_content() {
+    let project = tempdir().unwrap();
+    let base = tempdir().unwrap();
+    install_plugin(project.path());
+    let marker = "TUI_DOC_CONTENT_MARKER_9f3a_never_injected";
+    let doc = format!("# TUI doc\n\n{marker}\n\n{}", "x".repeat(16_000));
+    std::fs::create_dir_all(project.path().join(".agents").join("overview")).unwrap();
+    std::fs::write(project.path().join(".agents").join("overview").join("tui.md"), &doc).unwrap();
+
+    let host = start_host(project.path(), base.path()).await;
+    let appended = appended_instructions(&host).await;
     assert!(
-        parts.len() >= 2,
-        "a >16 KiB document must shard into multiple sections, got {} part(s)",
-        parts.len()
+        appended.contains(".agents/overview/tui.md"),
+        "pointer must name the workspace copy: {appended}"
     );
     assert!(
-        parts.iter().all(|part| !part.is_empty() && part.len() <= 16_384),
-        "every section must stay within the host text limit"
+        !appended.contains(marker),
+        "document content must never be injected: {appended}"
     );
     assert!(
-        parts[0].starts_with("TUI_DOC_FIXTURE_START"),
-        "first section must open with the document head: {:?}",
-        &parts[0][..40]
-    );
-    assert!(
-        parts.last().unwrap().ends_with("TUI_DOC_FIXTURE_END"),
-        "last section must close with the document tail"
-    );
-    // The boundary join inserts one blank line per split; collapsing those
-    // reproduces the document exactly.
-    assert_eq!(
-        appended.replace("\n\n", "\n"),
-        doc,
-        "injected sections must reproduce the document content losslessly"
+        appended.len() < 512,
+        "pointer must stay a short sentence, got {} bytes: {appended}",
+        appended.len()
     );
     host.shutdown().await;
 }
 
 #[tokio::test]
-async fn missing_document_registers_nothing_and_leaves_request_untouched() {
+async fn missing_workspace_document_points_at_installed_copy() {
     let project = tempdir().unwrap();
     let base = tempdir().unwrap();
     install_plugin(project.path());
 
     let host = start_host(project.path(), base.path()).await;
-    let matched = RuntimeRequestExtensionPort::invoke_request(&*host, invocation())
-        .await
-        .unwrap();
+    let appended = appended_instructions(&host).await;
     assert!(
-        matched.actions.is_empty(),
-        "no document → no sections → no request actions: {matched:?}"
+        appended.contains("~/.theway/docs/tui.md"),
+        "pointer must name the installed copy: {appended}"
+    );
+    assert!(
+        appended.len() < 512,
+        "pointer must stay a short sentence, got {} bytes: {appended}",
+        appended.len()
     );
     host.shutdown().await;
 }

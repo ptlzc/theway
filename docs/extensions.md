@@ -406,7 +406,7 @@ The same normalized bootstrap and promotion behavior is exercised through OpenAI
 
 ## TUI docs reference package
 
-`extensions/tui-docs` injects the workspace TUI documentation into the model context as prompt sections. At package load it reads the first readable candidate (`.agents/overview/tui.md`, then `docs/tui.md`) through `api.workspace.read` and registers the content with `registerPromptSection`, so document edits land on the next extension reload. Documents over the 16 KiB per-section text cap are sharded on line boundaries into `tui-docs-overview-N` sections appended in registration order; a missing document registers nothing. Install like any package (copy into a project or global extension root, record trust for `workspace.read`, reload the catalog).
+`extensions/tui-docs` registers one small prompt-section pointer telling the model where the theway configuration guide lives — it never injects the document body. It prefers a workspace copy (`.agents/overview/tui.md`, then `docs/tui.md`, checked via `api.workspace.read`) and otherwise points at `$THEWAY_DIR/docs/tui.md` (default `~/.theway/docs/tui.md`), the LLM-facing config guide bundled into the `theway` binary (theway-tui's `docs/theway-config.md`) and materialized on startup by the client, so every install method ships it. Install like any package (copy into a project or global extension root, record trust for `workspace.read`, reload the catalog).
 
 ## Compaction compatibility format
 

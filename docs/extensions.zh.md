@@ -406,7 +406,7 @@ Catalog 状态和诊断通过 gRPC、HTTP JSON-RPC、SSE/WebSocket snapshot、ty
 
 ## TUI docs 参考 package
 
-`extensions/tui-docs` 把工作区内的 TUI 文档以 prompt section 注入模型上下文。package 加载时通过 `api.workspace.read` 读取第一个可读候选（`.agents/overview/tui.md`，其次 `docs/tui.md`），并用 `registerPromptSection` 注册其内容，因此文档修改在下次 extension 重载后即生效。超过单 section 16 KiB 文本上限的文档按行边界切分为 `tui-docs-overview-N` 多段、按注册顺序追加；文档缺失时不注册任何内容。安装方式与其他 package 相同（复制到 project 或 global extension root，为 `workspace.read` 记录信任，然后重载 catalog）。
+`extensions/tui-docs` 注册一个简短的 prompt-section 指针，告诉模型 theway 配置指南在哪里——绝不注入文档正文。优先指向工作区副本（`.agents/overview/tui.md`，其次 `docs/tui.md`，通过 `api.workspace.read` 探测）；否则指向 `$THEWAY_DIR/docs/tui.md`（默认 `~/.theway/docs/tui.md`）——这份面向 LLM 的配置指南打包在 `theway` 二进制内（theway-tui 的 `docs/theway-config.md`），客户端启动时落盘，因此任何安装方式都自带该文档。安装方式与其他 package 相同（复制到 project 或 global extension root，为 `workspace.read` 记录信任，然后重载 catalog）。
 
 ## 压缩兼容格式
 

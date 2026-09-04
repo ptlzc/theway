@@ -155,6 +155,11 @@ pub(crate) async fn run_repl(
 ) -> Result<()> {
     let repo = std::sync::Arc::new(repo);
 
+    // Issue #90: materialize the bundled TUI documentation before anything
+    // else, so the `tui-docs` extension's prompt pointer always resolves —
+    // regardless of install method — for both interactive and headless runs.
+    crate::tui_docs::ensure_installed(&theway_transport::config::base_dir());
+
     // Resolve/create the session locally so CLI surfaces (--list-sessions,
     // export/import, delete) and the banner agree with the daemon's pick. The
     // daemon resolves its own session from the launch args; the TUI only needs

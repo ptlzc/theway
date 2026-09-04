@@ -1,20 +1,23 @@
 # tui-docs
 
-Runtime extension package that injects the project's TUI documentation into
-the model context as ordered prompt sections.
+Runtime extension package that tells the model where the theway TUI
+documentation lives, through one small prompt-section pointer appended to the
+request's `systemInstructions`. It never injects the document body, so the
+per-request cost is a single short sentence; the model reads the file with the
+read tool only when it actually needs TUI details.
 
-At package load the plugin reads the first readable candidate from the
-workspace root and registers it via `registerPromptSection`:
+Pointer resolution at package load:
 
-1. `.agents/overview/tui.md` — theway repo's agent-facing TUI architecture doc
-2. `docs/tui.md` — a committed docs location, when present
+1. A workspace copy, when readable: `.agents/overview/tui.md`, then
+   `docs/tui.md` (checked via `api.workspace.read`).
+2. Otherwise the installed copy: `$THEWAY_DIR/docs/tui.md` (default
+   `~/.theway/docs/tui.md`), which the `theway` client bundles in its binary
+   (theway-tui's `docs/theway-config.md`, the LLM-facing configuration guide)
+   and materializes on startup — every install method ships it, no extra
+   step needed.
 
-The document file stays the single source of truth: edits land on the next
-daemon extension reload (`/extension-reload`), no plugin change needed. If no
-candidate is readable the plugin logs a warning and registers nothing. The
-host caps one prompt section's text at 16 KiB, so longer documents are sharded
-on line boundaries into `tui-docs-overview-N` sections that the host appends
-in order to the request's `systemInstructions`.
+If the file is missing at read time the model simply moves on; the pointer
+itself is always registered.
 
 ## Install
 
@@ -27,5 +30,6 @@ cp -r extensions/tui-docs <cwd>/.theway/extensions/tui-docs
 # then /extension-reload (or restart the daemon)
 ```
 
-Verified by `crates/theway-daemon/tests/tui_docs_extension.rs` (document
-injection + missing-document no-op).
+Verified by `crates/theway-daemon/tests/tui_docs_extension.rs` (workspace
+pointer + installed-copy fallback), and the bundled-doc materialization by
+`crates/theway-tui/src/tui_docs.rs` unit tests.
