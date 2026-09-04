@@ -658,3 +658,68 @@ async fn reap_empty_auto_session_noop_without_auto_session() {
 }
 
 mod graph_tests;
+
+/// Issue #95: with a bare "/" in the composer the skill catalog entries must
+/// sit at the front of the completion popup — the alphabetical ordering
+/// would bury them below the popup's visible rows.
+#[tokio::test]
+async fn bare_slash_surfaces_skill_catalog_first() {
+    let (mut app, _rx, _ops) = test_app_with_sessions(&["sess-1"], false).await;
+    app.latest.sidebar.skills = theway_transport::wire::WireSkillsSnapshot {
+        total: 2,
+        enabled: 2,
+        disabled: 0,
+        builtin: 0,
+        user: 2,
+        project: 0,
+        items: vec![
+            WireSkillSnapshot {
+                name: "release-checklist".into(),
+                source: "user".into(),
+                file_path: "/tmp/skills/release-checklist".into(),
+                enabled: true,
+            },
+            WireSkillSnapshot {
+                name: "zebra-skill".into(),
+                source: "user".into(),
+                file_path: "/tmp/skills/zebra-skill".into(),
+                enabled: true,
+            },
+        ],
+    };
+
+    app.set_input("/");
+    assert!(
+        !app.completions.is_empty(),
+        "a bare slash must produce completions"
+    );
+    let skill_entries: Vec<&String> = app
+        .completions
+        .iter()
+        .filter(|entry| entry.starts_with("/skill::"))
+        .collect();
+    assert_eq!(skill_entries.len(), 2, "both skills must be listed");
+    let first_skill_idx = app
+        .completions
+        .iter()
+        .position(|entry| entry.starts_with("/skill::"))
+        .unwrap();
+    assert_eq!(
+        first_skill_idx, 0,
+        "skill entries must come first for a bare slash: {:?}",
+        app.completions
+    );
+    assert!(
+        app.completions.contains(&"/clear".to_string()),
+        "regular commands must still be reachable after the skill entries"
+    );
+
+    // A prefixed query keeps plain alphabetical matching.
+    app.set_input("/cl");
+    assert!(app.completions.contains(&"/clear".to_string()));
+    assert!(
+        app.completions.iter().all(|entry| entry.starts_with("/cl")),
+        "prefixed queries must not reorder: {:?}",
+        app.completions
+    );
+}

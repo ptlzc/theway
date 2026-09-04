@@ -157,8 +157,10 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     startup.storage_service_addr = options.storage_service_addr.clone();
     // Issue #86: when the controller provides StorageService, treat the daemon
     // as controller-provisioned and skip local auxiliary-source discovery
-    // (mcp/hooks/lsp/templates/skills/ts_extensions). Custom model definitions
-    // remain local until the settings RPC can provision them.
+    // (mcp/hooks/lsp/ts_extensions). Skills and templates stay local
+    // (issue #95): they are plain file catalogs loaded by
+    // `SessionProjectResources` regardless of this seam. Custom model
+    // definitions remain local until the settings RPC can provision them.
     if options.storage_service_addr.is_some() {
         startup.load_local_sources = false;
     }

@@ -797,3 +797,50 @@ export default defineExtension((api) => {
     drop(state);
 }
 mod context_build; mod runtime_tool_isolation; mod runtime_transcript_isolation;
+
+#[tokio::test]
+async fn controller_mode_still_loads_local_skills_and_templates() {
+    let base = tempfile::tempdir().unwrap();
+    // A user-layer skill under the home `.agents/skills` root.
+    let skill_dir = base.path().join(".agents").join("skills").join("controller-skill");
+    std::fs::create_dir_all(&skill_dir).unwrap();
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: controller-skill\ndescription: loads in controller mode\n---\nbody\n",
+    )
+    .unwrap();
+
+    let paths = crate::DaemonPaths {
+        base: base.path().to_path_buf(),
+        home: base.path().to_path_buf(),
+        work_dir: base.path().to_path_buf(),
+        extra_skill_dirs: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
+    };
+    // `false` = controller-provisioned (the default TUI flow). Skills are
+    // plain local file catalogs and must still load (issue #95).
+    let resources = SessionProjectResources::load(&paths, &[], &[], false)
+        .await
+        .unwrap();
+    assert!(
+        resources
+            .skills
+            .iter()
+            .any(|skill| skill.name == "controller-skill"),
+        "controller mode must load skills from ~/.agents/skills: {:?}",
+        resources
+            .skills
+            .iter()
+            .map(|skill| &skill.name)
+            .collect::<Vec<_>>()
+    );
+
+    // The reload closure keeps the same behavior.
+    let output = (resources.reload_skills_fn)().await;
+    assert!(
+        output
+            .skills
+            .iter()
+            .any(|skill| skill.name == "controller-skill"),
+        "reload must keep loading local skills in controller mode"
+    );
+}

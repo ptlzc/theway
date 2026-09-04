@@ -624,7 +624,17 @@ impl App {
         );
         self.completer = SlashCompleter::from_commands(commands);
         self.completions = if self.input_is_single_line() {
-            self.completer.matches(&self.input_text())
+            let mut matches = self.completer.matches(&self.input_text());
+            // Issue #95: a bare "/" matches every command; the skill catalog
+            // entries would land far below the popup's visible window.
+            // Surface them first so the loaded skills are immediately visible.
+            if self.input_text().trim() == "/" {
+                let (skills, rest): (Vec<String>, Vec<String>) = matches
+                    .into_iter()
+                    .partition(|entry| entry.starts_with("/skill::"));
+                matches = skills.into_iter().chain(rest).collect();
+            }
+            matches
         } else {
             Vec::new()
         };
