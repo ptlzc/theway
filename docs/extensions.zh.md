@@ -404,6 +404,10 @@ Catalog 状态和诊断通过 gRPC、HTTP JSON-RPC、SSE/WebSocket snapshot、ty
 
 相同的规范 bootstrap 和晋升行为通过 OpenAI Chat Completions、OpenAI Responses 与 Anthropic Messages provider serializer 验证。DeepSeek 和 Anchor 专属策略完全保留在该 package 中；core 与 provider crate 只暴露通用生命周期及规范 request seam。
 
+## TUI docs 参考 package
+
+`extensions/tui-docs` 把工作区内的 TUI 文档以 prompt section 注入模型上下文。package 加载时通过 `api.workspace.read` 读取第一个可读候选（`.agents/overview/tui.md`，其次 `docs/tui.md`），并用 `registerPromptSection` 注册其内容，因此文档修改在下次 extension 重载后即生效。超过单 section 16 KiB 文本上限的文档按行边界切分为 `tui-docs-overview-N` 多段、按注册顺序追加；文档缺失时不注册任何内容。安装方式与其他 package 相同（复制到 project 或 global extension root，为 `workspace.read` 记录信任，然后重载 catalog）。
+
 ## 压缩兼容格式
 
 扩展根目录正下方的顶层 `.ts` 文件可以声明 `export const kind = "compaction"`。该兼容格式支持 `decide_compact`、`select_cut_point` 和 `summarize_prefix`；hook 缺失、返回 null、无效或失败时回退到内置压缩算法。

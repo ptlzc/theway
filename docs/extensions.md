@@ -404,6 +404,10 @@ An accepted finalized assistant message matching the promotion condition atomica
 
 The same normalized bootstrap and promotion behavior is exercised through OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages provider serializers. DeepSeek- and Anchor-specific policy remains entirely in this package; core and provider crates expose only generic lifecycle and normalized request seams.
 
+## TUI docs reference package
+
+`extensions/tui-docs` injects the workspace TUI documentation into the model context as prompt sections. At package load it reads the first readable candidate (`.agents/overview/tui.md`, then `docs/tui.md`) through `api.workspace.read` and registers the content with `registerPromptSection`, so document edits land on the next extension reload. Documents over the 16 KiB per-section text cap are sharded on line boundaries into `tui-docs-overview-N` sections appended in registration order; a missing document registers nothing. Install like any package (copy into a project or global extension root, record trust for `workspace.read`, reload the catalog).
+
 ## Compaction compatibility format
 
 Top-level `.ts` files directly under either extension root may declare `export const kind = "compaction"`. This compatibility format supports `decide_compact`, `select_cut_point`, and `summarize_prefix`, with missing, null, invalid, or failed hook results falling back to the built-in compaction algorithm.
