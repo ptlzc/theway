@@ -453,6 +453,146 @@ fn trim_messages_for_summary_budget(
     kept
 }
 
+// ──────────────────────────────────────────────────────────────────────────────────────────
+// Summarization input projection (issue #101)
+// ──────────────────────────────────────────────────────────────────────────────────────────
+
+/// Character cap for user / assistant text blocks in the summarization projection.
+pub const SUMMARY_TEXT_CAP: usize = 8_000;
+/// Character cap for tool-result bodies and tool-call arguments.
+pub const SUMMARY_TOOL_CAP: usize = 2_000;
+/// Character cap for thinking blocks.
+pub const SUMMARY_THINKING_CAP: usize = 2_000;
+/// Total projected-token budget: beyond it the oldest projected messages drop.
+pub const SUMMARY_PROJECTED_BUDGET_TOKENS: u64 = 96_000;
+
+/// Truncate `text` to at most `cap` chars (char-boundary safe) with an explicit marker.
+fn truncate_chars_for_summary(text: &str, cap: usize) -> String {
+    if text.chars().count() <= cap {
+        return text.to_string();
+    }
+    let mut out: String = text.chars().take(cap).collect();
+    out.push_str("\n…[truncated for summarization]");
+    out
+}
+
+/// Truncate tool-call arguments: serialize, cap, and re-parse; an invalid
+/// truncated payload degrades to a marker string (JSON stays valid).
+fn truncate_tool_arguments(
+    args: serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let serialized = serde_json::to_string(&args).unwrap_or_default();
+    if serialized.chars().count() <= SUMMARY_TOOL_CAP {
+        return args;
+    }
+    let truncated = truncate_chars_for_summary(&serialized, SUMMARY_TOOL_CAP);
+    match serde_json::from_str(&truncated) {
+        Ok(parsed) => parsed,
+        Err(_) => {
+            let mut out = serde_json::Map::new();
+            out.insert(
+                "arguments_truncated".to_string(),
+                serde_json::Value::String(truncated),
+            );
+            out
+        }
+    }
+}
+
+/// Project one `AgentMessage` for summarization: user/assistant text, tool
+/// bodies, tool-call arguments and thinking are capped per block and the
+/// tool-result `details` payload is dropped. Custom messages (compaction
+/// summaries, branch markers) return `None` so a summary never re-quotes an
+/// older summary of itself.
+fn project_summary_message(message: &AgentMessage) -> Option<AgentMessage> {
+    match message {
+        AgentMessage::Llm(PiMessage::User(u)) => {
+            let mut u = u.clone();
+            match &mut u.content {
+                theway_llm_provider::UserContent::Text(s) => {
+                    *s = truncate_chars_for_summary(s, SUMMARY_TEXT_CAP);
+                }
+                theway_llm_provider::UserContent::Blocks(blocks) => {
+                    for block in blocks {
+                        if let theway_llm_provider::UserContentBlock::Text(t) = block {
+                            t.text = truncate_chars_for_summary(&t.text, SUMMARY_TEXT_CAP);
+                        }
+                    }
+                }
+            }
+            Some(AgentMessage::Llm(PiMessage::User(u)))
+        }
+        AgentMessage::Llm(PiMessage::Assistant(a)) => {
+            let mut a = a.clone();
+            for block in &mut a.content {
+                match block {
+                    theway_llm_provider::ContentBlock::Text(t) => {
+                        t.text = truncate_chars_for_summary(&t.text, SUMMARY_TEXT_CAP);
+                    }
+                    theway_llm_provider::ContentBlock::Thinking(t) => {
+                        t.thinking = truncate_chars_for_summary(&t.thinking, SUMMARY_THINKING_CAP);
+                    }
+                    theway_llm_provider::ContentBlock::ToolCall(c) => {
+                        c.arguments = truncate_tool_arguments(std::mem::take(&mut c.arguments));
+                    }
+                    theway_llm_provider::ContentBlock::Image(_) => {}
+                }
+            }
+            Some(AgentMessage::Llm(PiMessage::Assistant(a)))
+        }
+        AgentMessage::Llm(PiMessage::ToolResult(tr)) => {
+            let mut tr = tr.clone();
+            for block in &mut tr.content {
+                if let theway_llm_provider::UserContentBlock::Text(t) = block {
+                    t.text = truncate_chars_for_summary(&t.text, SUMMARY_TOOL_CAP);
+                }
+            }
+            tr.details = None;
+            Some(AgentMessage::Llm(PiMessage::ToolResult(tr)))
+        }
+        AgentMessage::Custom(_) => None,
+    }
+}
+
+/// Project session entries into summarization-safe messages (issue #101):
+/// every block is capped and the projected total is bounded by
+/// [`SUMMARY_PROJECTED_BUDGET_TOKENS`] — the oldest messages drop first, and
+/// the last message always survives (already capped). Feed this into the
+/// LLM summarizers instead of cloning the raw event tree, which carried
+/// complete tool outputs into the prompt.
+pub fn project_summary_messages(entries: &[SessionTreeEntry]) -> Vec<AgentMessage> {
+    let projected: Vec<AgentMessage> = entries
+        .iter()
+        .filter_map(|entry| match entry {
+            SessionTreeEntry::Message { message, .. } => project_summary_message(message),
+            _ => None,
+        })
+        .collect();
+    trim_projected_budget(projected)
+}
+
+/// Drop the oldest projected messages until the total fits the budget; the
+/// newest message always survives so the summarizer never sees an empty tail.
+fn trim_projected_budget(messages: Vec<AgentMessage>) -> Vec<AgentMessage> {
+    let total: u64 = messages.iter().map(estimate_tokens).sum();
+    if total <= SUMMARY_PROJECTED_BUDGET_TOKENS || messages.len() <= 1 {
+        return messages;
+    }
+    let mut kept: Vec<AgentMessage> = Vec::with_capacity(messages.len());
+    let mut running = 0u64;
+    // Walk from newest to oldest; the newest is kept unconditionally.
+    for message in messages.iter().rev() {
+        let tokens = estimate_tokens(message);
+        if !kept.is_empty() && running + tokens > SUMMARY_PROJECTED_BUDGET_TOKENS {
+            break;
+        }
+        running = running.saturating_add(tokens);
+        kept.push(message.clone());
+    }
+    kept.reverse();
+    kept
+}
+
 /// Byte index where the suffix of `s` last fits within `budget_tokens` by the char-class
 /// estimate. Always lands on a char boundary.
 fn suffix_start_for_token_budget(s: &str, budget_tokens: u64) -> usize {
@@ -710,10 +850,10 @@ pub async fn compact_with_model_context(
             .saturating_add(entries_to_summarize.len()),
     );
     messages.extend_from_slice(persistent_model_context);
-    messages.extend(entries_to_summarize.iter().filter_map(|entry| match entry {
-        SessionTreeEntry::Message { message, .. } => Some(message.clone()),
-        _ => None,
-    }));
+    // Issue #101: project the entries (cap tool outputs / thinking / tool-call
+    // arguments, drop custom self-summaries, bound the total) instead of
+    // cloning the raw event tree with complete tool outputs.
+    messages.extend(project_summary_messages(entries_to_summarize));
     let request = SummarizeRequest {
         model: &model,
         messages: &messages,

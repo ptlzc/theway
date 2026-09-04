@@ -9,7 +9,7 @@ use crate::agent::AgentRunError;
 use crate::agent::assembly::SessionEvent;
 use crate::agent::compaction::algorithm::SummarizeRequest;
 use crate::agent::compaction::compaction::{
-    SummarizeError, compact_with_model_context, estimate_context_tokens,
+    SummarizeError, compact_with_model_context, estimate_context_tokens, project_summary_messages,
 };
 use crate::agent::messages::compaction_summary;
 use crate::agent::session::session::SessionTreeEntry;
@@ -53,13 +53,11 @@ impl crate::agent::assembly::AgentHarness {
             Err(_) => return Ok(None),
         };
         // Fold everything: persistent model context plus every session
-        // message. Tool-result bodies are skipped by the entry projection,
-        // matching `transcript_material` semantics.
+        // message, projected for summarization (issue #101) — tool-output
+        // bodies, tool-call arguments and thinking are capped per block, the
+        // projected total is bounded, and custom self-summaries are skipped.
         let mut messages = self.runtime_compaction_context_messages();
-        messages.extend(entries.iter().filter_map(|entry| match entry {
-            SessionTreeEntry::Message { message, .. } => Some(message.clone()),
-            _ => None,
-        }));
+        messages.extend(project_summary_messages(&entries));
         if messages.is_empty() {
             return Ok(None);
         }

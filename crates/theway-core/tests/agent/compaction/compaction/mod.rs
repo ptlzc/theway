@@ -430,3 +430,173 @@ fn cut_point_lands_on_turn_boundary() {
         }
     }
 }
+
+/// Issue #101: the summarization projection caps tool-result bodies, tool-call
+/// arguments and thinking, drops `details`/custom self-summaries, and bounds
+/// the projected total so the raw event tree never reaches the summarizer.
+#[test]
+fn projection_caps_tool_outputs_and_bounds_total() {
+    use theway_core::agent::compaction::compaction::{
+        SUMMARY_PROJECTED_BUDGET_TOKENS, SUMMARY_TEXT_CAP, SUMMARY_TOOL_CAP,
+        project_summary_messages,
+    };
+
+    let huge = "y".repeat(20_000);
+    let mut entries = Vec::new();
+    // A custom compaction summary must be skipped (no self-referencing).
+    entries.push(SessionTreeEntry::Message {
+        id: "c1".into(),
+        parent_id: None,
+        timestamp: "t".into(),
+        message: AgentMessage::Custom(theway_core::types::CustomMessage {
+            role: "compactionSummary".into(),
+            timestamp: 0,
+            payload: serde_json::json!({"summary": huge.clone()}),
+        }),
+    });
+    // A tool result with a giant body.
+    entries.push(SessionTreeEntry::Message {
+        id: "m1".into(),
+        parent_id: None,
+        timestamp: "t".into(),
+        message: AgentMessage::Llm(PiMessage::ToolResult(
+            theway_llm_provider::ToolResultMessage {
+                role: theway_llm_provider::ToolResultRole::ToolResult,
+                tool_call_id: "tc1".into(),
+                tool_name: "read".into(),
+                content: vec![theway_llm_provider::UserContentBlock::text(huge.clone())],
+                details: Some(serde_json::json!({"raw": huge.clone()})),
+                is_error: false,
+                timestamp: 0,
+            },
+        )),
+    });
+    // An assistant message with oversized text, thinking and tool-call args.
+    let mut args = serde_json::Map::new();
+    args.insert("file".into(), serde_json::Value::String(huge.clone()));
+    entries.push(SessionTreeEntry::Message {
+        id: "m2".into(),
+        parent_id: None,
+        timestamp: "t".into(),
+        message: AgentMessage::Llm(PiMessage::Assistant(
+            theway_llm_provider::AssistantMessage {
+                role: theway_llm_provider::AssistantRole::Assistant,
+                content: vec![
+                    theway_llm_provider::ContentBlock::text(huge.clone()),
+                    theway_llm_provider::ContentBlock::Thinking(
+                        theway_llm_provider::ThinkingContent {
+                            thinking: huge.clone(),
+                            thinking_signature: None,
+                            redacted: false,
+                        },
+                    ),
+                    theway_llm_provider::ContentBlock::ToolCall(
+                        theway_llm_provider::ToolCall {
+                            id: "tc".into(),
+                            name: "edit".into(),
+                            arguments: args,
+                            thought_signature: None,
+                        },
+                    ),
+                ],
+                api: theway_llm_provider::Api::from("faux"),
+                provider: theway_llm_provider::Provider::from("faux"),
+                model: "faux".into(),
+                response_model: None,
+                response_id: None,
+                diagnostics: None,
+                usage: Usage::default(),
+                stop_reason: theway_llm_provider::StopReason::Stop,
+                error_message: None,
+                timestamp: 0,
+            },
+        )),
+    });
+
+    let projected = project_summary_messages(&entries);
+    assert_eq!(projected.len(), 2, "custom summary must be skipped");
+
+    let AgentMessage::Llm(PiMessage::ToolResult(tr)) = &projected[0] else {
+        panic!("first projected message must be the tool result");
+    };
+    let text = match &tr.content[0] {
+        theway_llm_provider::UserContentBlock::Text(t) => &t.text,
+        other => panic!("unexpected block {other:?}"),
+    };
+    assert!(
+        text.chars().count() <= SUMMARY_TOOL_CAP + 64,
+        "tool body must be capped (got {} chars)",
+        text.chars().count()
+    );
+    assert!(tr.details.is_none(), "details payload must be dropped");
+
+    let AgentMessage::Llm(PiMessage::Assistant(a)) = &projected[1] else {
+        panic!("second projected message must be the assistant message");
+    };
+    let mut saw_text = false;
+    let mut saw_thinking = false;
+    let mut saw_tool_call = false;
+    for block in &a.content {
+        match block {
+            theway_llm_provider::ContentBlock::Text(t) => {
+                saw_text = true;
+                assert!(
+                    t.text.chars().count() <= SUMMARY_TEXT_CAP + 64,
+                    "assistant text must be capped (got {})",
+                    t.text.chars().count()
+                );
+            }
+            theway_llm_provider::ContentBlock::Thinking(t) => {
+                saw_thinking = true;
+                assert!(
+                    t.thinking.chars().count() <= SUMMARY_THINKING_CAP + 64,
+                    "thinking must be capped (got {})",
+                    t.thinking.chars().count()
+                );
+            }
+            theway_llm_provider::ContentBlock::ToolCall(c) => {
+                saw_tool_call = true;
+                let serialized = serde_json::to_string(&c.arguments).unwrap_or_default();
+                assert!(
+                    serialized.chars().count() <= SUMMARY_TOOL_CAP + 128,
+                    "tool-call arguments must be capped (got {})",
+                    serialized.chars().count()
+                );
+            }
+            theway_llm_provider::ContentBlock::Image(_) => {}
+        }
+    }
+    assert!(saw_text && saw_thinking && saw_tool_call);
+
+    // Budget: enough oversized messages drop the oldest projected entries but
+    // keep the newest one.
+    let mut many = Vec::new();
+    let mut parent_id = None;
+    for i in 0..60 {
+        let id = format!("b-{i}");
+        many.push(SessionTreeEntry::Message {
+            id: id.clone(),
+            parent_id: parent_id.clone(),
+            timestamp: "t".into(),
+            message: user(&format!("bulk-{i} {}", "z".repeat(8_000))),
+        });
+        parent_id = Some(id);
+    }
+    let projected = project_summary_messages(&many);
+    assert!(projected.len() < many.len(), "oldest must drop on budget");
+    assert!(
+        projected
+            .last()
+            .is_some_and(|m| matches!(&m, AgentMessage::Llm(PiMessage::User(u))
+                if matches!(&u.content, theway_llm_provider::UserContent::Text(t) if t.starts_with("bulk-59")))),
+        "the newest message must survive the budget"
+    );
+    let total: u64 = projected
+        .iter()
+        .map(theway_core::agent::compaction::compaction::estimate_tokens)
+        .sum();
+    assert!(
+        total <= SUMMARY_PROJECTED_BUDGET_TOKENS,
+        "projected total {total} must fit the budget {SUMMARY_PROJECTED_BUDGET_TOKENS}"
+    );
+}
