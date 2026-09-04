@@ -445,6 +445,35 @@ impl TurnHost {
             }
         }
 
+        if !config.templates.is_empty() || config.clears("templates") {
+            // Issue #96: the controller owns template discovery and
+            // provisions the full catalog here. Templates have no builtin or
+            // override layers, so the provisioned list replaces the harness
+            // catalog wholesale; the shared slot keeps `/reload` and
+            // `SetSkillDirs` from wiping it.
+            let provisioned: Vec<theway_core::PromptTemplate> = config
+                .templates
+                .iter()
+                .map(|template| theway_core::PromptTemplate {
+                    name: template.name.clone(),
+                    description: if template.description.trim().is_empty() {
+                        None
+                    } else {
+                        Some(template.description.clone())
+                    },
+                    content: template.content.clone(),
+                    file_path: template.file_path.clone(),
+                })
+                .collect();
+            self.session.kernel.harness().replace_templates(provisioned.clone());
+            *self.runtime.provisioned_templates.write().unwrap() = provisioned.clone();
+            if provisioned.is_empty() {
+                applied.clear_fields.push("templates".into());
+            } else {
+                applied.templates = config.templates.clone();
+            }
+        }
+
         if !config.builtin_skills.is_empty() || config.clears("builtin_skills") {
             let requested = if config.clears("builtin_skills") && config.builtin_skills.is_empty() {
                 Vec::new()

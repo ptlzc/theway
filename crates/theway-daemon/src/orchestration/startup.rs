@@ -157,10 +157,10 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     startup.storage_service_addr = options.storage_service_addr.clone();
     // Issue #86: when the controller provides StorageService, treat the daemon
     // as controller-provisioned and skip local auxiliary-source discovery
-    // (mcp/hooks/lsp/skills/templates/ts_extensions). Skills are the
-    // controller's job in that mode (issue #95): the TUI scans the roots and
-    // provisions the catalog through `WireDaemonConfig.skills`. Custom model
-    // definitions remain local until the settings RPC can provision them.
+    // (mcp/hooks/lsp/skills/templates/ts_extensions). Skills and templates are
+    // the controller's job in that mode (issues #95/#96): the TUI scans the
+    // roots and provisions both catalogs through `WireDaemonConfig`. Custom
+    // model definitions remain local until the settings RPC can provision them.
     if options.storage_service_addr.is_some() {
         startup.load_local_sources = false;
     }
@@ -458,6 +458,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         cwd: cwd.clone(),
         paths: paths.clone(),
         provisioned_skills: session_context.resources.provisioned_skills.clone(),
+        provisioned_templates: session_context.resources.provisioned_templates.clone(),
         session_id,
         log_path: _logging.as_ref().map(|l| l.log_path.clone()),
         tool_count: tool_names.len(),

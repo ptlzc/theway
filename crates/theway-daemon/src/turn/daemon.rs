@@ -107,6 +107,10 @@ pub(crate) struct DaemonConfig {
     /// applier writes it alongside the harness catalog so `/reload` /
     /// `SetSkillDirs` keep the provisioned skills instead of wiping them.
     pub(crate) provisioned_skills: Arc<std::sync::RwLock<Vec<theway_core::Skill>>>,
+    /// Controller-provisioned prompt-template catalog slot (issue #96): the
+    /// settings applier writes it alongside the harness catalog so `/reload` /
+    /// `SetSkillDirs` keep the provisioned templates instead of wiping them.
+    pub(crate) provisioned_templates: Arc<std::sync::RwLock<Vec<theway_core::PromptTemplate>>>,
     pub(crate) session_id: String,
     pub(crate) log_path: Option<PathBuf>,
     pub(crate) tool_count: usize,
@@ -322,6 +326,9 @@ struct RuntimeConfiguration {
     /// Controller-provisioned skill catalog slot (issue #95); see
     /// [`crate::turn::DaemonConfig::provisioned_skills`].
     provisioned_skills: Arc<std::sync::RwLock<Vec<theway_core::Skill>>>,
+    /// Controller-provisioned prompt-template catalog slot (issue #96); see
+    /// [`crate::turn::DaemonConfig::provisioned_templates`].
+    provisioned_templates: Arc<std::sync::RwLock<Vec<theway_core::PromptTemplate>>>,
     /// Controller tool endpoint forwarder (issue #76): routes `ToolOps`
     /// calls to the connected controller's `ToolService` server.
     tool_ops: Arc<dyn ToolOps>,

@@ -72,6 +72,18 @@ impl TurnHost {
                     disable_model_invocation: skill.disable_model_invocation,
                 })
                 .collect(),
+            templates: config
+                .provisioned_templates
+                .read()
+                .unwrap()
+                .iter()
+                .map(|t| theway_transport::wire::WireProvisionedTemplate {
+                    name: t.name.clone(),
+                    description: t.description.clone().unwrap_or_default(),
+                    content: t.content.clone(),
+                    file_path: t.file_path.clone(),
+                })
+                .collect(),
             skills_dirs: config
                 .paths
                 .current_extra_skill_dirs()
@@ -142,6 +154,7 @@ impl TurnHost {
                 path_context,
                 config: daemon_config,
                 provisioned_skills: config.provisioned_skills,
+                provisioned_templates: config.provisioned_templates,
                 tool_ops,
                 model_catalog: model_catalog(),
                 feed_history_limit: config.startup.tui_max_feed_lines,

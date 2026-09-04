@@ -205,3 +205,98 @@ async fn handle_configure_clear_skills_empties_the_catalog() {
         "the config view reflects the cleared catalog"
     );
 }
+
+#[tokio::test]
+async fn handle_configure_provisions_template_catalog_and_echoes_it() {
+    let mut fixture = HostFixture::new().await;
+    let host = fixture.host();
+
+    let mut patch = WireDaemonConfig::default();
+    patch.templates = vec![
+        theway_transport::wire::WireProvisionedTemplate {
+            name: "provisioned-template".into(),
+            description: "provisioned by the controller".into(),
+            content: "template body".into(),
+            file_path: "/tmp/provisioned-template.md".into(),
+        },
+        theway_transport::wire::WireProvisionedTemplate {
+            name: "plain-template".into(),
+            description: "   ".into(),
+            content: "plain body".into(),
+            file_path: "/tmp/plain-template.md".into(),
+        },
+    ];
+    host.handle_configure(patch.clone(), &mut TurnState::default())
+        .await;
+
+    let templates = host.session.kernel.harness().templates();
+    let provisioned = templates
+        .iter()
+        .find(|template| template.name == "provisioned-template")
+        .expect("provisioned template must land in the harness catalog");
+    assert_eq!(provisioned.content, "template body");
+    assert_eq!(provisioned.file_path, "/tmp/provisioned-template.md");
+    assert_eq!(
+        provisioned.description.as_deref(),
+        Some("provisioned by the controller")
+    );
+    let plain = templates
+        .iter()
+        .find(|template| template.name == "plain-template")
+        .expect("plain template must land in the harness catalog");
+    assert_eq!(
+        plain.description, None,
+        "a whitespace-only description maps to None"
+    );
+
+    // The shared slot mirrors the catalog and the config view echoes it.
+    assert_eq!(host.runtime.provisioned_templates.read().unwrap().len(), 2);
+    assert_eq!(host.runtime.config.read().unwrap().templates, patch.templates);
+}
+
+#[tokio::test]
+async fn handle_configure_clear_templates_empties_the_catalog() {
+    let mut fixture = HostFixture::new().await;
+    let host = fixture.host();
+
+    let mut patch = WireDaemonConfig::default();
+    patch.templates = vec![theway_transport::wire::WireProvisionedTemplate {
+        name: "ephemeral-template".into(),
+        description: "temp".into(),
+        content: "body".into(),
+        file_path: "/tmp/ephemeral-template.md".into(),
+    }];
+    host.handle_configure(patch, &mut TurnState::default()).await;
+    assert!(
+        host.session
+            .kernel
+            .harness()
+            .templates()
+            .iter()
+            .any(|template| template.name == "ephemeral-template")
+    );
+
+    host.handle_configure(
+        WireDaemonConfig {
+            clear_fields: vec!["templates".into()],
+            ..Default::default()
+        },
+        &mut TurnState::default(),
+    )
+    .await;
+
+    assert!(
+        host.session
+            .kernel
+            .harness()
+            .templates()
+            .iter()
+            .all(|template| template.name != "ephemeral-template"),
+        "cleared templates must leave the catalog"
+    );
+    assert!(host.runtime.provisioned_templates.read().unwrap().is_empty());
+    assert!(
+        host.runtime.config.read().unwrap().templates.is_empty(),
+        "the config view reflects the cleared catalog"
+    );
+}

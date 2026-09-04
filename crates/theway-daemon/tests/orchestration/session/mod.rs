@@ -800,6 +800,13 @@ mod context_build; mod runtime_tool_isolation; mod runtime_transcript_isolation;
 #[tokio::test]
 async fn controller_mode_reload_closure_keeps_provisioned_skills() {
     let base = tempfile::tempdir().unwrap();
+    let templates_dir = base.path().join("templates");
+    std::fs::create_dir_all(&templates_dir).unwrap();
+    std::fs::write(
+        templates_dir.join("ignored.md"),
+        "---\nname: ignored-template\n---\nbody",
+    )
+    .unwrap();
     let paths = crate::DaemonPaths {
         base: base.path().to_path_buf(),
         home: base.path().to_path_buf(),
@@ -815,6 +822,10 @@ async fn controller_mode_reload_closure_keeps_provisioned_skills() {
         resources.skills.is_empty(),
         "controller mode must not scan skill files on disk"
     );
+    assert!(
+        resources.templates.is_empty(),
+        "controller mode must not scan template files on disk"
+    );
 
     *resources.provisioned_skills.write().unwrap() = vec![theway_core::Skill {
         name: "provisioned-skill".into(),
@@ -824,6 +835,12 @@ async fn controller_mode_reload_closure_keeps_provisioned_skills() {
         disable_model_invocation: false,
         source: theway_core::SkillSource::User,
     }];
+    *resources.provisioned_templates.write().unwrap() = vec![theway_core::PromptTemplate {
+        name: "provisioned-template".into(),
+        description: Some("from the controller".into()),
+        file_path: "/tmp/provisioned-template.md".into(),
+        content: "template body".into(),
+    }];
     let output = (resources.reload_skills_fn)().await;
     assert!(
         output
@@ -831,5 +848,44 @@ async fn controller_mode_reload_closure_keeps_provisioned_skills() {
             .iter()
             .any(|skill| skill.name == "provisioned-skill"),
         "reload must carry the provisioned slot forward instead of wiping it"
+    );
+    assert!(
+        resources
+            .provisioned_templates
+            .read()
+            .unwrap()
+            .iter()
+            .any(|template| template.name == "provisioned-template"),
+        "reload must keep the provisioned template slot instead of wiping it"
+    );
+}
+
+#[cfg(feature = "local")]
+#[tokio::test]
+async fn standalone_mode_load_scans_local_templates() {
+    let base = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let templates_dir = base.path().join("templates");
+    std::fs::create_dir_all(&templates_dir).unwrap();
+    std::fs::write(
+        templates_dir.join("standalone.md"),
+        "---\nname: standalone-template\n---\nbody",
+    )
+    .unwrap();
+    let paths = crate::DaemonPaths {
+        base: base.path().to_path_buf(),
+        home: base.path().to_path_buf(),
+        work_dir: work.path().to_path_buf(),
+        extra_skill_dirs: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
+    };
+    let resources = SessionProjectResources::load(&paths, &[], &[], true)
+        .await
+        .unwrap();
+    assert!(
+        resources
+            .templates
+            .iter()
+            .any(|template| template.name == "standalone-template"),
+        "standalone mode must still scan local template roots"
     );
 }

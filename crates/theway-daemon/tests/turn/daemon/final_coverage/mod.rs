@@ -150,6 +150,7 @@ fn build_host_with(
         cwd: work_dir,
         paths,
         provisioned_skills: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
+        provisioned_templates: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
         session_id: session_id.to_string(),
         log_path: None,
         tool_count: 0,

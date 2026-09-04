@@ -153,6 +153,7 @@ async fn host_with_extras(extras: Vec<PathBuf>) -> (TurnHost, Arc<AtomicU32>, Ve
         cwd: work_dir.clone(),
         paths,
         provisioned_skills: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
+        provisioned_templates: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
         session_id: "sess-test".into(),
         log_path: None,
         tool_count: 0,

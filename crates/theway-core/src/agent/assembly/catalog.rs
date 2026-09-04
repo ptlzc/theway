@@ -27,6 +27,12 @@ impl AgentHarness {
         self.agent.state().system_prompt = prompt;
     }
 
+    /// Replace the prompt-template catalog (issue #96). Templates do not feed the system
+    /// prompt, so — unlike replace_skills — no system-prompt rebuild is needed.
+    pub fn replace_templates(&self, templates: Vec<PromptTemplate>) {
+        *self.templates.lock() = templates;
+    }
+
     /// Hot-reload the skill catalog from disk via the embedder-supplied
     /// [`super::AgentHarnessOptions::reload_skills_fn`] closure. Used by `InstallSkillTool`,
     /// `/skills reload`, and any future control-plane that needs to refresh the catalog

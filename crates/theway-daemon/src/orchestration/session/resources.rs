@@ -24,6 +24,11 @@ pub struct SessionProjectResources {
     /// controller-mode reload closure reads it so `/reload` and `SetSkillDirs`
     /// never wipe the provisioned catalog.
     pub provisioned_skills: Arc<std::sync::RwLock<Vec<theway_core::Skill>>>,
+    /// Controller-provisioned prompt-template catalog (issue #96): written by
+    /// the settings applier when the TUI pushes `WireDaemonConfig.templates`;
+    /// the controller-mode reload closure reads it so `/reload` and
+    /// `SetSkillDirs` never wipe the provisioned catalog.
+    pub provisioned_templates: Arc<std::sync::RwLock<Vec<theway_core::PromptTemplate>>>,
 }
 
 impl SessionProjectResources {
@@ -37,10 +42,10 @@ impl SessionProjectResources {
         let memory_dir = paths.base.join("memory");
         let memory_block = crate::tools::memory::load_memory_block(&memory_dir).await;
         // Skills / templates load locally only when the daemon owns the local
-        // scan (standalone mode). Controller-provisioned sessions get the
-        // skill catalog through `WireDaemonConfig.skills` instead (issue #95):
-        // the TUI scans the roots and provisions the daemon — the daemon never
-        // reads skill files for a controller-backed runtime.
+        // scan (standalone mode). Controller-provisioned sessions get both
+        // catalogs through `WireDaemonConfig` instead (issues #95/#96): the
+        // TUI scans the roots and provisions the daemon — the daemon never
+        // reads skill or template files for a controller-backed runtime.
         let loaded_skills = if load_local_sources {
             crate::skills::load_all(paths).await
         } else {
@@ -70,14 +75,17 @@ impl SessionProjectResources {
         };
         crate::skill_overrides::apply(&state, &mut skills);
         let provisioned_skills = Arc::new(std::sync::RwLock::new(Vec::new()));
+        let provisioned_templates = Arc::new(std::sync::RwLock::new(Vec::new()));
         let reload_skills_fn: theway_core::ReloadSkillsFn = {
             let paths = paths.clone();
             let builtins = resolved_builtins.skills.clone();
             let provisioned = Arc::clone(&provisioned_skills);
+            let provisioned_templates = Arc::clone(&provisioned_templates);
             std::sync::Arc::new(move || {
                 let paths = paths.clone();
                 let builtins = builtins.clone();
                 let provisioned = Arc::clone(&provisioned);
+                let provisioned_templates = Arc::clone(&provisioned_templates);
                 Box::pin(async move {
                     let loaded = if load_local_sources {
                         crate::skills::load_all(&paths).await
@@ -90,6 +98,22 @@ impl SessionProjectResources {
                             diagnostics: Vec::new(),
                         }
                     };
+                    // Issue #96: templates follow the same reload policy as
+                    // skills. Standalone mode re-scans the roots (matching
+                    // startup); controller mode keeps the currently
+                    // provisioned catalog instead of wiping it with an empty
+                    // disk scan.
+                    let loaded_templates = if load_local_sources {
+                        crate::templates::load_all(&paths).await
+                    } else {
+                        crate::templates::LoadedTemplates {
+                            templates: provisioned_templates.read().unwrap().clone(),
+                            diagnostics: Vec::new(),
+                        }
+                    };
+                    if !load_local_sources {
+                        *provisioned_templates.write().unwrap() = loaded_templates.templates;
+                    }
                     let mut merged =
                         crate::builtin_skills::merge_with_user_project(builtins, &loaded.skills);
                     let state = if load_local_sources {
@@ -113,6 +137,7 @@ impl SessionProjectResources {
             reload_skills_fn,
             load_local_sources,
             provisioned_skills,
+            provisioned_templates,
         })
     }
 }
