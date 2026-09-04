@@ -13,6 +13,7 @@ fn sample_run(id: &str) -> PersistedRun {
         depends_on: vec!["root".to_string()],
         timeout: Some(120),
         cwd: None,
+        provider: Some("p1".to_string()),
         model: Some("m1".to_string()),
         thinking: Some("high".to_string()),
         max_iterations: None,

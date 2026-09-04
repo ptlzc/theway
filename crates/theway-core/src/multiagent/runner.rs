@@ -21,7 +21,7 @@ use theway_core::{
     MemorySessionStorage, ObservationContext, OperationId, Session, SessionStorage, StreamFn,
     ThinkingLevel,
 };
-use theway_llm_provider::{Message as PiMessage, Model};
+use theway_llm_provider::{Message as PiMessage, Model, Provider, get_model, list_models};
 use tokio_util::sync::CancellationToken;
 
 use super::types::AgentRunParams;
@@ -86,6 +86,94 @@ pub struct AgentRunResult {
 
 /// Default idle timeout for subagent runs (TS `ctx.defaults.timeout ?? 120`).
 const DEFAULT_IDLE_TIMEOUT_SECS: u64 = 120;
+
+/// Resolve the model a subagent run uses from the optional parent model and the
+/// caller's explicit provider/model overrides.
+///
+/// - `provider` + `model`: resolve against the loaded model catalog
+///   ([`theway_llm_provider::get_model`]). This is independent of the parent session model,
+///   so a model-less session can still delegate to a concrete provider/model.
+/// - `model` only: legacy id-rewrite over the parent model. A catalog entry on
+///   the parent's provider with that id wins; otherwise the parent descriptor
+///   is cloned with the id swapped.
+/// - `provider` only: error (an id is required to resolve the catalog entry).
+/// - Neither: the parent model.
+///
+/// Returns `None` when no parent model is available and no explicit pair was
+/// provided; callers map that to their own session-level "no model" error.
+pub fn resolve_run_model(
+    parent: Option<&Model>,
+    provider: Option<&str>,
+    model_id: Option<&str>,
+) -> Result<Option<Model>, String> {
+    match (provider, model_id) {
+        (Some(provider), Some(id)) => {
+            let provider_obj = Provider::from(provider);
+            get_model(&provider_obj, id)
+                .map(Some)
+                .ok_or_else(|| subagent_model_not_found_message(provider, id))
+        }
+        (Some(_), None) => {
+            Err("provider override requires a model override: pass both provider and model".into())
+        }
+        (None, Some(id)) => {
+            let Some(parent) = parent else {
+                return Ok(None);
+            };
+            if id == parent.id {
+                return Ok(Some(parent.clone()));
+            }
+            if let Some(catalog_model) = get_model(&parent.provider, id) {
+                return Ok(Some(catalog_model));
+            }
+            // Legacy behavior: rewrite the id, keep the parent's provider/base_url.
+            Ok(Some(Model {
+                id: id.to_string(),
+                ..parent.clone()
+            }))
+        }
+        (None, None) => Ok(parent.cloned()),
+    }
+}
+
+/// Catalog-miss message for an explicit subagent `(provider, model)` override.
+fn subagent_model_not_found_message(provider: &str, id: &str) -> String {
+    let mut by_provider = std::collections::BTreeMap::<String, Vec<String>>::new();
+    for model in list_models() {
+        by_provider
+            .entry(model.provider.0)
+            .or_default()
+            .push(model.id);
+    }
+    let Some(models) = by_provider.get_mut(provider) else {
+        let providers = by_provider
+            .iter()
+            .map(|(provider, models)| format!("{provider}({})", models.len()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return format!(
+            "model provider not found in catalog: provider={provider}. Known providers: {providers}"
+        );
+    };
+    models.sort();
+    let candidates = models
+        .iter()
+        .take(12)
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let more = if models.len() > 12 {
+        format!(
+            "; run `/model list {provider}` inside theway for all {} models",
+            models.len()
+        )
+    } else {
+        String::new()
+    };
+    format!(
+        "model not found in catalog: provider={provider} id={id}. Candidates: {candidates}{more}"
+    )
+}
 
 /// Force-kill grace after the idle watchdog aborts the harness
 /// (TS SIGTERM → 5s → SIGKILL escalation).

@@ -59,6 +59,8 @@ pub struct PersistedNode {
     pub depends_on: Vec<String>,
     pub timeout: Option<u64>,
     pub cwd: Option<String>,
+    #[serde(default)]
+    pub provider: Option<String>,
     pub model: Option<String>,
     pub thinking: Option<String>,
     #[serde(default)]

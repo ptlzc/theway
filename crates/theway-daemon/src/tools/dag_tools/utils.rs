@@ -254,6 +254,7 @@ pub(super) fn node_def_from_json(n: &Value) -> DagNodeDef {
         }),
         timeout: n.get("timeout").and_then(|v| v.as_u64()),
         cwd: n.get("cwd").and_then(|v| v.as_str()).map(String::from),
+        provider: n.get("provider").and_then(|v| v.as_str()).map(String::from),
         model: n.get("model").and_then(|v| v.as_str()).map(String::from),
         thinking: n.get("thinking").and_then(|v| v.as_str()).map(String::from),
         max_iterations: n

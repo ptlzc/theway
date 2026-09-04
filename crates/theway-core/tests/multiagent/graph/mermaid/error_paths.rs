@@ -79,6 +79,7 @@ fn render_tree_handles_missing_dependency() {
             depends_on: vec!["missing".into()],
             timeout: None,
             cwd: None,
+            provider: None,
             model: None,
             thinking: None,
             max_iterations: None,

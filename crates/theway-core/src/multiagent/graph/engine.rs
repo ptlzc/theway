@@ -218,6 +218,7 @@ impl DagEngine {
             depends_on: Vec::new(),
             timeout: None,
             cwd: None,
+            provider: None,
             model: None,
             thinking: None,
             max_iterations: None,

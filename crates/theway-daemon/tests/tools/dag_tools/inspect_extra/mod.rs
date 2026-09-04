@@ -100,6 +100,7 @@ async fn inspect_missing_dep_shows_missing_marker() {
             depends_on: vec!["ghost".into()],
             timeout: None,
             cwd: None,
+            provider: None,
             model: None,
             thinking: None,
             max_iterations: None,

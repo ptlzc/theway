@@ -86,6 +86,7 @@ fn node_def(id: &str) -> DagNodeDef {
         depends_on: None,
         timeout: None,
         cwd: None,
+        provider: None,
         model: None,
         thinking: None,
         max_iterations: None,
@@ -93,18 +94,24 @@ fn node_def(id: &str) -> DagNodeDef {
     }
 }
 
-// ── node_def_from_json: maxIterations / tools ───────────────────────────
+// ── node_def_from_json: provider / model / thinking / maxIterations / tools ──
 
 #[test]
-fn node_def_from_json_parses_max_iterations_and_tools() {
+fn node_def_from_json_parses_provider_model_thinking_budget_and_tools() {
     let def = node_def_from_json(&json!({
         "id": "a",
         "agent": "explorer",
         "task": "read",
+        "provider": "deepseek",
+        "model": "deepseek-v4-flash",
+        "thinking": "high",
         "maxIterations": 8,
         "tools": ["read", "bash"],
     }));
     assert_eq!(def.id, "a");
+    assert_eq!(def.provider, Some("deepseek".to_string()));
+    assert_eq!(def.model, Some("deepseek-v4-flash".to_string()));
+    assert_eq!(def.thinking, Some("high".to_string()));
     assert_eq!(def.max_iterations, Some(8));
     assert_eq!(
         def.tools,
@@ -113,12 +120,15 @@ fn node_def_from_json_parses_max_iterations_and_tools() {
 }
 
 #[test]
-fn node_def_from_json_missing_max_iterations_and_tools_stay_none() {
+fn node_def_from_json_missing_overrides_stay_none() {
     let def = node_def_from_json(&json!({
         "id": "a",
         "agent": "explorer",
         "task": "read",
     }));
+    assert_eq!(def.provider, None);
+    assert_eq!(def.model, None);
+    assert_eq!(def.thinking, None);
     assert_eq!(def.max_iterations, None);
     assert_eq!(def.tools, None);
 }
@@ -129,9 +139,15 @@ fn node_def_from_json_wrong_types_fall_back_to_none() {
         "id": "a",
         "agent": "explorer",
         "task": "read",
+        "provider": 7,
+        "model": 8,
+        "thinking": 9,
         "maxIterations": "eight",
         "tools": "read",
     }));
+    assert_eq!(def.provider, None);
+    assert_eq!(def.model, None);
+    assert_eq!(def.thinking, None);
     assert_eq!(def.max_iterations, None);
     assert_eq!(def.tools, None);
     // Non-string entries inside the tools array are dropped, not an error.

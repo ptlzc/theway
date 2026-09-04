@@ -184,6 +184,7 @@ pub fn build_run(def: &DagRunDef) -> DagRun {
             depends_on: n.depends_on.clone().unwrap_or_default(),
             timeout: n.timeout,
             cwd: n.cwd.clone(),
+            provider: n.provider.clone(),
             model: n.model.clone(),
             thinking: n.thinking.clone(),
             max_iterations: n.max_iterations,

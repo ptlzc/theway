@@ -18,6 +18,7 @@ fn node_def(id: &str, agent: &str, task: &str, deps: &[&str]) -> DagNodeDef {
         },
         timeout: None,
         cwd: None,
+        provider: None,
         model: None,
         thinking: None,
         max_iterations: None,

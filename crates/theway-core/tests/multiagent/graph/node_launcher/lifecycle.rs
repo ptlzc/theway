@@ -35,7 +35,9 @@ async fn missing_model_fails_the_node_with_clear_error() {
     assert_eq!(node.status, NodeStatus::Failed);
     assert_eq!(
         node.error.as_deref(),
-        Some("no model set for this session; select a model in the TUI before launching DAG nodes")
+        Some(
+            "no model set for this session; select a model in the TUI before launching DAG nodes (or set provider + model on the node)"
+        )
     );
     assert!(node.input_tokens.is_none() || node.input_tokens == Some(0));
 }
@@ -71,6 +73,7 @@ async fn model_override_rewrites_id_and_still_completes() {
             depends_on: None,
             timeout: None,
             cwd: None,
+            provider: None,
             model: Some("other-model".into()),
             thinking: None,
             max_iterations: None,
@@ -191,6 +194,7 @@ async fn model_override_same_id_uses_parent_model() {
             depends_on: None,
             timeout: None,
             cwd: None,
+            provider: None,
             model: Some("faux".into()),
             thinking: None,
             max_iterations: None,
@@ -208,4 +212,103 @@ async fn model_override_same_id_uses_parent_model() {
     let run = engine.get_run(&run_id).unwrap();
     assert_eq!(run.status, DagStatus::Completed);
     assert_eq!(run.node("a").unwrap().status, NodeStatus::Succeeded);
+}
+
+fn catalog_model(provider: &str, id: &str) -> Model {
+    Model {
+        id: id.into(),
+        name: format!("{provider} {id}"),
+        api: theway_llm_provider::Api::from("faux"),
+        provider: theway_llm_provider::Provider::from(provider),
+        base_url: String::new(),
+        reasoning: false,
+        thinking_level_map: None,
+        input: vec![],
+        cost: ModelCost::default(),
+        context_window: 0,
+        max_tokens: 0,
+        headers: None,
+        compat: None,
+    }
+}
+
+/// The regression case behind the feature request: an explicit
+/// `provider + model` pair must launch even when the parent session has no
+/// model (e.g. a collapse-inherited session with empty model state).
+#[tokio::test]
+async fn explicit_provider_model_resolves_without_parent_model() {
+    let provider = "test-node-provider";
+    let id = "test-node-model";
+    theway_llm_provider::register_custom_model(catalog_model(provider, id));
+
+    let engine = engine_with_launcher_model(None, faux_stream("catalog ok"));
+    let mut node = node_def("general");
+    node.provider = Some(provider.into());
+    node.model = Some(id.into());
+    let run_id = plan_node(&engine, node);
+    let results = engine
+        .wait_for_runs(std::slice::from_ref(&run_id), Duration::from_secs(10), None)
+        .await;
+
+    theway_llm_provider::unregister_custom_model(
+        &theway_llm_provider::Provider::from(provider),
+        id,
+    );
+
+    assert_eq!(results, vec![(run_id.clone(), false)], "run must finish");
+    let run = engine.get_run(&run_id).unwrap();
+    assert_eq!(run.status, DagStatus::Completed);
+    let node = run.node("a").unwrap();
+    assert_eq!(node.status, NodeStatus::Succeeded);
+    assert_eq!(node.output.as_deref(), Some("catalog ok"));
+}
+
+#[tokio::test]
+async fn unknown_provider_model_pair_fails_node_synchronously() {
+    let engine = engine_with_launcher(faux_model(), faux_stream("unreachable"));
+    let mut node = node_def("general");
+    node.provider = Some("test-no-such-provider".into());
+    node.model = Some("x".into());
+    let run_id = plan_node(&engine, node);
+    let run = engine.get_run(&run_id).unwrap();
+    assert_eq!(run.status, DagStatus::Failed);
+    let node = run.node("a").unwrap();
+    assert_eq!(node.status, NodeStatus::Failed);
+    let err = node.error.as_deref().unwrap();
+    assert!(err.contains("model provider not found in catalog"), "{err}");
+    assert!(err.contains("test-no-such-provider"), "{err}");
+}
+
+#[tokio::test]
+async fn provider_without_model_fails_node_synchronously() {
+    let engine = engine_with_launcher(faux_model(), faux_stream("unreachable"));
+    let mut node = node_def("general");
+    node.provider = Some("test-node-provider".into());
+    let run_id = plan_node(&engine, node);
+    let run = engine.get_run(&run_id).unwrap();
+    assert_eq!(run.status, DagStatus::Failed);
+    let node = run.node("a").unwrap();
+    assert_eq!(node.status, NodeStatus::Failed);
+    let err = node.error.as_deref().unwrap();
+    assert!(
+        err.contains("provider override requires a model override"),
+        "{err}"
+    );
+}
+
+#[tokio::test]
+async fn invalid_thinking_fails_node_synchronously() {
+    let engine = engine_with_launcher(faux_model(), faux_stream("unreachable"));
+    let mut node = node_def("general");
+    node.thinking = Some("ultra".into());
+    let run_id = plan_node(&engine, node);
+    let run = engine.get_run(&run_id).unwrap();
+    assert_eq!(run.status, DagStatus::Failed);
+    let node = run.node("a").unwrap();
+    assert_eq!(node.status, NodeStatus::Failed);
+    let err = node.error.as_deref().unwrap();
+    assert!(
+        err.contains("invalid thinking level: ultra"),
+        "{err}"
+    );
 }

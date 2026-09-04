@@ -26,6 +26,11 @@ pub struct DagNodeDef {
     /// Working directory for the subagent (absolute path). When set, the node's task
     /// prompt pins it and the subagent is told to run all commands from there.
     pub cwd: Option<String>,
+    /// Provider for an explicit `(provider, model)` override, resolved against
+    /// the loaded model catalog independently of the parent session model.
+    /// `None` keeps the legacy `model`-id-rewrite behavior.
+    #[serde(default)]
+    pub provider: Option<String>,
     /// Primary-target model override, passed through to the subagent runner.
     pub model: Option<String>,
     /// Primary-target thinking override.
@@ -63,6 +68,10 @@ pub struct DagNode {
     pub depends_on: Vec<String>,
     pub timeout: Option<u64>,
     pub cwd: Option<String>,
+    /// Provider for an explicit `(provider, model)` override; persisted so a
+    /// restored node still launches with it.
+    #[serde(default)]
+    pub provider: Option<String>,
     pub model: Option<String>,
     pub thinking: Option<String>,
     /// Iteration-budget override carried from the definition; persisted so a

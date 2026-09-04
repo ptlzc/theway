@@ -20,6 +20,7 @@ fn run_def(name: &str, max_conc: Option<usize>, fail_fast: Option<bool>) -> DagR
             depends_on: None,
             timeout: None,
             cwd: None,
+            provider: None,
             model: None,
             thinking: None,
             max_iterations: None,

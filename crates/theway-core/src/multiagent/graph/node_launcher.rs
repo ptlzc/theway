@@ -18,8 +18,9 @@
 //! (TS `ctx.defaults.timeout ?? 120`).
 //!
 //! Known deviations from the TS original — open gaps, NOT deliberately scoped out:
-//! - `node.model` override only rewrites the model *id* on the parent's [`Model`] (same
-//!   provider/base_url). A full provider lookup from the loaded models catalog is TODO.
+//! - `node.provider` + `node.model` resolve against the loaded models catalog via
+//!   [`resolve_run_model`](crate::multiagent::runner::resolve_run_model), independent of the
+//!   parent session model; `node.model` alone keeps the legacy id rewrite over the parent.
 //! - `node.thinking` maps onto the harness `ThinkingLevel`; providers without a
 //!   `thinking_level_map` ignore the reasoning option at stream time.
 //! - The spec's `max_iterations` is enforced by the shared runner (agent-loop cap:
@@ -37,7 +38,7 @@ use theway_llm_provider::Model;
 use tokio_util::sync::CancellationToken;
 
 use crate::multiagent::jobs::SubagentJobRegistry;
-use crate::multiagent::runner::{AgentRunOptions, filter_tool_set, run_agent};
+use crate::multiagent::runner::{AgentRunOptions, filter_tool_set, resolve_run_model, run_agent};
 use crate::multiagent::types::{AgentRunParams, AgentRunResolver, ToolSetResolver};
 
 /// Everything a single node job needs, captured at launch time so the spawned task never
@@ -158,19 +159,62 @@ impl NodeLauncher for NodeLauncherImpl {
             "launching DAG node subagent"
         );
 
-        // v1 model override: rewrite only the id, keep the parent's provider/base_url.
-        // A full lookup against the loaded models catalog is a follow-up. When the
-        // parent session has no model, the node inherits `None` and fails when the
-        // sub-harness tries to run (clear "no model" error).
-        let model = match &self.model {
-            Some(parent) => match node.model.as_deref() {
-                Some(mid) if mid != parent.id => Some(Model {
-                    id: mid.to_string(),
-                    ..parent.clone()
-                }),
-                _ => Some(parent.clone()),
+        // Thinking override: fail the node synchronously on a value the harness
+        // cannot parse, so a typo is visible instead of silently ignored.
+        let thinking = match node.thinking.as_deref() {
+            Some(raw) => match raw.parse::<theway_core::ThinkingLevel>() {
+                Ok(_) => Some(raw.to_string()),
+                Err(_) => {
+                    self.engine.on_node_completed(
+                        run_id,
+                        node_id,
+                        NodeOutcome {
+                            success: false,
+                            error: Some(format!(
+                                "invalid thinking level: {raw} (allowed: off, minimal, low, medium, high, xhigh, max)"
+                            )),
+                            duration_ms: 0,
+                            attempt: 0,
+                            total_attempts: 0,
+                            input_tokens: 0,
+                            output_tokens: 0,
+                            output: None,
+                        },
+                    );
+                    return;
+                }
             },
             None => None,
+        };
+
+        // Model override: explicit `(provider, model)` pairs resolve against the
+        // loaded models catalog independently of the parent session model;
+        // `model` alone keeps the legacy parent-model id rewrite. A model-less
+        // session with no explicit pair keeps the existing session-level error
+        // (raised when the spawned job starts).
+        let model = match resolve_run_model(
+            self.model.as_ref(),
+            node.provider.as_deref(),
+            node.model.as_deref(),
+        ) {
+            Ok(model) => model,
+            Err(err) => {
+                self.engine.on_node_completed(
+                    run_id,
+                    node_id,
+                    NodeOutcome {
+                        success: false,
+                        error: Some(err),
+                        duration_ms: 0,
+                        attempt: 0,
+                        total_attempts: 0,
+                        input_tokens: 0,
+                        output_tokens: 0,
+                        output: None,
+                    },
+                );
+                return;
+            }
         };
 
         let job = NodeJob {
@@ -182,7 +226,7 @@ impl NodeLauncher for NodeLauncherImpl {
             model,
             stream_fn: self.stream_fn.clone(),
             task_text: node.task.clone(),
-            thinking: node.thinking.clone(),
+            thinking,
             timeout: node.timeout,
             attempt: node.attempt.saturating_add(1),
             launch_gen: node.launch_gen,
@@ -241,7 +285,7 @@ async fn run_node(job: NodeJob, cancel: CancellationToken) {
             NodeOutcome {
                 success: false,
                 error: Some(
-                    "no model set for this session; select a model in the TUI before launching DAG nodes"
+                    "no model set for this session; select a model in the TUI before launching DAG nodes (or set provider + model on the node)"
                         .to_string(),
                 ),
                 duration_ms: 0,

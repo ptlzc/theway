@@ -15,6 +15,7 @@ fn insert_run(engine: &DagEngine, id: &str, node_id: &str, status: NodeStatus, k
                 depends_on: Vec::new(),
                 timeout: None,
                 cwd: None,
+                provider: None,
                 model: None,
                 thinking: None,
                 max_iterations: None,

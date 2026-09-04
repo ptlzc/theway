@@ -367,6 +367,7 @@ pub fn parse_mermaid(text: &str) -> MermaidParseResult {
                 depends_on: None,
                 timeout: None,
                 cwd: None,
+                provider: None,
                 model: None,
                 thinking: None,
                 // Mermaid labels only carry "agent: task"; budget/tools come
