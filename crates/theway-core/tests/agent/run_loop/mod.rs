@@ -89,6 +89,42 @@ async fn finalize_partial_turn_keeps_only_messages_with_content() {
     // Assert
     assert_eq!(agent.state().messages.len(), 1);
     assert!(agent.state().streaming_message.is_none());
+
+    // Arrange: thinking-only partials carry no conversational content and
+    // must not be appended (they serialize to an invalid empty assistant
+    // message on OpenAI-style wire protocols — closes the Esc-interrupt
+    // "Invalid assistant message" failure).
+    let thinking_only = assistant_message(vec![ContentBlock::Thinking(
+        theway_llm_provider::ThinkingContent {
+            thinking: "reasoning without any answer yet".into(),
+            ..Default::default()
+        },
+    )]);
+    agent.state().streaming_message = Some(thinking_only);
+
+    // Act
+    finalize_partial_turn(&agent.inner.clone(), &cancel).await;
+
+    // Assert
+    assert_eq!(agent.state().messages.len(), 1);
+    assert!(agent.state().streaming_message.is_none());
+
+    // Arrange: thinking + text is conversational and must be appended.
+    let with_thinking_and_text = assistant_message(vec![
+        ContentBlock::Thinking(theway_llm_provider::ThinkingContent {
+            thinking: "reasoning".into(),
+            ..Default::default()
+        }),
+        ContentBlock::text("partial"),
+    ]);
+    agent.state().streaming_message = Some(with_thinking_and_text);
+
+    // Act
+    finalize_partial_turn(&agent.inner.clone(), &cancel).await;
+
+    // Assert
+    assert_eq!(agent.state().messages.len(), 2);
+    assert!(agent.state().streaming_message.is_none());
 }
 
 #[tokio::test]

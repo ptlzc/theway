@@ -669,6 +669,55 @@ mod tests {
     }
 
     #[test]
+    fn thinking_only_assistant_message_is_skipped() {
+        let m = mk_model();
+        let ctx = Context {
+            system_prompt: None,
+            messages: vec![
+                Message::User(UserMessage {
+                    role: UserRole::User,
+                    content: UserContent::Text("hi".into()),
+                    timestamp: 0,
+                }),
+                // An interrupted turn can leave a thinking-only assistant
+                // partial in history. It has no conversational content and
+                // must not serialize as `content: null` — DeepSeek rejects
+                // that with "Invalid assistant message: content or tool_calls
+                // must be set".
+                Message::Assistant(AssistantMessage {
+                    role: AssistantRole::Assistant,
+                    content: vec![ContentBlock::Thinking(ThinkingContent {
+                        thinking: "reasoning only".into(),
+                        ..Default::default()
+                    })],
+                    api: Api::known(KnownApi::OpenAICompletions),
+                    provider: Provider::from("deepseek"),
+                    model: "deepseek-v4-pro".into(),
+                    response_model: None,
+                    response_id: None,
+                    diagnostics: None,
+                    usage: Usage::default(),
+                    stop_reason: StopReason::Stop,
+                    error_message: None,
+                    timestamp: 0,
+                }),
+                Message::User(UserMessage {
+                    role: UserRole::User,
+                    content: UserContent::Text("next message".into()),
+                    timestamp: 0,
+                }),
+            ],
+            tools: None,
+        };
+        let body = build_request_body(&m, &ctx, &Default::default());
+        let msgs = body["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0]["role"], "user");
+        assert_eq!(msgs[1]["role"], "user");
+        assert_eq!(msgs[1]["content"], "next message");
+    }
+
+    #[test]
     fn finish_reason_mapping() {
         assert_eq!(map_stop_reason("stop"), StopReason::Stop);
         assert_eq!(map_stop_reason("length"), StopReason::Length);

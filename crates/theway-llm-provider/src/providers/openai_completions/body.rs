@@ -99,6 +99,15 @@ pub(super) fn convert_messages(msgs: &[Message]) -> Vec<Value> {
                         _ => {}
                     }
                 }
+                // Thinking-only assistant turns (e.g. a partial persisted after an
+                // interrupted stream) carry no conversational content on this wire
+                // protocol. Emitting them as `content: null` with no `tool_calls`
+                // is rejected by strict providers (DeepSeek: "Invalid assistant
+                // message: content or tool_calls must be set") and would fail every
+                // subsequent request. Skip them instead.
+                if text.is_empty() && tool_calls.is_empty() {
+                    continue;
+                }
                 let mut msg = json!({ "role": "assistant" });
                 msg["content"] = if text.is_empty() {
                     Value::Null

@@ -51,7 +51,7 @@ pub mod utils;
 
 use std::sync::Arc;
 
-use theway_llm_provider::{Message as PiMessage, UserContentBlock};
+use theway_llm_provider::{ContentBlock, Message as PiMessage, UserContentBlock};
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::{AgentInner, AgentRunError, AgentRunPermit};
@@ -418,8 +418,21 @@ async fn drive_loop(
 async fn finalize_partial_turn(inner: &Arc<AgentInner>, cancel: &CancellationToken) {
     let partial = inner.state.lock().streaming_message.take();
     if let Some(m) = partial {
-        let has_content =
-            matches!(&m, AgentMessage::Llm(PiMessage::Assistant(a)) if !a.content.is_empty());
+        // Only persist partials with conversational content (text or tool
+        // calls). A thinking-only partial is a display artifact, not
+        // conversation: OpenAI-style wire protocols drop thinking blocks, so
+        // such a message would serialize to `{"role":"assistant",
+        // "content":null}` with no tool calls and strict providers (DeepSeek)
+        // reject the whole request with "Invalid assistant message" on every
+        // subsequent turn — permanently bricking the session.
+        let has_content = matches!(
+            &m,
+            AgentMessage::Llm(PiMessage::Assistant(a))
+                if a.content.iter().any(|block| matches!(
+                    block,
+                    ContentBlock::Text(_) | ContentBlock::ToolCall(_)
+                ))
+        );
         if has_content {
             finish_message(inner, m, cancel).await;
         }
