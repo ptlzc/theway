@@ -147,6 +147,29 @@ fn official_sdk_spans_share_trace_and_parent_identity() {
 }
 
 #[test]
+fn build_otel_constructs_http_exporters_with_configured_endpoint() {
+    let config = TelemetryConfig {
+        otlp_enabled: true,
+        otlp_traces_endpoint: Some("http://127.0.0.1:4318".into()),
+        otlp_traces_headers: Some(
+            [("Authorization".into(), "Basic dGVzdA==".into())]
+                .into_iter()
+                .collect(),
+        ),
+        ..TelemetryConfig::default()
+    };
+    let (tracer_provider, meter_provider, tracer, metrics) =
+        build_otel(&config).expect("OTLP HTTP client must be compiled in");
+    assert!(tracer_provider.is_some());
+    assert!(tracer.is_some());
+    assert!(meter_provider.is_none());
+    assert!(metrics.is_none());
+    if let Some(provider) = tracer_provider {
+        provider.shutdown().unwrap();
+    }
+}
+
+#[test]
 fn full_content_observer_sets_langfuse_attributes_on_spans() {
     let exporter = InMemorySpanExporter::default();
     let provider = SdkTracerProvider::builder()
