@@ -325,10 +325,10 @@ async fn completion_popup_pages_past_window_and_scrolls_back_up() {
     assert_window_contains_idx(&app);
 }
 
-/// Catalog entries (issue #47): every ENABLED skill appears as
-/// `skill::<name>` and every MCP tool as `mcp:<tool>` with verbatim names,
-/// stored with the `/` prefix like every other completion. Existing
-/// `/shortcut` entries and all other commands stay in the list.
+/// Skill entries (issue #110): each ENABLED skill appears exactly once.
+/// The dispatchable `/<shortcut>` is canonical when unique and non-colliding;
+/// `/skill::<name>` is the fallback for command collisions or ambiguous
+/// names. MCP tools still appear verbatim behind `mcp:`.
 #[test]
 fn collect_slash_commands_appends_skill_and_mcp_catalog_entries() {
     // Arrange
@@ -346,21 +346,46 @@ fn collect_slash_commands_appends_skill_and_mcp_catalog_entries() {
             file_path: "/skills/secrets".into(),
             enabled: false,
         },
+        WireSkillSnapshot {
+            name: "help".into(),
+            source: "user".into(),
+            file_path: "/skills/help".into(),
+            enabled: true,
+        },
+        WireSkillSnapshot {
+            name: "group/a".into(),
+            source: "user".into(),
+            file_path: "/skills/group/a".into(),
+            enabled: true,
+        },
+        WireSkillSnapshot {
+            name: "group/b".into(),
+            source: "user".into(),
+            file_path: "/skills/group/b".into(),
+            enabled: true,
+        },
     ];
     let mcp_tools = vec!["fetch_url".to_string(), "Server_Uppercase_Tool".to_string()];
 
     // Act
     let commands = collect_slash_commands(&registry, &skills, &[], &mcp_tools);
 
-    // Assert
+    // Assert: one entry per skill.
+    assert!(commands.contains(&"/code-review".to_string()));
     assert!(
-        commands.contains(&"/skill::code-review".to_string()),
-        "enabled skills must appear behind the skill:: prefix"
+        !commands.contains(&"/skill::code-review".to_string()),
+        "unique shortcuts must not duplicate as skill:: entries"
     );
     assert!(
-        !commands.contains(&"/skill::secrets-check".to_string()),
-        "disabled skills must not appear in the catalog"
+        !commands.contains(&"/secrets-check".to_string()),
+        "disabled skills must not appear"
     );
+    // `/help` collides with the local command, so the exact-name fallback is used.
+    assert!(commands.contains(&"/skill::help".to_string()));
+    // Two skills share the `group` first segment: both fall back to exact names.
+    assert!(!commands.contains(&"/group".to_string()));
+    assert!(commands.contains(&"/skill::group/a".to_string()));
+    assert!(commands.contains(&"/skill::group/b".to_string()));
     assert!(commands.contains(&"/mcp:fetch_url".to_string()));
     assert!(
         commands.contains(&"/mcp:Server_Uppercase_Tool".to_string()),
@@ -368,7 +393,6 @@ fn collect_slash_commands_appends_skill_and_mcp_catalog_entries() {
     );
     // Existing entries are preserved alongside the new catalog entries.
     assert!(commands.contains(&"/help".to_string()));
-    assert!(commands.contains(&"/code-review".to_string()));
 }
 
 /// Popup prefix filtering with catalog entries (issue #47): typing
@@ -391,21 +415,36 @@ async fn slash_popup_filters_skill_and_mcp_catalogs_by_prefix() {
             file_path: "/skills/secrets".into(),
             enabled: false,
         },
+        WireSkillSnapshot {
+            name: "help".into(),
+            source: "user".into(),
+            file_path: "/skills/help".into(),
+            enabled: true,
+        },
     ];
     app.latest.sidebar.mcp.tool_names = vec!["fetch_url".into()];
 
-    // Act: a bare slash lists the catalog entries among the commands.
+    // Act: a bare slash lists one entry per skill: the unique shortcut for
+    // `code-review` and the exact-name fallback for the colliding `help`.
     app.set_input("/");
     assert!(
-        app.completions.contains(&"/skill::code-review".to_string()),
-        "bare slash must list enabled skill catalog entries"
+        app.completions.contains(&"/code-review".to_string()),
+        "bare slash must list unique skill shortcuts"
+    );
+    assert!(
+        !app.completions.contains(&"/skill::code-review".to_string()),
+        "unique shortcuts must not duplicate as skill:: entries"
+    );
+    assert!(
+        app.completions.contains(&"/skill::help".to_string()),
+        "colliding skills must appear behind skill::"
     );
     assert!(
         app.completions.contains(&"/mcp:fetch_url".to_string()),
         "bare slash must list MCP catalog entries"
     );
 
-    // Act: the skill catalog prefix filters everything else out.
+    // Act: the skill catalog prefix filters to exact-name fallback entries.
     app.set_input("/skill::");
     assert!(!app.completions.is_empty());
     assert!(
@@ -413,7 +452,8 @@ async fn slash_popup_filters_skill_and_mcp_catalogs_by_prefix() {
         "skill prefix must leave only skill entries, got {:?}",
         app.completions
     );
-    assert!(app.completions.contains(&"/skill::code-review".to_string()));
+    assert!(app.completions.contains(&"/skill::help".to_string()));
+    assert!(!app.completions.contains(&"/skill::code-review".to_string()));
     assert!(
         !app.completions
             .contains(&"/skill::secrets-check".to_string())

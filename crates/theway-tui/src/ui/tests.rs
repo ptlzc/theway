@@ -721,16 +721,21 @@ async fn bare_slash_surfaces_skill_catalog_first() {
     let skill_entries: Vec<&String> = app
         .completions
         .iter()
-        .filter(|entry| entry.starts_with("/skill::"))
+        .filter(|entry| **entry == "/release-checklist" || **entry == "/zebra-skill")
         .collect();
-    assert_eq!(skill_entries.len(), 2, "both skills must be listed");
-    let first_skill_idx = app
-        .completions
-        .iter()
-        .position(|entry| entry.starts_with("/skill::"))
-        .unwrap();
-    assert_eq!(
-        first_skill_idx, 0,
+    assert_eq!(skill_entries.len(), 2, "both skills must be listed once");
+    assert!(
+        !app.completions
+            .iter()
+            .any(|entry| entry.starts_with("/skill::")),
+        "unique shortcuts must not duplicate as skill:: entries: {:?}",
+        app.completions
+    );
+    let first_two: Vec<&String> = app.completions.iter().take(2).collect();
+    assert!(
+        first_two
+            .iter()
+            .all(|entry| entry.as_str() == "/release-checklist" || entry.as_str() == "/zebra-skill"),
         "skill entries must come first for a bare slash: {:?}",
         app.completions
     );

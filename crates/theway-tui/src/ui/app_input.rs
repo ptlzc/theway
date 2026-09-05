@@ -10,6 +10,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::Terminal;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
+use std::collections::HashSet;
 
 use theway_transport::commands;
 use theway_transport::images;
@@ -629,13 +630,29 @@ impl App {
         self.completer = SlashCompleter::from_commands(commands);
         self.completions = if self.input_is_single_line() {
             let mut matches = self.completer.matches(&self.input_text());
-            // Issue #95: a bare "/" matches every command; the skill catalog
-            // entries would land far below the popup's visible window.
-            // Surface them first so the loaded skills are immediately visible.
+            // Issue #95/#110: a bare "/" matches every command; skill entries
+            // (shortcut or skill:: fallback) would land far below the popup's
+            // visible window. Surface them first so the loaded skills are
+            // immediately visible — each skill has exactly one entry.
             if self.input_text().trim() == "/" {
+                let skill_entries: HashSet<String> = self
+                    .latest
+                    .sidebar
+                    .skills
+                    .items
+                    .iter()
+                    .filter(|skill| skill.enabled)
+                    .flat_map(|skill| {
+                        let mut entries = vec![format!("/skill::{}", skill.name)];
+                        if let Some(shortcut) = skill.name.split('/').next() {
+                            entries.push(format!("/{shortcut}"));
+                        }
+                        entries
+                    })
+                    .collect();
                 let (skills, rest): (Vec<String>, Vec<String>) = matches
                     .into_iter()
-                    .partition(|entry| entry.starts_with("/skill::"));
+                    .partition(|entry| skill_entries.contains(entry));
                 matches = skills.into_iter().chain(rest).collect();
             }
             matches

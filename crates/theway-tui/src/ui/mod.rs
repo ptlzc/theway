@@ -52,6 +52,7 @@ use theme::Theme;
 
 pub use theway_transport::feed::FeedUpdate;
 
+use std::collections::{HashMap, HashSet};
 use std::io::IsTerminal;
 use std::io::Write as _;
 use std::path::PathBuf;
@@ -720,12 +721,14 @@ fn resume_picker_label(entry: &ResumePickerEntry) -> String {
 /// the TUI-local command set (`LOCAL_COMMANDS` — commands the client
 /// intercepts and never forwards) + the daemon-side command surface (the
 /// daemon owns the full registry; the client forwards slash text via
-/// `send_message`) + skill shortcuts from the snapshot sidebar + the
-/// daemon-scanned claude-code-format file commands (issue #37) + reference
-/// catalog entries (issue #47): every enabled skill as `skill::<name>` and
-/// every MCP tool as `mcp:<tool>` with verbatim names. Unknown slash commands
-/// submitted by the user fall back to a plain user message (#37 semantics),
-/// so the catalog entries are reference info.
+/// `send_message`) + one entry per enabled skill + the daemon-scanned
+/// claude-code-format file commands (issue #37) + MCP tool reference entries.
+///
+/// Skill naming (issue #110): the dispatchable `/<shortcut>` is canonical
+/// when unique and non-colliding; `/skill::<name>` is the fallback for
+/// command collisions and ambiguous names, so a skill never appears twice.
+/// Unknown slash commands submitted by the user fall back to a plain user
+/// message (#37 semantics), so catalog entries are reference info.
 fn collect_slash_commands(
     registry: &theway_transport::commands::Registry,
     skills: &[theway_transport::wire::WireSkillSnapshot],
@@ -744,15 +747,27 @@ fn collect_slash_commands(
     commands.extend(DAEMON_COMMANDS.iter().map(|name| format!("/{name}")));
     commands.extend(LOCAL_COMMANDS.iter().map(|name| format!("/{name}")));
     commands.extend(file_commands.iter().cloned());
-    for skill in skills {
+
+    let mut seen: HashSet<String> = commands.iter().cloned().collect();
+    let mut shortcut_counts: HashMap<String, usize> = HashMap::new();
+    for skill in skills.iter().filter(|skill| skill.enabled) {
         if let Some(shortcut) = skill.name.split('/').next() {
-            commands.push(format!("/{shortcut}"));
+            *shortcut_counts.entry(shortcut.to_string()).or_default() += 1;
         }
     }
-    // Skill catalog: one entry per enabled skill, `WireSkillSnapshot.name`
-    // verbatim behind the `skill::` prefix (issue #47).
     for skill in skills.iter().filter(|skill| skill.enabled) {
-        commands.push(format!("/skill::{}", skill.name));
+        let Some(shortcut) = skill.name.split('/').next() else {
+            continue;
+        };
+        let shortcut = format!("/{shortcut}");
+        let unique = shortcut_counts.get(&shortcut[1..]) == Some(&1);
+        if unique && seen.insert(shortcut.clone()) {
+            commands.push(shortcut);
+        } else {
+            // Issue #47/#110: exact-name fallback for colliding or ambiguous
+            // skills; never add it when the shortcut was already canonical.
+            commands.push(format!("/skill::{}", skill.name));
+        }
     }
     // MCP catalog: one entry per connected MCP tool, names verbatim —
     // server-defined names are never rewritten (issue #47).
