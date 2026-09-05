@@ -155,7 +155,7 @@ fn resume_picker_label_formats_name_busy_graph_and_current_marks() {
     };
 
     // Act + Assert (the id column pads to its full width).
-    let id_col = format!("{:<22}", "abc1234567890");
+    let id_col = format!("{:<9}", "abc1234567890");
     assert_eq!(
         super::resume_picker_label(&full),
         format!("├─ {id_col} | now   plan · busy · graphs 3 (2 active) · current")

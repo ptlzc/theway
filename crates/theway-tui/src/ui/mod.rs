@@ -846,7 +846,7 @@ fn format_relative_time(rfc3339: Option<&str>) -> Option<String> {
 /// when the session is mid-turn, `graphs N (M active)` when it has DAG runs,
 /// `current` on the daemon's active session. Marks join with `·`.
 fn resume_picker_label(entry: &ResumePickerEntry) -> String {
-    const ID_COL_WIDTH: usize = 22;
+    const ID_COL_WIDTH: usize = 9;
     const TIME_COL_WIDTH: usize = 4;
     let id_col = format!("{:<ID_COL_WIDTH$}", entry.id_short);
     let time = format_relative_time(entry.last_activity_at_rfc3339.as_deref())

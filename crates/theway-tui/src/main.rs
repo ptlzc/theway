@@ -45,7 +45,7 @@ use theway_storage::sqlite_repo::SqliteSessionRepo;
 use cli::{
     ActivateTriggersArg, Cli, CliCommand, SessionCliCommand, delete_session_cmd,
     list_all_sessions_cmd, list_sessions_cmd, print_dynamic_help_and_exit_if_requested,
-    print_session_archive_warning, short_id, yes_no,
+    print_session_archive_warning, session_id_display, yes_no,
 };
 use startup::run_repl;
 
@@ -141,7 +141,7 @@ async fn run_session_cli_command(
             );
             println!(
                 "session {} entries={} triggers={} cron={}",
-                short_id(&summary.session_id),
+                session_id_display(&summary.session_id),
                 summary.entry_count,
                 yes_no(summary.has_triggers),
                 yes_no(summary.has_cron)
@@ -169,7 +169,10 @@ async fn run_session_cli_command(
             let summary =
                 session_archive::import_session(repo, &archive_path, &target_cwd, effective)
                     .await?;
-            println!("imported session: {}", short_id(&summary.session_id));
+            println!(
+                "imported session: {}",
+                session_id_display(&summary.session_id)
+            );
             println!("path: {}", summary.session_path.display());
             println!(
                 "entries={} triggers={} cron={} automation={}",

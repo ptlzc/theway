@@ -205,30 +205,26 @@ pub(crate) fn print_session_archive_warning() {
     );
 }
 
-pub(crate) fn short_id(id: &str) -> String {
-    id.chars().take(16).collect()
-}
-
 /// Session-id display form shared by the resume picker and the session-list
-/// rows: `first16…last5`. The side panel shows only the `…last5` suffix
-/// (issue #104), so list rows must surface the suffix too — otherwise the
-/// panel's id can never be matched against the list. UUIDv7 ids share long
-/// time-ordered prefixes (same-time sessions collide), which is why the
-/// suffix is the discriminative part.
+/// rows: `…last8`. UUIDv7 ids are `timestamp-7xxx-random…`: the leading
+/// chars encode the millisecond timestamp (nearly identical for sessions
+/// started around the same time) plus only 12 bits of randomness, so a
+/// first-16 prefix is useless for telling sessions apart. The trailing 8
+/// hex chars carry 32 bits of randomness and always contain the side
+/// panel's `…last5` suffix (issue #104), keeping the two views matchable.
 pub(crate) fn session_id_display(id: &str) -> String {
-    if id.chars().count() <= 22 {
+    if id.chars().count() <= 16 {
         return id.to_string();
     }
-    let prefix: String = id.chars().take(16).collect();
     let suffix: String = id
         .chars()
         .rev()
-        .take(5)
+        .take(8)
         .collect::<Vec<_>>()
         .into_iter()
         .rev()
         .collect();
-    format!("{prefix}…{suffix}")
+    format!("…{suffix}")
 }
 
 pub(crate) fn yes_no(value: bool) -> &'static str {
@@ -361,7 +357,7 @@ fn online_session_row(summary: &SessionSummary, is_current: bool) -> String {
     let preview = summary.preview.as_deref().unwrap_or("(empty)");
     format!(
         "  {}{}  {}{badge}  {}",
-        short_id(&summary.session_id),
+        session_id_display(&summary.session_id),
         name,
         summary.created_at,
         preview

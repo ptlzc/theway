@@ -127,13 +127,13 @@ fn summary(id: &str) -> SessionSummary {
 
 #[test]
 fn online_session_row_renders_marks_and_preview() {
-    // Plain row: short id (first 16 chars, dashes included — same as the
-    // offline listing), created-at, preview.
-    let plain = online_session_row(&summary("019ea2fd-0000-7000-8000-000000000000"), false);
-    assert_eq!(plain, "  019ea2fd-0000-70  2026-01-01T00:00:00Z  hello");
+    // Plain row: suffix id (…last8, UUIDv7 prefix is timestamp noise),
+    // created-at, preview.
+    let plain = online_session_row(&summary("019ea2fd-0000-7000-8000-00000000a1b2"), false);
+    assert_eq!(plain, "  …0000a1b2  2026-01-01T00:00:00Z  hello");
 
     // Live marks join in one badge; `current` + `busy` + graph counts.
-    let mut current = summary("019ea2fd-0000-7000-8000-000000000000");
+    let mut current = summary("019ea2fd-0000-7000-8000-00000000a1b2");
     current.busy = true;
     current.graph_count = 2;
     current.active_graph_count = 1;
@@ -144,17 +144,17 @@ fn online_session_row_renders_marks_and_preview() {
     );
 
     // Graphs without an active run render the plain count.
-    let mut idle = summary("019ea2fd-0000-7000-8000-000000000000");
+    let mut idle = summary("019ea2fd-0000-7000-8000-00000000a1b2");
     idle.graph_count = 3;
     let row = online_session_row(&idle, false);
     assert!(row.contains("[graphs 3]"), "{row}");
 
     // A set name follows the id; a missing preview renders "(empty)".
-    let mut named = summary("019ea2fd-0000-7000-8000-000000000000");
+    let mut named = summary("019ea2fd-0000-7000-8000-00000000a1b2");
     named.name = "refactor".to_string();
     named.preview = None;
     let row = online_session_row(&named, false);
-    assert!(row.starts_with("  019ea2fd-0000-70  refactor  "), "{row}");
+    assert!(row.starts_with("  …0000a1b2  refactor  "), "{row}");
     assert!(row.ends_with("(empty)"), "{row}");
 }
 
@@ -282,16 +282,14 @@ async fn delete_session_offline_removes_from_local_repo() {
     assert!(err.contains("no session matches id nope"), "{err}");
 }
 
-/// Session-id display form: `first16…last5` so list rows surface the same
-/// suffix the side panel shows (issue #104) — a panel id like `…78dc` must
-/// be findable in resume rows. Short ids pass through unchanged.
+/// Session-id display form: `…last8` — UUIDv7 prefixes are timestamp
+/// noise (identical for same-time sessions), so rows show the random
+/// suffix, which also contains the side panel's `…last5` (issue #104).
+/// Short ids pass through unchanged.
 #[test]
 fn session_id_display_surfaces_the_panel_suffix() {
     let uuid = "01a06cc8-ee64-7ed0-9091-07b5ce78dc";
-    assert_eq!(
-        super::session_id_display(uuid),
-        "01a06cc8-ee64-7e…e78dc"
-    );
+    assert_eq!(super::session_id_display(uuid), "…b5ce78dc");
     // Short ids (fixtures, prefixes) render verbatim.
     assert_eq!(super::session_id_display("sess-1"), "sess-1");
     assert_eq!(super::session_id_display("abc1234567890"), "abc1234567890");
