@@ -155,6 +155,11 @@ pub struct SessionMcpResources {
     pub server_names: Vec<String>,
     pub tool_names: Vec<String>,
     pub notification_hook_count: usize,
+    /// Controller-provisioned MCP slot (issue #73): `Some` in controller
+    /// mode. Session builds read tools/hooks/inject sets from this slot
+    /// instead of the startup-frozen [`LoadedMcp`] snapshot, so `Configure`
+    /// provisioning reaches both the live session and every new session.
+    pub provision: Option<std::sync::Arc<std::sync::RwLock<crate::mcp_loader::McpProvisionState>>>,
     /// Per-server connection/config failures as `(name, message)`, parsed
     /// from the loader diagnostics so the transport snapshot can surface
     /// them to the TUI (3s banner + red `[x] name` panel rows).
@@ -209,6 +214,7 @@ impl SessionMcpResources {
             tool_names,
             notification_hook_count,
             server_errors,
+            provision: None,
         }
     }
 }

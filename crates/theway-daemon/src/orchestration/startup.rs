@@ -251,7 +251,17 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     } else {
         crate::mcp_loader::LoadedMcp::empty()
     };
-    let mcp_resources = SessionMcpResources::from_loaded(mcp);
+    // Issue #73: controller-provisioned MCP servers live in this slot —
+    // `Configure` writes it, session builds and `/reload` read it.
+    let mcp_provision = Arc::new(std::sync::RwLock::new(
+        crate::mcp_loader::McpProvisionState::default(),
+    ));
+    let mut mcp_resources = SessionMcpResources::from_loaded(mcp);
+    if !startup.load_local_sources {
+        // Controller mode (issue #73): session builds read provisioned
+        // MCP state from the slot instead of the (empty) startup snapshot.
+        mcp_resources.provision = Some(mcp_provision.clone());
+    }
     let project_resources = SessionProjectResources::load(
         &session_paths,
         &options.builtin_skills,
@@ -460,6 +470,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         paths: paths.clone(),
         provisioned_skills: session_context.resources.provisioned_skills.clone(),
         provisioned_templates: session_context.resources.provisioned_templates.clone(),
+        mcp_provision: mcp_provision.clone(),
         session_id,
         log_path: _logging.as_ref().map(|l| l.log_path.clone()),
         tool_count: tool_names.len(),

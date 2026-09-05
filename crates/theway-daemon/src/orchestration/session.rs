@@ -191,7 +191,14 @@ impl SessionRuntimeBuilder {
             ctx.repo.clone(),
             ctx.cwd.clone(),
         );
-        tools.extend(ctx.mcp.tools.iter().cloned());
+        if let Some(provision) = ctx.mcp.provision.as_ref() {
+            // Controller mode (issue #73): the provision slot is the live
+            // MCP state — `Configure` updates it at runtime, so each new
+            // session picks up the currently connected servers.
+            tools.extend(provision.read().unwrap().tools.iter().cloned());
+        } else {
+            tools.extend(ctx.mcp.tools.iter().cloned());
+        }
 
         let goal_harness_cell: Arc<OnceLock<Arc<AgentHarness>>> = Arc::new(OnceLock::new());
         let mut opts = AgentHarnessOptions::new(ctx.model.clone(), session.clone());
@@ -308,11 +315,21 @@ impl SessionRuntimeBuilder {
         // adapters plus cron/dynamic listeners registered per harness). Direct-inject
         // behavior comes from this context's MCP inject sets; cron/dynamic hooks remain
         // process-owned and are wrapped fresh for each executor.
+        let (inject_summary, inject_and_run) = match ctx.mcp.provision.as_ref() {
+            Some(provision) => {
+                let slot = provision.read().unwrap();
+                (slot.inject_summary.clone(), slot.inject_and_run.clone())
+            }
+            None => (
+                ctx.mcp.inject_summary_servers.clone(),
+                ctx.mcp.inject_and_run_servers.clone(),
+            ),
+        };
         let before_trigger_action = triggers::cron_action_hook(
             self.services.cron.clone(),
             triggers::direct_inject_action_hook(
-                ctx.mcp.inject_summary_servers.clone(),
-                ctx.mcp.inject_and_run_servers.clone(),
+                inject_summary,
+                inject_and_run,
                 triggers::before_trigger_action_hook(self.services.dynamic_triggers.clone()),
             ),
         );
@@ -331,7 +348,10 @@ impl SessionRuntimeBuilder {
         // Notification hooks: MCP push sources are one-shot per owning context; cron /
         // dynamic-trigger hooks are constructed fresh per executor. Registered exactly
         // once per executor — see `register_notification_hooks`.
-        let mcp_notification_hooks = std::mem::take(&mut *ctx.mcp.notification_hooks.lock());
+        let mcp_notification_hooks = match ctx.mcp.provision.as_ref() {
+            Some(provision) => provision.read().unwrap().hooks.clone(),
+            None => std::mem::take(&mut *ctx.mcp.notification_hooks.lock()),
+        };
         register_notification_hooks(
             &trigger_executor,
             &mcp_notification_hooks,
@@ -414,7 +434,10 @@ impl SessionRuntimeBuilder {
 /// Assembly target for notification hooks. The only production impl is the
 /// per-session [`TriggerExecutor`](crate::trigger_engine::execution::TriggerExecutor);
 /// the one-shot-registration unit tests inject a recording fake.
-trait NotificationHookSink {
+///
+/// `pub(crate)` so the settings `Configure` path (issue #73) can register
+/// freshly connected MCP hooks onto the live session's executor.
+pub(crate) trait NotificationHookSink {
     fn register(&self, hook: DynNotificationHook);
 }
 
@@ -430,7 +453,7 @@ impl NotificationHookSink for std::sync::Arc<crate::trigger_engine::execution::T
 /// the session (a second MCP `run` fails on the already-consumed receiver; cron /
 /// dynamic hooks would pump and fire twice), so `build` calls this exactly once per
 /// executor.
-fn register_notification_hooks(
+pub(crate) fn register_notification_hooks(
     sink: &(impl NotificationHookSink + ?Sized),
     mcp_notification_hooks: &[Arc<triggers::McpNotificationHook>],
     cwd: &std::path::Path,

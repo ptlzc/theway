@@ -9,12 +9,17 @@ impl TurnHost {
         ));
         let completer = SlashCompleter::from_commands(slash_commands(&registry));
         // Bind the application-owned reload slot after the initial session runtime exists.
-        let reload_runtime = config.services.reload.install(ReloadRuntime::new(
+        let mut reload_runtime = ReloadRuntime::new(
             registry.clone(),
             config.cwd.clone(),
             config.trigger_executor.clone(),
             Arc::new(AtomicU64::new(0)),
-        ));
+        );
+        // Issue #73: the `reload` tool reconnects provisioned MCP servers
+        // through the shared `/reload` path.
+        reload_runtime.mcp_provision = Some(config.mcp_provision.clone());
+        reload_runtime.auth_base = Some(config.paths.base.clone());
+        let reload_runtime = config.services.reload.install(reload_runtime);
         // Shared wire path context (issue #68): home/base/work_dir are fixed
         // at startup; `skills_dirs` starts as the CLI-supplied extras and is
         // the only part mutated at runtime (`SetSkillDirs`).
@@ -84,6 +89,10 @@ impl TurnHost {
                     file_path: t.file_path.clone(),
                 })
                 .collect(),
+            // Issue #73: MCP servers arrive through the settings RPC; the
+            // startup view starts empty (they get echoed back after the
+            // first Configure carrying `mcp_servers`).
+            mcp_servers: Vec::new(),
             skills_dirs: config
                 .paths
                 .current_extra_skill_dirs()
@@ -97,7 +106,11 @@ impl TurnHost {
             clear_fields: Vec::new(),
         }));
         let tool_ops: Arc<dyn ToolOps> = Arc::new(ForwardingToolOps::new(daemon_config.clone()));
-        let mut kernel = ReplKernel::new(config.harness, config.trigger_executor, config.retry.clone());
+        let mut kernel = ReplKernel::new(
+            config.harness,
+            config.trigger_executor.clone(),
+            config.retry.clone(),
+        );
         kernel.set_extension_host(config.extension_host);
         // Resume replay (issue #87): a rehydrated session's transcript has no
         // live `FeedUpdate`s left to drive the feed, so replay it into the
@@ -155,6 +168,8 @@ impl TurnHost {
                 config: daemon_config,
                 provisioned_skills: config.provisioned_skills,
                 provisioned_templates: config.provisioned_templates,
+                mcp_provision: config.mcp_provision,
+                trigger_executor: config.trigger_executor.clone(),
                 inherit_slot: Arc::new(std::sync::Mutex::new(None)),
                 tool_ops,
                 model_catalog: model_catalog(),

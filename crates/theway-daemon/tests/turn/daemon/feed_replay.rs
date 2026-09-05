@@ -133,6 +133,9 @@ fn daemon_config(
         paths,
         provisioned_skills: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
         provisioned_templates: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
+        mcp_provision: std::sync::Arc::new(std::sync::RwLock::new(
+            crate::mcp_loader::McpProvisionState::default(),
+        )),
         session_id: "sess-one".into(),
         log_path: None,
         tool_count: 0,

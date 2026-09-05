@@ -32,6 +32,13 @@ pub struct ReloadRuntime {
     pub cwd: PathBuf,
     trigger_executor: RwLock<Arc<TriggerExecutor>>,
     pub revision: Arc<AtomicU64>,
+    /// Controller-provisioned MCP slot (issue #73): the `reload` tool
+    /// reconnects the provisioned servers via the shared `/reload` path.
+    /// `pub` fields so the composition root can wire them after
+    /// construction without widening the constructor.
+    pub mcp_provision: Option<Arc<std::sync::RwLock<crate::mcp_loader::McpProvisionState>>>,
+    /// Base dir holding `auth.json` for MCP bearer tokens (issue #73).
+    pub auth_base: Option<PathBuf>,
 }
 
 impl ReloadRuntime {
@@ -46,6 +53,8 @@ impl ReloadRuntime {
             cwd,
             trigger_executor: RwLock::new(trigger_executor),
             revision,
+            mcp_provision: None,
+            auth_base: None,
         }
     }
 
@@ -157,6 +166,8 @@ impl AgentTool for ReloadTool {
             tool_count: 0,
             cwd: &runtime.cwd,
             inherit_slot: &inherit_slot,
+            mcp_provision: runtime.mcp_provision.as_ref(),
+            auth_base: runtime.auth_base.as_ref(),
         };
         match commands::dispatch("/reload", &runtime.registry, &ctx).await {
             CommandOutcome::Handled => {

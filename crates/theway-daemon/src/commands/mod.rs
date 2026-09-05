@@ -185,6 +185,12 @@ pub struct CommandCtx<'a> {
     /// right after dispatch and applies the carried settings to the child
     /// session's runtime.
     pub inherit_slot: &'a Arc<std::sync::Mutex<Option<InheritedSessionSettings>>>,
+    /// Controller-provisioned MCP slot (issue #73): `/reload` reconnects the
+    /// provisioned servers from the stored configs. `None` in standalone
+    /// mode or in contexts without a provision slot.
+    pub mcp_provision: Option<&'a Arc<std::sync::RwLock<crate::mcp_loader::McpProvisionState>>>,
+    /// Base dir holding `auth.json` for MCP bearer tokens (issue #73).
+    pub auth_base: Option<&'a std::path::PathBuf>,
 }
 
 /// Daemon-only context extras handed to command implementations through the shared
@@ -623,6 +629,39 @@ async fn reload_everything(registry: &Registry, ctx: &CommandCtx<'_>) -> Command
         Err(e) => {
             return CommandOutcome::Error(format!("reload skills failed: {e}"));
         }
+    }
+    // Issue #73: reconnect the provisioned MCP servers from the stored
+    // configs so a fixed `mcp.toml` (or auth.json) takes effect without a
+    // daemon restart. Standalone mode keeps the startup scan semantics.
+    if let (Some(slot), Some(auth_base)) = (ctx.mcp_provision, ctx.auth_base) {
+        let old_tools = slot.read().unwrap().tools.clone();
+        let configs = slot.read().unwrap().configs.clone();
+        let result =
+            crate::mcp_loader::connect_servers(&configs, ctx.cwd, &auth_base.join("auth.json"))
+                .await;
+        let (new_tools, new_hooks) = {
+            let mut slot_state = slot.write().unwrap();
+            slot_state.replace_connection_result(configs, result);
+            (slot_state.tools.clone(), slot_state.hooks.clone())
+        };
+        ctx.harness.replace_mcp_tools(&old_tools, new_tools.clone());
+        let registered = new_hooks.len();
+        {
+            use crate::orchestration::session::NotificationHookSink;
+            use crate::trigger_engine::notification_hook::NotificationHook;
+            let mut slot_state = slot.write().unwrap();
+            for hook in &new_hooks {
+                let label = hook.label().to_string();
+                if slot_state.registered_labels.insert(label) {
+                    ctx.trigger_executor.register(hook.clone());
+                }
+            }
+        }
+        cprintln!(
+            "reconnected mcp servers: {} connected, {} hook(s) registered",
+            slot.read().unwrap().server_names.len(),
+            registered
+        );
     }
     CommandOutcome::Handled
 }

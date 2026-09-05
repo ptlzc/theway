@@ -636,3 +636,75 @@ fn command_help_for_unknown_topic_suggests_skill_shortcut_prefix() {
     assert!(help.contains("unknown help topic: daily"), "{help}");
     assert!(help.contains("Did you mean /daily-digest?"), "{help}");
 }
+
+/// Issue #73: `/reload` reconnects the provisioned MCP servers from the
+/// stored configs — a fixed server list (or auth.json) takes effect without
+/// a daemon restart, and failures land in the slot's errors for the panel.
+#[tokio::test]
+async fn reload_reconnects_provisioned_mcp_servers() {
+    use theway_core::agent::skills::LoadSkillsOutput;
+
+    let session = new_session();
+    let reload_fn: theway_core::agent::assembly::ReloadSkillsFn = Arc::new(|| {
+        Box::pin(async { LoadSkillsOutput::default() })
+    });
+    let options = theway_core::AgentHarnessOptions {
+        reload_skills_fn: Some(reload_fn),
+        ..theway_core::AgentHarnessOptions::new(faux_model(), session)
+    };
+    let harness = Arc::new(AgentHarness::new(options));
+    let executor = executor_for(&harness);
+
+    // A provision slot whose stored config always fails to connect.
+    let slot = Arc::new(std::sync::RwLock::new(
+        crate::mcp_loader::McpProvisionState {
+            configs: vec![crate::mcp_loader::ServerConfig {
+                name: "broken".into(),
+                kind: crate::mcp_loader::ServerKind::Stdio,
+                command: Some("/definitely/not/a/real/path/for/mcp/broken".into()),
+                args: vec![],
+                endpoint: None,
+                auth: None,
+                request_timeout_ms: None,
+                sse_idle_timeout_ms: None,
+                body_cap_bytes: None,
+                reconnect: None,
+                inject_summary: false,
+                inject_and_run: false,
+            }],
+            ..Default::default()
+        },
+    ));
+    let base = tempfile::tempdir().unwrap();
+    let base_path = base.path().to_path_buf();
+    let inherit_slot = Arc::new(std::sync::Mutex::new(None));
+    let cwd = Path::new("/tmp");
+    let ctx = crate::commands::CommandCtx {
+        harness: &harness,
+        trigger_executor: &executor,
+        session_id: "sess-reload",
+        log_path: None,
+        tool_count: 0,
+        cwd,
+        inherit_slot: &inherit_slot,
+        mcp_provision: Some(&slot),
+        auth_base: Some(&base_path),
+    };
+    let registry = crate::commands::Registry::with_daemon_commands();
+
+    let outcome = crate::commands::reload_everything(&registry, &ctx).await;
+    assert!(
+        matches!(outcome, theway_transport::commands::CommandOutcome::Handled),
+        "reload must complete"
+    );
+
+    let slot = slot.read().unwrap();
+    assert_eq!(slot.errors.len(), 1, "the reconnect failure must surface");
+    assert_eq!(slot.errors[0].0, "broken");
+    assert!(
+        slot.errors[0].1.contains("spawn"),
+        "{}",
+        slot.errors[0].1
+    );
+    assert!(slot.server_names.is_empty());
+}

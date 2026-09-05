@@ -289,22 +289,54 @@ impl TurnHost {
                 disabled: cron_jobs.len().saturating_sub(cron_enabled),
                 jobs: cron_job_rows,
             },
-            mcp: WireMcpSnapshot {
-                servers: self.projection.capabilities.mcp_servers,
-                tools: self.projection.capabilities.mcp_tools,
-                notification_hooks: self.projection.capabilities.mcp_notification_hooks,
-                server_names: self.projection.capabilities.mcp_server_names.clone(),
-                tool_names: self.projection.capabilities.mcp_tool_names.clone(),
-                errors: self
-                    .projection
-                    .capabilities
-                    .mcp_server_errors
-                    .iter()
-                    .map(|(name, error)| WireMcpServerError {
-                        name: name.clone(),
-                        error: error.clone(),
-                    })
-                    .collect(),
+            mcp: {
+                // Issue #73: the provision slot is authoritative once it has
+                // been written (Configure or /reload), so reconnect results
+                // land in the panel/banner without waiting for the next
+                // Configure. Standalone mode (empty slot) falls back to the
+                // startup-frozen capabilities.
+                let slot = self.runtime.mcp_provision.read().unwrap();
+                let slot_active = !slot.configs.is_empty()
+                    || !slot.tools.is_empty()
+                    || !slot.errors.is_empty();
+                if slot_active {
+                    WireMcpSnapshot {
+                        servers: slot.server_names.len(),
+                        tools: slot.tool_names.len(),
+                        notification_hooks: slot.hooks.len(),
+                        server_names: slot.server_names.clone(),
+                        tool_names: slot.tool_names.clone(),
+                        errors: slot
+                            .errors
+                            .iter()
+                            .map(|(name, error)| WireMcpServerError {
+                                name: name.clone(),
+                                error: error.clone(),
+                            })
+                            .collect(),
+                    }
+                } else {
+                    WireMcpSnapshot {
+                        servers: self.projection.capabilities.mcp_servers,
+                        tools: self.projection.capabilities.mcp_tools,
+                        notification_hooks: self
+                            .projection
+                            .capabilities
+                            .mcp_notification_hooks,
+                        server_names: self.projection.capabilities.mcp_server_names.clone(),
+                        tool_names: self.projection.capabilities.mcp_tool_names.clone(),
+                        errors: self
+                            .projection
+                            .capabilities
+                            .mcp_server_errors
+                            .iter()
+                            .map(|(name, error)| WireMcpServerError {
+                                name: name.clone(),
+                                error: error.clone(),
+                            })
+                            .collect(),
+                    }
+                }
             },
             tools: WireToolsSnapshot {
                 total: self.projection.capabilities.tool_names.len(),

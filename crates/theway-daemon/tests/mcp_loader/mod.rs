@@ -78,7 +78,7 @@ async fn client_count_reflects_successful_connections_not_attempts() {
     let configs = vec![stdio_server("broken-a"), stdio_server("broken-b")];
     let (_work, _base, paths) = test_paths();
     let (tools, hooks, diagnostics, client_count, server_names) =
-        connect_all(&configs, &paths.work_dir, &paths.base.join("auth.json")).await;
+        connect_servers(&configs, &paths.work_dir, &paths.base.join("auth.json")).await;
     assert_eq!(client_count, 0, "no server should be reported as connected");
     assert!(server_names.is_empty());
     assert!(tools.is_empty(), "no tools should load from failed servers");
@@ -107,7 +107,7 @@ async fn client_count_reflects_successful_connections_not_attempts() {
 async fn empty_configs_reports_zero() {
     let (_work, _base, paths) = test_paths();
     let (tools, hooks, diagnostics, client_count, server_names) =
-        connect_all(&[], &paths.work_dir, &paths.base.join("auth.json")).await;
+        connect_servers(&[], &paths.work_dir, &paths.base.join("auth.json")).await;
     assert!(tools.is_empty());
     assert!(hooks.is_empty());
     assert!(diagnostics.is_empty());
@@ -443,7 +443,7 @@ async fn connect_all_returns_tools_and_hook_for_fake_stdio_server() {
     let (_work, _base, paths) = test_paths();
 
     let (tools, hooks, diagnostics, client_count, server_names) =
-        connect_all(&configs, &paths.work_dir, &paths.base.join("auth.json")).await;
+        connect_servers(&configs, &paths.work_dir, &paths.base.join("auth.json")).await;
 
     assert_eq!(client_count, 1);
     assert_eq!(server_names, vec!["fake-success".to_string()]);
@@ -455,4 +455,62 @@ async fn connect_all_returns_tools_and_hook_for_fake_stdio_server() {
         diagnostics[0].contains("broken-after-fake"),
         "{diagnostics:?}"
     );
+}
+
+/// Issue #73: the provision list must be valid before the daemon connects
+/// anything — empty names and duplicates are rejected as a whole.
+#[test]
+fn validate_unique_names_rejects_empty_and_duplicates() {
+    assert!(crate::mcp_loader::validate_unique_names(&[]).is_ok());
+    assert!(
+        crate::mcp_loader::validate_unique_names(&[stdio_server("a"), stdio_server("b")]).is_ok()
+    );
+    let mut empty = stdio_server("a");
+    empty.name = "  ".into();
+    let err = crate::mcp_loader::validate_unique_names(&[empty]).unwrap_err();
+    assert!(err.contains("must not be empty"), "{err}");
+    let err = crate::mcp_loader::validate_unique_names(&[
+        stdio_server("dup"),
+        stdio_server("dup"),
+    ])
+    .unwrap_err();
+    assert!(err.contains("duplicate server name 'dup'"), "{err}");
+}
+
+/// Issue #73: a fresh connection result replaces the slot state — errors
+/// come from the loader diagnostics with the server name attached, inject
+/// sets derive from the applied configs, and `registered_labels` resets
+/// because the hooks are new instances.
+#[test]
+fn replace_connection_result_recomputes_slot_state() {
+    let mut state = crate::mcp_loader::McpProvisionState::default();
+    state.registered_labels.insert("mcp:old".into());
+    let mut ok = stdio_server("ok");
+    ok.inject_summary = true;
+    let mut broken = stdio_server("broken");
+    broken.inject_and_run = true;
+    let configs = vec![ok, broken];
+    let result: (
+        Vec<Arc<dyn theway_core::AgentTool>>,
+        Vec<Arc<McpNotificationHook>>,
+        Vec<String>,
+        usize,
+        Vec<String>,
+    ) = (
+        Vec::new(),
+        Vec::new(),
+        vec!["mcp server 'broken' failed: spawn failed".into()],
+        1,
+        vec!["ok".into()],
+    );
+    state.replace_connection_result(configs, result);
+    assert_eq!(state.server_names, vec!["ok".to_string()]);
+    assert_eq!(state.errors.len(), 1);
+    assert_eq!(state.errors[0].0, "broken");
+    assert!(state.errors[0].1.contains("spawn failed"));
+    assert_eq!(state.inject_summary.len(), 1);
+    assert!(state.inject_summary.contains("ok"));
+    assert_eq!(state.inject_and_run.len(), 1);
+    assert!(state.inject_and_run.contains("broken"));
+    assert!(state.registered_labels.is_empty());
 }

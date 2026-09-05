@@ -331,6 +331,110 @@ fn replace_skills_updates_catalog_and_system_prompt() {
     assert!(h.templates().is_empty());
 }
 
+// ──────────────────────────────────────────────────────────────────────────────────────────
+// MCP tool provisioning — `replace_mcp_tools` (issue: provision-mcp-servers).
+//
+// `handle_configure` (daemon) swaps a live harness's MCP tools by (a) removing exactly the
+// tools that were connected by the previous provisioning (identity via `Arc::ptr_eq`, not
+// name), then (b) appending the freshly connected tools. Built-in harness tools must be
+// untouched, and tools sharing a name with a removed MCP tool but owned by a different
+// `Arc` (e.g. a built-in that happens to collide) must survive. This test pins that
+// identity-based contract.
+// ──────────────────────────────────────────────────────────────────────────────────────────
+
+#[derive(Clone)]
+struct FakeMcpTool {
+    def: theway_llm_provider::Tool,
+}
+
+#[async_trait::async_trait]
+impl AgentTool for FakeMcpTool {
+    fn definition(&self) -> &theway_llm_provider::Tool {
+        &self.def
+    }
+    fn label(&self) -> &str {
+        &self.def.name
+    }
+    async fn execute(
+        &self,
+        _id: &str,
+        _params: serde_json::Value,
+        _cancel: tokio_util::sync::CancellationToken,
+        _on_update: Option<AgentToolUpdate>,
+    ) -> Result<AgentToolResult, AgentToolError> {
+        Ok(AgentToolResult::default())
+    }
+}
+
+fn mcp_tool(name: &str) -> Arc<dyn AgentTool> {
+    Arc::new(FakeMcpTool {
+        def: theway_llm_provider::Tool {
+            name: name.into(),
+            description: format!("mcp {name}"),
+            parameters: serde_json::json!({ "type": "object" }),
+        },
+    })
+}
+
+fn harness_with_tools(tools: Vec<Arc<dyn AgentTool>>) -> AgentHarness {
+    let storage: Arc<dyn SessionStorage> = Arc::new(MemorySessionStorage::new());
+    let session = Session::new(storage);
+    let mut opts = AgentHarnessOptions::new(faux_model(), session);
+    opts.tools = tools;
+    AgentHarness::new(opts)
+}
+
+#[test]
+fn replace_mcp_tools_removes_matching_arcs_and_appends_new() {
+    let old_a = mcp_tool("mcp_a");
+    let old_b = mcp_tool("mcp_b");
+    let builtin = mcp_tool("builtin");
+    let h = harness_with_tools(vec![old_a.clone(), old_b.clone(), builtin.clone()]);
+    assert_eq!(h.agent().state().tools.len(), 3);
+
+    let new_a = mcp_tool("mcp_a_v2");
+    let new_b = mcp_tool("mcp_b_v2");
+    h.replace_mcp_tools(&[old_a.clone(), old_b.clone()], vec![new_a.clone(), new_b.clone()]);
+
+    let tools = &h.agent().state().tools;
+    assert_eq!(tools.len(), 3, "two removed, two added, builtin kept");
+    // Old MCP tools (the exact Arc instances provisioned before) must be gone.
+    assert!(!tools.iter().any(|t| Arc::ptr_eq(t, &old_a)));
+    assert!(!tools.iter().any(|t| Arc::ptr_eq(t, &old_b)));
+    // Built-in harness tool — even though it was not in `old` — must survive.
+    assert!(tools.iter().any(|t| Arc::ptr_eq(t, &builtin)));
+    // Freshly connected tools must be appended.
+    assert!(tools.iter().any(|t| Arc::ptr_eq(t, &new_a)));
+    assert!(tools.iter().any(|t| Arc::ptr_eq(t, &new_b)));
+}
+
+#[test]
+fn replace_mcp_tools_leaves_non_old_tools_of_same_name_untouched() {
+    // Identity semantics: a tool sharing a name with a removed MCP tool but backed by a
+    // different Arc (here: another provisioning round, or a builtin collision) is kept,
+    // because removal keys on `Arc::ptr_eq`, not on the name.
+    let stale_a = mcp_tool("mcp_a");
+    let stale_b = mcp_tool("mcp_a");
+    let h = harness_with_tools(vec![stale_a.clone(), stale_b.clone()]);
+
+    h.replace_mcp_tools(&[stale_a.clone()], Vec::new());
+
+    let tools = &h.agent().state().tools;
+    assert_eq!(tools.len(), 1);
+    assert!(!tools.iter().any(|t| Arc::ptr_eq(t, &stale_a)));
+    assert!(tools.iter().any(|t| Arc::ptr_eq(t, &stale_b)));
+}
+
+#[test]
+fn replace_mcp_tools_with_empty_old_and_empty_new_is_a_noop() {
+    let tool = mcp_tool("mcp_x");
+    let h = harness_with_tools(vec![tool.clone()]);
+    h.replace_mcp_tools(&[], Vec::new());
+    let tools = &h.agent().state().tools;
+    assert_eq!(tools.len(), 1);
+    assert!(tools.iter().any(|t| Arc::ptr_eq(t, &tool)));
+}
+
 #[test]
 fn abort_interrupt_enqueue_passthroughs_are_noops_without_active_run() {
     let h = harness();

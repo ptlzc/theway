@@ -151,6 +151,8 @@ impl TurnHost {
                 tool_count: self.session.tool_count,
                 cwd: &self.runtime.cwd,
                 inherit_slot: &self.runtime.inherit_slot,
+                mcp_provision: Some(&self.runtime.mcp_provision),
+                auth_base: Some(&self.runtime.paths.base),
             };
             commands::dispatch(input, &self.runtime.registry, &ctx).await
         };
@@ -307,6 +309,8 @@ impl TurnHost {
                 tool_count: session.tool_count,
                 cwd: &session.cwd,
                 inherit_slot: &self.runtime.inherit_slot,
+                mcp_provision: Some(&self.runtime.mcp_provision),
+                auth_base: Some(&self.runtime.paths.base),
             };
             commands::dispatch_with_output(input, &self.runtime.registry, &ctx, output).await
         };

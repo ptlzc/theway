@@ -110,6 +110,10 @@ pub(crate) struct DaemonConfig {
     /// applier writes it alongside the harness catalog so `/reload` /
     /// `SetSkillDirs` keep the provisioned skills instead of wiping them.
     pub(crate) provisioned_skills: Arc<std::sync::RwLock<Vec<theway_core::Skill>>>,
+    /// Controller-provisioned MCP server slot (issue #73): `Configure`
+    /// connects servers and stores tools/hooks/errors here; session builds
+    /// and `/reload` read it in controller mode.
+    pub(crate) mcp_provision: Arc<std::sync::RwLock<crate::mcp_loader::McpProvisionState>>,
     /// Controller-provisioned prompt-template catalog slot (issue #96): the
     /// settings applier writes it alongside the harness catalog so `/reload` /
     /// `SetSkillDirs` keep the provisioned templates instead of wiping them.
@@ -335,6 +339,12 @@ struct RuntimeConfiguration {
     /// Controller-provisioned prompt-template catalog slot (issue #96); see
     /// [`crate::turn::DaemonConfig::provisioned_templates`].
     provisioned_templates: Arc<std::sync::RwLock<Vec<theway_core::PromptTemplate>>>,
+    /// Controller-provisioned MCP server slot (issue #73); see
+    /// [`crate::turn::DaemonConfig::mcp_provision`].
+    mcp_provision: Arc<std::sync::RwLock<crate::mcp_loader::McpProvisionState>>,
+    /// Live session's trigger executor — `Configure` registers freshly
+    /// connected MCP notification hooks onto it (issue #73).
+    trigger_executor: Arc<crate::trigger_engine::execution::TriggerExecutor>,
     /// Runtime-settings inheritance slot (issue #100): slash commands write
     /// child-session settings here; `dispatch_web_slash` consumes the slot
     /// right after dispatch.
@@ -669,6 +679,13 @@ mod daemon_extra_tests {
     //! Extra turn-host tests live in `tests/turn/daemon/extra/` so the
     //! primary `tests/turn/daemon/mod.rs` bridge stays untouched.
     tests_bridge_macro::tests_bridge!("turn/daemon/extra");
+}
+
+#[cfg(test)]
+mod daemon_mcp_tests {
+    //! `Configure` MCP-provisioning tests live in
+    //! `tests/turn/daemon/mcp_provision/` (issue #73).
+    tests_bridge_macro::tests_bridge!("turn/daemon/mcp_provision");
 }
 
 #[cfg(test)]

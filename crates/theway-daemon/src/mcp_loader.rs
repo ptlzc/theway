@@ -27,7 +27,7 @@ pub struct McpConfig {
     pub server: Vec<ServerConfig>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ServerConfig {
     pub name: String,
     #[serde(default)]
@@ -55,7 +55,7 @@ pub struct ServerConfig {
     pub inject_and_run: bool,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ServerKind {
     #[default]
@@ -63,13 +63,13 @@ pub enum ServerKind {
     StreamableHttp,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct HttpAuthConfig {
     pub kind: String,
     pub token_keychain_ref: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ReconnectConfig {
     pub initial_ms: Option<u64>,
     pub max_ms: Option<u64>,
@@ -99,8 +99,8 @@ impl LoadedMcp {
     /// Empty load result — the issue #73 seam for startup without local
     /// `mcp.toml` scanning: when `StartupConfig::load_local_sources` is
     /// disabled the composition root uses this instead of [`load_all`].
-    /// TODO(#73): controller-provisioned MCP servers arrive through the
-    /// settings RPC in a later phase.
+    /// Controller-provisioned servers arrive through the settings RPC and
+    /// the [`McpProvisionState`] slot below.
     pub fn empty() -> Self {
         Self {
             tools: Vec::new(),
@@ -145,7 +145,7 @@ pub async fn load_all(paths: &theway_daemon::DaemonPaths) -> LoadedMcp {
         .collect();
 
     let (tools, notification_hooks, connect_diagnostics, client_count, server_names) =
-        connect_all(&configs, &paths.work_dir, &paths.base.join("auth.json")).await;
+        connect_servers(&configs, &paths.work_dir, &paths.base.join("auth.json")).await;
     diagnostics.extend(connect_diagnostics);
     LoadedMcp {
         tools,
@@ -166,7 +166,15 @@ pub async fn load_all(paths: &theway_daemon::DaemonPaths) -> LoadedMcp {
 /// banner prints "connected to N server(s)" using this field; previously it reported
 /// `configs.len()`, so the user saw "connected to 3" alongside two error diagnostics when
 /// 2 of 3 servers failed to start. See code-review item #9 (2026-05-22).
-async fn connect_all(
+/// Connect to each configured server. Returns the tools collected, the
+/// `McpNotificationHook` per successful connection, per-server failure diagnostics, and
+/// the number of servers that actually connected.
+///
+/// `client_count` reports **successful** connections, not attempted ones. The TUI startup
+/// banner prints "connected to N server(s)" using this field; previously it reported
+/// `configs.len()`, so the user saw "connected to 3" alongside two error diagnostics when
+/// 2 of 3 servers failed to start. See code-review item #9 (2026-05-22).
+pub(crate) async fn connect_servers(
     configs: &[ServerConfig],
     cwd: &Path,
     auth_path: &Path,
@@ -374,3 +382,97 @@ fn http_auth_recovery(auth: &HttpAuthConfig) -> &'static str {
 // Test files live in `tests/mcp_loader/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
 tests_bridge_macro::tests_bridge!("mcp_loader");
+
+/// Runtime slot for controller-provisioned MCP servers (issue #73): the
+/// settings `Configure` path connects the servers and stores the result
+/// here. Session builds read tools/hooks/inject sets from this slot in
+/// controller mode; `/reload` reconnects from the stored configs.
+#[derive(Default)]
+pub struct McpProvisionState {
+    /// The last applied server configs — reconnect source for `/reload`.
+    pub configs: Vec<ServerConfig>,
+    /// Tools from the currently connected servers.
+    pub tools: Vec<Arc<dyn AgentTool>>,
+    /// Notification hooks (one per connected server).
+    pub hooks: Vec<Arc<McpNotificationHook>>,
+    /// Names of connected servers configured with `inject_summary = true`.
+    pub inject_summary: std::collections::HashSet<String>,
+    /// Names of connected servers configured with `inject_and_run = true`.
+    pub inject_and_run: std::collections::HashSet<String>,
+    /// Successfully connected server names, in config order.
+    pub server_names: Vec<String>,
+    /// Tool names from the connected servers.
+    pub tool_names: Vec<String>,
+    /// Per-server failures as `(name, message)` — flows into
+    /// `WireMcpSnapshot.errors` so the TUI shows the 3s banner and red
+    /// panel rows.
+    pub errors: Vec<(String, String)>,
+    /// `mcp:<name>` labels of hooks already registered on the live
+    /// session's trigger executor. Reset on every (re)connection — the
+    /// new hook instances replace the old ones.
+    pub registered_labels: std::collections::HashSet<String>,
+}
+
+impl McpProvisionState {
+    /// Replace the state from a fresh connection result. Errors are derived
+    /// from the loader diagnostics (server failures carry the server name);
+    /// inject sets come from the applied configs; `registered_labels`
+    /// resets because the hooks are new instances.
+    pub(crate) fn replace_connection_result(
+        &mut self,
+        configs: Vec<ServerConfig>,
+        result: (
+            Vec<Arc<dyn AgentTool>>,
+            Vec<Arc<McpNotificationHook>>,
+            Vec<String>,
+            usize,
+            Vec<String>,
+        ),
+    ) {
+        let (tools, hooks, diagnostics, _client_count, server_names) = result;
+        self.configs = configs;
+        self.tools = tools;
+        self.hooks = hooks;
+        self.server_names = server_names;
+        self.tool_names = self
+            .tools
+            .iter()
+            .map(|tool| tool.definition().name.clone())
+            .collect();
+        self.errors = diagnostics
+            .iter()
+            .map(|diagnostic| crate::orchestration::session::parse_mcp_diagnostic(diagnostic))
+            .collect();
+        self.inject_summary = self
+            .configs
+            .iter()
+            .filter(|c| c.inject_summary)
+            .map(|c| c.name.clone())
+            .collect();
+        self.inject_and_run = self
+            .configs
+            .iter()
+            .filter(|c| c.inject_and_run)
+            .map(|c| c.name.clone())
+            .collect();
+        self.registered_labels.clear();
+    }
+}
+
+/// Validate a provisioned server list: every entry needs a non-empty name
+/// and names must be unique within the list.
+pub(crate) fn validate_unique_names(configs: &[ServerConfig]) -> Result<(), String> {
+    let mut seen = std::collections::HashSet::new();
+    for config in configs {
+        if config.name.trim().is_empty() {
+            return Err("mcp_servers: server name must not be empty".to_string());
+        }
+        if !seen.insert(config.name.as_str()) {
+            return Err(format!(
+                "mcp_servers: duplicate server name '{}'",
+                config.name
+            ));
+        }
+    }
+    Ok(())
+}

@@ -3,6 +3,7 @@ use crate::agent::system_prompt::format_skills_for_system_prompt;
 use crate::agent::types::{PromptTemplate, Skill};
 
 use super::{AgentHarness, ReloadSkillsError, SessionEvent};
+use std::sync::Arc;
 
 impl AgentHarness {
     pub fn skills(&self) -> Vec<Skill> {
@@ -25,6 +26,23 @@ impl AgentHarness {
         *self.skills.lock() = skills;
         let prompt = build_system_prompt(&self.base_system_prompt, &self.skills.lock());
         self.agent.state().system_prompt = prompt;
+    }
+
+    /// Replace a previously provisioned set of MCP tools. Every currently-loaded tool whose
+    /// `Arc` pointer matches one in `old` (via [`Arc::ptr_eq`]) is removed from the live
+    /// harness tool set, then `new` is appended. Used by MCP re-provisioning so that a
+    /// reconfigure swaps out exactly the tools that were connected before without disturbing
+    /// built-in harness tools. Unlike `replace_skills` no system-prompt rebuild is needed —
+    /// tools live on the [`crate::agent::AgentState`], not in the `<skills>` block.
+    pub fn replace_mcp_tools(
+        &self,
+        old: &[Arc<dyn crate::AgentTool>],
+        new: Vec<Arc<dyn crate::AgentTool>>,
+    ) {
+        let mut tools = std::mem::take(&mut self.agent.state().tools);
+        tools.retain(|t| !old.iter().any(|o| Arc::ptr_eq(o, t)));
+        tools.extend(new);
+        self.agent.state().tools = tools;
     }
 
     /// Replace the prompt-template catalog (issue #96). Templates do not feed the system
