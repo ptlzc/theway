@@ -23,6 +23,16 @@ fn wire_daemon_config_clears_and_unknown_fields() {
 }
 
 #[test]
+fn wire_daemon_config_mcp_servers_is_a_known_clear_field() {
+    let config = WireDaemonConfig {
+        clear_fields: vec!["mcp_servers".into()],
+        ..Default::default()
+    };
+    assert!(config.clears("mcp_servers"));
+    assert!(config.unknown_clear_fields().is_empty());
+}
+
+#[test]
 fn wire_daemon_config_merge_applies_fields_and_clears() {
     let mut current = WireDaemonConfig {
         provider: Some("old-provider".into()),
@@ -101,6 +111,69 @@ fn wire_daemon_config_clear_fields_empties_templates() {
 
     assert_eq!(touched, 1);
     assert!(current.templates.is_empty());
+}
+
+#[test]
+fn wire_daemon_config_merge_replaces_mcp_servers_when_non_empty() {
+    let mut current = WireDaemonConfig {
+        mcp_servers: vec![crate::wire::WireProvisionedMcpServer {
+            name: "old-server".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let patch = WireDaemonConfig {
+        mcp_servers: vec![crate::wire::WireProvisionedMcpServer {
+            name: "new-server".into(),
+            kind: "stdio".into(),
+            command: Some("/usr/bin/env".into()),
+            args: vec!["git-server".into()],
+            endpoint: None,
+            auth: Some(crate::wire::WireProvisionedMcpAuth {
+                kind: "token".into(),
+                token_keychain_ref: Some("keychain/git".into()),
+            }),
+            request_timeout_ms: Some(5000),
+            sse_idle_timeout_ms: None,
+            body_cap_bytes: Some(10 * 1024 * 1024),
+            reconnect: Some(crate::wire::WireProvisionedMcpReconnect {
+                initial_ms: Some(1000),
+                max_ms: Some(30_000),
+                max_attempts: Some(5),
+            }),
+            inject_summary: true,
+            inject_and_run: false,
+        }],
+        ..Default::default()
+    };
+
+    let touched = current.merge_from(&patch);
+
+    assert_eq!(touched, 1);
+    assert_eq!(current.mcp_servers.len(), 1);
+    assert_eq!(current.mcp_servers[0].name, "new-server");
+}
+
+#[test]
+fn wire_daemon_config_clear_fields_empties_mcp_servers() {
+    let mut current = WireDaemonConfig {
+        mcp_servers: vec![crate::wire::WireProvisionedMcpServer {
+            name: "server".into(),
+            kind: "stdio".into(),
+            command: Some("cmd".into()),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let patch = WireDaemonConfig {
+        clear_fields: vec!["mcp_servers".into()],
+        ..Default::default()
+    };
+
+    let touched = current.merge_from(&patch);
+
+    assert_eq!(touched, 1);
+    assert!(current.mcp_servers.is_empty());
 }
 
 #[test]

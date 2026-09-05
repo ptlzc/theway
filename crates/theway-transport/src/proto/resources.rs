@@ -166,6 +166,11 @@ pub fn daemon_config_to_proto(config: &crate::wire::WireDaemonConfig) -> wire::D
                 file_path: template.file_path.clone(),
             })
             .collect(),
+        mcp_servers: config
+            .mcp_servers
+            .iter()
+            .map(provisioned_mcp_server_to_proto)
+            .collect(),
         skills_dirs: config.skills_dirs.clone(),
         trigger_poll_secs: config
             .trigger_poll_secs
@@ -211,12 +216,71 @@ pub fn daemon_config_from_proto(config: &wire::DaemonConfig) -> crate::wire::Wir
                 file_path: template.file_path.clone(),
             })
             .collect(),
+        mcp_servers: config.mcp_servers.iter().map(provisioned_mcp_server_from_proto).collect(),
         skills_dirs: config.skills_dirs.clone(),
         trigger_poll_secs: config.trigger_poll_secs.map(u64::from),
         tui_max_feed_lines: config.tui_max_feed_lines.map(u64::from),
         tool_service_addr: config.tool_service_addr.clone(),
         storage_service_addr: config.storage_service_addr.clone(),
         clear_fields: config.clear_fields.clone(),
+    }
+}
+
+fn provisioned_mcp_server_to_proto(
+    server: &crate::wire::WireProvisionedMcpServer,
+) -> wire::ProvisionedMcpServer {
+    wire::ProvisionedMcpServer {
+        name: server.name.clone(),
+        kind: server.kind.clone(),
+        command: server.command.clone(),
+        args: server.args.clone(),
+        endpoint: server.endpoint.clone(),
+        auth: server.auth.as_ref().map(|auth| wire::ProvisionedMcpAuth {
+            kind: auth.kind.clone(),
+            token_keychain_ref: auth.token_keychain_ref.clone(),
+        }),
+        request_timeout_ms: server.request_timeout_ms,
+        sse_idle_timeout_ms: server.sse_idle_timeout_ms,
+        body_cap_bytes: server.body_cap_bytes,
+        reconnect: server
+            .reconnect
+            .as_ref()
+            .map(|reconnect| wire::ProvisionedMcpReconnect {
+                initial_ms: reconnect.initial_ms,
+                max_ms: reconnect.max_ms,
+                max_attempts: reconnect.max_attempts,
+            }),
+        inject_summary: server.inject_summary,
+        inject_and_run: server.inject_and_run,
+    }
+}
+
+fn provisioned_mcp_server_from_proto(
+    server: &wire::ProvisionedMcpServer,
+) -> crate::wire::WireProvisionedMcpServer {
+    crate::wire::WireProvisionedMcpServer {
+        name: server.name.clone(),
+        kind: server.kind.clone(),
+        command: server.command.clone(),
+        args: server.args.clone(),
+        endpoint: server.endpoint.clone(),
+        auth: server.auth.as_ref().map(|auth| crate::wire::WireProvisionedMcpAuth {
+            kind: auth.kind.clone(),
+            token_keychain_ref: auth.token_keychain_ref.clone(),
+        }),
+        request_timeout_ms: server.request_timeout_ms,
+        sse_idle_timeout_ms: server.sse_idle_timeout_ms,
+        body_cap_bytes: server.body_cap_bytes,
+        reconnect: server
+            .reconnect
+            .as_ref()
+            .map(|reconnect| crate::wire::WireProvisionedMcpReconnect {
+                initial_ms: reconnect.initial_ms,
+                max_ms: reconnect.max_ms,
+                max_attempts: reconnect.max_attempts,
+            }),
+        inject_summary: server.inject_summary,
+        inject_and_run: server.inject_and_run,
     }
 }
 

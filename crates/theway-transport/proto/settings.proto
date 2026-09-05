@@ -67,6 +67,9 @@ message DaemonConfig {
   repeated ProvisionedSkill skills = 13;
   // Controller-scanned prompt templates, mirroring the skills path.
   repeated ProvisionedTemplate templates = 14;
+  // Controller-provisioned MCP servers (open spec provision-mcp-servers),
+  // mirroring the skills/templates path.
+  repeated ProvisionedMcpServer mcp_servers = 15;
 
   // Field names to clear before applying values present in this message.
   // Unknown names make the daemon reject the patch without partial changes.
@@ -103,6 +106,56 @@ message ProvisionedTemplate {
   string content = 3;
   // Absolute path to the source template file.
   string file_path = 4;
+}
+
+// One controller-provisioned MCP server (open spec provision-mcp-servers):
+// the TUI provisions the daemon with the servers it should manage, mirroring
+// the skills/templates path.
+message ProvisionedMcpServer {
+  // Canonical server name.
+  string name = 1;
+  // Launch kind: `"stdio"` (local command) or `"sse"` (remote endpoint).
+  string kind = 2;
+  // Command to launch (stdio kind); absent for sse kind.
+  optional string command = 3;
+  // Command-line arguments for the stdio command.
+  repeated string args = 4;
+  // Remote endpoint URL (sse kind); absent for stdio kind.
+  optional string endpoint = 5;
+  // Authentication method (sse kind); absent for stdio kind.
+  ProvisionedMcpAuth auth = 6;
+  // Request timeout in milliseconds.
+  optional uint64 request_timeout_ms = 7;
+  // SSE idle timeout in milliseconds.
+  optional uint64 sse_idle_timeout_ms = 8;
+  // Max request/response body size cap in bytes.
+  optional uint64 body_cap_bytes = 9;
+  // Reconnect policy for the MCP transport.
+  ProvisionedMcpReconnect reconnect = 10;
+  // When true, the provisioned server's summary is injected into context.
+  bool inject_summary = 11;
+  // When true, the provisioned server can inject tools and run tools.
+  bool inject_and_run = 12;
+}
+
+// Authentication method for a provisioned MCP server (open spec
+// provision-mcp-servers).
+message ProvisionedMcpAuth {
+  // Auth kind: `"none"`, `"token"`, or `"oauth"`.
+  string kind = 1;
+  // Keychain reference holding the token/secret (absent when not needed).
+  optional string token_keychain_ref = 2;
+}
+
+// Reconnect policy for a provisioned MCP server (open spec
+// provision-mcp-servers).
+message ProvisionedMcpReconnect {
+  // Initial reconnect delay in milliseconds.
+  optional uint64 initial_ms = 1;
+  // Maximum reconnect delay in milliseconds.
+  optional uint64 max_ms = 2;
+  // Maximum number of reconnect attempts.
+  optional uint64 max_attempts = 3;
 }
 
 service SettingsService {

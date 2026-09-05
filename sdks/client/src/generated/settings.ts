@@ -103,6 +103,11 @@ export interface DaemonConfig {
   /** Controller-scanned prompt templates, mirroring the skills path. */
   templates: ProvisionedTemplate[];
   /**
+   * Controller-provisioned MCP servers (open spec provision-mcp-servers),
+   * mirroring the skills/templates path.
+   */
+  mcpServers: ProvisionedMcpServer[];
+  /**
    * Field names to clear before applying values present in this message.
    * Unknown names make the daemon reject the patch without partial changes.
    */
@@ -145,6 +150,80 @@ export interface ProvisionedTemplate {
   filePath: string;
 }
 
+/**
+ * One controller-provisioned MCP server (open spec provision-mcp-servers):
+ * the TUI provisions the daemon with the servers it should manage, mirroring
+ * the skills/templates path.
+ */
+export interface ProvisionedMcpServer {
+  /** Canonical server name. */
+  name: string;
+  /** Launch kind: `"stdio"` (local command) or `"sse"` (remote endpoint). */
+  kind: string;
+  /** Command to launch (stdio kind); absent for sse kind. */
+  command?:
+    | string
+    | undefined;
+  /** Command-line arguments for the stdio command. */
+  args: string[];
+  /** Remote endpoint URL (sse kind); absent for stdio kind. */
+  endpoint?:
+    | string
+    | undefined;
+  /** Authentication method (sse kind); absent for stdio kind. */
+  auth?:
+    | ProvisionedMcpAuth
+    | undefined;
+  /** Request timeout in milliseconds. */
+  requestTimeoutMs?:
+    | string
+    | undefined;
+  /** SSE idle timeout in milliseconds. */
+  sseIdleTimeoutMs?:
+    | string
+    | undefined;
+  /** Max request/response body size cap in bytes. */
+  bodyCapBytes?:
+    | string
+    | undefined;
+  /** Reconnect policy for the MCP transport. */
+  reconnect?:
+    | ProvisionedMcpReconnect
+    | undefined;
+  /** When true, the provisioned server's summary is injected into context. */
+  injectSummary: boolean;
+  /** When true, the provisioned server can inject tools and run tools. */
+  injectAndRun: boolean;
+}
+
+/**
+ * Authentication method for a provisioned MCP server (open spec
+ * provision-mcp-servers).
+ */
+export interface ProvisionedMcpAuth {
+  /** Auth kind: `"none"`, `"token"`, or `"oauth"`. */
+  kind: string;
+  /** Keychain reference holding the token/secret (absent when not needed). */
+  tokenKeychainRef?: string | undefined;
+}
+
+/**
+ * Reconnect policy for a provisioned MCP server (open spec
+ * provision-mcp-servers).
+ */
+export interface ProvisionedMcpReconnect {
+  /** Initial reconnect delay in milliseconds. */
+  initialMs?:
+    | string
+    | undefined;
+  /** Maximum reconnect delay in milliseconds. */
+  maxMs?:
+    | string
+    | undefined;
+  /** Maximum number of reconnect attempts. */
+  maxAttempts?: string | undefined;
+}
+
 function createBaseDaemonConfig(): DaemonConfig {
   return {
     provider: undefined,
@@ -160,6 +239,7 @@ function createBaseDaemonConfig(): DaemonConfig {
     thinkingLevel: undefined,
     skills: [],
     templates: [],
+    mcpServers: [],
     clearFields: [],
   };
 }
@@ -204,6 +284,9 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
     }
     for (const v of message.templates) {
       ProvisionedTemplate.encode(v!, writer.uint32(114).fork()).join();
+    }
+    for (const v of message.mcpServers) {
+      ProvisionedMcpServer.encode(v!, writer.uint32(122).fork()).join();
     }
     for (const v of message.clearFields) {
       writer.uint32(90).string(v!);
@@ -322,6 +405,14 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
           message.templates.push(ProvisionedTemplate.decode(reader, reader.uint32()));
           continue;
         }
+        case 15: {
+          if (tag !== 122) {
+            break;
+          }
+
+          message.mcpServers.push(ProvisionedMcpServer.decode(reader, reader.uint32()));
+          continue;
+        }
         case 11: {
           if (tag !== 90) {
             break;
@@ -390,6 +481,11 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
       templates: globalThis.Array.isArray(object?.templates)
         ? object.templates.map((e: any) => ProvisionedTemplate.fromJSON(e))
         : [],
+      mcpServers: globalThis.Array.isArray(object?.mcpServers)
+        ? object.mcpServers.map((e: any) => ProvisionedMcpServer.fromJSON(e))
+        : globalThis.Array.isArray(object?.mcp_servers)
+        ? object.mcp_servers.map((e: any) => ProvisionedMcpServer.fromJSON(e))
+        : [],
       clearFields: globalThis.Array.isArray(object?.clearFields)
         ? object.clearFields.map((e: any) => globalThis.String(e))
         : globalThis.Array.isArray(object?.clear_fields)
@@ -439,6 +535,9 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
     if (message.templates?.length) {
       obj.templates = message.templates.map((e) => ProvisionedTemplate.toJSON(e));
     }
+    if (message.mcpServers?.length) {
+      obj.mcpServers = message.mcpServers.map((e) => ProvisionedMcpServer.toJSON(e));
+    }
     if (message.clearFields?.length) {
       obj.clearFields = message.clearFields;
     }
@@ -463,6 +562,7 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
     message.thinkingLevel = object.thinkingLevel ?? undefined;
     message.skills = object.skills?.map((e) => ProvisionedSkill.fromPartial(e)) || [];
     message.templates = object.templates?.map((e) => ProvisionedTemplate.fromPartial(e)) || [];
+    message.mcpServers = object.mcpServers?.map((e) => ProvisionedMcpServer.fromPartial(e)) || [];
     message.clearFields = object.clearFields?.map((e) => e) || [];
     return message;
   },
@@ -724,6 +824,463 @@ export const ProvisionedTemplate: MessageFns<ProvisionedTemplate> = {
     message.description = object.description ?? "";
     message.content = object.content ?? "";
     message.filePath = object.filePath ?? "";
+    return message;
+  },
+};
+
+function createBaseProvisionedMcpServer(): ProvisionedMcpServer {
+  return {
+    name: "",
+    kind: "",
+    command: undefined,
+    args: [],
+    endpoint: undefined,
+    auth: undefined,
+    requestTimeoutMs: undefined,
+    sseIdleTimeoutMs: undefined,
+    bodyCapBytes: undefined,
+    reconnect: undefined,
+    injectSummary: false,
+    injectAndRun: false,
+  };
+}
+
+export const ProvisionedMcpServer: MessageFns<ProvisionedMcpServer> = {
+  encode(message: ProvisionedMcpServer, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.name !== "") {
+      writer.uint32(10).string(message.name);
+    }
+    if (message.kind !== "") {
+      writer.uint32(18).string(message.kind);
+    }
+    if (message.command !== undefined) {
+      writer.uint32(26).string(message.command);
+    }
+    for (const v of message.args) {
+      writer.uint32(34).string(v!);
+    }
+    if (message.endpoint !== undefined) {
+      writer.uint32(42).string(message.endpoint);
+    }
+    if (message.auth !== undefined) {
+      ProvisionedMcpAuth.encode(message.auth, writer.uint32(50).fork()).join();
+    }
+    if (message.requestTimeoutMs !== undefined) {
+      writer.uint32(56).uint64(message.requestTimeoutMs);
+    }
+    if (message.sseIdleTimeoutMs !== undefined) {
+      writer.uint32(64).uint64(message.sseIdleTimeoutMs);
+    }
+    if (message.bodyCapBytes !== undefined) {
+      writer.uint32(72).uint64(message.bodyCapBytes);
+    }
+    if (message.reconnect !== undefined) {
+      ProvisionedMcpReconnect.encode(message.reconnect, writer.uint32(82).fork()).join();
+    }
+    if (message.injectSummary !== false) {
+      writer.uint32(88).bool(message.injectSummary);
+    }
+    if (message.injectAndRun !== false) {
+      writer.uint32(96).bool(message.injectAndRun);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ProvisionedMcpServer {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseProvisionedMcpServer();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.kind = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.command = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.args.push(reader.string());
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.endpoint = reader.string();
+          continue;
+        }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.auth = ProvisionedMcpAuth.decode(reader, reader.uint32());
+          continue;
+        }
+        case 7: {
+          if (tag !== 56) {
+            break;
+          }
+
+          message.requestTimeoutMs = reader.uint64().toString();
+          continue;
+        }
+        case 8: {
+          if (tag !== 64) {
+            break;
+          }
+
+          message.sseIdleTimeoutMs = reader.uint64().toString();
+          continue;
+        }
+        case 9: {
+          if (tag !== 72) {
+            break;
+          }
+
+          message.bodyCapBytes = reader.uint64().toString();
+          continue;
+        }
+        case 10: {
+          if (tag !== 82) {
+            break;
+          }
+
+          message.reconnect = ProvisionedMcpReconnect.decode(reader, reader.uint32());
+          continue;
+        }
+        case 11: {
+          if (tag !== 88) {
+            break;
+          }
+
+          message.injectSummary = reader.bool();
+          continue;
+        }
+        case 12: {
+          if (tag !== 96) {
+            break;
+          }
+
+          message.injectAndRun = reader.bool();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ProvisionedMcpServer {
+    return {
+      name: isSet(object.name) ? globalThis.String(object.name) : "",
+      kind: isSet(object.kind) ? globalThis.String(object.kind) : "",
+      command: isSet(object.command) ? globalThis.String(object.command) : undefined,
+      args: globalThis.Array.isArray(object?.args) ? object.args.map((e: any) => globalThis.String(e)) : [],
+      endpoint: isSet(object.endpoint) ? globalThis.String(object.endpoint) : undefined,
+      auth: isSet(object.auth) ? ProvisionedMcpAuth.fromJSON(object.auth) : undefined,
+      requestTimeoutMs: isSet(object.requestTimeoutMs)
+        ? globalThis.String(object.requestTimeoutMs)
+        : isSet(object.request_timeout_ms)
+        ? globalThis.String(object.request_timeout_ms)
+        : undefined,
+      sseIdleTimeoutMs: isSet(object.sseIdleTimeoutMs)
+        ? globalThis.String(object.sseIdleTimeoutMs)
+        : isSet(object.sse_idle_timeout_ms)
+        ? globalThis.String(object.sse_idle_timeout_ms)
+        : undefined,
+      bodyCapBytes: isSet(object.bodyCapBytes)
+        ? globalThis.String(object.bodyCapBytes)
+        : isSet(object.body_cap_bytes)
+        ? globalThis.String(object.body_cap_bytes)
+        : undefined,
+      reconnect: isSet(object.reconnect) ? ProvisionedMcpReconnect.fromJSON(object.reconnect) : undefined,
+      injectSummary: isSet(object.injectSummary)
+        ? globalThis.Boolean(object.injectSummary)
+        : isSet(object.inject_summary)
+        ? globalThis.Boolean(object.inject_summary)
+        : false,
+      injectAndRun: isSet(object.injectAndRun)
+        ? globalThis.Boolean(object.injectAndRun)
+        : isSet(object.inject_and_run)
+        ? globalThis.Boolean(object.inject_and_run)
+        : false,
+    };
+  },
+
+  toJSON(message: ProvisionedMcpServer): unknown {
+    const obj: any = {};
+    if (message.name !== "") {
+      obj.name = message.name;
+    }
+    if (message.kind !== "") {
+      obj.kind = message.kind;
+    }
+    if (message.command !== undefined) {
+      obj.command = message.command;
+    }
+    if (message.args?.length) {
+      obj.args = message.args;
+    }
+    if (message.endpoint !== undefined) {
+      obj.endpoint = message.endpoint;
+    }
+    if (message.auth !== undefined) {
+      obj.auth = ProvisionedMcpAuth.toJSON(message.auth);
+    }
+    if (message.requestTimeoutMs !== undefined) {
+      obj.requestTimeoutMs = message.requestTimeoutMs;
+    }
+    if (message.sseIdleTimeoutMs !== undefined) {
+      obj.sseIdleTimeoutMs = message.sseIdleTimeoutMs;
+    }
+    if (message.bodyCapBytes !== undefined) {
+      obj.bodyCapBytes = message.bodyCapBytes;
+    }
+    if (message.reconnect !== undefined) {
+      obj.reconnect = ProvisionedMcpReconnect.toJSON(message.reconnect);
+    }
+    if (message.injectSummary !== false) {
+      obj.injectSummary = message.injectSummary;
+    }
+    if (message.injectAndRun !== false) {
+      obj.injectAndRun = message.injectAndRun;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ProvisionedMcpServer>, I>>(base?: I): ProvisionedMcpServer {
+    return ProvisionedMcpServer.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ProvisionedMcpServer>, I>>(object: I): ProvisionedMcpServer {
+    const message = createBaseProvisionedMcpServer();
+    message.name = object.name ?? "";
+    message.kind = object.kind ?? "";
+    message.command = object.command ?? undefined;
+    message.args = object.args?.map((e) => e) || [];
+    message.endpoint = object.endpoint ?? undefined;
+    message.auth = (object.auth !== undefined && object.auth !== null)
+      ? ProvisionedMcpAuth.fromPartial(object.auth)
+      : undefined;
+    message.requestTimeoutMs = object.requestTimeoutMs ?? undefined;
+    message.sseIdleTimeoutMs = object.sseIdleTimeoutMs ?? undefined;
+    message.bodyCapBytes = object.bodyCapBytes ?? undefined;
+    message.reconnect = (object.reconnect !== undefined && object.reconnect !== null)
+      ? ProvisionedMcpReconnect.fromPartial(object.reconnect)
+      : undefined;
+    message.injectSummary = object.injectSummary ?? false;
+    message.injectAndRun = object.injectAndRun ?? false;
+    return message;
+  },
+};
+
+function createBaseProvisionedMcpAuth(): ProvisionedMcpAuth {
+  return { kind: "", tokenKeychainRef: undefined };
+}
+
+export const ProvisionedMcpAuth: MessageFns<ProvisionedMcpAuth> = {
+  encode(message: ProvisionedMcpAuth, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.kind !== "") {
+      writer.uint32(10).string(message.kind);
+    }
+    if (message.tokenKeychainRef !== undefined) {
+      writer.uint32(18).string(message.tokenKeychainRef);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ProvisionedMcpAuth {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseProvisionedMcpAuth();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.kind = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.tokenKeychainRef = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ProvisionedMcpAuth {
+    return {
+      kind: isSet(object.kind) ? globalThis.String(object.kind) : "",
+      tokenKeychainRef: isSet(object.tokenKeychainRef)
+        ? globalThis.String(object.tokenKeychainRef)
+        : isSet(object.token_keychain_ref)
+        ? globalThis.String(object.token_keychain_ref)
+        : undefined,
+    };
+  },
+
+  toJSON(message: ProvisionedMcpAuth): unknown {
+    const obj: any = {};
+    if (message.kind !== "") {
+      obj.kind = message.kind;
+    }
+    if (message.tokenKeychainRef !== undefined) {
+      obj.tokenKeychainRef = message.tokenKeychainRef;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ProvisionedMcpAuth>, I>>(base?: I): ProvisionedMcpAuth {
+    return ProvisionedMcpAuth.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ProvisionedMcpAuth>, I>>(object: I): ProvisionedMcpAuth {
+    const message = createBaseProvisionedMcpAuth();
+    message.kind = object.kind ?? "";
+    message.tokenKeychainRef = object.tokenKeychainRef ?? undefined;
+    return message;
+  },
+};
+
+function createBaseProvisionedMcpReconnect(): ProvisionedMcpReconnect {
+  return { initialMs: undefined, maxMs: undefined, maxAttempts: undefined };
+}
+
+export const ProvisionedMcpReconnect: MessageFns<ProvisionedMcpReconnect> = {
+  encode(message: ProvisionedMcpReconnect, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.initialMs !== undefined) {
+      writer.uint32(8).uint64(message.initialMs);
+    }
+    if (message.maxMs !== undefined) {
+      writer.uint32(16).uint64(message.maxMs);
+    }
+    if (message.maxAttempts !== undefined) {
+      writer.uint32(24).uint64(message.maxAttempts);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ProvisionedMcpReconnect {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseProvisionedMcpReconnect();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.initialMs = reader.uint64().toString();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.maxMs = reader.uint64().toString();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.maxAttempts = reader.uint64().toString();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ProvisionedMcpReconnect {
+    return {
+      initialMs: isSet(object.initialMs)
+        ? globalThis.String(object.initialMs)
+        : isSet(object.initial_ms)
+        ? globalThis.String(object.initial_ms)
+        : undefined,
+      maxMs: isSet(object.maxMs)
+        ? globalThis.String(object.maxMs)
+        : isSet(object.max_ms)
+        ? globalThis.String(object.max_ms)
+        : undefined,
+      maxAttempts: isSet(object.maxAttempts)
+        ? globalThis.String(object.maxAttempts)
+        : isSet(object.max_attempts)
+        ? globalThis.String(object.max_attempts)
+        : undefined,
+    };
+  },
+
+  toJSON(message: ProvisionedMcpReconnect): unknown {
+    const obj: any = {};
+    if (message.initialMs !== undefined) {
+      obj.initialMs = message.initialMs;
+    }
+    if (message.maxMs !== undefined) {
+      obj.maxMs = message.maxMs;
+    }
+    if (message.maxAttempts !== undefined) {
+      obj.maxAttempts = message.maxAttempts;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ProvisionedMcpReconnect>, I>>(base?: I): ProvisionedMcpReconnect {
+    return ProvisionedMcpReconnect.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ProvisionedMcpReconnect>, I>>(object: I): ProvisionedMcpReconnect {
+    const message = createBaseProvisionedMcpReconnect();
+    message.initialMs = object.initialMs ?? undefined;
+    message.maxMs = object.maxMs ?? undefined;
+    message.maxAttempts = object.maxAttempts ?? undefined;
     return message;
   },
 };

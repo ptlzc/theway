@@ -145,6 +145,10 @@ pub struct WireDaemonConfig {
     /// provisioning path.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub templates: Vec<WireProvisionedTemplate>,
+    /// Controller-provisioned MCP servers, mirrors the skills/templates
+    /// provisioning path (open spec provision-mcp-servers).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mcp_servers: Vec<WireProvisionedMcpServer>,
     /// Extra skill search directories (mirrors `WirePathContext::skills_dirs`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skills_dirs: Vec<String>,
@@ -204,8 +208,60 @@ pub struct WireProvisionedTemplate {
     pub file_path: String,
 }
 
+/// One controller-provisioned MCP server (open spec provision-mcp-servers):
+/// the TUI provisions the daemon with the servers it should manage.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct WireProvisionedMcpServer {
+    /// Canonical server name.
+    pub name: String,
+    /// Launch kind: `"stdio"` (local command) or `"sse"` (remote endpoint).
+    pub kind: String,
+    /// Command to launch (stdio kind); `None` for sse kind.
+    pub command: Option<String>,
+    /// Command-line arguments for the stdio command.
+    pub args: Vec<String>,
+    /// Remote endpoint URL (sse kind); `None` for stdio kind.
+    pub endpoint: Option<String>,
+    /// Authentication method (sse kind); `None` for stdio kind.
+    pub auth: Option<WireProvisionedMcpAuth>,
+    /// Request timeout in milliseconds.
+    pub request_timeout_ms: Option<u64>,
+    /// SSE idle timeout in milliseconds.
+    pub sse_idle_timeout_ms: Option<u64>,
+    /// Max request/response body size cap in bytes.
+    pub body_cap_bytes: Option<u64>,
+    /// Reconnect policy for the MCP transport.
+    pub reconnect: Option<WireProvisionedMcpReconnect>,
+    /// When true, the provisioned server's summary is injected into context.
+    pub inject_summary: bool,
+    /// When true, the provisioned server can inject tools and run tools.
+    pub inject_and_run: bool,
+}
+
+/// Authentication method for a provisioned MCP server (open spec
+/// provision-mcp-servers).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct WireProvisionedMcpAuth {
+    /// Auth kind: `"none"`, `"token"`, or `"oauth"`.
+    pub kind: String,
+    /// Keychain reference holding the token/secret (`None` when not needed).
+    pub token_keychain_ref: Option<String>,
+}
+
+/// Reconnect policy for a provisioned MCP server (open spec
+/// provision-mcp-servers).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct WireProvisionedMcpReconnect {
+    /// Initial reconnect delay in milliseconds.
+    pub initial_ms: Option<u64>,
+    /// Maximum reconnect delay in milliseconds.
+    pub max_ms: Option<u64>,
+    /// Maximum number of reconnect attempts.
+    pub max_attempts: Option<u64>,
+}
+
 impl WireDaemonConfig {
-    pub const FIELDS: [&'static str; 13] = [
+    pub const FIELDS: [&'static str; 14] = [
         "provider",
         "model",
         "base_url",
@@ -214,6 +270,7 @@ impl WireDaemonConfig {
         "builtin_skills",
         "skills",
         "templates",
+        "mcp_servers",
         "skills_dirs",
         "trigger_poll_secs",
         "tui_max_feed_lines",
@@ -248,6 +305,7 @@ impl WireDaemonConfig {
                 "builtin_skills" => !std::mem::take(&mut self.builtin_skills).is_empty(),
                 "skills" => !std::mem::take(&mut self.skills).is_empty(),
                 "templates" => !std::mem::take(&mut self.templates).is_empty(),
+                "mcp_servers" => !std::mem::take(&mut self.mcp_servers).is_empty(),
                 "skills_dirs" => !std::mem::take(&mut self.skills_dirs).is_empty(),
                 "trigger_poll_secs" => self.trigger_poll_secs.take().is_some(),
                 "tui_max_feed_lines" => self.tui_max_feed_lines.take().is_some(),
@@ -287,6 +345,10 @@ impl WireDaemonConfig {
         }
         if !patch.templates.is_empty() {
             self.templates = patch.templates.clone();
+            touched += 1;
+        }
+        if !patch.mcp_servers.is_empty() {
+            self.mcp_servers = patch.mcp_servers.clone();
             touched += 1;
         }
         if !patch.skills_dirs.is_empty() {

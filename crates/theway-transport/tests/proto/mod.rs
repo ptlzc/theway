@@ -455,6 +455,24 @@ fn daemon_config_round_trips_wire_and_proto() {
             content: "# Pull Request\n\nDescribe the change.".into(),
             file_path: "/home/user/.agents/templates/pr-description.md".into(),
         }],
+        mcp_servers: vec![crate::wire::WireProvisionedMcpServer {
+            name: "filesystem".into(),
+            kind: "stdio".into(),
+            command: Some("/usr/local/bin/mcp-fs".into()),
+            args: vec!["--root".into(), "/srv/data".into()],
+            endpoint: None,
+            auth: None,
+            request_timeout_ms: Some(5000),
+            sse_idle_timeout_ms: None,
+            body_cap_bytes: Some(10 * 1024 * 1024),
+            reconnect: Some(crate::wire::WireProvisionedMcpReconnect {
+                initial_ms: Some(1000),
+                max_ms: Some(30_000),
+                max_attempts: Some(5),
+            }),
+            inject_summary: true,
+            inject_and_run: false,
+        }],
         skills_dirs: vec!["/home/user/.agents/skills".into()],
         trigger_poll_secs: Some(60),
         tui_max_feed_lines: Some(8000),
@@ -496,6 +514,24 @@ fn daemon_config_round_trips_wire_and_proto() {
         "/home/user/.agents/templates/pr-description.md"
     );
 
+    assert_eq!(proto.mcp_servers.len(), 1);
+    let server = &proto.mcp_servers[0];
+    assert_eq!(server.name, "filesystem");
+    assert_eq!(server.kind, "stdio");
+    assert_eq!(server.command.as_deref(), Some("/usr/local/bin/mcp-fs"));
+    assert_eq!(server.args, vec!["--root", "/srv/data"]);
+    assert!(server.endpoint.is_none());
+    assert!(server.auth.is_none());
+    assert_eq!(server.request_timeout_ms, Some(5000));
+    assert!(server.sse_idle_timeout_ms.is_none());
+    assert_eq!(server.body_cap_bytes, Some(10 * 1024 * 1024));
+    let reconnect = server.reconnect.as_ref().unwrap();
+    assert_eq!(reconnect.initial_ms, Some(1000));
+    assert_eq!(reconnect.max_ms, Some(30_000));
+    assert_eq!(reconnect.max_attempts, Some(5));
+    assert!(server.inject_summary);
+    assert!(!server.inject_and_run);
+
     assert_eq!(daemon_config_from_proto(&proto), config);
 
     // Default (all-absent) config round-trips too: no field gains presence.
@@ -509,6 +545,7 @@ fn daemon_config_round_trips_wire_and_proto() {
     assert!(proto_empty.builtin_skills.is_empty());
     assert!(proto_empty.skills.is_empty());
     assert!(proto_empty.templates.is_empty());
+    assert!(proto_empty.mcp_servers.is_empty());
     assert!(proto_empty.skills_dirs.is_empty());
     assert!(proto_empty.trigger_poll_secs.is_none());
     assert!(proto_empty.tui_max_feed_lines.is_none());
