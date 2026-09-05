@@ -34,6 +34,7 @@ impl App {
         let thinking_mode = ui_state.thinking_mode.unwrap_or_default();
         let side_panel_mode = ui_state.panel_mode.unwrap_or(SidePanelMode::Auto);
         let side_panel_position = ui_state.panel_position.unwrap_or_default();
+        let graph_position = ui_state.graph_position.unwrap_or_default();
         Self {
             client: config.client,
             connector: config.connector,
@@ -95,6 +96,9 @@ impl App {
             side_panel_position,
             panel_menu: None,
             panel_menu_saved: None,
+            graph_position,
+            graph_menu: None,
+            graph_menu_saved: None,
             extension_view: false,
             fork_picker: None,
             resume_picker: None,

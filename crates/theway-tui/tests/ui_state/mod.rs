@@ -29,9 +29,26 @@ thinking_mode = "banana"
 [panel]
 mode = "wide"
 position = "diagonal"
+
+[graph]
+position = "behind-the-fridge"
 "#,
     );
     assert_eq!(state, UiState::default());
+}
+
+#[test]
+fn parse_graph_position() {
+    let state = parse("[graph]\nposition = \"side-panel\"");
+    assert_eq!(
+        state.graph_position,
+        Some(crate::ui::GraphPosition::SidePanel)
+    );
+    let state = parse("[graph]\nposition = \"composer-top\"");
+    assert_eq!(
+        state.graph_position,
+        Some(crate::ui::GraphPosition::ComposerTop)
+    );
 }
 
 #[test]
@@ -46,11 +63,13 @@ fn render_emits_only_set_fields() {
         thinking_mode: Some(crate::feed_render::ThinkingMode::Hidden),
         panel_mode: Some(crate::ui::SidePanelMode::Hidden),
         panel_position: None,
+        graph_position: None,
     };
     let text = render(&state);
     assert!(text.contains("[feed]\nthinking_mode = \"hidden\""));
     assert!(text.contains("[panel]\nmode = \"hidden\""));
     assert!(!text.contains("position"));
+    assert!(!text.contains("[graph]"));
     // Rendered output parses back to the same state.
     assert_eq!(parse(&text), state);
 }
@@ -66,6 +85,7 @@ fn save_and_load_roundtrip() {
         thinking_mode: Some(crate::feed_render::ThinkingMode::Peek),
         panel_mode: Some(crate::ui::SidePanelMode::Shown(36)),
         panel_position: Some(crate::ui::SidePanelPosition::Top),
+        graph_position: Some(crate::ui::GraphPosition::SidePanel),
     };
     save_to(&path, &state).unwrap();
     assert_eq!(load_from(&path), state);

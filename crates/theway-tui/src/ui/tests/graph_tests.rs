@@ -81,27 +81,53 @@ async fn ctrl_c_empty_idle_two_presses_exits() {
 
 /// Bare `/graph` toggles the DAG band Show ↔ Hidden.
 #[tokio::test]
-async fn graph_bare_toggles_band_mode() {
+async fn graph_bare_opens_menu_and_enter_runs_clear_when_runs_exist() {
     let (mut app, _rx, _ops) = test_app_with_sessions(&["sess-1"], false).await;
     let backend = TestBackend::new(60, 12);
     let mut terminal = Terminal::new(backend).unwrap();
+    let key = |code| {
+        crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
+            code,
+            crossterm::event::KeyModifiers::empty(),
+        ))
+    };
 
-    assert_eq!(app.dag_band_mode, crate::ui::DagBandMode::Show);
+    // Without runs the menu offers position only.
     app.set_input("/graph");
     app.submit(&mut terminal).await.unwrap();
-    assert_eq!(
-        app.dag_band_mode,
-        crate::ui::DagBandMode::Hidden,
-        "bare /graph must hide the band"
-    );
+    let menu = app.graph_menu.expect("bare /graph opens the menu");
+    assert_eq!(menu.level, crate::ui::GraphMenuLevel::Root);
+    assert_eq!(menu.items(), vec!["position"]);
+    app.handle_event(key(crossterm::event::KeyCode::Esc), &mut terminal)
+        .await
+        .unwrap();
+    assert!(app.graph_menu.is_none());
 
+    // With runs the root offers clear + position; Enter on clear invokes
+    // the daemon clear RPC.
+    app.latest
+        .dags
+        .push(theway_transport::wire::WireDagRunSnapshot {
+            id: "dag-9".into(),
+            name: String::new(),
+            kind: "dag".into(),
+            status: "completed".into(),
+            fail_fast: false,
+            max_concurrency: 4,
+            direction: "TD".into(),
+            created_at: 0,
+            completed_at: None,
+            error: None,
+            nodes: vec![],
+        });
     app.set_input("/graph");
     app.submit(&mut terminal).await.unwrap();
-    assert_eq!(
-        app.dag_band_mode,
-        crate::ui::DagBandMode::Show,
-        "bare /graph must restore the band"
-    );
+    let menu = app.graph_menu.expect("menu opens");
+    assert_eq!(menu.items(), vec!["clear", "position"]);
+    app.handle_event(key(crossterm::event::KeyCode::Enter), &mut terminal)
+        .await
+        .unwrap();
+    assert!(app.graph_menu.is_none());
 }
 
 /// `/graph show` / `/graph hidden` set the band mode explicitly.
@@ -460,4 +486,137 @@ async fn terminal_only_dags_auto_hide_the_band() {
         text.contains("run-live") && text.contains("run-done"),
         "a live run must keep the band (with its siblings) rendered:\n{text}"
     );
+}
+
+/// `/graph › Position` live-previews the band placement: the cursor mirrors
+/// the placement into `graph_position` on every frame; Enter commits (and
+/// persists), Esc/← steps back reverting the preview, Esc at the root
+/// cancels.
+#[tokio::test]
+async fn graph_position_menu_previews_commits_and_reverts() {
+    let (mut app, _rx, _ops) = test_app_with_sessions(&["sess-1"], false).await;
+    let backend = TestBackend::new(60, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let key = |code| {
+        crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
+            code,
+            crossterm::event::KeyModifiers::empty(),
+        ))
+    };
+
+    // Open → Down (position) → Enter descends into the placements.
+    app.set_input("/graph");
+    app.submit(&mut terminal).await.unwrap();
+    app.handle_event(key(crossterm::event::KeyCode::Down), &mut terminal)
+        .await
+        .unwrap();
+    app.handle_event(key(crossterm::event::KeyCode::Enter), &mut terminal)
+        .await
+        .unwrap();
+    assert_eq!(
+        app.graph_menu.unwrap().level,
+        crate::ui::GraphMenuLevel::Position
+    );
+    assert_eq!(
+        app.graph_position,
+        crate::ui::GraphPosition::ComposerTop,
+        "cursor 0 previews composer top"
+    );
+
+    // Down live-previews side-panel.
+    app.handle_event(key(crossterm::event::KeyCode::Down), &mut terminal)
+        .await
+        .unwrap();
+    assert_eq!(app.graph_position, crate::ui::GraphPosition::SidePanel);
+
+    // Esc steps back to the root and reverts the preview.
+    app.handle_event(key(crossterm::event::KeyCode::Esc), &mut terminal)
+        .await
+        .unwrap();
+    assert_eq!(
+        app.graph_menu.unwrap().level,
+        crate::ui::GraphMenuLevel::Root
+    );
+    assert_eq!(app.graph_position, crate::ui::GraphPosition::ComposerTop);
+
+    // Enter commits side-panel (Descend again, Down, Enter).
+    app.handle_event(key(crossterm::event::KeyCode::Down), &mut terminal)
+        .await
+        .unwrap();
+    app.handle_event(key(crossterm::event::KeyCode::Enter), &mut terminal)
+        .await
+        .unwrap();
+    app.handle_event(key(crossterm::event::KeyCode::Down), &mut terminal)
+        .await
+        .unwrap();
+    app.handle_event(key(crossterm::event::KeyCode::Enter), &mut terminal)
+        .await
+        .unwrap();
+    assert!(app.graph_menu.is_none());
+    assert_eq!(app.graph_position, crate::ui::GraphPosition::SidePanel);
+}
+
+/// The side-panel graph placement: with runs + position side-panel the panel
+/// renders a Graph section (under Skills) reusing the band's node styling,
+/// and the feed band is suppressed.
+#[tokio::test]
+async fn graph_band_in_side_panel_renders_graph_section_and_suppresses_feed_band() {
+    use theway_transport::wire::{WireDagNodeSnapshot, WireDagRunSnapshot};
+
+    let (mut app, _rx, _ops) = test_app_with_sessions(&["sess-1"], false).await;
+    app.theme.screen.margin_left = 0;
+    let mut status = fixture_status(Vec::new());
+    status.sidebar.skills.items = vec![theway_transport::wire::WireSkillSnapshot {
+        name: "code-review".into(),
+        source: "user".into(),
+        file_path: "/skills/code-review".into(),
+        enabled: true,
+    }];
+    status.dags = vec![WireDagRunSnapshot {
+        id: "run-1".into(),
+        name: "demo".into(),
+        kind: "dag".into(),
+        status: "running".into(),
+        fail_fast: false,
+        max_concurrency: 4,
+        direction: "TD".into(),
+        created_at: 0,
+        completed_at: None,
+        error: None,
+        nodes: vec![WireDagNodeSnapshot {
+            id: "n1".into(),
+            agent: "a".into(),
+            status: "running".into(),
+            depends_on: vec![],
+            job_id: None,
+            attempt: 1,
+            started_at: None,
+            completed_at: None,
+            error: None,
+            input_tokens: None,
+            output_tokens: None,
+            result: None,
+            output_tail: None,
+            live_preview: None,
+        }],
+    }];
+    app.apply_snapshot(status);
+    app.side_panel_mode = crate::ui::SidePanelMode::Shown(36);
+    app.graph_position = crate::ui::GraphPosition::SidePanel;
+
+    let backend = TestBackend::new(120, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    let text = buffer_text(terminal.backend().buffer());
+
+    // The panel carries the Graph section with the run header + node row.
+    assert!(text.contains("Graph"), "graph section missing:\n{text}");
+    assert!(text.contains("run-1"), "run header missing:\n{text}");
+    assert!(text.contains("n1"), "node row missing:\n{text}");
+    // The feed band is suppressed: the run header must not render as a box
+    // in the feed area (only inside the panel).
+    let feed = app.last_feed_area.expect("feed renders");
+    let panel = app.last_panel_area.expect("panel renders");
+    assert_eq!(feed.width + panel.width, 120);
+    assert!(feed.right() == panel.x, "panel must sit on the right edge");
 }

@@ -50,6 +50,10 @@ impl App {
         if self.handle_panel_menu_key(&key) {
             return Ok(());
         }
+        // `/graph` hierarchical menu (issue #38): same modal contract.
+        if self.handle_graph_menu_key(&key).await {
+            return Ok(());
+        }
         // Interactive `/fork` picker (issue #55): modal — every key goes to
         // the picker until Enter forwards `/fork <n>` or Esc cancels.
         if self.handle_fork_picker_key(&key, terminal).await {
@@ -229,6 +233,9 @@ impl App {
     pub(super) fn open_panel_menu(&mut self) {
         self.model_picker = None;
         self.last_cascade_area = None;
+        if self.graph_menu.is_some() {
+            self.cancel_graph_menu();
+        }
         if self.panel_menu.is_some() {
             return;
         }
@@ -304,6 +311,148 @@ impl App {
         }
     }
 
+    /// `/graph` menu keys (issue #38): Up/Down move the highlight; Enter
+    /// runs `clear` (root, when offered) or commits the highlighted
+    /// placement (Position leaf); Esc/← steps back (reverting the live
+    /// preview), Esc at the root cancels; Ctrl-C cancels outright. The
+    /// Position cursor live-previews the band placement so the change is
+    /// visible before committing.
+    pub(super) async fn handle_graph_menu_key(&mut self, key: &KeyEvent) -> bool {
+        let Some(state) = self.graph_menu else {
+            return false;
+        };
+        if key.kind == KeyEventKind::Release {
+            return true;
+        }
+        let items = state.items();
+        match super::map_menu_key(key) {
+            super::MenuKey::Up => {
+                let cursor = state.cursor.saturating_sub(1);
+                self.graph_menu = Some(super::GraphMenuState { cursor, ..state });
+                self.apply_graph_preview();
+            }
+            super::MenuKey::Down => {
+                let cursor = state.cursor.saturating_add(1).min(items.len() - 1);
+                self.graph_menu = Some(super::GraphMenuState { cursor, ..state });
+                self.apply_graph_preview();
+            }
+            super::MenuKey::Enter => match state.level {
+                super::GraphMenuLevel::Root => match items.get(state.cursor).copied() {
+                    Some("clear") => {
+                        self.cancel_graph_menu();
+                        self.clear_graph_runs().await;
+                    }
+                    _ => {
+                        self.graph_menu = Some(super::GraphMenuState {
+                            level: super::GraphMenuLevel::Position,
+                            cursor: 0,
+                            has_graphs: state.has_graphs,
+                        });
+                        self.apply_graph_preview();
+                    }
+                },
+                super::GraphMenuLevel::Position => self.commit_graph_menu(),
+            },
+            super::MenuKey::Back | super::MenuKey::Left => match state.level {
+                super::GraphMenuLevel::Root => self.cancel_graph_menu(),
+                super::GraphMenuLevel::Position => {
+                    self.graph_menu = Some(super::GraphMenuState {
+                        level: super::GraphMenuLevel::Root,
+                        cursor: 0,
+                        has_graphs: state.has_graphs,
+                    });
+                    self.restore_graph_snapshot();
+                }
+            },
+            super::MenuKey::Close => self.cancel_graph_menu(),
+            _ => {}
+        }
+        true
+    }
+
+    /// Open the `/graph` menu at its root, snapshotting the band placement
+    /// for revert and whether the session currently has runs (decides if
+    /// `clear` is offered). Exactly one menu owns the inline band: opening
+    /// this one closes the panel menu and the model picker.
+    pub(super) fn open_graph_menu(&mut self) {
+        self.model_picker = None;
+        self.last_cascade_area = None;
+        if self.panel_menu.is_some() {
+            self.cancel_panel_menu();
+        }
+        if self.graph_menu.is_some() {
+            return;
+        }
+        self.graph_menu_saved = Some(self.graph_position);
+        self.graph_menu = Some(super::GraphMenuState {
+            level: super::GraphMenuLevel::Root,
+            cursor: 0,
+            has_graphs: !self.latest.dags.is_empty(),
+        });
+    }
+
+    /// Live preview: mirror the highlighted placement into the real band
+    /// position so the layout updates on the next frame.
+    fn apply_graph_preview(&mut self) {
+        let Some(state) = self.graph_menu else {
+            return;
+        };
+        if state.level == super::GraphMenuLevel::Position {
+            self.graph_position = if state.cursor == 0 {
+                super::GraphPosition::ComposerTop
+            } else {
+                super::GraphPosition::SidePanel
+            };
+        }
+    }
+
+    /// Enter on a placement: keep the preview, close the menu, drop the
+    /// snapshot, and persist the new position.
+    fn commit_graph_menu(&mut self) {
+        self.graph_menu = None;
+        self.graph_menu_saved = None;
+        self.system_line(format!("graph band: {}", self.graph_position.label()));
+        self.persist_ui_state();
+    }
+
+    /// Close the menu without committing: restore the placement captured
+    /// when the menu opened and drop the snapshot.
+    fn cancel_graph_menu(&mut self) {
+        self.graph_menu = None;
+        self.restore_graph_snapshot();
+        self.graph_menu_saved = None;
+    }
+
+    /// Revert the live preview to the snapshot captured when the menu
+    /// opened; the snapshot is retained so stepping back out of the level
+    /// and previewing again can still be reverted.
+    fn restore_graph_snapshot(&mut self) {
+        if let Some(position) = self.graph_menu_saved {
+            self.graph_position = position;
+        }
+    }
+
+    /// Clear the session's terminal (Completed/Failed/Cancelled) DAG runs
+    /// via the daemon — the `/graph › clear` action and the `/graph clear`
+    /// shortcut. Running DAGs are preserved.
+    pub(super) async fn clear_graph_runs(&mut self) {
+        let session_id = self.session_id.clone();
+        match crate::ui::daemon_call("graph_clear", self.client.graph_clear(&session_id, 0)).await {
+            Ok(removed) => {
+                if removed > 0 {
+                    self.system_line(format!(
+                        "✓ 已清除 {removed} 个终态 DAG (Completed/Failed/Cancelled)"
+                    ));
+                } else {
+                    self.system_line("当前没有可清除的终态 DAG; 运行中的 DAG 保留。");
+                }
+            }
+            Err(error) => {
+                self.error_line(format!("graph clear failed: {error}"));
+            }
+        }
+    }
+
     /// Persist the user-facing display switches to `ui-state.toml`
     /// (Ctrl+O thinking mode + `/side-panel` panel mode/position). Best
     /// effort — failures only warn.
@@ -312,6 +461,7 @@ impl App {
             thinking_mode: Some(self.thinking_mode),
             panel_mode: Some(self.side_panel_mode),
             panel_position: Some(self.side_panel_position),
+            graph_position: Some(self.graph_position),
         });
     }
 
@@ -476,6 +626,9 @@ impl App {
         // cancels an open `/side-panel` menu (reverting its preview).
         if self.panel_menu.is_some() {
             self.cancel_panel_menu();
+        }
+        if self.graph_menu.is_some() {
+            self.cancel_graph_menu();
         }
         // The catalog comes from the daemon's snapshot (credential detection is
         // daemon-side); refresh it from the latest cache before opening.

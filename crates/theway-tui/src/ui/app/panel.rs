@@ -47,6 +47,8 @@ impl App {
             || self.latest.goal.is_some()
             || sidebar.mcp.servers > 0
             || sidebar.mcp.notification_hooks > 0
+            || (self.graph_position == GraphPosition::SidePanel
+                && !self.latest.dags.is_empty())
             || !self.latest.extensions.catalog.is_empty()
             || self.latest.extensions.reload_pending
             || self
@@ -246,10 +248,48 @@ impl App {
             ));
         }
 
-        lines.push(Line::raw(""));
-        lines.push(panel_line("Triggers".to_string(), s.section, width));
-        if rules.is_empty() {
-            lines.push(panel_line("none".to_string(), s.muted, width));
+        // Graph section (issue #38 `/graph › Position › side-panel`): the
+        // DAG band moves into the panel under Skills, reusing the band's
+        // header/node styling. Up to MAX_RUNS runs; extra runs collapse
+        // into a `… N more` row.
+        if self.graph_position == GraphPosition::SidePanel
+            && !self.latest.dags.is_empty()
+        {
+            lines.push(Line::raw(""));
+            lines.push(panel_line("Graph".to_string(), s.section, width));
+            let band = self.theme.dag_band;
+            let max_w = width.max(1);
+            for run in self.latest.dags.iter().take(dag_band::MAX_RUNS) {
+                let cps = self
+                    .dag_meters
+                    .get(&run.id)
+                    .map(|meter| meter.cps())
+                    .unwrap_or(0.0);
+                lines.extend(dag_band::run_panel_lines(
+                    run, cps, self.dag_tick, max_w, &band,
+                ));
+                lines.push(Line::raw(""));
+            }
+            if self.latest.dags.len() > dag_band::MAX_RUNS {
+                lines.push(panel_line(
+                    format!("… {} more", self.latest.dags.len() - dag_band::MAX_RUNS),
+                    s.muted,
+                    width,
+                ));
+                lines.push(Line::raw(""));
+            }
+        }
+
+        // Triggers: hidden entirely when there are no rules and no polling
+        // status to report.
+        if !rules.is_empty() || self.latest.latest_trigger_poll.is_some() {
+            lines.push(Line::raw(""));
+            lines.push(panel_line("Triggers".to_string(), s.section, width));
+        }
+        if rules.is_empty() && self.latest.latest_trigger_poll.is_none() {
+            // no triggers at all
+        } else if rules.is_empty() {
+            // polling status only — rendered by the block below.
         } else {
             for rule in rules.iter().take(TRIGGER_PANEL_RULE_LIMIT) {
                 let state_flag = if rule.enabled { "enabled" } else { "disabled" };
@@ -352,10 +392,11 @@ impl App {
             ));
             lines.push(panel_line(String::new(), Color::Reset, width));
         }
-        lines.push(panel_line("Cron (session)".to_string(), s.section, width));
-        if cron_jobs.is_empty() {
-            lines.push(panel_line("none".to_string(), s.muted, width));
-        } else {
+        // Cron: hidden entirely when the session has no jobs.
+        if !cron_jobs.is_empty() {
+            lines.push(Line::raw(""));
+            lines.push(panel_line("Cron (session)".to_string(), s.section, width));
+            {
             let enabled = cron_jobs.iter().filter(|job| job.enabled).count();
             let disabled = cron_jobs.len().saturating_sub(enabled);
             lines.push(panel_line(
@@ -395,6 +436,7 @@ impl App {
                     width,
                 ));
             }
+            }
         }
 
         let hook_rows = self.panel_status.hook_points.len().max(1);
@@ -406,11 +448,11 @@ impl App {
             lines.push(Line::raw(""));
         }
 
-        lines.push(Line::raw(""));
-        lines.push(panel_line("MCP".to_string(), s.section, width));
-        if self.panel_status.mcp_servers == 0 {
-            lines.push(panel_line("none".to_string(), s.muted, width));
-        } else {
+        // MCP: hidden entirely when nothing is connected.
+        if self.panel_status.mcp_servers > 0 || self.panel_status.mcp_notification_hooks > 0 {
+            lines.push(Line::raw(""));
+            lines.push(panel_line("MCP".to_string(), s.section, width));
+            {
             lines.push(panel_line(
                 format!(
                     "servers {} · tools {}",
@@ -427,6 +469,7 @@ impl App {
                 s.muted,
                 width,
             ));
+            }
         }
 
         lines.push(Line::raw(""));

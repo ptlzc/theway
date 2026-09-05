@@ -84,6 +84,7 @@ impl App {
         // every run reaches a terminal state the band closes by itself.
         let band_rows = if !dag_band::has_live_runs(&self.latest.dags)
             || self.dag_band_mode == crate::ui::DagBandMode::Hidden
+            || self.graph_position == crate::ui::GraphPosition::SidePanel
         {
             0
         } else {
@@ -375,6 +376,27 @@ impl App {
                 },
                 title: data.title.clone(),
                 rows: data.rows.clone(),
+            });
+        }
+        if let Some(menu) = self.graph_menu.as_ref() {
+            let items = menu.items();
+            let rows = items
+                .iter()
+                .enumerate()
+                .map(|(index, label)| (label.to_string(), index == menu.cursor))
+                .collect();
+            let crumbs = vec![MenuCrumb {
+                label: "graph",
+                pinned: match menu.level {
+                    GraphMenuLevel::Root => String::new(),
+                    GraphMenuLevel::Position => "Position".to_string(),
+                },
+            }];
+            return Some(MenuBandData {
+                active: 0,
+                crumbs,
+                title: String::new(),
+                rows,
             });
         }
         let menu = self.panel_menu.as_ref()?;

@@ -149,16 +149,11 @@ impl App {
             // DAG runs via the daemon. Band visibility is TUI-local (issue #76);
             // the `[n graph]` status-bar counter (issue #78) only appears while
             // Hidden.
+            // Bare `/graph` opens the hierarchical menu (clear when the
+            // session has runs + position); the explicit show/hidden/clear
+            // shortcuts keep working.
             "/graph" if args.is_empty() => {
-                self.dag_band_mode = match self.dag_band_mode {
-                    crate::ui::DagBandMode::Show => crate::ui::DagBandMode::Hidden,
-                    crate::ui::DagBandMode::Hidden => crate::ui::DagBandMode::Show,
-                };
-                self.system_line(if self.dag_band_mode == crate::ui::DagBandMode::Hidden {
-                    "DAG band 已隐藏 (/graph show 恢复)"
-                } else {
-                    "DAG band 已显示 (/graph hidden 隐藏)"
-                });
+                self.open_graph_menu();
             }
             "/graph" if args == "show" => {
                 self.dag_band_mode = crate::ui::DagBandMode::Show;
@@ -169,28 +164,7 @@ impl App {
                 self.system_line("DAG band 已隐藏");
             }
             "/graph" if args == "clear" => {
-                let session_id = self.session_id.clone();
-                match crate::ui::daemon_call(
-                    "graph_clear",
-                    self.client.graph_clear(&session_id, 0),
-                )
-                .await
-                {
-                    Ok(removed) => {
-                        if removed > 0 {
-                            self.system_line(format!(
-                                "✓ 已清除 {removed} 个终态 DAG (Completed/Failed/Cancelled)"
-                            ));
-                        } else {
-                            self.system_line(
-                                "当前没有可清除的终态 DAG; 运行中的 DAG 保留。",
-                            );
-                        }
-                    }
-                    Err(error) => {
-                        self.error_line(format!("graph clear failed: {error}"));
-                    }
-                }
+                self.clear_graph_runs().await;
             }
             "/extensions" => match crate::ui::daemon_call(
                 "get_extensions",

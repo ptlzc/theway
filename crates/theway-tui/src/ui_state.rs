@@ -10,6 +10,9 @@
 //! [panel]
 //! mode = "shown"              # auto | shown | hidden (/side-panel › Toggle)
 //! position = "left"           # top | bottom | left | right (/side-panel › Position)
+//!
+//! [graph]
+//! position = "side-panel"     # composer-top | side-panel (/graph › Position)
 //! ```
 //!
 //! Missing, unreadable, or malformed files fall back to defaults silently —
@@ -19,7 +22,7 @@
 use std::path::Path;
 
 use crate::feed_render::ThinkingMode;
-use crate::ui::{SidePanelMode, SidePanelPosition, TRIGGER_PANEL_WIDTH};
+use crate::ui::{GraphPosition, SidePanelMode, SidePanelPosition, TRIGGER_PANEL_WIDTH};
 
 #[cfg(test)]
 static TEST_STATE_PATH: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
@@ -44,6 +47,7 @@ pub(crate) struct UiState {
     pub thinking_mode: Option<ThinkingMode>,
     pub panel_mode: Option<SidePanelMode>,
     pub panel_position: Option<SidePanelPosition>,
+    pub graph_position: Option<GraphPosition>,
 }
 
 /// Load from the default path (`${THEWAY_DIR}/ui-state.toml`).
@@ -78,6 +82,11 @@ fn parse(text: &str) -> UiState {
             state.panel_position = parse_panel_position(position);
         }
     }
+    if let Some(graph) = table.get("graph").and_then(toml::Value::as_table) {
+        if let Some(position) = graph.get("position").and_then(toml::Value::as_str) {
+            state.graph_position = parse_graph_position(position);
+        }
+    }
     state
 }
 
@@ -95,6 +104,14 @@ fn parse_panel_mode(mode: &str) -> Option<SidePanelMode> {
         "auto" => Some(SidePanelMode::Auto),
         "shown" => Some(SidePanelMode::Shown(TRIGGER_PANEL_WIDTH)),
         "hidden" => Some(SidePanelMode::Hidden),
+        _ => None,
+    }
+}
+
+fn parse_graph_position(position: &str) -> Option<GraphPosition> {
+    match position {
+        "composer-top" => Some(GraphPosition::ComposerTop),
+        "side-panel" => Some(GraphPosition::SidePanel),
         _ => None,
     }
 }
@@ -165,6 +182,17 @@ pub(crate) fn render(state: &UiState) -> String {
             out.push_str(&field);
             out.push('\n');
         }
+    }
+    if let Some(position) = state.graph_position {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str("[graph]\n");
+        let label = match position {
+            GraphPosition::ComposerTop => "composer-top",
+            GraphPosition::SidePanel => "side-panel",
+        };
+        out.push_str(&format!("position = \"{label}\"\n"));
     }
     out
 }

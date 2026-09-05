@@ -244,6 +244,28 @@ fn node_line(
     Line::from(spans)
 }
 
+/// Side-panel graph rows (issue #38 `/graph › Position › side-panel`): the
+/// run's header line followed by its node rows (capped at
+/// [`MAX_NODE_ROWS`] with a `… N more` tail). Each line is fitted to
+/// `max_w` display cells — the panel reuses the band's header/node styling
+/// so the two placements look identical. The header embeds a mini spinner
+/// while any node runs (driven by the shared `dag_tick` and the run's cps
+/// meter).
+#[must_use]
+pub fn run_panel_lines(
+    run: &WireDagRunSnapshot,
+    cps: f64,
+    tick: u64,
+    max_w: usize,
+    band: &crate::ui::theme::DagBandStyle,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let header = run_header_line(run, cps, tick, u16::MAX, band);
+    lines.push(fit_header(&header, max_w, band));
+    lines.extend(run_node_lines(run, band, max_w));
+    lines
+}
+
 /// The run's node text rows, one per node and capped at [`MAX_NODE_ROWS`];
 /// overflow appends a `… N more` tail row (also width-fitted).
 fn run_node_lines(

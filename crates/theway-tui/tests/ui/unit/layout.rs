@@ -438,3 +438,67 @@ async fn side_panel_border_faces_the_feed_per_position() {
     }
 }
 
+
+/// Empty automation sections stay out of the panel (issue #38): Triggers,
+/// Cron, and MCP render only when they have content — a bare session shows
+/// just Skills (+ Hooks/Runtime status rows).
+#[tokio::test]
+async fn panel_hides_empty_triggers_cron_and_mcp_sections() {
+    let (mut app, _rx) = test_app().await;
+    app.theme.screen.margin_left = 0;
+    let mut status = fixture_status(Vec::new());
+    status.sidebar.skills.items = vec![WireSkillSnapshot {
+        name: "code-review".into(),
+        source: "user".into(),
+        file_path: "/skills/code-review".into(),
+        enabled: true,
+    }];
+    // No triggers, no cron jobs, no MCP servers/hooks.
+    status.sidebar.triggers.rules.clear();
+    status.sidebar.cron.jobs.clear();
+    status.sidebar.mcp.servers = 0;
+    status.sidebar.mcp.notification_hooks = 0;
+    app.apply_snapshot(status);
+    app.side_panel_mode = super::SidePanelMode::Shown(36);
+
+    let backend = TestBackend::new(120, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    let text = buffer_text(terminal.backend().buffer());
+
+    assert!(text.contains("Skills"), "{text}");
+    assert!(!text.contains("Triggers"), "empty Triggers must hide:\n{text}");
+    assert!(
+        !text.contains("Cron (session)"),
+        "empty Cron must hide:\n{text}"
+    );
+    assert!(!text.contains("MCP"), "empty MCP must hide:\n{text}");
+
+    // Populated sections come back.
+    app.latest.sidebar.cron.jobs.push(theway_transport::wire::WireCronJobSnapshot {
+        id: "cron-1".into(),
+        enabled: true,
+        schedule: "@hourly".into(),
+        action: "check".into(),
+        skipped_overlap_count: 0,
+        last_error: None,
+    });
+    app.latest.sidebar.mcp.servers = 1;
+    app.latest.sidebar.triggers.rules.push(theway_transport::wire::WireTriggerRuleSnapshot {
+        id: "rule-1".into(),
+        full_id: "rule-1".into(),
+        enabled: true,
+        mode: "dynamic".into(),
+        condition: "on file change".into(),
+        action: "notify".into(),
+    });
+    // The MCP section reads the PanelStatus snapshot (mirrored from the
+    // wire sidebar by apply_snapshot); update it like the snapshot would.
+    app.panel_status.mcp_servers = 1;
+    app.panel_status.mcp_notification_hooks = 0;
+    terminal.draw(|f| app.render(f)).unwrap();
+    let text = buffer_text(terminal.backend().buffer());
+    assert!(text.contains("Triggers"), "{text}");
+    assert!(text.contains("Cron (session)"), "{text}");
+    assert!(text.contains("MCP"), "{text}");
+}

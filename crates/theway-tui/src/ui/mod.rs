@@ -233,6 +233,62 @@ impl PanelMenuState {
     }
 }
 
+/// Where the DAG status band renders (issue #38 + `/graph` menu): above
+/// the composer inside the scrollable feed (`ComposerTop`, the original
+/// placement) or inside the side panel under the Skills section
+/// (`SidePanel`). Persisted to `ui-state.toml`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum GraphPosition {
+    #[default]
+    ComposerTop,
+    SidePanel,
+}
+
+impl GraphPosition {
+    pub(crate) fn label(&self) -> &'static str {
+        match self {
+            Self::ComposerTop => "composer top",
+            Self::SidePanel => "side-panel",
+        }
+    }
+}
+
+/// `/graph` menu level: the root offers `clear` (only while the session has
+/// graph runs) and `position`; Position carries the two band placements.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GraphMenuLevel {
+    Root,
+    Position,
+}
+
+/// `/graph` menu state: `Some` = open, with the current level and cursor.
+/// The Position cursor live-previews the band placement; Enter commits,
+/// Esc/← steps back (reverting), Esc at the root cancels. `has_graphs` is
+/// snapshotted when the menu opens and decides whether `clear` is offered.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct GraphMenuState {
+    pub(crate) level: GraphMenuLevel,
+    pub(crate) cursor: usize,
+    pub(crate) has_graphs: bool,
+}
+
+impl GraphMenuState {
+    /// Root items depend on the session's graph runs: `[clear, position]`
+    /// when runs exist, `[position]` otherwise.
+    pub(crate) fn items(&self) -> Vec<&'static str> {
+        match self.level {
+            GraphMenuLevel::Root => {
+                if self.has_graphs {
+                    vec!["clear", "position"]
+                } else {
+                    vec!["position"]
+                }
+            }
+            GraphMenuLevel::Position => vec!["composer top", "side-panel"],
+        }
+    }
+}
+
 /// One interactive fork-picker row (issue #55): the 1-based number matches
 /// the daemon's `/fork <n>` numbering (1 = most recent user message) and the
 /// preview mirrors the daemon's ≤60-char listing (newlines flattened for
@@ -505,6 +561,17 @@ pub struct App {
     /// `(mode, position)` snapshot taken when the menu opened — restored
     /// when the menu is cancelled without committing.
     panel_menu_saved: Option<(SidePanelMode, SidePanelPosition)>,
+    /// DAG band placement (issue #38 + `/graph` menu): above the composer
+    /// (inside the scrollable feed) or inside the side panel under Skills.
+    /// Persisted to `ui-state.toml` on menu commit.
+    graph_position: GraphPosition,
+    /// `/graph` hierarchical menu: `Some` = open. Root offers `clear` (only
+    /// when the session has runs) + `position`; the Position cursor
+    /// live-previews the placement, Enter commits, Esc reverts/closes.
+    graph_menu: Option<GraphMenuState>,
+    /// `(position)` snapshot taken when the graph menu opened — restored on
+    /// cancel without committing.
+    graph_menu_saved: Option<GraphPosition>,
     /// Structured runtime-extension catalog/diagnostic popup. The data comes
     /// only from the transport snapshot; no extension code runs in the TUI.
     extension_view: bool,
