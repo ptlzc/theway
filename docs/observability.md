@@ -86,4 +86,4 @@ The observer worker emits `operation_started` and `operation_finished` tracing e
 
 ## Failure isolation
 
-Observation queue pressure, exporter construction failures, and export errors are logged but never enter agent control flow. Shutdown drains the queue and calls the OpenTelemetry SDK provider shutdown methods within bounded timeouts.
+Observation queue pressure, exporter construction failures, and export errors are logged but never enter agent control flow. The same events mark the shared observer status degraded, and `WireStatus.observability` carries the state into the client: the TUI appends `observer error` to the ready/status rule and shows the latest message in the busy band. A successful export clears the degraded state automatically. Shutdown drains the queue and calls the OpenTelemetry SDK provider shutdown methods within bounded timeouts.

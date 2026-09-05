@@ -86,4 +86,4 @@ observer worker 会在 target `theway::runtime` 下发出 `operation_started` �
 
 ## 故障隔离
 
-观测队列压力、导出器构建失败和导出错误只会记录日志，绝不进入 agent 控制流。关停时会在有界超时内排空队列并调用 OpenTelemetry SDK provider 的 shutdown 方法。
+观测队列压力、导出器构建失败和导出错误只会记录日志，绝不进入 agent 控制流。这些事件同时会把共享的 observer 状态标记为降级，`WireStatus.observability` 会把该状态带到客户端：TUI 在 ready/状态栏追加 `observer error`，并在 busy band 中显示最新消息。导出成功后会自动清除降级状态。关停时会在有界超时内排空队列并调用 OpenTelemetry SDK provider 的 shutdown 方法。
