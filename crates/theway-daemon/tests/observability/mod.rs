@@ -244,11 +244,9 @@ fn full_content_observer_sets_langfuse_attributes_on_spans() {
 #[tokio::test]
 async fn prometheus_endpoint_has_bounded_labels_and_exact_measurements() {
     let handle = TelemetryHandle::from_config(TelemetryConfig {
-        otlp_enabled: false,
-        otlp_metrics_enabled: false,
         metrics_addr: Some("127.0.0.1:0".parse().unwrap()),
         queue_capacity: 16,
-        full_content: false,
+        ..TelemetryConfig::default()
     })
     .await;
     assert!(handle.tracer_provider.is_none());
@@ -630,10 +628,18 @@ fn runtime_metrics_records_otel_paths_through_worker() {
 #[test]
 fn telemetry_config_from_env_detects_otlp_metrics_addr_and_queue_capacity() {
     let _guard = crate::test_env::ENV_LOCK.lock().unwrap();
+    let _theway_dir = crate::test_env::EnvGuard::set(
+        "THEWAY_DIR",
+        "/tmp/theway-observability-env-tests",
+    );
     let _endpoint = crate::test_env::EnvGuard::set("OTEL_EXPORTER_OTLP_ENDPOINT", "");
     let _traces = crate::test_env::EnvGuard::set(
         "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
         "http://127.0.0.1:4317",
+    );
+    let _headers = crate::test_env::EnvGuard::set(
+        "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+        "Authorization=Basic dGVzdA==",
     );
     let _metrics = crate::test_env::EnvGuard::set("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "");
     let _addr = crate::test_env::EnvGuard::set("THEWAY_METRICS_ADDR", "127.0.0.1:9876");
@@ -644,6 +650,19 @@ fn telemetry_config_from_env_detects_otlp_metrics_addr_and_queue_capacity() {
 
     assert!(config.otlp_enabled);
     assert!(!config.otlp_metrics_enabled);
+    assert_eq!(
+        config.otlp_traces_endpoint.as_deref(),
+        Some("http://127.0.0.1:4317")
+    );
+    assert_eq!(
+        config
+            .otlp_traces_headers
+            .as_ref()
+            .and_then(|headers| headers.get("Authorization"))
+            .map(String::as_str),
+        Some("Basic dGVzdA==")
+    );
+    assert_eq!(config.otlp_metrics_endpoint, None);
     assert_eq!(config.metrics_addr, Some("127.0.0.1:9876".parse().unwrap()));
     assert_eq!(config.queue_capacity, 123);
     assert!(config.full_content);
@@ -652,6 +671,10 @@ fn telemetry_config_from_env_detects_otlp_metrics_addr_and_queue_capacity() {
 #[test]
 fn telemetry_config_from_env_enables_metrics_exporter_with_metrics_endpoint() {
     let _guard = crate::test_env::ENV_LOCK.lock().unwrap();
+    let _theway_dir = crate::test_env::EnvGuard::set(
+        "THEWAY_DIR",
+        "/tmp/theway-observability-env-tests",
+    );
     let _endpoint = crate::test_env::EnvGuard::set("OTEL_EXPORTER_OTLP_ENDPOINT", "");
     let _traces = crate::test_env::EnvGuard::set("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "");
     let _metrics = crate::test_env::EnvGuard::set(
@@ -661,13 +684,21 @@ fn telemetry_config_from_env_enables_metrics_exporter_with_metrics_endpoint() {
 
     let config = TelemetryConfig::from_env();
 
-    assert!(config.otlp_enabled);
+    assert!(!config.otlp_enabled);
     assert!(config.otlp_metrics_enabled);
+    assert_eq!(
+        config.otlp_metrics_endpoint.as_deref(),
+        Some("http://127.0.0.1:4317")
+    );
 }
 
 #[test]
 fn telemetry_config_from_env_ignores_invalid_values() {
     let _guard = crate::test_env::ENV_LOCK.lock().unwrap();
+    let _theway_dir = crate::test_env::EnvGuard::set(
+        "THEWAY_DIR",
+        "/tmp/theway-observability-env-tests",
+    );
     let _endpoint = crate::test_env::EnvGuard::set("OTEL_EXPORTER_OTLP_ENDPOINT", "");
     let _traces = crate::test_env::EnvGuard::set("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "");
     let _metrics = crate::test_env::EnvGuard::set("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "");
@@ -679,9 +710,48 @@ fn telemetry_config_from_env_ignores_invalid_values() {
 
     assert!(!config.otlp_enabled);
     assert!(!config.otlp_metrics_enabled);
+    assert_eq!(config.otlp_traces_endpoint, None);
+    assert_eq!(config.otlp_metrics_endpoint, None);
     assert_eq!(config.metrics_addr, None);
     assert_eq!(config.queue_capacity, DEFAULT_QUEUE_CAPACITY);
     assert!(!config.full_content);
+}
+
+#[test]
+fn telemetry_config_reads_observability_env_file_as_fallback() {
+    let _guard = crate::test_env::ENV_LOCK.lock().unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        temp.path().join("observability.env"),
+        "# langfuse\n\
+         OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=\"https://lf.example/api/public/otel\"\n\
+         OTEL_EXPORTER_OTLP_TRACES_HEADERS=Authorization=Basic dGVzdA==\n\
+         THEWAY_OBSERVABILITY_FULL_CONTENT=true\n",
+    )
+    .unwrap();
+    let _theway_dir = crate::test_env::EnvGuard::set("THEWAY_DIR", temp.path().to_str().unwrap());
+    let _endpoint = crate::test_env::EnvGuard::set("OTEL_EXPORTER_OTLP_ENDPOINT", "");
+    let _traces = crate::test_env::EnvGuard::set("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "");
+    let _headers = crate::test_env::EnvGuard::set("OTEL_EXPORTER_OTLP_TRACES_HEADERS", "");
+    let _content = crate::test_env::EnvGuard::set("THEWAY_OBSERVABILITY_FULL_CONTENT", "");
+
+    let config = TelemetryConfig::from_env();
+
+    assert!(config.otlp_enabled);
+    assert!(!config.otlp_metrics_enabled);
+    assert_eq!(
+        config.otlp_traces_endpoint.as_deref(),
+        Some("https://lf.example/api/public/otel")
+    );
+    assert_eq!(
+        config
+            .otlp_traces_headers
+            .as_ref()
+            .and_then(|headers| headers.get("Authorization"))
+            .map(String::as_str),
+        Some("Basic dGVzdA==")
+    );
+    assert!(config.full_content);
 }
 
 #[test]

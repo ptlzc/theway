@@ -14,6 +14,7 @@ use std::time::Duration;
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::trace::{Span as _, Status, TraceContextExt, Tracer as _, TracerProvider as _};
 use opentelemetry::{Context, KeyValue};
+use opentelemetry_otlp::{WithExportConfig, WithHttpConfig};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::trace::{SdkTracer, SdkTracerProvider};
@@ -31,8 +32,12 @@ use runtime_metrics::{OtelMetrics, PrometheusMetrics, RuntimeMetrics};
 const DEFAULT_QUEUE_CAPACITY: usize = 4_096;
 const WORKER_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+/// Runtime env file read by [`TelemetryConfig::from_env`] as a fallback below
+/// the process environment. Lets launchers (TUI, workmate, scripts) pick up
+/// observability settings without inheriting shell exports.
+const OBSERVABILITY_ENV_FILE: &str = "observability.env";
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct TelemetryConfig {
     pub otlp_enabled: bool,
     /// Build the OTLP metric exporter. Enabled when the generic
@@ -40,6 +45,15 @@ pub struct TelemetryConfig {
     /// is set — a traces-only consumer (Langfuse) does not get a metric
     /// exporter pointed at the SDK default endpoint.
     pub otlp_metrics_enabled: bool,
+    /// Effective OTLP HTTP endpoint for spans (traces-specific env wins over
+    /// the generic endpoint; env wins over the runtime env file).
+    pub otlp_traces_endpoint: Option<String>,
+    /// Effective OTLP HTTP headers for spans.
+    pub otlp_traces_headers: Option<HashMap<String, String>>,
+    /// Effective OTLP HTTP endpoint for metrics.
+    pub otlp_metrics_endpoint: Option<String>,
+    /// Effective OTLP HTTP headers for metrics.
+    pub otlp_metrics_headers: Option<HashMap<String, String>>,
     pub metrics_addr: Option<SocketAddr>,
     pub queue_capacity: usize,
     /// Attach full input/output content to runtime observations so OTLP
@@ -51,23 +65,29 @@ pub struct TelemetryConfig {
 
 impl TelemetryConfig {
     pub fn from_env() -> Self {
-        let endpoint_set = |name: &str| {
+        let file = load_env_file();
+        let env_value = |name: &str| {
             std::env::var(name)
                 .ok()
-                .is_some_and(|endpoint| !endpoint.trim().is_empty())
+                .filter(|value| !value.trim().is_empty())
+                .or_else(|| file.get(name).cloned())
         };
-        let otlp_enabled = [
-            "OTEL_EXPORTER_OTLP_ENDPOINT",
-            "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
-            "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
-        ]
-        .iter()
-        .any(|name| endpoint_set(name));
-        let otlp_metrics_enabled = endpoint_set("OTEL_EXPORTER_OTLP_ENDPOINT")
-            || endpoint_set("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT");
-        let metrics_addr = std::env::var("THEWAY_METRICS_ADDR")
-            .ok()
-            .and_then(|value| match value.trim().parse() {
+        let otlp_traces_endpoint = env_value("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+            .or_else(|| env_value("OTEL_EXPORTER_OTLP_ENDPOINT"));
+        let otlp_metrics_endpoint = env_value("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")
+            .or_else(|| env_value("OTEL_EXPORTER_OTLP_ENDPOINT"));
+        let otlp_enabled = otlp_traces_endpoint.is_some();
+        let otlp_metrics_enabled = otlp_metrics_endpoint.is_some();
+        let otlp_traces_headers = parse_headers(
+            env_value("OTEL_EXPORTER_OTLP_TRACES_HEADERS")
+                .or_else(|| env_value("OTEL_EXPORTER_OTLP_HEADERS")),
+        );
+        let otlp_metrics_headers = parse_headers(
+            env_value("OTEL_EXPORTER_OTLP_METRICS_HEADERS")
+                .or_else(|| env_value("OTEL_EXPORTER_OTLP_HEADERS")),
+        );
+        let metrics_addr =
+            env_value("THEWAY_METRICS_ADDR").and_then(|value| match value.trim().parse() {
                 Ok(addr) => Some(addr),
                 Err(error) => {
                     tracing::warn!(
@@ -78,27 +98,76 @@ impl TelemetryConfig {
                     None
                 }
             });
-        let queue_capacity = std::env::var("THEWAY_OBSERVABILITY_QUEUE_CAPACITY")
-            .ok()
+        let queue_capacity = env_value("THEWAY_OBSERVABILITY_QUEUE_CAPACITY")
             .and_then(|value| value.parse::<usize>().ok())
             .filter(|capacity| *capacity > 0)
             .unwrap_or(DEFAULT_QUEUE_CAPACITY);
-        let full_content = std::env::var("THEWAY_OBSERVABILITY_FULL_CONTENT")
-            .ok()
-            .is_some_and(|value| {
-                matches!(
-                    value.trim().to_ascii_lowercase().as_str(),
-                    "1" | "true" | "yes" | "on"
-                )
-            });
+        let full_content = env_value("THEWAY_OBSERVABILITY_FULL_CONTENT").is_some_and(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        });
         Self {
             otlp_enabled,
             otlp_metrics_enabled,
+            otlp_traces_endpoint,
+            otlp_traces_headers,
+            otlp_metrics_endpoint,
+            otlp_metrics_headers,
             metrics_addr,
             queue_capacity,
             full_content,
         }
     }
+}
+
+/// Read `~/.theway/observability.env` (`$THEWAY_DIR` aware) as `KEY=value`
+/// fallback values. Process environment wins; malformed lines are ignored.
+fn load_env_file() -> HashMap<String, String> {
+    let path = theway_transport::client::base_dir().join(OBSERVABILITY_ENV_FILE);
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return HashMap::new();
+    };
+    let mut values = HashMap::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        if key.is_empty() {
+            continue;
+        }
+        let mut value = value.trim();
+        if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
+            value = &value[1..value.len() - 1];
+        }
+        values.insert(key.to_string(), value.to_string());
+    }
+    values
+}
+
+/// Parse OTLP header lists (`k1=v1,k2=v2`). Values may contain `=` (Basic auth
+/// tokens), so only the first `=` splits key from value; malformed entries are
+/// dropped.
+fn parse_headers(value: Option<String>) -> Option<HashMap<String, String>> {
+    let value = value?;
+    let mut headers = HashMap::new();
+    for pair in value.split(',') {
+        let Some((key, header_value)) = pair.trim().split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        let header_value = header_value.trim();
+        if !key.is_empty() && !header_value.is_empty() {
+            headers.insert(key.to_string(), header_value.to_string());
+        }
+    }
+    (!headers.is_empty()).then_some(headers)
 }
 
 pub struct TelemetryHandle {
@@ -116,21 +185,22 @@ impl TelemetryHandle {
 
     pub async fn from_config(config: TelemetryConfig) -> Self {
         let prometheus = PrometheusMetrics::new();
-        let (tracer_provider, meter_provider, tracer, otel_metrics) = if config.otlp_enabled {
-            match build_otel(config.otlp_metrics_enabled) {
-                Ok(parts) => parts,
-                Err(error) => {
-                    tracing::warn!(
-                        target: "theway::observability",
-                        %error,
-                        "OpenTelemetry export is disabled"
-                    );
-                    (None, None, None, None)
+        let (tracer_provider, meter_provider, tracer, otel_metrics) =
+            if config.otlp_enabled || config.otlp_metrics_enabled {
+                match build_otel(&config) {
+                    Ok(parts) => parts,
+                    Err(error) => {
+                        tracing::warn!(
+                            target: "theway::observability",
+                            %error,
+                            "OpenTelemetry export is disabled"
+                        );
+                        (None, None, None, None)
+                    }
                 }
-            }
-        } else {
-            (None, None, None, None)
-        };
+            } else {
+                (None, None, None, None)
+            };
         let metrics = Arc::new(RuntimeMetrics {
             prometheus,
             otel: otel_metrics,
@@ -259,7 +329,7 @@ impl DaemonRuntimeObserver {
 }
 
 fn build_otel(
-    metrics_enabled: bool,
+    config: &TelemetryConfig,
 ) -> anyhow::Result<(
     Option<SdkTracerProvider>,
     Option<SdkMeterProvider>,
@@ -273,19 +343,34 @@ fn build_otel(
             KeyValue::new("service.instance.id", uuid::Uuid::new_v4().to_string()),
         ])
         .build();
-    let span_exporter = opentelemetry_otlp::SpanExporter::builder()
-        .with_http()
-        .build()?;
-    let tracer_provider = SdkTracerProvider::builder()
-        .with_batch_exporter(span_exporter)
-        .with_resource(resource.clone())
-        .build();
-    let tracer = tracer_provider.tracer("theway-daemon");
+    let mut span_builder = opentelemetry_otlp::SpanExporter::builder().with_http();
+    if let Some(endpoint) = &config.otlp_traces_endpoint {
+        span_builder = span_builder.with_endpoint(endpoint.clone());
+    }
+    if let Some(headers) = &config.otlp_traces_headers {
+        span_builder = span_builder.with_headers(headers.clone());
+    }
+    let (tracer_provider, tracer) = if config.otlp_enabled {
+        let span_exporter = span_builder.build()?;
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_batch_exporter(span_exporter)
+            .with_resource(resource.clone())
+            .build();
+        let tracer = tracer_provider.tracer("theway-daemon");
+        (Some(tracer_provider), Some(tracer))
+    } else {
+        (None, None)
+    };
 
-    let (meter_provider, metrics) = if metrics_enabled {
-        let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
-            .with_http()
-            .build()?;
+    let (meter_provider, metrics) = if config.otlp_metrics_enabled {
+        let mut metric_builder = opentelemetry_otlp::MetricExporter::builder().with_http();
+        if let Some(endpoint) = &config.otlp_metrics_endpoint {
+            metric_builder = metric_builder.with_endpoint(endpoint.clone());
+        }
+        if let Some(headers) = &config.otlp_metrics_headers {
+            metric_builder = metric_builder.with_headers(headers.clone());
+        }
+        let metric_exporter = metric_builder.build()?;
         let reader = PeriodicReader::builder(metric_exporter).build();
         let meter_provider = SdkMeterProvider::builder()
             .with_reader(reader)
@@ -296,7 +381,7 @@ fn build_otel(
     } else {
         (None, None)
     };
-    Ok((Some(tracer_provider), meter_provider, Some(tracer), metrics))
+    Ok((tracer_provider, meter_provider, tracer, metrics))
 }
 
 struct ActiveOperation {
