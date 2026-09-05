@@ -138,3 +138,20 @@ separate_all = true
         assert_eq!(theme.feed.separator, None);
     }
 
+
+    #[test]
+    fn parse_thinking_section_sets_stats_format_template() {
+        let theme = Theme::parse(
+            r#"
+[thinking]
+stats_format = "in {in} / out {out} / {cps}c"
+"#,
+        );
+        assert_eq!(
+            theme.thinking_stats_format,
+            Some("in {in} / out {out} / {cps}c")
+        );
+
+        // Default is None (the built-in template).
+        assert_eq!(Theme::parse("").thinking_stats_format, None);
+    }

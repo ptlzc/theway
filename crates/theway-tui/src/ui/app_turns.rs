@@ -129,17 +129,19 @@ impl App {
                 self.follow = true;
             }
             "/help" => self.system_line(
-                "theway client · send messages to the thewayd daemon · local: /login /quit /clear /new /resume /model [provider:model-id] /session switch /status-panel · daemon: /goal /triggers /cron /session …",
+                "theway client · send messages to the thewayd daemon · local: /login /quit /clear /new /resume /model [provider:model-id] /session switch /side-panel · daemon: /goal /triggers /cron /session …",
             ),
             "/login" => self.login(args, terminal).await,
             "/session" if args.trim_start().starts_with("switch") => {
                 self.local_session_switch(args).await;
             }
-            // Issue #54: open the second-level panel-mode menu (show / hide /
-            // auto). Panel visibility is TUI-local state — nothing forwards
-            // to the daemon.
-            "/status-panel" => {
-                self.status_panel_menu = Some(0);
+            // Issue #54: open the hierarchical side-panel menu
+            // (Toggle → show/hide, Position → top/bottom/left/right with
+            // live preview). Panel visibility/placement is TUI-local state —
+            // nothing forwards to the daemon. `/status-panel` stays as an
+            // alias.
+            "/side-panel" | "/status-panel" => {
+                self.open_panel_menu();
             }
             // Issue #76: `/graph` controls the DAG status band. Bare `/graph`
             // toggles Show/Hidden; `/graph show` / `/graph hidden` set it

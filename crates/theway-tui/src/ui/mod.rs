@@ -37,6 +37,7 @@ mod app_goal;
 mod app_input;
 mod app_turns;
 pub mod dag_band;
+pub(crate) mod menu;
 mod pixel_loader;
 pub(crate) mod prompt_chrome;
 mod render_utils;
@@ -54,6 +55,8 @@ use theme::Theme;
 #[cfg(test)]
 pub(crate) use slash_commands::DAEMON_COMMANDS;
 pub(crate) use slash_commands::collect_slash_commands;
+
+pub(crate) use menu::{MenuBandData, MenuCrumb, MenuKey, map_menu_key, render_menu_band};
 
 pub use theway_transport::feed::FeedUpdate;
 
@@ -117,12 +120,16 @@ const RESUME_POPUP_MAX: usize = 8;
 const TRIGGER_PANEL_MIN_TOTAL_WIDTH: u16 = 100;
 /// Auto-mode width and the `show` menu option's width for the side panel
 /// (the Automation/trigger panel, issue #54).
-const TRIGGER_PANEL_WIDTH: u16 = 36;
+pub(crate) const TRIGGER_PANEL_WIDTH: u16 = 36;
+/// Fixed panel height for the top/bottom side-panel positions.
+pub(crate) const TRIGGER_PANEL_HEIGHT: u16 = 10;
 const TRIGGER_PANEL_RULE_LIMIT: usize = 5;
 const SIDE_PANEL_MIN_WIDTH: u16 = 24;
-/// Second-level `/status-panel` menu options (issue #54), in order:
-/// index 0 = show, 1 = hide, 2 = auto.
-const SIDE_PANEL_MENU_ITEMS: [&str; 3] = ["show", "hide", "auto"];
+/// `/side-panel` menu tree labels (issue #54): the root offers Toggle and
+/// Position; Toggle carries show/hide; Position carries the four sides.
+pub(crate) const PANEL_MENU_ROOT: [&str; 2] = ["Toggle", "Position"];
+pub(crate) const PANEL_MENU_TOGGLE: [&str; 2] = ["show", "hide"];
+pub(crate) const PANEL_MENU_POSITION: [&str; 4] = ["top", "bottom", "left", "right"];
 const CONTROL_PROMPT_TEXT_WIDTH: usize = 68;
 
 #[derive(Clone, Debug, Default)]
@@ -164,12 +171,66 @@ impl PanelStatus {
 /// Side-panel visibility mode (issue #54): `Auto` keeps the pre-existing
 /// content-driven rule (panel content + ≥100 columns → 36 wide); `Shown(w)`
 /// forces the panel at an explicit width; `Hidden` closes it. TUI-local
-/// in-memory state — never persisted, never sent to the daemon.
+/// state — persisted to `ui-state.toml` when changed through the
+/// `/side-panel` menu.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SidePanelMode {
     Auto,
     Shown(u16),
     Hidden,
+}
+
+/// Side-panel placement (issue #54 `/side-panel › Position`): the panel
+/// renders on one of the four edges of the content area; the feed reclaims
+/// the remaining space. Persisted to `ui-state.toml`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum SidePanelPosition {
+    #[default]
+    Right,
+    Left,
+    Top,
+    Bottom,
+}
+
+impl SidePanelPosition {
+    pub(crate) fn label(&self) -> &'static str {
+        match self {
+            Self::Top => "top",
+            Self::Bottom => "bottom",
+            Self::Left => "left",
+            Self::Right => "right",
+        }
+    }
+}
+
+/// `/side-panel` menu level: the root offers Toggle/Position; each entry
+/// descends into its own choice list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PanelMenuLevel {
+    Root,
+    Toggle,
+    Position,
+}
+
+/// `/side-panel` menu state: `Some` = open, `level` = current submenu,
+/// `cursor` = highlighted row in that level's list
+/// ([`PANEL_MENU_ROOT`]/[`PANEL_MENU_TOGGLE`]/[`PANEL_MENU_POSITION`]).
+/// Moving the cursor in a leaf level live-previews the layout; Enter commits,
+/// Esc/← steps back (reverting the preview), Esc at the root closes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PanelMenuState {
+    pub(crate) level: PanelMenuLevel,
+    pub(crate) cursor: usize,
+}
+
+impl PanelMenuState {
+    pub(crate) fn items(&self) -> &'static [&'static str] {
+        match self.level {
+            PanelMenuLevel::Root => &PANEL_MENU_ROOT,
+            PanelMenuLevel::Toggle => &PANEL_MENU_TOGGLE,
+            PanelMenuLevel::Position => &PANEL_MENU_POSITION,
+        }
+    }
 }
 
 /// One interactive fork-picker row (issue #55): the 1-based number matches
@@ -292,6 +353,11 @@ pub struct AppConfig {
     /// (issue #56) is NOT created at startup — the App creates + selects it
     /// right before the first submitted message, so an idle TUI leaves no
     /// empty conversation behind.
+    /// Test-only override for the persisted UI state: hermetic fixtures
+    /// pass `Some(Default::default())` so `App::new` never reads the
+    /// machine's real `ui-state.toml`.
+    #[cfg(test)]
+    pub(crate) ui_state: Option<crate::ui_state::UiState>,
     pub fresh_attach: bool,
     /// Issue #47: session id the SPAWNED daemon created at startup
     /// (`SessionSelection::New`). The App deletes it on exit when no message
@@ -426,12 +492,19 @@ pub struct App {
     /// DAG band animation tick (one per event-loop frame interval).
     dag_tick: u64,
     /// Side-panel visibility mode (issue #54): `Auto` by default; the
-    /// `/status-panel` menu changes it. Never persisted — panel visibility
-    /// is client-side state.
+    /// `/side-panel › Toggle` menu changes it. Persisted to `ui-state.toml`
+    /// on commit — panel visibility is client-side state.
     side_panel_mode: SidePanelMode,
-    /// Second-level `/status-panel` menu highlight (issue #54): `Some(i)` =
-    /// open, highlighting option `SIDE_PANEL_MENU_ITEMS[i]`.
-    status_panel_menu: Option<usize>,
+    /// Side-panel placement (issue #54 `/side-panel › Position`).
+    side_panel_position: SidePanelPosition,
+    /// `/side-panel` hierarchical menu: `Some` = open, with the current
+    /// level and highlighted row. Leaf-level cursor moves live-preview the
+    /// panel mode/position; Enter commits, Esc steps back (reverting), Esc
+    /// at the root closes.
+    panel_menu: Option<PanelMenuState>,
+    /// `(mode, position)` snapshot taken when the menu opened — restored
+    /// when the menu is cancelled without committing.
+    panel_menu_saved: Option<(SidePanelMode, SidePanelPosition)>,
     /// Structured runtime-extension catalog/diagnostic popup. The data comes
     /// only from the transport snapshot; no extension code runs in the TUI.
     extension_view: bool,

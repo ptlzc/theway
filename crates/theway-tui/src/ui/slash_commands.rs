@@ -114,6 +114,7 @@ pub(crate) const DAEMON_COMMANDS: &[&str] = &[
 /// session-list popup over `list_sessions`).
 const LOCAL_COMMANDS: &[&str] = &[
     "new",
+    "side-panel",
     "status-panel",
     "resume",
     "extensions",

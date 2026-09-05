@@ -2,22 +2,21 @@ impl App {
     fn render(&mut self, frame: &mut ratatui::Frame) {
         let area = self.theme.screen.inset(frame.area());
         let input_rows = self.composer_rows(area.width);
-        // Cascade model selector (issue #72): while the picker is open the
-        // input area gains an inline band (breadcrumb + active-column choices)
-        // above the prompt chrome instead of a centered popup. The band is
-        // 1 row for the breadcrumb plus up to `CASCADE_CHOICE_ROWS` rows for
-        // the active column's choices.
-        let cascade_rows: u16 = self
-            .model_picker
+        // Inline menu band (model selector issue #72 + `/side-panel` menu
+        // issue #54): while a hierarchical menu is open the input area gains
+        // a band above the prompt chrome (1 breadcrumb row + the active
+        // level's choices, capped at CASCADE_CHOICE_ROWS).
+        let menu_band = self.menu_band_data();
+        let band_rows = menu_band
             .as_ref()
-            .map(|p| 1 + p.active_len().clamp(1, CASCADE_CHOICE_ROWS))
-            .unwrap_or(0) as u16;
+            .map(|data| menu::band_rows(data.rows.len(), CASCADE_CHOICE_ROWS))
+            .unwrap_or(0);
         let chunks = Layout::vertical([
             Constraint::Min(1),
             // Blank spacer between the feed/output and the status bar.
             Constraint::Length(1),
             Constraint::Length(1), // status rule / single-cell Braille indicator
-            Constraint::Length(input_rows + 2 + cascade_rows), // input box + cascade band
+            Constraint::Length(input_rows + 2 + band_rows), // input box + menu band
         ])
         .split(area);
         let content_area = chunks[0];
@@ -25,24 +24,20 @@ impl App {
         let input_area = chunks[3];
         self.last_status_area = Some(status_area);
         self.last_input_area = Some(input_area);
-        // The cascade band occupies the top `cascade_rows` of the input area;
-        // the prompt chrome starts below it.
-        let (cascade_area, chrome_area) = if cascade_rows > 0 {
-            let split = Layout::vertical([Constraint::Length(cascade_rows), Constraint::Min(1)])
+        // The menu band occupies the top `band_rows` of the input area; the
+        // prompt chrome starts below it.
+        let (cascade_area, chrome_area) = if band_rows > 0 {
+            let split = Layout::vertical([Constraint::Length(band_rows), Constraint::Min(1)])
                 .split(input_area);
             (Some(split[0]), split[1])
         } else {
             (None, input_area)
         };
         self.last_cascade_area = cascade_area;
-        let (feed_area, trigger_area) = match self.side_panel_width(content_area.width) {
-            Some(width) => {
-                let cols = Layout::horizontal([Constraint::Min(40), Constraint::Length(width)])
-                    .split(content_area);
-                (cols[0], Some(cols[1]))
-            }
-            None => (content_area, None),
-        };
+        // Side panel (issue #54): the panel sits on the configured edge of
+        // the content area (right by default; the `/side-panel › Position`
+        // menu moves it and the feed reclaims the rest).
+        let (feed_area, trigger_area) = self.side_panel_layout(content_area);
         self.last_feed_area = Some(feed_area);
         // Issue #54: record the rendered panel rect for left-edge drag
         // hit-testing; cleared whenever the panel is not rendered so a stale
@@ -236,7 +231,7 @@ impl App {
             );
         }
         if let Some(area) = trigger_area {
-            self.render_trigger_panel(frame, area);
+            self.render_trigger_panel(frame, area, self.side_panel_position);
         }
 
         // Status rule: plain ready/offline rule when idle; a single-cell
@@ -345,113 +340,122 @@ impl App {
 
         // Completion popup, drawn above the input over the feed.
         self.render_completions(frame, status_area);
-        self.render_model_picker(frame);
+        self.render_menu_band_overlay(frame);
         self.render_control_plane_prompt(frame);
-        self.render_status_panel_menu(frame);
         self.render_fork_picker(frame);
         self.render_resume_picker(frame);
         self.render_extension_view(frame);
     }
 
-    /// Inline cascade band for the model selector (issue #72): a horizontal
-    /// breadcrumb row (`provider › model › thinking`) above the composer,
-    /// with the active column's choice window rendered as a vertical list
-    /// under its header. The user moves ←/→ between the columns (cascade) and
-    /// ↑/↓ within the active column; Enter commits from the thinking column.
-    fn render_model_picker(&self, frame: &mut ratatui::Frame) {
-        let Some(picker) = self.model_picker.as_ref() else {
+    /// Assemble the inline band payload for whichever hierarchical menu is
+    /// open (the model selector or the `/side-panel` menu). `None` = no
+    /// menu, no band.
+    fn menu_band_data(&self) -> Option<MenuBandData> {
+        if let Some(picker) = self.model_picker.as_ref() {
+            let data = picker.cascade(CASCADE_CHOICE_ROWS);
+            return Some(MenuBandData {
+                crumbs: vec![
+                    MenuCrumb {
+                        label: "provider",
+                        pinned: data.provider.to_string(),
+                    },
+                    MenuCrumb {
+                        label: "model",
+                        pinned: data.model.clone(),
+                    },
+                    MenuCrumb {
+                        label: "thinking",
+                        pinned: data.thinking.clone(),
+                    },
+                ],
+                active: match data.active {
+                    crate::model_picker::CascadeColumn::Provider => 0,
+                    crate::model_picker::CascadeColumn::Model => 1,
+                    crate::model_picker::CascadeColumn::Thinking => 2,
+                },
+                title: data.title.clone(),
+                rows: data.rows.clone(),
+            });
+        }
+        let menu = self.panel_menu.as_ref()?;
+        let items = menu.items();
+        let rows = items
+            .iter()
+            .enumerate()
+            .map(|(index, label)| (label.to_string(), index == menu.cursor))
+            .collect();
+        let crumbs = vec![MenuCrumb {
+            label: "side-panel",
+            pinned: match menu.level {
+                PanelMenuLevel::Root => String::new(),
+                PanelMenuLevel::Toggle => "Toggle".to_string(),
+                PanelMenuLevel::Position => "Position".to_string(),
+            },
+        }];
+        Some(MenuBandData {
+            active: 0,
+            crumbs,
+            title: String::new(),
+            rows,
+        })
+    }
+
+    /// Split the content area for the side panel (issue #54): the panel
+    /// occupies the configured edge (right by default; the `/side-panel ›
+    /// Position` menu moves it) and the feed reclaims the remaining space.
+    /// Returns `(feed_area, panel_area)`; `None` panel = fully hidden.
+    fn side_panel_layout(&self, area: Rect) -> (Rect, Option<Rect>) {
+        let Some(width) = self.side_panel_width(area.width) else {
+            return (area, None);
+        };
+        match self.side_panel_position {
+            SidePanelPosition::Right => {
+                let cols = Layout::horizontal([Constraint::Min(40), Constraint::Length(width)])
+                    .split(area);
+                (cols[0], Some(cols[1]))
+            }
+            SidePanelPosition::Left => {
+                let cols = Layout::horizontal([Constraint::Length(width), Constraint::Min(40)])
+                    .split(area);
+                (cols[1], Some(cols[0]))
+            }
+            SidePanelPosition::Top => {
+                let rows = Layout::vertical([
+                    Constraint::Length(TRIGGER_PANEL_HEIGHT),
+                    Constraint::Min(1),
+                ])
+                .split(area);
+                (rows[1], Some(rows[0]))
+            }
+            SidePanelPosition::Bottom => {
+                let rows = Layout::vertical([
+                    Constraint::Min(1),
+                    Constraint::Length(TRIGGER_PANEL_HEIGHT),
+                ])
+                .split(area);
+                (rows[0], Some(rows[1]))
+            }
+        }
+    }
+
+    /// Shared inline band renderer: whichever menu is open draws its
+    /// breadcrumb + choice list above the composer (issue #72/#54).
+    fn render_menu_band_overlay(&self, frame: &mut ratatui::Frame) {
+        let Some(data) = self.menu_band_data() else {
             return;
         };
         let Some(cascade_area) = self.last_cascade_area else {
             return;
         };
-        // `cascade()` windows the active column's choices (this is the active
-        // column at either the provider, model or thinking level).
-        let data = picker.cascade(CASCADE_CHOICE_ROWS);
-        let picker_theme = self.theme.picker;
-        let composer = &self.theme.composer;
-
-        // Transparent band (composer background removed): the choices render
-        // over the feed with only fg colors.
-        frame.render_widget(Clear, cascade_area);
-
-        // Breadcrumb row: the three pinned labels, the active one accented.
-        let breadcrumb = [
-            ("provider", data.provider.as_str()),
-            ("model", data.model.as_str()),
-            ("thinking", data.thinking.as_str()),
-        ];
-        let breadcrumb_y = cascade_area.y;
-        let is_active = |name: &str| {
-            matches!(
-                (name, data.active),
-                ("provider", crate::model_picker::CascadeColumn::Provider)
-                    | ("model", crate::model_picker::CascadeColumn::Model)
-                    | ("thinking", crate::model_picker::CascadeColumn::Thinking)
-            )
-        };
-        let crumb_text = breadcrumb
-            .iter()
-            .map(|(name, pinned)| {
-                let crumb = format!("{name} › {pinned}");
-                if is_active(name) {
-                    format!("❯ {crumb}")
-                } else {
-                    crumb
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("   ");
-        let crumb_w = cascade_area.width as usize;
-        let crumb_style = Style::default().fg(composer.info_text);
-        frame.buffer_mut().set_string(
-            cascade_area.x,
-            breadcrumb_y,
-            theway_transport::feed::truncate_chars(&crumb_text, crumb_w),
-            crumb_style,
+        render_menu_band(
+            frame,
+            cascade_area,
+            &data,
+            &self.theme.picker,
+            &self.theme.composer,
         );
-
-        // The active column's choices, rendered as a vertical list below the
-        // breadcrumb, left-padded past the ❯ marker of the breadcrumb.
-        let list_y = breadcrumb_y + 1;
-        let list_x = cascade_area.x + 2;
-        let list_w = cascade_area.width.saturating_sub(2) as usize;
-        let mut y = list_y;
-        for (text, is_cursor) in &data.rows {
-            if y >= cascade_area.bottom() {
-                break;
-            }
-            let style = if *is_cursor {
-                Style::default()
-                    .fg(picker_theme.highlight_fg)
-                    .bg(picker_theme.highlight_bg)
-                    .add_modifier(ratatui::style::Modifier::BOLD)
-            } else {
-                Style::default().fg(picker_theme.fg)
-            };
-            let line = format!("{text}  ({})", data.title);
-            frame.buffer_mut().set_string(
-                list_x,
-                y,
-                theway_transport::feed::truncate_chars(&line, list_w),
-                style,
-            );
-            y += 1;
-        }
-        if y == list_y {
-            // Empty active column: show a single dim hint so the band is not
-            // blank.
-            frame.buffer_mut().set_string(
-                list_x,
-                list_y,
-                theway_transport::feed::truncate_chars(
-                    "(no choices — use /model <provider:model>)",
-                    list_w,
-                ),
-                Style::default().fg(picker_theme.dim),
-            );
-        }
     }
+
 
     fn render_control_plane_prompt(&self, frame: &mut ratatui::Frame) {
         let Some(prompt) = self.control_plane_prompt.as_ref() else {
@@ -502,43 +506,6 @@ impl App {
             Paragraph::new(text).block(block).wrap(Wrap { trim: true }),
             rect,
         );
-    }
-
-    /// Second-level `/status-panel` menu (issue #54): a centered popup with
-    /// the three mode options (`show` / `hide` / `auto`); the highlighted
-    /// option renders with the popup's cyan background. Keys are handled in
-    /// `app_input::handle_status_panel_menu_key`.
-    fn render_status_panel_menu(&self, frame: &mut ratatui::Frame) {
-        let Some(selected) = self.status_panel_menu else {
-            return;
-        };
-        let area = self.theme.screen.inset(frame.area());
-        let width = area.width.clamp(20, 34);
-        let height = SIDE_PANEL_MENU_ITEMS.len() as u16 + 3; // items + hint + borders
-        let rect = centered_rect(area, width, height);
-        let picker_theme = self.theme.picker;
-        let mut text = Vec::with_capacity(SIDE_PANEL_MENU_ITEMS.len() + 1);
-        for (i, label) in SIDE_PANEL_MENU_ITEMS.iter().enumerate() {
-            let style = if i == selected {
-                Style::default()
-                    .fg(picker_theme.highlight_fg)
-                    .bg(picker_theme.highlight_bg)
-            } else {
-                Style::default().fg(picker_theme.fg)
-            };
-            text.push(Line::styled(format!(" {label} "), style));
-        }
-        text.push(Line::styled(
-            "↑↓ move · Enter apply · Esc cancel",
-            Style::default().fg(picker_theme.dim),
-        ));
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(" status panel ")
-            .title_style(Style::default().fg(picker_theme.title))
-            .border_style(Style::default().fg(picker_theme.fg));
-        frame.render_widget(Clear, rect);
-        frame.render_widget(Paragraph::new(text).block(block), rect);
     }
 
     /// Interactive `/fork` picker (issue #55): a centered popup listing the

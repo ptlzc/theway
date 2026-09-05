@@ -335,3 +335,106 @@ async fn snapshot_rebuilds_feed_and_resyncs_busy_panel() {
     assert!(!text.contains("banner"), "{text}");
     assert!(!app.follow, "snapshot append must not re-enable follow");
 }
+
+/// Side-panel placement (issue #54 `/side-panel › Position`): the panel
+/// renders on the configured edge and the feed reclaims the rest. Right =
+/// feed left / panel right (default); Left mirrors it; Top/Bottom put the
+/// panel full-width above/below the feed.
+#[tokio::test]
+async fn side_panel_position_places_panel_on_each_edge() {
+    let (mut app, _rx) = test_app().await;
+    app.theme.screen.margin_left = 0;
+    app.side_panel_mode = super::SidePanelMode::Shown(36);
+    let backend = TestBackend::new(120, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    // Right (default): feed on the left, panel on the right at width 36.
+    app.side_panel_position = super::SidePanelPosition::Right;
+    terminal.draw(|f| app.render(f)).unwrap();
+    let panel = app.last_panel_area.expect("right panel renders");
+    let feed = app.last_feed_area.expect("feed renders");
+    assert_eq!(panel.width, 36);
+    assert_eq!(panel.height, feed.height);
+    assert_eq!(panel.x, feed.right());
+    assert_eq!(feed.width, 120 - 36);
+
+    // Left: panel on the left edge, feed to its right.
+    app.side_panel_position = super::SidePanelPosition::Left;
+    terminal.draw(|f| app.render(f)).unwrap();
+    let panel = app.last_panel_area.expect("left panel renders");
+    let feed = app.last_feed_area.expect("feed renders");
+    assert_eq!(panel.x, 0);
+    assert_eq!(feed.x, panel.right());
+    assert_eq!(feed.width, 120 - 36);
+
+    // Top: full-width panel above the feed, 10 rows tall.
+    app.side_panel_position = super::SidePanelPosition::Top;
+    terminal.draw(|f| app.render(f)).unwrap();
+    let panel = app.last_panel_area.expect("top panel renders");
+    let feed = app.last_feed_area.expect("feed renders");
+    assert_eq!(panel.width, 120);
+    assert_eq!(panel.height, super::TRIGGER_PANEL_HEIGHT);
+    assert_eq!(feed.y, panel.bottom());
+    assert_eq!(panel.y, 0);
+
+    // Bottom: full-width panel under the feed.
+    app.side_panel_position = super::SidePanelPosition::Bottom;
+    terminal.draw(|f| app.render(f)).unwrap();
+    let panel = app.last_panel_area.expect("bottom panel renders");
+    let feed = app.last_feed_area.expect("feed renders");
+    assert_eq!(panel.width, 120);
+    assert_eq!(panel.height, super::TRIGGER_PANEL_HEIGHT);
+    assert_eq!(feed.bottom(), panel.y);
+}
+
+/// The panel border runs along the edge facing the feed for every position:
+/// LEFT for Right, RIGHT for Left, BOTTOM for Top, TOP for Bottom.
+#[tokio::test]
+async fn side_panel_border_faces_the_feed_per_position() {
+    use ratatui::widgets::Borders;
+    let (mut app, _rx) = test_app().await;
+    app.theme.screen.margin_left = 0;
+    app.side_panel_mode = super::SidePanelMode::Shown(36);
+    let backend = TestBackend::new(120, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let cases = [
+        (super::SidePanelPosition::Right, Borders::LEFT),
+        (super::SidePanelPosition::Left, Borders::RIGHT),
+        (super::SidePanelPosition::Top, Borders::BOTTOM),
+        (super::SidePanelPosition::Bottom, Borders::TOP),
+    ];
+    for (position, want) in cases {
+        app.side_panel_position = position;
+        terminal.draw(|f| app.render(f)).unwrap();
+        let panel = app.last_panel_area.expect("panel renders");
+        let buf = terminal.backend().buffer();
+        // Vertical borders (LEFT/RIGHT): the border column is a glyph on
+        // every row. Horizontal borders (TOP/BOTTOM): the border row is a
+        // '─' line (interrupted by the title at the left edge).
+        let has_border = match want {
+            Borders::LEFT | Borders::RIGHT => {
+                let x = if want == Borders::LEFT {
+                    panel.x
+                } else {
+                    panel.right() - 1
+                };
+                (0..panel.height).any(|dy| {
+                    let y = panel.y + dy;
+                    y < buf.area().height
+                        && x < buf.area().width
+                        && buf[(x, y)].symbol() != " "
+                })
+            }
+            _ => {
+                let y = if want == Borders::TOP {
+                    panel.y
+                } else {
+                    panel.bottom() - 1
+                };
+                (panel.x..panel.right()).any(|x| buf[(x, y)].symbol() == "─")
+            }
+        };
+        assert!(has_border, "position {position:?} border {want:?} missing");
+    }
+}
+

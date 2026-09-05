@@ -21,6 +21,12 @@ pub struct Theme {
     pub tool_error_bg: Option<Color>,
     pub thinking_text: Color,
     pub thinking_bg: Option<Color>,
+    /// Optional template for the thinking stats line (`[thinking]
+    /// stats_format` in theme.toml, same mechanism as the statusbar's
+    /// `[statusbar] stats_format`). Supports `{cps}`, `{in}`, `{out}`
+    /// placeholders; `None` uses the built-in default
+    /// (`c/s: {cps} · in: {in} · out: {out}`).
+    pub thinking_stats_format: Option<&'static str>,
     // ── screen viewport ────────────────────────────────────────────────────
     /// `[screen]` viewport inset: keeps the whole UI clear of the terminal
     /// edges (left/right breathing room especially).
@@ -62,6 +68,7 @@ impl Default for Theme {
             tool_error_bg: TOOL_ERROR_BG_DEFAULT,
             thinking_text: THINKING_TEXT_DEFAULT,
             thinking_bg: THINKING_BG_DEFAULT,
+            thinking_stats_format: None,
             screen: ScreenStyle::default(),
             user: BlockTheme::default(),
             assistant: BlockTheme::default(),
@@ -119,6 +126,14 @@ impl Theme {
                 "screen" => apply_screen_section(&mut theme.screen, section_table),
                 "composer" => apply_composer_section(&mut theme.composer, section_table, &palette),
                 "blocks" => apply_blocks_section(&mut theme, section_table, &palette),
+                "thinking" => apply_style_section(
+                    "thinking",
+                    section_table,
+                    &palette,
+                    &mut [],
+                    &mut [],
+                    &mut [("stats_format", &mut theme.thinking_stats_format)],
+                ),
                 "feed" => apply_feed_section(&mut theme.feed, section_table, &palette),
                 "statusbar" => apply_style_section(
                     "statusbar",

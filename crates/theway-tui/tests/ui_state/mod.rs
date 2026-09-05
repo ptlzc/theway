@@ -1,0 +1,79 @@
+//! Tests for `ui_state.rs`: the TUI display-switch persistence file.
+
+use super::*;
+
+#[test]
+fn parse_roundtrips_all_fields() {
+    let state = parse(
+        r#"
+[feed]
+thinking_mode = "peek"
+
+[panel]
+mode = "shown"
+position = "left"
+"#,
+    );
+    assert_eq!(state.thinking_mode, Some(crate::feed_render::ThinkingMode::Peek));
+    assert_eq!(state.panel_mode, Some(crate::ui::SidePanelMode::Shown(crate::ui::TRIGGER_PANEL_WIDTH)));
+    assert_eq!(state.panel_position, Some(crate::ui::SidePanelPosition::Left));
+}
+
+#[test]
+fn parse_unknown_values_fall_back_to_none() {
+    let state = parse(
+        r#"
+[feed]
+thinking_mode = "banana"
+
+[panel]
+mode = "wide"
+position = "diagonal"
+"#,
+    );
+    assert_eq!(state, UiState::default());
+}
+
+#[test]
+fn parse_missing_file_is_default() {
+    let state = parse("");
+    assert_eq!(state, UiState::default());
+}
+
+#[test]
+fn render_emits_only_set_fields() {
+    let state = UiState {
+        thinking_mode: Some(crate::feed_render::ThinkingMode::Hidden),
+        panel_mode: Some(crate::ui::SidePanelMode::Hidden),
+        panel_position: None,
+    };
+    let text = render(&state);
+    assert!(text.contains("[feed]\nthinking_mode = \"hidden\""));
+    assert!(text.contains("[panel]\nmode = \"hidden\""));
+    assert!(!text.contains("position"));
+    // Rendered output parses back to the same state.
+    assert_eq!(parse(&text), state);
+}
+
+#[test]
+fn save_and_load_roundtrip() {
+    let dir = std::env::temp_dir().join(format!("theway-ui-state-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("ui-state.toml");
+    let _ = std::fs::remove_file(&path);
+
+    let state = UiState {
+        thinking_mode: Some(crate::feed_render::ThinkingMode::Peek),
+        panel_mode: Some(crate::ui::SidePanelMode::Shown(36)),
+        panel_position: Some(crate::ui::SidePanelPosition::Top),
+    };
+    save_to(&path, &state).unwrap();
+    assert_eq!(load_from(&path), state);
+
+    // Empty state removes the file so stale choices never resurrect.
+    save_to(&path, &UiState::default()).unwrap();
+    assert!(!path.exists());
+    assert_eq!(load_from(&path), UiState::default());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

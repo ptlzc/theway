@@ -84,14 +84,6 @@ impl ModelPickerState {
         }
     }
 
-    /// Number of choices in the *active* cascade column (issue #72). Used by
-    /// the renderer to size the inline band: the band is a single breadcrumb
-    /// row plus this many choice rows (capped by the caller). Empty catalog →
-    /// 0 (band degrades to just the breadcrumb).
-    pub fn active_len(&self) -> usize {
-        self.len()
-    }
-
     pub fn up(&mut self) {
         self.cursor = self.cursor.saturating_sub(1);
     }

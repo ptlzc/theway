@@ -1,12 +1,25 @@
 impl App {
-    fn render_trigger_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+    fn render_trigger_panel(
+        &mut self,
+        frame: &mut ratatui::Frame,
+        area: Rect,
+        position: SidePanelPosition,
+    ) {
         let lines =
             self.trigger_panel_lines(area.width.saturating_sub(2) as usize, area.height as usize);
         // Issue #103: snapshot the selectable lines for mouse selection.
         self.panel_select_lines = lines.clone();
+        // The panel sits on the configured edge: its border runs along the
+        // edge facing the feed (issue #54 `/side-panel › Position`).
+        let borders = match position {
+            SidePanelPosition::Right => Borders::LEFT,
+            SidePanelPosition::Left => Borders::RIGHT,
+            SidePanelPosition::Top => Borders::BOTTOM,
+            SidePanelPosition::Bottom => Borders::TOP,
+        };
         let panel = Paragraph::new(lines).block(
             Block::default()
-                .borders(Borders::LEFT)
+                .borders(borders)
                 .padding(Padding::left(1))
                 .title(" Automation ")
                 .border_style(Style::default().fg(self.theme.sidebar.fg))

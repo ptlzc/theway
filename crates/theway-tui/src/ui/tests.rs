@@ -160,6 +160,7 @@ async fn test_app_with_sessions(
         registry: crate::local_commands::local_registry(),
         pending_images: vec![],
         color_level: theway_markdown::ColorLevel::TrueColor,
+        ui_state: Some(Default::default()),
         fresh_attach,
         auto_session: None,
     });
@@ -465,6 +466,11 @@ async fn busy_status_shows_braille_spinner() {
 include!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/tests/ui/unit/status.rs"
+));
+
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/ui/unit/menu.rs"
 ));
 include!(concat!(
     env!("CARGO_MANIFEST_DIR"),

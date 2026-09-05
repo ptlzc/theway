@@ -24,6 +24,16 @@ impl App {
                 .map(|command| format!("/ext:{}", command.name)),
         );
         let completer = SlashCompleter::from_commands(commands);
+        // UI state (issue #54): the user's persisted Ctrl+O thinking-mode
+        // choice and `/side-panel` panel selections load at startup.
+        #[cfg(test)]
+        let ui_state = config.ui_state.unwrap_or_else(crate::ui_state::load);
+        #[cfg(not(test))]
+        let ui_state = crate::ui_state::load();
+        let theme = Theme::load();
+        let thinking_mode = ui_state.thinking_mode.unwrap_or_default();
+        let side_panel_mode = ui_state.panel_mode.unwrap_or(SidePanelMode::Auto);
+        let side_panel_position = ui_state.panel_position.unwrap_or_default();
         Self {
             client: config.client,
             connector: config.connector,
@@ -61,10 +71,10 @@ impl App {
             follow: true,
             scroll_repeat: 0,
             scroll_repeat_up: None,
-            thinking_mode: crate::feed_render::ThinkingMode::Full,
+            thinking_mode,
             tools_expanded: false,
             color_level: config.color_level,
-            theme: Theme::load(),
+            theme,
             last_runtime_revision: initial_runtime_revision,
             feed_cache: crate::feed_cache::FeedRenderCache::new(),
             last_viewport_h: 1,
@@ -81,8 +91,10 @@ impl App {
             spinner: pixel_loader::RainbowSpinner::new(),
             dag_meters: std::collections::HashMap::new(),
             dag_tick: 0,
-            side_panel_mode: SidePanelMode::Auto,
-            status_panel_menu: None,
+            side_panel_mode,
+            side_panel_position,
+            panel_menu: None,
+            panel_menu_saved: None,
             extension_view: false,
             fork_picker: None,
             resume_picker: None,

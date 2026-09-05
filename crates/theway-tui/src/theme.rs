@@ -3,7 +3,9 @@
 //!
 //! [`Theme::load`] parses `${THEWAY_DIR:-$HOME/.theway}/theme.toml` once at
 //! startup. Sections: `[colors]` roles, `[blocks.<kind>]` layout,
-//! `[composer]` chrome, `[feed]` vertical rhythm, `[palette]` named colors.
+//! `[composer]` chrome, `[feed]` vertical rhythm, `[palette]` named colors,
+//! `[thinking] stats_format` (thinking stats-line template, same mechanism
+//! as `[statusbar] stats_format`).
 //! [`Theme::default`] mirrors the hardcoded tokyonight consts in
 //! [`crate::feed_render`] / [`crate::ui::prompt_chrome`] exactly, so a build
 //! without a theme file renders identically to the pre-theme build.

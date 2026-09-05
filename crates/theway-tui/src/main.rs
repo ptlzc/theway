@@ -31,6 +31,7 @@ mod startup;
 mod template_scan;
 mod tui_docs;
 pub mod ui;
+mod ui_state;
 
 use std::io::IsTerminal as _;
 

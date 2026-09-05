@@ -231,9 +231,27 @@ fn human_count(n: u64) -> String {
     }
 }
 
+/// Default thinking stats template: `{cps}` = chars/sec throughput, `{in}` /
+/// `{out}` = last-turn input/output tokens (human format).
+/// Can be overridden with `[thinking] stats_format = "…"` in `theme.toml` —
+/// the same mechanism as the statusbar's `[statusbar] stats_format`.
+pub(crate) const DEFAULT_THINKING_STATS_TEMPLATE: &str = "c/s: {cps} · in: {in} · out: {out}";
+
+/// Render the thinking stats right-hand segment from a configurable
+/// template. Supported placeholders: `{cps}`, `{in}`, `{out}`.
+fn thinking_stats_segment(template: Option<&str>, opts: &FeedRenderOptions) -> String {
+    let template = template.unwrap_or(DEFAULT_THINKING_STATS_TEMPLATE);
+    let cps_text = (opts.thinking_cps.round() as u64).to_string();
+    template
+        .replace("{cps}", &cps_text)
+        .replace("{in}", &human_count(opts.thinking_input_tokens))
+        .replace("{out}", &human_count(opts.thinking_output_tokens))
+}
+
 /// Build the thinking stats line for `chars` characters of thinking text:
 /// char count (human format) on the left, `c/s` throughput + last-turn
-/// input/output tokens on the right, right aligned to the content width.
+/// input/output tokens on the right (theme-configurable via
+/// [`DEFAULT_THINKING_STATS_TEMPLATE`]), right aligned to the content width.
 /// Shared by the one-shot renderer and the streaming cache so both stay
 /// byte-identical.
 pub(crate) fn thinking_stats_line(
@@ -242,13 +260,7 @@ pub(crate) fn thinking_stats_line(
     width: usize,
 ) -> Line<'static> {
     let left = format!("{TOOL_PREFIX}thinking · {} char", human_count(chars as u64));
-    let cps = opts.thinking_cps.round() as u64;
-    let right = format!(
-        "c/s: {} · in: {} · out: {}",
-        cps,
-        human_count(opts.thinking_input_tokens),
-        human_count(opts.thinking_output_tokens)
-    );
+    let right = thinking_stats_segment(opts.theme.thinking_stats_format, opts);
     let left_w = unicode_width::UnicodeWidthStr::width(left.as_str());
     let right_w = unicode_width::UnicodeWidthStr::width(right.as_str());
     let pad = width.saturating_sub(left_w + right_w).max(1);

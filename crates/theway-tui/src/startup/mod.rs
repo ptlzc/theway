@@ -248,6 +248,8 @@ pub(crate) async fn run_repl(
         registry: crate::local_commands::local_registry(),
         pending_images: cli.image.clone(),
         color_level: theway_markdown::get_color_level(),
+        #[cfg(test)]
+        ui_state: None,
         fresh_attach,
         auto_session,
     });

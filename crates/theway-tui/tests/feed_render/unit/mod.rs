@@ -346,6 +346,30 @@
     }
 
     #[test]
+    fn thinking_stats_line_uses_theme_template_when_configured() {
+        let feed = feed_with(&[WireFeedBlock::Thinking {
+            text: "x".repeat(1200),
+            timestamp: None,
+        }]);
+        let mut theme = Theme::default();
+        theme.thinking_stats_format = Some("in: {in} · out: {out} · {cps} c/s");
+        let opts = FeedRenderOptions {
+            thinking_mode: ThinkingMode::Full,
+            thinking_cps: 84.0,
+            thinking_input_tokens: 57_100,
+            thinking_output_tokens: 1_200,
+            theme,
+            ..Default::default()
+        };
+        let flat = flat(&super::lines(&feed, 80, &opts));
+        // The left segment (char count) is unchanged; the right segment is
+        // the substituted theme template.
+        assert!(flat.contains("⏵ thinking · 1.2k char"), "{flat}");
+        assert!(flat.contains("in: 57.1k · out: 1.2k · 84 c/s"), "{flat}");
+        assert!(!flat.contains("c/s: 84 · in:"), "default template must be replaced: {flat}");
+    }
+
+    #[test]
     fn feed_render_options_defaults() {
         let opts = FeedRenderOptions::default();
         assert_eq!(opts.thinking_mode, ThinkingMode::default());

@@ -45,9 +45,9 @@ impl App {
             }
             return Ok(());
         }
-        // Second-level `/status-panel` menu (issue #54): modal — it consumes
-        // every key until Enter applies the highlighted mode or Esc cancels.
-        if self.handle_status_panel_menu_key(&key) {
+        // `/side-panel` hierarchical menu (issue #54): modal — it consumes
+        // every key until Enter commits a leaf choice, Esc closes.
+        if self.handle_panel_menu_key(&key) {
             return Ok(());
         }
         // Interactive `/fork` picker (issue #55): modal — every key goes to
@@ -129,7 +129,12 @@ impl App {
             KeyCode::Char('m') if alt => {
                 self.open_model_picker();
             }
-            KeyCode::Char('o') if ctrl => self.cycle_thinking_mode(),
+            KeyCode::Char('o') if ctrl => {
+                self.cycle_thinking_mode();
+                // Issue #54: Ctrl+O's last selection persists across
+                // restarts (ui-state.toml).
+                self.persist_ui_state();
+            }
             KeyCode::Char('t') if ctrl => self.toggle_tool_outputs(),
             KeyCode::Tab => self.cycle_completion(),
             KeyCode::Up if !self.completions.is_empty() => self.completion_prev(),
@@ -162,44 +167,152 @@ impl App {
         Ok(())
     }
 
-    /// `/status-panel` menu keys (issue #54): Up/Down move the highlight
-    /// over `show` / `hide` / `auto`, Enter applies the highlighted mode
-    /// (show → `Shown(36)`, hide → `Hidden`, auto → `Auto`) and closes the
-    /// menu, Esc cancels. Returns `true` (and consumes the key) whenever the
-    /// menu is open — the menu is modal.
-    pub(super) fn handle_status_panel_menu_key(&mut self, key: &KeyEvent) -> bool {
-        let Some(idx) = self.status_panel_menu else {
+    /// `/side-panel` menu keys (issue #54): Up/Down move the highlight
+    /// within the current level; Enter descends into Toggle/Position or
+    /// commits the highlighted leaf choice; Esc/← steps back (reverting the
+    /// live preview), Esc at the root cancels; Ctrl-C cancels outright.
+    /// Leaf-level cursor moves live-preview the panel mode/position so the
+    /// layout changes are visible before committing. Returns `true` (and
+    /// consumes the key) whenever the menu is open — the menu is modal.
+    pub(super) fn handle_panel_menu_key(&mut self, key: &KeyEvent) -> bool {
+        let Some(state) = self.panel_menu else {
             return false;
         };
-        match key.code {
-            KeyCode::Up => {
-                self.status_panel_menu = Some(idx.saturating_sub(1));
+        if key.kind == KeyEventKind::Release {
+            return true;
+        }
+        let items = state.items();
+        match super::map_menu_key(key) {
+            super::MenuKey::Up => {
+                let cursor = state.cursor.saturating_sub(1);
+                self.panel_menu = Some(super::PanelMenuState { cursor, ..state });
+                self.apply_panel_preview();
             }
-            KeyCode::Down => {
-                self.status_panel_menu = Some(
-                    idx.saturating_add(1)
-                        .min(super::SIDE_PANEL_MENU_ITEMS.len() - 1),
-                );
+            super::MenuKey::Down => {
+                let cursor = state.cursor.saturating_add(1).min(items.len() - 1);
+                self.panel_menu = Some(super::PanelMenuState { cursor, ..state });
+                self.apply_panel_preview();
             }
-            KeyCode::Enter => {
-                self.status_panel_menu = None;
-                let (mode, label) = match idx {
-                    0 => (
-                        super::SidePanelMode::Shown(super::TRIGGER_PANEL_WIDTH),
-                        "shown",
-                    ),
-                    1 => (super::SidePanelMode::Hidden, "hidden"),
-                    _ => (super::SidePanelMode::Auto, "auto"),
-                };
-                self.side_panel_mode = mode;
-                self.system_line(format!("status panel: {label}"));
-            }
-            KeyCode::Esc => {
-                self.status_panel_menu = None;
-            }
+            super::MenuKey::Enter => match state.level {
+                super::PanelMenuLevel::Root => {
+                    // Descend into Toggle (cursor 0) or Position (cursor 1).
+                    let level = match state.cursor {
+                        0 => super::PanelMenuLevel::Toggle,
+                        _ => super::PanelMenuLevel::Position,
+                    };
+                    self.panel_menu = Some(super::PanelMenuState { level, cursor: 0 });
+                    self.apply_panel_preview();
+                }
+                super::PanelMenuLevel::Toggle | super::PanelMenuLevel::Position => {
+                    self.commit_panel_menu();
+                }
+            },
+            super::MenuKey::Back | super::MenuKey::Left => match state.level {
+                super::PanelMenuLevel::Root => self.cancel_panel_menu(),
+                _ => {
+                    self.panel_menu = Some(super::PanelMenuState {
+                        level: super::PanelMenuLevel::Root,
+                        cursor: state.cursor.min(1),
+                    });
+                    self.restore_panel_snapshot();
+                }
+            },
+            super::MenuKey::Close => self.cancel_panel_menu(),
             _ => {}
         }
         true
+    }
+
+    /// Open the `/side-panel` menu at its root, snapshotting the current
+    /// mode/position for revert. Opening it closes the model picker (and
+    /// vice versa) so exactly one menu owns the inline band.
+    pub(super) fn open_panel_menu(&mut self) {
+        self.model_picker = None;
+        self.last_cascade_area = None;
+        if self.panel_menu.is_some() {
+            return;
+        }
+        self.panel_menu_saved = Some((self.side_panel_mode, self.side_panel_position));
+        self.panel_menu = Some(super::PanelMenuState {
+            level: super::PanelMenuLevel::Root,
+            cursor: 0,
+        });
+    }
+
+    /// Live preview: mirror the highlighted leaf choice into the real panel
+    /// state so the layout updates on the next frame. Position previews
+    /// force the panel visible (a hidden panel cannot show a position).
+    fn apply_panel_preview(&mut self) {
+        let Some(state) = self.panel_menu else {
+            return;
+        };
+        match state.level {
+            super::PanelMenuLevel::Toggle => {
+                self.side_panel_mode = if state.cursor == 0 {
+                    super::SidePanelMode::Shown(super::TRIGGER_PANEL_WIDTH)
+                } else {
+                    super::SidePanelMode::Hidden
+                };
+            }
+            super::PanelMenuLevel::Position => {
+                self.side_panel_position = match state.cursor {
+                    0 => super::SidePanelPosition::Top,
+                    1 => super::SidePanelPosition::Bottom,
+                    2 => super::SidePanelPosition::Left,
+                    _ => super::SidePanelPosition::Right,
+                };
+                if !matches!(self.side_panel_mode, super::SidePanelMode::Shown(_)) {
+                    self.side_panel_mode = super::SidePanelMode::Shown(super::TRIGGER_PANEL_WIDTH);
+                }
+            }
+            super::PanelMenuLevel::Root => {}
+        }
+    }
+
+    /// Enter on a leaf choice: keep the live preview, close the menu, drop
+    /// the revert snapshot, and persist the new state.
+    fn commit_panel_menu(&mut self) {
+        self.panel_menu = None;
+        self.panel_menu_saved = None;
+        self.system_line(format!(
+            "side panel: {} · position {}",
+            match self.side_panel_mode {
+                super::SidePanelMode::Auto => "auto",
+                super::SidePanelMode::Shown(_) => "shown",
+                super::SidePanelMode::Hidden => "hidden",
+            },
+            self.side_panel_position.label()
+        ));
+        self.persist_ui_state();
+    }
+
+    /// Close the menu without committing: restore the mode/position captured
+    /// when the menu opened and drop the snapshot.
+    fn cancel_panel_menu(&mut self) {
+        self.panel_menu = None;
+        self.restore_panel_snapshot();
+        self.panel_menu_saved = None;
+    }
+
+    /// Revert the live preview to the snapshot captured when the menu
+    /// opened. The snapshot is retained (not consumed) so stepping back out
+    /// of a level and previewing again can still be reverted.
+    fn restore_panel_snapshot(&mut self) {
+        if let Some((mode, position)) = self.panel_menu_saved {
+            self.side_panel_mode = mode;
+            self.side_panel_position = position;
+        }
+    }
+
+    /// Persist the user-facing display switches to `ui-state.toml`
+    /// (Ctrl+O thinking mode + `/side-panel` panel mode/position). Best
+    /// effort — failures only warn.
+    pub(super) fn persist_ui_state(&self) {
+        crate::ui_state::save(&crate::ui_state::UiState {
+            thinking_mode: Some(self.thinking_mode),
+            panel_mode: Some(self.side_panel_mode),
+            panel_position: Some(self.side_panel_position),
+        });
     }
 
     /// `/fork` picker keys (issue #55): Up/Down move the highlight over the
@@ -359,6 +472,11 @@ impl App {
     }
 
     pub(super) fn open_model_picker(&mut self) {
+        // Exactly one menu owns the inline band: opening the model picker
+        // cancels an open `/side-panel` menu (reverting its preview).
+        if self.panel_menu.is_some() {
+            self.cancel_panel_menu();
+        }
         // The catalog comes from the daemon's snapshot (credential detection is
         // daemon-side); refresh it from the latest cache before opening.
         self.model_catalog = self.latest.model_catalog.clone();
@@ -393,41 +511,41 @@ impl App {
             let Some(picker) = self.model_picker.as_mut() else {
                 return true;
             };
-            match key.code {
-                KeyCode::Up | KeyCode::Char('k') => {
+            // Shared menu key mapping (issue #72): the model selector and
+            // the `/side-panel` menu interpret the same keys.
+            match super::map_menu_key(key) {
+                super::MenuKey::Up => {
                     picker.up();
                     PickerAction::None
                 }
-                KeyCode::Down | KeyCode::Char('j') => {
+                super::MenuKey::Down => {
                     picker.down();
                     PickerAction::None
                 }
                 // Cascade navigation (issue #72): ←/→ move between the
                 // provider→model→thinking columns; the armed column receives
                 // ↑/↓. Enter commits from the thinking column.
-                KeyCode::Left | KeyCode::Char('h') => {
+                super::MenuKey::Left => {
                     picker.left();
                     PickerAction::None
                 }
-                KeyCode::Right | KeyCode::Char('l') => {
+                super::MenuKey::Right => {
                     picker.right();
                     PickerAction::None
                 }
-                KeyCode::Enter => match picker.enter() {
+                super::MenuKey::Enter => match picker.enter() {
                     Some(selection) => PickerAction::Select(selection),
                     None => PickerAction::None,
                 },
-                KeyCode::Esc => {
+                super::MenuKey::Back => {
                     if picker.back() {
                         PickerAction::Close
                     } else {
                         PickerAction::None
                     }
                 }
-                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    PickerAction::Close
-                }
-                _ => PickerAction::None,
+                super::MenuKey::Close => PickerAction::Close,
+                super::MenuKey::Other => PickerAction::None,
             }
         };
         match action {

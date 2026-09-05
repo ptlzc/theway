@@ -44,7 +44,7 @@ impl App {
                     }
                     "/help" => {
                         println!(
-                            "theway client — send messages to the thewayd daemon; local commands: /login /quit /clear /new /resume /status-panel /session"
+                            "theway client — send messages to the thewayd daemon; local commands: /login /quit /clear /new /resume /side-panel /session"
                         );
                         continue;
                     }
