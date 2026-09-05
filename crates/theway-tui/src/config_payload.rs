@@ -197,6 +197,19 @@ pub(crate) fn assemble_config_from(
     payload.templates =
         crate::template_scan::scan_templates(cwd, &theway_transport::config::base_dir());
 
+    // Issue #73 (open spec provision-mcp-servers): the controller owns local
+    // MCP server config discovery too — scan user `base/mcp.toml` then project
+    // `<cwd>/.theway/mcp.toml` and provision the merged catalog so the daemon
+    // never reads MCP config files in a controller-provisioned session. Parse
+    // diagnostics ride the payload's notes vec, mirroring the skill/template
+    // scans.
+    let (mcp_servers, mcp_diagnostics) = crate::mcp_scan::scan_mcp_servers(
+        &theway_transport::config::base_dir().join("mcp.toml"),
+        &cwd.join(".theway").join("mcp.toml"),
+    );
+    diagnostics.extend(mcp_diagnostics);
+    payload.mcp_servers = mcp_servers;
+
     // Trigger poll interval: CLI wins over `[triggers] poll_interval_secs`.
     payload.trigger_poll_secs = match cli.trigger_poll_secs {
         Some(secs) => Some(secs),
@@ -324,6 +337,16 @@ pub(crate) fn reconcile(
         patch.templates = desired.templates.clone();
     } else if desired.clears("templates") && !current.templates.is_empty() {
         clear_field(&mut patch, "templates");
+    }
+
+    // Provisioned MCP server catalog (open spec provision-mcp-servers): pushed
+    // when the controller's scan differs from what the daemon holds. The
+    // daemon has no "clear the list" semantics — an empty desired list pushes
+    // nothing; clearing is expressed via `clear_fields: ["mcp_servers"]`.
+    if !desired.mcp_servers.is_empty() && desired.mcp_servers != current.mcp_servers {
+        patch.mcp_servers = desired.mcp_servers.clone();
+    } else if desired.clears("mcp_servers") && !current.mcp_servers.is_empty() {
+        clear_field(&mut patch, "mcp_servers");
     }
 
     if let Some(secs) = desired.trigger_poll_secs {

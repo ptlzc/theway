@@ -202,3 +202,75 @@ use super::*;
         assert!(notes.is_empty(), "{notes:?}");
     }
 
+    // ── reconcile: provisioned MCP servers (provision-mcp-servers) ─────
+
+    fn mcp_server(name: &str, command: &str) -> theway_transport::wire::WireProvisionedMcpServer {
+        theway_transport::wire::WireProvisionedMcpServer {
+            name: name.to_string(),
+            kind: "stdio".to_string(),
+            command: Some(command.to_string()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn reconcile_pushes_mcp_server_catalog_when_it_differs() {
+        let current = WireDaemonConfig {
+            mcp_servers: vec![mcp_server("shared", "user-shared")],
+            ..Default::default()
+        };
+        let desired = WireDaemonConfig {
+            mcp_servers: vec![mcp_server("shared", "project-shared")],
+            ..Default::default()
+        };
+        let (patch, notes) = reconcile(&desired, &current, true);
+        assert!(notes.is_empty(), "{notes:?}");
+        assert_eq!(patch.mcp_servers, desired.mcp_servers);
+
+        // A changed list replaces the daemon's list wholesale.
+        let (patch, _) = reconcile(&desired, &current, true);
+        assert_eq!(patch.mcp_servers, desired.mcp_servers);
+    }
+
+    #[test]
+    fn reconcile_equal_mcp_server_catalogs_skip_the_push() {
+        let current = WireDaemonConfig {
+            mcp_servers: vec![mcp_server("shared", "same")],
+            ..Default::default()
+        };
+        let desired = current.clone();
+        let (patch, notes) = reconcile(&desired, &current, true);
+        assert!(notes.is_empty(), "{notes:?}");
+        assert!(patch.mcp_servers.is_empty());
+        assert_eq!(patch, WireDaemonConfig::default());
+    }
+
+    #[test]
+    fn reconcile_empty_desired_mcp_servers_push_nothing() {
+        // The daemon has no "clear the list" semantics: an empty desired list
+        // (absent from the scan) must not clear servers the daemon already has.
+        let current = WireDaemonConfig {
+            mcp_servers: vec![mcp_server("existing", "cmd")],
+            ..Default::default()
+        };
+        let desired = WireDaemonConfig::default(); // no mcp_servers, no clear
+        let (patch, notes) = reconcile(&desired, &current, true);
+        assert!(notes.is_empty(), "{notes:?}");
+        assert_eq!(patch, WireDaemonConfig::default());
+    }
+
+    #[test]
+    fn reconcile_forwards_explicit_mcp_server_clear() {
+        let current = WireDaemonConfig {
+            mcp_servers: vec![mcp_server("existing", "cmd")],
+            ..Default::default()
+        };
+        let desired = WireDaemonConfig {
+            clear_fields: vec!["mcp_servers".into()],
+            ..Default::default()
+        };
+        let (patch, notes) = reconcile(&desired, &current, true);
+        assert_eq!(patch.clear_fields, vec!["mcp_servers".to_string()]);
+        assert!(notes.is_empty(), "{notes:?}");
+    }
+

@@ -289,3 +289,109 @@ max_feed_lines = 0
         assert!(payload.templates.is_empty(), "{:?}", payload.templates);
     }
 
+    // ── payload assembly: provisioned MCP servers (provision-mcp-servers) ─
+
+    #[test]
+    fn assemble_scans_user_and_project_mcp_toml() {
+        let _serial = ENV_LOCK.lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().join("base");
+        let project = tmp.path().join("project");
+
+        write(
+            &base.join("mcp.toml"),
+            r#"
+[[server]]
+name = "user-only"
+command = "user-only-cmd"
+
+[[server]]
+name = "shared"
+command = "user-shared-cmd"
+inject_summary = true
+"#,
+        );
+        write(
+            &project.join(".theway/mcp.toml"),
+            r#"
+[[server]]
+name = "shared"
+command = "project-shared-cmd"
+
+[[server]]
+name = "project-only"
+command = "project-only-cmd"
+"#,
+        );
+
+        let _theway = EnvGuard::set("THEWAY_DIR", &base);
+        let cli = cli_from(&["theway"]);
+        let (payload, diagnostics) =
+            assemble_config_from(&cli, None, "config.toml", &project);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+        let servers = &payload.mcp_servers;
+        assert_eq!(servers.len(), 3, "{servers:?}");
+        let by_name = |name: &str| {
+            servers
+                .iter()
+                .find(|server| server.name == name)
+                .unwrap()
+        };
+
+        assert_eq!(by_name("user-only").command.as_deref(), Some("user-only-cmd"));
+        assert_eq!(
+            by_name("project-only").command.as_deref(),
+            Some("project-only-cmd")
+        );
+        // Project layer replaces a same-named user entry (project wins) and its
+        // flags don't leak through.
+        let shared = by_name("shared");
+        assert_eq!(shared.command.as_deref(), Some("project-shared-cmd"));
+        assert!(!shared.inject_summary, "{shared:?}");
+    }
+
+    #[test]
+    fn assemble_mcp_scan_is_empty_when_files_missing() {
+        let _serial = ENV_LOCK.lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().join("base");
+        let project = tmp.path().join("project");
+
+        let _theway = EnvGuard::set("THEWAY_DIR", &base);
+        let cli = cli_from(&["theway"]);
+        let (payload, diagnostics) =
+            assemble_config_from(&cli, None, "config.toml", &project);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert!(payload.mcp_servers.is_empty(), "{:?}", payload.mcp_servers);
+    }
+
+    #[test]
+    fn assemble_mcp_parse_failure_reports_diagnostic_and_keeps_other_file() {
+        let _serial = ENV_LOCK.lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().join("base");
+        let project = tmp.path().join("project");
+
+        // The user (THEWAY_DIR) file stays well-formed so the shared env root
+        // never exposes a malformed mcp.toml to concurrently-running tests; the
+        // malformed file lives on this test's private project path.
+        write(
+            &base.join("mcp.toml"),
+            "[[server]]\nname = \"user-ok\"\ncommand = \"u\"",
+        );
+        write(&project.join(".theway/mcp.toml"), "not [[[ valid toml");
+
+        let _theway = EnvGuard::set("THEWAY_DIR", &base);
+        let cli = cli_from(&["theway"]);
+        let (payload, diagnostics) =
+            assemble_config_from(&cli, None, "config.toml", &project);
+        // The good (user) file still provisions; the project parse failure
+        // lands in the diagnostics/notes vec.
+        assert_eq!(payload.mcp_servers.len(), 1, "{:?}", payload.mcp_servers);
+        assert_eq!(payload.mcp_servers[0].name, "user-ok");
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert!(diagnostics[0].contains("mcp config"), "{diagnostics:?}");
+        assert!(diagnostics[0].contains("parse failed"), "{diagnostics:?}");
+    }
+

@@ -24,6 +24,7 @@ mod feed_cache;
 mod feed_render;
 mod local_commands;
 mod local_tool_ops;
+mod mcp_scan;
 mod model_picker;
 mod resume_picker;
 mod skill_scan;
