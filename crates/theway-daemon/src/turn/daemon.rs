@@ -86,6 +86,9 @@ pub(crate) struct RuntimeCapabilities {
     pub(crate) mcp_tools: usize,
     pub(crate) mcp_server_names: Vec<String>,
     pub(crate) mcp_tool_names: Vec<String>,
+    /// Per-server MCP failures as `(name, message)` — surfaced to the TUI
+    /// as a startup banner + red panel rows.
+    pub(crate) mcp_server_errors: Vec<(String, String)>,
     pub(crate) tool_names: Vec<String>,
     pub(crate) mcp_notification_hooks: usize,
     pub(crate) hook_points: Vec<String>,

@@ -136,6 +136,12 @@ message McpSnapshot {
   uint32 notification_hooks = 3;
   repeated string server_names = 4;
   repeated string tool_names = 5;
+  repeated McpServerError errors = 6;
+}
+
+message McpServerError {
+  string name = 1;
+  string error = 2;
 }
 
 message ToolsSnapshot {

@@ -99,6 +99,8 @@ impl App {
             graph_position,
             graph_menu: None,
             graph_menu_saved: None,
+            mcp_error_banner: None,
+            mcp_banner_last_fingerprint: String::new(),
             extension_view: false,
             fork_picker: None,
             resume_picker: None,

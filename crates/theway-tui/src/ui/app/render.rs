@@ -20,8 +20,31 @@ impl App {
         ])
         .split(area);
         let content_area = chunks[0];
+        let banner_area = chunks[1];
         let status_area = chunks[2];
         let input_area = chunks[3];
+        // Transient MCP-failure banner (3s): the spacer row doubles as the
+        // banner row; expired banners clear themselves on the next frame
+        // (the event loop also wakes at expiry to force that frame).
+        if let Some(banner) = self.mcp_error_banner.as_ref() {
+            if banner.until <= tokio::time::Instant::now() {
+                self.mcp_error_banner = None;
+            }
+        }
+        if let Some(banner) = self.mcp_error_banner.as_ref() {
+            frame.render_widget(
+                Paragraph::new(Line::styled(
+                    theway_transport::feed::truncate_chars(
+                        &banner.text,
+                        banner_area.width as usize,
+                    ),
+                    Style::default()
+                        .fg(self.theme.sidebar.error)
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                )),
+                banner_area,
+            );
+        }
         self.last_status_area = Some(status_area);
         self.last_input_area = Some(input_area);
         // The menu band occupies the top `band_rows` of the input area; the

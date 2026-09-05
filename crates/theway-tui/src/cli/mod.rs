@@ -209,6 +209,28 @@ pub(crate) fn short_id(id: &str) -> String {
     id.chars().take(16).collect()
 }
 
+/// Session-id display form shared by the resume picker and the session-list
+/// rows: `first16…last5`. The side panel shows only the `…last5` suffix
+/// (issue #104), so list rows must surface the suffix too — otherwise the
+/// panel's id can never be matched against the list. UUIDv7 ids share long
+/// time-ordered prefixes (same-time sessions collide), which is why the
+/// suffix is the discriminative part.
+pub(crate) fn session_id_display(id: &str) -> String {
+    if id.chars().count() <= 22 {
+        return id.to_string();
+    }
+    let prefix: String = id.chars().take(16).collect();
+    let suffix: String = id
+        .chars()
+        .rev()
+        .take(5)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    format!("{prefix}…{suffix}")
+}
+
 pub(crate) fn yes_no(value: bool) -> &'static str {
     if value { "yes" } else { "no" }
 }
@@ -415,7 +437,7 @@ pub(crate) async fn list_all_sessions_cmd() -> Result<()> {
     for (bucket, e) in all {
         let bucket_name = bucket.file_name().and_then(|n| n.to_str()).unwrap_or("?");
         let preview = e.preview.as_deref().unwrap_or("");
-        let id_short: String = e.id.chars().take(16).collect();
+        let id_short: String = session_id_display(&e.id);
         let badge = e
             .automation
             .badge()
@@ -514,7 +536,7 @@ pub(crate) async fn select_resume_session(
     let rows: Vec<resume_picker::PickerRow> = tree
         .iter()
         .map(|row| resume_picker::PickerRow {
-            id_short: row.id.chars().take(16).collect(),
+            id_short: session_id_display(&row.id),
             // RFC3339 with sub-second precision is noise in a menu; minutes are enough.
             created_at: row.created_at.chars().take(16).collect(),
             badge: row.automation.badge(),

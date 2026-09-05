@@ -295,6 +295,16 @@ impl TurnHost {
                 notification_hooks: self.projection.capabilities.mcp_notification_hooks,
                 server_names: self.projection.capabilities.mcp_server_names.clone(),
                 tool_names: self.projection.capabilities.mcp_tool_names.clone(),
+                errors: self
+                    .projection
+                    .capabilities
+                    .mcp_server_errors
+                    .iter()
+                    .map(|(name, error)| WireMcpServerError {
+                        name: name.clone(),
+                        error: error.clone(),
+                    })
+                    .collect(),
             },
             tools: WireToolsSnapshot {
                 total: self.projection.capabilities.tool_names.len(),

@@ -333,6 +333,7 @@ pub fn empty_sidebar_snapshot() -> WireSidebarSnapshot {
             notification_hooks: 0,
             server_names: Vec::new(),
             tool_names: Vec::new(),
+            errors: Vec::new(),
         },
         tools: WireToolsSnapshot {
             total: 0,

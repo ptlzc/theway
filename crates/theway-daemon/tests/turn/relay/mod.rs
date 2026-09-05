@@ -233,6 +233,7 @@ fn sample_wire_status(feed_lines: Vec<String>) -> WireStatus {
                 notification_hooks: 0,
                 server_names: Vec::new(),
                 tool_names: Vec::new(),
+                errors: Vec::new(),
             },
             tools: WireToolsSnapshot {
                 total: 0,

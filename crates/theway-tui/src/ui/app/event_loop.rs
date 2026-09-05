@@ -183,6 +183,14 @@ impl App {
                         }
                     }
                 }
+                _ = async {
+                    match self.mcp_error_banner.as_ref() {
+                        Some(banner) => tokio::time::sleep_until(banner.until).await,
+                        None => std::future::pending().await,
+                    }
+                }, if self.mcp_error_banner.is_some() => {
+                    self.mcp_error_banner = None;
+                }
                 _ = tick.tick(), if self.busy || crate::ui::dag_band::has_live_runs(&self.latest.dags) => {
                     if self.busy {
                         self.spinner_frame = self.spinner_frame.wrapping_add(1);

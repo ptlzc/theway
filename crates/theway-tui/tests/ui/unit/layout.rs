@@ -502,3 +502,71 @@ async fn panel_hides_empty_triggers_cron_and_mcp_sections() {
     assert!(text.contains("Cron (session)"), "{text}");
     assert!(text.contains("MCP"), "{text}");
 }
+
+/// MCP errors surface twice (issue): a transient 3s banner in the spacer row
+/// and red `[x] name` rows in the side panel's MCP section. The banner only
+/// re-triggers when the error set changes.
+#[tokio::test]
+async fn mcp_errors_show_banner_and_red_panel_rows() {
+    let (mut app, _rx) = test_app().await;
+    app.theme.screen.margin_left = 0;
+    let mut status = fixture_status(Vec::new());
+    status.sidebar.mcp.errors = vec![
+        theway_transport::wire::WireMcpServerError {
+            name: "devops-mcp".into(),
+            error: "connect timeout".into(),
+        },
+        theway_transport::wire::WireMcpServerError {
+            name: "crg".into(),
+            error: "spawn failed".into(),
+        },
+    ];
+    status.sidebar.mcp.servers = 1; // one healthy server still shows counts
+    app.apply_snapshot(status);
+
+    // The banner is armed for ~3s.
+    let banner = app.mcp_error_banner.clone().expect("banner armed");
+    assert!(banner.text.contains("[x] devops-mcp"), "{}", banner.text);
+    assert!(banner.text.contains("[x] crg"), "{}", banner.text);
+
+    // The panel MCP section renders the failed servers in red.
+    app.side_panel_mode = super::SidePanelMode::Shown(36);
+    let backend = TestBackend::new(120, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    let buf = terminal.backend().buffer();
+    let text = buffer_text(buf);
+    assert!(text.contains("[x] devops-mcp"), "{text}");
+    assert!(text.contains("[x] crg"), "{text}");
+    // The rows are red.
+    let red_rows = (0..buf.area().height)
+        .filter(|&y| {
+            (0..buf.area().width).any(|x| buf[(x, y)].fg == Color::Red)
+        })
+        .count();
+    assert!(red_rows >= 2, "expected red [x] rows, got {red_rows}");
+
+    // A repeated snapshot with the same errors does NOT re-arm the banner;
+    // the armed one is untouched (same text, still set).
+    let mut status2 = fixture_status(Vec::new());
+    status2.sidebar.mcp.errors = vec![
+        theway_transport::wire::WireMcpServerError {
+            name: "devops-mcp".into(),
+            error: "connect timeout".into(),
+        },
+        theway_transport::wire::WireMcpServerError {
+            name: "crg".into(),
+            error: "spawn failed".into(),
+        },
+    ];
+    app.apply_snapshot(status2);
+    assert!(app.mcp_error_banner.is_some(), "same errors must not re-arm");
+
+    // An expired banner clears on the next render.
+    app.mcp_error_banner = Some(super::McpErrorBanner {
+        text: "MCP 连接失败: [x] devops-mcp".into(),
+        until: tokio::time::Instant::now() - std::time::Duration::from_secs(1),
+    });
+    terminal.draw(|f| app.render(f)).unwrap();
+    assert!(app.mcp_error_banner.is_none(), "expired banner must clear");
+}

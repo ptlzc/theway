@@ -135,6 +135,19 @@ fn sidebar_wire(sidebar: Option<&wire::SidebarSnapshot>) -> crate::wire::WireSid
                 .as_ref()
                 .map(|m| m.tool_names.clone())
                 .unwrap_or_default(),
+            errors: sidebar
+                .mcp
+                .as_ref()
+                .map(|m| {
+                    m.errors
+                        .iter()
+                        .map(|e| crate::wire::WireMcpServerError {
+                            name: e.name.clone(),
+                            error: e.error.clone(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
         },
         tools: crate::wire::WireToolsSnapshot {
             total: sidebar
@@ -221,6 +234,15 @@ pub(crate) fn sidebar_proto(
             notification_hooks: snapshot.mcp.notification_hooks as u32,
             server_names: snapshot.mcp.server_names.clone(),
             tool_names: snapshot.mcp.tool_names.clone(),
+            errors: snapshot
+                .mcp
+                .errors
+                .iter()
+                .map(|e| wire::McpServerError {
+                    name: e.name.clone(),
+                    error: e.error.clone(),
+                })
+                .collect(),
         }),
         tools: Some(wire::ToolsSnapshot {
             total: snapshot.tools.total as u32,

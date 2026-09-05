@@ -85,6 +85,7 @@ impl App {
         }
         self.busy = self.latest.busy;
         self.panel_status = PanelStatus::from_sidebar(&self.latest.sidebar);
+        self.maybe_show_mcp_error_banner();
         self.model_catalog = self.latest.model_catalog.clone();
         self.persist_confirmed_model_default();
         self.persist_confirmed_thinking_default();
@@ -197,4 +198,43 @@ impl App {
     }
 
     // ── main entry ──────────────────────────────────────────────────────────────────────
+}
+
+impl App {
+    /// Show the 3s MCP-failure banner when the snapshot's MCP error set
+    /// differs from the last shown one (repeated snapshot frames carry the
+    /// same errors and must not re-trigger). An empty error set resets the
+    /// fingerprint so a later failure shows again.
+    fn maybe_show_mcp_error_banner(&mut self) {
+        let errors = &self.latest.sidebar.mcp.errors;
+        if errors.is_empty() {
+            self.mcp_banner_last_fingerprint.clear();
+            return;
+        }
+        let fingerprint = mcp_errors_fingerprint(errors);
+        if fingerprint == self.mcp_banner_last_fingerprint {
+            return;
+        }
+        self.mcp_banner_last_fingerprint = fingerprint;
+        let text = errors
+            .iter()
+            .map(|e| format!("[x] {}", e.name))
+            .collect::<Vec<_>>()
+            .join(" · ");
+        self.mcp_error_banner = Some(McpErrorBanner {
+            text: format!("MCP 连接失败: {text}"),
+            until: tokio::time::Instant::now()
+                + std::time::Duration::from_millis(MCP_ERROR_BANNER_MS),
+        });
+    }
+}
+
+/// Stable fingerprint over the MCP error set (name + message), used to
+/// dedupe banner triggers across snapshot frames.
+fn mcp_errors_fingerprint(errors: &[theway_transport::wire::WireMcpServerError]) -> String {
+    errors
+        .iter()
+        .map(|e| format!("{}:{}", e.name, e.error))
+        .collect::<Vec<_>>()
+        .join("|")
 }

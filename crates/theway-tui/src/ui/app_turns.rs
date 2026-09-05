@@ -410,7 +410,7 @@ impl App {
             .iter()
             .map(|s| super::ResumePickerEntry {
                 id: s.session_id.clone(),
-                id_short: crate::cli::short_id(&s.session_id),
+                id_short: crate::cli::session_id_display(&s.session_id),
                 name: s.name.clone(),
                 tree_prefix: s.tree_prefix.clone(),
                 last_activity_at_rfc3339: s.last_activity_at_rfc3339.clone(),

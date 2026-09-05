@@ -15,8 +15,8 @@ mod session_snapshot_collapse;
 mod system_context;
 use crate::feed::{Level, TriggerPollStatus};
 use crate::wire::{
-    WireCronSnapshot, WireMcpSnapshot, WireSidebarSnapshot, WireSkillsSnapshot, WireToolsSnapshot,
-    WireTriggersSnapshot,
+    WireCronSnapshot, WireMcpServerError, WireMcpSnapshot, WireSidebarSnapshot, WireSkillsSnapshot,
+    WireToolsSnapshot, WireTriggersSnapshot,
 };
 
 fn fixture_snapshot() -> WireStatus {
@@ -73,6 +73,10 @@ fn fixture_snapshot() -> WireStatus {
                 notification_hooks: 0,
                 server_names: Vec::new(),
                 tool_names: Vec::new(),
+                errors: vec![WireMcpServerError {
+                    name: "devops-mcp".into(),
+                    error: "connect timeout".into(),
+                }],
             },
             tools: WireToolsSnapshot {
                 total: 1,
@@ -132,6 +136,10 @@ fn converts_full_snapshot_to_session_snapshot() {
     assert_eq!(sidebar.inbox_new, 1);
     assert_eq!(sidebar.skills.as_ref().unwrap().total, 2);
     assert_eq!(sidebar.tools.as_ref().unwrap().names, vec!["read"]);
+    let mcp = sidebar.mcp.as_ref().unwrap();
+    assert_eq!(mcp.errors.len(), 1);
+    assert_eq!(mcp.errors[0].name, "devops-mcp");
+    assert_eq!(mcp.errors[0].error, "connect timeout");
     assert_eq!(sidebar.runtime, vec!["ok"]);
     let feed = state.feed.as_ref().unwrap();
     assert_eq!(feed.blocks.len(), 2);

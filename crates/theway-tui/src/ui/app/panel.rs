@@ -47,6 +47,7 @@ impl App {
             || self.latest.goal.is_some()
             || sidebar.mcp.servers > 0
             || sidebar.mcp.notification_hooks > 0
+            || !sidebar.mcp.errors.is_empty()
             || (self.graph_position == GraphPosition::SidePanel
                 && !self.latest.dags.is_empty())
             || !self.latest.extensions.catalog.is_empty()
@@ -448,8 +449,14 @@ impl App {
             lines.push(Line::raw(""));
         }
 
-        // MCP: hidden entirely when nothing is connected.
-        if self.panel_status.mcp_servers > 0 || self.panel_status.mcp_notification_hooks > 0 {
+        // MCP: shown when servers/hooks are connected OR any server failed
+        // to load — failures render as red `[x] name` rows so a broken
+        // mcp.toml entry is visible instead of silently disappearing.
+        let mcp_errors = &self.latest.sidebar.mcp.errors;
+        if self.panel_status.mcp_servers > 0
+            || self.panel_status.mcp_notification_hooks > 0
+            || !mcp_errors.is_empty()
+        {
             lines.push(Line::raw(""));
             lines.push(panel_line("MCP".to_string(), s.section, width));
             {
@@ -469,6 +476,9 @@ impl App {
                 s.muted,
                 width,
             ));
+            for error in mcp_errors {
+                lines.push(panel_line(format!("[x] {}", error.name), s.error, width));
+            }
             }
         }
 

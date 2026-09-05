@@ -22,7 +22,7 @@ pub(crate) use activation_build::load_persisted_dag_runs;
 // Public API re-exports; some are used only by external embedders/tests.
 pub use resources::{
     SessionExecutionContext, SessionExtensionResources, SessionHookResources, SessionMcpResources,
-    SessionProjectResources,
+    SessionProjectResources, parse_mcp_diagnostic,
 };
 
 /// session-resource-model: rebuilds a fully-wired [`AgentHarness`] for any session id —

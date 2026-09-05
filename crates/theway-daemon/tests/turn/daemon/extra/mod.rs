@@ -377,6 +377,7 @@ async fn wire_snapshot_reflects_populated_goal_poll_prompt_and_sidebar_state() {
         mcp_tools: 3,
         mcp_server_names: vec!["server-a".into()],
         mcp_tool_names: vec!["tool-a".into()],
+        mcp_server_errors: Vec::new(),
         tool_names: vec!["bash".into(), "read".into()],
         mcp_notification_hooks: 1,
         hook_points: vec!["before_tool_call".into()],

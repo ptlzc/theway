@@ -229,6 +229,12 @@ export interface McpSnapshot {
   notificationHooks: number;
   serverNames: string[];
   toolNames: string[];
+  errors: McpServerError[];
+}
+
+export interface McpServerError {
+  name: string;
+  error: string;
 }
 
 export interface ToolsSnapshot {
@@ -2486,7 +2492,7 @@ export const CronJobSnapshot: MessageFns<CronJobSnapshot> = {
 };
 
 function createBaseMcpSnapshot(): McpSnapshot {
-  return { servers: 0, tools: 0, notificationHooks: 0, serverNames: [], toolNames: [] };
+  return { servers: 0, tools: 0, notificationHooks: 0, serverNames: [], toolNames: [], errors: [] };
 }
 
 export const McpSnapshot: MessageFns<McpSnapshot> = {
@@ -2505,6 +2511,9 @@ export const McpSnapshot: MessageFns<McpSnapshot> = {
     }
     for (const v of message.toolNames) {
       writer.uint32(42).string(v!);
+    }
+    for (const v of message.errors) {
+      McpServerError.encode(v!, writer.uint32(50).fork()).join();
     }
     return writer;
   },
@@ -2556,6 +2565,14 @@ export const McpSnapshot: MessageFns<McpSnapshot> = {
           message.toolNames.push(reader.string());
           continue;
         }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.errors.push(McpServerError.decode(reader, reader.uint32()));
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -2584,6 +2601,7 @@ export const McpSnapshot: MessageFns<McpSnapshot> = {
         : globalThis.Array.isArray(object?.tool_names)
         ? object.tool_names.map((e: any) => globalThis.String(e))
         : [],
+      errors: globalThis.Array.isArray(object?.errors) ? object.errors.map((e: any) => McpServerError.fromJSON(e)) : [],
     };
   },
 
@@ -2604,6 +2622,9 @@ export const McpSnapshot: MessageFns<McpSnapshot> = {
     if (message.toolNames?.length) {
       obj.toolNames = message.toolNames;
     }
+    if (message.errors?.length) {
+      obj.errors = message.errors.map((e) => McpServerError.toJSON(e));
+    }
     return obj;
   },
 
@@ -2617,6 +2638,83 @@ export const McpSnapshot: MessageFns<McpSnapshot> = {
     message.notificationHooks = object.notificationHooks ?? 0;
     message.serverNames = object.serverNames?.map((e) => e) || [];
     message.toolNames = object.toolNames?.map((e) => e) || [];
+    message.errors = object.errors?.map((e) => McpServerError.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseMcpServerError(): McpServerError {
+  return { name: "", error: "" };
+}
+
+export const McpServerError: MessageFns<McpServerError> = {
+  encode(message: McpServerError, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.name !== "") {
+      writer.uint32(10).string(message.name);
+    }
+    if (message.error !== "") {
+      writer.uint32(18).string(message.error);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): McpServerError {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseMcpServerError();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.error = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): McpServerError {
+    return {
+      name: isSet(object.name) ? globalThis.String(object.name) : "",
+      error: isSet(object.error) ? globalThis.String(object.error) : "",
+    };
+  },
+
+  toJSON(message: McpServerError): unknown {
+    const obj: any = {};
+    if (message.name !== "") {
+      obj.name = message.name;
+    }
+    if (message.error !== "") {
+      obj.error = message.error;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<McpServerError>, I>>(base?: I): McpServerError {
+    return McpServerError.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<McpServerError>, I>>(object: I): McpServerError {
+    const message = createBaseMcpServerError();
+    message.name = object.name ?? "";
+    message.error = object.error ?? "";
     return message;
   },
 };

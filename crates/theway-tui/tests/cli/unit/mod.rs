@@ -281,3 +281,18 @@ async fn delete_session_offline_removes_from_local_repo() {
         .to_string();
     assert!(err.contains("no session matches id nope"), "{err}");
 }
+
+/// Session-id display form: `first16…last5` so list rows surface the same
+/// suffix the side panel shows (issue #104) — a panel id like `…78dc` must
+/// be findable in resume rows. Short ids pass through unchanged.
+#[test]
+fn session_id_display_surfaces_the_panel_suffix() {
+    let uuid = "01a06cc8-ee64-7ed0-9091-07b5ce78dc";
+    assert_eq!(
+        super::session_id_display(uuid),
+        "01a06cc8-ee64-7e…e78dc"
+    );
+    // Short ids (fixtures, prefixes) render verbatim.
+    assert_eq!(super::session_id_display("sess-1"), "sess-1");
+    assert_eq!(super::session_id_display("abc1234567890"), "abc1234567890");
+}

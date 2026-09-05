@@ -170,6 +170,7 @@ async fn host_with_extras(extras: Vec<PathBuf>) -> (TurnHost, Arc<AtomicU32>, Ve
             mcp_tools: 0,
             mcp_server_names: Vec::new(),
             mcp_tool_names: Vec::new(),
+            mcp_server_errors: Vec::new(),
             tool_names: Vec::new(),
             mcp_notification_hooks: 0,
             hook_points: Vec::new(),

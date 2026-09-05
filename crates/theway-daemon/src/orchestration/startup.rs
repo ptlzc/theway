@@ -371,6 +371,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         mcp_tools: session_context.mcp.tool_names.len(),
         mcp_server_names: session_context.mcp.server_names.clone(),
         mcp_tool_names: session_context.mcp.tool_names.clone(),
+        mcp_server_errors: session_context.mcp.server_errors.clone(),
         tool_names: tool_names.clone(),
         mcp_notification_hooks: session_context.mcp.notification_hook_count,
         hook_points: runtime_capabilities::active_hook_registrations(lsp_lang_count, hooks_active),

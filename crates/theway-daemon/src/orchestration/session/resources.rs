@@ -155,6 +155,30 @@ pub struct SessionMcpResources {
     pub server_names: Vec<String>,
     pub tool_names: Vec<String>,
     pub notification_hook_count: usize,
+    /// Per-server connection/config failures as `(name, message)`, parsed
+    /// from the loader diagnostics so the transport snapshot can surface
+    /// them to the TUI (3s banner + red `[x] name` panel rows).
+    pub server_errors: Vec<(String, String)>,
+}
+
+/// Split one loader diagnostic into a `(name, message)` pair. Server
+/// failures carry the server name; config-file problems carry the file
+/// label. Any unrecognized diagnostic keeps the full text under `mcp`.
+pub fn parse_mcp_diagnostic(diagnostic: &str) -> (String, String) {
+    if let Some(rest) = diagnostic.strip_prefix("mcp server '") {
+        if let Some((name, message)) = rest.split_once("' failed: ") {
+            return (name.to_string(), message.to_string());
+        }
+    }
+    if let Some(rest) = diagnostic.strip_prefix("mcp config (") {
+        if let Some((head, message)) = rest.split_once("): ") {
+            // `head` = `user, /path/to/mcp.toml` — the label is the segment
+            // before the comma; the message follows `): `.
+            let label = head.split_once(", ").map_or(head, |(l, _)| l);
+            return (format!("mcp.toml ({label})"), message.to_string());
+        }
+    }
+    ("mcp".to_string(), diagnostic.to_string())
 }
 
 impl SessionMcpResources {
@@ -170,6 +194,11 @@ impl SessionMcpResources {
             .map(|tool| tool.definition().name.clone())
             .collect::<Vec<_>>();
         let notification_hook_count = loaded.notification_hooks.len();
+        let server_errors = loaded
+            .diagnostics
+            .iter()
+            .map(|diagnostic| parse_mcp_diagnostic(diagnostic))
+            .collect();
         Self {
             tools: loaded.tools,
             notification_hooks: Arc::new(parking_lot::Mutex::new(loaded.notification_hooks)),
@@ -179,6 +208,7 @@ impl SessionMcpResources {
             server_names: loaded.server_names,
             tool_names,
             notification_hook_count,
+            server_errors,
         }
     }
 }

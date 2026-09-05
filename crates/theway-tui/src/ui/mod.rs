@@ -261,6 +261,19 @@ pub(crate) enum GraphMenuLevel {
     Position,
 }
 
+/// Transient MCP failure banner (issue: MCP errors must surface): shown
+/// for [`MCP_ERROR_BANNER_MS`] after the first snapshot that carries
+/// per-server MCP errors, then cleared. The fingerprint dedupes repeated
+/// snapshot frames so the banner only appears when the error set changes.
+#[derive(Clone, Debug)]
+pub(crate) struct McpErrorBanner {
+    pub(crate) text: String,
+    pub(crate) until: tokio::time::Instant,
+}
+
+/// How long the startup MCP-error banner stays visible.
+pub(crate) const MCP_ERROR_BANNER_MS: u64 = 3_000;
+
 /// `/graph` menu state: `Some` = open, with the current level and cursor.
 /// The Position cursor live-previews the band placement; Enter commits,
 /// Esc/← steps back (reverting), Esc at the root cancels. `has_graphs` is
@@ -572,6 +585,14 @@ pub struct App {
     /// `(position)` snapshot taken when the graph menu opened — restored on
     /// cancel without committing.
     graph_menu_saved: Option<GraphPosition>,
+    /// Transient MCP-failure banner: `Some` while visible (rendered in the
+    /// spacer row between the feed and the status bar, cleared after
+    /// [`MCP_ERROR_BANNER_MS`]).
+    mcp_error_banner: Option<McpErrorBanner>,
+    /// Fingerprint of the last banner-shown MCP error set; a changed set
+    /// re-triggers the banner, an identical one (repeated snapshot frames)
+    /// does not.
+    mcp_banner_last_fingerprint: String,
     /// Structured runtime-extension catalog/diagnostic popup. The data comes
     /// only from the transport snapshot; no extension code runs in the TUI.
     extension_view: bool,
@@ -825,7 +846,7 @@ fn format_relative_time(rfc3339: Option<&str>) -> Option<String> {
 /// when the session is mid-turn, `graphs N (M active)` when it has DAG runs,
 /// `current` on the daemon's active session. Marks join with `·`.
 fn resume_picker_label(entry: &ResumePickerEntry) -> String {
-    const ID_COL_WIDTH: usize = 16;
+    const ID_COL_WIDTH: usize = 22;
     const TIME_COL_WIDTH: usize = 4;
     let id_col = format!("{:<ID_COL_WIDTH$}", entry.id_short);
     let time = format_relative_time(entry.last_activity_at_rfc3339.as_deref())

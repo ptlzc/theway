@@ -154,10 +154,11 @@ fn resume_picker_label_formats_name_busy_graph_and_current_marks() {
         current: true,
     };
 
-    // Act + Assert
+    // Act + Assert (the id column pads to its full width).
+    let id_col = format!("{:<22}", "abc1234567890");
     assert_eq!(
         super::resume_picker_label(&full),
-        "├─ abc1234567890    | now   plan · busy · graphs 3 (2 active) · current"
+        format!("├─ {id_col} | now   plan · busy · graphs 3 (2 active) · current")
     );
     let inactive_graphs = super::ResumePickerEntry {
         busy: false,
@@ -167,7 +168,7 @@ fn resume_picker_label_formats_name_busy_graph_and_current_marks() {
     };
     assert_eq!(
         super::resume_picker_label(&inactive_graphs),
-        "├─ abc1234567890    | now   plan · graphs 3"
+        format!("├─ {id_col} | now   plan · graphs 3")
     );
     let bare = super::ResumePickerEntry {
         name: String::new(),
@@ -179,7 +180,7 @@ fn resume_picker_label_formats_name_busy_graph_and_current_marks() {
     };
     assert_eq!(
         super::resume_picker_label(&bare),
-        "├─ abc1234567890    | now"
+        format!("├─ {id_col} | now")
     );
 }
 

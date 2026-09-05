@@ -263,6 +263,8 @@ pub struct SidebarStyle {
     pub badge: Color,
     /// Warning emphasis (disabled counts, reload pending).
     pub warn: Color,
+    /// Error emphasis (failed MCP servers, `[x] name` rows).
+    pub error: Color,
     /// Dim/summary text.
     pub muted: Color,
 }
@@ -276,6 +278,7 @@ impl Default for SidebarStyle {
             section: Color::Cyan,
             badge: Color::Green,
             warn: Color::Yellow,
+            error: Color::Red,
             muted: Color::DarkGray,
         }
     }

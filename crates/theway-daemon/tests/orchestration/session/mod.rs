@@ -782,3 +782,21 @@ async fn standalone_mode_load_scans_local_templates() {
         "standalone mode must still scan local template roots"
     );
 }
+
+/// MCP loader diagnostics map to structured `(name, message)` pairs: server
+/// failures keep the server name, config failures keep the file label,
+/// unrecognized text falls back to `mcp`.
+#[test]
+fn parse_mcp_diagnostic_splits_server_and_config_errors() {
+    let server = super::parse_mcp_diagnostic("mcp server 'devops-mcp' failed: connect timeout");
+    assert_eq!(server, ("devops-mcp".to_string(), "connect timeout".to_string()));
+
+    let config = super::parse_mcp_diagnostic("mcp config (user, /root/.theway/mcp.toml): parse failed: bad toml");
+    assert_eq!(
+        config,
+        ("mcp.toml (user)".to_string(), "parse failed: bad toml".to_string())
+    );
+
+    let other = super::parse_mcp_diagnostic("something unexpected");
+    assert_eq!(other, ("mcp".to_string(), "something unexpected".to_string()));
+}

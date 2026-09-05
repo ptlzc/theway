@@ -172,6 +172,7 @@ impl Theme {
                         ("section", &mut theme.sidebar.section),
                         ("badge", &mut theme.sidebar.badge),
                         ("warn", &mut theme.sidebar.warn),
+                        ("error", &mut theme.sidebar.error),
                         ("muted", &mut theme.sidebar.muted),
                     ],
                     &mut [("bg", &mut theme.sidebar.bg)],

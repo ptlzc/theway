@@ -151,12 +151,23 @@ pub struct WireLoadCronJobsResult {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct WireMcpServerError {
+    pub name: String,
+    pub error: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WireMcpSnapshot {
     pub servers: usize,
     pub tools: usize,
     pub notification_hooks: usize,
     pub server_names: Vec<String>,
     pub tool_names: Vec<String>,
+    /// Per-server connection/config failures (name + message). The TUI
+    /// surfaces these as a 3s startup banner and red `[x] name` rows in the
+    /// side panel's MCP section.
+    #[serde(default)]
+    pub errors: Vec<WireMcpServerError>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
