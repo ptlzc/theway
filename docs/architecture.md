@@ -333,7 +333,16 @@ sandbox-only builds.
   project ↻ user). In controller-provisioned mode the daemon does zero local
   file IO for either catalog: the TUI scans and provisions both through the
   settings surface (`WireDaemonConfig.skills` / `templates`, carried on both
-  gRPC and JSON-RPC). MCP loader + LSP supervisor, lifecycle hooks
+  gRPC and JSON-RPC). MCP servers follow the same controller-supply model
+  (issue #73): the TUI scans `~/.theway/mcp.toml` + project `mcp.toml` and
+  provisions `WireDaemonConfig.mcp_servers` through the settings surface; the
+  daemon connects (stdio spawn / streamable HTTP), swaps the live session's
+  MCP tools, registers push hooks on the trigger executor, and publishes
+  per-server failures into the snapshot (`McpSnapshot.errors` → 3s startup
+  banner + red panel rows). Credentials never cross the wire — only the
+  `token_keychain_ref`, resolved against `auth.json` daemon-side. `/reload`
+  reconnects from the provisioned configs. Standalone `thewayd` keeps the
+  local `mcp.toml` scan. LSP supervisor, lifecycle hooks
   (`hooks`, `hook_executors`), TS extension host, and runtime observability exporters.
 
 The daemon re-exports the shared client-contract modules
