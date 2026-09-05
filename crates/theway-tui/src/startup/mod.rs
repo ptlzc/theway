@@ -334,6 +334,7 @@ pub(crate) mod test_daemon {
             extensions: theway_transport::wire::WireExtensionSnapshot::default(),
             system_context: String::new(),
             shell_count: 0,
+            observability: Default::default(),
         }
     }
 

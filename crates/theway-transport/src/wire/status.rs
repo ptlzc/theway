@@ -20,6 +20,18 @@ pub struct WireContextUsage {
     pub context_window: u64,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct WireObservabilityStatus {
+    /// True when the daemon observer is degraded (OTLP export failure, queue
+    /// overflow, exporter construction failure). The agent runtime itself is
+    /// unaffected; this is a presentation hint only.
+    #[serde(default)]
+    pub degraded: bool,
+    /// Latest failure message; empty when healthy.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub message: String,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct WireStatus {
     pub session_id: String,
@@ -64,6 +76,10 @@ pub struct WireStatus {
     /// exited) across the whole daemon process.
     #[serde(default)]
     pub shell_count: u64,
+    /// Daemon observer health hint (OTLP export failures etc.); never affects
+    /// agent control flow.
+    #[serde(default)]
+    pub observability: WireObservabilityStatus,
     /// TUI display settings resolved by the daemon from `config.toml`
     /// (`[tui] max_feed_lines`); `None` → the TUI built-in default applies.
     pub tui_max_feed_lines: Option<u64>,
@@ -340,6 +356,7 @@ impl From<&WireSessionSnapshot> for WireStatus {
             extensions: snapshot.runtime.extensions.clone(),
             system_context: snapshot.runtime.system_context.clone(),
             shell_count: snapshot.runtime.shell_count,
+            observability: WireObservabilityStatus::default(),
         }
     }
 }

@@ -106,6 +106,7 @@ fn fixture_snapshot(feed_line: &str) -> WireStatus {
         extensions: crate::wire::WireExtensionSnapshot::default(),
         system_context: String::new(),
         shell_count: 0,
+        observability: Default::default(),
     }
 }
 

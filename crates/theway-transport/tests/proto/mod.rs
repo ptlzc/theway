@@ -106,6 +106,7 @@ fn fixture_snapshot() -> WireStatus {
         extensions: WireExtensionSnapshot::default(),
         system_context: String::new(),
         shell_count: 3,
+        observability: Default::default(),
     }
 }
 

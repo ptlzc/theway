@@ -34,6 +34,7 @@ fn wire_status(session_id: &str) -> WireStatus {
         extensions: WireExtensionSnapshot::default(),
         system_context: String::new(),
         shell_count: 0,
+        observability: Default::default(),
     }
 }
 

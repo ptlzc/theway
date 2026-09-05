@@ -260,6 +260,7 @@ fn sample_wire_status(feed_lines: Vec<String>) -> WireStatus {
         extensions: theway_transport::wire::WireExtensionSnapshot::default(),
         system_context: String::new(),
         shell_count: 0,
+        observability: Default::default(),
     }
 }
 

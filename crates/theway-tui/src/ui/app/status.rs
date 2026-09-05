@@ -7,10 +7,15 @@ impl App {
         } else {
             format!(" · {} queued", self.latest.queued_count)
         };
+        let observer = if self.latest.observability.degraded {
+            " · observer error"
+        } else {
+            ""
+        };
         let status = if !self.connected {
             format!("daemon offline{queue}")
         } else {
-            format!("ready{queue}")
+            format!("ready{queue}{observer}")
         };
         let scrolled = if self.follow { "" } else { " ↑scrolled" };
         format!(" {status}{scrolled} ")
@@ -117,6 +122,17 @@ impl App {
                 spans.push(Span::styled(
                     format!(" · [{} shell]", self.latest.shell_count),
                     Style::default().fg(band.fg),
+                ));
+            }
+            if self.latest.observability.degraded {
+                let hint = if self.latest.observability.message.is_empty() {
+                    "observer error".to_string()
+                } else {
+                    format!("observer: {}", self.latest.observability.message)
+                };
+                spans.push(Span::styled(
+                    format!(" · [{hint}]"),
+                    Style::default().fg(band.error),
                 ));
             }
             let line = Line::from(spans);

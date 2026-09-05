@@ -148,6 +148,7 @@ fn daemon_config(
         thinking_summary: None,
         startup,
         services: crate::orchestration::DaemonServices::new(),
+        observability: Default::default(),
     }
 }
 

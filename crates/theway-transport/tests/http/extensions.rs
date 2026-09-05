@@ -43,6 +43,7 @@ fn extension_http_state() -> (HttpState, mpsc::UnboundedReceiver<WireCommand>) {
         },
         system_context: String::new(),
         shell_count: 0,
+        observability: Default::default(),
     };
     (
         HttpState {

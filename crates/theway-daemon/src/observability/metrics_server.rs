@@ -1,8 +1,11 @@
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use prometheus::Encoder as _;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+use super::ObservabilityStatus;
 
 pub(super) struct MetricsServer {
     #[cfg(test)]
@@ -12,10 +15,15 @@ pub(super) struct MetricsServer {
 }
 
 impl MetricsServer {
-    pub(super) async fn spawn(addr: SocketAddr, registry: prometheus::Registry) -> Option<Self> {
+    pub(super) async fn spawn(
+        addr: SocketAddr,
+        registry: prometheus::Registry,
+        status: Arc<ObservabilityStatus>,
+    ) -> Option<Self> {
         let listener = match tokio::net::TcpListener::bind(addr).await {
             Ok(listener) => listener,
             Err(error) => {
+                status.record_failure(format!("Prometheus listener failed: {error}"));
                 tracing::warn!(
                     target: "theway::observability",
                     %addr,

@@ -135,6 +135,9 @@ pub(crate) struct DaemonConfig {
     /// startup snapshot.
     pub(crate) startup: crate::startup_config::StartupConfig,
     pub(crate) services: DaemonServices,
+    /// Observer health shared with the status plane; the TUI renders it as a
+    /// hint when OTLP export or the observation queue is degraded.
+    pub(crate) observability: crate::observability::ObservabilityStatus,
 }
 
 struct SessionRuntimeState {
@@ -392,6 +395,11 @@ struct RuntimeEventInputs {
     feed_tx: mpsc::UnboundedSender<(String, FeedUpdate)>,
     main_run_rx: Option<mpsc::UnboundedReceiver<String>>,
     control_plane_prompt_rx: Option<mpsc::UnboundedReceiver<PendingControlPlanePrompt>>,
+    /// Observer health handle carried into the wire status plane.
+    observability: crate::observability::ObservabilityStatus,
+    /// Watch subscription that wakes the event loop when the observer status
+    /// transitions so a full status snapshot republishes the hint.
+    observability_rx: Option<tokio::sync::watch::Receiver<u64>>,
 }
 
 /// Headless transport host for `thewayd` (gRPC / HTTP / MCP).

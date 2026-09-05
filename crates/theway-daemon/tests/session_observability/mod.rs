@@ -55,6 +55,7 @@ fn live_status(session_id: &str, system_context: &str) -> WireStatus {
         extensions: theway_transport::wire::WireExtensionSnapshot::default(),
         system_context: system_context.to_string(),
         shell_count: 0,
+        observability: Default::default(),
     }
 }
 

@@ -26,6 +26,7 @@ fn bounded_queue_counts_drops_without_blocking() {
         dropped: AtomicU64::new(0),
         metrics: runtime_metrics,
         full_content: false,
+        status: Arc::new(ObservabilityStatus::default()),
     });
     let observer_port: Arc<dyn RuntimeObserver> = observer.clone();
     let first = OperationScope::start(
@@ -44,6 +45,8 @@ fn bounded_queue_counts_drops_without_blocking() {
     std::mem::forget(second);
 
     assert!(observer.dropped.load(Ordering::Relaxed) >= 1);
+    assert!(observer.status.snapshot().degraded);
+    assert!(observer.status.snapshot().message.contains("queue full"));
     let families = observer.metrics.prometheus.registry.gather();
     let dropped = families
         .iter()
@@ -63,6 +66,7 @@ fn disconnected_worker_is_isolated_and_counted_as_dropped() {
         dropped: AtomicU64::new(0),
         metrics: runtime_metrics,
         full_content: false,
+        status: Arc::new(ObservabilityStatus::default()),
     });
     let observer_port: Arc<dyn RuntimeObserver> = observer.clone();
 
@@ -102,6 +106,7 @@ fn official_sdk_spans_share_trace_and_parent_identity() {
         dropped: AtomicU64::new(0),
         metrics: runtime_metrics,
         full_content: false,
+        status: Arc::new(ObservabilityStatus::default()),
     });
 
     let parent = OperationScope::start(
@@ -159,7 +164,8 @@ fn build_otel_constructs_http_exporters_with_configured_endpoint() {
         ..TelemetryConfig::default()
     };
     let (tracer_provider, meter_provider, tracer, metrics) =
-        build_otel(&config).expect("OTLP HTTP client must be compiled in");
+        build_otel(&config, Arc::new(ObservabilityStatus::default()))
+            .expect("OTLP HTTP client must be compiled in");
     assert!(tracer_provider.is_some());
     assert!(tracer.is_some());
     assert!(meter_provider.is_none());
@@ -167,6 +173,43 @@ fn build_otel_constructs_http_exporters_with_configured_endpoint() {
     if let Some(provider) = tracer_provider {
         provider.shutdown().unwrap();
     }
+}
+
+#[tokio::test]
+async fn observability_status_transitions_notify_subscribers() {
+    let status = ObservabilityStatus::default();
+    let mut rx = status.subscribe();
+
+    status.record_failure("link down");
+    rx.changed().await.expect("failure transition");
+    let snapshot = status.snapshot();
+    assert!(snapshot.degraded);
+    assert_eq!(snapshot.message, "link down");
+
+    status.record_success();
+    rx.changed().await.expect("recovery transition");
+    let snapshot = status.snapshot();
+    assert!(!snapshot.degraded);
+    assert!(snapshot.message.is_empty());
+}
+
+#[tokio::test]
+async fn from_config_records_exporter_construction_failure() {
+    let handle = TelemetryHandle::from_config(TelemetryConfig {
+        otlp_enabled: true,
+        otlp_traces_endpoint: Some("http://[::1".into()),
+        ..TelemetryConfig::default()
+    })
+    .await;
+
+    let status = handle.status().snapshot();
+    assert!(status.degraded, "{status:?}");
+    assert!(
+        status.message.contains("OpenTelemetry export is disabled"),
+        "{status:?}"
+    );
+
+    handle.shutdown().await;
 }
 
 #[test]
@@ -190,6 +233,7 @@ fn full_content_observer_sets_langfuse_attributes_on_spans() {
         dropped: AtomicU64::new(0),
         metrics: runtime_metrics,
         full_content: true,
+        status: Arc::new(ObservabilityStatus::default()),
     });
     assert!(observer.include_content());
 
@@ -435,6 +479,7 @@ fn worker_loop_records_all_operation_kinds_and_token_measurements() {
         dropped: AtomicU64::new(0),
         metrics: metrics.clone(),
         full_content: false,
+        status: Arc::new(ObservabilityStatus::default()),
     });
 
     let details = [
@@ -549,6 +594,7 @@ fn worker_loop_records_abandoned_active_operations() {
         dropped: AtomicU64::new(0),
         metrics: metrics.clone(),
         full_content: false,
+        status: Arc::new(ObservabilityStatus::default()),
     });
     let active = OperationScope::start(
         observer,
@@ -611,6 +657,7 @@ fn runtime_metrics_records_otel_paths_through_worker() {
         dropped: AtomicU64::new(0),
         metrics: metrics.clone(),
         full_content: false,
+        status: Arc::new(ObservabilityStatus::default()),
     });
 
     OperationScope::start(
@@ -801,6 +848,7 @@ fn worker_loop_trace_attributes_cover_all_details_and_error_status() {
         dropped: AtomicU64::new(0),
         metrics: metrics.clone(),
         full_content: false,
+        status: Arc::new(ObservabilityStatus::default()),
     });
     let context = ObservationContext {
         session_id: Some("session-a".into()),

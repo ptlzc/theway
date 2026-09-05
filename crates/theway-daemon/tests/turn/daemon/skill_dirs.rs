@@ -180,6 +180,7 @@ async fn host_with_extras(extras: Vec<PathBuf>) -> (TurnHost, Arc<AtomicU32>, Ve
         // controller payload in this fixture).
         startup: crate::startup_config::StartupConfig::default(),
         services: crate::orchestration::DaemonServices::new(),
+        observability: Default::default(),
     };
 
     (TurnHost::new(config), reload_calls, vec![scratch, repo_dir])

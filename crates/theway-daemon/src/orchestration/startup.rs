@@ -474,6 +474,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         thinking_summary,
         startup,
         services,
+        observability: (*telemetry.status()).clone(),
     });
 
     let mode_label = match mode {

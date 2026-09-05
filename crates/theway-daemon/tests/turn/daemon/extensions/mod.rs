@@ -126,6 +126,7 @@ fn build_host() -> (TurnHost, TempDir, TempDir) {
         thinking_summary: None,
         startup: crate::startup_config::StartupConfig::default(),
         services: crate::orchestration::DaemonServices::new(),
+        observability: Default::default(),
     };
 
     (TurnHost::new(config), scratch, repo_dir)

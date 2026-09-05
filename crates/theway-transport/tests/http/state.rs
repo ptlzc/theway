@@ -61,6 +61,7 @@ async fn spawn_state_server() -> (
             extensions: WireExtensionSnapshot::default(),
             system_context: String::new(),
             shell_count: 0,
+            observability: Default::default(),
         })),
         session_states: Arc::new(Mutex::new(std::collections::HashMap::new())),
         completer: SlashCompleter::from_commands(vec!["/help".into()]),

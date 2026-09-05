@@ -130,6 +130,7 @@ impl HostFixture {
             thinking_summary: None,
             startup: crate::startup_config::StartupConfig::default(),
             services: crate::orchestration::DaemonServices::new(),
+            observability: Default::default(),
         };
         Self {
             host: TurnHost::new(config),

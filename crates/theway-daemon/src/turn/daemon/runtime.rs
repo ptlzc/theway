@@ -169,6 +169,8 @@ impl TurnHost {
                 feed_tx: config.feed_tx,
                 main_run_rx: Some(config.main_run_rx),
                 control_plane_prompt_rx: config.control_plane_prompt_rx,
+                observability: config.observability.clone(),
+                observability_rx: Some(config.observability.subscribe()),
             },
         }
     }
@@ -353,6 +355,11 @@ impl TurnHost {
         let mut publish_tick = tokio::time::interval(Duration::from_millis(50));
         publish_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         publish_tick.reset();
+        let mut observability_rx = self
+            .inputs
+            .observability_rx
+            .take()
+            .expect("observability_rx taken once");
 
         loop {
             tokio::select! {
@@ -393,6 +400,10 @@ impl TurnHost {
                     }
                 }, if control_plane_prompt_rx.is_some() => {
                     self.show_control_plane_prompt(prompt);
+                    dirty = true;
+                    metadata_dirty = true;
+                }
+                _ = observability_rx.changed() => {
                     dirty = true;
                     metadata_dirty = true;
                 }
