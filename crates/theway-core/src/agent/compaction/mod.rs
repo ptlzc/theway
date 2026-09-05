@@ -4,6 +4,7 @@
 pub mod algorithm;
 pub mod branch_summarization;
 pub mod compaction;
+pub mod estimate;
 pub mod triggers;
 pub mod utils;
 
