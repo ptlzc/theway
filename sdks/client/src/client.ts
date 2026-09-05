@@ -860,6 +860,8 @@ function fillDaemonConfig(config: Partial<DaemonConfig>): DaemonConfig {
     ...config,
     builtinSkills: config.builtinSkills ?? [],
     skillsDirs: config.skillsDirs ?? [],
+    skills: config.skills ?? [],
+    templates: config.templates ?? [],
     clearFields: config.clearFields ?? [],
   };
 }
