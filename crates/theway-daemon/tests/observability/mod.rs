@@ -175,6 +175,28 @@ fn build_otel_constructs_http_exporters_with_configured_endpoint() {
     }
 }
 
+#[test]
+fn report_export_result_records_and_clears_status() {
+    let status = Arc::new(ObservabilityStatus::default());
+
+    report_export_result(
+        &status,
+        "OTLP trace export failed",
+        &Err(opentelemetry_sdk::error::OTelSdkError::InternalFailure(
+            "boom".into(),
+        )),
+    );
+    let snapshot = status.snapshot();
+    assert!(snapshot.degraded);
+    assert!(snapshot.message.contains("OTLP trace export failed"));
+    assert!(snapshot.message.contains("boom"), "{}", snapshot.message);
+
+    report_export_result(&status, "OTLP trace export failed", &Ok(()));
+    let snapshot = status.snapshot();
+    assert!(!snapshot.degraded);
+    assert!(snapshot.message.is_empty());
+}
+
 #[tokio::test]
 async fn observability_status_transitions_notify_subscribers() {
     let status = ObservabilityStatus::default();
