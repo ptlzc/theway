@@ -14,8 +14,8 @@ use uuid::Uuid;
 
 pub use crate::agent::session::session::SubagentJobSnapshot;
 use crate::observability::{
-    ErrorCategory, ObservationContext, OperationDetail, OperationId, OperationOutcome,
-    OperationScope, RuntimeMeasurements, RuntimeObserver, noop_runtime_observer,
+    ErrorCategory, ObservationContent, ObservationContext, OperationDetail, OperationId,
+    OperationOutcome, OperationScope, RuntimeMeasurements, RuntimeObserver, noop_runtime_observer,
 };
 
 #[cfg(test)]
@@ -435,7 +435,7 @@ impl SubagentJobRegistry {
                 tools_called: job.tools_called,
                 session_id: job.session_id.clone(),
             });
-            if let Some(scope) = self.operations.lock().remove(id) {
+            if let Some(mut scope) = self.operations.lock().remove(id) {
                 let timed_out = error.as_deref().is_some_and(|message| {
                     let message = message.to_ascii_lowercase();
                     message.contains("timed out") || message.contains("timeout")
@@ -460,6 +460,24 @@ impl SubagentJobRegistry {
                         Some(ErrorCategory::Cancellation),
                     ),
                 };
+                if self.observer().include_content() {
+                    scope.attach_content(ObservationContent {
+                        input: Some(serde_json::json!({
+                            "agent": job.agent,
+                            "source": job.source,
+                            "runId": job.run_id,
+                            "nodeId": job.node_id,
+                        })),
+                        output: Some(serde_json::json!({
+                            "status": status.as_str(),
+                            "error": error,
+                            "output": job.output,
+                            "outputTruncated": job.truncated,
+                            "messages": job.messages,
+                            "messagesTruncated": job.messages_truncated,
+                        })),
+                    });
+                }
                 scope.finish(
                     outcome,
                     category,

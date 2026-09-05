@@ -22,6 +22,29 @@ impl RuntimeObserver for RecordingObserver {
     }
 }
 
+#[derive(Default)]
+struct FullRecordingObserver {
+    observations: Mutex<Vec<RuntimeObservation>>,
+}
+
+impl RuntimeObserver for FullRecordingObserver {
+    fn observe(&self, observation: RuntimeObservation) {
+        self.observations.lock().push(observation);
+    }
+
+    fn include_content(&self) -> bool {
+        true
+    }
+}
+
+#[test]
+fn include_content_defaults_to_false() {
+    let recording = RecordingObserver::default();
+    let observer: Arc<dyn RuntimeObserver> = Arc::new(recording);
+    assert!(!observer.include_content());
+    assert!(!theway_core::noop_runtime_observer().include_content());
+}
+
 #[test]
 fn operation_scope_pairs_start_and_finish_with_parent() {
     let recording = Arc::new(RecordingObserver::default());
@@ -91,6 +114,37 @@ fn dropped_scope_finishes_as_abandoned_once() {
     };
     assert_eq!(finish.id, id);
     assert_eq!(finish.outcome, OperationOutcome::Abandoned);
+}
+
+#[test]
+fn attached_content_carries_into_the_finish_observation() {
+    let recording = Arc::new(FullRecordingObserver::default());
+    let observer: Arc<dyn RuntimeObserver> = recording.clone();
+    let mut scope = OperationScope::start(
+        observer,
+        None,
+        ObservationContext::default(),
+        OperationDetail::ToolExecution {
+            tool_name: "bash".into(),
+        },
+    );
+    scope.attach_content(ObservationContent {
+        input: Some(serde_json::json!({ "command": "ls" })),
+        output: Some(serde_json::json!({ "stdout": "src" })),
+    });
+    scope.finish(
+        OperationOutcome::Succeeded,
+        None,
+        RuntimeMeasurements::default(),
+    );
+
+    let events = recording.observations.lock();
+    let RuntimeObservation::OperationFinished(finish) = &events[1] else {
+        panic!("expected finish");
+    };
+    let content = finish.content.as_ref().expect("attached content");
+    assert_eq!(content.input.as_ref().unwrap()["command"], "ls");
+    assert_eq!(content.output.as_ref().unwrap()["stdout"], "src");
 }
 
 struct PanickingObserver;
@@ -475,6 +529,115 @@ async fn parallel_tools_are_siblings_and_payloads_are_absent() {
     let debug = format!("{events:?}");
     assert!(!debug.contains("SECRET_TOOL_ARG"));
     assert!(!debug.contains("SECRET_TOOL_RESULT"));
+}
+
+#[tokio::test]
+async fn full_content_observer_gets_llm_and_tool_input_output() {
+    let recording = Arc::new(FullRecordingObserver::default());
+    let observer: Arc<dyn RuntimeObserver> = recording.clone();
+    let arguments = serde_json::Map::from_iter([(
+        "secret".into(),
+        serde_json::Value::String("SECRET_TOOL_ARG".into()),
+    )]);
+    let first = AssistantMessage {
+        content: vec![ContentBlock::ToolCall(ToolCall {
+            id: "call-1".into(),
+            name: "one".into(),
+            arguments,
+            thought_signature: None,
+        })],
+        stop_reason: StopReason::ToolUse,
+        ..done_message("ignored", Usage::default())
+    };
+    let second = done_message("complete", Usage::default());
+    let responses = Arc::new(tokio::sync::Mutex::new(vec![first, second]));
+    let mut state = AgentState::default();
+    state.model = Some(faux_model());
+    state.tools = vec![Arc::new(OkTool {
+        definition: theway_llm_provider::Tool {
+            name: "one".into(),
+            description: "one".into(),
+            parameters: serde_json::json!({"type": "object"}),
+        },
+    })];
+    let agent = Agent::new(AgentOptions {
+        initial_state: Some(state),
+        observer,
+        stream_fn: Some(queued_stream(responses)),
+        ..Default::default()
+    });
+
+    agent
+        .prompt(AgentMessage::Llm(Message::User(UserMessage {
+            role: UserRole::User,
+            content: UserContent::Text("SECRET_PROMPT".into()),
+            timestamp: 0,
+        })))
+        .await
+        .unwrap();
+
+    let events = recording.observations.lock();
+    let llm_finish = events.iter().find_map(|event| match event {
+        RuntimeObservation::OperationFinished(finish)
+            if finish.kind == OperationKind::LlmRequest =>
+        {
+            Some(finish)
+        }
+        _ => None,
+    });
+    let llm_finish = llm_finish.expect("LLM finish observation");
+    let llm_input = llm_finish
+        .content
+        .as_ref()
+        .and_then(|content| content.input.as_ref())
+        .expect("full LLM input")
+        .to_string();
+    assert!(llm_input.contains("SECRET_PROMPT"), "{llm_input}");
+    let complete_llm = events.iter().find_map(|event| match event {
+        RuntimeObservation::OperationFinished(finish)
+            if finish.kind == OperationKind::LlmRequest
+                && finish
+                    .content
+                    .as_ref()
+                    .and_then(|content| content.output.as_ref())
+                    .is_some_and(|output| output.to_string().contains("complete")) =>
+        {
+            Some(finish)
+        }
+        _ => None,
+    });
+    let llm_output = complete_llm
+        .expect("LLM finish whose output contains the final text")
+        .content
+        .as_ref()
+        .and_then(|content| content.output.as_ref())
+        .expect("full LLM output")
+        .to_string();
+    assert!(llm_output.contains("complete"), "{llm_output}");
+
+    let tool_finish = events.iter().find_map(|event| match event {
+        RuntimeObservation::OperationFinished(finish)
+            if finish.kind == OperationKind::ToolExecution =>
+        {
+            Some(finish)
+        }
+        _ => None,
+    });
+    let tool_finish = tool_finish.expect("tool finish observation");
+    let tool_input = tool_finish
+        .content
+        .as_ref()
+        .and_then(|content| content.input.as_ref())
+        .expect("full tool input")
+        .to_string();
+    assert!(tool_input.contains("SECRET_TOOL_ARG"), "{tool_input}");
+    let tool_output = tool_finish
+        .content
+        .as_ref()
+        .and_then(|content| content.output.as_ref())
+        .expect("full tool output")
+        .to_string();
+    assert!(tool_output.contains("SECRET_TOOL_RESULT"), "{tool_output}");
 }
 
 fn done_message(text: &str, usage: Usage) -> AssistantMessage {

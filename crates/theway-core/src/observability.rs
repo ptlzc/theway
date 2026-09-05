@@ -203,7 +203,19 @@ pub struct OperationStarted {
     pub detail: OperationDetail,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// Opt-in full input/output payload attached to a finished operation.
+///
+/// JSON-shaped so exporters can serialize it directly (e.g. OTLP span
+/// attributes for Langfuse). Producers only build this when the embedder's
+/// [`RuntimeObserver::include_content`] returns `true`; the default keeps
+/// runtime observations content-safe.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ObservationContent {
+    pub input: Option<serde_json::Value>,
+    pub output: Option<serde_json::Value>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct OperationFinished {
     pub id: OperationId,
     pub kind: OperationKind,
@@ -212,9 +224,12 @@ pub struct OperationFinished {
     pub error_category: Option<ErrorCategory>,
     pub duration: Duration,
     pub measurements: RuntimeMeasurements,
+    /// Full input/output content. `None` unless the embedder opted in via
+    /// [`RuntimeObserver::include_content`].
+    pub content: Option<ObservationContent>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum RuntimeObservation {
     OperationStarted(OperationStarted),
@@ -224,6 +239,13 @@ pub enum RuntimeObservation {
 /// Embedder-owned, non-blocking observation port.
 pub trait RuntimeObserver: Send + Sync {
     fn observe(&self, observation: RuntimeObservation);
+
+    /// Whether operation producers should attach full input/output content to
+    /// finished observations. Defaults to `false` — observations stay
+    /// content-safe unless an embedder explicitly opts in.
+    fn include_content(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Debug, Default)]
@@ -253,6 +275,7 @@ pub struct OperationScope {
     observer: Arc<dyn RuntimeObserver>,
     started_at: Instant,
     finished: bool,
+    content: Option<ObservationContent>,
 }
 
 impl OperationScope {
@@ -280,11 +303,18 @@ impl OperationScope {
             observer,
             started_at: Instant::now(),
             finished: false,
+            content: None,
         }
     }
 
     pub fn id(&self) -> OperationId {
         self.id
+    }
+
+    /// Attach opt-in full input/output content carried into the finish
+    /// observation. Call before [`OperationScope::finish`].
+    pub fn attach_content(&mut self, content: ObservationContent) {
+        self.content = Some(content);
     }
 
     pub fn finish(
@@ -316,6 +346,7 @@ impl OperationScope {
                 error_category,
                 duration: self.started_at.elapsed(),
                 measurements,
+                content: self.content.take(),
             }),
         );
     }

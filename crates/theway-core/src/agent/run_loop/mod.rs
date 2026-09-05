@@ -56,7 +56,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::agent::{AgentInner, AgentRunError, AgentRunPermit};
 use crate::observability::{
-    ErrorCategory, OperationDetail, OperationOutcome, OperationScope, RuntimeMeasurements,
+    ErrorCategory, ObservationContent, OperationDetail, OperationOutcome, OperationScope,
+    RuntimeMeasurements,
 };
 use crate::types::*;
 
@@ -438,7 +439,7 @@ async fn run_one(
     let context = active_turn
         .map(|(_, turn)| inner.options.observation_context.with_turn(turn))
         .unwrap_or_else(|| inner.options.observation_context.clone());
-    let scope = OperationScope::start(
+    let mut scope = OperationScope::start(
         Arc::clone(&inner.options.observer),
         active_turn.map(|(id, _)| id),
         context,
@@ -577,6 +578,20 @@ async fn run_one(
         },
     };
     let cancelled = cancel_state.is_cancelled();
+    if inner.options.observer.include_content() {
+        scope.attach_content(ObservationContent {
+            input: Some(serde_json::json!({
+                "name": outcome.name,
+                "arguments": outcome.args,
+            })),
+            output: Some(serde_json::json!({
+                "executed": outcome.executed,
+                "isError": outcome.is_error,
+                "content": outcome.result.content,
+                "details": outcome.result.details,
+            })),
+        });
+    }
     scope.finish(
         if cancelled {
             OperationOutcome::Cancelled

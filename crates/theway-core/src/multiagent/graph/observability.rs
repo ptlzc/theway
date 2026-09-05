@@ -1,6 +1,6 @@
 use crate::observability::{
-    ErrorCategory, ObservationContext, OperationDetail, OperationId, OperationOutcome,
-    OperationScope, RuntimeMeasurements, RuntimeObserver,
+    ErrorCategory, ObservationContent, ObservationContext, OperationDetail, OperationId,
+    OperationOutcome, OperationScope, RuntimeMeasurements, RuntimeObserver,
 };
 
 use super::engine::DagEngine;
@@ -75,7 +75,7 @@ impl DagEngine {
     }
 
     pub(super) fn finish_node_observation(&self, run_id: &str, node_id: &str, status: NodeStatus) {
-        let Some(scope) = self
+        let Some(mut scope) = self
             .node_operations
             .lock()
             .remove(&(run_id.to_string(), node_id.to_string()))
@@ -118,11 +118,31 @@ impl DagEngine {
                 (OperationOutcome::Abandoned, Some(ErrorCategory::Runtime))
             }
         };
+        if self.observer().include_content() {
+            let node = self
+                .get_run(run_id)
+                .and_then(|run| run.node(node_id).cloned());
+            if let Some(node) = node {
+                scope.attach_content(ObservationContent {
+                    input: Some(serde_json::json!({
+                        "agent": node.agent,
+                        "task": node.task,
+                        "provider": node.provider,
+                        "model": node.model,
+                    })),
+                    output: Some(serde_json::json!({
+                        "status": status,
+                        "error": node.error,
+                        "output": node.output,
+                    })),
+                });
+            }
+        }
         scope.finish(outcome, category, measurements);
     }
 
     pub(super) fn finish_run_observation(&self, run_id: &str, status: DagStatus) {
-        let Some(scope) = self.run_operations.lock().remove(run_id) else {
+        let Some(mut scope) = self.run_operations.lock().remove(run_id) else {
             return;
         };
         let measurements = self
@@ -150,6 +170,21 @@ impl DagEngine {
             ),
             DagStatus::Running => (OperationOutcome::Abandoned, Some(ErrorCategory::Runtime)),
         };
+        if self.observer().include_content() {
+            if let Some(run) = self.get_run(run_id) {
+                let nodes = run
+                    .nodes
+                    .iter()
+                    .map(|node| {
+                        serde_json::json!({ "id": node.id, "agent": node.agent, "task": node.task })
+                    })
+                    .collect::<Vec<_>>();
+                scope.attach_content(ObservationContent {
+                    input: Some(serde_json::json!({ "name": run.name, "nodes": nodes })),
+                    output: Some(serde_json::json!({ "status": status, "error": run.error })),
+                });
+            }
+        }
         scope.finish(outcome, category, measurements);
     }
 }

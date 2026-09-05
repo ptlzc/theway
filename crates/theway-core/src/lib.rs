@@ -24,9 +24,10 @@ pub use agent::{
     LoopSyncCallback,
 };
 pub use observability::{
-    ErrorCategory, NoopRuntimeObserver, ObservationContext, OperationDetail, OperationFinished,
-    OperationId, OperationKind, OperationOutcome, OperationScope, OperationStarted,
-    RuntimeMeasurements, RuntimeObservation, RuntimeObserver, noop_runtime_observer,
+    ErrorCategory, NoopRuntimeObserver, ObservationContent, ObservationContext, OperationDetail,
+    OperationFinished, OperationId, OperationKind, OperationOutcome, OperationScope,
+    OperationStarted, RuntimeMeasurements, RuntimeObservation, RuntimeObserver,
+    noop_runtime_observer,
 };
 pub use types::{
     AfterToolCallContext, AfterToolCallHook, AfterToolCallResult, AgentContext, AgentLoopConfig,

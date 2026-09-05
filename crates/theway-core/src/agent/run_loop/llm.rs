@@ -12,7 +12,8 @@ use tokio_util::sync::CancellationToken;
 use crate::agent::model_request::{NormalizedGenerationOptions, NormalizedModelRequestDraft};
 use crate::agent::{AgentInner, AgentRunError};
 use crate::observability::{
-    ErrorCategory, OperationDetail, OperationOutcome, OperationScope, RuntimeMeasurements,
+    ErrorCategory, ObservationContent, OperationDetail, OperationOutcome, OperationScope,
+    RuntimeMeasurements,
 };
 use crate::types::*;
 
@@ -70,7 +71,8 @@ pub(super) async fn call_llm(
     let context = active_turn
         .map(|(_, turn)| inner.options.observation_context.with_turn(turn))
         .unwrap_or_else(|| inner.options.observation_context.clone());
-    let scope = OperationScope::start(
+    let include_content = inner.options.observer.include_content();
+    let mut scope = OperationScope::start(
         Arc::clone(&inner.options.observer),
         active_turn.map(|(id, _)| id),
         context,
@@ -80,7 +82,7 @@ pub(super) async fn call_llm(
         },
     );
 
-    let result = async {
+    let (result, input_content) = async {
         // `transform_context` runs before convert_to_llm so callers can prune / inject ephemeral
         // context without mutating persisted state.
         let agent_messages = if let Some(transform) = inner.options.transform_context.clone() {
@@ -133,6 +135,14 @@ pub(super) async fn call_llm(
                     .cloned()
             })
             .collect::<Vec<_>>();
+        // Opt-in full-context capture: serialize the exact normalized request
+        // that will be sent (system instructions, messages, tools, generation
+        // options) before its fields are moved into the provider context.
+        let input_content = if include_content {
+            serde_json::to_value(&request).ok()
+        } else {
+            None
+        };
         let context = PiContext {
             system_prompt: request.system_instructions,
             messages: request.messages,
@@ -174,10 +184,10 @@ pub(super) async fn call_llm(
             let ev = tokio::select! {
                 biased;
                 _ = cancel.cancelled() => {
-                    return Err(AgentRunError::Other("aborted".into()));
+                    return (Err(AgentRunError::Other("aborted".into())), input_content.clone());
                 }
                 _ = turn_cancel.cancelled() => {
-                    return Err(AgentRunError::TurnInterrupted);
+                    return (Err(AgentRunError::TurnInterrupted), input_content.clone());
                 }
                 next = stream.next() => match next {
                     Some(ev) => ev,
@@ -222,14 +232,23 @@ pub(super) async fn call_llm(
                     // last_message would be overwritten by `return Err` below; don't bother.
                     let msg = error.error_message.clone().unwrap_or_default();
                     inner.state.lock().streaming_message = None;
-                    return Err(AgentRunError::Other(msg));
+                    return (Err(AgentRunError::Other(msg)), input_content.clone());
                 }
                 _ => {}
             }
         }
         inner.state.lock().streaming_message = None;
-        let mut message = last_message
-            .ok_or_else(|| AgentRunError::Other("LLM stream produced no message".into()))?;
+        let mut message = match last_message {
+            Some(message) => message,
+            None => {
+                return (
+                    Err(AgentRunError::Other(
+                        "LLM stream produced no message".into(),
+                    )),
+                    input_content,
+                );
+            }
+        };
         // Issue #105: `usage.input` is the TOTAL input token count (prompt
         // tokens already include cached reads on OpenAI/DeepSeek), and
         // `usage.cache_read` is the cached subset of it. Adding them again
@@ -248,10 +267,19 @@ pub(super) async fn call_llm(
             } else {
                 None
             };
-        Ok(ModelCallResult {
-            message,
-            executable_tools,
-        })
+        message.usage.provider_cache_hit_rate =
+            if total_input_tokens > 0 && message.usage.cache_read > 0 {
+                Some(message.usage.cache_read as f64 / total_input_tokens as f64)
+            } else {
+                None
+            };
+        (
+            Ok(ModelCallResult {
+                message,
+                executable_tools,
+            }),
+            input_content,
+        )
     }
     .await;
 
@@ -283,6 +311,16 @@ pub(super) async fn call_llm(
             RuntimeMeasurements::default(),
         ),
     };
+    if include_content && (input_content.is_some() || result.is_ok()) {
+        let output = match &result {
+            Ok(call) => serde_json::to_value(&call.message).ok(),
+            Err(error) => Some(serde_json::json!({ "error": error.to_string() })),
+        };
+        scope.attach_content(ObservationContent {
+            input: input_content,
+            output,
+        });
+    }
     scope.finish(outcome, category, measurements);
     result
 }
