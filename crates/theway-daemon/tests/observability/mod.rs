@@ -3,8 +3,8 @@ use std::sync::Arc;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider};
 use theway_core::{
-    ObservationContext, OperationDetail, OperationOutcome, OperationScope, RuntimeMeasurements,
-    RuntimeObserver,
+    ObservationContent, ObservationContext, OperationDetail, OperationOutcome, OperationScope,
+    RuntimeMeasurements, RuntimeObserver,
 };
 
 use super::*;
@@ -25,6 +25,7 @@ fn bounded_queue_counts_drops_without_blocking() {
         stopped: Arc::new(AtomicBool::new(false)),
         dropped: AtomicU64::new(0),
         metrics: runtime_metrics,
+        full_content: false,
     });
     let observer_port: Arc<dyn RuntimeObserver> = observer.clone();
     let first = OperationScope::start(
@@ -61,6 +62,7 @@ fn disconnected_worker_is_isolated_and_counted_as_dropped() {
         stopped: Arc::new(AtomicBool::new(false)),
         dropped: AtomicU64::new(0),
         metrics: runtime_metrics,
+        full_content: false,
     });
     let observer_port: Arc<dyn RuntimeObserver> = observer.clone();
 
@@ -99,6 +101,7 @@ fn official_sdk_spans_share_trace_and_parent_identity() {
         stopped: stopped.clone(),
         dropped: AtomicU64::new(0),
         metrics: runtime_metrics,
+        full_content: false,
     });
 
     let parent = OperationScope::start(
@@ -143,12 +146,109 @@ fn official_sdk_spans_share_trace_and_parent_identity() {
     provider.shutdown().unwrap();
 }
 
+#[test]
+fn full_content_observer_sets_langfuse_attributes_on_spans() {
+    let exporter = InMemorySpanExporter::default();
+    let provider = SdkTracerProvider::builder()
+        .with_simple_exporter(exporter.clone())
+        .build();
+    let tracer = provider.tracer("theway-observability-content-test");
+    let runtime_metrics = metrics();
+    let stopped = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = mpsc::sync_channel(16);
+    let worker_stopped = stopped.clone();
+    let worker_metrics = runtime_metrics.clone();
+    let worker = std::thread::spawn(move || {
+        worker_loop(rx, Some(tracer), worker_metrics, worker_stopped);
+    });
+    let observer: Arc<dyn RuntimeObserver> = Arc::new(DaemonRuntimeObserver {
+        tx,
+        stopped: stopped.clone(),
+        dropped: AtomicU64::new(0),
+        metrics: runtime_metrics,
+        full_content: true,
+    });
+    assert!(observer.include_content());
+
+    let parent = OperationScope::start(
+        observer.clone(),
+        None,
+        ObservationContext::default(),
+        OperationDetail::AgentRun,
+    );
+    let mut tool = OperationScope::start(
+        observer,
+        Some(parent.id()),
+        ObservationContext::default().with_turn(1),
+        OperationDetail::ToolExecution {
+            tool_name: "bash".into(),
+        },
+    );
+    tool.attach_content(ObservationContent {
+        input: Some(serde_json::json!({ "command": "ls", "args": ["-la"] })),
+        output: Some(serde_json::json!({ "stdout": "SECRET_TOOL_RESULT" })),
+    });
+    tool.finish(
+        OperationOutcome::Succeeded,
+        None,
+        RuntimeMeasurements::default(),
+    );
+    parent.finish(
+        OperationOutcome::Succeeded,
+        None,
+        RuntimeMeasurements::default(),
+    );
+    stopped.store(true, Ordering::Release);
+    worker.join().unwrap();
+
+    let spans = exporter.get_finished_spans().unwrap();
+    let agent = spans
+        .iter()
+        .find(|span| span.name == "agent.run")
+        .expect("agent run span");
+    let agent_trace_name = agent
+        .attributes
+        .iter()
+        .find(|attribute| attribute.key.as_str() == "langfuse.trace.name")
+        .expect("root trace name");
+    let opentelemetry::Value::String(trace_name) = &agent_trace_name.value else {
+        panic!("trace name must be a string value");
+    };
+    assert_eq!(trace_name.as_ref(), "theway agent.run");
+
+    let tool = spans
+        .iter()
+        .find(|span| span.name == "tool.execute")
+        .expect("tool span");
+    let observation_type = tool
+        .attributes
+        .iter()
+        .find(|attribute| attribute.key.as_str() == "langfuse.observation.type")
+        .expect("observation type");
+    assert!(format!("{:?}", observation_type.value).contains("span"));
+    let input = tool
+        .attributes
+        .iter()
+        .find(|attribute| attribute.key.as_str() == "langfuse.observation.input")
+        .expect("input content");
+    assert!(format!("{:?}", input.value).contains("ls"));
+    let output = tool
+        .attributes
+        .iter()
+        .find(|attribute| attribute.key.as_str() == "langfuse.observation.output")
+        .expect("output content");
+    assert!(format!("{:?}", output.value).contains("SECRET_TOOL_RESULT"));
+    provider.shutdown().unwrap();
+}
+
 #[tokio::test]
 async fn prometheus_endpoint_has_bounded_labels_and_exact_measurements() {
     let handle = TelemetryHandle::from_config(TelemetryConfig {
         otlp_enabled: false,
+        otlp_metrics_enabled: false,
         metrics_addr: Some("127.0.0.1:0".parse().unwrap()),
         queue_capacity: 16,
+        full_content: false,
     })
     .await;
     assert!(handle.tracer_provider.is_none());
@@ -268,6 +368,7 @@ fn runtime_metrics_records_finish_without_started_entry() {
         error_category: Some(ErrorCategory::Tool),
         duration: Duration::from_millis(5),
         measurements: RuntimeMeasurements::default(),
+        content: None,
     };
     metrics.record_finish(&finish, None);
 
@@ -312,6 +413,7 @@ fn worker_loop_records_all_operation_kinds_and_token_measurements() {
         stopped: stopped.clone(),
         dropped: AtomicU64::new(0),
         metrics: metrics.clone(),
+        full_content: false,
     });
 
     let details = [
@@ -425,6 +527,7 @@ fn worker_loop_records_abandoned_active_operations() {
         stopped: stopped.clone(),
         dropped: AtomicU64::new(0),
         metrics: metrics.clone(),
+        full_content: false,
     });
     let active = OperationScope::start(
         observer,
@@ -486,6 +589,7 @@ fn runtime_metrics_records_otel_paths_through_worker() {
         stopped: stopped.clone(),
         dropped: AtomicU64::new(0),
         metrics: metrics.clone(),
+        full_content: false,
     });
 
     OperationScope::start(
@@ -534,12 +638,31 @@ fn telemetry_config_from_env_detects_otlp_metrics_addr_and_queue_capacity() {
     let _metrics = crate::test_env::EnvGuard::set("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "");
     let _addr = crate::test_env::EnvGuard::set("THEWAY_METRICS_ADDR", "127.0.0.1:9876");
     let _queue = crate::test_env::EnvGuard::set("THEWAY_OBSERVABILITY_QUEUE_CAPACITY", "123");
+    let _content = crate::test_env::EnvGuard::set("THEWAY_OBSERVABILITY_FULL_CONTENT", "true");
 
     let config = TelemetryConfig::from_env();
 
     assert!(config.otlp_enabled);
+    assert!(!config.otlp_metrics_enabled);
     assert_eq!(config.metrics_addr, Some("127.0.0.1:9876".parse().unwrap()));
     assert_eq!(config.queue_capacity, 123);
+    assert!(config.full_content);
+}
+
+#[test]
+fn telemetry_config_from_env_enables_metrics_exporter_with_metrics_endpoint() {
+    let _guard = crate::test_env::ENV_LOCK.lock().unwrap();
+    let _endpoint = crate::test_env::EnvGuard::set("OTEL_EXPORTER_OTLP_ENDPOINT", "");
+    let _traces = crate::test_env::EnvGuard::set("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "");
+    let _metrics = crate::test_env::EnvGuard::set(
+        "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+        "http://127.0.0.1:4317",
+    );
+
+    let config = TelemetryConfig::from_env();
+
+    assert!(config.otlp_enabled);
+    assert!(config.otlp_metrics_enabled);
 }
 
 #[test]
@@ -550,12 +673,15 @@ fn telemetry_config_from_env_ignores_invalid_values() {
     let _metrics = crate::test_env::EnvGuard::set("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "");
     let _addr = crate::test_env::EnvGuard::set("THEWAY_METRICS_ADDR", "not-an-address");
     let _queue = crate::test_env::EnvGuard::set("THEWAY_OBSERVABILITY_QUEUE_CAPACITY", "0");
+    let _content = crate::test_env::EnvGuard::set("THEWAY_OBSERVABILITY_FULL_CONTENT", "banana");
 
     let config = TelemetryConfig::from_env();
 
     assert!(!config.otlp_enabled);
+    assert!(!config.otlp_metrics_enabled);
     assert_eq!(config.metrics_addr, None);
     assert_eq!(config.queue_capacity, DEFAULT_QUEUE_CAPACITY);
+    assert!(!config.full_content);
 }
 
 #[test]
@@ -581,6 +707,7 @@ fn worker_loop_trace_attributes_cover_all_details_and_error_status() {
         stopped: stopped.clone(),
         dropped: AtomicU64::new(0),
         metrics: metrics.clone(),
+        full_content: false,
     });
     let context = ObservationContext {
         session_id: Some("session-a".into()),

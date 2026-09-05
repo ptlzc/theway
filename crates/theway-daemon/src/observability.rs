@@ -35,23 +35,36 @@ const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Clone, Debug)]
 pub struct TelemetryConfig {
     pub otlp_enabled: bool,
+    /// Build the OTLP metric exporter. Enabled when the generic
+    /// `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`
+    /// is set — a traces-only consumer (Langfuse) does not get a metric
+    /// exporter pointed at the SDK default endpoint.
+    pub otlp_metrics_enabled: bool,
     pub metrics_addr: Option<SocketAddr>,
     pub queue_capacity: usize,
+    /// Attach full input/output content to runtime observations so OTLP
+    /// consumers (e.g. Langfuse) can show prompts, messages, tool arguments,
+    /// tool results, and model output. Default OFF: observations stay
+    /// content-safe.
+    pub full_content: bool,
 }
 
 impl TelemetryConfig {
     pub fn from_env() -> Self {
+        let endpoint_set = |name: &str| {
+            std::env::var(name)
+                .ok()
+                .is_some_and(|endpoint| !endpoint.trim().is_empty())
+        };
         let otlp_enabled = [
             "OTEL_EXPORTER_OTLP_ENDPOINT",
             "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
             "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
         ]
         .iter()
-        .any(|name| {
-            std::env::var(name)
-                .ok()
-                .is_some_and(|endpoint| !endpoint.trim().is_empty())
-        });
+        .any(|name| endpoint_set(name));
+        let otlp_metrics_enabled = endpoint_set("OTEL_EXPORTER_OTLP_ENDPOINT")
+            || endpoint_set("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT");
         let metrics_addr = std::env::var("THEWAY_METRICS_ADDR")
             .ok()
             .and_then(|value| match value.trim().parse() {
@@ -70,10 +83,20 @@ impl TelemetryConfig {
             .and_then(|value| value.parse::<usize>().ok())
             .filter(|capacity| *capacity > 0)
             .unwrap_or(DEFAULT_QUEUE_CAPACITY);
+        let full_content = std::env::var("THEWAY_OBSERVABILITY_FULL_CONTENT")
+            .ok()
+            .is_some_and(|value| {
+                matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            });
         Self {
             otlp_enabled,
+            otlp_metrics_enabled,
             metrics_addr,
             queue_capacity,
+            full_content,
         }
     }
 }
@@ -94,7 +117,7 @@ impl TelemetryHandle {
     pub async fn from_config(config: TelemetryConfig) -> Self {
         let prometheus = PrometheusMetrics::new();
         let (tracer_provider, meter_provider, tracer, otel_metrics) = if config.otlp_enabled {
-            match build_otel() {
+            match build_otel(config.otlp_metrics_enabled) {
                 Ok(parts) => parts,
                 Err(error) => {
                     tracing::warn!(
@@ -118,6 +141,7 @@ impl TelemetryHandle {
             stopped: Arc::new(AtomicBool::new(false)),
             dropped: AtomicU64::new(0),
             metrics: Arc::clone(&metrics),
+            full_content: config.full_content,
         });
         let stopped = Arc::clone(&observer.stopped);
         let worker = std::thread::Builder::new()
@@ -208,6 +232,7 @@ pub struct DaemonRuntimeObserver {
     stopped: Arc<AtomicBool>,
     dropped: AtomicU64,
     metrics: Arc<RuntimeMetrics>,
+    full_content: bool,
 }
 
 impl RuntimeObserver for DaemonRuntimeObserver {
@@ -220,6 +245,10 @@ impl RuntimeObserver for DaemonRuntimeObserver {
             self.record_drop();
         }
     }
+
+    fn include_content(&self) -> bool {
+        self.full_content
+    }
 }
 
 impl DaemonRuntimeObserver {
@@ -229,7 +258,9 @@ impl DaemonRuntimeObserver {
     }
 }
 
-fn build_otel() -> anyhow::Result<(
+fn build_otel(
+    metrics_enabled: bool,
+) -> anyhow::Result<(
     Option<SdkTracerProvider>,
     Option<SdkMeterProvider>,
     Option<SdkTracer>,
@@ -251,22 +282,21 @@ fn build_otel() -> anyhow::Result<(
         .build();
     let tracer = tracer_provider.tracer("theway-daemon");
 
-    let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
-        .with_http()
-        .build()?;
-    let reader = PeriodicReader::builder(metric_exporter).build();
-    let meter_provider = SdkMeterProvider::builder()
-        .with_reader(reader)
-        .with_resource(resource)
-        .build();
-    let meter = meter_provider.meter("theway-daemon");
-    let metrics = OtelMetrics::new(&meter);
-    Ok((
-        Some(tracer_provider),
-        Some(meter_provider),
-        Some(tracer),
-        Some(metrics),
-    ))
+    let (meter_provider, metrics) = if metrics_enabled {
+        let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
+            .with_http()
+            .build()?;
+        let reader = PeriodicReader::builder(metric_exporter).build();
+        let meter_provider = SdkMeterProvider::builder()
+            .with_reader(reader)
+            .with_resource(resource)
+            .build();
+        let meter = meter_provider.meter("theway-daemon");
+        (Some(meter_provider), Some(OtelMetrics::new(&meter)))
+    } else {
+        (None, None)
+    };
+    Ok((Some(tracer_provider), meter_provider, Some(tracer), metrics))
 }
 
 struct ActiveOperation {
@@ -320,6 +350,7 @@ fn worker_loop(
                     for attribute in trace_attributes(&start) {
                         span.set_attribute(attribute);
                     }
+                    set_langfuse_span_attributes(&mut span, kind, start.parent_id.is_none());
                     Context::new().with_span(span)
                 });
                 active.insert(
@@ -354,6 +385,52 @@ fn worker_loop(
             span.set_status(Status::error(OperationOutcome::Abandoned.as_str()));
             span.end();
         }
+    }
+}
+
+/// Langfuse-specific span attributes. Langfuse maps OTLP spans with these
+/// attributes into observations (generation vs span) and renders
+/// `observation.input` / `observation.output` as structured JSON.
+fn set_langfuse_span_attributes<S: opentelemetry::trace::Span + ?Sized>(
+    span: &mut S,
+    kind: OperationKind,
+    root: bool,
+) {
+    let observation_type = match kind {
+        OperationKind::LlmRequest | OperationKind::Compaction => "generation",
+        _ => "span",
+    };
+    span.set_attribute(KeyValue::new("langfuse.observation.type", observation_type));
+    span.set_attribute(KeyValue::new("langfuse.observation.name", kind.as_str()));
+    if root {
+        span.set_attribute(KeyValue::new(
+            "langfuse.trace.name",
+            format!("theway {}", kind.as_str()),
+        ));
+    }
+}
+
+/// Maximum characters per content attribute. Full contexts can be much larger
+/// than a practical OTLP attribute; a clipped value is exported with an
+/// explicit truncation marker instead of failing the batch.
+const MAX_CONTENT_ATTRIBUTE_CHARS: usize = 1_000_000;
+
+fn set_content_attribute(
+    span: &opentelemetry::trace::SpanRef<'_>,
+    key: &str,
+    value: &serde_json::Value,
+) {
+    let text = value.to_string();
+    let (text, truncated) = if text.chars().count() > MAX_CONTENT_ATTRIBUTE_CHARS {
+        let mut clipped: String = text.chars().take(MAX_CONTENT_ATTRIBUTE_CHARS).collect();
+        clipped.push_str("…(theway content truncated)");
+        (clipped, true)
+    } else {
+        (text, false)
+    };
+    span.set_attribute(KeyValue::new(key.to_string(), text));
+    if truncated {
+        span.set_attribute(KeyValue::new("theway.content.truncated", true));
     }
 }
 
@@ -432,6 +509,14 @@ fn finish_span(context: &Context, finish: &OperationFinished) {
         span.set_attribute(KeyValue::new("error.type", category.as_str()));
     }
     add_measurement_attributes(&span, finish.measurements);
+    if let Some(content) = &finish.content {
+        if let Some(input) = &content.input {
+            set_content_attribute(&span, "langfuse.observation.input", input);
+        }
+        if let Some(output) = &content.output {
+            set_content_attribute(&span, "langfuse.observation.output", output);
+        }
+    }
     if matches!(
         finish.outcome,
         OperationOutcome::Failed | OperationOutcome::TimedOut | OperationOutcome::Abandoned
