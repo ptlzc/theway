@@ -156,3 +156,38 @@ async fn model_picker_hides_providers_without_credentials() {
     assert_eq!(rows.len(), 1);
     assert!(rx.try_recv().is_err(), "no command until thinking level chosen");
 }
+
+/// Cyclic selection on the model picker: at a level, Up at the top wraps
+/// to the last row and Down at the bottom back to the first.
+#[tokio::test]
+async fn model_picker_cursor_wraps_at_both_ends() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let (mut app, _rx) = test_app().await;
+    // Two credentialed providers so the provider level has real width.
+    // `open_model_picker` refreshes the catalog from the latest snapshot,
+    // so extend that, not `app.model_catalog`.
+    app.latest.model_catalog.push(theway_transport::wire::ProviderGroup {
+        provider: "openai".into(),
+        has_credential: true,
+        models: vec![theway_transport::wire::ModelEntry {
+            id: "gpt-x".into(),
+            name: "GPT X".into(),
+        }],
+    });
+    app.open_model_picker();
+    let key = |code| KeyEvent::new(code, KeyModifiers::empty());
+    let cursor = |app: &crate::ui::App| app.model_picker.as_ref().map(|p| p.cursor);
+    assert_eq!(cursor(&app), Some(0));
+
+    // Up at the top wraps to the last provider.
+    assert!(app.handle_model_picker_key(&key(KeyCode::Up)).await);
+    assert_eq!(cursor(&app), Some(1));
+    // Down at the bottom wraps back to the first.
+    assert!(app.handle_model_picker_key(&key(KeyCode::Down)).await);
+    assert_eq!(cursor(&app), Some(0));
+    // Down moves forward normally (no wrap yet).
+    assert!(app.handle_model_picker_key(&key(KeyCode::Down)).await);
+    assert_eq!(cursor(&app), Some(1));
+    assert!(app.handle_model_picker_key(&key(KeyCode::Down)).await);
+    assert_eq!(cursor(&app), Some(0));
+}

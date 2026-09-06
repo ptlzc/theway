@@ -188,12 +188,12 @@ impl App {
         let items = state.items();
         match super::map_menu_key(key) {
             super::MenuKey::Up => {
-                let cursor = state.cursor.saturating_sub(1);
+                let cursor = super::wrap_prev(state.cursor, items.len());
                 self.panel_menu = Some(super::PanelMenuState { cursor, ..state });
                 self.apply_panel_preview();
             }
             super::MenuKey::Down => {
-                let cursor = state.cursor.saturating_add(1).min(items.len() - 1);
+                let cursor = super::wrap_next(state.cursor, items.len());
                 self.panel_menu = Some(super::PanelMenuState { cursor, ..state });
                 self.apply_panel_preview();
             }
@@ -327,12 +327,12 @@ impl App {
         let items = state.items();
         match super::map_menu_key(key) {
             super::MenuKey::Up => {
-                let cursor = state.cursor.saturating_sub(1);
+                let cursor = super::wrap_prev(state.cursor, items.len());
                 self.graph_menu = Some(super::GraphMenuState { cursor, ..state });
                 self.apply_graph_preview();
             }
             super::MenuKey::Down => {
-                let cursor = state.cursor.saturating_add(1).min(items.len() - 1);
+                let cursor = super::wrap_next(state.cursor, items.len());
                 self.graph_menu = Some(super::GraphMenuState { cursor, ..state });
                 self.apply_graph_preview();
             }
@@ -466,11 +466,11 @@ impl App {
     }
 
     /// `/fork` picker keys (issue #55): Up/Down move the highlight over the
-    /// newest-first user-message list, Enter forwards `/fork <n>` (n = the
-    /// highlighted row's number, matching the daemon's numbering) through
-    /// the normal dispatch path and closes the popup, Esc cancels. Returns
-    /// `true` (and consumes the key) whenever the picker is open — the
-    /// picker is modal.
+    /// newest-first user-message list (wrapping at both ends — cyclic
+    /// selection), Enter forwards `/fork <n>` (n = the highlighted row's
+    /// number, matching the daemon's numbering) through the normal dispatch
+    /// path and closes the popup, Esc cancels. Returns `true` (and consumes
+    /// the key) whenever the picker is open — the picker is modal.
     pub(super) async fn handle_fork_picker_key<B: ratatui::backend::Backend>(
         &mut self,
         key: &KeyEvent,
@@ -482,16 +482,13 @@ impl App {
         match key.code {
             KeyCode::Up => {
                 if let Some(picker) = self.fork_picker.as_mut() {
-                    picker.selected = picker.selected.saturating_sub(1);
+                    picker.selected = super::wrap_prev(picker.selected, picker.entries.len());
                 }
                 self.sync_fork_picker_window();
             }
             KeyCode::Down => {
                 if let Some(picker) = self.fork_picker.as_mut() {
-                    picker.selected = picker
-                        .selected
-                        .saturating_add(1)
-                        .min(picker.entries.len().saturating_sub(1));
+                    picker.selected = super::wrap_next(picker.selected, picker.entries.len());
                 }
                 self.sync_fork_picker_window();
             }
@@ -527,11 +524,11 @@ impl App {
     }
 
     /// `/resume` picker keys (issue #56): Up/Down move the highlight over
-    /// the daemon's session list (tree order, oldest → newest), Enter
-    /// selects the highlighted session client-side via `select_session` and
-    /// closes the popup, Esc cancels.
-    /// Returns `true` (and consumes the key) whenever the picker is open —
-    /// the picker is modal.
+    /// the daemon's session list (activity order, newest at the bottom;
+    /// wrapping at both ends — cyclic selection), Enter selects the
+    /// highlighted session client-side via `select_session` and closes the
+    /// popup, Esc cancels. Returns `true` (and consumes the key) whenever
+    /// the picker is open — the picker is modal.
     pub(super) async fn handle_resume_picker_key(&mut self, key: &KeyEvent) -> bool {
         if self.resume_picker.is_none() {
             return false;
@@ -539,16 +536,13 @@ impl App {
         match key.code {
             KeyCode::Up => {
                 if let Some(picker) = self.resume_picker.as_mut() {
-                    picker.selected = picker.selected.saturating_sub(1);
+                    picker.selected = super::wrap_prev(picker.selected, picker.entries.len());
                 }
                 self.sync_resume_picker_window();
             }
             KeyCode::Down => {
                 if let Some(picker) = self.resume_picker.as_mut() {
-                    picker.selected = picker
-                        .selected
-                        .saturating_add(1)
-                        .min(picker.entries.len().saturating_sub(1));
+                    picker.selected = super::wrap_next(picker.selected, picker.entries.len());
                 }
                 self.sync_resume_picker_window();
             }

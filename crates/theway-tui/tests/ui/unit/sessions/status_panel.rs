@@ -91,6 +91,30 @@ async fn position_preview_restores_hidden_mode_and_position_on_cancel() {
     assert_eq!(app.side_panel_position, super::SidePanelPosition::Right);
 }
 
+/// Cyclic selection on the `/side-panel` menu: Up at the top wraps to the
+/// last item, Down at the bottom wraps back to the first.
+#[tokio::test]
+async fn side_panel_menu_cursor_wraps_at_both_ends() {
+    let (mut app, _rx) = test_app().await;
+    let mut term = terminal_placeholder();
+    let key = |code| Event::Key(KeyEvent::new(code, KeyModifiers::empty()));
+    app.dispatch_slash("/side-panel", &mut term).await;
+    let cursor = |app: &crate::ui::App| app.panel_menu.map(|m| (m.level, m.cursor));
+    assert_eq!(cursor(&app), Some((super::PanelMenuLevel::Root, 0)));
+
+    // Up at the top wraps to Position (the last root item).
+    app.handle_event(key(KeyCode::Up), &mut term).await.unwrap();
+    assert_eq!(cursor(&app), Some((super::PanelMenuLevel::Root, 1)));
+    // Down at the bottom wraps back to Toggle.
+    app.handle_event(key(KeyCode::Down), &mut term).await.unwrap();
+    assert_eq!(cursor(&app), Some((super::PanelMenuLevel::Root, 0)));
+    // Down moves forward normally (no wrap yet).
+    app.handle_event(key(KeyCode::Down), &mut term).await.unwrap();
+    assert_eq!(cursor(&app), Some((super::PanelMenuLevel::Root, 1)));
+    app.handle_event(key(KeyCode::Down), &mut term).await.unwrap();
+    assert_eq!(cursor(&app), Some((super::PanelMenuLevel::Root, 0)));
+}
+
 /// The `/side-panel` menu renders through the shared inline band: breadcrumb
 /// `side-panel › Toggle` with the choice rows and the highlight on the
 /// cursor.

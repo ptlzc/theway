@@ -232,6 +232,49 @@ fn resume_entries_sort_by_activity_newest_at_bottom() {
     assert_eq!(ids, ["no-ts", "oldest", "mid", "newest"]);
 }
 
+/// Cyclic selection: Down at the last row wraps to the first, Up at the
+/// first wraps to the last — every selection menu shares this behavior.
+#[tokio::test]
+async fn resume_picker_keys_wrap_at_both_ends() {
+    let (mut app, _rx, _ops) =
+        test_app_with_sessions(&["sess-1", "sess-2", "sess-3"], false).await;
+    let mut term = terminal_placeholder();
+    let key = |code| Event::Key(KeyEvent::new(code, KeyModifiers::empty()));
+    app.dispatch_slash("/resume", &mut term).await;
+    let selected = |app: &crate::ui::App| app.resume_picker.as_ref().map(|p| p.selected);
+    assert_eq!(selected(&app), Some(0), "current session pre-selected on top");
+
+    // Up at the top wraps to the last entry.
+    app.handle_event(key(KeyCode::Up), &mut term).await.unwrap();
+    assert_eq!(selected(&app), Some(2));
+    // Down at the bottom wraps back to the first.
+    app.handle_event(key(KeyCode::Down), &mut term).await.unwrap();
+    assert_eq!(selected(&app), Some(0));
+    // Down twice from the top lands on the last entry (no wrap yet).
+    app.handle_event(key(KeyCode::Down), &mut term).await.unwrap();
+    app.handle_event(key(KeyCode::Down), &mut term).await.unwrap();
+    assert_eq!(selected(&app), Some(2));
+    // Down once more wraps to the first.
+    app.handle_event(key(KeyCode::Down), &mut term).await.unwrap();
+    assert_eq!(selected(&app), Some(0));
+}
+
+/// The shared cyclic-cursor helpers: `wrap_next`/`wrap_prev` cycle at both
+/// ends, keep a single-entry menu pinned, and are no-ops at length zero.
+#[test]
+fn wrap_cursors_cycle_at_both_ends() {
+    assert_eq!(super::wrap_next(0, 3), 1);
+    assert_eq!(super::wrap_next(2, 3), 0);
+    assert_eq!(super::wrap_prev(0, 3), 2);
+    assert_eq!(super::wrap_prev(2, 3), 1);
+    // Single-entry menus stay put.
+    assert_eq!(super::wrap_next(0, 1), 0);
+    assert_eq!(super::wrap_prev(0, 1), 0);
+    // Zero-length is a defensive no-op.
+    assert_eq!(super::wrap_next(3, 0), 3);
+    assert_eq!(super::wrap_prev(3, 0), 3);
+}
+
 /// Issue #56 busy-switch path: the client follows the daemon's per-session
 /// snapshot; `apply_snapshot`'s session-id path presents the new session
 /// automatically.

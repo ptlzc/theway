@@ -515,3 +515,66 @@ async fn cascade_band_renders_inline_above_composer() {
         crate::model_picker::PickerLevel::Thinking { .. }
     ));
 }
+
+/// Cyclic selection on the `/fork` picker: Up at the top wraps to the last
+/// user message, Down at the bottom wraps back to the first.
+#[tokio::test]
+async fn fork_picker_keys_wrap_at_both_ends() {
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    let (mut app, _rx) = test_app().await;
+    app.latest.feed_blocks = vec![
+        WireFeedBlock::User {
+            text: "first".into(),
+            timestamp: None,
+        },
+        WireFeedBlock::User {
+            text: "second".into(),
+            timestamp: None,
+        },
+    ];
+    app.open_fork_picker();
+    let selected = |app: &crate::ui::App| app.fork_picker.as_ref().map(|p| p.selected);
+    assert_eq!(selected(&app), Some(0));
+    let key = |code| Event::Key(KeyEvent::new(code, KeyModifiers::empty()));
+    let mut term = terminal_placeholder();
+
+    // Up at the top wraps to the last entry.
+    app.handle_event(key(KeyCode::Up), &mut term).await.unwrap();
+    assert_eq!(selected(&app), Some(1));
+    // Down at the bottom wraps back to the first.
+    app.handle_event(key(KeyCode::Down), &mut term).await.unwrap();
+    assert_eq!(selected(&app), Some(0));
+    // A second Down moves forward normally (no wrap yet).
+    app.handle_event(key(KeyCode::Down), &mut term).await.unwrap();
+    assert_eq!(selected(&app), Some(1));
+    app.handle_event(key(KeyCode::Down), &mut term).await.unwrap();
+    assert_eq!(selected(&app), Some(0));
+}
+
+/// Cyclic selection on the `/graph` menu: at the Position level, Up at the
+/// top wraps to the last placement and Down at the bottom back to the first.
+#[tokio::test]
+async fn graph_menu_cursor_wraps_at_both_ends() {
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    let (mut app, _rx) = test_app().await;
+    let mut term = terminal_placeholder();
+    let key = |code| Event::Key(KeyEvent::new(code, KeyModifiers::empty()));
+
+    // Open at the root and descend into Position (two placements).
+    app.dispatch_slash("/graph", &mut term).await;
+    let state = |app: &crate::ui::App| app.graph_menu.map(|m| (m.level, m.cursor));
+    assert_eq!(state(&app), Some((super::GraphMenuLevel::Root, 0)));
+    app.handle_event(key(KeyCode::Enter), &mut term).await.unwrap();
+    assert_eq!(state(&app), Some((super::GraphMenuLevel::Position, 0)));
+
+    // Up at the top wraps to "side-panel" (the last placement).
+    app.handle_event(key(KeyCode::Up), &mut term).await.unwrap();
+    assert_eq!(state(&app), Some((super::GraphMenuLevel::Position, 1)));
+    // Down at the bottom wraps back to "composer top".
+    app.handle_event(key(KeyCode::Down), &mut term).await.unwrap();
+    assert_eq!(state(&app), Some((super::GraphMenuLevel::Position, 0)));
+    app.handle_event(key(KeyCode::Down), &mut term).await.unwrap();
+    assert_eq!(state(&app), Some((super::GraphMenuLevel::Position, 1)));
+    app.handle_event(key(KeyCode::Down), &mut term).await.unwrap();
+    assert_eq!(state(&app), Some((super::GraphMenuLevel::Position, 0)));
+}

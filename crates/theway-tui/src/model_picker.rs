@@ -84,14 +84,23 @@ impl ModelPickerState {
         }
     }
 
+    /// Up wraps: at the top of a level, Up jumps to its last row — every
+    /// selection menu cycles (Down at the bottom wraps to the first).
     pub fn up(&mut self) {
-        self.cursor = self.cursor.saturating_sub(1);
+        let len = self.len();
+        if len == 0 {
+            return;
+        }
+        self.cursor = (self.cursor + len - 1) % len;
     }
 
+    /// Down wraps: at the bottom of a level, Down jumps to its first row.
     pub fn down(&mut self) {
-        if self.cursor + 1 < self.len() {
-            self.cursor += 1;
+        let len = self.len();
+        if len == 0 {
+            return;
         }
+        self.cursor = (self.cursor + 1) % len;
     }
 
     /// Fixed provider for the current navigation position (the chosen

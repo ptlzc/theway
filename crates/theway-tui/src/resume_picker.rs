@@ -155,6 +155,26 @@ fn key_action(key: &KeyEvent) -> Action {
     }
 }
 
+/// Apply a movement action to a selection index over `total` entries.
+/// Up/Down wrap at the ends (cyclic selection — Up at the top jumps to the
+/// last row, Down at the bottom to the first); PageUp/PageDown clamp, so
+/// the page keys keep their read-a-page semantics. `total == 0` is a
+/// defensive no-op.
+fn move_selection(selected: usize, total: usize, action: &Action) -> usize {
+    if total == 0 {
+        return selected;
+    }
+    match action {
+        Action::Up => (selected + total - 1) % total,
+        Action::Down => (selected + 1) % total,
+        Action::PageUp => selected.saturating_sub(10),
+        Action::PageDown => (selected + 10).min(total - 1),
+        Action::Home => 0,
+        Action::End => total - 1,
+        _ => selected,
+    }
+}
+
 /// Run the interactive picker on the current terminal. Blocking; call from
 /// `spawn_blocking`. The caller must have verified stdin/stdout are TTYs.
 pub fn pick_blocking(rows: &[PickerRow]) -> Result<PickerChoice> {
@@ -193,12 +213,12 @@ pub fn pick_blocking(rows: &[PickerRow]) -> Result<PickerChoice> {
 
         match crossterm::event::read().context("read picker key")? {
             Event::Key(key) => match key_action(&key) {
-                Action::Up => selected = selected.saturating_sub(1),
-                Action::Down => selected = (selected + 1).min(total - 1),
-                Action::PageUp => selected = selected.saturating_sub(10),
-                Action::PageDown => selected = (selected + 10).min(total - 1),
-                Action::Home => selected = 0,
-                Action::End => selected = total - 1,
+                Action::Up => selected = move_selection(selected, total, &Action::Up),
+                Action::Down => selected = move_selection(selected, total, &Action::Down),
+                Action::PageUp => selected = move_selection(selected, total, &Action::PageUp),
+                Action::PageDown => selected = move_selection(selected, total, &Action::PageDown),
+                Action::Home => selected = move_selection(selected, total, &Action::Home),
+                Action::End => selected = move_selection(selected, total, &Action::End),
                 Action::Select => {
                     return Ok(if selected == 0 {
                         PickerChoice::Clean
@@ -350,5 +370,25 @@ mod tests {
         let mut release = key(KeyCode::Down);
         release.kind = KeyEventKind::Release;
         assert_eq!(key_action(&release), Action::None);
+    }
+
+    #[test]
+    fn selection_wraps_at_both_ends_while_page_keys_clamp() {
+        // total = clean row + 3 sessions.
+        let total = 4;
+        // Up at the top wraps to the last entry.
+        assert_eq!(move_selection(0, total, &Action::Up), 3);
+        // Down at the bottom wraps to the first (the clean row).
+        assert_eq!(move_selection(3, total, &Action::Down), 0);
+        // Down from the top moves forward normally.
+        assert_eq!(move_selection(0, total, &Action::Down), 1);
+        // Page keys keep their clamp semantics (no wrap).
+        assert_eq!(move_selection(0, total, &Action::PageUp), 0);
+        assert_eq!(move_selection(3, total, &Action::PageDown), 3);
+        // Home/End pin the ends.
+        assert_eq!(move_selection(2, total, &Action::Home), 0);
+        assert_eq!(move_selection(1, total, &Action::End), 3);
+        // Zero entries is a defensive no-op.
+        assert_eq!(move_selection(2, 0, &Action::Down), 2);
     }
 }

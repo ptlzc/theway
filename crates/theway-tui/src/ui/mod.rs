@@ -917,5 +917,24 @@ fn activity_time(rfc3339: &Option<String>) -> Option<chrono::DateTime<chrono::Ut
         .map(|dt| dt.with_timezone(&chrono::Utc))
 }
 
+/// Cyclic cursor movement shared by every selection menu (`/resume`,
+/// `/fork`, the model picker, `/side-panel`, `/graph`): Down at the bottom
+/// wraps to the first row, Up at the top wraps to the last. `len == 0` is
+/// a defensive no-op — the pickers only open with entries.
+pub(crate) fn wrap_next(cursor: usize, len: usize) -> usize {
+    if len == 0 {
+        return cursor;
+    }
+    (cursor + 1) % len
+}
+
+/// [`wrap_next`]'s inverse: Up at the top wraps to the last row.
+pub(crate) fn wrap_prev(cursor: usize, len: usize) -> usize {
+    if len == 0 {
+        return cursor;
+    }
+    (cursor + len - 1) % len
+}
+
 #[cfg(test)]
 mod tests;
