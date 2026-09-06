@@ -562,11 +562,12 @@ async fn hung_await_listener_is_dropped_after_bound() {
     assert!(!agent.is_streaming(), "the run must have finished");
 }
 
-/// An abort must win over a hung await-listener immediately: `emit` races
-/// the run's cancellation token before the per-listener bound, so `prompt`
-/// returns right after `abort()` instead of waiting out the bound.
-#[tokio::test]
-async fn cancel_wins_over_hung_listener() {
+/// An abort must still deliver the cancelled token to listeners — the hook
+/// executor observes it and kills its subprocess — but a listener that
+/// ignores cancellation and hangs is dropped after the per-listener bound.
+/// Virtual time keeps the test fast (the 30s backstop auto-advances).
+#[tokio::test(start_paused = true)]
+async fn abort_reaches_listeners_and_bound_backstops_hung_ones() {
     let responses = Arc::new(Mutex::new(vec![assistant_with(
         vec![ContentBlock::text("hello there")],
         StopReason::Stop,
@@ -579,8 +580,15 @@ async fn cancel_wins_over_hung_listener() {
         stream_fn: Some(faux_stream_fn_with(responses)),
         ..Default::default()
     }));
-    let _unsub = agent.subscribe(Arc::new(|_event, _cancel| {
-        Box::pin(std::future::pending::<()>())
+    let saw_cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let saw_cancelled_inner = saw_cancelled.clone();
+    let _unsub = agent.subscribe(Arc::new(move |_event, cancel| {
+        let saw = saw_cancelled_inner.clone();
+        Box::pin(async move {
+            saw.store(cancel.is_cancelled(), std::sync::atomic::Ordering::SeqCst);
+            // Misbehaving: neither completes nor honors cancellation.
+            std::future::pending().await
+        })
     }));
 
     let user = AgentMessage::Llm(theway_llm_provider::Message::User(
@@ -606,10 +614,16 @@ async fn cancel_wins_over_hung_listener() {
     let started = std::time::Instant::now();
     agent.abort();
     let _ = handle.await.expect("prompt task panicked");
+    // Virtual time: the 30s per-listener bound auto-advanced, so real time
+    // stays tiny even though the listener hung.
     assert!(
         started.elapsed() < std::time::Duration::from_secs(5),
-        "cancel must preempt the hung listener: {:?}",
+        "the bound must backstop the hung listener: {:?}",
         started.elapsed()
+    );
+    assert!(
+        saw_cancelled.load(std::sync::atomic::Ordering::SeqCst),
+        "the listener must receive the cancelled token (hook executors rely on it)"
     );
     assert!(!agent.is_streaming(), "the run must have finished");
 }

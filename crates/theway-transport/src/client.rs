@@ -44,6 +44,11 @@ use crate::proto::theway_grpc::{
     SessionStateRequest, SetModelRequest, SetSkillDirsRequest, SetThinkingRequest,
     StreamEventsRequest, StreamFrame, StreamSessionGraphNodeRequest, UpdateSessionMetadataRequest,
 };
+
+/// Frame stream type for session events (the tonic streaming response of
+/// `stream_events`). Re-exported so clients (the TUI) can name the type
+/// without depending on tonic directly.
+pub type SessionEventStream = tonic::codec::Streaming<StreamFrame>;
 use crate::wire::{
     SessionSummary, WireDaemonConfig, WireExtensionCommandOutcome, WireExtensionReloadResult,
     WireExtensionSnapshot, WireExtensionTrustRequest, WireExtensionTrustResult,

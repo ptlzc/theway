@@ -70,10 +70,21 @@ impl AgentHarness {
     /// extension session-shutdown lifecycle exactly once.
     pub async fn shutdown_runtime_extensions(&self) {
         self.abort();
-        self.agent.wait_until_idle().await;
+        // Bounded: a run wedged on a misbehaving listener must not block
+        // session activation/reap forever. The await-listener backstop in
+        // `emit` caps the wait in practice; this is defense in depth.
+        if tokio::time::timeout(SHUTDOWN_IDLE_TIMEOUT, self.agent.wait_until_idle())
+            .await
+            .is_err()
+        {
+            tracing::warn!("runtime-extension shutdown: run did not go idle in time; continuing");
+        }
         self.runtime_extensions.shutdown().await;
     }
 }
+
+/// Hard bound for `shutdown_runtime_extensions` waiting on the active run.
+const SHUTDOWN_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
 
 /// Harness-level lifecycle events emitted in addition to the inner agent's per-turn events.
 #[derive(Clone, Debug)]

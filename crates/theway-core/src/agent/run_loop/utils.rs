@@ -45,9 +45,13 @@ pub(super) fn snapshot_context(inner: &Arc<AgentInner>) -> AgentContext {
 ///    metrics accumulator. One panic does not poison others.
 /// 2. **Await listeners** — sequential async dispatch for persistence/I/O subscribers
 ///    (e.g. `make_session_listener`). Each receives the cancellation token. Bounded:
-///    run cancellation wins immediately and a misbehaving listener is dropped after
-///    [`EMIT_LISTENER_TIMEOUT`] — a hung listener must never wedge the turn future
-///    (the daemon has to publish busy=false no matter what).
+///    a misbehaving listener is dropped after [`EMIT_LISTENER_TIMEOUT`] — a hung
+///    listener must never wedge the turn future (the daemon has to publish busy=false
+///    no matter what). There is deliberately NO cancel-preemption branch here: the
+///    persistence listener ignores the token on purpose so messages always durably
+///    land, and well-behaved listeners (hook executors) observe the cancelled token
+///    and kill their subprocesses in milliseconds — an aborted run still drains
+///    promptly without dropping durable writes.
 /// 3. **Broadcast** — non-blocking `tokio::sync::broadcast::Sender::send`. Slow consumers
 ///    receive `Lagged(n)` errors; the sender never blocks.
 pub(super) async fn emit(inner: &Arc<AgentInner>, event: LoopEvent, cancel: &CancellationToken) {
@@ -63,22 +67,18 @@ pub(super) async fn emit(inner: &Arc<AgentInner>, event: LoopEvent, cancel: &Can
     // Segment 2: await listeners (persistence, I/O).
     let await_listeners = inner.await_listeners.lock().clone();
     for listener in await_listeners {
-        let token = cancel.clone();
-        let listener_token = token.clone();
-        tokio::select! {
-            biased;
-            _ = token.cancelled() => {
-                // Run cancelled: stop waiting on listeners immediately so the
-                // turn future resolves right after an abort.
-                return;
-            }
-            _ = tokio::time::sleep(EMIT_LISTENER_TIMEOUT) => {
-                tracing::warn!(
-                    "loop listener exceeded {}s and was dropped",
-                    EMIT_LISTENER_TIMEOUT.as_secs()
-                );
-            }
-            _ = async { listener(event.clone(), listener_token).await } => {}
+        let listener_token = cancel.clone();
+        if tokio::time::timeout(
+            EMIT_LISTENER_TIMEOUT,
+            listener(event.clone(), listener_token),
+        )
+        .await
+        .is_err()
+        {
+            tracing::warn!(
+                "loop listener exceeded {}s and was dropped",
+                EMIT_LISTENER_TIMEOUT.as_secs()
+            );
         }
     }
 

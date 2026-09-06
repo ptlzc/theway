@@ -88,6 +88,7 @@ impl App {
             busy: false,
             cancel_in_flight: Arc::new(AtomicBool::new(false)),
             abort_failed: Arc::new(AtomicBool::new(false)),
+            reconnect_handle: None,
             spinner_frame: 0,
             cps_meter: stats::CpsMeter::new(),
             token_meter: stats::CpsMeter::new(),

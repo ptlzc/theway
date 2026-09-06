@@ -398,6 +398,7 @@ impl TurnHost {
                     // command stuck on storage) must not wedge the whole
                     // transport loop — no frames, no further RPCs. Drop the
                     // handler after the bound and keep serving.
+                    let command_label = format!("{command:?}");
                     if tokio::time::timeout(
                         COMMAND_HANDLER_TIMEOUT,
                         self.handle_web_command(command, &mut turn),
@@ -405,6 +406,10 @@ impl TurnHost {
                     .await
                     .is_err()
                     {
+                        tracing::warn!(
+                            "daemon command handler timed out after {}s: {command_label}",
+                            COMMAND_HANDLER_TIMEOUT.as_secs()
+                        );
                         self.error_line("daemon command handler timed out — continuing");
                     }
                     self.start_parked_turns(&mut parked_turns);

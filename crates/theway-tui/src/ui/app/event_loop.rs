@@ -1,6 +1,48 @@
+/// Open the frame stream + authoritative snapshot on a recovered candidate
+/// connection. Both steps are bounded by [`crate::ui::daemon_call`] and run
+/// inside the background reconnect task — a hung daemon stalls THIS future,
+/// never the event loop.
+async fn open_recovered_stream(
+    mut client: GrpcClient,
+    reused: bool,
+    notes: Vec<String>,
+    session_id: &str,
+) -> Option<RecoveredConnection> {
+    let stream = match crate::ui::daemon_call(
+        "stream_events",
+        client.stream_events_for_session(Some(session_id)),
+    )
+    .await
+    {
+        Ok(stream) => stream,
+        Err(error) => {
+            tracing::debug!("daemon recovery stream failed: {error}");
+            return None;
+        }
+    };
+    let state = match crate::ui::daemon_call(
+        "get_snapshot_for_session",
+        client.get_snapshot_for_session(session_id),
+    )
+    .await
+    {
+        Ok(state) => state,
+        Err(error) => {
+            tracing::debug!("daemon recovery snapshot failed: {error}");
+            return None;
+        }
+    };
+    Some(RecoveredConnection {
+        client,
+        reused,
+        notes,
+        stream,
+        state,
+    })
+}
+
 impl App {
-    pub async fn run(mut self) -> Result<()> {
-        // Issue #79: a reused-daemon fresh attach must not load the old
+    pub async fn run(mut self) -> Result<()> {        // Issue #79: a reused-daemon fresh attach must not load the old
         // session's nested snapshot before the fresh session is created.
         if !self.pending_fresh_attach {
             self.refresh_session_snapshot().await;
@@ -131,74 +173,85 @@ impl App {
                         }
                     }
                 }
-                _ = reconnect.tick(), if stream.is_none() && !self.pending_fresh_attach => {
-                    if !self.quit {
-                        let session_id = self.session_id.clone();
-                        let attempt: Result<(GrpcClient, bool, Vec<String>)> =
-                            if let Some(connector) = self.connector.as_mut() {
-                                connector.recover(&session_id).await.map(|connection| {
-                                    (connection.client, connection.reused, connection.notes)
-                                })
-                            } else {
-                                Ok((self.client.clone(), true, Vec::new()))
-                            };
-
-                        match attempt {
-                            Ok((mut candidate, reused, notes)) => {
-                                // A recovery is announced only after both the
-                                // event stream and an authoritative snapshot
-                                // succeed on the candidate connection.
-                                match crate::ui::daemon_call(
-                                    "stream_events",
-                                    candidate.stream_events_for_session(Some(&session_id)),
-                                )
-                                .await
-                                {
-                                    Ok(candidate_stream) => {
-                                        // Issue #99: bounded — a hung daemon
-                                        // must not freeze the reconnect branch.
-                                        match crate::ui::daemon_call(
-                                            "get_snapshot_for_session",
-                                            candidate.get_snapshot_for_session(&session_id),
-                                        )
-                                        .await
-                                        {
-                                            Ok(state) => {
-                                                let addr = candidate.addr().to_string();
-                                                self.client = candidate;
-                                                self.apply_snapshot(
-                                                    wire_status_from_session_snapshot(&state),
-                                                );
-                                                self.connected = true;
-                                                if reused {
-                                                    self.connection_line(format!(
-                                                        "reconnected to daemon at {addr}; state synchronized"
-                                                    ));
-                                                } else {
-                                                    self.connection_line(format!(
-                                                        "daemon restarted at {addr}; restored session {}",
-                                                        self.session_id
-                                                    ));
-                                                }
-                                                for note in notes {
-                                                    self.connection_line(note);
-                                                }
-                                                stream = Some(candidate_stream);
-                                            }
-                                            Err(error) => tracing::debug!(
-                                                "daemon recovery snapshot failed: {error}"
-                                            ),
-                                        }
-                                    }
-                                    Err(error) => tracing::debug!(
-                                        "daemon recovery stream failed: {error}"
-                                    ),
+                // Background reconnect result. Polling a JoinHandle never
+                // blocks: it stays Pending until the task finishes, so the
+                // event loop keeps serving keys while the (potentially
+                // minute-long) recover chain runs in the background.
+                outcome = async {
+                    match self.reconnect_handle.as_mut() {
+                        Some(handle) => Some(handle.await),
+                        None => None,
+                    }
+                }, if self.reconnect_handle.is_some() => {
+                    match outcome {
+                        Some(Ok((connector, recovered))) => {
+                            self.connector = connector;
+                            self.reconnect_handle = None;
+                            if let Some(rec) = recovered {
+                                let addr = rec.client.addr().to_string();
+                                self.client = rec.client;
+                                self.apply_snapshot(wire_status_from_session_snapshot(
+                                    &rec.state,
+                                ));
+                                self.connected = true;
+                                if rec.reused {
+                                    self.connection_line(format!(
+                                        "reconnected to daemon at {addr}; state synchronized"
+                                    ));
+                                } else {
+                                    self.connection_line(format!(
+                                        "daemon restarted at {addr}; restored session {}",
+                                        self.session_id
+                                    ));
                                 }
-                            }
-                            Err(error) => {
-                                tracing::debug!("daemon recovery attempt failed: {error}");
+                                for note in rec.notes {
+                                    self.connection_line(note);
+                                }
+                                stream = Some(rec.stream);
                             }
                         }
+                        Some(Err(error)) => {
+                            self.reconnect_handle = None;
+                            tracing::debug!("reconnect task failed: {error}");
+                        }
+                        None => {}
+                    }
+                }
+                _ = reconnect.tick(), if stream.is_none() && !self.pending_fresh_attach && self.reconnect_handle.is_none() => {
+                    if !self.quit {
+                        // Issue #99: the recover chain runs in a background
+                        // task. A hung daemon makes discover/config/snapshot
+                        // take their full bounds — awaiting that here froze
+                        // the UI for tens of seconds at a time.
+                        let connector = self.connector.take();
+                        let base_client = self.client.clone();
+                        let session_id = self.session_id.clone();
+                        self.reconnect_handle = Some(tokio::spawn(async move {
+                            let mut connector = connector;
+                            let recovered = if let Some(c) = connector.as_mut() {
+                                match c.recover(&session_id).await {
+                                    Ok(connection) => {
+                                        open_recovered_stream(
+                                            connection.client,
+                                            connection.reused,
+                                            connection.notes,
+                                            &session_id,
+                                        )
+                                        .await
+                                    }
+                                    Err(error) => {
+                                        tracing::debug!(
+                                            "daemon recovery attempt failed: {error}"
+                                        );
+                                        None
+                                    }
+                                }
+                            } else {
+                                open_recovered_stream(base_client, true, Vec::new(), &session_id)
+                                    .await
+                            };
+                            (connector, recovered)
+                        }));
                     }
                 }
                 _ = async {

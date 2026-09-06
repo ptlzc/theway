@@ -670,6 +670,23 @@ pub struct App {
     /// loop's busy tick reads this, drops the frame stream, and lets the
     /// reconnect path take over instead of freezing the UI.
     abort_failed: Arc<AtomicBool>,
+    /// Background reconnect attempt (issue #99 hardening): the recover chain
+    /// (discover + config + snapshot + stream) can take a minute against a
+    /// hung daemon, so it runs OUTSIDE the event loop; the loop only polls
+    /// this handle. `Some` also means the connector is temporarily owned by
+    /// the task and must be handed back with the result.
+    reconnect_handle:
+        Option<tokio::task::JoinHandle<(Option<DaemonConnector>, Option<RecoveredConnection>)>>,
+}
+
+/// A successful background reconnect: the candidate client, its frame stream,
+/// and the authoritative snapshot the loop applies atomically.
+struct RecoveredConnection {
+    client: GrpcClient,
+    reused: bool,
+    notes: Vec<String>,
+    stream: theway_transport::client::SessionEventStream,
+    state: theway_transport::proto::theway_grpc::SessionSnapshot,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
