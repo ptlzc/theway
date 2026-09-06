@@ -88,9 +88,15 @@ impl SessionObservabilityOps for DaemonSessionObservability {
             return Ok(WireSessionSnapshot::from(&live));
         };
 
-        // 3. Merge: runtime / feed / system_context / dags / subagents come
-        //    from live; info / graph nodes / active node / lineage come from
-        //    the resource plane.
+        // 3. Merge: runtime / feed / system_context / dags / subagents /
+        //    the sidebar come from live; info identity fields / graph nodes
+        //    / active node / lineage come from the resource plane.
+        //
+        //    The sidebar is live runtime inventory (skills / triggers /
+        //    cron / MCP / tool counts) — the resource plane's
+        //    `session_snapshot` cannot know it and always carries the empty
+        //    snapshot, so `info` merges field-by-field: identity from the
+        //    resource, the sidebar from the live projection.
         let mut merged = WireSessionSnapshot::from(&live);
         merged.session_id = if resource.session_id.is_empty() {
             merged.session_id
@@ -98,6 +104,7 @@ impl SessionObservabilityOps for DaemonSessionObservability {
             resource.session_id.clone()
         };
         merged.info = resource.info;
+        merged.info.sidebar = live.sidebar.clone();
         merged.graph_state.nodes = std::mem::take(&mut resource.graph_state.nodes);
         merged.graph_state.active_node_id = resource.graph_state.active_node_id.take();
         merged.lineage = resource.lineage;

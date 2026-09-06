@@ -194,11 +194,18 @@ async fn authoritative_snapshot_merges_live_and_resource_planes() {
             ..Default::default()
         },
     );
-    let states = Arc::new(Mutex::new(HashMap::from([(
-        "sess-1".into(),
-        live_status("sess-1", "<context>live</context>"),
-    )])));
-    let latest = Arc::new(Mutex::new(live_status("sess-1", "<context>live</context>")));
+    // The live projection carries the real sidebar inventory (MCP servers +
+    // errors); the resource plane's snapshot always has an empty sidebar.
+    let mut live = live_status("sess-1", "<context>live</context>");
+    live.sidebar.mcp.servers = 2;
+    live.sidebar.mcp.tools = 34;
+    live.sidebar.mcp.server_names = vec!["devops-mcp".into(), "crg".into()];
+    live.sidebar.mcp.errors = vec![theway_transport::wire::WireMcpServerError {
+        name: "devin-search".into(),
+        error: "transport error".into(),
+    }];
+    let states = Arc::new(Mutex::new(HashMap::from([("sess-1".into(), live.clone())])));
+    let latest = Arc::new(Mutex::new(live));
     let ops = observability(repo, resource, states, latest);
 
     let snapshot = ops.authoritative_snapshot("sess-1").await.unwrap();
@@ -207,7 +214,7 @@ async fn authoritative_snapshot_merges_live_and_resource_planes() {
     assert_eq!(snapshot.runtime.system_context, "<context>live</context>");
     assert_eq!(snapshot.runtime.thinking_level, "high");
     assert_eq!(snapshot.feed.lines, vec!["live feed"]);
-    // Resource fields: info + graph nodes + lineage.
+    // Resource fields: info identity + graph nodes + lineage.
     assert_eq!(snapshot.info.cwd, "/resource/cwd");
     assert_eq!(snapshot.info.name, "resource-name");
     assert_eq!(snapshot.graph_state.nodes.len(), 1);
@@ -216,6 +223,17 @@ async fn authoritative_snapshot_merges_live_and_resource_planes() {
         Some("node-1")
     );
     assert_eq!(snapshot.lineage.root_session_id.as_deref(), Some("root-1"));
+    // The sidebar is live inventory: the resource plane cannot know it, so
+    // the merge must keep the live projection's sidebar (issue: MCP servers
+    // vanished from GetSnapshot / the TUI's startup panel view).
+    assert_eq!(snapshot.info.sidebar.mcp.servers, 2);
+    assert_eq!(snapshot.info.sidebar.mcp.tools, 34);
+    assert_eq!(
+        snapshot.info.sidebar.mcp.server_names,
+        vec!["devops-mcp", "crg"]
+    );
+    assert_eq!(snapshot.info.sidebar.mcp.errors.len(), 1);
+    assert_eq!(snapshot.info.sidebar.mcp.errors[0].name, "devin-search");
 }
 
 #[tokio::test]
