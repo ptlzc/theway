@@ -386,13 +386,14 @@ impl App {
     }
 
     /// Issue #56: `/resume` opens the TUI-local session picker over
-    /// `client.list_sessions()` — rows keep the daemon's tree order
-    /// (oldest → newest), carry short id + name + busy/graph marks, and the
-    /// current session row is annotated and pre-selected. An empty daemon
-    /// list prints a system hint instead of opening an empty popup; a list
-    /// RPC failure reports an error line. Selecting a row (Enter in
-    /// `handle_resume_picker_key`) selects the session client-side via
-    /// `select_session`.
+    /// `client.list_sessions()` — rows are sorted by last activity
+    /// (oldest → newest, so the most recent session sits at the bottom),
+    /// and carry short id + relative time + working-directory path + name +
+    /// busy/graph marks; the current session row is annotated and
+    /// pre-selected. An empty daemon list prints a system hint instead of
+    /// opening an empty popup; a list RPC failure reports an error line.
+    /// Selecting a row (Enter in `handle_resume_picker_key`) selects the
+    /// session client-side via `select_session`.
     pub(super) async fn open_resume_picker(&mut self) {
         let (sessions, current_id) =
             match crate::ui::daemon_call("list_sessions", self.client.list_sessions()).await {
@@ -406,13 +407,13 @@ impl App {
             self.system_line("no sessions to resume");
             return;
         }
-        let entries: Vec<super::ResumePickerEntry> = sessions
+        let mut entries: Vec<super::ResumePickerEntry> = sessions
             .iter()
             .map(|s| super::ResumePickerEntry {
                 id: s.session_id.clone(),
                 id_short: crate::cli::session_id_display(&s.session_id),
                 name: s.name.clone(),
-                tree_prefix: s.tree_prefix.clone(),
+                path: s.cwd.clone(),
                 last_activity_at_rfc3339: s.last_activity_at_rfc3339.clone(),
                 busy: s.busy,
                 graph_count: s.graph_count,
@@ -420,6 +421,14 @@ impl App {
                 current: s.session_id == current_id,
             })
             .collect();
+        // Time order, newest at the bottom (issue #56 follow-up): the
+        // daemon's tree order is not a time order once forks exist, so
+        // sort explicitly. Stable — ties keep the daemon's order, and
+        // timestamp-less sessions land at the top.
+        entries.sort_by(|a, b| {
+            super::activity_time(&a.last_activity_at_rfc3339)
+                .cmp(&super::activity_time(&b.last_activity_at_rfc3339))
+        });
         let selected = entries.iter().position(|e| e.current).unwrap_or(0);
         self.resume_picker = Some(super::ResumePickerState {
             entries,

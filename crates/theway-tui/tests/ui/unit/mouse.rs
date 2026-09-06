@@ -236,13 +236,13 @@ async fn mouse_selects_panel_composer_and_status_regions() {
     app.last_feed_area = Some(ratatui::layout::Rect::new(0, 0, 59, 8));
     app.panel_select_lines = vec![
         ratatui::text::Line::raw("Session".to_string()),
-        ratatui::text::Line::raw("…78dc · unnamed".to_string()),
+        ratatui::text::Line::raw("…5ce78dc · unnamed".to_string()),
         ratatui::text::Line::raw("Skills".to_string()),
     ];
     app.status_select_lines = vec![ratatui::text::Line::raw(" ready ".to_string())];
     app.set_input("hello world");
 
-    // Panel: press at (row 1, col 61) -> panel line 1, col 1 ("…78dc…").
+    // Panel: press at (row 1, col 61) -> panel line 1, col 1 ("…5ce78dc…").
     app.handle_mouse(mouse_event(
         crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
         1,

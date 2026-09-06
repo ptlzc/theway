@@ -601,11 +601,12 @@ impl App {
     }
 
     /// Interactive `/resume` picker (issue #56): a full-width popup listing
-    /// the daemon's sessions in tree order (oldest → newest), reusing the
-    /// completion popup style — cyan rows, black-on-cyan highlight, a fixed
-    /// [`RESUME_POPUP_MAX`]-row window that slides with the selection.
-    /// Rows render short id + name + busy/graph marks via
-    /// [`resume_picker_label`]; the daemon's current session is annotated.
+    /// the daemon's sessions by last activity (oldest → newest, newest at
+    /// the bottom), reusing the completion popup style — cyan rows,
+    /// black-on-cyan highlight, a fixed [`RESUME_POPUP_MAX`]-row window
+    /// that slides with the selection. Rows render short id + time + path +
+    /// name + busy/graph marks via [`resume_picker_label`]; the daemon's
+    /// current session is annotated.
     /// Enter in `app_input::handle_resume_picker_key` switches session.
     fn render_resume_picker(&self, frame: &mut ratatui::Frame) {
         let Some(picker) = self.resume_picker.as_ref() else {

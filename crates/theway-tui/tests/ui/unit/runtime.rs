@@ -136,9 +136,9 @@ async fn resume_picker_empty_list_prints_no_sessions_hint() {
     );
 }
 
-/// Issue #56: the popup row label joins short id + name + marks (`busy`,
-/// `graphs N (M active)`, `current`) — a bare session renders just the
-/// short id.
+/// Issue #56: the popup row label joins short id + relative time + path
+/// column + name + marks (`busy`, `graphs N (M active)`, `current`) — a
+/// bare session renders just id, time and path.
 #[test]
 fn resume_picker_label_formats_name_busy_graph_and_current_marks() {
     // Arrange
@@ -146,7 +146,7 @@ fn resume_picker_label_formats_name_busy_graph_and_current_marks() {
         id: "abc1234567890".into(),
         id_short: "abc1234567890".into(),
         name: "plan".into(),
-        tree_prefix: "├─ ".into(),
+        path: "/tmp/proj".into(),
         last_activity_at_rfc3339: Some(chrono::Utc::now().to_rfc3339()),
         busy: true,
         graph_count: 3,
@@ -154,11 +154,14 @@ fn resume_picker_label_formats_name_busy_graph_and_current_marks() {
         current: true,
     };
 
-    // Act + Assert (the id column pads to its full width).
+    // Act + Assert (the id and path columns pad to their full width).
     let id_col = format!("{:<9}", "abc1234567890");
+    let path_col = format!("{:<20}", "/tmp/proj");
     assert_eq!(
         super::resume_picker_label(&full),
-        format!("├─ {id_col} | now   plan · busy · graphs 3 (2 active) · current")
+        format!(
+            "{id_col} | now  | {path_col}  plan · busy · graphs 3 (2 active) · current"
+        )
     );
     let inactive_graphs = super::ResumePickerEntry {
         busy: false,
@@ -168,7 +171,7 @@ fn resume_picker_label_formats_name_busy_graph_and_current_marks() {
     };
     assert_eq!(
         super::resume_picker_label(&inactive_graphs),
-        format!("├─ {id_col} | now   plan · graphs 3")
+        format!("{id_col} | now  | {path_col}  plan · graphs 3")
     );
     let bare = super::ResumePickerEntry {
         name: String::new(),
@@ -180,8 +183,53 @@ fn resume_picker_label_formats_name_busy_graph_and_current_marks() {
     };
     assert_eq!(
         super::resume_picker_label(&bare),
-        format!("├─ {id_col} | now")
+        format!("{id_col} | now  | {}", "/tmp/proj")
     );
+}
+
+/// The path column keeps the full path when it fits 20 chars; longer paths
+/// keep their tail (the repo directory) and cut the head with an ellipsis.
+#[test]
+fn resume_picker_path_column_truncates_head_beyond_20_chars() {
+    assert_eq!(super::path_column("/tmp/proj", 20), format!("{:<20}", "/tmp/proj"));
+    let long = super::path_column("/very/long/workspace/path/that/exceeds/twenty", 20);
+    assert_eq!(long.chars().count(), 20, "{long:?}");
+    assert!(long.starts_with('…'), "{long:?}");
+    assert!(long.ends_with("that/exceeds/twenty"), "{long:?}");
+    // A path of exactly 20 chars stays whole.
+    let exact = super::path_column("/root/workspace/thew", 20);
+    assert_eq!(exact, "/root/workspace/thew");
+    assert!(!exact.starts_with('…'), "{exact:?}");
+}
+
+/// The last-activity sort key parses RFC3339 to UTC and yields `None` for
+/// missing/garbage timestamps, so a stable sort puts the oldest on top and
+/// the newest at the bottom.
+#[test]
+fn resume_entries_sort_by_activity_newest_at_bottom() {
+    let entry = |id: &str, ts: Option<&str>| super::ResumePickerEntry {
+        id: id.into(),
+        id_short: id.into(),
+        name: String::new(),
+        path: String::new(),
+        last_activity_at_rfc3339: ts.map(str::to_string),
+        busy: false,
+        graph_count: 0,
+        active_graph_count: 0,
+        current: false,
+    };
+    let mut entries = [
+        entry("newest", Some("2026-09-06T10:00:00.250+00:00")),
+        entry("oldest", Some("2026-09-06T08:00:00+00:00")),
+        entry("no-ts", None),
+        entry("mid", Some("2026-09-06T09:59:59+00:00")),
+    ];
+    entries.sort_by(|a, b| {
+        super::activity_time(&a.last_activity_at_rfc3339)
+            .cmp(&super::activity_time(&b.last_activity_at_rfc3339))
+    });
+    let ids: Vec<_> = entries.iter().map(|e| e.id.as_str()).collect();
+    assert_eq!(ids, ["no-ts", "oldest", "mid", "newest"]);
 }
 
 /// Issue #56 busy-switch path: the client follows the daemon's per-session

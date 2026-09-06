@@ -145,7 +145,7 @@ impl App {
             lines.push(panel_line(
                 format!(
                     "…{} · {}",
-                    id_suffix(&snapshot.info.id, 5),
+                    id_suffix(&snapshot.info.id, 7),
                     if snapshot.info.name.is_empty() {
                         "unnamed"
                     } else {

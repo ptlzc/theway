@@ -323,10 +323,11 @@ pub(crate) struct ForkPickerState {
     pub(crate) scroll: usize,
 }
 
-/// One `/resume` popup row (issue #56): a daemon session in tree order
-/// (oldest → newest, as `list_sessions` returns it). The row label renders
-/// short id + name + busy/graph marks, with `current` annotating the
-/// daemon's active session — see [`resume_picker_label`].
+/// One `/resume` popup row (issue #56): a daemon session sorted by last
+/// activity (oldest → newest, newest at the bottom). The row label renders
+/// short id + relative time + working-directory path + name + busy/graph
+/// marks, with `current` annotating the daemon's active session — see
+/// [`resume_picker_label`].
 #[derive(Clone, Debug)]
 pub(crate) struct ResumePickerEntry {
     /// Full session id — used for client-side session selection (also accepts
@@ -334,8 +335,9 @@ pub(crate) struct ResumePickerEntry {
     pub(crate) id: String,
     pub(crate) id_short: String,
     pub(crate) name: String,
-    /// Pi-style tree prefix (`├─ ` / `└─ ` / `│ `) for fork-lineage display.
-    pub(crate) tree_prefix: String,
+    /// Working directory the session runs in (the `cwd` of the session's
+    /// repo); rendered as a tail-truncated path column.
+    pub(crate) path: String,
     /// Last activity time, RFC3339 when available.
     pub(crate) last_activity_at_rfc3339: Option<String>,
     pub(crate) busy: bool,
@@ -841,18 +843,21 @@ fn format_relative_time(rfc3339: Option<&str>) -> Option<String> {
     }
 }
 
-/// `/resume` popup row label (issue #56): tree prefix + aligned short id +
-/// `|` + relative last-activity time + session title, plus marks — `busy`
-/// when the session is mid-turn, `graphs N (M active)` when it has DAG runs,
-/// `current` on the daemon's active session. Marks join with `·`.
+/// `/resume` popup row label (issue #56): aligned short id + `|` +
+/// relative last-activity time + `|` + tail-truncated working-directory
+/// path + session title, plus marks — `busy` when the session is mid-turn,
+/// `graphs N (M active)` when it has DAG runs, `current` on the daemon's
+/// active session. Marks join with `·`.
 fn resume_picker_label(entry: &ResumePickerEntry) -> String {
     const ID_COL_WIDTH: usize = 9;
     const TIME_COL_WIDTH: usize = 4;
+    const PATH_COL_WIDTH: usize = 20;
     let id_col = format!("{:<ID_COL_WIDTH$}", entry.id_short);
     let time = format_relative_time(entry.last_activity_at_rfc3339.as_deref())
         .unwrap_or_else(|| "-".to_string());
     let time_col = format!("{:<TIME_COL_WIDTH$}", time);
-    let mut label = format!("{}{} | {}", entry.tree_prefix, id_col, time_col);
+    let path_col = path_column(&entry.path, PATH_COL_WIDTH);
+    let mut label = format!("{} | {} | {}", id_col, time_col, path_col);
     if !entry.name.is_empty() {
         label.push_str("  ");
         label.push_str(&entry.name);
@@ -879,6 +884,37 @@ fn resume_picker_label(entry: &ResumePickerEntry) -> String {
         label.push_str(&marks.join(" · "));
     }
     label.trim_end().to_string()
+}
+
+/// Path column for the `/resume` picker: the full path when it fits
+/// `width`, otherwise `…` + the path's last `width - 1` chars so the tail
+/// (the repo directory) stays visible while the head is cut.
+fn path_column(path: &str, width: usize) -> String {
+    let chars = path.chars().count();
+    if chars <= width {
+        return format!("{path:<width$}");
+    }
+    let tail: String = path
+        .chars()
+        .rev()
+        .take(width - 1)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    format!("…{tail}")
+}
+
+/// Last-activity sort key for the `/resume` picker: parsed RFC3339 as UTC,
+/// `None` when the timestamp is missing or unparseable — `None` sorts
+/// before any real time, so timestamp-less sessions land at the top
+/// (oldest). String comparison is avoided because RFC3339 fractional
+/// seconds are variable-width.
+fn activity_time(rfc3339: &Option<String>) -> Option<chrono::DateTime<chrono::Utc>> {
+    rfc3339
+        .as_deref()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc))
 }
 
 #[cfg(test)]
