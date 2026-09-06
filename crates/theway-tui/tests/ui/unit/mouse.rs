@@ -291,3 +291,159 @@ async fn mouse_selects_panel_composer_and_status_regions() {
     assert_eq!(sel.region, super::SelectRegion::Composer);
     assert_eq!(app.selected_text(), "hello", "composer selection text");
 }
+
+// ── side-panel edge drag resize (issue #54) ────────────────────────────────
+
+/// Grabbing the side panel's feed-facing border column starts a width drag
+/// (never a text selection) and exits Auto at the current width; the width
+/// tracks the pointer, collapses below the floor or past the outer edge,
+/// re-expands within the same drag, and release ends the drag.
+#[tokio::test]
+async fn side_panel_edge_drag_resizes_and_collapses_below_min() {
+    use crossterm::event::{MouseButton, MouseEventKind};
+    let (mut app, _rx) = test_app().await;
+    // Right-positioned panel, 36 wide starting at x=100.
+    let panel = ratatui::layout::Rect::new(100, 0, 36, 10);
+    app.last_panel_area = Some(panel);
+    app.side_panel_position = super::SidePanelPosition::Right;
+    assert_eq!(app.side_panel_mode, super::SidePanelMode::Auto);
+
+    // Grab the 1-column left-edge strip: starts a drag, exits Auto, and
+    // never starts a text selection.
+    app.handle_mouse(mouse_event(
+        MouseEventKind::Down(MouseButton::Left),
+        panel.y + 1,
+        panel.x,
+    ));
+    let drag = app.panel_drag.expect("edge grab starts a panel drag");
+    assert_eq!((drag.start_col, drag.start_width), (100, 36));
+    assert_eq!(app.side_panel_mode, super::SidePanelMode::Shown(36));
+    assert!(app.mouse_select.is_none(), "grab must not start a selection");
+
+    // Dragging left grows the panel (the right edge stays anchored).
+    app.handle_mouse(mouse_event(
+        MouseEventKind::Drag(MouseButton::Left),
+        panel.y + 1,
+        panel.x - 6,
+    ));
+    assert_eq!(app.side_panel_mode, super::SidePanelMode::Shown(42));
+
+    // Squeezing below the 24-column floor hides the panel…
+    app.handle_mouse(mouse_event(
+        MouseEventKind::Drag(MouseButton::Left),
+        panel.y + 1,
+        panel.x + 20,
+    ));
+    assert_eq!(app.side_panel_mode, super::SidePanelMode::Hidden);
+
+    // …but dragging back left within the same drag reopens it.
+    app.handle_mouse(mouse_event(
+        MouseEventKind::Drag(MouseButton::Left),
+        panel.y + 1,
+        panel.x - 4,
+    ));
+    assert_eq!(app.side_panel_mode, super::SidePanelMode::Shown(40));
+
+    // Reaching the panel's last column (the outer edge) collapses it too.
+    app.handle_mouse(mouse_event(
+        MouseEventKind::Drag(MouseButton::Left),
+        panel.y + 1,
+        panel.right() - 1,
+    ));
+    assert_eq!(app.side_panel_mode, super::SidePanelMode::Hidden);
+
+    // Release ends the drag.
+    app.handle_mouse(mouse_event(
+        MouseEventKind::Up(MouseButton::Left),
+        panel.y + 1,
+        panel.x,
+    ));
+    assert!(app.panel_drag.is_none());
+    // The collapsed state sticks after release.
+    assert_eq!(app.side_panel_mode, super::SidePanelMode::Hidden);
+}
+
+/// A left-positioned panel grabs on its right border and mirrors the width
+/// math: dragging right grows, dragging left past the outer edge collapses.
+#[tokio::test]
+async fn side_panel_left_position_drag_grabs_right_edge() {
+    use crossterm::event::{MouseButton, MouseEventKind};
+    let (mut app, _rx) = test_app().await;
+    let panel = ratatui::layout::Rect::new(0, 0, 30, 10);
+    app.last_panel_area = Some(panel);
+    app.side_panel_position = super::SidePanelPosition::Left;
+
+    // Grab the right border (x=29); the left border starts a selection
+    // instead (it is the screen edge, not the feed-facing edge).
+    app.handle_mouse(mouse_event(
+        MouseEventKind::Down(MouseButton::Left),
+        2,
+        panel.right() - 1,
+    ));
+    assert!(app.panel_drag.is_some(), "right border grabs on the left panel");
+    assert!(app.mouse_select.is_none());
+
+    // Dragging right grows the panel.
+    app.handle_mouse(mouse_event(
+        MouseEventKind::Drag(MouseButton::Left),
+        2,
+        35,
+    ));
+    assert_eq!(app.side_panel_mode, super::SidePanelMode::Shown(36));
+
+    // Squeezing below the floor collapses.
+    app.handle_mouse(mouse_event(
+        MouseEventKind::Drag(MouseButton::Left),
+        2,
+        22,
+    ));
+    assert_eq!(app.side_panel_mode, super::SidePanelMode::Hidden);
+
+    // Dragging past the panel's left edge collapses as well.
+    app.handle_mouse(mouse_event(
+        MouseEventKind::Drag(MouseButton::Left),
+        2,
+        29,
+    ));
+    assert_eq!(app.side_panel_mode, super::SidePanelMode::Shown(30));
+    app.handle_mouse(mouse_event(
+        MouseEventKind::Drag(MouseButton::Left),
+        2,
+        0,
+    ));
+    assert_eq!(app.side_panel_mode, super::SidePanelMode::Hidden);
+}
+
+/// Pressing the panel interior (not the grab strip) still starts a text
+/// selection, and a top/bottom-positioned panel has no drag strip at all.
+#[tokio::test]
+async fn side_panel_interior_press_starts_selection_not_drag() {
+    use crossterm::event::{MouseButton, MouseEventKind};
+    let (mut app, _rx) = test_app().await;
+    let panel = ratatui::layout::Rect::new(100, 0, 36, 10);
+    app.last_panel_area = Some(panel);
+    app.side_panel_position = super::SidePanelPosition::Right;
+    app.panel_select_lines = vec![ratatui::text::Line::raw("Session")];
+
+    // Interior press (column 102, not the x=100 border) selects panel text.
+    app.handle_mouse(mouse_event(
+        MouseEventKind::Down(MouseButton::Left),
+        1,
+        102,
+    ));
+    assert!(app.panel_drag.is_none());
+    assert_eq!(
+        app.mouse_select.as_ref().map(|s| s.region),
+        Some(super::SelectRegion::Panel)
+    );
+    app.clear_mouse_select();
+
+    // Top/bottom placements: the border press is a plain selection, no drag.
+    app.side_panel_position = super::SidePanelPosition::Top;
+    app.handle_mouse(mouse_event(
+        MouseEventKind::Down(MouseButton::Left),
+        1,
+        panel.x,
+    ));
+    assert!(app.panel_drag.is_none());
+}

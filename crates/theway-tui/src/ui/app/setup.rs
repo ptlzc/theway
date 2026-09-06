@@ -108,6 +108,7 @@ impl App {
             last_input_area: None,
             last_cascade_area: None,
             last_panel_area: None,
+            panel_drag: None,
             last_ctrlc: None,
             quit: false,
             connected: true,

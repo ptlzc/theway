@@ -180,6 +180,29 @@ pub(crate) enum SidePanelMode {
     Hidden,
 }
 
+/// Live side-panel drag-resize state (issue #54): anchored on mouse-down at
+/// the panel's feed-facing edge (1-column grab strip — the left border for a
+/// right-positioned panel, the right border for a left-positioned one), the
+/// width tracks the pointer while the button is held. Dragging the width
+/// below [`SIDE_PANEL_MIN_WIDTH`] (or past the panel's outer edge) collapses
+/// the panel to `Hidden`. All geometry is captured at grab time so a drag
+/// keeps working while the panel is collapsed (its rect disappears from the
+/// next render).
+#[derive(Clone, Copy, Debug)]
+struct PanelDrag {
+    /// Column the drag anchored on (the grab strip).
+    start_col: u16,
+    /// Panel width at drag start.
+    start_width: u16,
+    /// `true` for a right-positioned panel (left-edge grab): dragging right
+    /// shrinks; `false` for left-positioned (right-edge grab): dragging
+    /// right grows.
+    grab_left_edge: bool,
+    /// The panel's outer edge column: dragging the grabbed edge to or past
+    /// it collapses the panel.
+    outer_edge: u16,
+}
+
 /// Side-panel placement (issue #54 `/side-panel › Position`): the panel
 /// renders on one of the four edges of the content area; the feed reclaims
 /// the remaining space. Persisted to `ui-state.toml`.
@@ -621,6 +644,9 @@ pub struct App {
     last_cascade_area: Option<Rect>,
     /// Rendered side-panel rect; `None` when the panel is not rendered.
     last_panel_area: Option<Rect>,
+    /// Live side-panel drag-resize state (issue #54): `Some` while the left
+    /// button is held on the panel's grab strip.
+    panel_drag: Option<PanelDrag>,
     last_ctrlc: Option<Instant>,
     quit: bool,
 

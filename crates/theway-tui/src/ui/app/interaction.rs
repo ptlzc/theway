@@ -149,8 +149,49 @@ impl App {
     const WHEEL_SCROLL_LINES: usize = 3;
 
     /// Left-button press inside a selectable region starts a character
-    /// selection at the clicked position; a press outside clears it.
+    /// selection at the clicked position; a press outside clears it. The
+    /// side panel's feed-facing edge (1-column grab strip, issue #54) is
+    /// checked first: grabbing it starts a width drag instead of a text
+    /// selection, and exits `Auto` into an explicit width.
     fn mouse_down_left(&mut self, mouse: crossterm::event::MouseEvent) {
+        // Side-panel resize grab (issue #54): the panel's feed-facing border
+        // column over its full height. Checked BEFORE region selection so the
+        // grab strip never starts a text selection.
+        if let Some(area) = self.last_panel_area
+            && self.side_panel_position == SidePanelPosition::Right
+            && mouse.column == area.x
+            && mouse.row >= area.y
+            && mouse.row < area.bottom()
+        {
+            self.clear_mouse_select();
+            self.panel_drag = Some(PanelDrag {
+                start_col: mouse.column,
+                start_width: area.width,
+                grab_left_edge: true,
+                outer_edge: area.right().saturating_sub(1),
+            });
+            // Grabbing exits Auto: the panel becomes user-controlled at its
+            // current width.
+            self.side_panel_mode = SidePanelMode::Shown(area.width);
+            return;
+        }
+        // Left-positioned panel: the grab strip is its right border.
+        if let Some(area) = self.last_panel_area
+            && self.side_panel_position == SidePanelPosition::Left
+            && mouse.column == area.right().saturating_sub(1)
+            && mouse.row >= area.y
+            && mouse.row < area.bottom()
+        {
+            self.clear_mouse_select();
+            self.panel_drag = Some(PanelDrag {
+                start_col: mouse.column,
+                start_width: area.width,
+                grab_left_edge: false,
+                outer_edge: area.x,
+            });
+            self.side_panel_mode = SidePanelMode::Shown(area.width);
+            return;
+        }
         let Some((region, pos)) = self.region_pos_at(mouse.row, mouse.column) else {
             self.clear_mouse_select();
             return;
@@ -163,9 +204,36 @@ impl App {
         });
     }
 
-    /// Left-button drag extends the character selection (clamped to the
-    /// region's rows).
+    /// Left-button drag: an active panel resize tracks the pointer (issue
+    /// #54); otherwise the drag extends the character selection (clamped to
+    /// the region's rows).
     fn mouse_drag_left(&mut self, mouse: crossterm::event::MouseEvent) {
+        if let Some(drag) = self.panel_drag {
+            // Right-positioned panel: the right edge stays anchored while the
+            // left edge follows the pointer — width = start_width +
+            // (start_col - column) (signed: dragging right of the grab column
+            // shrinks). Left-positioned: mirrored, dragging right grows.
+            let width = if drag.grab_left_edge {
+                i64::from(drag.start_width) + i64::from(drag.start_col) - i64::from(mouse.column)
+            } else {
+                i64::from(drag.start_width) + i64::from(mouse.column) - i64::from(drag.start_col)
+            };
+            // Dragging the grabbed edge to or past the panel's outer edge, or
+            // squeezing the width below the floor, collapses the panel
+            // (issue #54). The geometry is captured at grab time, so the drag
+            // keeps working (and can re-expand) after the collapse.
+            let past_outer_edge = if drag.grab_left_edge {
+                mouse.column >= drag.outer_edge
+            } else {
+                mouse.column <= drag.outer_edge
+            };
+            self.side_panel_mode = if past_outer_edge || width < i64::from(SIDE_PANEL_MIN_WIDTH) {
+                SidePanelMode::Hidden
+            } else {
+                SidePanelMode::Shown(width.clamp(0, i64::from(u16::MAX)) as u16)
+            };
+            return;
+        }
         let Some(sel) = self.mouse_select else { return };
         if !sel.dragging {
             return;
@@ -181,10 +249,14 @@ impl App {
         self.mouse_select = Some(MouseSelect { current: pos, ..sel });
     }
 
-    /// Left-button release ends the drag: a drag (anchor moved) copies the
-    /// selected characters to the clipboard via OSC 52 and stays highlighted;
-    /// a plain click (no drag) just clears.
+    /// Left-button release ends any live drag: a panel resize ends (the
+    /// collapsed/expanded width stays), a selection drag (anchor moved)
+    /// copies the selected characters to the clipboard via OSC 52 and stays
+    /// highlighted; a plain click (no drag) just clears.
     fn mouse_up_left(&mut self) {
+        if self.panel_drag.take().is_some() {
+            return;
+        }
         let Some(sel) = self.mouse_select else { return };
         if !sel.dragging {
             return;
