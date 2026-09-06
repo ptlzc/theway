@@ -50,6 +50,25 @@ pub trait NotificationHook: Send + Sync {
 /// alias instead of writing the trait-object syntax everywhere.
 pub type DynNotificationHook = Arc<dyn NotificationHook>;
 
+/// Assembly target for notification hooks. The only production impl is the
+/// per-session [`TriggerExecutor`](super::execution::TriggerExecutor); the
+/// one-shot-registration unit tests inject a recording fake.
+///
+/// `pub(crate)` so the settings `Configure` path (issue #73) and the
+/// `/reload` reconnect path can register freshly connected MCP hooks onto
+/// the live session's executor. Lives here (not in `orchestration`) so the
+/// path-included slash-command integration tests can reach it without
+/// pulling the whole orchestration layer.
+pub(crate) trait NotificationHookSink {
+    fn register(&self, hook: DynNotificationHook);
+}
+
+impl NotificationHookSink for std::sync::Arc<super::execution::TriggerExecutor> {
+    fn register(&self, hook: DynNotificationHook) {
+        self.register_notification_hook(hook);
+    }
+}
+
 /// Failure modes reported by a hook to the runtime supervisor. The supervisor decides
 /// whether to restart, escalate to `requires_attention`, or surface as a user error.
 #[derive(Clone, Debug, thiserror::Error)]

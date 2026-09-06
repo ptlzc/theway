@@ -417,7 +417,7 @@ fn replace_mcp_tools_leaves_non_old_tools_of_same_name_untouched() {
     let stale_b = mcp_tool("mcp_a");
     let h = harness_with_tools(vec![stale_a.clone(), stale_b.clone()]);
 
-    h.replace_mcp_tools(&[stale_a.clone()], Vec::new());
+    h.replace_mcp_tools(std::slice::from_ref(&stale_a), Vec::new());
 
     let tools = &h.agent().state().tools;
     assert_eq!(tools.len(), 1);

@@ -647,8 +647,8 @@ async fn reload_everything(registry: &Registry, ctx: &CommandCtx<'_>) -> Command
         ctx.harness.replace_mcp_tools(&old_tools, new_tools.clone());
         let registered = new_hooks.len();
         {
-            use crate::orchestration::session::NotificationHookSink;
             use crate::trigger_engine::notification_hook::NotificationHook;
+            use crate::trigger_engine::notification_hook::NotificationHookSink;
             let mut slot_state = slot.write().unwrap();
             for hook in &new_hooks {
                 let label = hook.label().to_string();

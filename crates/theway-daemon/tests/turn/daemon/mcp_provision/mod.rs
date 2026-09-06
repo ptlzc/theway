@@ -167,7 +167,7 @@ fn thewayd_stdio_server(scratch: &TempDir, name: &str) -> WireProvisionedMcpServ
     WireProvisionedMcpServer {
         name: name.into(),
         kind: "stdio".into(),
-        command: Some(bin.into()),
+        command: Some(bin),
         args: vec![
             "--mcp".into(),
             "--cwd".into(),

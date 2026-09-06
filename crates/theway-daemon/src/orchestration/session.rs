@@ -11,7 +11,6 @@ use theway_transport::feed::FeedUpdate;
 use theway_transport::inbox;
 
 use crate::orchestration::DaemonServices;
-use crate::trigger_engine::notification_hook::DynNotificationHook;
 use crate::{agent_specs, tools, triggers};
 
 mod activation_build;
@@ -431,21 +430,12 @@ impl SessionRuntimeBuilder {
     }
 }
 
-/// Assembly target for notification hooks. The only production impl is the
-/// per-session [`TriggerExecutor`](crate::trigger_engine::execution::TriggerExecutor);
-/// the one-shot-registration unit tests inject a recording fake.
-///
-/// `pub(crate)` so the settings `Configure` path (issue #73) can register
-/// freshly connected MCP hooks onto the live session's executor.
-pub(crate) trait NotificationHookSink {
-    fn register(&self, hook: DynNotificationHook);
-}
-
-impl NotificationHookSink for std::sync::Arc<crate::trigger_engine::execution::TriggerExecutor> {
-    fn register(&self, hook: DynNotificationHook) {
-        self.register_notification_hook(hook);
-    }
-}
+/// Assembly target for notification hooks — defined next to
+/// [`DynNotificationHook`] in `trigger_engine::notification_hook` so the
+/// path-included integration tests can reach it; re-exported here to keep
+/// the session-assembly namespace (`crate::orchestration::session::…`)
+/// stable for existing callers.
+pub(crate) use crate::trigger_engine::notification_hook::NotificationHookSink;
 
 /// One-shot registration contract: wires every notification hook onto `sink` exactly
 /// once — the process-level MCP push sources, then a fresh cron watcher, then a fresh

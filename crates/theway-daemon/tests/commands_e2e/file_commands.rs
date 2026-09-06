@@ -60,6 +60,8 @@ async fn dispatch_file_command_expands_arguments_into_prompt() {
         tool_count: 0,
         cwd: cwd.path(),
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        mcp_provision: None,
+        auth_base: None,
     };
 
     let outcome = commands::dispatch("/commit the whole diff", &registry, &ctx).await;
@@ -121,6 +123,8 @@ async fn dispatch_reload_rescans_skills_and_file_commands() {
         tool_count: 0,
         cwd: cwd.path(),
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        mcp_provision: None,
+        auth_base: None,
     };
 
     let _guard = COMMAND_OUTPUT_LOCK.lock().unwrap();
@@ -158,6 +162,8 @@ async fn dispatch_plain_message_does_not_error_for_path_like_slash() {
         tool_count: 0,
         cwd: cwd.path(),
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        mcp_provision: None,
+        auth_base: None,
     };
     let outcome = commands::dispatch("/etc/hosts", &registry, &ctx).await;
     match outcome {

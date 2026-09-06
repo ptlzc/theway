@@ -13,9 +13,10 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::trigger_engine::notification_hook::DynNotificationHook;
 use crate::triggers;
 
-use super::{DynNotificationHook, NotificationHookSink, register_notification_hooks};
+use super::{NotificationHookSink, register_notification_hooks};
 
 /// Recording stand-in for `Arc<TriggerExecutor>` — captures what the helper
 /// registers without touching executor internals.

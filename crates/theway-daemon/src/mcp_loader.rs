@@ -441,7 +441,7 @@ impl McpProvisionState {
             .collect();
         self.errors = diagnostics
             .iter()
-            .map(|diagnostic| crate::orchestration::session::parse_mcp_diagnostic(diagnostic))
+            .map(|diagnostic| parse_mcp_diagnostic(diagnostic))
             .collect();
         self.inject_summary = self
             .configs
@@ -457,6 +457,30 @@ impl McpProvisionState {
             .collect();
         self.registered_labels.clear();
     }
+}
+
+/// Split one loader diagnostic into a `(name, message)` pair. Server
+/// failures carry the server name; config-file problems carry the file
+/// label. Any unrecognized diagnostic keeps the full text under `mcp`.
+///
+/// Defined here (not in `orchestration/session/resources`) so the
+/// path-included integration tests can reach it; the session-resource model
+/// re-exports it for its own namespace.
+pub fn parse_mcp_diagnostic(diagnostic: &str) -> (String, String) {
+    if let Some(rest) = diagnostic.strip_prefix("mcp server '") {
+        if let Some((name, message)) = rest.split_once("' failed: ") {
+            return (name.to_string(), message.to_string());
+        }
+    }
+    if let Some(rest) = diagnostic.strip_prefix("mcp config (") {
+        if let Some((head, message)) = rest.split_once("): ") {
+            // `head` = `user, /path/to/mcp.toml` — the label is the segment
+            // before the comma; the message follows `): `.
+            let label = head.split_once(", ").map_or(head, |(l, _)| l);
+            return (format!("mcp.toml ({label})"), message.to_string());
+        }
+    }
+    ("mcp".to_string(), diagnostic.to_string())
 }
 
 /// Validate a provisioned server list: every entry needs a non-empty name
