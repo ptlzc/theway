@@ -463,14 +463,36 @@ mod tests {
     }
 
     #[test]
-    fn picker_cursor_clamps_at_bounds() {
+    fn picker_single_entry_menu_pins_the_cursor() {
+        // One credentialed provider: Up/Down are no-ops under wrap
+        // semantics — a length-1 menu pins its cursor.
         let mut p = ModelPickerState::new(two_groups(), None, "off".into());
         p.up();
         assert_eq!(p.cursor, 0);
         p.down();
         p.down();
         p.down();
-        assert_eq!(p.cursor, 0); // one credentialed provider, clamped
+        assert_eq!(p.cursor, 0);
+    }
+
+    #[test]
+    fn picker_thinking_column_wraps_at_both_ends() {
+        let mut p = ModelPickerState::new(two_groups(), None, "off".into());
+        p.enter(); // → models
+        p.enter(); // → thinking, cursor 0 = off (current level)
+        assert!(matches!(p.level, PickerLevel::Thinking { .. }));
+        assert_eq!(p.cursor, 0);
+        // Up at the top (off) wraps to the last level (max).
+        p.up();
+        assert_eq!(p.cursor, THINKING_LEVELS.len() - 1);
+        assert_eq!(THINKING_LEVELS[p.cursor], "max");
+        // Down at the bottom wraps back to off.
+        p.down();
+        assert_eq!(p.cursor, 0);
+        assert_eq!(THINKING_LEVELS[p.cursor], "off");
+        // Down from off moves forward normally.
+        p.down();
+        assert_eq!(THINKING_LEVELS[p.cursor], "minimal");
     }
 
     #[test]
