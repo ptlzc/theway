@@ -297,3 +297,118 @@ fn parse_error_in_both_files_yields_two_diagnostics_and_empty_list() {
     assert_eq!(labels, vec![true, true], "{diagnostics:?}");
 }
 
+// ── config.toml [[server]] scan (scan_mcp_servers_from_config) ──────────
+
+/// A single `config.toml` at a hermetic temp path.
+struct ConfigFile {
+    _dir: TempDir,
+    path: PathBuf,
+}
+
+impl ConfigFile {
+    fn new() -> Self {
+        let dir = TempDir::new();
+        let path = dir.path().join("config.toml");
+        Self { _dir: dir, path }
+    }
+}
+
+#[test]
+fn scan_from_config_yields_servers() {
+    let file = ConfigFile::new();
+    write(
+        &file.path,
+        r#"
+[[server]]
+name = "alpha"
+command = "alpha-cmd"
+
+[[server]]
+name = "beta"
+kind = "streamable_http"
+endpoint = "http://127.0.0.1:10443"
+"#,
+    );
+
+    let (servers, diagnostics) = scan_mcp_servers_from_config(&file.path);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(servers.len(), 2, "{servers:?}");
+    assert_eq!(servers[0].name, "alpha");
+    assert_eq!(servers[0].kind, "stdio");
+    assert_eq!(servers[0].command.as_deref(), Some("alpha-cmd"));
+    assert_eq!(servers[1].name, "beta");
+    assert_eq!(servers[1].kind, "streamable_http");
+}
+
+#[test]
+fn scan_from_config_missing_file_is_empty_no_diagnostic() {
+    let dir = TempDir::new();
+    let path = dir.path().join("missing").join("config.toml");
+
+    let (servers, diagnostics) = scan_mcp_servers_from_config(&path);
+    assert!(servers.is_empty(), "{servers:?}");
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+}
+
+#[test]
+fn scan_from_config_parse_error_yields_one_diagnostic() {
+    let file = ConfigFile::new();
+    write(&file.path, "this is [[[ not valid toml");
+
+    let (servers, diagnostics) = scan_mcp_servers_from_config(&file.path);
+    assert!(servers.is_empty(), "{servers:?}");
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert!(diagnostics[0].contains("mcp config"), "{diagnostics:?}");
+    assert!(diagnostics[0].contains("(config,"), "{diagnostics:?}");
+    assert!(diagnostics[0].contains("parse failed"), "{diagnostics:?}");
+    assert!(
+        diagnostics[0].contains(&file.path.display().to_string()),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn scan_from_config_with_other_sections_still_yields_only_servers() {
+    let file = ConfigFile::new();
+    write(
+        &file.path,
+        r#"
+[model]
+provider = "acme"
+model = "warp-9"
+
+[theme]
+name = "dark"
+
+[ui]
+max_feed_lines = 8000
+
+[[server]]
+name = "only"
+command = "only-cmd"
+"#,
+    );
+
+    let (servers, diagnostics) = scan_mcp_servers_from_config(&file.path);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(servers.len(), 1, "{servers:?}");
+    assert_eq!(servers[0].name, "only");
+    assert_eq!(servers[0].command.as_deref(), Some("only-cmd"));
+}
+
+#[test]
+fn scan_from_config_empty_server_list_is_empty_no_diagnostic() {
+    let file = ConfigFile::new();
+    write(
+        &file.path,
+        r#"
+[model]
+provider = "acme"
+"#,
+    );
+
+    let (servers, diagnostics) = scan_mcp_servers_from_config(&file.path);
+    assert!(servers.is_empty(), "{servers:?}");
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+}
+

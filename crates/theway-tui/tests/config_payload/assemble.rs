@@ -395,3 +395,88 @@ command = "project-only-cmd"
         assert!(diagnostics[0].contains("parse failed"), "{diagnostics:?}");
     }
 
+    // ── payload assembly: config.toml [[server]] wins over mcp.toml ──
+
+    #[test]
+    fn assemble_config_toml_servers_win_and_fallback_not_read() {
+        let _serial = ENV_LOCK.lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().join("base");
+        let project = tmp.path().join("project");
+
+        // config.toml carries a `[[server]]` block.
+        write(
+            &base.join("config.toml"),
+            r#"
+[model]
+provider = "acme"
+model = "warp-9"
+
+[[server]]
+name = "cfg-server"
+command = "cfg-cmd"
+"#,
+        );
+        // The legacy mcp.toml roots must NOT be consulted when config.toml has
+        // `[[server]]` — give them distinct servers to catch any leak.
+        write(
+            &base.join("mcp.toml"),
+            "[[server]]\nname = \"user-legacy\"\ncommand = \"u\"",
+        );
+        write(
+            &project.join(".theway/mcp.toml"),
+            "[[server]]\nname = \"project-legacy\"\ncommand = \"p\"",
+        );
+
+        let _theway = EnvGuard::set("THEWAY_DIR", &base);
+        let cli = cli_from(&["theway"]);
+        let (payload, diagnostics) =
+            assemble_config_from(&cli, None, "config.toml", &project);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+        // Only the config.toml `[[server]]` entry is provisioned.
+        let servers = &payload.mcp_servers;
+        assert_eq!(servers.len(), 1, "{servers:?}");
+        assert_eq!(servers[0].name, "cfg-server");
+        assert_eq!(servers[0].command.as_deref(), Some("cfg-cmd"));
+    }
+
+    #[test]
+    fn assemble_falls_back_to_mcp_toml_when_config_has_no_servers() {
+        let _serial = ENV_LOCK.lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().join("base");
+        let project = tmp.path().join("project");
+
+        // config.toml exists but carries no `[[server]]` block.
+        write(
+            &base.join("config.toml"),
+            r#"
+[model]
+provider = "acme"
+model = "warp-9"
+"#,
+        );
+        write(
+            &base.join("mcp.toml"),
+            "[[server]]\nname = \"user-only\"\ncommand = \"user-cmd\"",
+        );
+        write(
+            &project.join(".theway/mcp.toml"),
+            "[[server]]\nname = \"project-only\"\ncommand = \"project-cmd\"",
+        );
+
+        let _theway = EnvGuard::set("THEWAY_DIR", &base);
+        let cli = cli_from(&["theway"]);
+        let (payload, diagnostics) =
+            assemble_config_from(&cli, None, "config.toml", &project);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+        // Empty config.toml `[[server]]` list falls back to the legacy
+        // user+project mcp.toml merge.
+        let servers = &payload.mcp_servers;
+        assert_eq!(servers.len(), 2, "{servers:?}");
+        assert_eq!(servers[0].name, "user-only");
+        assert_eq!(servers[1].name, "project-only");
+    }
+

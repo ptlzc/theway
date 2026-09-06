@@ -85,10 +85,26 @@ impl Default for Theme {
 }
 
 impl Theme {
-    /// Load the theme from `${THEWAY_DIR:-$HOME/.theway}/theme.toml`. A
-    /// missing or unreadable file is the documented default (no warning).
+    /// Load the theme from the local `config.toml` `[theme]` table when one is
+    /// present, otherwise fall back to the legacy
+    /// `${THEWAY_DIR:-$HOME/.theway}/theme.toml` (the historical default).
     pub fn load() -> Self {
+        // A `[theme]` table in config.toml wins over the legacy theme.toml.
+        let config_path = crate::config_payload::config_path(None);
+        if let Ok(text) = std::fs::read_to_string(&config_path) {
+            if let Ok(table) = text.parse::<TomlTable>() {
+                if table.get("theme").is_some_and(|value| value.is_table()) {
+                    return Self::load_from_config_text(&text);
+                }
+            }
+        }
         Self::load_from(&theme_toml_path())
+    }
+
+    /// Parse theme text that may namespace its sections under `[theme]` —
+    /// the config.toml shape. Used by tests and by the runtime reload path.
+    pub fn load_from_config_text(text: &str) -> Self {
+        Self::parse_namespaced(text)
     }
 
     /// Parse `path` when it exists; any read error (missing file, no
@@ -104,18 +120,41 @@ impl Theme {
     /// roles, invalid hex, unknown align and invalid values warn on stderr
     /// and keep the current value; everything missing stays default.
     pub fn parse(text: &str) -> Self {
-        let mut theme = Theme::default();
         let table: TomlTable = match text.parse() {
             Ok(table) => table,
             Err(err) => {
                 warn(&format!("parse error: {err} — using defaults"));
-                return theme;
+                return Theme::default();
             }
         };
-        // Palette first: any slot can reference `p:name` regardless of the
-        // section order in the file.
-        let palette = build_palette(&table);
-        for (section, value) in &table {
+        Self::parse_sections(&table)
+    }
+
+    /// Parse text whose theme sections may live under a `[theme]` table (the
+    /// config.toml shape). A flat file with top-level `[screen]` / `[feed]` /
+    /// `[blocks.*]` sections still parses the same way, so both shapes work
+    /// through this single entry point.
+    pub fn parse_namespaced(text: &str) -> Self {
+        let table: TomlTable = match text.parse() {
+            Ok(table) => table,
+            Err(err) => {
+                warn(&format!("parse error: {err} — using defaults"));
+                return Theme::default();
+            }
+        };
+        match table.get("theme") {
+            Some(toml::Value::Table(theme)) => Self::parse_sections(theme),
+            _ => Self::parse_sections(&table),
+        }
+    }
+
+    /// Shared post-parse body: resolve the palette first (any slot can
+    /// reference `p:name` regardless of the section order in the file), then
+    /// walk the top-level `[section]` tables applying each known one.
+    fn parse_sections(table: &TomlTable) -> Theme {
+        let mut theme = Theme::default();
+        let palette = build_palette(table);
+        for (section, value) in table {
             let Some(section_table) = value.as_table() else {
                 warn(&format!("key {section:?} outside any [section] — ignored"));
                 continue;

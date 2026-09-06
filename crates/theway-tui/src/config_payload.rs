@@ -58,7 +58,21 @@ pub(crate) fn config_base_dir(home: Option<&Path>) -> PathBuf {
 /// [`assemble_config`]. Keeping this path in `App` makes model-default writes
 /// honor both `$THEWAY_DIR` and the startup `--home` flag.
 pub(crate) fn config_path(home: Option<&Path>) -> PathBuf {
+    #[cfg(test)]
+    if let Some(path) = TEST_CONFIG_PATH.lock().unwrap().clone() {
+        return path;
+    }
     config_base_dir(home).join("config.toml")
+}
+
+#[cfg(test)]
+static TEST_CONFIG_PATH: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
+/// Redirect the controller config lookup for hermetic fixtures (mirrors
+/// `ui_state::set_state_path_for_tests`); `None` restores the real path.
+#[cfg(test)]
+pub(crate) fn set_config_path_for_tests(path: Option<PathBuf>) {
+    *TEST_CONFIG_PATH.lock().unwrap() = path;
 }
 
 /// Pure base-dir resolution (testable without env access).
@@ -198,15 +212,25 @@ pub(crate) fn assemble_config_from(
         crate::template_scan::scan_templates(cwd, &theway_transport::config::base_dir());
 
     // Issue #73 (open spec provision-mcp-servers): the controller owns local
-    // MCP server config discovery too — scan user `base/mcp.toml` then project
-    // `<cwd>/.theway/mcp.toml` and provision the merged catalog so the daemon
-    // never reads MCP config files in a controller-provisioned session. Parse
-    // diagnostics ride the payload's notes vec, mirroring the skill/template
-    // scans.
-    let (mcp_servers, mcp_diagnostics) = crate::mcp_scan::scan_mcp_servers(
-        &theway_transport::config::base_dir().join("mcp.toml"),
-        &cwd.join(".theway").join("mcp.toml"),
-    );
+    // MCP server config discovery too. `config.toml`'s `[[server]]` block wins
+    // when present (non-empty); otherwise fall back to scanning user
+    // `base/mcp.toml` then project `<cwd>/.theway/mcp.toml` and provision the
+    // merged catalog so the daemon never reads MCP config files in a
+    // controller-provisioned session. Parse diagnostics ride the payload's
+    // notes vec, mirroring the skill/template scans.
+    let (mcp_servers, mcp_diagnostics) = {
+        let (from_config, config_diags) =
+            crate::mcp_scan::scan_mcp_servers_from_config(&config_path(cli.home.as_deref()));
+        if from_config.is_empty() {
+            let (file_servers, file_diags) = crate::mcp_scan::scan_mcp_servers(
+                &theway_transport::config::base_dir().join("mcp.toml"),
+                &cwd.join(".theway").join("mcp.toml"),
+            );
+            (file_servers, [config_diags, file_diags].concat())
+        } else {
+            (from_config, config_diags)
+        }
+    };
     diagnostics.extend(mcp_diagnostics);
     payload.mcp_servers = mcp_servers;
 

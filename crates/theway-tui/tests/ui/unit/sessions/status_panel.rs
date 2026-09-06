@@ -142,6 +142,10 @@ async fn ctrl_o_persists_last_thinking_mode() {
     let dir = std::env::temp_dir().join(format!("theway-ui-ctrl-o-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     crate::ui_state::set_state_path_for_tests(Some(dir.join("ui-state.toml")));
+    // `load()` consults `config.toml` first (unify-config-toml): point it at a
+    // missing temp path so the fallback reads the test's ui-state.toml, not
+    // the real `~/.theway/config.toml`.
+    crate::config_payload::set_config_path_for_tests(Some(dir.join("config.toml")));
 
     let (mut app, _rx) = test_app().await;
     let mut term = terminal_placeholder();
@@ -159,4 +163,5 @@ async fn ctrl_o_persists_last_thinking_mode() {
 
     let _ = std::fs::remove_dir_all(&dir);
     crate::ui_state::set_state_path_for_tests(None);
+    crate::config_payload::set_config_path_for_tests(None);
 }

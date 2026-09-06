@@ -130,6 +130,22 @@ impl From<ReconnectConfigToml> for WireProvisionedMcpReconnect {
     }
 }
 
+/// Scan a single `config.toml` for its `[[server]]` catalog.
+///
+/// Unlike [`scan_mcp_servers`] this reads exactly one file — the controller's
+/// `config.toml` — and yields its `[[server]]` entries verbatim (no
+/// user/project merge). It is the first-chosen source: the caller uses it only
+/// when it produces a non-empty list, otherwise falling back to
+/// [`scan_mcp_servers`]. Diagnostics use the `(config, <path>)` label so a
+/// config.toml parse failure is distinguishable from the legacy file scan.
+pub(crate) fn scan_mcp_servers_from_config(
+    config_path: &Path,
+) -> (Vec<WireProvisionedMcpServer>, Vec<String>) {
+    let mut diagnostics = Vec::new();
+    let servers = read_config(config_path, "config", &mut diagnostics);
+    (servers, diagnostics)
+}
+
 /// Scan the two local MCP config roots and return the merged provisioned
 /// server catalog plus `(file_label, parse error)` diagnostics.
 ///

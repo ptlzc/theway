@@ -50,9 +50,26 @@ pub(crate) struct UiState {
     pub graph_position: Option<GraphPosition>,
 }
 
-/// Load from the default path (`${THEWAY_DIR}/ui-state.toml`).
+/// Load the persisted UI state.
+///
+/// Reads a `[ui]` table from `config.toml` (the controller-owned config file)
+/// when one is present; otherwise falls back to the legacy `ui-state.toml`.
 pub(crate) fn load() -> UiState {
+    let config_path = crate::config_payload::config_path(None);
+    if let Ok(text) = std::fs::read_to_string(&config_path) {
+        if let Ok(table) = text.parse::<toml::Table>() {
+            if table.contains_key("ui") {
+                return parse_namespaced(&text);
+            }
+        }
+    }
     load_from(&state_path())
+}
+
+/// Parse `config.toml` text, honoring the `[ui]` namespace when present.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn load_from_config_text(text: &str) -> UiState {
+    parse_namespaced(text)
 }
 
 /// Parse `path` when it exists; any read/parse error → defaults.
@@ -64,17 +81,41 @@ pub(crate) fn load_from(path: &Path) -> UiState {
 }
 
 fn parse(text: &str) -> UiState {
-    let mut state = UiState::default();
     let table: toml::map::Map<String, toml::Value> = match text.parse() {
         Ok(table) => table,
-        Err(_) => return state,
+        Err(_) => return UiState::default(),
     };
-    if let Some(feed) = table.get("feed").and_then(toml::Value::as_table) {
+    read_ui_sections(&table, UiState::default())
+}
+
+/// Parse text that may carry a `[ui]` namespace: when a `[ui]` table is
+/// present, read `ui.feed`/`ui.panel`/`ui.graph`; otherwise fall back to the
+/// top-level `[feed]`/`[panel]`/`[graph]` layout (graceful).
+fn parse_namespaced(text: &str) -> UiState {
+    let table: toml::map::Map<String, toml::Value> = match text.parse() {
+        Ok(table) => table,
+        Err(_) => return UiState::default(),
+    };
+    match table.get("ui") {
+        Some(ui) => parse_ui_section(ui),
+        None => read_ui_sections(&table, UiState::default()),
+    }
+}
+
+/// Read `feed.thinking_mode`, `panel.mode`, `panel.position` and
+/// `graph.position` out of `container` — the same field parsing whether the
+/// tables live at the top level (legacy `ui-state.toml`) or under `[ui]`
+/// (`config.toml`).
+fn read_ui_sections(
+    container: &toml::map::Map<String, toml::Value>,
+    mut state: UiState,
+) -> UiState {
+    if let Some(feed) = container.get("feed").and_then(toml::Value::as_table) {
         if let Some(mode) = feed.get("thinking_mode").and_then(toml::Value::as_str) {
             state.thinking_mode = parse_thinking_mode(mode);
         }
     }
-    if let Some(panel) = table.get("panel").and_then(toml::Value::as_table) {
+    if let Some(panel) = container.get("panel").and_then(toml::Value::as_table) {
         if let Some(mode) = panel.get("mode").and_then(toml::Value::as_str) {
             state.panel_mode = parse_panel_mode(mode);
         }
@@ -82,12 +123,20 @@ fn parse(text: &str) -> UiState {
             state.panel_position = parse_panel_position(position);
         }
     }
-    if let Some(graph) = table.get("graph").and_then(toml::Value::as_table) {
+    if let Some(graph) = container.get("graph").and_then(toml::Value::as_table) {
         if let Some(position) = graph.get("position").and_then(toml::Value::as_str) {
             state.graph_position = parse_graph_position(position);
         }
     }
     state
+}
+
+/// Read the UI state from a `[ui]` sub-table (e.g. the value of `config.toml`'s
+/// `ui` key).
+fn parse_ui_section(ui: &toml::Value) -> UiState {
+    ui.as_table()
+        .map(|table| read_ui_sections(table, UiState::default()))
+        .unwrap_or_default()
 }
 
 fn parse_thinking_mode(mode: &str) -> Option<ThinkingMode> {

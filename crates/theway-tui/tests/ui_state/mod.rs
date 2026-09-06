@@ -58,6 +58,107 @@ fn parse_missing_file_is_default() {
 }
 
 #[test]
+fn namespaced_ui_fields_parse_same_as_top_level() {
+    let namespaced = parse_namespaced(
+        r#"
+[ui.feed]
+thinking_mode = "peek"
+
+[ui.panel]
+mode = "shown"
+position = "left"
+
+[ui.graph]
+position = "side-panel"
+"#,
+    );
+    let top_level = parse(
+        r#"
+[feed]
+thinking_mode = "peek"
+
+[panel]
+mode = "shown"
+position = "left"
+
+[graph]
+position = "side-panel"
+"#,
+    );
+    assert_eq!(namespaced, top_level);
+    assert_eq!(
+        namespaced.thinking_mode,
+        Some(crate::feed_render::ThinkingMode::Peek)
+    );
+    assert_eq!(
+        namespaced.panel_mode,
+        Some(crate::ui::SidePanelMode::Shown(crate::ui::TRIGGER_PANEL_WIDTH))
+    );
+    assert_eq!(
+        namespaced.panel_position,
+        Some(crate::ui::SidePanelPosition::Left)
+    );
+    assert_eq!(namespaced.graph_position, Some(crate::ui::GraphPosition::SidePanel));
+}
+
+#[test]
+fn load_from_config_text_parses_ui_section_in_full_config() {
+    let state = load_from_config_text(
+        r#"
+[model]
+provider = "openai"
+name = "gpt-4o"
+
+[theme]
+name = "dracula"
+
+[[server]]
+name = "local"
+addr = "unix:///tmp/theway"
+
+[ui.feed]
+thinking_mode = "hidden"
+
+[ui.panel]
+mode = "hidden"
+position = "bottom"
+
+[ui.graph]
+position = "composer-top"
+"#,
+    );
+    assert_eq!(
+        state.thinking_mode,
+        Some(crate::feed_render::ThinkingMode::Hidden)
+    );
+    assert_eq!(state.panel_mode, Some(crate::ui::SidePanelMode::Hidden));
+    assert_eq!(
+        state.panel_position,
+        Some(crate::ui::SidePanelPosition::Bottom)
+    );
+    assert_eq!(
+        state.graph_position,
+        Some(crate::ui::GraphPosition::ComposerTop)
+    );
+}
+
+#[test]
+fn parse_namespaced_without_ui_table_falls_back_to_top_level() {
+    let text =
+        "[feed]\nthinking_mode = \"full\"\n[panel]\nposition = \"right\"\n";
+    let namespaced = parse_namespaced(text);
+    assert_eq!(namespaced, parse(text));
+    assert_eq!(
+        namespaced.thinking_mode,
+        Some(crate::feed_render::ThinkingMode::Full)
+    );
+    assert_eq!(
+        namespaced.panel_position,
+        Some(crate::ui::SidePanelPosition::Right)
+    );
+}
+
+#[test]
 fn render_emits_only_set_fields() {
     let state = UiState {
         thinking_mode: Some(crate::feed_render::ThinkingMode::Hidden),

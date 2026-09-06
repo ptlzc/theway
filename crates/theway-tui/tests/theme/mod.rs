@@ -6,4 +6,5 @@ use crate::ui::prompt_chrome;
 
 mod color;
 mod components;
+mod namespaced;
 mod sections;

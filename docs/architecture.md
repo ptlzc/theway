@@ -334,8 +334,10 @@ sandbox-only builds.
   file IO for either catalog: the TUI scans and provisions both through the
   settings surface (`WireDaemonConfig.skills` / `templates`, carried on both
   gRPC and JSON-RPC). MCP servers follow the same controller-supply model
-  (issue #73): the TUI scans `~/.theway/mcp.toml` + project `mcp.toml` and
-  provisions `WireDaemonConfig.mcp_servers` through the settings surface; the
+  (issue #73): the TUI scans the controller `config.toml` `[[server]]` block
+  first; when that is empty it falls back to the legacy `~/.theway/mcp.toml` +
+  project `mcp.toml` merge, and provisions
+  `WireDaemonConfig.mcp_servers` through the settings surface; the
   daemon connects (stdio spawn / streamable HTTP), swaps the live session's
   MCP tools, registers push hooks on the trigger executor, and publishes
   per-server failures into the snapshot (`McpSnapshot.errors` → 3s startup
@@ -423,6 +425,26 @@ TUI exits; multiple clients can share one daemon.
 the daemon — the CLI opens the local SQLite session repository directly.
 Standalone session queries try the running daemon's RPC first and fall back
 to the local repo when no daemon is up; export/import always go repo-direct.
+
+**Controller config file.** The TUI owns one unified `config.toml`
+(`<base>/config.toml`, resolved via `$THEWAY_DIR` > `--home` > `$HOME/.theway`)
+that namespaces every controller-side config domain, with per-domain
+fallbacks to the legacy files:
+
+| Domain | `config.toml` section | Legacy fallback |
+|--------|----------------------|-----------------|
+| daemon runtime defaults (`[model]` etc.) | `[model]` | — (controller-only, #74) |
+| theme | `[theme.<section>]` | `<base>/theme.toml` |
+| UI state (thinking mode, panel, graph position) | `[ui.feed]` / `[ui.panel]` / `[ui.graph]` | `<base>/ui-state.toml` |
+| MCP servers | top-level `[[server]]` | `<base>/mcp.toml` + project `<cwd>/.theway/mcp.toml` |
+
+Each reader checks whether its domain section EXISTS in `config.toml` (an
+empty table still counts); only when absent does it fall back to the legacy
+file. UI-state WRITES still target `ui-state.toml` (runtime self-written
+state stays out of the hand-edited config), so a `[ui]` table in
+`config.toml` pins those switches and shadows runtime toggles until removed.
+Theme reload (`/reload` path) re-reads the same `config.toml`; standalone
+`thewayd` (no controller) keeps its own local `mcp.toml` scan unchanged.
 
 ## Shared contract (`theway-contract`) and storage layering
 
