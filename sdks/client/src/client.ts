@@ -862,6 +862,7 @@ function fillDaemonConfig(config: Partial<DaemonConfig>): DaemonConfig {
     skillsDirs: config.skillsDirs ?? [],
     skills: config.skills ?? [],
     templates: config.templates ?? [],
+    mcpServers: config.mcpServers ?? [],
     clearFields: config.clearFields ?? [],
   };
 }
