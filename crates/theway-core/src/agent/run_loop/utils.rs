@@ -2,11 +2,18 @@
 //! turn updates, and control-plane prompt payload helpers.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::AgentInner;
 use crate::types::*;
+
+/// Backstop for segment-2 await listeners: a listener that neither completes
+/// nor honors the cancellation token is dropped after this bound so the turn
+/// future always resolves (issue: a hung hook listener wedged the daemon —
+/// the run was cancelled but busy never cleared).
+const EMIT_LISTENER_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub(super) fn apply_turn_update(inner: &Arc<AgentInner>, update: AgentLoopTurnUpdate) {
     let mut state = inner.state.lock();
@@ -37,7 +44,10 @@ pub(super) fn snapshot_context(inner: &Arc<AgentInner>) -> AgentContext {
 /// 1. **Sync callbacks** — `catch_unwind`-wrapped, memory-only (<1µs): cost tracker,
 ///    metrics accumulator. One panic does not poison others.
 /// 2. **Await listeners** — sequential async dispatch for persistence/I/O subscribers
-///    (e.g. `make_session_listener`). Each receives the cancellation token.
+///    (e.g. `make_session_listener`). Each receives the cancellation token. Bounded:
+///    run cancellation wins immediately and a misbehaving listener is dropped after
+///    [`EMIT_LISTENER_TIMEOUT`] — a hung listener must never wedge the turn future
+///    (the daemon has to publish busy=false no matter what).
 /// 3. **Broadcast** — non-blocking `tokio::sync::broadcast::Sender::send`. Slow consumers
 ///    receive `Lagged(n)` errors; the sender never blocks.
 pub(super) async fn emit(inner: &Arc<AgentInner>, event: LoopEvent, cancel: &CancellationToken) {
@@ -54,7 +64,22 @@ pub(super) async fn emit(inner: &Arc<AgentInner>, event: LoopEvent, cancel: &Can
     let await_listeners = inner.await_listeners.lock().clone();
     for listener in await_listeners {
         let token = cancel.clone();
-        listener(event.clone(), token).await;
+        let listener_token = token.clone();
+        tokio::select! {
+            biased;
+            _ = token.cancelled() => {
+                // Run cancelled: stop waiting on listeners immediately so the
+                // turn future resolves right after an abort.
+                return;
+            }
+            _ = tokio::time::sleep(EMIT_LISTENER_TIMEOUT) => {
+                tracing::warn!(
+                    "loop listener exceeded {}s and was dropped",
+                    EMIT_LISTENER_TIMEOUT.as_secs()
+                );
+            }
+            _ = async { listener(event.clone(), listener_token).await } => {}
+        }
     }
 
     // Segment 3: broadcast (non-blocking; ignore Lagged).

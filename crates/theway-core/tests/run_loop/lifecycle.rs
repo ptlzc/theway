@@ -521,3 +521,95 @@ async fn max_iterations_caps_tool_loop() {
         .count();
     assert_eq!(tool_results, 2);
 }
+
+/// A misbehaving await-listener that never resolves and ignores its
+/// cancellation token must not wedge the run: `emit` drops it after the
+/// per-listener bound, so `prompt` still completes. Virtual time keeps the
+/// test fast (each event's 30s wait is auto-advanced).
+#[tokio::test(start_paused = true)]
+async fn hung_await_listener_is_dropped_after_bound() {
+    let responses = Arc::new(Mutex::new(vec![assistant_with(
+        vec![ContentBlock::text("hello there")],
+        StopReason::Stop,
+    )]));
+
+    let mut state = AgentState::default();
+    state.model = Some(faux_model());
+    let agent = Agent::new(AgentOptions {
+        initial_state: Some(state),
+        stream_fn: Some(faux_stream_fn_with(responses)),
+        ..Default::default()
+    });
+    let _unsub = agent.subscribe(Arc::new(|_event, _cancel| {
+        Box::pin(std::future::pending::<()>())
+    }));
+
+    let user = AgentMessage::Llm(theway_llm_provider::Message::User(
+        theway_llm_provider::UserMessage {
+            role: theway_llm_provider::UserRole::User,
+            content: theway_llm_provider::UserContent::Text("hi".into()),
+            timestamp: 0,
+        },
+    ));
+    let started = std::time::Instant::now();
+    let result = agent.prompt(user).await;
+    assert!(result.is_ok(), "{result:?}");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "hung listener must be dropped after the virtual bound: {:?}",
+        started.elapsed()
+    );
+    assert!(!agent.is_streaming(), "the run must have finished");
+}
+
+/// An abort must win over a hung await-listener immediately: `emit` races
+/// the run's cancellation token before the per-listener bound, so `prompt`
+/// returns right after `abort()` instead of waiting out the bound.
+#[tokio::test]
+async fn cancel_wins_over_hung_listener() {
+    let responses = Arc::new(Mutex::new(vec![assistant_with(
+        vec![ContentBlock::text("hello there")],
+        StopReason::Stop,
+    )]));
+
+    let mut state = AgentState::default();
+    state.model = Some(faux_model());
+    let agent = Arc::new(Agent::new(AgentOptions {
+        initial_state: Some(state),
+        stream_fn: Some(faux_stream_fn_with(responses)),
+        ..Default::default()
+    }));
+    let _unsub = agent.subscribe(Arc::new(|_event, _cancel| {
+        Box::pin(std::future::pending::<()>())
+    }));
+
+    let user = AgentMessage::Llm(theway_llm_provider::Message::User(
+        theway_llm_provider::UserMessage {
+            role: theway_llm_provider::UserRole::User,
+            content: theway_llm_provider::UserContent::Text("hi".into()),
+            timestamp: 0,
+        },
+    ));
+    let handle = {
+        let agent = agent.clone();
+        tokio::spawn(async move { agent.prompt(user).await })
+    };
+    // Wait until the run admitted and registered its cancellation token.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while agent.active_token().is_none() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the run never registered its cancel token"
+        );
+        tokio::task::yield_now().await;
+    }
+    let started = std::time::Instant::now();
+    agent.abort();
+    let _ = handle.await.expect("prompt task panicked");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "cancel must preempt the hung listener: {:?}",
+        started.elapsed()
+    );
+    assert!(!agent.is_streaming(), "the run must have finished");
+}

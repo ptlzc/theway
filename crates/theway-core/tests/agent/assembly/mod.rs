@@ -756,3 +756,42 @@ async fn on_turn_end_hook_continue_respects_cap_zero() {
         .collect();
     assert_eq!(decisions, vec!["budget_limited"]);
 }
+
+#[test]
+fn replace_mcp_tools_drops_new_tools_with_colliding_names() {
+    // A provisioned server exposing a tool that collides with a built-in name
+    // (devin-search ships `web_search`, which duplicates the harness's own
+    // `web_search`) must not land in the request catalog: DeepSeek rejects
+    // duplicate tool names with HTTP 400 and breaks every turn.
+    let builtin = mcp_tool("web_search");
+    let h = harness_with_tools(vec![builtin.clone()]);
+    let mcp_ws = mcp_tool("web_search");
+    let mcp_ws_dup = mcp_tool("web_search");
+    let ok = mcp_tool("list_sessions");
+
+    h.replace_mcp_tools(
+        &[],
+        vec![mcp_ws.clone(), mcp_ws_dup.clone(), ok.clone()],
+    );
+
+    let tools = &h.agent().state().tools;
+    assert_eq!(tools.len(), 2, "builtin kept, unique MCP tool added");
+    assert!(tools.iter().any(|t| Arc::ptr_eq(t, &builtin)));
+    assert!(
+        !tools.iter().any(|t| Arc::ptr_eq(t, &mcp_ws)),
+        "MCP duplicate of a builtin name is dropped"
+    );
+    assert!(
+        !tools.iter().any(|t| Arc::ptr_eq(t, &mcp_ws_dup)),
+        "second MCP duplicate is dropped"
+    );
+    assert!(tools.iter().any(|t| Arc::ptr_eq(t, &ok)));
+    assert_eq!(
+        tools
+            .iter()
+            .filter(|t| t.definition().name == "web_search")
+            .count(),
+        1,
+        "exactly one web_search remains"
+    );
+}

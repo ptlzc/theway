@@ -63,6 +63,8 @@ pub use theway_transport::feed::FeedUpdate;
 use std::io::IsTerminal;
 use std::io::Write as _;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use std::time::Instant;
 
@@ -660,6 +662,14 @@ pub struct App {
     /// The event loop recreates its frame stream for this session after the
     /// current input event finishes so live updates follow the selection.
     resubscribe_session: Option<String>,
+    /// One in-flight `cancel_session` RPC at a time (issue #99 hardening):
+    /// repeated Ctrl-C presses while the daemon is not answering would
+    /// otherwise pile up unbounded hung tasks.
+    cancel_in_flight: Arc<AtomicBool>,
+    /// The last cancel RPC timed out: the daemon is unresponsive. The event
+    /// loop's busy tick reads this, drops the frame stream, and lets the
+    /// reconnect path take over instead of freezing the UI.
+    abort_failed: Arc<AtomicBool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

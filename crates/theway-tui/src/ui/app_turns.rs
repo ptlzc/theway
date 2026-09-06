@@ -7,6 +7,7 @@
 //! SQLite repo) and everything else forwarded to the daemon as a message
 //! (the daemon dispatches the full registry and publishes the result).
 
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -486,17 +487,35 @@ impl App {
     }
 
     pub(super) fn request_abort(&mut self) {
-        if self.busy {
-            self.system_line("aborting current turn…");
-            let client = self.client.clone();
-            let session_id = self.session_id.clone();
-            tokio::spawn(async move {
-                let mut client = client;
-                if let Err(e) = client.cancel_session(&session_id).await {
-                    eprintln!("cancel: {e}");
-                }
-            });
+        if !self.busy {
+            return;
         }
+        // Issue #99 hardening: dedupe in-flight cancels — a hung daemon must
+        // not accumulate one forever-blocked RPC task per Ctrl-C press.
+        if self.cancel_in_flight.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        self.system_line("aborting current turn…");
+        let client = self.client.clone();
+        let session_id = self.session_id.clone();
+        let in_flight = self.cancel_in_flight.clone();
+        let failed = self.abort_failed.clone();
+        tokio::spawn(async move {
+            let mut client = client;
+            let result =
+                crate::ui::daemon_call("cancel_session", client.cancel_session(&session_id)).await;
+            in_flight.store(false, Ordering::SeqCst);
+            if let Err(e) = result {
+                // No eprintln here: the task runs detached from the TUI and
+                // raw stderr writes would interleave with the full-screen UI.
+                // The event loop surfaces the timeout via the feed instead.
+                tracing::debug!("cancel: {e}");
+                // The event loop's busy tick observes this flag, drops the
+                // frame stream, and lets the reconnect path take over —
+                // the UI stays alive even when the daemon never answers.
+                failed.store(true, Ordering::SeqCst);
+            }
+        });
     }
 
     pub(super) fn handle_ctrl_d(&mut self) -> bool {

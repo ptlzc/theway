@@ -94,14 +94,25 @@ impl App {
                         Some(Ok(frame)) => {
                             self.apply_frame(frame);
                             if self.resync_pending {
-                                self.resync_pending = false;
-                                match self.client.get_snapshot_for_session(&self.session_id).await {
+                                // Issue #99: bounded — a hung daemon must not
+                                // freeze the client in this await. The flag
+                                // stays armed so the next frame retries.
+                                match crate::ui::daemon_call(
+                                    "get_snapshot_for_session",
+                                    self.client
+                                        .get_snapshot_for_session(&self.session_id),
+                                )
+                                .await
+                                {
                                     Ok(state) => {
-                                        self.apply_snapshot(wire_status_from_session_snapshot(
-                                            &state,
-                                        ))
+                                        self.resync_pending = false;
+                                        self.apply_snapshot(
+                                            wire_status_from_session_snapshot(&state),
+                                        )
                                     }
-                                    Err(e) => self.error_line(format!("GetSnapshot: {e}")),
+                                    Err(e) => {
+                                        self.error_line(format!("resync GetSnapshot: {e}"))
+                                    }
                                 }
                             }
                         }
@@ -144,7 +155,14 @@ impl App {
                                 .await
                                 {
                                     Ok(candidate_stream) => {
-                                        match candidate.get_snapshot_for_session(&session_id).await {
+                                        // Issue #99: bounded — a hung daemon
+                                        // must not freeze the reconnect branch.
+                                        match crate::ui::daemon_call(
+                                            "get_snapshot_for_session",
+                                            candidate.get_snapshot_for_session(&session_id),
+                                        )
+                                        .await
+                                        {
                                             Ok(state) => {
                                                 let addr = candidate.addr().to_string();
                                                 self.client = candidate;
@@ -192,6 +210,17 @@ impl App {
                     self.mcp_error_banner = None;
                 }
                 _ = tick.tick(), if self.busy || crate::ui::dag_band::has_live_runs(&self.latest.dags) => {
+                    // Issue #99: the cancel RPC timed out — the daemon is not
+                    // answering. Drop the frame stream so the reconnect branch
+                    // takes over; the UI stays alive and recovers when the
+                    // daemon responds again.
+                    if self.abort_failed.swap(false, Ordering::SeqCst) {
+                        self.connected = false;
+                        self.connection_line(
+                            "daemon did not answer cancel within 15s — reconnecting…",
+                        );
+                        stream = None;
+                    }
                     if self.busy {
                         self.spinner_frame = self.spinner_frame.wrapping_add(1);
                         self.cps_meter

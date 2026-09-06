@@ -687,3 +687,45 @@ fn assistant_url_uses_hyperlinks_not_regex_scan() {
     assert!(underlined.contains("docs"), "{underlined}");
     assert!(underlined.contains("https://example.com/x"), "{underlined}");
 }
+
+/// Issue #99 hardening: repeated Ctrl-C presses while a cancel RPC is in
+/// flight are deduped — a hung daemon must not accumulate one blocked task
+/// per keypress, and the feed gets exactly one abort line for the first press.
+#[tokio::test]
+async fn request_abort_dedupes_repeat_presses() {
+    let (mut app, _rx) = test_app().await;
+    app.busy = true;
+
+    // Act: two presses back-to-back with no yield between them — the first
+    // spawned cancel task cannot have completed yet on this runtime.
+    app.request_abort();
+    app.request_abort();
+
+    // Assert: exactly one feedback line and one in-flight cancel RPC.
+    let text = feed_text(&app);
+    assert_eq!(text.matches("aborting current turn…").count(), 1, "{text}");
+    assert!(
+        app.cancel_in_flight.load(std::sync::atomic::Ordering::SeqCst),
+        "first press must leave a cancel in flight"
+    );
+}
+
+/// Issue #99 hardening: request_abort is a no-op while idle — it neither
+/// spawns a cancel task nor writes feedback into the feed.
+#[tokio::test]
+async fn request_abort_ignored_when_idle() {
+    let (mut app, _rx) = test_app().await;
+    app.busy = false;
+
+    app.request_abort();
+
+    let text = feed_text(&app);
+    assert!(
+        !text.contains("aborting current turn…"),
+        "idle abort must not write feedback: {text}"
+    );
+    assert!(
+        !app.cancel_in_flight.load(std::sync::atomic::Ordering::SeqCst),
+        "idle abort must not arm a cancel"
+    );
+}

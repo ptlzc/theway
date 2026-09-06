@@ -34,6 +34,12 @@ impl AgentHarness {
     /// reconfigure swaps out exactly the tools that were connected before without disturbing
     /// built-in harness tools. Unlike `replace_skills` no system-prompt rebuild is needed —
     /// tools live on the [`crate::agent::AgentState`], not in the `<skills>` block.
+    ///
+    /// Name collisions are resolved here because the LLM rejects duplicate tool names
+    /// outright (DeepSeek: HTTP 400 "Tool names must be unique"), which breaks every
+    /// turn. Built-in harness tools win over provisioned MCP tools; among the
+    /// provisioned batch itself, the earlier server wins. Dropped duplicates are
+    /// reported so operators can see a server's tool never made it in.
     pub fn replace_mcp_tools(
         &self,
         old: &[Arc<dyn crate::AgentTool>],
@@ -41,7 +47,23 @@ impl AgentHarness {
     ) {
         let mut tools = std::mem::take(&mut self.agent.state().tools);
         tools.retain(|t| !old.iter().any(|o| Arc::ptr_eq(o, t)));
-        tools.extend(new);
+        let mut seen: std::collections::HashSet<String> =
+            tools.iter().map(|t| t.definition().name.clone()).collect();
+        let mut dropped: Vec<String> = Vec::new();
+        for tool in new {
+            let name = tool.definition().name.clone();
+            if seen.insert(name.clone()) {
+                tools.push(tool);
+            } else {
+                dropped.push(name);
+            }
+        }
+        if !dropped.is_empty() {
+            tracing::warn!(
+                "dropped MCP tool(s) with duplicate names (built-ins and earlier servers win): {}",
+                dropped.join(", ")
+            );
+        }
         self.agent.state().tools = tools;
     }
 

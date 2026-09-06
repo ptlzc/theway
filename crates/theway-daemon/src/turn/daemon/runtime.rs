@@ -1,3 +1,7 @@
+/// Bounds [`TurnHost::handle_web_command`] in the transport select loop: a
+/// hung command handler must not wedge the daemon (frames + further RPCs).
+const COMMAND_HANDLER_TIMEOUT: Duration = Duration::from_secs(30);
+
 impl TurnHost {
     pub(crate) fn new(config: DaemonConfig) -> Self {
         // Scan claude-code-format file commands once at startup; `/reload`
@@ -390,7 +394,19 @@ impl TurnHost {
                     metadata_dirty = true;
                 }
                 Some(command) = command_rx.recv() => {
-                    self.handle_web_command(command, &mut turn).await;
+                    // Bounded: a command handler that hangs (e.g. a slash
+                    // command stuck on storage) must not wedge the whole
+                    // transport loop — no frames, no further RPCs. Drop the
+                    // handler after the bound and keep serving.
+                    if tokio::time::timeout(
+                        COMMAND_HANDLER_TIMEOUT,
+                        self.handle_web_command(command, &mut turn),
+                    )
+                    .await
+                    .is_err()
+                    {
+                        self.error_line("daemon command handler timed out — continuing");
+                    }
                     self.start_parked_turns(&mut parked_turns);
                     dirty = true;
                     metadata_dirty = true;
