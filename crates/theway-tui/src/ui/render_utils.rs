@@ -103,6 +103,30 @@ pub(super) fn human_tokens(tokens: u64) -> String {
     }
 }
 
+/// Context-usage label for the composer info line (issue #38): USED tokens
+/// over the window with the fill percentage, e.g. `60k/1M [60%]`. Both
+/// counts round to the largest unit that keeps them legible (`60k`, `1M`).
+pub(super) fn context_usage_label(used: u64, window: u64) -> String {
+    let pct = ((used as f64 * 100.0 / window as f64).round()).clamp(0.0, 100.0) as u64;
+    format!(
+        "{}/{} [{pct}%]",
+        compact_tokens(used),
+        compact_tokens(window)
+    )
+}
+
+/// `60k` / `1M` style token counts: rounded, no decimals, no suffix.
+/// A k-round that reaches 1000k carries into `1M`.
+fn compact_tokens(tokens: u64) -> String {
+    if tokens >= 999_500 {
+        format!("{}M", (tokens + 500_000) / 1_000_000)
+    } else if tokens >= 1_000 {
+        format!("{}k", (tokens + 500) / 1_000)
+    } else {
+        format!("{tokens}")
+    }
+}
+
 pub(super) fn new_textarea() -> TextArea {
     // The ported textarea has no placeholder or cursor-line-style knobs;
     // defaults match the previous look (plain cursor, no placeholder).
@@ -150,5 +174,30 @@ mod tests {
         assert_eq!(id_suffix("01a06cc8-ee64-7ed0-9091-07b5ce78dc", 5), "e78dc");
         assert_eq!(id_suffix("abc", 5), "abc");
         assert_eq!(id_suffix("", 5), "");
+    }
+
+    #[test]
+    fn context_usage_label_shows_used_over_window_with_percent() {
+        // The canonical shape: 600k used of a 1M window at 60%.
+        assert_eq!(context_usage_label(600_000, 1_000_000), "600k/1M [60%]");
+        // Sub-1k counts stay exact; the percentage still renders.
+        assert_eq!(context_usage_label(512, 2_000), "512/2k [26%]");
+        // Rounding: 999_500 k-rounds to 1M.
+        assert_eq!(context_usage_label(999_500, 1_000_000), "1M/1M [100%]");
+        // Overflow clamps at 100%.
+        assert_eq!(context_usage_label(2_000_000, 1_000_000), "2M/1M [100%]");
+    }
+
+    #[test]
+    fn compact_tokens_rounds_to_largest_unit() {
+        assert_eq!(compact_tokens(999), "999");
+        assert_eq!(compact_tokens(1_000), "1k");
+        assert_eq!(compact_tokens(1_499), "1k");
+        assert_eq!(compact_tokens(1_500), "2k");
+        assert_eq!(compact_tokens(59_999), "60k");
+        assert_eq!(compact_tokens(999_499), "999k");
+        assert_eq!(compact_tokens(999_500), "1M");
+        assert_eq!(compact_tokens(1_048_576), "1M");
+        assert_eq!(compact_tokens(2_500_000), "3M");
     }
 }

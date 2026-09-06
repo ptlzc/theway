@@ -308,15 +308,13 @@ impl App {
         // Context-usage label: the wire usage carries the recent turn's token
         // counts (daemon `wire_snapshot`, issue #38), so total ÷ window
         // tracks the live context fill instead of pegging at 100% on
-        // session-cumulative totals.
+        // session-cumulative totals. Rendered as USED tokens over the window
+        // (e.g. `60k/1M [60%]`).
         let usage_label = {
             let usage = &self.latest.usage;
             let total_tokens = usage.total_input_tokens.saturating_add(usage.output_tokens);
             if usage.context_window > 0 && total_tokens > 0 {
-                let pct = ((total_tokens as f64 * 100.0 / usage.context_window as f64)
-                    .round())
-                .clamp(0.0, 100.0) as u64;
-                format!("{pct}% ctx")
+                render_utils::context_usage_label(total_tokens, usage.context_window)
             } else if total_tokens > 0 {
                 render_utils::human_tokens(total_tokens)
             } else {
