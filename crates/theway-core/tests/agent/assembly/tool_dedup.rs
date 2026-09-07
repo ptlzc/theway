@@ -10,8 +10,8 @@ use super::{harness_with_tools, mcp_tool};
 fn harness_construction_drops_duplicate_tool_names_first_wins() {
     // Initial session assembly appends provisioned MCP tools after the built-in
     // harness tools. A colliding MCP name must never reach the provider.
-    let builtin = mcp_tool("web_search");
-    let mcp_duplicate = mcp_tool("web_search");
+    let builtin = mcp_tool("shared_tool");
+    let mcp_duplicate = mcp_tool("shared_tool");
     let ok = mcp_tool("read");
 
     let h = harness_with_tools(vec![builtin.clone(), mcp_duplicate.clone(), ok.clone()]);
@@ -27,7 +27,7 @@ fn harness_construction_drops_duplicate_tool_names_first_wins() {
     assert_eq!(
         tools
             .iter()
-            .filter(|t| t.definition().name == "web_search")
+            .filter(|t| t.definition().name == "shared_tool")
             .count(),
         1
     );

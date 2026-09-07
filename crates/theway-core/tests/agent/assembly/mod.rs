@@ -762,14 +762,13 @@ async fn on_turn_end_hook_continue_respects_cap_zero() {
 
 #[test]
 fn replace_mcp_tools_drops_new_tools_with_colliding_names() {
-    // A provisioned server exposing a tool that collides with a built-in name
-    // (devin-search ships `web_search`, which duplicates the harness's own
-    // `web_search`) must not land in the request catalog: DeepSeek rejects
-    // duplicate tool names with HTTP 400 and breaks every turn.
-    let builtin = mcp_tool("web_search");
+    // A provisioned server exposing a tool that collides with an existing name
+    // must not land in the request catalog: DeepSeek rejects duplicate tool
+    // names with HTTP 400 and breaks every turn.
+    let builtin = mcp_tool("shared_tool");
     let h = harness_with_tools(vec![builtin.clone()]);
-    let mcp_ws = mcp_tool("web_search");
-    let mcp_ws_dup = mcp_tool("web_search");
+    let mcp_ws = mcp_tool("shared_tool");
+    let mcp_ws_dup = mcp_tool("shared_tool");
     let ok = mcp_tool("list_sessions");
 
     h.replace_mcp_tools(
@@ -792,9 +791,9 @@ fn replace_mcp_tools_drops_new_tools_with_colliding_names() {
     assert_eq!(
         tools
             .iter()
-            .filter(|t| t.definition().name == "web_search")
+            .filter(|t| t.definition().name == "shared_tool")
             .count(),
         1,
-        "exactly one web_search remains"
+        "exactly one shared_tool remains"
     );
 }
