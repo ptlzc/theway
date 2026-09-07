@@ -308,6 +308,21 @@ semantics (the trait's `run_command` kills only the direct child), and
 exposes — which is exactly why they are excluded rather than stubbed in
 sandbox-only builds.
 
+**The `grep` tool is tgrep-accelerated (issue #121).** The daemon hosts a
+process-scoped `TgrepServerRegistry` (`crates/theway-daemon/src/tgrep_server.rs`,
+exposed on `DaemonServices.tgrep`): it lazily spawns `tgrep serve <root>`
+per canonical project root (the vendored microsoft/tgrep binary shipped
+next to `thewayd`), polls the server's JSON-RPC `status` until the initial
+trigram index build completes, LRU-evicts beyond three servers, and reaps
+children at daemon exit. `GrepTool` takes the index path only when the
+registry is *ready* and the query path sits inside the session root —
+otherwise it answers with its in-process `ignore` walker, so results are
+always complete and never a partial-index snapshot. Both paths ingest into
+one shared formatter (tgrep's ripgrep-compatible `--json` stream on the
+client path), keeping `content` / `files_with_matches` / `count` output
+byte-identical. Serve stderr lands in
+`<base>/logs/tgrep-serve-<slug>.log`.
+
 ### Trigger / cron / session / DAG runtime
 
 - **Trigger engine** (`trigger_engine` + `triggers`): dynamic trigger rules,
