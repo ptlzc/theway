@@ -298,13 +298,12 @@ impl SessionRuntimeBuilder {
         opts.after_tool_call = self.after_tool_call.clone();
         let harness = std::sync::Arc::new(AgentHarness::new(opts));
         if let Some((extensions, base_tools)) = &runtime_extension_host {
-            let agent = harness.agent_arc();
-            let agent = Arc::downgrade(&agent);
+            let harness_ref = std::sync::Arc::downgrade(&harness);
             extensions.configure_reload_tool_publisher(
                 base_tools.clone(),
                 Arc::new(move |tools| {
-                    if let Some(agent) = agent.upgrade() {
-                        agent.state().tools = tools;
+                    if let Some(harness) = harness_ref.upgrade() {
+                        harness.replace_tools(tools);
                     }
                 }),
             );

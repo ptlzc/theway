@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
@@ -190,7 +190,31 @@ impl RegistrationRuntime {
         engine: QuickJsEnginePool,
         cwd: String,
     ) -> (Vec<Arc<dyn AgentTool>>, Vec<String>) {
-        let mut tools = base;
+        // The base catalog may contain name collisions already (a provisioned
+        // MCP server can expose `web_search`, which duplicates the built-in
+        // harness tool). Providers reject duplicate tool names outright, and a
+        // duplicate base entry would also make the `override_existing` index
+        // replacement below leave a stale copy behind. First-wins matches
+        // daemon assembly: built-in harness tools are appended before MCP
+        // tools, so the earlier registration is the built-in.
+        let mut tools = Vec::with_capacity(base.len());
+        let mut seen = HashSet::new();
+        let mut dropped_base = Vec::new();
+        for tool in base {
+            let name = tool.definition().name.clone();
+            if seen.insert(name.clone()) {
+                tools.push(tool);
+            } else {
+                dropped_base.push(name);
+            }
+        }
+        if !dropped_base.is_empty() {
+            tracing::warn!(
+                target: "extensions",
+                "dropped duplicate base tool name(s) before extension merge (earlier registrations win): {}",
+                dropped_base.join(", ")
+            );
+        }
         let mut indexes = tools
             .iter()
             .enumerate()

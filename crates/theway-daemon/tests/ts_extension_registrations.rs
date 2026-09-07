@@ -330,6 +330,12 @@ export default defineExtension((api) => {
     let base_tool: Arc<dyn AgentTool> = Arc::new(BuiltinTool::named("shared_tool"));
     let merged = host.merge_registered_tools(vec![Arc::clone(&base_tool)]);
     assert_eq!(merged[0].label(), "Override");
+    // A duplicate base name (built-in + provisioned MCP collision) must not
+    // survive the merge or leave a stale copy next to the extension override.
+    let mcp_duplicate: Arc<dyn AgentTool> = Arc::new(BuiltinTool::named("shared_tool"));
+    let deduped = host.merge_registered_tools(vec![Arc::clone(&base_tool), mcp_duplicate]);
+    assert_eq!(deduped.len(), 1);
+    assert_eq!(deduped[0].label(), "Override");
     host.shutdown().await;
     let restored = host.merge_registered_tools(vec![Arc::clone(&base_tool)]);
     assert_eq!(restored[0].label(), "Built-in");

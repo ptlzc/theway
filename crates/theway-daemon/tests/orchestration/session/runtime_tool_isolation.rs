@@ -130,3 +130,59 @@ async fn built_runtimes_keep_bash_and_mcp_tools_cwd_isolated() {
     assert!(runtime_b.tool_names.iter().any(|name| name == "mcp-b"));
     assert!(!runtime_b.tool_names.iter().any(|name| name == "mcp-a"));
 }
+
+#[tokio::test]
+async fn built_runtime_drops_mcp_tools_that_collide_with_builtin_names() {
+    let _serial = ENV_LOCK.lock().unwrap();
+    let home = TempDir::new().unwrap();
+    let _theway_dir = EnvGuard::set("THEWAY_DIR", home.path());
+
+    let work = TempDir::new().unwrap();
+    let base = TempDir::new().unwrap();
+    let repo_root = TempDir::new().unwrap();
+    let repo = theway_storage::sqlite_repo::SqliteSessionRepo::new(repo_root.path());
+    let id = create_session_with_cwd(&repo, work.path().to_str().unwrap()).await;
+
+    let (factory, storage, _state) = test_factory();
+    let mut ctx = session_context(work.path(), repo, storage, base.path()).await;
+    ctx.mcp.tools.push(Arc::new(FakeMcpTool::new("bash")));
+    ctx.mcp.tools.push(Arc::new(FakeMcpTool::new("bash")));
+    ctx.mcp.tools.push(Arc::new(FakeMcpTool::new("mcp-keep")));
+
+    let runtime = factory
+        .build(&ctx, &id)
+        .await
+        .expect("runtime with colliding MCP tools builds");
+
+    let names = runtime
+        .harness
+        .agent()
+        .state()
+        .tools
+        .iter()
+        .map(|tool| tool.definition().name.clone())
+        .collect::<Vec<_>>();
+    let mut unique_names = names.clone();
+    unique_names.sort();
+    unique_names.dedup();
+    assert_eq!(
+        names.len(),
+        unique_names.len(),
+        "the request catalog must never contain duplicate tool names: {names:?}"
+    );
+    assert_eq!(
+        names.iter().filter(|name| *name == "bash").count(),
+        1,
+        "colliding MCP tools are dropped, not the built-in"
+    );
+    assert!(names.iter().any(|name| name == "mcp-keep"));
+
+    // First-wins must keep the real built-in bash tool: running `pwd` proves
+    // the surviving entry is the harness tool, not the MCP fake.
+    let bash = bash_tool(&runtime);
+    let out = run_pwd(&bash).await;
+    assert!(
+        out.contains(runtime.cwd.to_string_lossy().as_ref()),
+        "built-in bash must survive the MCP name collision: {out}"
+    );
+}
