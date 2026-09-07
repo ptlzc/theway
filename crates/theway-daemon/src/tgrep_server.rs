@@ -101,7 +101,11 @@ impl TgrepServerRegistry {
         }
         // Fall back to PATH resolution at spawn time: a bare "tgrep" argv[0]
         // is searched by the OS.
-        Some(PathBuf::from(if cfg!(windows) { "tgrep.exe" } else { "tgrep" }))
+        Some(PathBuf::from(if cfg!(windows) {
+            "tgrep.exe"
+        } else {
+            "tgrep"
+        }))
     }
 
     fn binary(&self) -> Option<PathBuf> {
@@ -125,20 +129,29 @@ impl TgrepServerRegistry {
         if let Some(entry) = inner.entries.get_mut(&root) {
             entry.last_used = now;
             if entry.ready {
-                return TgrepReadiness::Ready;
-            }
-            // A server that died before becoming ready gets reaped and
-            // re-spawned; a dead Ready server is handled by the client's own
-            // fallback plus a reap on the next poll attempt.
-            if let Some(child) = entry.child.as_mut()
-                && matches!(child.try_wait(), Ok(Some(_)))
-            {
-                inner.entries.remove(&root);
-            } else if poll_status(&root) == Some(true) {
-                entry.ready = true;
-                return TgrepReadiness::Ready;
+                // Reap a dead server and re-spawn below; a live one stays Ready.
+                if let Some(child) = entry.child.as_mut()
+                    && matches!(child.try_wait(), Ok(Some(_)))
+                {
+                    inner.entries.remove(&root);
+                } else {
+                    return TgrepReadiness::Ready;
+                }
             } else {
-                return TgrepReadiness::Indexing;
+                let Some(child) = entry.child.as_mut() else {
+                    // Cached negative (binary missing / spawn failed): do not
+                    // retry within this process lifetime.
+                    return TgrepReadiness::Missing;
+                };
+                if matches!(child.try_wait(), Ok(Some(_))) {
+                    // Server died before becoming ready: re-spawn below.
+                    inner.entries.remove(&root);
+                } else if poll_status(&root) == Some(true) {
+                    entry.ready = true;
+                    return TgrepReadiness::Ready;
+                } else {
+                    return TgrepReadiness::Indexing;
+                }
             }
         }
 
@@ -150,11 +163,15 @@ impl TgrepServerRegistry {
         match spawn {
             Ok(child) => {
                 tracing::info!(target: "tgrep", root = %root.display(), pid = child.id(), "spawned tgrep serve");
-                insert_and_evict(&mut inner.entries, root, ServerEntry {
-                    child: Some(child),
-                    ready: false,
-                    last_used: now,
-                });
+                insert_and_evict(
+                    &mut inner.entries,
+                    root,
+                    ServerEntry {
+                        child: Some(child),
+                        ready: false,
+                        last_used: now,
+                    },
+                );
                 TgrepReadiness::Indexing
             }
             Err(err) => {
@@ -167,7 +184,11 @@ impl TgrepServerRegistry {
 
     /// Number of tracked servers (diagnostics/tests).
     pub fn len(&self) -> usize {
-        self.inner.lock().expect("tgrep registry poisoned").entries.len()
+        self.inner
+            .lock()
+            .expect("tgrep registry poisoned")
+            .entries
+            .len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -190,10 +211,18 @@ impl Drop for RegistryInner {
 }
 
 fn missing_entry(now: Instant) -> ServerEntry {
-    ServerEntry { child: None, ready: false, last_used: now }
+    ServerEntry {
+        child: None,
+        ready: false,
+        last_used: now,
+    }
 }
 
-fn insert_and_evict(entries: &mut HashMap<PathBuf, ServerEntry>, root: PathBuf, entry: ServerEntry) {
+fn insert_and_evict(
+    entries: &mut HashMap<PathBuf, ServerEntry>,
+    root: PathBuf,
+    entry: ServerEntry,
+) {
     entries.insert(root, entry);
     if entries.len() > MAX_SERVERS {
         if let Some(lru) = entries
@@ -255,11 +284,7 @@ fn poll_status(root: &Path) -> Option<bool> {
     let info_path = root.join(INDEX_DIR_NAME).join("serve.json");
     let info: ServeInfo = serde_json::from_str(&std::fs::read_to_string(info_path).ok()?).ok()?;
     let addr = format!("127.0.0.1:{}", info.port);
-    let mut stream = TcpStream::connect_timeout(
-        &addr.parse().ok()?,
-        POLL_TIMEOUT,
-    )
-    .ok()?;
+    let mut stream = TcpStream::connect_timeout(&addr.parse().ok()?, POLL_TIMEOUT).ok()?;
     stream.set_read_timeout(Some(POLL_TIMEOUT)).ok()?;
     stream.set_write_timeout(Some(POLL_TIMEOUT)).ok()?;
     writeln!(
@@ -318,7 +343,8 @@ mod tests {
     fn failed_spawn_is_cached_as_missing() {
         // A non-executable path fails to spawn; the registry must cache
         // Missing so it does not retry on every query.
-        let registry = TgrepServerRegistry::with_binary(PathBuf::from("/bin/false/definitely-not-tgrep"));
+        let registry =
+            TgrepServerRegistry::with_binary(PathBuf::from("/bin/false/definitely-not-tgrep"));
         let dir = tempfile::tempdir().expect("tempdir");
         let readiness = registry.query_root(dir.path());
         assert_eq!(readiness, TgrepReadiness::Missing);
@@ -332,7 +358,12 @@ mod tests {
     fn serve_log_file_slugs_root() {
         let a = serve_log_file(Path::new("/tmp/proj-a")).expect("log file");
         let b = serve_log_file(Path::new("/tmp/proj-b")).expect("log file");
-        assert!(a.file_name().expect("name").to_string_lossy().starts_with("tgrep-serve-"));
+        assert!(
+            a.file_name()
+                .expect("name")
+                .to_string_lossy()
+                .starts_with("tgrep-serve-")
+        );
         assert_ne!(a, b);
     }
 }
