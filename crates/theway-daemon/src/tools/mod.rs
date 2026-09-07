@@ -10,8 +10,8 @@
 //!   `dag_tools` / the skill family / `memory` / `mcp_adapter` / `exec_shell`.
 //! - **Local-execution tool bodies** (bash / fs / git / grep / find / ls / outline /
 //!   truncate) are environment-specific agent capabilities.
-//! - **Web tools** (`web_fetch` / `web_search`) are app-layer capabilities too (they
-//!   need external credentials/configuration).
+//! - **Web tool** (`web_fetch`) is an app-layer capability too (it needs external
+//!   credentials/configuration).
 //! - **Assembly**: [`local_tools`] / the subagent tool-set resolver / `session_tool_set`
 //!   wire engine tools + local tools together, then append the server-side
 //!   trigger/cron family.
@@ -74,7 +74,6 @@ pub mod read;
 pub mod session_tool_result;
 pub mod truncate;
 pub mod web_fetch;
-pub mod web_search;
 pub mod write;
 
 // Trigger/cron model-facing constructors live in `triggers::tool_assembly` (kept
@@ -187,8 +186,8 @@ pub fn local_tools(executor: Arc<dyn ToolExecutor>) -> Vec<Arc<dyn AgentTool>> {
 /// registered and a `tracing::warn` names every omitted tool — never a silent drop.
 /// The executor-backed tools (read / write / edit / outline / git) stay registered:
 /// their effects go through the [`ToolExecutor`] seam, where the sandbox executor
-/// answers with an explicit `UnsupportedKind` error. `web_fetch` / `web_search` stay
-/// too: they are pure network requests with no host FS/process side effects.
+/// answers with an explicit `UnsupportedKind` error. `web_fetch` stays too: it is a
+/// pure network request with no host FS/process side effects.
 #[cfg(feature = "local")]
 pub fn local_tools_for_cwd(
     executor: Arc<dyn ToolExecutor>,
@@ -212,12 +211,11 @@ pub fn local_tools_for_cwd(
         Arc::new(outline::OutlineTool::new(executor.clone())),
         Arc::new(git::GitTool::new(executor)),
         Arc::new(web_fetch::WebFetchTool),
-        Arc::new(web_search::WebSearchTool::new()),
     ]
 }
 
-/// Sandbox-only variant: only the executor-backed tools and the network-only web tools
-/// are registered (see the `local` variant's doc for the policy). The omitted
+/// Sandbox-only variant: only the executor-backed tools and the network-only web
+/// tool are registered (see the `local` variant's doc for the policy). The omitted
 /// direct-OS tools are named explicitly in a `tracing::warn` so the degraded tool set
 /// is never silent.
 #[cfg(all(not(feature = "local"), feature = "sandbox"))]
@@ -234,8 +232,8 @@ pub fn local_tools_for_cwd(
         omitted = ?LOCAL_ONLY_TOOL_NAMES,
         "sandbox-only build: local-only tools bypass the ToolExecutor seam and touch \
          the host FS/process table directly, so they are NOT registered (fail closed); \
-         executor-backed tools (read/write/edit/outline/git) and network-only tools \
-         (web_fetch/web_search) remain"
+         executor-backed tools (read/write/edit/outline/git) and the network-only
+         web_fetch tool remain"
     );
     vec![
         Arc::new(read::ReadTool::new(executor.clone())),
@@ -244,7 +242,6 @@ pub fn local_tools_for_cwd(
         Arc::new(outline::OutlineTool::new(executor.clone())),
         Arc::new(git::GitTool::new(executor)),
         Arc::new(web_fetch::WebFetchTool),
-        Arc::new(web_search::WebSearchTool::new()),
     ]
 }
 
