@@ -53,11 +53,9 @@ impl SlashCommand<DaemonCtx> for SkillCommand {
                 "skill '{name}' is disabled (disable_model_invocation=true); edit the skill frontmatter to enable it"
             ));
         }
-        cprintln!(
-            "using skill: {} ({}) for next turn",
-            skill.name,
-            skill.source.label()
-        );
+        // The daemon host already renders an `AttachSkill` confirmation line
+        // ("skill `name` attached for the next prompt"); printing again here
+        // produces a duplicate timestamped feed entry.
         CommandOutcome::AttachSkill { name: name.clone() }
     }
 }

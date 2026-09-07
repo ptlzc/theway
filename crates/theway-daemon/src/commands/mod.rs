@@ -495,7 +495,6 @@ fn run_skill_shortcut(
 ) -> Option<CommandOutcome> {
     match resolve_skill_shortcut(&ctx.harness.skills(), registry, name) {
         Ok(Some(skill)) => {
-            cprintln!("using skill: {} ({})", skill.name, skill.source.label());
             if argv.is_empty() {
                 Some(CommandOutcome::AttachSkill {
                     name: skill.name.clone(),

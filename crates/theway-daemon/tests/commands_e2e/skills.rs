@@ -54,7 +54,10 @@ async fn dynamic_skill_slash_command_attaches_skill_without_body_echo() {
         other => panic!("expected AttachSkill outcome, got {other:?}"),
     }
     let output = _capture.text();
-    assert!(output.contains("using skill: db9 (user)"), "{output}");
+    assert!(
+        !output.contains("using skill"),
+        "skill shortcut must not print a duplicate using-skill line: {output}"
+    );
     assert!(!output.contains("SECRET SKILL BODY"), "{output}");
 }
 
