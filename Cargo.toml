@@ -30,7 +30,7 @@ members = [
 # `theway-pager-render`, `theway-ratatui-textarea`, Apache-2.0), and the
 # microsoft/tgrep vendored pair (`tgrep-core`, `tgrep-cli`, MIT, issue #121).
 [workspace.package]
-version = "0.1.17"
+version = "0.1.18"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
