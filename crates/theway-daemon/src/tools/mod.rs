@@ -193,6 +193,17 @@ pub fn local_tools_for_cwd(
     executor: Arc<dyn ToolExecutor>,
     cwd: PathBuf,
 ) -> Vec<Arc<dyn AgentTool>> {
+    local_tools_for_cwd_with_tgrep(executor, cwd, None)
+}
+
+/// [`local_tools_for_cwd`] with the daemon-wide tgrep registry attached to the
+/// grep tool (issue #121). `None` keeps the grep tool on its in-process walker.
+#[cfg(feature = "local")]
+pub fn local_tools_for_cwd_with_tgrep(
+    executor: Arc<dyn ToolExecutor>,
+    cwd: PathBuf,
+    tgrep: Option<crate::tgrep_server::TgrepServerRegistry>,
+) -> Vec<Arc<dyn AgentTool>> {
     vec![
         Arc::new(read::ReadTool::new(executor.clone())),
         Arc::new(write::WriteTool::new(executor.clone())),
@@ -206,7 +217,10 @@ pub fn local_tools_for_cwd(
         Arc::new(exec_shell::KillShellTool),
         Arc::new(exec_shell::WriteToProcessTool),
         Arc::new(CwdScopedTool::new(Arc::new(ls::LsTool), cwd.clone())),
-        Arc::new(CwdScopedTool::new(Arc::new(grep::GrepTool), cwd.clone())),
+        Arc::new(CwdScopedTool::new(
+            Arc::new(grep::GrepTool::new(tgrep, cwd.clone())),
+            cwd.clone(),
+        )),
         Arc::new(CwdScopedTool::new(Arc::new(find::FindTool), cwd)),
         Arc::new(outline::OutlineTool::new(executor.clone())),
         Arc::new(git::GitTool::new(executor)),
@@ -316,6 +330,19 @@ pub fn subagent_tool_sets_for_cwd(
     executor: Arc<dyn ToolExecutor>,
     cwd: PathBuf,
 ) -> ToolSetResolver {
+    subagent_tool_sets_for_cwd_with_tgrep(memory_dir, base_dir, skill_harness_cell, executor, cwd, None)
+}
+
+/// [`subagent_tool_sets_for_cwd`] with the daemon-wide tgrep registry attached.
+#[allow(clippy::too_many_arguments)]
+pub fn subagent_tool_sets_for_cwd_with_tgrep(
+    memory_dir: PathBuf,
+    base_dir: PathBuf,
+    skill_harness_cell: SkillHarnessCell,
+    executor: Arc<dyn ToolExecutor>,
+    cwd: PathBuf,
+    tgrep: Option<crate::tgrep_server::TgrepServerRegistry>,
+) -> ToolSetResolver {
     assembly::subagent_tools(
         &memory_dir,
         &base_dir,
@@ -323,7 +350,9 @@ pub fn subagent_tool_sets_for_cwd(
         // The kernel-side local-tools factory closes over the daemon's executor and cwd,
         // so every subagent / DAG-node tool set dispatches through the same execution
         // environment and path-scoped direct-OS tools.
-        Arc::new(move || local_tools_for_cwd(executor.clone(), cwd.clone())),
+        Arc::new(move || {
+            local_tools_for_cwd_with_tgrep(executor.clone(), cwd.clone(), tgrep.clone())
+        }),
     )
 }
 
@@ -340,6 +369,7 @@ pub fn node_launcher(
     base_dir: PathBuf,
     skill_harness_cell: SkillHarnessCell,
     executor: Arc<dyn ToolExecutor>,
+    tgrep: Option<crate::tgrep_server::TgrepServerRegistry>,
 ) -> Arc<node_launcher::NodeLauncherImpl> {
     node_launcher::node_launcher(
         engine,
@@ -347,7 +377,14 @@ pub fn node_launcher(
         stream_fn,
         cwd.clone(),
         registry,
-        subagent_tool_sets_for_cwd(memory_dir, base_dir, skill_harness_cell, executor, cwd),
+        subagent_tool_sets_for_cwd_with_tgrep(
+            memory_dir,
+            base_dir,
+            skill_harness_cell,
+            executor,
+            cwd,
+            tgrep,
+        ),
         crate::agent_specs::launch_resolver(),
     )
 }
@@ -402,7 +439,8 @@ pub fn session_tool_set_for_cwd(
     repo: Arc<dyn SessionRepository>,
     cwd: PathBuf,
 ) -> Vec<Arc<dyn AgentTool>> {
-    let mut tools = local_tools_for_cwd(executor.clone(), cwd.clone());
+    let mut tools =
+        local_tools_for_cwd_with_tgrep(executor.clone(), cwd.clone(), Some(services.tgrep.clone()));
     // Engine-owned tools (DAG / subagent / skills / memory), assembled kernel-side with the
     // same subagent tool-set resolver the DAG node launcher uses.
     tools.extend(assembly::engine_tools(
@@ -410,12 +448,13 @@ pub fn session_tool_set_for_cwd(
         base_dir,
         dag_engine,
         subagent_registry,
-        subagent_tool_sets_for_cwd(
+        subagent_tool_sets_for_cwd_with_tgrep(
             memory_dir.to_path_buf(),
             base_dir.to_path_buf(),
             skill_harness_cell.clone(),
             executor,
             cwd.clone(),
+            Some(services.tgrep.clone()),
         ),
         crate::agent_specs::launch_resolver(),
         crate::agent_specs::spec_names(),

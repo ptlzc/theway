@@ -1,31 +1,61 @@
 //! `grep` tool — line-based regex match across a directory tree. Models
-//! `packages/coding-agent/src/core/tools/grep.ts` at a simplified level: no thread pool, no
-//! ripgrep delegation, just `ignore::WalkBuilder` + the `regex` crate.
+//! `packages/coding-agent/src/core/tools/grep.ts` at a simplified level.
+//!
+//! Two execution paths share one formatting pipeline (issue #121):
+//!   - **tgrep path** (default once available): when the daemon's
+//!     [`TgrepServerRegistry`](crate::tgrep_server::TgrepServerRegistry) has a
+//!     *ready* (index-complete) `tgrep serve` for the session root and the
+//!     query path is inside it, the tool runs the `tgrep` client with
+//!     `--json` and ingests the ripgrep-compatible NDJSON stream. Trigram
+//!     index makes queries instant on large repos.
+//!   - **walker path** (fallback): `ignore::WalkBuilder` + the `regex` crate,
+//!     used while the serve index builds, when the binary is missing, or for
+//!     paths outside the session root. Always complete — never partial-index
+//!     results.
 //!
 //! `output_mode` mirrors the enhanced-tools `grep.ts`:
 //!   - `content` (default): ripgrep-style grouped output — file path printed once, merged
 //!     overlapping contexts, `--` between disjoint regions, `:` for match lines, `-` for
 //!     context lines.
 //!   - `files_with_matches`: just the file paths (deduped).
-//!   - `count`: `count<TAB>path` per file (ripgrep `--count` style).
+//!   - `count`: `count<TAB>path` per file (ripgrep `--count` style, matching lines).
 //!
-//! Result count is capped (`max_results`); long lines are previewed around the match with
-//! `[line truncated]` markers.
+//! Result count is capped (`max_results`, matching lines); long lines are previewed around
+//! the match with `[line truncated]` markers.
 
 use async_trait::async_trait;
 use ignore::WalkBuilder;
 use regex::Regex;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
+use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use theway_core::{AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate, ToolExecutionMode};
 use theway_llm_provider::{Tool, UserContentBlock};
 use tokio_util::sync::CancellationToken;
 
+use crate::tgrep_server::{TgrepReadiness, TgrepServerRegistry};
+
 const DEFAULT_MAX_RESULTS: usize = 100;
 const DEFAULT_MAX_FILES: usize = 5_000;
 const MAX_MATCH_LINE_CHARS: usize = 500;
+/// tgrep's on-disk index directory name (upstream constant).
+const INDEX_DIR_NAME: &str = ".tgrep";
 
-pub struct GrepTool;
+pub struct GrepTool {
+    /// Daemon-wide serve registry; `None` = walker-only (tests, sandbox).
+    tgrep: Option<TgrepServerRegistry>,
+    /// The session root the registry may serve. Queries outside it never take
+    /// the tgrep path (we don't index arbitrary directories).
+    home_root: PathBuf,
+}
+
+impl GrepTool {
+    pub fn new(tgrep: Option<TgrepServerRegistry>, home_root: PathBuf) -> Self {
+        Self { tgrep, home_root }
+    }
+}
 
 #[async_trait]
 impl AgentTool for GrepTool {
@@ -94,90 +124,84 @@ impl AgentTool for GrepTool {
             .build()
             .map_err(|e| AgentToolError::from(format!("regex: {e}")))?;
 
-        // Walk synchronously inside spawn_blocking so .gitignore + sibling files are honored
-        // by `ignore` and we don't block the runtime.
-        let path_owned = path.to_string();
+        // Run the whole decision + execution inside one spawn_blocking task:
+        // the walker honors .gitignore without blocking the runtime, and the
+        // tgrep path's readiness poll / client I/O is synchronous by design.
+        let tgrep = self.tgrep.clone();
+        let home_root = self.home_root.clone();
+        let pattern_owned = pattern.to_string();
+        let path_owned = path.clone();
         let glob = glob.map(str::to_string);
         let re_clone = re.clone();
         let cancel_clone = cancel.clone();
-        let result = tokio::task::spawn_blocking(move || -> Result<Vec<RawMatch>, String> {
-            let mut walker = WalkBuilder::new(&path_owned);
-            walker.standard_filters(true).hidden(true);
-            if let Some(g) = &glob {
-                let mut tb = ignore::types::TypesBuilder::new();
-                tb.add("g", g).map_err(|e| e.to_string())?;
-                tb.select("g");
-                let types = tb.build().map_err(|e| e.to_string())?;
-                walker.types(types);
-            }
-            let walker = walker.build();
-            let mut out: Vec<RawMatch> = Vec::new();
-            let mut files_scanned = 0usize;
-            for entry in walker {
-                if cancel_clone.is_cancelled() {
-                    break;
-                }
-                let entry = match entry {
-                    Ok(e) => e,
-                    Err(_) => continue,
+        let ingest = tokio::task::spawn_blocking(move || -> Result<Ingest, String> {
+            // tgrep path eligibility: a ready serve for the home root and the
+            // query path inside it. Anything else uses the walker.
+            if let Some(registry) = tgrep.as_ref() {
+                let home = home_root.canonicalize().ok();
+                let target = Path::new(&path_owned).canonicalize().ok();
+                let eligible = match (&home, &target) {
+                    (Some(home), Some(target)) => target.starts_with(home),
+                    _ => false,
                 };
-                if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
-                    continue;
-                }
-                files_scanned += 1;
-                if files_scanned > DEFAULT_MAX_FILES {
-                    break;
-                }
-                let p = entry.path();
-                let body = match std::fs::read_to_string(p) {
-                    Ok(b) => b,
-                    Err(_) => continue, // binary or unreadable; skip
-                };
-                let lines: Vec<&str> = body.lines().collect();
-                for (i, line) in lines.iter().enumerate() {
-                    if re_clone.is_match(line) {
-                        let before_start = i.saturating_sub(context_lines);
-                        let after_end = (i + 1 + context_lines).min(lines.len());
-                        out.push(RawMatch {
-                            path: p.display().to_string(),
-                            lineno: i + 1,
-                            line: (*line).to_string(),
-                            context_before: lines[before_start..i]
-                                .iter()
-                                .map(|l| truncate_line(l))
-                                .collect(),
-                            context_after: lines[i + 1..after_end]
-                                .iter()
-                                .map(|l| truncate_line(l))
-                                .collect(),
-                        });
-                        if out.len() >= max_matches {
-                            return Ok(out);
+                if eligible {
+                    let home = home.expect("eligible implies a canonicalized home root");
+                    match registry.query_root(&home) {
+                        TgrepReadiness::Ready => {
+                            let binary = registry.binary_path();
+                            let Some(binary) = binary else {
+                                tracing::warn!(target: "tgrep", "ready serve but tgrep binary missing; falling back to the walker");
+                                return Err("tgrep binary not found".to_string());
+                            };
+                            let index_dir = home.join(INDEX_DIR_NAME);
+                            return run_tgrep_client(
+                                &binary,
+                                &index_dir,
+                                &path_owned,
+                                &pattern_owned,
+                                &re_clone,
+                                case_insensitive,
+                                context_lines,
+                                glob.as_deref(),
+                                max_matches,
+                                &cancel_clone,
+                            );
+                        }
+                        readiness => {
+                            // Missing/Indexing: walker path below (complete results).
+                            tracing::debug!(target: "tgrep", ?readiness, "tgrep not ready; grep walks");
                         }
                     }
                 }
             }
-            Ok(out)
+            walk_tree(
+                &path_owned,
+                &re_clone,
+                context_lines,
+                glob.as_deref(),
+                max_matches,
+                &cancel_clone,
+            )
         })
         .await
-        .map_err(|e| AgentToolError::from(format!("spawn_blocking: {e}")))?;
-        let matches = result.map_err(AgentToolError::from)?;
+        .map_err(|e| AgentToolError::from(format!("spawn_blocking: {e}")))?
+        .map_err(AgentToolError::from)?;
 
         let output_mode = output_mode.unwrap_or("content");
-        let (text, truncated_lines) = if matches.is_empty() {
+        let (text, truncated_lines) = if ingest.match_count() == 0 {
             (format!("No matches for /{pattern}/ in {path}"), 0)
         } else {
             match output_mode {
-                "files_with_matches" => (format_files_with_matches(&matches), 0),
-                "count" => (format_counts(&matches), 0),
-                _ => format_content(&matches, &re, max_matches),
+                "files_with_matches" => (format_files_with_matches(&ingest), 0),
+                "count" => (format_counts(&ingest), 0),
+                _ => format_content(&ingest),
             }
         };
 
         Ok(AgentToolResult {
             content: vec![UserContentBlock::text(text)],
             details: json!({
-                "matches": matches.len(),
+                "matches": ingest.match_count(),
                 "truncated_lines": truncated_lines,
                 "max_match_line_chars": MAX_MATCH_LINE_CHARS,
                 "outputMode": output_mode,
@@ -187,32 +211,254 @@ impl AgentTool for GrepTool {
     }
 }
 
-struct RawMatch {
-    path: String,
-    lineno: usize,
-    line: String,
-    context_before: Vec<String>,
-    context_after: Vec<String>,
+/// Query a `tgrep serve` instance with `--json` and ingest the NDJSON stream.
+///
+/// The client is pointed at the session root's index dir (`--index-path`) so
+/// subdirectory queries still hit the server; `-s` pins case-sensitive
+/// defaults (tgrep otherwise applies ripgrep-style smart-casing). Reading
+/// stops as soon as `max_matches` matching lines are ingested, and the client
+/// is killed mid-stream.
+#[allow(clippy::too_many_arguments)]
+fn run_tgrep_client(
+    binary: &Path,
+    index_dir: &Path,
+    path: &str,
+    pattern: &str,
+    re: &Regex,
+    case_insensitive: bool,
+    context_lines: usize,
+    glob: Option<&str>,
+    max_matches: usize,
+    cancel: &CancellationToken,
+) -> Result<Ingest, String> {
+    let mut cmd = Command::new(binary);
+    cmd.arg("--index-path")
+        .arg(index_dir)
+        .arg("--json")
+        .arg("--no-messages");
+    cmd.arg(if case_insensitive { "-i" } else { "-s" });
+    if context_lines > 0 {
+        cmd.arg("-C").arg(context_lines.to_string());
+    }
+    if let Some(g) = glob {
+        cmd.arg("-g").arg(g);
+    }
+    cmd.arg("-e").arg(pattern).arg(path);
+    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("failed to spawn tgrep: {e}"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "tgrep stdout unavailable".to_string())?;
+    let mut ingest = Ingest::new(max_matches);
+    let reader = BufReader::new(stdout);
+    for line in reader.lines() {
+        if cancel.is_cancelled() || ingest.is_capped() {
+            let _ = child.kill();
+            break;
+        }
+        let Ok(line) = line else { break };
+        if line.trim().is_empty() {
+            continue;
+        }
+        let Ok(record) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        ingest_json_record(&mut ingest, &record, re);
+    }
+    let _ = child.wait();
+    Ok(ingest)
+}
+
+/// Ingest one NDJSON record (ripgrep-compatible). A match record is one
+/// matching line (tgrep emits one per line, submatches listed), mirroring the
+/// walker's per-line semantics; the preview window centers on the first
+/// submatch byte range when present.
+fn ingest_json_record(ingest: &mut Ingest, record: &serde_json::Value, re: &Regex) {
+    let Some(record_type) = record.get("type").and_then(|t| t.as_str()) else {
+        return;
+    };
+    let Some(data) = record.get("data") else { return };
+    let Some(path) = data
+        .get("path")
+        .and_then(|p| p.get("text"))
+        .and_then(|t| t.as_str())
+    else {
+        return;
+    };
+    let Some(line_text) = data
+        .get("lines")
+        .and_then(|l| l.get("text"))
+        .and_then(|t| t.as_str())
+    else {
+        return;
+    };
+    let Some(lineno) = data.get("line_number").and_then(|n| n.as_u64()) else {
+        return;
+    };
+    let lineno = lineno as usize;
+    let line_text = line_text.strip_suffix('\n').unwrap_or(line_text);
+    match record_type {
+        "match" => {
+            let range = data
+                .get("submatches")
+                .and_then(|s| s.as_array())
+                .and_then(|spans| spans.first())
+                .and_then(|span| {
+                    Some((
+                        span.get("start")?.as_u64()? as usize,
+                        span.get("end")?.as_u64()? as usize,
+                    ))
+                })
+                .or_else(|| re.find(line_text).map(|m| (m.start(), m.end())));
+            let (preview, was_truncated) = preview_match_line(line_text, range);
+            ingest.match_line(path, lineno, &preview, was_truncated);
+        }
+        "context" => ingest.context_line(path, lineno, truncate_line(line_text)),
+        _ => {} // begin / end / summary carry no line data
+    }
+}
+
+/// The in-process walker fallback: `ignore::WalkBuilder` + the `regex` crate,
+/// one occurrence per matching line (the pre-tgrep behavior, preserved).
+fn walk_tree(
+    path: &str,
+    re: &Regex,
+    context_lines: usize,
+    glob: Option<&str>,
+    max_matches: usize,
+    cancel: &CancellationToken,
+) -> Result<Ingest, String> {
+    let mut walker = WalkBuilder::new(path);
+    walker.standard_filters(true).hidden(true);
+    if let Some(g) = glob {
+        let mut tb = ignore::types::TypesBuilder::new();
+        tb.add("g", g).map_err(|e| e.to_string())?;
+        tb.select("g");
+        let types = tb.build().map_err(|e| e.to_string())?;
+        walker.types(types);
+    }
+    let walker = walker.build();
+    let mut ingest = Ingest::new(max_matches);
+    let mut files_scanned = 0usize;
+    for entry in walker {
+        if cancel.is_cancelled() {
+            break;
+        }
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            continue;
+        }
+        files_scanned += 1;
+        if files_scanned > DEFAULT_MAX_FILES {
+            break;
+        }
+        let p = entry.path();
+        let body = match std::fs::read_to_string(p) {
+            Ok(b) => b,
+            Err(_) => continue, // binary or unreadable; skip
+        };
+        let lines: Vec<&str> = body.lines().collect();
+        for (i, line) in lines.iter().enumerate() {
+            if !re.is_match(line) {
+                continue;
+            }
+            let lineno = i + 1;
+            let before_start = i.saturating_sub(context_lines);
+            let after_end = (i + 1 + context_lines).min(lines.len());
+            for (j, ctx) in lines[before_start..i].iter().enumerate() {
+                ingest.context_line(
+                    &p.display().to_string(),
+                    lineno - (i - before_start) + j,
+                    truncate_line(ctx),
+                );
+            }
+            let (preview, was_truncated) =
+                preview_match_line(line, re.find(line).map(|m| (m.start(), m.end())));
+            ingest.match_line(&p.display().to_string(), lineno, &preview, was_truncated);
+            for (j, ctx) in lines[i + 1..after_end].iter().enumerate() {
+                ingest.context_line(&p.display().to_string(), lineno + 1 + j, truncate_line(ctx));
+            }
+            if ingest.is_capped() {
+                return Ok(ingest);
+            }
+        }
+    }
+    Ok(ingest)
+}
+
+/// Shared ingestion for both execution paths. `by_file` feeds `content` mode
+/// (per-line map dedups overlapping contexts); the occurrence list feeds
+/// `count` / `files_with_matches` and the match cap (one entry per matching
+/// line, mirroring the walker's semantics).
+#[derive(Default)]
+struct Ingest {
+    by_file: BTreeMap<String, BTreeMap<usize, (String, bool)>>,
+    occurrences: Vec<String>,
+    truncated_lines: usize,
+    max_matches: usize,
+}
+
+impl Ingest {
+    fn new(max_matches: usize) -> Self {
+        Self {
+            max_matches,
+            ..Default::default()
+        }
+    }
+
+    fn match_line(&mut self, path: &str, lineno: usize, preview: &str, was_truncated: bool) {
+        self.by_file
+            .entry(path.to_string())
+            .or_default()
+            .insert(lineno, (preview.to_string(), true));
+        self.occurrences.push(path.to_string());
+        if was_truncated {
+            self.truncated_lines += 1;
+        }
+    }
+
+    fn context_line(&mut self, path: &str, lineno: usize, text: String) {
+        self.by_file
+            .entry(path.to_string())
+            .or_default()
+            .entry(lineno)
+            .or_insert((text, false));
+    }
+
+    fn match_count(&self) -> usize {
+        self.occurrences.len()
+    }
+
+    fn is_capped(&self) -> bool {
+        self.match_count() >= self.max_matches
+    }
 }
 
 /// `files_with_matches` mode: deduped file paths, one per line, in scan order.
-fn format_files_with_matches(matches: &[RawMatch]) -> String {
+fn format_files_with_matches(ingest: &Ingest) -> String {
     let mut files: Vec<&str> = Vec::new();
-    for m in matches {
-        if !files.contains(&m.path.as_str()) {
-            files.push(m.path.as_str());
+    for path in &ingest.occurrences {
+        if !files.contains(&path.as_str()) {
+            files.push(path.as_str());
         }
     }
     files.join("\n")
 }
 
-/// `count` mode: `count<TAB>path` per file, ripgrep `--count` style.
-fn format_counts(matches: &[RawMatch]) -> String {
+/// `count` mode: `count<TAB>path` per file, ripgrep `--count` style
+/// (matching lines per file).
+fn format_counts(ingest: &Ingest) -> String {
     let mut counts: Vec<(&str, usize)> = Vec::new();
-    for m in matches {
-        match counts.iter_mut().find(|(p, _)| *p == m.path.as_str()) {
+    for path in &ingest.occurrences {
+        match counts.iter_mut().find(|(p, _)| *p == path.as_str()) {
             Some((_, c)) => *c += 1,
-            None => counts.push((m.path.as_str(), 1)),
+            None => counts.push((path.as_str(), 1)),
         }
     }
     counts
@@ -221,34 +467,15 @@ fn format_counts(matches: &[RawMatch]) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
+
 /// `content` mode: port of enhanced-tools `grep.ts` `formatContentMatches` — file path
 /// printed once as a header, per-file line map dedups overlapping contexts, contiguous
 /// lines form one region, disjoint regions are separated by `--`. Match lines use `:`,
 /// context lines `-`; line numbers are right-aligned to the widest line number in the file.
 /// Returns the text plus how many match lines were preview-truncated.
-fn format_content(matches: &[RawMatch], re: &Regex, max_matches: usize) -> (String, usize) {
-    let mut by_file: BTreeMap<String, BTreeMap<usize, (String, bool)>> = BTreeMap::new();
-    let mut truncated_lines = 0usize;
-    for m in matches {
-        let file_map = by_file.entry(m.path.clone()).or_default();
-        let before_len = m.context_before.len();
-        for (i, l) in m.context_before.iter().enumerate() {
-            let ln = m.lineno - before_len + i;
-            file_map.entry(ln).or_insert((l.clone(), false));
-        }
-        let (preview, was_truncated) = preview_match_line(&m.line, re.find(&m.line));
-        file_map.insert(m.lineno, (preview, true));
-        if was_truncated {
-            truncated_lines += 1;
-        }
-        for (i, l) in m.context_after.iter().enumerate() {
-            let ln = m.lineno + 1 + i;
-            file_map.entry(ln).or_insert((l.clone(), false));
-        }
-    }
-
+fn format_content(ingest: &Ingest) -> (String, usize) {
     let mut out: Vec<String> = Vec::new();
-    for (file_path, line_map) in &by_file {
+    for (file_path, line_map) in &ingest.by_file {
         let line_nums: Vec<usize> = line_map.keys().copied().collect();
         let width = line_nums.last().map(|n| n.to_string().len()).unwrap_or(1);
         // Split into contiguous regions (adjacent line numbers differ by 1).
@@ -279,16 +506,20 @@ fn format_content(matches: &[RawMatch], re: &Regex, max_matches: usize) -> (Stri
     }
 
     let mut text = String::new();
-    if matches.len() >= max_matches {
-        text.push_str(&format!("... ({max_matches} matches shown, may be more)\n"));
-    }
-    text.push_str(out.join("\n").trim_end());
-    if truncated_lines > 0 {
+    if ingest.match_count() >= ingest.max_matches {
         text.push_str(&format!(
-            "\n[{truncated_lines} long matching line(s) truncated to {MAX_MATCH_LINE_CHARS} chars]\n"
+            "... ({} matches shown, may be more)\n",
+            ingest.max_matches
         ));
     }
-    (text, truncated_lines)
+    text.push_str(out.join("\n").trim_end());
+    if ingest.truncated_lines > 0 {
+        text.push_str(&format!(
+            "\n[{} long matching line(s) truncated to {MAX_MATCH_LINE_CHARS} chars]\n",
+            ingest.truncated_lines
+        ));
+    }
+    (text, ingest.truncated_lines)
 }
 
 fn truncate_line(line: &str) -> String {
@@ -300,27 +531,26 @@ fn truncate_line(line: &str) -> String {
     }
 }
 
-fn preview_match_line(line: &str, match_range: Option<regex::Match<'_>>) -> (String, bool) {
+/// Center the preview window on the match's byte range; falls back to a head
+/// preview when no range is known.
+fn preview_match_line(line: &str, match_range: Option<(usize, usize)>) -> (String, bool) {
     if line.chars().count() <= MAX_MATCH_LINE_CHARS {
         return (line.to_string(), false);
     }
 
-    let Some(match_range) = match_range else {
+    let Some((match_start, match_end)) = match_range else {
         let preview: String = line.chars().take(MAX_MATCH_LINE_CHARS).collect();
         return (format!("{preview}...[line truncated]"), true);
     };
 
-    let match_start = line[..match_range.start()].chars().count();
-    let match_len = line[match_range.start()..match_range.end()]
-        .chars()
-        .count()
-        .max(1);
+    let match_start_chars = line[..match_start].chars().count();
+    let match_len = line[match_start..match_end].chars().count().max(1);
     let visible_match_len = match_len.min(MAX_MATCH_LINE_CHARS);
     let context_budget = MAX_MATCH_LINE_CHARS.saturating_sub(visible_match_len);
     let before_budget = context_budget / 2;
     let after_budget = context_budget - before_budget;
-    let start_char = match_start.saturating_sub(before_budget);
-    let end_char = match_start + visible_match_len + after_budget;
+    let start_char = match_start_chars.saturating_sub(before_budget);
+    let end_char = match_start_chars + visible_match_len + after_budget;
     let total_chars = line.chars().count();
 
     let mut preview = String::new();
@@ -363,10 +593,15 @@ static DEFINITION: Lazy<Tool> = Lazy::new(|| Tool {
         "required": ["pattern"],
     }),
 });
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    fn walker_tool() -> GrepTool {
+        GrepTool::new(None, PathBuf::from("."))
+    }
 
     async fn run(tool: &GrepTool, params: Value) -> String {
         let r = tool
@@ -386,7 +621,7 @@ mod tests {
         std::fs::create_dir(dir.path().join("sub")).unwrap();
         std::fs::write(dir.path().join("sub/b.txt"), "another hello\n").unwrap();
 
-        let tool = GrepTool;
+        let tool = walker_tool();
         let r = tool
             .execute(
                 "g",
@@ -410,7 +645,7 @@ mod tests {
         let long_line = format!("needle {}", "x".repeat(MAX_MATCH_LINE_CHARS + 100));
         std::fs::write(dir.path().join("a.txt"), long_line).unwrap();
 
-        let tool = GrepTool;
+        let tool = walker_tool();
         let r = tool
             .execute(
                 "g",
@@ -437,7 +672,7 @@ mod tests {
         let long_line = format!("{} NEEDLE {}", "prefix".repeat(120), "suffix".repeat(120));
         std::fs::write(dir.path().join("a.txt"), long_line).unwrap();
 
-        let tool = GrepTool;
+        let tool = walker_tool();
         let r = tool
             .execute(
                 "g",
@@ -465,7 +700,7 @@ mod tests {
         )
         .unwrap();
 
-        let tool = GrepTool;
+        let tool = walker_tool();
         let text = run(
             &tool,
             json!({
@@ -494,7 +729,7 @@ mod tests {
         let dir = tempdir().unwrap();
         std::fs::write(dir.path().join("a.txt"), "a\nmatch1\nb\nc\nd\nmatch2\ne\n").unwrap();
 
-        let tool = GrepTool;
+        let tool = walker_tool();
         let text = run(
             &tool,
             json!({
@@ -515,7 +750,7 @@ mod tests {
         std::fs::write(dir.path().join("a.txt"), "hello one\n").unwrap();
         std::fs::write(dir.path().join("b.txt"), "hello two\n").unwrap();
 
-        let tool = GrepTool;
+        let tool = walker_tool();
         let text = run(
             &tool,
             json!({
@@ -540,7 +775,7 @@ mod tests {
         std::fs::write(dir.path().join("a.txt"), "hello\nhello\n").unwrap();
         std::fs::write(dir.path().join("b.txt"), "hi hello\n").unwrap();
 
-        let tool = GrepTool;
+        let tool = walker_tool();
         let text = run(
             &tool,
             json!({
@@ -561,7 +796,7 @@ mod tests {
         let dir = tempdir().unwrap();
         std::fs::write(dir.path().join("a.txt"), "m1\nm2\nm3\nm4\nm5\n").unwrap();
 
-        let tool = GrepTool;
+        let tool = walker_tool();
         let text = run(
             &tool,
             json!({
@@ -583,7 +818,7 @@ mod tests {
         let dir = tempdir().unwrap();
         std::fs::write(dir.path().join("a.txt"), "hello\n").unwrap();
 
-        let tool = GrepTool;
+        let tool = walker_tool();
         let r = tool
             .execute(
                 "g",
@@ -604,7 +839,7 @@ mod tests {
         let dir = tempdir().unwrap();
         std::fs::write(dir.path().join("a.txt"), "hello\n").unwrap();
 
-        let tool = GrepTool;
+        let tool = walker_tool();
         let text = run(
             &tool,
             json!({
@@ -615,5 +850,155 @@ mod tests {
         )
         .await;
         assert!(text.contains("No matches"));
+    }
+
+    /// JSON-stream ingestion must produce the same map/occurrences the walker
+    /// path does for the same fixture (shared formatter => byte-identical).
+    #[test]
+    fn json_ingestion_matches_walker_semantics() {
+        let re = Regex::new("hello").unwrap();
+        let mut ingest = Ingest::new(100);
+        let records = [
+            r#"{"type":"begin","data":{"path":{"text":"a.txt"}}}"#,
+            r#"{"type":"match","data":{"path":{"text":"a.txt"},"lines":{"text":"hello world\n"},"line_number":1,"submatches":[{"match":{"text":"hello"},"start":0,"end":5}]}}"#,
+            r#"{"type":"context","data":{"path":{"text":"a.txt"},"lines":{"text":"foo bar\n"},"line_number":2,"submatches":[]}}"#,
+            r#"{"type":"match","data":{"path":{"text":"b.txt"},"lines":{"text":"x hello hello y\n"},"line_number":7,"submatches":[{"match":{"text":"hello"},"start":2,"end":7},{"match":{"text":"hello"},"start":8,"end":13}]}}"#,
+            r#"{"type":"end","data":{"path":{"text":"b.txt"}}}"#,
+            r#"{"type":"summary","data":{"stats":{}}}"#,
+        ];
+        for line in records {
+            let record: serde_json::Value = serde_json::from_str(line).unwrap();
+            ingest_json_record(&mut ingest, &record, &re);
+        }
+        // One occurrence per matching line, regardless of submatch count.
+        assert_eq!(ingest.match_count(), 2);
+        assert_eq!(ingest.by_file.len(), 2);
+        let b = &ingest.by_file["b.txt"];
+        assert_eq!(b.len(), 1);
+        assert_eq!(b[&7], ("x hello hello y".to_string(), true));
+        // Context line lands as a non-match entry.
+        let a = &ingest.by_file["a.txt"];
+        assert_eq!(a[&2], ("foo bar".to_string(), false));
+        // files_with_matches: deduped in first-seen order.
+        assert_eq!(format_files_with_matches(&ingest), "a.txt\nb.txt");
+        // count: matching lines per file.
+        let counts = format_counts(&ingest);
+        assert!(counts.contains("1\ta.txt"));
+        assert!(counts.contains("1\tb.txt"));
+    }
+
+    #[test]
+    fn json_ingestion_caps_at_max_matches() {
+        let re = Regex::new("m").unwrap();
+        let mut ingest = Ingest::new(2);
+        let records = [
+            r#"{"type":"match","data":{"path":{"text":"a.txt"},"lines":{"text":"m\n"},"line_number":1,"submatches":[{"match":{"text":"m"},"start":0,"end":1}]}}"#,
+            r#"{"type":"match","data":{"path":{"text":"a.txt"},"lines":{"text":"m\n"},"line_number":2,"submatches":[{"match":{"text":"m"},"start":0,"end":1}]}}"#,
+            r#"{"type":"match","data":{"path":{"text":"a.txt"},"lines":{"text":"m\n"},"line_number":3,"submatches":[{"match":{"text":"m"},"start":0,"end":1}]}}"#,
+        ];
+        for line in records {
+            let record: serde_json::Value = serde_json::from_str(line).unwrap();
+            ingest_json_record(&mut ingest, &record, &re);
+            if ingest.is_capped() {
+                break; // run_tgrep_client kills the child here
+            }
+        }
+        assert_eq!(ingest.match_count(), 2);
+        assert!(ingest.is_capped());
+    }
+}
+
+#[cfg(test)]
+mod coverage_gap {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn walker_tool() -> GrepTool {
+        GrepTool::new(None, PathBuf::from("."))
+    }
+
+    async fn run(tool: &GrepTool, params: Value) -> String {
+        let r = tool
+            .execute("g", params, CancellationToken::new(), None)
+            .await
+            .unwrap();
+        match &r.content[0] {
+            UserContentBlock::Text(t) => t.text.clone(),
+            _ => panic!("expected text"),
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_pattern_is_rejected() {
+        let tool = walker_tool();
+        let err = tool
+            .execute("g", json!({}), CancellationToken::new(), None)
+            .await
+            .expect_err("missing pattern must fail");
+        assert!(
+            err.to_string().contains("missing `pattern`"),
+            "got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_regex_is_rejected() {
+        let tool = walker_tool();
+        let err = tool
+            .execute(
+                "g",
+                json!({ "pattern": "[", "path": "." }),
+                CancellationToken::new(),
+                None,
+            )
+            .await
+            .expect_err("invalid regex must fail");
+        assert!(err.to_string().contains("regex"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn relative_path_resolves_against_cwd() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        std::fs::write(dir.path().join("sub").join("a.txt"), "needle\n").unwrap();
+        std::fs::write(dir.path().join("b.txt"), "needle\n").unwrap();
+
+        let tool = walker_tool();
+        let text = run(
+            &tool,
+            json!({
+                "pattern": "needle",
+                "cwd": dir.path().to_str().unwrap(),
+                "path": "sub",
+            }),
+        )
+        .await;
+        assert!(text.contains("a.txt"), "got: {text}");
+        assert!(!text.contains("b.txt"), "got: {text}");
+    }
+
+    #[test]
+    fn preview_match_line_falls_back_to_head_when_no_range() {
+        let line = "x".repeat(MAX_MATCH_LINE_CHARS + 100);
+        let (preview, truncated) = preview_match_line(&line, None);
+        assert!(truncated);
+        assert!(preview.contains("[line truncated]"), "got: {preview}");
+        assert!(!preview.contains("xxx"), "head preview only, got length {}", preview.len());
+    }
+
+    #[test]
+    fn truncate_line_caps_long_context_lines() {
+        let line = "y".repeat(MAX_MATCH_LINE_CHARS + 10);
+        let truncated = truncate_line(&line);
+        assert!(truncated.contains("[line truncated]"), "got: {truncated}");
+    }
+
+    #[test]
+    fn format_files_with_matches_dedupes_in_scan_order() {
+        let mut ingest = Ingest::new(10);
+        ingest.match_line("a.txt", 1, "a", false);
+        ingest.match_line("b.txt", 1, "b", false);
+        ingest.match_line("a.txt", 2, "a2", false);
+        assert_eq!(format_files_with_matches(&ingest), "a.txt\nb.txt");
     }
 }

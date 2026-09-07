@@ -56,6 +56,7 @@ impl SessionRuntimeBuilder {
                 ctx.paths.base.clone(),
                 skill_harness_cell.clone(),
                 ctx.executor.clone(),
+                Some(self.services.tgrep.clone()),
             ),
         );
 
@@ -100,6 +101,7 @@ impl SessionRuntimeBuilder {
                 ctx.paths.base.clone(),
                 cell,
                 ctx.executor.clone(),
+                Some(self.services.tgrep.clone()),
             ),
         );
         true
