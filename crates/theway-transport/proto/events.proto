@@ -78,6 +78,8 @@ message RunStatus {
 message StreamEventsRequest {
   // Omitted = all sessions; set = only events for this session.
   optional string session_id = 1;
+  // Optional feed-history cap for snapshot frames, in rendered plain rows.
+  optional uint32 feed_limit = 2;
 }
 
 service EventService {

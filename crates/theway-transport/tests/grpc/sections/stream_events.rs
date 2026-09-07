@@ -2,7 +2,7 @@
 async fn stream_events_emits_published_snapshots() {
     let (state, _command_rx) = grpc_state();
     let response = state
-        .stream_events(Request::new(StreamEventsRequest { session_id: None }))
+        .stream_events(Request::new(StreamEventsRequest { session_id: None, feed_limit: None }))
         .await
         .unwrap()
         .into_inner();

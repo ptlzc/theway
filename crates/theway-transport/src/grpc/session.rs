@@ -12,11 +12,14 @@ impl SessionService for GrpcState {
         } else {
             request.session_id.clone()
         };
-        let snapshot = self
+        let mut snapshot = self
             .external_ops
             .authoritative_snapshot(&session_id)
             .await
             .map_err(|e| Status::not_found(e.to_string()))?;
+        if let Some(limit) = request.feed_limit.filter(|limit| *limit > 0) {
+            snapshot.feed.trim_to_lines(100, limit as usize);
+        }
         Ok(Response::new(crate::proto::wire_session_snapshot(
             &snapshot,
         )))

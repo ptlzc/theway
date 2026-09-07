@@ -4,12 +4,12 @@ async fn two_simultaneous_subscribers_both_receive_frames() {
     // to every subscriber — a second client must not starve the first.
     let (state, _command_rx) = grpc_state();
     let first = state
-        .stream_events(Request::new(StreamEventsRequest { session_id: None }))
+        .stream_events(Request::new(StreamEventsRequest { session_id: None, feed_limit: None }))
         .await
         .unwrap()
         .into_inner();
     let second = state
-        .stream_events(Request::new(StreamEventsRequest { session_id: None }))
+        .stream_events(Request::new(StreamEventsRequest { session_id: None, feed_limit: None }))
         .await
         .unwrap()
         .into_inner();
@@ -62,7 +62,7 @@ async fn two_simultaneous_subscribers_both_receive_frames() {
 async fn stream_events_merges_snapshot_and_event_payloads() {
     let (state, _command_rx) = grpc_state();
     let response = state
-        .stream_events(Request::new(StreamEventsRequest { session_id: None }))
+        .stream_events(Request::new(StreamEventsRequest { session_id: None, feed_limit: None }))
         .await
         .unwrap()
         .into_inner();
@@ -125,7 +125,7 @@ async fn stream_events_merges_snapshot_and_event_payloads() {
 async fn stream_events_forwards_dag_node_status_frames() {
     let (state, _command_rx) = grpc_state();
     let response = state
-        .stream_events(Request::new(StreamEventsRequest { session_id: None }))
+        .stream_events(Request::new(StreamEventsRequest { session_id: None, feed_limit: None }))
         .await
         .unwrap()
         .into_inner();

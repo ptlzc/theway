@@ -517,6 +517,8 @@ export interface SessionGraphNodeStreamFrame {
 
 export interface SessionStateRequest {
   sessionId: string;
+  /** Optional feed-history cap in rendered plain rows. Omitted = full feed. */
+  feedLimit?: number | undefined;
 }
 
 export interface UpdateSessionMetadataRequest {
@@ -6406,13 +6408,16 @@ export const SessionGraphNodeStreamFrame: MessageFns<SessionGraphNodeStreamFrame
 };
 
 function createBaseSessionStateRequest(): SessionStateRequest {
-  return { sessionId: "" };
+  return { sessionId: "", feedLimit: undefined };
 }
 
 export const SessionStateRequest: MessageFns<SessionStateRequest> = {
   encode(message: SessionStateRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.sessionId !== "") {
       writer.uint32(10).string(message.sessionId);
+    }
+    if (message.feedLimit !== undefined) {
+      writer.uint32(16).uint32(message.feedLimit);
     }
     return writer;
   },
@@ -6432,6 +6437,14 @@ export const SessionStateRequest: MessageFns<SessionStateRequest> = {
           message.sessionId = reader.string();
           continue;
         }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.feedLimit = reader.uint32();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -6448,6 +6461,11 @@ export const SessionStateRequest: MessageFns<SessionStateRequest> = {
         : isSet(object.session_id)
         ? globalThis.String(object.session_id)
         : "",
+      feedLimit: isSet(object.feedLimit)
+        ? globalThis.Number(object.feedLimit)
+        : isSet(object.feed_limit)
+        ? globalThis.Number(object.feed_limit)
+        : undefined,
     };
   },
 
@@ -6455,6 +6473,9 @@ export const SessionStateRequest: MessageFns<SessionStateRequest> = {
     const obj: any = {};
     if (message.sessionId !== "") {
       obj.sessionId = message.sessionId;
+    }
+    if (message.feedLimit !== undefined) {
+      obj.feedLimit = Math.round(message.feedLimit);
     }
     return obj;
   },
@@ -6465,6 +6486,7 @@ export const SessionStateRequest: MessageFns<SessionStateRequest> = {
   fromPartial<I extends Exact<DeepPartial<SessionStateRequest>, I>>(object: I): SessionStateRequest {
     const message = createBaseSessionStateRequest();
     message.sessionId = object.sessionId ?? "";
+    message.feedLimit = object.feedLimit ?? undefined;
     return message;
   },
 };

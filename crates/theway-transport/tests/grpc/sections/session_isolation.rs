@@ -4,6 +4,7 @@ async fn stream_events_filters_by_session() {
     let response = state
         .stream_events(Request::new(theway_grpc::StreamEventsRequest {
             session_id: Some("sess-a".into()),
+            feed_limit: None,
         }))
         .await
         .unwrap()
@@ -60,6 +61,7 @@ async fn stream_events_full_mode_carries_session_ids() {
     let response = state
         .stream_events(Request::new(theway_grpc::StreamEventsRequest {
             session_id: None,
+            feed_limit: None,
         }))
         .await
         .unwrap()
@@ -110,6 +112,7 @@ async fn two_sessions_prompt_concurrently_with_isolated_events() {
     let stream_a = state
         .stream_events(Request::new(theway_grpc::StreamEventsRequest {
             session_id: Some("sess-a".into()),
+            feed_limit: None,
         }))
         .await
         .unwrap()
@@ -117,6 +120,7 @@ async fn two_sessions_prompt_concurrently_with_isolated_events() {
     let stream_b = state
         .stream_events(Request::new(theway_grpc::StreamEventsRequest {
             session_id: Some("sess-b".into()),
+            feed_limit: None,
         }))
         .await
         .unwrap()

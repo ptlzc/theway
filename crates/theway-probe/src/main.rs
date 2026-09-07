@@ -414,6 +414,7 @@ async fn run_get_snapshot(addr: &str) -> Result<theway_grpc::SessionSnapshot> {
     let resp = client
         .get_snapshot(Request::new(SessionStateRequest {
             session_id: String::new(),
+            feed_limit: None,
         }))
         .await?;
     Ok(resp.into_inner())

@@ -31,10 +31,21 @@ impl GrpcClient {
 
     /// Full nested session snapshot for an explicit session.
     pub async fn get_snapshot_for_session(&mut self, session_id: &str) -> Result<SessionSnapshot> {
+        self.get_snapshot_for_session_with_limit(session_id, None)
+            .await
+    }
+
+    /// Full nested session snapshot, trimmed to the request's feed limit.
+    pub async fn get_snapshot_for_session_with_limit(
+        &mut self,
+        session_id: &str,
+        feed_limit: Option<u32>,
+    ) -> Result<SessionSnapshot> {
         let snapshot = self
             .session
             .get_snapshot(SessionStateRequest {
                 session_id: session_id.to_string(),
+                feed_limit,
             })
             .await
             .map_err(|e| anyhow::anyhow!("get_snapshot: {e}"))?
@@ -86,10 +97,21 @@ impl GrpcClient {
         &mut self,
         session_id: Option<&str>,
     ) -> Result<Streaming<StreamFrame>> {
+        self.stream_events_for_session_with_limit(session_id, None)
+            .await
+    }
+
+    /// Open the snapshot/event frame stream with a snapshot feed-history cap.
+    pub async fn stream_events_for_session_with_limit(
+        &mut self,
+        session_id: Option<&str>,
+        feed_limit: Option<u32>,
+    ) -> Result<Streaming<StreamFrame>> {
         let response = self
             .events
             .stream_events(StreamEventsRequest {
                 session_id: session_id.map(str::to_string),
+                feed_limit,
             })
             .await
             .map_err(|e| anyhow::anyhow!("stream_events: {e}"))?;

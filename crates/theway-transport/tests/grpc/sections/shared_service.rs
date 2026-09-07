@@ -64,6 +64,7 @@ async fn one_shared_service_backs_snapshot_page_command_and_settings() {
         &state,
         Request::new(theway_grpc::SessionStateRequest {
             session_id: "test-session".into(),
+            feed_limit: None,
         }),
     )
     .await

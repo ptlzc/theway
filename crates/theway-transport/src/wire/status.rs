@@ -96,6 +96,30 @@ pub struct WireStatus {
     pub system_context: String,
 }
 
+impl WireStatus {
+    /// Trim the oldest feed blocks until the rendered plain-text rows fit
+    /// within `max_lines`, then rebuild `feed_lines` from the trimmed tail.
+    /// Used by request-scoped snapshot limits: the server keeps its live feed
+    /// intact for other consumers while this copy shrinks to the caller's
+    /// scrollback cap before protobuf encoding. Returns true when rows were
+    /// dropped.
+    pub fn trim_feed_to_lines(&mut self, width: usize, max_lines: usize) -> bool {
+        let mut feed = crate::feed::Feed::new();
+        feed.replace_blocks(&self.feed_blocks);
+        if !crate::feed::trim_feed_to_lines(&mut feed, width, max_lines) {
+            return false;
+        }
+        self.feed_blocks = feed.wire_blocks();
+        let mut cache = crate::feed::PlainLinesCache::new(width);
+        cache.update(&feed, width);
+        self.feed_lines = cache.rows().to_vec();
+        self.feed_blocks_base = 0;
+        self.feed_lines_base = 0;
+        self.feed_block_patches.clear();
+        true
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WireFeedBlockPatch {
     pub index: u64,

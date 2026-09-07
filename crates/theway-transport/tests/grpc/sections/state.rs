@@ -4,6 +4,7 @@ async fn get_snapshot_returns_structured_session_snapshot() {
     let state = state
         .get_snapshot(Request::new(theway_grpc::SessionStateRequest {
             session_id: String::new(),
+            feed_limit: None,
         }))
         .await
         .unwrap()
@@ -30,6 +31,7 @@ async fn get_snapshot_returns_registered_session_snapshot() {
     let response = state
         .get_snapshot(Request::new(theway_grpc::SessionStateRequest {
             session_id: "other-session".into(),
+            feed_limit: None,
         }))
         .await
         .unwrap()
@@ -43,6 +45,7 @@ async fn get_snapshot_returns_registered_session_snapshot() {
     let err = state
         .get_snapshot(Request::new(theway_grpc::SessionStateRequest {
             session_id: "missing".into(),
+            feed_limit: None,
         }))
         .await
         .unwrap_err();
@@ -61,7 +64,7 @@ fn plain_block(text: &str) -> crate::feed::WireFeedBlock {
 async fn lagged_snapshot_stream_emits_latest_full_state() {
     let (state, _command_rx) = grpc_state();
     let mut stream = state
-        .stream_events(Request::new(StreamEventsRequest { session_id: None }))
+        .stream_events(Request::new(StreamEventsRequest { session_id: None, feed_limit: None }))
         .await
         .unwrap()
         .into_inner();

@@ -493,7 +493,9 @@ impl EventService for GrpcState {
         &self,
         request: Request<StreamEventsRequest>,
     ) -> Result<Response<Self::StreamEventsStream>, Status> {
-        let filter = request.into_inner().session_id.filter(|id| !id.is_empty());
+        let request = request.into_inner();
+        let filter = request.session_id.filter(|id| !id.is_empty());
+        let feed_limit = request.feed_limit.filter(|limit| *limit > 0);
         // Merge snapshot publications with the event plane. Routine daemon
         // publications contain only transcript deltas; `latest` remains the
         // authoritative source for first frames and resynchronization.
@@ -522,7 +524,7 @@ impl EventService for GrpcState {
                         let mut cursor = cursor.lock();
                         Some(Ok(StreamFrame {
                             payload: Some(theway_grpc::stream_frame::Payload::Snapshot(
-                                project_stream_snapshot(&update, &latest, &mut cursor),
+                                project_stream_snapshot(&update, &latest, &mut cursor, feed_limit),
                             )),
                         }))
                     }
@@ -539,7 +541,7 @@ impl EventService for GrpcState {
                         cursor.resync_pending = true;
                         Some(Ok(StreamFrame {
                             payload: Some(theway_grpc::stream_frame::Payload::Snapshot(
-                                project_authoritative_snapshot(&snapshot, &mut cursor),
+                                project_authoritative_snapshot(&snapshot, &mut cursor, feed_limit),
                             )),
                         }))
                     }

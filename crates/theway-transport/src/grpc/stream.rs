@@ -24,10 +24,11 @@ pub(super) fn project_stream_snapshot(
     update: &WireStatusUpdate,
     authoritative: &WireStatus,
     cursor: &mut StreamCursor,
+    feed_limit: Option<u32>,
 ) -> theway_grpc::SessionSnapshot {
     let delta = match update {
         WireStatusUpdate::Full(snapshot) => {
-            return project_authoritative_snapshot(snapshot, cursor);
+            return project_authoritative_snapshot(snapshot, cursor, feed_limit);
         }
         WireStatusUpdate::Delta(delta) => delta,
     };
@@ -56,7 +57,8 @@ pub(super) fn project_stream_snapshot(
         || !patches_are_contiguous;
 
     let snapshot = if needs_full {
-        session_snapshot(authoritative)
+        let limited = trimmed_status(authoritative, feed_limit);
+        session_snapshot(limited.as_ref())
     } else {
         incremental_session_snapshot(authoritative, delta, cursor.feed_lines)
     };
@@ -78,10 +80,26 @@ pub(super) fn project_stream_snapshot(
 pub(super) fn project_authoritative_snapshot(
     snapshot: &WireStatus,
     cursor: &mut StreamCursor,
+    feed_limit: Option<u32>,
 ) -> theway_grpc::SessionSnapshot {
-    cursor.feed_lines = snapshot.feed_lines.len();
-    cursor.feed_blocks = snapshot.feed_blocks.len();
+    let limited = trimmed_status(snapshot, feed_limit);
+    cursor.feed_lines = limited.feed_lines.len();
+    cursor.feed_blocks = limited.feed_blocks.len();
     cursor.first_frame = false;
     cursor.resync_pending = false;
-    session_snapshot(snapshot)
+    session_snapshot(limited.as_ref())
+}
+
+/// Clone + trim the authoritative status when the request carries a
+/// feed-history cap; otherwise borrow it untouched.
+fn trimmed_status(
+    status: &WireStatus,
+    feed_limit: Option<u32>,
+) -> std::borrow::Cow<'_, WireStatus> {
+    let Some(limit) = feed_limit.filter(|limit| *limit > 0) else {
+        return std::borrow::Cow::Borrowed(status);
+    };
+    let mut limited = status.clone();
+    limited.trim_feed_to_lines(100, limit as usize);
+    std::borrow::Cow::Owned(limited)
 }

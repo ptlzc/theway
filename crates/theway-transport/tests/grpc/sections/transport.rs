@@ -19,6 +19,7 @@ async fn grpc_server_over_transport_serves_client() {
     let state = session_client
         .get_snapshot(theway_grpc::SessionStateRequest {
             session_id: String::new(),
+            feed_limit: None,
         })
         .await
         .unwrap()
@@ -48,7 +49,7 @@ async fn grpc_server_over_transport_serves_client() {
             .await
             .unwrap();
     let event_stream = event_client
-        .stream_events(StreamEventsRequest { session_id: None })
+        .stream_events(StreamEventsRequest { session_id: None, feed_limit: None })
         .await
         .unwrap()
         .into_inner();

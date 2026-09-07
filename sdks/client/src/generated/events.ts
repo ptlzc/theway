@@ -96,7 +96,11 @@ export interface RunStatus {
 
 export interface StreamEventsRequest {
   /** Omitted = all sessions; set = only events for this session. */
-  sessionId?: string | undefined;
+  sessionId?:
+    | string
+    | undefined;
+  /** Optional feed-history cap for snapshot frames, in rendered plain rows. */
+  feedLimit?: number | undefined;
 }
 
 function createBaseStreamFrame(): StreamFrame {
@@ -1216,13 +1220,16 @@ export const RunStatus: MessageFns<RunStatus> = {
 };
 
 function createBaseStreamEventsRequest(): StreamEventsRequest {
-  return { sessionId: undefined };
+  return { sessionId: undefined, feedLimit: undefined };
 }
 
 export const StreamEventsRequest: MessageFns<StreamEventsRequest> = {
   encode(message: StreamEventsRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.sessionId !== undefined) {
       writer.uint32(10).string(message.sessionId);
+    }
+    if (message.feedLimit !== undefined) {
+      writer.uint32(16).uint32(message.feedLimit);
     }
     return writer;
   },
@@ -1242,6 +1249,14 @@ export const StreamEventsRequest: MessageFns<StreamEventsRequest> = {
           message.sessionId = reader.string();
           continue;
         }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.feedLimit = reader.uint32();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1258,6 +1273,11 @@ export const StreamEventsRequest: MessageFns<StreamEventsRequest> = {
         : isSet(object.session_id)
         ? globalThis.String(object.session_id)
         : undefined,
+      feedLimit: isSet(object.feedLimit)
+        ? globalThis.Number(object.feedLimit)
+        : isSet(object.feed_limit)
+        ? globalThis.Number(object.feed_limit)
+        : undefined,
     };
   },
 
@@ -1265,6 +1285,9 @@ export const StreamEventsRequest: MessageFns<StreamEventsRequest> = {
     const obj: any = {};
     if (message.sessionId !== undefined) {
       obj.sessionId = message.sessionId;
+    }
+    if (message.feedLimit !== undefined) {
+      obj.feedLimit = Math.round(message.feedLimit);
     }
     return obj;
   },
@@ -1275,6 +1298,7 @@ export const StreamEventsRequest: MessageFns<StreamEventsRequest> = {
   fromPartial<I extends Exact<DeepPartial<StreamEventsRequest>, I>>(object: I): StreamEventsRequest {
     const message = createBaseStreamEventsRequest();
     message.sessionId = object.sessionId ?? undefined;
+    message.feedLimit = object.feedLimit ?? undefined;
     return message;
   },
 };

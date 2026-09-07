@@ -5,6 +5,31 @@ fn feed_of(state: &theway_grpc::SessionSnapshot) -> &theway_grpc::SessionFeed {
 }
 
 #[test]
+fn stream_snapshot_first_frame_honors_feed_limit() {
+    let mut snapshot = fixture_snapshot("one");
+    snapshot.feed_blocks = vec![
+        plain_block("one"),
+        plain_block("two"),
+        plain_block("three"),
+    ];
+    snapshot.feed_lines = vec!["one".into(), "two".into(), "three".into()];
+
+    let update = WireStatusUpdate::full(snapshot.clone());
+    let state = project_stream_snapshot(
+        &update,
+        &snapshot,
+        &mut StreamCursor::default(),
+        Some(2),
+    );
+    let feed = feed_of(&state);
+
+    assert_eq!(feed.lines, vec!["two", "three"]);
+    assert_eq!(feed.blocks.len(), 2);
+    assert!(feed.block_patches.is_empty());
+    assert_eq!(feed.blocks_base, 0);
+}
+
+#[test]
 fn stream_snapshot_first_frame_is_authoritative() {
     let mut snapshot = fixture_snapshot("one");
     snapshot.feed_blocks = vec![plain_block("one")];
@@ -14,7 +39,7 @@ fn stream_snapshot_first_frame_is_authoritative() {
     }];
 
     let update = WireStatusUpdate::full(snapshot.clone());
-    let state = project_stream_snapshot(&update, &snapshot, &mut StreamCursor::default());
+    let state = project_stream_snapshot(&update, &snapshot, &mut StreamCursor::default(), None);
     let feed = feed_of(&state);
 
     assert_eq!(feed.blocks.len(), 1);
@@ -29,7 +54,7 @@ fn stream_snapshot_slices_normal_incremental_frame() {
     let mut first = fixture_snapshot("one");
     first.feed_blocks = vec![plain_block("one")];
     let first_update = WireStatusUpdate::full(first.clone());
-    project_stream_snapshot(&first_update, &first, &mut cursor);
+    project_stream_snapshot(&first_update, &first, &mut cursor, None);
 
     let mut authoritative = fixture_snapshot("one");
     authoritative.feed_lines.push("two".into());
@@ -43,7 +68,7 @@ fn stream_snapshot_slices_normal_incremental_frame() {
         block: plain_block("two"),
     }];
     let update = WireStatusUpdate::delta_from_status(delta, 2, 2);
-    let state = project_stream_snapshot(&update, &authoritative, &mut cursor);
+    let state = project_stream_snapshot(&update, &authoritative, &mut cursor, None);
     let feed = feed_of(&state);
 
     assert!(feed.blocks.is_empty());
@@ -59,7 +84,7 @@ fn stream_snapshot_resyncs_after_lag_or_clear() {
     let mut first = fixture_snapshot("one");
     first.feed_blocks = vec![plain_block("one"), plain_block("two")];
     let first_update = WireStatusUpdate::full(first.clone());
-    project_stream_snapshot(&first_update, &first, &mut cursor);
+    project_stream_snapshot(&first_update, &first, &mut cursor, None);
 
     cursor.resync_pending = true;
     let mut unchanged = fixture_snapshot("");
@@ -67,7 +92,7 @@ fn stream_snapshot_resyncs_after_lag_or_clear() {
     unchanged.feed_lines_base = 1;
     unchanged.feed_blocks_base = 2;
     let unchanged = WireStatusUpdate::delta_from_status(unchanged, 2, 1);
-    let lagged = project_stream_snapshot(&unchanged, &first, &mut cursor);
+    let lagged = project_stream_snapshot(&unchanged, &first, &mut cursor, None);
     let lagged_feed = feed_of(&lagged);
     assert_eq!(lagged_feed.blocks.len(), 2);
     assert!(lagged_feed.block_patches.is_empty());
@@ -79,7 +104,7 @@ fn stream_snapshot_resyncs_after_lag_or_clear() {
         block: plain_block("new"),
     }];
     let cleared_update = WireStatusUpdate::full(cleared.clone());
-    let reset = project_stream_snapshot(&cleared_update, &cleared, &mut cursor);
+    let reset = project_stream_snapshot(&cleared_update, &cleared, &mut cursor, None);
     let reset_feed = feed_of(&reset);
     assert_eq!(reset_feed.blocks.len(), 1);
     assert!(reset_feed.block_patches.is_empty());

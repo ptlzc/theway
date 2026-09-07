@@ -110,6 +110,26 @@ pub struct WireSessionFeed {
     pub block_patches: Vec<WireFeedBlockPatch>,
 }
 
+impl WireSessionFeed {
+    /// Trim the oldest blocks until the rendered plain rows fit `max_lines`,
+    /// and rebuild `lines` from the trimmed tail. Returns true when dropped.
+    pub fn trim_to_lines(&mut self, width: usize, max_lines: usize) -> bool {
+        let mut feed = crate::feed::Feed::new();
+        feed.replace_blocks(&self.blocks);
+        if !crate::feed::trim_feed_to_lines(&mut feed, width, max_lines) {
+            return false;
+        }
+        self.blocks = feed.wire_blocks();
+        let mut cache = crate::feed::PlainLinesCache::new(width);
+        cache.update(&feed, width);
+        self.lines = cache.rows().to_vec();
+        self.blocks_base = 0;
+        self.lines_base = 0;
+        self.block_patches.clear();
+        true
+    }
+}
+
 /// Graph-mode state mounted under a session snapshot.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WireSessionGraphState {

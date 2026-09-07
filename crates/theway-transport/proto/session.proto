@@ -393,6 +393,8 @@ message SessionGraphNodeStreamFrame {
 
 message SessionStateRequest {
   string session_id = 1;
+  // Optional feed-history cap in rendered plain rows. Omitted = full feed.
+  optional uint32 feed_limit = 2;
 }
 
 message UpdateSessionMetadataRequest {
