@@ -237,6 +237,22 @@ fn durable_entry(
 }
 
 #[tokio::test]
+async fn compaction_observation_with_non_object_payload_is_ignored() {
+    let port = Arc::new(RecordingPort::default());
+    let harness = harness_with_port(
+        port.clone(),
+        success_stream(Arc::new(AtomicUsize::new(0))),
+        Session::new(Arc::new(MemorySessionStorage::new())),
+    );
+
+    harness
+        .runtime_compaction_succeeded(serde_json::json!([]))
+        .await;
+
+    assert!(port.events().is_empty());
+}
+
+#[tokio::test]
 async fn compaction_receives_deduplicated_model_context_but_never_private_state() {
     let projection = ExtensionModelContextProjection::rebuild(vec![
         durable_entry(
