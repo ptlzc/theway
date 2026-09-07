@@ -11,6 +11,7 @@
 //!   THEWAY_E2E_BASE_URL  网关地址 (缺省探测 ~/.pi/agent/models.json 的 litellm)
 //!   THEWAY_E2E_MODEL     模型 id (缺省 deepseek-v4-flash-max)
 //!   THEWAY_BIN           theway 二进制 (缺省 target/release/theway)
+//!   BRAVE_SEARCH_API_KEY web_search 后端 key (无则 web_search 断言跳过)
 
 use std::env;
 use std::fs;
@@ -29,13 +30,13 @@ struct Case {
     timeout_secs: u64,
     /// 必须出现的完成标记 (agent 逐工具 echo <tool>_ok >> marks.txt)
     marks: &'static [&'static str],
-    /// 可选标记：缺失不视为失败
+    /// 无 BRAVE_SEARCH_API_KEY 时允许缺失的标记
     optional_marks: &'static [&'static str],
     /// 必须存在的产物文件 (case 工作目录下)
     files: &'static [&'static str],
     /// 必须在 log.txt 中出现的工具调用痕迹 ("⚙ <ev>")
     log_evidence: &'static [&'static str],
-    /// 可选日志证据：缺失不视为失败
+    /// 无 BRAVE_SEARCH_API_KEY 时允许缺失的日志证据
     optional_log: &'static [&'static str],
     prompt_file: &'static str,
 }
@@ -166,10 +167,10 @@ const CASES: &[Case] = &[
         name: "tools-web",
         timeout_secs: 300,
         marks: &["web_fetch_ok"],
-        optional_marks: &[],
+        optional_marks: &["web_search_ok"],
         files: &[],
         log_evidence: &["web_fetch("],
-        optional_log: &[],
+        optional_log: &["web_search("],
         prompt_file: "cases/tools-web.prompt.txt",
     },
     Case {
@@ -191,6 +192,7 @@ struct E2eConfig {
     base_url: String,
     model: String,
     bin: PathBuf,
+    brave_key: Option<String>,
 }
 
 fn probe_litellm_config() -> (String, String) {
@@ -245,6 +247,9 @@ fn e2e_config() -> Option<E2eConfig> {
         base_url,
         model,
         bin,
+        brave_key: env::var("BRAVE_SEARCH_API_KEY")
+            .ok()
+            .filter(|s| !s.is_empty()),
     })
 }
 
@@ -354,8 +359,12 @@ async fn run_case(cfg: &E2eConfig, case: &Case) {
         }
     }
     for m in case.optional_marks {
-        if !marks.contains(m) {
-            failures.push(format!("missing-mark:{m}"));
+        let required = *m != "web_search_ok" || cfg.brave_key.is_some();
+        if required && !marks.contains(m) {
+            failures.push(format!(
+                "missing-mark:{m} (brave key present: {})",
+                cfg.brave_key.is_some()
+            ));
         }
     }
 
@@ -373,8 +382,12 @@ async fn run_case(cfg: &E2eConfig, case: &Case) {
         }
     }
     for ev in case.optional_log {
-        if !log.contains(&format!("⚙ {ev}")) {
-            failures.push(format!("no-log-evidence:{ev}"));
+        let required = *ev != "web_search(" || cfg.brave_key.is_some();
+        if required && !log.contains(&format!("⚙ {ev}")) {
+            failures.push(format!(
+                "no-log-evidence:{ev} (brave key present: {})",
+                cfg.brave_key.is_some()
+            ));
         }
     }
 

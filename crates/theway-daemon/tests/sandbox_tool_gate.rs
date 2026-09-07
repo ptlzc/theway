@@ -15,7 +15,7 @@
 //!    registered: their effects dispatch through the [`theway_core::executor::ToolExecutor`]
 //!    seam, where [`theway_daemon::executor::sandbox::SandboxExecutor`] answers with an
 //!    explicit `UnsupportedKind(Sandbox)` error at call time (fail closed per call, not
-//!    a silent empty set). The network-only `web_fetch`, the in-memory
+//!    a silent empty set). The network-only `web_fetch` / `web_search`, the in-memory
 //!    `skill` lookup, `reload`, the DAG/subagent orchestration and the in-memory
 //!    trigger/cron family remain for the same reason.
 //! 3. An executor-backed call actually fails closed with the unsupported-kind error.
@@ -66,7 +66,7 @@ const DIRECT_OS_ENGINE_TOOLS: &[&str] = &[
 const EXECUTOR_BACKED_TOOLS: &[&str] = &["read", "write", "edit", "outline", "git"];
 
 /// Network-only (no host FS/process side effects) — stay registered.
-const NETWORK_ONLY_TOOLS: &[&str] = &["web_fetch"];
+const NETWORK_ONLY_TOOLS: &[&str] = &["web_fetch", "web_search"];
 
 fn sandbox_exec() -> Arc<dyn ToolExecutor> {
     Arc::new(SandboxExecutor::new())

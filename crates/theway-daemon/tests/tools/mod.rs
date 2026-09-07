@@ -62,6 +62,7 @@ fn local_tools_registers_all_local_only_bodies() {
     assert!(names.iter().any(|n| n == "outline"), "{names:?}");
     assert!(names.iter().any(|n| n == "git"), "{names:?}");
     assert!(names.iter().any(|n| n == "web_fetch"), "{names:?}");
+    assert!(names.iter().any(|n| n == "web_search"), "{names:?}");
 }
 
 #[cfg(feature = "local")]

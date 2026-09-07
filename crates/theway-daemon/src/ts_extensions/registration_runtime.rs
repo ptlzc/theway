@@ -191,8 +191,8 @@ impl RegistrationRuntime {
         cwd: String,
     ) -> (Vec<Arc<dyn AgentTool>>, Vec<String>) {
         // The base catalog may contain name collisions already (a provisioned
-        // MCP server can expose `bash` or `read`, which duplicate built-in
-        // harness tools. Providers reject duplicate tool names outright, and a
+        // MCP server can expose `web_search`, which duplicates the built-in
+        // harness tool). Providers reject duplicate tool names outright, and a
         // duplicate base entry would also make the `override_existing` index
         // replacement below leave a stale copy behind. First-wins matches
         // daemon assembly: built-in harness tools are appended before MCP
