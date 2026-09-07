@@ -16,6 +16,16 @@ cargo build --release
 
 The CLI binary is at `./target/release/theway`.
 
+### Install from Cargo
+
+```bash
+cargo install --locked theway-tui theway-daemon
+```
+
+This installs the `theway` and `thewayd` binaries from crates.io into `~/.cargo/bin`.
+
+The npm package [`@theway-ai/sdk`](https://www.npmjs.com/package/@theway-ai/sdk) is a TypeScript SDK for talking to `thewayd`; it is not the CLI.
+
 ### Install locally
 
 ```bash
